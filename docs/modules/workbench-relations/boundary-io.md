@@ -191,3 +191,9 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 资料替代输入现在要求所有所需凭证子项有有效文件且明确填写金额；文件存在但金额未知不能绕过缺发票完成要求。凭证变更不改正式成员，沿现有 matching scope 通知。金额服务输出真实 `invoice_total` 与单独的凭证/综合核对金额；进行中 OA 仍 unpaired。指纹绑定当前采用的凭证与子项金额，旧异常审阅不认可变更后事实。
 
 - 归属规则版本 `invoice-expense-remaining-v2` 纳入现有 formal batch 幂等指纹的 rule_versions，仅影响包含归属处理的命令。升级后相同事实可按新规则重算，不能复用旧规则成功但未归属的 no-op；同版本重试仍幂等。不增加缓存、表或重试循环。
+
+## 2026-09-21 ETC 跨页面正式成员读取
+
+- OA 待付款、进项使用及待找发票共用 `postgres_repositories/relation_invoice_members.py` 的只读成员展开：通过提交批次准确身份、active bridge 或既有 canonical `etc_invoice_id` 取得真实发票；同一 canonical 发票去重，软删除和撤回关系按当前事实处理。保留原关系 ETC summary，不另写一套关系，不把 ETC 原始票据伪造成正式发票。
+- 读取在页面既有只读 snapshot 内集合执行；没有新增缓存、read model、worker 或逐票查询。进项合并组搜索覆盖全部成员，+N 与详情抽屉使用同一成员集合，流水/OA 金额按实体去重；汇总付款不按每张发票复制累计。
+- 文件范围新增共享 repository SQL；各页面现有 query/assembler/API DTO 和权限保持各自 owner。旧的仅以显式 invoice row ID 读取 ETC 关系的路径已替换。回归入口：`tests/test_etc_relation_page_reads_postgres.py`，覆盖进行中 OA、47 张票、显式重复成员、成员搜索、删除、撤回与三页详情。

@@ -97,7 +97,7 @@ export default function WorkbenchInvoiceEntryDrawer({
 
   const fileCount = documents.length + files.length;
   const amountValid = fileCount === 0 || /^\d{1,18}(?:\.\d{1,2})?$/.test(totalAmount.trim());
-  const dirty = saved !== null && (files.length > 0 || totalAmount !== (saved.totalAmount ?? "")
+  const dirty = saved !== null && (saved.amountConfirmationRequired || files.length > 0 || totalAmount !== (saved.totalAmount ?? "")
     || documents.length !== saved.documents.length);
 
   function addFiles(selected: File[]) {
@@ -238,12 +238,13 @@ export default function WorkbenchInvoiceEntryDrawer({
             {fileCount > 0 ? <Chip color="default" size="sm" variant="soft"><Chip.Label>{fileCount} 个文件</Chip.Label></Chip> : null}
           </div>
           <label className="workbench-supporting-documents__amount">
+            {saved?.amountConfirmationRequired ? <p role="status">关联发票已变化，请核对凭证金额是否仍为发票之外的补充金额，再保存确认。</p> : null}
             <span>凭证总金额（元）</span>
             <Input aria-label="凭证总金额（元）" inputMode="decimal" value={totalAmount}
               disabled={disabled || loading || !saved || fileCount === 0}
               onChange={(event) => { setTotalAmount(event.currentTarget.value); setCompletion(undefined); }}
               placeholder="填写当前 OA 明细全部凭证的总金额" />
-            <span>{fileCount === 0 ? "删除全部文件并保存后，凭证金额会一并清空。" : "多份文件只填写一个总金额；允许 0，最多两位小数。"}</span>
+            <span>{fileCount === 0 ? "删除全部文件并保存后，凭证金额会一并清空。" : "填写凭证自身的合计金额，不含已有发票金额；多份文件只计一次，允许 0，最多两位小数。"}</span>
             {!amountValid && totalAmount.trim() ? <span role="alert">请输入非负金额，最多两位小数。</span> : null}
           </label>
           <div className="workbench-supporting-documents__list">

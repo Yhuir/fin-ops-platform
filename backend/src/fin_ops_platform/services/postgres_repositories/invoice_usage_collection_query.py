@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
-import re
 from typing import Any
 
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
@@ -17,8 +17,8 @@ from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRep
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAWorkflowRepository,
 )
+from fin_ops_platform.services.postgres_repositories.relation_invoice_members import RELATION_INVOICE_READ_SQL
 from fin_ops_platform.services.search_query import normalize_money_search_query
-
 
 _MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
@@ -1259,7 +1259,7 @@ def _fact_cte(
                 relation.amount_check,
                 relation.special_metadata,
                 relation.raw_payload
-            from app.workbench_pair_relations relation
+            from {RELATION_INVOICE_READ_SQL} relation
             where relation.status = 'active'
         ),
         relation_members as (
@@ -1383,6 +1383,9 @@ def _fact_cte(
                     ),
                     ''
                 ) as invoice_remarks,
+                string_agg(concat_ws(' ', member.digital_invoice_no, member.invoice_no,
+                    member.seller_name, member.seller_tax_no, member.buyer_name, member.buyer_tax_no,
+                    member.taxable_item_name, member.total_with_tax::text), ' ') as invoice_member_search_text,
                 count(*)::bigint as invoice_count,
                 bool_or(member.total_with_tax < 0) as has_negative_invoice,
                 bool_or(member.in_scope) as in_scope
@@ -1600,6 +1603,7 @@ def _where_sql(
             if field in field_sql
         ]
         search_columns = [
+            "invoice_member_search_text",
             "invoice_no",
             "seller_name",
             "seller_tax_no",
@@ -1727,7 +1731,7 @@ def _load_facts(
     )
     relation_rows = (
         transaction.fetch_all(
-            """
+            f"""
             with recursive active_relations as (
                 select
                     id,
@@ -1738,7 +1742,7 @@ def _load_facts(
                     amount_check,
                     special_metadata,
                     raw_payload
-                from app.workbench_pair_relations
+                from {RELATION_INVOICE_READ_SQL}
                 where status = 'active'
             ),
             relation_members as (

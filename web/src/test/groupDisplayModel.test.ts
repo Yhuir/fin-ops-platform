@@ -1,5 +1,6 @@
 import {
   buildWorkbenchGroupDisplayLayout,
+  canSupplementWorkbenchItem,
   buildWorkbenchInvoiceExpenseItemCandidates,
   buildWorkbenchServerPageQuery,
   buildWorkbenchDisplayGroups,
@@ -825,7 +826,7 @@ describe("groupDisplayModel time filter", () => {
         supportingDocuments: documents,
         supportingDocumentAmount: "30.00",
         supportingDocumentOaAmount: "38.00",
-        supportingDocumentCoveredByInvoice: false,
+        supportingDocumentHasInvoice: false,
         amount: "",
         displayOnly: true,
         tableValues: {},
@@ -1132,5 +1133,26 @@ describe("OA child rows independent of invoice folding", () => {
     expect(layout.segmentedPaneIds).toEqual(["oa"]);
     expect(group.rows.bank).toEqual([bank]);
     expect(group.rows.oa).toEqual([parent]);
+  });
+});
+
+
+describe("supplement entry amount rule", () => {
+  test.each([
+    { invoices: ["23.00"], voucher: undefined, expected: true },
+    { invoices: ["23.00", "25.00", "23.00"], voucher: undefined, expected: false },
+    { invoices: ["72.00"], voucher: undefined, expected: false },
+    { invoices: [""], voucher: undefined, expected: false },
+    { invoices: ["23.00"], voucher: "48.00", expected: false },
+    { invoices: ["23.00"], voucher: "47.00", expected: true },
+    { invoices: ["23.00"], voucher: null, expected: false },
+  ])("counts evidence once and preserves unknown amounts: %j", ({ invoices, voucher, expected }) => {
+    const row = { ...buildOaRow("oa-71", "71.00"), displayRole: "expense-claim-item" as const, sourceExpenseItemIds: ["item-71"] };
+    const evidence: WorkbenchRecord[] = invoices.map((amount, i) => ({
+      ...buildAttachmentInvoiceRow(`inv-${i}`, row.id, amount), sourceExpenseItemIds: ["item-71"],
+    }));
+    if (voucher !== undefined) evidence.push({ ...evidence[0], id: "voucher", sourceKind: "oa_supporting_document",
+      supportingDocumentAmount: voucher, displayOnly: true });
+    expect(canSupplementWorkbenchItem(row, evidence)).toBe(expected);
   });
 });

@@ -781,7 +781,7 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 
 ## 2026-09-21 凭证金额闭环验证
 
-- 业务：`test_workbench_amount_check_service.py` 验证凭证实际金额、多文件计一次、未知/零、正式发票优先及关联撤回、明细差额抵消、OA 子项金额变化使审阅指纹失效、正式发票缺金额不输出假合计。
+- 业务：`test_workbench_amount_check_service.py` 验证凭证实际金额、多文件计一次、未知/零、同项正式发票加凭证、发票依据变化要求重新确认及关联撤回、明细差额抵消、OA 子项金额变化使审阅指纹失效、正式发票缺金额不输出假合计。
 - Service/API/事务：凭证 service/API 和 `test_workbench_oa_supporting_document_postgres_integration.py`验证原子发布、审计失败回滚、CAS、重试、历史未知和清空。
 - Canonical SQL：`test_workbench_query_postgres_integration.py` 在真实 PostgreSQL 验证金额/分类/指纹/审阅的 SQL/Python 一致性、分页前明细分类及原固定查询预算；`test_workbench_page_query_repository.py` 保持 scope-first 与 OA 来源优先约束。
 - 前端/E2E：凭证编辑、异常抽屉、三栏组件及 `workbench-supporting-documents-flow.spec.ts` 覆盖一次保存、双入口、取消/失败/刷新、旧按钮移除和只读权限。
@@ -797,7 +797,7 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 
 - Core：`test_workbench_invoice_expense_item_matching.py` 覆盖 71=23+23+25、另一独立 25 子项、重复 canonical ID、顺序不变性、已覆盖/超额/非法金额、共享票、币种和歧义。
 - Service/integration：`test_workbench_query_postgres_integration.py` 覆盖批量写入、审计失败全回滚、重复执行无新增、canonical 详情立即可见；既有 100/1000 票批量 SQL 检查及进行中 OA/8000 分期回归继续执行。`test_workbench_invoice_supplement_service.py` 覆盖继续追加多票保留既有成员。
-- UI：`RelationGroupGrid.test.tsx` 覆盖三张票同段、继续录入精确目标、只读/异常允许录入/无权限边界、旧按钮消失。主页面和异常共用 grid；初次待归属抽屉的失败与刷新回归保持。
+- UI：`RelationGroupGrid.test.tsx` 覆盖三张票同段、票少加号录入精确目标、只读/异常允许录入/无权限边界、旧按钮消失。主页面和异常共用 grid；初次待归属抽屉的失败与刷新回归保持。
 - API/worker/source：执行补录 API、附件 promotion、来源优先与现有 matching scope 测试；不引入新的 API 或 worker。
 
 - 升级重跑：真实 PostgreSQL 中先缓存旧整项规则的成功 no-op，确认旧版本重复调用命中幂等，再切换余额规则；同一事实必须补齐两张票，审计失败回滚，成功后重复执行无重复归属。

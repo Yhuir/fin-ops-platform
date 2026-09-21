@@ -4,12 +4,12 @@ import { formatMoney } from "../../features/money";
 import type { WorkbenchExpenseItem } from "../../features/workbench/types";
 
 export default function WorkbenchSupportingDocumentFiles({
-  documents, totalAmount, oaAmount, coveredByInvoice = false, canManage, onManage,
+  documents, totalAmount, oaAmount, hasInvoice = false, canManage, onManage,
 }: {
   documents: NonNullable<WorkbenchExpenseItem["supportingDocuments"]>;
   totalAmount?: string | null;
   oaAmount?: string;
-  coveredByInvoice?: boolean;
+  hasInvoice?: boolean;
   canManage: boolean;
   onManage: () => void;
 }) {
@@ -31,7 +31,7 @@ export default function WorkbenchSupportingDocumentFiles({
       </ul>
       <div className="workbench-supporting-files__amount">
         <strong>凭证金额 {knownAmount ? formatMoney(totalAmount) : "待填写"}</strong>
-        {coveredByInvoice ? <span>按正式发票核对，凭证不重复计额</span>
+        {hasInvoice ? <span>与同项发票合并核对</span>
           : <span>差额（OA − 凭证）{delta ?? "待核对"}</span>}
       </div>
       {canManage ? <Button size="sm" variant="ghost" onPress={onManage}>管理凭证</Button> : null}

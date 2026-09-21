@@ -1850,6 +1850,7 @@ export async function listWorkbenchOaSupportingDocumentGallery({
 }
 
 type ApiWorkbenchOaSupportingDocumentSet = {
+  amount_confirmation_required: boolean;
   documents: ApiWorkbenchOaSupportingDocument[];
   total_amount: string | null;
   version: number;
@@ -1860,7 +1861,8 @@ function mapSupportingDocumentSet(payload: ApiWorkbenchOaSupportingDocumentSet):
     || (payload.total_amount !== null && typeof payload.total_amount !== "string")) {
     throw new Error("补充凭证数据不完整，请重新读取。");
   }
-  return { documents: payload.documents.map(mapSupportingDocument), totalAmount: payload.total_amount, version: payload.version };
+  return { documents: payload.documents.map(mapSupportingDocument), totalAmount: payload.total_amount, version: payload.version,
+    amountConfirmationRequired: payload.amount_confirmation_required };
 }
 
 export async function listWorkbenchOaSupportingDocuments(

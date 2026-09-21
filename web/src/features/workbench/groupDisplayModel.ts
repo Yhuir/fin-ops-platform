@@ -585,7 +585,7 @@ function missingInvoicePlaceholder(
 function supportingDocumentRows(
   parent: WorkbenchRecord,
   item: NonNullable<WorkbenchRecord["expenseItems"]>[number],
-  coveredByInvoice: boolean,
+  hasInvoice: boolean,
 ): WorkbenchRecord[] {
   if (!item.supportingDocuments?.length) return [];
   return [{
@@ -598,7 +598,7 @@ function supportingDocumentRows(
     supportingDocuments: item.supportingDocuments,
     supportingDocumentAmount: item.supportingDocumentAmount ?? null,
     supportingDocumentOaAmount: item.amount,
-    supportingDocumentCoveredByInvoice: coveredByInvoice,
+    supportingDocumentHasInvoice: hasInvoice,
     label: "补充凭证",
     status: item.supportingDocumentAmount == null ? "待填写凭证金额" : "凭证已保存",
     statusCode: "supporting_document",
@@ -1092,4 +1092,20 @@ function matchesWorkbenchTimeFilter(
   }
 
   return timeValue.startsWith(timeFilter.month);
+}
+
+/** Only offer more evidence when this exact, unshared item has a known shortage. */
+export function canSupplementWorkbenchItem(row: WorkbenchRecord, invoices: WorkbenchRecord[]): boolean {
+  if (row.displayRole !== "expense-claim-item" || row.sourceExpenseItemIds?.length !== 1) return false;
+  const itemId = row.sourceExpenseItemIds[0];
+  const evidence = invoices.filter((invoice) => invoice.sourceExpenseItemIds?.includes(itemId));
+  if (!evidence.length || evidence.some((invoice) => invoice.sourceExpenseItemIds?.length !== 1)) return false;
+  let total = 0;
+  for (const invoice of evidence) {
+    const value = invoice.sourceKind === "oa_supporting_document" ? invoice.supportingDocumentAmount : invoice.amount;
+    if (value == null || !/^-?\d+(?:\.\d{1,2})?$/.test(value.replace(/,/g, ""))) return false;
+    total += parseWorkbenchAmountCents(value);
+  }
+  return /^\d+(?:\.\d{1,2})?$/.test(row.amount.replace(/,/g, ""))
+    && parseWorkbenchAmountCents(row.amount) > total;
 }

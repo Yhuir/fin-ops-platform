@@ -14626,15 +14626,15 @@ body.column-layout-dragging {
   width: 100%;
 }
 
-.candidate-group-cell-with-footer {
+.candidate-group-cell-with-entry-control {
   flex-direction: column;
 }
 
-.candidate-group-cell-with-footer .candidate-group-stack {
+.candidate-group-cell-with-entry-control .candidate-group-stack {
   min-height: 0;
 }
 
-.workbench-invoice-entry-footer {
+.workbench-invoice-entry-control {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;

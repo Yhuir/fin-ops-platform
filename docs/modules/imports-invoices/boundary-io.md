@@ -167,3 +167,7 @@ ConfirmedInvoiceImportUnitOfWork 在导入事务内继续提交 promotion 与同
 ## 2026-09-21 凭证金额隔离
 
 关联台凭证新增子项总金额，仍不创建或改写 canonical invoice，不计入发票张数、税额或抵扣。全局凭证 gallery 保持只读文件接口；外部“选择已有发票”按钮移除不改变关联台人工录入按强身份复用 canonical invoice 的合同。
+
+## 2026-09-21 原始发票缺失核对
+
+`import_audit_repair_ops --inspect-invoice-source --dry-run --file-id ... --invoice-id ...` 只读指定原始文件的“发票基础信息”表头和准确票号行，通过原 file object SHA 校验。拒绝混入执行/修复参数，不创建或修改发票。缺失发票仍须由普通导入预览、确认、job 形成正式事实；不能用 ETC 原始金额猜测税额。

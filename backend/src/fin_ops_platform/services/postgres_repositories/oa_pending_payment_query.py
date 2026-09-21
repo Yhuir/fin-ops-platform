@@ -15,8 +15,11 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     COMPLETED_WORKFLOW_STATUS_ALIASES,
     PostgresOAProjectionRepository,
 )
+from fin_ops_platform.services.postgres_repositories.relation_invoice_members import (
+    RELATION_INVOICE_READ_SQL,
+    expand_relation_invoices,
+)
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
-
 
 FILTER_FIELDS = {
     "oa_applicant": ("oa_applicant", "text"),
@@ -456,7 +459,7 @@ class PostgresOaPendingPaymentQueryRepository:
                         else 'matched'
                     end as relation_status,
                     1 as priority
-                from app.workbench_pair_relations relation
+                from {RELATION_INVOICE_READ_SQL} relation
                 cross join lateral unnest(relation.row_ids, relation.row_types)
                     as bank_member(row_id, row_type)
                 where relation.status = 'active'
@@ -656,6 +659,7 @@ class PostgresOaPendingPaymentQueryRepository:
             for relation in dict(relation_snapshot.get("pair_relations") or {}).values()
             if isinstance(relation, dict)
         ]
+        relations = expand_relation_invoices(self._connection, relations)
         core = PostgresCoreRepository(self._connection)
         bank_transactions = core.list_bank_transactions_by_ids(
             relation_member_ids(relations, row_types={"bank", "bank_transaction"})
@@ -769,7 +773,7 @@ def _descriptor_oa_ids(
     )
 
 
-_CANONICAL_ROWS_CTE = """
+_CANONICAL_ROWS_CTE = f"""
 with requested as (
     select %s::text as tenant_id
 ),
@@ -824,7 +828,7 @@ workflow_relation_groups as materialized (
         array_agg(oa.oa_id order by member.ordinality) as oa_ids,
         relation.row_ids,
         relation.row_types
-    from app.workbench_pair_relations relation
+    from {RELATION_INVOICE_READ_SQL} relation
     cross join lateral unnest(relation.row_ids) with ordinality as member(row_id, ordinality)
     join canonical_oa oa on oa.oa_id = member.row_id
     where relation.status = 'active'
@@ -1108,7 +1112,7 @@ def list_oa_pending_payment_relation_visibility_gaps(
                 relation.case_id as relation_id,
                 oa.scope_key,
                 oa.source_kind
-            from app.workbench_pair_relations relation
+            from {RELATION_INVOICE_READ_SQL} relation
             cross join lateral unnest(relation.row_ids) with ordinality
                 as oa_member(row_id, ordinality)
             join canonical_oa oa on oa.oa_id = oa_member.row_id

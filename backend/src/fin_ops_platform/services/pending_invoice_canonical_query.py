@@ -35,6 +35,7 @@ from fin_ops_platform.services.pending_invoice_status import (
     pending_invoice_filter_status_codes,
     pending_invoice_status_payload,
 )
+from fin_ops_platform.services.postgres_repositories.relation_invoice_members import RELATION_INVOICE_READ_SQL
 from fin_ops_platform.services.search_query import normalize_money_search_query
 
 PAGE_SIZE_LIMIT = 200
@@ -265,7 +266,7 @@ banks as materialized (
 ),
 active_relations as materialized (
     select r.case_id, r.relation_mode, r.row_ids, r.row_types
-    from app.workbench_pair_relations r
+    from {RELATION_INVOICE_READ_SQL} r
     where r.status = 'active'
       and r.relation_mode <> 'turnover_manual_closure'
 ),
@@ -1119,11 +1120,11 @@ CANDIDATE_SORT_EXPRESSIONS = {
     "amount_difference_abs": "amount_difference_abs",
 }
 
-CANDIDATE_QUERY_SQL = """
+CANDIDATE_QUERY_SQL = f"""
 with
 active_relations as materialized (
     select case_id, row_ids, row_types
-    from app.workbench_pair_relations
+    from {RELATION_INVOICE_READ_SQL}
     where status = 'active'
       and relation_mode <> 'turnover_manual_closure'
 ),
@@ -1427,10 +1428,10 @@ where oa.row_id = %s
 limit 1
 """
 
-RELATION_DETAIL_SQL = """
+RELATION_DETAIL_SQL = f"""
 with active_relations as materialized (
     select relation.case_id, relation.row_ids, relation.row_types
-    from app.workbench_pair_relations relation
+    from {RELATION_INVOICE_READ_SQL} relation
     where relation.status = 'active'
       and relation.relation_mode <> 'turnover_manual_closure'
       and %s = any(relation.row_ids)
@@ -1528,7 +1529,7 @@ oa_rows as materialized (
         coalesce(oa.normalized_payload->>'reason', '') as reason,
         coalesce(oa.normalized_payload->>'expense_type', '') as expense_type,
         coalesce(oa.normalized_payload->>'expense_content', '') as expense_content,
-        coalesce(oa.normalized_payload->'detail_fields', '{}'::jsonb) as detail_fields
+        coalesce(oa.normalized_payload->'detail_fields', '{{}}'::jsonb) as detail_fields
     from oa_member_ids member
     join app.oa_applications oa on oa.row_id = member.row_id
     where oa.workflow_status is null
@@ -1552,7 +1553,7 @@ oa_rows as materialized (
         case
             when jsonb_typeof(admission.source_payload->'detail_fields') = 'object'
             then admission.source_payload->'detail_fields'
-            else '{}'::jsonb
+            else '{{}}'::jsonb
         end
     from oa_member_ids member
     join app.oa_pending_payment_admissions admission on admission.oa_id = member.row_id
@@ -2242,7 +2243,7 @@ class PendingInvoiceCanonicalQueryService:
             sections.extend(_detail_sections(oa_rows, "OA", _oa_detail_fields))
         return {
             "title": "关系详情",
-            "detail_available": True,
+            "detail_available": bool(sections),
             "sections": sections,
         }
 

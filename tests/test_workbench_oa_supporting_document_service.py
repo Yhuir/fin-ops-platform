@@ -80,7 +80,8 @@ class _Repository:
 
     def get_bundle(self, *, oa_row_id, expense_item_id):
         return {"documents": self.list_active(oa_row_id=oa_row_id, expense_item_id=expense_item_id),
-                "total_amount": getattr(self, "amount", None), "version": getattr(self, "version", 0)}
+                "total_amount": getattr(self, "amount", None), "version": getattr(self, "version", 0),
+                "amount_confirmation_required": False}
 
     def list_active(self, *, oa_row_id: str, expense_item_id: str):
         return [row for row in self.rows.values() if row["status"] == "active" and row["oa_row_id"] == oa_row_id and row["expense_item_id"] == expense_item_id]

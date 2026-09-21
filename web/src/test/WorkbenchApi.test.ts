@@ -2547,10 +2547,10 @@ test("maps display subgroups without replacing formal selection identities", asy
 
 test("reads and atomically saves one supporting-document set with zero, null, files and version", async () => {
   const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => new Response(JSON.stringify({
-    documents: [], total_amount: init?.method === "POST" ? null : "0.00", version: init?.method === "POST" ? 4 : 3,
+    amount_confirmation_required: false, documents: [], total_amount: init?.method === "POST" ? null : "0.00", version: init?.method === "POST" ? 4 : 3,
   }), { status: 200 }));
   const target = { caseId: "CASE-1", oaRowId: "oa-1", expenseItemId: "item-1" };
-  expect(await listWorkbenchOaSupportingDocuments(target)).toEqual({ documents: [], totalAmount: "0.00", version: 3 });
+  expect(await listWorkbenchOaSupportingDocuments(target)).toEqual({ documents: [], totalAmount: "0.00", version: 3, amountConfirmationRequired: false });
   const files = [new File(["png"], "voucher.png", { type: "image/png" }), new File(["pdf"], "note.pdf", { type: "application/pdf" })];
   await saveWorkbenchOaSupportingDocuments(target, { retainedDocumentIds: ["doc-1"], files, totalAmount: "0", expectedVersion: 3 });
   const body = fetchSpy.mock.calls[1][1]?.body as FormData;
@@ -2562,7 +2562,7 @@ test("reads and atomically saves one supporting-document set with zero, null, fi
   expect(body.get("total_amount")).toBe("0");
   expect(body.getAll("files")).toEqual(files);
   expect(await saveWorkbenchOaSupportingDocuments(target, { retainedDocumentIds: [], files: [], totalAmount: null, expectedVersion: 4 }))
-    .toEqual({ documents: [], totalAmount: null, version: 4 });
+    .toEqual({ documents: [], totalAmount: null, version: 4, amountConfirmationRequired: false });
   const clearedBody = fetchSpy.mock.calls[2][1]?.body as FormData;
   expect(clearedBody.get("total_amount")).toBe("");
   expect(clearedBody.get("retained_document_ids")).toBe("[]");

@@ -104,7 +104,7 @@ function WorkbenchRecordCard({
           documents={row.supportingDocuments}
           totalAmount={row.supportingDocumentAmount}
           oaAmount={row.supportingDocumentOaAmount}
-          coveredByInvoice={row.supportingDocumentCoveredByInvoice}
+          hasInvoice={row.supportingDocumentHasInvoice}
           canManage={!invoiceResolutionDisabled}
           onManage={() => onRowAction(row, "manage-supporting-documents")}
         />

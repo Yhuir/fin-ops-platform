@@ -541,7 +541,9 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             values ('CASE-PARTIAL', 'manual_confirmed', 'active', %s, %s, '{}'::jsonb)""",
             ([owner] + ids, ['oa', 'invoice', 'invoice', 'invoice']))
 
-        from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import PostgresWorkbenchFormalRelationFactRepository
+        from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import (
+            PostgresWorkbenchFormalRelationFactRepository,
+        )
         from fin_ops_platform.services.workbench_free_matching_engine import WorkbenchFreeMatchingEngine
         from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchMatchingOrchestrator
         orchestrator = WorkbenchMatchingOrchestrator(
@@ -1215,6 +1217,40 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         )
         accepted = self.repository.get_workbench_initial_page(scope_key="2026-07")
         self.assertTrue(any(group.get("detail_key") == "CASE-DIRECT-1" for group in accepted["paired"]["groups"]))
+
+    def test_same_item_formal_invoice_and_voucher_addition_sql_python_parity(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.supporting_document_invoice_basis import (
+            SUPPORTING_DOCUMENT_INVOICE_BASIS_SQL,
+        )
+        self._insert_supporting_document("77.00")
+        self.raw_connection.execute("""
+            insert into app.invoices(legacy_mongo_id, invoice_type, invoice_no, invoice_date,
+                invoice_month, amount, signed_amount, total_with_tax, status, source_links, raw_payload)
+            values ('invoice-direct-1', 'input', 'MIXED-INVOICE', '2026-07-21', '2026-07-01', 23, 23, 23,
+                'active', '[{"source_type":"oa_attachment_invoice","source_expense_item_id":"oa-direct-1:item:0",
+                "derived_from_oa_id":"oa-direct-1:item:0","source_workbench_row_id":"invoice-direct-1"}]'::jsonb, '{}'::jsonb)
+        """)
+        self.raw_connection.execute("""
+            update app.workbench_pair_relations set row_ids=array['oa-direct-1','bank-direct-1','invoice-direct-1'],
+                row_types=array['oa','bank','invoice'], special_metadata='{"requires_invoice":true}'::jsonb
+            where case_id='CASE-DIRECT-1'
+        """)
+        self.raw_connection.execute(f"""update app.workbench_oa_supporting_document_bundles bundle
+            set invoice_basis=basis.invoice_basis from ({SUPPORTING_DOCUMENT_INVOICE_BASIS_SQL}) basis
+            where bundle.oa_row_id=basis.oa_row_id and bundle.expense_item_id=basis.expense_item_id""")
+        page = self.repository.get_workbench_initial_page(scope_key="2026-07")
+        group = next(g for g in page["paired"]["groups"] if g.get("detail_key")=="CASE-DIRECT-1")
+        self.assertEqual(group["amount_check"]["invoice_total"], "23.00")
+        self.assertEqual(group["amount_check"]["evidence_total"], "100.00")
+        self.assertNotIn("workbench_anomaly", group)
+        with self.raw_connection.transaction() as transaction:
+            transaction.execute("select set_config('fin_ops.correction_reason', '凭证比较测试', true)")
+            transaction.execute("select set_config('fin_ops.actor_id', 'test-suite', true)")
+            transaction.execute("update app.invoices set total_with_tax=25 where legacy_mongo_id='invoice-direct-1'")
+        page = self.repository.get_workbench_initial_page(scope_key="2026-07")
+        group = next(g for g in page["unpaired"]["groups"] if g.get("detail_key")=="CASE-DIRECT-1")
+        self.assertIsNone(group["amount_check"]["evidence_total"])
+        self.assertEqual(group["workbench_anomaly"]["items"][0]["code"], "oa_supporting_document_amount_missing")
 
     def test_voucher_amount_unknown_difference_and_review_parity(self) -> None:
         self.raw_connection.execute("""

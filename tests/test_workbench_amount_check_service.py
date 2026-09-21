@@ -810,7 +810,7 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         rows = {
             "oa": [{**self._oa_row("300"), "id": "oa-1", "expense_items": [
                 {"id": "fine", "amount": "100", "supporting_document_amount": "100.00", "supporting_document_version": 1, "supporting_documents": [{"id": "doc-1"}]},
-                {"id": "hotel", "amount": "200", "supporting_documents": [{"id": "doc-2"}]},
+                {"id": "hotel", "amount": "200", "supporting_document_amount": "0.00", "supporting_documents": [{"id": "doc-2"}]},
             ]}],
             "bank": [self._bank_row("300")],
             "invoice": [{**self._invoice_row("190"), "id": "inv-1", "source_expense_item_ids": ["hotel"]}],
@@ -825,17 +825,18 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         anomaly = self.service.workbench_anomaly(rows, relation_id="CASE-DOC")
         self.assertEqual(anomaly["items"][0]["code"], "oa_invoice_equal_bank_more")
 
-    def test_supporting_documents_do_not_double_subtract_shared_invoice_items(self) -> None:
+    def test_supporting_documents_add_once_to_shared_invoice_component(self) -> None:
         rows = {
             "oa": [{**self._oa_row("300"), "id": "oa-1", "expense_items": [
                 {"id": "first", "amount": "100", "supporting_document_amount": "100.00", "supporting_document_version": 1, "supporting_documents": [{"id": "doc"}]},
                 {"id": "second", "amount": "200"},
             ]}],
             "bank": [self._bank_row("300")],
-            "invoice": [{**self._invoice_row("300"), "id": "inv-1", "source_expense_item_ids": ["first", "second"]}],
+            "invoice": [{**self._invoice_row("200"), "id": "inv-1", "source_expense_item_ids": ["first", "second"]}],
         }
         self.assertIsNone(self.service.workbench_anomaly(rows, relation_id="CASE-DOC"))
-        self.assertEqual(self.service.check(rows)["invoice_total"], "300.00")
+        self.assertEqual(self.service.check(rows)["invoice_total"], "200.00")
+        self.assertEqual(self.service.check(rows)["evidence_total"], "300.00")
 
     def test_document_only_group_has_no_fake_invoice_and_preserves_bank_check(self) -> None:
         rows = {
@@ -887,7 +888,7 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         self.assertIsNone(self.service.workbench_anomaly(rows, relation_id="voucher"))
         rows["invoice"] = [{**self._invoice_row("90"), "id": "inv", "source_expense_item_ids": ["item-1"]}]
         result = self.service.check(rows)
-        self.assertEqual((result["supporting_document_total"], result["evidence_total"]), ("0.00", "90.00"))
+        self.assertEqual((result["supporting_document_total"], result["evidence_total"]), ("100.00", "190.00"))
         self.assertEqual(result["status"], "mismatch")
         rows["invoice"] = []
         self.assertEqual(self.service.check(rows)["evidence_total"], "100.00")

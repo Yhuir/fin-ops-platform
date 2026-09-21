@@ -62,7 +62,7 @@ class WorkbenchOaSupportingDocumentPostgresIntegrationTests(unittest.TestCase):
         return self.service.list(oa_row_id="oa-1", expense_item_id="oa-1:item:0")
 
     def test_atomic_edit_amount_only_delete_and_semantic_retry_with_one_dirty_notification(self):
-        self.assertEqual(self.read(), {"documents": [], "total_amount": None, "version": 0})
+        self.assertEqual(self.read(), {"documents": [], "total_amount": None, "version": 0, "amount_confirmation_required": False})
         with patch.object(PostgresWorkbenchMatchingQueueRepository, "mark_relation_matching_dirty",
                           autospec=True, wraps=None) as dirty:
             first = self.save()
@@ -84,13 +84,13 @@ class WorkbenchOaSupportingDocumentPostgresIntegrationTests(unittest.TestCase):
         dirty = self.connection.fetch_one("select reason, status from job.workbench_matching_dirty_scopes")
         self.assertEqual(dirty, {"reason": "oa_supporting_document_changed", "status": "dirty"})
         rows = [{"id": "oa-1", "expense_items": [{"id": "oa-1:item:0"}, {"id": "other"}]}]
-        self.repository.attach_to_oa_rows(rows)
+        PostgresWorkbenchOaSupportingDocumentRepository(self.connection).attach_to_oa_rows(rows)
         self.assertEqual(rows[0]["expense_items"][0]["supporting_document_amount"], "200.00")
         self.assertEqual(rows[0]["expense_items"][0]["supporting_document_version"], 2)
         self.assertEqual(rows[0]["expense_items"][1]["supporting_document_version"], 0)
         self.assertIsNone(rows[0]["expense_items"][1]["supporting_document_amount"])
         cleared = self.save(amount=None, version=2, retained=(), files=())
-        self.assertEqual(cleared, {"documents": [], "total_amount": None, "version": 3})
+        self.assertEqual(cleared, {"documents": [], "total_amount": None, "version": 3, "amount_confirmation_required": False})
         self.assertEqual(self.save(amount=None, version=2, retained=(), files=()), cleared)
         for document_id in ids:
             with self.assertRaises(WorkbenchOaSupportingDocumentError):
@@ -158,7 +158,7 @@ class WorkbenchOaSupportingDocumentPostgresIntegrationTests(unittest.TestCase):
         with patch.object(self.store, "delete_workbench_oa_supporting_document", side_effect=OSError("storage failed")):
             with self.assertLogs("fin_ops_platform.services.workbench_oa_supporting_document_service", level="ERROR"):
                 result = self.save(version=1, amount=None, files=())
-        self.assertEqual(result, {"documents": [], "total_amount": None, "version": 2})
+        self.assertEqual(result, {"documents": [], "total_amount": None, "version": 2, "amount_confirmation_required": False})
         with self.assertRaises(WorkbenchOaSupportingDocumentError) as error:
             self.save(version=1, amount="10.00", retained=[first["documents"][0]["id"]], files=())
         self.assertEqual(error.exception.error, "supporting_document_version_conflict")
@@ -182,3 +182,20 @@ class WorkbenchOaSupportingDocumentPostgresIntegrationTests(unittest.TestCase):
         updated = self.save(amount="1.23", retained=[historical["documents"][0]["id"]], files=())
         self.assertEqual(updated["total_amount"], "1.23")
         self.assertEqual(updated["version"], 1)
+
+    def test_invoice_change_requires_reconfirming_only_affected_voucher(self):
+        saved = self.save(amount="48.00", files=(b"%PDF-additional",))
+        self.connection.execute("""insert into app.invoices(legacy_mongo_id,invoice_type,invoice_no,invoice_date,
+            invoice_month,amount,signed_amount,total_with_tax,status,source_links) values ('supplement-invoice','input','supplement-23',
+            '2026-09-01','2026-09-01',23,23,23,'active',
+            '[{"source_type":"oa_expense_item_invoice","source_workbench_row_id":"oa-1","source_expense_item_id":"oa-1:item:0"}]')""")
+        self.assertTrue(self.read()["amount_confirmation_required"])
+        rows = [{"id":"oa-1","expense_items":[{"id":"oa-1:item:0"}]}]
+        PostgresWorkbenchOaSupportingDocumentRepository(self.connection).attach_to_oa_rows(rows)
+        self.assertIsNone(rows[0]["expense_items"][0]["supporting_document_amount"])
+        confirmed = self.save(amount="48.00",version=1,retained=[d["id"] for d in saved["documents"]],files=())
+        self.assertEqual(confirmed["version"],2)
+        self.assertFalse(confirmed["amount_confirmation_required"])
+        PostgresWorkbenchOaSupportingDocumentRepository(self.connection).attach_to_oa_rows(rows)
+        self.assertEqual(rows[0]["expense_items"][0]["supporting_document_amount"],"48.00")
+        self.assertEqual(self.save(amount="48.00",version=2,retained=[d["id"] for d in saved["documents"]],files=()), confirmed)

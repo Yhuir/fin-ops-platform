@@ -170,7 +170,7 @@ export type WorkbenchRecord = {
   supportingDocuments?: WorkbenchExpenseItem["supportingDocuments"];
   supportingDocumentAmount?: string | null;
   supportingDocumentOaAmount?: string;
-  supportingDocumentCoveredByInvoice?: boolean;
+  supportingDocumentHasInvoice?: boolean;
   id: string;
   caseId?: string;
   exceptionCaseId?: string;
@@ -464,6 +464,7 @@ export type WorkbenchOaSupportingDocument = {
 };
 
 export type WorkbenchOaSupportingDocumentSet = {
+  amountConfirmationRequired?: boolean;
   documents: WorkbenchOaSupportingDocument[];
   totalAmount: string | null;
   version: number;

@@ -2727,3 +2727,48 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class InvoiceSourceInspectionTests(unittest.TestCase):
+    def test_inspection_reads_only_requested_original_rows_and_closes_connection(self):
+        import hashlib
+
+        from openpyxl import Workbook
+        workbook = Workbook()
+        workbook.active.title = "发票基础信息"
+        workbook.active.append(["发票号码", "价税合计"])
+        workbook.active.append(["26537912210800231212", 39.25])
+        workbook.active.append(["other", 99])
+        content = io.BytesIO()
+        workbook.save(content)
+        workbook.close()
+        data = content.getvalue()
+        connection = Mock()
+        transaction = Mock()
+        @contextmanager
+        def transaction_context():
+            yield transaction
+        connection.transaction = transaction_context
+        store = Mock()
+        store.read_import_file.return_value = data
+        output = io.StringIO()
+        with patch.object(import_audit_repair_ops.PostgresSettings, "from_env"), \
+             patch.object(import_audit_repair_ops, "PostgresConnection", return_value=connection), \
+             patch.object(import_audit_repair_ops, "load_import_source_file", return_value={
+                 "stored_file_path":"source.xlsx", "original_filename":"原始.xlsx",
+                 "sha256":hashlib.sha256(data).hexdigest()}), \
+             patch.object(import_audit_repair_ops, "_build_bank_repair_state_store", return_value=store):
+            result = import_audit_repair_ops.main(["--dry-run", "--inspect-invoice-source",
+                "--file-id", "file-1", "--invoice-id", "26537912210800231212"], stdout=output)
+        self.assertEqual(result, 0)
+        report = json.loads(output.getvalue())
+        self.assertTrue(report["read_only"])
+        self.assertEqual(report["rows"], [{"excel_row":2,"values":["26537912210800231212",39.25]}])
+        transaction.execute.assert_called_once_with("set transaction isolation level repeatable read, read only")
+        connection.close.assert_called_once()
+
+    def test_inspection_rejects_write_mode_before_opening_connection(self):
+        with patch.object(import_audit_repair_ops, "PostgresConnection") as connection:
+            with self.assertRaises(SystemExit):
+                import_audit_repair_ops.main(["--execute", "--inspect-invoice-source",
+                    "--file-id", "file-1", "--invoice-id", "number"], stdout=io.StringIO())
+            connection.assert_not_called()

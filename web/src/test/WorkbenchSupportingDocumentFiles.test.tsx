@@ -49,11 +49,11 @@ test.each([
   expect(screen.getByText(deltaText)).toBeInTheDocument();
 });
 
-test("official invoice coverage keeps management without counting the voucher a second time", () => {
-  render(<WorkbenchRecordCard row={{ ...row, supportingDocumentAmount: "80.00", supportingDocumentOaAmount: "100.00", supportingDocumentCoveredByInvoice: true }} paneId="invoice" zoneId="unpaired" rowState="idle"
+test("mixed invoice evidence keeps voucher management and explains combined comparison", () => {
+  render(<WorkbenchRecordCard row={{ ...row, supportingDocumentAmount: "80.00", supportingDocumentOaAmount: "100.00", supportingDocumentHasInvoice: true }} paneId="invoice" zoneId="unpaired" rowState="idle"
     canOperateData showWorkflowActions onRowAction={vi.fn()} onSelectRow={vi.fn()} onOpenDetail={vi.fn()} />);
   expect(screen.getByText("凭证金额 80.00")).toBeInTheDocument();
-  expect(screen.getByText("按正式发票核对，凭证不重复计额")).toBeInTheDocument();
+  expect(screen.getByText("与同项发票合并核对")).toBeInTheDocument();
   expect(screen.queryByText(/差额（OA/)).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "管理凭证" })).toBeInTheDocument();
 });

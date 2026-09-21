@@ -25,6 +25,9 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_sql impo
     pending_oa_application_date_sql,
     pending_oa_application_time_sql,
 )
+from fin_ops_platform.services.postgres_repositories.supporting_document_invoice_basis import (
+    SUPPORTING_DOCUMENT_INVOICE_BASIS_SQL,
+)
 from fin_ops_platform.services.postgres_repositories.workbench_page_hydration import (
     PostgresWorkbenchPageHydrationRepository,
 )
@@ -1431,16 +1434,22 @@ source_owned_relation_placement_rollups as materialized (
     where placement.owner_relation_case_id is not null
     group by placement.owner_relation_case_id
 ),
+supporting_invoice_basis as materialized ({SUPPORTING_DOCUMENT_INVOICE_BASIS_SQL}),
 active_supporting_document_items as materialized (
-    select document.oa_row_id, document.expense_item_id, bundle.total_amount,
+    select document.oa_row_id, document.expense_item_id,
+           case when bundle.invoice_basis = coalesce(basis.invoice_basis, '{{}}'::jsonb)
+                then bundle.total_amount end as total_amount,
            coalesce(bundle.version, 0) as version,
            string_agg(document.id::text, ',' order by document.id::text) as document_ids
     from app.workbench_oa_supporting_documents document
     join app.file_objects file on file.id = document.file_object_id
     left join app.workbench_oa_supporting_document_bundles bundle
       on bundle.oa_row_id = document.oa_row_id and bundle.expense_item_id = document.expense_item_id
+    left join supporting_invoice_basis basis
+      on basis.oa_row_id = document.oa_row_id and basis.expense_item_id = document.expense_item_id
     where document.status = 'active' and file.tombstoned_at is null
-    group by document.oa_row_id, document.expense_item_id, bundle.total_amount, bundle.version
+    group by document.oa_row_id, document.expense_item_id, bundle.total_amount, bundle.version,
+             bundle.invoice_basis, basis.invoice_basis
 ),
 fully_supported_relations as materialized (
     select member.case_id
@@ -2036,7 +2045,7 @@ unassigned_invoice_anomaly_items as materialized (
         ), 'hex') as item_fingerprint
     from unassigned_relation_invoices invoice
 ),
-unlinked_expense_items as materialized (
+evidence_expense_items as materialized (
     select
         expense.internal_key,
         expense.case_id,
@@ -2046,15 +2055,15 @@ unlinked_expense_items as materialized (
         document.expense_item_id is not null as has_supporting_document,
         document.total_amount as supporting_document_amount,
         document.version as supporting_document_version,
-        document.document_ids
+        document.document_ids,
+        count(linked.invoice_row_id) > 0 as has_invoice
     from oa_expense_items expense
     left join active_supporting_document_items document
       on document.oa_row_id = expense.oa_row_id and document.expense_item_id = expense.item_id
     left join normalized_invoice_item_links linked
       on linked.internal_key = expense.internal_key
      and linked.canonical_expense_item_id = expense.item_id
-    where linked.invoice_row_id is null
-      and not exists (
+    where not exists (
         select 1
         from relation_anomaly_members etc_member
         where etc_member.internal_key = expense.internal_key
@@ -2092,16 +2101,56 @@ unlinked_expense_anomaly_items as materialized (
             convert_to(totals.attachment_file_count::text, 'UTF8'),
             'sha256'
         ), 'hex') as item_fingerprint
-    from unlinked_expense_items totals
-    where not totals.has_supporting_document or totals.supporting_document_amount is null
+    from evidence_expense_items totals
+    where (not totals.has_invoice and not totals.has_supporting_document)
+       or (totals.has_supporting_document and totals.supporting_document_amount is null)
+),
+supporting_item_reach(internal_key, seed_item_id, item_id) as (
+    select internal_key, item_id, item_id from evidence_expense_items where has_supporting_document
+    union
+    select reach.internal_key, reach.seed_item_id, neighbor.canonical_expense_item_id
+    from supporting_item_reach reach
+    join normalized_invoice_item_links own
+      on own.internal_key = reach.internal_key and own.canonical_expense_item_id = reach.item_id
+    join normalized_invoice_item_links neighbor
+      on neighbor.internal_key = own.internal_key and neighbor.invoice_row_id = own.invoice_row_id
+),
+supporting_component_amounts as materialized (
+    select reach.internal_key, reach.seed_item_id,
+           sum(item.item_amount) as oa_amount,
+           sum(item.supporting_document_amount) as supporting_amount,
+           bool_or(item.has_supporting_document and item.supporting_document_amount is null) as unknown_amount
+    from supporting_item_reach reach
+    join evidence_expense_items item
+      on item.internal_key = reach.internal_key and item.item_id = reach.item_id
+    group by reach.internal_key, reach.seed_item_id
+),
+supporting_component_invoices as materialized (
+    select facts.internal_key, facts.seed_item_id, sum(facts.invoice_amount) as invoice_amount
+    from (
+        select distinct reach.internal_key, reach.seed_item_id, linked.invoice_row_id, linked.invoice_amount
+        from supporting_item_reach reach
+        join normalized_invoice_item_links linked
+          on linked.internal_key = reach.internal_key and linked.canonical_expense_item_id = reach.item_id
+    ) facts
+    group by facts.internal_key, facts.seed_item_id
+),
+supporting_component_mismatches as materialized (
+    select amounts.internal_key,
+           bool_or(not amounts.unknown_amount and amounts.oa_amount <>
+               coalesce(amounts.supporting_amount, 0) + coalesce(invoices.invoice_amount, 0)) as has_item_mismatch
+    from supporting_component_amounts amounts
+    left join supporting_component_invoices invoices using (internal_key, seed_item_id)
+    group by amounts.internal_key
 ),
 supporting_document_totals as materialized (
-    select internal_key, sum(supporting_document_amount) as supporting_amount,
-           bool_or(supporting_document_amount is null) as has_unknown_amount,
-           bool_or(item_amount <> supporting_document_amount) as has_item_mismatch
-    from unlinked_expense_items
-    where has_supporting_document
-    group by internal_key
+    select item.internal_key, sum(item.supporting_document_amount) as supporting_amount,
+           bool_or(item.supporting_document_amount is null) as has_unknown_amount,
+           bool_or(mismatch.has_item_mismatch) as has_item_mismatch
+    from evidence_expense_items item
+    join supporting_component_mismatches mismatch using (internal_key)
+    where item.has_supporting_document
+    group by item.internal_key
 ),
 supporting_document_fingerprints as materialized (
     select item.internal_key, item.case_id,
@@ -2116,7 +2165,7 @@ supporting_document_fingerprints as materialized (
                convert_to(item.supporting_document_version::text, 'UTF8') || decode('00', 'hex') ||
                convert_to(item.document_ids, 'UTF8'), 'sha256'
            ), 'hex') as item_fingerprint
-    from unlinked_expense_items item
+    from evidence_expense_items item
     where item.has_supporting_document
 ),
 expense_anomaly_items as materialized (

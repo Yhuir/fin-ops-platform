@@ -150,6 +150,7 @@ class WorkbenchOaSupportingDocumentService:
         return {
             "documents": [self._present(document) for document in bundle["documents"]],
             "total_amount": bundle["total_amount"], "version": bundle["version"],
+            "amount_confirmation_required": bundle["amount_confirmation_required"],
         }
 
     def gallery(self, *, page_size: int = MAX_GALLERY_PAGE_SIZE, cursor: str = "") -> dict[str, Any]:

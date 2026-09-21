@@ -53,6 +53,18 @@ beforeEach(() => { vi.mocked(listWorkbenchOaSupportingDocuments).mockResolvedVal
 afterEach(() => vi.resetAllMocks());
 
 describe("WorkbenchInvoiceEntryDrawer", () => {
+  test("reconfirms a changed invoice basis without requiring amount or file edits", async () => {
+    vi.mocked(listWorkbenchOaSupportingDocuments).mockResolvedValue({ ...existing, amountConfirmationRequired: true });
+    vi.mocked(saveWorkbenchOaSupportingDocuments).mockResolvedValue({ ...existing, version: 4, amountConfirmationRequired: false });
+    const { user } = setup();
+    await ready();
+    expect(screen.getByText(/关联发票已变化/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "保存凭证" }));
+    await waitFor(() => expect(saveWorkbenchOaSupportingDocuments).toHaveBeenCalledWith(target, expect.objectContaining({
+      totalAmount: "100.00", expectedVersion: 3, retainedDocumentIds: [document.id], files: [],
+    })));
+  });
+
   test("defaults to canonical invoice entry and reports completion without auto-closing", async () => {
     const { user, onClose, baseProps } = setup({ initialMode: "manual" });
     vi.mocked(previewWorkbenchManualInvoices).mockResolvedValue(batchPreview);

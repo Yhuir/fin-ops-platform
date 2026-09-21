@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fin_ops_platform.services.postgres_repositories.common import run_in_transaction
 from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
+from fin_ops_platform.services.postgres_repositories.supporting_document_invoice_basis import (
+    SUPPORTING_DOCUMENT_INVOICE_BASIS_SQL,
+)
 from fin_ops_platform.services.postgres_repositories.workbench_matching_queue import (
     PostgresWorkbenchMatchingQueueRepository,
 )
@@ -19,8 +23,8 @@ class PostgresWorkbenchOaSupportingDocumentRepository:
         if not rows:
             return
         documents = self._connection.fetch_all(
-            """
-            with documents as (
+            f"""
+            with invoice_basis as ({SUPPORTING_DOCUMENT_INVOICE_BASIS_SQL}), documents as (
                 select document.oa_row_id, document.expense_item_id,
                        document.id::text as id, document.original_filename as file_name,
                        document.content_type, document.size_bytes,
@@ -32,9 +36,12 @@ class PostgresWorkbenchOaSupportingDocumentRepository:
                 where document.oa_row_id = any(%s::text[])
                   and document.status = 'active' and file.tombstoned_at is null
             ), bundles as (
-                select oa_row_id, expense_item_id, total_amount::text as total_amount, version
-                from app.workbench_oa_supporting_document_bundles
-                where oa_row_id = any(%s::text[])
+                select bundle.oa_row_id, bundle.expense_item_id,
+                       case when bundle.invoice_basis = coalesce(basis.invoice_basis, '{{}}'::jsonb)
+                            then bundle.total_amount::text end as total_amount, bundle.version
+                from app.workbench_oa_supporting_document_bundles bundle
+                left join invoice_basis basis using (oa_row_id, expense_item_id)
+                where bundle.oa_row_id = any(%s::text[])
             )
             select coalesce(documents.oa_row_id, bundles.oa_row_id) as oa_row_id,
                    coalesce(documents.expense_item_id, bundles.expense_item_id) as expense_item_id,
@@ -72,14 +79,26 @@ class PostgresWorkbenchOaSupportingDocumentRepository:
     @staticmethod
     def _read_bundle(connection: Any, oa_row_id: str, expense_item_id: str) -> dict[str, Any]:
         bundle = connection.fetch_one(
-            """select total_amount::text as total_amount, version
+            """select total_amount::text as total_amount, version, invoice_basis
                from app.workbench_oa_supporting_document_bundles
                where oa_row_id = %s and expense_item_id = %s""",
             (oa_row_id, expense_item_id),
-        ) or {"total_amount": None, "version": 0}
-        return {**bundle, "documents": PostgresWorkbenchOaSupportingDocumentRepository(connection).list_active(
+        ) or {"total_amount": None, "version": 0, "invoice_basis": {}}
+        basis = PostgresWorkbenchOaSupportingDocumentRepository._invoice_basis(connection, oa_row_id, expense_item_id)
+        documents = PostgresWorkbenchOaSupportingDocumentRepository(connection).list_active(
             oa_row_id=oa_row_id, expense_item_id=expense_item_id,
-        )}
+        )
+        bundle["amount_confirmation_required"] = bool(documents) and bundle.pop("invoice_basis") != basis
+        bundle.pop("invoice_basis", None)
+        return {**bundle, "documents": documents}
+
+    @staticmethod
+    def _invoice_basis(connection: Any, oa_row_id: str, expense_item_id: str) -> dict[str, Any]:
+        row = connection.fetch_one(
+            f"select invoice_basis from ({SUPPORTING_DOCUMENT_INVOICE_BASIS_SQL}) basis "
+            "where oa_row_id = %s and expense_item_id = %s", (oa_row_id, expense_item_id),
+        )
+        return row["invoice_basis"] if row else {}
 
     def save_bundle(
         self, *, relation_case_id: str, oa_row_id: str, expense_item_id: str,
@@ -94,11 +113,12 @@ class PostgresWorkbenchOaSupportingDocumentRepository:
                 (oa_row_id, expense_item_id, actor_id, actor_id),
             )
             bundle = connection.fetch_one(
-                """select total_amount::text as total_amount, version
+                """select total_amount::text as total_amount, version, invoice_basis
                    from app.workbench_oa_supporting_document_bundles
                    where oa_row_id = %s and expense_item_id = %s for update""",
                 (oa_row_id, expense_item_id),
             )
+            basis = self._invoice_basis(connection, oa_row_id, expense_item_id)
             current = PostgresWorkbenchOaSupportingDocumentRepository(connection).list_active(
                 oa_row_id=oa_row_id, expense_item_id=expense_item_id,
             )
@@ -114,10 +134,10 @@ class PostgresWorkbenchOaSupportingDocumentRepository:
                 )
             target_hashes = {by_id[key]["content_sha256"] for key in retained_document_ids}
             target_hashes.update(row["content_sha256"] for row in documents)
-            if bundle["total_amount"] == total_amount and target_hashes == {
+            if bundle["invoice_basis"] == basis and bundle["total_amount"] == total_amount and target_hashes == {
                 row["content_sha256"] for row in current
             }:
-                return {**bundle, "documents": current, "removed_storage_uris": []}
+                return {**bundle, "amount_confirmation_required": False, "documents": current, "removed_storage_uris": []}
             if bundle["version"] != expected_version:
                 raise WorkbenchOaSupportingDocumentError(
                     "supporting_document_version_conflict", "补充凭证已被其他操作更新，请刷新后重试。",
@@ -152,10 +172,10 @@ class PostgresWorkbenchOaSupportingDocumentRepository:
                 active_hashes.add(document["content_sha256"])
             connection.execute(
                 """update app.workbench_oa_supporting_document_bundles
-                   set total_amount = %s::numeric, version = version + 1,
+                   set total_amount = %s::numeric, invoice_basis = %s::jsonb, version = version + 1,
                        updated_by = %s, updated_at = now()
                    where oa_row_id = %s and expense_item_id = %s""",
-                (total_amount, actor_id, oa_row_id, expense_item_id),
+                (total_amount, json.dumps(basis), actor_id, oa_row_id, expense_item_id),
             )
             result = self._read_bundle(connection, oa_row_id, expense_item_id)
             PostgresOperationsAuditRepository(connection).append_operation_event({

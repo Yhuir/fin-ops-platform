@@ -61,7 +61,12 @@ test("supporting documents refresh the exact item, preview, and restore missing 
   await expect(files).toBeVisible();
   await expect(files.getByText("凭证金额 40.00")).toBeVisible();
   await expect(files.getByText("差额（OA − 凭证）15.00")).toBeVisible();
-  await expect(zone.getByRole("button", { name: "录入发票" })).toHaveCount(0);
+  await expect(zone.getByRole("button", { name: "录入发票", exact: true })).toHaveCount(0);
+  const supplement = zone.getByRole("button", { name: "录入发票 55 元付款项" });
+  await expect(supplement).toHaveText("+");
+  await supplement.click();
+  await expect(page.getByRole("dialog", { name: "录入发票" })).toBeVisible();
+  await page.getByRole("button", { name: "关闭录入发票" }).click();
   expect(await files.evaluate(el => getComputedStyle(el).gridColumn)).toBe("1 / -1");
 
   const popupPromise = page.waitForEvent("popup");

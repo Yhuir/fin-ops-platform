@@ -66,6 +66,7 @@ from fin_ops_platform.services.postgres_repositories.import_audit_repair import 
     load_etc_invoice_payload_repair_snapshot,
     load_failed_import_job_recovery_snapshot,
     load_import_audit_repair_snapshot,
+    load_import_source_file,
     load_invoice_expense_item_link_repair_snapshot,
     load_invoice_header_fact_repair_snapshot,
     load_oa_attachment_invoice_link_audit_snapshot,
@@ -397,6 +398,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-bank-audit-row-unlink-count", type=int)
     parser.add_argument("--repair-etc-invoice-payload", action="store_true")
     parser.add_argument("--invoice-id", action="append", default=[])
+    parser.add_argument("--inspect-invoice-source", action="store_true")
     parser.add_argument("--operator-id")
     return parser
 
@@ -457,9 +459,49 @@ def _run_etc_invoice_payload_repair(args: Any, *, stdout: TextIO) -> int:
         connection.close()
 
 
+def _inspect_invoice_source(args: Any, *, stdout: TextIO) -> int:
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    allowed = {"inspect_invoice_source", "dry_run", "file_id", "invoice_id"}
+    if not args.dry_run or not args.file_id or not args.invoice_id or any(
+        _argument_is_set(value) for name, value in vars(args).items() if name not in allowed
+    ):
+        raise SystemExit("Source inspection requires dry-run, one file ID and explicit invoice numbers only.")
+    connection = PostgresConnection(PostgresSettings.from_env())
+    try:
+        with connection.transaction() as tx:
+            tx.execute("set transaction isolation level repeatable read, read only")
+            source = load_import_source_file(tx, args.file_id)
+        if source is None:
+            raise ValueError("Source file is missing or deleted.")
+        content = _build_bank_repair_state_store(connection).read_import_file(source["stored_file_path"])
+        digest = hashlib.sha256(content).hexdigest()
+        if digest != source["sha256"]:
+            raise ValueError("Stored source checksum mismatch.")
+        workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
+        try:
+            sheet = workbook["发票基础信息"]
+            rows = list(sheet.values)
+            numbers = set(args.invoice_id)
+            hits = [{"excel_row": index + 1, "values": list(row)} for index, row in enumerate(rows)
+                    if any(str(value) in numbers for value in row)]
+            print(json.dumps({"file_id": args.file_id, "source_name": source["original_filename"],
+                "sha256": digest, "headers": list(rows[0]), "rows": hits, "read_only": True},
+                ensure_ascii=False, default=str), file=stdout)
+        finally:
+            workbook.close()
+        return 0
+    finally:
+        connection.close()
+
+
 def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> int:
     stdout = stdout or sys.stdout
     args = build_parser().parse_args(argv)
+    if args.inspect_invoice_source:
+        return _inspect_invoice_source(args, stdout=stdout)
     if args.delete_rollback_manifest_artifact:
         if not args.expected_rollback_manifest_fingerprint:
             raise SystemExit(

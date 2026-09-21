@@ -2095,11 +2095,11 @@ describe("Workbench candidate grouping layout", () => {
     { readOnly: true, canOperateData: true, allowInvoiceEntryInReadOnly: true, enabled: true },
     { readOnly: true, canOperateData: true, allowInvoiceEntryInReadOnly: false, enabled: false },
     { readOnly: false, canOperateData: false, allowInvoiceEntryInReadOnly: false, enabled: false },
-  ])("continues entry for the exact item with three invoices: %j", (permissions) => {
+  ])("offers invoice entry for the exact incomplete item: %j", (permissions) => {
     const onAction = vi.fn();
     const parent = { ...createOaRecord("oa-multi-71", "测试", "71.00"),
       expenseItems: [{ id: "item-71", rowIndex: "0", projectName: "测试项目", amount: "71.00", expenseType: "交通费" }] };
-    const invoices = ["23.00", "25.00", "23.00"].map((amount, i) =>
+    const invoices = ["23.00", "25.00"].map((amount, i) =>
       createAttachmentInvoiceRecord(`multi-${i}`, "测试销方", amount, parent.id, "item-71"));
     const group: WorkbenchRelationGroup = { id: "multi-71", groupType: "unpaired", matchConfidence: "high",
       reason: "canonical_unpaired", rows: { oa: [parent], bank: [], invoice: invoices } };
@@ -2109,8 +2109,8 @@ describe("Workbench candidate grouping layout", () => {
       rowTemplateColumns="1fr 8px 1fr 8px 1fr" zoneId="unpaired"
       onOpenDetail={vi.fn()} onRowAction={onAction} onSelectRow={vi.fn()} />);
     const segment = screen.getByTestId("candidate-group-segment-unpaired-multi-71-item-71");
-    expect(segment.querySelectorAll(".record-card-invoice")).toHaveLength(3);
-    const button = within(segment).getByRole("button", { name: "继续录入 71.00 元付款项发票" });
+    expect(segment.querySelectorAll(".record-card-invoice")).toHaveLength(2);
+    const button = within(segment).getByRole("button", { name: "录入发票 71.00 元付款项" });
     if (permissions.enabled) {
       fireEvent.click(button);
       expect(onAction).toHaveBeenCalledWith(expect.objectContaining({ sourceOaId: parent.id,

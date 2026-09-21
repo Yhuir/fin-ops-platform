@@ -25,7 +25,7 @@ OA 子付款项未识别出正式发票，发票后续人工导入时，系统�
 5. `workbench_free_matching_engine.py` 的事实是父 OA、流水和发票；子付款项不能提升成正式 relation member。现有完整三栏关系的拓扑保护应保留，不能拿它阻止组内归属补齐。
 6. `workbench_invoice_expense_item_assignment_service.py` 已有同组归属、事务锁、source-link CAS 和审计，但人工命令要求异常 fingerprint，且拒绝已有不同归属。自动调用不能伪造人工异常请求；人工纠正也需要明确的更改语义。
 7. `invoice_expense_item_links.py` 已支持 `entry_method`，保留其他 provenance 后写入 `oa_expense_item_invoice`；可区分自动与人工来源，不需要新关系表。
-8. `workbench_amount_check_service.py` 已按有效 source item IDs 判定归属，补充凭证只覆盖没有已归属发票的明细。优先沿用并补回归，不预设重写金额规则。
+8. `workbench_amount_check_service.py` 已按有效 source item IDs 判定归属，补充凭证现在与同项已归属发票合计核对（以当前 boundary-io.md 为准）。优先沿用并补回归，不预设重写金额规则。
 9. `workbench_oa_supporting_document_service.py` 的删除路径目前仅删除凭证事实与对象，没有独立的发票归属补齐步骤。
 10. 现有 App Health 已暴露 matching scopes/running/error 状态。应复用状态 owner，不恢复页面 freshness 队列。
 

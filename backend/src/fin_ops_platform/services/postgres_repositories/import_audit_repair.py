@@ -1218,3 +1218,12 @@ def load_etc_invoice_payload_repair_snapshot(connection: Any, invoice_ids: list[
            where (%s::text[] = '{}'::text[] or i.legacy_mongo_id = any(%s::text[]) or i.id::text = any(%s::text[]))
            order by i.id""", (invoice_ids, invoice_ids, invoice_ids),
     )
+
+
+def load_import_source_file(connection: Any, file_id: str) -> dict[str, Any] | None:
+    return connection.fetch_one(
+        """select file.stored_file_path, file.original_filename, object.sha256
+           from app.import_files file join app.file_objects object on object.id = file.file_object_id
+           where (file.legacy_mongo_id = %s or file.id::text = %s) and object.tombstoned_at is null""",
+        (file_id, file_id),
+    )

@@ -512,7 +512,10 @@ class WorkbenchAmountCheckService:
             )
         ]
         for expense_item_id, (oa_row, expense_item) in expense_by_id.items():
-            if item_invoice_ids[expense_item_id]:
+            if item_invoice_ids[expense_item_id] and not (
+                expense_item.get("supporting_documents")
+                and self._decimal(expense_item.get("supporting_document_amount")) is None
+            ):
                 continue
             documents = expense_item.get("supporting_documents") or []
             supporting_amount = self._decimal(expense_item.get("supporting_document_amount"))
@@ -589,6 +592,11 @@ class WorkbenchAmountCheckService:
                 else sum((amount for amount in oa_amounts if amount is not None), ZERO).quantize(CENT)
             )
             invoice_total = self._strict_sum_amounts(component_invoices)
+            document_amounts = [self._decimal(expense_by_id[item_id][1].get("supporting_document_amount"))
+                                for item_id in ordered_item_ids if expense_by_id[item_id][1].get("supporting_documents")]
+            if invoice_total is not None:
+                invoice_total = (None if any(value is None for value in document_amounts)
+                                 else invoice_total + sum(document_amounts, ZERO))
             if oa_total is None or invoice_total is None or oa_total == invoice_total:
                 continue
             source_oa_ids = sorted({
@@ -603,7 +611,7 @@ class WorkbenchAmountCheckService:
             )
             anomalies.append(
                 self._anomaly_item(
-                    code="oa_invoice_amount_mismatch",
+                    code="oa_supporting_document_amount_mismatch" if document_amounts else "oa_invoice_amount_mismatch",
                     relation_id=relation_id,
                     comparison_unit_id=comparison_unit_id,
                     source_oa_ids=source_oa_ids,
@@ -759,14 +767,10 @@ class WorkbenchAmountCheckService:
             row.get("source_kind") == "etc_invoice_summary" for row in rows_by_type.get("invoice", [])
         ):
             return []
-        linked_items = {
-            item_id for row in rows_by_type.get("invoice", [])
-            for item_id in self._source_expense_item_ids(row)
-        }
         return [
             item for row in rows_by_type.get("oa", [])
             for item in row.get("expense_items") or []
-            if item.get("supporting_documents") and item.get("id") not in linked_items
+            if item.get("supporting_documents")
         ]
 
     def _supporting_fingerprints(
@@ -829,10 +833,9 @@ class WorkbenchAmountCheckService:
             "oa": totals["oa_total"], "bank": totals["bank_total"], "invoice": evidence_total,
         }
         supporting_deltas = [
-            abs(oa_amount - amount)
-            for item, amount in zip(supporting_items, supporting_amounts, strict=True)
-            if amount is not None and (oa_amount := self._decimal(item.get("amount"))) is not None
-            and oa_amount != amount
+            Decimal(item["amount_delta"])
+            for item in (self._expense_item_anomalies(normalized_rows["oa"], normalized_rows["invoice"], relation_id="") or [])
+            if item["code"] == "oa_supporting_document_amount_mismatch" and item["amount_delta"] is not None
         ]
         comparable = {f"{key}_total": value for key, value in comparison.items() if value is not None}
         mismatch_fields: list[str] = []

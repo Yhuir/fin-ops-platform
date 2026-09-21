@@ -8,7 +8,7 @@
 - `GET /api/workbench/oa-invoice-supplements/documents` 返回 `{documents,total_amount,version}`；`POST` 同路径接收 multipart 的目标 OA/子项、`retained_document_ids` JSON 数组、`total_amount`、`expected_version` 和新增 `files`，返回完整组。非空文件组要求非负、最多两位小数金额；空组金额为空。旧单文件 DELETE 路由及逐文件独立发布已删除；增删文件和金额统一保存。
 - service 先验证并准备文件，repository 在同一事务锁定子项凭证组、校验版本、发布最终文件集合和金额、追加审计并通知现有 matching scope 一次。相同最终内容重试为 no-op；失败不发布半组，未发布文件沿原存储端口清理。匹配 worker/正式关系 owner 不变，不新增队列或 read model。
 - OA expense item DTO 增加 `supporting_document_amount`、`supporting_document_version`，文件数组保持原形。页面 hydration 在原一次有界查询内带入金额，不增加逐子项 SQL。
-- 正式发票存在有效子项来源边时优先核对；该子项凭证保留但不重复计额。正式关联撤回后按当前事实重新采用仍有效凭证。`amount_check.invoice_total` 只含正式发票；新增 `supporting_document_total/evidence_total/evidence_complete` 明确凭证及综合核对信息，不污染发票池、税额、抵扣或正式成员。
+- 正式发票与该子项明确填写的补充凭证金额合并核对，发票按 canonical ID 去重、凭证按子项只计一次。凭证保存时记录当前准确发票身份和金额；发票依据变化后要求重新确认凭证金额，禁止自动重复累计。`amount_check.invoice_total` 只含正式发票；新增 `supporting_document_total/evidence_total/evidence_complete` 明确凭证及综合核对信息，不污染发票池、税额、抵扣或正式成员。
 - SQL/Python 原“凭证子项 OA 金额从 OA 与银行扣减”逻辑移除。两端统一采用正式发票去重金额加实际凭证金额，未知保持未知；子项凭证差额不能相互抵消。保留七个整组分类，未命中整组分类但有凭证子项差额时使用 `expense_item_amount_mismatch`（明细金额不一致）；非空凭证无金额使用 `oa_supporting_document_amount_missing`（待填写凭证金额）。每组仍只计一次。
 - 既有异常指纹增加采用中的凭证金额、版本、文件身份和 OA 子项金额证据。任一相关事实变化使旧审阅决定失效；不改正式关系拓扑版本。进行中 OA 始终保持 unpaired。
 - 主关联台与异常抽屉共用 `RelationGroupGrid`、列配置、完整关系和录入/管理动作。凭证组仅一个金额输入；保存成功回读失败必须明确“已保存”。删除外部“选择已有发票”及专用 picker，保留录入按强身份复用已有发票和其他页面的归属 API。
@@ -313,7 +313,7 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 
 ## 2026-09-20 后到发票与归属纠正
 
-- 缺票明细使用“录入发票”；已有发票或凭证的子付款项使用“继续录入”，复用同一补录抽屉及批量 append 服务。页面不再提供“选择已有发票”或“更改归属”。只有无 OA 来源且确实待归属的历史人工发票保留异常内初次“选择 OA 明细”。
+- 缺票明细使用“录入发票”；已有发票或凭证且金额明确不足的子付款项仅在左上角显示“+”，打开同一录入抽屉及批量 append 服务。金额相等、超额或未知时不显示追加入口；凭证管理仍可用。页面不再提供“选择已有发票”或“更改归属”。只有无 OA 来源且确实待归属的历史人工发票保留异常内初次“选择 OA 明细”。
 - `POST /api/workbench/actions/assign-invoice-expense-items` 保留初次归属 fingerprint 合同；纠正模式提供非空 `previous_targets`（同 targets 结构），锁内比较当前完整归属集合，再替换为用户 targets，冲突返回 409。非显式 provenance 保留，记录 before/after，后续自动任务不改回。现有认证、页面写权限和幂等键不变。
 - 补充凭证仅为资料证明，不排除正式发票归属。新增/软删除由凭证 repository 在其事务登记 matching scope；文件对象仍由既有 storage owner 管理。已有正式归属时删除凭证不会删除它。
 - 页面复用 App Health 的 matching 完成时间，时间变化后合并触发一次 canonical 回读；活动抽屉/选择期间复用现有延期机制，不轮询整个列表。
@@ -350,3 +350,10 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - 普通“更改归属”的前端按钮、previousTargets 状态、预选逻辑和 API client 参数全部移除。后端显式纠正命令的既有 CAS/审计合同保持不变，供受控维护，不再由普通行触发。
 - 自动规则保留 OA 来源优先及明确归属。独立子项以 OA 金额减去已归属 canonical 发票去重金额计算余额；仅有唯一同额候选或唯一剩余子项与全部剩余票合计相等时补齐。共享发票、归属不完整、不同币种和歧义不做自动分摊。自动金额来源明确标识为 `workbench_auto_unique_amount`，不能冒充 OA 附件。
 - 沿用 relation UoW、一次批量 CAS 和一次审计；不增加 GET 查询、队列、worker 或 read model。进行中 OA 仍在未配对，银行及 ETC 规则不变。
+
+## 2026-09-21 部分补齐与混合凭证计额
+
+- 精确单个子项的票据合计已知且小于 OA 时，左上角 `+` 调用原录入抽屉；移除旧无条件追加按钮及 footer 布局。无证据保留原录入入口，共享多子项发票不能按单项重复算差额。
+- 凭证多文件一个金额，金额为凭证自身合计；正式发票、凭证允许同段并合计。共享发票按连通的来源子项合计且只计一次。SQL 分区、领域核对、主表和异常处理采用一致语义。
+- migration 0174 为凭证组新增 `invoice_basis` JSON；保存事务记录准确 invoice ID/金额。事实变化后有效凭证金额为空，列表提示待填写/确认，管理 API 返回 `amount_confirmation_required`，原金额仍可编辑并重新确认。未知不得按 OA 值补齐，原发票财务字段和税务统计不受影响。
+- 原有版本冲突、权限、文件校验、审计及 matching scope 合同不变；进行中 OA 仍不能进入已配对。旧“正式发票覆盖凭证则不计额”分支移除，无并行旧链。
