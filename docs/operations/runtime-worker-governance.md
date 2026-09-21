@@ -67,7 +67,7 @@ read-model 字样仅限历史 migration/checksum 和负向审计；`retired_proj
 
 ## 发布闭环
 
-激活前的 preflight 对现有运行版本执行 domain、runtime closure 与队列健康查询，代码及 SQL 必须来自实际 active release；候选 registry 仅用于计算新增 event 差异，不能把候选 SQL 提前运行在未迁移 schema 上。激活和 migration 完成后，T+0/T+30 才使用候选版本执行同类检查。该规则同样适用于回滚后的当前 runtime 检查。
+激活前的 preflight 对现有运行版本执行 domain 与队列健康查询，worker 要求也来自 active release。只读 runtime closure 在当前发布的 schema plan 确认两版 schema contract 完全一致且无 pending migration 时使用候选代码，以验证审计自身的修复；HTTP、worker 与队列仍检查真实线上状态。其他情况使用 active release，禁止把候选 SQL 提前运行在未迁移 schema 上。激活和 migration 完成后，T+0/T+30 全部使用候选版本执行同类检查。该规则同样适用于回滚后的当前 runtime 检查。
 
 若 forward-only migration 后 T0/T30 失败，正式服务会留在维护停止状态。此时使用正式发布入口的 `--resume-forward-repair`（可与 `--activate-existing --release-name <新候选>` 组合）恢复：helper 必须核对实际 active release 的精确 FAIL、未回滚证据、原 schema plan 的 `forward_only=true / rollback_supported=false`，并实际确认 API、全部已注册和系统发现的 worker 都为 inactive。候选仍执行正常验证，且只能使用当前已经完整应用的相同 schema；缺证据、服务仍运行、查询失败或新 migration 都拒绝。当前 preflight 明确保留 FAIL 与来源证据引用，不伪造运行健康。维护检查按正式 manifest 的空格分隔 instance 列表逐项检查；临时文件清理 trap 在注册时绑定并转义实际路径，不能在嵌套回滚时重新解析同名变量而删除持久证据。恢复后 T0/T30 完整检查不变；再次失败会停止并验证全部服务、保持维护状态，保留最初 forward-only 来源与本次失败，不回滚到已失败的运行版本。
 

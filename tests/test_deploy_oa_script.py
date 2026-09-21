@@ -1338,7 +1338,8 @@ class DeployOAScriptTest(unittest.TestCase):
                     "    def ready_health_summary(self):\n"
                     f"        owner = {name!r}\n"
                     "        with Path(os.environ['EXECUTION_LOG']).open('a') as log: log.write(owner + '\\n')\n"
-                    f"        assert os.environ['TEST_SCHEMA_HEAD'] == {schema!r}, 'candidate SQL ran before migration'\n"
+                    f"        expected = os.environ['CANDIDATE_SCHEMA_HEAD'] if owner == 'candidate' else {schema!r}\n"
+                    "        assert os.environ['TEST_SCHEMA_HEAD'] == expected, 'candidate SQL ran before migration'\n"
                     "        assert os.environ.get('UNHEALTHY_OWNER') != owner, 'runtime unhealthy'\n"
                     "        return {'queue_backlog': {}, 'import_queue': {'failed': 1}, 'owner': owner}\n")
                 (package / "tools/domain_contract_audit.py").write_text(
@@ -1364,16 +1365,29 @@ class DeployOAScriptTest(unittest.TestCase):
                 'candidate_only_worker_event_types() { [[ "$1" == "$TEST_ROOT/active" && "$2" == "$TEST_ROOT/candidate" ]]; }\n'
                 'die() { printf "%s\\n" "$*" >&2; exit 1; }\n'
                 + checkpoint + '\nrelease_gate_checkpoint "$1" "$2" token "$EVIDENCE_ROOT" "$3" "$4"\n')
-            for owner, label, profile, schema, unhealthy in (
-                ("active", "pre", "preflight", "0174", ""),
-                ("candidate", "t0", "stability", "0175", ""),
-                ("active", "blocked", "preflight", "0174", "active"),
+            for owner, label, profile, schema, unhealthy, same_schema, pending, closure_owner in (
+                ("active", "pre", "preflight", "0174", "", False, ["0175"], "active"),
+                ("active", "same", "preflight", "0174", "", True, [], "candidate"),
+                ("active", "different", "preflight", "0174", "", False, [], "active"),
+                ("active", "pending", "preflight", "0174", "", True, ["0174"], "active"),
+                ("candidate", "t0", "stability", "0175", "", False, [], "candidate"),
+                ("active", "blocked", "preflight", "0174", "active", True, [], "candidate"),
+                ("active", "audit-blocked", "preflight", "0174", "candidate", True, [], "candidate"),
             ):
                 with self.subTest(checkpoint=label):
+                    evidence = root / "evidence"
+                    evidence.mkdir(exist_ok=True)
+                    (evidence / "schema-compatibility-plan.json").write_text(json.dumps({
+                        "previous": {"release_name": "active", "schema_contract": {"head": "0174"}},
+                        "candidate": {"release_name": "candidate", "schema_contract": {
+                            "head": "0174" if same_schema else "0175"}},
+                        "pending_migrations": pending,
+                    }))
                     log = root / f"{label}.log"
                     result = subprocess.run(
                         ["bash", str(harness), owner, label, profile, "candidate"],
                         env={**os.environ, "TEST_ROOT": str(root), "TEST_SCHEMA_HEAD": schema,
+                             "CANDIDATE_SCHEMA_HEAD": "0174" if same_schema else "0175",
                              "UNHEALTHY_OWNER": unhealthy, "EXECUTION_LOG": str(log),
                              "COMMON_ENV": str(empty_env), "SECRETS_ENV": str(empty_env),
                              "EVIDENCE_ROOT": str(root / "evidence"), "API_PYTHON": sys.executable},
@@ -1381,7 +1395,7 @@ class DeployOAScriptTest(unittest.TestCase):
                     self.assertEqual(result.returncode, 1 if unhealthy else 0, result.stderr)
                     report = json.loads((root / "evidence" / label / "checkpoint.json").read_text())
                     self.assertEqual(report["release_gate_status"], "FAIL" if unhealthy else "PASS")
-                    self.assertEqual(log.read_text().splitlines(), [owner, owner, owner])
+                    self.assertEqual(log.read_text().splitlines(), [owner, closure_owner, owner])
 
     def test_deploy_control_write_operation_runner_refuses_untrusted_scenario_path(self) -> None:
         result = subprocess.run(

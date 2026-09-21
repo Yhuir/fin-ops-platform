@@ -144,6 +144,8 @@ Migration `0175_import_jobs_direct_claim.sql` 将导入执行事实统一为直�
 - 没有新产生的退役 projection event。
 
 Release gate 不自动执行真实业务 confirm/withdraw，不伪造业务数据，也不清空失败队列来获得绿色状态。
+同 schema 且无 pending migration 的发布，preflight 只读 closure 使用候选审计代码，避免旧审计缺陷阻断其自身修复；有迁移时继续使用 active 代码。实时 HTTP、worker、队列以及 T+0/T+30 检查不变。
+
 候选激活和自动回滚都会先停止 OA sync enqueue timer，避免 `Persistent=true` timer 在 worker 切换窗口创建
 随后失去 lease owner 的 `oa.sync` 任务；timer 只在候选或 previous release 已完成验证后恢复。
 

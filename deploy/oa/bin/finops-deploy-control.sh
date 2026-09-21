@@ -2509,13 +2509,32 @@ release_gate_checkpoint() {
   local evidence_dir="$4"
   local profile="${5:-full}"
   local verification_release="${6:-$release}"
-  local src verification_src checkpoint_dir domain_report closure_report inventory_report runtime_report
+  local src verification_src closure_src checkpoint_dir domain_report closure_report inventory_report runtime_report
   local required_worker_instance candidate_only_event_type
   local -a closure_args
   [[ "$profile" == "preflight" || "$profile" == "full" || "$profile" == "stability" ]] \
     || die "unsupported release gate profile: $profile"
   src="$(release_src "$release")"
   verification_src="$(release_src "$verification_release")"
+  closure_src="$src"
+  if [[ "$profile" == "preflight" ]]; then
+    closure_src="$("$API_PYTHON" - "$evidence_dir/schema-compatibility-plan.json" \
+      "$release" "$verification_release" "$src" "$verification_src" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+plan_path, active, candidate, active_src, candidate_src = sys.argv[1:]
+plan = json.loads(Path(plan_path).read_text())
+if (plan["previous"]["release_name"] != active
+        or plan["candidate"]["release_name"] != candidate):
+    raise SystemExit("checkpoint schema plan does not match releases")
+same_schema = (plan["pending_migrations"] == []
+               and plan["previous"]["schema_contract"] == plan["candidate"]["schema_contract"])
+print(candidate_src if same_schema else active_src)
+PY
+    )" || return 1
+  fi
   checkpoint_dir="$evidence_dir/$label"
   domain_report="$checkpoint_dir/domain-contract-audit.json"
   closure_report="$checkpoint_dir/runtime-sync-closure.json"
@@ -2523,9 +2542,9 @@ release_gate_checkpoint() {
   runtime_report="$checkpoint_dir/runtime-health.json"
   install -d -m 0700 "$checkpoint_dir"
   worker_inventory_report "$src" "$inventory_report"
-  # Every database probe belongs to the release actually running at this
-  # checkpoint: active before migration, candidate after activation. Candidate
-  # registry metadata below may describe new events but must not supply SQL.
+  # Domain/runtime probes belong to the running release. Read-only closure can
+  # verify candidate audit corrections before activation only on identical,
+  # fully applied schema; pending migrations still require active-release SQL.
   (
     set -a
     # shellcheck disable=SC1090
@@ -2545,11 +2564,11 @@ release_gate_checkpoint() {
     # shellcheck disable=SC1090
     source "$SECRETS_ENV"
     set +a
-    export PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
+    export PYTHONPATH="$closure_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
     export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
     export FIN_OPS_HTTP_SLO_ADMIN_TOKEN="$admin_token"
     export FIN_OPS_E2E_ADMIN_TOKEN="$admin_token"
-    cd "$src"
+    cd "$closure_src"
     closure_args=(
       --base-url http://127.0.0.1:18001
       --page-base-url https://www.yn-sourcing.com
@@ -2568,8 +2587,8 @@ release_gate_checkpoint() {
       while IFS= read -r candidate_only_event_type; do
         [[ -n "$candidate_only_event_type" ]] \
           && closure_args+=(--allow-preflight-pending-event-type "$candidate_only_event_type")
-      # Preflight executes the active release while verifying the candidate.
-      # Only event types added by the candidate may be accepted as upgrade backlog.
+      # Live worker requirements remain active-release facts regardless of the
+      # audit code owner. Only candidate additions qualify as upgrade backlog.
       done < <(candidate_only_worker_event_types "$src" "$verification_src")
     fi
     "$API_PYTHON" -m fin_ops_platform.tools.runtime_sync_closure_gate "${closure_args[@]}" >/dev/null

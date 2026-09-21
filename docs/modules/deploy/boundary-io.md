@@ -19,6 +19,7 @@
 - `scripts/deploy-oa.sh` 负责 build/upload/activate orchestration。
 - `finops-deploy-control` 负责 root 级 maintenance、migration、runtime assets、checkpoints。
 - `finops-ensure-runtime-workers` 只从 registry 派生 worker；未登记实例 stop/disable。
+- Preflight 的只读 closure 在本次 schema plan 证明两版 schema 完全相同且无待迁移项时加载候选代码；其余情况使用 active 代码。Domain、worker inventory 与队列健康仍归 active release，T+0/T+30 使用激活后的版本。该选择不放宽任何失败条件，不写业务数据。
 - 不开放任意 shell/SQL，不修改 OA 源码，不删除主数据库，不恢复旧 projection runtime。
 
 ## Forward-only

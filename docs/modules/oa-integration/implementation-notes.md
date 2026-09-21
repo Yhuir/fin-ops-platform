@@ -336,3 +336,5 @@
 ### 发布前出现的新阻断及复审
 
 成本发布之后，两次真实用户上传的发票在确认前因 4 条待复核数据被拒绝，均无正式 batch_id、预览批次 pending。原审计把所有 failed import job 无差别判成数据一致性 error，阻断 OCR 候选发布。补充修复仅在已证明输入复核拒绝、全部所选文件仍未提交时报告可见 warning；数据库故障、孤立引用、已提交状态异常仍为 error。保持全部业务事实及失败任务，不重试导入，不修改发布 gate；单测正向和七种反向证据验证后重新发布。
+
+第二次预检确认旧 helper 把只读候选审计也放在 active PYTHONPATH 执行，导致审计修复无法验证。补充计划及复审：只在本次 schema plan 的 candidate/previous 身份一致、schema contract 相同且 pending migrations 为空时选择候选 closure 代码，domain/runtime 与 worker 要求仍读取 active；有迁移或 schema 不同仍用 active。保留 HTTP 与候选只读审计的全部既有判定，无业务写入或跳过 gate。执行式测试覆盖同 schema、有迁移、schema 不同、active 故障与候选审计故障；部署脚本回归 60 项通过。
