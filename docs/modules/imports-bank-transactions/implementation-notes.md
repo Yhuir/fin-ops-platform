@@ -344,3 +344,14 @@
 - 修复：每次页面激活都创建空白本地草稿，删除浏览器持久化和活跃 session 自动恢复 HTTP 入口。显式清空只对当前页面生成的 preview 调用既有 owner-bound discard，成功后才清本地状态；离开后才返回的 preview 响应丢弃。
 - UI 只直接展示后端审计事实：常驻“新增”和“APP 已存在”，只在有值时显示更新、本批重复或需检查；前端不用旧计数反推缺失字段。
 - 不新增 Redis、read model、worker、数据库迁移、兼容分支或 fallback；导入 session 仍是 PostgreSQL 中的持久审计/确认事实，但不再是页面入口状态。
+
+
+## 2026-09-22 银行历史身份迁移
+
+- `bank_identity_repair_service.py` 只按 canonical 字段、原身份和一致业务指纹生成 v2→v3 计划；不推断合并、不删除流水。`postgres_repositories/bank_identity_repair.py` 批量读取、锁定目标并 CAS 更新 `source_unique_key` 和其 `raw_payload.normalized_payload` 副本。金额、主键、来源和关系不变。
+- 运维入口复用 `import_audit_repair_ops --repair-bank-identities`。执行必须传精确 `--bank-transaction-id` 集合、既有 dry-run fingerprint、私有恢复文件、操作者及原因；事务内重验、写入和审计，失败整笔回滚。无新增 schema/API/worker/cache，普通页面不新增查询或刷新任务。
+- canonical 流水身份读取只使用正式表列，删除 JSON 身份副本优先覆盖的旧路径。历史导入行保持原证据，继续通过已有指纹及官方参考号证明引用；不改写原文件或历史决策。仍有效的旧来源识别保留。
+- 身份时间将带时区值统一为上海时间；对象审计移除截断时区的旧代码，合法 v4 使用已有 statement-position policy，不能按 v3 误报。
+- 七类验证：业务、事务/审计、导入 API、worker 重载、现有前端回归、重复导入链路、下游回归。专项入口 `tests/test_bank_identity_repair.py`；复用 identity、object audit、bank import page audit、file service/API 与银行页面测试。
+
+本轮部署前验证：后端全量 4468 项中 4463 项通过，5 项现金 schema 兼容测试因专用测试库名限制拒绝，改用独立 fin_ops_cash_test 库重跑 5 项全部通过；前端 1442 项和构建通过，相关浏览器回归 39 项通过。生产只读试算为 158 条候选，约 97 ms；银行导入与关系审计通过。生产执行与性能结果以该次运维报告为准，不能将试算记为已迁移。

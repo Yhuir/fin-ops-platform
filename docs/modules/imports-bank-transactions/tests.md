@@ -214,3 +214,8 @@ Nightly CI 通过 `scripts/verify.sh all` 执行后端、前端、Playwright bro
 | 完整同步耗时（不含排队等待） | 1.524 | 1.582 |
 
 基准的 1000 行特意共用时间、金额与对手方，只有官方流水号不同。旧逐候选重算使 commit 约 6 秒；复用当前批量身份 cache 增加官方编号索引后约 1 秒。`test_bank_distinct_references_share_fingerprint_without_quadratic_identity_work` 防止再次出现平方级身份重算；bank-v3/v4 与弱指纹保守复核保持原契约。
+
+
+## 银行身份迁移回归（2026-09-22）
+
+`tests/test_bank_identity_repair.py` 覆盖字段保护、原始证据保留、缺失/冲突拒绝、时区等价、合法 v4、canonical 身份读取、事务失败及旧值 CAS、CLI 精确范围/恢复工件/审计、迁移后重复导入和幂等。需真实可丢弃 PostgreSQL；既有 file API/service 测试覆盖 preview stale、权限、任务恢复。前端没有新交互，运行现有导入、明细和工作台回归，不新增仅镜像实现的组件测试。

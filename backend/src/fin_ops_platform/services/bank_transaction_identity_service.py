@@ -7,6 +7,7 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction
@@ -224,6 +225,8 @@ class BankTransactionIdentityService:
     @staticmethod
     def _normalize_trade_time(value: Any) -> str | None:
         if isinstance(value, datetime):
+            if value.tzinfo is not None:
+                value = value.astimezone(ZoneInfo("Asia/Shanghai"))
             return value.replace(microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
         if isinstance(value, date):
             return None
@@ -242,6 +245,12 @@ class BankTransactionIdentityService:
                 f"{match.group(1)}-{match.group(2)}-{match.group(3)} "
                 f"{match.group(4)}:{match.group(5)}:{match.group(6)}"
             )
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is not None:
+            return parsed.astimezone(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
         return None
 
     @staticmethod

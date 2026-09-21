@@ -201,3 +201,12 @@ worker 不写独立 background job；全局进度从同一 import job 投影，�
 - 纯银行强身份重复、无新增/更新/错误时 prepare 直接 succeeded + `outcome=no_changes`。发票重复仍可能补来源或元数据，不能按新增零机械判定无动作。
 - 预览变更先 CAS 入 prepare 后由 worker 解析；放弃预览与 cancel job 同事务。确认前财务冲突将 awaiting_confirmation CAS 为 needs_review，用户重新预览后确认；同身份且同事实的并发新增仅重分类为重复。
 - job 只保存 session 引用、范围、摘要和结果；候选明细只在 session/batch rows 存储。HTTP/worker request-local service 不重置全局实例。
+
+
+## 2026-09-22 银行历史身份迁移
+
+- `bank_identity_repair_service.py` 只按 canonical 字段、原身份和一致业务指纹生成 v2→v3 计划；不推断合并、不删除流水。`postgres_repositories/bank_identity_repair.py` 批量读取、锁定目标并 CAS 更新 `source_unique_key` 和其 `raw_payload.normalized_payload` 副本。金额、主键、来源和关系不变。
+- 运维入口复用 `import_audit_repair_ops --repair-bank-identities`。执行必须传精确 `--bank-transaction-id` 集合、既有 dry-run fingerprint、私有恢复文件、操作者及原因；事务内重验、写入和审计，失败整笔回滚。无新增 schema/API/worker/cache，普通页面不新增查询或刷新任务。
+- canonical 流水身份读取只使用正式表列，删除 JSON 身份副本优先覆盖的旧路径。历史导入行保持原证据，继续通过已有指纹及官方参考号证明引用；不改写原文件或历史决策。仍有效的旧来源识别保留。
+- 身份时间将带时区值统一为上海时间；对象审计移除截断时区的旧代码，合法 v4 使用已有 statement-position policy，不能按 v3 误报。
+- 七类验证：业务、事务/审计、导入 API、worker 重载、现有前端回归、重复导入链路、下游回归。专项入口 `tests/test_bank_identity_repair.py`；复用 identity、object audit、bank import page audit、file service/API 与银行页面测试。

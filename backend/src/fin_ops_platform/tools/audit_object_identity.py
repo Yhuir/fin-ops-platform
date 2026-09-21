@@ -59,7 +59,7 @@ def audit_object_identity(
                raw_payload->'normalized_payload'->>'account_detail_no' as account_detail_no,
                raw_payload->'normalized_payload'->>'enterprise_serial_no' as enterprise_serial_no,
                raw_payload->'normalized_payload'->>'voucher_no' as voucher_no,
-               source_unique_key, data_fingerprint, status
+               source_unique_key, data_fingerprint, status, balance, currency
         from app.bank_transactions
         order by txn_month nulls last, created_at, id
         """
@@ -253,11 +253,15 @@ def _bank_identity_payload(policy: FinancialObjectIdentityPolicy, row: dict[str,
         source_unique_key=row.get("source_unique_key"),
         data_fingerprint=row.get("data_fingerprint"),
         txn_date=str(row.get("txn_date")) if row.get("txn_date") is not None else None,
-        trade_time=str(row.get("trade_time"))[:19] if row.get("trade_time") is not None else None,
-        pay_receive_time=str(row.get("pay_receive_time"))[:19] if row.get("pay_receive_time") is not None else None,
+        trade_time=row.get("trade_time"),
+        pay_receive_time=row.get("pay_receive_time"),
         account_name=row.get("account_name"),
+        balance=row.get("balance"),
+        currency=row.get("currency"),
     )
     identity = policy.identify_bank_transaction(transaction)
+    if str(row.get("source_unique_key") or "").startswith("bank-v4:"):
+        identity = policy.identify_bank_transaction_position(transaction)
     return {
         "object_id": transaction.id,
         "object_type": "bank_transaction",

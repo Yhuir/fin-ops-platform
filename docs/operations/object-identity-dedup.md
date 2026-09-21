@@ -124,3 +124,12 @@ Blocking issue 包含：
 恢复文件只覆盖本次涉及的 invoice/关联/缓存及缓存映射快照；成功验证后必须通过现有
 `--delete-rollback-manifest-artifact <文件名> --expected-rollback-manifest-fingerprint <指纹>` 精确删除，不能遗留备份。
 这不是按金额或文件名批量去重；一个附件包含多张真实发票仍合法。
+
+
+## 银行 v2→v3 原位迁移
+
+仅针对旧键与当前正式规则的账号/参考号完全一致、业务指纹与 canonical/normalized payload 一致、目标键无占用及计算歧义的记录。复用 `import-audit-repair <release> --repair-bank-identities --dry-run` 发现候选；`--bank-transaction-id` 可重复传入精确范围。创建私有 `--rollback-manifest-path` 后，execute 传同一 ID 集合、`--expected-fingerprint`、操作者和原因；工具在 serializable 事务内批量重验/CAS，失败整体回滚。
+
+恢复工件记录旧/新身份和 payload，恢复必须比较当前身份及相关事实，不能覆盖后续业务写入。成功后重跑精确 ID dry-run 应为 `planned_count=0`；重跑对象身份、银行导入和关系审计，对比金额、余额、核销、分类及关系，并在隔离库保护重复导入链路。最后通过既有 `import-audit-repair-artifact-delete` 精确删除任务恢复工件；不得删除主数据库、正式历史或原始文件。
+
+`BankTransactionIdentityService` 对带时区时间按 Asia/Shanghai 归一；对象审计不再截断时区，v4 使用现有 position policy。历史导入行仍保存当时来源，不因迁移批量改写。此工具不删除流水、不重放文件、不改关系、不创建页面重建任务。

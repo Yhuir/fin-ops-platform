@@ -99,3 +99,8 @@
 - 当前仍保留的 ETC historical migration/link/cleanup 和 bank auto-tag restore 运维工具必须通过 `tools/runtime_application.py` 的 lightweight tool runtime builder 取得 public app tool ports；业务工具文件不得直接调用 `build_application(...)`、访问 `Application._*`、`Application._state_store` 或 `_initialize_runtime_services`。`tool_runtime_ports()` 不得暴露完整 `state_store`，工具初始化只能通过 `Application.tool_runtime_state_snapshot()` 取得最小 state。该边界不是新的长期业务事实源，可在工具退休或归并 owner module CLI 后删除。
 - `file_object.gridfs_migration` final closure blocker 已删除：registry registration、worker flag/handler、legacy GridFS service/config、deploy env examples 和 RabbitMQ dispatch event 已同切片移除，guard 禁止回归。
 - `ApplicationStateStore` / local pickle 只保留为非生产 fixture/tooling I/O；它不是 canonical facts owner，也不得通过 production factory、app、service、worker 或 tool 主路径成为业务事实源。
+
+
+## 2026-09-22 银行身份窄修复边界
+
+银行历史 v2→v3 迁移由 `bank_identity_repair_service` 生成纯计划，专用 `postgres_repositories/bank_identity_repair` adapter 在调用者事务中更新身份列及 normalized payload 身份副本，既有财务纠错 actor/reason 与审计继续生效。不经全量 snapshot 或整行 upsert，不改变金融事实、主键、来源归属或关系。canonical loader 的身份仅以表列为准，JSON 副本不再覆盖正式身份；运维/恢复合同见 `docs/operations/object-identity-dedup.md`。

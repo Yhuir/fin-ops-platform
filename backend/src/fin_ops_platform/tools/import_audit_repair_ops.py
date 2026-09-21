@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from typing import Any, TextIO
 
 from fin_ops_platform.services.audit import AuditTrailService
+from fin_ops_platform.services.bank_identity_repair_service import build_bank_identity_repair_plan
 from fin_ops_platform.services.bank_import_audit_contract_repair_service import (
     build_bank_import_audit_contract_repair_plan,
     public_bank_import_audit_contract_repair_report,
@@ -51,6 +52,10 @@ from fin_ops_platform.services.postgres_connection import (
     PostgresConnection,
     PostgresSettings,
     PostgresTransaction,
+)
+from fin_ops_platform.services.postgres_repositories.bank_identity_repair import (
+    apply_bank_identity_repair,
+    load_bank_identity_repair_rows,
 )
 from fin_ops_platform.services.postgres_repositories.bank_import_audit_contract_repair import (
     apply_bank_import_audit_contract_repair,
@@ -384,6 +389,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-bank-workbench-withdraw-count", type=int)
     parser.add_argument("--expected-bank-workbench-transaction-id")
     parser.add_argument("--repair-bank-audit-contract", action="store_true")
+    parser.add_argument("--repair-bank-identities", action="store_true")
+    parser.add_argument("--bank-transaction-id", action="append", default=[])
     parser.add_argument("--repair-invoice-header-source-sha256")
     parser.add_argument("--repair-invoice-financial-source", action="append", default=[],
                         help="Stored tax header import file ID; use --invoice-id for exact existing targets.")
@@ -675,9 +682,61 @@ def _run_oa_bank_account_invoice_repair(args: Any, *, stdout: TextIO) -> int:
         connection.close()
 
 
+def _run_bank_identity_repair(args: Any, *, stdout: TextIO) -> int:
+    allowed = {"repair_bank_identities", "bank_transaction_id", "dry_run", "execute",
+               "expected_fingerprint", "rollback_manifest_path", "operator_id", "reason"}
+    if any(_argument_is_set(value) for name, value in vars(args).items() if name not in allowed):
+        raise SystemExit("Bank identity repair cannot be combined with another mode.")
+    if args.execute and not all((args.bank_transaction_id, args.expected_fingerprint,
+                                args.rollback_manifest_path, args.operator_id, args.reason)):
+        raise SystemExit("Execute requires exact transaction IDs, fingerprint, recovery artifact, operator and reason.")
+    targets = sorted(set(args.bank_transaction_id)) if args.bank_transaction_id else None
+    connection = PostgresConnection(PostgresSettings.from_env())
+    try:
+        with connection.transaction() as tx:
+            tx.execute("set transaction isolation level repeatable read read only")
+            plan = build_bank_identity_repair_plan(load_bank_identity_repair_rows(tx), transaction_ids=targets)
+        plan["rollback_manifest_fingerprint"] = _rollback_manifest_fingerprint(plan["rollback_manifest"])
+        if args.dry_run and args.rollback_manifest_path:
+            _write_private_rollback_manifest(args.rollback_manifest_path, plan)
+        written = 0
+        if args.execute:
+            if plan["source_fingerprint"] != args.expected_fingerprint:
+                raise RuntimeError("Bank identity evidence changed after dry-run.")
+            _verify_private_rollback_manifest(args.rollback_manifest_path, plan)
+            with connection.transaction() as tx:
+                tx.execute("set transaction isolation level serializable")
+                tx.execute("set local lock_timeout = '5s'")
+                tx.execute("set local statement_timeout = '30s'")
+                current = build_bank_identity_repair_plan(
+                    load_bank_identity_repair_rows(tx, lock_ids=targets), transaction_ids=targets)
+                if current["source_fingerprint"] != args.expected_fingerprint:
+                    raise RuntimeError("Bank identity evidence changed before execution.")
+                written = apply_bank_identity_repair(
+                    tx, current["updates"], operator_id=args.operator_id, reason=args.reason)
+                if written:
+                    AuditTrailService(PostgresOperationsAuditRepository(tx)).record_action(
+                        actor_id=args.operator_id, action="bank_identity_repair",
+                        entity_type="bank_transaction", entity_id=plan["source_fingerprint"],
+                        metadata={"event_type": "operation.completed", "page_key": "imports.bank-transactions",
+                                  "reason": args.reason, "outcome": "success", "updated_count": written,
+                                  "transaction_ids": targets},
+                    )
+        report = {key: value for key, value in plan.items() if key not in {"updates", "rollback_manifest"}}
+        report.update(mode="execute" if args.execute else "dry_run", updated_count=written)
+        print(json.dumps(report, ensure_ascii=False, indent=2, default=str), file=stdout)
+        return 0
+    finally:
+        connection.close()
+
+
 def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> int:
     stdout = stdout or sys.stdout
     args = build_parser().parse_args(argv)
+    if args.repair_bank_identities:
+        return _run_bank_identity_repair(args, stdout=stdout)
+    if args.bank_transaction_id:
+        raise SystemExit("--bank-transaction-id requires --repair-bank-identities.")
     if args.retire_oa_bank_account_invoice:
         return _run_oa_bank_account_invoice_repair(args, stdout=stdout)
     if args.export_source_file_id:
