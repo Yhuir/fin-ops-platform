@@ -1173,6 +1173,75 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('sleep 1', checkpoint)
         self.assertIn('failed_or_dead > 0', checkpoint)
 
+    def test_release_checkpoints_execute_the_runtime_owners_schema_code(self) -> None:
+        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
+        checkpoint = "release_gate_checkpoint() {" + script.split("release_gate_checkpoint() {", 1)[1].split(
+            "\nwrite_release_gate_evidence() {", 1)[0]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for name, schema in (("active", "0174"), ("candidate", "0175")):
+                package = root / name / "backend/src/fin_ops_platform"
+                for directory in (package, package / "services", package / "tools"):
+                    directory.mkdir(parents=True, exist_ok=True)
+                    (directory / "__init__.py").write_text("")
+                (package / "services/postgres_connection.py").write_text(
+                    "class PostgresSettings:\n"
+                    "    @staticmethod\n"
+                    "    def from_env(): return None\n"
+                    "class PostgresConnection:\n"
+                    "    def __init__(self, settings): pass\n")
+                (package / "services/runtime_monitoring.py").write_text(
+                    "import os\nfrom pathlib import Path\n"
+                    "class RuntimeMonitoringRepository:\n"
+                    "    def __init__(self, connection): pass\n"
+                    "    def ready_health_summary(self):\n"
+                    f"        owner = {name!r}\n"
+                    "        with Path(os.environ['EXECUTION_LOG']).open('a') as log: log.write(owner + '\\n')\n"
+                    f"        assert os.environ['TEST_SCHEMA_HEAD'] == {schema!r}, 'candidate SQL ran before migration'\n"
+                    "        assert os.environ.get('UNHEALTHY_OWNER') != owner, 'runtime unhealthy'\n"
+                    "        return {'queue_backlog': {}, 'owner': owner}\n")
+                (package / "tools/domain_contract_audit.py").write_text(
+                    "import json\n"
+                    "from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository\n"
+                    "RuntimeMonitoringRepository(None).ready_health_summary()\n"
+                    "print(json.dumps({'status':'pass'}))\n")
+                (package / "tools/runtime_sync_closure_gate.py").write_text(
+                    "import json,sys\nfrom pathlib import Path\n"
+                    "from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository\n"
+                    "RuntimeMonitoringRepository(None).ready_health_summary()\n"
+                    "report={'status':'pass','checks':[{'name':'page_canonical_audit','status':'pass',"
+                    "'payload':{'status':'pass','audit_count':1}}]}\n"
+                    "Path(sys.argv[sys.argv.index('--output')+1]).write_text(json.dumps(report))\n")
+            empty_env = root / "empty.env"
+            empty_env.write_text("")
+            harness = root / "checkpoint.sh"
+            harness.write_text(
+                'set -euo pipefail\n'
+                'release_src() { printf "%s/%s\\n" "$TEST_ROOT" "$1"; }\n'
+                'worker_inventory_report() { printf \'{"status":"PASS"}\' > "$2"; }\n'
+                'required_worker_instances() { printf "import\\n"; }\n'
+                'candidate_only_worker_event_types() { [[ "$1" == "$TEST_ROOT/active" && "$2" == "$TEST_ROOT/candidate" ]]; }\n'
+                'die() { printf "%s\\n" "$*" >&2; exit 1; }\n'
+                + checkpoint + '\nrelease_gate_checkpoint "$1" "$2" token "$EVIDENCE_ROOT" "$3" "$4"\n')
+            for owner, label, profile, schema, unhealthy in (
+                ("active", "pre", "preflight", "0174", ""),
+                ("candidate", "t0", "stability", "0175", ""),
+                ("active", "blocked", "preflight", "0174", "active"),
+            ):
+                with self.subTest(checkpoint=label):
+                    log = root / f"{label}.log"
+                    result = subprocess.run(
+                        ["bash", str(harness), owner, label, profile, "candidate"],
+                        env={**os.environ, "TEST_ROOT": str(root), "TEST_SCHEMA_HEAD": schema,
+                             "UNHEALTHY_OWNER": unhealthy, "EXECUTION_LOG": str(log),
+                             "COMMON_ENV": str(empty_env), "SECRETS_ENV": str(empty_env),
+                             "EVIDENCE_ROOT": str(root / "evidence"), "API_PYTHON": sys.executable},
+                        text=True, capture_output=True, check=False)
+                    self.assertEqual(result.returncode, 1 if unhealthy else 0, result.stderr)
+                    report = json.loads((root / "evidence" / label / "checkpoint.json").read_text())
+                    self.assertEqual(report["release_gate_status"], "FAIL" if unhealthy else "PASS")
+                    self.assertEqual(log.read_text().splitlines(), [owner, owner, owner])
+
     def test_deploy_control_write_operation_runner_refuses_untrusted_scenario_path(self) -> None:
         result = subprocess.run(
             [

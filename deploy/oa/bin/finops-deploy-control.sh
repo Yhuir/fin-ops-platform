@@ -2523,6 +2523,9 @@ release_gate_checkpoint() {
   runtime_report="$checkpoint_dir/runtime-health.json"
   install -d -m 0700 "$checkpoint_dir"
   worker_inventory_report "$src" "$inventory_report"
+  # Every database probe belongs to the release actually running at this
+  # checkpoint: active before migration, candidate after activation. Candidate
+  # registry metadata below may describe new events but must not supply SQL.
   (
     set -a
     # shellcheck disable=SC1090
@@ -2530,9 +2533,9 @@ release_gate_checkpoint() {
     # shellcheck disable=SC1090
     source "$SECRETS_ENV"
     set +a
-    export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
+    export PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
     export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
-    cd "$verification_src"
+    cd "$src"
     "$API_PYTHON" -m fin_ops_platform.tools.domain_contract_audit >"$domain_report"
   ) || true
   (
@@ -2542,11 +2545,11 @@ release_gate_checkpoint() {
     # shellcheck disable=SC1090
     source "$SECRETS_ENV"
     set +a
-    export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
+    export PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
     export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
     export FIN_OPS_HTTP_SLO_ADMIN_TOKEN="$admin_token"
     export FIN_OPS_E2E_ADMIN_TOKEN="$admin_token"
-    cd "$verification_src"
+    cd "$src"
     closure_args=(
       --base-url http://127.0.0.1:18001
       --page-base-url https://www.yn-sourcing.com
@@ -2578,7 +2581,7 @@ release_gate_checkpoint() {
     # shellcheck disable=SC1090
     source "$SECRETS_ENV"
     set +a
-    export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
+    export PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
     "$API_PYTHON" - "$runtime_report" <<'PY'
 import json
 from pathlib import Path
@@ -2622,7 +2625,7 @@ PY
         # shellcheck disable=SC1090
         source "$SECRETS_ENV"
         set +a
-        export PYTHONPATH="$verification_src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
+        export PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
         "$API_PYTHON" - "$runtime_report" <<'PY'
 import json
 from pathlib import Path

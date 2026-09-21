@@ -67,6 +67,8 @@ read-model 字样仅限历史 migration/checksum 和负向审计；`retired_proj
 
 ## 发布闭环
 
+激活前的 preflight 对现有运行版本执行 domain、runtime closure 与队列健康查询，代码及 SQL 必须来自实际 active release；候选 registry 仅用于计算新增 event 差异，不能把候选 SQL 提前运行在未迁移 schema 上。激活和 migration 完成后，T+0/T+30 才使用候选版本执行同类检查。该规则同样适用于回滚后的当前 runtime 检查。
+
 自动 release gate 使用两个有界 checkpoint：T+0 与 T+30。每个 checkpoint 必须证明：
 
 - `/health/ready` 成功；

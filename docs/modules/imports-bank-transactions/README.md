@@ -65,9 +65,9 @@
 
 - 预览可以产生文件级错误，不能因单个损坏文件中断整批预览。
 - 银行流水表头归一、人工映射校验、银行账号映射冲突、导入对象 identity/dedup 和 preview stale 必须由后端 service 决定；前端只收集明确映射和展示结果，不模糊猜列。
-- 导入确认是异步业务动作：页面看到 `job` 后只能提示“已开始后台导入”，不能假设下游 read model 已 fresh。
+- 导入确认是异步业务动作：页面看到 `job` 后只能提示“已开始后台导入”；只有事实与任务成功状态同事务提交后才显示完成。
 - `job.import_jobs` 是 import worker 的唯一队列；worker 直接 claim，不依赖导入 outbox 或 RabbitMQ。
-- 导入成功后的跨页一致性必须通过后端 lifecycle、dirty scope、read model worker 和 App Status 收敛，不能只依赖前端刷新或本地缓存。
+- 导入成功后，各页面通过自己的 canonical query 在下一次请求读取已提交事实；Workbench 自动匹配由独立领域 worker 处理，不是页面事实可见性的前置条件。不存在页面 read model worker，也不以本地缓存推断写入成功。
 - `preview_stale` 必须返回可识别错误；前端要提示重新预览后再确认。
 - 撤回后的 batch/file 状态为 `withdrawn`，原文件可以在选择正确账户后重新导入；不得删除导入历史、文件审计、财务纠错审计或主数据库。
 
