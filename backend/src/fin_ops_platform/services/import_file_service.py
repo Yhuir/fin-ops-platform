@@ -1958,11 +1958,16 @@ def parse_invoice_source_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
     header_index = find_invoice_header_index(rows)
     header = [canonical_invoice_header(cell) for cell in rows[header_index]]
     data_rows = []
+    control_totals: tuple[int, dict[str, str]] | None = None
     for source_row, row in enumerate(rows[header_index + 1 :], start=header_index + 2):
         mapped = row_to_dict(header, row)
         if not any(mapped.values()):
             continue
+        if control_totals is not None:
+            raise ValueError(f"第 {source_row} 行位于发票合计行之后，不能作为有效汇总尾行解析。")
         if is_invoice_summary_footer(mapped):
+            if clean(mapped.get("序号")) == "合计行":
+                control_totals = (source_row, mapped)
             continue
         if not _has_invoice_identity(mapped):
             raise ValueError(f"第 {source_row} 行缺少有效发票号码，不能静默跳过。")
@@ -1997,6 +2002,15 @@ def parse_invoice_source_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
                 "remark": mapped.get("备注"),
             }
         )
+    if control_totals is not None:
+        source_row, totals = control_totals
+        for source_field, parsed_field in (("金额", "amount"), ("税额", "tax_amount"), ("价税合计", "total_with_tax")):
+            if not clean(totals.get(source_field)):
+                continue
+            actual = sum((_invoice_line_decimal(item.get(parsed_field)) for item in data_rows), Decimal("0"))
+            expected = _invoice_line_decimal(totals[source_field])
+            if _invoice_line_decimal_text(actual) != _invoice_line_decimal_text(expected):
+                raise ValueError(f"第 {source_row} 行的{source_field}控制合计与发票业务行合计不一致，已停止导入。")
     return data_rows
 
 
@@ -2183,6 +2197,14 @@ def _invoice_line_signature(row: dict[str, Any]) -> tuple[str, ...]:
 
 
 def is_invoice_summary_footer(mapped: dict[str, str]) -> bool:
+    if clean(mapped.get("序号")) == "合计行":
+        populated = {key for key, value in mapped.items() if clean(value)}
+        if not {"金额", "税额"}.issubset(populated) or populated - {"序号", "金额", "税额", "价税合计"}:
+            return False
+        try:
+            return all(_invoice_line_decimal(mapped[key]).is_finite() for key in populated - {"序号"})
+        except InvalidOperation:
+            return False
     invoice_kind = clean(mapped.get("发票票种"))
     return invoice_kind.startswith("份数：") and not any(
         clean(mapped.get(key)) for key in ("数电发票号码", "发票代码", "发票号码", "开票日期", "金额", "税额")

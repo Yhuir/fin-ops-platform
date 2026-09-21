@@ -20,6 +20,7 @@ from fin_ops_platform.services.import_file_service import (
     detect_invoice_template,
     is_company_identity,
     parse_bank_statement_rows,
+    parse_invoice_source_rows,
     read_xlsx_rows,
 )
 from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
@@ -197,6 +198,60 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertEqual(normalized["source_sheet_role"], "invoice_header")
         self.assertEqual(normalized["source_line_count"], 2)
         self.assertEqual(len(normalized["source_line_items"]), 2)
+
+    def test_tax_export_control_totals_are_not_invoice_rows(self) -> None:
+        workbook = load_workbook(BytesIO(invoice_header_and_detail_file()))
+        header_sheet = workbook["发票基础信息"]
+        header_sheet.insert_cols(1)
+        header_sheet.cell(1, 1, "序号")
+        header_sheet.cell(2, 1, "1")
+        columns = [cell.value for cell in header_sheet[1]]
+        header_sheet.append([{"序号": "合计行", "金额": "100", "税额": "13"}.get(key, "") for key in columns])
+        buffer = BytesIO()
+        workbook.save(buffer)
+        service = FileImportService(ImportNormalizationService(id_registry=FakeImportEntityRegistry()))
+        session = service.preview_files(
+            imported_by="tester",
+            uploads=[UploadedImportFile(file_name="带合计全量发票.xlsx", content=buffer.getvalue())],
+        )
+        item = session.files[0]
+        self.assertEqual(item.status, "preview_ready")
+        self.assertEqual(item.row_count, 1)
+        self.assertEqual(item.success_count, 1)
+        self.assertEqual(item.normalized_rows[0]["amount"], "100.00")
+        self.assertEqual(item.normalized_rows[0]["tax_amount"], "13.00")
+        self.assertEqual(item.normalized_rows[0]["source_line_count"], 2)
+
+    def test_invoice_control_totals_validate_each_financial_column(self) -> None:
+        header = ["序号", "发票代码", "发票号码", "数电发票号码", "销方识别号", "购买方名称", "开票日期", "金额", "税额", "价税合计"]
+        invoice = ["1", "", "", "26110000000000000001", "TAX-A", "购买方", "2026-06-01", "100", "13", "113"]
+        for field in ("金额", "税额", "价税合计"):
+            with self.subTest(field=field):
+                totals = {"序号": "合计行", "金额": "100", "税额": "13", "价税合计": "113"}
+                totals[field] = "1"
+                with self.assertRaisesRegex(ValueError, f"{field}控制合计.*不一致"):
+                    parse_invoice_source_rows([header, invoice, [totals.get(key, "") for key in header]])
+        valid = {"序号": "合计行", "金额": "100", "税额": "13", "价税合计": "113"}
+        parsed = parse_invoice_source_rows([header, invoice, [valid.get(key, "") for key in header]])
+        self.assertEqual(len(parsed), 1)
+        with self.assertRaisesRegex(ValueError, "位于发票合计行之后"):
+            parse_invoice_source_rows([header, [valid.get(key, "") for key in header], invoice])
+
+    def test_missing_invoice_identity_and_fake_totals_still_fail(self) -> None:
+        header = ["序号", "发票代码", "发票号码", "数电发票号码", "销方识别号", "购买方名称", "开票日期", "金额", "税额"]
+        for overrides in (
+            {"序号": "1"},
+            {"购买方名称": "真实业务记录"},
+            {"发票号码": "00000001"},
+            {"金额": "错误金额"},
+            {"金额": "NaN"},
+            {"税额": "Infinity"},
+            {"税额": ""},
+        ):
+            with self.subTest(overrides=overrides):
+                row = {"序号": "合计行", "金额": "100", "税额": "13", **overrides}
+                with self.assertRaisesRegex(ValueError, "缺少有效发票号码"):
+                    parse_invoice_source_rows([header, [row.get(key, "") for key in header]])
 
     def test_malformed_authoritative_invoice_sheet_fails_closed(self) -> None:
         service = FileImportService(ImportNormalizationService(id_registry=FakeImportEntityRegistry()))
