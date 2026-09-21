@@ -16,14 +16,14 @@ it('uses current structured hierarchy and codes, preserves slashes and single-le
   expect(within(screen.getByRole('listbox',{name:'子标签'})).getByRole('option',{name:'工资'})).toBeVisible();
   await user.click(screen.getByRole('option',{name:'费用',exact:true}));
   await user.click(screen.getByRole('option',{name:'运费/邮费/杂费',exact:true}));
-  expect(onChange).toHaveBeenLastCalledWith(tags[1]);
+  expect(onChange).toHaveBeenLastCalledWith(tags[1], undefined);
   await user.click(trigger);
   await user.click(screen.getByRole('option',{name:'其他',exact:true}));
   await user.click(screen.getByRole('option',{name:'工资',exact:true}));
-  expect(onChange).toHaveBeenLastCalledWith(tags[3]);
+  expect(onChange).toHaveBeenLastCalledWith(tags[3], undefined);
   await user.click(trigger);
   await user.click(screen.getByRole('option',{name:'内部往来款',exact:true}));
-  expect(onChange).toHaveBeenLastCalledWith(tags[2]);
+  expect(onChange).toHaveBeenLastCalledWith(tags[2], undefined);
   expect(onLoad).toHaveBeenCalledTimes(3);
 });
 it('hides stale options on loading/failure, supports retry, preserves archived label',async()=>{
@@ -40,6 +40,9 @@ it('hides stale options on loading/failure, supports retry, preserves archived l
   expect(onLoad).toHaveBeenCalledTimes(2);
   expect(onChange).not.toHaveBeenCalled();
   await user.keyboard('{Escape}');
+  expect(screen.getByRole('combobox')).toHaveTextContent('旧标签');
+  expect(screen.getByRole('combobox')).not.toHaveTextContent('已停用');
+  rerender(<CostManualTagPicker {...props} loading={false}/>);
   expect(screen.getByRole('combobox')).toHaveTextContent('旧标签（已停用）');
 });
 it('disabled picker cannot open or request data',async()=>{

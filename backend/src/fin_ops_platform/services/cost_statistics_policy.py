@@ -13,6 +13,7 @@ from fin_ops_platform.services.app_settings_service import (
 )
 from fin_ops_platform.services.cost_statistics_allocation_scope import covered_source_task, project_source_task
 from fin_ops_platform.services.cost_statistics_bank_tags import bank_tag_context_from_row
+from fin_ops_platform.services.cost_statistics_oa_cost_tags import cost_tag_fields
 from fin_ops_platform.services.cost_statistics_scope import read_project_cost_scope, source_in_project_cost_scope
 from fin_ops_platform.services.cost_statistics_source_allocation import (
     SourceAllocationError,
@@ -823,6 +824,7 @@ def _append_source_allocation_entries(
     if decision is None:
         return
     manual_by_id = {item["unit_id"]: item for item in task["manual_items"]}
+    cost_tags = {(row["unit_id"], row["bank_transaction_id"]): row for row in task["oa_cost_tag_overrides"]}
     for line in decision["cost_lines"]:
         amount = _required_nonnegative_money(line["amount"])
         if amount == ZERO:
@@ -837,6 +839,7 @@ def _append_source_allocation_entries(
             continue
         entries.append(_allocation_entry(
             contexts_by_id[line["unit_id"]], bank_row=bank_row,
+            cost_tag=cost_tags.get((line["unit_id"], line["bank_transaction_id"])),
             allocated_amount=amount, oa_total=oa_total,
             relation_case_id=relation_case_id,
             bank_account_label=_clean_text(bank_row.get("payment_account_label")) or UNRESOLVED_BANK_ACCOUNT_LABEL,
@@ -923,6 +926,7 @@ def _manual_allocation_task(
         "allows_partial": bool(group.get("waiting_oa_ids")) or partial_source,
         "waiting_oa_ids": group.get("waiting_oa_ids", []),
         "manual_items": [],
+        "oa_cost_tag_overrides": [],
         "bank_events": bank_events,
         "allocations": [],
         "non_cost_amount": "0.00",
@@ -976,6 +980,7 @@ def _manual_allocation_task(
     for unit in units:
         unit["lock_oa_amount"] = manual_record["oa_amount_locks"][unit["unit_id"]]
     task["manual_items"] = list(manual_record.get("manual_items", []))
+    task["oa_cost_tag_overrides"] = manual_record["oa_cost_tag_overrides"]
     raw_allocations = [
         dict(line)
         for line in list(manual_record.get("allocations") or [])
@@ -1477,6 +1482,7 @@ def _allocation_entry(
     context: dict[str, Any],
     *,
     bank_row: dict[str, Any],
+    cost_tag: dict[str, str] | None,
     allocated_amount: Decimal,
     oa_total: Decimal,
     relation_case_id: str,
@@ -1508,6 +1514,7 @@ def _allocation_entry(
         "bank_tag_primary_label": source["bank_tag_primary_label"],
         "bank_tag_sub_label": source["bank_tag_sub_label"],
         "bank_tag_label_path": source["bank_tag_label_path"],
+        **(cost_tag_fields(cost_tag) if cost_tag is not None else {}),
         "occurred_at": occurred_at,
         "counterparty_name": context["counterparty_name"],
         "payment_account_label": source["payment_account_label"],
@@ -1532,7 +1539,6 @@ def _manual_cost_entry(item: dict[str, Any], bank: dict[str, Any], amount: Decim
                        case_id: str, evidence: list[dict[str, Any]], reconciliation: dict[str, Any]) -> dict[str, Any]:
     source = _serialize_bank_row(bank)
     identity = f"relation:{case_id}:unit:{item['unit_id']}:source:{source['transaction_id']}"
-    path = list(dict.fromkeys(v for v in [item["cost_tag_primary_label"], item["cost_tag_sub_label"]] if v))
     return {**source, "entry_id": identity, "row_key": identity, "allocation_id": identity,
             "row_kind": "manual_allocation", "relation_case_id": case_id, "group_id": case_id,
             "project_id": item["project_id"], "project_name": item["project_name"],
@@ -1541,9 +1547,7 @@ def _manual_cost_entry(item: dict[str, Any], bank: dict[str, Any], amount: Decim
             "oa_original_amount": None, "oa_allocation_weight": "", "bank_event_amount": source["amount"],
             "amount_decimal": amount, "occurred_at": source["trade_time"],
             "bank_account_label": source["payment_account_label"],
-            "bank_tag_code": item["cost_tag_code"], "bank_tag_primary_label": item["cost_tag_primary_label"],
-            "bank_tag_sub_label": item["cost_tag_sub_label"], "bank_tag_label_path": path,
-            "bank_tag_label": " / ".join(path), "payment_evidence": evidence, "reconciliation": reconciliation}
+            **cost_tag_fields(item), "payment_evidence": evidence, "reconciliation": reconciliation}
 
 
 def _payment_evidence(bank_row: dict[str, Any]) -> dict[str, Any]:

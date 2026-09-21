@@ -4655,7 +4655,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     status: allocations.length > 0 ? "allocated" : "pending",
     pending_reasons: allocations.length ? [] : ["amount_required"],
     source_allocations: manualSourceAllocations,
-    manual_items: [], manual_options: { projects: [], tags: [] }, suggested_source_allocations: null,
+    oa_cost_tag_overrides: [], manual_items: [], manual_options: { projects: [], tags: [] }, suggested_source_allocations: null,
     relation_display_groups: [{unit_ids: ["oa-1:parent", "oa-2:expense-2"], bank_transaction_ids: ["bank-manual-001", "bank-manual-002"], sources_excluded: false}],
     project_names: ["项目 A", "项目 B"], unit_count: 2, bank_event_count: 2,
     oa_total: "1010.00",

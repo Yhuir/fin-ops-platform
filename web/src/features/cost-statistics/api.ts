@@ -135,6 +135,8 @@ type ApiCostStatisticsExplorerPage = {
 type ApiCostManualItem = { unit_id: string; project_id: string; expense_content: string; cost_tag_code: string;
   project_name: string; cost_tag_primary_label: string; cost_tag_sub_label: string };
 type ApiCostStatisticsManualAllocationTask = {
+  oa_cost_tag_overrides: Array<{ unit_id: string; bank_transaction_id: string; cost_tag_code: string;
+    cost_tag_primary_label: string; cost_tag_sub_label: string }>;
   manual_items: ApiCostManualItem[];
   manual_options: import('./types').CostManualOptions;
   relation_case_id: string;
@@ -199,7 +201,7 @@ type ApiCostSourceAllocations = {
   non_cost_lines: Array<{ bank_transaction_id: string; amount: string }>;
 };
 
-type ApiCostManualAllocationSummary = Omit<ApiCostStatisticsManualAllocationTask, "units" | "bank_events" | "allocations" | "source_allocations" | "suggested_source_allocations" | "relation_display_groups" | "manual_items" | "manual_options"> & {
+type ApiCostManualAllocationSummary = Omit<ApiCostStatisticsManualAllocationTask, "units" | "bank_events" | "allocations" | "source_allocations" | "suggested_source_allocations" | "relation_display_groups" | "manual_items" | "manual_options" | "oa_cost_tag_overrides"> & {
   project_names: string[]; unit_count: number; bank_event_count: number;
 };
 
@@ -432,6 +434,8 @@ function mapManualAllocationTask(
     status: task.status,
     pendingReasons: task.pending_reasons,
     allowsPartial: task.allows_partial, waitingOaIds: task.waiting_oa_ids,
+    oaCostTagOverrides: task.oa_cost_tag_overrides.map(row => ({ unitId: row.unit_id, bankTransactionId: row.bank_transaction_id,
+      costTagCode: row.cost_tag_code, costTagPrimaryLabel: row.cost_tag_primary_label, costTagSubLabel: row.cost_tag_sub_label })),
     manualItems: task.manual_items.map(item => ({ unitId: item.unit_id, projectId: item.project_id, expenseContent: item.expense_content,
       costTagCode: item.cost_tag_code, projectName: item.project_name, costTagPrimaryLabel: item.cost_tag_primary_label, costTagSubLabel: item.cost_tag_sub_label })),
     manualOptions: task.manual_options,
@@ -653,6 +657,7 @@ export async function saveCostStatisticsManualAllocation(
         expected_version: request.expectedVersion,
         source_fingerprint: request.sourceFingerprint,
         scope_version: request.scopeVersion,
+        oa_cost_tag_overrides: request.oaCostTagOverrides.map(row => ({ unit_id: row.unitId, bank_transaction_id: row.bankTransactionId, cost_tag_code: row.costTagCode })),
         oa_amount_locks: request.oaAmountLocks.map(item => ({ unit_id: item.unitId, locked: item.locked })),
         manual_items: request.manualItems.map(item => ({ unit_id: item.unitId, project_name: item.projectName, expense_content: item.expenseContent, cost_tag_code: item.costTagCode })),
         allocations: request.allocations.map((line) => ({

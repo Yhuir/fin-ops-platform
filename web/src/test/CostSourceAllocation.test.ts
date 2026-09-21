@@ -11,7 +11,7 @@ export function sourceTask(): CostStatisticsManualAllocationTask {
       { transactionId: 'bank-a', eventKind: 'outflow', amount: '350.00', counterpartyName: '供应商', tradeTime: '2026-08-15', tags: ['采购', '材料款'], bankAccountLabel: '建行 8106', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款' },
       { transactionId: 'bank-b', eventKind: 'outflow', amount: '250.00', counterpartyName: '供应商', tradeTime: '2026-09-03', tags: ['采购', '材料款'], bankAccountLabel: '民生 9486', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款' },
     ],
-    allocations: [{ unitId: 'oa-1:parent', amount: '600.00' }], manualItems: [], manualOptions: {projects: [], tags: []}, suggestedSourceAllocations: null, relationDisplayGroups: [], sourceAllocations: null,
+    allocations: [{ unitId: 'oa-1:parent', amount: '600.00' }], oaCostTagOverrides: [], manualItems: [], manualOptions: {projects: [], tags: []}, suggestedSourceAllocations: null, relationDisplayGroups: [], sourceAllocations: null,
     nonCostAmount: '0.00', nonCostReason: '', version: 0, updatedAt: '', updatedBy: '', canSave: true,
   };
 }
@@ -161,4 +161,23 @@ test('does not reconcile an interrupted save against a different scope version',
   const request = sourceSaveRequest(task,draft);
   task.version = 1; task.scopeVersion = 2; task.sourceAllocations = request.sourceAllocations;
   expect(sourceDecisionMatches(request, task)).toBe(false);
+});
+
+test('persists explicit cost tags, verifies interrupted saves, restores inheritance and discards stale overrides', () => {
+  const task=sourceTask();
+  task.sourceAllocations={costLines:task.bankEvents.map(event=>({unitId:task.units[0].unitId,bankTransactionId:event.transactionId,amount:event.amount})),refundLinks:[],nonCostLines:[]};
+  task.manualOptions.tags=[{code:'interest',label:'费用 / 利息',primary_label:'费用',sub_label:'利息'}];
+  const draft=createSourceDraft(task);
+  draft.costLines[0].costTag=task.manualOptions.tags[0];
+  const request=sourceSaveRequest(task,draft);
+  expect(request.oaCostTagOverrides).toEqual([{unitId:task.units[0].unitId,bankTransactionId:'bank-a',costTagCode:'interest',costTagPrimaryLabel:'费用',costTagSubLabel:'利息'}]);
+  task.version=1; task.allocations=request.allocations;
+  expect(sourceDecisionMatches(request,task)).toBe(false);
+  task.oaCostTagOverrides=request.oaCostTagOverrides;
+  expect(sourceDecisionMatches(request,task)).toBe(true);
+  expect(createSourceDraft(task).costLines[0].costTag?.code).toBe('interest');
+  const restored=createSourceDraft(task);restored.costLines[0].costTag=undefined;
+  expect(sourceSaveRequest(task,restored).oaCostTagOverrides).toEqual([]);
+  task.pendingReasons=['allocation_stale'];
+  expect(createSourceDraft(task).costLines).toEqual([]);
 });

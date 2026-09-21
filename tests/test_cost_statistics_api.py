@@ -365,7 +365,7 @@ class CostStatisticsApiTests(unittest.TestCase):
                     "relation_case_id": task["relation_case_id"],
                     "expected_version": task["version"],
                     "source_fingerprint": task["source_fingerprint"], "scope_version": task["scope_version"],
-                    "oa_amount_locks": [{"unit_id": u["unit_id"], "locked": u["lock_oa_amount"]} for u in task["units"]],
+                    "oa_cost_tag_overrides": [], "oa_amount_locks": [{"unit_id": u["unit_id"], "locked": u["lock_oa_amount"]} for u in task["units"]],
                     "allocations": [
                         {
                             "unit_id": task["units"][0]["unit_id"],
@@ -549,7 +549,7 @@ class CostStatisticsApiTests(unittest.TestCase):
                 {
                     "expected_version": task["version"],
                     "source_fingerprint": task["source_fingerprint"], "scope_version": task["scope_version"],
-                    "oa_amount_locks": [{"unit_id": u["unit_id"], "locked": u["lock_oa_amount"]} for u in task["units"]],
+                    "oa_cost_tag_overrides": [], "oa_amount_locks": [{"unit_id": u["unit_id"], "locked": u["lock_oa_amount"]} for u in task["units"]],
                     "allocations": allocations,
                     "source_allocations": {"cost_lines": [{**line, "bank_transaction_id": self.bank_id} for line in allocations], "refund_links": [], "non_cost_lines": []},
                 }
@@ -564,7 +564,7 @@ class CostStatisticsApiTests(unittest.TestCase):
                     "relation_case_id": "another-case",
                     "expected_version": task["version"],
                     "source_fingerprint": task["source_fingerprint"], "scope_version": task["scope_version"],
-                    "oa_amount_locks": [{"unit_id": u["unit_id"], "locked": u["lock_oa_amount"]} for u in task["units"]],
+                    "oa_cost_tag_overrides": [], "oa_amount_locks": [{"unit_id": u["unit_id"], "locked": u["lock_oa_amount"]} for u in task["units"]],
                     "allocations": allocations,
                     "source_allocations": {"cost_lines": [{**line, "bank_transaction_id": self.bank_id} for line in allocations], "refund_links": [], "non_cost_lines": []},
                 }
@@ -579,7 +579,7 @@ class CostStatisticsApiTests(unittest.TestCase):
                     "relation_case_id": task["relation_case_id"],
                     "expected_version": task["version"],
                     "source_fingerprint": task["source_fingerprint"], "scope_version": task["scope_version"],
-                    "oa_amount_locks": [{"unit_id": u["unit_id"], "locked": u["lock_oa_amount"]} for u in task["units"]],
+                    "oa_cost_tag_overrides": [], "oa_amount_locks": [{"unit_id": u["unit_id"], "locked": u["lock_oa_amount"]} for u in task["units"]],
                     "allocations": allocations,
                     "source_allocations": {"cost_lines": [{**line, "bank_transaction_id": self.bank_id} for line in allocations], "refund_links": [], "non_cost_lines": []},
                     "sources": [],
@@ -595,7 +595,7 @@ class CostStatisticsApiTests(unittest.TestCase):
                     "relation_case_id": task["relation_case_id"],
                     "expected_version": task["version"],
                     "source_fingerprint": task["source_fingerprint"], "scope_version": task["scope_version"],
-                    "oa_amount_locks": [{"unit_id": u["unit_id"], "locked": u["lock_oa_amount"]} for u in task["units"]],
+                    "oa_cost_tag_overrides": [], "oa_amount_locks": [{"unit_id": u["unit_id"], "locked": u["lock_oa_amount"]} for u in task["units"]],
                     "allocations": [{**allocations[0], "source_id": self.bank_id}],
                 }
             ),
@@ -609,7 +609,7 @@ class CostStatisticsApiTests(unittest.TestCase):
                     "relation_case_id": task["relation_case_id"],
                     "expected_version": task["version"],
                     "source_fingerprint": task["source_fingerprint"], "scope_version": task["scope_version"],
-                    "oa_amount_locks": [{"unit_id": u["unit_id"], "locked": u["lock_oa_amount"]} for u in task["units"]],
+                    "oa_cost_tag_overrides": [], "oa_amount_locks": [{"unit_id": u["unit_id"], "locked": u["lock_oa_amount"]} for u in task["units"]],
                     "allocations": allocations[:1],
                 }
             ),
@@ -623,7 +623,7 @@ class CostStatisticsApiTests(unittest.TestCase):
                     "relation_case_id": task["relation_case_id"],
                     "expected_version": task["version"],
                     "source_fingerprint": task["source_fingerprint"], "scope_version": task["scope_version"],
-                    "oa_amount_locks": [{"unit_id": u["unit_id"], "locked": u["lock_oa_amount"]} for u in task["units"]],
+                    "oa_cost_tag_overrides": [], "oa_amount_locks": [{"unit_id": u["unit_id"], "locked": u["lock_oa_amount"]} for u in task["units"]],
                     "allocations": allocations,
                     "source_allocations": {"cost_lines": [{**line, "bank_transaction_id": self.bank_id} for line in allocations], "refund_links": [], "non_cost_lines": []},
                 }
@@ -694,7 +694,7 @@ class CostStatisticsApiTests(unittest.TestCase):
                     "relation_case_id": task["relation_case_id"],
                     "expected_version": saved_task["version"],
                     "source_fingerprint": saved_task["source_fingerprint"], "scope_version": saved_task["scope_version"],
-                    "oa_amount_locks": [{"unit_id": u["unit_id"], "locked": u["lock_oa_amount"]} for u in saved_task["units"]],
+                    "oa_cost_tag_overrides": [], "oa_amount_locks": [{"unit_id": u["unit_id"], "locked": u["lock_oa_amount"]} for u in saved_task["units"]],
                     "allocations": edited_allocations,
                     "source_allocations": {"cost_lines": [{**line, "bank_transaction_id": self.bank_id} for line in edited_allocations], "refund_links": [], "non_cost_lines": [{"bank_transaction_id": self.bank_id, "amount": "50.00"}]},
                     "non_cost_amount": "50.00",

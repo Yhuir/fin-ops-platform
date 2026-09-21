@@ -10,6 +10,7 @@ from fin_ops_platform.services.cost_statistics_canonical_repository import (
     PostgresCostStatisticsCanonicalRepository,
 )
 from fin_ops_platform.services.cost_statistics_manual_items import allocation_targets, validate_manual_items
+from fin_ops_platform.services.cost_statistics_oa_cost_tags import validate_oa_cost_tags
 from fin_ops_platform.services.cost_statistics_policy import CostStatisticsPolicy
 from fin_ops_platform.services.cost_statistics_source_allocation import (
     SourceAllocationError,
@@ -209,6 +210,7 @@ class CostStatisticsManualAllocationService:
             "allocations",
             "manual_items",
             "oa_amount_locks",
+            "oa_cost_tag_overrides",
             "source_allocations",
             "non_cost_amount",
             "non_cost_reason",
@@ -316,6 +318,14 @@ class CostStatisticsManualAllocationService:
             error = CostStatisticsManualAllocationValidationError(str(exc))
             error.field_error = {"path": exc.path, "code": exc.code, "message": str(exc)}
             raise error from exc
+        try:
+            oa_cost_tags = validate_oa_cost_tags(
+                payload.get("oa_cost_tag_overrides"), units=task["units"],
+                cost_lines=source_allocations["cost_lines"], tags=options["tags"],
+                previous=task["oa_cost_tag_overrides"],
+            )
+        except ValueError as exc:
+            raise CostStatisticsManualAllocationValidationError(str(exc)) from exc
         actor_id = str(actor.get("id") or "").strip()
         if not actor_id:
             raise CostStatisticsManualAllocationValidationError(
@@ -352,6 +362,8 @@ class CostStatisticsManualAllocationService:
             source_allocations=merged["source_allocations"],
             manual_items=stored_manual,
             oa_amount_locks={**(valid_previous["oa_amount_locks"] if valid_previous else {}), **lock_map},
+            oa_cost_tag_overrides=([row for row in valid_previous["oa_cost_tag_overrides"]
+                                    if row["bank_transaction_id"] not in selected] if valid_previous else []) + oa_cost_tags,
             non_cost_amount=merged["non_cost_amount"],
             non_cost_reason=merged["non_cost_reason"],
             expected_version=expected_version,
@@ -384,6 +396,8 @@ class CostStatisticsManualAllocationService:
                         "allocations": allocations,
                         "manual_items": manual_items,
                         "oa_amount_locks": locks,
+                        "oa_cost_tag_overrides_before": task["oa_cost_tag_overrides"],
+                        "oa_cost_tag_overrides": oa_cost_tags,
                         "source_allocations": source_allocations,
                         "non_cost_amount": f"{non_cost_amount:.2f}",
                         "non_cost_reason": non_cost_reason,

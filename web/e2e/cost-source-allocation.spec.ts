@@ -13,7 +13,7 @@ async function sourceScenario(page: Page, options: { detailDelayMs?: number; aut
       { transaction_id: 'bank-a', event_kind: 'outflow', in_project_cost_scope: true, amount: '350.00', trade_time: '2026-08-15T00:00:00Z', counterparty_name: '设备供应商', bank_account_label: '建设银行 8106', bank_tag_code: options.missingTag ? '' : 'material', bank_tag_primary_label: options.missingTag ? '' : '采购', bank_tag_sub_label: options.missingTag ? '' : '材料款', tags: options.missingTag ? [] : ['采购', '材料款'] },
       { transaction_id: 'bank-b', event_kind: 'outflow', in_project_cost_scope: true, amount: '250.00', trade_time: '2026-09-03', counterparty_name: '设备供应商', bank_account_label: '民生银行 9486', bank_tag_code: 'material', bank_tag_primary_label: '采购', bank_tag_sub_label: '材料款', tags: ['采购', '材料款'] },
     ],
-    allocations: [{ unit_id: 'oa-1', amount: '600.00' }], relation_display_groups: [] as Array<{unit_ids:string[];bank_transaction_ids:string[];sources_excluded:boolean}>, manual_items: [] as Array<Record<string,string>>, manual_options: { projects: [{id:"p-1",name:"云南溯源科技"}], tags: [{code:"service",label:"费用 / 服务费",primary_label:"费用",sub_label:"服务费"}] }, suggested_source_allocations: null as unknown, source_allocations: null as unknown,
+    allocations: [{ unit_id: 'oa-1', amount: '600.00' }], relation_display_groups: [] as Array<{unit_ids:string[];bank_transaction_ids:string[];sources_excluded:boolean}>, oa_cost_tag_overrides: [] as Array<Record<string,string>>, manual_items: [] as Array<Record<string,string>>, manual_options: { projects: [{id:"p-1",name:"云南溯源科技"}], tags: [{code:"service",label:"费用 / 服务费",primary_label:"费用",sub_label:"服务费"}] }, suggested_source_allocations: null as unknown, source_allocations: null as unknown,
     non_cost_amount: '0.00', non_cost_reason: '', version: 0, updated_by: '', updated_at: '', can_save: options.canSave !== false,
   };
   if (options.partial) {
@@ -106,6 +106,7 @@ async function sourceScenario(page: Page, options: { detailDelayMs?: number; aut
     task.status = 'allocated'; task.pending_reasons = [];
     task.source_allocations = {cost_lines: task.bank_events.map(bank => ({unit_id: 'oa-1', bank_transaction_id: bank.transaction_id, amount: bank.amount})), refund_links: [], non_cost_lines: []};
   }
+  await page.route('**/api/cost-statistics/manual-tags',route=>route.fulfill({json:{tags:task.manual_options.tags}}));
   let writes = 0; let details = 0; let savedBody: Record<string, any> | null = null;
   await page.route('**/api/cost-statistics/manual-allocations**', async route => {
     const url = new URL(route.request().url());
@@ -113,6 +114,7 @@ async function sourceScenario(page: Page, options: { detailDelayMs?: number; aut
       writes++; savedBody = route.request().postDataJSON();
       if (options.conflict) return route.fulfill({ status: 409, json: { error: 'cost_statistics_manual_allocation_conflict', message: '数据已变化，请重新核对；修改已保留' } });
       task.manual_items = savedBody!.manual_items.map((item: Record<string,string>) => ({...item,project_id:'',project_name:'云南溯源科技',cost_tag_primary_label:'费用',cost_tag_sub_label:'服务费'}));
+      task.oa_cost_tag_overrides = savedBody!.oa_cost_tag_overrides.map((row: Record<string,string>) => ({...row,cost_tag_primary_label:'费用',cost_tag_sub_label:'服务费'}));
       task.source_allocations = savedBody!.source_allocations;
       task.units.forEach(u => { u.lock_oa_amount = savedBody!.oa_amount_locks.find((r: any) => r.unit_id === u.unit_id).locked; });
       task.suggested_source_allocations = null;
@@ -300,9 +302,9 @@ for (const large of [false, true]) {
     await page.setViewportSize({ width: 1440, height: 1000 });
     const scene = await sourceScenario(page, { large, performance: true });
     const table = scene.drawer.getByRole('table', { name: '成本分配明细', exact: true });
-    await expect(table.getByRole('combobox')).toHaveCount(large ? 100 : 2);
+    await expect(table.getByRole('combobox', {name:/来源流水/})).toHaveCount(large ? 100 : 2);
     const measurements = await table.evaluate(async element => {
-      const input = element.querySelector('input')!;
+      const input = element.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!;
 
       const durations: number[] = [];
       for (let i = 0; i < 20; i++) {
@@ -331,7 +333,7 @@ for (const large of [false, true]) {
     await table.getByRole('textbox').nth(1).fill('0');
     const opening: number[] = []; const selection: number[] = [];
     for (let i = 0; i < 20; i++) {
-      const trigger = table.getByRole('combobox').first();
+      const trigger = table.getByRole('combobox', {name:/来源流水/}).first();
       const recordNextClick = () => page.evaluate(() => {
         (window as any).__costInteraction = null;
         document.addEventListener('pointerdown', () => {
@@ -367,7 +369,7 @@ test('keeps a successful allocation committed when the statistics refresh fails'
 test('keeps invalid amount feedback within its cell and leaves source geometry stable', async ({ page }) => {
   const scene = await sourceScenario(page);
   await scene.unit.getByRole('button', { name: '新增来源', exact: true }).click();
-  const source = scene.unit.getByRole('combobox'); const amount = scene.unit.getByRole('textbox');
+  const source = scene.unit.getByRole('combobox', {name:/来源流水/}); const amount = scene.unit.getByRole('textbox');
   await source.press('ArrowDown');
   await page.getByRole('option', { name: /建设银行 8106/ }).click();
   const before = await source.boundingBox();
@@ -389,7 +391,7 @@ test('keeps invalid amount feedback within its cell and leaves source geometry s
 test('prefill is editable, merged, pending until save, with four distinct block colors', async ({page}) => {
   await page.setViewportSize({width: 1600, height: 1100});
   const scene = await sourceScenario(page, {prefill: true});
-  await expect(scene.unit.getByRole('combobox')).toHaveCount(2);
+  await expect(scene.unit.getByRole('combobox', {name:/来源流水/})).toHaveCount(2);
   await expect(scene.unit.locator('td[rowspan="2"]')).toHaveCount(2);
   expect(scene.writes()).toBe(0);
   expect(scene.task.status).toBe('pending');
@@ -408,7 +410,7 @@ test('clearing prefill and collapsing the block does not recreate deleted input'
   await scene.unit.getByRole('button', {name: '删除来源行 1', exact: true}).click();
   const heading = scene.drawer.locator('.cost-source-task-heading').first();
   await heading.click(); await heading.click();
-  await expect(scene.unit.getByRole('combobox')).toHaveCount(0);
+  await expect(scene.unit.getByRole('combobox', {name:/来源流水/})).toHaveCount(0);
   await expect(scene.unit.getByText('未分配')).toBeVisible();
   expect(scene.writes()).toBe(0);
 });
@@ -418,7 +420,7 @@ test('COST-E2E-014 screenshot three OA four bank suggestions save as four source
   await page.setViewportSize({ width: 1600, height: 1100 });
   const scene = await sourceScenario(page, { screenshotCase: true });
   const table = scene.drawer.locator('.cost-source-table');
-  await expect(table.getByRole('combobox')).toHaveCount(4);
+  await expect(table.getByRole('combobox', {name:/来源流水/})).toHaveCount(4);
   await expect(table.locator('td[rowspan="2"]')).toHaveCount(2);
   for (const amount of ['64996.69', '23053.31', '29350.00', '469600.00']) {
     await expect(table.locator(`input[value="${amount}"]`)).toBeVisible();
@@ -431,7 +433,7 @@ test('COST-E2E-014 screenshot three OA four bank suggestions save as four source
   expect(scene.body()!.allocations.map((line: {amount: string}) => line.amount)).toEqual(['88050.00', '29350.00', '469600.00']);
   expect(scene.body()!.source_allocations.cost_lines.map((line: {amount: string}) => line.amount)).toEqual(['64996.69', '23053.31', '29350.00', '469600.00']);
   await scene.drawer.getByRole('radio', { name: /已完成/ }).click();
-  await expect(scene.drawer.locator('.cost-source-table').getByRole('combobox')).toHaveCount(4);
+  await expect(scene.drawer.locator('.cost-source-table').getByRole('combobox', {name:/来源流水/})).toHaveCount(4);
   await expectNoUnexpectedSuccessUiErrors(page);
 });
 
@@ -439,7 +441,7 @@ for (const width of [1440, 390]) {
   test(`source menu contains multiline options without shrinking at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 });
     const scene = await sourceScenario(page, { screenshotCase: true, longMenu: true });
-    await scene.unit.getByRole('combobox').first().click();
+    await scene.unit.getByRole('combobox', {name:/来源流水/}).first().click();
     const menu = page.getByRole('listbox', { name: '来源流水 1', exact: true });
     await expect(menu.getByRole('option')).toHaveCount(4);
     await expect(menu.getByText('已用完')).toHaveCount(0);
@@ -553,7 +555,7 @@ test('scoped hotel task omits excluded loan, saves only scoped source and keeps 
   await expect(scene.drawer.getByRole('heading',{name:'银行流水 · 1 条'})).toBeVisible();
   await expect(scene.drawer.getByText(/范围外|借出款|2026-08-01/)).toHaveCount(0);
   await expect(scene.drawer.getByText('分配金额一致',{exact:true})).toBeVisible();
-  await scene.unit.getByRole('combobox').click();
+  await scene.unit.getByRole('combobox', {name:/来源流水/}).click();
   const menu=page.getByRole('listbox',{name:'来源流水 1',exact:true});
   await expect(menu.getByRole('option')).toHaveCount(1);
   await expect(menu).toContainText('住宿费');
@@ -578,7 +580,7 @@ test('seven historical OA groups prefill fourteen sources, stay editable and sur
   await page.setViewportSize({width:1440,height:1000});
   const scene = await sourceScenario(page,{telecom:true});
   const table = scene.drawer.getByRole('table',{name:'成本分配明细',exact:true});
-  await expect(table.getByRole('combobox')).toHaveCount(14);
+  await expect(table.getByRole('combobox', {name:/来源流水/})).toHaveCount(14);
   await expect(table.getByText('未分配',{exact:true})).toHaveCount(0);
   await expect(scene.drawer.getByRole('table',{name:'OA 与流水对照'}).locator('tbody')).toHaveCount(7);
   const expected = scene.task.bank_events.map(b=>b.amount);
@@ -594,7 +596,7 @@ test('seven historical OA groups prefill fourteen sources, stay editable and sur
   await expect.poll(scene.writes).toBe(1);
   expect(scene.body()!.source_allocations.cost_lines).toHaveLength(14);
   await scene.drawer.getByRole('radio',{name:'已完成 1'}).click();
-  await expect(table.getByRole('combobox')).toHaveCount(14);
+  await expect(table.getByRole('combobox', {name:/来源流水/})).toHaveCount(14);
   expect(await table.getByRole('textbox').evaluateAll(inputs=>inputs.map(input=>(input as HTMLInputElement).value))).toEqual(expected);
   await expectNoUnexpectedSuccessUiErrors(page);
 });
@@ -753,4 +755,31 @@ test('project accordion smoothly accommodates the first delayed detail', async (
   await testInfo.attach('async-height-frames',{body:JSON.stringify({heights,full}),contentType:'application/json'});
   expect(heights.some(height=>height>60 && height<full-10)).toBe(true);
   expect(scene.details()).toBe(1);expect(scene.writes()).toBe(0);
+});
+
+
+test('OA cost tag edits survive save and reopen, then explicitly restore source inheritance', async ({page}) => {
+  const scene=await sourceScenario(page,{prefill:true});
+  const evidence=await scene.drawer.locator('.cost-source-evidence').innerText();
+  const picker=scene.unit.getByRole('combobox',{name:'成本标签 1 1'});
+  await picker.click();
+  await page.getByRole('option',{name:'费用',exact:true}).click();
+  await expect(page.getByRole('listbox',{name:'主标签'})).toBeVisible();
+  await expect(page.getByRole('listbox',{name:'子标签'})).toBeVisible();
+  await page.getByRole('option',{name:'服务费',exact:true}).click();
+  await scene.drawer.getByRole('button',{name:'保存',exact:true}).click();
+  await expect.poll(()=>scene.writes()).toBe(1);
+  expect(scene.body()!.oa_cost_tag_overrides).toEqual([{unit_id:'oa-1',bank_transaction_id:'bank-a',cost_tag_code:'service'}]);
+  await scene.drawer.getByRole('radio',{name:/已完成/}).click();
+  await expect(picker).toContainText('费用 / 服务费');
+  const toggle=scene.drawer.locator('.cost-source-task-heading').first();
+  await toggle.click();await toggle.click();
+  await expect(picker).toContainText('费用 / 服务费');
+  expect(await scene.drawer.locator('.cost-source-evidence').innerText()).toBe(evidence);
+  await scene.unit.getByRole('button',{name:'恢复来源标签'}).click();
+  await scene.drawer.getByRole('button',{name:'保存',exact:true}).click();
+  await expect.poll(()=>scene.writes()).toBe(2);
+  expect(scene.body()!.oa_cost_tag_overrides).toEqual([]);
+  await expect(picker).toContainText('采购 / 材料款');
+  await expectNoUnexpectedSuccessUiErrors(page);
 });

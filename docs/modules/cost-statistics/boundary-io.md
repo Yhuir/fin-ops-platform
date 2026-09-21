@@ -57,7 +57,7 @@ PUT manual allocation
 - `GET /manual-allocations` 仅返回摘要：关系 ID、项目名集合、OA 单元/银行流水计数、关系合计、状态、原因、版本、可写权限。`counts={pending,allocated}` 与 `row_count/next_cursor` 来自同一关系快照；不在 items 中带 units/bank_events/source_allocations。
 - `GET /manual-allocations/{case_id}` 定向读取该关联的完整 OA 单元、银行证据、当前有效分配。返回当前成本范围内支出及其已确认退款份额；完整关系事实仍在 repository 内保留。关系内支出与退款一次批量分类，使用 owner 的 `effective_category_*` 明确映射，不拆斜杠或猜主子标签。
 - `PUT` 请求固定为 `relation_case_id, expected_version, scope_version, source_fingerprint, allocations, source_allocations, non_cost_amount, non_cost_reason`。单元合计只接受 `{unit_id,amount}`；来源明细分别为 `cost_lines[{unit_id,bank_transaction_id,amount}]`、`refund_links[{refund_transaction_id,bank_transaction_id,amount}]`、`non_cost_lines[{bank_transaction_id,amount}]`。金额为两位小数字符串；来源行必须正数，零成本单元允许明确 0。
-- 选择来源后，银行账户与付款日期只读。OA 行标签取来源；人工补充行通过 cost_tag_code 单独选择成本标签，不写银行分类。OA 费用类型仅作原始凭据。
+- 选择来源后，银行账户与付款日期只读。OA 行默认继承来源标签，可通过 oa_cost_tag_overrides 人工覆盖；人工补充行通过 cost_tag_code 选择成本标签，均不写银行分类。OA 费用类型仅作原始凭据。
 - 完整分配保持 `C+X=N`；混合审批及已保存的单来源部分决定允许 `C+X≤N`。逐来源不得超分、逐退款必须完整、逐单元来源合计必须与其分配金额相等。部分分配只允许已完成 OA，单元金额不超过原额；等待审批的预算不转成人工成本或非成本。全部完成任务按单元金额锁定校验，见下方 2026-09-21 合同。
 - 保存先取得既有 relation member locks，再锁关系及来源银行/OA 行，重新核对事实与版本。一次事务写 allocation 和 audit；锁冲突、事实变化、CAS 冲突返回 409，不自动重试提交。
 - 0169 只为既有 manual allocation 表增加 nullable JSONB `source_allocations`。旧 NULL 表示没有显式来源决定，只在当前事实确实存在唯一解时推导，不反推历史多对多。
@@ -294,3 +294,16 @@ Cost 的关系展示复用统一 OA—银行对应规则；canonical repository 
 - 分配任务全集服务详情/保存；人工列表只取 pending/stale 和已持久化的人工记录。计数、搜索、分页一致过滤。新增详情入口复用同一表单和权限，不新增 API、表、worker、缓存或依赖。
 - 运行时删除旧整体固定目标、自动项进入已完成列表、按前端增减猜计数的分支。退款闭合、来源容量、审批资格和事实版本校验继续有效。
 - 0176 为 forward-only，旧 writer 缺少必填元数据不能继续使用；沿用现有正式发布检查。无主数据库删除或本任务全库备份。
+
+
+## OA 来源行人工成本标签（2026-09-21）
+
+- Owner 为成本人工分配；银行原始标签、金额、OA 与正式关系不写入。来源准入仍根据银行有效标签，人工成本标签不能改变范围准入。
+- GET/PUT 既有详情接口增加 `oa_cost_tag_overrides`。PUT 必填数组，每项仅接受 `{unit_id,bank_transaction_id,cost_tag_code}`，必须唯一对应当前范围内 OA 正数成本来源行；缺字段要求刷新，不默认为清空。GET/存储另包含服务端解析的 `cost_tag_primary_label/cost_tag_sub_label` 名称快照。
+- migration 0177 在既有 `app.cost_statistics_manual_allocations` 增加同名 JSONB 数组列，历史默认空集合，不改变金额、来源、版本。没有覆盖代表继承来源；人工选择与来源同代码也保留覆盖；显式恢复才删除。
+- 校验和标签字段映射集中于纯函数 `cost_statistics_oa_cost_tags.py`。Service 复用当前目录和事务、权限、CAS、审计；repository 批量读写新字段，范围投影只输出当前来源对应覆盖，保存保留范围外有效覆盖。失效关系不沿用旧覆盖；删除/零成本行不允许孤立覆盖。
+- 新选择必须有效；原行相同代码保留名称快照及已停用历史，不能转移到新来源。客户端只提交代码，不能伪造标签名称。审计记录前后覆盖。
+- Policy 在唯一成本事件生成处应用覆盖；人工补充行复用同一标签字段映射。三个成本视角、搜索/筛选、详情与导出一致。输出既有标签字段形状不变，银行证据始终保留银行标签。
+- 前端复用 `CostManualTagPicker` 左主右子，OA 来源行可选择或恢复来源，金额/原额锁定互相独立。覆盖跟随草稿行，更换来源时由服务端重新验证，保存请求结果核对包含覆盖代码。待分配、已完成、明细调整复用同一表单。
+- 删除 OA 行只能只读银行标签的 UI 分支和无条件银行分类的成本构建限制；不删除银行凭据、非成本、退款的只读标签。无新 API、表、索引、worker、缓存或跨页刷新。
+- 标签解析为批量映射，无逐行 I/O；两个银行视角不加载成本人工分配。发布沿用既有 forward-only 清单防止旧代码忽略新事实，不新增审批门禁。

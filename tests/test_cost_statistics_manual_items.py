@@ -82,3 +82,21 @@ class ManualCostItemsTests(unittest.TestCase):
         route._resolve_read_session = lambda headers: (None, (HTTPStatus.FORBIDDEN, {'error':'forbidden'}))
         self.assertEqual(route.route('GET', '/api/cost-statistics/manual-tags', {}), (HTTPStatus.FORBIDDEN, {'error':'forbidden'}))
         self.assertEqual(settings.get_cost_manual_tags.call_count, 2)
+
+
+class OaCostTagsTests(unittest.TestCase):
+    def test_explicit_tags_are_source_owned_and_never_guessed(self):
+        from fin_ops_platform.services.cost_statistics_oa_cost_tags import validate_oa_cost_tags
+        row={'unit_id':'oa','bank_transaction_id':'bank','cost_tag_code':'interest'}
+        args={'units':[{'unit_id':'oa'}], 'cost_lines':[{'unit_id':'oa','bank_transaction_id':'bank','amount':'1497.22'}],
+              'tags':[{'code':'interest','primary_label':'费用','sub_label':'利息'}], 'previous':[]}
+        self.assertEqual(validate_oa_cost_tags([],**args),[])
+        saved=validate_oa_cost_tags([row],**args)
+        self.assertEqual(saved,[{**row,'cost_tag_primary_label':'费用','cost_tag_sub_label':'利息'}])
+        # Explicit same-code choice remains a decision even after catalogue changes.
+        self.assertEqual(validate_oa_cost_tags([row],**{**args,'tags':[],'previous':saved}),saved)
+        for value in (None,{},[row,row],[{**row,'cost_tag_code':'unknown'}],[{**row,'unit_id':'manual:foreign'}],
+                      [{**row,'bank_transaction_id':'outside'}],[{**row,'cost_tag_code':None}],[{**row,'amount':'0'}]):
+            with self.subTest(value=value),self.assertRaises(ValueError):validate_oa_cost_tags(value,**args)
+        with self.assertRaises(ValueError):validate_oa_cost_tags([row],**{**args,'cost_lines':[]})
+        self.assertEqual(args['previous'],[])

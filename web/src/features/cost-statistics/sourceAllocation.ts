@@ -1,6 +1,6 @@
 import type { CostSourceAllocations, CostStatisticsManualAllocationTask, SaveCostStatisticsManualAllocationRequest } from './types';
 
-export type SourceDraftLine = { id: number; ownerId: string; bankTransactionId: string; amount: string };
+export type SourceDraftLine = { id: number; ownerId: string; bankTransactionId: string; amount: string; costTag?: { code: string; primary_label: string; sub_label: string } };
 export type SourceDraft = {
   oaAmountLocks: Record<string, boolean>;
   manualItems: import("./types").CostManualItem[];
@@ -26,11 +26,13 @@ export function createSourceDraft(task: CostStatisticsManualAllocationTask): Sou
   const stale = task.pendingReasons.includes('allocation_stale');
   const saved = stale ? null : task.sourceAllocations;
   const suggested = stale || task.version !== 0 ? null : task.suggestedSourceAllocations;
+  const tags = new Map(task.oaCostTagOverrides.map(row => [JSON.stringify([row.unitId, row.bankTransactionId]),
+    { code: row.costTagCode, primary_label: row.costTagPrimaryLabel, sub_label: row.costTagSubLabel }]));
   return {
     oaAmountLocks: Object.fromEntries(task.units.map(unit => [unit.unitId, unit.lockOaAmount])),
     manualItems: task.pendingReasons.includes("allocation_stale") ? [] : task.manualItems.map(item => ({ ...item })),
     zeroUnitIds: task.pendingReasons.includes('allocation_stale') ? [] : task.allocations.filter(line => cents(line.amount) === 0n).map(line => line.unitId),
-    costLines: [...(saved?.costLines ?? []), ...(suggested?.costLines ?? [])].map(line => ({ ...line, ownerId: line.unitId, id: ++id })),
+    costLines: [...(saved?.costLines ?? []), ...(suggested?.costLines ?? [])].map(line => ({ ...line, ownerId: line.unitId, id: ++id, costTag: stale ? undefined : tags.get(JSON.stringify([line.unitId, line.bankTransactionId])) })),
     refundLinks: [...(saved?.refundLinks ?? []), ...(suggested?.refundLinks ?? [])].map(line => ({ ...line, ownerId: line.refundTransactionId, id: ++id })),
     nonCostLines: [...(saved?.nonCostLines ?? []), ...(suggested?.nonCostLines ?? [])].map(line => ({ ...line, ownerId: '', id: ++id })),
     nonCostAmount: task.nonCostAmount,
@@ -66,6 +68,8 @@ export function validateSourceDraft(task: CostStatisticsManualAllocationTask, dr
   const refunds = new Set(task.bankEvents.filter(event => event.eventKind === 'wrong_payment_refund').map(event => event.transactionId));
   const totals = new Map<string, bigint>();
   const targets = sourceUnitAmounts(task, draft);
+  const tagCodes = new Set(task.manualOptions.tags.map(tag => tag.code));
+  const priorTags = new Map(task.oaCostTagOverrides.map(row => [JSON.stringify([row.unitId, row.bankTransactionId]), row.costTagCode]));
   const zero = new Set(draft.zeroUnitIds);
   const sum = (lines: SourceDraftLine[]) => lines.reduce((total, line) => total + (cents(line.amount) ?? 0n), 0n);
   for (const kind of ['costLines', 'refundLinks', 'nonCostLines'] as const) {
@@ -76,6 +80,10 @@ export function validateSourceDraft(task: CostStatisticsManualAllocationTask, dr
       const allowed = sources.get(line.bankTransactionId)?.allowedUnitIds;
       if (allowed && (kind === 'costLines' && !allowed.includes(line.ownerId) || kind === 'nonCostLines' && !allowed.length)) errors[`${field}.source`] = '该来源不属于此已完成成本项';
       if (kind === 'costLines' && task.units.some(u => u.unitId === line.ownerId && u.costEligible === false)) errors[`${field}.owner`] = '进行中的 OA 暂不计入成本';
+      if (kind === 'costLines' && line.costTag) {
+        const previous = priorTags.get(JSON.stringify([line.ownerId, line.bankTransactionId]));
+        if (!tagCodes.has(line.costTag.code) && previous !== line.costTag.code) errors[`${field}.tag`] = '请选择有效的成本标签';
+      }
       if (kind === 'costLines' && !units.has(line.ownerId)) errors[`${field}.owner`] = '请选择有效的 OA 成本项';
       if (kind === 'refundLinks' && !refunds.has(line.ownerId)) errors[`${field}.owner`] = '请选择有效的退款流水';
       const amount = cents(line.amount);
@@ -148,6 +156,8 @@ export function sourceSaveRequest(task: CostStatisticsManualAllocationTask, draf
   };
   return {
     relationCaseId: task.relationCaseId, expectedVersion: task.version, sourceFingerprint: task.sourceFingerprint, scopeVersion: task.scopeVersion,
+    oaCostTagOverrides: draft.costLines.filter(line => line.costTag).map(line => ({ unitId: line.ownerId, bankTransactionId: line.bankTransactionId,
+      costTagCode: line.costTag!.code, costTagPrimaryLabel: line.costTag!.primary_label, costTagSubLabel: line.costTag!.sub_label })),
     oaAmountLocks: task.units.map(unit => ({ unitId: unit.unitId, locked: draft.oaAmountLocks[unit.unitId] })),
     manualItems: draft.manualItems.map(item => ({ ...item, expenseContent: item.expenseContent.trim() })),
     allocations: [...task.units, ...draft.manualItems].map(unit => ({ unitId: unit.unitId, amount: money(targets.get(unit.unitId)!) })),
@@ -166,7 +176,8 @@ export function sourceDecisionMatches(request: SaveCostStatisticsManualAllocatio
     ordered(value.nonCostLines.map(line => [line.bankTransactionId, line.amount])),
   ].join('|');
   const manualMatrix = (items: import('./types').CostManualItem[]) => ordered(items.map(item => [item.unitId, item.projectName, item.expenseContent, item.costTagCode]));
-  return ordered(request.oaAmountLocks.map(item => [item.unitId, String(item.locked)])) === ordered(task.units.map(unit => [unit.unitId, String(unit.lockOaAmount)]))
+  const tagMatrix = (rows: CostStatisticsManualAllocationTask['oaCostTagOverrides']) => ordered(rows.map(row => [row.unitId, row.bankTransactionId, row.costTagCode]));
+  return tagMatrix(request.oaCostTagOverrides) === tagMatrix(task.oaCostTagOverrides) && ordered(request.oaAmountLocks.map(item => [item.unitId, String(item.locked)])) === ordered(task.units.map(unit => [unit.unitId, String(unit.lockOaAmount)]))
     && manualMatrix(request.manualItems) === manualMatrix(task.manualItems) && matrix(request.sourceAllocations) === matrix(task.sourceAllocations)
     && ordered(request.allocations.map(line => [line.unitId, line.amount])) === ordered(task.allocations.map(line => [line.unitId, line.amount]))
     && request.nonCostAmount === task.nonCostAmount && request.nonCostReason === task.nonCostReason;

@@ -1,13 +1,14 @@
 import { ListBox, Popover } from '@heroui/react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import type { CostManualOptions } from '../../features/cost-statistics/types';
 
 type Tag = CostManualOptions['tags'][number];
 type Props = { value: string; savedLabel: string; tags: Tag[]; loading: boolean; error?: string;
-  disabled: boolean; onLoad: () => void; onChange: (tag: Tag) => void };
+  label?: string; placeholder?: string;
+  disabled: boolean; onLoad: () => void; lineId?: number; onChange: (tag: Tag, lineId?: number) => void };
 
-export default function CostManualTagPicker({ value, savedLabel, tags, loading, error, disabled, onLoad, onChange }: Props) {
+export default memo(function CostManualTagPicker({ value, savedLabel, tags, loading, error, disabled, onLoad, onChange, label = '人工成本标签', placeholder = '选择成本标签', lineId }: Props) {
   const [open, setOpen] = useState(false);
   const [primary, setPrimary] = useState('');
   const selected = tags.find(tag => tag.code === value);
@@ -19,20 +20,20 @@ export default function CostManualTagPicker({ value, savedLabel, tags, loading, 
     }
     return result;
   }, [tags]);
-  const choose = (tag: Tag) => { onChange(tag); setOpen(false); };
+  const choose = (tag: Tag) => { onChange(tag, lineId); setOpen(false); };
   const changeOpen = (next: boolean) => {
     if (disabled) return;
     setOpen(next);
     if (next) { setPrimary(selected?.primary_label ?? ''); onLoad(); }
   };
   return <Popover isOpen={open} onOpenChange={changeOpen}>
-    <Popover.Trigger className="cost-source-picker" role="combobox" aria-label="人工成本标签" aria-haspopup="dialog" aria-expanded={open} aria-disabled={disabled} tabIndex={disabled ? -1 : 0}
+    <Popover.Trigger className="cost-source-picker" role="combobox" aria-label={label} aria-haspopup="dialog" aria-expanded={open} aria-disabled={disabled} tabIndex={disabled ? -1 : 0}
       onKeyDown={event => { if (!disabled && event.key === 'ArrowDown') { event.preventDefault(); changeOpen(true); } }}>
-      <span>{selected?.label || (value ? `${savedLabel}（已停用）` : '选择成本标签')}</span><ChevronDown size={14} />
+      <span>{value ? `${savedLabel || selected?.label || ''}${!selected && !loading && !error ? '（已停用）' : ''}` : placeholder}</span><ChevronDown size={14} />
     </Popover.Trigger>
     <Popover.Content className="cost-manual-tag-popover" placement="bottom end" offset={4}>
       <Popover.Dialog aria-label="选择成本标签">
-        {loading ? <p role="status">正在读取标签…</p> : error ? <div role="alert">{error}<button type="button" onClick={onLoad}>重试</button></div> : !tags.length ? <p>暂无可选标签</p> : <div className="cost-manual-tag-columns" onKeyDownCapture={event => {
+        {!open ? null : loading ? <p role="status">正在读取标签…</p> : error ? <div role="alert">{error}<button type="button" onClick={onLoad}>重试</button></div> : !tags.length ? <p>暂无可选标签</p> : <div className="cost-manual-tag-columns" onKeyDownCapture={event => {
           if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setOpen(false); }
         }}>
           <ListBox aria-label="主标签" selectionMode="single" selectedKeys={primary ? [primary] : []} onSelectionChange={keys => {
@@ -53,4 +54,4 @@ export default function CostManualTagPicker({ value, savedLabel, tags, loading, 
       </Popover.Dialog>
     </Popover.Content>
   </Popover>;
-}
+});

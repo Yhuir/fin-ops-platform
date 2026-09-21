@@ -27,6 +27,7 @@ class PostgresCostStatisticsManualAllocationRepository:
                 source_allocations,
                 manual_items,
                 oa_amount_locks,
+                oa_cost_tag_overrides,
                 non_cost_amount,
                 non_cost_reason,
                 version,
@@ -60,6 +61,7 @@ class PostgresCostStatisticsManualAllocationRepository:
         source_allocations: dict[str, Any],
         manual_items: list[dict[str, Any]],
         oa_amount_locks: dict[str, bool],
+        oa_cost_tag_overrides: list[dict[str, str]],
         non_cost_amount: str,
         non_cost_reason: str,
         expected_version: int,
@@ -80,6 +82,7 @@ class PostgresCostStatisticsManualAllocationRepository:
                     source_allocations,
                     manual_items,
                     oa_amount_locks,
+                    oa_cost_tag_overrides,
                     non_cost_amount,
                     non_cost_reason,
                     version,
@@ -87,7 +90,7 @@ class PostgresCostStatisticsManualAllocationRepository:
                     updated_by
                 ) values (
                     %s, %s, %s, %s::numeric, %s::numeric, %s::numeric, %s::numeric,
-                    %s, %s, %s, %s, %s::numeric, %s, 1, %s, %s
+                    %s, %s, %s, %s, %s, %s::numeric, %s, 1, %s, %s
                 )
                 on conflict (relation_case_id) do nothing
                 returning *
@@ -104,6 +107,7 @@ class PostgresCostStatisticsManualAllocationRepository:
                     jsonb(serialize_value(source_allocations)),
                     jsonb(serialize_value(manual_items)),
                     jsonb(oa_amount_locks),
+                    jsonb(oa_cost_tag_overrides),
                     non_cost_amount,
                     non_cost_reason,
                     actor_id,
@@ -124,6 +128,7 @@ class PostgresCostStatisticsManualAllocationRepository:
                     source_allocations = %s,
                     manual_items = %s,
                     oa_amount_locks = %s,
+                    oa_cost_tag_overrides = %s,
                     non_cost_amount = %s::numeric,
                     non_cost_reason = %s,
                     version = version + 1,
@@ -144,6 +149,7 @@ class PostgresCostStatisticsManualAllocationRepository:
                     jsonb(serialize_value(source_allocations)),
                     jsonb(serialize_value(manual_items)),
                     jsonb(oa_amount_locks),
+                    jsonb(oa_cost_tag_overrides),
                     non_cost_amount,
                     non_cost_reason,
                     actor_id,
@@ -196,6 +202,7 @@ def _record(row: dict[str, Any]) -> dict[str, Any]:
         "source_allocations": row.get("source_allocations"),
         "manual_items": row["manual_items"],
         "oa_amount_locks": row["oa_amount_locks"],
+        "oa_cost_tag_overrides": row["oa_cost_tag_overrides"],
         "allocations": [
             dict(line)
             for line in list(row.get("unit_allocations") or [])

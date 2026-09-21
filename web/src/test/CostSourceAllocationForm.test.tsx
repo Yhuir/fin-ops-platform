@@ -14,7 +14,7 @@ function fixture(): CostStatisticsManualAllocationTask {
       { unitId: 'unit-b', oaId: 'internal-oa', oaApplyType: '支付申请', expenseItemId: '', projectId: 'project', projectName: '项目甲', expenseType: '运费', expenseContent: '设备运输', oaApplicant: '张先生', lockOaAmount: false, outsideCostAmount: "0.00", oaOriginalAmount: '200.00' },
     ],
     bankEvents: [{ transactionId: 'internal-bank', eventKind: 'outflow', inProjectCostScope: true, amount: '600.00', tradeTime: '2026-08-15', counterpartyName: '材料公司', bankAccountLabel: '建行 8106', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款', tags: ['采购', '材料款'] }],
-    allocations: [], manualItems: [], manualOptions: {projects: [], tags: []}, suggestedSourceAllocations: null, relationDisplayGroups: [], sourceAllocations: null, nonCostAmount: '0.00', nonCostReason: '', version: 0, updatedBy: '', updatedAt: '', canSave: true,
+    allocations: [], oaCostTagOverrides: [], manualItems: [], manualOptions: {projects: [], tags: []}, suggestedSourceAllocations: null, relationDisplayGroups: [], sourceAllocations: null, nonCostAmount: '0.00', nonCostReason: '', version: 0, updatedBy: '', updatedAt: '', canSave: true,
   };
 }
 function Editor({ task, save = vi.fn() }: { task: CostStatisticsManualAllocationTask; save?: () => void }) {
@@ -51,29 +51,29 @@ it('hides exhausted hints while preserving capacity, duplicate, current selectio
   const { container } = render(<Editor task={task} />);
   const groups = container.querySelectorAll('.cost-source-table tbody');
   const first = within(groups[0] as HTMLElement); const second = within(groups[1] as HTMLElement);
-  await user.click(first.getByRole('combobox'));
+  await user.click(first.getByRole('combobox', { name: /来源流水/ }));
   expect(screen.getByRole('option')).not.toHaveAttribute('aria-disabled', 'true');
   await user.keyboard('{Escape}');
   await user.click(second.getByRole('button', { name: '新增来源' }));
-  await user.click(second.getByRole('combobox'));
+  await user.click(second.getByRole('combobox', { name: /来源流水/ }));
   expect(screen.getByRole('option')).toHaveAttribute('aria-disabled', 'true');
   expect(screen.queryByText('已用完')).not.toBeInTheDocument();
   await user.keyboard('{ArrowDown}{Enter}');
   await user.keyboard('{Escape}');
-  expect(second.getByRole('combobox')).toHaveTextContent('选择流水');
+  expect(second.getByRole('combobox', { name: /来源流水/ })).toHaveTextContent('选择流水');
   await user.clear(first.getByRole('textbox'));
   await user.type(first.getByRole('textbox'), '300');
-  await user.click(second.getByRole('combobox'));
+  await user.click(second.getByRole('combobox', { name: /来源流水/ }));
   expect(screen.getByRole('option')).not.toHaveAttribute('aria-disabled', 'true');
   await user.click(screen.getByRole('option'));
-  expect(second.getByRole('combobox')).toHaveTextContent('建行 8106');
+  expect(second.getByRole('combobox', { name: /来源流水/ })).toHaveTextContent('建行 8106');
   expect(first.getByRole('textbox')).toHaveValue('300.00');
   await user.click(first.getByRole('button', { name: '新增来源' }));
-  await user.click(first.getAllByRole('combobox')[1]);
+  await user.click(first.getAllByRole('combobox', { name: /来源流水/ })[1]);
   expect(screen.getByRole('option')).toHaveAttribute('aria-disabled', 'true');
   expect(screen.queryByText('本项已使用')).not.toBeInTheDocument();
   await user.keyboard('{ArrowDown}{Enter}{Escape}');
-  expect(first.getAllByRole('combobox')[1]).toHaveTextContent('选择流水');
+  expect(first.getAllByRole('combobox', { name: /来源流水/ })[1]).toHaveTextContent('选择流水');
 });
 
 describe('compact source allocation editor', () => {
@@ -93,7 +93,7 @@ describe('compact source allocation editor', () => {
     expect(unit.getByText('零成本', { exact: true })).toBeInTheDocument();
     await user.click(unit.getByRole('button', { name: '新增来源' }));
     expect(unit.queryByText('零成本', { exact: true })).not.toBeInTheDocument();
-    expect(unit.getByRole('combobox')).toHaveFocus();
+    expect(unit.getByRole('combobox', { name: /来源流水/ })).toHaveFocus();
     await user.click(unit.getByRole('button', { name: '删除来源行 1' }));
     expect(unit.getByRole('button', { name: '新增来源' })).toHaveFocus();
     await user.click(screen.getByRole('button', { name: '保存' }));
@@ -111,7 +111,7 @@ describe('compact source allocation editor', () => {
     const groups = container.querySelectorAll('.cost-source-table tbody');
     const first = within(groups[0] as HTMLElement); const second = within(groups[1] as HTMLElement);
     await user.click(first.getByRole('button', { name: '新增来源' }));
-    await user.click(first.getByRole('combobox'));
+    await user.click(first.getByRole('combobox', { name: /来源流水/ }));
     await user.click(screen.getByRole('option', { name: /建行 8106/ }));
     await user.type(first.getByRole('textbox', { name: '分配金额 1' }), '600');
     await user.click(second.getByRole('button', { name: '设为零成本' }));
@@ -126,7 +126,7 @@ it('keeps source and amount issues in their own cells without showing instructio
   render(<Editor task={fixture()} save={save} />);
   const table = screen.getByRole('table', { name: '成本分配明细' });
   await user.click(within(table).getAllByRole('button', { name: '新增来源' })[0]);
-  const source = within(table).getByRole('combobox');
+  const source = within(table).getByRole('combobox', { name: /来源流水/ });
   const amount = within(table).getByRole('textbox');
   await user.click(source); await user.keyboard('{Escape}');
   expect(amount).toHaveAttribute('aria-invalid', 'false');
@@ -150,13 +150,13 @@ it('preserves money when selecting another real source and derives readonly chip
   render(<Editor task={task} />);
   const table = screen.getByRole('table', { name: '成本分配明细' });
   await user.click(within(table).getAllByRole('button', { name: '新增来源' })[0]);
-  const source = within(table).getByRole('combobox'); const amount = within(table).getByRole('textbox');
+  const source = within(table).getByRole('combobox', { name: /来源流水/ }); const amount = within(table).getByRole('textbox');
   await user.type(amount, '350');
   await user.click(source); await user.click(screen.getByRole('option', { name: /建行 8106/ }));
   await user.click(source); await user.click(screen.getByRole('option', { name: /民生银行 9486/ }));
   expect(amount).toHaveValue('350.00');
   expect(source).toHaveTextContent('民生银行 9486 · 2026-09-03');
-  expect(within(table).getByText('差旅费')).toBeInTheDocument();
+  expect(within(table).getByText('项目开销 / 差旅费')).toBeInTheDocument();
   expect(within(table).queryByText('材料款')).not.toBeInTheDocument();
   expect(table.textContent).not.toMatch(/账户|bank-two/);
 });
@@ -173,7 +173,7 @@ it('keeps one inline add action through first, middle and last deletion and pres
   expect(group.getAllByRole('textbox').map(e => (e as HTMLInputElement).value)).toEqual(['10.00','30.00']);
   await user.click(group.getByRole('button', { name: '删除来源行 1' }));
   expect(group.getByRole('textbox')).toHaveValue('30.00');
-  expect(group.getByRole('combobox')).toHaveFocus();
+  expect(group.getByRole('combobox', { name: /来源流水/ })).toHaveFocus();
   expect(group.getAllByRole('button', { name: '新增来源' })).toHaveLength(1);
   await user.click(group.getByRole('button', { name: '删除来源行 1' }));
   expect(group.getByRole('button', { name: '新增来源' })).toHaveFocus();
@@ -205,7 +205,7 @@ it('keeps refunds and non-cost sources editable through inline actions with full
     await user.click(table.getByRole('button', { name: '删除来源行 1' }));
     expect(table.getByRole('button', { name: '新增来源' })).toHaveFocus();
     await user.click(table.getByRole('button', { name: '新增来源' }));
-    await user.click(table.getByRole('combobox'));
+    await user.click(table.getByRole('combobox', { name: /来源流水/ }));
     await user.click(screen.getByRole('option', { name: /建行 8106/ }));
     await user.type(table.getByRole('textbox'), '100');
   }
@@ -220,7 +220,7 @@ it('keeps source ordinals aligned with bank evidence when refunds appear first',
   render(<Editor task={task} />);
   const table = within(screen.getByRole('table', { name: '成本分配明细' }));
   await user.click(table.getAllByRole('button', { name: '新增来源' })[0]);
-  await user.click(table.getByRole('combobox'));
+  await user.click(table.getByRole('combobox', { name: /来源流水/ }));
   expect(screen.getByRole('option', { name: /^2\. 建行 8106/ })).toBeInTheDocument();
   expect(screen.getAllByRole('option')).toHaveLength(1);
 });
@@ -262,7 +262,7 @@ it('shows balance only for complete allocations without changing formal correspo
   // Grand total still equals 600, but per-unit/source amounts are wrong.
   expect(screen.queryByText('分配金额一致')).not.toBeInTheDocument();
   await user.clear(first.getByRole('textbox')); await user.type(first.getByRole('textbox'),'400');
-  await user.click(first.getByRole('combobox'));
+  await user.click(first.getByRole('combobox', { name: /来源流水/ }));
   await user.click(screen.getByRole('option',{name:/民生银行 9486/}));
   expect(evidence.innerHTML).toBe(formalHtml);
   expect(screen.queryByText('分配金额一致')).not.toBeInTheDocument();
@@ -319,4 +319,28 @@ it('unlocks a full loan OA for interest while preserving original amount and pri
   await user.click(screen.getByRole('button',{name:'保存'})); expect(save).toHaveBeenCalledOnce();
   expect(task.units[0].oaOriginalAmount).toBe('1001497.22');
   await user.click(lock); await user.click(screen.getByRole('button',{name:'保存'})); expect(save).toHaveBeenCalledOnce();
+});
+
+it('manually selects OA cost tags with two columns and restores the source without changing evidence or amounts', async () => {
+  const task=fixture();const user=userEvent.setup();const save=vi.fn();
+  task.units=[{...task.units[0],oaOriginalAmount:'1497.22',lockOaAmount:true}];
+  task.oaTotal='1497.22';task.netOutflowTotal=task.grossOutflowTotal=task.bankEvents[0].amount='1001497.22';
+  task.nonCostAmount='1000000.00';task.nonCostReason='贷款本金';
+  task.manualOptions.tags=[{code:'interest',label:'费用 / 利息',primary_label:'费用',sub_label:'利息'}];
+  task.sourceAllocations={costLines:[{unitId:'unit-a',bankTransactionId:'internal-bank',amount:'1497.22'}],refundLinks:[],nonCostLines:[{bankTransactionId:'internal-bank',amount:'1000000.00'}]};
+  const {container}=render(<Editor task={task} save={save}/>);
+  const evidence=container.querySelector('.cost-source-evidence')!.textContent;
+  const picker=screen.getByRole('combobox',{name:'成本标签 1 1'});
+  await user.click(picker);
+  expect(screen.getByRole('listbox',{name:'主标签'})).toBeVisible();
+  await user.click(screen.getByRole('option',{name:'费用',exact:true}));
+  expect(screen.getByRole('listbox',{name:'子标签'})).toBeVisible();
+  await user.click(screen.getByRole('option',{name:'利息',exact:true}));
+  expect(picker).toHaveTextContent('费用 / 利息');
+  await user.click(screen.getByRole('button',{name:'保存'}));expect(save).toHaveBeenCalledOnce();
+  expect(screen.getByRole('textbox',{name:'不计入成本金额'})).toHaveValue('1000000.00');
+  expect(container.querySelector('.cost-source-evidence')!.textContent).toBe(evidence);
+  await user.click(screen.getByRole('button',{name:'恢复来源标签'}));
+  expect(picker).toHaveTextContent('采购 / 材料款');
+  expect(screen.getByRole('checkbox',{name:'按 OA 原额'})).toBeChecked();
 });

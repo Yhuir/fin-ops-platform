@@ -244,3 +244,11 @@ FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:5189 npx playw
 ## 成本分配变更（2026-09-21）
 
 新增 PostgreSQL 本息拆分、金额锁定/解锁、零成本、重复提交、撤回、迁移保金额回归；UI 覆盖锁定切换和明细直接编辑。保留范围合并、审计回滚、并发 CAS、部分审批、权限和跨页回归。无新增 read model/cache/worker，七类中的第 4 类仅验证 canonical 写后读取和批量 I/O。
+
+## OA 成本标签覆盖（2026-09-21）
+
+- 核心：`test_cost_statistics_manual_items.py` 覆盖继承、显式覆盖、非法/重复/无归属/停用原行保留；既有零成本和金额闭合继续验证。
+- Service/API/真实 PostgreSQL：`test_cost_statistics_source_postgres.py` 覆盖本息拆分后仅改标签、GET/PUT、三视角和真实 XLSX、银行/OA/关系事实不变、范围外保留、恢复来源、停用标签、CAS 和审计回滚，以及0177迁移保金额/版本。
+- 前端：`CostSourceAllocation.test.ts` 覆盖回填、仅改标签请求、超时结果比较与失效；`CostSourceAllocationForm.test.tsx` 覆盖双栏、恢复来源、证据和本金不变；`CostStatisticsApi.test.ts` 覆盖 DTO。
+- 浏览器：`cost-source-allocation.spec.ts` 覆盖人工选择→保存→重开→恢复来源，复用既有权限/错误/大表性能与范围、关系回归。
+- 七类适用：1业务、2服务、3API、5交互、6集成、7回归均适用；4只验证 canonical 写后读取/批量I/O，无缓存、read model 或 worker。

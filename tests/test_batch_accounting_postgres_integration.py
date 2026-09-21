@@ -385,7 +385,14 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
                 defer_full_payload=True,
             )
             rows = tx.fetch_all(
-                f"""with {candidates},{sql} select c.* from classified_with_semantics c
+                f"""with {candidates},{sql} select c.*,
+                coalesce(nullif(case
+                    when effective_category_source='manual_confirmation'
+                        then confirmation_raw_payload->'normalized_payload'->>'turnover_role'
+                    when effective_category_source in ('manual','turnover_ledger')
+                        then manual_category_raw_payload->'normalized_payload'->>'turnover_role'
+                end,''),effective_definition->>'turnover_role','') as turnover_role
+                from classified_with_semantics c
                 join comparison_candidates b on b.row_id=c.row_id""",
                 (*params, *sql_params),
             )

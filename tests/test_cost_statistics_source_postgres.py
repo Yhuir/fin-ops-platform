@@ -115,6 +115,114 @@ class CostSourcePostgresTests(unittest.TestCase):
         self.assertEqual(saved['status'], 'allocated')
         self.assertTrue(saved['units'][0]['lock_oa_amount'])
 
+    def add_interest_tag(self):
+        definition = {"code": "interest-test", "label": "利息", "output_primary_label": "费用",
+                      "output_sub_label": "利息", "status": "active", "rules": {}}
+        self.connection.execute("""update app.app_settings set settings_payload=jsonb_set(settings_payload,
+            '{bank_transaction_tags,definitions}', coalesce(settings_payload #> '{bank_transaction_tags,definitions}', '[]'::jsonb) || %s::jsonb)""", (json.dumps([definition]),))
+
+    def test_oa_tag_loan_api_save_reopen_export_and_bank_isolation(self):
+        from fin_ops_platform.services.cost_statistics_policy import CostStatisticsPolicy
+
+        from tests.app_test_support import build_local_state_application
+        self.loan_fixture('1497.22')
+        self.add_interest_tag()
+        payload = self.current_payload()
+        payload.update(allocations=[{'unit_id':'oa:oa-a','amount':'1497.22'}], non_cost_amount='1000000.00', non_cost_reason='贷款本金',
+            source_allocations={'cost_lines':[{'unit_id':'oa:oa-a','bank_transaction_id':'bank-1','amount':'1497.22'}], 'refund_links':[], 'non_cost_lines':[{'bank_transaction_id':'bank-1','amount':'1000000.00'}]})
+        saved = self.save(payload)
+        before = {table:self.connection.fetch_all(f'select to_jsonb(t) as row from {table} t') for table in
+                  ('app.bank_transactions','app.bank_transaction_categories','app.oa_applications','app.workbench_pair_relations')}
+        app = build_local_state_application()
+        app._cost_statistics_api_routes._manual_allocation_service = self.service
+        app._cost_statistics_api_routes._query_service = self.query
+        self.service._audit_repository = PostgresOperationsAuditRepository(self.connection)
+        path = '/api/cost-statistics/manual-allocations/cost-source-case'
+        payload = self.current_payload()
+        payload['oa_cost_tag_overrides'] = [{'unit_id':'oa:oa-a','bank_transaction_id':'bank-1','cost_tag_code':'interest-test'}]
+        response = app.handle_request('PUT', path, body=json.dumps(payload))
+        self.assertEqual(response.status_code,200,response.body)
+        edited = json.loads(response.body)
+        self.assertEqual(edited['version'],saved['version']+1)
+        self.assertEqual(edited['non_cost_amount'],'1000000.00')
+        self.assertEqual(edited['allocations'],saved['allocations'])
+        self.assertEqual(json.loads(app.handle_request('GET',path).body)['oa_cost_tag_overrides'],edited['oa_cost_tag_overrides'])
+        rows = CostStatisticsPolicy(self.repository.load_snapshot()).serialized_cost_rows
+        self.assertEqual([(r['amount'],r['bank_tag_primary_label'],r['bank_tag_sub_label']) for r in rows],[('1497.22','费用','利息')])
+        for view in ('project','cost_tag','bank_account'):
+            self.assertEqual(self.query.get_explorer_page(scope='all',view=view,filters={'bank_tag_primary_key':'label:费用'},cursor=None,page_size=20)['summary']['total_amount'],'1497.22')
+            from urllib.parse import urlencode
+            query=urlencode({'month':'2026-08','view':view,'project_name':'测试项目','bank_tag_primary_key':'label:费用','bank_account_label':rows[0]['bank_account_label']})
+            preview=app.handle_request('GET','/api/cost-statistics/export-preview?'+query)
+            self.assertEqual(preview.status_code,200,preview.body)
+            self.assertIn('利息',preview.body)
+            exported=app.handle_request('GET','/api/cost-statistics/export?'+query)
+            self.assertEqual(exported.status_code,200)
+            from io import BytesIO
+
+            from openpyxl import load_workbook
+            workbook=load_workbook(BytesIO(exported.body),read_only=True)
+            self.assertTrue(any('利息' in str(cell) for row in workbook.active.values for cell in row))
+            workbook.close()
+        for table, rows_before in before.items():
+            self.assertEqual(self.connection.fetch_all(f'select to_jsonb(t) as row from {table} t'),rows_before)
+        audit=self.connection.fetch_one("select payload from audit.events where action='cost_statistics.manual_allocation.save' order by occurred_at desc limit 1")['payload']
+        self.assertEqual(audit['oa_cost_tag_overrides'],edited['oa_cost_tag_overrides'])
+        stale=dict(payload)
+        with self.assertRaises(CostStatisticsManualAllocationConflictError): self.save(stale)
+        restored=self.current_payload();restored['oa_cost_tag_overrides']=[]
+        self.save(restored)
+        self.assertEqual(CostStatisticsPolicy(self.repository.load_snapshot()).serialized_cost_rows[0]['bank_tag_primary_label'],'外部往来款付款')
+
+    def test_oa_tag_scope_preserves_outside_and_invalid_changes_are_atomic(self):
+        self.add_interest_tag()
+        payload=self.payload()
+        payload['oa_cost_tag_overrides']=[{'unit_id':line['unit_id'],'bank_transaction_id':line['bank_transaction_id'],'cost_tag_code':'interest-test'} for line in payload['source_allocations']['cost_lines']]
+        saved=self.save(payload)
+        self.exclude_second_source()
+        current=self.current_payload()
+        self.assertTrue(all(row['bank_transaction_id']=='bank-1' for row in current['oa_cost_tag_overrides']))
+        current['oa_cost_tag_overrides']=[]
+        self.save(current)
+        stored=PostgresCostStatisticsManualAllocationRepository(self.connection).list_by_case_ids(['cost-source-case'])['cost-source-case']
+        self.assertEqual(stored['oa_cost_tag_overrides'],[row for row in saved['oa_cost_tag_overrides'] if row['bank_transaction_id']=='bank-2'])
+        invalid=self.current_payload()
+        invalid['oa_cost_tag_overrides']=[{'unit_id':'oa:oa-b','bank_transaction_id':'bank-2','cost_tag_code':'interest-test'}]
+        with self.assertRaises(CostStatisticsManualAllocationValidationError):self.save(invalid)
+        self.assertEqual(PostgresCostStatisticsManualAllocationRepository(self.connection).list_by_case_ids(['cost-source-case'])['cost-source-case'],stored)
+        self.scope_service().update_project_cost_scope({'expected_version':1,'selected_tag_codes':['uncategorized','internal_transfer']},actor_id='cost-test')
+        self.assertEqual(self.service.get_task('cost-source-case',can_save=True)['oa_cost_tag_overrides'],stored['oa_cost_tag_overrides'])
+
+    def test_oa_tag_archived_same_row_retained_new_row_rejected_and_audit_rollback(self):
+        self.add_interest_tag()
+        payload=self.payload()
+        first=payload['source_allocations']['cost_lines'][0]
+        payload['oa_cost_tag_overrides']=[{k:first[k] for k in ('unit_id','bank_transaction_id')} | {'cost_tag_code':'interest-test'}]
+        saved=self.save(payload)
+        self.connection.execute("update app.app_settings set settings_payload=jsonb_set(settings_payload,'{bank_transaction_tags,definitions,0,status}','\"archived\"'::jsonb)")
+        self.assertEqual(self.save(self.current_payload())['oa_cost_tag_overrides'],saved['oa_cost_tag_overrides'])
+        current=self.current_payload();current['oa_cost_tag_overrides'][0]['bank_transaction_id']='bank-2'
+        with self.assertRaises(CostStatisticsManualAllocationValidationError): self.save(current)
+        prior=self.service.get_task('cost-source-case',can_save=True)
+        self.service._audit_repository=PostgresOperationsAuditRepository(self.connection)
+        current=self.current_payload();current['oa_cost_tag_overrides']=[]
+        with patch.object(PostgresOperationsAuditRepository,'append_operation_event',side_effect=RuntimeError('audit failed')):
+            with self.assertRaises(RuntimeError):self.save(current)
+        reread=self.service.get_task('cost-source-case',can_save=True)
+        self.assertEqual(reread['version'],prior['version'])
+        self.assertEqual(reread['oa_cost_tag_overrides'],prior['oa_cost_tag_overrides'])
+
+    def test_oa_tag_migration_only_initializes_empty_overrides(self):
+        from pathlib import Path
+        self.save(self.payload())
+        before=self.connection.fetch_one('select to_jsonb(t) - \'oa_cost_tag_overrides\' as row from app.cost_statistics_manual_allocations t')['row']
+        with self.connection.transaction() as tx:
+            tx.execute('alter table app.cost_statistics_manual_allocations drop column oa_cost_tag_overrides')
+            tx.execute(Path('backend/src/fin_ops_platform/postgres/migrations/0177_cost_statistics_oa_cost_tags.sql').read_text())
+        after=self.connection.fetch_one('select to_jsonb(t) as row from app.cost_statistics_manual_allocations t')['row']
+        self.assertEqual(after.pop('oa_cost_tag_overrides'),[])
+        self.assertEqual(before,after)
+
     def test_lock_migration_preserves_saved_amounts(self):
         from pathlib import Path
         self.save(self.payload())
@@ -181,7 +289,9 @@ class CostSourcePostgresTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409, response.body)
 
     def test_mixed_status_reads_admission_fact_without_importing_it_as_completed(self):
-        from fin_ops_platform.services.postgres_repositories.oa_pending_payment_admission import PostgresOaPendingPaymentAdmissionRepository
+        from fin_ops_platform.services.postgres_repositories.oa_pending_payment_admission import (
+            PostgresOaPendingPaymentAdmissionRepository,
+        )
         self.connection.execute("delete from app.oa_applications where row_id='oa-b'")
         PostgresOaPendingPaymentAdmissionRepository(self.connection).replace_scope(scope_key='2026-08', records=[{
             'id': 'oa-b', 'apply_type': '支付申请', 'workflow_status': 'in_progress', 'amount': '400.00',
@@ -586,7 +696,7 @@ class CostSourcePostgresTests(unittest.TestCase):
         task = self.service.get_task("cost-source-case", can_save=True)
         return {"relation_case_id": task["relation_case_id"], "expected_version": task["version"],
                 "scope_version": task["scope_version"], "source_fingerprint": task["source_fingerprint"],
-                "oa_amount_locks": [{"unit_id": u["unit_id"], "locked": u["lock_oa_amount"]} for u in task["units"]],
+                "oa_cost_tag_overrides": [{k: r[k] for k in ("unit_id", "bank_transaction_id", "cost_tag_code")} for r in task["oa_cost_tag_overrides"]], "oa_amount_locks": [{"unit_id": u["unit_id"], "locked": u["lock_oa_amount"]} for u in task["units"]],
                 "allocations": task["allocations"], "source_allocations": task["source_allocations"],
                 "non_cost_amount": task["non_cost_amount"], "non_cost_reason": task["non_cost_reason"]}
 
@@ -803,7 +913,7 @@ class CostSourcePostgresTests(unittest.TestCase):
     def payload(self):
         task = self.service.get_task("cost-source-case", can_save=True)
         return {"relation_case_id": task["relation_case_id"], "expected_version": task["version"],
-                "source_fingerprint": task["source_fingerprint"], "scope_version": task["scope_version"], "oa_amount_locks": [{"unit_id": u["unit_id"], "locked": u["lock_oa_amount"]} for u in task["units"]], "allocations": task["allocations"],
+                "source_fingerprint": task["source_fingerprint"], "scope_version": task["scope_version"], "oa_cost_tag_overrides": [{k: r[k] for k in ("unit_id", "bank_transaction_id", "cost_tag_code")} for r in task["oa_cost_tag_overrides"]], "oa_amount_locks": [{"unit_id": u["unit_id"], "locked": u["lock_oa_amount"]} for u in task["units"]], "allocations": task["allocations"],
                 "non_cost_amount": "0.00", "non_cost_reason": "", "source_allocations": {
                     "cost_lines": [{"unit_id": "oa:oa-a", "bank_transaction_id": "bank-1", "amount": "500.00"},
                                    {"unit_id": "oa:oa-a", "bank_transaction_id": "bank-2", "amount": "100.00"},

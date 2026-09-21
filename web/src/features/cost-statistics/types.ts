@@ -161,7 +161,11 @@ export type CostManualItem = { unitId: string; projectId: string; expenseContent
 export type CostManualOptions = { projects: Array<{ id: string; name: string }>;
   tags: Array<{ code: string; label: string; primary_label: string; sub_label: string }> };
 
+export type CostOaTagOverride = { unitId: string; bankTransactionId: string; costTagCode: string;
+  costTagPrimaryLabel: string; costTagSubLabel: string };
+
 export type CostStatisticsManualAllocationTask = {
+  oaCostTagOverrides: CostOaTagOverride[];
   manualItems: CostManualItem[];
   manualOptions: CostManualOptions;
   relationCaseId: string;
@@ -196,7 +200,7 @@ export type CostSourceAllocations = {
   nonCostLines: Array<{ bankTransactionId: string; amount: string }>;
 };
 
-export type CostStatisticsManualAllocationSummary = Omit<CostStatisticsManualAllocationTask, "units" | "bankEvents" | "allocations" | "sourceAllocations" | "suggestedSourceAllocations" | "relationDisplayGroups" | "manualItems" | "manualOptions"> & {
+export type CostStatisticsManualAllocationSummary = Omit<CostStatisticsManualAllocationTask, "units" | "bankEvents" | "allocations" | "sourceAllocations" | "suggestedSourceAllocations" | "relationDisplayGroups" | "manualItems" | "manualOptions" | "oaCostTagOverrides"> & {
   projectNames: string[];
   unitCount: number;
   bankEventCount: number;
@@ -218,6 +222,7 @@ export type CostStatisticsManualAllocationPageRequest = {
 };
 
 export type SaveCostStatisticsManualAllocationRequest = {
+  oaCostTagOverrides: CostOaTagOverride[];
   oaAmountLocks: Array<{ unitId: string; locked: boolean }>;
   manualItems: CostManualItem[];
   sourceAllocations: CostSourceAllocations;

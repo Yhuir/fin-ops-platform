@@ -94,6 +94,9 @@ def project_source_task(task: dict[str, Any], decision: dict[str, Any] | None, *
               'net_outflow_total': f'{gross - refund_total:.2f}', 'difference': f'{gross - refund_total - oa_total:.2f}',
               'in_project_cost_scope': bool(selected),
               'source_allocations': scoped, 'suggested_source_allocations': None}
+    scoped_keys = {(line['unit_id'], line['bank_transaction_id']) for line in scoped['cost_lines']} if scoped else set()
+    result['oa_cost_tag_overrides'] = [row for row in task['oa_cost_tag_overrides']
+                                      if (row['unit_id'], row['bank_transaction_id']) in scoped_keys]
     if scoped is not None:
         allocations, non_cost = source_totals(allocation_targets(result), scoped)
         result.update(allocations=allocations, non_cost_amount=f'{non_cost:.2f}',

@@ -108,3 +108,7 @@
 - 未完成：无 final closure blocker；后续仅保留 owner 模块常规维护，以及 retained bank/ETC 运维工具在 runbook 退休后的删除或归并。
 - 运维工具边界：`tools/runtime_application.py` 只作为 retained bank/ETC operational tools 的 lightweight public app tool-port adapter；工具文件不得直接访问 `Application._*`、`_state_store` 或 `_initialize_runtime_services`；`tool_runtime_ports()` 不得暴露完整 `state_store`，工具初始化只能通过 `Application.tool_runtime_state_snapshot()` 取得最小 state。
 - 已接受边界：`ApplicationStateStore` / local pickle 只作为非生产 fixture/tooling I/O 保留，不是业务事实源；生产 factory 必须使用 PostgreSQL，生产 app/service/tool 路径不得 import local `state_store.py`。
+
+### 成本人工标签决定（2026-09-21）
+
+`app.cost_statistics_manual_allocations.oa_cost_tag_overrides` 由成本人工分配 service/repository 独占写入，保存OA单元和银行来源对应的人工成本分类。银行有效分类仅为默认继承和范围准入事实，不被该写入口修改；读取复用Cost Policy唯一事件集合，无跨页刷新或后台同步。

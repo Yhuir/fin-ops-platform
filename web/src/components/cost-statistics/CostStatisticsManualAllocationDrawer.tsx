@@ -1,6 +1,6 @@
 import { Accordion, Button, Chip } from '@heroui/react';
 import { ChevronRight, Search } from 'lucide-react';
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ApiClientError } from '../../features/apiClient';
 import AppDrawer from '../common/AppDrawer';
 import CostSourceAllocationForm from './CostSourceAllocationForm';
@@ -42,7 +42,7 @@ export default function CostStatisticsManualAllocationDrawer({ caseId, onCloseCa
   const [tagLoading, setTagLoading] = useState(false);
   const [tagError, setTagError] = useState<string>();
   const tagRequest = useRef<AbortController | null>(null);
-  const loadTags = async () => {
+  const loadTags = useCallback(async () => {
     tagRequest.current?.abort();
     const controller = new AbortController(); tagRequest.current = controller;
     setTagLoading(true); setTagError(undefined);
@@ -57,7 +57,7 @@ export default function CostStatisticsManualAllocationDrawer({ caseId, onCloseCa
     } finally {
       if (!controller.signal.aborted) setTagLoading(false);
     }
-  };
+  }, []);
   useEffect(() => () => tagRequest.current?.abort(), []);
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<'pending' | 'allocated'>('pending');

@@ -321,7 +321,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                     "source_fingerprint": pending["source_fingerprint"],
                     "net_outflow_total": pending["net_outflow_total"],
                     "version": 1,
-                    "oa_amount_locks": {u["unit_id"]: False for u in pending["units"]},
+                    "oa_cost_tag_overrides": [], "oa_amount_locks": {u["unit_id"]: False for u in pending["units"]},
                     "allocations": [
                         self._line("oa:oa-exp-1:item:lodging", "1000.00"),
                         self._line("oa:oa-exp-1:item:other", "15.00"),
@@ -357,7 +357,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                     "source_fingerprint": pending["source_fingerprint"],
                     "net_outflow_total": pending["net_outflow_total"],
                     "version": 1,
-                    "oa_amount_locks": {u["unit_id"]: False for u in pending["units"]},
+                    "oa_cost_tag_overrides": [], "oa_amount_locks": {u["unit_id"]: False for u in pending["units"]},
                     "allocations": [
                         self._line("oa:oa-a", "50.01"),
                         self._line("oa:oa-b", "49.99"),
@@ -394,7 +394,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                     "source_fingerprint": pending["source_fingerprint"],
                     "net_outflow_total": pending["net_outflow_total"],
                     "version": 1,
-                    "oa_amount_locks": {u["unit_id"]: False for u in pending["units"]},
+                    "oa_cost_tag_overrides": [], "oa_amount_locks": {u["unit_id"]: False for u in pending["units"]},
                     "allocations": [
                         self._line("oa:oa-a", "50.00"),
                         self._line("oa:oa-b", "50.00"),

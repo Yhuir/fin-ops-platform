@@ -22,3 +22,5 @@
 来源专项：`test_cost_statistics_source_allocation.py`、`test_cost_statistics_source_postgres.py`、`CostSourceAllocation.test.ts`、`cost-source-allocation.spec.ts`覆盖双边闭合、固定目标、并发冲突、事务回滚、跨月、缺资料保存与草稿恢复。
 
 紧凑抽屉：`CostSourceAllocationForm.test.tsx` 与 `cost-source-allocation.spec.ts` 保护两栏/原生输入表、唯一OA计数、显式零与焦点、未确认保存核实和刷新失败。2/100行性能测量在独立负载下记录，不作为生产API耗时。结果与边界见[实施记录](implementation-notes.md)。
+
+- COST-OA-TAG：`web/e2e/cost-source-allocation.spec.ts` 的 OA tag save/reopen/restore；持久化和 XLSX 对账由 `test_cost_statistics_source_postgres.py` 真实数据库集成补齐。
