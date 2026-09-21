@@ -421,7 +421,7 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
         for payload in (first, deep, empty):
             self.assertEqual(payload["summary"]["unsubmitted_count"], 5001)
             self.assertEqual(payload["pagination"]["bank_rows"]["total"], 5001)
-            self.assertLess(len(json.dumps(payload).encode()), 200_000)
+            self.assertLess(len(json.dumps(payload, default=str).encode()), 200_000)
         self.assertEqual(len(first["bank_rows"]), 200)
         self.assertEqual(len(deep["bank_rows"]), 200)
         self.assertEqual(empty["bank_rows"], [])
