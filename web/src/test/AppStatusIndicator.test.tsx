@@ -205,4 +205,40 @@ describe("global app status indicator", () => {
       expect(screen.queryByText("全局运行状态")).not.toBeInTheDocument();
     });
   });
+  test("keeps worker and queue facts visible when matching reports error", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({ sessionRole: "admin", appHealth: {
+      status: "blocked", session: { status: "authenticated" },
+      oa_sync: { status: "error", message: "ocr_inference_failed", dirty_scopes: [] },
+      workbench_matching: { status: "error", dirty_scopes: [] },
+      background_jobs: { active: 0, queued: 0, running: 0, attention: 0 }, dependencies: {},
+      app_status: { ...globalAppStatus,
+        overall: { level: "blocked", color: "red", reason: "OA 同步异常", blocks_mutations: true },
+        domains: [{ ...globalAppStatus.domains[0], key: "workbench", label: "关联台", level: "busy", status: "error" }],
+      },
+    } });
+    renderAppAt("/");
+    await user.click(await screen.findByRole("button", { name: "OA 同步异常" }));
+    const dialog = await screen.findByRole("dialog", { name: "全局运行状态" });
+    expect(within(dialog).getByText("1 stale / 1 missing / 0 mismatch")).toBeInTheDocument();
+    expect(within(dialog).getByRole("link", { name: "关联台 失败" })).toBeInTheDocument();
+    expect(within(dialog).queryByText("已同步 0")).not.toBeInTheDocument();
+  });
+
+  test("shows unknown when the overview is absent instead of healthy zeroes", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({ sessionRole: "admin", appHealth: {
+      status: "blocked", session: { status: "authenticated" },
+      oa_sync: { status: "error", message: "ocr_inference_failed", dirty_scopes: [] },
+      workbench_matching: { status: "error", dirty_scopes: [] },
+      background_jobs: { active: 0, queued: 0, running: 0, attention: 0 }, dependencies: {},
+    } });
+    renderAppAt("/");
+    await user.click(await screen.findByRole("button", { name: "ocr_inference_failed" }));
+    const dialog = await screen.findByRole("dialog", { name: "全局运行状态" });
+    expect(within(dialog).getAllByText("状态未知")).toHaveLength(3);
+    expect(within(dialog).queryByText("无队列积压")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("已同步 0")).not.toBeInTheDocument();
+  });
+
 });

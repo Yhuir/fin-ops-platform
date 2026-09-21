@@ -22,6 +22,7 @@ from fin_ops_platform.services.imports import clean_string
 from fin_ops_platform.services.oa_adapter import (
     OAAdapter,
     OAApplicationRecord,
+    OAAttachmentPreparationPending,
     OAReadStatus,
     build_attachment_invoice_detail_fields,
     detect_etc_batch_metadata,
@@ -198,6 +199,9 @@ class MongoOAAdapter(OAAdapter):
     ) -> None:
         self._settings = settings
         self._attachment_invoice_cache = attachment_invoice_cache
+        self._attachment_parse_limit: int | None = None
+        self._attachment_parse_count = 0
+        self._attachment_parse_started = 0.0
         self._attachment_invoice_sync_parse_depth = 0
         self._attachment_invoice_force_reparse_depth = 0
         self._client: MongoClient | None = None
@@ -238,11 +242,17 @@ class MongoOAAdapter(OAAdapter):
         self._available_months_cache = None
 
     @contextmanager
-    def force_attachment_invoice_sync_parse(self):
+    def force_attachment_invoice_sync_parse(self, *, max_new_attachments: int | None = None):
+        self._attachment_parse_limit = max_new_attachments
+        self._attachment_parse_count = 0
+        self._attachment_parse_started = monotonic()
         self._attachment_invoice_sync_parse_depth += 1
         try:
             yield
         finally:
+            self._attachment_parse_limit = None
+            if self._attachment_parse_count:
+                self._records_cache.clear()
             self._attachment_invoice_sync_parse_depth = max(
                 0,
                 self._attachment_invoice_sync_parse_depth - 1,
@@ -2330,6 +2340,10 @@ class MongoOAAdapter(OAAdapter):
         parsed_artifacts: list[dict[str, str]] = []
         updated = False
         for cache_key, file_entry in files:
+            if self._attachment_parse_limit is not None and self._attachment_parse_count > 0:
+                if (self._attachment_parse_count >= self._attachment_parse_limit
+                        or monotonic() - self._attachment_parse_started >= 45):
+                    raise OAAttachmentPreparationPending(self._attachment_parse_count)
             file_result = self._parse_attachment_file_result_from_service(file_entry)
             evidences = [
                 self._normalize_parsed_attachment_evidence(evidence, file_entry=file_entry)
@@ -2357,6 +2371,7 @@ class MongoOAAdapter(OAAdapter):
                     "parsed_at": datetime.now().isoformat(),
                 },
             )
+            self._attachment_parse_count += 1
             parsed_evidences.extend(evidences)
             parsed_invoices.extend(invoices)
             parsed_artifacts.extend(artifacts)

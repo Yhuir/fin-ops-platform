@@ -77,7 +77,11 @@ describe("Workbench pane display model", () => {
     fireEvent.change(within(zone).getByRole("searchbox"), { target: { value: "杭州" } });
     expect(monthButton).toBeInTheDocument();
     const key = buildPageSessionStorageKey({ userScope: "1", pageKey: "reconciliation-workbench", stateKey: "openDisplayState" });
-    await waitFor(() => expect(window.sessionStorage.getItem(key)).toContain('"month":"2026-04"'));
+    await waitFor(() => {
+      const persisted = window.sessionStorage.getItem(key);
+      expect(persisted).toContain('"month":"2026-04"');
+      expect(persisted).toContain('"searchQuery":"杭州"');
+    });
     mounted.unmount();
     renderWorkbenchPage();
     const reentered = await screen.findByTestId("zone-unpaired");

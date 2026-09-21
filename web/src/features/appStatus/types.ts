@@ -82,7 +82,7 @@ export type AppStatusOverview = {
   version: number;
   generatedAt: string;
   overall: AppStatusOverall;
-  runtimeSummary: AppStatusRuntimeSummary;
+  runtimeSummary: AppStatusRuntimeSummary | null;
   domains: AppStatusDomain[];
   backgroundTasks: AppStatusTask[];
   alerts: Array<Record<string, unknown>>;

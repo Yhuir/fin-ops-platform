@@ -18,6 +18,18 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
 class OaProjectionSyncServiceTests(unittest.TestCase):
+    def test_attachment_preparation_defers_without_partial_snapshot_or_failed_run(self) -> None:
+        from unittest.mock import Mock
+
+        from fin_ops_platform.services.oa_adapter import OAAttachmentPreparationPending
+        repository = Mock()
+        service = OAProjectionSyncService(source_adapter=Mock(), projection_repository=repository)
+        service._run_sync = Mock(side_effect=OAAttachmentPreparationPending(20))
+        result = service.handle_runtime_event(RuntimeQueueEvent(event_id="event", tenant_id="default", event_type="oa.sync", aggregate_type=None, aggregate_id=None, scope_type="oa", scope_key="all", dedupe_key="oa.sync:all", payload={}, attempts=1, status="processing"))
+        self.assertEqual(result, {"status": "deferred", "reason": "oa_attachments_preparing", "parsed_attachment_count": 20})
+        repository.record_sync_run.assert_not_called()
+        repository.upsert_application_records.assert_not_called()
+
     def test_targeted_attachment_refresh_updates_only_selected_completed_rows(self) -> None:
         selected = replace(
             _oa("oa-selected", "2026-06", workflow_status="completed"),

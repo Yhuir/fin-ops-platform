@@ -167,3 +167,7 @@ OA 附件解析的金额与税额优先读取明确字段或合计表头，不�
 ### 导入执行结果一致性（2026-09-21）
 
 共享 OA 手工导入保持逐条来源校验与结果列表：全失败必须同事务记录 job.failed 和 audit.failed，显式重试同一意图；部分成功记录真实已导入/失败项，任务呈现 partial_success 并要求查看失败明细，不伪装全部成功。全局关闭提醒不改变业务结果。
+
+## 2026-09-21 附件准备分批
+
+普通 OA month/all 同步使用现有 adapter 解析上下文，每轮最多准备 20 个未缓存附件；已有进展且耗时达到 45 秒时在下一文件前返回准备未完成信号。已成功解析文件逐个持久化，后续领取复用相同 parser version 的缓存。service 输出 `status=deferred, reason=oa_attachments_preparing, parsed_attachment_count`，不写部分 OA/admission/payment snapshot，不执行权威删除或 promotion，不登记同步成功/失败。完整 source batch 准备好后才沿原事务完成提交。精确强制重解析和人工上传保持既有合同；真实 OCR 错误不缓存为空结果。

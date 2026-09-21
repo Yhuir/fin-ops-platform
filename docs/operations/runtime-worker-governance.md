@@ -114,3 +114,7 @@ production scenario 和审批输入下运行；它必须使用测试自有数据
 `import` instance 直接轮询 `job.import_jobs`，四类任务共用单 lease 与递增 `claim_version`，不再生产/消费 `import.process.requested`。发布迁移 `0175` 保留原 job 与历史事件，把能够精确对应 job 的旧未完成事件退役，旧 processing job 释放 lease 并递增 claim_version；旧成功/取消任务展示标记已读，失败仍可见。没有对应 job 的孤立 import event 明确记为 failed/migration_orphan，保留人工核验依据；不得删除未知事件或主数据库。迁移后核对 `pending/processing` 和最老等待年龄，不以旧 outbox 已 done 证明导入成功。
 
 `/health/ready` 的运行信息增加 `import_queue`（pending、processing、failed、awaiting_confirmation、oldest_pending_age_seconds），通用 backlog 包含直接导入。用户上传无效文件导致的 failed 会展示并允许处理，但不阻断整个 API readiness。发布验证必须读取精确任务结果、对应事实与页面，确认任务 succeeded 和实际提交一致。
+
+## OA 附件冷缓存续跑（2026-09-21）
+
+parser version 变化后的正常 OA 同步分批准备附件，沿同一 durable event 释放/重领，不消耗失败重试次数；每轮最多 20 个新附件，已取得进展后在 45 秒边界让出。准备阶段不提交部分 canonical snapshot。任务 300 秒硬限额保留，真实超时明确记录，不包装成 OCR 故障。retry/release/requeue 使用事件 UUID 的独立重试 key，周期新事件保持原 enqueue key；不要手工清空死信、伪造成功或全量删除 OCR 缓存。

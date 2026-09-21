@@ -103,7 +103,7 @@ function domainStatusLabel(status: string) {
   if (status === "missing") {
     return "缺失";
   }
-  if (status === "refreshing" || status === "loading" || status === "processing") {
+  if (status === "refreshing" || status === "loading" || status === "processing" || status === "rebuilding") {
     return "同步";
   }
   if (status === "stale") {
@@ -115,7 +115,7 @@ function domainStatusLabel(status: string) {
   if (status === "source_mismatch") {
     return "来源异常";
   }
-  if (status === "failed") {
+  if (status === "failed" || status === "error") {
     return "失败";
   }
   if (status === "unavailable") {
@@ -130,7 +130,7 @@ function domainDebugTitle(domain: AppStatusDomain) {
 
 function workerSummaryLabel(summary: AppStatusRuntimeSummaryGroup | undefined) {
   if (!summary || summary.total === 0) {
-    return "暂无 worker 事实";
+    return "状态未知";
   }
   const issueCount = (summary.stale ?? 0) + (summary.missing ?? 0) + (summary.mismatched ?? 0) + (summary.unavailable ?? 0);
   if (issueCount > 0) {
@@ -143,8 +143,8 @@ function workerSummaryLabel(summary: AppStatusRuntimeSummaryGroup | undefined) {
 }
 
 function queueSummaryLabel(summary: AppStatusQueueSummary | undefined) {
-  if (!summary || summary.eventTypeCount === 0) {
-    return "无队列积压";
+  if (!summary) {
+    return "状态未知";
   }
   if (summary.failed > 0) {
     return `${summary.failed} failed / ${summary.backlog} backlog`;
@@ -235,13 +235,13 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
                 <div className="app-status-runtime-summary" data-testid="app-status-runtime-summary">
                   <div className="app-status-summary-row">
                     <span>Worker</span>
-                    <Chip size="sm" color={summaryTone(workerIssues)} variant="soft">
+                    <Chip size="sm" color={!runtimeSummary?.workers.total ? "warning" : summaryTone(workerIssues)} variant="soft">
                       {workerSummaryLabel(runtimeSummary?.workers)}
                     </Chip>
                   </div>
                   <div className="app-status-summary-row">
                     <span>Queue</span>
-                    <Chip size="sm" color={summaryTone(queueIssues)} variant="soft">
+                    <Chip size="sm" color={!runtimeSummary?.queue ? "warning" : summaryTone(queueIssues)} variant="soft">
                       {queueSummaryLabel(runtimeSummary?.queue)}
                     </Chip>
                   </div>
@@ -256,7 +256,7 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
                   <div className="app-status-summary-chips">
                     {blockedDomainCount > 0 ? <Chip size="sm" color="danger" variant="soft">{`阻断 ${blockedDomainCount}`}</Chip> : null}
                     {busyDomainCount > 0 ? <Chip size="sm" color="warning" variant="soft">{`同步 ${busyDomainCount}`}</Chip> : null}
-                    {blockedDomainCount === 0 && busyDomainCount === 0 ? <Chip size="sm" color="success" variant="soft">{`已同步 ${domains.length}`}</Chip> : null}
+                    {domains.length === 0 ? <Chip size="sm" color="warning" variant="soft">状态未知</Chip> : blockedDomainCount === 0 && busyDomainCount === 0 ? <Chip size="sm" color="success" variant="soft">{`已同步 ${domains.length}`}</Chip> : null}
                   </div>
                 </div>
                 <div className="app-status-domain-grid">

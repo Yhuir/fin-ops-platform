@@ -177,3 +177,11 @@ Nightly CI 应至少覆盖：
 - `test_invoice_attachment_recognition_service.py`：财务待核对证据不创建正式发票；强身份已存在仍可关联。
 - `test_import_closed_loop.py`：缺金额铁路证据不会新建，已有税务金额不被旧 OA 金额覆盖，来源边可保留。
 - `test_oa_attachment_invoice_promotion_service.py`：真实 PostgreSQL 来源晋升、事务/并发与原有 ownership 回归。
+
+## 2026-09-21 OCR 同步链路回归
+
+- 业务/服务：`test_mongo_oa_adapter` 的 25 文件两轮准备、45 秒让出、缓存不重做；`test_oa_projection_sync_service` 的 deferred 不提交快照；`test_runtime_worker` 的超时穿透 OCR 包装和释放不 ACK。
+- PostgreSQL：`test_runtime_infrastructure_postgres_integration` 保护新 pending 与 retry/release/requeue 并存、payload、attempts、重复入队及实际领取完成。
+- API/组件：`AppStatusApi.test.ts`、`AppStatusIndicator.test.tsx` 覆盖 error/rebuilding/mismatch、摘要缺失和状态弹层；既有 app health API/service 与 OA API 权限测试回归。
+- Read model/cache/job：复用附件缓存与 durable queue，无 read model 新增或刷新策略变化；已保存进展、失败不缓存、恢复后提交均需验证。
+- 生产：真实 OCR 只读识别、OA 同步状态/四 worker/队列、部署 T0/T30 和成本页面回归。

@@ -7,6 +7,7 @@ from typing import Any
 
 from fin_ops_platform.services.oa_adapter import (
     OAApplicationRecord,
+    OAAttachmentPreparationPending,
     is_in_progress_expense_claim,
 )
 from fin_ops_platform.services.oa_attachment_refresh_request_service import (
@@ -56,6 +57,8 @@ class OAProjectionSyncService:
         scope_key = self._event_scope_key(event)
         try:
             return self._run_sync(scope_key)
+        except OAAttachmentPreparationPending as exc:
+            return {"status": "deferred", "reason": str(exc), "parsed_attachment_count": exc.parsed_count}
         except Exception as exc:
             self._record_failed_sync_run(scope_key=scope_key, error=exc)
             raise
@@ -391,7 +394,7 @@ class OAProjectionSyncService:
         if not callable(load_batch):
             raise RuntimeError("OA sync source adapter must expose load_sync_application_batch().")
         sync_parse = getattr(self._source_adapter, "force_attachment_invoice_sync_parse", None)
-        context = sync_parse() if callable(sync_parse) else nullcontext()
+        context = sync_parse(max_new_attachments=20) if callable(sync_parse) else nullcontext()
         with context:
             batch = load_batch(scope_key, retention_cutoff_month=cutoff_month)
         projection_records = getattr(batch, "projection_records", None)

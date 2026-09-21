@@ -6,16 +6,16 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
-from fin_ops_platform.services.runtime_worker_handlers import (
-    ImportRuntimeProcessorFactory,
-    WorkbenchMatchingWorkerFactory,
-)
 from fin_ops_platform.services.runtime_worker import (
     DEFAULT_RUNTIME_WORKER_POLL_INTERVAL_SECONDS,
     RuntimeWorker,
     RuntimeWorkerConfig,
     RuntimeWorkerResult,
     RuntimeWorkerShutdownRequested,
+)
+from fin_ops_platform.services.runtime_worker_handlers import (
+    ImportRuntimeProcessorFactory,
+    WorkbenchMatchingWorkerFactory,
 )
 
 
@@ -414,6 +414,34 @@ class RuntimeWorkerTests(unittest.TestCase):
         self.assertEqual([event_id for event_id, _worker_id, _payload in queue.acked], ["event-1", "event-2", "event-3"])
         self.assertEqual(len(queue.claim_calls), 3)
         self.assertEqual([claimed.event_id for claimed in queue.claimed_events], ["event-4"])
+
+    def test_deferred_preparation_releases_without_ack_or_failure(self) -> None:
+        queue = FakeQueue(event())
+        worker = RuntimeWorker(queue_repository=queue, config=RuntimeWorkerConfig(worker_id="worker-1", event_types=["runtime.test"]),
+            handlers={"runtime.test": lambda _: {"status": "deferred", "reason": "oa_attachments_preparing", "parsed_attachment_count": 20}})
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.DEFERRED)
+        self.assertEqual(queue.released_events, [("event-1", "worker-1", "oa_attachments_preparing")])
+        self.assertEqual(queue.acked, [])
+        self.assertEqual(queue.failed_events, [])
+
+    def test_task_timeout_bypasses_ocr_exception_wrappers(self) -> None:
+        from unittest.mock import Mock
+
+        from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
+        queue = FakeQueue(event())
+        service = OAAttachmentInvoiceService()
+        def third_party(_):
+            try:
+                import time
+                time.sleep(2)
+            except Exception as exc:
+                raise RuntimeError("ONNXRuntime inference failed") from exc
+        service._ocr_engine = Mock(side_effect=third_party)
+        worker = RuntimeWorker(queue_repository=queue, config=RuntimeWorkerConfig(worker_id="worker-1", event_types=["runtime.test"], task_timeout_seconds=1),
+            handlers={"runtime.test": lambda _: service._run_image_ocr(b"test")})
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.FAILED_RETRYABLE)
+        self.assertIn("task exceeded 1s timeout", queue.failed_events[0][2])
+        self.assertNotIn("ocr_inference_failed", queue.failed_events[0][2])
 
     def test_run_forever_releases_claimed_event_on_shutdown_request(self) -> None:
         queue = FakeQueue(event())

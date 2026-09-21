@@ -300,3 +300,35 @@
 - `all` stale projection 清理不再由本轮返回记录的月份反推范围；整月从 retention 投影消失时也会清理旧 canonical 行，避免 worker 的重现检查读取陈旧 OA。month scope 仍只清理指定月份，manual import owner 不变。
 - `oa-sync` 的既有 payment handler 执行 MySQL DELETE 前，对删除候选做两个配置财务表单的 Mongo `_id` 精确索引定位，并按候选业务编号重读同组流程、复用 full sync 的 lifecycle arbitration，再合并 completed projection 与 admitted in-progress flow；只有候选仍是 current canonical OA 才视为重现，被新流程取代的历史 raw document 继续删除。OA 在排队期间以 canonical 身份重现、仅超出 retention 且仍为 canonical，或 source read 失败时均不误删。该 cross-system destructive boundary 是唯一新增门禁，不进入普通页面或同步热路径。source cleanup 不再生成必然找不到已删除 OA row 的旧 reconcile 事件。
 - 无 schema migration、无新 worker/queue 类型、无 fallback 或数据库备份；页面/API 热路径零新增 I/O。
+
+## 2026-09-21 - OCR 超时与同步分批修复计划及复审
+
+### 已核实根因
+
+生产 14:36 至 15:09 有 904 个附件因 parser version 变化重新解析。普通 all 同步的 300 秒任务限额在 ONNX 调用期间触发，TimeoutError 被第三方及附件服务包装成 ocr_inference_failed。任务返回 pending 时，另一个周期事件已占用相同 dedupe key，触发唯一约束并使 worker 重启。前端未接受关联域 error/rebuilding，丢弃整体 App Status 后又以绿色零值展示未知运行事实。
+
+### 可执行计划
+
+1. OA adapter 的普通同步解析上下文每轮最多准备 20 个新附件，取得进展后达到 45 秒则在下一文件前让出；使用现有逐文件持久化缓存续跑。OA service 输出 deferred，不写部分 canonical snapshot，不登记成功。精确重解析与人工上传保持既有显式操作语义。
+2. Runtime worker 接收 deferred 后释放同一事件，恢复本轮领取所增 attempts，保留事件及 payload；下一轮继续准备。完成完整 source batch 后沿原事务边界提交 OA/admission/payment status，再执行原 promotion 链。
+3. Worker 任务取消使用独立 BaseException 控制信号，绕过第三方 Exception 包装，在 worker 边界显式转为失败与有限重试。真实 OCR 失败仍抛出 OAAttachmentOCRRuntimeError，不能缓存空结果。
+4. retry、shutdown release、manual requeue 使用由事件 UUID 确定的重试 dedupe key，避免与周期新事件争用 enqueue key；不删除事件、不覆盖另一事件 payload、不重置真实失败次数。既有入口统一替换，保留 enqueue 去重约束。
+5. 前端接受后端实际 error/rebuilding/mismatch 状态；摘要缺失保持 null 和“状态未知”，有效的空队列仍显示“无队列积压”。不改页面权限或扩大写入门禁。
+6. 单测覆盖冷缓存多轮、超时穿透、真实 OCR 失败、无部分提交；真实 PostgreSQL 覆盖 retry/release/requeue 与同键新事件并存、幂等重复、attempt 与 payload 保真；前端覆盖 DTO、故障与缺失状态；回归 OA/队列/全局状态/成本。
+7. 提交推送 main，走 deploy-oa.sh 发布；验证真实 OCR、周期同步、四 worker、队列、健康摘要和成本结果，并记录测量。测试只使用独立临时数据库，完成后删除测试实例；不创建生产数据库备份、不删除主库。
+
+### 二次审阅结论
+
+- 不延长超时，不吞错，不放行失败快照，不新增 worker、队列表、read model、依赖或通用框架。
+- 分批仅降低每轮占用，不能承诺 904 次真实 OCR 瞬时完成；单个文件真实超时仍有限重试并可诊断。
+- 源数据每轮重新读取，最终完整集合才可执行权威删除；缓存只是附件证据，不替代业务提交。
+- 重试保留事件 ID，调用者可按原 ID 查询状态；周期新事件可独立完成，旧事件必须真实执行或走既有明确 supersession 合同，不直接清除失败。
+- API permission、金额口径、解析版本及正式发票准入不变。需要回归共享人工上传解析、全局状态和全部 worker 的任务取消。
+
+### 发布前验证
+
+- OA、worker、queue 与 App Health 主回归 230 项通过；补充 runtime 运维/监控/识别/权限回归 71 项、worker registry/装配回归 25 项通过（套件存在交叉，不作为独立总数相加）。
+- 独立 UTF-8 PostgreSQL 全部 26 项通过，包含真实 cache + queue + adapter + sync service + worker 的两轮冷缓存链路；第一轮零业务提交，第二轮复用 20 个缓存，只解析剩余 5 个，完成一次快照。测试实例已清理。
+- 状态 DTO 与交互专项 13 项通过；TypeScript 和生产构建通过。完整前端与浏览器回归、正式发布及生产验证继续沿既有入口执行。
+
+- 跨页面 Chromium 回归 42 项通过。前端全量 1440 项中 1439 项首过；1 项旧测试仅等月份持久化就卸载，未等待搜索词持久化，存在异步竞态。改为同时断言月份与搜索词已保存，保留恢复断言；所属 17 项套件复验通过。页面业务代码未改。

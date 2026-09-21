@@ -35,6 +35,78 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.addCleanup(self.connection.close)
         self.runtime_queue = RuntimeQueueRepository(self.connection)
 
+    def test_retry_release_and_requeue_preserve_events_with_new_pending_same_key(self) -> None:
+        for operation in ("retry", "release", "requeue"):
+            with self.subTest(operation=operation):
+                key = f"oa.sync:test-{operation}"
+                first = self.runtime_queue.enqueue(event_type="oa.sync", dedupe_key=key, payload={"original": operation})
+                claimed = self.runtime_queue.claim_next("worker-test", event_types=["oa.sync"])
+                self.assertEqual(claimed.event_id, first.event_id)
+                if operation == "requeue":
+                    self.assertTrue(self.runtime_queue.fail_event(first.event_id, "worker-test", "test failure", max_attempts=1))
+                second = self.runtime_queue.enqueue(event_type="oa.sync", dedupe_key=key, payload={"newer": operation})
+                if operation == "retry":
+                    self.assertTrue(self.runtime_queue.fail_event(first.event_id, "worker-test", "test timeout", retry_delay_seconds=0))
+                elif operation == "release":
+                    self.assertTrue(self.runtime_queue.release_event(first.event_id, "worker-test", reason="oa_attachments_preparing"))
+                else:
+                    self.assertTrue(self.runtime_queue.requeue_event(first.event_id, reason="test recovery"))
+                    self.assertTrue(self.runtime_queue.requeue_event(first.event_id, reason="test recovery"))
+                original = self.runtime_queue.get_event(first.event_id)
+                self.assertEqual(original.status, "pending")
+                self.assertEqual(original.payload, {"original": operation})
+                self.assertEqual(original.attempts, 1 if operation == "retry" else 0)
+                self.assertEqual(self.runtime_queue.get_event(second.event_id).payload, {"newer": operation})
+                self.assertEqual(self.runtime_queue.enqueue(event_type="oa.sync", dedupe_key=key).event_id, second.event_id)
+                processed = set()
+                for _ in range(2):
+                    event = self.runtime_queue.claim_next("worker-test", event_types=["oa.sync"])
+                    processed.add(event.event_id)
+                    self.assertTrue(self.runtime_queue.complete(event.event_id, "worker-test"))
+                self.assertEqual(processed, {first.event_id, second.event_id})
+
+    def test_cold_oa_attachments_continue_same_event_before_snapshot_commit(self) -> None:
+        from unittest.mock import patch
+        from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
+        from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
+        from fin_ops_platform.services.runtime_worker import RuntimeWorker, RuntimeWorkerConfig, RuntimeWorkerResult
+        from tests.test_mongo_oa_adapter import StubMongoOAAdapter
+        from tests.test_oa_projection_sync_service import FakeProjectionRepository, FakeSourceAdapter, _oa
+
+        adapter = StubMongoOAAdapter(form_documents={}, project_documents=[], attachment_invoice_cache=PostgresOpsTaxEtcRepository(self.connection))
+        files = adapter._attachment_files_with_source_context(
+            [{"fileName": f"invoice-{i}.png", "filePath": f"/invoice-{i}.png", "suffix": "png"} for i in range(25)],
+            oa_external_id="batch-test", source_expense_row_index="0", source_expense_item_id="batch-item",
+        )
+        class Source(FakeSourceAdapter):
+            force_attachment_invoice_sync_parse = adapter.force_attachment_invoice_sync_parse
+
+            def load_sync_application_batch(self, scope_key, *, retention_cutoff_month=None):
+                adapter._parse_attachment_evidence_pool(files)
+                return super().load_sync_application_batch(scope_key, retention_cutoff_month=retention_cutoff_month)
+
+        source = Source(months=["2026-06"], records_by_month={"2026-06": [_oa("oa-batch-test", "2026-06", workflow_status="completed")]})
+        projection = FakeProjectionRepository()
+        service = OAProjectionSyncService(source_adapter=source, projection_repository=projection)
+        worker = RuntimeWorker(queue_repository=self.runtime_queue,
+            config=RuntimeWorkerConfig(worker_id="worker-test", event_types=["oa.sync"]), handlers={"oa.sync": service.handle_runtime_event})
+        event = self.runtime_queue.enqueue(event_type="oa.sync", scope_key="all", dedupe_key="oa.sync:all")
+        with patch.object(adapter._attachment_invoice_service, "parse_file_result", return_value={"evidences": [], "parse_status": "no_evidence"}) as parser:
+            self.assertEqual(worker.run_once(), RuntimeWorkerResult.DEFERRED)
+            self.assertEqual(self.runtime_queue.get_event(event.event_id).status, "pending")
+            self.assertEqual(self.runtime_queue.get_event(event.event_id).attempts, 0)
+            self.assertEqual(projection.saved_records, [])
+            self.assertEqual(projection.stale_completed_scopes, [])
+            self.assertEqual(projection.sync_runs, [])
+            self.assertEqual(parser.call_count, 20)
+            self.assertEqual(worker.run_once(), RuntimeWorkerResult.PROCESSED)
+            self.assertEqual(parser.call_count, 25)
+        self.assertEqual(self.runtime_queue.get_event(event.event_id).status, "done")
+        self.assertEqual([row.id for row in projection.saved_records], ["oa-batch-test"])
+        self.assertEqual(len(projection.sync_runs), 1)
+        attempts = self.connection.fetch_all("select outcome from job.runtime_event_attempts where event_id = %s order by started_at, id", (event.event_id,))
+        self.assertEqual([row["outcome"] for row in attempts], ["released", "succeeded"])
+
     def test_runtime_infrastructure_tables_exist(self) -> None:
         for table in (
             "job.runtime_event_attempts",

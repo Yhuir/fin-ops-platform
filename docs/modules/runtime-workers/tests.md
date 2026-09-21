@@ -45,3 +45,11 @@
 - 三个 import page audit 保留事实一致性证明，prepare/待确认是合法生命周期；无需新 outbox 事件。
 - 直接队列额外覆盖：执行前撤权拒绝、税务任务其他用户不可读取、HTTP stale 版本 CAS、OA completed/进行中/不存在的精确接纳边界。
 - `tests/test_verified_invoice_financial_repair.py`：税务原件金额/税额语义、来源冲突/缺失/总额改变拒绝；隔离 PostgreSQL 验证修复+cache 失效原子回滚、fact guard 审计、CLI dry-run/execute、旧 fingerprint 拒绝、二次零更新。前端类测试不适用于只读/维护 CLI，由页面所属任务覆盖用户交互。
+
+## 2026-09-21 OCR 同步链路回归
+
+- 业务/服务：`test_mongo_oa_adapter` 的 25 文件两轮准备、45 秒让出、缓存不重做；`test_oa_projection_sync_service` 的 deferred 不提交快照；`test_runtime_worker` 的超时穿透 OCR 包装和释放不 ACK。
+- PostgreSQL：`test_runtime_infrastructure_postgres_integration` 保护新 pending 与 retry/release/requeue 并存、payload、attempts、重复入队及实际领取完成。
+- API/组件：`AppStatusApi.test.ts`、`AppStatusIndicator.test.tsx` 覆盖 error/rebuilding/mismatch、摘要缺失和状态弹层；既有 app health API/service 与 OA API 权限测试回归。
+- Read model/cache/job：复用附件缓存与 durable queue，无 read model 新增或刷新策略变化；已保存进展、失败不缓存、恢复后提交均需验证。
+- 生产：真实 OCR 只读识别、OA 同步状态/四 worker/队列、部署 T0/T30 和成本页面回归。

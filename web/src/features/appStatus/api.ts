@@ -12,6 +12,9 @@ import type {
 type RawRecord = Record<string, unknown>;
 
 const DOMAIN_STATUSES = new Set([
+  "error",
+  "rebuilding",
+  "mismatch",
   "ready",
   "fresh",
   "loading",
@@ -219,10 +222,10 @@ export function mapAppStatusOverview(value: unknown): AppStatusOverview | null {
       blocksMutations: writeSafety.blocksMutations,
       writeSafety,
     },
-    runtimeSummary: {
+    runtimeSummary: runtimeSummary.workers && runtimeSummary.queue ? {
       workers: mapSummaryGroup(runtimeSummary.workers),
       queue: mapQueueSummary(runtimeSummary.queue),
-    },
+    } : null,
     domains: domains as AppStatusDomain[],
     backgroundTasks: backgroundTasks as AppStatusTask[],
     alerts: Array.isArray(raw.alerts)

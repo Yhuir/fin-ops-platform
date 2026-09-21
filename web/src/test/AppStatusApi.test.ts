@@ -148,7 +148,7 @@ describe("app status API mapper", () => {
       alerts: [],
     });
 
-    expect(mapped?.runtimeSummary.workers).toMatchObject({
+    expect(mapped?.runtimeSummary?.workers).toMatchObject({
       total: 4,
       required: 3,
       ready: 1,
@@ -157,7 +157,7 @@ describe("app status API mapper", () => {
       missing: 1,
       issueCount: 2,
     });
-    expect(mapped?.runtimeSummary.queue).toEqual({
+    expect(mapped?.runtimeSummary?.queue).toEqual({
       eventTypeCount: 3,
       pending: 2,
       processing: 1,
@@ -165,4 +165,22 @@ describe("app status API mapper", () => {
       backlog: 6,
     });
   });
+  test.each(["error", "rebuilding", "mismatch"])("preserves runtime facts with domain status %s", (status) => {
+    const mapped = mapAppStatusOverview({
+      overall: { level: "blocked", color: "red", reason: "OA 同步异常" },
+      runtime_summary: { workers: { total: 4, ready: 4 }, queue: { event_type_count: 1, failed: 1 } },
+      domains: [{ key: "workbench", level: "busy", status, reason: "匹配待恢复" }],
+      background_tasks: [],
+    });
+    expect(mapped?.runtimeSummary?.workers.total).toBe(4);
+    expect(mapped?.runtimeSummary?.queue.failed).toBe(1);
+    expect(mapped?.domains[0].status).toBe(status);
+  });
+
+  test("does not manufacture a healthy summary when runtime facts are missing", () => {
+    expect(mapAppStatusOverview({
+      overall: { level: "blocked", color: "red", reason: "OA 同步异常" }, domains: [], background_tasks: [],
+    })?.runtimeSummary).toBeNull();
+  });
+
 });

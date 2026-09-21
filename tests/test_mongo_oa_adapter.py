@@ -2669,6 +2669,38 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(cache.entries[cache_key]["parser_version"], adapter._attachment_invoice_cache_parser_version())
         self.assertEqual(cache.entries[cache_key]["cache_schema_version"], "2026-05-11-evidence-v1")
 
+    def test_cold_attachment_batch_resumes_cached_progress_without_reparsing(self) -> None:
+        from fin_ops_platform.services.oa_adapter import OAAttachmentPreparationPending
+        cache = MemoryAttachmentInvoiceCache()
+        adapter = StubMongoOAAdapter(form_documents={"2": [], "32": []}, project_documents=[], attachment_invoice_cache=cache)
+        files = adapter._attachment_files_with_source_context(
+            [{"fileName": f"invoice-{i}.png", "filePath": f"/invoice-{i}.png", "suffix": "png"} for i in range(25)],
+            oa_external_id="oa-batch", source_expense_row_index="0", source_expense_item_id="item-0",
+        )
+        with patch.object(adapter._attachment_invoice_service, "parse_file_result", return_value={"evidences": [], "parse_status": "no_evidence"}) as parser:
+            with self.assertRaises(OAAttachmentPreparationPending) as raised:
+                with adapter.force_attachment_invoice_sync_parse(max_new_attachments=20):
+                    adapter._parse_attachment_evidence_pool(files)
+            self.assertEqual(raised.exception.parsed_count, 20)
+            self.assertEqual(len(cache.entries), 20)
+            self.assertEqual(adapter._attachment_invoice_sync_parse_depth, 0)
+            with adapter.force_attachment_invoice_sync_parse(max_new_attachments=20):
+                result = adapter._parse_attachment_evidence_pool(files)
+            self.assertEqual(len(result["artifacts"]), 25)
+            self.assertEqual(parser.call_count, 25)
+            with adapter.force_attachment_invoice_sync_parse(max_new_attachments=20):
+                adapter._parse_attachment_evidence_pool(files)
+            self.assertEqual(parser.call_count, 25)
+
+    def test_attachment_batch_yields_at_time_budget_after_persisted_progress(self) -> None:
+        from fin_ops_platform.services.oa_adapter import OAAttachmentPreparationPending
+        adapter = StubMongoOAAdapter(form_documents={}, project_documents=[], attachment_invoice_cache=MemoryAttachmentInvoiceCache())
+        with patch.object(adapter._attachment_invoice_service, "parse_file_result", return_value={"evidences": []}), patch("fin_ops_platform.services.mongo_oa_adapter.monotonic", side_effect=[0, 46]):
+            with self.assertRaises(OAAttachmentPreparationPending) as raised:
+                with adapter.force_attachment_invoice_sync_parse(max_new_attachments=20):
+                    adapter._parse_attachment_invoice_files_now([("one", {"fileName": "a.png"}), ("two", {"fileName": "b.png"})])
+        self.assertEqual(raised.exception.parsed_count, 1)
+
     def test_worker_sync_does_not_save_cache_when_ocr_runtime_fails(self) -> None:
         cache = MemoryAttachmentInvoiceCache()
         file_entry = {"fileName": "invoice-a.pdf", "filePath": "/invoice-a.pdf", "suffix": "pdf"}

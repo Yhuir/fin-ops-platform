@@ -58,3 +58,7 @@
 ## 2026-09-20 Matching 完成通知
 
 `/api/app-health.workbench_matching.last_completed_at` 是现有 matching scope 列表中最新 completed_at，可为 null。复用已有队列读取，不增加每次轮询 SQL；前端状态 context 向关联台透出时间变化以触发一次回读。仍不写业务事实、不增加页面门禁或轮询列表。
+
+## 2026-09-21 Shell 状态完整性
+
+Shell 接受后端关联域 `error/rebuilding` 与 worker `mismatch` 状态，不因这些有效状态丢弃整份 overview。运行摘要缺失时前端模型为 null，Worker、Queue 和空数据域显示“状态未知”；有明确队列摘要且计数为零时仍显示“无队列积压”。权限和写入门禁不变。

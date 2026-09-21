@@ -504,6 +504,7 @@ class RuntimeQueueRepository:
                 update job.outbox_events
                 set
                     status = 'pending',
+                    dedupe_key = 'runtime.retry:' || id::text,
                     last_error = %s,
                     available_at = now() + (%s * interval '1 second'),
                     updated_at = now(),
@@ -560,6 +561,7 @@ class RuntimeQueueRepository:
                 update job.outbox_events
                 set
                     status = case when attempts >= %s then 'dead_lettered' else 'pending' end,
+                    dedupe_key = 'runtime.retry:' || id::text,
                     last_error = %s,
                     available_at = case when attempts >= %s then available_at else now() + (%s * interval '1 second') end,
                     processed_at = case when attempts >= %s then now() else processed_at end,
@@ -625,6 +627,7 @@ class RuntimeQueueRepository:
                 update job.outbox_events
                 set
                     status = 'pending',
+                    dedupe_key = 'runtime.retry:' || id::text,
                     attempts = 0,
                     available_at = now(),
                     last_error = null,
@@ -655,6 +658,7 @@ class RuntimeQueueRepository:
                 update job.outbox_events
                 set
                     status = 'pending',
+                    dedupe_key = 'runtime.retry:' || id::text,
                     available_at = now(),
                     locked_by = null,
                     locked_at = null,

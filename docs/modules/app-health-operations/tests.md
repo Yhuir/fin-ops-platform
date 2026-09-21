@@ -58,3 +58,11 @@ bash scripts/verify.sh docs
 ```
 
 配置 `FIN_OPS_TEST_DATABASE_URL` 时，PostgreSQL integration 必须实际执行；未配置时只能报告 conditional skip。生产验证使用 `scripts/with-production-admin-token.sh` 加载本机 secret，禁止打印或提交 token。
+
+## 2026-09-21 OCR 同步链路回归
+
+- 业务/服务：`test_mongo_oa_adapter` 的 25 文件两轮准备、45 秒让出、缓存不重做；`test_oa_projection_sync_service` 的 deferred 不提交快照；`test_runtime_worker` 的超时穿透 OCR 包装和释放不 ACK。
+- PostgreSQL：`test_runtime_infrastructure_postgres_integration` 保护新 pending 与 retry/release/requeue 并存、payload、attempts、重复入队及实际领取完成。
+- API/组件：`AppStatusApi.test.ts`、`AppStatusIndicator.test.tsx` 覆盖 error/rebuilding/mismatch、摘要缺失和状态弹层；既有 app health API/service 与 OA API 权限测试回归。
+- Read model/cache/job：复用附件缓存与 durable queue，无 read model 新增或刷新策略变化；已保存进展、失败不缓存、恢复后提交均需验证。
+- 生产：真实 OCR 只读识别、OA 同步状态/四 worker/队列、部署 T0/T30 和成本页面回归。

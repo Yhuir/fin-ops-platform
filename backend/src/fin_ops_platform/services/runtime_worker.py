@@ -1,17 +1,16 @@
 from __future__ import annotations
 
+import json
+import os
+import signal
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-import json
-import os
-import signal
 from time import monotonic, sleep
 from typing import Any, Iterator
 
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
-
 
 RuntimeEventHandler = Callable[[RuntimeQueueEvent], dict[str, Any] | None]
 DEFAULT_RUNTIME_WORKER_POLL_INTERVAL_SECONDS = 0.05
@@ -25,6 +24,10 @@ class RuntimeWorkerResult(str, Enum):
     DEFERRED = "deferred"
     FAILED_RETRYABLE = "failed_retryable"
     FAILED_PERMANENT = "failed_permanent"
+
+
+class RuntimeWorkerTaskTimeout(BaseException):
+    """Worker cancellation must bypass third-party Exception wrappers."""
 
 
 class RuntimeWorkerShutdownRequested(BaseException):
@@ -134,7 +137,7 @@ class RuntimeWorker:
             self._record_heartbeat("stopping", {"event_id": event.event_id, "reason": reason})
             self._log("runtime_worker.event_released", event=event, retry=True, error=reason)
             raise
-        except Exception as exc:
+        except (Exception, RuntimeWorkerTaskTimeout) as exc:
             error = str(exc) or exc.__class__.__name__
             self._fail_event(event, error)
             self._record_heartbeat("failed", {"event_id": event.event_id, "retry": True, "error": error})
@@ -142,6 +145,12 @@ class RuntimeWorker:
             return RuntimeWorkerResult.FAILED_RETRYABLE
         finally:
             self._set_statement_timeout(None)
+
+        if isinstance(result_payload, dict) and result_payload.get("status") == "deferred":
+            reason = str(result_payload["reason"])
+            self._release_event(event, reason)
+            self._record_heartbeat("deferred", {"event_id": event.event_id, **result_payload})
+            return RuntimeWorkerResult.DEFERRED
 
         ack_payload = dict(result_payload) if isinstance(result_payload, dict) else {}
         ack_payload.setdefault("duration_ms", round((monotonic() - started_at) * 1000, 3))
@@ -290,7 +299,7 @@ class RuntimeWorker:
             return
 
         def timeout_handler(_signum: int, _frame: Any) -> None:
-            raise TimeoutError(f"runtime worker task exceeded {seconds}s timeout")
+            raise RuntimeWorkerTaskTimeout(f"runtime worker task exceeded {seconds}s timeout")
 
         previous_handler = signal.getsignal(signal.SIGALRM)
         try:

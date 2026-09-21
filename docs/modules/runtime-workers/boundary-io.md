@@ -93,3 +93,9 @@ Migration `0151_workbench_matching_worker_idempotency_grant.sql` 修复历史只
 - 已认证发票和 OA 手动导入由 `SharedImportProcessor` 使用明确的事务 repository；OA 仅新增/重新接纳指定行，不把未选记录置 inactive。
 - import 失败数量、排队年龄单独观测；用户文件失败保留在 `import_queue.failed`，不计入全局 `queue_backlog.failed` / `failed_jobs`，不使 API readiness 或发布 runtime closure 失败。pending/processing 导入仍参与发布排空，outbox 失败/死信仍阻断发布。旧导入 outbox 仅作为历史证据读取。
 - Migration `0175` 增加版本/确认状态并退役能对应权威 job 的旧事件；不删除事实和历史任务。
+
+## 2026-09-21 准备续跑与任务取消
+
+事件 handler 可返回 `status=deferred` 与非空 `reason`，worker 释放同一事件并撤回本轮领取增加的 attempt，不 ACK、不登记失败；后续轮次继续。`RuntimeWorkerTaskTimeout` 是 worker 控制信号，继承 BaseException，避免被第三方 Exception 包装吞掉；worker 显式捕获并通过原失败/有限重试通道记录真实超时。
+
+retry、release 和 manual requeue 保留 event UUID、payload、source version，改用 `runtime.retry:<event UUID>` 作为重试队列去重键。新周期任务仍使用原 enqueue key，两者均保留且可实际执行，禁止覆盖新任务或以成功代替失败处理。release 沿用现有 runtime_shutdown_release 证据字段和 released attempt outcome。无新 worker、schema 或 read model。

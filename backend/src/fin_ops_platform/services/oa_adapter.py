@@ -12,6 +12,12 @@ ETC_BATCH_ID_RE = re.compile(r"etc_batch_id\s*=\s*([^\s,;，；]+)", re.IGNORECA
 OA_EXPENSE_CLAIM_APPLY_TYPE = "日常报销"
 
 
+class OAAttachmentPreparationPending(RuntimeError):
+    def __init__(self, parsed_count: int) -> None:
+        self.parsed_count = parsed_count
+        super().__init__("oa_attachments_preparing")
+
+
 @dataclass(slots=True)
 class OAApplicationRecord:
     id: str
