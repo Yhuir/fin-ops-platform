@@ -199,3 +199,7 @@ ConfirmedInvoiceImportUnitOfWork 在导入事务内继续提交 promotion 与同
 先 `--dry-run` 查看逐票 before/after 与 source_fingerprint，再使用相同目标和 `--execute --expected-fingerprint ... --operator-id ... --reason ...`。在 serializable 事务内复核快照，通过 core repository CAS 修改财务字段及税务来源 provenance，精准失效包含这些身份的 OA 解析 cache；保留发票 ID、来源关系、核销关系与总额。数据库 fact guard 记录 before/after，维护操作审计与修改同事务。再次 dry-run 必须零财务更新、零待失效 cache。工具不创建数据库备份或删除数据库。
 
 历史缺失导入审计行只能使用原有 row_results、normalized_rows 与明确 link 恢复可证部分；当前事实存在不证明当年是 created 还是 duplicate。证据不足的缺口保留并报告，不能写虚构成功记录让 Audit 变绿。
+
+## 2026-09-21 确认前复核拒绝的审计分类
+
+明确的 `selected files require review before confirmation: ...` commit 失败，只有所选文件全部存在、同属本会话、仍为 preview_ready、无正式 batch_id、对应预览批次仍 pending，且存在 error_count/suspected_duplicate_count 时，报告可见 warning `invoice_import_job_review_required`。其他任务失败、孤立引用、已提交/终结状态异常仍为 error。审计只读，不修改任务状态、导入行或正式发票；沿用输入错误不阻断全站的现有合同。`test_uncommitted_review_rejection_is_visible_warning_only` 覆盖正向与七种反向证据。

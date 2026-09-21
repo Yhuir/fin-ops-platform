@@ -231,3 +231,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 | 解析+候选持久化 | 0.559 | 0.584 |
 | 确认+事实/任务提交 | 1.175 | 1.275 |
 | 完整同步耗时（不含排队等待） | 1.769 | 1.843 |
+
+## 2026-09-21 确认前复核拒绝的审计分类
+
+明确的 `selected files require review before confirmation: ...` commit 失败，只有所选文件全部存在、同属本会话、仍为 preview_ready、无正式 batch_id、对应预览批次仍 pending，且存在 error_count/suspected_duplicate_count 时，报告可见 warning `invoice_import_job_review_required`。其他任务失败、孤立引用、已提交/终结状态异常仍为 error。审计只读，不修改任务状态、导入行或正式发票；沿用输入错误不阻断全站的现有合同。`test_uncommitted_review_rejection_is_visible_warning_only` 覆盖正向与七种反向证据。

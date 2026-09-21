@@ -255,6 +255,30 @@ class FakeConnection:
 
 
 class InvoiceImportPageAuditTests(unittest.TestCase):
+    def test_uncommitted_review_rejection_is_visible_warning_only(self) -> None:
+        job = {"job_id": "job-review", "import_session_id": "session-1", "status": "failed", "stage": "commit",
+               "last_error": "selected files require review before confirmation: file-1", "payload": {"selected_file_ids": ["file-1"]}}
+        file = {"file_id": "file-1", "session_id": "session-1", "status": "preview_ready",
+                "raw_payload": {"normalized_payload": {"preview_batch_id": "preview-1", "batch_id": None, "error_count": 4}}}
+        batches = [{"batch_id": "preview-1", "status": "pending"}]
+        issues = invoice_import_page_audit._job_issues([job], [file], [file], batches)
+        self.assertEqual([(issue.severity, issue.code) for issue in issues], [("warning", "invoice_import_job_review_required")])
+        mutations = [
+            ("database_error", lambda j, f, b: j.update(last_error="database write failed")),
+            ("confirmed_file", lambda j, f, b: f.update(status="confirmed")),
+            ("committed_batch", lambda j, f, b: f["raw_payload"]["normalized_payload"].update(batch_id="actual-batch")),
+            ("terminal_preview", lambda j, f, b: b[0].update(status="completed")),
+            ("missing_file", lambda j, f, b: j["payload"].update(selected_file_ids=["missing"])),
+            ("no_review_issue", lambda j, f, b: f["raw_payload"]["normalized_payload"].update(error_count=0)),
+            ("wrong_session", lambda j, f, b: f.update(session_id="other")),
+        ]
+        for name, mutate in mutations:
+            with self.subTest(name=name):
+                changed_job, changed_file, changed_batches = deepcopy((job, file, batches))
+                mutate(changed_job, changed_file, changed_batches)
+                issues = invoice_import_page_audit._job_issues([changed_job], [changed_file], [changed_file], changed_batches)
+                self.assertIn(("error", "invoice_import_job_terminal_failure"), [(issue.severity, issue.code) for issue in issues])
+
     def _duplicate_name_fixture(self) -> FakeConnection:
         connection = FakeConnection()
         batch = deepcopy(connection.batches[0])

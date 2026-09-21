@@ -754,6 +754,7 @@ def _job_issues(
     invoice_sessions = {_text(row.get("session_id")) for row in invoice_files}
     batch_ids = {_text(row.get("batch_id")) for row in batches}
     file_by_id = {_text(row.get("file_id")): row for row in invoice_files}
+    batch_by_id = {_text(row.get("batch_id")): row for row in batches}
     for row in jobs:
         job_id = _text(row.get("job_id"))
         status = _text(row.get("status"))
@@ -779,7 +780,27 @@ def _job_issues(
                 )
             )
         elif status == "failed":
-            issues.append(_issue("invoice_import_job_terminal_failure", job_id, {"last_error": row.get("last_error")}))
+            selected_files = [file_by_id[file_id] for file_id in selected_file_ids & invoice_file_ids]
+            review_rejected = (
+                _text(row.get("stage")) == "commit"
+                and _text(row.get("last_error")).startswith("selected files require review before confirmation: ")
+                and bool(selected_file_ids)
+                and len(selected_files) == len(selected_file_ids)
+                and all(
+                    _text(file.get("session_id")) == session_id
+                    and _text(file.get("status")) == "preview_ready"
+                    and not _text(_payload(file).get("batch_id"))
+                    and _text(batch_by_id.get(_text(_payload(file).get("preview_batch_id")), {}).get("status")) == "pending"
+                    for file in selected_files
+                )
+                and any(_int(_payload(file).get("error_count")) > 0
+                        or _int(_payload(file).get("suspected_duplicate_count")) > 0 for file in selected_files)
+            )
+            if review_rejected:
+                issues.append(AuditIssue("warning", "invoice_import_job_review_required", "发票导入待复核。",
+                                         job_id, "invoice_import", {"last_error": row.get("last_error")}))
+            else:
+                issues.append(_issue("invoice_import_job_terminal_failure", job_id, {"last_error": row.get("last_error")}))
         if status == "succeeded":
             expected_batch_ids = {
                 _text(_payload(file_by_id[file_id]).get("batch_id"))
