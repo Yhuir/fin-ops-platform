@@ -1550,6 +1550,39 @@ class ApplicationStateStore:
             )
         self._save_local_pickle(current_payload)
 
+    def save_import_registration(self, payload: dict[str, Any], *, register_job: Any) -> Any:
+        """Local tooling/test adapter; production uses the PostgreSQL transaction."""
+        previous = self._load_local_pickle()
+        try:
+            self.save_import_delta(payload)
+            return register_job(None)
+        except Exception:
+            self._save_local_pickle(previous)
+            raise
+
+    def save_import_draft_change(self, payload: dict[str, Any], *, job_command: Any) -> Any:
+        previous = self._load_local_pickle()
+        try:
+            result = job_command(None)
+            self.save_import_delta(payload)
+            return result
+        except Exception:
+            self._save_local_pickle(previous)
+            raise
+
+    def save_import_preview_with_completion(self, payload: dict[str, Any], *, completion: Any, result_payload: dict[str, Any]) -> None:
+        previous = self._load_local_pickle()
+        try:
+            completion.lock(None)
+            self.save_import_delta(payload)
+            if result_payload.get("outcome") == "no_changes":
+                completion.succeed(None, result_payload)
+            else:
+                completion.preview(None, result_payload)
+        except Exception:
+            self._save_local_pickle(previous)
+            raise
+
     def save_confirmed_import_delta_with_oa_attachment_promotion(
         self,
         payload: dict[str, Any],
@@ -1557,13 +1590,22 @@ class ApplicationStateStore:
         scope_months: list[str],
         promotion_mode: str,
         source_versions: dict[str, object],
+        completion: Any | None = None,
+        result_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         del scope_months, promotion_mode, source_versions
-        self.save_import_delta(payload)
-        return {
-            "queued_matching_months": [],
-            "oa_attachment_invoice_promotion": {},
-        }
+        previous = self._load_local_pickle()
+        try:
+            if completion is not None:
+                completion.lock(None)
+            self.save_import_delta(payload)
+            result = {**dict(result_payload or {}), "queued_matching_months": [], "oa_attachment_invoice_promotion": {}}
+            if completion is not None:
+                completion.succeed(None, result)
+            return result
+        except Exception:
+            self._save_local_pickle(previous)
+            raise
 
     def save_invoices(self, invoices: list[Any]) -> None:
         self._merge_import_invoices(invoices)
@@ -1673,13 +1715,12 @@ class ApplicationStateStore:
             raise RuntimeError("Legacy GridFS import file references are not supported by ApplicationStateStore.")
         return Path(stored_file_path).read_bytes()
 
-    def find_confirmed_import_file_by_sha256(
-        self,
-        *,
-        content_sha256: str,
-        exclude_file_id: str,
-    ) -> dict[str, Any] | None:
-        return None
+    def delete_unregistered_import_uploads(self, session_id: str, files: list[Any]) -> int:
+        snapshot = self._load_local_pickle()
+        sessions = dict((snapshot.get("file_imports") or {}).get("sessions") or {})
+        if session_id in sessions:
+            return 0
+        return self.delete_import_files([item.stored_file_path for item in files])
 
     def delete_import_files(self, stored_file_paths: list[str]) -> int:
         deleted_count = 0

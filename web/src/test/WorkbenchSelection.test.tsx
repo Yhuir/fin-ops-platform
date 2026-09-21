@@ -3851,6 +3851,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(JSON.parse(String((confirmCall?.[1] as RequestInit).body))).toEqual({
       session_id: "import_session_0001",
       selected_file_ids: ["import_file_0001"],
+      preview_version: 2,
     });
   });
 

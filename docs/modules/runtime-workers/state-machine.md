@@ -22,7 +22,7 @@ pending -> processing -> done
 
 - 通用 runtime event 以 `job.outbox_events` 为事实源；import 与 matching 使用各自 PostgreSQL durable queue/table。
 - Worker 直接在 PostgreSQL durable queue 上 claim/complete；不存在 broker publish/ack 的第二状态机。
-- stale processing 只能通过受控 queue ops 释放；不能伪造 done。
+- Event stale processing 遵循原队列恢复合同；import 过期 lease 由直接领取自动恢复并递增 owner version，不能伪造成功。
 - App 页面 GET 不 enqueue、不等待这些状态，也不从它们推导财务 payload。
 
 ### `oa.sync(operation=refresh_attachments)` 分支
@@ -45,3 +45,15 @@ pending -> processing -> done
 ## 发布与恢复
 
 Deploy 先停止/禁用 registry 外实例和已知 RabbitMQ 遗留 unit/env，再确认 4 个 required workers heartbeat、通用 outbox/领域队列的 PostgreSQL backlog/dead-letter 和 System Audit。Migration `0149_remove_read_model_runtime.sql` forward-only 删除旧 projection schema/dirty-scope。历史 outbox RabbitMQ 列只在上一版本回滚窗口内作为 schema 兼容面保留；当前 API、Worker、监控和部署链路均不读写这些列。物理删列必须晚于回滚窗口并作为独立 schema maintenance 执行，不能与本次运行时切换绑定。
+
+## 导入任务
+
+```text
+pending(prepare) -> processing(prepare) -> awaiting_confirmation / needs_review
+awaiting_confirmation -> pending(commit) -> processing(commit) -> succeeded
+processing -> pending (有限重试) / failed
+pending / processing / awaiting_confirmation / needs_review / failed -> canceled
+failed -> pending (用户显式重试)
+```
+
+正式提交必须锁定领取版本，并把业务事实和 succeeded 同事务提交。确认改变已确认选择前必须重新预览，不能用重复上传请求修改正在执行的 payload。失败保留 prepare/commit 阶段，重试不跳过原阶段。

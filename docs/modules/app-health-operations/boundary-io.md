@@ -18,6 +18,7 @@
 | Health/dependency state | app health services |
 | Worker registry/heartbeat | runtime worker registry/repository |
 | PostgreSQL queue metrics | runtime monitoring repository |
+| 导入任务与积压 | `job.import_jobs`；prepare、待确认、commit 共用同一任务，import worker 直接领取 |
 | Workbench matching scopes | `job.workbench_matching_dirty_scopes`；只读 status/last_error |
 | API/DB timing | request metrics collector |
 | Canonical audit | page audit repositories，一个 caller-owned read-only snapshot |
@@ -29,8 +30,10 @@
 - `/api/operations/app-health/page-audit`：后端 page proof dispatch 与前端唯一 System Audit 的 bounded report。
 - `/health`、`/health/ready`、`/metrics`：liveness/readiness/Prometheus。
 
-输出不包含旧 projection registry、scope/readiness 或 freshness summary。Queue 只显示 PostgreSQL 通用 event types，
+输出不包含旧 projection registry、scope/readiness 或 freshness summary。Queue 分别显示 PostgreSQL 通用 event types 与直接领取的 import jobs，
 缺少必要字段时必须标记 unavailable，不能伪造 queue healthy。
+
+`/api/background-jobs/active` 聚合导入任务摘要及其他原有后台任务；导入状态从 `job.import_jobs` 派生，旧独立导入 BackgroundJob 不再参与执行状态。待确认可显式打开对应预览；失败可同意图重试，读取结果不执行导入。导入失败和待复核保持可见，但用户输入错误不阻断全部页面健康状态。三类导入 page audit 检查直接任务，不要求已退役的 import outbox 事件。
 
 `workbench_matching.status=stale|rebuilding|error` 必须把 Workbench domain 标为 busy/yellow；failed scope 产生 critical alert 并携带 scope 与错误。该诊断不阻断全局写入，也不创建已退役的 `workbench_matching` BackgroundJob。
 

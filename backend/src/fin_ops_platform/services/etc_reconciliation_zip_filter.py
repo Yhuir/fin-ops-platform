@@ -733,19 +733,29 @@ def _find_amount_combinations(
     candidate_amounts = [_money_cents(candidate.invoice.total_amount) for candidate in sorted_candidates]
     split_index = len(sorted_candidates) // 2
     right_combinations_by_count_and_sum: dict[tuple[int, int], list[tuple[int, ...]]] = {}
-    for count in range(0, min(expected_count, len(sorted_candidates) - split_index) + 1):
+    # Counts that cannot be completed by the other half can never match. In
+    # particular a whole-package match must not enumerate every subset first.
+    right_size = len(sorted_candidates) - split_index
+    visited = 0
+    for count in range(max(0, expected_count - split_index), min(expected_count, right_size) + 1):
         for indexes in combinations(range(split_index, len(sorted_candidates)), count):
+            visited += 1
+            if visited > 100_000:
+                raise RuntimeError("matching_complexity_exceeded")
             amount_sum = sum(candidate_amounts[index] for index in indexes)
             if amount_sum > target_cents:
                 continue
             right_combinations_by_count_and_sum.setdefault((count, amount_sum), []).append(indexes)
 
     retained: list[tuple[tuple[object, ...], tuple[int, ...]]] = []
-    for left_count in range(0, min(expected_count, split_index) + 1):
+    for left_count in range(max(0, expected_count - right_size), min(expected_count, split_index) + 1):
         right_count = expected_count - left_count
         if right_count < 0 or right_count > len(sorted_candidates) - split_index:
             continue
         for left_indexes in combinations(range(0, split_index), left_count):
+            visited += 1
+            if visited > 100_000:
+                raise RuntimeError("matching_complexity_exceeded")
             left_sum = sum(candidate_amounts[index] for index in left_indexes)
             if left_sum > target_cents:
                 continue
@@ -753,6 +763,9 @@ def _find_amount_combinations(
                 (right_count, target_cents - left_sum),
                 [],
             ):
+                visited += 1
+                if visited > 100_000:
+                    raise RuntimeError("matching_complexity_exceeded")
                 indexes = (*left_indexes, *right_indexes)
                 match = tuple(sorted_candidates[index] for index in indexes)
                 insort(retained, (_combination_match_score(match, requirement), indexes))

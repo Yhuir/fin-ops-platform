@@ -134,6 +134,36 @@ describe("Import pages", () => {
     expect(css).toContain(".import-workflow-detail-tabs .tabs__tab:hover");
   });
 
+  test("retrying an interrupted upload preserves its request identity", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    const original = fetchMock.getMockImplementation()!;
+    let interrupted = false;
+    fetchMock.mockImplementation(async (...args) => {
+      if (String(args[0]) === "/imports/files/preview" && !interrupted) {
+        interrupted = true;
+        throw new Error("上传连接中断");
+      }
+      return original(...args);
+    });
+    renderAppAt("/imports/invoices");
+    await screen.findByRole("heading", { name: "发票导入" });
+    await user.upload(getUploadInput("上传发票文件", "上传文件"), [
+      new File(["invoice"], "二月发票.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+    ]);
+    await user.selectOptions(screen.getByLabelText("票据方向 二月发票.xlsx"), "input_invoice");
+    await user.click(screen.getByRole("button", { name: "开始预览" }));
+    await screen.findByText("上传连接中断");
+    await user.click(screen.getByRole("button", { name: "开始预览" }));
+    await screen.findByLabelText("新增 11");
+    const uploads = fetchMock.mock.calls.filter(([url]) => String(url) === "/imports/files/preview");
+    expect(uploads).toHaveLength(2);
+    const requestIds = uploads.map(([, init]) => ((init as RequestInit).body as FormData).get("request_id"));
+    expect(requestIds[0]).toBeTruthy();
+    expect(requestIds[1]).toBe(requestIds[0]);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/imports/files/confirm")).toHaveLength(0);
+  });
+
   test("bank transaction import uses the standalone route and sends bank mapping overrides", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({ sessionRole: "admin" });
@@ -837,6 +867,7 @@ describe("Import pages", () => {
     expect(JSON.parse(String((confirmCall?.[1] as RequestInit).body))).toEqual({
       sessionId: "etc_import_session_0001",
       taskId: "etc_task_ready_001",
+      preview_version: 2,
     });
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/imports/files/preview")).toBe(false);
   });

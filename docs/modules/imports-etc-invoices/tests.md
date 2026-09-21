@@ -40,10 +40,10 @@
 | Reconciliation task service | `EtcReconciliationTaskService` | ready/importing/imported/closed、confirmed item set hash、missing requirements、source files、delete/reopen invalidating preview |
 | Zip parser/filter | `etc_document_parsers.py`、`etc_reconciliation_zip_filter.py`、`EtcService.inspect_import_zips(...)` | corrupted zip、重复发票、组合金额匹配、多 requirement 分配、非 ETC evidence |
 | ETC import service | `EtcService.preview_import_zips(...)`、`confirm_business_batch_import(...)` | import session freshness、duplicate/idempotency、attachments、business batch merge、partial success |
-| Import processing | `ImportProcessingService.execute_etc_invoice_import_confirm_job(...)` | 创建/复用 task-scoped business batch、background progress、mark imported/failed、保存 ETC metadata/PDF/XML 附件关系，并只关联已存在 canonical invoice |
+| Import processing | `ImportProcessingService.execute_etc_invoice_import_confirm_job(...)` | 同事务创建/复用 task-scoped business batch、发布 session/task/job 状态、保存 ETC metadata/PDF/XML 附件关系，并只关联已存在 canonical invoice |
 | Import cleanup | `EtcReconciliationImportCleanupService`、`EtcBusinessBatchDeleteService` | 删除/重导只清理 ETC task/import batch/business batch 自有事实和 changed months，不调用通用 import service 删除或改写 canonical invoice |
 | 页面访问收敛 | import processor、各消费页 owner | `etc_import_confirmed` 只提交 canonical metadata/source version，普通确认零页面 dirty/outbox；ETC 票据、Workbench/relation/matching、invoice lifecycle、tax offset、Cost 分别在访问或重新激活时按各自合同读取；historical repair 不进入热路径 |
-| App Status / worker | `import` worker、`app_status_*_registry.py`、`tests/test_platform_runtime_boundary_guards.py` | `etc_invoice_import` job readiness、`import.process.requested` envelope、全局 status 不能误判 ready，且 runtime ETC import link helper 不得调用 canonical invoice create API |
+| App Status / worker | `import` worker、`app_status_*_registry.py`、`tests/test_platform_runtime_boundary_guards.py` | `etc_invoice_import` durable job readiness、直接领取和全局 status 不能误判 ready，且 runtime ETC import link helper 不得调用 canonical invoice create API |
 
 ## 场景覆盖清单
 
@@ -171,7 +171,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 - 真实对象存储、Postgres/RabbitMQ/Redis/systemd import worker drain、worker crash/retry、RabbitMQ wakeup 未由本地单测完全证明；`write_operation_slo_audit --operation etc_import_confirmed` 已有本地契约测试，但仍需要 staging 中真实 ETC confirm 样本产生 recent outbox rows 才能证明真实 write-flow。
 - 真实 OA 草稿创建、人工提交确认、Nginx `/api/` 和 `/fin-ops-api/` 代理路径仍需发布后 smoke。
 - Browser e2e 当前覆盖 deterministic mock 下的 ready task zip preview/confirm job feedback、ETC 票据批次、税金抵扣和成本统计下游展示；大数据 ETC business batch 列表、真实 worker 完成后的 Workbench/historical repair 展示、长任务源文件、真实浏览器导出/删除/网络恢复仍是 `documented-risk`。
-- 共享 `import.process.requested` 仍是多导入域 fallback；具体 ETC confirm job 通过 `etc_invoice_import.source` 精确指向 ETC 导入页和 ETC 票据域。
+- ETC prepare/commit 直接由 `job.import_jobs` 领取；任务 source 精确指向 ETC 导入页和 ETC 票据域，旧 outbox 仅保留历史审计证据。
 
 ## 2026-07-15 历史失败覆盖证明
 
@@ -190,3 +190,16 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 
 - `web/src/test/ImportCenterPage.test.tsx` 保护共享工作区；既有 ETC backend/E2E 测试继续保护 ZIP、任务和确认链路。
 - `tests/test_postgres_repositories_boundaries.py` 保护 ready task 摘要查询只访问 `app.etc_reconciliation_tasks` 并且不加载 formal file rows；backend API 测试锁定 ready/unavailable exact summary keys，避免详情 DTO 再次污染导入首屏。
+
+## 2026-09-21 原子导入回归
+
+`tests/test_etc_import_uow.py` 使用隔离 PostgreSQL 和显式内存对象存储，覆盖确认零原件读取、提交零 XML 重解析、最终完成失败全事务回滚、重试创建一次、重复票当前成员且不重传附件、task version 改变拒绝提交、canonical invoice 零新增。服务/业务/任务/API 编排合同由该文件与 `test_import_processing_service.py` 共同覆盖。前端/E2E/下游回归仍由共享实施负责，不能以本组通过代替完整发布验收。
+
+`test_etc_backend.py` 的固定 ID 属于显式历史领域测试夹具；生产新导入 ID 使用 UUID。数据库测试不得指向主库。
+
+### 2026-09-21 原子性与性能复核
+
+- PostgreSQL 测试新增：最终 job 完成失败回滚 canonical metadata/ETC batch/task/session；重复票加入本批且不改首个 provenance；第二附件失败清理首个准备对象；事务已提交但 ACK 丢失保留引用对象；显式重新预览接受当前 task 版本后再次确认。
+- API/保留功能回归涵盖正常 prepare/confirm、重复确认、重试、权限、task stale、全批失败、ETC 票据列表、OA 草稿/手工状态、删除、历史修复，以及旧业务批次导入路由 404。
+- 120 张合成票、本机隔离 PostgreSQL、内存对象存储，5 个独立样本：prepare p50/p95 112.75/117.80 ms、读取 manifest+validate 3.17/3.50 ms、commit 251.74/261.23 ms（含引用检查清理）；每样本 120 ETC metadata、0 canonical 新票。p95 用 nearest-rank，5 样本等于最大值；该数据不代表生产网络耗时。
+- `tests/test_audit_etc_import_page.py` 证明重复导入成员与首次 provenance 分别校验；保留真实缺失成员阻断。

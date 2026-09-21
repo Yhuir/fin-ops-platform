@@ -140,7 +140,6 @@ class WorkbenchInvoiceSupplementService:
                 confirmed = self._file_import_service.confirm_session(
                     session_id=session_id,
                     selected_file_ids=file_ids,
-                    atomic_batch=True,
                 )
                 row_results = [
                     row_result

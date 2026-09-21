@@ -78,6 +78,11 @@ class RuntimeMonitoringRepository:
                 and coalesce(payload->>'operation', '') = 'refresh_attachments'
               )
             group by event_type, 2, 3, 4
+            union all
+            select import_type as event_type, 'import' as scope_type, import_type as scope_key,
+                status, count(*)::bigint as count, max(last_error), max(updated_at)::text
+            from job.import_jobs where status in ('pending','processing','failed')
+                and acknowledged_at is null group by import_type,status
             """
         )
         grouped: dict[str, dict[str, Any]] = {}
@@ -161,9 +166,20 @@ class RuntimeMonitoringRepository:
             for row in worker_metrics
             if row.get("required") and row.get("warning_code") in {"worker_kind_mismatch", "worker_event_type_mismatch"}
         )
-        queue_backlog = outbox_summary["queue_backlog"]
+        import_summary = self._connection.fetch_one("""
+            select count(*) filter(where status='pending')::bigint as pending,
+                count(*) filter(where status='processing')::bigint as processing,
+                count(*) filter(where status='failed' and acknowledged_at is null)::bigint as failed,
+                count(*) filter(where status in ('awaiting_confirmation','needs_review'))::bigint as awaiting_confirmation,
+                extract(epoch from max(now()-available_at) filter(where status='pending'))::float as oldest_pending_age_seconds
+            from job.import_jobs where status in ('pending','processing','failed','awaiting_confirmation','needs_review')
+        """) or {}
+        queue_backlog = dict(outbox_summary["queue_backlog"])
+        for status in ('pending', 'processing', 'failed'):
+            queue_backlog[status] = int(queue_backlog.get(status, 0)) + int(import_summary.get(status) or 0)
         return {
             "queue_backlog": queue_backlog,
+            "import_queue": dict(import_summary),
             "failed_jobs": int(queue_backlog.get("failed", 0)) + int(queue_backlog.get("dead_lettered", 0)),
             "max_pending_age_seconds": outbox_summary["max_pending_age_seconds"],
             "oldest_pending_event_age_seconds": outbox_summary["max_pending_age_seconds"],

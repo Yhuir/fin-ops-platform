@@ -1080,7 +1080,7 @@ class BankTransactionImportPageAuditTests(unittest.TestCase):
 
         report = bank_transaction_import_page_audit.audit_bank_transaction_import_page(connection)
 
-        issue = next(item for item in report["issues"] if item["code"] == "page_runtime_queue_not_drained")
+        issue = next(item for item in report["issues"] if item["code"] == "bank_import_job_terminal_failure")
         self.assertEqual(
             issue["details"],
             {

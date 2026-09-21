@@ -237,6 +237,7 @@ export type EtcReconciliationFilterPreview = {
 };
 
 export type EtcImportPreviewResult = {
+  job?: BackgroundJob;
   sessionId: string;
   audit: ImportPreviewAuditCounts;
   importAudit: ImportPreviewAuditCounts;

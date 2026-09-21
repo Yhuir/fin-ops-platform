@@ -343,6 +343,7 @@ class PostgresCoreRepository:
         *,
         canonical_key: str | None = None,
         suspected_key: str | None = None,
+        official_references: set[str] | None = None,
     ) -> list[BankTransaction]:
         source_unique_key = self._text(canonical_key)
         data_fingerprint = self._text(suspected_key)
@@ -1217,7 +1218,7 @@ class PostgresCoreRepository:
         if not all(incoming) or len(incoming) != len(serialized):
             raise ValueError("ETC metadata requires distinct canonical invoice IDs.")
         ids = sorted(incoming)
-        with self._connection.transaction() as tx:
+        def write(tx: Any) -> None:
             rows = tx.fetch_all(
                 """select id, coalesce(legacy_mongo_id, id::text) as invoice_id,
                           etc_invoice_id, workbench_visibility, tags, source_links, raw_payload
@@ -1272,6 +1273,9 @@ class PostgresCoreRepository:
                        where invoice.id = delta.id""", (_jsonb(updates),),
                 )
 
+        from fin_ops_platform.services.postgres_repositories.common import run_in_transaction
+        run_in_transaction(self._connection, write)
+
     def repair_etc_invoice_payload(self, connection: Any, updates: list[dict[str, Any]]) -> int:
         if not updates:
             return 0
@@ -1322,6 +1326,28 @@ class PostgresCoreRepository:
             )
             if affected != 1:
                 raise RuntimeError(f"Invoice {update['invoice_id']} changed after the repair plan was built.")
+
+    def repair_verified_invoice_financial_facts(
+        self, connection: Any, updates: list[dict[str, Any]], *, operator_id: str, reason: str,
+    ) -> None:
+        connection.execute("select set_config('fin_ops.correction_reason',%s,true)", (reason,))
+        connection.execute("select set_config('fin_ops.actor_id',%s,true)", (operator_id,))
+        for update in updates:
+            before = update["before"]
+            affected = connection.execute("""
+                update app.invoices set amount=%s, signed_amount=%s, tax_amount=%s,
+                    total_with_tax=%s, raw_payload=%s::jsonb, updated_at=now()
+                where coalesce(legacy_mongo_id,id::text)=%s and amount=%s::numeric
+                    and signed_amount=%s::numeric and tax_amount is not distinct from %s::numeric
+                    and total_with_tax is not distinct from %s::numeric
+                    and raw_payload=%s::jsonb
+            """, (update["amount"], update["signed_amount"], update["tax_amount"],
+                  update["total_with_tax"], _jsonb(update["raw_payload"]),
+                  update["invoice_id"], before["amount"], before["signed_amount"],
+                  before["tax_amount"], before["total_with_tax"],
+                  _jsonb(before["raw_payload"])))
+            if affected != 1:
+                raise RuntimeError("Financial repair target changed; rerun dry-run.")
 
     def repair_invoice_header_facts(
         self,
@@ -1571,7 +1597,43 @@ class PostgresCoreRepository:
             or 0
         )
 
-    def load_file_imports(self) -> dict[str, Any]:
+    def load_file_import_session_snapshot(self, session_id: str) -> dict[str, Any]:
+        """Restore one durable draft; canonical identity candidates load in bulk on demand."""
+        files = self.load_file_imports(session_id=session_id)
+        session = (files.get("sessions") or {}).get(session_id)
+        if session is None:
+            raise KeyError(session_id)
+        batch_ids = list(dict.fromkeys(
+            str(item.batch_id or item.preview_batch_id)
+            for item in session.files if item.batch_id or item.preview_batch_id
+        ))
+        batches = self._connection.fetch_all(
+            """select *, coalesce(legacy_mongo_id, id::text) as legacy_id
+               from app.import_batches where legacy_mongo_id = any(%s::text[])""",
+            (batch_ids,),
+        ) if batch_ids else []
+        rows = self._connection.fetch_all(
+            """select *, coalesce(legacy_mongo_id, id::text) as legacy_id
+               from app.import_batch_rows where legacy_batch_id = any(%s::text[])
+               order by legacy_batch_id, row_no""",
+            (batch_ids,),
+        ) if batch_ids else []
+        results: dict[str, list[ImportedBatchRowResult]] = {}
+        normalized: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            result = self._batch_row_from_row(row)
+            results.setdefault(result.batch_id, []).append(result)
+            normalized.setdefault(result.batch_id, []).append(dict(self._row_payload(row).get("normalized_row") or {}))
+        previews = {}
+        for row in batches:
+            batch = self._batch_from_row(row)
+            previews[batch.id] = ImportPreview(
+                batch=batch, row_results=results.get(batch.id, []),
+                normalized_rows=normalized.get(batch.id, []),
+            )
+        return {"imports": {"batches": previews}, "file_imports": files}
+
+    def load_file_imports(self, *, session_id: str | None = None) -> dict[str, Any]:
         rows = self._connection.fetch_all(
             """
             select coalesce(import_files.legacy_mongo_id, import_files.id::text) as legacy_id,
@@ -1581,8 +1643,10 @@ class PostgresCoreRepository:
                    import_files.raw_payload
             from app.import_files import_files
             where import_files.status <> 'deleted'
+              and (%s::text is null or import_files.session_id = %s)
             order by import_files.session_id, import_files.original_filename, legacy_id
-            """
+            """,
+            (session_id, session_id),
         )
         sessions: dict[str, FileImportSession] = {}
         for row in rows:
@@ -1608,8 +1672,10 @@ class PostgresCoreRepository:
             item = self._file_item_from_row(row, payload)
             session.files.append(item)
             session.file_count = len(session.files)
-            if any(file.status == "confirmed" for file in session.files):
+            if all(file.status == "confirmed" for file in session.files):
                 session.status = "confirmed"
+            elif any(file.status == "preview_ready" for file in session.files):
+                session.status = "preview_ready"
         if not sessions:
             return {}
         return {
@@ -1648,9 +1714,9 @@ class PostgresCoreRepository:
                     """
                     insert into app.import_files(
                         legacy_mongo_id, session_id, stored_file_path, original_filename,
-                        template_kind, status, uploaded_by, audit_contract_revision, raw_payload
+                        template_kind, status, uploaded_by, audit_contract_revision, raw_payload, file_object_id
                     )
-                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, (select id from app.file_objects where storage_uri=%s and tombstoned_at is null limit 1))
                     on conflict (legacy_mongo_id) do update set
                         session_id = excluded.session_id,
                         stored_file_path = excluded.stored_file_path,
@@ -1659,7 +1725,8 @@ class PostgresCoreRepository:
                         status = excluded.status,
                         uploaded_by = excluded.uploaded_by,
                         audit_contract_revision = excluded.audit_contract_revision,
-                        raw_payload = excluded.raw_payload
+                        raw_payload = excluded.raw_payload,
+                        file_object_id = excluded.file_object_id
                     """,
                     (
                         file_id,
@@ -1683,6 +1750,7 @@ class PostgresCoreRepository:
                                 }
                             }
                         ),
+                        self._text(raw_file.get("stored_file_path")),
                     ),
                 )
 

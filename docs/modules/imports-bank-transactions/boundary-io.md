@@ -22,13 +22,13 @@
 - 导入完成后返回精确 affected scopes；direct-canonical 下游页面下次请求在同一只读 snapshot 直接看到新 facts，只有保留的 `workbench_relation` read-model consumer 使用自己的 freshness gateway，关联台页面不使用。
 - 记录导入预览审计。
 - 每次进入页面都创建空白本地草稿，不从浏览器存储或活跃 session 列表恢复历史预览；用户显式放弃时，只允许在同一事务内将当前认证用户拥有的未确认 preview session/file/batch 终结为 `reverted`。
-- 以 SHA-256 阻断同批或历史已确认的同内容文件；文件名变化不绕过文件级防重。
+- SHA-256 只验证原件完整性；文件内和跨上传均逐业务项去重，不以文件相同拒绝重传。
 - 银行有官方参考号时默认使用 `bank-v3`：账户、官方参考号种类/值和业务字段指纹摘要共同形成强 identity。若既有 `bank-v3` 键冲突，但双方非空余额或币种明确证明是不同账单位置，只为该冲突事实生成确定性的 `bank-v4` statement-position 键；重放同一位置必须命中同一 `bank-v4`，不得穿透数据库 `source_unique_key` 唯一约束。若历史 canonical 行尚无 `bank-v4` 键，仅当账户、秒级交易时间、方向、金额、账后余额、币种六项全部存在且只命中一条时，才作为 legacy statement-position duplicate；多条命中进入 `suspected_duplicate`，缺字段不自动合并。历史 `bank-v2` 只在业务指纹一致、双方官方参考号存在唯一交集时迁移判重；缺失或多义证据进入 `suspected_duplicate`。没有官方参考号时业务字段指纹仍只产生人工复核。
 - `preview_stale` 不只比较汇总计数。confirm 前必须逐行比较 decision、linked object type 和 linked object id；即使总重复数/可导入数未变，只要任一行换了 canonical owner 也必须拒绝旧预览。错误只报告变化字段及数量，不输出业务值或内部 ID。
 - 一个银行文件的 preview/confirm 必须先对当前 canonical 事实做有界批量 identity preload：一次读取 canonical/fingerprint 候选，一次读取完整 statement-position 候选，再在内存中逐行决定并把本批新建事实写入同一批缓存；不得逐行查询数据库，同文件重复项也不得穿透 confirm。
 - 普通 confirm 不得把 `suspected_duplicate` 解释为用户授权新建。弱指纹命中必须保持未写入并使 batch 收敛为 `completed_with_errors`；preview 可暂存候选 canonical 引用用于复核，但 terminal row 的 `linked_object_type/id`（包括 normalized payload）必须清空。只有 `created`、`status_updated`、`duplicate_skipped` 可以保留正式 canonical 引用。
 - 在有界资源内验证 XLS/XLSX 签名与容器结构；文件声明的行数/借贷合计与解析结果不一致时禁止确认。
-- 通过统一 page Audit 在同一只读 snapshot 证明 file object、session/file、batch/row、canonical bank transaction、当前 import job/outbox 的集合、字段、引用与 queue 状态。
+- 通过统一 page Audit 在同一只读 snapshot 证明 file object、session/file、batch/row、canonical bank transaction、当前 import canonical import job 的集合、字段、引用与 queue 状态。
 - 受控重放必须为新 session/file 生成新的归档对象登记；不得让新 `app.import_files` 复用旧 `stored_file_path` 却缺少 `file_object_id`。历史已存在的缺失链接只能由维护工具按唯一 storage URI、登记 SHA-256、对象大小和非 tombstone 生命周期证明后修复。
 - 受控重放的 `duplicate_skipped` 行可以保留原上传文件的 source key/fingerprint，同时引用旧 canonical 流水；page Audit 仅在登记 reason 属于三类受控重放、去重恢复工具写入的唯一 owner-reclassification reason，或普通确认的 canonical duplicate reason，且账户、秒级交易时间、方向、金额、账后余额完整相等时接受该引用。币种有值时必须相等；历史 canonical 币种为空时，仅接受 row 同为空，或银行解析器按既有合同补出的 `CNY`。owner-reclassification 与普通确认 reason 只属于历史 page Audit provenance，不进入受控重放 reason map；普通确认仍由正常 importer 决定，不获得重放覆盖能力。row 缺失但 canonical 有值、非 `CNY` 的单边缺失或显式值不同仍必须阻断。普通导入、前五项缺字段/漂移仍必须阻断。
 - 退休版本的普通确认 reason 仅允许证明“row 有 source key、canonical 缺 source key”的历史迁移形态：row/canonical 数据指纹必须非空且相等，该指纹在 canonical 流水池中必须只有一个 owner，同时账户、秒级交易时间、方向、金额和标准化对方名仍须相等。该 reason 不进入受控重放 provenance 集合或运行时 reason map；指纹多 owner、任一基础字段漂移或相反的 key 缺失形态继续阻断。
@@ -54,15 +54,15 @@
 | 复核明细分页 | `GET /imports/files/sessions/{session_id}/review-rows?kind=duplicate|unimported&offset&limit` | `limit` 最大 100；返回当前 session 的稳定切片和 `total/has_more`。session 摘要不携带无界 `row_results`、`normalized_rows` 或 `duplicate_groups`，页面不得从摘要恢复全量复核列表。 |
 | 不完整表头字段映射 | `ImportWorkflowPage.tsx`、`features/imports/api.ts` | 后端返回 `header_signature`、`mapping_candidates`、`mapping_fields`、`field_mapping`；页面只向 `/imports/files/retry` 提交当前文件的 canonical 字段到源列映射，不提交已解析交易事实。 |
 | 页面手动刷新 | `ImportWorkflowPage.tsx` | 重新读取银行映射配置；有持久化 preview session 时同时精确重读该 session，保留当前草稿和文件选择，不执行浏览器 reload 或跨页面 refresh。 |
-| Job event | runtime worker handlers | 后台处理必须可恢复；相同 import idempotency key 只接受相同 request fingerprint。瞬时失败归还 pending 并由 durable outbox 重试，达到最大次数才终态失败；用户再次确认同一请求时，terminal failed/partial job 必须原子复用原 job id 并重新 queued/pending，禁止新建冲突 job；活跃 processing lease 不得被并发 worker 接管。 |
+| Import job | `job.import_jobs` | 唯一 prepare/commit 状态源；worker 直接 claim、租约续期与 fencing。相同意图失败重试复用原 job；确认范围变化仅在前一任务成功且显式版本匹配后创建下一意图。业务事实、审计、必要 dirty scopes 与成功状态同事务提交。 |
 
 preview/confirm/retry 都属于 canonical 导入写链，必须在 multipart/JSON 解析前通过共享 mutation guard；`imported_by` 与 background job owner 只取已认证 session username，客户端 form/body 同名字段不具有身份语义。
 
 preview 首次登记 `app.import_files` 时必须同时写入认证 username 到 `uploaded_by` 与 `raw_payload.normalized_payload.imported_by`，最终 session delta 必须保持同值；恢复、列出和放弃只使用该服务端 owner 事实。session/file/batch/canonical candidate ID 使用带业务前缀的 UUID，不使用进程内顺序号或“先查询再递增”的多 worker 竞态分配。
 
-Import worker 注册 handler 时只固定 processor 类型，不得把启动时的 `FileImportService` / canonical import snapshot 长期缓存到后续 job。每次 `import.process.requested` 执行前必须从 PostgreSQL durable facts 重新构造 processor，使 worker 启动后新创建的 session/file 以及最新 canonical 去重事实可见。
+Import worker 每次 claim 后构建当前任务的 request-local service，仅恢复指定 session/files/rows 和匹配身份所需 canonical facts；不得长期缓存启动时的事实快照。
 
-生产 API 的 session GET、confirm、retry 与 background retry 在进入 file/session service 前同样必须从 `load_imports_snapshot` + `load_file_imports_snapshot` 显式恢复当前 PostgreSQL import runtime；该恢复只属于导入操作边界，不得重新启用 `state:imports`、`state:file_imports` 或 full-state bootstrap fallback。
+生产 API 的 session GET、confirm、retry 与 discard 使用 `load_file_import_session_snapshot(session_id)` 返回独立 service，不覆盖 Application 全局服务；新上传使用空 session service。禁止 full-state bootstrap fallback。
 
 file/session preview/retry 只允许输出当前 `session_id`、files 与其 `preview_batch_id` 的精确 delta，且不得包含 canonical invoice/transaction facts。confirm 的持久化输出必须是本次所选 session、正式 batch 及其新建/状态更新 canonical facts 的精确 delta。合法重复行只引用既有 transaction，不重新拥有或回写该 transaction；两条链都不得回写其它 session 或未受影响 facts。调用方必须通过 `ApplicationStateStoreProtocol.save_import_delta(...)` 写入；PostgreSQL 在同一事务写 batch 与 file/session，本地实现按 batch/entity/session id 合并且计数器只增不减，二者共享“未出现在 delta 中的事实保持不变”语义。
 
@@ -96,11 +96,11 @@ round-trip；`ON CONFLICT` 的 legacy batch owner 条件和 affected-row 数必�
 | Write result envelope | 前端导入页面/job result | 返回 `affected_scope_keys`，普通写的 `read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` 为空。前端立即结束写操作；后续访问页面由该页 freshness/status/enqueue 边界收敛 |
 | Page Audit | `/api/operations/app-health/page-audit?page=imports.bank-transactions` | admin-only、只读、`read_model_keys=[]`、`relation_proof_required=false`；expected-set 同时包含本次正式 batch 拥有的 transaction 与 duplicate row 引用的历史 canonical transaction，反向 owner 唯一性只约束本批次拥有的 transaction；受控历史重放允许 row/canonical 币种同时缺失，也允许解析器默认 `row=CNY` 对历史 `canonical=空`，但账户、秒级时间、方向、金额、余额仍必须完整相等，反向缺失、非 CNY 单边缺失或显式值不同继续失败；下游 read model 只登记为 impact targets，不冒充页面 consumer |
 
-失败但仍可重试的 import job 必须在 admin-only Audit issue 中返回 `attempt_count/max_attempts`、`last_error`、`session_id` 和 `selected_file_ids`，使运维只能通过正式 file/session retry/confirm I/O 定位和恢复；恢复必须复用同一 import/background job id，重置失败租约与错误并写入新的 durable outbox，且 request fingerprint 不同返回结构化 `409 idempotency_conflict`。不得要求直接查询或改写 `job.import_jobs`。
+失败任务提供 `attempt_count/max_attempts`、`last_error`、`session_id` 与 `selected_file_ids`；正式 retry I/O 复用当前意图和 job ID。文件映射修改先以 CAS 将任务重置 prepare，解析结果和 preview 版本同事务持久化。
 
-worker 更新导入 background job 的 running/progress/terminal 状态时，只允许按 canonical `job_id` 单行读写；不得把全量历史 background job snapshot 回写到 PostgreSQL。历史 raw payload 内的旧 `job_id` 不能覆盖正式表主键，否则下游成本统计、Workbench 等副作用的旧任务会污染本次导入事务。
+worker 不写独立 background job；全局进度从同一 import job 投影，旧 raw payload 中的 background ID 不参与执行。
 
-若已部署旧版本在 background job 全量回写阶段把同一 `file_import.confirm` 事件推进到 dead letter，且 session/file 仍完整停留在 `preview_ready`、对应 preview batch 为 `pending`、正式银行流水写入为零，只允许通过候选 release 的 `import-audit-repair` 精确恢复模式处理。只读 discovery 可从一个明确 import job id 推导唯一 outbox/background job/session/file 白名单，但存在多个 dead letter 或任何坐标缺失时必须拒绝；执行时仍必须显式提供完整 target，并先取得同一 repeatable-read snapshot 的 fingerprint。候选 processor 只有在上述事实全部一一匹配时才复用原 import/background job id 执行。正式 batch/file/job 全部成功后才允许把该条 dead letter 标记完成；任一业务事实不闭环时保留 dead letter，不得假完成或扫描其它失败任务。
+历史死信恢复由 `import-audit-repair` 精确目标工具读取旧证据；当前执行使用 direct import worker 与 canonical job。历史 outbox 仅作审计证据，不再驱动新导入。
 
 已确认文件的生产恢复只能走 `import-audit-repair --repair-bank-source` 受控模式。dry-run 必须显式绑定全部 source session/file、恢复 cohort 数、保护 cohort 数、精确重复删除数、预期重放新增数、预期受控跳过数和预期释放的错误 canonical reference 数，并验证原文件 SHA-256、精确 batch owner、业务指纹与官方参考号唯一匹配、零核销和零 canonical relation。释放数不得超过本次 source files 实际拥有的 canonical reference evidence。唯一例外是显式 `--cleanup-related-bank-duplicates` 恢复合同：只允许精确数量的 duplicate-owned `单标签 + 单事件`，以及精确一条由指定 duplicate transaction id 拥有的 `银行流水 + 进项发票` active Workbench relation；不得包含 OA、确认、核销、批次、claim、override、exception 或其它关系。dry-run 必须冻结 category/event 全部 CAS 字段、relation case/version/preview、发票成员，并证明撤回不会恢复旧关系。execute 使用相同 fingerprint、serializable transaction 和 advisory lock，先通过正式 Workbench command/repository 撤回关系并追加 history，再删除精确 category/event，最后才处理导入审计：每个待删副本必须恰好有一条 `created` owner，可同时有零到多条已存在的 `duplicate_skipped` 引用；全部引用都重定向到原正确流水，只有 `created` owner 转换计入正式 batch 的 success→duplicate 计数，原 `duplicate_skipped` 的 decision/reason 保持不变。`import_files.raw_payload` 是原始预览证据，不是最终 row audit；工具只冻结其 SHA-256，不得用最终决策覆盖。完成正式 row/batch 审计重定向后才删除错误副本；全部事实写在同一事务内，任何一步漂移整体回滚。随后复用正式 preview/confirm processor 重放归档文件。重放的权威行证据必须来自 dry-run 已冻结的 `app.import_batch_rows`，并按 source file、row_no、record type、data fingerprint 和 canonical ID 传入 processor；禁止从 `import_files.raw_payload` 的旧预览 decision 推断最终 owner。证据分为三类：已修复的重复引用绑定保护 cohort keeper；仍保留在恢复 cohort 中的原始 `created` owner 绑定当前 canonical 流水；既有 `duplicate_skipped` 行绑定修复后仍保留的 canonical 流水。只有当前预览仍匹配同一证据的行才能受控转为 `duplicate_skipped`，三类证据必须分别精确计数且不得行号重叠，历史判重引用不得指向本次待删除事实；普通疑似行、不同 fingerprint、缺失 owner、不同原因或计数漂移全部拒绝。canonical reference 证据还必须在回放时按冻结 ID 重读 canonical 流水并比较账户、秒级交易时间、方向、金额、余额、币种；六项任一不一致时不得强绑旧 ID，而是释放该行并保留普通 importer 的当前 decision。目标缺失则 fail closed。真正缺失的行不在其余受控证据中，仍必须由正式 importer 判定为 `created`。首轮和幂等重放都必须精确命中授权释放数；受控重放创建新的审计 session/file，原已确认会话不可修改；重复重放必须得到零新增并保持相同受控跳过与释放计数。确认前 stale gate 不得关闭；持久化后的受控行仍须带已登记的受控 reason。普通去重重算为 `duplicate_skipped` 或 `suspected_duplicate` 时，只有指向完全相同的 canonical transaction ID 才允许维持权威重复分类；若因历史 parser/identity 漂移重算为 `created`，则必须在确认瞬间按冻结 canonical ID 重新读取事实，并证明账户、秒级交易时间、方向、金额、余额、币种六项全部存在且完全相同，才允许维持重复分类。canonical ID 缺失、六项任一缺失/变化、类型变化或其它 decision 仍必须报 `preview_stale`。read model 月份 scope 必须规范为 `YYYY-MM`。任何歧义、额外关系、hash、计数、preview/version 或 owner 漂移均在删除前失败。
 
@@ -181,3 +181,23 @@ worker 更新导入 background job 的 running/progress/terminal 状态时，只
 ## 右侧抽屉交互（2026-09-15）
 
 本模块复用的右侧抽屉遵循[统一关闭行为](../../dev/right-drawer-dismissal.md)：外部点击/Esc 不关闭，X 继续执行已有关闭保护。业务 owner 持有保存/确认完成状态，公共 AppDrawer 仅展示 `completion`；不改变本模块后端 API、权限、事实写入及查询 I/O。旧的重复退出按钮和成功自动关闭路径已移除，内部编辑取消仍按局部职责处理。
+
+## 2026-09-21 导入闭环变更
+
+- 上传登记输出 `uploaded` session 与归档引用，不在请求中解析文件；登记草稿与 prepare job 同事务。worker prepare 保存逐项预览，并通过任务 completion 端口原子进入待确认。
+- `ImportProcessingService` 的普通提交只传当前 selected scope delta、精确影响月份和结果；`ConfirmedInvoiceImportUnitOfWork` 先 `completion.lock(tx)`，最后 `completion.succeed(tx, result)`，成功与正式事实同事务。显式关联台同步补录仍复用领域事务，不要求异步任务。
+- 当前 session 恢复通过 `load_file_import_session_snapshot(session_id)`，只读取本会话文件及其 batch/rows；相关现存发票/流水身份批量读取。不恢复全局历史 snapshot。
+- `FileImportService.confirm_session` 始终原子确认所选范围，删除 `atomic_batch=False` 旧分支。任何错误/疑似行阻断该范围，未选文件保留草稿。确认后文件行与实际 batch 结果重新绑定，防止跨进程恢复后继续显示预览 created。
+- 文件 SHA 仅用于原件完整性，不作业务去重。`find_confirmed_import_file_by_sha256` 端口与相同文件阻断已删除。每个业务项仍使用已有 invoice/bank identity 规则。
+- 发票金额+税额与价税合计不一致、同强身份财务字段冲突明确报错，不能静默覆盖。20 位票号仅在“发票号码”列仍可识别；缺身份数据行、多非标准事实 sheet 或混合进销方向明确拒绝，不再忽略。
+- 银行负借方+贷方字符串零（及对称负贷方情况）按真实冲正方向解析，保留银行 v3/v4 身份规则。
+- 删除普通导入独立 background job 写入；任务和全局状态由 canonical import job 查询呈现。历史 outbox/background 仅保留取证读取，不构成执行入口。
+- 直接回归：`tests/test_import_closed_loop.py`（含隔离真实 PostgreSQL）、`test_import_file_service.py`、`test_import_service.py`、`test_confirmed_invoice_import_uow.py`、`test_postgres_core_repository.py`、`test_postgres_state_store.py`。依赖及下游写权限未扩大。
+
+### 登记失败、剩余范围与无动作闭环
+
+- 原件先落不可变对象；`app.import_files`、preview session 与 prepare job 在一次事务登记。登记失败仅清理本次 UUID 原件且数据库证明未被任何 file/session/job 引用；响应丢失后已经提交的引用不得清理。
+- 选择部分文件成功后，未选文件保持 preview_ready。携最新版本再次选择剩余文件创建新 commit 意图，复用 session 的原件和候选；旧任务不可变。重复任一已受理精确范围始终返回原任务。
+- 纯银行强身份重复、无新增/更新/错误时 prepare 直接 succeeded + `outcome=no_changes`。发票重复仍可能补来源或元数据，不能按新增零机械判定无动作。
+- 预览变更先 CAS 入 prepare 后由 worker 解析；放弃预览与 cancel job 同事务。确认前财务冲突将 awaiting_confirmation CAS 为 needs_review，用户重新预览后确认；同身份且同事实的并发新增仅重分类为重复。
+- job 只保存 session 引用、范围、摘要和结果；候选明细只在 session/batch rows 存储。HTTP/worker request-local service 不重置全局实例。

@@ -703,33 +703,25 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
                 payload={"session_id": "integration-session-2"},
             )
 
-        processing = repository.mark_processing(job.import_job_id, worker_id="integration-import-worker")
+        processing = repository.claim_next("integration-import-worker", import_job_id=job.import_job_id)
         self.assertIsNotNone(processing)
-        self.assertIsNone(repository.mark_processing(job.import_job_id, worker_id="competing-worker"))
+        self.assertIsNone(repository.claim_next("competing-worker", import_job_id=job.import_job_id))
         self.assertTrue(
-            repository.mark_retryable(
-                job.import_job_id,
-                worker_id="integration-import-worker",
+            repository.fail_claim(
+                processing, retry=True, delay_seconds=0,
                 error="transient integration failure",
             )
         )
-        retried = repository.mark_processing(job.import_job_id, worker_id="integration-import-worker")
+        retried = repository.claim_next("integration-import-worker", import_job_id=job.import_job_id)
         self.assertIsNotNone(retried)
         self.assertEqual(retried.attempt_count, 2)
         self.assertTrue(
-            repository.mark_failed(
-                job.import_job_id,
-                worker_id="integration-import-worker",
+            repository.fail_claim(
+                retried, retry=False,
                 error="terminal integration failure",
             )
         )
-        manual_retry = repository.create_or_get_job(
-            import_type="bank_transactions.import",
-            import_session_id="integration-session-1",
-            source_file_id="integration-file-1",
-            idempotency_key="integration-import-1",
-            payload={"session_id": "integration-session-1"},
-        )
+        manual_retry = repository.retry_job(job.import_job_id)
         self.assertEqual(manual_retry.import_job_id, job.import_job_id)
         self.assertEqual(manual_retry.status, "pending")
         self.assertEqual(manual_retry.attempt_count, 0)

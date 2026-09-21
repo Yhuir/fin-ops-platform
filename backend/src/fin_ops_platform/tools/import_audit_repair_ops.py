@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -354,6 +355,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-rollback-manifest-fingerprint")
     parser.add_argument("--batch-id")
     parser.add_argument("--file-id")
+    parser.add_argument("--export-source-file-id", help="Read one registered original by ID; JSON output must be redirected to a private task artifact.")
     parser.add_argument("--retire-etc-session-id", action="append", default=[])
     parser.add_argument("--normalize-reverted-batch-id", action="append", default=[])
     parser.add_argument("--recover-import-job-id")
@@ -383,6 +385,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-bank-workbench-transaction-id")
     parser.add_argument("--repair-bank-audit-contract", action="store_true")
     parser.add_argument("--repair-invoice-header-source-sha256")
+    parser.add_argument("--repair-invoice-financial-source", action="append", default=[],
+                        help="Stored tax header import file ID; use --invoice-id for exact existing targets.")
     parser.add_argument("--expected-invoice-header-repair-count", type=int)
     parser.add_argument("--repair-invoice-expense-link-id", action="append", default=[])
     parser.add_argument("--repair-invoice-expense-link-case-id")
@@ -459,6 +463,32 @@ def _run_etc_invoice_payload_repair(args: Any, *, stdout: TextIO) -> int:
         connection.close()
 
 
+def _export_source_file(args: Any, *, stdout: TextIO) -> int:
+    allowed = {"export_source_file_id", "dry_run"}
+    if not args.dry_run or any(_argument_is_set(value) for name, value in vars(args).items() if name not in allowed):
+        raise SystemExit("Source export requires --dry-run and one registered file ID only.")
+    if stdout.isatty():
+        raise SystemExit("Redirect source export to a private task artifact; terminal output is not allowed.")
+    connection = PostgresConnection(PostgresSettings.from_env())
+    try:
+        with connection.transaction() as transaction:
+            transaction.execute("set transaction isolation level repeatable read, read only")
+            source = load_import_source_file(transaction, args.export_source_file_id)
+        if source is None:
+            raise ValueError("Source file is missing or deleted.")
+        content = _build_bank_repair_state_store(connection).read_import_file(source["stored_file_path"])
+        digest = hashlib.sha256(content).hexdigest()
+        if digest != source["sha256"] or len(content) != int(source["size_bytes"]):
+            raise ValueError("Stored source checksum or size mismatch.")
+        print(json.dumps({"file_id": source["file_id"], "session_id": source["session_id"],
+            "source_name": source["original_filename"], "sha256": digest, "size_bytes": len(content),
+            "content_base64": base64.b64encode(content).decode("ascii"), "read_only": True},
+            ensure_ascii=False), file=stdout)
+        return 0
+    finally:
+        connection.close()
+
+
 def _inspect_invoice_source(args: Any, *, stdout: TextIO) -> int:
     from io import BytesIO
 
@@ -497,9 +527,87 @@ def _inspect_invoice_source(args: Any, *, stdout: TextIO) -> int:
         connection.close()
 
 
+def _run_verified_financial_repair(args: Any, *, stdout: TextIO) -> int:
+    from fin_ops_platform.services.import_file_service import parse_invoice_source_rows, read_xlsx_import_rows
+    from fin_ops_platform.services.invoice_header_fact_repair_service import build_verified_financial_repair_plan
+    from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
+        apply_verified_financial_repair,
+        load_verified_financial_repair_snapshot,
+    )
+
+    allowed = {"repair_invoice_financial_source", "invoice_id", "dry_run", "execute",
+               "expected_fingerprint", "operator_id", "reason"}
+    if not args.invoice_id or any(_argument_is_set(value) for name, value in vars(args).items() if name not in allowed):
+        raise SystemExit("Financial repair requires exact invoice IDs and cannot combine repair modes.")
+    if args.execute and not all((args.expected_fingerprint, args.operator_id, args.reason)):
+        raise SystemExit("Execute requires dry-run fingerprint, operator and reason.")
+    connection = PostgresConnection(PostgresSettings.from_env())
+    try:
+        store = _build_bank_repair_state_store(connection)
+        sources = []
+        for file_id in sorted(set(args.repair_invoice_financial_source)):
+            source = load_import_source_file(connection, file_id)
+            if source is None:
+                raise ValueError(f"Source file {file_id} is missing or deleted.")
+            content = store.read_import_file(source["stored_file_path"])
+            digest = hashlib.sha256(content).hexdigest()
+            if digest != source["sha256"]:
+                raise ValueError(f"Source file {file_id} checksum differs.")
+            workbook = read_xlsx_import_rows(content)
+            if workbook.invoice_header_sheet_name != "发票基础信息":
+                raise ValueError(f"Source file {file_id} has no authoritative tax header sheet.")
+            sources.append({"file_id": file_id, "filename": source["original_filename"],
+                            "sha256": digest, "rows": parse_invoice_source_rows(workbook.rows)})
+        def load_plan(tx: Any) -> dict[str, Any]:
+            return build_verified_financial_repair_plan(
+                **load_verified_financial_repair_snapshot(tx, args.invoice_id),
+                invoice_ids=args.invoice_id, sources=sources)
+
+        with connection.transaction() as tx:
+            tx.execute("set transaction isolation level repeatable read read only")
+            plan = load_plan(tx)
+        completion = None
+        if args.execute:
+            if plan["source_fingerprint"] != args.expected_fingerprint:
+                raise RuntimeError("Financial facts changed after dry-run.")
+            with connection.transaction() as tx:
+                tx.execute("set transaction isolation level serializable")
+                current = load_plan(tx)
+                if current["source_fingerprint"] != args.expected_fingerprint:
+                    raise RuntimeError("Financial facts changed before execution.")
+                completion = apply_verified_financial_repair(tx, current, operator_id=args.operator_id, reason=args.reason)
+                if current["updates"] or current["invalidate_cache_keys"]:
+                    AuditTrailService(PostgresOperationsAuditRepository(tx)).record_action(
+                        actor_id=args.operator_id, action="invoice_financial_source_repair",
+                        entity_type="invoice", entity_id=current["source_fingerprint"],
+                        metadata={"event_type": "operation.completed", "page_key": "imports_invoices",
+                                  "reason": args.reason, "sources": current["sources"],
+                                  "outcome": "success", **completion,
+                                  "invoice_ids": args.invoice_id,
+                                  "invalidated_cache_keys": current["invalidate_cache_keys"],
+                                  "corrections": [{"invoice_id": item["invoice_id"],
+                                      "before": {field: str(item["before"][field]) for field in ("amount", "tax_amount", "total_with_tax")},
+                                      "after": {field: item[field] for field in ("amount", "tax_amount", "total_with_tax")}}
+                                      for item in current["updates"]]},
+                    )
+        report = {key: value for key, value in plan.items() if key != "updates"}
+        report.update(mode="execute" if args.execute else "dry_run", completion=completion,
+                      updates=[{**{key: value for key, value in item.items() if key not in ("before", "raw_payload")},
+                                "before": {field: str(item["before"][field]) for field in ("amount", "tax_amount", "total_with_tax")}}
+                               for item in plan["updates"]])
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, default=str), file=stdout)
+        return 0
+    finally:
+        connection.close()
+
+
 def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> int:
     stdout = stdout or sys.stdout
     args = build_parser().parse_args(argv)
+    if args.export_source_file_id:
+        return _export_source_file(args, stdout=stdout)
+    if args.repair_invoice_financial_source:
+        return _run_verified_financial_repair(args, stdout=stdout)
     if args.inspect_invoice_source:
         return _inspect_invoice_source(args, stdout=stdout)
     if args.delete_rollback_manifest_artifact:

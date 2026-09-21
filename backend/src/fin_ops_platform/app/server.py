@@ -174,6 +174,7 @@ from fin_ops_platform.services.import_job_queue import ImportJob, ImportJobIdemp
 from fin_ops_platform.services.import_lifecycle_service import ImportLifecycleService
 from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
 from fin_ops_platform.services.import_processing_service import ImportProcessingService
+from fin_ops_platform.services.import_workflow_service import IMPORT_JOB_PREFIX, ImportWorkflowService, import_job_payload
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_canonical_query_service import (
     InputInvoiceUsageCanonicalQueryService,
@@ -1049,7 +1050,6 @@ class Application:
         self._etc_import_session_store = build_etc_import_session_store(self._state_store)
         self._etc_service = EtcService(
             state_store=self._state_store,
-            import_session_store=self._etc_import_session_store,
             oa_prefill_provider=lambda: self._app_settings_service.get_oa_draft_prefill_configuration(
                 ETC_OA_DRAFT_PREFILL_FAMILY
             ),
@@ -1087,20 +1087,17 @@ class Application:
         self._background_job_service = background_job_service
         self._import_processing_service = ImportProcessingService(
             file_import_service=self._file_import_service,
-            tax_certified_import_service=self._tax_certified_import_service,
             etc_service=self._etc_service,
             etc_reconciliation_task_service=self._etc_reconciliation_task_service,
-            background_job_service=self._background_job_service,
             serialize_value=self._serialize_value,
             persist_confirmed_import_delta=self._persist_confirmed_import_delta,
+            persist_import_preview_delta=self._persist_import_preview_delta,
             workbench_matching_scope_months_for_import_file_session=self._workbench_matching_scope_months_for_import_file_session,
             tax_offset_scope_keys_for_import_file_session=self._tax_offset_scope_keys_for_import_file_session,
             bank_scope_keys_for_import_file_session=self._bank_scope_keys_for_import_file_session,
             input_invoice_usage_scope_keys_for_import_file_session=self._input_invoice_usage_scope_keys_for_import_file_session,
             output_invoice_collection_scope_keys_for_import_file_session=self._output_invoice_collection_scope_keys_for_import_file_session,
-            link_etc_import_result_to_existing_invoices=self._link_etc_import_result_to_existing_invoices,
             etc_import_preview_service=self._etc_import_preview_service,
-            oa_manual_import_create_processor=self._process_oa_manual_import_create_job,
         )
         self._app_health_service = AppHealthService()
         self._app_status_overview_service = AppStatusOverviewService()
@@ -1176,8 +1173,16 @@ class Application:
             canonical_repository=self._tax_offset_canonical_repository,
             tax_offset_service=tax_offset_service,
         )
+        from fin_ops_platform.services.postgres_repositories.shared_imports import PostgresSharedImportRepository
+        import_connection = getattr(self._state_store, "_connection", None)
+        session_owner_provider = (
+            PostgresSharedImportRepository(import_connection).tax_session_owner
+            if import_connection is not None
+            else lambda session_id: self._tax_certified_import_service.get_session(session_id).imported_by
+        )
         self._tax_certified_import_job_service = TaxCertifiedImportJobService(
             import_job_repository_provider=self._get_import_job_repository,
+            session_owner_provider=session_owner_provider,
         )
         self._tax_certified_import_application_service = TaxCertifiedImportApplicationService(
             certified_import_service=getattr(self, "_tax_certified_import_service", None),
@@ -1201,10 +1206,8 @@ class Application:
             actor_id_provider=self._tax_offset_actor_id,
             certified_import_records_provider=self._tax_certified_import_application_service.records_payload,
             certified_import_preview_provider=self._tax_certified_import_application_service.preview_payload,
-            import_job_processing_enabled=self._import_job_processing_enabled,
             enqueue_import_job=self._enqueue_import_process_job,
             serialize_import_job=self._serialize_import_job,
-            execute_tax_certified_import_confirm=self._import_processing_service.execute_tax_certified_import_confirm,
             month_metric_emitter=self._emit_tax_offset_month_metric,
             calculate_metric_emitter=self._emit_tax_offset_calculate_metric,
             duration_ms=self._duration_ms,
@@ -1251,10 +1254,8 @@ class Application:
             actor_id_provider=self._tax_offset_actor_id,
             certified_import_records_provider=self._tax_certified_import_application_service.records_payload,
             certified_import_preview_provider=self._tax_certified_import_application_service.preview_payload,
-            import_job_processing_enabled=self._import_job_processing_enabled,
             enqueue_import_job=self._enqueue_import_process_job,
             serialize_import_job=self._serialize_import_job,
-            execute_tax_certified_import_confirm=self._import_processing_service.execute_tax_certified_import_confirm,
         )
 
     def _tax_offset_query(self) -> TaxOffsetQueryService:
@@ -1873,12 +1874,22 @@ class Application:
         )
         if method == "GET" and route_path == "/api/background-jobs/active":
             return self._handle_api_background_jobs_active(request_actor_id)
+        if method == "GET" and route_path.startswith("/api/background-jobs/") and route_path.endswith("/result"):
+            job_id = unquote(route_path.rsplit("/", 2)[-2])
+            try:
+                job = self._import_workflow().get_owned(job_id, request_actor_id)
+            except KeyError:
+                return self._json_response(HTTPStatus.NOT_FOUND, {"error": "import_job_not_found"})
+            return self._json_response(HTTPStatus.OK, {"job": import_job_payload(job), "result": job.result_payload})
         if method == "GET" and route_path.startswith("/api/background-jobs/"):
             job_id = unquote(route_path.rsplit("/", 1)[-1])
             return self._handle_api_background_job(job_id, request_actor_id)
         if method == "POST" and route_path.startswith("/api/background-jobs/") and route_path.endswith("/acknowledge"):
             job_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_background_job_acknowledge(job_id, request_actor_id)
+        if method == "POST" and route_path.startswith("/api/background-jobs/") and route_path.endswith("/cancel"):
+            job_id = unquote(route_path.removeprefix("/api/background-jobs/").removesuffix("/cancel"))
+            return self._handle_api_import_job_cancel(job_id, request_actor_id)
         if method == "POST" and route_path.startswith("/api/background-jobs/") and route_path.endswith("/retry"):
             job_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_background_job_retry(job_id, request_actor_id)
@@ -2228,6 +2239,9 @@ class Application:
                 "/api/background-jobs/active",
                 "/api/background-jobs/{job_id}",
                 "/api/background-jobs/{job_id}/acknowledge",
+                "/api/background-jobs/{job_id}/retry",
+                "/api/background-jobs/{job_id}/cancel",
+                "/api/background-jobs/{job_id}/result",
                 "/api/etc/import/preview",
                 "/api/etc/import/confirm",
                 "/api/etc/import/discard",
@@ -3977,13 +3991,11 @@ class Application:
             return routes
         routes = EtcImportApiRoutes(
             preview_service=self._etc_import_preview_service,
-            background_job_service=self._background_job_service,
+            workflow_provider=self._import_workflow,
             json_response=self._json_response,
             load_json_body=self._load_json_body,
             load_multipart_body=self._load_multipart_body,
             reconciliation_error_response=self._reconciliation_error_response,
-            enqueue_import_job=self._enqueue_import_process_job,
-            serialize_import_job=self._serialize_import_job,
         )
         self._etc_import_api_routes = routes
         return routes
@@ -4285,138 +4297,98 @@ class Application:
     def _handle_api_background_jobs_active(self, owner_user_id: str) -> Response:
         active_jobs = self._background_job_service.list_active_jobs(owner_user_id, include_system=True)
         attention_jobs = self._background_job_service.list_attention_jobs(owner_user_id, include_system=True)
-        active_payloads = [self._serialize_background_job(job) for job in active_jobs]
-        attention_payloads = [self._serialize_background_job(job) for job in attention_jobs]
-        jobs = AppHealthService._combine_job_payloads(active_payloads, attention_payloads)
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "jobs": jobs,
-                "active_jobs": active_payloads,
-                "attention_jobs": attention_payloads,
-            },
-        )
+        import_types = {"file_import", "etc_invoice_import", "tax_certified_import", "oa_manual_import"}
+        active_payloads = [self._serialize_background_job(job) for job in active_jobs if job.type not in import_types]
+        attention_payloads = [self._serialize_background_job(job) for job in attention_jobs if job.type not in import_types]
+        imports = self._import_workflow().active_payloads(owner_user_id)
+        active_payloads.extend(job for job in imports if not job["attention"])
+        attention_payloads.extend(job for job in imports if job["attention"])
+        return self._json_response(HTTPStatus.OK, {
+            "jobs": AppHealthService._combine_job_payloads(active_payloads, attention_payloads),
+            "active_jobs": active_payloads, "attention_jobs": attention_payloads,
+        })
 
     def _handle_api_background_job(self, job_id: str, owner_user_id: str) -> Response:
         try:
-            job = self._background_job_service.get_job(job_id, owner_user_id)
-        except (BackgroundJobNotFoundError, BackgroundJobAccessError):
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "background_job_not_found", "message": "后台任务不存在或不可见。"},
-            )
-        return self._json_response(HTTPStatus.OK, {"job": self._serialize_background_job(job)})
+            if job_id.startswith(IMPORT_JOB_PREFIX):
+                payload = import_job_payload(self._import_workflow().get_owned(job_id, owner_user_id))
+            else:
+                payload = self._serialize_background_job(self._background_job_service.get_job(job_id, owner_user_id))
+        except (KeyError, BackgroundJobNotFoundError, BackgroundJobAccessError):
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "background_job_not_found", "message": "任务不存在或不可见。"})
+        return self._json_response(HTTPStatus.OK, {"job": payload})
 
     def _handle_api_background_job_acknowledge(self, job_id: str, owner_user_id: str) -> Response:
         try:
-            job = self._background_job_service.acknowledge_job(job_id, owner_user_id)
-        except (BackgroundJobNotFoundError, BackgroundJobAccessError):
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "background_job_not_found", "message": "后台任务不存在或不可见。"},
-            )
-        return self._json_response(HTTPStatus.OK, {"job": self._serialize_background_job(job)})
+            if job_id.startswith(IMPORT_JOB_PREFIX):
+                workflow = self._import_workflow()
+                job = workflow.get_owned(job_id, owner_user_id)
+                if not workflow.repository.acknowledge_job(job.import_job_id, created_by=owner_user_id):
+                    raise ValueError("任务仍未完成，不能关闭其执行状态。")
+                payload = {**import_job_payload(job), "status": "acknowledged"}
+            else:
+                payload = self._serialize_background_job(self._background_job_service.acknowledge_job(job_id, owner_user_id))
+        except (KeyError, BackgroundJobNotFoundError, BackgroundJobAccessError):
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "background_job_not_found", "message": "任务不存在或不可见。"})
+        except ValueError as exc:
+            return self._json_response(HTTPStatus.CONFLICT, {"error": "import_job_state_conflict", "message": str(exc)})
+        return self._json_response(HTTPStatus.OK, {"job": payload})
 
     def _handle_api_background_job_retry(self, job_id: str, owner_user_id: str) -> Response:
+        if not job_id.startswith(IMPORT_JOB_PREFIX):
+            return self._json_response(HTTPStatus.CONFLICT, {
+                "error": "historical_import_requires_review",
+                "message": "历史任务请从导入记录打开对应预览并确认，不能仅关闭错误提示。",
+            })
         try:
-            job = self._background_job_service.get_job(job_id, owner_user_id)
-        except (BackgroundJobNotFoundError, BackgroundJobAccessError):
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "background_job_not_found", "message": "后台任务不存在或不可见。"},
-            )
-        if job.type == "file_import":
-            return self._retry_file_import_background_job(job, owner_user_id)
-        return self._json_response(
-            HTTPStatus.BAD_REQUEST,
-            {"error": "background_job_retry_not_supported", "message": "当前后台任务没有可用的重新执行入口。"},
-        )
+            workflow = self._import_workflow()
+            previous = workflow.get_owned(job_id, owner_user_id)
+            if previous.import_type == "file_import.confirm" and (
+                previous.status == "needs_review" or (previous.status == "failed" and previous.stage == "prepare")
+            ):
+                session_id = str(previous.import_session_id or "")
+                job = workflow.revise_files(
+                    file_service=self._reload_file_import_runtime_state(session_id), store=self._state_store,
+                    session_id=session_id, owner=owner_user_id,
+                    selected_file_ids=list(previous.payload.get("selected_file_ids") or []),
+                )
+            else:
+                job = workflow.retry(job_id, owner_user_id)
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "background_job_not_found", "message": "任务不存在或不可见。"})
+        except (ValueError, ImportJobIdempotencyConflict) as exc:
+            return self._json_response(HTTPStatus.CONFLICT, {"error": "import_job_state_conflict", "message": str(exc)})
+        return self._json_response(HTTPStatus.ACCEPTED, {"job": import_job_payload(job), "retry_mode": "same_intent"})
+
+    def _handle_api_import_job_cancel(self, job_id: str, owner_user_id: str) -> Response:
+        try:
+            workflow = self._import_workflow()
+            job = workflow.get_owned(job_id, owner_user_id)
+            if job.import_type == "file_import.confirm":
+                session_id = str(job.import_session_id or "")
+                workflow.discard_files(
+                    file_service=self._reload_file_import_runtime_state(session_id), store=self._state_store,
+                    session_id=session_id, owner=owner_user_id,
+                )
+                job = workflow.get_owned(job_id, owner_user_id)
+            elif job.import_type == "etc_invoice_import.confirm":
+                response = self._etc_import_routes().discard(
+                    json.dumps({"sessionId": job.import_session_id}), owner_user_id=owner_user_id,
+                )
+                if response.status_code != HTTPStatus.OK:
+                    return response
+                job = workflow.get_owned(job_id, owner_user_id)
+            elif job.status != "canceled":
+                job = workflow.repository.cancel_job(job.import_job_id, created_by=owner_user_id)
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "import_job_not_found"})
+        except (ValueError, ImportJobIdempotencyConflict) as exc:
+            return self._json_response(HTTPStatus.CONFLICT, {"error": "import_job_state_conflict", "message": str(exc)})
+        return self._json_response(HTTPStatus.OK, {"job": import_job_payload(job)})
 
     @staticmethod
     def _serialize_background_job(job) -> dict[str, object]:
         return AppHealthService._job_payload(job)
-
-    def _retry_file_import_background_job(self, job, owner_user_id: str) -> Response:
-        self._reload_file_import_runtime_state()
-        source = job.source if isinstance(job.source, dict) else {}
-        session_id = str(source.get("session_id") or "").strip()
-        selected_file_ids = [
-            str(file_id).strip()
-            for file_id in list(source.get("selected_file_ids") or [])
-            if str(file_id).strip()
-        ]
-        if not session_id or not selected_file_ids:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "background_job_retry_not_supported", "message": "导入任务缺少重新执行所需的 session_id 或 selected_file_ids。"},
-            )
-        try:
-            session = self._file_import_service.get_session(session_id)
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "import_file_session_not_found", "message": "导入会话不存在。"},
-            )
-        selected = set(selected_file_ids)
-        selected_files = [file for file in list(getattr(session, "files", []) or []) if str(getattr(file, "id", "")) in selected]
-        if not selected_files:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "import_file_session_not_found", "message": "导入会话中没有可重试的文件。"},
-            )
-
-        confirmed_files = [file for file in selected_files if str(getattr(file, "status", "")) == "confirmed"]
-        if confirmed_files:
-            scope_months = self._workbench_matching_scope_months_for_import_file_session(session, selected_file_ids)
-            queued_matching_months = self._schedule_workbench_matching_scopes(
-                scope_months,
-                reason="file_import_retry_after_confirm",
-            )
-            self._background_job_service.acknowledge_job(job.job_id, owner_user_id)
-            return self._json_response(
-                HTTPStatus.ACCEPTED,
-                {
-                    "retry_mode": "workbench_matching",
-                    "queued_matching_months": queued_matching_months,
-                },
-            )
-
-        try:
-            session = self._file_import_service.retry_session_files(
-                session_id=session_id,
-                selected_file_ids=selected_file_ids,
-            )
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_import_file_retry_request", "message": str(exc)},
-            )
-        self._background_job_service.acknowledge_job(job.job_id, owner_user_id)
-        self._persist_import_preview_delta(session.id)
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "session": self._serialize_file_session(session),
-                "retry_mode": "file_preview",
-            },
-        )
-
-    def _resolve_task_etc_business_batch(
-        self,
-        *,
-        task_id: str,
-        owner_user_id: str,
-        idempotency_key: str,
-    ):
-        return self._import_processing_service.resolve_task_etc_business_batch(
-            task_id=task_id,
-            owner_user_id=owner_user_id,
-            idempotency_key=idempotency_key,
-        )
-
-    @staticmethod
-    def _etc_import_job_summary(result, total: int) -> dict[str, int]:
-        return ImportProcessingService.etc_import_job_summary(result, total)
 
     def _link_etc_import_result_to_existing_invoices(self, result: object) -> list[str]:
         return EtcExistingInvoiceLinkService(
@@ -4547,8 +4519,6 @@ class Application:
             etc_service=self._etc_service,
             reconciliation_task_service=self._etc_reconciliation_task_service,
             oa_client_factory=self._build_etc_oa_client,
-            link_etc_invoices_to_existing_invoices=self._link_etc_invoices_to_existing_invoices,
-            refresh_after_etc_invoice_link=self._refresh_after_etc_invoice_link,
             refresh_after_etc_business_batch_status_change=self._refresh_after_etc_business_batch_status_change,
             invoice_pdf_bundle_service=EtcInvoicePdfBundleService(
                 read_invoice_pdf=self._etc_service.read_invoice_pdf_bytes,
@@ -4723,40 +4693,6 @@ class Application:
                 return error
             status_code, payload = routes.source_files(business_batch_id, files, session=session)
             return self._json_response(status_code, payload)
-        if method == "POST" and action == "etc-import/preview":
-            fields, files, error = self._load_multipart_body(body, headers)
-            if error is not None:
-                return error
-            if not files:
-                return self._etc_business_response(
-                    HTTPStatus.BAD_REQUEST,
-                    None,
-                    code="invalid_etc_import_request",
-                    message="At least one zip file is required.",
-                )
-            invalid_files = [file.file_name for file in files if not file.file_name.lower().endswith(".zip")]
-            if invalid_files:
-                return self._etc_business_response(
-                    HTTPStatus.BAD_REQUEST,
-                    None,
-                    code="invalid_etc_import_request",
-                    message="Only .zip files can be imported.",
-                )
-            uploads = [UploadedEtcZipFile(file_name=file.file_name, content=file.content) for file in files]
-            expected_version = self._optional_int((fields.get("expectedVersion") or fields.get("expected_version") or [None])[0])
-            status_code, payload = routes.preview_import(
-                business_batch_id,
-                uploads,
-                expected_version=expected_version,
-                session=session,
-            )
-            return self._json_response(status_code, payload)
-        if method == "POST" and action == "etc-import/confirm":
-            payload, error = self._load_json_body(body)
-            if error is not None:
-                return error
-            status_code, result = routes.confirm_import(business_batch_id, payload, session=session)
-            return self._json_response(status_code, result)
         if method == "POST" and action == "oa-draft":
             payload, error = self._load_json_body(body)
             if error is not None:
@@ -5325,7 +5261,6 @@ class Application:
             request_data_reset=self._request_settings_data_reset_job,
             serialize_sync_run=self._serialize_sync_run,
             serialize_data_reset_background_job=self._serialize_data_reset_background_job,
-            import_job_processing_enabled=self._import_job_processing_enabled,
             enqueue_import_process_job=self._enqueue_import_process_job,
             serialize_import_job=self._serialize_import_job,
             manual_import_affected_scope_keys=self._settings_oa_manual_import_affected_scope_keys,
@@ -7278,16 +7213,6 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, {"case": case})
 
-    def build_import_job_processors(self) -> dict[str, Callable[[ImportJob], dict[str, object]]]:
-        return self._import_processing_service.build_import_job_processors()
-
-    def _process_oa_manual_import_create_job(self, import_job: ImportJob) -> dict[str, object]:
-        row_ids = import_job.payload.get("row_ids")
-        if not isinstance(row_ids, list):
-            raise ValueError("import job payload.row_ids is required.")
-        actor_id = str(import_job.payload.get("actor_id") or import_job.created_by or "workbench_settings").strip()
-        return self._execute_oa_manual_import_create([str(row_id) for row_id in row_ids], actor_id=actor_id)
-
     def _handle_import_batch(self, batch_id: str) -> Response:
         try:
             preview = self._import_service.get_batch(batch_id)
@@ -7304,12 +7229,8 @@ class Application:
             raise RuntimeError("FIN_OPS_IMPORT_PROCESSING_BACKEND must be postgres.")
         return "postgres"
 
-    def _import_job_processing_enabled(self) -> bool:
-        self._import_processing_backend()
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        return callable(getattr(queue_repository, "enqueue", None))
-
     def _get_import_job_repository(self) -> ImportJobRepository:
+        self._import_processing_backend()
         injected = getattr(self, "_import_job_repository_override", None)
         if injected is None:
             injected = self.__dict__.get("_import_job_repository")
@@ -7334,28 +7255,15 @@ class Application:
         priority: str = "normal",
         reason: str = "import_confirm",
     ):
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        if queue_repository is None or not callable(getattr(queue_repository, "enqueue", None)):
-            raise RuntimeError("Runtime queue repository is not available.")
-        repository = self._get_import_job_repository()
-        import_job = repository.create_or_get_job(
-            import_type=import_type,
-            import_session_id=import_session_id,
-            source_file_id=source_file_id,
-            idempotency_key=idempotency_key,
-            payload=payload,
-            raw_payload={"request_payload": payload},
-            created_by=created_by,
-            priority=priority,
+        import_job = self._get_import_job_repository().create_or_get_job(
+            import_type=import_type, import_session_id=import_session_id,
+            source_file_id=source_file_id, idempotency_key=idempotency_key,
+            payload=payload, created_by=created_by, priority=priority,
         )
-        if import_job.status in {"succeeded", "failed", "canceled"}:
-            return import_job, None
-        event = repository.enqueue_process_requested(
-            queue_repository=queue_repository,
-            import_job=import_job,
-            reason=reason,
-        )
-        return import_job, event
+        return import_job
+
+    def _import_workflow(self) -> ImportWorkflowService:
+        return ImportWorkflowService(self._get_import_job_repository())
 
     @staticmethod
     def _serialize_import_job(import_job: ImportJob) -> dict[str, object]:
@@ -7491,17 +7399,19 @@ class Application:
         if error is not None:
             return error
         try:
+            file_service = self._reload_file_import_runtime_state()
+            manual_service = ManualInvoiceEntryService(file_import_service=file_service, document_recognizer=self._invoice_document_recognizer)
             payloads = payload.get("invoices") if isinstance(payload.get("invoices"), list) else []
             preview_method = (
-                self._manual_invoice_entry_service.preview_workbench_batch
+                manual_service.preview_workbench_batch
                 if link_existing_invoices
-                else self._manual_invoice_entry_service.preview_batch
+                else manual_service.preview_batch
             )
             preview = preview_method(
                 payloads=[item for item in payloads if isinstance(item, dict)],
                 imported_by=imported_by,
             )
-            self._persist_import_preview_delta(preview.session.id)
+            self._state_store.save_import_delta(file_service.preview_session_persistence_payload(preview.session.id))
         except ManualInvoiceEntryError as exc:
             return self._json_response(exc.status_code, {"error": exc.error, "message": exc.message})
         except RuntimeError:
@@ -7544,11 +7454,14 @@ class Application:
                 },
             )
         try:
-            preview = self._manual_bank_transaction_entry_service.preview_batch(
+            file_service = self._reload_file_import_runtime_state()
+            manual_service = ManualBankTransactionEntryService(file_import_service=file_service,
+                bank_account_mappings_provider=self._app_settings_service.get_bank_account_mappings_payload)
+            preview = manual_service.preview_batch(
                 payloads=transactions,
                 imported_by=imported_by,
             )
-            self._persist_import_preview_delta(preview.session.id)
+            self._state_store.save_import_delta(file_service.preview_session_persistence_payload(preview.session.id))
         except ManualBankTransactionEntryError as exc:
             return self._json_response(exc.status_code, {"error": exc.error, "message": exc.message})
         except RuntimeError:
@@ -7575,14 +7488,16 @@ class Application:
             },
         )
 
-    def _workbench_invoice_supplement_service(self) -> WorkbenchInvoiceSupplementService:
+    def _workbench_invoice_supplement_service(self, session_id: str) -> WorkbenchInvoiceSupplementService:
         state_store = getattr(self, "_state_store", None)
         connection = getattr(state_store, "_connection", None)
         if str(getattr(state_store, "storage_backend", "") or "").strip() != "postgres" or connection is None:
             raise RuntimeError("Workbench invoice supplements require PostgreSQL storage.")
+        file_service = self._reload_file_import_runtime_state(session_id)
+        checkpoint = file_service.draft_checkpoint(session_id)
         return WorkbenchInvoiceSupplementService(
             connection=connection,
-            file_import_service=self._file_import_service,
+            file_import_service=file_service,
             relation_repository_factory=PostgresWorkbenchRelationRepository,
             relation_command_service_factory=lambda repository: self._workbench_relation_command_service(
                 repository=repository
@@ -7596,7 +7511,7 @@ class Application:
                     file_imports_snapshot=file_imports_snapshot,
                 )
             ),
-            restore_import_runtime=self._reload_file_import_runtime_state,
+            restore_import_runtime=lambda: file_service.restore_draft(checkpoint),
         )
 
     def _workbench_invoice_expense_item_assignment_service(
@@ -7706,7 +7621,7 @@ class Application:
         )
         _REQUEST_AUDIT_EVIDENCE.set(build_operation_evidence(target=target))
         try:
-            result = self._workbench_invoice_supplement_service().attach_manual_invoices(
+            result = self._workbench_invoice_supplement_service(str(payload.get("session_id") or "")).attach_manual_invoices(
                 ManualInvoiceSupplementCommand(
                     session_id=str(payload.get("session_id") or ""),
                     file_ids=tuple(str(value) for value in list(payload.get("file_ids") or [])),
@@ -7975,9 +7890,25 @@ class Application:
                 )
                 for file, override in zip(files, file_overrides)
             ]
-        session = self._file_import_service.preview_files(imported_by=imported_by, uploads=files)
-        self._persist_import_preview_delta(session.id)
-        return self._json_response(HTTPStatus.OK, self._serialize_file_session(session))
+        try:
+            _session, job = self._import_workflow().register_files(
+                file_service=self._reload_file_import_runtime_state(), store=self._state_store,
+                owner=imported_by, uploads=files,
+                request_id=(fields.get("request_id") or [None])[0],
+            )
+        except ImportJobIdempotencyConflict as exc:
+            return self._json_response(HTTPStatus.CONFLICT, {
+                "error": "import_upload_conflict", "message": str(exc),
+            })
+        except ValueError as exc:
+            return self._json_response(HTTPStatus.BAD_REQUEST, {
+                "error": "invalid_import_upload", "message": str(exc),
+            })
+        except RuntimeError as exc:
+            return self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, {
+                "error": "import_preparation_unavailable", "message": str(exc),
+            })
+        return self._json_response(HTTPStatus.ACCEPTED, {"job": import_job_payload(job)})
 
     def _handle_import_file_confirm(self, body: str | bytes | None, *, owner_user_id: str) -> Response:
         payload, error = self._load_json_body(body)
@@ -8000,9 +7931,9 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_import_file_confirm_request", "message": "selected_file_ids cannot be empty."},
             )
-        self._reload_file_import_runtime_state()
         try:
-            session = self._file_import_service.get_session(normalized_session_id)
+            file_service = self._reload_file_import_runtime_state(normalized_session_id)
+            session = file_service.get_session(normalized_session_id)
         except KeyError as exc:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
@@ -8036,8 +7967,17 @@ class Application:
             )
         try:
             if any(item.id in selected and item.status == "preview_ready" for item in session.files):
-                self._file_import_service.assert_session_preview_current(session_id=normalized_session_id)
+                file_service.assert_session_preview_current(
+                    session_id=normalized_session_id, selected_file_ids=normalized_selected_file_ids,
+                )
         except ImportPreviewStaleError as exc:
+            current_job = self._import_workflow().session_job(normalized_session_id, owner_user_id, "file_import.confirm")
+            if current_job is not None and current_job.status == "awaiting_confirmation":
+                try:
+                    self._import_job_repository.mark_preview_needs_review(current_job.import_job_id, expected_version=current_job.version)
+                except ImportJobIdempotencyConflict:
+                    # Another request already advanced the same version.
+                    pass
             return self._json_response(
                 HTTPStatus.CONFLICT,
                 {
@@ -8052,73 +7992,31 @@ class Application:
                 HTTPStatus.CONFLICT,
                 {"error": "import_file_session_not_confirmable", "message": str(exc)},
             )
-        total = len(normalized_selected_file_ids)
-        label = ImportProcessingService.file_import_job_label(session, normalized_selected_file_ids)
-        selected_key = ",".join(sorted(normalized_selected_file_ids))
-        affected_import_domains, import_route = self._file_import_job_status_scope(
-            session,
-            normalized_selected_file_ids,
-        )
+        domains, route = self._file_import_job_status_scope(session, normalized_selected_file_ids)
         try:
-            job, created = self._background_job_service.create_or_get_idempotent_job_with_created(
-                job_type="file_import",
-                label=label,
-                owner_user_id=owner_user_id,
-                idempotency_key=f"file_import_session:{normalized_session_id}:{selected_key}",
-                phase="queued",
-                current=0,
-                total=total,
-                message=f"{label}任务已创建。",
-                result_summary={"confirmed": 0, "selected": total, "matching_results": 0},
-                source={
-                    "session_id": normalized_session_id,
-                    "selected_file_ids": normalized_selected_file_ids,
-                    "affected_domains": affected_import_domains,
-                    "route": import_route,
-                },
-                affected_scopes=["imports", "workbench"],
-            )
-        except BackgroundJobIdempotencyConflict as exc:
-            return self._json_response(
-                HTTPStatus.CONFLICT,
-                {"error": "import_idempotency_conflict", "message": str(exc)},
-            )
-        try:
-            import_job, event = self._enqueue_import_process_job(
-                import_type="file_import.confirm",
-                import_session_id=normalized_session_id,
-                idempotency_key=f"file_import.confirm:{normalized_session_id}:{selected_key}",
+            job = self._import_workflow().confirm(
+                session_id=normalized_session_id, owner=owner_user_id,
+                import_type="file_import.confirm", expected_version=payload.get("preview_version"),
                 payload={
                     "session_id": normalized_session_id,
                     "selected_file_ids": normalized_selected_file_ids,
                     "owner_user_id": owner_user_id,
-                    "background_job_id": job.job_id,
+                    "affected_domains": domains, "route": route,
+                    "label": ImportProcessingService.file_import_job_label(session, normalized_selected_file_ids),
+                    "total": len(normalized_selected_file_ids),
                 },
-                created_by=owner_user_id,
-                reason="file_import_confirm",
             )
-            job_payload = job.to_payload()
-            job_payload["import_job"] = self._serialize_import_job(import_job)
-            job_payload["event_id"] = getattr(event, "event_id", None)
-            response_payload = self._serialize_file_session(session)
-            response_payload["job"] = job_payload
-            return self._json_response(HTTPStatus.ACCEPTED, response_payload)
-        except ImportJobIdempotencyConflict as exc:
-            response_job = job
-            if created:
-                response_job = self._background_job_service.fail_job(job.job_id, "导入文件任务未启动。", str(exc))
-            return self._json_response(
-                HTTPStatus.CONFLICT,
-                {"error": "import_idempotency_conflict", "message": str(exc), "job": response_job.to_payload()},
-            )
+        except (ImportJobIdempotencyConflict, ValueError) as exc:
+            return self._json_response(HTTPStatus.CONFLICT, {
+                "error": "import_confirmation_conflict", "message": str(exc),
+            })
         except RuntimeError as exc:
-            response_job = job
-            if created:
-                response_job = self._background_job_service.fail_job(job.job_id, "导入文件任务未启动。", str(exc))
-            return self._json_response(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {"error": "import_queue_unavailable", "message": str(exc), "job": response_job.to_payload()},
-            )
+            return self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, {
+                "error": "import_queue_unavailable", "message": str(exc),
+            })
+        response_payload = self._serialize_file_session(session)
+        response_payload["job"] = import_job_payload(job)
+        return self._json_response(HTTPStatus.ACCEPTED, response_payload)
 
     @staticmethod
     def _file_import_job_status_scope(session, selected_file_ids: list[str]) -> tuple[list[str], str]:
@@ -8148,44 +8046,31 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        session_id = payload.get("session_id")
+        session_id = str(payload.get("session_id") or "").strip()
         selected_file_ids = payload.get("selected_file_ids")
         if not session_id or not isinstance(selected_file_ids, list):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_import_file_retry_request",
-                    "message": "session_id and selected_file_ids are required.",
-                },
-            )
-        self._reload_file_import_runtime_state()
+            return self._json_response(HTTPStatus.BAD_REQUEST, {
+                "error": "invalid_import_file_retry_request", "message": "session_id and selected_file_ids are required.",
+            })
         try:
-            self._file_import_service.assert_session_owner(
-                session_id=str(session_id),
-                imported_by=owner_user_id,
-            )
-            session = self._file_import_service.retry_session_files(
-                session_id=str(session_id),
+            file_service = self._reload_file_import_runtime_state(session_id)
+            job = self._import_workflow().revise_files(
+                file_service=file_service, store=self._state_store,
+                session_id=session_id, owner=owner_user_id,
                 selected_file_ids=[str(item) for item in selected_file_ids],
                 overrides=payload.get("overrides") if isinstance(payload.get("overrides"), dict) else None,
             )
         except KeyError as exc:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "import_file_session_not_found", "message": str(exc)},
-            )
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "import_file_session_not_found", "message": str(exc)})
         except PermissionError as exc:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "import_file_session_forbidden", "message": str(exc)},
-            )
+            return self._json_response(HTTPStatus.FORBIDDEN, {"error": "import_file_session_forbidden", "message": str(exc)})
+        except ImportJobIdempotencyConflict as exc:
+            return self._json_response(HTTPStatus.CONFLICT, {"error": "import_confirmation_conflict", "message": str(exc)})
         except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_import_file_retry_request", "message": str(exc)},
-            )
-        self._persist_import_preview_delta(session.id)
-        return self._json_response(HTTPStatus.OK, self._serialize_file_session(session))
+            return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "invalid_import_file_retry_request", "message": str(exc)})
+        except RuntimeError as exc:
+            return self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "import_queue_unavailable", "message": str(exc)})
+        return self._json_response(HTTPStatus.ACCEPTED, {"job": import_job_payload(job), "session_id": session_id})
 
     def _handle_import_file_discard(self, body: str | bytes | None, *, owner_user_id: str) -> Response:
         payload, error = self._load_json_body(body)
@@ -8193,55 +8078,25 @@ class Application:
             return error
         session_id = str(payload.get("session_id") or "").strip()
         if not session_id:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_import_file_discard_request", "message": "session_id is required."},
-            )
+            return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "invalid_import_file_discard_request", "message": "session_id is required."})
         try:
-            connection = getattr(self._state_store, "_connection", None)
-            if connection is not None:
-                ImportLifecycleService(PostgresImportLifecycleRepository(connection)).discard_session(
-                    session_id=session_id,
-                    imported_by=owner_user_id,
-                )
-                try:
-                    session = self._file_import_service.discard_session(
-                        session_id=session_id,
-                        imported_by=owner_user_id,
-                    )
-                except (KeyError, PermissionError, ValueError):
-                    # A different API process may own the in-memory preview. Keep the
-                    # PostgreSQL fact authoritative and only pay the snapshot reload
-                    # cost when this process cannot synchronize its local session.
-                    self._reload_file_import_runtime_state()
-                    session = self._file_import_service.get_session(session_id)
-            else:
-                session = self._file_import_service.discard_session(
-                    session_id=session_id,
-                    imported_by=owner_user_id,
-                )
-                self._persist_import_preview_delta(session.id)
+            file_service = self._reload_file_import_runtime_state(session_id)
+            session = self._import_workflow().discard_files(
+                file_service=file_service, store=self._state_store,
+                session_id=session_id, owner=owner_user_id,
+            )
         except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "import_file_session_not_found", "session_id": session_id},
-            )
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "import_file_session_not_found", "session_id": session_id})
         except PermissionError as exc:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "import_file_session_forbidden", "message": str(exc)},
-            )
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.CONFLICT,
-                {"error": "import_file_session_not_discardable", "message": str(exc)},
-            )
+            return self._json_response(HTTPStatus.FORBIDDEN, {"error": "import_file_session_forbidden", "message": str(exc)})
+        except (ValueError, ImportJobIdempotencyConflict) as exc:
+            return self._json_response(HTTPStatus.CONFLICT, {"error": "import_file_session_not_discardable", "message": str(exc)})
         return self._json_response(HTTPStatus.OK, self._serialize_file_session(session))
 
     def _handle_import_file_session(self, session_id: str, *, owner_user_id: str) -> Response:
-        self._reload_file_import_runtime_state()
         try:
-            session = self._file_import_service.assert_session_owner(
+            file_service = self._reload_file_import_runtime_state(session_id)
+            session = file_service.assert_session_owner(
                 session_id=session_id,
                 imported_by=owner_user_id,
             )
@@ -8255,7 +8110,11 @@ class Application:
                 HTTPStatus.FORBIDDEN,
                 {"error": "import_file_session_forbidden", "message": str(exc)},
             )
-        return self._json_response(HTTPStatus.OK, self._serialize_file_session(session))
+        result = self._serialize_file_session(session)
+        job = self._import_workflow().session_job(session_id, owner_user_id, "file_import.confirm")
+        if job is not None:
+            result["job"] = import_job_payload(job)
+        return self._json_response(HTTPStatus.OK, result)
 
     def _handle_import_file_review_rows(
         self,
@@ -8273,13 +8132,13 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_import_review_rows_request", "message": "offset and limit must be integers."},
             )
-        self._reload_file_import_runtime_state()
         try:
-            self._file_import_service.assert_session_owner(
+            file_service = self._reload_file_import_runtime_state(session_id)
+            file_service.assert_session_owner(
                 session_id=session_id,
                 imported_by=owner_user_id,
             )
-            payload = self._file_import_service.review_rows(
+            payload = file_service.review_rows(
                 session_id=session_id,
                 kind=kind,
                 offset=offset,
@@ -8302,31 +8161,17 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, self._serialize_value(payload))
 
-    def _reload_file_import_runtime_state(self) -> None:
+    def _reload_file_import_runtime_state(self, session_id: str | None = None) -> FileImportService:
+        """Build request-local state; never replace services shared by other requests."""
         if str(getattr(self._state_store, "storage_backend", "") or "").strip() != "postgres":
-            return
-        load_imports = getattr(self._state_store, "load_imports_snapshot", None)
-        load_file_imports = getattr(self._state_store, "load_file_imports_snapshot", None)
-        if not callable(load_imports) or not callable(load_file_imports):
-            raise RuntimeError("PostgreSQL file import runtime requires explicit import snapshot loaders.")
+            return self._file_import_service
+        snapshot = self._state_store.load_file_import_session_snapshot(session_id) if session_id else {}
         import_service = ImportNormalizationService.from_snapshot(
-            load_imports(),
-            id_registry=self._state_store,
-            fact_repository=getattr(self._state_store, "import_fact_repository", None),
+            snapshot.get("imports", {}), id_registry=self._state_store,
+            fact_repository=self._state_store.import_fact_repository,
         )
-        self._import_service = import_service
-        self._file_import_service = FileImportService.from_snapshot(
-            import_service,
-            load_file_imports(),
-            file_store=self._state_store,
-        )
-        self._manual_invoice_entry_service = ManualInvoiceEntryService(
-            file_import_service=self._file_import_service,
-            document_recognizer=self._invoice_document_recognizer,
-        )
-        self._manual_bank_transaction_entry_service = ManualBankTransactionEntryService(
-            file_import_service=self._file_import_service,
-            bank_account_mappings_provider=self._app_settings_service.get_bank_account_mappings_payload,
+        return FileImportService.from_snapshot(
+            import_service, snapshot.get("file_imports", {}), file_store=self._state_store,
         )
 
     def _parse_import_file_preview_overrides(
@@ -8688,19 +8533,22 @@ class Application:
             if callable(persist):
                 persist(snapshot)
 
-    def _persist_import_preview_delta(self, session_id: str) -> None:
+    def _persist_import_preview_delta(self, session_id: str, *, completion=None, result_payload=None) -> None:
         if self._state_store is None:
-            return
-        persist = getattr(self._state_store, "save_import_delta", None)
-        if not callable(persist):
-            raise RuntimeError("File import preview requires the import delta persistence port.")
-        persist(self._file_import_service.preview_session_persistence_payload(session_id))
+            raise RuntimeError("Import preview requires a configured persistence store.")
+        payload = self._file_import_service.preview_session_persistence_payload(session_id)
+        if completion is not None:
+            self._state_store.save_import_preview_with_completion(payload, completion=completion, result_payload=result_payload)
+        else:
+            self._state_store.save_import_delta(payload)
 
     def _persist_confirmed_import_delta(
         self,
         *,
         import_state_payload: dict[str, object],
         scope_months: list[str],
+        completion=None,
+        result_payload: dict[str, object] | None = None,
     ) -> dict[str, object]:
         if self._state_store is not None:
             payload = dict(import_state_payload or {})
@@ -8718,6 +8566,8 @@ class Application:
             result = dict(
                 persist(
                     payload,
+                    completion=completion,
+                    result_payload=result_payload,
                     scope_months=list(scope_months or []),
                     promotion_mode=(
                         self._app_settings_service.get_oa_attachment_invoice_promotion_mode()

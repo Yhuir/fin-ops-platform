@@ -1,3 +1,4 @@
+import { waitForImportPreparation, fetchImportTaskResult, type ImportPreparationAccepted } from "../imports/preparation";
 import { mapBackgroundJob, type ApiBackgroundJob } from "../backgroundJobs/api";
 import { apiUrl } from "../../app/runtime";
 import { apiFetchResolved } from "../apiClient";
@@ -1617,22 +1618,24 @@ export async function deleteEtcBusinessBatch(
   });
 }
 
-export async function previewEtcZipFiles(files: File[], taskId?: string): Promise<EtcImportPreviewResult> {
+export async function previewEtcZipFiles(files: File[], taskId?: string, requestId: string = crypto.randomUUID()): Promise<EtcImportPreviewResult> {
   const formData = new FormData();
+  formData.append("request_id", requestId);
   files.forEach((file) => formData.append("files", file));
   if (taskId) {
     formData.append("task_id", taskId);
   }
-  const payload = await requestJson<ApiEtcImportSummary>("/api/etc/import/preview", {
+  const payload = await requestJson<ImportPreparationAccepted>("/api/etc/import/preview", {
     method: "POST",
     body: formData,
     timeoutMs: ETC_FILE_UPLOAD_TIMEOUT_MS,
     timeoutMessage: "ETC zip 上传或预览超时，请检查网络后重试，或分批上传较大的 zip 文件。",
   });
-  return mapEtcImportResult(payload);
+  const job = await waitForImportPreparation(payload);
+  return fetchEtcImportPreview(job.jobId);
 }
 
-export async function confirmEtcImportSession(sessionId: string, taskId?: string): Promise<EtcImportConfirmResult> {
+export async function confirmEtcImportSession(sessionId: string, taskId?: string, previewVersion?: number): Promise<EtcImportConfirmResult> {
   const payload = await requestJson<ApiEtcImportSummary>("/api/etc/import/confirm", {
     method: "POST",
     headers: {
@@ -1640,6 +1643,7 @@ export async function confirmEtcImportSession(sessionId: string, taskId?: string
     },
     body: JSON.stringify({
       sessionId,
+      ...(previewVersion !== undefined ? { preview_version: previewVersion } : {}),
       ...(taskId ? { taskId } : {}),
     }),
     timeoutMs: ETC_IMPORT_CONFIRM_TIMEOUT_MS,
@@ -1663,4 +1667,10 @@ export async function reparseEtcSource(taskId: string, fileId: string, expectedV
     `/api/etc/reconciliation-tasks/${encodeURIComponent(taskId)}/source-files/${encodeURIComponent(fileId)}/reparse`,
     { method: "POST", body: JSON.stringify({ expectedVersion }) },
   ));
+}
+
+export async function fetchEtcImportPreview(jobId: string): Promise<EtcImportPreviewResult> {
+  const { job, result } = await fetchImportTaskResult<{ preview: ApiEtcImportSummary }>(jobId);
+  if (!result.preview) throw new Error("ETC 任务尚未准备完成，请查看进度。");
+  return { ...mapEtcImportResult(result.preview), job };
 }

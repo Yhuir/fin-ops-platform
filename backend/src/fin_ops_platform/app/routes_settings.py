@@ -15,6 +15,7 @@ from fin_ops_platform.services.app_settings_service import (
     AppSettingsValidationError,
 )
 from fin_ops_platform.services.background_job_service import BackgroundJobAccessError, BackgroundJobNotFoundError
+from fin_ops_platform.services.import_workflow_service import import_job_payload
 from fin_ops_platform.services.oa_applicant_credentials import (
     OaApplicantCredentialConfigurationError,
     OaApplicantCredentialError,
@@ -80,8 +81,7 @@ class SettingsApiRoutes:
         request_data_reset: DataResetRequester,
         serialize_sync_run: Callable[[object], dict[str, object]],
         serialize_data_reset_background_job: Callable[[Any], dict[str, object]],
-        import_job_processing_enabled: Callable[[], bool],
-        enqueue_import_process_job: Callable[..., tuple[Any, Any]],
+        enqueue_import_process_job: Callable[..., Any],
         serialize_import_job: Callable[[Any], dict[str, object]],
         manual_import_affected_scope_keys: Callable[[dict[str, object], list[str]], list[str]],
         manual_import_affected_scope_payload: Callable[[list[str]], dict[str, object]],
@@ -105,7 +105,6 @@ class SettingsApiRoutes:
         self._request_data_reset = request_data_reset
         self._serialize_sync_run = serialize_sync_run
         self._serialize_data_reset_background_job = serialize_data_reset_background_job
-        self._import_job_processing_enabled = import_job_processing_enabled
         self._enqueue_import_process_job = enqueue_import_process_job
         self._serialize_import_job = serialize_import_job
         self._manual_import_affected_scope_keys = manual_import_affected_scope_keys
@@ -645,32 +644,29 @@ class SettingsApiRoutes:
             else str(payload.get("actor_id") or payload.get("actor") or "workbench_settings").strip()
         )
         normalized_actor_id = actor_id or "workbench_settings"
-        if self._import_job_processing_enabled():
-            try:
-                import_job, event = self._enqueue_import_process_job(
-                    import_type="oa_manual_import.create",
-                    import_session_id=",".join(sorted(row_ids)),
-                    idempotency_key=f"oa_manual_import.create:{normalized_actor_id}:{','.join(sorted(row_ids))}",
-                    payload={"row_ids": row_ids, "actor_id": normalized_actor_id},
-                    created_by=normalized_actor_id,
-                    reason="oa_manual_import_create",
-                )
-            except RuntimeError as exc:
-                return self._json_response(
-                    HTTPStatus.SERVICE_UNAVAILABLE,
-                    {"error": "import_queue_unavailable", "message": str(exc)},
-                )
-            return self._json_response(
-                HTTPStatus.ACCEPTED,
-                {
-                    "status": "queued",
-                    "import_job": self._serialize_import_job(import_job),
-                    "event_id": getattr(event, "event_id", None),
-                },
+        owner_user_id = str(session.identity.username) if session is not None else normalized_actor_id
+        try:
+            import_job = self._enqueue_import_process_job(
+                import_type="oa_manual_import.create",
+                import_session_id=",".join(sorted(row_ids)),
+                idempotency_key=f"oa_manual_import.create:{owner_user_id}:{','.join(sorted(row_ids))}",
+                payload={"row_ids": row_ids, "actor_id": normalized_actor_id},
+                created_by=owner_user_id,
+                reason="oa_manual_import_create",
             )
-        result = service.import_row_ids(row_ids, actor_id=normalized_actor_id)
-        self._add_manual_import_affected_scopes(result, row_ids=row_ids)
-        return self._json_response(HTTPStatus.OK, result)
+        except RuntimeError as exc:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "import_queue_unavailable", "message": str(exc)},
+            )
+        return self._json_response(
+            HTTPStatus.ACCEPTED,
+            {
+                "status": "queued",
+                "import_job": self._serialize_import_job(import_job),
+                "job": import_job_payload(import_job),
+            },
+        )
 
     def delete_oa_manual_import(
         self,

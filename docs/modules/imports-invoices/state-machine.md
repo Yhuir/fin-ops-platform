@@ -1,82 +1,36 @@
-# 发票导入状态机
+# 发票导入状态与恢复
 
-> 修改 `发票导入` 相关业务状态、UI 状态、read model 状态或 worker 状态前必须读取本文件。
+## 当前执行合同（2026-09-21）
 
-## 业务状态
+导入执行的唯一事实源是 `job.import_jobs`。上传完成只说明原件和草稿登记完成；prepare 完成只说明逐项预览可读；正式 facts、来源、批次行和 job 成功必须在一个数据库事务中提交。
 
-### FileImportSession
-
-事实源：`FileImportService` session snapshot，API 输出由 `/imports/files/*` 返回。
-
-| 状态 | 含义 | 允许流转 |
+| 阶段/状态 | 含义 | 用户操作 |
 | --- | --- | --- |
-| `files_selected` | 前端本地状态，用户已选择一个或多个文件 | `files_configured`、清空 |
-| `files_configured` | 每个文件已选择 `input_invoice` 或 `output_invoice` | `previewing`、清空 |
-| `manual_editing` | 单张人工录入表单可编辑；附件识别仅为可选预填 | `manual_previewing`、清空 |
-| `manual_previewing` | 服务端正在校验人工字段、查重并创建普通 file import preview | `preview_ready`、`error` |
-| `previewing` | 前端正在调用 `/imports/files/preview` | `preview_ready`、`preview_ready_with_errors`、`error`、unmount cleanup |
-| `preview_ready` | 所有可识别文件生成 preview batch，可选择确认 | `confirming`、重新预览、清空 |
-| `preview_ready_with_errors` | 至少一个文件不可识别或存在 file-level error | 可确认其中 `preview_ready` 文件，或重试/重新预览 |
-| `reverted` | 用户在确认前显式放弃预览，file/session/pending preview batch 已在服务端终结 | 终态；可重新上传新文件，不可 retry/confirm |
-| `preview_stale` | 后端检测当前 preview 与最新发票事实不一致 | 只能重新预览 |
-| `confirming` | 前端已提交确认，等待同步结果或 job | `queued`、`confirmed`、`error` |
-| `queued` | 确认交给 `file_import` background job；发票文件确认 job 的 App Status domain 为 `imports_invoices`、route 为 `/imports/invoices` | `processing`、`failed`、轮询 |
-| `processing` | import worker 正在处理确认 | `confirmed`、`failed` |
-| `confirmed` | 选中文件已确认，发票事实写入或已幂等确认 | 下游 read model 仍需 freshness 判断 |
-| `skipped` | 未选中文件或没有可确认 preview batch | 终态，可重新上传 |
-| `failed` | job 或同步确认失败 | 可重试或重新预览，不能把旧结果当 fresh |
+| `prepare / pending` | 原件和 session 已登记，等待解析 | 查看进度；可以离开页面 |
+| `prepare / processing` | worker 读取已归档原件并解析 | 等待同一任务，禁止猜测导入成功 |
+| `awaiting_confirmation` | 预览已持久化，正式事实未写入 | 查看逐项新增/重复/错误，选择本次范围 |
+| `needs_review` | 字段、身份、财务或预览版本发生需复核的问题 | 修改映射/选择并重新预览 |
+| `commit / pending` | 已确认的精确选择范围待执行 | 重复确认返回同一意图 |
+| `commit / processing` | 短业务事务正式提交 | 查询同一任务；取消与提交由事务判定 |
+| `succeeded` | 正式数据与结果已一并提交 | 显示实际新增/更新/重复数量 |
+| `failed` | 无成功结果；错误和重试范围可读 | 可恢复故障重试原意图；业务冲突重新复核 |
+| `canceled` | 确认的取消已生效 | 不将取消误报为导入成功 |
 
-### 发票事实与生命周期
+文件/session 的 `uploaded / preview_ready / preview_ready_with_errors / confirmed` 仅描述原件和预览业务状态，不再另设 background job 执行事实。未选择文件保留 `preview_ready`，不能被其它文件成功标成 confirmed 或 skipped。一个选择范围内有错误/疑似行时，整个范围不写事实；正常重复不是错误。
 
-- `input_invoice` / `output_invoice` batch type 是导入事实方向，不能在 confirm 后被前端随意改写。
-- 发票 source links、canonical invoice identity、duplicate decisions 由 `ImportNormalizationService` 决定。
-- `invoice_import_confirmed` 是 derived lifecycle 入口，必须先覆盖 `invoice_lifecycle`，再影响待找发票、税金、进项/销项/OA 待付款、成本统计和搜索。
-- job 成功只代表导入写入完成，不代表下游页面 fresh。
+确认时复核只加载当前 session 的批次和相关身份候选。同一强身份刚被别的导入合法创建，可以转为重复并返回实际计数；身份指向漂移、财务冲突或扩大写集仍需复核。worker 在业务写入前锁定任务的领取者和 claim version；旧进程不可提交。失败后从持久化草稿恢复，不从旧进程全量状态补写。
 
-## 禁止流转
+## 不允许的旧路径
 
-- 未选择每文件 `batch_type` 时不得预览发票导入。
-- `unrecognized_template` / file-level error 文件不得被当作 confirmed。
-- `preview_stale` 不得继续 confirm；必须重新预览。
-- `queued` / `processing` 不得向下游页面报告 fresh。
-- `confirmed` 后不得绕过 lifecycle/dirty scope 直接让下游 read model 复用旧 cache。
-- 任一其它 session 的 preview/retry 不得把已 `confirmed` 的 file/session 或已完成 batch 降级回 `preview_ready` / `pending`。
-- unknown selected file ids 必须失败，不能静默忽略。
-- session GET/review/retry/confirm/discard 必须校验当前认证用户 owner；已 `reverted`、已确认或有活跃/成功 job 的会话不得放弃或再次确认。
+- 不按已确认文件 SHA 拒绝整文件；每次主动重传都按业务项比较当前池。
+- 不创建导入专用 `import.process.requested` 事件，不使用双租约或第二份 background job 结果。
+- 不把 valid 行先提交、error 行跳过后显示整批成功。
+- 不在预览、清理草稿、较小的全量文件或文件删除时删除 canonical 事实。
+- 不将下游页面刷新任务当作事实提交成功的前提。页面按其 owner 的 canonical 查询读取；必要匹配任务保留既有边界。
 
-## UI 状态
+## 验证
 
-- loading：文件 preview、confirm、job polling、session restore 时显示当前导入动作；卸载后不得保留 in-flight 状态污染新路由。
-- empty：未选择文件时不能显示可确认状态。
-- error：文件读取失败、模板不识别、权限/API 错误、job failure 必须有用户可见反馈。
-- stale/refreshing：`preview_stale` 显示重新预览提示；下游页面 stale/refreshing 由各自 read model status 呈现。
-- permission disabled/hidden：当前导入写权限由后端 contract 决定；若未来增加前端权限显示，必须补隐藏/禁用交互测试。
-- manual entry：只读账号不显示入口；识别、预览、返回编辑和确认期间锁定关闭。返回编辑必须先成功 discard 服务端预览；确认弹窗只读且最终确认仍走普通 file confirm job。
-- fresh session：每次页面激活都清空文件、方向、preview 和反馈，不从 sessionStorage 或服务端活跃 session 列表恢复；离开页面后才完成的 preview 响应必须丢弃。清空已预览内容必须先成功调用 discard，再清理本地状态；discard 失败时保留预览。
-
-## Read Model / Worker 状态
-
-| 状态 | 事实源 | UI/调用方语义 |
-| --- | --- | --- |
-| `fresh` | 下游 read model source_versions 与发票事实匹配 | 页面可展示并允许对应写入 |
-| `missing` | read model scope 不存在 | API 应 enqueue refresh 并返回 refreshing/missing 语义 |
-| `refreshing` | dirty scope/job 已排队或处理中 | 页面显示刷新中，不能把旧数据当最终结果 |
-| `stale` | source_versions 或 dirty scope 表明旧数据 | 页面禁用依赖 fresh 的写入，提示刷新 |
-| `failed` | worker/job/readiness 失败 | App Status/App Health 应暴露阻塞或 busy 详情 |
-| `unavailable` | durable queue、repository 或 worker plane 不可用 | 不能用 Redis/RabbitMQ cache 伪造 fresh |
-
-刷新触发来源：
-
-- `invoice_import_confirmed`
-- `tax_certified_import_confirmed`
-- canonical `pair_relation_changed` 相关下游 source-version/read-model 链路；不包含前端跨页事件
-- `startup_stale_scan` 默认关闭，且不直接刷新发票相关 read model；它只标记 workbench matching dirty scopes。
-
-失败恢复：
-
-- import job failure 通过 background job 状态和 App Status 暴露。
-- 下游 read model failure 由对应 worker/readiness 负责，导入页不能替下游页面做 fresh 判定。
-- 重新预览可恢复 `preview_stale`，但不能修复 worker/read model failed。
+`tests/test_import_closed_loop.py` 覆盖注册不解析、跨进程草稿恢复、原子选择范围、未选择文件、真实 PostgreSQL 提交/回滚/领取版本隔离。解析与计数见 `test_import_file_service.py`、`test_import_service.py`、`test_import_preview_audit.py`；API/页面/worker 回归由各 owner 维护。
 
 ## 变更记录
 

@@ -56,7 +56,8 @@ test.describe("workbench relation browser flow", () => {
     const item = owner.expense_items[0];
     owner.amount = item.amount = "71.00";
     delete group.workbench_anomaly;
-    group.invoice_rows = ["23.00", "25.00", "23.00"].map((amount, index) => ({
+    // Three existing invoices total 70, leaving an explicit 1 yuan shortage.
+    group.invoice_rows = ["23.00", "25.00", "22.00"].map((amount, index) => ({
       id: `multi-invoice-${index}`, type: "invoice", invoice_type: "input", status: "active",
       case_id: owner.case_id, amount, total_with_tax: amount, invoice_no: `TEST-MULTI-${index}`,
       seller_name: "测试销方", buyer_name: "测试购方", source_kind: "oa_attachment_invoice",
@@ -68,7 +69,7 @@ test.describe("workbench relation browser flow", () => {
     const segment = page.getByTestId(`candidate-group-segment-unpaired-${group.group_id}-${item.id}`);
     await expect(segment.locator(".record-card-invoice")).toHaveCount(3);
     await expect(segment.getByRole("button", { name: "更改归属" })).toHaveCount(0);
-    await segment.getByRole("button", { name: "继续录入 71 元付款项发票" }).click();
+    await segment.getByRole("button", { name: "录入发票 71 元付款项", exact: true }).click();
     const drawer = page.getByRole("dialog", { name: "录入发票" });
     await expect(drawer).toBeVisible();
     await drawer.getByRole("button", { name: "添加发票" }).click();
@@ -162,9 +163,8 @@ test.describe("workbench relation browser flow", () => {
     expect(invoicePaneBox).not.toBeNull();
     expect(invoiceRowBox).not.toBeNull();
     expect(Math.abs((invoicePaneBox?.height ?? 0) - (oaItemPaneBox?.height ?? 0))).toBeLessThanOrEqual(2);
-    const entryFooterBox = await invoicePane.locator(".workbench-invoice-entry-footer").boundingBox();
-    expect(entryFooterBox).not.toBeNull();
-    expect(Math.abs((invoiceRowBox?.height ?? 0) + (entryFooterBox?.height ?? 0) - (invoicePaneBox?.height ?? 0))).toBeLessThanOrEqual(2);
+    await expect(invoicePane.getByRole("button", { name: /录入发票/ })).toHaveCount(0);
+    expect(Math.abs((invoiceRowBox?.height ?? 0) - (invoicePaneBox?.height ?? 0))).toBeLessThanOrEqual(2);
 
     const compositeBand = page.getByTestId(
       "candidate-group-segment-unpaired-row:oa-exp-2035-oa-exp-2035:item:2",
@@ -190,9 +190,9 @@ test.describe("workbench relation browser flow", () => {
     expect(compositeInvoiceBox).not.toBeNull();
     expect(compositeInvoiceRowBoxes).toHaveLength(2);
     expect(Math.abs((compositeInvoiceBox?.height ?? 0) - (compositeOaBox?.height ?? 0))).toBeLessThanOrEqual(2);
+    await expect(compositeInvoicePane.getByRole("button", { name: /录入发票/ })).toHaveCount(0);
     expect(Math.abs(
       compositeInvoiceRowBoxes.reduce((height, row) => height + row.height, 0)
-      + (await compositeInvoicePane.locator(".workbench-invoice-entry-footer").boundingBox())!.height
       - (compositeInvoiceBox?.height ?? 0),
     )).toBeLessThanOrEqual(4);
 
@@ -230,7 +230,8 @@ test.describe("workbench relation browser flow", () => {
     await expect(residualInvoice.getByText("人工导入", { exact: true })).toHaveCount(1);
     await expect(residualInvoice.getByText("导入记录", { exact: true })).toHaveCount(0);
     await expect(residualInvoice.getByText("明细归属", { exact: true })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "录入发票" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "录入发票", exact: true })).toHaveCount(0);
+    await expect(explicitSegment.getByRole("button", { name: "录入发票 531.92 元付款项", exact: true })).toBeVisible();
 
     const anomalyTrigger = residualSegment.getByRole("button", {
       name: "该发票有 1 项异常，查看详情",
@@ -296,9 +297,8 @@ test.describe("workbench relation browser flow", () => {
     await expect(assignedInvoicePane.getByText("193.92", { exact: true })).toHaveCount(1);
     await expect(assignedInvoicePane.getByText("338.00", { exact: true })).toHaveCount(1);
     await expect(assignedManualInvoice.getByRole("button", { name: "更改归属" })).toHaveCount(0);
-    await assignedInvoicePane.getByRole("button", { name: "继续录入 531.92 元付款项发票" }).click();
-    await expect(page.getByRole("dialog", { name: "录入发票" })).toBeVisible();
-    await page.getByRole("button", { name: "关闭录入发票" }).click();
+    // Both owned invoices now exactly cover 531.92, so no append entry remains.
+    await expect(assignedInvoicePane.getByRole("button", { name: /录入发票/ })).toHaveCount(0);
 
     await expect(assignedAttachmentInvoice.getByText("OA附件", { exact: true })).toHaveCount(1);
     await expect(assignedAttachmentInvoice.getByText("人工导入", { exact: true })).toHaveCount(0);

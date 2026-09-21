@@ -1,17 +1,15 @@
-from io import BytesIO
 import unittest
-from zipfile import ZipFile
+from io import BytesIO
 from unittest.mock import Mock, patch
+from zipfile import ZipFile
 
 import fitz
-from PIL import Image
-
 from fin_ops_platform.services.oa_attachment_invoice_service import (
     OAAttachmentInvoiceService,
     OAAttachmentOCRRuntimeError,
 )
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
-
+from PIL import Image
 
 PNG_INVOICE_TEXT = """
 云南增值税电子普通发票
@@ -666,6 +664,12 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         self.assertEqual(invoice["total_with_tax"], "292.00")
         self.assertEqual(invoice["tax_rate"], "1%")
 
+    def test_explicit_financial_labels_preserve_net_and_tax_order(self):
+        service = OAAttachmentInvoiceService()
+        self.assertEqual(service._extract_amount_summary("金额¥3.67税额¥0.33(小写)4.00"), ("3.67", "0.33", "4.00"))
+        self.assertEqual(service._extract_amount_summary("税额¥0.33金额¥3.67(小写)4.00"), ("3.67", "0.33", "4.00"))
+        self.assertIsNone(service._extract_amount_summary("¥0.33¥3.67(小写)4.00"))
+
     def test_parse_invoice_text_accepts_railway_e_ticket_invoice_amount_layout(self) -> None:
         service = OAAttachmentInvoiceService()
 
@@ -677,8 +681,8 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         self.assertEqual(invoice["issue_date"], "2026-02-04")
         self.assertEqual(invoice["buyer_name"], "云南溯源科技有限公司")
         self.assertEqual(invoice["buyer_tax_no"], "915300007194052520")
-        self.assertEqual(invoice["net_amount"], "38.00")
-        self.assertEqual(invoice["tax_amount"], "0.00")
+        self.assertEqual(invoice["net_amount"], "")
+        self.assertEqual(invoice["tax_amount"], "")
         self.assertEqual(invoice["total_with_tax"], "38.00")
         self.assertEqual(invoice["invoice_kind"], "电子发票（铁路电子客票）")
 
@@ -691,8 +695,8 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         assert invoice is not None
         self.assertEqual(invoice["invoice_no"], "26539150014000355216")
         self.assertEqual(invoice["issue_date"], "2026-06-08")
-        self.assertEqual(invoice["net_amount"], "145.00")
-        self.assertEqual(invoice["tax_amount"], "0.00")
+        self.assertEqual(invoice["net_amount"], "")
+        self.assertEqual(invoice["tax_amount"], "")
         self.assertEqual(invoice["total_with_tax"], "145.00")
 
     def test_parse_invoice_text_accepts_ocr_y_as_currency_marker(self) -> None:

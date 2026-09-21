@@ -229,18 +229,20 @@ class OAManualImportApiTests(unittest.TestCase):
             "/api/workbench/settings/oa/manual-imports",
             json.dumps({"row_ids": ["oa-exp-1981", "oa-pay-2048"], "actor_id": "tester"}),
         )
+        app._import_job_repository.process_all()
         second = app.handle_request(
             "POST",
             "/api/workbench/settings/oa/manual-imports",
             json.dumps({"row_ids": ["oa-exp-1981"], "actor_id": "tester"}),
         )
 
-        self.assertEqual(first.status_code, 200)
-        first_payload = json.loads(first.body)
+        self.assertEqual(first.status_code, 202)
+        app._import_job_repository.process_all()
+        first_payload = app._import_job_repository.get_job(json.loads(first.body)["import_job"]["import_job_id"]).result_payload
         self.assertEqual(first_payload["imported"], ["oa-exp-1981"])
         self.assertEqual(first_payload["failed"][0]["code"], "not_completed")
         self._assert_oa_manual_targets(first_payload, month="2025-12")
-        self.assertEqual(json.loads(second.body)["already_imported"], ["oa-exp-1981"])
+        self.assertEqual(app._import_job_repository.get_job(json.loads(second.body)["import_job"]["import_job_id"]).result_payload["already_imported"], ["oa-exp-1981"])
         self.assertEqual(workbench.synced_row_ids, [["oa-exp-1981"], ["oa-exp-1981"]])
 
     def test_list_and_delete_manual_imports_endpoint_removes_marker_and_invalidates(self) -> None:

@@ -12,9 +12,9 @@
 | --- | --- | --- |
 | `draft` / `reviewing` | 对账任务仍在编辑或复核 | 不能作为 ETC zip 导入任务 |
 | `ready_for_import` / confirmed task | 对账已确认，具备 `confirmed_item_set_hash` | 可在 `/imports/etc-invoices` 中选择并预览 zip |
-| `importing` | ETC import confirm 已开始，任务被锁定 | 不允许重复 preview/confirm；等待 job |
+| 历史 `importing` | 旧链路中间状态；新链路处理进度由 job 表达 | 新提交保持 ready，成功事务一次推进 imported |
 | `imported` | 导入成功，绑定 import batch/business batch | 不能重复导入，除非先移除已导入发票 |
-| `import_failed` / ready retry | confirm job 失败或 partial success | 可按当前 task/version/hash 重新预览或重试 |
+| 历史 `import_failed` | 旧链路失败状态；新失败不改变正式 task | 当前 job 为 failed/needs_review，按同意图重试或显式重新预览 |
 | `closed` / `deleted` | 任务关闭或本地删除 | 不能导入 |
 
 ### Zip Preview
@@ -31,7 +31,7 @@
 | `discarding` | owner 对当前 session 调用 `/api/etc/import/discard` | 成功进入 `fresh`；失败保留 `preview_ready` 便于用户重试 |
 | `reverted` | 未确认 session 已被 owner 幂等放弃 | 服务端终态，不可 confirm；页面展示为 `fresh` |
 | `preview_blocked` | 缺少必要 ETC 发票、匹配歧义或无 allowlist | 不能 confirm；需要修正 task/source/zip |
-| `preview_stale` | canonical invoice 或 import session 已变化 | 只能重新预览 |
+| `preview_stale` | ETC identity、import session 或 task 版本已变化 | 只能重新预览 |
 | `task_preview_stale` | task version/hash/source facts 已变化 | 清空 preview，重新读取 task 后再 preview |
 
 ### Confirm / Job
@@ -39,11 +39,11 @@
 | 状态 | 含义 | 允许流转 |
 | --- | --- | --- |
 | `confirming` | 前端从 durable session 校验后提交 `/api/etc/import/confirm` | `queued`、`error`；不修改 task、不 inline |
-| `queued` | `job.import_jobs` 与 `import.process.requested` 已登记；App Status domain 为 `imports_etc_invoices` + `etc_tickets` | `processing`、`failed`、可轮询 |
-| `processing` | worker 幂等执行 task `begin_import`，重载原始 ZIP 并确定性过滤后写入 | `succeeded`、`partial_success`、`failed` |
+| `queued` | 同一 `job.import_jobs` 已确认进入 commit；App Status domain 为 `imports_etc_invoices` + `etc_tickets` | `processing`、`failed`、可轮询 |
+| `processing` | worker 读取持久化 manifest，准备附件后短事务原子提交 | `succeeded`、`needs_review`、`failed` |
 | `succeeded` | 所有匹配发票导入成功，task 标记 imported | downstream refreshing |
-| `partial_success` | 部分 item 失败，task 标记 import failed 可重试 | 保留错误，允许重试 |
-| `failed` | job 或 service 失败 | task 标记 import failed，不能把旧 preview 当 fresh |
+| 历史 `partial_success` | 仅历史展示；新链路不产生部分正式成功 | 按当前事实重新预览 |
+| `failed` | job 或 service 失败 | 正式 task 保持提交前状态；瞬时错误重试同意图，数据冲突显式重新预览 |
 
 ### ETC Business Batch / OA Manual Status
 
@@ -97,8 +97,8 @@ ETC zip confirm 会创建或复用 task-scoped business batch。后续状态主�
 
 失败恢复：
 
-- ETC import job failure 通过 background job 和 reconciliation task `import_failed` 暴露。
-- `partial_success` 需要保留失败 item，允许用户按当前 task 重新预览或重试。
+- ETC import job failure 由 `job.import_jobs` 公开；正式 task 不写中间失败状态。
+- 历史 `partial_success` 继续展示；新链路整批回滚。`needs_review` 的显式重新预览读取原件并绑定当前 task version/hash，再由用户确认；自动重试不得扩大已确认范围。
 - 下游 read model failure 由对应 worker/readiness 负责，ETC 导入页不能替下游页面做 fresh 判定。
 
 ## 变更记录
@@ -109,3 +109,7 @@ ETC zip confirm 会创建或复用 task-scoped business batch。后续状态主�
 | 2026-06-16 | 补齐 ETC 导入 confirm job 的 App Status metadata contract | `etc_invoice_import` job source 保留 task/domain/route，导入页和 ETC 票据页都能被全局状态标记为受影响域 | `tests/test_etc_backend.py::EtcApiTests::test_etc_confirm_returns_background_job_and_imports_asynchronously`、`tests/test_app_status_overview_service.py`、`web/src/test/AppStatusIndicator.test.tsx` |
 | 2026-06-11 | 首轮补齐 ETC 发票导入状态机 | 明确 task/zip preview/confirm job/business batch/read model 状态边界 | `tests/test_etc_backend.py`、`tests/test_etc_reconciliation_service.py`、`web/src/test/ImportCenterPage.test.tsx`、`bash scripts/verify.sh docs` |
 | 2026-07-05 | 移除 runtime canonical cleanup surface | 删除/重导链路只清理 ETC 自有事实，历史 canonical 污染改走 invoice-pool cleanup 运维链路 | `tests/test_etc_reconciliation_import_cleanup_service.py`、`tests/test_etc_business_batch_delete_service.py`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_etc_paths_do_not_call_legacy_canonical_sync_helpers` |
+
+## 2026-09-21 执行状态补充
+
+`preparing` session 与 prepare job 同事务登记；prepare 完成转 `preview_ready`，job 进入 awaiting_confirmation 或 needs_review。用户确认后同一 job 进入 commit pending/processing。session、reconciliation task imported 与 job succeeded 仅在正式事务成功时一起发布；失败时正式 task 保持原状态，由 canonical job 显示错误。确认 metadata 校验零原件读取；旧版本没有 prepared manifest 的 session 明确要求新预览，不走旧解析兜底。

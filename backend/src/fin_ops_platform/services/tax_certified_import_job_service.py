@@ -6,16 +6,23 @@ from fin_ops_platform.services.import_job_queue import ImportJob
 
 
 class TaxCertifiedImportJobService:
-    def __init__(self, *, import_job_repository_provider: Callable[[], Any]) -> None:
+    def __init__(self, *, import_job_repository_provider: Callable[[], Any], session_owner_provider: Callable[[str], str] | None = None) -> None:
         self._import_job_repository_provider = import_job_repository_provider
+        self._session_owner_provider = session_owner_provider
 
-    def get_confirm_job_payload(self, import_job_id: str) -> dict[str, Any]:
+    def validate_session_owner(self, session_id: str, *, owner_user_id: str) -> None:
+        if self._session_owner_provider is None:
+            raise RuntimeError("Tax import session ownership reader is not configured.")
+        if self._session_owner_provider(session_id) != owner_user_id:
+            raise KeyError(session_id)
+
+    def get_confirm_job_payload(self, import_job_id: str, *, owner_user_id: str) -> dict[str, Any]:
         normalized_import_job_id = str(import_job_id or "").strip()
         if not normalized_import_job_id:
             raise ValueError("import_job_id is required.")
         repository = self._import_job_repository_provider()
         import_job = repository.get_job(normalized_import_job_id)
-        if import_job is None or import_job.import_type != "tax_certified_import.confirm":
+        if import_job is None or import_job.import_type != "tax_certified_import.confirm" or import_job.created_by != owner_user_id:
             raise KeyError(normalized_import_job_id)
         return self.serialize_import_job(import_job)
 

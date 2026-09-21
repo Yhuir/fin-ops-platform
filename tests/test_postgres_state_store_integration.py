@@ -5,6 +5,7 @@ import unittest
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
+from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -25,7 +26,13 @@ from fin_ops_platform.services.etc_service import (
     EtcInvoiceStatus,
     EtcService,
 )
-from fin_ops_platform.services.import_file_service import FileImportPreviewItem, FileImportService, FileImportSession
+from fin_ops_platform.services.import_file_service import (
+    FileImportPreviewItem,
+    FileImportService,
+    FileImportSession,
+    UploadedImportFile,
+)
+from fin_ops_platform.services.import_job_queue import ImportJobRepository
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.postgres_connection import (
     PostgresConnection,
@@ -694,25 +701,43 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
         )
 
     def test_import_file_metadata_writes_file_object_and_import_file(self) -> None:
-        stored_path = self.store.store_import_file(
-            session_id="session-1",
-            file_id="file-1",
-            file_name="bank.xlsx",
-            content=b"file-bytes",
-        )
-
+        files = FileImportService(ImportNormalizationService(), file_store=self.store)
+        session = files.register_uploads(imported_by="YNSYLP005", uploads=[
+            UploadedImportFile(file_name="bank.xlsx", content=b"file-bytes"),
+        ])
+        item = session.files[0]
+        stored_path = item.stored_file_path
         self.assertEqual(self.store.read_import_file(stored_path), b"file-bytes")
-        self.assertEqual(fetch_scalar(self.database_url, "select count(*) from app.file_objects where legacy_mongo_id = 'file-1';"), "1")
-        self.assertEqual(
-            fetch_scalar(
-                self.database_url,
-                "select count(*) from app.import_files where legacy_mongo_id = 'file-1' and file_object_id is not null;",
-            ),
-            "1",
+        original = self.connection.fetch_one(
+            "select id, sha256, size_bytes, storage_uri from app.file_objects where legacy_mongo_id=%s",
+            (item.id,),
         )
-        self.assertTrue(self.store.import_file_exists("file-1"))
+        self.assertEqual(original["sha256"], sha256(b"file-bytes").hexdigest())
+        self.assertEqual(original["size_bytes"], len(b"file-bytes"))
+        self.assertEqual(original["storage_uri"], stored_path)
+        self.assertFalse(self.store.import_file_exists(item.id))
+        self.assertEqual(fetch_scalar(self.database_url, "select count(*) from job.import_jobs"), "0")
+
+        repository = ImportJobRepository(self.connection)
+        job = self.store.save_import_registration(files.preview_session_persistence_payload(session.id),
+            register_job=lambda transaction: repository.create_or_get_job(
+                import_type="file_import.confirm", import_session_id=session.id, stage="prepare",
+                payload={"session_id": session.id, "selected_file_ids": [item.id]},
+                created_by="YNSYLP005", transaction=transaction,
+            ))
+        registered = self.connection.fetch_one(
+            "select file_object_id, stored_file_path, uploaded_by, status from app.import_files where legacy_mongo_id=%s",
+            (item.id,),
+        )
+        self.assertEqual(registered["file_object_id"], original["id"])
+        self.assertEqual(registered["stored_file_path"], stored_path)
+        self.assertEqual(registered["uploaded_by"], "YNSYLP005")
+        self.assertEqual(registered["status"], "uploaded")
+        self.assertEqual(repository.get_job(job.import_job_id).import_session_id, session.id)
+        self.assertTrue(self.store.import_file_exists(item.id))
         self.assertEqual(self.store.delete_import_files([stored_path, stored_path]), 1)
-        self.assertEqual(fetch_scalar(self.database_url, "select status from app.import_files where legacy_mongo_id = 'file-1';"), "deleted")
+        self.assertFalse(Path(stored_path).exists())
+        self.assertEqual(self.connection.fetch_one("select status from app.import_files where legacy_mongo_id=%s", (item.id,))["status"], "deleted")
 
     def test_bank_reset_records_retryable_file_cleanup_intent_on_current_schema(
         self,

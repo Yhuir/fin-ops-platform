@@ -170,3 +170,10 @@ Nightly CI 应至少覆盖：
 - `tests/test_etc_formal_matching_postgres.py`：47 张 ETC、进行中 OA、后到银行同 case、幂等、事务回滚、旧事实拒绝、提交与 dirty scopes 原子性、多批来源不覆盖。
 - 既有 ETC API/删除、OA adapter、matching/UoW、Workbench query/grouping/command、成本和待付款回归；`WorkbenchColumns.test.tsx` 覆盖 paired/unpaired 两区真实进行中标签。
 - 不新增 read model/cache，freshness 专属测试不适用。部署和生产证据记录在 [实施计划](../../dev/etc-oa-invoice-bank-matching-plan.md)。
+
+## 2026-09-21 财务证据回归
+
+- `test_oa_attachment_invoice_service.py`：明示金额/税额顺序、无标签不猜测、OCR 表格乱序通过唯一税率/总额校验、铁路票价不生成零税。
+- `test_invoice_attachment_recognition_service.py`：财务待核对证据不创建正式发票；强身份已存在仍可关联。
+- `test_import_closed_loop.py`：缺金额铁路证据不会新建，已有税务金额不被旧 OA 金额覆盖，来源边可保留。
+- `test_oa_attachment_invoice_promotion_service.py`：真实 PostgreSQL 来源晋升、事务/并发与原有 ownership 回归。

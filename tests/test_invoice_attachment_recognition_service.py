@@ -1,5 +1,5 @@
-from decimal import Decimal
 import unittest
+from decimal import Decimal
 
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import Counterparty, Invoice
@@ -52,6 +52,14 @@ class InvoiceAttachmentRecognitionServiceTests(unittest.TestCase):
         self.assertEqual(decision.action, LINK_EXISTING_INVOICE)
         self.assertEqual(decision.invoice, self.existing_invoice)
         self.assertEqual(decision.identity_key, "26532000000141671581")
+
+    def test_incomplete_financial_evidence_requires_review_but_can_link_proven_identity(self):
+        evidence = {"evidence_type": "tax_invoice", "invoice_no": "26532000000141671582",
+                    "issue_date": "2026-01-27", "total_with_tax": "400.00", "financial_review_reason": "Missing tax fields"}
+        decision = self.service.decide(evidence)
+        self.assertEqual((decision.action, decision.reason), (IGNORE, "financial_requires_review"))
+        decision = self.service.decide({**evidence, "invoice_no": "26532000000141671581"})
+        self.assertEqual(decision.action, LINK_EXISTING_INVOICE)
 
     def test_formal_attachment_with_ambiguous_existing_identity_is_ignored(self) -> None:
         duplicate_invoice = Invoice(

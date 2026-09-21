@@ -35,6 +35,8 @@ class FakeConnection:
                     {"event_type": "oa.sync", "status": "failed", "count": 1},
                 ],
             }
+        if "from job.import_jobs" in normalized:
+            return {"pending": 2, "processing": 1, "failed": 3, "awaiting_confirmation": 4, "oldest_pending_age_seconds": 5}
         if "from job.runtime_worker_heartbeats" in normalized:
             return {"max_worker_heartbeat_lag_seconds": 8.0}
         if "from job.outbox_events" in normalized and "pending_count" in normalized:
@@ -59,7 +61,7 @@ class FakeConnection:
                     lag=1.0,
                 ),
                 _worker("host-match", "workbench-matching", "workbench-matching", [], lag=2.0),
-                _worker("host-import", "import", "import-job", ["import.process.requested"], lag=3.0),
+                _worker("host-import", "import", "import-job", [], lag=3.0),
                 _worker(
                     "host-settings",
                     "settings-maintenance",
@@ -106,15 +108,16 @@ def _worker(
 
 
 class RuntimeMonitoringRepositoryTests(unittest.TestCase):
-    def test_ready_health_summary_uses_outbox_and_worker_contract_only(self) -> None:
+    def test_ready_health_summary_includes_direct_import_queue_without_business_failure_gate(self) -> None:
         connection = FakeConnection()
         repository = RuntimeMonitoringRepository(connection)
 
         summary = repository.ready_health_summary(stale_after_seconds=300)
         executed_sql = "\n".join(sql for sql, _params in connection.calls).lower()
 
-        self.assertEqual(summary["queue_backlog"], {"pending": 3, "failed": 1})
-        self.assertEqual(summary["failed_jobs"], 1)
+        self.assertEqual(summary["queue_backlog"], {"pending": 5, "processing": 1, "failed": 4})
+        self.assertEqual(summary["import_queue"]["awaiting_confirmation"], 4)
+        self.assertEqual(summary["failed_jobs"], 4)
         self.assertEqual(summary["oldest_pending_event_age_seconds"], 42.0)
         self.assertEqual(summary["worker_heartbeat_lag_seconds"], 8.0)
         self.assertNotIn("rabbitmq_publish_status", summary)
@@ -143,6 +146,7 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
             "mismatched_required_worker_count": 0,
             "critical_failed_outbox_count": 0,
             "queue_backlog": {"pending": 4},
+            "import_queue": {"failed": 8},
         }
         common = {
             "storage_backend": "postgres",

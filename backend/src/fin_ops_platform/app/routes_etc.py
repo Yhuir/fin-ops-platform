@@ -156,44 +156,6 @@ class EtcBusinessBatchApiRoutes:
             return self._error_response(exc)
         return self._success(HTTPStatus.OK, delete_result.delete_result)
 
-    def preview_import(
-        self,
-        business_batch_id: str,
-        uploads: list[UploadedEtcZipFile],
-        *,
-        expected_version: int | None,
-        session: OARequestSession,
-    ) -> tuple[HTTPStatus, dict[str, Any]]:
-        try:
-            result = self._application_service.preview_import_payload(
-                business_batch_id,
-                uploads,
-                expected_version=expected_version,
-                actor=self._actor(session),
-            )
-        except Exception as exc:
-            return self._error_response(exc)
-        return self._success(HTTPStatus.OK, result)
-
-    def confirm_import(
-        self,
-        business_batch_id: str,
-        payload: dict[str, Any],
-        *,
-        session: OARequestSession,
-    ) -> tuple[HTTPStatus, dict[str, Any]]:
-        try:
-            result = self._application_service.confirm_import_payload(
-                business_batch_id,
-                session_id=str(payload.get("sessionId") or payload.get("session_id") or "").strip(),
-                expected_version=self._optional_int(payload.get("expectedVersion") or payload.get("expected_version")),
-                idempotency_key=str(payload.get("idempotencyKey") or payload.get("idempotency_key") or "").strip() or None,
-                actor=self._actor(session),
-            )
-        except Exception as exc:
-            return self._error_response(exc)
-        return self._success(HTTPStatus.OK, result)
-
     def create_oa_draft(
         self,
         business_batch_id: str,

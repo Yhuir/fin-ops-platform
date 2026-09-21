@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from contextlib import nullcontext
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,8 +13,8 @@ from fin_ops_platform.domain.models import ImportedBatch, ImportedBatchRowResult
 from fin_ops_platform.services.import_file_service import (
     BankStatementMappingRequired,
     FileImportPreviewItem,
-    FileImportSession,
     FileImportService,
+    FileImportSession,
     UploadedImportFile,
     aggregate_invoice_line_rows,
     detect_invoice_template,
@@ -21,8 +22,8 @@ from fin_ops_platform.services.import_file_service import (
     parse_bank_statement_rows,
     read_xlsx_rows,
 )
-from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
+from fin_ops_platform.services.imports import ImportNormalizationService
 from openpyxl import Workbook, load_workbook
 
 TESTS_DIR = Path(__file__).resolve().parent
@@ -888,7 +889,7 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertEqual(duplicate_group.rows[-1]["direction"], "outflow")
         self.assertEqual(duplicate_group.rows[-1]["amount"], "6180.00")
 
-    def test_preview_blocks_identical_file_content_before_row_parsing(self) -> None:
+    def test_preview_counts_identical_files_per_item(self) -> None:
         service = FileImportService(ImportNormalizationService())
         first_upload = invoice_export_file("first.xlsx")
         second_upload = type(first_upload)("renamed.xlsx", first_upload.content)
@@ -902,11 +903,13 @@ class ImportFileServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(session.files[0].status, "preview_ready")
-        self.assertEqual(session.files[1].status, "duplicate_file")
-        self.assertEqual(session.files[1].duplicate_file_name, "first.xlsx")
-        self.assertEqual(session.status, "preview_ready_with_errors")
+        self.assertEqual(session.files[1].status, "preview_ready")
+        self.assertIsNone(session.files[1].duplicate_file_name)
+        self.assertEqual(session.files[0].row_count, session.files[1].row_count)
+        self.assertGreater(session.audit.duplicate_across_files_count, 0)
+        self.assertEqual(session.status, "preview_ready")
 
-    def test_preview_blocks_file_content_already_confirmed_under_another_name(self) -> None:
+    def test_preview_counts_existing_items_when_same_file_is_reuploaded(self) -> None:
         service = FileImportService(ImportNormalizationService())
         upload = invoice_export_file("first.xlsx")
         first = service.preview_files(
@@ -920,9 +923,11 @@ class ImportFileServiceTests(unittest.TestCase):
             uploads=[UploadedImportFile(file_name="renamed.xlsx", content=upload.content)],
         )
 
-        self.assertEqual(second.files[0].status, "duplicate_file")
-        self.assertEqual(second.files[0].duplicate_file_name, "first.xlsx")
-        self.assertEqual(second.status, "preview_ready_with_errors")
+        self.assertEqual(second.files[0].status, "preview_ready")
+        self.assertIsNone(second.files[0].duplicate_file_name)
+        self.assertGreater(second.files[0].row_count, 0)
+        self.assertEqual(second.audit.existing_duplicate_count, second.audit.unique_count)
+        self.assertEqual(second.status, "preview_ready")
 
     def test_bank_source_control_mismatch_blocks_preview(self) -> None:
         rows = [
@@ -962,7 +967,7 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertEqual(detect_invoice_template(invoice_rows), "invoice_export")
         self.assertEqual(len(invoice_rows), 2)
 
-    def test_confirm_session_rejects_stale_preview_when_existing_records_change(self) -> None:
+    def test_confirm_session_reclassifies_exact_concurrent_creation_as_duplicate(self) -> None:
         import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
         service = FileImportService(import_service)
         upload = invoice_export_file("jan.xlsx")
@@ -978,11 +983,15 @@ class ImportFileServiceTests(unittest.TestCase):
         )
         import_service.confirm_import(competing_preview.id)
 
-        with self.assertRaisesRegex(ValueError, "preview_stale"):
-            service.confirm_session(session_id=session.id, selected_file_ids=[session.files[0].id])
+        confirmed = service.confirm_session(session_id=session.id, selected_file_ids=[session.files[0].id])
+        self.assertEqual(confirmed.files[0].success_count, 0)
+        self.assertEqual(confirmed.files[0].duplicate_count, 1)
+        self.assertEqual(confirmed.files[0].row_results[0].decision, ImportDecision.DUPLICATE_SKIPPED)
+        self.assertEqual(len(import_service.list_invoices()), 1)
 
     def test_stale_gate_rejects_link_drift_when_aggregate_counts_are_unchanged(self) -> None:
         import_service = SimpleNamespace(
+            preload_normalized_identities=lambda _rows: nullcontext(),
             current_import_decision_for_normalized_row=lambda **_kwargs: (
                 ImportDecision.DUPLICATE_SKIPPED,
                 "bank_transaction",
@@ -1574,12 +1583,14 @@ class ImportFileServiceTests(unittest.TestCase):
             )
 
         import_service = SimpleNamespace(
+            preload_normalized_identities=lambda _rows: nullcontext(),
             current_import_decision_for_normalized_row=lambda **_kwargs: (
                 ImportDecision.SUSPECTED_DUPLICATE,
                 "bank_transaction",
                 "canonical-transaction-1",
             ),
-            confirm_import=confirm_import,
+            confirm_imports=lambda batch_ids, **_kwargs: [confirm_import(batch_id) for batch_id in batch_ids],
+            get_batch=lambda _batch_id: SimpleNamespace(row_results=session.files[0].row_results, normalized_rows=session.files[0].normalized_rows),
         )
         service = FileImportService(import_service)
         row_result = ImportedBatchRowResult(
@@ -1640,6 +1651,7 @@ class ImportFileServiceTests(unittest.TestCase):
 
     def test_controlled_replay_stale_gate_rejects_changed_canonical_transaction(self) -> None:
         import_service = SimpleNamespace(
+            preload_normalized_identities=lambda _rows: nullcontext(),
             current_import_decision_for_normalized_row=lambda **_kwargs: (
                 ImportDecision.SUSPECTED_DUPLICATE,
                 "bank_transaction",
@@ -1731,13 +1743,15 @@ class ImportFileServiceTests(unittest.TestCase):
             )
 
         import_service = SimpleNamespace(
+            preload_normalized_identities=lambda _rows: nullcontext(),
             current_import_decision_for_normalized_row=lambda **_kwargs: (
                 ImportDecision.CREATED,
                 None,
                 None,
             ),
             bank_transaction_matches_strict_statement_evidence=strict_evidence_matches,
-            confirm_import=confirm_import,
+            confirm_imports=lambda batch_ids, **_kwargs: [confirm_import(batch_id) for batch_id in batch_ids],
+            get_batch=lambda _batch_id: SimpleNamespace(row_results=session.files[0].row_results, normalized_rows=session.files[0].normalized_rows),
         )
         service = FileImportService(import_service)
         normalized = {
@@ -1801,6 +1815,7 @@ class ImportFileServiceTests(unittest.TestCase):
 
     def test_controlled_replay_stale_gate_rejects_created_without_strict_evidence(self) -> None:
         import_service = SimpleNamespace(
+            preload_normalized_identities=lambda _rows: nullcontext(),
             current_import_decision_for_normalized_row=lambda **_kwargs: (
                 ImportDecision.CREATED,
                 None,

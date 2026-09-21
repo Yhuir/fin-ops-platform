@@ -141,6 +141,21 @@ class FakeConnection(EtcTicketsFakeConnection):
 
 
 class EtcImportPageAuditTests(unittest.TestCase):
+    def test_repeated_ticket_members_keep_first_provenance_without_false_missing_edge(self) -> None:
+        session = {"session_id": "current", "task_id": "task", "status": "succeeded"}
+        facts = {
+            "tasks": [{"task_id": "task", "status": "imported"}],
+            "batches": [{"business_batch_id": "business", "raw_payload": {
+                "import_attempts": [{"session_id": "current"}]}}],
+            "import_batches": [{"raw_payload": {"source_session_id": "current", "invoice_ids": ["ticket"]}}],
+            "invoices": [{"etc_invoice_id": "ticket", "raw_payload": {"import_session_id": "first"}}],
+        }
+        issues = etc_import_page_audit._session_task_edge_issues(sessions=[session], facts=facts)
+        self.assertNotIn("etc_import_session_invoice_edge_mismatch", {issue.code for issue in issues})
+        facts["invoices"] = []
+        issues = etc_import_page_audit._session_task_edge_issues(sessions=[session], facts=facts)
+        self.assertIn("etc_import_session_invoice_edge_mismatch", {issue.code for issue in issues})
+
     def test_deleted_task_is_a_formal_covering_state_for_historical_sessions_and_jobs(self) -> None:
         facts = {
             "tasks": [{"task_id": "task-1", "status": "deleted", "raw_payload": {}}],

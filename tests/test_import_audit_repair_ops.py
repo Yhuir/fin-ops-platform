@@ -35,6 +35,7 @@ from fin_ops_platform.services.postgres_repositories.import_audit_repair import 
     load_failed_import_job_recovery_snapshot,
     load_import_audit_repair_snapshot,
 )
+from fin_ops_platform.services.runtime_worker import RuntimeWorkerResult
 from fin_ops_platform.tools import import_audit_repair_ops
 
 
@@ -526,7 +527,7 @@ class FailedImportRecoveryTests(unittest.TestCase):
     def test_execute_processes_candidate_before_resolving_exact_dead_letter(self) -> None:
         plan = build_failed_import_job_recovery_plan(_failed_import_recovery_snapshot())
         import_repository = Mock()
-        import_repository.create_or_get_job.return_value = SimpleNamespace(
+        import_repository.retry_job.return_value = SimpleNamespace(
             import_job_id="import-job-1",
             status="pending",
         )
@@ -536,7 +537,8 @@ class FailedImportRecoveryTests(unittest.TestCase):
             status="dead_lettered",
         )
         queue.resolve_dead_letter_event.return_value = True
-        handler = Mock(return_value={"processed": True})
+        from fin_ops_platform.services.runtime_worker import RuntimeWorkerResult
+        handler = Mock(return_value=RuntimeWorkerResult.PROCESSED)
         processor_factory = Mock()
         processor_factory.build_processors.return_value = {"file_import.confirm": Mock()}
         processed = _failed_import_recovery_snapshot(completed=True, event_status="dead_lettered")
@@ -556,10 +558,8 @@ class FailedImportRecoveryTests(unittest.TestCase):
                 return_value=processor_factory,
             ),
             patch(
-                "fin_ops_platform.services.runtime_worker_handlers.build_import_job_handler_bundle",
-                return_value=SimpleNamespace(
-                    handlers={"import.process.requested": handler}
-                ),
+                "fin_ops_platform.services.import_job_queue.ImportJobWorker",
+                return_value=SimpleNamespace(process_claimed_job=handler),
             ),
             patch(
                 "fin_ops_platform.services.postgres_repositories.import_audit_repair.load_failed_import_job_recovery_snapshot",
@@ -573,7 +573,7 @@ class FailedImportRecoveryTests(unittest.TestCase):
             session_id="session-bank-1",
             selected_file_ids=["file-bank-1", "file-bank-2"],
         )
-        handler.assert_called_once_with(queue.get_event.return_value)
+        handler.assert_called_once_with(import_repository.claim_next.return_value)
         queue.resolve_dead_letter_event.assert_called_once_with(
             "event-1",
             reason="candidate_import_recovery_succeeded",
@@ -582,7 +582,7 @@ class FailedImportRecoveryTests(unittest.TestCase):
     def test_execute_keeps_dead_letter_when_candidate_business_facts_are_incomplete(self) -> None:
         plan = build_failed_import_job_recovery_plan(_failed_import_recovery_snapshot())
         import_repository = Mock()
-        import_repository.create_or_get_job.return_value = SimpleNamespace(
+        import_repository.retry_job.return_value = SimpleNamespace(
             import_job_id="import-job-1",
             status="pending",
         )
@@ -592,7 +592,7 @@ class FailedImportRecoveryTests(unittest.TestCase):
             status="dead_lettered",
         )
         incomplete = _failed_import_recovery_snapshot(completed=True, event_status="dead_lettered")
-        incomplete["background_jobs"][0]["status"] = "partial_success"
+        incomplete["import_jobs"][0]["status"] = "failed"
 
         with (
             patch(
@@ -607,16 +607,14 @@ class FailedImportRecoveryTests(unittest.TestCase):
                 "fin_ops_platform.services.runtime_worker_handlers.ImportRuntimeProcessorFactory"
             ) as processor_factory,
             patch(
-                "fin_ops_platform.services.runtime_worker_handlers.build_import_job_handler_bundle",
-                return_value=SimpleNamespace(
-                    handlers={"import.process.requested": Mock(return_value={"processed": True})}
-                ),
+                "fin_ops_platform.services.import_job_queue.ImportJobWorker",
+                return_value=SimpleNamespace(process_claimed_job=Mock(return_value=RuntimeWorkerResult.PROCESSED)),
             ),
             patch(
                 "fin_ops_platform.services.postgres_repositories.import_audit_repair.load_failed_import_job_recovery_snapshot",
                 return_value=incomplete,
             ),
-            self.assertRaisesRegex(RuntimeError, "background job did not reach succeeded"),
+            self.assertRaisesRegex(RuntimeError, "import job did not reach succeeded"),
         ):
             processor_factory.return_value.build_processors.return_value = {}
             execute_failed_import_job_recovery(object(), plan)
@@ -626,7 +624,7 @@ class FailedImportRecoveryTests(unittest.TestCase):
     def test_execute_keeps_dead_letter_when_candidate_canonical_fields_do_not_match(self) -> None:
         plan = build_failed_import_job_recovery_plan(_failed_import_recovery_snapshot())
         import_repository = Mock()
-        import_repository.create_or_get_job.return_value = SimpleNamespace(
+        import_repository.retry_job.return_value = SimpleNamespace(
             import_job_id="import-job-1",
             status="pending",
         )
@@ -651,10 +649,8 @@ class FailedImportRecoveryTests(unittest.TestCase):
                 "fin_ops_platform.services.runtime_worker_handlers.ImportRuntimeProcessorFactory"
             ) as processor_factory,
             patch(
-                "fin_ops_platform.services.runtime_worker_handlers.build_import_job_handler_bundle",
-                return_value=SimpleNamespace(
-                    handlers={"import.process.requested": Mock(return_value={"processed": True})}
-                ),
+                "fin_ops_platform.services.import_job_queue.ImportJobWorker",
+                return_value=SimpleNamespace(process_claimed_job=Mock(return_value=RuntimeWorkerResult.PROCESSED)),
             ),
             patch(
                 "fin_ops_platform.services.postgres_repositories.import_audit_repair.load_failed_import_job_recovery_snapshot",

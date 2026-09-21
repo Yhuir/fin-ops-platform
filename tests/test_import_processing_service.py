@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
+from fin_ops_platform.services.import_job_queue import ImportJobDataError
 from fin_ops_platform.services.import_processing_service import ImportProcessingService
 
 
@@ -29,6 +30,7 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
                 status="confirmed",
                 batch_type="bank_transaction",
                 normalized_rows=[{"trade_time": "2026-06-02 10:00:00", "account_no": "6222"}],
+                row_results=[],
             )
         ],
     )
@@ -49,10 +51,8 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
             confirm_session=lambda **_kwargs: confirmed_session,
             confirmed_session_persistence_payload=lambda **_kwargs: import_state_payload,
         ),
-        tax_certified_import_service=SimpleNamespace(),
         etc_service=SimpleNamespace(),
         etc_reconciliation_task_service=SimpleNamespace(),
-        background_job_service=SimpleNamespace(),
         serialize_value=lambda value: value,
         persist_confirmed_import_delta=persist_confirmed_import_delta,
         workbench_matching_scope_months_for_import_file_session=lambda _session, _selected_file_ids: ["2026-06"],
@@ -60,7 +60,6 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
         bank_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: ["2026-06"],
         input_invoice_usage_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         output_invoice_collection_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
-        link_etc_import_result_to_existing_invoices=lambda _result: [],
         etc_import_preview_service=SimpleNamespace(),
     )
 
@@ -69,7 +68,6 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
             service.execute_file_import_confirm_job(
                 session_id="session-1",
                 selected_file_ids=["file-bank"],
-                background_job_id="",
             )
         except RuntimeError as exc:
             assert str(exc) == "persist failed"
@@ -81,7 +79,6 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
     result = service.execute_file_import_confirm_job(
         session_id="session-1",
         selected_file_ids=["file-bank"],
-        background_job_id="",
     )
 
     assert events == ["persist"]
@@ -94,54 +91,29 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
 
 
 def _assert_etc_invoice_import_confirm_job_returns_targets_after_changed_months_are_known() -> None:
-    imported_marks: list[dict[str, object]] = []
-    business_batch = SimpleNamespace(
-        business_batch_id="business-1",
-        import_batch_ids=["batch-etc-1"],
-        version=3,
-        is_active=True,
-    )
-    import_result = SimpleNamespace(imported=2, attachments_completed=1, duplicates_skipped=0, failed=0)
+    commits = []
+    completion = object()
+    validated = SimpleNamespace(session=SimpleNamespace(task_version=3, confirmed_item_set_hash="hash-1"))
+    def commit(**kwargs):
+        commits.append(kwargs)
+        return {"affected_months": ["2026-04"], "affected_scope_keys": ["2026-04"]}
     service = ImportProcessingService(
-        file_import_service=SimpleNamespace(),
-        tax_certified_import_service=SimpleNamespace(),
-        etc_service=SimpleNamespace(
-            list_business_batches=lambda **_kwargs: [business_batch],
-            create_business_batch=lambda **_kwargs: business_batch,
-            confirm_business_batch_import=lambda *_args, **_kwargs: (business_batch, import_result),
-            list_import_batches=lambda: [SimpleNamespace(id="batch-etc-1")],
-        ),
-        etc_reconciliation_task_service=SimpleNamespace(
-            begin_import=lambda **_kwargs: None,
-            mark_imported=lambda **kwargs: imported_marks.append(dict(kwargs)),
-            mark_import_failed=lambda **_kwargs: None,
-        ),
-        background_job_service=SimpleNamespace(),
-        serialize_value=lambda value: value,
+        file_import_service=SimpleNamespace(), serialize_value=lambda value: value,
+        etc_service=SimpleNamespace(), etc_reconciliation_task_service=SimpleNamespace(),
         persist_confirmed_import_delta=lambda **kwargs: None,
-        workbench_matching_scope_months_for_import_file_session=lambda _session, _selected_file_ids: [],
-        tax_offset_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
-        bank_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
-        input_invoice_usage_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
-        output_invoice_collection_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
-        link_etc_import_result_to_existing_invoices=lambda _result: ["2026-04"],
-        etc_import_preview_service=SimpleNamespace(
-            validate=lambda **_kwargs: SimpleNamespace(uploads=[]),
-            mark_status=lambda *_args, **_kwargs: None,
-        ),
+        workbench_matching_scope_months_for_import_file_session=lambda *_args: [],
+        tax_offset_scope_keys_for_import_file_session=lambda *_args: [],
+        bank_scope_keys_for_import_file_session=lambda *_args: [],
+        input_invoice_usage_scope_keys_for_import_file_session=lambda *_args: [],
+        output_invoice_collection_scope_keys_for_import_file_session=lambda *_args: [],
+        etc_import_preview_service=SimpleNamespace(validate=lambda **_kwargs: validated),
+        etc_import_uow=SimpleNamespace(commit=commit),
     )
-
     result = service.execute_etc_invoice_import_confirm_job(
-        session_id="etc-session-1",
-        task_id="task-1",
-        owner_user_id="user",
-        background_job_id="",
-        task_version=3,
-        confirmed_item_set_hash="hash-1",
-        total=3,
+        session_id="etc-session-1", task_id="task-1", owner_user_id="user", task_version=3,
+        confirmed_item_set_hash="hash-1", completion=completion,
     )
-
-    assert imported_marks[0]["import_batch_id"] == "batch-etc-1"
+    assert commits == [{"validated": validated, "owner_user_id": "user", "completion": completion}]
     assert result["affected_months"] == ["2026-04"]
     assert result["affected_scope_keys"] == ["2026-04"]
 
@@ -158,3 +130,12 @@ class ImportProcessingServiceTests(unittest.TestCase):
 
     def test_etc_invoice_import_confirm_job_returns_targets_after_changed_months_are_known(self) -> None:
         _assert_etc_invoice_import_confirm_job_returns_targets_after_changed_months_are_known()
+
+    def test_etc_processor_rejects_missing_or_mismatched_owner_before_io(self) -> None:
+        service = object.__new__(ImportProcessingService)
+        for owner, payload in [(None, {}), ("owner", {"owner_user_id": "other"})]:
+            with self.subTest(owner=owner):
+                with self.assertRaisesRegex(ImportJobDataError, "owner"):
+                    service.process_etc_invoice_import_confirm_job(SimpleNamespace(
+                        created_by=owner, payload=payload,
+                    ))

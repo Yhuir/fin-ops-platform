@@ -8,6 +8,7 @@ from decimal import Decimal
 from enum import Enum
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
     bank_flow_rule_batch_candidate_guard,
@@ -386,6 +387,9 @@ class PostgresStateStore:
     def list_etc_reconciliation_import_task_summaries(self) -> list[dict[str, Any]]:
         return self._ops_tax_etc_repository.list_etc_reconciliation_import_task_summaries()
 
+    def load_etc_import_scope(self, *, task_id: str, invoice_numbers: list[str]) -> dict[str, Any]:
+        return self._ops_tax_etc_repository.load_etc_import_scope(task_id=task_id, invoice_numbers=invoice_numbers)
+
     def save_etc_state(self, snapshot: dict[str, Any]) -> None:
         self._ops_tax_etc_repository.save_etc_state(snapshot)
 
@@ -430,10 +434,11 @@ class PostgresStateStore:
         file_name: str,
         content: bytes,
     ) -> dict[str, object]:
-        storage_file_id = f"{session_id}:{file_id}"
+        storage_file_id = f"{session_id}:{file_id}:{uuid4().hex}"
         if self._object_storage_repository is not None:
             stored_file_path = self._store_object_file(
                 namespace="etc_import",
+                new_object=True,
                 file_id=storage_file_id,
                 file_name=file_name,
                 content=content,
@@ -472,14 +477,21 @@ class PostgresStateStore:
                 continue
         return deleted
 
+    def delete_unreferenced_etc_import_files(self, stored_file_paths: list[str]) -> int:
+        paths = sorted(set(stored_file_paths))
+        if not paths:
+            return 0
+        referenced = self._etc_import_session_repository.referenced_object_paths(paths)
+        return self.delete_etc_import_archives([path for path in paths if path not in referenced])
+
     def read_etc_reconciliation_file(self, stored_file_path: str) -> bytes:
         return self._read_file(stored_file_path)
 
     def store_etc_invoice_file(self, *, invoice_number: str, file_name: str, content: bytes) -> str:
         normalized_invoice_number = _sanitize_name(invoice_number)
-        file_id = f"etc_invoice:{normalized_invoice_number}:{_sanitize_name(file_name)}"
+        file_id = f"etc_invoice:{normalized_invoice_number}:{_sanitize_name(file_name)}:{uuid4().hex}"
         if self._object_storage_repository is not None:
-            return self._store_object_file(namespace="etc_invoice", file_id=file_id, file_name=file_name, content=content)
+            return self._store_object_file(namespace="etc_invoice", file_id=file_id, file_name=file_name, content=content, new_object=True)
         stored_file_path = self._store_local_file("etc_invoice", file_id, file_name, content)
         self._save_file_object(file_id=file_id, file_name=file_name, stored_file_path=stored_file_path, content=content)
         return stored_file_path
@@ -1108,6 +1120,9 @@ class PostgresStateStore:
     def load_file_imports_snapshot(self) -> dict[str, Any]:
         return self._load_file_imports()
 
+    def load_file_import_session_snapshot(self, session_id: str) -> dict[str, Any]:
+        return self._core_repository.load_file_import_session_snapshot(session_id)
+
     def load_matching_snapshot(self) -> dict[str, Any]:
         return self._load_matching()
 
@@ -1153,14 +1168,42 @@ class PostgresStateStore:
         if "pending_invoice_commands" in normalized:
             self.save_pending_invoice_commands(normalized.get("pending_invoice_commands") or {})
 
-    def save_import_delta(self, payload: dict[str, Any]) -> None:
+    def save_import_delta(self, payload: dict[str, Any], *, transaction: Any | None = None) -> None:
         normalized = self._serialize_value(payload)
         if not isinstance(normalized, dict) or not normalized or set(normalized) - {"imports", "file_imports"}:
             raise ValueError("Import delta requires only imports and file_imports payloads.")
-        self._core_repository.save_import_delta(
-            normalized.get("imports") or {},
-            normalized.get("file_imports") or {},
-        )
+        if transaction is not None:
+            self._core_repository.save_import_delta_in_transaction(
+                transaction,
+                imports_snapshot=normalized.get("imports") or {},
+                file_imports_snapshot=normalized.get("file_imports") or {},
+            )
+        else:
+            self._core_repository.save_import_delta(
+                normalized.get("imports") or {}, normalized.get("file_imports") or {},
+            )
+
+    def save_import_registration(self, payload: dict[str, Any], *, register_job: Any) -> Any:
+        with self._connection.transaction() as transaction:
+            self.save_import_delta(payload, transaction=transaction)
+            return register_job(transaction)
+
+    def save_import_draft_change(self, payload: dict[str, Any], *, job_command: Any) -> Any:
+        with self._connection.transaction() as transaction:
+            result = job_command(transaction)
+            self.save_import_delta(payload, transaction=transaction)
+            return result
+
+    def save_import_preview_with_completion(
+        self, payload: dict[str, Any], *, completion: Any, result_payload: dict[str, Any],
+    ) -> None:
+        with self._connection.transaction() as transaction:
+            completion.lock(transaction)
+            self.save_import_delta(payload, transaction=transaction)
+            if result_payload.get("outcome") == "no_changes":
+                completion.succeed(transaction, result_payload)
+            else:
+                completion.preview(transaction, result_payload)
 
     def save_confirmed_import_delta_with_oa_attachment_promotion(
         self,
@@ -1169,6 +1212,8 @@ class PostgresStateStore:
         scope_months: list[str],
         promotion_mode: str,
         source_versions: dict[str, object],
+        completion: Any | None = None,
+        result_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         normalized = self._serialize_value(payload)
         if not isinstance(normalized, dict) or not normalized or set(normalized) - {"imports", "file_imports"}:
@@ -1178,6 +1223,8 @@ class PostgresStateStore:
             scope_months=list(scope_months or []),
             promotion_mode=promotion_mode,
             source_versions=source_versions,
+            completion=completion,
+            result_payload=result_payload,
         )
 
     def save_workbench_overrides(self, workbench_overrides_snapshot: dict[str, Any], *, changed_row_ids: set[str] | None = None) -> None:
@@ -1207,47 +1254,13 @@ class PostgresStateStore:
         content: bytes,
         imported_by: str | None = None,
     ) -> str:
-        normalized_imported_by = str(imported_by or "").strip() or None
+        # Upload owns immutable bytes only; session/file metadata and the job
+        # are admitted together later in save_import_registration.
         if self._object_storage_repository is not None:
-            stored_file_path = self._store_object_file(namespace="imports", file_id=file_id, file_name=file_name, content=content)
-            file_object_id = self._file_object_id_for_storage_uri(stored_file_path)
+            stored_file_path = self._store_object_file(namespace="imports", file_id=file_id, file_name=file_name, content=content, new_object=True)
         else:
             stored_file_path = self._store_local_file("imports", file_id, file_name, content)
-            file_object_id = self._save_file_object(file_id=file_id, file_name=file_name, stored_file_path=stored_file_path, content=content)
-        self._connection.execute(
-            """
-            insert into app.import_files(
-                legacy_mongo_id, session_id, stored_file_path, original_filename,
-                status, file_object_id, uploaded_by, raw_payload
-            )
-            values (%s, %s, %s, %s, 'stored', %s::uuid, %s, %s)
-            on conflict (legacy_mongo_id) do update set
-                session_id = excluded.session_id,
-                stored_file_path = excluded.stored_file_path,
-                original_filename = excluded.original_filename,
-                status = excluded.status,
-                file_object_id = excluded.file_object_id,
-                uploaded_by = excluded.uploaded_by,
-                raw_payload = excluded.raw_payload
-            """,
-            (
-                file_id,
-                session_id,
-                stored_file_path,
-                file_name,
-                file_object_id,
-                normalized_imported_by,
-                _jsonb({
-                    "normalized_payload": {
-                        "id": file_id,
-                        "file_name": file_name,
-                        "stored_file_path": stored_file_path,
-                        "session_id": session_id,
-                        "imported_by": normalized_imported_by,
-                    }
-                }),
-            ),
-        )
+            self._save_file_object(file_id=file_id, file_name=file_name, stored_file_path=stored_file_path, content=content)
         return stored_file_path
 
     def store_workbench_oa_supporting_document(
@@ -1358,25 +1371,24 @@ class PostgresStateStore:
     def read_import_file(self, stored_file_path: str) -> bytes:
         return self._read_file(stored_file_path)
 
-    def find_confirmed_import_file_by_sha256(
-        self,
-        *,
-        content_sha256: str,
-        exclude_file_id: str,
-    ) -> dict[str, Any] | None:
-        return self._connection.fetch_one(
-            """
-            select import_files.original_filename as file_name, import_files.uploaded_at
-            from app.import_files import_files
-            join app.file_objects file_objects on file_objects.id = import_files.file_object_id
-            where file_objects.sha256 = %s
-              and import_files.status = 'confirmed'
-              and coalesce(import_files.legacy_mongo_id, import_files.id::text) <> %s
-            order by import_files.uploaded_at desc
-            limit 1
-            """,
-            (content_sha256, exclude_file_id),
-        )
+    def delete_unregistered_import_uploads(self, session_id: str, files: list[Any]) -> int:
+        # A lost commit response must never delete already admitted originals.
+        if self._connection.fetch_one("select id from job.import_jobs where import_session_id=%s limit 1", (session_id,)):
+            return 0
+        deleted = 0
+        for item in files:
+            row = self._connection.fetch_one("""
+                select id from app.file_objects objects
+                where legacy_mongo_id=%s and storage_uri=%s and tombstoned_at is null
+                  and not exists (select 1 from app.import_files files
+                    where files.file_object_id=objects.id or files.stored_file_path=objects.storage_uri)
+            """, (item.id, item.stored_file_path))
+            if row is None:
+                continue
+            self.delete_import_files([item.stored_file_path])
+            self._connection.execute("update app.file_objects set tombstoned_at=now(), updated_at=now() where id=%s", (row["id"],))
+            deleted += 1
+        return deleted
 
     def delete_import_files(self, stored_file_paths: list[str]) -> int:
         deleted = 0
@@ -1546,6 +1558,7 @@ class PostgresStateStore:
         content: bytes,
         content_type: str | None = None,
         legacy_gridfs_id: str | None = None,
+        new_object: bool = False,
     ) -> str:
         if self._object_storage_repository is None or not self._object_storage_backend or not self._object_storage_bucket:
             raise ObjectStorageWriteError("Object storage repository is not configured for PostgreSQL file writes.")
@@ -1596,6 +1609,7 @@ class PostgresStateStore:
                 file_name=file_name,
                 content=content_bytes,
                 content_type=content_type,
+                new_object=new_object,
             )
         except ObjectStorageWriteError as exc:
             self._mark_file_object_failed(file_object_id, str(exc))
@@ -1604,24 +1618,29 @@ class PostgresStateStore:
             self._mark_file_object_failed(file_object_id, str(exc) or exc.__class__.__name__)
             raise ObjectStorageWriteError(str(exc) or exc.__class__.__name__) from exc
 
-        self._mark_file_object_verified(
-            file_object_id,
-            storage_backend=result.storage_backend,
-            storage_uri=result.storage_uri,
-            bucket_name=result.bucket_name,
-            object_key=result.object_key,
-            etag=result.etag,
-            raw_payload={
-                "normalized_payload": {
-                    "id": file_id,
-                    "file_name": file_name,
-                    "stored_file_path": result.storage_uri,
-                    "sha256": result.sha256,
-                    "size_bytes": result.size_bytes,
-                    "migration_status": "verified",
-                }
-            },
-        )
+        try:
+            self._mark_file_object_verified(
+                file_object_id,
+                storage_backend=result.storage_backend,
+                storage_uri=result.storage_uri,
+                bucket_name=result.bucket_name,
+                object_key=result.object_key,
+                etag=result.etag,
+                raw_payload={
+                    "normalized_payload": {
+                        "id": file_id,
+                        "file_name": file_name,
+                        "stored_file_path": result.storage_uri,
+                        "sha256": result.sha256,
+                        "size_bytes": result.size_bytes,
+                        "migration_status": "verified",
+                    }
+                },
+            )
+        except Exception:
+            if new_object:
+                self._object_storage_repository.delete_object(result.object_key)
+            raise
         return result.storage_uri
 
     def _upsert_file_object(

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from decimal import Decimal
 import hashlib
 import json
+from decimal import Decimal
 from typing import Any
 
 from fin_ops_platform.domain.enums import InvoiceType
-
+from fin_ops_platform.services.invoice_identity_service import InvoiceIdentityService
 
 INVOICE_HEADER_REPAIR_SOURCE_SHA256 = (
     "c1080bb92a64553956ea76a363022cc4034e9673cbfaa1f55528a208411abb00"
@@ -239,3 +239,68 @@ def _text(value: Any) -> str:
 def _fingerprint(value: Any) -> str:
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def build_verified_financial_repair_plan(
+    snapshot: list[dict[str, Any]], *, invoice_ids: list[str],
+    sources: list[dict[str, Any]], cache_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Correct only explicit existing facts using verified tax header originals."""
+    if not invoice_ids or len(invoice_ids) != len(set(invoice_ids)):
+        raise ValueError("Explicit unique invoice IDs are required.")
+    if {row["invoice_id"] for row in snapshot} != set(invoice_ids) or len(snapshot) != len(invoice_ids):
+        raise ValueError("Every repair invoice must resolve exactly once.")
+    identities = InvoiceIdentityService()
+    target_keys = {identities.canonical_key_for_mapping(row) for row in snapshot}
+    facts: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+    for source in sources:
+        for row in source["rows"]:
+            key = identities.canonical_key_for_mapping(row)
+            if key not in target_keys:
+                continue
+            if any(row.get(field) in (None, "") for field in ("amount", "tax_amount", "total_with_tax", "invoice_date")):
+                raise ValueError(f"Tax header {key} lacks explicit financial fields.")
+            values = tuple(_money(row[field]) for field in ("amount", "tax_amount", "total_with_tax"))
+            if Decimal(values[0]) + Decimal(values[1]) != Decimal(values[2]):
+                raise ValueError(f"Tax header {key} has inconsistent amounts.")
+            if key in facts:
+                old = facts[key][0]
+                if values != tuple(_money(old[field]) for field in ("amount", "tax_amount", "total_with_tax")) or str(old["invoice_date"]) != str(row["invoice_date"]):
+                    raise ValueError(f"Tax originals disagree for {key}.")
+            else:
+                facts[key] = row, source
+    fingerprint = _fingerprint({"snapshot": snapshot, "sources": sources, "caches": cache_rows})
+    updates = []
+    target_keys = set()
+    for current in snapshot:
+        key = identities.canonical_key_for_mapping(current)
+        if not key or key not in facts:
+            raise ValueError(f"No tax original proves invoice {current['invoice_id']}.")
+        target_keys.add(key)
+        fact, source = facts[key]
+        if current["invoice_type"] != "input" or str(current["invoice_date"])[:10] != str(fact["invoice_date"])[:10]:
+            raise ValueError(f"Invoice date/type differs from tax original: {key}.")
+        if _money(current["total_with_tax"]) != _money(fact["total_with_tax"]):
+            raise ValueError(f"Repair may not change the invoice total: {key}.")
+        amounts = {field: _money(fact[field]) for field in ("amount", "tax_amount", "total_with_tax")}
+        amounts["signed_amount"] = amounts["amount"]
+        if all(_money(current[field]) == value for field, value in amounts.items()):
+            continue
+        raw = dict(current["raw_payload"] or {})
+        normalized = dict(raw.get("normalized_payload") or raw)
+        normalized.update(amounts)
+        normalized.update(source_sheet_name="发票基础信息", source_sheet_role="invoice_header",
+                          source_workbook_sha256=source["sha256"],
+                          financial_repair_source_file_id=source["file_id"],
+                          financial_repair_fingerprint=fingerprint)
+        raw["normalized_payload"] = normalized
+        updates.append({"invoice_id": current["invoice_id"], "identity_key": key,
+                        "before": current, "raw_payload": raw, **amounts})
+    invalidate_keys = sorted({row["source_attachment_key"] for row in cache_rows
+        if any(identities.canonical_key_for_mapping(item) in target_keys
+               for item in row["invoices"] if isinstance(item, dict))})
+    return {"source_fingerprint": fingerprint, "updates": updates,
+            "target_count": len(snapshot), "update_count": len(updates),
+            "invalidate_cache_keys": invalidate_keys,
+            "affected_months": sorted({str(row["invoice_date"])[:7] for row in snapshot}),
+            "sources": [{key: source[key] for key in ("file_id", "sha256", "filename")} for source in sources]}

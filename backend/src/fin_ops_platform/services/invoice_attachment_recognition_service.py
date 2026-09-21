@@ -7,7 +7,6 @@ from typing import Any, Protocol
 from fin_ops_platform.domain.models import Invoice
 from fin_ops_platform.services.invoice_identity_service import InvoiceIdentityService
 
-
 LINK_EXISTING_INVOICE = "link_existing_invoice"
 CREATE_INVOICE_AND_LINK = "create_invoice_and_link"
 IGNORE = "ignore"
@@ -110,6 +109,11 @@ class InvoiceAttachmentRecognitionService:
                 reason="matched_existing_invoice",
                 identity_key=identity_key,
                 invoice=existing,
+            )
+
+        if normalized.get("financial_review_reason"):
+            return InvoiceAttachmentRecognitionDecision(
+                action=IGNORE, reason="financial_requires_review", identity_key=identity_key,
             )
 
         if not self._has_minimum_create_fields(normalized):

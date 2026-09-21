@@ -14,16 +14,19 @@ from fin_ops_platform.services.app_settings_service import (
     DEFAULT_OA_RETENTION_CUTOFF_DATE,
     OA_ATTACHMENT_INVOICE_PROMOTION_MODES,
 )
-from fin_ops_platform.services.import_job_queue import IMPORT_PROCESS_REQUESTED_EVENT
+from fin_ops_platform.services.bank_relation_requirement_recalculation import (
+    BANK_RELATION_REQUIREMENT_RECALCULATION_EVENT,
+)
+from fin_ops_platform.services.import_job_queue import ImportJobRepository, ImportJobWorker
 from fin_ops_platform.services.mongo_oa_adapter import load_mongo_oa_settings
-from fin_ops_platform.services.oa_payment_status_service import MySQLOAPaymentStatusRepository
+from fin_ops_platform.services.oa_attachment_invoice_promotion_service import (
+    OAAttachmentInvoicePromotionService,
+)
 from fin_ops_platform.services.oa_payment_status_reconcile import OAPaymentStatusReconcileService
 from fin_ops_platform.services.oa_payment_status_reconcile_contract import (
     OA_PAYMENT_STATUS_RECONCILE_EVENT,
 )
-from fin_ops_platform.services.oa_attachment_invoice_promotion_service import (
-    OAAttachmentInvoicePromotionService,
-)
+from fin_ops_platform.services.oa_payment_status_service import MySQLOAPaymentStatusRepository
 from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
 from fin_ops_platform.services.oa_sync_source_adapter import build_oa_sync_source_adapter
 from fin_ops_platform.services.postgres_connection import (
@@ -31,17 +34,14 @@ from fin_ops_platform.services.postgres_connection import (
     PostgresConnection,
     PostgresSettings,
 )
-from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
-    PostgresOaPendingPaymentSourceSnapshotRepository,
+from fin_ops_platform.services.postgres_repositories.oa_attachment_invoice import (
+    PostgresOAAttachmentInvoiceRepository,
 )
 from fin_ops_platform.services.postgres_repositories.oa_payment_status_reconcile import (
     PostgresOAPaymentStatusReconcileRepository,
 )
-from fin_ops_platform.services.postgres_repositories.workbench_relation import (
-    PostgresWorkbenchRelationRepository,
-)
-from fin_ops_platform.services.workbench_relation_command_service import (
-    WorkbenchRelationCommandService,
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
+    PostgresOaPendingPaymentSourceSnapshotRepository,
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     OA_PROJECTION_SYNC_VERSION,
@@ -49,10 +49,10 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionRepository,
     PostgresOAWorkflowRepository,
 )
-from fin_ops_platform.services.postgres_repositories.oa_attachment_invoice import (
-    PostgresOAAttachmentInvoiceRepository,
-)
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
+from fin_ops_platform.services.postgres_repositories.workbench_relation import (
+    PostgresWorkbenchRelationRepository,
+)
 from fin_ops_platform.services.runtime_paths import default_data_dir
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository, RuntimeQueueSettings
 from fin_ops_platform.services.runtime_worker import (
@@ -64,18 +64,17 @@ from fin_ops_platform.services.runtime_worker_handlers import (
     ImportRuntimeProcessorFactory,
     SettingsDataResetRuntimeFactory,
     WorkbenchMatchingWorkerFactory,
-    build_import_job_handler_bundle,
     check_import_job_processors,
-)
-from fin_ops_platform.services.settings_data_reset_job import SETTINGS_DATA_RESET_REQUESTED_EVENT
-from fin_ops_platform.services.bank_relation_requirement_recalculation import (
-    BANK_RELATION_REQUIREMENT_RECALCULATION_EVENT,
 )
 from fin_ops_platform.services.runtime_worker_registry import (
     RuntimeWorkerRegistration,
     get_registration_by_instance_name,
     worker_claim_event_types,
     worker_registrations,
+)
+from fin_ops_platform.services.settings_data_reset_job import SETTINGS_DATA_RESET_REQUESTED_EVENT
+from fin_ops_platform.services.workbench_relation_command_service import (
+    WorkbenchRelationCommandService,
 )
 
 APP_SETTINGS_KEY = "app_settings"
@@ -222,6 +221,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             config.event_types.append("oa.sync")
         if OA_PAYMENT_STATUS_RECONCILE_EVENT not in config.event_types:
             config.event_types.append(OA_PAYMENT_STATUS_RECONCILE_EVENT)
+    import_processors = {}
     if args.enable_import_job_processing:
         import_processors = (
             check_import_job_processors()
@@ -231,14 +231,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 connection=connection,
             ).build_processors()
         )
-        import_handlers = build_import_job_handler_bundle(
-            connection=connection,
-            worker_id=config.worker_id,
-            processors=import_processors,
-        )
-        handlers.update(import_handlers.handlers)
-        if IMPORT_PROCESS_REQUESTED_EVENT not in config.event_types:
-            config.event_types.append(IMPORT_PROCESS_REQUESTED_EVENT)
     settings_maintenance_factory = None
     if args.enable_settings_maintenance:
         if args.check:
@@ -276,6 +268,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "worker_kind": config.worker_kind,
                     "event_types": config.event_types,
                     "handlers": sorted(handlers),
+                    "import_processors": sorted(import_processors),
+                    "import_queue": "job.import_jobs" if args.enable_import_job_processing else None,
                     "registration": _registration_check_payload(registration),
                     "poll_interval_seconds": config.poll_interval_seconds,
                     "lock_timeout_seconds": config.lock_timeout_seconds,
@@ -318,6 +312,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             target=workbench_dirty_scope_worker.run_forever,
             daemon=True,
         ).start()
+
+    if args.enable_import_job_processing:
+        if handlers or args.enable_workbench_matching:
+            raise ValueError("Import processing requires its dedicated worker instance.")
+        ImportJobWorker(repository=ImportJobRepository(connection), worker_id=config.worker_id,
+                        processors=import_processors, config=config, heartbeat_recorder=queue).run_forever()
+        return 0
 
     worker = RuntimeWorker(queue_repository=queue, config=config, handlers=handlers)
     worker.run_forever()

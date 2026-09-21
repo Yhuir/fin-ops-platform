@@ -56,6 +56,23 @@ afterEach(() => {
   document.cookie = "Admin-Token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
 });
 
+function acceptEtcPreparation(fetchMock: ReturnType<typeof vi.fn>) {
+  const original = fetchMock.getMockImplementation()!;
+  let prepared: unknown;
+  const job = { job_id: "import:etc-job-1", version: 2, status: "awaiting_confirmation",
+    source: { session_id: "etc_import_session_001" } };
+  fetchMock.mockImplementation(async (...args: unknown[]) => {
+    if (String(args[0]).endsWith("/result")) {
+      return new Response(JSON.stringify({ job, result: { preview: prepared } }),
+        { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    const response = await original(...args) as Response;
+    prepared = await response.clone().json();
+    return new Response(JSON.stringify({ job }),
+      { status: 202, headers: { "Content-Type": "application/json" } });
+  });
+}
+
 describe("etc api", () => {
   test("reparses one stored source with a version and preserves conflict errors", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: "task_version_conflict", message: "版本已变化" }), {
@@ -617,6 +634,7 @@ describe("etc api", () => {
     );
     global.fetch = fetchMock as typeof fetch;
 
+    acceptEtcPreparation(fetchMock);
     const result = await previewEtcZipFiles(
       [
         new File(["zip-a"], "etc-2026-03.zip", { type: "application/zip" }),
@@ -697,6 +715,7 @@ describe("etc api", () => {
     }));
     global.fetch = fetchMock as typeof fetch;
 
+    acceptEtcPreparation(fetchMock);
     const pendingPreview = previewEtcZipFiles(
       [new File(["zip-a"], "large-etc.zip", { type: "application/zip" })],
       "etc_task_ready_001",

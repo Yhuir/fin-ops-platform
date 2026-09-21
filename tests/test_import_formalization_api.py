@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from tempfile import TemporaryDirectory
 import time
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from openpyxl import Workbook
 
 from tests.app_test_support import (
     build_grouped_workbench_projection,
-    build_local_state_application as build_application,
     install_durable_import_queue,
+)
+from tests.app_test_support import (
+    build_local_state_application as build_application,
 )
 from tests.mock_import_files import INVOICE_JAN, PINGAN_JAN, MockImportFile
 
@@ -58,6 +60,15 @@ def build_multipart_payload(
 
 
 class ImportFormalizationApiTests(unittest.TestCase):
+    def _prepare(self, app, *, body, headers):
+        response = app.handle_request("POST", "/imports/files/preview", body=body, headers=headers)
+        self.assertEqual(response.status_code, 202, response.body)
+        job = json.loads(response.body)["job"]
+        app._import_job_repository.process_all()
+        response = app.handle_request("GET", f"/imports/files/sessions/{job['source']['session_id']}")
+        self.assertEqual(response.status_code, 200, response.body)
+        return response
+
     def _wait_for_background_job(self, app, job_id: str) -> dict[str, object]:
         deadline = time.monotonic() + 3
         job_payload: dict[str, object] = {}
@@ -78,12 +89,7 @@ class ImportFormalizationApiTests(unittest.TestCase):
                 imported_by="user_finance_01",
                 files=[INVOICE_JAN, PINGAN_JAN],
             )
-            preview_response = app.handle_request(
-                "POST",
-                "/imports/files/preview",
-                body=preview_body,
-                headers=preview_headers,
-            )
+            preview_response = self._prepare(app, body=preview_body, headers=preview_headers)
             self.assertEqual(preview_response.status_code, 200)
             preview_payload = json.loads(preview_response.body)
 
@@ -93,6 +99,7 @@ class ImportFormalizationApiTests(unittest.TestCase):
                 json.dumps(
                     {
                         "session_id": preview_payload["session"]["id"],
+                        "preview_version": preview_payload["job"]["version"],
                         "selected_file_ids": [
                             file["id"] for file in preview_payload["files"] if file["status"] == "preview_ready"
                         ],
@@ -104,7 +111,7 @@ class ImportFormalizationApiTests(unittest.TestCase):
             import_queue.process_all()
             job_payload = self._wait_for_background_job(app, confirm_payload["job"]["job_id"])
             self.assertEqual(job_payload["status"], "succeeded")
-            self.assertIn("2026-01", job_payload["result_summary"]["queued_matching_months"])
+            self.assertIn("2026-01", job_payload["result_summary"]["affected_months"])
             self.assertNotIn("enqueued_matching_job_id", job_payload["result_summary"])
 
             restarted = build_application(data_dir=Path(temp_dir), bootstrap_mode="legacy")
@@ -135,12 +142,7 @@ class ImportFormalizationApiTests(unittest.TestCase):
                 imported_by="user_finance_01",
                 files=[INVOICE_JAN],
             )
-            invoice_preview_response = stale_api.handle_request(
-                "POST",
-                "/imports/files/preview",
-                body=invoice_body,
-                headers=invoice_headers,
-            )
+            invoice_preview_response = self._prepare(stale_api, body=invoice_body, headers=invoice_headers)
             self.assertEqual(invoice_preview_response.status_code, 200)
             invoice_preview = json.loads(invoice_preview_response.body)
             invoice_session_id = invoice_preview["session"]["id"]
@@ -164,19 +166,14 @@ class ImportFormalizationApiTests(unittest.TestCase):
             import_queue.process_all()
             job_payload = self._wait_for_background_job(worker_api, confirm_payload["job"]["job_id"])
             self.assertEqual(job_payload["status"], "succeeded")
-            self.assertIn("2026-01", job_payload["result_summary"]["queued_matching_months"])
+            self.assertIn("2026-01", job_payload["result_summary"]["affected_months"])
             self.assertNotIn("enqueued_matching_job_id", job_payload["result_summary"])
 
             bank_body, bank_headers = build_multipart_payload(
                 imported_by="user_finance_01",
                 files=[PINGAN_JAN],
             )
-            bank_preview_response = stale_api.handle_request(
-                "POST",
-                "/imports/files/preview",
-                body=bank_body,
-                headers=bank_headers,
-            )
+            bank_preview_response = self._prepare(stale_api, body=bank_body, headers=bank_headers)
             self.assertEqual(bank_preview_response.status_code, 200)
 
             restarted = build_application(data_dir=data_dir, bootstrap_mode="legacy")
@@ -280,12 +277,7 @@ class ImportFormalizationApiTests(unittest.TestCase):
                 imported_by="user_finance_01",
                 files=[invoice_file],
             )
-            preview_response = app.handle_request(
-                "POST",
-                "/imports/files/preview",
-                body=preview_body,
-                headers=preview_headers,
-            )
+            preview_response = self._prepare(app, body=preview_body, headers=preview_headers)
             self.assertEqual(preview_response.status_code, 200)
             preview_payload = json.loads(preview_response.body)
             file_payload = preview_payload["files"][0]
@@ -300,6 +292,7 @@ class ImportFormalizationApiTests(unittest.TestCase):
                 json.dumps(
                     {
                         "session_id": preview_payload["session"]["id"],
+                        "preview_version": preview_payload["job"]["version"],
                         "selected_file_ids": [file_payload["id"]],
                         "overrides": {
                             file_payload["id"]: {
@@ -310,9 +303,11 @@ class ImportFormalizationApiTests(unittest.TestCase):
                     }
                 ),
             )
-            self.assertEqual(retry_response.status_code, 200)
-            retry_payload = json.loads(retry_response.body)
-            self.assertEqual(retry_payload["files"][0]["batch_type"], "input_invoice")
+            self.assertEqual(retry_response.status_code, 202)
+            app._import_job_repository.process_all()
+            retry_payload = json.loads(app.handle_request("GET", f"/imports/files/sessions/{preview_payload['session']['id']}").body)
+            self.assertEqual(retry_payload["files"][0]["status"], "unrecognized_template")
+            self.assertIn("方向", retry_payload["files"][0]["message"])
             app.close()
 
     def test_revert_batch_and_download_batch_export(self) -> None:
@@ -323,12 +318,7 @@ class ImportFormalizationApiTests(unittest.TestCase):
                 imported_by="user_finance_01",
                 files=[INVOICE_JAN],
             )
-            preview_response = app.handle_request(
-                "POST",
-                "/imports/files/preview",
-                body=preview_body,
-                headers=preview_headers,
-            )
+            preview_response = self._prepare(app, body=preview_body, headers=preview_headers)
             preview_payload = json.loads(preview_response.body)
             file_payload = preview_payload["files"][0]
 
@@ -338,6 +328,7 @@ class ImportFormalizationApiTests(unittest.TestCase):
                 json.dumps(
                     {
                         "session_id": preview_payload["session"]["id"],
+                        "preview_version": preview_payload["job"]["version"],
                         "selected_file_ids": [file_payload["id"]],
                     }
                 ),

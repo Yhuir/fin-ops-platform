@@ -20,7 +20,7 @@ from fin_ops_platform.services.postgres_repositories.etc_tickets_page_audit impo
 
 ACTIVE_JOB_STATUSES = frozenset({"pending", "processing"})
 TERMINAL_SESSION_STATUSES = frozenset({"succeeded", "partial_success"})
-KNOWN_SESSION_STATUSES = frozenset({"preview_ready", "queued", "processing", "failed"}) | TERMINAL_SESSION_STATUSES
+KNOWN_SESSION_STATUSES = frozenset({"preparing", "preview_ready", "queued", "processing", "failed", "canceled", "reverted"}) | TERMINAL_SESSION_STATUSES
 ETC_IMPORT_AUDIT_CONTRACT_REVISION = "etc-import-page-audit.v1"
 ETC_IMPORT_DELETED_TASK_RETIREMENT_REVISION = "etc-import-page-audit.v1.deleted-task-retired"
 STRICT_SESSION_AUDIT_REVISIONS = frozenset(
@@ -269,6 +269,7 @@ def _session_contract_issues(
                     None,
                 )
             )
+        preparing = _text(row.get("status")) in {"preparing", "canceled", "reverted"}
         required = (
             "task_id",
             "task_version",
@@ -276,7 +277,7 @@ def _session_contract_issues(
             "preview_fingerprint",
         )
         for field_name in required:
-            if row.get(field_name) in (None, "", 0):
+            if not (preparing and field_name == "preview_fingerprint") and row.get(field_name) in (None, "", 0):
                 issues.append(_issue("etc_import_session_required_field_missing", session_id, {"field": field_name}))
         for formal_key in (
             "session_id",
@@ -295,6 +296,8 @@ def _session_contract_issues(
                         {"field": formal_key, "formal": row.get(formal_key), "payload": payload.get(formal_key)},
                     )
                 )
+        if preparing:
+            continue
         preview_result = payload.get("preview_result") if isinstance(payload.get("preview_result"), dict) else {}
         preview_audit = payload.get("preview_audit") if isinstance(payload.get("preview_audit"), dict) else {}
         preview_files = [item for item in list(payload.get("preview_files") or []) if isinstance(item, dict)]
@@ -492,14 +495,19 @@ def _session_task_edge_issues(
                 for invoice_id in list(_payload(batch.get("raw_payload")).get("invoice_ids") or [])
                 if _text(invoice_id)
             }
-            if batch_invoice_ids != invoice_edges.get(session_id, set()):
+            # Import-batch members describe this event; invoice provenance keeps
+            # the first import owner when a later event reuses an existing ticket.
+            known_invoice_ids = {_text(row.get("etc_invoice_id")) for row in facts["invoices"]}
+            missing_invoice_ids = batch_invoice_ids - known_invoice_ids
+            orphan_origin_ids = invoice_edges.get(session_id, set()) - batch_invoice_ids
+            if missing_invoice_ids or orphan_origin_ids:
                 issues.append(
                     _issue(
                         "etc_import_session_invoice_edge_mismatch",
                         session_id,
                         {
-                            "missing": sorted(batch_invoice_ids - invoice_edges.get(session_id, set())),
-                            "extra": sorted(invoice_edges.get(session_id, set()) - batch_invoice_ids),
+                            "missing": sorted(missing_invoice_ids),
+                            "extra": sorted(orphan_origin_ids),
                         },
                     )
                 )
@@ -572,7 +580,7 @@ def _session_job_issues(
     for session in sessions:
         status = _text(session.get("status"))
         related = jobs_by_session.get(_text(session.get("session_id")), [])
-        if status in {"processing"} and not any(_text(job.get("status")) in ACTIVE_JOB_STATUSES for job in related):
+        if status in {"preparing", "processing"} and not any(_text(job.get("status")) in ACTIVE_JOB_STATUSES for job in related):
             issues.append(_issue("etc_import_processing_job_missing", _text(session.get("session_id")), None))
         if status in TERMINAL_SESSION_STATUSES and not any(_text(job.get("status")) == "succeeded" for job in related):
             issues.append(_issue("etc_import_terminal_job_missing", _text(session.get("session_id")), None))

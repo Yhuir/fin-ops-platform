@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from http import HTTPStatus
 from typing import Any, Callable
+from uuid import uuid4
 
-from fin_ops_platform.services.background_job_service import BackgroundJobIdempotencyConflict
-from fin_ops_platform.services.etc_service import EtcImportPreviewStaleError, EtcServiceError, UploadedEtcZipFile
 from fin_ops_platform.services.etc_reconciliation_zip_filter import StaleReconciliationPreviewError
+from fin_ops_platform.services.etc_service import EtcImportPreviewStaleError, EtcServiceError, UploadedEtcZipFile
 from fin_ops_platform.services.import_job_queue import ImportJobIdempotencyConflict
+from fin_ops_platform.services.import_workflow_service import import_job_payload, upload_request_descriptor
 
 
 class EtcImportApiRoutes:
@@ -14,22 +15,18 @@ class EtcImportApiRoutes:
         self,
         *,
         preview_service: Any,
-        background_job_service: Any,
+        workflow_provider: Callable[[], Any],
         json_response: Callable[[HTTPStatus, dict[str, Any]], Any],
         load_json_body: Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]],
         load_multipart_body: Callable[[str | bytes | None, dict[str, str] | None], tuple[dict[str, list[str]], list[Any], Any | None]],
         reconciliation_error_response: Callable[[ValueError], Any],
-        enqueue_import_job: Callable[..., tuple[Any, Any]],
-        serialize_import_job: Callable[[Any], dict[str, Any]],
     ) -> None:
         self._preview_service = preview_service
-        self._background_job_service = background_job_service
+        self._workflow_provider = workflow_provider
         self._json_response = json_response
         self._load_json_body = load_json_body
         self._load_multipart_body = load_multipart_body
         self._reconciliation_error_response = reconciliation_error_response
-        self._enqueue_import_job = enqueue_import_job
-        self._serialize_import_job = serialize_import_job
 
     def route(
         self,
@@ -74,11 +71,37 @@ class EtcImportApiRoutes:
         if not task_id:
             return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "task_id_required", "message": "task_id is required."})
         try:
-            payload = self._preview_service.preview(
-                task_id=task_id,
-                uploads=uploads,
-                imported_by=owner_user_id,
-            )
+            workflow = self._workflow_provider()
+            request_id = (fields.get("request_id") or [str(uuid4())])[0]
+            key = f"etc_import.upload:{owner_user_id}:{request_id}"
+            existing = workflow.repository.get_by_idempotency_key(key, created_by=owner_user_id)
+            descriptor = upload_request_descriptor(uploads)
+            if existing is not None:
+                if existing.payload.get("upload_manifest") != descriptor or existing.payload.get("task_id") != task_id:
+                    raise ImportJobIdempotencyConflict("同一上传请求的文件或对账任务不同。")
+                return self._json_response(HTTPStatus.ACCEPTED, {"job": import_job_payload(existing)})
+            jobs = []
+            def register_job(transaction, session):
+                registered = workflow.repository.create_or_get_job(
+                    import_type="etc_invoice_import.confirm", import_session_id=session.session_id,
+                    idempotency_key=key, created_by=owner_user_id, stage="prepare", transaction=transaction,
+                    payload={"session_id": session.session_id, "task_id": task_id,
+                             "upload_manifest": descriptor,
+                             "owner_user_id": owner_user_id, "route": "/imports/etc-invoices",
+                             "affected_domains": ["imports_etc_invoices", "etc_tickets"]},
+                )
+                if registered.import_session_id != session.session_id:
+                    raise ImportJobIdempotencyConflict("上传请求已经登记。")
+                jobs.append(registered)
+            self._preview_service.register(task_id=task_id, uploads=uploads,
+                                           imported_by=owner_user_id, register_job=register_job)
+            payload = {"job": import_job_payload(jobs[0])}
+        except ImportJobIdempotencyConflict as error:
+            existing = workflow.repository.get_by_idempotency_key(key, created_by=owner_user_id)
+            if (existing is not None and existing.payload.get("upload_manifest") == descriptor
+                    and existing.payload.get("task_id") == task_id):
+                return self._json_response(HTTPStatus.ACCEPTED, {"job": import_job_payload(existing)})
+            return self._json_response(HTTPStatus.CONFLICT, {"error": "idempotency_conflict", "message": str(error)})
         except KeyError:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
         except ValueError as error:
@@ -88,7 +111,7 @@ class EtcImportApiRoutes:
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 {"error": "etc_import_storage_unavailable", "message": str(error)},
             )
-        return self._json_response(HTTPStatus.OK, payload)
+        return self._json_response(HTTPStatus.ACCEPTED, payload)
 
     def confirm(self, body: str | bytes | None, *, owner_user_id: str) -> Any:
         payload, error = self._load_json_body(body)
@@ -105,111 +128,47 @@ class EtcImportApiRoutes:
         if not isinstance(task_id, str) or not task_id.strip():
             return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "task_id_required", "message": "task_id is required."})
         normalized_task_id = task_id.strip()
-        idempotency_key = f"etc_import_session:{normalized_session_id}"
+        workflow = self._workflow_provider()
         try:
-            validated_preview = self._preview_service.validate(
-                session_id=normalized_session_id,
-                task_id=normalized_task_id,
-                imported_by=owner_user_id,
+            existing = workflow.session_job(normalized_session_id, owner_user_id, "etc_invoice_import.confirm")
+            if existing is not None and existing.stage == "commit":
+                if existing.payload.get("task_id") != normalized_task_id:
+                    raise ImportJobIdempotencyConflict("导入任务与对账批次不一致。")
+                job = workflow.retry(existing.import_job_id, owner_user_id)
+                return self._json_response(HTTPStatus.ACCEPTED, {"job": import_job_payload(job)})
+            validated = self._preview_service.validate(
+                session_id=normalized_session_id, task_id=normalized_task_id, imported_by=owner_user_id,
             )
-            total = validated_preview.item_total
+            job = workflow.confirm(
+                session_id=normalized_session_id, owner=owner_user_id,
+                import_type="etc_invoice_import.confirm", expected_version=payload.get("preview_version"),
+                payload={"session_id": normalized_session_id, "task_id": normalized_task_id,
+                         "owner_user_id": owner_user_id, "task_version": int(validated.session.task_version),
+                         "confirmed_item_set_hash": validated.session.confirmed_item_set_hash,
+                         "total": validated.item_total, "route": "/imports/etc-invoices",
+                         "affected_domains": ["imports_etc_invoices", "etc_tickets"]},
+            )
         except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "etc_import_session_not_found", "message": "ETC import session not found."},
-            )
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_import_session_not_found", "message": "ETC 导入会话不存在。"})
         except PermissionError as error:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "etc_import_session_forbidden", "message": str(error)},
-            )
-        except EtcImportPreviewStaleError as error:
+            return self._json_response(HTTPStatus.FORBIDDEN, {"error": "etc_import_session_forbidden", "message": str(error)})
+        except (EtcImportPreviewStaleError, StaleReconciliationPreviewError, ImportJobIdempotencyConflict) as error:
+            if isinstance(error, (EtcImportPreviewStaleError, StaleReconciliationPreviewError)):
+                current_job = workflow.session_job(normalized_session_id, owner_user_id, "etc_invoice_import.confirm")
+                if current_job is not None and current_job.status == "awaiting_confirmation":
+                    try:
+                        workflow.repository.mark_preview_needs_review(current_job.import_job_id, expected_version=current_job.version)
+                    except ImportJobIdempotencyConflict:
+                        # A concurrent command already advanced this exact version.
+                        pass
             return self._json_response(HTTPStatus.CONFLICT, {"error": "preview_stale", "message": str(error)})
-        except StaleReconciliationPreviewError as error:
-            existing_job = self._background_job_service.get_idempotent_job(owner_user_id, idempotency_key)
-            if existing_job is not None and existing_job.status in {"queued", "running", "succeeded"}:
-                return self._json_response(HTTPStatus.ACCEPTED, {"job": existing_job.to_payload()})
-            return self._json_response(HTTPStatus.CONFLICT, {"error": "stale_reconciliation_task_preview", "message": str(error)})
         except ValueError as error:
-            return self._reconciliation_error_response(error)
+            return self._json_response(HTTPStatus.CONFLICT, {"error": "invalid_import_confirmation", "message": str(error)})
         except EtcServiceError as error:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_import_session_not_found", "message": str(error)})
-
-        effective_task_version = int(validated_preview.session.task_version)
-        initial_summary = {
-            "created": 0,
-            "imported": 0,
-            "updated": 0,
-            "attachments_completed": 0,
-            "duplicates": 0,
-            "failed": 0,
-            "total": total,
-        }
-        try:
-            job, created = self._background_job_service.create_or_get_idempotent_job_with_created(
-                job_type="etc_invoice_import",
-                label="导入 ETC发票",
-                owner_user_id=owner_user_id,
-                idempotency_key=idempotency_key,
-                phase="queued",
-                current=0,
-                total=total,
-                message="ETC发票导入任务已创建。",
-                result_summary=initial_summary,
-                source={
-                    "session_id": normalized_session_id,
-                    "task_id": normalized_task_id,
-                    "affected_domains": ["imports_etc_invoices", "etc_tickets"],
-                    "route": "/imports/etc-invoices",
-                },
-                affected_scopes=["etc_invoices", "imports", "workbench"],
-            )
-        except BackgroundJobIdempotencyConflict as exc:
-            return self._json_response(
-                HTTPStatus.CONFLICT,
-                {"error": "import_idempotency_conflict", "message": str(exc)},
-            )
-        if not created:
-            return self._json_response(HTTPStatus.ACCEPTED, {"job": job.to_payload()})
-        try:
-            import_job, event = self._enqueue_import_job(
-                    import_type="etc_invoice_import.confirm",
-                    import_session_id=normalized_session_id,
-                    idempotency_key=f"etc_invoice_import.confirm:{normalized_task_id}:{normalized_session_id}",
-                    payload={
-                        "session_id": normalized_session_id,
-                        "task_id": normalized_task_id,
-                        "owner_user_id": owner_user_id,
-                        "background_job_id": job.job_id,
-                        "task_version": effective_task_version,
-                        "confirmed_item_set_hash": validated_preview.session.confirmed_item_set_hash,
-                        "total": total,
-                    },
-                    created_by=owner_user_id,
-                    reason="etc_invoice_import_confirm",
-                )
-            job_payload = job.to_payload()
-            job_payload["import_job"] = self._serialize_import_job(import_job)
-            job_payload["event_id"] = getattr(event, "event_id", None)
-            return self._json_response(HTTPStatus.ACCEPTED, {"job": job_payload})
-        except ImportJobIdempotencyConflict as exc:
-            failed_job = self._background_job_service.fail_job(job.job_id, "ETC发票导入任务未启动。", str(exc))
-            return self._json_response(
-                HTTPStatus.CONFLICT,
-                {"error": "import_idempotency_conflict", "message": str(exc), "job": failed_job.to_payload()},
-            )
-        except RuntimeError as exc:
-            failed_job = self._background_job_service.fail_job(job.job_id, "ETC发票导入任务未启动。", str(exc))
-            self._preview_service.mark_status(
-                normalized_session_id,
-                status="failed",
-                imported_by=owner_user_id,
-                last_error=str(exc),
-            )
-            return self._json_response(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {"error": "import_queue_unavailable", "message": str(exc), "job": failed_job.to_payload()},
-            )
+        except RuntimeError as error:
+            return self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "import_queue_unavailable", "message": str(error)})
+        return self._json_response(HTTPStatus.ACCEPTED, {"job": import_job_payload(job)})
 
     def discard(self, body: str | bytes | None, *, owner_user_id: str) -> Any:
         payload, error = self._load_json_body(body)
@@ -223,9 +182,13 @@ class EtcImportApiRoutes:
             )
         normalized_session_id = session_id.strip()
         try:
+            workflow = self._workflow_provider()
+            job = workflow.session_job(normalized_session_id, owner_user_id, "etc_invoice_import.confirm")
+            def cancel(transaction):
+                if job is not None and job.status != "canceled":
+                    workflow.repository.cancel_job(job.import_job_id, created_by=owner_user_id, transaction=transaction)
             self._preview_service.discard(
-                session_id=normalized_session_id,
-                imported_by=owner_user_id,
+                session_id=normalized_session_id, imported_by=owner_user_id, on_discard=cancel,
             )
         except KeyError:
             return self._json_response(

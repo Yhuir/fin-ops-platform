@@ -6,10 +6,9 @@ from time import monotonic
 from typing import Any, Callable
 from urllib.parse import unquote
 
-from fin_ops_platform.services.tax_offset_service import TaxOffsetService
-from fin_ops_platform.services.tax_offset_plan_service import TaxOffsetPlanConflictError
 from fin_ops_platform.services.tax_certified_import_service import UploadedCertifiedImportFile
-
+from fin_ops_platform.services.tax_offset_plan_service import TaxOffsetPlanConflictError
+from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 
 SessionResolver = Callable[[dict[str, str] | None], tuple[Any | None, Any | None]]
 JsonBodyLoader = Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]]
@@ -17,10 +16,8 @@ MultipartBodyLoader = Callable[[str | bytes | None, dict[str, str] | None], tupl
 ActorIdProvider = Callable[[Any | None, dict[str, Any], str], str]
 CertifiedImportRecordsProvider = Callable[[str], dict[str, Any]]
 CertifiedImportPreviewProvider = Callable[..., dict[str, object]]
-ImportJobEnabled = Callable[[], bool]
-ImportJobEnqueuer = Callable[..., tuple[Any, Any]]
+ImportJobEnqueuer = Callable[..., Any]
 ImportJobSerializer = Callable[[Any], dict[str, object]]
-TaxCertifiedImportConfirmExecutor = Callable[[str], dict[str, object]]
 
 
 class TaxApiRoutes:
@@ -39,10 +36,8 @@ class TaxApiRoutes:
         actor_id_provider: ActorIdProvider | None = None,
         certified_import_records_provider: CertifiedImportRecordsProvider | None = None,
         certified_import_preview_provider: CertifiedImportPreviewProvider | None = None,
-        import_job_processing_enabled: ImportJobEnabled | None = None,
         enqueue_import_job: ImportJobEnqueuer | None = None,
         serialize_import_job: ImportJobSerializer | None = None,
-        execute_tax_certified_import_confirm: TaxCertifiedImportConfirmExecutor | None = None,
         month_metric_emitter: Callable[..., None] | None = None,
         calculate_metric_emitter: Callable[..., None] | None = None,
         duration_ms: Callable[[float], float] | None = None,
@@ -60,10 +55,8 @@ class TaxApiRoutes:
         self._actor_id_provider = actor_id_provider
         self._certified_import_records_provider = certified_import_records_provider
         self._certified_import_preview_provider = certified_import_preview_provider
-        self._import_job_processing_enabled = import_job_processing_enabled
         self._enqueue_import_job = enqueue_import_job
         self._serialize_import_job = serialize_import_job
-        self._execute_tax_certified_import_confirm = execute_tax_certified_import_confirm
         self._month_metric_emitter = month_metric_emitter
         self._calculate_metric_emitter = calculate_metric_emitter
         self._duration_ms = duration_ms or (lambda started_at: (monotonic() - started_at) * 1000)
@@ -80,10 +73,8 @@ class TaxApiRoutes:
         actor_id_provider: ActorIdProvider,
         certified_import_records_provider: CertifiedImportRecordsProvider,
         certified_import_preview_provider: CertifiedImportPreviewProvider,
-        import_job_processing_enabled: ImportJobEnabled,
         enqueue_import_job: ImportJobEnqueuer,
         serialize_import_job: ImportJobSerializer,
-        execute_tax_certified_import_confirm: TaxCertifiedImportConfirmExecutor,
     ) -> "TaxApiRoutes":
         self._json_response = json_response
         self._resolve_read_session = resolve_read_session
@@ -93,10 +84,8 @@ class TaxApiRoutes:
         self._actor_id_provider = actor_id_provider
         self._certified_import_records_provider = certified_import_records_provider
         self._certified_import_preview_provider = certified_import_preview_provider
-        self._import_job_processing_enabled = import_job_processing_enabled
         self._enqueue_import_job = enqueue_import_job
         self._serialize_import_job = serialize_import_job
-        self._execute_tax_certified_import_confirm = execute_tax_certified_import_confirm
         return self
 
     def route(
@@ -113,7 +102,8 @@ class TaxApiRoutes:
             return self._read(headers, lambda _session: self.handle_summary(query.get("month", [None])[0]))
         if method == "GET" and route_path.startswith("/api/tax-offset/certified-import/jobs/"):
             import_job_id = unquote(route_path.removeprefix("/api/tax-offset/certified-import/jobs/")).strip()
-            return self._read(headers, lambda _session: self.handle_import_job(import_job_id))
+            return self._read(headers, lambda session: self.handle_import_job(
+                import_job_id, owner_user_id=self._import_owner(session)))
         if method == "GET" and route_path == "/api/tax-offset/certified-imports":
             return self._read(headers, lambda _session: self.handle_certified_imports(query.get("month", [None])[0]))
         if method == "POST" and route_path == "/api/tax-offset/calculate":
@@ -208,9 +198,9 @@ class TaxApiRoutes:
             )
         return self._respond(HTTPStatus.OK, result)
 
-    def handle_import_job(self, import_job_id: str) -> Any:
+    def handle_import_job(self, import_job_id: str, *, owner_user_id: str) -> Any:
         try:
-            import_job = self._require_import_job_service().get_confirm_job_payload(import_job_id)
+            import_job = self._require_import_job_service().get_confirm_job_payload(import_job_id, owner_user_id=owner_user_id)
         except ValueError as exc:
             return self._respond(
                 HTTPStatus.BAD_REQUEST,
@@ -275,43 +265,25 @@ class TaxApiRoutes:
                     "message": "session_id is required.",
                 },
             )
-        if self._import_job_enabled():
-            try:
-                import_job, event = self._enqueue_import_job(
-                    import_type="tax_certified_import.confirm",
-                    import_session_id=session_id,
-                    idempotency_key=f"tax_certified_import.confirm:{session_id}",
-                    payload={"session_id": session_id},
-                    created_by=actor_id,
-                    reason="tax_certified_import_confirm",
-                )
-            except RuntimeError as exc:
-                return self._respond(
-                    HTTPStatus.SERVICE_UNAVAILABLE,
-                    {"error": "import_queue_unavailable", "message": str(exc)},
-                )
-            return self._respond(
-                HTTPStatus.ACCEPTED,
-                {
-                    "status": "queued",
-                    "import_job": self._serialize_job(import_job),
-                    "event_id": getattr(event, "event_id", None),
-                },
-            )
+        if self._enqueue_import_job is None:
+            return self._respond(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "import_queue_unavailable", "message": "Import queue is not configured."})
         try:
-            result = self._execute_confirm(session_id)
-        except KeyError as exc:
-            return self._respond(
-                HTTPStatus.NOT_FOUND,
-                {"error": "tax_certified_import_session_not_found", "message": str(exc)},
+            self._require_import_job_service().validate_session_owner(session_id, owner_user_id=actor_id)
+            import_job = self._enqueue_import_job(
+                import_type="tax_certified_import.confirm",
+                import_session_id=session_id,
+                idempotency_key=f"tax_certified_import.confirm:{session_id}",
+                payload={"session_id": session_id},
+                created_by=actor_id,
+                reason="tax_certified_import_confirm",
             )
-        return self._respond(
-            HTTPStatus.OK,
-            {
-                **result,
-                **self._tax_certified_import_write_targets(result),
-            },
-        )
+        except KeyError:
+            return self._respond(HTTPStatus.NOT_FOUND, {"error": "tax_certified_import_session_not_found"})
+        except RuntimeError as exc:
+            return self._respond(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "import_queue_unavailable", "message": str(exc)})
+        return self._respond(HTTPStatus.ACCEPTED, {
+            "status": "queued", "import_job": self._serialize_job(import_job),
+        })
 
     def _require_query_service(self) -> Any:
         if self._query_service is None:
@@ -375,7 +347,7 @@ class TaxApiRoutes:
         if error is not None:
             return error
         imported_by = (
-            self._actor_id(session, {}, "system")
+            self._import_owner(session)
             if session is not None
             else (fields.get("imported_by") or ["system"])[0]
         )
@@ -400,8 +372,12 @@ class TaxApiRoutes:
         payload, error = self._json_body(body)
         if error is not None:
             return error
-        actor_id = self._actor_id(session, payload, "tax_certified_api")
+        actor_id = self._import_owner(session)
         return self.handle_certified_import_confirm(payload, actor_id=actor_id)
+
+    @staticmethod
+    def _import_owner(session: Any | None) -> str:
+        return str(session.identity.username) if session is not None else "tax_certified_api"
 
     def _read_session(self, headers: dict[str, str] | None) -> tuple[Any | None, Any | None]:
         if self._resolve_read_session is None:
@@ -423,23 +399,10 @@ class TaxApiRoutes:
             return self._actor_id_provider(session, payload, fallback)
         return fallback
 
-    def _import_job_enabled(self) -> bool:
-        return bool(self._import_job_processing_enabled and self._import_job_processing_enabled())
-
     def _serialize_job(self, import_job: Any) -> dict[str, object]:
         if self._serialize_import_job is None:
             raise RuntimeError("Tax import job serializer is not configured.")
         return self._serialize_import_job(import_job)
-
-    def _execute_confirm(self, session_id: str) -> dict[str, object]:
-        if self._execute_tax_certified_import_confirm is None:
-            raise RuntimeError("Tax certified import confirm executor is not configured.")
-        return self._execute_tax_certified_import_confirm(session_id)
-
-    @staticmethod
-    def _tax_certified_import_write_targets(result: dict[str, object]) -> dict[str, object]:
-        batch = result.get("batch") if isinstance(result.get("batch"), dict) else {}
-        return {"affected_scope_keys": list(batch.get("months") or []) or ["all"]}
 
 
 def _safe_list_count(value: object) -> int:

@@ -58,9 +58,13 @@
 | Route | `app/routes_tax.py` |
 | Query/service | `tax_offset_query_service.py`、`tax_offset_service.py`、`tax_offset_plan_service.py` |
 | Repository | `services/postgres_repositories/tax_offset.py`、`services/postgres_repositories/tax_offset_page_audit.py` |
-| Import | `tax_certified_import_*`、既有 import processing owner |
+| Import | `tax_certified_import_*`、`SharedImportProcessor`；确认返回 202，直接 import queue 领取；批次、明细、审计和任务终态同事务，重复请求复用任务；确认受理前窄读 session owner 并按登录 username 比对，任务 GET 同 owner 隔离，worker 提交前再次检查 |
 | Tests | `test_tax_offset_canonical_repository.py`、`test_tax_offset_api.py`、`test_tax_offset_service.py`、Tax Vitest/Playwright |
 
 ## 旧代码删除结果
 
 页面 SQL read model、cache gateway、polling、projection/repository、refresh/rebuild/warmup、manifest/scope policy、runtime worker、App Status、deploy env 和 RabbitMQ 条目已删除；税金 Page Audit 使用 direct-canonical proof。历史 migration/表暂留作回滚证据，没有运行时 reader/writer。
+
+### 认证导入任务所有权（2026-09-21）
+
+确认入队前通过窄 repository 读取 preview 所有者；非本人 session 返回不可见且不得占用任务幂等键。worker 正式事务再次校验 owner。任务 owner 使用认证用户名，与全局任务读取及 worker 权限合同一致。

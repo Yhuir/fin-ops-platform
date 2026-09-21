@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import re
-from types import SimpleNamespace
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from fin_ops_platform.app.server import build_application
 from fin_ops_platform.app import server as server_module
+from fin_ops_platform.app.server import build_application
 from fin_ops_platform.services import file_object_migration as file_object_migration_module
-from fin_ops_platform.services.import_file_service import FileImportSession
 from fin_ops_platform.services import postgres_state_store as postgres_state_store_module
-from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services import runtime_bootstrap as runtime_bootstrap_module
+from fin_ops_platform.services.import_file_service import FileImportSession
+from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.state_store import ApplicationStateStore
 
 
@@ -109,26 +109,21 @@ class RuntimeBootstrapTests(unittest.TestCase):
         )
         calls: list[str] = []
         store = SimpleNamespace(
-            storage_backend="postgres",
-            import_fact_repository=None,
-            load_imports_snapshot=lambda: calls.append("imports") or {},
-            load_file_imports_snapshot=lambda: calls.append("file_imports")
-            or {
-                "session_counter": 21,
-                "file_counter": 63,
-                "sessions": {session.id: session},
+            storage_backend="postgres", import_fact_repository=None,
+            load_file_import_session_snapshot=lambda session_id: calls.append(session_id) or {
+                "imports": {}, "file_imports": {"sessions": {session.id: session}},
             },
         )
         app = object.__new__(server_module.Application)
         app._state_store = store
-        app._invoice_document_recognizer = SimpleNamespace()
-        app._app_settings_service = SimpleNamespace(get_bank_account_mappings_payload=lambda: [])
-
-        app._reload_file_import_runtime_state()
-
-        self.assertEqual(calls, ["imports", "file_imports"])
-        self.assertIs(app._file_import_service.get_session(session.id), session)
-        self.assertEqual(store.__dict__.get("load_calls", 0), 0)
+        original_service = object()
+        app._file_import_service = original_service
+        first = app._reload_file_import_runtime_state(session.id)
+        second = app._reload_file_import_runtime_state(session.id)
+        self.assertEqual(calls, [session.id, session.id])
+        self.assertEqual(first.get_session(session.id).id, session.id)
+        self.assertIsNot(first, second)
+        self.assertIs(app._file_import_service, original_service)
 
     def test_lightweight_bootstrap_does_not_call_full_state_load_and_exposes_repositories(self) -> None:
         store = LoadTrackingStore()

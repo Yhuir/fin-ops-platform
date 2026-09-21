@@ -235,10 +235,16 @@ class OAManualImportService:
             )
         return list(list_by_ids(row_ids))
 
-    def _record_to_search_row(self, record: OAApplicationRecord) -> dict[str, object]:
+    def serialize_import_result_rows(
+        self, records: list[OAApplicationRecord], *, imported_entries: dict[str, Any],
+    ) -> list[dict[str, object]]:
+        return [self._record_to_search_row(record, imported_entries=imported_entries) for record in records]
+
+    def _record_to_search_row(self, record: OAApplicationRecord, *, imported_entries: dict[str, Any] | None = None) -> dict[str, object]:
         status = self._record_status(record)
         form_type = self._record_form_type(record)
-        imported_entries = self._manual_import_entries()
+        if imported_entries is None:
+            imported_entries = self._manual_import_entries()
         imported_entry = imported_entries.get(record.id, {})
         can_import = status == OA_IMPORT_STATUS_COMPLETED
         attachment_file_count = self._attachment_file_count(record)

@@ -3,6 +3,7 @@ import type { BackgroundJob, BackgroundJobActivePayload, BackgroundJobStatus } f
 
 export type ApiBackgroundJob = {
   job_id?: string;
+  version?: number;
   jobId?: string;
   type?: string;
   label?: string;
@@ -52,7 +53,8 @@ function toNumber(value: unknown) {
 function toBackgroundJobStatus(value: unknown): BackgroundJobStatus {
   const status = typeof value === "string" ? value : "";
   if (
-    status === "queued"
+    status === "awaiting_confirmation"
+    || status === "queued"
     || status === "running"
     || status === "succeeded"
     || status === "partial_success"
@@ -63,7 +65,7 @@ function toBackgroundJobStatus(value: unknown): BackgroundJobStatus {
   ) {
     return status;
   }
-  return "queued";
+  throw new Error("后台任务返回了未知状态。");
 }
 
 function toStringArray(value: unknown) {
@@ -77,6 +79,7 @@ export function mapBackgroundJob(job: ApiBackgroundJob): BackgroundJob {
   const resultSummary = job.result_summary ?? job.resultSummary ?? {};
   return {
     jobId,
+    version: job.version,
     type: job.type ?? "file_import",
     label: job.label ?? "后台任务",
     shortLabel: job.short_label ?? job.shortLabel ?? job.message ?? job.label ?? "后台任务处理中",
@@ -133,7 +136,8 @@ export async function acknowledgeBackgroundJob(jobId: string, signal?: AbortSign
     body: "{}",
     signal,
   });
-  return mapBackgroundJob(payload.job ?? { job_id: jobId, status: "acknowledged" });
+  if (!payload.job) throw new Error("后台任务响应缺少任务数据。");
+  return mapBackgroundJob(payload.job);
 }
 
 export async function retryBackgroundJob(job: BackgroundJob, signal?: AbortSignal): Promise<void> {

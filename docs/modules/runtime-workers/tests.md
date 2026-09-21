@@ -36,3 +36,12 @@
 - `tests/test_etc_formal_matching_postgres.py`：47 张 ETC、进行中 OA、后到银行同 case、幂等、事务回滚、旧事实拒绝、提交与 dirty scopes 原子性、多批来源不覆盖。
 - 既有 ETC API/删除、OA adapter、matching/UoW、Workbench query/grouping/command、成本和待付款回归；`WorkbenchColumns.test.tsx` 覆盖 paired/unpaired 两区真实进行中标签。
 - 不新增 read model/cache，freshness 专属测试不适用。部署和生产证据记录在 [实施计划](../../dev/etc-oa-invoice-bank-matching-plan.md)。
+
+## 导入直接领取验证
+
+- `tests/test_import_direct_queue_postgres_integration.py`：双 claimant、领取版本隔离、取消竞争、业务+任务结果原子回滚、真实子进程退出回滚与恢复、最大尝试、prepare/confirm/commit 单任务、OA add-only、已认证发票同事务。仅使用 `FIN_OPS_TEST_DATABASE_URL` 指定的隔离测试数据库。
+- `tests/test_import_job_queue.py`：幂等重放不覆盖选择、worker CLI 仅直接领取、四类 processor、持久化原件配置。
+- `tests/test_runtime_monitoring.py`：直接导入 backlog/失败可见，用户业务失败不增加全局 readiness 门禁。
+- 三个 import page audit 保留事实一致性证明，prepare/待确认是合法生命周期；无需新 outbox 事件。
+- 直接队列额外覆盖：执行前撤权拒绝、税务任务其他用户不可读取、HTTP stale 版本 CAS、OA completed/进行中/不存在的精确接纳边界。
+- `tests/test_verified_invoice_financial_repair.py`：税务原件金额/税额语义、来源冲突/缺失/总额改变拒绝；隔离 PostgreSQL 验证修复+cache 失效原子回滚、fact guard 审计、CLI dry-run/execute、旧 fingerprint 拒绝、二次零更新。前端类测试不适用于只读/维护 CLI，由页面所属任务覆盖用户交互。

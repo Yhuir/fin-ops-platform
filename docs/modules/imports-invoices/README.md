@@ -68,12 +68,12 @@
 | 动作 | 事实源 / 事件 | 影响 |
 | --- | --- | --- |
 | 文件预览 | `FileImportSession`、`ImportPreviewAuditCounts` | 当前导入页重复审计和 confirm eligibility |
-| 文件确认排队 | `file_import` background job + durable `import.process.requested` | 导入页 job feedback、App Status import worker；发票文件确认必须进入 PostgreSQL durable queue，并报告 `affected_domains=["imports_invoices"]` 和 route `/imports/invoices`；RabbitMQ 仅可选 wakeup |
-| 文件确认处理 | `ImportNormalizationService.confirm_import(...)` | input/output invoice facts、source links、duplicate decisions |
+| 文件确认排队 | `job.import_jobs` 的 prepare/commit 生命周期 | 导入页 job feedback、App Status import worker；发票文件确认必须进入 PostgreSQL durable queue，并报告 `affected_domains=["imports_invoices"]` 和 route `/imports/invoices` |
+| 文件确认处理 | `ImportNormalizationService.confirm_imports(..., reject_issues=True)` | input/output invoice facts、source links、duplicate decisions |
 | 发票导入生命周期 | `invoice_import_confirmed` | canonical invoice/source-link versions、Workbench relation/matching；各 direct 页面下次 normal GET 读取，已退休 page/Search projection不入队 |
 | 预览过期 | API `409 preview_stale` | 当前导入页必须要求重新预览，不能继续确认旧结果 |
 
-页面统一 Audit 不读取下游 read model。它独立证明已登记 input/output file/session、batch/row、canonical invoice 与 `manual_invoice_import` source-link 的双向集合和关键字段，并仅以归属于这些 session/file 的 job/outbox 判断 queue。下游页面必须继续通过各自 Audit 证明，原始税务导出是否漏票也必须由外部对账证明。
+页面统一 Audit 不读取下游 read model。它独立证明已登记 input/output file/session、batch/row、canonical invoice 与 `manual_invoice_import` source-link 的双向集合和关键字段，并仅以归属于这些 session/file 的 canonical import job 判断 queue。下游页面必须继续通过各自 Audit 证明，原始税务导出是否漏票也必须由外部对账证明。
 
 ## 维护触发器
 
@@ -92,3 +92,5 @@
 - `state-machine.md`：维护当前有效状态和状态流转；不适用时写明原因。
 - `tests.md`：维护七类测试适用性、现有测试入口、验证命令和回归范围。
 - `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。
+
+当前实施的生命周期和跨进程恢复合同见 [state-machine.md](state-machine.md) 的 2026-09-21 合同；普通上传/提交不再维护独立 background job 或导入 outbox。

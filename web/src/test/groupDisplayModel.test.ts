@@ -70,6 +70,7 @@ function buildAttachmentInvoiceRow(id: string, sourceOaId: string, amount = "100
     tableValues: {
       sellerName: `seller-${id}`,
       amount,
+      grossAmount: amount,
     },
     detailFields: [],
     actionVariant: "detail-only",
@@ -1155,4 +1156,20 @@ describe("supplement entry amount rule", () => {
       supportingDocumentAmount: voucher, displayOnly: true });
     expect(canSupplementWorkbenchItem(row, evidence)).toBe(expected);
   });
+});
+
+
+test("supplement compares invoice gross amount with the OA payment and preserves unknown gross", () => {
+  const row = { ...buildOaRow("oa-tax", "531.92"), displayRole: "expense-claim-item" as const, sourceExpenseItemIds: ["item-tax"] };
+  const evidence = [["171.61", "193.92"], ["299.11", "338.00"]].map(([net, gross], i) => ({
+    ...buildAttachmentInvoiceRow(`gross-${i}`, row.id, net), sourceExpenseItemIds: ["item-tax"],
+    tableValues: { amount: net, grossAmount: gross },
+  }));
+  expect(canSupplementWorkbenchItem(row, evidence)).toBe(false);
+  evidence[1].tableValues.grossAmount = "337.99";
+  expect(canSupplementWorkbenchItem(row, evidence)).toBe(true);
+  evidence[1].tableValues.grossAmount = "";
+  expect(canSupplementWorkbenchItem(row, evidence)).toBe(false);
+  evidence[1].tableValues.grossAmount = "unknown";
+  expect(canSupplementWorkbenchItem(row, evidence)).toBe(false);
 });

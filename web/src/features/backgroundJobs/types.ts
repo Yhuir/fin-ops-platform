@@ -1,4 +1,5 @@
 export type BackgroundJobStatus =
+  | "awaiting_confirmation"
   | "queued"
   | "running"
   | "succeeded"
@@ -19,6 +20,7 @@ export type BackgroundJobType =
 
 export type BackgroundJob = {
   jobId: string;
+  version?: number;
   type: BackgroundJobType | string;
   label: string;
   shortLabel: string;

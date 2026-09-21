@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 from typing import Any
 
-from fin_ops_platform.services.object_storage import ObjectStorageReadError, ObjectStorageRepository, ObjectStorageWriteError
-
+from fin_ops_platform.services.object_storage import (
+    ObjectStorageReadError,
+    ObjectStorageRepository,
+    ObjectStorageWriteError,
+)
 
 FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -34,6 +37,7 @@ def write_verified_object(
     file_name: str,
     content: bytes,
     content_type: str | None = None,
+    new_object: bool = False,
 ) -> ObjectWriteResult:
     content_bytes = bytes(content or b"")
     sha256 = hashlib.sha256(content_bytes).hexdigest()
@@ -51,6 +55,12 @@ def write_verified_object(
         final_bytes = object_storage_repository.get_object(final_object_key)
         _verify_object_bytes(final_bytes, expected_sha256=sha256, expected_size=len(content_bytes), label=final_object_key)
     except Exception as exc:
+        if new_object:
+            # The caller allocated a fresh identity, so no committed reader can
+            # reference either key before this write returns successfully.
+            object_storage_repository.delete_object(final_object_key)
+            object_storage_repository.delete_object(temporary_object_key)
+            raise ObjectStorageWriteError(str(exc) or exc.__class__.__name__) from exc
         try:
             object_storage_repository.delete_object(temporary_object_key)
         except Exception:

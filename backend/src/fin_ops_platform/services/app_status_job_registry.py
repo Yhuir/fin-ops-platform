@@ -24,11 +24,17 @@ APP_STATUS_BACKGROUND_JOB_REGISTRY: dict[str, AppStatusBackgroundJobDefinition] 
     "bank_transaction_import": AppStatusBackgroundJobDefinition("bank_transaction_import", "银行流水导入", ("imports_bank_transactions", "bank_details"), "/imports/bank-transactions"),
     "invoice_import": AppStatusBackgroundJobDefinition("invoice_import", "发票导入", ("imports_invoices",), "/imports/invoices"),
     "etc_invoice_import": AppStatusBackgroundJobDefinition("etc_invoice_import", "ETC发票导入", ("imports_etc_invoices", "etc_tickets"), "/imports/etc-invoices"),
-    "import.process.requested": AppStatusBackgroundJobDefinition(
-        "import.process.requested",
-        "导入处理",
-        ("imports_bank_transactions", "imports_invoices", "imports_etc_invoices"),
-        "/operations/app-health",
+    "file_import.confirm": AppStatusBackgroundJobDefinition(
+        "file_import.confirm", "文件导入", ("imports_bank_transactions", "imports_invoices"), "/operations/app-health",
+    ),
+    "etc_invoice_import.confirm": AppStatusBackgroundJobDefinition(
+        "etc_invoice_import.confirm", "ETC发票导入", ("imports_etc_invoices", "etc_tickets"), "/imports/etc-invoices",
+    ),
+    "tax_certified_import.confirm": AppStatusBackgroundJobDefinition(
+        "tax_certified_import.confirm", "税金认证导入", ("tax_offset",), "/tax-offset",
+    ),
+    "oa_manual_import.create": AppStatusBackgroundJobDefinition(
+        "oa_manual_import.create", "OA手动导入", ("settings",), "/settings",
     ),
     "tax_certified_import": AppStatusBackgroundJobDefinition("tax_certified_import", "税金认证导入", ("tax_offset",), "/tax-offset", legacy=True),
     "oa.sync": AppStatusBackgroundJobDefinition("oa.sync", "OA同步", ("oa_pending_payments",), "/oa-pending-payments"),

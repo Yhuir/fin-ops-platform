@@ -21,7 +21,7 @@ class FakeRuntimeMonitoringRepository:
         return {
             "outbox_statuses": {
                 "oa.sync": {"status": "ready"},
-                "import.process.requested": {"status": "failed", "last_error": "import failed"},
+                "file_import.confirm": {"status": "failed", "last_error": "import failed"},
             },
             "worker_statuses": {
                 "oa-sync": {"status": "ready"},
@@ -162,7 +162,7 @@ class SyncSloBaselineTests(unittest.TestCase):
         self.assertEqual(payload["slo_targets"]["canonical_api_read_p99_ms"], 1000)
         self.assertNotIn("heavy_workbench_local_convergence_p95_ms", payload["slo_targets"])
         self.assertEqual(payload["runtime_health"]["data"]["failed_jobs"], 0)
-        self.assertIn("import.process.requested", payload["runtime_snapshot"]["data"]["outbox_attention"])
+        self.assertIn("file_import.confirm", payload["runtime_snapshot"]["data"]["outbox_attention"])
         self.assertIn("import", payload["runtime_snapshot"]["data"]["worker_attention"])
         self.assertEqual(payload["postgres_connections"]["data"]["max_connections"], 100)
         self.assertEqual(payload["postgres_table_sizes"]["data"][0]["schema_name"], "app")

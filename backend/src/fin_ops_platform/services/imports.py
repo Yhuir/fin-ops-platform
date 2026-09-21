@@ -137,10 +137,12 @@ class _ImportObjectIdentityRepository:
         *,
         canonical_key: str | None = None,
         suspected_key: str | None = None,
+        official_references: set[str] | None = None,
     ) -> list[BankTransaction]:
         return self._import_service._find_transactions_by_identity(
             source_unique_key=canonical_key,
             data_fingerprint=suspected_key,
+            official_references=official_references,
         )
 
     def find_bank_transactions_by_statement_position(
@@ -400,10 +402,20 @@ class ImportNormalizationService:
         with self._transaction_identity_cache_for(normalized_rows):
             yield
 
+    @contextmanager
+    def preload_normalized_identities(self, rows_by_type: dict[BatchType, list[dict[str, Any]]]) -> Iterator[None]:
+        invoice_rows = [*rows_by_type.get(BatchType.INPUT_INVOICE, []), *rows_by_type.get(BatchType.OUTPUT_INVOICE, [])]
+        with self._invoice_identity_cache_for(invoice_rows, enabled=bool(invoice_rows)):
+            with self._transaction_identity_cache_for(
+                rows_by_type.get(BatchType.BANK_TRANSACTION, []),
+                enabled=bool(rows_by_type.get(BatchType.BANK_TRANSACTION)),
+            ):
+                yield
+
     def confirm_import(self, batch_id: str) -> ImportedBatch:
         return self.confirm_imports([batch_id])[0]
 
-    def confirm_imports(self, batch_ids: list[str]) -> list[ImportedBatch]:
+    def confirm_imports(self, batch_ids: list[str], *, reject_issues: bool = False) -> list[ImportedBatch]:
         normalized_batch_ids = list(dict.fromkeys(
             str(batch_id).strip() for batch_id in batch_ids if str(batch_id).strip()
         ))
@@ -426,7 +438,10 @@ class ImportNormalizationService:
             "counterparty_counter": self._counterparty_counter,
         }
         try:
-            return [self._confirm_import_without_rollback(batch_id) for batch_id in normalized_batch_ids]
+            confirmed = [self._confirm_import_without_rollback(batch_id) for batch_id in normalized_batch_ids]
+            if reject_issues and any(batch.error_count or batch.suspected_duplicate_count for batch in confirmed):
+                raise ValueError("selected files require review before confirmation")
+            return confirmed
         except Exception:
             self._batches.update(rollback["previews"])
             self._invoices_by_id = rollback["invoices"]
@@ -474,6 +489,9 @@ class ImportNormalizationService:
         preview.batch.status = BatchStatus.COMPLETED_WITH_ERRORS if has_issues else BatchStatus.COMPLETED
         self._batches[batch_id] = preview
         return preview.batch
+
+    def restore_preview_batches(self, batches: dict[str, ImportPreview]) -> None:
+        self._batches.update(batches)
 
     def discard_preview(self, batch_id: str) -> ImportedBatch:
         preview = self._batches[batch_id]
@@ -526,6 +544,10 @@ class ImportNormalizationService:
             row_result.linked_object_id = decision.linked_object_id
             row_result.decision = ImportDecision(decision.decision)
             row_result.decision_reason = decision.decision_reason
+        conflicts = self.invoice_financial_conflicts(normalized, existing)
+        if conflicts:
+            row_result.decision = ImportDecision.ERROR
+            row_result.decision_reason = "existing invoice financial conflict: " + ", ".join(conflicts)
 
     def get_batch(self, batch_id: str) -> ImportPreview:
         return self._batches[batch_id]
@@ -894,6 +916,7 @@ class ImportNormalizationService:
         if callable(finder_many) and (canonical_keys or suspected_keys):
             for invoice in list(finder_many(canonical_keys=canonical_keys, suspected_keys=suspected_keys) or []):
                 if isinstance(invoice, Invoice):
+                    self._register_invoice(invoice)
                     self._add_invoice_to_identity_cache(cache, invoice)
         for invoice in self._invoices_by_id.values():
             self._add_invoice_to_identity_cache(cache, invoice)
@@ -958,7 +981,14 @@ class ImportNormalizationService:
         *,
         source_unique_key: str | None,
         data_fingerprint: str | None,
+        official_references: set[str] | None = None,
     ) -> list[BankTransaction]:
+        if self._transaction_identity_cache is not None and data_fingerprint and official_references:
+            cache = self._transaction_identity_cache
+            candidates = [*cache.get(("suspected_reference", data_fingerprint, ""), [])]
+            for reference in official_references:
+                candidates.extend(cache.get(("suspected_reference", data_fingerprint, reference), []))
+            return list({item.id: item for item in candidates}.values())
         matches: list[BankTransaction] = []
         seen_ids: set[str] = set()
 
@@ -1120,6 +1150,13 @@ class ImportNormalizationService:
             matches = cache.setdefault((key_type, text), [])
             if all(existing.id != transaction.id for existing in matches):
                 matches.append(transaction)
+        if transaction.data_fingerprint:
+            identity = self._object_identity_policy.identify_bank_transaction(transaction)
+            references = self._dedup_decision_service._official_reference_values(identity)
+            for reference in references or {""}:
+                matches = cache.setdefault(("suspected_reference", transaction.data_fingerprint, reference), [])
+                if all(existing.id != transaction.id for existing in matches):
+                    matches.append(transaction)
         position = self._bank_identity_service.statement_position_for_transaction(transaction)
         if position is not None:
             matches = cache.setdefault(("position", *position), [])
@@ -1157,15 +1194,35 @@ class ImportNormalizationService:
             return loaded
         return None
 
+    @staticmethod
+    def invoice_financial_conflicts(normalized: dict[str, Any], existing: Invoice | None) -> list[str]:
+        if existing is None or not normalized.get("source_unique_key"):
+            return []
+        conflicts = []
+        for name in ("amount", "tax_amount", "total_with_tax"):
+            candidate = normalized.get(name)
+            current = getattr(existing, name)
+            if candidate not in (None, "") and current is not None and Decimal(str(candidate)) != current:
+                conflicts.append(name)
+        for name in ("invoice_date", "invoice_type", "seller_tax_no", "buyer_tax_no"):
+            candidate = normalized.get(name)
+            current = getattr(existing, name)
+            current = getattr(current, "value", current)
+            if candidate not in (None, "") and current not in (None, "") and str(candidate) != str(current):
+                conflicts.append(name)
+        return conflicts
+
     def current_import_decision_for_normalized_row(
         self,
         *,
         batch_type: BatchType,
         normalized: dict[str, Any],
     ) -> tuple[ImportDecision | None, str | None, str | None]:
-        source_unique_key = normalized.get("source_unique_key")
         if batch_type in (BatchType.OUTPUT_INVOICE, BatchType.INPUT_INVOICE):
             decision = self._dedup_decision_service.decide_invoice_import(normalized)
+            existing = decision.matched_object if isinstance(decision.matched_object, Invoice) else None
+            if self.invoice_financial_conflicts(normalized, existing):
+                return ImportDecision.ERROR, decision.linked_object_type, decision.linked_object_id
         else:
             decision = self._dedup_decision_service.decide_bank_transaction_import(normalized)
         return ImportDecision(decision.decision), decision.linked_object_type, decision.linked_object_id
@@ -1242,6 +1299,25 @@ class ImportNormalizationService:
         source_workbench_row_id: str | None = None,
         allow_create: bool = False,
     ) -> Invoice | None:
+        if attachment_invoice.get("financial_review_reason"):
+            if not self._is_promotable_oa_attachment_invoice(attachment_invoice):
+                return None
+            identity_input = dict(attachment_invoice)
+            number = str(identity_input.get("invoice_no") or "").strip()
+            if not identity_input.get("digital_invoice_no") and number.isdigit() and len(number) == 20:
+                identity_input["digital_invoice_no"] = number
+            matched = self._dedup_decision_service.decide_oa_attachment_invoice_import(identity_input)
+            if not matched.identity.canonical_key or not matched.linked_object_id:
+                return None
+            existing = self._ensure_invoice_loaded(matched.linked_object_id)
+            if existing is None:
+                return None
+            # Incomplete OCR can link a proven identity, but only canonical
+            # financial values may enter the metadata enrichment operation.
+            attachment_invoice = {**attachment_invoice, "financial_review_reason": "",
+                "amount": str(existing.amount), "net_amount": str(existing.amount),
+                "tax_amount": str(existing.tax_amount) if existing.tax_amount is not None else "",
+                "total_with_tax": str(existing.total_with_tax) if existing.total_with_tax is not None else ""}
         normalized = self._normalize_oa_attachment_invoice(
             attachment_invoice,
             oa_form_id=oa_form_id,
@@ -1354,6 +1430,13 @@ class ImportNormalizationService:
             parsed_value = self._parse_decimal(raw_row.get(source_key))
             if parsed_value is not None:
                 normalized[source_key] = self._format_decimal(parsed_value)
+            elif source_key in {"tax_amount", "total_with_tax"} and raw_row.get(source_key) not in (None, ""):
+                errors.append(f"{source_key} is invalid")
+        tax_amount = self._parse_decimal(raw_row.get("tax_amount"))
+        total_with_tax = self._parse_decimal(raw_row.get("total_with_tax"))
+        if amount is not None and tax_amount is not None and total_with_tax is not None:
+            if (amount + tax_amount).quantize(Decimal("0.01")) != total_with_tax.quantize(Decimal("0.01")):
+                errors.append("amount plus tax_amount must equal total_with_tax")
 
         identity = self._object_identity_policy.identify_invoice_mapping(normalized)
         source_unique_key = identity.canonical_key
@@ -1394,6 +1477,10 @@ class ImportNormalizationService:
         decision = ImportDecision(dedup_decision.decision)
         reason = dedup_decision.decision_reason
         existing = dedup_decision.matched_object if isinstance(dedup_decision.matched_object, Invoice) else None
+        conflicts = self.invoice_financial_conflicts(normalized, existing)
+        if conflicts:
+            decision = ImportDecision.ERROR
+            reason = "existing invoice financial conflict: " + ", ".join(conflicts)
         if source_unique_key and existing is not None:
             normalized["previous_invoice_status_from_source"] = existing.invoice_status_from_source
             normalized["previous_source_batch_id"] = existing.source_batch_id
@@ -1827,6 +1914,8 @@ class ImportNormalizationService:
         if not isinstance(attachment_invoice, dict):
             return None
         if not self._is_promotable_oa_attachment_invoice(attachment_invoice):
+            return None
+        if attachment_invoice.get("financial_review_reason"):
             return None
 
         issue_date = self._parse_date(

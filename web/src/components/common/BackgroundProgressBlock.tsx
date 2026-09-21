@@ -34,7 +34,7 @@ function canAcknowledge(status: BackgroundJobStatus) {
 }
 
 function canRetry(job: BackgroundJob) {
-  return job.retryable && (job.status === "failed" || job.status === "partial_success");
+  return job.retryable && (job.status === "failed" || job.status === "partial_success" || job.retryMode === "reprepare");
 }
 
 export default function BackgroundProgressBlock(props: BackgroundProgressBlockProps) {
@@ -56,7 +56,7 @@ export default function BackgroundProgressBlock(props: BackgroundProgressBlockPr
   const { job, extraCount, operating, onAcknowledge, onRetry } = props;
   const tone = statusTone(job.status);
   const label = job.shortLabel || job.message || job.label || "后台任务处理中";
-  const actionLabel = operating ? "处理中" : "重新执行";
+  const actionLabel = operating ? "处理中" : job.retryMode === "reprepare" ? "重新预览" : "重新执行";
   const acknowledgeLabel = operating ? "处理中" : "确认已知";
 
   return (
@@ -70,6 +70,12 @@ export default function BackgroundProgressBlock(props: BackgroundProgressBlockPr
       <span className="background-progress-dot" aria-hidden="true" />
       <strong>{label}</strong>
       {extraCount > 0 ? <span className="background-progress-extra">+{extraCount}</span> : null}
+      {job.status === "awaiting_confirmation" && typeof job.source.route === "string" ? (
+        <a className="background-progress-action"
+          href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}${job.source.route}?import_job=${encodeURIComponent(job.jobId)}`}>
+          查看预览
+        </a>
+      ) : null}
       {canRetry(job) ? (
         <button
           aria-label={actionLabel}

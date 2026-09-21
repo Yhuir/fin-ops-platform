@@ -159,3 +159,11 @@ Mongo 日常报销 schedule 新保留 detailPaymentMethod、detailTypeOfInvoice�
 - 统一 effective source helper 供 promotion、canonical row、明细映射与匹配消费；同一 OA 的一对多附件来源全部保留，不增加解析器或新表。
 - 普通归属 CAS 与补录不得覆盖 OA 来源。历史维护工具改为读取当前 OA/item/attachment 与票号的直接证据，修复 OA 来源自身，删除原来补写人工明细边的旧路径；跨有效 OA 冲突仍报错。
 - 归属与审批状态分离：进行中可形成关系，仍只显示在未配对区。
+
+## 2026-09-21 金额证据修正
+
+OA 附件解析的金额与税额优先读取明确字段或合计表头，不再按最后两个货币符号的位置猜测。OCR 表格乱序仅在票面总额与唯一明示税率能唯一验证金额对时接受（允许分位舍入差一分）；缺乏证明保留待核对证据。铁路票价只证明价税合计，不填零税、不反算未知税率；缺未税金额/税额的 evidence 标记 `financial_review_reason`，不得自动晋升成完整 canonical 财务事实，promotion 明确记录 financial_requires_review；已存在强身份发票可按 canonical 财务值只补 OA 来源边。当前 canonical 已有税务财务值的 OA merge 仍只补空字段，不覆盖金额。parser version 更新使旧金额解析缓存按需失效，不触发全历史重放。
+
+### 导入执行结果一致性（2026-09-21）
+
+共享 OA 手工导入保持逐条来源校验与结果列表：全失败必须同事务记录 job.failed 和 audit.failed，显式重试同一意图；部分成功记录真实已导入/失败项，任务呈现 partial_success 并要求查看失败明细，不伪装全部成功。全局关闭提醒不改变业务结果。

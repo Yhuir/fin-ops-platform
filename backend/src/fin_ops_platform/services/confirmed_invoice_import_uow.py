@@ -34,6 +34,8 @@ class ConfirmedInvoiceImportUnitOfWork:
         scope_months: list[str],
         promotion_mode: str,
         source_versions: dict[str, object],
+        completion: Any | None = None,
+        result_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         imports_snapshot = normalized_payload.get("imports") or {}
         file_imports_snapshot = normalized_payload.get("file_imports") or {}
@@ -45,6 +47,8 @@ class ConfirmedInvoiceImportUnitOfWork:
             }
         )
         with self._connection.transaction() as transaction:
+            if completion is not None:
+                completion.lock(transaction)
             core = PostgresCoreRepository(transaction)
             # This must precede the generic UPSERT: it merges every current
             # provenance edge, including edges absent from today's OA cache.
@@ -83,10 +87,14 @@ class ConfirmedInvoiceImportUnitOfWork:
                 if expanded_months and imports_snapshot.get("invoices")
                 else []
             )
-        return {
-            "queued_matching_months": list(queued_matching_months),
-            "oa_attachment_invoice_promotion": promotion,
-        }
+            result = {
+                **dict(result_payload or {}),
+                "queued_matching_months": list(queued_matching_months),
+                "oa_attachment_invoice_promotion": promotion,
+            }
+            if completion is not None:
+                completion.succeed(transaction, result)
+        return result
 
     @staticmethod
     def _strong_invoice_keys(imports_snapshot: dict[str, Any]) -> set[str]:

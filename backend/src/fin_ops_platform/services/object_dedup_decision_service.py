@@ -54,6 +54,7 @@ class ObjectIdentityRepository(Protocol):
         *,
         canonical_key: str | None = None,
         suspected_key: str | None = None,
+        official_references: set[str] | None = None,
     ) -> list[BankTransaction]:
         ...
 
@@ -349,9 +350,10 @@ class ObjectDedupDecisionService:
             return transaction, "canonical" if identity.canonical_key else "suspected"
         canonical_position_conflict = bool(transaction is not None and identity.canonical_key)
         if identity.canonical_key and identity.suspected_key:
+            incoming_references = self._official_reference_values(identity)
             candidates = self._repository.find_bank_transactions_by_identity(
-                canonical_key=None,
-                suspected_key=identity.suspected_key,
+                canonical_key=None, suspected_key=identity.suspected_key,
+                official_references=incoming_references,
             )
             exact_matches: list[BankTransaction] = []
             ambiguous_matches: list[BankTransaction] = []

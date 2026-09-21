@@ -259,7 +259,16 @@ function installFetchMock({
     }
     if (url.pathname === "/api/workbench/settings/oa/manual-imports") {
       expect(init?.method).toBe("POST");
-      return manualImportResponse ?? successfulImportResponse();
+      const response = await (manualImportResponse ?? successfulImportResponse());
+      if (!response.ok) return response;
+      return new Response(JSON.stringify({ job: { job_id: "import:oa-1", status: "queued" } }), { status: 202 });
+    }
+    if (decodeURIComponent(url.pathname) === "/api/background-jobs/import:oa-1") {
+      return new Response(JSON.stringify({ job: { job_id: "import:oa-1", status: "succeeded" } }));
+    }
+    if (decodeURIComponent(url.pathname) === "/api/background-jobs/import:oa-1/result") {
+      return new Response(JSON.stringify({ job: { job_id: "import:oa-1", status: "succeeded" },
+        result: await successfulImportResponse().json() }));
     }
     throw new Error(`Unhandled fetch ${url.pathname}`);
   });

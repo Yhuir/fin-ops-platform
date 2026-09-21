@@ -1,5 +1,27 @@
 # API 契约
 
+## 导入受理、预览和正式提交（2026-09-21）
+
+流水、普通发票与 ETC 上传先持久化原件与 `job.import_jobs`，返回 `202 {job}`。`request_id` 标识一次上传请求；断网重发保留该 ID，主动选择新文件/映射/对账任务后生成新 ID。同 ID 的文件内容或选项不同返回冲突；文件校验不代替逐项业务去重。
+
+| 操作 | 输入与输出 |
+| --- | --- |
+| `POST /imports/files/preview` | 原 multipart 文件/映射，加 `request_id`；返回 prepare 任务 |
+| `POST /imports/files/retry` | 原 session、选择与映射；持久修订同一草稿后返回 `202 {job}`，不在 HTTP 内重解析 |
+| `GET /imports/files/sessions/{session_id}` | 当前会话、文件、统计和 `job.version`；仅 owner 可读 |
+| `POST /imports/files/confirm` | `session_id`、`selected_file_ids`、上传草稿的 `preview_version`；返回 `202` 会话与权威任务 |
+| `POST /api/etc/import/preview` | ZIP、`task_id`、`request_id`；返回 prepare 任务 |
+| `POST /api/etc/import/confirm` | `sessionId`、`taskId`、`preview_version`；返回 `202 {job}` |
+| `GET /api/background-jobs/{job_id}` | 有界任务摘要；导入 ID 为 `import:<uuid>` |
+| `GET /api/background-jobs/{job_id}/result` | `{job,result}`；ETC 预览在 `result.preview`，全局轮询不携带候选全文 |
+| `POST /api/background-jobs/{job_id}/retry` | 失败提交恢复同一选择；需复核状态重新准备预览，不把再次生成预览称作已入库 |
+| `POST /api/background-jobs/{job_id}/cancel` | 取消与提交由同一任务行锁/领取版本确定先后；已提交结果不能用取消删除 |
+| `POST /api/background-jobs/{job_id}/acknowledge` | 只关闭终态提醒，不改变执行结果 |
+
+展示状态为 queued/running/awaiting_confirmation/succeeded/partial_success/failed/cancelled。只有正式事务提交后才能显示导入完成；`succeeded` 且 `result_summary.outcome=no_changes` 表示检查完成、没有入库动作。共享 OA 手工导入保留逐条处理合同：全部来源校验失败为持久 failed，可显式重试；部分成功呈现 partial_success 和失败项，不能显示全部成功。确认版本或财务事实冲突返回 `409`；owner 不符不可读取结果；依赖不可用返回明确错误，不切换同步导入。授权在正式事务中再检查，撤权与提交有明确顺序。
+
+准备阶段无 canonical 写入，确认事务包括本次选定事实、来源、必要审计与任务终态。重复确认原范围返回原任务；首次只选部分文件时，后续剩余文件是新的提交意图，保留前任务结果。ETC 已有票仍可加入当前对账批次或补附件，零新增不自动等于零动作。旧 business-batch ETC preview/confirm 入口已移除，统一使用任务绑定的 `/api/etc/import/*`。
+
 ## ETC 对账刷新与来源重解析（2026-09-14）
 
 - `POST /api/etc/reconciliation-tasks/{task_id}/refresh-matches`：JSON `{expectedVersion: number}`，返回当前 task DTO；无变化不增版本/审计。缺字段400，版本冲突/不可编辑409，使用已有 mutation 权限和认证actor。
@@ -48,7 +70,7 @@
 
 ### 银行流水文件预览与字段映射
 
-- `POST /imports/files/preview` 的银行文件只使用 `template_code=bank_statement`。成功文件返回 `preview_ready`；已定位表头但核心字段不完整时返回 `unrecognized_template`，同时返回 `header_signature`、`mapping_candidates[{key,label}]`、`mapping_fields[{key,label,selected,required}]`、`field_mapping` 和 `mapping_source`，且不生成可确认 rows。
+- `POST /imports/files/preview` 的银行文件只使用 `template_code=bank_statement`。受理后等待 prepare 任务，再读取会话：成功文件为 `preview_ready`；已定位表头但核心字段不完整时为 `unrecognized_template`，同时返回 `header_signature`、`mapping_candidates[{key,label}]`、`mapping_fields[{key,label,selected,required}]`、`field_mapping` 和 `mapping_source`，且不生成可确认 rows。
 - `POST /imports/files/retry` 可在 `overrides[file_id].field_mapping` 提交 canonical 字段到源列 key 的映射。服务端必须校验列存在、核心日期/金额组合完整和方向合同；失败仍保持不可确认，成功重新生成 preview。
 - `GET /api/import-facts/files?page&page_size` 与 `GET /api/import-facts/batches?page&page_size` 是运行探针和导入事实审计使用的只读摘要合同；不得返回完整预览 payload。`GET /imports/batches/{batch_id}/errors.csv` 只输出错误/需复核行的用户可读字段，下载文件名不得暴露内部 ID。
 - 相同文件内容以 SHA-256 判断，不受文件名影响；同批或历史已确认文件命中时返回 `duplicate_file`。银行来源控制合计不一致返回 `source_control_mismatch` 且不可确认。
@@ -1433,7 +1455,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - 该接口不能证明外部银行/OA/发票/ETC 来源系统没有漏同步。外部源完整性仍必须由对应 manifest、同步 runbook 和来源系统对账证明。
 - `imports.bank-transactions` 是 direct-canonical 页面：`registered_read_model_keys=[]`、`relation_proof_required=false`。Audit 双向证明已登记 file/session/batch/row/canonical bank transaction 与当前 job/outbox；bank detail、account balance、Workbench、cost 是写后 impact targets，不是该页 consumer。文件对象 hash/size 不等于银行外部 statement control evidence。
 - `imports.invoices` 是 direct-canonical 页面：`registered_read_model_keys=[]`、`relation_proof_required=false`。Audit 双向证明 input/output file/session/batch/row、canonical invoice、manual source-link 和精确归属 job/outbox；同一 batch/canonical invoice 的不同物理明细按整票金额比较，完全相同的重复行不二次加总。下游 read models 与业务配对关系不由本页通过状态推断。`POST /imports/files/confirm` 只允许 durable enqueue；queue 不可用返回 `503 import_queue_unavailable`，没有 inline 或 batch revert fallback。
-- `imports.etc-invoices` 是 zero-own-read-model 的 direct-canonical workflow，并登记 ETC internal relation proof。`POST /api/etc/import/preview` 持久化当前认证用户拥有的 task-bound session、原始 ZIP file objects、counts/matches/fingerprint；`POST /api/etc/import/confirm` 只从 durable session 校验 owner/freshness 并 enqueue；`POST /api/etc/import/discard` 只允许 owner 幂等终结尚未确认且没有活跃或成功 job 的 preview。Audit 双向证明 session/file/task/requirement/business-import-batch/ETC-invoice/canonical bridge 与 job/outbox；历史 failed/preview session 仅在精确 task 已正式 `imported/closed` 时作为 covered warning，其它失败继续阻断；不推断下游 Workbench 配对或外部 ETC ZIP 完整性。
+- `imports.etc-invoices` 是 zero-own-read-model 的 direct-canonical workflow，并登记 ETC internal relation proof。`POST /api/etc/import/preview` 持久化当前认证用户拥有的 task-bound session、原始 ZIP file objects、counts/matches/fingerprint；`POST /api/etc/import/confirm` 只从 durable session 校验 owner/freshness 并 enqueue；`POST /api/etc/import/discard` 允许 owner 同事务取消尚未正式提交的 job 并弃用 session，准备中可取消，重复取消幂等；成功任务不得通过取消删除事实。全局 cancel 复用该边界。Audit 双向证明 session/file/task/requirement/business-import-batch/ETC-invoice/canonical bridge 与持久 job，旧 outbox 只作为历史证据；历史 failed/preview session 仅在精确 task 已正式 `imported/closed` 时作为 covered warning，其它失败继续阻断；不推断下游 Workbench 配对或外部 ETC ZIP 完整性。
 - `tax-offset` 是明确的 direct-canonical relation 非消费者：canonical expected-set 来自 active `app.invoices`、`app.tax_certified_import_records` 与最新 saved `app.tax_offset_plans`。Audit 独立重算 output/input/certified/matched/outside 五组 item、认证匹配优先级、锁定、默认选择、税额 summary 和结构化展示字段；`relation_proof_required=false`，成功文案必须显示“本页面不消费配对关系”，不得宣称已证明配对关系。页面成功不以 Tax Offset read model source versions、dirty scope 或 outbox freshness 为条件。
 - `etc-tickets` 是 `registered_read_model_keys=[]` 的直接 canonical 页面；统一 executor 在一个只读 repeatable-read snapshot 内证明 business batch/task/file/ETC invoice/import/submission/canonical invoice bridge 的集合、字段与内部 typed edge，并以 `job.import_jobs(import_type=etc_invoice_import.confirm)` 判定 queue。只有 `pending/processing` job 属于 backlog；`failed/dead_lettered` 是终态，只有精确关联的 reconciliation task 已 `imported/closed` 才作为已覆盖历史失败并计入 additive `summary.covered_failed_import_job_count`，否则阻断 integrity。成功不能依赖伪造的 page read-model status；也不能把 Workbench、tax、cost 或 invoice-lifecycle 下游影响目标声称为本页 consumer。外部文件字节、ETC 归档和真实 OA 草稿状态不在此合同内。
 - `settings` 是 `registered_read_model_keys=[]`、`relation_proof_required=false` 的 direct-canonical control-plane 页面。Audit 证明唯一 settings singleton、生产归一化合同、非敏感 credential summary 和 settings reset jobs；credential SQL 不解密也不选择密文，报告不得出现密码/token/secret。OA project provider、真实 credential 登录、manual OA search/import 和 reset 后多页面 smoke 属于 external gate。

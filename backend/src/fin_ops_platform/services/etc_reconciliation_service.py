@@ -40,7 +40,8 @@ FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 class EtcReconciliationTaskService:
-    def __init__(self, *, data_dir: Path | None = None, state_store: Any | None = None) -> None:
+    def __init__(self, *, data_dir: Path | None = None, state_store: Any | None = None,
+                 load_initial_state: bool = True) -> None:
         root = data_dir or getattr(state_store, "data_dir", None) or default_data_dir()
         self._data_dir = Path(root)
         self._state_store = state_store
@@ -49,7 +50,7 @@ class EtcReconciliationTaskService:
         self._tasks: dict[str, EtcReconciliationTask] = {}
         self._source_parse_commit_lock = RLock()
         self._root.mkdir(parents=True, exist_ok=True)
-        self._hydrate(self._load_snapshot())
+        self._hydrate(self._load_snapshot() if load_initial_state else {})
 
     @classmethod
     def from_snapshot(

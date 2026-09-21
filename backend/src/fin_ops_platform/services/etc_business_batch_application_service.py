@@ -79,8 +79,6 @@ class EtcBusinessBatchApplicationService:
         etc_service: EtcService,
         reconciliation_task_service: Any,
         oa_client_factory: Callable[[dict[str, str] | None], Any] | None = None,
-        link_etc_invoices_to_existing_invoices: Callable[[list[object]], list[str]] | None = None,
-        refresh_after_etc_invoice_link: Callable[[list[str], str], None] | None = None,
         refresh_after_etc_business_batch_status_change: Callable[[list[str], str], None] | None = None,
         invoice_pdf_bundle_service: EtcInvoicePdfBundleService | None = None,
         record_invoice_pdf_download: Callable[[EtcBusinessBatchActor, EtcBusinessBatch, EtcInvoicePdfBundle], None] | None = None,
@@ -88,8 +86,6 @@ class EtcBusinessBatchApplicationService:
         self._etc_service = etc_service
         self._reconciliation_task_service = reconciliation_task_service
         self._oa_client_factory = oa_client_factory
-        self._link_etc_invoices_to_existing_invoices = link_etc_invoices_to_existing_invoices
-        self._refresh_after_etc_invoice_link = refresh_after_etc_invoice_link
         self._refresh_after_etc_business_batch_status_change = refresh_after_etc_business_batch_status_change
         self._invoice_pdf_bundle_service = invoice_pdf_bundle_service or EtcInvoicePdfBundleService(
             read_invoice_pdf=etc_service.read_invoice_pdf_bytes,
@@ -266,43 +262,6 @@ class EtcBusinessBatchApplicationService:
             expected_version=expected_version,
             reason=reason,
         )
-
-    def preview_import_payload(
-        self,
-        business_batch_id: str,
-        uploads: list[UploadedEtcZipFile],
-        *,
-        expected_version: int | None,
-        actor: EtcBusinessBatchActor,
-    ) -> dict[str, object]:
-        self._scoped_batch(business_batch_id, actor)
-        return self._etc_service.preview_business_batch_import_zips(
-            business_batch_id,
-            uploads,
-            expected_version=expected_version,
-        )
-
-    def confirm_import_payload(
-        self,
-        business_batch_id: str,
-        *,
-        session_id: str,
-        expected_version: int | None,
-        idempotency_key: str | None,
-        actor: EtcBusinessBatchActor,
-    ) -> dict[str, object]:
-        self._scoped_batch(business_batch_id, actor)
-        batch, result = self._etc_service.confirm_business_batch_import(
-            business_batch_id,
-            session_id,
-            expected_version=expected_version,
-            idempotency_key=idempotency_key,
-        )
-        self._link_existing_canonical_invoices(batch, "etc_business_batch_import_confirm")
-        return {
-            "businessBatch": self.business_batch_payload(batch),
-            "importResult": self._etc_service.import_result_payload(result),
-        }
 
     def create_oa_draft_payload(
         self,
@@ -659,14 +618,6 @@ class EtcBusinessBatchApplicationService:
             "ETC 对账任务尚未完成发票导入，不能创建 OA 草稿。",
             code="invalid_reconciliation_task_status",
         )
-
-    def _link_existing_canonical_invoices(self, batch: EtcBusinessBatch, reason: str) -> None:
-        if self._link_etc_invoices_to_existing_invoices is None:
-            return
-        invoices = self._etc_service.list_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or []))
-        changed_months = self._link_etc_invoices_to_existing_invoices(invoices)
-        if self._refresh_after_etc_invoice_link is not None:
-            self._refresh_after_etc_invoice_link(changed_months, reason=reason)
 
     def _refresh_business_batch_status_change(self, batch: EtcBusinessBatch, *, reason: str) -> None:
         if self._refresh_after_etc_business_batch_status_change is None:

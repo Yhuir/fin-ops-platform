@@ -1,7 +1,8 @@
 import { Alert, Button, Chip, ListBox, Select, Tabs } from "@heroui/react";
 import { ArrowLeft, FilePlus2, Files, RefreshCw, Search, Trash2, UploadCloud } from "lucide-react";
 import { type DragEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Link as RouterLink } from "react-router-dom";
+import { Link as RouterLink, useSearchParams } from "react-router-dom";
+import { fetchBackgroundJob } from "../../features/backgroundJobs/api";
 
 import {
   EmptyValue,
@@ -34,6 +35,7 @@ import {
   confirmEtcImportSession,
   discardEtcImportSession,
   fetchReadyEtcReconciliationTasks,
+  fetchEtcImportPreview,
   previewEtcZipFiles,
 } from "../../features/etc/api";
 import { formatMoney } from "../../features/money";
@@ -651,6 +653,38 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setIsPreviewing,
     setIsConfirming,
   } = useImportWorkflowDraft();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedJobId = searchParams.get("import_job");
+  useEffect(() => {
+    if (!requestedJobId || !pageActive) return;
+    let current = true;
+    void (async () => {
+      try {
+        const job = await fetchBackgroundJob(requestedJobId);
+        if (mode === "etc_invoice") {
+          const preview = await fetchEtcImportPreview(requestedJobId);
+          if (!current) return;
+          setSelectedEtcTaskId(String(job.source.task_id || ""));
+          setEtcPreviewPayload(preview);
+          setEtcImported(job.status === "succeeded");
+        } else {
+          if (typeof job.source.session_id !== "string") throw new Error("任务缺少导入会话。");
+          const preview = await fetchImportSession(job.source.session_id);
+          if (!current) return;
+          setPreviewPayload(preview);
+        }
+        if (current) {
+          setErrorMessage(null);
+          setFeedbackMessage("已恢复指定导入任务，请核对预览。");
+          setSearchParams((params) => { params.delete("import_job"); return params; }, { replace: true });
+        }
+      } catch (error) {
+        if (current) setErrorMessage(resolveImportApiErrorMessage(error, "导入任务暂时不可读，请重试。"));
+      }
+    })();
+    return () => { current = false; };
+  }, [requestedJobId, pageActive, mode, setSelectedEtcTaskId, setEtcPreviewPayload, setEtcImported,
+      setPreviewPayload, setErrorMessage, setFeedbackMessage, setSearchParams]);
   const healthStatus = useAppHealthStatus();
   const { canOperateData } = useSessionPermissions();
   const {
@@ -1106,7 +1140,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       setErrorMessage(null);
       setFeedbackMessage(null);
       try {
-        const payload = await previewEtcZipFiles(selectedFiles, selectedEtcTask.taskId);
+        const payload = await previewEtcZipFiles(selectedFiles, selectedEtcTask.taskId, draft.uploadRequestId);
         if (!isCurrentRequest()) {
           return;
         }
@@ -1143,7 +1177,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setErrorMessage(null);
     setFeedbackMessage(null);
     try {
-      const payload = await previewImportFiles(selectedFiles, "web_finance_user", buildPreviewOverrides());
+      const payload = await previewImportFiles(selectedFiles, "web_finance_user", buildPreviewOverrides(), draft.uploadRequestId);
       if (!isCurrentRequest()) {
         return;
       }
@@ -1229,7 +1263,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       setIsConfirming(true);
       setErrorMessage(null);
       try {
-        const payload = await confirmEtcImportSession(etcPreviewPayload.sessionId, selectedEtcTask.taskId);
+        const payload = await confirmEtcImportSession(etcPreviewPayload.sessionId, selectedEtcTask.taskId, etcPreviewPayload.job?.version);
         setEtcImported(true);
         setFeedbackMessage(payload.job ? "已开始后台导入" : "已导入 ETC票据管理");
       } catch (error) {
@@ -1251,7 +1285,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setIsConfirming(true);
     setErrorMessage(null);
     try {
-      const payload = await confirmImportFiles(previewPayload.session.id, confirmableFileIds);
+      const payload = await confirmImportFiles(previewPayload.session.id, confirmableFileIds, previewPayload.job?.version);
       if (payload.job) {
         resetDraft();
         if (payload.job.status === "succeeded" || payload.job.status === "partial_success") {

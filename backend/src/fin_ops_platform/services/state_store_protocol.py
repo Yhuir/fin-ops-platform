@@ -218,13 +218,6 @@ class ApplicationStateStoreProtocol(Protocol):
         imported_by: str | None = None,
     ) -> str: ...
 
-    def find_confirmed_import_file_by_sha256(
-        self,
-        *,
-        content_sha256: str,
-        exclude_file_id: str,
-    ) -> dict[str, Any] | None: ...
-
     def read_import_file(self, stored_file_path: str) -> bytes: ...
 
     def delete_import_files(self, stored_file_paths: list[str]) -> int: ...

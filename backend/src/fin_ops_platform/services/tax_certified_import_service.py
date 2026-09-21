@@ -1,18 +1,18 @@
 from __future__ import annotations
 
+import re
+import warnings
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from pathlib import Path
-import re
 from typing import Any
-import warnings
+from uuid import uuid4
 
 from openpyxl import load_workbook
 
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
-
 
 MONTH_FROM_FILENAME_RE = re.compile(r"(\d{4})年(\d{1,2})月")
 COMPACT_MONTH_RE = re.compile(r"^\d{6}$")
@@ -608,15 +608,15 @@ class TaxCertifiedImportService:
 
     def _next_session_id(self) -> str:
         self._session_counter += 1
-        return f"tax-certified-session-{self._session_counter:04d}"
+        return f"tax-certified-session-{uuid4().hex}"
 
     def _next_file_id(self) -> str:
         self._file_counter += 1
-        return f"tax-certified-file-{self._file_counter:04d}"
+        return f"tax-certified-file-{uuid4().hex}"
 
     def _next_batch_id(self) -> str:
         self._batch_counter += 1
-        return f"tax-certified-batch-{self._batch_counter:04d}"
+        return f"tax-certified-batch-{uuid4().hex}"
 
 
 def _cell_value(rows: list[tuple[Any, ...]], row_index: int, column_index: int) -> Any:

@@ -1,3 +1,4 @@
+import { fetchImportTaskResult, waitForImportCompletion, type ImportPreparationAccepted } from "../imports/preparation";
 import type {
   WorkbenchActionVariant,
   WorkbenchAmountDirection,
@@ -3401,7 +3402,7 @@ export async function getManualOaImportAttachmentRefreshStatus(
 }
 
 export async function importManualOaRows(rowIds: string[]): Promise<OaManualImportResult> {
-  const payload = await requestJson<ApiOaManualImportResult>(
+  const accepted = await requestJson<ImportPreparationAccepted>(
     "/api/workbench/settings/oa/manual-imports",
     {
       method: "POST",
@@ -3414,6 +3415,11 @@ export async function importManualOaRows(rowIds: string[]): Promise<OaManualImpo
       }),
     },
   );
+  const job = await waitForImportCompletion(accepted);
+  const { result: payload } = await fetchImportTaskResult<ApiOaManualImportResult>(job.jobId);
+  if (!Array.isArray(payload.imported) || !Array.isArray(payload.failed)) {
+    throw new Error("OA 导入任务缺少最终业务结果。");
+  }
   return {
     imported: (payload.imported ?? []).map((rowId) => String(rowId)),
     alreadyImported: (payload.already_imported ?? []).map((rowId) => String(rowId)),

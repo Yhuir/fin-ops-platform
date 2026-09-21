@@ -101,8 +101,30 @@ def manual_bank_transaction_payload(**overrides: str) -> dict[str, str]:
 
 
 class ImportFileApiTests(unittest.TestCase):
+    def _prepare(self, app, *, body, headers):
+        queue = getattr(app, "_import_job_repository", None)
+        if queue is None:
+            queue = install_durable_import_queue(app)
+        before_invoices = len(app._import_service.list_invoices())
+        before_transactions = len(app._import_service.list_transactions())
+        accepted = app.handle_request("POST", "/imports/files/preview", body=body, headers=headers)
+        self.assertEqual(accepted.status_code, 202, accepted.body)
+        job = json.loads(accepted.body)["job"]
+        self.assertEqual(job["phase"], "prepare")
+        self.assertEqual(job["status"], "queued")
+        self.assertEqual(len(app._import_service.list_invoices()), before_invoices)
+        self.assertEqual(len(app._import_service.list_transactions()), before_transactions)
+        queue.process_all()
+        response = app.handle_request("GET", f"/imports/files/sessions/{job['source']['session_id']}")
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertGreater(json.loads(response.body)["job"]["version"], job["version"])
+        return response
+
     def test_manual_bank_transaction_preview_rejects_non_object_batch_items(self) -> None:
         app = build_application()
+        fixture = getattr(app, "_test_import_storage_tmp", None)
+        if fixture is not None:
+            self.addCleanup(fixture.cleanup)
 
         response = app.handle_request(
             "POST",
@@ -118,8 +140,11 @@ class ImportFileApiTests(unittest.TestCase):
 
     def test_manual_bank_transaction_preview_and_confirm_use_the_formal_import_job_chain(self) -> None:
         app = build_application()
+        fixture = getattr(app, "_test_import_storage_tmp", None)
+        if fixture is not None:
+            self.addCleanup(fixture.cleanup)
         import_queue = install_durable_import_queue(app)
-        app._manual_bank_transaction_entry_service._bank_account_mappings_provider = lambda: [{  # type: ignore[attr-defined]
+        app._app_settings_service.get_bank_account_mappings_payload = lambda: [{  # type: ignore[attr-defined]
             "id": "ccb-8106",
             "last4": "8106",
             "bank_name": "中国建设银行",
@@ -173,34 +198,48 @@ class ImportFileApiTests(unittest.TestCase):
         self.assertTrue(transactions[0].data_fingerprint.startswith("bank:"))
         self.assertEqual(str(transactions[0].amount), "100.00")
 
-    def test_postgres_discard_synchronizes_local_session_without_full_runtime_reload(self) -> None:
+    def test_discard_cancels_queued_commit_before_worker_can_write(self) -> None:
         app = build_application()
-        preview = app._manual_invoice_entry_service.preview_batch(  # type: ignore[attr-defined]
-            payloads=[manual_invoice_payload(invoice_number="26117000001052654675")],
-            imported_by="local",
-        )
-        lifecycle = SimpleNamespace(discard_session=Mock(return_value=1))
-        app._state_store = SimpleNamespace(_connection=object(), storage_backend="postgres")  # type: ignore[attr-defined]
+        self.addCleanup(app._test_import_storage_tmp.cleanup)
+        queue = install_durable_import_queue(app)
+        body, headers = build_multipart_payload(imported_by="user_finance_01", files=[INVOICE_JAN])
+        preview = json.loads(self._prepare(app, body=body, headers=headers).body)
+        session_id = preview["session"]["id"]
+        accepted = app.handle_request("POST", "/imports/files/confirm", json.dumps({
+            "session_id": session_id, "selected_file_ids": [preview["files"][0]["id"]],
+            "preview_version": preview["job"]["version"],
+        }))
+        self.assertEqual(accepted.status_code, 202)
+        discarded = app.handle_request("POST", "/imports/files/discard", json.dumps({"session_id": session_id}))
+        self.assertEqual(discarded.status_code, 200, discarded.body)
+        self.assertEqual(json.loads(discarded.body)["session"]["status"], "reverted")
+        queue.process_all()
+        self.assertEqual(queue.jobs[0].status, "canceled")
+        self.assertEqual(app._import_service.list_invoices(), [])
 
-        with (
-            patch("fin_ops_platform.app.server.ImportLifecycleService", return_value=lifecycle),
-            patch.object(app, "_reload_file_import_runtime_state") as reload_runtime,
-        ):
-            response = app._handle_import_file_discard(  # type: ignore[attr-defined]
-                json.dumps({"session_id": preview.session.id}),
-                owner_user_id="local",
-            )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(app._file_import_service.get_session(preview.session.id).status, "reverted")  # type: ignore[attr-defined]
-        lifecycle.discard_session.assert_called_once_with(
-            session_id=preview.session.id,
-            imported_by="local",
-        )
-        reload_runtime.assert_not_called()
+    def test_reprepare_is_queued_and_old_preview_version_cannot_confirm(self) -> None:
+        app = build_application()
+        self.addCleanup(app._test_import_storage_tmp.cleanup)
+        queue = install_durable_import_queue(app)
+        body, headers = build_multipart_payload(imported_by="user_finance_01", files=[INVOICE_JAN])
+        preview = json.loads(self._prepare(app, body=body, headers=headers).body)
+        old_batch = preview["files"][0]["preview_batch_id"]
+        request = {"session_id": preview["session"]["id"], "selected_file_ids": [preview["files"][0]["id"]]}
+        with patch.object(app._file_import_service, "_read_rows", side_effect=AssertionError("HTTP retry must not parse")):
+            retried = app.handle_request("POST", "/imports/files/retry", json.dumps(request))
+        self.assertEqual(retried.status_code, 202, retried.body)
+        self.assertEqual(json.loads(retried.body)["job"]["import_job_id"], preview["job"]["import_job_id"])
+        queue.process_all()
+        stale = app.handle_request("POST", "/imports/files/confirm", json.dumps({**request, "preview_version": preview["job"]["version"]}))
+        self.assertEqual(stale.status_code, 409, stale.body)
+        self.assertEqual(app._import_service.get_batch(old_batch).batch.status.value, "reverted")
+        self.assertEqual(app._import_service.list_invoices(), [])
 
     def test_manual_invoice_preview_and_confirm_use_the_formal_import_job_chain(self) -> None:
         app = build_application()
+        fixture = getattr(app, "_test_import_storage_tmp", None)
+        if fixture is not None:
+            self.addCleanup(fixture.cleanup)
         import_queue = install_durable_import_queue(app)
 
         preview_response = app.handle_request(
@@ -251,6 +290,9 @@ class ImportFileApiTests(unittest.TestCase):
 
     def test_manual_invoice_preview_blocks_exact_duplicate(self) -> None:
         app = build_application()
+        fixture = getattr(app, "_test_import_storage_tmp", None)
+        if fixture is not None:
+            self.addCleanup(fixture.cleanup)
         first = app._manual_invoice_entry_service.preview_batch(  # type: ignore[attr-defined]
             payloads=[manual_invoice_payload()],
             imported_by="local",
@@ -271,6 +313,9 @@ class ImportFileApiTests(unittest.TestCase):
 
     def test_manual_invoice_recognition_uses_only_the_first_uploaded_file(self) -> None:
         app = build_application()
+        fixture = getattr(app, "_test_import_storage_tmp", None)
+        if fixture is not None:
+            self.addCleanup(fixture.cleanup)
         calls: list[tuple[str, bytes]] = []
 
         def recognize(*, file_name: str, content: bytes) -> dict[str, str]:
@@ -296,6 +341,9 @@ class ImportFileApiTests(unittest.TestCase):
 
     def test_import_batch_error_csv_contains_review_rows_without_internal_ids(self) -> None:
         app = build_application()
+        fixture = getattr(app, "_test_import_storage_tmp", None)
+        if fixture is not None:
+            self.addCleanup(fixture.cleanup)
         preview = app._import_service.preview_import(  # type: ignore[attr-defined]
             batch_type=BatchType.INPUT_INVOICE,
             source_name="invalid.xlsx",
@@ -361,17 +409,24 @@ class ImportFileApiTests(unittest.TestCase):
 
     def test_preview_files_uses_lightweight_import_preview_persistence(self) -> None:
         app = build_application()
+        fixture = getattr(app, "_test_import_storage_tmp", None)
+        if fixture is not None:
+            self.addCleanup(fixture.cleanup)
         persist_calls: list[str] = []
         app._persist_confirmed_import_delta = lambda **_kwargs: self.fail(  # type: ignore[attr-defined]
             "file preview must not persist full workbench state"
         )
-        app._persist_import_preview_delta = lambda session_id: persist_calls.append(session_id)  # type: ignore[attr-defined]
+        original_persist = app._persist_import_preview_delta
+        def persist_preview(session_id, **kwargs):
+            persist_calls.append(session_id)
+            return original_persist(session_id, **kwargs)
+        app._import_processing_service._persist_import_preview_delta = persist_preview
         body, headers = build_multipart_payload(
             imported_by="user_finance_01",
             files=[INVOICE_JAN],
         )
 
-        response = app.handle_request("POST", "/imports/files/preview", body=body, headers=headers)
+        response = self._prepare(app, body=body, headers=headers)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(persist_calls), 1)
@@ -379,6 +434,9 @@ class ImportFileApiTests(unittest.TestCase):
 
     def test_preview_files_keeps_corrupt_excel_as_file_level_error_without_aborting_batch(self) -> None:
         app = build_application()
+        fixture = getattr(app, "_test_import_storage_tmp", None)
+        if fixture is not None:
+            self.addCleanup(fixture.cleanup)
         boundary = "----finops-import-boundary"
         chunks: list[bytes] = []
 
@@ -414,9 +472,7 @@ class ImportFileApiTests(unittest.TestCase):
         )
         chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
 
-        response = app.handle_request(
-            "POST",
-            "/imports/files/preview",
+        response = self._prepare(app,
             body=b"".join(chunks),
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
         )
@@ -430,12 +486,15 @@ class ImportFileApiTests(unittest.TestCase):
 
     def test_preview_files_detects_supported_templates_and_keeps_unrecognized_file_level_error(self) -> None:
         app = build_application()
+        fixture = getattr(app, "_test_import_storage_tmp", None)
+        if fixture is not None:
+            self.addCleanup(fixture.cleanup)
         body, headers = build_multipart_payload(
             imported_by="user_finance_01",
             files=[INVOICE_JAN, ICBC_JAN, PINGAN_JAN, UNSUPPORTED],
         )
 
-        response = app.handle_request("POST", "/imports/files/preview", body=body, headers=headers)
+        response = self._prepare(app, body=body, headers=headers)
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.body)
@@ -480,12 +539,15 @@ class ImportFileApiTests(unittest.TestCase):
 
     def test_preview_files_recognizes_bank_statement_templates(self) -> None:
         app = build_application()
+        fixture = getattr(app, "_test_import_storage_tmp", None)
+        if fixture is not None:
+            self.addCleanup(fixture.cleanup)
         body, headers = build_multipart_payload(
             imported_by="user_finance_01",
             files=[CEB_JAN, CCB_JAN, CMBC_JAN, BOCOM_JAN],
         )
 
-        response = app.handle_request("POST", "/imports/files/preview", body=body, headers=headers)
+        response = self._prepare(app, body=body, headers=headers)
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.body)
@@ -507,6 +569,9 @@ class ImportFileApiTests(unittest.TestCase):
 
     def test_preview_files_accepts_per_file_overrides(self) -> None:
         app = build_application()
+        fixture = getattr(app, "_test_import_storage_tmp", None)
+        if fixture is not None:
+            self.addCleanup(fixture.cleanup)
         body, headers = build_multipart_payload(
             imported_by="user_finance_01",
             files=[INVOICE_JAN, PINGAN_JAN],
@@ -528,13 +593,15 @@ class ImportFileApiTests(unittest.TestCase):
             ],
         )
 
-        response = app.handle_request("POST", "/imports/files/preview", body=body, headers=headers)
+        response = self._prepare(app, body=body, headers=headers)
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.body)
         file_map = {item["file_name"]: item for item in payload["files"]}
 
-        self.assertEqual(file_map[INVOICE_JAN.name]["batch_type"], "output_invoice")
+        self.assertIsNone(file_map[INVOICE_JAN.name]["batch_type"])
+        self.assertIn("方向", file_map[INVOICE_JAN.name]["message"])
+        self.assertNotEqual(file_map[INVOICE_JAN.name]["status"], "preview_ready")
         self.assertEqual(file_map[INVOICE_JAN.name]["override_batch_type"], "output_invoice")
         self.assertEqual(file_map[PINGAN_JAN.name]["template_code"], "bank_statement")
         self.assertEqual(file_map[PINGAN_JAN.name]["override_template_code"], "bank_statement")
@@ -545,6 +612,9 @@ class ImportFileApiTests(unittest.TestCase):
 
     def test_preview_files_returns_bank_selection_conflict_fields(self) -> None:
         app = build_application()
+        fixture = getattr(app, "_test_import_storage_tmp", None)
+        if fixture is not None:
+            self.addCleanup(fixture.cleanup)
         body, headers = build_multipart_payload(
             imported_by="user_finance_01",
             files=[PINGAN_JAN],
@@ -560,7 +630,7 @@ class ImportFileApiTests(unittest.TestCase):
             ],
         )
 
-        response = app.handle_request("POST", "/imports/files/preview", body=body, headers=headers)
+        response = self._prepare(app, body=body, headers=headers)
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.body)
@@ -574,14 +644,15 @@ class ImportFileApiTests(unittest.TestCase):
 
     def test_confirm_files_imports_only_selected_files_from_session(self) -> None:
         app = build_application()
+        fixture = getattr(app, "_test_import_storage_tmp", None)
+        if fixture is not None:
+            self.addCleanup(fixture.cleanup)
         import_queue = install_durable_import_queue(app)
         preview_body, preview_headers = build_multipart_payload(
             imported_by="user_finance_01",
             files=[INVOICE_JAN, PINGAN_JAN],
         )
-        preview_response = app.handle_request(
-            "POST",
-            "/imports/files/preview",
+        preview_response = self._prepare(app,
             body=preview_body,
             headers=preview_headers,
         )
@@ -597,6 +668,7 @@ class ImportFileApiTests(unittest.TestCase):
             json.dumps(
                 {
                     "session_id": preview_payload["session"]["id"],
+                    "preview_version": preview_payload["job"]["version"],
                     "selected_file_ids": [invoice_file["id"]],
                 }
             ),
@@ -629,7 +701,7 @@ class ImportFileApiTests(unittest.TestCase):
 
         self.assertEqual(confirmed_file["status"], "confirmed")
         self.assertTrue(confirmed_file["batch_id"])
-        self.assertEqual(skipped_file["status"], "skipped")
+        self.assertEqual(skipped_file["status"], "preview_ready")
         self.assertIsNone(skipped_file["batch_id"])
 
         batch_response = app.handle_request("GET", f"/imports/batches/{confirmed_file['batch_id']}")
@@ -639,102 +711,110 @@ class ImportFileApiTests(unittest.TestCase):
 
         session_file = next(item for item in confirm_payload["files"] if item["id"] == invoice_file["id"])
         self.assertEqual(session_file["status"], "confirmed")
-
-    def test_confirm_fails_closed_when_durable_import_queue_is_unavailable(self) -> None:
-        app = build_application()
-        preview_body, preview_headers = build_multipart_payload(
-            imported_by="user_finance_01",
-            files=[INVOICE_JAN],
-        )
-        preview_response = app.handle_request(
-            "POST",
-            "/imports/files/preview",
-            body=preview_body,
-            headers=preview_headers,
-        )
-        preview_payload = json.loads(preview_response.body)
-
-        response = app.handle_request(
-            "POST",
-            "/imports/files/confirm",
-            json.dumps(
-                {
-                    "session_id": preview_payload["session"]["id"],
-                    "selected_file_ids": [preview_payload["files"][0]["id"]],
-                }
-            ),
-        )
-
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(json.loads(response.body)["error"], "import_queue_unavailable")
-        session = app._file_import_service.get_session(preview_payload["session"]["id"])
-        self.assertEqual(session.files[0].status, "preview_ready")
-        self.assertIsNone(session.files[0].batch_id)
-
-    def test_confirm_retry_reuses_pending_import_job_and_background_job(self) -> None:
-        app = build_application()
-        import_queue = install_durable_import_queue(app)
-        import_queue.fail_next_enqueue = True
-        preview_body, preview_headers = build_multipart_payload(
-            imported_by="user_finance_01",
-            files=[INVOICE_JAN],
-        )
-        preview_payload = json.loads(
-            app.handle_request(
-                "POST",
-                "/imports/files/preview",
-                body=preview_body,
-                headers=preview_headers,
-            ).body
-        )
-        request_body = json.dumps(
-            {
-                "session_id": preview_payload["session"]["id"],
-                "selected_file_ids": [preview_payload["files"][0]["id"]],
-            }
-        )
-
-        first = app.handle_request("POST", "/imports/files/confirm", request_body)
-        second = app.handle_request("POST", "/imports/files/confirm", request_body)
-
-        self.assertEqual(first.status_code, 503)
-        self.assertEqual(second.status_code, 202)
-        first_background_job_id = json.loads(first.body)["job"]["job_id"]
-        second_background_job_id = json.loads(second.body)["job"]["job_id"]
-        self.assertEqual(first_background_job_id, second_background_job_id)
-        self.assertEqual(len(import_queue.jobs), 1)
-        self.assertEqual(import_queue.jobs[0].payload["background_job_id"], second_background_job_id)
-
+        # Confirm the remaining file as a new intent on the retained originals.
+        second = app.handle_request("POST", "/imports/files/confirm", json.dumps({
+            "session_id": preview_payload["session"]["id"],
+            "preview_version": confirm_payload["job"]["version"],
+            "selected_file_ids": [pingan_file["id"]],
+        }))
+        self.assertEqual(second.status_code, 202, second.body)
+        self.assertNotEqual(json.loads(second.body)["job"]["job_id"], job_id)
         import_queue.process_all()
-        session = app._file_import_service.get_session(preview_payload["session"]["id"])
-        self.assertEqual(session.files[0].status, "confirmed")
+        repeated = app.handle_request("POST", "/imports/files/confirm", json.dumps({
+            "session_id": preview_payload["session"]["id"],
+            "preview_version": preview_payload["job"]["version"],
+            "selected_file_ids": [invoice_file["id"]],
+        }))
+        self.assertEqual(repeated.status_code, 202, repeated.body)
+        self.assertEqual(json.loads(repeated.body)["job"]["job_id"], job_id)
+        self.assertEqual(app._file_import_service.get_session(preview_payload["session"]["id"]).status, "confirmed")
+
+    def test_all_duplicate_bank_upload_finishes_without_commit(self):
+        app = build_application()
+        self.addCleanup(app._test_import_storage_tmp.cleanup)
+        body, headers = build_multipart_payload(imported_by="user_finance_01", files=[PINGAN_JAN], file_overrides=[{"field_mapping": {"bank_serial_no": "10"}}])
+        first = json.loads(self._prepare(app, body=body, headers=headers).body)
+        response = app.handle_request("POST", "/imports/files/confirm", json.dumps({
+            "session_id": first["session"]["id"], "selected_file_ids": [first["files"][0]["id"]],
+            "preview_version": first["job"]["version"],
+        }))
+        self.assertEqual(response.status_code, 202)
+        app._import_job_repository.process_all()
+        count = len(app._import_service.list_transactions())
+        duplicate = json.loads(self._prepare(app, body=body, headers=headers).body)
+        self.assertEqual(duplicate["job"]["status"], "succeeded")
+        self.assertEqual(duplicate["job"]["result_summary"]["outcome"], "no_changes")
+        self.assertEqual(duplicate["job"]["result_summary"]["created"], 0)
+        self.assertEqual(len(app._import_service.list_transactions()), count)
+
+    def test_upload_fails_explicitly_when_durable_import_queue_is_unavailable(self) -> None:
+        app = build_application()
+        fixture = getattr(app, "_test_import_storage_tmp", None)
+        if fixture is not None:
+            self.addCleanup(fixture.cleanup)
+        app._import_job_repository = None
+        body, headers = build_multipart_payload(imported_by="user_finance_01", files=[INVOICE_JAN])
+        response = app.handle_request("POST", "/imports/files/preview", body=body, headers=headers)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(json.loads(response.body)["error"], "import_preparation_unavailable")
+        self.assertEqual(app._import_service.list_invoices(), [])
+
+    def test_confirm_retry_reuses_failed_import_intent_and_has_no_outbox(self) -> None:
+        app = build_application()
+        fixture = getattr(app, "_test_import_storage_tmp", None)
+        if fixture is not None:
+            self.addCleanup(fixture.cleanup)
+        queue = install_durable_import_queue(app)
+        body, headers = build_multipart_payload(imported_by="user_finance_01", files=[INVOICE_JAN])
+        preview = json.loads(self._prepare(app, body=body, headers=headers).body)
+        request = json.dumps({"session_id": preview["session"]["id"],
+                              "selected_file_ids": [preview["files"][0]["id"]],
+                              "preview_version": preview["job"]["version"]})
+        first = app.handle_request("POST", "/imports/files/confirm", request)
+        self.assertEqual(first.status_code, 202, first.body)
+        job_id = json.loads(first.body)["job"]["import_job_id"]
+        # Failure happens before facts, then the same confirmation resumes commit.
+        with patch.object(app._file_import_service, "confirm_session", side_effect=RuntimeError("temporary database failure")):
+            queue.process_all(raise_errors=False)
+        self.assertEqual(queue.get_job(job_id).status, "failed")
+        second = app.handle_request("POST", "/imports/files/confirm", request)
+        self.assertEqual(second.status_code, 202, second.body)
+        self.assertEqual(json.loads(second.body)["job"]["import_job_id"], job_id)
+        queue.process_all()
+        self.assertEqual(queue.get_job(job_id).status, "succeeded")
+        self.assertEqual(len(queue.jobs), 1)
+        self.assertEqual(queue.events, [])
+        self.assertNotIn("background_job_id", queue.get_job(job_id).payload)
+        self.assertEqual(app._file_import_service.get_session(preview["session"]["id"]).files[0].status, "confirmed")
 
     def test_confirm_returns_structured_conflict_for_mismatched_idempotent_job(self) -> None:
         app = build_application()
+        fixture = getattr(app, "_test_import_storage_tmp", None)
+        if fixture is not None:
+            self.addCleanup(fixture.cleanup)
         install_durable_import_queue(app)
         preview_body, preview_headers = build_multipart_payload(
             imported_by="user_finance_01",
             files=[INVOICE_JAN],
         )
         preview_payload = json.loads(
-            app.handle_request(
-                "POST",
-                "/imports/files/preview",
+            self._prepare(app,
                 body=preview_body,
                 headers=preview_headers,
             ).body
         )
 
-        def conflict(**_kwargs):
+        def conflict(*_args, **_kwargs):
             raise ImportJobIdempotencyConflict("request fingerprint mismatch")
 
-        app._enqueue_import_process_job = conflict
+        app._import_job_repository.confirm_job = conflict
         response = app.handle_request(
             "POST",
             "/imports/files/confirm",
             json.dumps(
                 {
                     "session_id": preview_payload["session"]["id"],
+                    "preview_version": preview_payload["job"]["version"],
                     "selected_file_ids": [preview_payload["files"][0]["id"]],
                 }
             ),
@@ -742,12 +822,15 @@ class ImportFileApiTests(unittest.TestCase):
 
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 409)
-        self.assertEqual(payload["error"], "import_idempotency_conflict")
+        self.assertEqual(payload["error"], "import_confirmation_conflict")
         self.assertEqual(payload["message"], "request fingerprint mismatch")
-        self.assertEqual(payload["job"]["status"], "failed")
+        self.assertEqual(app._import_job_repository.jobs[0].status, "awaiting_confirmation")
 
     def test_confirm_bank_transaction_file_job_reports_bank_import_domain(self) -> None:
         app = build_application()
+        fixture = getattr(app, "_test_import_storage_tmp", None)
+        if fixture is not None:
+            self.addCleanup(fixture.cleanup)
         import_queue = install_durable_import_queue(app)
         preview_body, preview_headers = build_multipart_payload(
             imported_by="user_finance_01",
@@ -764,9 +847,7 @@ class ImportFileApiTests(unittest.TestCase):
                 }
             ],
         )
-        preview_response = app.handle_request(
-            "POST",
-            "/imports/files/preview",
+        preview_response = self._prepare(app,
             body=preview_body,
             headers=preview_headers,
         )
@@ -779,6 +860,7 @@ class ImportFileApiTests(unittest.TestCase):
             json.dumps(
                 {
                     "session_id": preview_payload["session"]["id"],
+                    "preview_version": preview_payload["job"]["version"],
                     "selected_file_ids": [bank_file["id"]],
                 }
             ),
@@ -797,12 +879,15 @@ class ImportFileApiTests(unittest.TestCase):
 
     def test_preview_session_can_be_discarded_before_confirm(self) -> None:
         app = build_application()
+        fixture = getattr(app, "_test_import_storage_tmp", None)
+        if fixture is not None:
+            self.addCleanup(fixture.cleanup)
         preview_body, preview_headers = build_multipart_payload(
             imported_by="user_finance_01",
             files=[INVOICE_JAN],
         )
         preview_payload = json.loads(
-            app.handle_request("POST", "/imports/files/preview", body=preview_body, headers=preview_headers).body
+            self._prepare(app, body=preview_body, headers=preview_headers).body
         )
         session_id = preview_payload["session"]["id"]
 

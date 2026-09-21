@@ -194,3 +194,23 @@ Nightly CI 通过 `scripts/verify.sh all` 执行后端、前端、Playwright bro
 - `tests/test_import_audit_repair_ops.py` 证明恢复只接受完整 job/event/background job/session/file 白名单、已知唯一键错误（或该精确恢复的 `preview_stale` 中止态）、untouched 且可正式确认的 bank preview（含仅有弱指纹疑似重复的 `preview_ready_with_errors`）和零 canonical 写入，并在正式确认前用归档原文件重新预览。
 - 候选 processor 处理完成后必须先证明 import/background job、batch/file 和 canonical transaction 计数闭环，才 resolve 原 dead letter；不完整结果保留死信。
 - 只读 recovery discovery 必须从一个明确 failed import job 推导唯一 event/background job/session/file target；多个 dead letter、缺失坐标或不完整 preview 必须 fail closed。
+
+## 2026-09-21 导入闭环回归
+
+- 核心/服务：`test_import_closed_loop.py` 覆盖选择范围原子回滚、财务字段一致性、原件登记不解析、窄 session 恢复、相同请求并发登记、响应丢失保持引用、登记失败清理、旧 claim 拒绝写事实，以及真实 PostgreSQL 事实/任务成功同事务。
+- API/后台任务：`test_import_file_api.py` 与 `test_import_formalization_api.py` 覆盖 upload 202 → prepare → session GET → 版本确认 → commit → 下游读取；重试同意图、取消已排队确认、重解析旧版本冲突、剩余文件新意图和旧范围幂等返回。
+- 下游回归：`test_runtime_bootstrap.py` 证明请求独立 service；`test_workbench_v2_api.py` 证明财务冲突进入 needs_review；现金兼容测试在单独 `fin_ops_cash_test_*` synthetic 数据库验证既有现金事实不被污染。
+- 页面交互由 `web/src/test/ImportCenterPage.test.tsx` / `ImportsApi.test.ts` 维护；本模块 service 测试不以 UI 内部状态代替用户可观察闭环。
+
+### 本机 PostgreSQL 1000 行基准
+
+2026-09-21 在隔离 synthetic 数据库使用真实 XLSX、文件登记、解析、候选持久化、独立服务恢复、确认 UoW、job completion 与 matching dirty。同一场景 5 次；p95 使用 nearest-rank（5 次时为最大值），不是生产 p95。时间单位秒：
+
+| 阶段 | p50 | p95 |
+| --- | ---: | ---: |
+| 原件登记 | 0.010 | 0.011 |
+| 解析+候选持久化 | 0.573 | 0.584 |
+| 确认+事实/任务提交 | 0.959 | 0.999 |
+| 完整同步耗时（不含排队等待） | 1.524 | 1.582 |
+
+基准的 1000 行特意共用时间、金额与对手方，只有官方流水号不同。旧逐候选重算使 commit 约 6 秒；复用当前批量身份 cache 增加官方编号索引后约 1 秒。`test_bank_distinct_references_share_fingerprint_without_quadratic_identity_work` 防止再次出现平方级身份重算；bank-v3/v4 与弱指纹保守复核保持原契约。

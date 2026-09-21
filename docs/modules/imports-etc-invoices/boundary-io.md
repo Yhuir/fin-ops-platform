@@ -24,8 +24,8 @@
 - 触发 ETC reconciliation 与附件识别领域流程；普通确认不触发页面 read model lifecycle fan-out。
 - 为 ETC 票据管理页面提供导入后业务事实。
 - 后台导入 job 完成后，`result_summary` 必须返回精确 affected months；普通导入的页面 read model targets 与 operation barrier targets 为空，queued admission 阶段不得伪造 targets。
-- 相同 import idempotency key 只接受相同 request fingerprint；瞬时失败把业务 job 归还 pending 并由 durable outbox 重试，达到最大次数才终态失败。用户再次确认同一请求时，terminal failed/partial job 必须原子复用原 job id 并重新 queued/pending，禁止新建冲突 job；不同 fingerprint 返回结构化 `409 idempotency_conflict`。processing lease 只有超时后才能被其它 worker 接管。
-- background job 运行状态只按 canonical `job_id` 单行读写；禁止 ETC 导入 worker 全量回写历史 background job snapshot，历史 raw payload 的旧 id 不得污染当前任务。
+- 同一导入任务持久化 prepare/commit 两阶段；worker 直接领取 `job.import_jobs`，不发布 import outbox。瞬时失败有限重试同一意图，数据冲突需要复核。确认与任务领取都按 version/claim_version 检查；旧领取者不得提交。
+- 导入运行状态只读取 `job.import_jobs`；不再独立写 background job。
 
 ### 不负责
 
@@ -38,7 +38,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | ETC 文件/ZIP | `ImportEtcInvoicesPage.tsx` | 原件先经 verified file-object I/O 登记；route 不保存 bytes |
-| 预览确认 | import workflow | preview application service 持久化当前认证用户 owner 与 session；confirm 必须校验同一 owner，且只创建 durable job/outbox |
+| 预览确认 | import workflow | preview application service 先持久化原件，再同事务登记 owner/session/prepare job；confirm 必须校验同一 owner，且只推进同一 durable import job |
 | 显式清空 | `POST /api/etc/import/discard` | 只允许 session owner 幂等终结尚未确认、且没有活跃或成功 job 的 preview；成功后页面回到 fresh |
 | 页面手动刷新 | import workflow | 重新读取当前可导入的 ETC 对账任务；保留当前文件选择，不执行浏览器 reload 或跨页面 refresh。 |
 
@@ -68,7 +68,7 @@ ETC preview、confirm 与 discard 都是写入操作，必须在 multipart/JSON 
 
 - Own read model：无独立 manifest entry；页面 Audit `registered_read_model_keys=[]`。
 - 逻辑影响消费者：`workbench`、`workbench_relation`、invoice lifecycle、tax offset、cost statistics；普通导入不直接投递这些页面模型，页面访问通过各 owner 边界读取。显式维护命令的 targets 只由对应 owner 返回。
-- Worker：`etc_invoice_import.confirm` 只走 `job.import_jobs` + `import.process.requested`；worker 幂等执行 `begin_import`，Web 不 inline。
+- Worker：`etc_invoice_import.confirm` 只走 `job.import_jobs`；prepare 一次解析持久化 manifest，commit 读取 manifest 并执行 `EtcImportUow`。Web 不 inline。
 
 ## 文件范围
 
@@ -118,9 +118,27 @@ ETC preview、confirm 与 discard 都是写入操作，必须在 multipart/JSON 
 ## Audit v19 session 版本边界（2026-07-12）
 
 - migration 0101 为新 `app.etc_import_sessions` 设置 `audit_contract_revision=etc-import-page-audit.v1` 默认值，不回填历史/合成 session。
-- 当前 revision session 必须严格证明 ZIP file object/hash、preview requirement edge、fingerprint、task version、job/outbox；缺失一律阻断。
+- 当前 revision session 必须严格证明 ZIP file object/hash、preview requirement edge、fingerprint、task version、canonical import job；preparing 尚无 preview，不能把未完成字段误报为缺失。历史 outbox 仍检查活动/失败残留，新任务不要求 outbox。
 - revision 为 NULL 的历史 session 只报告 `legacy_session_provenance_unproven`；禁止从当前 ETC invoice 反向生成不存在的 ZIP/session 证据。
 - v20 中 import batch/invoice edge 按历史事件成员与当前 provenance owner 两个不同方向证明；重复导入不会覆盖首个 owner，也不能因此被误报为关系缺失。
 - `preview_ready`/`failed` 历史 session 只有在其精确 `task_id` 当前已进入正式 `imported`、`closed` 或 `deleted` 时，才可作为已被后续正式结果覆盖并降为 warning；未完成 task、活动 job/outbox、缺失 task 或其它关系冲突仍必须阻断。`deleted` 只属于导入 session 的后续覆盖状态，不加入 ETC 票据页面的 active task 覆盖集合。
 - `succeeded` session 的精确 task 可以处于导入完成时的 `imported`，也可以在后续 OA 提交流程合法推进为 `closed` 或由受控删除流程进入 `deleted`。`partial_success` 仍要求 `ready_for_import`，其它状态与缺失 output edge 继续阻断。
 - 历史上已被合法删除 task 遗留的严格 session 可以通过 `import-audit-repair --retire-etc-session-id` 标记为 `etc-import-page-audit.v1.deleted-task-retired`；新审计仍把该 revision 当作严格合同逐项验证，标记只用于让旧审计在候选激活前识别其为归档历史。工具保留 session、ZIP/file-object 与 output edge，不允许活动 job/outbox 或隐式扫描目标。
+
+## 2026-09-21 单任务与原子提交
+
+- `register(..., register_job)` 的原件对象写入在数据库事务前；session 元数据和任务登记共享事务。
+- `prepare` 一次解包、解析和匹配，将有界 manifest（含已解析字段和附件 bytes）压缩写入对象存储；PostgreSQL 仅保存引用。预览 session 和任务 awaiting_confirmation/needs_review 同事务。
+- `validate(load_manifest=False)` 仅读当前 owner/task/version/generation 和预览 metadata，不读原 ZIP；commit 才读取准备好的 manifest，不再解包原件或解析 XML。
+- `EtcImportUow` 先准备缺失附件，随后在短事务锁定任务、领取版本和本批发票身份，重读本 task 的候选与已有成员。ETC metadata、当前 import/business batch、正式任务 imported、session succeeded、job succeeded 同事务。
+- canonical invoice 通过现有 `EtcExistingInvoiceLinkService` + `save_invoice_etc_metadata` 端口在同一事务补元数据；不创建票、不改金额、税额或日期。
+- 领域计算用显式 `_PreparedEtcState` 暂存适配器，不产生中途数据库保存；落库仅提交本 task 变化。新 ETC 导入 ID 使用 UUID，历史 ID 保持。
+- 不允许部分正式成功：任何票据、owner、task version 或最终 job 完成失败回滚整批。对象存储准备不代表正式导入成功。
+- 完整重复票仍加入本批成员；首次 provenance 保持。附件补全和成员关系是独立业务动作。
+
+- 上传对象每次准备使用唯一存储身份，失败清理仅限本次已准备且查询确认无 session/manifest/invoice 引用的对象；事务成功但 ACK 丢失时保留已引用原件/附件。重新预览完成后旧 manifest 也按精确引用清理。
+- 删除 business-batch 第二套 preview/confirm route/application 方法和旧 EtcService 预览确认状态机，保留 OA 草稿、提交、撤回、删除及历史修复边界。
+- 显式 reprepare 重新绑定当前可导入 task 的 version/hash/generation，并生成新预览；commit 自动重试复用原 manifest 和原确认范围。
+- 包含整包 120 张票的金额组合匹配先按左右子集可完成数量剪枝，不能枚举不可能满足张数的所有子集；仍使用已有 matching_complexity_exceeded 反馈复杂匹配。
+
+- discard 在同一 PostgreSQL 事务取消 job 和标记 session reverted；准备中允许取消，重复取消幂等，正式成功后拒绝取消。被取消的未完成预览不要求存在 fingerprint/match 结果。

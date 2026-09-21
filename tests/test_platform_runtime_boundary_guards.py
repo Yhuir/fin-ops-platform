@@ -15,9 +15,6 @@ from fin_ops_platform.services.cutover_preflight import redact_secret_text
 from fin_ops_platform.services.etc_business_batch_application_service import EtcBusinessBatchApplicationService
 from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.etc_service import EtcImportItem, EtcImportResult
-from fin_ops_platform.services.runtime_worker_handlers import (
-    _link_etc_import_result_to_existing_invoices,
-)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = REPO_ROOT / "backend" / "src" / "fin_ops_platform"
@@ -289,7 +286,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             SERVICES_ROOT / "postgres_repositories" / "invoice_import_page_audit.py"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("_enqueue_import_process_job", confirm_source)
+        self.assertIn("self._import_workflow().confirm(", confirm_source)
         self.assertNotIn("execute_file_import_confirm_job", confirm_source)
         self.assertNotIn("run_file_import", confirm_source)
         for source in (server_source, imports_source, file_service_source, web_api_source):
@@ -1256,7 +1253,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         self.assertIn("class PendingInvoiceCanonicalQueryService", source)
         self.assertIn("set transaction isolation level repeatable read read only", source)
         self.assertIn("app.bank_transactions", source)
-        self.assertIn("app.workbench_pair_relations", source)
+        self.assertIn("RELATION_INVOICE_READ_SQL", source)
 
     def test_server_no_longer_owns_import_confirm_processors(self) -> None:
         server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
@@ -1655,7 +1652,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "certified_import_preview_provider",
             "enqueue_import_job",
             "serialize_import_job",
-            "execute_tax_certified_import_confirm",
             'idempotency_key=f"tax_certified_import.confirm:{session_id}"',
         ):
             if marker not in route_class:
@@ -1665,10 +1661,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for marker in (
             "load_multipart_body=self._load_multipart_body",
             "certified_import_preview_provider=self._tax_certified_import_application_service.preview_payload",
-            "import_job_processing_enabled=self._import_job_processing_enabled",
             "enqueue_import_job=self._enqueue_import_process_job",
             "serialize_import_job=self._serialize_import_job",
-            "execute_tax_certified_import_confirm=self._import_processing_service.execute_tax_certified_import_confirm",
         ):
             if marker not in route_factory:
                 violations.append(f"tax route factory is missing certified import port {marker}")
@@ -2624,7 +2618,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("Application is missing explicit output collection xlsx response port")
         for required in (
             "set transaction isolation level repeatable read read only",
-            "app.workbench_pair_relations",
+            "RELATION_INVOICE_READ_SQL",
             "relation.status = 'active'",
             "app.invoices",
         ):
@@ -2749,7 +2743,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "set transaction isolation level repeatable read read only",
             "app.oa_applications",
             "app.oa_pending_payment_admissions",
-            "app.workbench_pair_relations",
+            "RELATION_INVOICE_READ_SQL",
             "relation.status = 'active'",
         ):
             if required not in query_repository_source:
@@ -3052,8 +3046,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append(f"server.py keeps removed ETC business batch legacy handlers: {sorted(present)}")
         for required_delegate in (
             "routes.source_files(",
-            "routes.preview_import(",
-            "routes.confirm_import(",
             "routes.create_oa_draft(",
             "routes.revoke_oa_draft(",
             "routes.manual_oa_status(",
@@ -3324,8 +3316,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("_etc_import_routes does not construct the route owner")
         for required_dependency in (
             "preview_service=self._etc_import_preview_service",
-            "background_job_service=self._background_job_service",
-            "enqueue_import_job=self._enqueue_import_process_job",
+            "workflow_provider=self._import_workflow",
         ):
             if required_dependency not in route_factory:
                 violations.append(f"ETC import route owner lacks explicit dependency {required_dependency}")
@@ -3347,10 +3338,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if required_route not in route_owner_route:
                 violations.append(f"ETC import route owner missing dispatch branch {required_route}")
-        if "self._preview_service.preview(" not in route_owner_preview:
+        if "self._preview_service.register(" not in route_owner_preview:
             violations.append("ETC import route owner preview does not delegate to the durable preview service")
-        if "create_or_get_idempotent_job_with_created" not in route_owner_confirm:
-            violations.append("ETC import route owner confirm does not create idempotent background job")
+        if "workflow.confirm(" not in route_owner_confirm:
+            violations.append("ETC import route owner confirm does not durably confirm the existing job")
         if "self._preview_service.validate(" not in route_owner_confirm:
             violations.append("ETC import route owner confirm does not validate the durable preview")
         if "self._preview_service.discard(" not in route_owner_discard:
@@ -3372,7 +3363,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("EtcService reintroduced process-local import session ownership")
         if "class EtcImportPreviewService" not in preview_service_source:
             violations.append("ETC import durable preview owner is missing")
-        for marker in ("self._etc_import_preview_service.validate(", "begin_import(", "uploads=list(validated_preview.uploads)"):
+        for marker in ("self._etc_import_preview_service.validate(", "self._etc_import_uow.commit(", "load_manifest=True"):
             if marker not in processing_service_source:
                 violations.append(f"ETC import worker processing lacks durable boundary marker {marker}")
 
@@ -3796,7 +3787,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"Input usage canonical query service is missing {required}")
         for required in (
             "set transaction isolation level repeatable read read only",
-            "app.workbench_pair_relations",
+            "RELATION_INVOICE_READ_SQL",
             "relation.status = 'active'",
             "app.invoices",
         ):
@@ -5503,7 +5494,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         checks = [
             (APP_ROOT / "server.py", "_link_etc_import_result_to_existing_invoices"),
             (APP_ROOT / "server.py", "_link_etc_invoices_to_existing_invoices"),
-            (SERVICES_ROOT / "runtime_worker_handlers.py", "_link_etc_import_result_to_existing_invoices"),
         ]
         violations: list[str] = []
 
@@ -6113,10 +6103,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
 class RuntimeWorkerEtcImportLinkExistingTests(unittest.TestCase):
     def test_etc_oa_workflow_methods_do_not_link_or_refresh_canonical_invoice_facts(self) -> None:
-        self.assertIn(
-            "_link_existing_canonical_invoices",
-            inspect.getsource(EtcBusinessBatchApplicationService.confirm_import_payload),
-        )
+        self.assertFalse(hasattr(EtcBusinessBatchApplicationService, "confirm_import_payload"))
+        self.assertFalse(hasattr(EtcBusinessBatchApplicationService, "preview_import_payload"))
+        uow_source = (SERVICES_ROOT / "etc_import_uow.py").read_text(encoding="utf-8")
+        self.assertIn("EtcExistingInvoiceLinkService", uow_source)
+        self.assertIn("completion.succeed(transaction", uow_source)
         for method in (
             EtcBusinessBatchApplicationService.create_oa_draft_payload,
             EtcBusinessBatchApplicationService.recover_oa_draft_payload,
@@ -6273,11 +6264,10 @@ class RuntimeWorkerEtcImportLinkExistingTests(unittest.TestCase):
 
         etc_service = EtcService()
         persisted: list[list[object]] = []
-        link = _link_etc_import_result_to_existing_invoices(
-            ImportService(),
-            etc_service,
-            SimpleNamespace(save_invoice_etc_metadata=lambda invoices: persisted.append(list(invoices))),
-        )
+        link = EtcExistingInvoiceLinkService(
+            import_service=ImportService(), etc_service=etc_service,
+            persist_linked_invoices=lambda invoices: persisted.append(list(invoices)),
+        ).link_import_result_to_existing_invoices
 
         months = link(
             EtcImportResult(
@@ -6317,11 +6307,10 @@ class RuntimeWorkerEtcImportLinkExistingTests(unittest.TestCase):
                     )
                 ]
 
-        link = _link_etc_import_result_to_existing_invoices(
-            ImportService(),
-            EtcService(),
-            SimpleNamespace(save_invoice_etc_metadata=lambda _invoices: None),
-        )
+        link = EtcExistingInvoiceLinkService(
+            import_service=ImportService(), etc_service=EtcService(),
+            persist_linked_invoices=lambda _invoices: None,
+        ).link_import_result_to_existing_invoices
 
         months = link(
             EtcImportResult(
@@ -6367,11 +6356,10 @@ class RuntimeWorkerEtcImportLinkExistingTests(unittest.TestCase):
                     )
                 ]
 
-        link = _link_etc_import_result_to_existing_invoices(
-            ImportService(),
-            EtcService(),
-            SimpleNamespace(save_invoice_etc_metadata=lambda _invoices: None),
-        )
+        link = EtcExistingInvoiceLinkService(
+            import_service=ImportService(), etc_service=EtcService(),
+            persist_linked_invoices=lambda _invoices: None,
+        ).link_import_result_to_existing_invoices
 
         months = link(
             EtcImportResult(

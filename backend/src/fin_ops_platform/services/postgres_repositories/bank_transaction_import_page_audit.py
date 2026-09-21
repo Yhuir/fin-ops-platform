@@ -872,7 +872,7 @@ def _job_issues(
         selected_file_ids = _job_selected_file_ids(row)
         if selected_file_ids - file_ids:
             issues.append(_issue("bank_import_job_file_orphan", job_id, {"file_ids": sorted(selected_file_ids - file_ids)}))
-        if status in ACTIVE_JOB_STATUSES or (status == "failed" and _int(row.get("attempt_count"), 0) < _int(row.get("max_attempts"), 1)):
+        if status in ACTIVE_JOB_STATUSES:
             issues.append(
                 AuditIssue(
                     "error",
@@ -892,7 +892,11 @@ def _job_issues(
                 )
             )
         elif status == "failed":
-            issues.append(_issue("bank_import_job_terminal_failure", job_id, {"last_error": row.get("last_error")}))
+            issues.append(_issue("bank_import_job_terminal_failure", job_id, {
+                "last_error": row.get("last_error"), "status": status, "stage": row.get("stage"),
+                "attempt_count": _int(row.get("attempt_count"), 0), "max_attempts": _int(row.get("max_attempts"), 0),
+                "session_id": session_id, "selected_file_ids": sorted(selected_file_ids),
+            }))
         if status == "succeeded":
             result_batch_ids = _result_batch_ids(result)
             if result_batch_ids and not result_batch_ids.issubset(batch_ids):

@@ -765,9 +765,9 @@ def _job_issues(
             issues.append(_issue("invoice_import_job_file_orphan", job_id, {"file_ids": sorted(selected_file_ids - all_file_ids)}))
         if selected_file_ids - invoice_file_ids:
             issues.append(_issue("invoice_import_job_mixed_file_types", job_id, {"file_ids": sorted(selected_file_ids - invoice_file_ids)}))
-        if not selected_file_ids:
+        if not selected_file_ids and _text(row.get("stage")) != "prepare":
             issues.append(_issue("invoice_import_job_selected_files_missing", job_id, None))
-        if status in ACTIVE_JOB_STATUSES or (status == "failed" and _int(row.get("attempt_count"), 0) < _int(row.get("max_attempts"), 1)):
+        if status in ACTIVE_JOB_STATUSES:
             issues.append(
                 AuditIssue(
                     "error",

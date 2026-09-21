@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-from contextlib import redirect_stdout
-from io import StringIO
 import json
 import os
-from types import SimpleNamespace
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fin_ops_platform.app import worker as worker_app
-from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.services.import_job_queue import (
-    IMPORT_PROCESS_REQUESTED_EVENT,
     ImportJob,
     ImportJobIdempotencyConflict,
     ImportJobRepository,
@@ -22,8 +20,9 @@ from fin_ops_platform.services.runtime_worker_handlers import (
     _input_invoice_usage_scope_keys_for_import_file_session,
     _output_invoice_collection_scope_keys_for_import_file_session,
     _tax_offset_scope_keys_for_import_file_session,
-    build_import_job_handler_bundle,
 )
+
+from tests.app_test_support import build_local_state_application as build_application
 from tests.mock_import_files import CERTIFIED_JAN, MockImportFile
 
 
@@ -109,50 +108,6 @@ class FakeApplicationImportJobRepository:
             priority=str(kwargs.get("priority") or "normal"),
         )
 
-    def enqueue_process_requested(self, *, queue_repository, import_job: ImportJob, reason: str = "import_job_created"):
-        self.enqueued.append(import_job)
-        return queue_repository.enqueue(
-            event_type=IMPORT_PROCESS_REQUESTED_EVENT,
-            aggregate_type="import_job",
-            aggregate_id=import_job.import_job_id,
-            scope_type="import",
-            scope_key=import_job.import_type,
-            dedupe_key=f"{IMPORT_PROCESS_REQUESTED_EVENT}:{import_job.tenant_id}:{import_job.import_job_id}",
-            payload={"import_job_id": import_job.import_job_id, "import_type": import_job.import_type, "reason": reason},
-            tenant_id=import_job.tenant_id,
-            source_version=0,
-            priority=import_job.priority,
-            trace_id=import_job.trace_id,
-        )
-
-
-class FakeImportJobRepository:
-    def __init__(self, job: ImportJob | None) -> None:
-        self.job = job
-        self.processing: list[tuple[str, str]] = []
-        self.succeeded: list[tuple[str, str, dict[str, object]]] = []
-        self.failed: list[tuple[str, str, str, dict[str, object], str]] = []
-        self.retryable: list[tuple[str, str, str]] = []
-
-    def mark_processing(self, import_job_id: str, *, worker_id: str):
-        self.processing.append((import_job_id, worker_id))
-        return self.job
-
-    def get_job(self, import_job_id: str):
-        return self.job
-
-    def mark_succeeded(self, import_job_id: str, *, worker_id: str, result_payload=None, stage="succeeded"):
-        self.succeeded.append((import_job_id, worker_id, result_payload or {}))
-        return True
-
-    def mark_failed(self, import_job_id: str, *, worker_id: str, error: str, result_payload=None, stage="failed"):
-        self.failed.append((import_job_id, worker_id, error, result_payload or {}, stage))
-        return True
-
-    def mark_retryable(self, import_job_id: str, *, worker_id: str, error: str, stage="retry_pending"):
-        self.retryable.append((import_job_id, worker_id, error))
-        return True
-
 
 def job_row(**overrides: object) -> dict[str, object]:
     row: dict[str, object] = {
@@ -197,7 +152,7 @@ def import_job(**overrides: object) -> ImportJob:
         payload=overrides.get("payload", {"session_id": "session-1"}),
         result_payload=overrides.get("result_payload", {}),
         raw_payload=overrides.get("raw_payload", {}),
-        created_by="operator",
+        created_by=str(overrides.get("created_by", "operator")),
         trace_id="trace-1",
     )
 
@@ -239,7 +194,7 @@ class ImportJobRepositoryTests(unittest.TestCase):
         factory = ImportRuntimeProcessorFactory(data_dir="/tmp/finops-test", connection=object())
         generations: list[int] = []
 
-        def build_current_processors():
+        def build_current_processors(**kwargs):
             generation = len(generations) + 1
             generations.append(generation)
             return {"file_import.confirm": lambda _job: {"generation": generation}}
@@ -292,7 +247,6 @@ class ImportJobRepositoryTests(unittest.TestCase):
 
         with patch.dict(os.environ, {"FIN_OPS_IMPORT_PROCESSING_BACKEND": "postgres"}):
             self.assertEqual(app._import_processing_backend(), "postgres")  # noqa: SLF001
-            self.assertTrue(app._import_job_processing_enabled())  # noqa: SLF001
 
         with patch.dict(os.environ, {"FIN_OPS_IMPORT_PROCESSING_BACKEND": "inline"}):
             with self.assertRaisesRegex(RuntimeError, "must be postgres"):
@@ -392,122 +346,15 @@ class ImportJobRepositoryTests(unittest.TestCase):
                 payload={"session_id": "session-2"},
             )
 
-    def test_create_or_get_job_atomically_requeues_same_failed_request(self) -> None:
-        transaction = FakeTransaction(rows=[job_row(status="pending", stage="queued", attempt_count=0)])
+    def test_create_replay_does_not_mutate_existing_job_payload_or_status(self):
+        transaction = FakeTransaction(rows=[job_row(status="pending", stage="commit")])
         repository = ImportJobRepository(FakeConnection(transaction))
+        repository.create_or_get_job(import_type="file_import.confirm", idempotency_key="same", payload={})
+        sql = " ".join(transaction.calls[0][1].lower().split())
+        self.assertIn("do update set updated_at=job.import_jobs.updated_at", sql)
+        self.assertNotIn("then excluded.payload", sql)
 
-        job = repository.create_or_get_job(
-            import_type="bank_transactions.import",
-            import_session_id="session-1",
-            idempotency_key="bank_transactions.import:session-1",
-            payload={"session_id": "session-1"},
-        )
-
-        self.assertEqual(job.status, "pending")
-        _, sql, _params = transaction.calls[0]
-        normalized_sql = " ".join(sql.lower().split())
-        self.assertIn("when job.import_jobs.status = 'failed' then 'pending'", normalized_sql)
-        self.assertIn("when job.import_jobs.status = 'failed' then 0", normalized_sql)
-        self.assertIn("when job.import_jobs.status in ('pending', 'failed') then excluded.payload", normalized_sql)
-
-    def test_mark_processing_only_reclaims_an_expired_processing_lease(self) -> None:
-        transaction = FakeTransaction(rows=[job_row(status="processing", attempt_count=2)])
-        repository = ImportJobRepository(FakeConnection(transaction))
-
-        job = repository.mark_processing("job-1", worker_id="worker-1", lock_timeout_seconds=300)
-
-        self.assertIsNotNone(job)
-        _, sql, params = transaction.calls[0]
-        normalized_sql = " ".join(sql.lower().split())
-        self.assertIn("status = 'pending' and available_at <= now()", normalized_sql)
-        self.assertIn("locked_at < now() - (%s * interval '1 second')", normalized_sql)
-        self.assertEqual(params[:4], ("processing", "worker-1", "job-1", 300))
-
-    def test_mark_retryable_returns_processing_job_to_pending(self) -> None:
-        transaction = FakeTransaction(rows=[job_row(status="pending", stage="retry_pending")])
-        repository = ImportJobRepository(FakeConnection(transaction))
-
-        updated = repository.mark_retryable("job-1", worker_id="worker-1", error="transient")
-
-        self.assertTrue(updated)
-        _, sql, params = transaction.calls[0]
-        normalized_sql = " ".join(sql.lower().split())
-        self.assertIn("status = 'pending'", normalized_sql)
-        self.assertIn("available_at = now()", normalized_sql)
-        self.assertEqual(params, ("retry_pending", "transient", "job-1", "worker-1"))
-
-    def test_enqueue_process_requested_keeps_queue_envelope_small(self) -> None:
-        repository = ImportJobRepository(FakeConnection(FakeTransaction()))
-        queue = FakeRuntimeQueue()
-
-        repository.enqueue_process_requested(queue_repository=queue, import_job=import_job(), reason="confirmed")
-
-        self.assertEqual(len(queue.enqueued), 1)
-        event = queue.enqueued[0]
-        self.assertEqual(event["event_type"], IMPORT_PROCESS_REQUESTED_EVENT)
-        self.assertEqual(event["aggregate_type"], "import_job")
-        self.assertEqual(event["aggregate_id"], "job-1")
-        self.assertEqual(event["scope_type"], "import")
-        self.assertEqual(event["scope_key"], "bank_transactions.import")
-        self.assertEqual(event["source_version"], 0)
-        self.assertEqual(event["payload"], {"import_job_id": "job-1", "import_type": "bank_transactions.import", "reason": "confirmed"})
-
-    def test_worker_marks_unknown_processor_failed_without_throwing(self) -> None:
-        repository = FakeImportJobRepository(import_job())
-        worker = ImportJobWorker(repository=repository, worker_id="worker-1", processors={})
-        event = _runtime_event()
-
-        result = worker.handle_runtime_event(event)
-
-        self.assertEqual(result["error_code"], "processor_not_registered")
-        self.assertEqual(repository.failed[0][0], "job-1")
-        self.assertIn("not registered", repository.failed[0][2])
-        self.assertEqual(repository.succeeded, [])
-
-    def test_worker_runs_registered_processor_and_marks_success(self) -> None:
-        repository = FakeImportJobRepository(import_job())
-        worker = ImportJobWorker(
-            repository=repository,
-            worker_id="worker-1",
-            processors={"bank_transactions.import": lambda job: {"row_count": 431}},
-        )
-
-        result = worker.handle_runtime_event(_runtime_event())
-
-        self.assertTrue(result["processed"])
-        self.assertEqual(result["row_count"], 431)
-        self.assertEqual(repository.succeeded[0][0], "job-1")
-        self.assertEqual(repository.failed, [])
-
-    def test_worker_releases_transient_failure_for_durable_retry(self) -> None:
-        repository = FakeImportJobRepository(import_job(max_attempts=5))
-        worker = ImportJobWorker(
-            repository=repository,
-            worker_id="worker-1",
-            processors={"bank_transactions.import": lambda _job: (_ for _ in ()).throw(RuntimeError("temporary"))},
-        )
-
-        with self.assertRaisesRegex(RuntimeError, "temporary"):
-            worker.handle_runtime_event(_runtime_event(attempts=1))
-
-        self.assertEqual(repository.retryable, [("job-1", "worker-1", "temporary")])
-        self.assertEqual(repository.failed, [])
-
-    def test_worker_marks_final_attempt_failed_before_outbox_dead_letter(self) -> None:
-        repository = FakeImportJobRepository(import_job(max_attempts=2))
-        worker = ImportJobWorker(
-            repository=repository,
-            worker_id="worker-1",
-            processors={"bank_transactions.import": lambda _job: (_ for _ in ()).throw(RuntimeError("still broken"))},
-        )
-
-        with self.assertRaisesRegex(RuntimeError, "still broken"):
-            worker.handle_runtime_event(_runtime_event(attempts=2))
-
-        self.assertEqual(repository.retryable, [])
-        self.assertEqual(repository.failed[0][4], "processor_failed")
-
-    def test_worker_check_claims_only_import_process_requested_in_postgres_mode(self) -> None:
+    def test_worker_check_reports_direct_import_queue_without_outbox_handler(self) -> None:
         stdout = StringIO()
         with patch.dict(
             os.environ,
@@ -522,18 +369,23 @@ class ImportJobRepositoryTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["worker_kind"], "import-job")
-        self.assertEqual(payload["event_types"], [IMPORT_PROCESS_REQUESTED_EVENT])
-        self.assertEqual(payload["handlers"], [IMPORT_PROCESS_REQUESTED_EVENT])
+        self.assertEqual(payload["event_types"], [])
+        self.assertEqual(payload["handlers"], [])
+        self.assertEqual(payload["import_queue"], "job.import_jobs")
+        self.assertEqual(len(payload["import_processors"]), 4)
 
-    def test_import_handler_bundle_has_no_legacy_fact_changed_bridge(self) -> None:
-        bundle = build_import_job_handler_bundle(
-            connection=SimpleNamespace(),
-            worker_id="worker-1",
-            processors={},
-        )
-
-        self.assertEqual(set(bundle.handlers), {IMPORT_PROCESS_REQUESTED_EVENT})
-        self.assertNotIn("import.fact.changed", bundle.handlers)
+    def test_tax_confirm_rejects_foreign_preview_before_claiming_idempotency_key(self) -> None:
+        from fin_ops_platform.services.tax_certified_import_service import UploadedCertifiedImportFile
+        app = build_application()
+        self.addCleanup(app.close)
+        session = app._tax_certified_import_service.preview_files(imported_by="other-owner", uploads=[
+            UploadedCertifiedImportFile(file_name=CERTIFIED_JAN.name, content=CERTIFIED_JAN.content)])
+        repository = FakeApplicationImportJobRepository()
+        app._import_job_repository = repository
+        response = app.handle_request('POST','/api/tax-offset/certified-import/confirm',json.dumps({'session_id':session.id}))
+        self.assertEqual(response.status_code,404)
+        self.assertEqual(json.loads(response.body)['error'],'tax_certified_import_session_not_found')
+        self.assertEqual(repository.created,[])
 
     def test_tax_certified_import_confirm_queue_result_can_be_polled(self) -> None:
         app = build_application()
@@ -568,7 +420,7 @@ class ImportJobRepositoryTests(unittest.TestCase):
         self.assertEqual(confirm_payload["status"], "queued")
         self.assertEqual(confirm_payload["import_job"]["import_type"], "tax_certified_import.confirm")
         self.assertEqual(import_jobs.created[0]["idempotency_key"], f"tax_certified_import.confirm:{session_id}")
-        self.assertEqual(queue.enqueued[0]["event_type"], IMPORT_PROCESS_REQUESTED_EVENT)
+        self.assertEqual(queue.enqueued, [])
 
         batch_payload = {
             "id": "tax-certified-batch-1",
@@ -580,7 +432,7 @@ class ImportJobRepositoryTests(unittest.TestCase):
         }
         app._import_job_repository = SimpleNamespace(  # noqa: SLF001
             get_job=lambda import_job_id: import_job(
-                import_job_id=import_job_id,
+                import_job_id=import_job_id, created_by=import_jobs.created[0]["created_by"],
                 import_type="tax_certified_import.confirm",
                 import_session_id=session_id,
                 status="succeeded",
@@ -598,25 +450,6 @@ class ImportJobRepositoryTests(unittest.TestCase):
         status_payload = json.loads(status_response.body)
         self.assertEqual(status_payload["import_job"]["status"], "succeeded")
         self.assertEqual(status_payload["import_job"]["result_payload"]["batch"]["persisted_record_count"], 2)
-
-def _runtime_event(*, attempts: int = 1):
-    from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
-
-    return RuntimeQueueEvent(
-        event_id="event-1",
-        tenant_id="default",
-        event_type=IMPORT_PROCESS_REQUESTED_EVENT,
-        aggregate_type="import_job",
-        aggregate_id="job-1",
-        scope_type="import",
-        scope_key="bank_transactions.import",
-        dedupe_key="import.process.requested:default:job-1",
-        payload={"import_job_id": "job-1"},
-        attempts=attempts,
-        status="processing",
-        source_version=0,
-    )
-
 
 if __name__ == "__main__":
     unittest.main()

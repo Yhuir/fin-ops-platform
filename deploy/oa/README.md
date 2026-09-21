@@ -131,6 +131,8 @@ Migration `0162_cost_statistics_unit_manual_allocations.sql` 同样是 forward-o
 
 ## Release checkpoint
 
+Migration `0175_import_jobs_direct_claim.sql` 将导入执行事实统一为直接领取的任务，并退役导入 outbox 中转。新 prepare/待确认状态不能交给旧 consumer，故为 forward-only；发布前 deploy-control 的 forward-only 版本集合必须包含 `0175`。迁移后验证失败保留 maintenance 并向前修复，不能回切旧 worker。旧 processing 领取被失效并重新排队，已有完成态只标记历史提醒已读；孤立旧事件明确保留 failed 原因，不伪报已处理。
+
 每个 checkpoint 必须同时证明：
 
 - `/health/ready` 成功且 response contract 完整；

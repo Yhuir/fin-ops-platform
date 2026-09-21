@@ -15,6 +15,7 @@ export type FileSelectionState = Record<
 >;
 
 export type ImportWorkflowDraft = {
+  uploadRequestId: string;
   selectedFiles: File[];
   fileSelections: FileSelectionState;
   previewPayload: ImportSessionPayload | null;
@@ -29,6 +30,7 @@ export type ImportWorkflowDraft = {
 
 function createEmptyDraft(): ImportWorkflowDraft {
   return {
+    uploadRequestId: crypto.randomUUID(),
     selectedFiles: [],
     fileSelections: {},
     previewPayload: null,
@@ -53,6 +55,8 @@ export function useImportWorkflowDraft() {
     (updater: SetStateAction<ImportWorkflowDraft[Key]>) => {
       updateDraft((current) => ({
         ...current,
+        ...(["selectedFiles", "fileSelections", "selectedEtcTaskId"].includes(key)
+          ? { uploadRequestId: crypto.randomUUID() } : {}),
         [key]: typeof updater === "function"
           ? (updater as (value: ImportWorkflowDraft[Key]) => ImportWorkflowDraft[Key])(current[key])
           : updater,

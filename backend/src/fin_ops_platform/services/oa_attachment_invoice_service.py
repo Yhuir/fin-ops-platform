@@ -1,21 +1,22 @@
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
-from io import BytesIO
 import os
-from pathlib import Path
 import re
+import xml.etree.ElementTree as ET
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from io import BytesIO
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 from zipfile import BadZipFile, ZipFile
-import xml.etree.ElementTree as ET
 
 import fitz
 from rapidocr_onnxruntime import RapidOCR
 
 from fin_ops_platform.services.imports import clean_string
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from fin_ops_platform.services.untrusted_document_policy import (
     OA_ATTACHMENT_LIMITS,
     UntrustedDocumentError,
@@ -23,8 +24,6 @@ from fin_ops_platform.services.untrusted_document_policy import (
     inspect_untrusted_document,
     normalize_image_for_ocr,
 )
-from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
-
 
 INVOICE_CODE_RE = re.compile(r"发票代码:([0-9A-Za-z]+)")
 INVOICE_NO_RE = re.compile(r"发票号码:([0-9A-Za-z]{6,20})(?![0-9A-Za-z])")
@@ -33,7 +32,7 @@ LOOSE_INVOICE_NO_RE = re.compile(r"发票号码[:：]?([0-9A-Za-z]{6,20})(?![0-9
 ISSUE_DATE_RE = re.compile(r"开票日期:(\d{4})年(\d{2})月(\d{2})日")
 DIGITAL_INVOICE_NO_RE = re.compile(r"(?<![0-9A-Z])([0-9]{20})(?![0-9A-Z])")
 LOOSE_ISSUE_DATE_RE = re.compile(r"(\d{4})年(\d{2})月(\d{2})日")
-TOTALS_RE = re.compile(r"合计¥([0-9]+(?:\.\d+)?)¥([0-9]+(?:\.\d+)?)")
+TOTALS_RE = re.compile(r"合计[¥Y]([0-9]+(?:\.\d+)?)[¥Y]([0-9]+(?:\.\d+)?)")
 TOTAL_WITH_TAX_RE = re.compile(r"价税合计.*?¥([0-9]+\.[0-9]{2}|[0-9]+(?![0-9.]))")
 CURRENCY_AMOUNT_RE = re.compile(r"[¥Y]\s*([0-9]+\.[0-9]{2}|[0-9]+(?![0-9.]))")
 SMALL_TOTAL_RE = re.compile(
@@ -58,7 +57,7 @@ class OAAttachmentOCRRuntimeError(RuntimeError):
 
 
 class OAAttachmentInvoiceService:
-    PARSER_VERSION = "2026-08-26-pdf-page-representation-v3"
+    PARSER_VERSION = "2026-09-21-financial-field-semantics-v4"
 
     def __init__(
         self,
@@ -560,7 +559,7 @@ class OAAttachmentInvoiceService:
         invoice_code = self._match_text(INVOICE_CODE_RE, compact_text)
         invoice_no = self._match_text(INVOICE_NO_RE, compact_text) or self._extract_digital_invoice_no(compact_text)
         issue_date = self._extract_issue_date(compact_text)
-        totals = self._extract_amount_summary(compact_text)
+        totals = self._extract_amount_summary(compact_text, tax_rates=set(TAX_RATE_RE.findall(extracted_text)))
         if not invoice_no or not issue_date or totals is None:
             non_tax_receipt = self._parse_non_tax_payment_receipt_text(extracted_text, compact_text)
             if non_tax_receipt is not None:
@@ -606,6 +605,8 @@ class OAAttachmentInvoiceService:
             "invoice_type": "进项发票",
             "invoice_kind": self._extract_invoice_kind(extracted_text),
         }
+        if not net_amount or not tax_amount:
+            parsed["financial_review_reason"] = "票面只提供价税合计，未税金额和税额须以税务数据核对。"
         return parsed
 
     def _parse_machine_printed_invoice_texts(
@@ -848,7 +849,7 @@ class OAAttachmentInvoiceService:
                 return clean_string(match.group(1))
         return self._match_text(TAX_RATE_RE, compact_text)
 
-    def _extract_amount_summary(self, compact_text: str) -> tuple[str, str, str] | None:
+    def _extract_amount_summary(self, compact_text: str, *, tax_rates: set[str] | None = None) -> tuple[str, str, str] | None:
         totals_match = TOTALS_RE.search(compact_text)
         total_with_tax = self._normalize_amount_text(self._match_text(TOTAL_WITH_TAX_RE, compact_text))
         if totals_match is not None and total_with_tax:
@@ -858,28 +859,34 @@ class OAAttachmentInvoiceService:
                 total_with_tax,
             )
 
-        currency_amounts = CURRENCY_AMOUNT_RE.findall(compact_text)
-        if len(currency_amounts) >= 3:
-            net_amount, tax_amount, total_amount = currency_amounts[-3:]
+        net_match = re.search(r"(?<![税总])金额[:：]?[¥Y]?([0-9]+\.[0-9]{2}|[0-9]+(?![0-9.]))", compact_text)
+        tax_match = re.search(r"税额[:：]?[¥Y]?([0-9]+\.[0-9]{2}|[0-9]+(?![0-9.]))", compact_text)
+        small_total = self._normalize_amount_text(self._match_text(SMALL_TOTAL_RE, compact_text))
+        if net_match is not None and tax_match is not None and (total_with_tax or small_total):
             return self._validated_amount_summary(
-                self._normalize_amount_text(net_amount),
-                self._normalize_amount_text(tax_amount),
-                self._normalize_amount_text(total_amount),
+                self._normalize_amount_text(net_match.group(1)),
+                self._normalize_amount_text(tax_match.group(1)),
+                total_with_tax or small_total,
             )
-        if len(currency_amounts) >= 2:
-            small_total_match = SMALL_TOTAL_RE.search(compact_text)
-            if small_total_match is not None:
-                tax_amount, net_amount = currency_amounts[-2:]
-                total_amount = self._normalize_amount_text(small_total_match.group(1))
-                if total_amount:
-                    return self._validated_amount_summary(
-                        self._normalize_amount_text(net_amount),
-                        self._normalize_amount_text(tax_amount),
-                        total_amount,
-                    )
-        railway_ticket_amount = self._extract_railway_ticket_amount(compact_text, currency_amounts)
+        # OCR may reorder table cells. Accept a pair only when the displayed
+        # total and one explicit tax rate uniquely prove both financial values.
+        rates = tax_rates if tax_rates is not None else set(TAX_RATE_RE.findall(compact_text))
+        total = total_with_tax or small_total
+        amounts = {Decimal(self._normalize_amount_text(value)) for value in CURRENCY_AMOUNT_RE.findall(compact_text)}
+        if total and len(rates) == 1:
+            rate = Decimal(next(iter(rates)).removesuffix("%")) / Decimal(100)
+            candidates = {
+                (net, Decimal(total) - net) for net in amounts
+                if Decimal(total) - net in amounts
+                and abs((net * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) - (Decimal(total) - net)) <= Decimal("0.01")
+            }
+            if len(candidates) == 1:
+                net, tax = candidates.pop()
+                return (str(net.quantize(Decimal("0.01"))), str(tax.quantize(Decimal("0.01"))), total)
+        railway_ticket_amount = self._extract_railway_ticket_amount(compact_text, CURRENCY_AMOUNT_RE.findall(compact_text))
         if railway_ticket_amount:
-            return (railway_ticket_amount, "0.00", railway_ticket_amount)
+            # A ticket price proves the total only, never a zero tax amount.
+            return ("", "", railway_ticket_amount)
         return None
 
     @staticmethod

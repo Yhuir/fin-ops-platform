@@ -34,6 +34,7 @@ type BackgroundJobProgressContextValue = {
 const BackgroundJobProgressContext = createContext<BackgroundJobProgressContextValue | null>(null);
 
 function jobPriority(job: BackgroundJob) {
+  if (job.status === "awaiting_confirmation") return 1;
   if (job.status === "failed") {
     return 0;
   }

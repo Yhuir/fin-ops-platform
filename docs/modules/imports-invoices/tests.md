@@ -180,7 +180,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 - 本地已覆盖 240 行合成发票重复组；真实客户发票 Excel 大文件、历史模板变体、异常编码、超大重复组内存/耗时和真实浏览器上传仍需 staging/manual smoke。
 - 真实 Postgres/RabbitMQ/Redis/systemd import worker drain、worker crash/retry、RabbitMQ transport wakeup 未由本地单测完全证明；`write_operation_slo_audit --operation invoice_import_confirmed` 已有本地契约测试，但仍需要 staging 中真实发票确认样本产生 recent outbox rows 才能证明真实 write-flow。
 - Browser e2e 当前覆盖 deterministic mock 下的发票上传、方向选择、预览审计、慢预览动作锁定、损坏文件混合、确认、显式 operation barrier 等待和零 Workbench 页面请求，以及销项收款/进项使用/待找发票/OA 待付款、税金抵扣/成本统计的下游展示；真实 worker drain、下游真实浏览器大数据表格、长分页、导出下载和网络恢复 smoke 仍是 `documented-risk`。
-- `import.process.requested` 是 file confirm 唯一 durable processing event，不是 inline fallback；具体发票 job 通过 session + selected file ids + batch type 精确归属于发票页，银行/发票任务和 outbox 不得互相阻断 Audit。
+- `job.import_jobs` 是 file prepare/confirm 的执行事实源；具体发票 job 通过 session + selected file ids + batch type 精确归属于发票页，银行/发票任务不得互相阻断 Audit；旧 import outbox 只作历史证据。
 - `tests/test_audit_invoice_import_page.py` 覆盖 direct-canonical expected-set、关键字段、manual source-link 双向 equality、strict 发票同时保留 known legacy invoice-batch edge 的非阻断语义、unknown/non-invoice batch edge 的 fail-closed、file hash、job/outbox 和一次性 PostgreSQL 0001–0097 破坏性反证；`tests/test_platform_runtime_boundary_guards.py` 防止 inline/revert/import-file batch-column 旧链回流。
 
 ## 2026-07-15 多明细发票回归
@@ -213,3 +213,21 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 - `tests/test_etc_invoice_metadata_postgres.py`：真实 PostgreSQL 并发来源保留、整批回滚、原导入证据查询及税率副本局部修复。必须在显式的 disposable test database 上运行。
 - `tests/test_import_service.py`：ETC 先到、正式发票后到时保留正式空税率，并复用原身份关联。
 - `tests/test_postgres_core_repository.py`：正式空税率读取不被 payload 补写；原 API、ETC/发票导入与关联台测试继续保护跨页面合同。
+
+## 2026-09-21 导入闭环回归
+
+- 核心/服务：`test_import_closed_loop.py` 覆盖选择范围原子回滚、财务字段一致性、原件登记不解析、窄 session 恢复、相同请求并发登记、响应丢失保持引用、登记失败清理、旧 claim 拒绝写事实，以及真实 PostgreSQL 事实/任务成功同事务。
+- API/后台任务：`test_import_file_api.py` 与 `test_import_formalization_api.py` 覆盖 upload 202 → prepare → session GET → 版本确认 → commit → 下游读取；重试同意图、取消已排队确认、重解析旧版本冲突、剩余文件新意图和旧范围幂等返回。
+- 下游回归：`test_runtime_bootstrap.py` 证明请求独立 service；`test_workbench_v2_api.py` 证明财务冲突进入 needs_review；现金兼容测试在单独 `fin_ops_cash_test_*` synthetic 数据库验证既有现金事实不被污染。
+- 页面交互由 `web/src/test/ImportCenterPage.test.tsx` / `ImportsApi.test.ts` 维护；本模块 service 测试不以 UI 内部状态代替用户可观察闭环。
+
+### 本机 PostgreSQL 1000 行基准
+
+2026-09-21 在隔离 synthetic 数据库使用真实 XLSX、文件登记、解析、候选持久化、独立服务恢复、确认 UoW、job completion 与 matching dirty。同一场景 5 次；p95 使用 nearest-rank（5 次时为最大值），不是生产 p95。时间单位秒：
+
+| 阶段 | p50 | p95 |
+| --- | ---: | ---: |
+| 原件登记 | 0.010 | 0.068 |
+| 解析+候选持久化 | 0.559 | 0.584 |
+| 确认+事实/任务提交 | 1.175 | 1.275 |
+| 完整同步耗时（不含排队等待） | 1.769 | 1.843 |

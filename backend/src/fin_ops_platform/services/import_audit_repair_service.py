@@ -231,7 +231,7 @@ def public_failed_import_recovery_report(
 
 
 def execute_failed_import_job_recovery(connection: Any, plan: dict[str, Any]) -> dict[str, Any]:
-    from fin_ops_platform.services.import_job_queue import ImportJobRepository
+    from fin_ops_platform.services.import_job_queue import ImportJobRepository, ImportJobWorker
     from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
         load_failed_import_job_recovery_snapshot,
     )
@@ -239,25 +239,11 @@ def execute_failed_import_job_recovery(connection: Any, plan: dict[str, Any]) ->
     from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
     from fin_ops_platform.services.runtime_worker_handlers import (
         ImportRuntimeProcessorFactory,
-        build_import_job_handler_bundle,
     )
 
     target = dict(plan["target"])
-    job_row = dict(plan["import_job"])
     import_jobs = ImportJobRepository(connection)
-    recovered_job = import_jobs.create_or_get_job(
-        import_type=job_row["import_type"],
-        tenant_id=job_row.get("tenant_id") or "default",
-        import_session_id=job_row.get("import_session_id"),
-        source_file_id=job_row.get("source_file_id"),
-        idempotency_key=job_row.get("idempotency_key"),
-        payload=dict(job_row.get("payload") or {}),
-        raw_payload=dict(job_row.get("raw_payload") or {}),
-        created_by=job_row.get("created_by"),
-        trace_id=job_row.get("trace_id"),
-        priority=job_row.get("priority") or "normal",
-        max_attempts=int(job_row.get("max_attempts") or 5),
-    )
+    recovered_job = import_jobs.retry_job(target["import_job_id"])
     if recovered_job.import_job_id != target["import_job_id"] or recovered_job.status != "pending":
         raise RuntimeError("Failed import job did not re-enter the exact pending row.")
 
@@ -273,13 +259,17 @@ def execute_failed_import_job_recovery(connection: Any, plan: dict[str, Any]) ->
         session_id=target["session_id"],
         selected_file_ids=target["file_ids"],
     )
-    handler = build_import_job_handler_bundle(
-        connection=connection,
-        worker_id=f"import-audit-repair:{target['import_job_id']}",
+    worker_id = f"import-audit-repair:{target['import_job_id']}"
+    claimed_job = import_jobs.claim_next(worker_id, import_job_id=target["import_job_id"])
+    if claimed_job is None:
+        raise RuntimeError("Authorized import job could not be claimed.")
+    from fin_ops_platform.services.runtime_worker import RuntimeWorkerResult
+    result = ImportJobWorker(
+        repository=import_jobs,
+        worker_id=worker_id,
         processors=processor_factory.build_processors(),
-    ).handlers[event.event_type]
-    result = handler(event)
-    if not result.get("processed"):
+    ).process_claimed_job(claimed_job)
+    if result is not RuntimeWorkerResult.PROCESSED:
         raise RuntimeError("Candidate import processor did not process the authorized job.")
 
     snapshot_args = {
@@ -325,12 +315,10 @@ def _verify_failed_import_job_recovery_completion(
     files = sorted(list(snapshot.get("files") or []), key=lambda row: _text(row.get("file_id")))
     if [_text(row.get("file_id")) for row in files] != target["file_ids"]:
         raise RuntimeError("Recovered import files no longer match the authorized target.")
-    if _text(import_job.get("status")) != "succeeded" or _text(import_job.get("stage")) != "succeeded":
+    if _text(import_job.get("status")) != "succeeded":
         raise RuntimeError("Recovered import job did not reach succeeded.")
     if _text(event.get("status")) != expected_event_status:
         raise RuntimeError("Recovered import event did not reach the expected state.")
-    if _text(background_job.get("status")) != "succeeded":
-        raise RuntimeError("Recovered background job did not reach succeeded.")
 
     canonical_count = 0
     for file_row in files:
@@ -354,7 +342,7 @@ def _verify_failed_import_job_recovery_completion(
         canonical_count += file_canonical_count
     return {
         "import_job_status": "succeeded",
-        "background_job_status": "succeeded",
+        "background_job_status": _text(background_job.get("status")),
         "event_status": expected_event_status,
         "session_status": "confirmed",
         "confirmed_file_count": len(files),

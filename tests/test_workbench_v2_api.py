@@ -3,30 +3,31 @@ import pickle
 import tempfile
 import unittest
 from contextlib import contextmanager
+from decimal import Decimal
 from http import HTTPStatus
 from io import BytesIO
-from unittest.mock import patch
-from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
-
-from pymongo.errors import ServerSelectionTimeoutError
-from openpyxl import load_workbook
+from unittest.mock import patch
 
 from fin_ops_platform.app.http_adapter import WsgiHttpAdapter
 from fin_ops_platform.app.server import Application
-from tests.app_test_support import build_local_state_application as build_application
-from fin_ops_platform.services.bank_details_export_service import BANK_DETAIL_EXPORT_ROW_LIMIT
 from fin_ops_platform.domain.enums import BatchType
-from fin_ops_platform.services.oa_identity_service import OAUserIdentity
-from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, MongoOASettings
-from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
-from fin_ops_platform.services.oa_adapter import InMemoryOAAdapter, OAApplicationRecord
-from fin_ops_platform.services.settings_data_reset_service import RESET_OA_AND_REBUILD_ACTION
+from fin_ops_platform.services.bank_details_export_service import BANK_DETAIL_EXPORT_ROW_LIMIT
 from fin_ops_platform.services.etc_service import UploadedEtcZipFile
+from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, MongoOASettings
+from fin_ops_platform.services.oa_adapter import InMemoryOAAdapter, OAApplicationRecord
+from fin_ops_platform.services.oa_identity_service import OAUserIdentity
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
+from fin_ops_platform.services.settings_data_reset_service import RESET_OA_AND_REBUILD_ACTION
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
-from tests.test_etc_backend import etc_zip
+from openpyxl import load_workbook
+from pymongo.errors import ServerSelectionTimeoutError
+
+from tests.app_test_support import build_local_state_application as build_application
 from tests.mock_import_files import INVOICE_JAN
+from tests.test_etc_backend import etc_zip
+
 
 class FailingMongoWorkbenchOAAdapter(MongoOAAdapter):
     def __init__(self) -> None:
@@ -891,8 +892,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             body=preview_body,
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
         )
-        self.assertEqual(preview_response.status_code, 200)
-        preview_payload = json.loads(preview_response.body)
+        self.assertEqual(preview_response.status_code, 202)
+        queued = json.loads(preview_response.body)["job"]
+        app._import_job_repository.process_all()
+        preview_payload = json.loads(app.handle_request("GET", f"/imports/files/sessions/{queued['source']['session_id']}").body)
         session = app._file_import_service.get_session(preview_payload["session"]["id"])
         competing_preview = app._import_service.preview_import(
             batch_type=session.files[0].batch_type,
@@ -901,6 +904,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             rows=[session.files[0].row_results[0].raw_payload],
         )
         app._import_service.confirm_import(competing_preview.id)
+        # A different financial fact is a true stale conflict; an exact concurrent
+        # insert is instead safely reclassified as an item duplicate.
+        existing = app._import_service.list_invoices()[0]
+        existing.total_with_tax += Decimal("1")
 
         confirm_response = app.handle_request(
             "POST",
@@ -908,6 +915,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             json.dumps(
                 {
                     "session_id": preview_payload["session"]["id"],
+                    "preview_version": preview_payload["job"]["version"],
                     "selected_file_ids": [preview_payload["files"][0]["id"]],
                 }
             ),
@@ -915,6 +923,24 @@ class WorkbenchV2ApiTests(unittest.TestCase):
 
         self.assertEqual(confirm_response.status_code, 409)
         self.assertEqual(json.loads(confirm_response.body)["error"], "preview_stale")
+        current_job = app._import_job_repository.get_job(queued["import_job_id"])
+        self.assertEqual(current_job.status, "needs_review")
+        existing.total_with_tax -= Decimal("1")
+        retry = app.handle_request("POST", f"/api/background-jobs/{queued['job_id']}/retry", json.dumps({}))
+        self.assertEqual(retry.status_code, 202, retry.body)
+        self.assertEqual(json.loads(retry.body)["job"]["job_id"], queued["job_id"])
+        app._import_job_repository.process_all()
+        refreshed = json.loads(app.handle_request("GET", f"/imports/files/sessions/{session.id}").body)
+        self.assertEqual(refreshed["job"]["status"], "awaiting_confirmation")
+        self.assertGreater(refreshed["job"]["version"], preview_payload["job"]["version"])
+        confirm = app.handle_request("POST", "/imports/files/confirm", json.dumps({
+            "session_id": session.id, "selected_file_ids": [refreshed["files"][0]["id"]],
+            "preview_version": refreshed["job"]["version"],
+        }))
+        self.assertEqual(confirm.status_code, 202, confirm.body)
+        app._import_job_repository.process_all()
+        self.assertEqual(app._import_job_repository.get_job(queued["import_job_id"]).status, "succeeded")
+        self.assertEqual(len(app._import_service.list_invoices()), 1)
 
     def test_enqueued_workbench_auto_matching_only_marks_durable_scopes(self) -> None:
         app = build_application()

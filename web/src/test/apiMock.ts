@@ -7815,7 +7815,10 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       });
     }
     if (url.pathname.startsWith("/imports/files/sessions/")) {
-      return jsonResponse({ body: latestImportSession });
+      return jsonResponse({ body: { ...latestImportSession, job: {
+        job_id: "import:file-preview", version: 2, status: "awaiting_confirmation",
+        source: { session_id: latestImportSession.session.id },
+      } } });
     }
     const etcBusinessBatchRoute = url.pathname.match(/^\/api\/etc\/business-batches\/([^/]+)(?:\/([^/]+)(?:\/([^/]+))?)?$/);
     if (etcBusinessBatchRoute) {
@@ -8021,6 +8024,10 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       dataResetJobs.set(jobId, job);
       return jsonResponse({ body: { job } });
     }
+    if (decodeURIComponent(url.pathname) === "/api/background-jobs/import:etc-preview/result") {
+      return jsonResponse({ body: { job: { job_id: "import:etc-preview", status: "awaiting_confirmation", version: 2 },
+        result: { preview: cloneJson(latestEtcImportPreview) } } });
+    }
     if (
       (init?.method ?? "GET").toUpperCase() === "POST"
       && url.pathname.startsWith("/api/background-jobs/")
@@ -8144,6 +8151,14 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       && url.pathname.startsWith("/api/workbench/actions/")
     ) {
       await new Promise((resolve) => window.setTimeout(resolve, options.actionDelayMs));
+    }
+    if (["/imports/files/preview", "/imports/files/retry", "/api/etc/import/preview"].includes(url.pathname)
+      && (!response.status || response.status < 300)) {
+      const etc = url.pathname === "/api/etc/import/preview";
+      return jsonResponse({ status: 202, body: { job: {
+        job_id: etc ? "import:etc-preview" : "import:file-preview", status: "awaiting_confirmation", version: 2,
+        source: { session_id: etc ? latestEtcImportPreview.sessionId : latestImportSession.session.id },
+      } } });
     }
     return jsonResponse(response);
   });

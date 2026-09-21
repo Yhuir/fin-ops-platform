@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import unittest
+from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from fin_ops_platform.services.object_storage import InMemoryObjectStorageRepository, ObjectStorageWriteError
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
@@ -119,12 +120,16 @@ class FileObjectStorageTests(unittest.TestCase):
             self.assertTrue(stored_uri.startswith("minio://fin-ops-files/objects/imports/file-1/"))
             self.assertEqual(store.read_import_file(stored_uri), b"file-bytes")
             self.assertEqual(connection.file_objects["file-object-1"]["migration_status"], "verified")
-            self.assertEqual(connection.import_files["file-1"]["stored_file_path"], stored_uri)
-            self.assertEqual(connection.import_files["file-1"]["uploaded_by"], "YNSYLP005")
-            self.assertEqual(
-                connection.import_files["file-1"]["raw_payload"]["normalized_payload"]["imported_by"],
-                "YNSYLP005",
-            )
+            file_object = connection.file_objects["file-object-1"]
+            self.assertEqual(file_object["storage_uri"], stored_uri)
+            self.assertEqual(file_object["legacy_mongo_id"], "file-1")
+            self.assertEqual(file_object["sha256"], sha256(b"file-bytes").hexdigest())
+            self.assertEqual(file_object["size_bytes"], len(b"file-bytes"))
+            self.assertIsNone(file_object["temporary_object_key"])
+            # Upload registers verified immutable bytes only. File/session owner
+            # metadata is admitted atomically with its prepare job in the UoW.
+            self.assertEqual(connection.import_files, {})
+            self.assertFalse(any("insert into app.import_files" in sql.lower() for sql, _ in connection.executed))
             self.assertFalse((Path(temp_dir) / "postgres_files").exists())
 
     def test_postgres_import_upload_fails_fast_and_marks_file_object_failed_when_object_storage_fails(self) -> None:

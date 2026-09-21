@@ -53,6 +53,7 @@ class FakeObjectIdentityRepository:
         *,
         canonical_key: str | None = None,
         suspected_key: str | None = None,
+        official_references: set[str] | None = None,
     ) -> list[BankTransaction]:
         self.bank_queries.append((canonical_key, suspected_key))
         return [

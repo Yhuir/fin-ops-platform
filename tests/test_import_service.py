@@ -673,7 +673,7 @@ class ImportNormalizationServiceTests(unittest.TestCase):
 
     def test_invoice_placeholder_digital_number_does_not_mask_stable_code_number_key(self) -> None:
         preview = self.service.preview_import(
-            batch_type=BatchType.INPUT_INVOICE,
+            batch_type=BatchType.OUTPUT_INVOICE,
             source_name="placeholder-demo.json",
             imported_by="user_finance_01",
             rows=[
@@ -1268,7 +1268,7 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual(second_confirmed.success_count, 0)
         self.assertEqual(mar_preview.row_results[0].decision, ImportDecision.DUPLICATE_SKIPPED)
 
-    def test_input_invoice_import_merges_existing_etc_canonical_invoice_without_duplicate(self) -> None:
+    def test_input_invoice_import_exposes_existing_etc_financial_conflict(self) -> None:
         etc_invoice = Invoice(
             id="inv_etc_001",
             invoice_type=InvoiceType.INPUT,
@@ -1323,16 +1323,18 @@ class ImportNormalizationServiceTests(unittest.TestCase):
 
         invoices = service.list_invoices()
         self.assertEqual(len(invoices), 1)
-        self.assertEqual(confirmed.success_count, 1)
+        self.assertEqual(confirmed.success_count, 0)
+        self.assertEqual(confirmed.error_count, 1)
+        self.assertEqual(preview.row_results[0].decision, ImportDecision.ERROR)
         self.assertEqual(preview.row_results[0].linked_object_id, "inv_etc_001")
         merged = service.get_invoice("inv_etc_001")
         self.assertIn("ETC", merged.tags)
         self.assertEqual(merged.etc_invoice_id, "etc_invoice_0001")
         self.assertEqual(
             [link["source_type"] for link in merged.source_links],
-            ["etc_import", "manual_invoice_import"],
+            ["etc_import"],
         )
-        self.assertEqual(merged.source_links[1]["batch_id"], preview.id)
+        self.assertEqual(merged.amount, Decimal("41.75"))
 
     def test_input_invoice_import_links_existing_submitted_etc_metadata_when_formal_invoice_arrives_later(self) -> None:
         etc_invoice = type(

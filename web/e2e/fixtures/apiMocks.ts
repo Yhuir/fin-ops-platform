@@ -2698,6 +2698,18 @@ function importDuplicateGroups(
   ];
 }
 
+function preparationJob(scenario: ImportScenario | "etc") {
+  return {
+    job_id: `import:prepare_${scenario}`, version: 2, status: "awaiting_confirmation",
+    type: scenario === "etc" ? "etc_invoice_import" : "file_import", phase: "prepare",
+    label: "导入预览", source: {
+      session_id: scenario === "etc" ? "etc_import_session_e2e_001" : importSessionIds[scenario],
+      task_id: scenario === "etc" ? "etc_task_ready_001" : undefined,
+      route: scenario === "etc" ? "/imports/etc-invoices" : scenario === "bank" ? "/imports/bank-transactions" : "/imports/invoices",
+    },
+  };
+}
+
 function importSessionPayload(
   scenario: ImportScenario,
   imported = false,
@@ -2710,6 +2722,7 @@ function importSessionPayload(
 ) {
   const sessionId = importSessionIds[scenario];
   return {
+    job: { ...preparationJob(scenario), status: imported ? "succeeded" : "awaiting_confirmation" },
     session: {
       id: sessionId,
       imported_by: "web_finance_user",
@@ -8938,8 +8951,14 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, etcReadyTasksPayload());
     }
 
+    const preparationMatch = decodeURIComponent(path).match(/^\/api\/background-jobs\/import:prepare_(invoice|bank|etc)(\/result)?$/);
+    if (preparationMatch) {
+      const scenario = preparationMatch[1] as ImportScenario | "etc";
+      return json(route, { job: preparationJob(scenario),
+        ...(preparationMatch[2] ? { result: { preview: etcImportPayload(false) } } : {}) });
+    }
     if (path === "/api/etc/import/preview") {
-      return json(route, etcImportPayload(false));
+      return json(route, { job: { ...preparationJob("etc"), status: "queued", version: 1 } }, 202);
     }
 
     if (path === "/api/etc/import/discard") {
@@ -9931,12 +9950,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       if (latestImportScenario === "bank" && options.bankImportPreviewDelayMs && options.bankImportPreviewDelayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, options.bankImportPreviewDelayMs));
       }
-      return json(route, importSessionPayload(latestImportScenario, false, {
-        allExistingBankTransactions: latestImportScenario === "bank" && options.bankImportAllExisting === true,
-        corruptBankFile: latestImportScenario === "bank" && options.bankImportIncludeCorruptFile === true,
-        corruptInvoiceFile: latestImportScenario === "invoice" && options.invoiceImportIncludeCorruptFile === true,
-        noBankAccountConflict: options.bankImportNoAccountConflict,
-      }));
+      return json(route, { job: { ...preparationJob(latestImportScenario), status: "queued", version: 1 } }, 202);
     }
 
     if (path === "/imports/files/confirm") {

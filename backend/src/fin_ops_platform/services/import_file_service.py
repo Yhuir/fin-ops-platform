@@ -272,6 +272,7 @@ class FileImportService:
         self._file_counter = 0
         self._sessions: dict[str, FileImportSession] = {}
         self._file_store = file_store
+        self._retired_preview_batches: dict[str, list[str]] = {}
 
     @classmethod
     def from_snapshot(
@@ -327,7 +328,7 @@ class FileImportService:
         ]
         return {
             "imports": self._import_service.persistence_snapshot_for_batches(
-                batch_ids,
+                [*batch_ids, *self._retired_preview_batches.get(session_id, [])],
                 include_facts=False,
             ),
             "file_imports": {
@@ -362,6 +363,117 @@ class FileImportService:
     def list_templates(self) -> list[dict[str, Any]]:
         return [dict(template) for template in TEMPLATE_DEFINITIONS]
 
+    def register_uploads(self, *, imported_by: str, uploads: list[UploadedImportFile]) -> FileImportSession:
+        """Persistable upload registration; parsing belongs to the prepare worker."""
+        if not uploads:
+            raise ValueError("at least one upload is required")
+        if self._file_store is None:
+            raise ValueError("durable import file storage is required")
+        session = FileImportSession(
+            id=self._next_session_id(), imported_by=imported_by,
+            file_count=len(uploads), status="uploaded", files=[],
+        )
+        # Validate options before writing any original.
+        for upload in uploads:
+            if upload.batch_type_override:
+                BatchType(upload.batch_type_override)
+        try:
+            for upload in uploads:
+                file_id = self._next_file_id()
+                stored = self._store_upload_file(session.id, file_id, upload, imported_by=imported_by)
+                session.files.append(FileImportPreviewItem(
+                    id=file_id, file_name=upload.file_name, template_code=None, batch_type=None,
+                    status="uploaded", message="文件已上传，等待解析。", row_count=0,
+                    stored_file_path=stored,
+                    content_sha256=hashlib.sha256(upload.content).hexdigest(),
+                    override_template_code=upload.template_code_override,
+                    override_batch_type=BatchType(upload.batch_type_override) if upload.batch_type_override else None,
+                    selected_bank_mapping_id=upload.selected_bank_mapping_id,
+                    selected_bank_name=upload.selected_bank_name,
+                    selected_bank_short_name=upload.selected_bank_short_name,
+                    selected_bank_last4=upload.selected_bank_last4,
+                    field_mapping=dict(upload.field_mapping or {}),
+                ))
+        except Exception:
+            self._file_store.delete_unregistered_import_uploads(session.id, session.files)
+            raise
+        self._sessions[session.id] = session
+        return session
+
+    def draft_checkpoint(self, session_id: str) -> dict[str, Any]:
+        return deepcopy({"session": self._sessions[session_id], "imports": self.preview_session_persistence_payload(session_id)["imports"]})
+
+    def restore_draft(self, checkpoint: dict[str, Any]) -> None:
+        """Undo this command's draft mutations after its transaction rolls back."""
+        session = checkpoint["session"]
+        self._sessions[session.id] = session
+        self._import_service.restore_preview_batches(checkpoint["imports"]["batches"])
+
+    def register_reprepare(self, *, session_id: str, selected_file_ids: list[str], overrides: dict[str, dict[str, Any]] | None = None) -> FileImportSession:
+        session = self._sessions[session_id]
+        selected = set(selected_file_ids)
+        if not selected or selected - {item.id for item in session.files}:
+            raise ValueError("selected files must belong to this session")
+        selected_items = [item for item in session.files if item.id in selected]
+        if any(item.status in {"confirmed", "reverted"} or not item.stored_file_path for item in selected_items):
+            raise ValueError("selected files cannot be re-prepared")
+        for item in selected_items:
+            values = (overrides or {}).get(item.id, {})
+            if "template_code" in values:
+                item.override_template_code = values["template_code"] or None
+            if "batch_type" in values:
+                item.override_batch_type = BatchType(values["batch_type"]) if values["batch_type"] else None
+            for field_name, key in (("selected_bank_mapping_id", "bank_mapping_id"), ("selected_bank_name", "bank_name"), ("selected_bank_short_name", "bank_short_name"), ("selected_bank_last4", "last4")):
+                if key in values:
+                    setattr(item, field_name, values[key] or None)
+            if "field_mapping" in values:
+                if not isinstance(values["field_mapping"], dict):
+                    raise ValueError("field_mapping must be an object")
+                item.field_mapping = dict(values["field_mapping"])
+            item.status = "uploaded"
+            item.message = "等待重新解析。"
+        session.status = "uploaded"
+        return session
+
+    def prepare_registered_session(self, session_id: str) -> FileImportSession:
+        session = self._sessions[session_id]
+        if session.status not in {"uploaded", "preparing"}:
+            raise ValueError("only registered uploads can be prepared")
+        if self._file_store is None:
+            raise ValueError("durable import file storage is required")
+        prepared = []
+        for item in session.files:
+            if item.status != "uploaded":
+                prepared.append(item)
+                continue
+            if not item.stored_file_path:
+                raise ValueError("registered original file is missing")
+            if item.preview_batch_id:
+                self._import_service.discard_preview(item.preview_batch_id)
+                self._retired_preview_batches.setdefault(session_id, []).append(item.preview_batch_id)
+            content = self._file_store.read_import_file(item.stored_file_path)
+            if hashlib.sha256(content).hexdigest() != item.content_sha256:
+                raise ValueError("registered original file content changed")
+            prepared.append(self._preview_single_file(
+                imported_by=session.imported_by,
+                upload=UploadedImportFile(file_name=item.file_name, content=content),
+                file_id=item.id, stored_file_path=item.stored_file_path,
+                template_code_override=item.override_template_code,
+                batch_type_override=item.override_batch_type.value if item.override_batch_type else None,
+                selected_bank_mapping_id=item.selected_bank_mapping_id,
+                selected_bank_name=item.selected_bank_name,
+                selected_bank_short_name=item.selected_bank_short_name,
+                selected_bank_last4=item.selected_bank_last4,
+                field_mapping=item.field_mapping,
+            ))
+        session.files = prepared
+        session.status = "preview_ready_with_errors" if any(
+            item.status not in {"preview_ready", "confirmed"} or item.error_count or item.suspected_duplicate_count
+            for item in prepared
+        ) else "preview_ready"
+        self._refresh_session_audit(session)
+        return session
+
     def preview_files(self, *, imported_by: str, uploads: list[UploadedImportFile]) -> FileImportSession:
         session = FileImportSession(
             id=self._next_session_id(),
@@ -371,48 +483,24 @@ class FileImportService:
             files=[],
         )
 
-        seen_hashes: dict[str, str] = {}
         for upload in uploads:
             file_id = self._next_file_id()
             stored_file_path = self._store_upload_file(
-                session.id,
-                file_id,
-                upload,
-                imported_by=imported_by,
+                session.id, file_id, upload, imported_by=imported_by,
             )
-            content_sha256 = hashlib.sha256(upload.content).hexdigest()
-            duplicate_name = seen_hashes.get(content_sha256)
-            if duplicate_name:
-                file_item = self._build_preview_error_item(
-                    file_id=file_id,
-                    upload=upload,
-                    stored_file_path=stored_file_path,
-                    message=f"文件内容与本次上传的“{duplicate_name}”完全相同。",
-                    status="duplicate_file",
-                    content_sha256=content_sha256,
-                    duplicate_file_name=duplicate_name,
-                    template_code_override=upload.template_code_override,
-                    batch_type_override=upload.batch_type_override,
-                    selected_bank_mapping_id=upload.selected_bank_mapping_id,
-                    selected_bank_name=upload.selected_bank_name,
-                    selected_bank_short_name=upload.selected_bank_short_name,
-                    selected_bank_last4=upload.selected_bank_last4,
-                )
-            else:
-                file_item = self._preview_single_file(
-                    imported_by=imported_by,
-                    upload=upload,
-                    file_id=file_id,
-                    stored_file_path=stored_file_path,
-                    template_code_override=upload.template_code_override,
-                    batch_type_override=upload.batch_type_override,
-                    selected_bank_mapping_id=upload.selected_bank_mapping_id,
-                    selected_bank_name=upload.selected_bank_name,
-                    selected_bank_short_name=upload.selected_bank_short_name,
-                    selected_bank_last4=upload.selected_bank_last4,
-                    field_mapping=upload.field_mapping,
-                )
-            seen_hashes.setdefault(content_sha256, upload.file_name)
+            file_item = self._preview_single_file(
+                imported_by=imported_by,
+                upload=upload,
+                file_id=file_id,
+                stored_file_path=stored_file_path,
+                template_code_override=upload.template_code_override,
+                batch_type_override=upload.batch_type_override,
+                selected_bank_mapping_id=upload.selected_bank_mapping_id,
+                selected_bank_name=upload.selected_bank_name,
+                selected_bank_short_name=upload.selected_bank_short_name,
+                selected_bank_last4=upload.selected_bank_last4,
+                field_mapping=upload.field_mapping,
+            )
             session.files.append(file_item)
 
         if any(file.status != "preview_ready" for file in session.files):
@@ -626,7 +714,6 @@ class FileImportService:
         session_id: str,
         selected_file_ids: list[str],
         progress_callback: Callable[[FileImportSession, int, int], None] | None = None,
-        atomic_batch: bool = False,
     ) -> FileImportSession:
         session = self._sessions[session_id]
         selected = set(selected_file_ids)
@@ -648,8 +735,13 @@ class FileImportService:
                 "bank account selection conflicts must be resolved before confirmation: "
                 + ", ".join(sorted(conflicting_items))
             )
+        incomplete = [item.id for item in selected_items if item.status == "preview_ready" and (
+            not item.preview_batch_id or item.error_count or item.suspected_duplicate_count
+        )]
+        if incomplete:
+            raise ValueError("selected files require review before confirmation: " + ", ".join(incomplete))
         if any(item.status == "preview_ready" for item in selected_items):
-            self.assert_session_preview_current(session_id=session_id)
+            self.assert_session_preview_current(session_id=session_id, selected_file_ids=selected_file_ids)
         progress_total = len(selected_items)
         progress_current = 0
         rollback_session = deepcopy(session)
@@ -660,16 +752,13 @@ class FileImportService:
                     str(item.preview_batch_id)
                     for item in selected_items
                     if item.status == "preview_ready" and item.preview_batch_id
-                ])
-            } if atomic_batch and any(
+                ], reject_issues=True)
+            } if any(
                 item.status == "preview_ready" and item.preview_batch_id
                 for item in selected_items
             ) else {}
             for item in session.files:
                 if item.id not in selected:
-                    if item.status == "preview_ready":
-                        item.status = "skipped"
-                        item.batch_id = None
                     continue
                 progress_current += 1
                 if item.status == "confirmed":
@@ -677,20 +766,25 @@ class FileImportService:
                     if progress_callback is not None:
                         progress_callback(session, progress_current, progress_total)
                     continue
-                if not item.preview_batch_id:
-                    if progress_callback is not None:
-                        progress_callback(session, progress_current, progress_total)
-                    continue
-                batch = confirmed_batches.get(item.preview_batch_id)
-                if batch is None:
-                    batch = self._import_service.confirm_import(item.preview_batch_id)
+                batch = confirmed_batches[item.preview_batch_id]
+                confirmed_preview = self._import_service.get_batch(batch.id)
+                item.row_results = confirmed_preview.row_results
+                item.normalized_rows = confirmed_preview.normalized_rows
+                item.success_count = batch.success_count
+                item.updated_count = batch.updated_count
+                item.error_count = batch.error_count
+                item.duplicate_count = batch.duplicate_count
+                item.suspected_duplicate_count = batch.suspected_duplicate_count
                 item.batch_id = batch.id
                 item.status = "confirmed"
                 confirmed_any = True
                 if progress_callback is not None:
                     progress_callback(session, progress_current, progress_total)
 
-            session.status = "confirmed" if confirmed_any else "skipped"
+            session.status = (
+                "preview_ready" if any(item.status == "preview_ready" for item in session.files)
+                else "confirmed" if confirmed_any else "skipped"
+            )
             self._refresh_session_audit(session)
             self._sessions[session.id] = session
             return session
@@ -698,11 +792,20 @@ class FileImportService:
             self._sessions[session.id] = rollback_session
             raise
 
-    def assert_session_preview_current(self, *, session_id: str) -> None:
+    def assert_session_preview_current(self, *, session_id: str, selected_file_ids: list[str] | None = None) -> None:
         session = self._sessions[session_id]
+        if selected_file_ids is not None:
+            session = deepcopy(session)
+            session.files = [item for item in session.files if item.id in set(selected_file_ids)]
+            self._refresh_session_audit(session)
         if session.status == "reverted":
             raise ValueError("discarded import sessions cannot be confirmed")
-        current_audit = self._build_session_audit(session, refresh_existing=True)
+        rows_by_type: dict[BatchType, list[dict[str, Any]]] = {}
+        for item in session.files:
+            if item.batch_type is not None:
+                rows_by_type.setdefault(item.batch_type, []).extend(item.normalized_rows)
+        with self._import_service.preload_normalized_identities(rows_by_type):
+            current_audit = self._build_session_audit(session, refresh_existing=True)
         if (
             current_audit.audit.stale_projection() != session.audit.stale_projection()
             or current_audit.stale_row_change_counts
@@ -720,84 +823,9 @@ class FileImportService:
         selected_file_ids: list[str],
         overrides: dict[str, dict[str, Any]] | None = None,
     ) -> FileImportSession:
-        session = self._sessions[session_id]
-        if session.status == "reverted":
-            raise ValueError("discarded import sessions cannot be retried")
-        override_map = overrides or {}
-        selected = set(selected_file_ids)
-        for item in session.files:
-            if item.id not in selected:
-                continue
-            if item.status == "confirmed":
-                raise ValueError("confirmed files cannot be retried directly")
-            if not item.stored_file_path:
-                raise ValueError("original upload file is missing")
-            if self._file_store is None:
-                raise ValueError("import file storage is not configured")
-            upload = UploadedImportFile(
-                file_name=item.file_name,
-                content=self._file_store.read_import_file(item.stored_file_path),
-                selected_bank_mapping_id=item.selected_bank_mapping_id,
-                selected_bank_name=item.selected_bank_name,
-                selected_bank_short_name=item.selected_bank_short_name,
-                selected_bank_last4=item.selected_bank_last4,
-                field_mapping=item.field_mapping,
-            )
-            override_payload = override_map.get(item.id, {})
-            field_mapping = override_payload.get("field_mapping")
-            if not isinstance(field_mapping, dict):
-                field_mapping = item.field_mapping
-            refreshed = self._preview_single_file(
-                imported_by=session.imported_by,
-                upload=upload,
-                file_id=item.id,
-                stored_file_path=item.stored_file_path,
-                template_code_override=override_payload.get("template_code"),
-                batch_type_override=override_payload.get("batch_type"),
-                selected_bank_mapping_id=override_payload.get("bank_mapping_id") or item.selected_bank_mapping_id,
-                selected_bank_name=override_payload.get("bank_name") or item.selected_bank_name,
-                selected_bank_short_name=override_payload.get("bank_short_name") or item.selected_bank_short_name,
-                selected_bank_last4=override_payload.get("last4") or item.selected_bank_last4,
-                field_mapping={str(key): str(value) for key, value in field_mapping.items()},
-            )
-            item.template_code = refreshed.template_code
-            item.batch_type = refreshed.batch_type
-            item.status = refreshed.status
-            item.message = refreshed.message
-            item.row_count = refreshed.row_count
-            item.success_count = refreshed.success_count
-            item.error_count = refreshed.error_count
-            item.duplicate_count = refreshed.duplicate_count
-            item.suspected_duplicate_count = refreshed.suspected_duplicate_count
-            item.updated_count = refreshed.updated_count
-            item.preview_batch_id = refreshed.preview_batch_id
-            item.row_results = refreshed.row_results
-            item.normalized_rows = refreshed.normalized_rows
-            item.override_template_code = refreshed.override_template_code
-            item.override_batch_type = refreshed.override_batch_type
-            item.selected_bank_mapping_id = refreshed.selected_bank_mapping_id
-            item.selected_bank_name = refreshed.selected_bank_name
-            item.selected_bank_short_name = refreshed.selected_bank_short_name
-            item.selected_bank_last4 = refreshed.selected_bank_last4
-            item.detected_bank_name = refreshed.detected_bank_name
-            item.detected_last4 = refreshed.detected_last4
-            item.bank_selection_conflict = refreshed.bank_selection_conflict
-            item.conflict_message = refreshed.conflict_message
-            item.header_signature = refreshed.header_signature
-            item.mapping_candidates = refreshed.mapping_candidates
-            item.mapping_fields = refreshed.mapping_fields
-            item.field_mapping = refreshed.field_mapping
-            item.mapping_source = refreshed.mapping_source
-            item.content_sha256 = refreshed.content_sha256
-            item.duplicate_file_name = refreshed.duplicate_file_name
-            item.source_control = refreshed.source_control
-
-        session.status = "preview_ready_with_errors" if any(
-            file.status != "preview_ready" for file in session.files
-        ) else "preview_ready"
-        self._refresh_session_audit(session)
-        self._sessions[session.id] = session
-        return session
+        """Explicit maintenance/tool command using the same prepare pipeline."""
+        self.register_reprepare(session_id=session_id, selected_file_ids=selected_file_ids, overrides=overrides)
+        return self.prepare_registered_session(session_id)
 
     def replay_confirmed_session_files(
         self,
@@ -908,7 +936,6 @@ class FileImportService:
                 selected_bank_short_name=source_item.selected_bank_short_name,
                 selected_bank_last4=source_item.selected_bank_last4,
                 field_mapping=dict(source_item.field_mapping),
-                skip_duplicate_file_guard=True,
             )
             (
                 repaired_count,
@@ -1151,33 +1178,8 @@ class FileImportService:
         selected_bank_short_name: str | None = None,
         selected_bank_last4: str | None = None,
         field_mapping: dict[str, str] | None = None,
-        skip_duplicate_file_guard: bool = False,
     ) -> FileImportPreviewItem:
         content_sha256 = hashlib.sha256(upload.content).hexdigest()
-        duplicate_file_name = (
-            None
-            if skip_duplicate_file_guard
-            else self._find_confirmed_duplicate_file(
-                content_sha256=content_sha256,
-                exclude_file_id=file_id,
-            )
-        )
-        if duplicate_file_name:
-            return self._build_preview_error_item(
-                file_id=file_id,
-                upload=upload,
-                stored_file_path=stored_file_path,
-                message=f"该文件内容已通过“{duplicate_file_name}”确认导入。",
-                status="duplicate_file",
-                content_sha256=content_sha256,
-                duplicate_file_name=duplicate_file_name,
-                template_code_override=template_code_override,
-                batch_type_override=batch_type_override,
-                selected_bank_mapping_id=selected_bank_mapping_id,
-                selected_bank_name=selected_bank_name,
-                selected_bank_short_name=selected_bank_short_name,
-                selected_bank_last4=selected_bank_last4,
-            )
         try:
             workbook_rows = self._read_rows(upload)
             try:
@@ -1371,6 +1373,17 @@ class FileImportService:
                         current_decision=decision,
                         current_linked_object_type=linked_object_type,
                         current_linked_object_id=linked_object_id,
+                    ):
+                        decision = row_result.decision
+                        linked_object_type = row_result.linked_object_type
+                        linked_object_id = row_result.linked_object_id
+                    # A concurrent import of the exact same strong identity only
+                    # shrinks the write set; final confirm reclassifies this row.
+                    if (
+                        row_result.decision == ImportDecision.CREATED
+                        and decision == ImportDecision.DUPLICATE_SKIPPED
+                        and normalized.get("source_unique_key")
+                        and linked_object_id
                     ):
                         decision = row_result.decision
                         linked_object_type = row_result.linked_object_type
@@ -1644,8 +1657,6 @@ class FileImportService:
         return f"import_file_{uuid4().hex}"
 
     def _resolve_invoice_batch_type(self, rows: list[dict[str, Any]], override: str | None) -> BatchType:
-        if override:
-            return BatchType(override)
         if not rows:
             return BatchType.INPUT_INVOICE
         input_votes = 0
@@ -1661,7 +1672,15 @@ class FileImportService:
                 row.get("buyer_name"),
             ):
                 output_votes += 1
-        return BatchType.OUTPUT_INVOICE if output_votes > input_votes else BatchType.INPUT_INVOICE
+        if input_votes and output_votes:
+            raise ValueError("文件同时包含进项与销项发票，请分别导出后导入。")
+        detected = BatchType.OUTPUT_INVOICE if output_votes else BatchType.INPUT_INVOICE
+        if override:
+            requested = BatchType(override)
+            if (input_votes or output_votes) and requested != detected:
+                raise ValueError("所选发票方向与购销方事实不一致，请更正后导入。")
+            return requested
+        return detected
 
     def _store_upload_file(
         self,
@@ -1680,19 +1699,6 @@ class FileImportService:
             content=upload.content,
             imported_by=imported_by,
         )
-
-    def _find_confirmed_duplicate_file(self, *, content_sha256: str, exclude_file_id: str) -> str | None:
-        for session in self._sessions.values():
-            for item in session.files:
-                if item.id != exclude_file_id and item.status == "confirmed" and item.content_sha256 == content_sha256:
-                    return item.file_name
-        finder = getattr(self._file_store, "find_confirmed_import_file_by_sha256", None)
-        if not callable(finder):
-            return None
-        match = finder(content_sha256=content_sha256, exclude_file_id=exclude_file_id)
-        if isinstance(match, dict):
-            return clean(match.get("file_name")) or None
-        return None
 
     @staticmethod
     def _detect_bank_selection(parsed: ParsedImportFile) -> tuple[str | None, str | None]:
@@ -1804,6 +1810,7 @@ def read_xlsx_import_rows(content: bytes) -> WorkbookImportRows:
             )
 
         first_rows: list[list[str]] | None = None
+        candidates: list[list[list[str]]] = []
         for sheet in workbook.worksheets:
             # Some bank and invoice exporters write an invalid/underreported
             # worksheet dimension (for example ``A1``) even though the sheet
@@ -1816,11 +1823,13 @@ def read_xlsx_import_rows(content: bytes) -> WorkbookImportRows:
                 first_rows = rows
             try:
                 detect_invoice_template(rows)
-                return WorkbookImportRows(rows=rows)
+                candidates.append(rows)
             except ValueError:
                 if find_bank_header_candidate(rows) is not None:
-                    return WorkbookImportRows(rows=rows)
-        return WorkbookImportRows(rows=first_rows or [])
+                    candidates.append(rows)
+        if len(candidates) > 1:
+            raise ValueError("工作簿包含多个可导入工作表，无法确定唯一事实表，请分别导出。")
+        return WorkbookImportRows(rows=candidates[0] if candidates else first_rows or [])
     finally:
         workbook.close()
 
@@ -1883,6 +1892,7 @@ def read_xls_import_rows(content: bytes) -> WorkbookImportRows:
         )
 
     first_rows: list[list[str]] = []
+    candidates: list[list[list[str]]] = []
     for sheet_index in range(workbook.nsheets):
         sheet = workbook.sheet_by_index(sheet_index)
         rows = _xls_sheet_rows(sheet)
@@ -1890,11 +1900,13 @@ def read_xls_import_rows(content: bytes) -> WorkbookImportRows:
             first_rows = rows
         try:
             detect_invoice_template(rows)
-            return WorkbookImportRows(rows=rows)
+            candidates.append(rows)
         except ValueError:
             if find_bank_header_candidate(rows) is not None:
-                return WorkbookImportRows(rows=rows)
-    return WorkbookImportRows(rows=first_rows)
+                candidates.append(rows)
+    if len(candidates) > 1:
+        raise ValueError("工作簿包含多个可导入工作表，无法确定唯一事实表，请分别导出。")
+    return WorkbookImportRows(rows=candidates[0] if candidates else first_rows)
 
 
 def _xls_sheet_rows(sheet: Any) -> list[list[str]]:
@@ -1946,14 +1958,14 @@ def parse_invoice_source_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
     header_index = find_invoice_header_index(rows)
     header = [canonical_invoice_header(cell) for cell in rows[header_index]]
     data_rows = []
-    for row in rows[header_index + 1 :]:
+    for source_row, row in enumerate(rows[header_index + 1 :], start=header_index + 2):
         mapped = row_to_dict(header, row)
         if not any(mapped.values()):
             continue
         if is_invoice_summary_footer(mapped):
             continue
         if not _has_invoice_identity(mapped):
-            continue
+            raise ValueError(f"第 {source_row} 行缺少有效发票号码，不能静默跳过。")
         data_rows.append(
             {
                 "invoice_code": mapped.get("发票代码"),
@@ -1991,6 +2003,7 @@ def parse_invoice_source_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
 def _has_invoice_identity(mapped: dict[str, Any]) -> bool:
     return bool(
         _invoice_identifier(mapped.get("数电发票号码"))
+        or re.fullmatch(r"\d{20}", _invoice_identifier(mapped.get("发票号码")) or "")
         or (
             _invoice_identifier(mapped.get("发票代码"))
             and _invoice_identifier(mapped.get("发票号码"))
@@ -2590,9 +2603,9 @@ def row_to_dict(header: list[str], row: list[str]) -> dict[str, str]:
 def normalize_signed_debit_credit_columns(debit_amount: str | None, credit_amount: str | None) -> tuple[str | None, str | None]:
     debit_text = clean(debit_amount)
     credit_text = clean(credit_amount)
-    if debit_text.startswith("-") and not credit_text:
+    if debit_text.startswith("-") and (not credit_text or _control_decimal(credit_text) == Decimal("0")):
         return None, debit_text[1:].strip()
-    if credit_text.startswith("-") and not debit_text:
+    if credit_text.startswith("-") and (not debit_text or _control_decimal(debit_text) == Decimal("0")):
         return credit_text[1:].strip(), None
     return debit_amount, credit_amount
 

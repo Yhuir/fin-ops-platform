@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | `oa-sync` | `oa-sync` | `oa.sync`、`oa.payment_status.reconcile` | OA integration 普通 month/all 同步、selected-row 精确附件重解析，以及正式 OA+流水关系变化后的支付状态自动收敛 |
 | `workbench-matching` | `workbench-matching` | PostgreSQL matching dirty scopes | 正式关系候选计算 |
-| `import` | `import-job` | `import.process.requested` | 文件导入后台处理 |
+| `import` | `import-job` | `job.import_jobs` 单任务领取 | 流水/发票/ETC 的 prepare/commit，以及已认证发票与 OA 手动导入 |
 | `settings-maintenance` | `settings-maintenance` | settings maintenance events | 数据重置与关系要求重算 |
 
 不存在 read-model worker。未登记的 systemd worker 必须由 release helper stop/disable。
@@ -22,6 +22,7 @@
   `fin_ops_worker` 对 `app.workbench_idempotency_records` 持有 `SELECT/INSERT/UPDATE`，不得授予 `DELETE`。
 - Matching worker 的银行有效分类由 formal-relation fact repository 对计划 IDs 一次批量读取 canonical SQL 分类投影；worker 不装载 category snapshot，不组装 Python effective-category provider。
 - 每个 job/event 必须有 bounded retry、lease、idempotency 和结构化失败证据。
+- 导入事务在取得任务 owner fence 后，用同事务 settings 共享锁复核创建者当前页面权限；撤权先提交则禁止事实写入。四类入口共用此权限边界。
 - API route 只 enqueue 已登记任务；worker 不读取 HTTP cookie/header，不构造 response，不依赖 `Application`。
 - OA 精确附件刷新复用 `oa.sync`，不新增 event/worker；worker 独占 Mongo 下载、OCR、定向 owner commit、统一附件 promotion 与 matching reconciliation。completed 与 `in_progress + expense_claim` 复用同一个 promotion 边界；进行中支付申请仍不接纳附件解析。API 只读取受控 durable status/result，不得恢复同步 fallback。
 - OA 支付状态复用同一个 `oa-sync` instance 的独立 `oa.payment_status.reconcile` handler。关系事件携带 typed OA IDs，handler 查询最新 active topology；金额不等不阻断、inflow 不触发、failed 不覆盖；有 active outflow 写 `已支付`，无 active outflow 写 `待支付`。完整 OA `all` snapshot 还可登记 `remove_missing_oa_statuses + exact flow IDs`：handler 必须先批量复查 completed projection 与 pending admission，再幂等删除仍缺失 flow 的 MySQL 状态；month/retention 不得触发该外部删除。Migration `0160` 删除旧 ownership 表，并为全部已完成 OA 与已准入进行中 OA 的并集登记一次规则重算事件。
@@ -29,8 +30,8 @@
 
 ## 输出 I/O
 
-- 业务结果通过明确 service/repository 写 canonical tables。
-- 通用状态写 `job.outbox_events`、background job、attempt 与 heartbeat。
+- 业务结果通过明确 service/repository 写 canonical tables。OA 手动导入先精确读取已选 OA 来源并校验 completed，再把定向 projection、manual marker、操作审计和任务终态放在同一事务；不得全量替换其他 manual marker或宣告整月同步完成。已认证发票的批次、明细和任务终态同事务。
+- Event worker 状态写 `job.outbox_events` 与 attempt；导入状态只写 `job.import_jobs`，heartbeat 复用现有表。导入不再生产/消费 `import.process.requested`，不更新第二套 background job 状态。
 - Worker 不读写 Redis，不写页面 DTO、projection schema、page cache 或 freshness/readiness 状态。
 
 ## 依赖方向
@@ -81,3 +82,14 @@ Migration `0151_workbench_matching_worker_idempotency_grant.sql` 修复历史只
 ## 2026-09-21 凭证组保存通知
 
 凭证文件集合和子项总金额在一次事务提交后，只通过原 matching repository 通知目标 OA scope 一次；逐文件独立投递已移除。既有 worker 以批量 OA hydration 读取金额，不增加实例、事件类型、缓存或 read model。
+
+## 2026-09-21 导入单任务事务合同
+
+- `ImportJobRepository.claim_next` 使用 `FOR UPDATE SKIP LOCKED` 直接领取，`claim_version` 每次递增；续租与失败写入必须匹配 job ID、owner、领取版本。
+- prepare 与 commit 共用同一任务。预览结果和 session 同事务，确认 CAS 预览版本；重复上传请求只返回原任务，不能覆盖已确认的 payload。
+- `ImportJobCompletion.lock(transaction)` 在正式写入前锁定任务并校验所有权；`succeed(transaction,result)` 与正式数据同事务。worker 不做独立成功补写。
+- 取消也锁任务：取消先提交则旧 owner 无法写事实，业务事务先提交则取消返回已完成冲突。
+- 进程退出释放同一领取；强制进程终止后依靠过期 lease 恢复。最大尝试耗尽明确失败，用户显式重试；不存在第二事件 ACK。
+- 已认证发票和 OA 手动导入由 `SharedImportProcessor` 使用明确的事务 repository；OA 仅新增/重新接纳指定行，不把未选记录置 inactive。
+- import 失败数量、排队年龄单独观测；用户文件失败不使全局 API readiness 失败。旧导入 outbox 仅作为历史证据读取。
+- Migration `0175` 增加版本/确认状态并退役能对应权威 job 的旧事件；不删除事实和历史任务。

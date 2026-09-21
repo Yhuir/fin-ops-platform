@@ -1381,6 +1381,43 @@ class PostgresOpsTaxEtcRepository:
             for row in rows
         ]
 
+    def load_etc_import_scope(self, *, task_id: str, invoice_numbers: list[str], lock: bool = False) -> dict[str, Any]:
+        """Only the current task and its candidate/member facts belong to this write."""
+        def keyed(sql: str, params: tuple[Any, ...]) -> dict[str, Any]:
+            return {str(row["key"]): row_payload(row, "raw_payload")
+                    for row in self._connection.fetch_all(sql, params)}
+
+        suffix = " for update" if lock else ""
+        business = keyed(
+            "select business_batch_id as key, raw_payload from app.etc_business_batches "
+            "where task_id = %s order by business_batch_id" + suffix, (task_id,))
+        member_ids = sorted({value for payload in business.values() for value in payload.get("invoice_ids", [])})
+        invoices = keyed(
+            "select etc_invoice_id as key, raw_payload from app.etc_invoices "
+            "where invoice_no = any(%s) or etc_invoice_id = any(%s) order by etc_invoice_id" + suffix,
+            (invoice_numbers, member_ids))
+        batch_ids = sorted({value for payload in business.values() for value in payload.get("import_batch_ids", [])})
+        batches = keyed(
+            "select batch_id as key, raw_payload from app.etc_import_batches where batch_id = any(%s) "
+            "order by batch_id" + suffix, (batch_ids,))
+        return {"invoices": invoices, "invoice_numbers": {
+            str(payload["invoice_number"]): key for key, payload in invoices.items()
+        }, "business_batches": business, "import_batches": batches, "batches": {}}
+
+    def lock_etc_import_task(self, *, task_id: str, task_version: int, confirmed_item_set_hash: str) -> dict[str, Any]:
+        row = self._connection.fetch_one(
+            "select raw_payload from app.etc_reconciliation_tasks where task_id = %s for update", (task_id,))
+        task = row_payload(row, "raw_payload") if row else None
+        if (not task or task.get("status") != "ready_for_import" or int(task.get("version", 0)) != task_version
+                or task.get("confirmed_item_set_hash") != confirmed_item_set_hash):
+            raise ValueError("stale_reconciliation_task_preview")
+        return task
+
+    def lock_etc_import_invoice_keys(self, invoice_numbers: list[str]) -> None:
+        self._connection.execute(
+            "select pg_advisory_xact_lock(hashtextextended('etc-invoice:' || number, 0)) "
+            "from (select unnest(%s::text[]) as number order by number) ordered", (invoice_numbers,))
+
     def save_etc_state(self, snapshot: dict[str, Any]) -> None:
         def write(connection: Any) -> None:
             normalized = serialize_value(snapshot)
@@ -1518,7 +1555,8 @@ class PostgresOpsTaxEtcRepository:
                     ),
                 )
             business_batches = normalized.get("business_batches") if isinstance(normalized, dict) else None
-            invoice_payloads = {invoice_id: payload for invoice_id, payload in iter_mapping(invoices)}
+            invoice_payloads = {invoice_id: payload for invoice_id, payload in iter_mapping(
+                normalized.get("invoice_summary", invoices))}
             for business_batch_id, payload in iter_mapping(business_batches):
                 invoice_ids = text_list(payload.get("invoice_ids"))
                 submission_batch_id = text(payload.get("submission_batch_id"))

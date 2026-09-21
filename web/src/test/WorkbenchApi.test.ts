@@ -2484,15 +2484,18 @@ describe("workbench OA manual import affected scopes", () => {
 
   test("maps import and delete affected scopes", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ job: {
+        job_id: "import:oa-1", status: "succeeded", version: 2,
+      } }), { status: 202, headers: { "Content-Type": "application/json" } }))
       .mockResolvedValueOnce(
         new Response(
-          JSON.stringify({
+          JSON.stringify({ job: { job_id: "import:oa-1", status: "succeeded" }, result: {
             imported: ["oa-exp-1981"],
             already_imported: [],
             failed: [],
             rows: [{ row_id: "oa-exp-1981", status: "completed", can_import: false }],
             ...targetEnvelope,
-          }),
+          } }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
       )

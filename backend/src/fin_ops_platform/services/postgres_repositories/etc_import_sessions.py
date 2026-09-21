@@ -10,7 +10,7 @@ class PostgresEtcImportSessionRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
-    def save_preview(self, payload: dict[str, Any], files: list[dict[str, Any]]) -> None:
+    def save_preview(self, payload: dict[str, Any], files: list[dict[str, Any]], *, on_saved: Any = None) -> None:
         def write(connection: Any) -> None:
             connection.execute(
                 """
@@ -80,6 +80,9 @@ class PostgresEtcImportSessionRepository:
                     ),
                 )
 
+            if on_saved is not None:
+                on_saved(connection)
+
         run_in_transaction(self._connection, write)
 
     def get(self, session_id: str) -> dict[str, Any] | None:
@@ -111,6 +114,22 @@ class PostgresEtcImportSessionRepository:
             (str(row["row_id"]),),
         )
         return {**dict(row), "files": [dict(item) for item in files]}
+
+    def referenced_object_paths(self, paths: list[str]) -> set[str]:
+        rows = self._connection.fetch_all(
+            """select candidate.path from unnest(%s::text[]) candidate(path)
+               where exists (
+                   select 1 from app.etc_import_session_files file
+                   join app.file_objects object on object.id=file.file_object_id
+                   where object.storage_uri=candidate.path)
+               or exists (select 1 from app.etc_import_sessions session
+                   where session.raw_payload->'normalized_payload'->>'prepared_manifest_ref'=candidate.path)
+               or exists (select 1 from app.etc_invoices invoice
+                   where invoice.raw_payload->'normalized_payload'->>'xml_file_path'=candidate.path
+                      or invoice.raw_payload->'normalized_payload'->>'pdf_file_path'=candidate.path)""",
+            (paths,),
+        )
+        return {str(row["path"]) for row in rows}
 
     def update_status(
         self,
@@ -150,8 +169,10 @@ class PostgresEtcImportSessionRepository:
             raise KeyError(session_id)
         return row
 
-    def discard_preview(self, session_id: str, *, imported_by: str) -> None:
+    def discard_preview(self, session_id: str, *, imported_by: str, on_discard: Any = None) -> None:
         def discard(connection: Any) -> None:
+            if on_discard is not None:
+                on_discard(connection)
             current = connection.fetch_one(
                 """
                 select status, imported_by, raw_payload
@@ -168,7 +189,7 @@ class PostgresEtcImportSessionRepository:
             status = str(current.get("status") or "")
             if status == "reverted":
                 return
-            if status not in {"preview_ready", "failed"}:
+            if status not in {"preparing", "preview_ready", "failed"}:
                 raise ValueError(f"ETC import session cannot be discarded from status: {status}")
             active_job = connection.fetch_one(
                 """

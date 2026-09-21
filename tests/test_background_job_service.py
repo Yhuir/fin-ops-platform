@@ -479,7 +479,7 @@ class BackgroundJobServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             job = app._background_job_service.create_job(
-                job_type="etc_invoice_import",
+                job_type="bank_relation_requirement_recalculation",
                 label="导入 ETC发票",
                 owner_user_id="test_finops_user",
                 total=2,

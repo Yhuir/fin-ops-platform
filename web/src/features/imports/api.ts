@@ -1,3 +1,4 @@
+import { waitForImportPreparation, type ImportPreparationAccepted } from "./preparation";
 import type {
   ImportFilePreviewOverride,
   ImportBatchType,
@@ -609,9 +610,11 @@ export async function previewImportFiles(
   files: File[],
   importedBy = "web_finance_user",
   fileOverrides?: ImportFilePreviewOverride[],
+  requestId: string = crypto.randomUUID(),
 ): Promise<ImportSessionPayload> {
   const formData = new FormData();
   formData.append("imported_by", importedBy);
+  formData.append("request_id", requestId);
   files.forEach((file) => formData.append("files", file));
   if (fileOverrides && fileOverrides.length > 0) {
     formData.append(
@@ -633,11 +636,14 @@ export async function previewImportFiles(
     );
   }
 
-  const payload = await requestJson<ApiImportSessionPayload>("/imports/files/preview", {
+  const payload = await requestJson<ImportPreparationAccepted>("/imports/files/preview", {
     method: "POST",
     body: formData,
   });
-  return mapImportPayload(payload);
+  const job = await waitForImportPreparation(payload);
+  const sessionId = job.source.session_id;
+  if (typeof sessionId !== "string" || !sessionId) throw new Error("导入任务缺少会话编号。");
+  return fetchImportSession(sessionId);
 }
 
 export async function retryImportFiles(
@@ -653,7 +659,7 @@ export async function retryImportFiles(
     fieldMapping?: Record<string, string>;
   }>,
 ): Promise<ImportSessionPayload> {
-  const payload = await requestJson<ApiImportSessionPayload>("/imports/files/retry", {
+  const payload = await requestJson<ImportPreparationAccepted>("/imports/files/retry", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -679,12 +685,14 @@ export async function retryImportFiles(
       ),
     }),
   });
-  return mapImportPayload(payload);
+  await waitForImportPreparation(payload);
+  return fetchImportSession(sessionId);
 }
 
 export async function confirmImportFiles(
   sessionId: string,
   selectedFileIds: string[],
+  previewVersion?: number,
 ): Promise<ImportSessionPayload> {
   const payload = await requestJson<ApiImportSessionPayload>("/imports/files/confirm", {
     method: "POST",
@@ -694,6 +702,7 @@ export async function confirmImportFiles(
     body: JSON.stringify({
       session_id: sessionId,
       selected_file_ids: selectedFileIds,
+      ...(previewVersion !== undefined ? { preview_version: previewVersion } : {}),
     }),
   });
   return mapImportPayload(payload);

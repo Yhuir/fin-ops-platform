@@ -25,6 +25,12 @@
 - Durable queue：`backend/src/fin_ops_platform/services/runtime_queue.py`
 - Worker registry：`backend/src/fin_ops_platform/services/runtime_worker_registry.py`
 
+## 导入运行链
+
+三个导入页面共用 `ImportWorkflowService` 与 `job.import_jobs` 生命周期；领域解析和写入分别由普通文件/ETC 模块负责。上传原件与登记任务后返回 202，import worker 直接领取 prepare 任务，持久预览后等待确认。确认固化本次范围和版本，worker 在领域事务中同时提交事实、来源、审计和任务成功状态。旧 import outbox 中转与独立 BackgroundJob 状态写入已退役；税务认证和 OA 手动导入也使用同一直接队列。
+
+HTTP 只读取当前请求的会话上下文，worker 为每次执行创建独立领域上下文；禁止把某个请求的会话覆盖到共享 Application 服务。ETC 原件解析与附件准备在短财务事务之外，最终成员/附件引用、metadata、task/session 与 job 原子提交。页面直接读 canonical facts，导入不恢复已退役的页面 read model。全局进度读取任务摘要，可显式恢复 owner 的预览。详细 I/O 见[API 契约](../dev/api-contracts.md)及三个导入模块。
+
 ## 页面读取合同
 
 成本统计、银行明细、OA 待付款、流水规则批量处理、批量账务、ETC、税金抵扣、待找发票、进项使用、销项收款与外部往来款都是 page-specific canonical direct-read 页面。页面 query facade/repository 在单个 `REPEATABLE READ READ ONLY` PostgreSQL snapshot 内组合 canonical facts 与 active formal relations，不消费 projection、Redis、refresh status、queue 或 worker。

@@ -36,14 +36,16 @@ class StoredEtcImportSession:
     imported_by: str | None = None
     imported_at: datetime | None = None
     last_error: str | None = None
+    prepared_manifest: bytes | None = None
+    prepared_manifest_ref: str | None = None
 
 
 class EtcImportSessionStorePort(Protocol):
     durable: bool
 
-    def save_preview(self, session: StoredEtcImportSession) -> StoredEtcImportSession: ...
+    def save_preview(self, session: StoredEtcImportSession, *, on_saved: Any = None) -> StoredEtcImportSession: ...
 
-    def get(self, session_id: str) -> StoredEtcImportSession | None: ...
+    def get(self, session_id: str, *, load_uploads: bool = True, load_manifest: bool = False) -> StoredEtcImportSession | None: ...
 
     def update_status(
         self,
@@ -54,7 +56,7 @@ class EtcImportSessionStorePort(Protocol):
         last_error: str | None = None,
     ) -> StoredEtcImportSession: ...
 
-    def discard_preview(self, session_id: str, *, imported_by: str) -> None: ...
+    def discard_preview(self, session_id: str, *, imported_by: str, on_discard: Any = None) -> None: ...
 
 
 class InMemoryEtcImportSessionStore:
@@ -65,12 +67,14 @@ class InMemoryEtcImportSessionStore:
     def __init__(self) -> None:
         self._sessions: dict[str, StoredEtcImportSession] = {}
 
-    def save_preview(self, session: StoredEtcImportSession) -> StoredEtcImportSession:
+    def save_preview(self, session: StoredEtcImportSession, *, on_saved: Any = None) -> StoredEtcImportSession:
         copied = _copy_session(session)
+        if on_saved is not None:
+            on_saved(None, copied)
         self._sessions[copied.session_id] = copied
         return _copy_session(copied)
 
-    def get(self, session_id: str) -> StoredEtcImportSession | None:
+    def get(self, session_id: str, *, load_uploads: bool = True, load_manifest: bool = False) -> StoredEtcImportSession | None:
         session = self._sessions.get(str(session_id or "").strip())
         return _copy_session(session) if session is not None else None
 
@@ -96,7 +100,7 @@ class InMemoryEtcImportSessionStore:
         self._sessions[updated.session_id] = _copy_session(updated)
         return _copy_session(updated)
 
-    def discard_preview(self, session_id: str, *, imported_by: str) -> None:
+    def discard_preview(self, session_id: str, *, imported_by: str, on_discard: Any = None) -> None:
         current = self._sessions.get(str(session_id or "").strip())
         if current is None:
             raise KeyError(session_id)
@@ -104,8 +108,10 @@ class InMemoryEtcImportSessionStore:
             raise PermissionError("ETC import session belongs to another user")
         if current.status == "reverted":
             return
-        if current.status not in {"preview_ready", "failed"}:
+        if current.status not in {"preparing", "preview_ready", "failed"}:
             raise ValueError(f"ETC import session cannot be discarded from status: {current.status}")
+        if on_discard is not None:
+            on_discard(None)
         updated = replace(current, status="reverted", last_error=None)
         self._sessions[updated.session_id] = _copy_session(updated)
 
@@ -117,11 +123,19 @@ class PostgresEtcImportSessionStore:
         self._repository = repository
         self._archive_store = archive_store
 
-    def save_preview(self, session: StoredEtcImportSession) -> StoredEtcImportSession:
+    def save_preview(self, session: StoredEtcImportSession, *, on_saved: Any = None) -> StoredEtcImportSession:
         stored_paths: list[str] = []
         stored_uploads: list[StoredEtcImportUpload] = []
+        previous_manifest = None
+        if session.prepared_manifest is not None:
+            previous = self._repository.get(session.session_id)
+            if previous is not None:
+                previous_manifest = _normalized_payload(previous.get("raw_payload")).get("prepared_manifest_ref")
         try:
             for upload in session.uploads:
+                if upload.stored_file_path and upload.file_object_id:
+                    stored_uploads.append(upload)
+                    continue
                 metadata = self._archive_store.store_etc_import_archive(
                     session_id=session.session_id,
                     file_id=upload.file_id,
@@ -132,12 +146,12 @@ class PostgresEtcImportSessionStore:
                 file_object_id = str(metadata.get("file_object_id") or "").strip()
                 if not stored_path or not file_object_id:
                     raise RuntimeError("ETC import archive storage did not return a verified object reference.")
+                stored_paths.append(stored_path)
                 if (
                     str(metadata.get("sha256") or "") != upload.sha256
                     or int(metadata.get("size_bytes") or -1) != upload.size_bytes
                 ):
                     raise RuntimeError("ETC import archive storage hash or size verification failed.")
-                stored_paths.append(stored_path)
                 stored_uploads.append(
                     replace(
                         upload,
@@ -145,18 +159,29 @@ class PostgresEtcImportSessionStore:
                         stored_file_path=stored_path,
                     )
                 )
-            persisted = replace(session, uploads=tuple(stored_uploads))
+            manifest_ref = session.prepared_manifest_ref
+            if session.prepared_manifest is not None and manifest_ref is None:
+                metadata = self._archive_store.store_etc_import_archive(
+                    session_id=session.session_id, file_id="prepared-manifest", file_name="manifest.json.gz",
+                    content=session.prepared_manifest,
+                )
+                manifest_ref = str(metadata["stored_file_path"])
+                stored_paths.append(manifest_ref)
+            persisted = replace(session, uploads=tuple(stored_uploads), prepared_manifest_ref=manifest_ref)
             self._repository.save_preview(
                 _session_payload(persisted),
                 [_upload_payload(upload) for upload in persisted.uploads],
+                **({"on_saved": lambda transaction: on_saved(transaction, persisted)} if on_saved is not None else {}),
             )
         except Exception:
             if stored_paths:
-                self._archive_store.delete_etc_import_archives(stored_paths)
+                self._archive_store.delete_unreferenced_etc_import_files(stored_paths)
             raise
+        if previous_manifest and previous_manifest != persisted.prepared_manifest_ref:
+            self._archive_store.delete_unreferenced_etc_import_files([previous_manifest])
         return persisted
 
-    def get(self, session_id: str) -> StoredEtcImportSession | None:
+    def get(self, session_id: str, *, load_uploads: bool = True, load_manifest: bool = False) -> StoredEtcImportSession | None:
         row = self._repository.get(str(session_id or "").strip())
         if row is None:
             return None
@@ -168,7 +193,7 @@ class PostgresEtcImportSessionStore:
             stored_path = str(file_row.get("storage_uri") or "").strip()
             if not stored_path:
                 raise RuntimeError("ETC import archive object has no storage URI.")
-            content = bytes(self._archive_store.read_etc_import_archive(stored_path))
+            content = bytes(self._archive_store.read_etc_import_archive(stored_path)) if load_uploads else b""
             uploads.append(
                 StoredEtcImportUpload(
                     file_id=str(file_row.get("file_id") or ""),
@@ -202,6 +227,9 @@ class PostgresEtcImportSessionStore:
             imported_by=str(row.get("imported_by") or "") or None,
             imported_at=_optional_datetime(row.get("imported_at")),
             last_error=str(row.get("last_error") or "") or None,
+            prepared_manifest_ref=payload.get("prepared_manifest_ref"),
+            prepared_manifest=(bytes(self._archive_store.read_etc_import_archive(payload["prepared_manifest_ref"]))
+                               if load_manifest and payload.get("prepared_manifest_ref") else None),
         )
 
     def update_status(
@@ -218,15 +246,16 @@ class PostgresEtcImportSessionStore:
             imported_by=str(imported_by or "").strip() or None,
             last_error=str(last_error or "").strip() or None,
         )
-        loaded = self.get(session_id)
+        loaded = self.get(session_id, load_uploads=False)
         if loaded is None:
             raise KeyError(session_id)
         return loaded
 
-    def discard_preview(self, session_id: str, *, imported_by: str) -> None:
+    def discard_preview(self, session_id: str, *, imported_by: str, on_discard: Any = None) -> None:
         self._repository.discard_preview(
             str(session_id or "").strip(),
             imported_by=str(imported_by or "").strip(),
+            **({"on_discard": on_discard} if on_discard is not None else {}),
         )
 
 
@@ -273,6 +302,7 @@ def _session_payload(session: StoredEtcImportSession) -> dict[str, Any]:
         "imported_by": session.imported_by,
         "imported_at": session.imported_at.isoformat() if session.imported_at is not None else None,
         "last_error": session.last_error,
+        "prepared_manifest_ref": session.prepared_manifest_ref,
     }
 
 

@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from fin_ops_platform.domain.enums import BatchType
-from fin_ops_platform.services.import_job_queue import ImportJob
+from fin_ops_platform.services.etc_reconciliation_zip_filter import StaleReconciliationPreviewError
+from fin_ops_platform.services.etc_service import EtcBusinessBatchInvalidTransitionError, EtcImportPreviewStaleError
+from fin_ops_platform.services.import_job_queue import ImportJob, ImportJobDataError
 
 
 class ImportProcessingService:
@@ -11,10 +13,8 @@ class ImportProcessingService:
         self,
         *,
         file_import_service: Any,
-        tax_certified_import_service: Any,
         etc_service: Any,
         etc_reconciliation_task_service: Any,
-        background_job_service: Any,
         serialize_value: Callable[[Any], Any],
         persist_confirmed_import_delta: Callable[..., Any],
         workbench_matching_scope_months_for_import_file_session: Callable[[Any, list[str]], list[str]],
@@ -22,15 +22,13 @@ class ImportProcessingService:
         bank_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
         input_invoice_usage_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
         output_invoice_collection_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
-        link_etc_import_result_to_existing_invoices: Callable[[Any], list[str]],
         etc_import_preview_service: Any,
-        oa_manual_import_create_processor: Callable[[ImportJob], dict[str, object]] | None = None,
+        etc_import_uow: Any = None,
+        persist_import_preview_delta: Callable[..., Any] | None = None,
     ) -> None:
         self._file_import_service = file_import_service
-        self._tax_certified_import_service = tax_certified_import_service
         self._etc_service = etc_service
         self._etc_reconciliation_task_service = etc_reconciliation_task_service
-        self._background_job_service = background_job_service
         self._serialize_value = serialize_value
         self._persist_confirmed_import_delta = persist_confirmed_import_delta
         self._workbench_matching_scope_months_for_import_file_session = workbench_matching_scope_months_for_import_file_session
@@ -40,296 +38,129 @@ class ImportProcessingService:
         )
         self._input_invoice_usage_scope_keys_for_import_file_session = input_invoice_usage_scope_keys_for_import_file_session
         self._output_invoice_collection_scope_keys_for_import_file_session = output_invoice_collection_scope_keys_for_import_file_session
-        self._link_etc_import_result_to_existing_invoices = link_etc_import_result_to_existing_invoices
         self._etc_import_preview_service = etc_import_preview_service
-        self._oa_manual_import_create_processor = oa_manual_import_create_processor
+        self._etc_import_uow = etc_import_uow
+        self._persist_import_preview_delta = persist_import_preview_delta
 
     def build_import_job_processors(self) -> dict[str, Callable[[ImportJob], dict[str, object]]]:
         processors: dict[str, Callable[[ImportJob], dict[str, object]]] = {
             "file_import.confirm": self.process_file_import_confirm_job,
             "etc_invoice_import.confirm": self.process_etc_invoice_import_confirm_job,
-            "tax_certified_import.confirm": self.process_tax_certified_import_confirm_job,
         }
-        if self._oa_manual_import_create_processor is not None:
-            processors["oa_manual_import.create"] = self._oa_manual_import_create_processor
         return processors
-
-    def process_tax_certified_import_confirm_job(self, import_job: ImportJob) -> dict[str, object]:
-        session_id = str(import_job.payload.get("session_id") or "").strip()
-        if not session_id:
-            raise ValueError("import job payload.session_id is required.")
-        return self.execute_tax_certified_import_confirm(session_id)
 
     def process_file_import_confirm_job(self, import_job: ImportJob) -> dict[str, object]:
         session_id = str(import_job.payload.get("session_id") or "").strip()
+        if not session_id:
+            raise ValueError("import job payload.session_id is required.")
+        if import_job.stage == "prepare":
+            if self._persist_import_preview_delta is None or import_job.completion is None:
+                raise RuntimeError("durable prepare requires preview persistence and task completion")
+            session = self._file_import_service.prepare_registered_session(session_id)
+            result = {"session_id": session.id, "summary": {
+                "files": len(session.files),
+                "created": sum(item.success_count for item in session.files),
+                "duplicates": sum(item.duplicate_count for item in session.files),
+                "failed": sum(item.error_count for item in session.files),
+            }}
+            # Bank duplicates have no enrichment or provenance write. Invoice
+            # duplicates may still enrich canonical facts and require confirmation.
+            if session.files and all(
+                item.batch_type == BatchType.BANK_TRANSACTION
+                and item.status == "preview_ready" and item.row_results
+                and all(row.decision.value == "duplicate_skipped" for row in item.row_results)
+                for item in session.files
+            ):
+                result.update(outcome="no_changes", created=0, updated=0,
+                              duplicates=sum(len(item.row_results) for item in session.files), failed=0)
+            self._persist_import_preview_delta(
+                session_id, completion=import_job.completion, result_payload=result,
+            )
+            return result
         selected_file_ids = import_job.payload.get("selected_file_ids")
-        if not session_id or not isinstance(selected_file_ids, list):
-            raise ValueError("import job payload.session_id and payload.selected_file_ids are required.")
+        if not isinstance(selected_file_ids, list):
+            raise ValueError("import job payload.selected_file_ids is required.")
         return self.execute_file_import_confirm_job(
             session_id=session_id,
             selected_file_ids=[str(item) for item in selected_file_ids],
-            background_job_id=str(import_job.payload.get("background_job_id") or "").strip(),
+            completion=import_job.completion,
         )
 
     def process_etc_invoice_import_confirm_job(self, import_job: ImportJob) -> dict[str, object]:
         payload = import_job.payload
+        owner = str(import_job.created_by or "").strip()
+        if not owner or str(payload.get("owner_user_id") or owner).strip() != owner:
+            raise ImportJobDataError("ETC import task owner is missing or inconsistent.")
+        session_id = str(payload.get("session_id") or "").strip()
+        if import_job.stage == "prepare":
+            return self._etc_import_preview_service.prepare(
+                session_id=session_id, imported_by=owner, completion=import_job.completion)
         return self.execute_etc_invoice_import_confirm_job(
-            session_id=str(payload.get("session_id") or "").strip(),
-            task_id=str(payload.get("task_id") or "").strip(),
-            owner_user_id=str(payload.get("owner_user_id") or import_job.created_by or "system").strip(),
-            background_job_id=str(payload.get("background_job_id") or "").strip(),
+            session_id=session_id, task_id=str(payload.get("task_id") or "").strip(),
+            owner_user_id=owner,
             task_version=int(payload.get("task_version") or 0),
             confirmed_item_set_hash=str(payload.get("confirmed_item_set_hash") or "").strip(),
-            total=int(payload.get("total") or 0),
+            completion=import_job.completion,
         )
-
-    def execute_tax_certified_import_confirm(self, session_id: str) -> dict[str, object]:
-        batch = self._tax_certified_import_service.confirm_session(session_id)
-        return {
-            "success": True,
-            "batch": self._serialize_value(batch),
-        }
 
     def execute_file_import_confirm_job(
         self,
         *,
         session_id: str,
         selected_file_ids: list[str],
-        background_job_id: str,
+        completion: Any | None = None,
     ) -> dict[str, object]:
-        session = self._file_import_service.get_session(session_id)
+        confirmed_session = self._file_import_service.confirm_session(
+            session_id=session_id, selected_file_ids=selected_file_ids,
+        )
         selected = set(selected_file_ids)
-        total = len(selected_file_ids)
-        label = self.file_import_job_label(session, selected_file_ids)
-        running_job = self._background_job_service.start_job(background_job_id) if background_job_id else None
-
-        def progress_callback(progress_session: Any, current: int, progress_total: int) -> None:
-            if running_job is None:
-                return
-            confirmed_count = sum(1 for file in progress_session.files if file.id in selected and file.status == "confirmed")
-            self._background_job_service.update_progress(
-                running_job.job_id,
-                phase="confirm_files",
-                message=f"正在{label} {current}/{max(progress_total, 1)}。",
-                current=current,
-                total=progress_total,
-                result_summary={
-                    "confirmed": confirmed_count,
-                    "selected": progress_total,
-                    "matching_results": 0,
-                },
-            )
-
-        try:
-            confirmed_session = self._file_import_service.confirm_session(
-                session_id=session_id,
-                selected_file_ids=selected_file_ids,
-                progress_callback=progress_callback,
-            )
-            confirmed_count = sum(1 for file in confirmed_session.files if file.id in selected and file.status == "confirmed")
-            scope_months = self._workbench_matching_scope_months_for_import_file_session(
-                confirmed_session,
-                selected_file_ids,
-            )
-            tax_offset_scope_keys = self._tax_offset_scope_keys_for_import_file_session(
-                confirmed_session,
-                selected_file_ids,
-            )
-            bank_scope_keys = self._bank_scope_keys_for_import_file_session(
-                confirmed_session,
-                selected_file_ids,
-            )
-            input_invoice_usage_scope_keys = self._input_invoice_usage_scope_keys_for_import_file_session(
-                confirmed_session,
-                selected_file_ids,
-            )
-            output_invoice_collection_scope_keys = self._output_invoice_collection_scope_keys_for_import_file_session(
-                confirmed_session,
-                selected_file_ids,
-            )
-            import_state_payload = self._file_import_service.confirmed_session_persistence_payload(
-                session_id=session_id,
-                selected_file_ids=selected_file_ids,
-            )
-            persistence_result = self._persist_confirmed_import_delta(
-                import_state_payload=import_state_payload,
-                scope_months=scope_months if confirmed_count else [],
-            )
-            persistence_result = (
-                dict(persistence_result) if isinstance(persistence_result, dict) else {}
-            )
-            queued_matching_months = list(
-                persistence_result.get("queued_matching_months") or []
-            )
-            result_summary = {
-                "confirmed": confirmed_count,
-                "selected": total,
-                "affected_months": scope_months,
-                "queued_matching_months": queued_matching_months,
-                "oa_attachment_invoice_promotion": dict(
-                    persistence_result.get("oa_attachment_invoice_promotion") or {}
-                ),
-                **self._write_result_envelope(
-                    tax_offset_scope_keys=tax_offset_scope_keys,
-                    bank_scope_keys=bank_scope_keys,
-                    input_invoice_usage_scope_keys=input_invoice_usage_scope_keys,
-                    output_invoice_collection_scope_keys=output_invoice_collection_scope_keys,
-                ),
-            }
-            if running_job is not None:
-                self._background_job_service.succeed_job(
-                    running_job.job_id,
-                    f"{label}完成。",
-                    result_summary=result_summary,
-                )
-            return result_summary
-        except Exception as exc:
-            if running_job is not None:
-                self._background_job_service.fail_job(running_job.job_id, "后台任务失败。", str(exc))
-            raise
+        confirmed_files = [item for item in confirmed_session.files if item.id in selected and item.status == "confirmed"]
+        if len(confirmed_files) != len(selected):
+            raise ValueError("selected import scope did not complete")
+        scope_months = self._workbench_matching_scope_months_for_import_file_session(confirmed_session, selected_file_ids)
+        result_summary = {
+            "session_id": session_id,
+            "confirmed": len(confirmed_files),
+            "selected": len(selected),
+            "created": sum(row.decision.value == "created" for item in confirmed_files for row in item.row_results),
+            "updated": sum(row.decision.value == "status_updated" for item in confirmed_files for row in item.row_results),
+            "duplicates": sum(row.decision.value == "duplicate_skipped" for item in confirmed_files for row in item.row_results),
+            "failed": 0,
+            "affected_months": scope_months,
+            **self._write_result_envelope(
+                tax_offset_scope_keys=self._tax_offset_scope_keys_for_import_file_session(confirmed_session, selected_file_ids),
+                bank_scope_keys=self._bank_scope_keys_for_import_file_session(confirmed_session, selected_file_ids),
+                input_invoice_usage_scope_keys=self._input_invoice_usage_scope_keys_for_import_file_session(confirmed_session, selected_file_ids),
+                output_invoice_collection_scope_keys=self._output_invoice_collection_scope_keys_for_import_file_session(confirmed_session, selected_file_ids),
+            ),
+        }
+        import_state_payload = self._file_import_service.confirmed_session_persistence_payload(
+            session_id=session_id, selected_file_ids=selected_file_ids,
+        )
+        persistence_result = self._persist_confirmed_import_delta(
+            import_state_payload=import_state_payload,
+            scope_months=scope_months,
+            completion=completion,
+            result_payload=result_summary,
+        )
+        return {**result_summary, **persistence_result}
 
     def execute_etc_invoice_import_confirm_job(
-        self,
-        *,
-        session_id: str,
-        task_id: str,
-        owner_user_id: str,
-        background_job_id: str,
-        task_version: int,
-        confirmed_item_set_hash: str,
-        total: int,
+        self, *, session_id: str, task_id: str, owner_user_id: str,
+        task_version: int, confirmed_item_set_hash: str, completion: Any = None,
     ) -> dict[str, object]:
-        if not session_id or not task_id or task_version <= 0:
-            raise ValueError("ETC import job payload requires session_id, task_id and task_version.")
-        running_job = self._background_job_service.start_job(background_job_id) if background_job_id else None
-
-        def progress_callback(result: Any) -> None:
-            if running_job is None:
-                return
-            summary = self.etc_import_job_summary(result, total)
-            self._background_job_service.update_progress(
-                running_job.job_id,
-                phase="persist_items",
-                message=f"正在导入 ETC发票 {summary['total_current']}/{total}。",
-                current=int(summary["total_current"]),
-                total=total,
-                result_summary={key: value for key, value in summary.items() if key != "total_current"},
-            )
-
+        if self._etc_import_uow is None or completion is None:
+            raise RuntimeError("ETC import requires its transactional unit of work and task completion port.")
         try:
-            validated_preview = self._etc_import_preview_service.validate(
-                session_id=session_id,
-                task_id=task_id,
-                imported_by=owner_user_id,
+            validated = self._etc_import_preview_service.validate(
+                session_id=session_id, task_id=task_id, imported_by=owner_user_id, load_manifest=True,
             )
-            self._etc_reconciliation_task_service.begin_import(
-                task_id=task_id,
-                task_version=task_version,
-                confirmed_item_set_hash=confirmed_item_set_hash,
-                import_session_id=session_id,
-                actor=owner_user_id,
-            )
-            self._etc_import_preview_service.mark_status(
-                session_id,
-                status="processing",
-                imported_by=owner_user_id,
-            )
-            business_batch = self.resolve_task_etc_business_batch(
-                task_id=task_id,
-                owner_user_id=owner_user_id,
-                idempotency_key=f"etc_business_task_import:{task_id}:{session_id}",
-            )
-            business_batch, result = self._etc_service.confirm_business_batch_import(
-                business_batch.business_batch_id,
-                session_id,
-                expected_version=business_batch.version,
-                idempotency_key=f"etc_import_session:{session_id}",
-                progress_callback=progress_callback,
-                uploads=list(validated_preview.uploads),
-            )
-        except Exception as exc:
-            self._etc_reconciliation_task_service.mark_import_failed(
-                task_id=task_id,
-                task_version=task_version,
-                confirmed_item_set_hash=confirmed_item_set_hash,
-                actor=owner_user_id,
-                note=str(exc),
-            )
-            if running_job is not None:
-                self._background_job_service.fail_job(running_job.job_id, "后台任务失败。", str(exc))
-            self._etc_import_preview_service.mark_status(
-                session_id,
-                status="failed",
-                imported_by=owner_user_id,
-                last_error=str(exc),
-            )
-            raise
-        import_batch = next(
-            (
-                batch
-                for batch in self._etc_service.list_import_batches()
-                if batch.id in set(getattr(business_batch, "import_batch_ids", []) or [])
-            ),
-            None,
-        )
-        changed_months = self._link_etc_import_result_to_existing_invoices(result)
-        summary = self.etc_import_job_summary(result, total)
-        changed_scope_keys = list(
-            dict.fromkeys(
-                str(month).strip()
-                for month in changed_months
-                if str(month).strip()
-            )
-        )
-        result_summary = {
-            key: value
-            for key, value in summary.items()
-            if key != "total_current"
-        }
-        result_summary.update(
-            {
-                "affected_months": changed_scope_keys,
-                **self._write_result_envelope(
-                    tax_offset_scope_keys=changed_scope_keys,
-                    bank_scope_keys=[],
-                    input_invoice_usage_scope_keys=changed_scope_keys,
-                    output_invoice_collection_scope_keys=[],
-                ),
-            }
-            if changed_scope_keys
-            else {"affected_months": []}
-        )
-        status = "partial_success" if result.failed > 0 else "succeeded"
-        if status == "partial_success":
-            self._etc_reconciliation_task_service.mark_import_failed(
-                task_id=task_id,
-                task_version=task_version,
-                confirmed_item_set_hash=confirmed_item_set_hash,
-                actor=owner_user_id,
-                note="ETC zip import partially failed; task remains ready for retry.",
-            )
-        else:
-            self._etc_reconciliation_task_service.mark_imported(
-                task_id=task_id,
-                task_version=task_version,
-                confirmed_item_set_hash=confirmed_item_set_hash,
-                import_batch_id=getattr(import_batch, "id", None),
-                actor=owner_user_id,
-            )
-        self._etc_import_preview_service.mark_status(
-            session_id,
-            status=status,
-            imported_by=owner_user_id,
-        )
-        message = "ETC发票导入部分完成。" if status == "partial_success" else "ETC发票导入完成。"
-        if running_job is not None:
-            self._background_job_service.succeed_job(
-                running_job.job_id,
-                message,
-                result_summary=result_summary,
-                status=status,
-            )
-        return result_summary
+            if (validated.session.task_version != task_version
+                    or validated.session.confirmed_item_set_hash != confirmed_item_set_hash):
+                raise ImportJobDataError("stale_reconciliation_task_preview")
+            return self._etc_import_uow.commit(validated=validated, owner_user_id=owner_user_id, completion=completion)
+        except (EtcImportPreviewStaleError, StaleReconciliationPreviewError, EtcBusinessBatchInvalidTransitionError) as error:
+            raise ImportJobDataError(str(error)) from error
 
     @staticmethod
     def file_import_job_label(session: Any, selected_file_ids: list[str]) -> str:
@@ -344,20 +175,6 @@ class ImportProcessingService:
         if batch_types and batch_types.issubset({BatchType.INPUT_INVOICE.value, BatchType.OUTPUT_INVOICE.value}):
             return "导入 发票"
         return "导入文件"
-
-    @staticmethod
-    def etc_import_job_summary(result: Any, total: int) -> dict[str, int]:
-        total_current = result.imported + result.attachments_completed + result.duplicates_skipped + result.failed
-        return {
-            "created": result.imported,
-            "imported": result.imported,
-            "updated": result.attachments_completed,
-            "attachments_completed": result.attachments_completed,
-            "duplicates": result.duplicates_skipped,
-            "failed": result.failed,
-            "total": total,
-            "total_current": total_current,
-        }
 
     @staticmethod
     def _write_result_envelope(
@@ -382,20 +199,3 @@ class ImportProcessingService:
         return {
             "affected_scope_keys": scope_keys,
         }
-
-    def resolve_task_etc_business_batch(
-        self,
-        *,
-        task_id: str,
-        owner_user_id: str,
-        idempotency_key: str,
-    ) -> Any:
-        existing_batches = self._etc_service.list_business_batches(task_id=task_id)
-        for batch in existing_batches:
-            if getattr(batch, "is_active", False):
-                return batch
-        return self._etc_service.create_business_batch(
-            task_id=task_id,
-            owner_user_id=owner_user_id,
-            idempotency_key=idempotency_key,
-        )

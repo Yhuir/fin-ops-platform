@@ -49,6 +49,43 @@ def load_invoice_header_fact_repair_snapshot(
     )
 
 
+def load_verified_financial_repair_snapshot(connection: Any, invoice_ids: list[str]) -> dict[str, Any]:
+    invoices = connection.fetch_all("""
+        select coalesce(legacy_mongo_id,id::text) as invoice_id, invoice_type,
+            invoice_no, invoice_code, digital_invoice_no, invoice_date::text,
+            amount, signed_amount, tax_amount, total_with_tax, tax_rate, raw_payload
+        from app.invoices where coalesce(legacy_mongo_id,id::text)=any(%s::text[])
+        order by id
+    """, (invoice_ids,))
+    caches = connection.fetch_all("""
+        select cache.source_attachment_key, cache.invoices, cache.parser_version
+        from app.oa_attachment_invoice_cache cache
+        where exists (
+            select 1 from jsonb_array_elements(cache.invoices) item
+            join app.invoices invoice on
+                coalesce(nullif(item->>'digital_invoice_no',''),
+                    case when item->>'invoice_no' ~ '^\\d{20}$' then item->>'invoice_no'
+                         else (item->>'invoice_code') || ':' || (item->>'invoice_no') end)
+                = coalesce(nullif(invoice.digital_invoice_no,''),
+                    case when invoice.invoice_no ~ '^\\d{20}$' then invoice.invoice_no
+                         else invoice.invoice_code || ':' || invoice.invoice_no end)
+            where coalesce(invoice.legacy_mongo_id,invoice.id::text)=any(%s::text[])
+        ) order by cache.source_attachment_key
+    """, (invoice_ids,))
+    return {"snapshot": invoices, "cache_rows": caches}
+
+
+def apply_verified_financial_repair(
+    connection: Any, plan: dict[str, Any], *, operator_id: str, reason: str,
+) -> dict[str, int]:
+    PostgresCoreRepository(connection).repair_verified_invoice_financial_facts(
+        connection, plan["updates"], operator_id=operator_id, reason=reason)
+    removed = connection.execute("""
+        delete from app.oa_attachment_invoice_cache where source_attachment_key=any(%s::text[])
+    """, (plan["invalidate_cache_keys"],))
+    return {"written_invoice_count": len(plan["updates"]), "invalidated_cache_count": removed}
+
+
 _OA_ATTACHMENT_INVOICE_LINK_AUDIT_SQL = """
 with pending_oa as materialized (
     select 'pending:' || oa_id as id, oa_id as row_id, source_payload
@@ -1222,7 +1259,8 @@ def load_etc_invoice_payload_repair_snapshot(connection: Any, invoice_ids: list[
 
 def load_import_source_file(connection: Any, file_id: str) -> dict[str, Any] | None:
     return connection.fetch_one(
-        """select file.stored_file_path, file.original_filename, object.sha256
+        """select file.id::text as file_id, file.session_id::text as session_id,
+                  file.stored_file_path, file.original_filename, object.sha256, object.size_bytes
            from app.import_files file join app.file_objects object on object.id = file.file_object_id
            where (file.legacy_mongo_id = %s or file.id::text = %s) and object.tombstoned_at is null""",
         (file_id, file_id),

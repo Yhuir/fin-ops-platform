@@ -1102,7 +1102,7 @@ export function canSupplementWorkbenchItem(row: WorkbenchRecord, invoices: Workb
   if (!evidence.length || evidence.some((invoice) => invoice.sourceExpenseItemIds?.length !== 1)) return false;
   let total = 0;
   for (const invoice of evidence) {
-    const value = invoice.sourceKind === "oa_supporting_document" ? invoice.supportingDocumentAmount : invoice.amount;
+    const value = invoice.sourceKind === "oa_supporting_document" ? invoice.supportingDocumentAmount : invoice.tableValues.grossAmount;
     if (value == null || !/^-?\d+(?:\.\d{1,2})?$/.test(value.replace(/,/g, ""))) return false;
     total += parseWorkbenchAmountCents(value);
   }

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from fin_ops_platform.services.audit import AuditTrailService
+from fin_ops_platform.services.manual_invoice_entry_service import ManualInvoiceEntryService
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.workbench_oa_supporting_document_service import (
     WorkbenchOaSupportingDocumentError,
@@ -136,7 +137,7 @@ class WorkbenchInvoiceSupplementApiTests(unittest.TestCase):
         app = build_local_state_application()
 
         with patch.object(
-            app._manual_invoice_entry_service,  # type: ignore[attr-defined]
+            ManualInvoiceEntryService,
             "preview_workbench_batch",
             side_effect=RuntimeError("postgres driver secret"),
         ):

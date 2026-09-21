@@ -8,6 +8,7 @@ import unittest
 from tests.app_test_support import (
     build_local_state_application as build_application,
     configure_access_control,
+    install_durable_import_queue,
 )
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
@@ -185,10 +186,10 @@ class TaxOffsetApiTests(unittest.TestCase):
 
         first_payload = json.loads(first_response.body)
         second_payload = json.loads(second_response.body)
-        self.assertEqual(first_response.status_code, 200)
-        self.assertEqual(second_response.status_code, 200)
-        self.assertEqual(first_payload["batch"]["id"], second_payload["batch"]["id"])
-        self.assertEqual(second_payload["batch"]["persisted_record_count"], 2)
+        self.assertEqual(first_response.status_code, 202)
+        self.assertEqual(second_response.status_code, 202)
+        self.assertEqual(first_payload["import_job"]["import_job_id"], second_payload["import_job"]["import_job_id"])
+        self.assertEqual(len(install_durable_import_queue(app).jobs), 1)
 
     def test_tax_offset_summary_endpoint_reads_canonical_payload_without_runtime_fields(self) -> None:
         app = build_application()
@@ -364,7 +365,7 @@ class TaxOffsetApiTests(unittest.TestCase):
                 json.dumps({"session_id": preview_payload["session"]["id"]}),
             )
 
-        self.assertEqual(confirm_response.status_code, 200)
+        self.assertEqual(confirm_response.status_code, 202)
         self.assertFalse(hasattr(app, "_execute_derived_data_lifecycle_event"))
 
     def test_tax_offset_includes_oa_attachment_invoice_rows_by_issue_month(self) -> None:
@@ -482,11 +483,12 @@ class TaxOffsetApiTests(unittest.TestCase):
                 "/api/tax-offset/certified-import/confirm",
                 json.dumps({"session_id": preview_payload["session"]["id"]}),
             )
-            self.assertEqual(confirm_response.status_code, 200)
-            confirm_payload = json.loads(confirm_response.body)
+            self.assertEqual(confirm_response.status_code, 202)
+            queue = install_durable_import_queue(app)
+            queue.process_all()
+            confirm_payload = queue.get_job(json.loads(confirm_response.body)["import_job"]["import_job_id"]).result_payload
             self.assertEqual(confirm_payload["batch"]["months"], ["2026-01"])
             self.assertEqual(confirm_payload["batch"]["persisted_record_count"], 2)
-            self.assertEqual(confirm_payload["affected_scope_keys"], ["2026-01"])
             self.assertNotIn("read_model_scope_keys", confirm_payload)
             self.assertNotIn("freshness_targets", confirm_payload)
             self.assertNotIn("operation_barrier_targets", confirm_payload)

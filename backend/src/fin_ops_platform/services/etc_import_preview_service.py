@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
+from dataclasses import dataclass, replace
 from typing import Any
 from uuid import uuid4
 
@@ -12,14 +12,15 @@ from fin_ops_platform.services.etc_import_session_store import (
     StoredEtcImportUpload,
 )
 from fin_ops_platform.services.etc_reconciliation_zip_filter import (
+    EtcZipFilterItem,
     EtcZipFilterPreview,
     StaleReconciliationPreviewError,
     filter_manifest_by_allowlist,
-    filter_uploads_by_allowlist,
     preview_etc_zip_for_task,
     validate_etc_zip_confirm_for_task,
 )
 from fin_ops_platform.services.etc_service import (
+    EtcArchiveManifest,
     EtcImportPreviewStaleError,
     UploadedEtcZipFile,
     build_etc_archive_manifest,
@@ -31,6 +32,7 @@ class ValidatedEtcImportPreview:
     session: StoredEtcImportSession
     uploads: tuple[UploadedEtcZipFile, ...]
     item_total: int
+    manifest: EtcArchiveManifest | None = None
 
 
 class EtcImportPreviewService:
@@ -39,95 +41,100 @@ class EtcImportPreviewService:
         self._task_service = task_service
         self._session_store = session_store
 
-    def preview(
-        self,
-        *,
-        task_id: str,
-        uploads: list[UploadedEtcZipFile],
-        imported_by: str,
-    ) -> dict[str, Any]:
+    def register(self, *, task_id: str, uploads: list[UploadedEtcZipFile], imported_by: str, register_job: Any = None) -> StoredEtcImportSession:
         task = self._task_service.get_task(task_id)
-        payload, reconciliation_preview, filtered_uploads = self._build_preview(task=task, uploads=uploads)
-        session_id = uuid4().hex
-        fingerprint = _preview_fingerprint(
-            task=task,
-            uploads=uploads,
-            payload=payload,
-            reconciliation_preview=reconciliation_preview,
-        )
-        stored_uploads = tuple(
-            StoredEtcImportUpload(
-                file_id=f"etc-import-{index + 1:04d}",
-                file_name=upload.file_name,
-                content=bytes(upload.content),
-                sha256=hashlib.sha256(upload.content).hexdigest(),
-                size_bytes=len(upload.content),
-                ordinal=index,
-            )
-            for index, upload in enumerate(uploads)
-        )
+        if str(getattr(task.status, "value", task.status)) != "ready_for_import":
+            raise StaleReconciliationPreviewError("stale_reconciliation_task_preview")
         session = StoredEtcImportSession(
-            session_id=session_id,
-            status="preview_ready",
-            task_id=str(task.task_id),
-            task_version=int(task.version),
-            zip_preview_generation=int(getattr(task, "zip_preview_generation", 0) or 0),
+            session_id=uuid4().hex, status="preparing", task_id=task_id, task_version=int(task.version),
+            zip_preview_generation=int(task.zip_preview_generation or 0),
             confirmed_item_set_hash=str(task.confirmed_item_set_hash or ""),
-            preview_fingerprint=fingerprint,
-            preview_result=dict(payload),
-            preview_audit=dict(payload.get("audit") or {}),
-            preview_files=[dict(item) for item in list(payload.get("files") or []) if isinstance(item, dict)],
-            reconciliation_filter=reconciliation_preview.to_payload(),
-            uploads=stored_uploads,
-            imported_by=str(imported_by or "").strip(),
+            preview_fingerprint="", preview_result={}, preview_audit={}, preview_files=[], reconciliation_filter={},
+            uploads=tuple(StoredEtcImportUpload(
+                file_id=f"etc-import-{index + 1:04d}", file_name=upload.file_name,
+                content=bytes(upload.content), sha256=hashlib.sha256(upload.content).hexdigest(),
+                size_bytes=len(upload.content), ordinal=index,
+            ) for index, upload in enumerate(uploads)),
+            imported_by=imported_by,
         )
-        self._session_store.save_preview(session)
-        return {**payload, "sessionId": session_id}
+        return self._session_store.save_preview(session, on_saved=register_job)
 
-    def validate(self, *, session_id: str, task_id: str, imported_by: str) -> ValidatedEtcImportPreview:
+    def preview(self, *, task_id: str, uploads: list[UploadedEtcZipFile], imported_by: str) -> dict[str, Any]:
+        session = self.register(task_id=task_id, uploads=uploads, imported_by=imported_by)
+        return self.prepare(session_id=session.session_id, imported_by=imported_by)
+
+    def prepare(self, *, session_id: str, imported_by: str, completion: Any = None) -> dict[str, Any]:
+        from fin_ops_platform.services.etc_import_manifest import encode_manifest
+
         session = self._session_store.get(session_id)
+        if session is None:
+            raise KeyError("etc_import_session_not_found")
+        if session.imported_by != imported_by:
+            raise PermissionError("ETC import session belongs to another user")
+        task = self._task_service.get_task(session.task_id)
+        if str(getattr(task.status, "value", task.status)) != "ready_for_import":
+            raise StaleReconciliationPreviewError("stale_reconciliation_task_preview")
+        uploads = [UploadedEtcZipFile(upload.file_name, upload.content) for upload in session.uploads]
+        for stored in session.uploads:
+            if len(stored.content) != stored.size_bytes or hashlib.sha256(stored.content).hexdigest() != stored.sha256:
+                raise EtcImportPreviewStaleError("ETC archive identity changed.")
+        payload, reconciliation_preview, manifest = self._build_preview(task=task, uploads=uploads)
+        updated = replace(
+            session, task_version=int(task.version),
+            confirmed_item_set_hash=str(task.confirmed_item_set_hash or ""),
+            zip_preview_generation=int(task.zip_preview_generation or 0),
+            status="preview_ready", preview_result=payload, preview_audit=dict(payload["audit"]),
+            preview_files=list(payload["files"]), reconciliation_filter=reconciliation_preview.to_payload(),
+            preview_fingerprint=_preview_fingerprint(task=task, uploads=uploads, payload=payload,
+                                                     reconciliation_preview=reconciliation_preview),
+            prepared_manifest=encode_manifest(manifest), prepared_manifest_ref=None,
+        )
+        result = {**payload, "sessionId": session_id}
+        def finish(transaction: Any, _session: StoredEtcImportSession) -> None:
+            completion.lock(transaction)
+            completion.preview(transaction, {"preview": result}, status=("needs_review" if reconciliation_preview.blocking_issues
+                                                           else "awaiting_confirmation"))
+        self._session_store.save_preview(updated, on_saved=finish if completion is not None else None)
+        return result
+
+    @staticmethod
+    def _assert_task_version(task: Any, session: StoredEtcImportSession) -> None:
+        if (int(task.version) != session.task_version
+                or str(task.confirmed_item_set_hash or "") != session.confirmed_item_set_hash
+                or int(task.zip_preview_generation or 0) != session.zip_preview_generation):
+            raise StaleReconciliationPreviewError("stale_reconciliation_task_preview")
+
+    def validate(self, *, session_id: str, task_id: str, imported_by: str,
+                 load_manifest: bool = False) -> ValidatedEtcImportPreview:
+        from fin_ops_platform.services.etc_import_manifest import decode_manifest
+
+        session = self._session_store.get(session_id, load_uploads=False, load_manifest=load_manifest)
         if session is None:
             raise KeyError("etc_import_session_not_found")
         if session.imported_by != str(imported_by or "").strip():
             raise PermissionError("ETC import session belongs to another user")
-        if session.task_id != str(task_id or "").strip():
+        if session.task_id != task_id or session.status not in {"preview_ready", "queued", "processing", "failed"}:
             raise StaleReconciliationPreviewError("stale_reconciliation_task_preview")
-        if session.status not in {"preview_ready", "queued", "processing", "failed"}:
-            raise StaleReconciliationPreviewError("stale_reconciliation_task_preview")
-        try:
-            task = self._task_service.get_task(session.task_id)
-        except KeyError as error:
-            raise StaleReconciliationPreviewError("stale_reconciliation_task_preview") from error
-        original_uploads = [
-            UploadedEtcZipFile(upload.file_name, bytes(upload.content))
-            for upload in session.uploads
-        ]
-        for stored, upload in zip(session.uploads, original_uploads, strict=True):
-            if hashlib.sha256(upload.content).hexdigest() != stored.sha256 or len(upload.content) != stored.size_bytes:
-                raise EtcImportPreviewStaleError("ETC import archive hash or size no longer matches its preview.")
-        payload, reconciliation_preview, filtered_uploads = self._build_preview(task=task, uploads=original_uploads)
-        validate_etc_zip_confirm_for_task(task=task, preview=reconciliation_preview)
-        fingerprint = _preview_fingerprint(
-            task=task,
-            uploads=original_uploads,
-            payload=payload,
-            reconciliation_preview=reconciliation_preview,
+        task = self._task_service.get_task(task_id)
+        self._assert_task_version(task, session)
+        if not session.prepared_manifest_ref and session.prepared_manifest is None:
+            raise EtcImportPreviewStaleError("ETC preview has no prepared manifest; prepare a new preview.")
+        value = session.reconciliation_filter
+        preview = EtcZipFilterPreview(
+            task_id=value["taskId"], task_version=value["taskVersion"],
+            confirmed_item_set_hash=value["confirmedItemSetHash"],
+            allowed_invoice_numbers=list(value["allowedInvoiceNumbers"]),
+            blocking_issues=list(value["blockingIssues"]),
+            items=[EtcZipFilterItem(file_name=item["fileName"], invoice_number=item["invoiceNumber"],
+                                   filter_status=item["filterStatus"], requirement_id=item.get("requirementId"),
+                                   message=item.get("message", "")) for item in value["items"]],
         )
-        if (
-            int(task.version) != session.task_version
-            or str(task.confirmed_item_set_hash or "") != session.confirmed_item_set_hash
-            or reconciliation_preview.to_payload() != session.reconciliation_filter
-        ):
-            raise StaleReconciliationPreviewError("stale_reconciliation_task_preview")
-        if fingerprint != session.preview_fingerprint:
-            raise EtcImportPreviewStaleError("ETC import preview is stale; refresh preview before confirming.")
+        validate_etc_zip_confirm_for_task(task=task, preview=preview)
+        manifest = decode_manifest(session.prepared_manifest) if load_manifest and session.prepared_manifest else None
+        uploads = tuple(UploadedEtcZipFile(file.source_name, b"") for file in manifest.files) if manifest else ()
         return ValidatedEtcImportPreview(
-            session=session,
-            uploads=tuple(filtered_uploads),
-            item_total=sum(
-                int((payload.get("summary") if isinstance(payload.get("summary"), dict) else {}).get(key) or 0)
-                for key in ("imported", "duplicatesSkipped", "attachmentsCompleted", "failed")
-            ),
+            session=session, uploads=uploads, manifest=manifest,
+            item_total=len(set(preview.allowed_invoice_numbers)),
         )
 
     def mark_status(
@@ -145,26 +152,24 @@ class EtcImportPreviewService:
             last_error=last_error,
         )
 
-    def discard(self, *, session_id: str, imported_by: str) -> None:
-        self._session_store.discard_preview(session_id, imported_by=imported_by)
+    def discard(self, *, session_id: str, imported_by: str, on_discard: Any = None) -> None:
+        self._session_store.discard_preview(session_id, imported_by=imported_by, on_discard=on_discard)
 
     def _build_preview(
         self,
         *,
         task: Any,
         uploads: list[UploadedEtcZipFile],
-    ) -> tuple[dict[str, Any], EtcZipFilterPreview, list[UploadedEtcZipFile]]:
+    ) -> tuple[dict[str, Any], EtcZipFilterPreview, EtcArchiveManifest]:
         manifest = build_etc_archive_manifest(uploads)
+        self._etc_service.load_import_candidates(sorted({entry.parsed_invoice.invoice_number
+            for file in manifest.files for entry in file.entries if entry.parsed_invoice is not None}))
         reconciliation_preview = preview_etc_zip_for_task(task=task, uploads=uploads, manifest=manifest)
-        filtered_uploads = filter_uploads_by_allowlist(
-            uploads=uploads,
-            allowed_invoice_numbers=reconciliation_preview.allowed_invoice_numbers,
-            manifest=manifest,
-        )
         filtered_manifest = filter_manifest_by_allowlist(
             manifest=manifest,
             allowed_invoice_numbers=reconciliation_preview.allowed_invoice_numbers,
         )
+        filtered_uploads = [UploadedEtcZipFile(file.source_name, b"") for file in filtered_manifest.files]
         import_result, import_audit, import_file_audits = self._etc_service.inspect_import_zips(
             filtered_uploads,
             manifest=filtered_manifest,
@@ -184,7 +189,7 @@ class EtcImportPreviewService:
             "taskId": str(task.task_id),
             "reconciliationFilter": reconciliation_preview.to_payload(),
         }
-        return payload, reconciliation_preview, filtered_uploads
+        return payload, reconciliation_preview, filtered_manifest
 
 
 def _preview_items_with_filter_status(items: list[Any], preview: EtcZipFilterPreview) -> list[dict[str, object]]:

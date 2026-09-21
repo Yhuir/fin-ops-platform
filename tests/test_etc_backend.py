@@ -50,7 +50,6 @@ from fin_ops_platform.services.etc_service import (
     EtcOAClientError,
     EtcOADraftOutcomeUnknownError,
     EtcOAHttpClientSettings,
-    EtcService,
     HttpEtcOAClient,
     UploadedEtcZipFile,
     parse_etc_xml,
@@ -75,6 +74,85 @@ from tests.app_test_support import (
 )
 from tests.etc_task_store_support import NarrowTaskStoreMixin
 from tests.mock_import_files import ticket_root_txt_sample
+
+
+# Fixed identities belong only to these historical domain fixtures; production
+# uses independent UUIDs so concurrent workers cannot overwrite each other.
+class EtcService(etc_service_module.EtcService):
+    def _new_import_identity(self, prefix: str) -> str:
+        counter = {"etc_invoice": self._invoice_counter, "etc_import_batch": self._import_batch_counter,
+                   "etc_business_batch": self._business_batch_counter}[prefix]
+        return f"{prefix}_{counter:04d}"
+
+
+    def preview_import_zips(self, uploads):
+        manifest = etc_service_module.build_etc_archive_manifest(uploads)
+        result, audit, files = self.inspect_import_zips(uploads, manifest=manifest)
+        if not hasattr(self, "_fixture_previews"):
+            self._fixture_previews = {}
+        session_id = f"fixture-session-{len(self._fixture_previews) + 1}"
+        self._fixture_previews[session_id] = (uploads, manifest, None)
+        return {"sessionId": session_id, **self.import_result_payload(result), "audit": audit.to_payload(), "files": files}
+
+    def confirm_import_session(self, session_id):
+        uploads, manifest, result = self._fixture_previews[session_id]
+        if result is None:
+            result = self._process_import_zips(uploads, manifest=manifest, persist=True, import_session_id=session_id)
+            self._fixture_previews[session_id] = (uploads, manifest, result)
+        return result
+
+    def preview_business_batch_import_zips(self, batch_id, uploads, *, expected_version=None):
+        batch = self._get_business_batch_mutable(batch_id)
+        self._assert_business_batch_version(batch, expected_version)
+        self._assert_business_batch_allows_import(batch)
+        return {**self.preview_import_zips(uploads), "businessBatch": self.business_batch_payload(batch)}
+
+    def confirm_business_batch_import(self, batch_id, session_id, **kwargs):
+        if "uploads" not in kwargs:
+            uploads, manifest, _ = self._fixture_previews[session_id]
+            kwargs.update(uploads=uploads, manifest=manifest)
+        return super().confirm_business_batch_import(batch_id, session_id, **kwargs)
+
+
+def seed_business_batch(app, created, body, headers):
+    """Seed domain facts for downstream-page tests; no retired HTTP import route."""
+    from fin_ops_platform.app.server import Response
+    from fin_ops_platform.services.postgres_repositories.common import serialize_value
+    _fields, files, error = app._load_multipart_body(body, headers)
+    assert error is None
+    uploads = [UploadedEtcZipFile(file.file_name, file.content) for file in files]
+    manifest = etc_service_module.build_etc_archive_manifest(uploads)
+    batch, result = app._etc_service.confirm_business_batch_import(
+        created["businessBatchId"], "fixture-business-seed", uploads=uploads, manifest=manifest, atomic=True,
+        expected_version=created["version"], idempotency_key="fixture-business-seed")
+    payload = {"data": {"businessBatch": app._etc_service.business_batch_payload(batch),
+                        "importResult": app._etc_service.import_result_payload(result)}}
+    response = Response(200, json.dumps(serialize_value(payload)))
+    return response, response
+
+
+def _preview_version(app, session_id):
+    jobs = app._test_import_queue.list_by_session(session_id)
+    return jobs[0].version if jobs else 1
+
+
+def prepare_preview_request(app, **kwargs):
+    """Drive the accepted request and its explicit worker preparation in API fixtures."""
+    from dataclasses import replace
+    response = app.handle_request("POST", "/api/etc/import/preview", **kwargs)
+    if response.status_code != 202:
+        return response
+    accepted = json.loads(response.body)
+    app._test_import_queue.process_all()
+    job = app._test_import_queue.get_job(accepted["job"]["import_job_id"])
+    if job.status not in {"awaiting_confirmation", "needs_review"}:
+        raise AssertionError(job)
+    result_response = app.handle_request("GET", f"/api/background-jobs/{accepted['job']['job_id']}/result")
+    assert result_response.status_code == 200
+    preview = dict(json.loads(result_response.body)["result"]["preview"])
+    preview["preview_version"] = job.version
+    return replace(response, body=json.dumps(preview))
+
 
 TICKET_ROOT_TEXT = """
 票根网通行明细
@@ -2324,6 +2402,14 @@ class EtcServiceTests(unittest.TestCase):
 
 
 class EtcApiTests(unittest.TestCase):
+    def test_retired_business_batch_import_routes_cannot_write_facts(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            for action in ("preview", "confirm"):
+                response = app.handle_request("POST", f"/api/etc/business-batches/old/etc-import/{action}", "{}")
+                self.assertEqual(response.status_code, 404)
+            self.assertEqual(app._etc_service.list_import_batches(), [])
+
     def test_etc_query_services_reload_worker_writes_from_postgres_state_store(self) -> None:
         class SharedPostgresEtcStateStore(NarrowTaskStoreMixin, MemoryEtcStateStore):
             storage_backend = "postgres"
@@ -2467,7 +2553,7 @@ class EtcApiTests(unittest.TestCase):
             {"outer.zip": content},
             fields={"task_id": task_id},
         )
-        preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+        preview_response = prepare_preview_request(app, body=body, headers=headers)
         preview_payload = json.loads(preview_response.body)
         return task_id, preview_response, preview_payload
 
@@ -2566,12 +2652,12 @@ class EtcApiTests(unittest.TestCase):
             },
             fields={"task_id": task_id},
         )
-        preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+        preview_response = prepare_preview_request(app, body=body, headers=headers)
         preview_payload = json.loads(preview_response.body)
         confirm_response = app.handle_request(
             "POST",
             "/api/etc/import/confirm",
-            json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+            json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id, "preview_version": _preview_version(app, preview_payload["sessionId"])}),
         )
         self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
         business_batch = json.loads(
@@ -2597,12 +2683,12 @@ class EtcApiTests(unittest.TestCase):
             },
             fields={"task_id": task_id},
         )
-        preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+        preview_response = prepare_preview_request(app, body=body, headers=headers)
         preview_payload = json.loads(preview_response.body)
         confirm_response = app.handle_request(
             "POST",
             "/api/etc/import/confirm",
-            json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+            json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id, "preview_version": _preview_version(app, preview_payload["sessionId"])}),
         )
         self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
         task = app._etc_reconciliation_task_service.get_task(task_id)
@@ -3723,7 +3809,7 @@ class EtcApiTests(unittest.TestCase):
             confirm_response = app.handle_request(
                 "POST",
                 "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id, "preview_version": _preview_version(app, preview_payload["sessionId"])}),
             )
             self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
             imported_task = app._etc_reconciliation_task_service.get_task(task_id)
@@ -3752,7 +3838,7 @@ class EtcApiTests(unittest.TestCase):
             confirm_response = app.handle_request(
                 "POST",
                 "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id, "preview_version": _preview_version(app, preview_payload["sessionId"])}),
             )
             self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
             imported_task = app._etc_reconciliation_task_service.get_task(task_id)
@@ -3799,21 +3885,7 @@ class EtcApiTests(unittest.TestCase):
                 {"invoices.zip": etc_zip(["ETC001"])},
                 {"expectedVersion": str(created["version"])},
             )
-            preview_response = app.handle_request(
-                "POST",
-                f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/preview",
-                preview_body,
-                preview_headers,
-            )
-            preview = json.loads(preview_response.body)["data"]
-            confirm_response = app.handle_request(
-                "POST",
-                f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/confirm",
-                json.dumps({
-                    "sessionId": preview["sessionId"],
-                    "expectedVersion": preview["businessBatch"]["version"],
-                }),
-            )
+            preview_response, confirm_response = seed_business_batch(app, created, preview_body, preview_headers)
             confirmed = json.loads(confirm_response.body)["data"]["businessBatch"]
             draft_response = app.handle_request(
                 "POST",
@@ -3852,27 +3924,12 @@ class EtcApiTests(unittest.TestCase):
                     {"invoices.zip": etc_zip(["ETC001"])},
                     {"expectedVersion": str(created["version"])},
                 )
-                preview_response = app.handle_request(
-                    "POST",
-                    f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/preview",
-                    preview_body,
-                    preview_headers,
-                )
-                preview = json.loads(preview_response.body)["data"]
-                confirm_response = app.handle_request(
-                    "POST",
-                    f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/confirm",
-                    json.dumps({
-                        "sessionId": preview["sessionId"],
-                        "expectedVersion": preview["businessBatch"]["version"],
-                    }),
-                )
+                preview_response, confirm_response = seed_business_batch(app, created, preview_body, preview_headers)
                 detail_response = app.handle_request("GET", f"/api/etc/business-batches/{created['businessBatchId']}")
             finally:
                 app.close()
 
         self.assertEqual(create_response.status_code, 201)
-        self.assertEqual(preview_response.status_code, 200)
         self.assertEqual(confirm_response.status_code, 200)
         detail = json.loads(detail_response.body)["data"]["businessBatch"]
         self.assertEqual(detail["invoiceItems"][0]["invoice_number"], "ETC001")
@@ -3899,21 +3956,7 @@ class EtcApiTests(unittest.TestCase):
                     {"invoices.zip": etc_zip(invoice_numbers)},
                     {"expectedVersion": str(created["version"])},
                 )
-                preview_response = app.handle_request(
-                    "POST",
-                    f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/preview",
-                    preview_body,
-                    preview_headers,
-                )
-                preview = json.loads(preview_response.body)["data"]
-                confirm_response = app.handle_request(
-                    "POST",
-                    f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/confirm",
-                    json.dumps({
-                        "sessionId": preview["sessionId"],
-                        "expectedVersion": preview["businessBatch"]["version"],
-                    }),
-                )
+                preview_response, confirm_response = seed_business_batch(app, created, preview_body, preview_headers)
                 with (
                     patch.object(
                         app._state_store,
@@ -3938,7 +3981,6 @@ class EtcApiTests(unittest.TestCase):
                 app.close()
 
         self.assertEqual(create_response.status_code, 201)
-        self.assertEqual(preview_response.status_code, 200)
         self.assertEqual(confirm_response.status_code, 200)
         self.assertEqual(list_response.status_code, 200)
         self.assertLessEqual(len(list_response.body.encode("utf-8")), 250 * 1024)
@@ -4218,21 +4260,7 @@ class EtcApiTests(unittest.TestCase):
                 {"invoices.zip": etc_zip(["ETC001"])},
                 {"expectedVersion": str(created["version"])},
             )
-            preview_response = app.handle_request(
-                "POST",
-                f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/preview",
-                preview_body,
-                preview_headers,
-            )
-            preview = json.loads(preview_response.body)["data"]
-            confirm_response = app.handle_request(
-                "POST",
-                f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/confirm",
-                json.dumps({
-                    "sessionId": preview["sessionId"],
-                    "expectedVersion": preview["businessBatch"]["version"],
-                }),
-            )
+            preview_response, confirm_response = seed_business_batch(app, created, preview_body, preview_headers)
             confirmed = json.loads(confirm_response.body)["data"]["businessBatch"]
             draft_response = app.handle_request(
                 "POST",
@@ -4253,7 +4281,6 @@ class EtcApiTests(unittest.TestCase):
             }
 
         self.assertEqual(create_response.status_code, 201)
-        self.assertEqual(preview_response.status_code, 200)
         self.assertEqual(confirm_response.status_code, 200)
         self.assertEqual(draft_response.status_code, 200)
         self.assertEqual(draft_payload["status"], "oa_confirmation_pending")
@@ -4331,14 +4358,10 @@ class EtcApiTests(unittest.TestCase):
                 app._etc_service.oa_client = FakeEtcOAClient()
                 app._etc_service.import_zips([UploadedEtcZipFile("draft.zip", etc_zip(["ETC001"]))])
                 batch = app._etc_service.create_business_batch(task_id="ETC-TASK-MANUAL")
+                uploads = [UploadedEtcZipFile("manual.zip", etc_zip(["ETC002"]))]
                 imported, _ = app._etc_service.confirm_business_batch_import(
-                    batch.business_batch_id,
-                    app._etc_service.preview_business_batch_import_zips(
-                        batch.business_batch_id,
-                        [UploadedEtcZipFile("manual.zip", etc_zip(["ETC002"]))],
-                        expected_version=batch.version,
-                    )["sessionId"],
-                    expected_version=batch.version,
+                    batch.business_batch_id, "fixture-manual", expected_version=batch.version,
+                    uploads=uploads, manifest=etc_service_module.build_etc_archive_manifest(uploads), atomic=True,
                 )
                 drafted = app._etc_service.create_business_batch_oa_draft(
                     imported.business_batch_id,
@@ -4404,11 +4427,11 @@ class EtcApiTests(unittest.TestCase):
             app._etc_service.oa_client = FakeEtcOAClient()
 
             task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001", "ETC002"])
-            self.assertEqual(preview_response.status_code, 200)
+            self.assertEqual(preview_response.status_code, 202)
             confirm_response = app.handle_request(
                 "POST",
                 "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id, "preview_version": _preview_version(app, preview_payload["sessionId"])}),
             )
             self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
             business_batches = json.loads(
@@ -4479,21 +4502,7 @@ class EtcApiTests(unittest.TestCase):
                 },
                 fields={"expectedVersion": str(created["version"])},
             )
-            preview_response = app.handle_request(
-                "POST",
-                f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/preview",
-                body,
-                headers,
-            )
-            preview_payload = json.loads(preview_response.body)["data"]
-            confirm_response = app.handle_request(
-                "POST",
-                f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/confirm",
-                json.dumps({
-                    "sessionId": preview_payload["sessionId"],
-                    "expectedVersion": preview_payload["businessBatch"]["version"],
-                }),
-            )
+            preview_response, confirm_response = seed_business_batch(app, created, body, headers)
             business_batch = json.loads(confirm_response.body)["data"]["businessBatch"]
             draft_response = app.handle_request(
                 "POST",
@@ -4603,11 +4612,11 @@ class EtcApiTests(unittest.TestCase):
             app._etc_service.oa_client = FakeEtcOAClient()
 
             task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001", "ETC002"])
-            self.assertEqual(preview_response.status_code, 200)
+            self.assertEqual(preview_response.status_code, 202)
             confirm_response = app.handle_request(
                 "POST",
                 "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id, "preview_version": _preview_version(app, preview_payload["sessionId"])}),
             )
             self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
             business_batch = json.loads(
@@ -4667,11 +4676,11 @@ class EtcApiTests(unittest.TestCase):
             app._etc_service.oa_client = FakeEtcOAClient()
 
             task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001", "ETC002"])
-            self.assertEqual(preview_response.status_code, 200)
+            self.assertEqual(preview_response.status_code, 202)
             confirm_response = app.handle_request(
                 "POST",
                 "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id, "preview_version": _preview_version(app, preview_payload["sessionId"])}),
             )
             self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
             business_batch = json.loads(
@@ -4844,11 +4853,11 @@ class EtcApiTests(unittest.TestCase):
             app._etc_service.oa_client = FakeEtcOAClient()
 
             task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001", "ETC002"])
-            self.assertEqual(preview_response.status_code, 200)
+            self.assertEqual(preview_response.status_code, 202)
             confirm_response = app.handle_request(
                 "POST",
                 "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id, "preview_version": _preview_version(app, preview_payload["sessionId"])}),
             )
             self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
             business_batch = json.loads(
@@ -4927,11 +4936,11 @@ class EtcApiTests(unittest.TestCase):
             app._etc_service.oa_client = FakeEtcOAClient()
 
             task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001", "ETC002"])
-            self.assertEqual(preview_response.status_code, 200)
+            self.assertEqual(preview_response.status_code, 202)
             confirm_response = app.handle_request(
                 "POST",
                 "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id, "preview_version": _preview_version(app, preview_payload["sessionId"])}),
             )
             self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
             business_batch = json.loads(
@@ -5302,23 +5311,21 @@ class EtcApiTests(unittest.TestCase):
                 fields={"task_id": task_id},
             )
 
-            missing_task_response = app.handle_request(
-                "POST",
-                "/api/etc/import/preview",
+            missing_task_response = prepare_preview_request(app,
                 body=missing_task_body,
                 headers=missing_task_headers,
             )
-            preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+            preview_response = prepare_preview_request(app, body=body, headers=headers)
             preview_payload = json.loads(preview_response.body)
             confirm_response = app.handle_request(
                 "POST",
                 "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id, "preview_version": _preview_version(app, preview_payload["sessionId"])}),
             )
             retry_confirm_response = app.handle_request(
                 "POST",
                 "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id, "preview_version": _preview_version(app, preview_payload["sessionId"])}),
             )
             completed_job = self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
             invoices = json.loads(app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20").body)
@@ -5327,7 +5334,7 @@ class EtcApiTests(unittest.TestCase):
 
         self.assertEqual(missing_task_response.status_code, 400)
         self.assertEqual(json.loads(missing_task_response.body)["error"], "task_id_required")
-        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(preview_response.status_code, 202)
         self.assertEqual(
             {item["invoiceNumber"]: item["filterStatus"] for item in preview_payload["reconciliationFilter"]["items"]},
             {"ETC001": "included", "EXTRA": "excluded_extra_zip_invoice"},
@@ -5357,7 +5364,7 @@ class EtcApiTests(unittest.TestCase):
             confirm_response = app.handle_request(
                 "POST",
                 "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id, "preview_version": _preview_version(app, preview_payload["sessionId"])}),
             )
             self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
             imported_task = app._etc_reconciliation_task_service.get_task(task_id)
@@ -5390,9 +5397,7 @@ class EtcApiTests(unittest.TestCase):
                 },
                 fields={"task_id": task_id},
             )
-            reimport_preview_response = app.handle_request(
-                "POST",
-                "/api/etc/import/preview",
+            reimport_preview_response = prepare_preview_request(app,
                 body=reimport_body,
                 headers=reimport_headers,
             )
@@ -5400,7 +5405,7 @@ class EtcApiTests(unittest.TestCase):
             reimport_confirm_response = app.handle_request(
                 "POST",
                 "/api/etc/import/confirm",
-                json.dumps({"sessionId": reimport_preview["sessionId"], "taskId": task_id}),
+                json.dumps({"sessionId": reimport_preview["sessionId"], "taskId": task_id, "preview_version": _preview_version(app, reimport_preview["sessionId"])}),
             )
             reimport_job = self._wait_for_job(app, json.loads(reimport_confirm_response.body)["job"]["job_id"])
             final_task_payload = json.loads(app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}").body)
@@ -5416,7 +5421,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertNotIn("removedCanonicalInvoiceCount", removed_payload)
         self.assertEqual(invoices_after_remove["total"], 0)
         self.assertEqual(canonical_etc_after_remove, [])
-        self.assertEqual(reimport_preview_response.status_code, 200)
+        self.assertEqual(reimport_preview_response.status_code, 202)
         self.assertEqual(reimport_preview["summary"]["imported"], 1)
         self.assertEqual(reimport_confirm_response.status_code, 202)
         self.assertEqual(reimport_job["status"], "succeeded")
@@ -5488,12 +5493,12 @@ class EtcApiTests(unittest.TestCase):
                 fields={"task_id": confirmed.task_id},
             )
 
-            preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+            preview_response = prepare_preview_request(app, body=body, headers=headers)
             preview_payload = json.loads(preview_response.body)
             confirm_response = app.handle_request(
                 "POST",
                 "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": confirmed.task_id}),
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": confirmed.task_id, "preview_version": _preview_version(app, preview_payload["sessionId"])}),
             )
             completed_job = self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
             invoices = json.loads(app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20").body)
@@ -5504,7 +5509,7 @@ class EtcApiTests(unittest.TestCase):
                 app.handle_request("GET", "/api/etc/business-batches?bucket=unsubmitted&page=1&page_size=100").body
             )
 
-        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(preview_response.status_code, 202)
         self.assertEqual(preview_payload["reconciliationFilter"]["allowedInvoiceNumbers"], ["ETC2950", "ETC4175"])
         self.assertEqual(preview_payload["summary"]["imported"], 2)
         self.assertEqual(preview_payload["audit"]["original_count"], 3)
@@ -5537,7 +5542,7 @@ class EtcApiTests(unittest.TestCase):
                 validated_preview = app._etc_import_preview_service.validate(
                     session_id=session_id,
                     task_id=task_id,
-                    imported_by="test_finops_user",
+                    imported_by="test_finops_user", load_manifest=True,
                 )
                 app._etc_reconciliation_task_service.begin_import(
                     task_id=task_id,
@@ -5547,7 +5552,7 @@ class EtcApiTests(unittest.TestCase):
                     actor="alice",
                 )
                 app._etc_reconciliation_task_service.recover_interrupted_imports(active_import_session_ids=[])
-                business_batch = app._import_processing_service.resolve_task_etc_business_batch(
+                business_batch = app._etc_service.create_business_batch(
                     task_id=task_id,
                     owner_user_id="web_finance_user",
                     idempotency_key=f"etc_business_task_import:{task_id}:{session_id}",
@@ -5557,7 +5562,7 @@ class EtcApiTests(unittest.TestCase):
                     session_id,
                     expected_version=business_batch.version,
                     idempotency_key=f"etc_import_session:{session_id}",
-                    uploads=list(validated_preview.uploads),
+                    uploads=list(validated_preview.uploads), manifest=validated_preview.manifest,
                 )
 
                 draft_payload = app._etc_business_application_service().create_oa_draft_payload(
@@ -5571,7 +5576,7 @@ class EtcApiTests(unittest.TestCase):
             finally:
                 app.close()
 
-        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(preview_response.status_code, 202)
         self.assertEqual(result.failed, 0)
         self.assertEqual(result.imported, 1)
         self.assertIn("businessBatch", draft_payload)
@@ -5585,7 +5590,7 @@ class EtcApiTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             body, headers = multipart({"invoices.zip": etc_zip(["ETC001"])})
 
-            preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+            preview_response = prepare_preview_request(app, body=body, headers=headers)
             confirm_response = app.handle_request(
                 "POST",
                 "/api/etc/import/confirm",
@@ -5611,10 +5616,10 @@ class EtcApiTests(unittest.TestCase):
                 fields={"task_id": task_id},
             )
 
-            preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+            preview_response = prepare_preview_request(app, body=body, headers=headers)
             preview_payload = json.loads(preview_response.body)
 
-        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(preview_response.status_code, 202)
         self.assertEqual(preview_payload["summary"]["imported"], 1)
         self.assertEqual(
             {item["invoiceNumber"]: item["filterStatus"] for item in preview_payload["reconciliationFilter"]["items"]},
@@ -5654,17 +5659,17 @@ class EtcApiTests(unittest.TestCase):
                 fields={"task_id": task.task_id},
             )
 
-            preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+            preview_response = prepare_preview_request(app, body=body, headers=headers)
             preview_payload = json.loads(preview_response.body)
             confirm_response = app.handle_request(
                 "POST",
                 "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task.task_id}),
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task.task_id, "preview_version": _preview_version(app, preview_payload["sessionId"])}),
             )
             completed_job = self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
             invoices = json.loads(app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20").body)
 
-        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(preview_response.status_code, 202)
         self.assertEqual(preview_payload["summary"]["imported"], 0)
         self.assertEqual(
             {item["invoiceNumber"]: item["filterStatus"] for item in preview_payload["reconciliationFilter"]["items"]},
@@ -5682,14 +5687,14 @@ class EtcApiTests(unittest.TestCase):
             confirm_response = app.handle_request(
                 "POST",
                 "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id, "preview_version": _preview_version(app, preview_payload["sessionId"])}),
             )
             confirm_payload = json.loads(confirm_response.body)
             job = confirm_payload["job"]
             completed_job = self._wait_for_job(app, job["job_id"])
             query_response = app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20")
 
-        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(preview_response.status_code, 202)
         self.assertEqual(json.loads(before_confirm_response.body)["total"], 0)
         self.assertEqual(confirm_response.status_code, 202)
         self.assertEqual(job["type"], "etc_invoice_import")
@@ -5704,6 +5709,37 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(completed_job["result_summary"]["imported"], 2)
         self.assertEqual(completed_job["result_summary"]["total"], 2)
         self.assertEqual(json.loads(query_response.body)["total"], 2)
+
+    def test_stale_etc_confirm_exposes_explicit_reprepare_action(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task_id, _, preview = self._preview_task_zip(app, ["ETC001"])
+            session_id = preview["sessionId"]
+            app._etc_reconciliation_task_service._tasks[task_id].version += 1
+            response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({
+                "sessionId": session_id, "taskId": task_id, "preview_version": _preview_version(app, session_id)}))
+            self.assertEqual(response.status_code, 409)
+            job = app._import_workflow().session_job(session_id, "test_finops_user", "etc_invoice_import.confirm")
+            self.assertEqual(job.status, "needs_review")
+            self.assertEqual(json.loads(app.handle_request("GET", f"/api/background-jobs/import:{job.import_job_id}").body)["job"]["retry_mode"], "reprepare")
+
+    def test_etc_preparing_upload_can_be_canceled_idempotently_before_worker(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task_id = self._create_ready_reconciliation_task(app)
+            body, headers = multipart({"etc.zip": zip_bytes({"invoice.xml": etc_xml("ETC001")})},
+                                      fields={"task_id": task_id})
+            accepted = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+            self.assertEqual(accepted.status_code, 202)
+            job = json.loads(accepted.body)["job"]
+            session_id = job["source"]["session_id"]
+            for _ in range(2):
+                response = app.handle_request("POST", "/api/etc/import/discard", json.dumps({"sessionId": session_id}))
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(json.loads(response.body)["status"], "reverted")
+            result = json.loads(app.handle_request("GET", f"/api/background-jobs/{job['job_id']}").body)["job"]
+            self.assertEqual(result["status"], "cancelled")
+            self.assertEqual(app._etc_service.list_import_batches(), [])
 
     def test_etc_preview_can_be_discarded_idempotently_before_confirm(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -5724,15 +5760,15 @@ class EtcApiTests(unittest.TestCase):
             confirm_response = app.handle_request(
                 "POST",
                 "/api/etc/import/confirm",
-                json.dumps({"sessionId": session_id, "taskId": task_id}),
+                json.dumps({"sessionId": session_id, "taskId": task_id, "preview_version": _preview_version(app, session_id)}),
             )
 
-        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(preview_response.status_code, 202)
         self.assertEqual(discard_response.status_code, 200)
         self.assertEqual(json.loads(discard_response.body)["status"], "reverted")
         self.assertEqual(repeated_response.status_code, 200)
         self.assertEqual(confirm_response.status_code, 409)
-        self.assertEqual(json.loads(confirm_response.body)["error"], "stale_reconciliation_task_preview")
+        self.assertEqual(json.loads(confirm_response.body)["error"], "preview_stale")
 
     def test_etc_import_links_existing_canonical_invoices_and_dedupes_manual_invoice(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -5749,7 +5785,7 @@ class EtcApiTests(unittest.TestCase):
                         "seller_tax_no": "915300007194052520",
                         "buyer_name": "云南溯源科技有限公司",
                         "buyer_tax_no": "915300007194052521",
-                        "amount": "13.07",
+                        "amount": "12.68",
                         "total_with_tax": "13.07",
                         "tax_amount": "0.39",
                         "invoice_date": "2026-02-27",
@@ -5759,7 +5795,7 @@ class EtcApiTests(unittest.TestCase):
             app._import_service.confirm_import(manual_preview.id)
             task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001"])
             session_id = preview_payload["sessionId"]
-            confirm_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id, "taskId": task_id}))
+            confirm_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id, "taskId": task_id, "preview_version": _preview_version(app, session_id)}))
             job = json.loads(confirm_response.body)["job"]
             self._wait_for_job(app, job["job_id"])
             invoices = app._import_service.list_invoices()
@@ -5779,7 +5815,7 @@ class EtcApiTests(unittest.TestCase):
 
             task_id, preview_response, _preview_payload = self._preview_task_zip(app, ["ETC001", "ETC002"])
             session_id = json.loads(preview_response.body)["sessionId"]
-            confirm_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id, "taskId": task_id}))
+            confirm_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id, "taskId": task_id, "preview_version": _preview_version(app, session_id)}))
             job = json.loads(confirm_response.body)["job"]
             self._wait_for_job(app, job["job_id"])
             invoices = app._import_service.list_invoices()
@@ -5811,12 +5847,12 @@ class EtcApiTests(unittest.TestCase):
                 fields={"task_id": task_id},
             )
 
-            preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+            preview_response = prepare_preview_request(app, body=body, headers=headers)
             preview_payload = json.loads(preview_response.body)
             confirm_response = app.handle_request(
                 "POST",
                 "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id, "preview_version": _preview_version(app, preview_payload["sessionId"])}),
             )
             job = json.loads(confirm_response.body)["job"]
             self._wait_for_job(app, job["job_id"])
@@ -5828,7 +5864,7 @@ class EtcApiTests(unittest.TestCase):
             str(item.get("invoiceNumber")): str(item.get("filterStatus"))
             for item in preview_payload["items"]
         }
-        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(preview_response.status_code, 202)
         self.assertEqual(confirm_response.status_code, 202)
         self.assertEqual(filter_status_by_invoice["ETC001"], "included")
         self.assertEqual(filter_status_by_invoice["ETC999"], "excluded_extra_zip_invoice")
@@ -5836,7 +5872,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual([invoice.invoice_number for invoice in stored_etc_invoices], ["ETC001"])
         self.assertEqual(canonical_invoices, [])
 
-    def test_etc_import_confirm_returns_preview_stale_when_canonical_invoice_changes_after_preview(self) -> None:
+    def test_etc_import_commit_links_canonical_invoice_created_after_preview(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
 
@@ -5853,7 +5889,7 @@ class EtcApiTests(unittest.TestCase):
                         "seller_tax_no": "915300007194052520",
                         "buyer_name": "云南溯源科技有限公司",
                         "buyer_tax_no": "915300007194052521",
-                        "amount": "13.07",
+                        "amount": "12.68",
                         "total_with_tax": "13.07",
                         "tax_amount": "0.39",
                         "invoice_date": "2026-02-27",
@@ -5865,15 +5901,16 @@ class EtcApiTests(unittest.TestCase):
             confirm_response = app.handle_request(
                 "POST",
                 "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id, "preview_version": _preview_version(app, preview_payload["sessionId"])}),
             )
+            completed = self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
             query_response = app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20")
 
         self.assertEqual(preview_payload["audit"]["importable_count"], 1)
         self.assertEqual(preview_payload["audit"]["merge_count"], 0)
-        self.assertEqual(confirm_response.status_code, 409)
-        self.assertEqual(json.loads(confirm_response.body)["error"], "preview_stale")
-        self.assertEqual(json.loads(query_response.body)["total"], 0)
+        self.assertEqual(confirm_response.status_code, 202)
+        self.assertEqual(completed["status"], "succeeded")
+        self.assertEqual(json.loads(query_response.body)["total"], 1)
 
     def test_etc_invoice_api_reports_attachment_existence_flags(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -5881,7 +5918,7 @@ class EtcApiTests(unittest.TestCase):
 
             task_id, preview_response, _preview_payload = self._preview_task_zip(app, ["ETC001"], nested=False)
             session_id = json.loads(preview_response.body)["sessionId"]
-            confirm_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id, "taskId": task_id}))
+            confirm_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id, "taskId": task_id, "preview_version": _preview_version(app, session_id)}))
             job = json.loads(confirm_response.body)["job"]
             self._wait_for_job(app, job["job_id"])
             query_response = app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20")
@@ -5897,10 +5934,10 @@ class EtcApiTests(unittest.TestCase):
 
             task_id, preview_response, _preview_payload = self._preview_task_zip(app, ["ETC001"])
             session_id = json.loads(preview_response.body)["sessionId"]
-            first_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id, "taskId": task_id}))
+            first_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id, "taskId": task_id, "preview_version": _preview_version(app, session_id)}))
             first_job = json.loads(first_response.body)["job"]
             self._wait_for_job(app, first_job["job_id"])
-            second_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id, "taskId": task_id}))
+            second_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id, "taskId": task_id, "preview_version": _preview_version(app, session_id)}))
             second_job = json.loads(second_response.body)["job"]
             query_response = app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20")
 
@@ -5924,7 +5961,7 @@ class EtcApiTests(unittest.TestCase):
             first_response = app.handle_request(
                 "POST",
                 "/api/etc/import/confirm",
-                json.dumps({"sessionId": session_id, "taskId": task_id}),
+                json.dumps({"sessionId": session_id, "taskId": task_id, "preview_version": _preview_version(app, session_id)}),
             )
             first_job = json.loads(first_response.body)["job"]
             failed_job = self._wait_for_job(app, first_job["job_id"])
@@ -5933,7 +5970,7 @@ class EtcApiTests(unittest.TestCase):
             second_response = app.handle_request(
                 "POST",
                 "/api/etc/import/confirm",
-                json.dumps({"sessionId": session_id, "taskId": task_id}),
+                json.dumps({"sessionId": session_id, "taskId": task_id, "preview_version": _preview_version(app, session_id)}),
             )
             second_job = json.loads(second_response.body)["job"]
             completed_job = self._wait_for_job(app, second_job["job_id"])
@@ -5946,7 +5983,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(completed_job["status"], "succeeded", completed_job)
         self.assertEqual(json.loads(query_response.body)["total"], 1)
 
-    def test_etc_confirm_job_partial_success_when_some_items_fail(self) -> None:
+    def test_etc_confirm_job_rolls_back_all_items_when_one_fails(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001", "ETC002"])
@@ -5967,7 +6004,7 @@ class EtcApiTests(unittest.TestCase):
 
             app._etc_service._upsert_attachment_metadata_from_import = fail_second_required_invoice
 
-            confirm_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id, "taskId": task_id}))
+            confirm_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id, "taskId": task_id, "preview_version": _preview_version(app, session_id)}))
             job = json.loads(confirm_response.body)["job"]
             completed_job = self._wait_for_job(app, job["job_id"])
             query_response = app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20")
@@ -5979,12 +6016,9 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(preview_payload["audit"]["error_count"], 0)
         self.assertEqual(preview_payload["audit"]["skipped_count"], 0)
         self.assertEqual(job["total"], 2)
-        self.assertEqual(completed_job["status"], "partial_success")
-        self.assertEqual(completed_job["current"], 2)
-        self.assertEqual(completed_job["result_summary"]["created"], 1)
-        self.assertEqual(completed_job["result_summary"]["failed"], 1)
-        self.assertEqual(completed_job["result_summary"]["total"], 2)
-        self.assertEqual(json.loads(query_response.body)["total"], 1)
+        self.assertEqual(completed_job["status"], "failed")
+        self.assertIn("synthetic persist failure", completed_job["error"])
+        self.assertEqual(json.loads(query_response.body)["total"], 0)
         self.assertEqual(json.loads(task_response.body)["status"], "ready_for_import")
 
     def test_reconciliation_backed_oa_draft_uploads_supplements_and_uses_oa_total(self) -> None:
@@ -6009,7 +6043,7 @@ class EtcApiTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             body, headers = multipart({"not-a-zip.txt": b"plain text"})
 
-            response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+            response = prepare_preview_request(app, body=body, headers=headers)
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(json.loads(response.body)["error"], "invalid_etc_import_request")

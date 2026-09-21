@@ -37,6 +37,20 @@ afterEach(() => {
   document.cookie = "Admin-Token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
 });
 
+function acceptPreparation(fetchMock: ReturnType<typeof vi.fn>) {
+  const original = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation(async (...args: unknown[]) => {
+    const response = await original(...args) as Response;
+    if (args[0] === "/imports/files/preview" || args[0] === "/imports/files/retry") {
+      const preview = await response.clone().json();
+      return new Response(JSON.stringify({ job: { job_id: "import:job-1", version: 2,
+        status: "awaiting_confirmation", source: { session_id: preview.session.id } } }),
+        { status: 202, headers: { "Content-Type": "application/json" } });
+    }
+    return response.clone();
+  });
+}
+
 describe("imports api", () => {
   test("serializes manual bank entries and maps the server-authoritative preview", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
@@ -330,6 +344,7 @@ describe("imports api", () => {
     );
     global.fetch = fetchMock as typeof fetch;
 
+    acceptPreparation(fetchMock);
     await previewImportFiles([
       new File(["demo"], "销项发票.xlsx", {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -375,6 +390,7 @@ describe("imports api", () => {
     );
     global.fetch = fetchMock as typeof fetch;
 
+    acceptPreparation(fetchMock);
     await retryImportFiles("import_session_0001", ["import_file_0001"], {
       import_file_0001: {
         templateCode: "bank_statement",
@@ -396,7 +412,7 @@ describe("imports api", () => {
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+      3,
       "/imports/files/confirm",
       expect.objectContaining({
         method: "POST",
@@ -405,7 +421,7 @@ describe("imports api", () => {
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
+      4,
       "/imports/files/sessions/import_session_0001",
       expect.objectContaining({
         method: "GET",
@@ -414,7 +430,7 @@ describe("imports api", () => {
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      4,
+      5,
       "/imports/files/discard",
       expect.objectContaining({ method: "POST", credentials: "include" }),
     );
@@ -535,6 +551,7 @@ describe("imports api", () => {
     );
     global.fetch = fetchMock as typeof fetch;
 
+    acceptPreparation(fetchMock);
     const payload = await previewImportFiles([
       new File(["demo"], "建行流水.xlsx", {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

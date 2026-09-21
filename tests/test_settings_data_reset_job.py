@@ -10,7 +10,6 @@ from unittest.mock import patch
 from tests.app_test_support import (
     build_local_state_application,
     configure_access_control,
-    install_durable_import_queue,
 )
 from fin_ops_platform.services.background_job_service import BackgroundJobService
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
@@ -24,6 +23,27 @@ from fin_ops_platform.services.settings_data_reset_service import (
     SettingsDataResetResult,
 )
 from fin_ops_platform.services.state_store import ApplicationStateStore
+
+
+class SettingsQueueFixture:
+    def __init__(self):
+        self.events = []
+        self.fail_next_enqueue = False
+
+    def enqueue(self, **kwargs):
+        if self.fail_next_enqueue:
+            self.fail_next_enqueue = False
+            raise RuntimeError("test settings queue unavailable")
+        event = SimpleNamespace(event_id=f"settings-event-{len(self.events)+1}", **kwargs)
+        self.events.append(event)
+        return event
+
+
+def install_settings_queue(app):
+    queue = SettingsQueueFixture()
+    values = dict(vars(app._runtime_repositories))
+    app._runtime_repositories = SimpleNamespace(**{**values, "queue_repository": queue})
+    return queue
 
 
 class SettingsDataResetJobTests(unittest.TestCase):
@@ -93,7 +113,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
     def test_api_enqueues_durable_reset_without_persisting_password(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
-            queue = install_durable_import_queue(app)
+            queue = install_settings_queue(app)
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="admin-id",
                 username="YNSYLP005",
@@ -124,7 +144,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
     def test_api_rejects_non_admin_without_enqueuing_reset(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
-            queue = install_durable_import_queue(app)
+            queue = install_settings_queue(app)
             configure_access_control(app, usernames=["YNSYLP006"])
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="finance-id",
@@ -154,7 +174,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
     def test_api_rejects_reset_without_reason_or_recovery_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
-            queue = install_durable_import_queue(app)
+            queue = install_settings_queue(app)
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="admin-id", username="YNSYLP005", nickname="管理员", display_name="管理员"
             )
@@ -179,7 +199,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
     def test_api_rejects_wrong_password_without_enqueuing_or_echoing_secret(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
-            queue = install_durable_import_queue(app)
+            queue = install_settings_queue(app)
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="admin-id",
                 username="YNSYLP005",
@@ -204,7 +224,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
     def test_api_rejects_a_second_active_reset(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
-            queue = install_durable_import_queue(app)
+            queue = install_settings_queue(app)
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="admin-id", username="YNSYLP005", nickname="管理员", display_name="管理员"
             )
@@ -224,7 +244,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
     def test_api_replays_same_reset_request_without_duplicate_event(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
-            queue = install_durable_import_queue(app)
+            queue = install_settings_queue(app)
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="admin-id", username="YNSYLP005", nickname="管理员", display_name="管理员"
             )
@@ -245,7 +265,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
     def test_api_fails_closed_when_durable_queue_is_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
-            queue = install_durable_import_queue(app)
+            queue = install_settings_queue(app)
             queue.fail_next_enqueue = True
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="admin-id", username="YNSYLP005", nickname="管理员", display_name="管理员"

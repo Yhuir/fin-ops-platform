@@ -17,15 +17,9 @@ from fin_ops_platform.services.bank_relation_requirement_recalculation import (
 )
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
-from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.etc_service import EtcService
 from fin_ops_platform.services.import_file_service import FileImportService
-from fin_ops_platform.services.import_job_queue import (
-    IMPORT_PROCESS_REQUESTED_EVENT,
-    ImportJobRepository,
-    ImportJobWorker,
-)
 from fin_ops_platform.services.import_processing_service import ImportProcessingService
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.integrations import IntegrationHubService
@@ -44,6 +38,7 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
 from fin_ops_platform.services.postgres_repositories.operations_audit import (
     PostgresOperationsAuditRepository,
 )
+from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import (
     PostgresWorkbenchFormalRelationFactRepository,
@@ -99,13 +94,27 @@ class ImportRuntimeProcessorFactory:
     def __init__(self, *, data_dir: str | Path, connection: Any) -> None:
         self._data_dir = data_dir
         self._connection = connection
+        self._oa_source_adapter: Any = None
 
     def build_processors(self) -> dict[str, Callable[[Any], dict[str, object]]]:
         return {import_type: self._durable_processor(import_type) for import_type in IMPORT_JOB_PROCESSOR_TYPES}
 
     def _durable_processor(self, import_type: str) -> Callable[[Any], dict[str, object]]:
         def process(job: Any) -> dict[str, object]:
-            processor = self._build_processors_from_durable_state().get(import_type)
+            from fin_ops_platform.services.shared_import_processor import SharedImportProcessor
+            if import_type == "tax_certified_import.confirm":
+                return SharedImportProcessor(self._connection).tax_certified(job)
+            if import_type == "oa_manual_import.create":
+                from fin_ops_platform.services.mongo_oa_adapter import load_mongo_oa_settings
+                from fin_ops_platform.services.oa_sync_source_adapter import build_oa_sync_source_adapter
+                if self._oa_source_adapter is None:
+                    settings = load_mongo_oa_settings(self._data_dir)
+                    if settings is None:
+                        raise RuntimeError("OA manual import requires OA source configuration.")
+                    self._oa_source_adapter = build_oa_sync_source_adapter(settings=settings,
+                        attachment_invoice_cache=PostgresOpsTaxEtcRepository(self._connection))
+                return SharedImportProcessor(self._connection, oa_source_adapter=self._oa_source_adapter).oa_manual(job)
+            processor = self._build_processors_from_durable_state(job=job).get(import_type)
             if not callable(processor):
                 raise RuntimeError(f"Import processor is not registered: {import_type}")
             return processor(job)
@@ -118,7 +127,7 @@ class ImportRuntimeProcessorFactory:
         session_id: str,
         selected_file_ids: list[str],
     ) -> dict[str, object]:
-        state_store, _, file_import_service = self._build_file_import_services_from_durable_state()
+        state_store, _, file_import_service = self._build_file_import_services_from_durable_state(session_id=session_id)
         session = file_import_service.retry_session_files(
             session_id=session_id,
             selected_file_ids=selected_file_ids,
@@ -144,7 +153,7 @@ class ImportRuntimeProcessorFactory:
         expected_canonical_reference_count: int = 0,
         canonical_reference_evidence: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
-        state_store, _, file_import_service = self._build_file_import_services_from_durable_state()
+        state_store, _, file_import_service = self._build_file_import_services_from_durable_state(session_id=source_session_id)
         (
             replay_session,
             released_canonical_reference_count,
@@ -170,7 +179,7 @@ class ImportRuntimeProcessorFactory:
         state_store.save_import_delta(
             file_import_service.preview_session_persistence_payload(replay_session.id)
         )
-        processor = self._build_processors_from_durable_state().get("file_import.confirm")
+        processor = self._build_processors_from_durable_state(job=SimpleNamespace(import_type="file_import.confirm", payload={"session_id": replay_session.id})).get("file_import.confirm")
         if not callable(processor):
             raise RuntimeError("File import confirmation processor is not registered.")
         result = processor(
@@ -184,7 +193,7 @@ class ImportRuntimeProcessorFactory:
                 created_by=operator_id,
             )
         )
-        _, _, refreshed_file_import_service = self._build_file_import_services_from_durable_state()
+        _, _, refreshed_file_import_service = self._build_file_import_services_from_durable_state(session_id=replay_session.id)
         refreshed_session = refreshed_file_import_service.get_session(replay_session.id)
         refreshed_files = [item for item in refreshed_session.files if item.id in set(replay_file_ids)]
         return {
@@ -211,37 +220,29 @@ class ImportRuntimeProcessorFactory:
             },
         }
 
-    def _build_processors_from_durable_state(self) -> dict[str, Callable[[Any], dict[str, object]]]:
-        state_store, import_service, file_import_service = self._build_file_import_services_from_durable_state()
+    def _build_processors_from_durable_state(self, *, job: Any = None) -> dict[str, Callable[[Any], dict[str, object]]]:
+        session_id = str(job.payload.get("session_id") or "") if job is not None and job.import_type == "file_import.confirm" else None
+        state_store, import_service, file_import_service = self._build_file_import_services_from_durable_state(session_id=session_id)
 
-        tax_certified_import_service = TaxCertifiedImportService(state_store=state_store)
+        tax_certified_import_service = None
         from fin_ops_platform.services.etc_import_preview_service import EtcImportPreviewService
         from fin_ops_platform.services.etc_import_session_store import build_etc_import_session_store
+        from fin_ops_platform.services.etc_import_uow import EtcImportUow
 
-        etc_import_session_store = build_etc_import_session_store(state_store)
-        etc_service = EtcService(state_store=state_store, import_session_store=etc_import_session_store)
-        etc_service.set_canonical_invoice_key_exists(_canonical_invoice_key_exists(import_service))
-        etc_reconciliation_task_service = EtcReconciliationTaskService(state_store=state_store)
-        etc_import_preview_service = EtcImportPreviewService(
-            etc_service=etc_service,
-            task_service=etc_reconciliation_task_service,
-            session_store=etc_import_session_store,
-        )
-        background_job_service = BackgroundJobService(state_store)
-        category_service = BankTransactionCategoryService.from_snapshot(
-            state_store.load_bank_transaction_categories(),
-            transaction_exists=lambda transaction_id: bool(_bank_transaction_by_id(import_service, transaction_id)),
-        )
-        auto_category_service = BankTransactionAutoCategoryService(category_service=category_service)
-        project_costing_service = _project_costing_service(import_service)
-        app_settings_service = AppSettingsService(
-            state_store,
-            project_costing_service,
-            oa_role_sync_service=OARoleSyncService.from_environment(),
-            bank_transaction_category_service=category_service,
-            bank_transaction_auto_category_service=auto_category_service,
-            audit_service=AuditTrailService(),
-        )
+        etc_service = None
+        etc_reconciliation_task_service = None
+        etc_import_preview_service = None
+        if job is not None and job.import_type == "etc_invoice_import.confirm":
+            etc_import_session_store = build_etc_import_session_store(state_store)
+            etc_service = EtcService(state_store=state_store, load_initial_state=False)
+            etc_service.set_canonical_invoice_key_exists(_canonical_invoice_key_exists(import_service))
+            etc_reconciliation_task_service = EtcReconciliationTaskService(state_store=state_store, load_initial_state=False)
+            etc_import_preview_service = EtcImportPreviewService(
+                etc_service=etc_service,
+                task_service=etc_reconciliation_task_service,
+                session_store=etc_import_session_store,
+            )
+        app_settings_service = _WorkbenchMatchingSettingsReader(state_store)
         import_support = _RuntimeWorkerImportSupport(
             state_store=state_store,
             workbench_source_versions_provider=lambda: _workbench_matching_source_versions(app_settings_service),
@@ -251,40 +252,38 @@ class ImportRuntimeProcessorFactory:
         )
         processing_service = ImportProcessingService(
             file_import_service=file_import_service,
-            tax_certified_import_service=tax_certified_import_service,
             etc_service=etc_service,
             etc_reconciliation_task_service=etc_reconciliation_task_service,
-            background_job_service=background_job_service,
             serialize_value=_serialize_value,
             persist_confirmed_import_delta=import_support.persist_confirmed_import_delta,
+            persist_import_preview_delta=lambda session_id, completion, result_payload: state_store.save_import_preview_with_completion(
+                file_import_service.preview_session_persistence_payload(session_id), completion=completion, result_payload=result_payload
+            ),
             workbench_matching_scope_months_for_import_file_session=_workbench_matching_scope_months_for_import_file_session,
             tax_offset_scope_keys_for_import_file_session=_tax_offset_scope_keys_for_import_file_session,
             bank_scope_keys_for_import_file_session=_bank_scope_keys_for_import_file_session,
             input_invoice_usage_scope_keys_for_import_file_session=_input_invoice_usage_scope_keys_for_import_file_session,
             output_invoice_collection_scope_keys_for_import_file_session=_output_invoice_collection_scope_keys_for_import_file_session,
-            link_etc_import_result_to_existing_invoices=_link_etc_import_result_to_existing_invoices(
-                import_service,
-                etc_service,
-                state_store,
-            ),
             etc_import_preview_service=etc_import_preview_service,
-            oa_manual_import_create_processor=_oa_manual_import_create_processor(state_store=state_store),
+            etc_import_uow=EtcImportUow(connection=self._connection, archive_store=state_store, data_dir=self._data_dir),
         )
         return processing_service.build_import_job_processors()
 
     def _build_file_import_services_from_durable_state(
         self,
+        *, session_id: str | None = None,
     ) -> tuple[Any, ImportNormalizationService, FileImportService]:
         state_store = self._state_store()
         import_fact_repository = getattr(state_store, "import_fact_repository", None)
+        scoped = state_store.load_file_import_session_snapshot(session_id) if session_id else {}
         import_service = ImportNormalizationService.from_snapshot(
-            _call_or_empty(state_store, "load_imports_snapshot"),
+            scoped.get("imports", {}),
             id_registry=state_store,
             fact_repository=import_fact_repository,
         )
         file_import_service = FileImportService.from_snapshot(
             import_service,
-            _call_or_empty(state_store, "load_file_imports_snapshot"),
+            scoped.get("file_imports", {}),
             file_store=state_store,
         )
         return state_store, import_service, file_import_service
@@ -405,6 +404,9 @@ class _WorkbenchMatchingSettingsReader:
         return AppSettingsService.bank_category_relation_policy_snapshot(
             self._settings()
         )["paired_policy"]
+
+    def get_oa_attachment_invoice_promotion_mode(self) -> str:
+        return str(self._settings()["oa_import"]["attachment_invoice_promotion_mode"])
 
     def _settings(self) -> dict[str, Any]:
         return AppSettingsService.normalize_settings_payload(
@@ -560,23 +562,6 @@ def _request_api_runtime_reload() -> None:
     os.kill(pid, signal.SIGHUP)
 
 
-def build_import_job_handler_bundle(
-    *,
-    connection: Any,
-    worker_id: str,
-    processors: dict[str, Callable[[Any], dict[str, object]]],
-) -> RuntimeWorkerHandlerBundle:
-    import_job_repository = ImportJobRepository(connection)
-    import_job_worker = ImportJobWorker(
-        repository=import_job_repository,
-        worker_id=worker_id,
-        processors=processors,
-    )
-    return RuntimeWorkerHandlerBundle(
-        handlers={IMPORT_PROCESS_REQUESTED_EVENT: import_job_worker.handle_runtime_event}
-    )
-
-
 class _RuntimeWorkerImportSupport:
     def __init__(
         self,
@@ -596,6 +581,8 @@ class _RuntimeWorkerImportSupport:
         *,
         import_state_payload: dict[str, Any],
         scope_months: list[str],
+        completion: Any = None,
+        result_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         payload = dict(import_state_payload or {})
         if not payload or set(payload) - {"imports", "file_imports"}:
@@ -615,6 +602,8 @@ class _RuntimeWorkerImportSupport:
                 scope_months=list(scope_months or []),
                 promotion_mode=self._oa_attachment_invoice_promotion_mode_provider(),
                 source_versions=self._workbench_source_versions_provider(),
+                completion=completion,
+                result_payload=result_payload,
             )
         )
 
@@ -759,39 +748,6 @@ def _current_bank_auto_tag_rules_version(app_settings_service: AppSettingsServic
     except Exception:
         return 1
 
-
-def _link_etc_import_result_to_existing_invoices(
-    import_service: Any,
-    etc_service: Any,
-    state_store: Any,
-) -> Callable[[Any], list[str]]:
-    persist = getattr(state_store, "save_invoice_etc_metadata", None)
-    if not callable(persist):
-        raise RuntimeError("ETC import processing requires the canonical invoice metadata persistence port.")
-    link_service = EtcExistingInvoiceLinkService(
-        import_service=import_service,
-        etc_service=etc_service,
-        persist_linked_invoices=persist,
-    )
-
-    def link(result: Any) -> list[str]:
-        return link_service.link_import_result_to_existing_invoices(result)
-
-    return link
-
-
-def _oa_manual_import_create_processor(*, state_store: Any) -> Callable[[Any], dict[str, object]]:
-    def process(import_job: Any) -> dict[str, object]:
-        row_ids = import_job.payload.get("row_ids")
-        if not isinstance(row_ids, list):
-            raise ValueError("import job payload.row_ids is required.")
-        actor_id = str(import_job.payload.get("actor_id") or import_job.created_by or "workbench_settings").strip()
-        add_manual_oa_imports = getattr(state_store, "add_manual_oa_imports", None)
-        if not callable(add_manual_oa_imports):
-            raise RuntimeError("state_store must expose add_manual_oa_imports for OA manual import jobs.")
-        return add_manual_oa_imports([str(row_id) for row_id in row_ids], actor_id=actor_id)
-
-    return process
 
 
 def _workbench_matching_scope_months_for_import_file_session(session: Any, selected_file_ids: list[str]) -> list[str]:

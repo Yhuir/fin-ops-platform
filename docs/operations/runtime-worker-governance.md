@@ -103,3 +103,9 @@ production scenario 和审批输入下运行；它必须使用测试自有数据
 既有 `workbench-matching-retry <release> --scope-month YYYY-MM --dry-run` 除 failed 外允许 completed scope：completed dry-run 使用线上同一纯规则/归属 service 预览同组补齐数及正式关系计划数，不写来源。`--execute --expected-fingerprint ...` 仅通过 scope repository 对原状态/attempt/request/source_versions 做 CAS 并登记 expedite；实际修复仍由正常 worker 完成。dirty/processing 状态禁止重复登记。无 rule-version 全历史重放、无直写发票脚本。
 
 人工来源/关系/补充凭证变更与 scope 登记同事务；自动 actor 不递归 enqueue。回退代码不会撤销已提交归属，需要通过正式纠正命令和审计修正。此次无新增 schema、无全库备份要求，不删除主数据库。
+
+## 导入队列切换（2026-09-21）
+
+`import` instance 直接轮询 `job.import_jobs`，四类任务共用单 lease 与递增 `claim_version`，不再生产/消费 `import.process.requested`。发布迁移 `0175` 保留原 job 与历史事件，把能够精确对应 job 的旧未完成事件退役，旧 processing job 释放 lease 并递增 claim_version；旧成功/取消任务展示标记已读，失败仍可见。没有对应 job 的孤立 import event 明确记为 failed/migration_orphan，保留人工核验依据；不得删除未知事件或主数据库。迁移后核对 `pending/processing` 和最老等待年龄，不以旧 outbox 已 done 证明导入成功。
+
+`/health/ready` 的运行信息增加 `import_queue`（pending、processing、failed、awaiting_confirmation、oldest_pending_age_seconds），通用 backlog 包含直接导入。用户上传无效文件导致的 failed 会展示并允许处理，但不阻断整个 API readiness。发布验证必须读取精确任务结果、对应事实与页面，确认任务 succeeded 和实际提交一致。

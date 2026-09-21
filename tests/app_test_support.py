@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from weakref import finalize
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -9,7 +11,7 @@ from fin_ops_platform.app.server import Application
 from fin_ops_platform.app.server import build_application as _build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.access_control_service import ASSIGNABLE_PAGE_KEYS
-from fin_ops_platform.services.import_job_queue import IMPORT_PROCESS_REQUESTED_EVENT, ImportJob
+from fin_ops_platform.services.import_job_queue import ImportJob, ImportJobIdempotencyConflict
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.oa_role_sync_service import (
     OARoleAssignment,
@@ -83,6 +85,7 @@ def build_local_state_application(*args, **kwargs):
 
 
 def _install_test_oa_directory(application: Application) -> None:
+    install_durable_import_queue(application)
     application._app_settings_service._oa_role_sync_service = OARoleSyncService(  # noqa: SLF001
         executor=_TestOARoleSyncExecutor()
     )
@@ -400,110 +403,207 @@ def install_direct_workbench_selection_repository(application: Application) -> N
     )
 
 
+class _TestImportCompletion:
+    def __init__(self, repository, job):
+        self.repository, self.job = repository, job
+
+    def lock(self, transaction):
+        current = self.repository.get_job(self.job.import_job_id)
+        if current.status != "processing" or current.claim_version != self.job.claim_version:
+            raise ImportJobIdempotencyConflict("Import claim lost")
+
+    def succeed(self, transaction, result_payload):
+        self.lock(transaction)
+        self.repository.update(self.job.import_job_id, status="succeeded", result_payload=dict(result_payload))
+
+    def fail(self, transaction, result_payload, *, error):
+        self.lock(transaction)
+        self.repository.update(self.job.import_job_id, status="failed", result_payload=dict(result_payload), last_error=error)
+
+    def preview(self, transaction, result_payload, *, status="awaiting_confirmation"):
+        self.lock(transaction)
+        self.repository.update(self.job.import_job_id, status=status, result_payload=dict(result_payload))
+
+
 class DurableImportQueueHarness:
-    """Test driver for the same durable file-import job boundary used in production."""
+    """Explicit in-memory test implementation of the single durable job boundary."""
 
     def __init__(self, application: Application) -> None:
         self.application = application
-        self.events: list[SimpleNamespace] = []
+        self.events = []
         self.jobs: list[ImportJob] = []
-        self._processed: set[str] = set()
         self.fail_next_enqueue = False
 
-    def enqueue(self, **kwargs):
+    def update(self, job_id, **changes):
+        job = self.get_job(job_id)
+        updated = replace(job, version=job.version + 1, **changes)
+        self.jobs[self.jobs.index(job)] = updated
+        return updated
+
+    def create_or_get_job(self, **kwargs) -> ImportJob:
         if self.fail_next_enqueue:
             self.fail_next_enqueue = False
             raise RuntimeError("test durable import queue unavailable")
-        event = SimpleNamespace(event_id=f"test-import-event-{len(self.events) + 1}", **kwargs)
-        self.events.append(event)
-        return event
-
-    def create_or_get_job(self, **kwargs) -> ImportJob:
-        idempotency_key = str(kwargs.get("idempotency_key") or "")
-        for job in self.jobs:
-            if job.idempotency_key == idempotency_key:
-                if job.status in {"pending", "failed", "dead_lettered"}:
-                    updated = replace(
-                        job,
-                        status="pending",
-                        stage="queued",
-                        attempt_count=0,
-                        last_error=None,
-                        payload=dict(kwargs.get("payload") or {}),
-                        raw_payload=dict(kwargs.get("raw_payload") or {}),
-                        created_by=str(kwargs.get("created_by") or "") or None,
-                    )
-                    self.jobs[self.jobs.index(job)] = updated
-                    return updated
-                return job
+        key = str(kwargs.get("idempotency_key") or "")
+        existing = next((job for job in self.jobs if job.idempotency_key == key), None)
+        if existing:
+            if existing.payload != dict(kwargs.get("payload") or {}):
+                raise ImportJobIdempotencyConflict("Import request changed")
+            return existing
         job = ImportJob(
-            import_job_id=f"test-import-job-{len(self.jobs) + 1}",
-            tenant_id=str(kwargs.get("tenant_id") or "default"),
-            import_type=str(kwargs["import_type"]),
-            import_session_id=str(kwargs.get("import_session_id") or "") or None,
-            source_file_id=str(kwargs.get("source_file_id") or "") or None,
-            idempotency_key=idempotency_key or None,
-            request_fingerprint=None,
-            status="pending",
-            stage="queued",
-            priority=str(kwargs.get("priority") or "normal"),
-            attempt_count=0,
-            max_attempts=int(kwargs.get("max_attempts") or 5),
-            last_error=None,
-            payload=dict(kwargs.get("payload") or {}),
-            result_payload={},
-            raw_payload=dict(kwargs.get("raw_payload") or {}),
-            created_by=str(kwargs.get("created_by") or "") or None,
-            trace_id=str(kwargs.get("trace_id") or "") or None,
+            import_job_id=f"test-import-job-{len(self.jobs) + 1}", tenant_id="default",
+            import_type=kwargs["import_type"], import_session_id=kwargs.get("import_session_id"),
+            source_file_id=kwargs.get("source_file_id"), idempotency_key=key, request_fingerprint=None,
+            status=kwargs.get("status", "pending"), stage=kwargs.get("stage", "commit"),
+            priority=kwargs.get("priority", "normal"), attempt_count=0, max_attempts=5,
+            last_error=None, payload=dict(kwargs.get("payload") or {}), result_payload={},
+            raw_payload={}, created_by=kwargs.get("created_by"), trace_id=None,
         )
         self.jobs.append(job)
         return job
 
-    def enqueue_process_requested(self, *, queue_repository, import_job: ImportJob, reason: str):
-        return queue_repository.enqueue(
-            event_type=IMPORT_PROCESS_REQUESTED_EVENT,
-            aggregate_type="import_job",
-            aggregate_id=import_job.import_job_id,
-            scope_type="import",
-            scope_key=import_job.import_type,
-            dedupe_key=f"{IMPORT_PROCESS_REQUESTED_EVENT}:{import_job.tenant_id}:{import_job.import_job_id}",
-            payload={"import_job_id": import_job.import_job_id, "import_type": import_job.import_type, "reason": reason},
-            tenant_id=import_job.tenant_id,
-            source_version=0,
-            priority=import_job.priority,
-            trace_id=import_job.trace_id,
-        )
+    def get_job(self, job_id):
+        return next((job for job in self.jobs if job.import_job_id == job_id), None)
 
-    def get_job(self, import_job_id: str) -> ImportJob | None:
-        return next((job for job in self.jobs if job.import_job_id == import_job_id), None)
+    def get_by_idempotency_key(self, key, *, created_by):
+        return next((job for job in self.jobs if job.idempotency_key == key and job.created_by == created_by), None)
 
-    def process_all(self, *, raise_errors: bool = True) -> None:
-        processors = self.application._import_processing_service.build_import_job_processors()  # noqa: SLF001
-        for index, job in enumerate(list(self.jobs)):
-            if job.import_job_id in self._processed:
+    def list_by_session(self, session_id):
+        return [job for job in reversed(self.jobs) if job.import_session_id == session_id]
+
+    def list_jobs(self, *, created_by, limit=100, statuses=None):
+        return [job for job in reversed(self.jobs) if job.created_by == created_by
+                and (statuses is None or job.status in statuses)][:limit]
+
+    def confirm_job(self, job_id, *, expected_version, payload):
+        job = self.get_job(job_id)
+        if job.version != expected_version or job.status not in {"awaiting_confirmation", "needs_review"}:
+            raise ImportJobIdempotencyConflict("Preview changed")
+        return self.update(job_id, payload=dict(payload), status="pending", stage="commit", acknowledged_at=None)
+
+    def retry_job(self, job_id):
+        return self.update(job_id, status="pending", last_error=None, acknowledged_at=None)
+
+    def acknowledge_job(self, job_id, *, created_by):
+        job = self.get_job(job_id)
+        if job.created_by != created_by:
+            raise KeyError(job_id)
+        self.update(job_id, acknowledged_at="acknowledged")
+        return True
+
+    def mark_preview_needs_review(self, job_id, *, expected_version, transaction=None):
+        job = self.get_job(job_id)
+        if job.status != "awaiting_confirmation" or job.version != expected_version:
+            raise ImportJobIdempotencyConflict("Preview version changed")
+        return self.update(job_id, status="needs_review")
+
+    def reprepare_job(self, job_id, *, expected_version, payload=None, transaction=None):
+        job = self.get_job(job_id)
+        if job.version != expected_version or job.status not in {"awaiting_confirmation", "needs_review", "failed"}:
+            raise ImportJobIdempotencyConflict("Preview changed")
+        return self.update(job_id, payload=dict(payload or job.payload), status="pending", stage="prepare",
+                           result_payload={}, last_error=None, acknowledged_at=None, claim_version=job.claim_version + 1)
+
+    def cancel_job(self, job_id, *, created_by, transaction=None):
+        job = self.get_job(job_id)
+        if job.created_by != created_by:
+            raise KeyError(job_id)
+        if job.status == "succeeded":
+            raise ImportJobIdempotencyConflict("Already committed")
+        return self.update(job_id, status="canceled", claim_version=job.claim_version + 1)
+
+    def process_all(self, *, raise_errors=True):
+        processors = self.application._import_processing_service.build_import_job_processors()
+        for original in list(self.jobs):
+            if original.status != "pending":
                 continue
+            job = self.update(original.import_job_id, status="processing", claim_version=original.claim_version + 1)
+            job = replace(job, completion=_TestImportCompletion(self, job))
             try:
-                result = processors[job.import_type](job)
+                if job.import_type == "tax_certified_import.confirm":
+                    batch = self.application._tax_certified_import_service.confirm_session(job.payload["session_id"])
+                    job.completion.succeed(None, {"success": True, "batch": self.application._serialize_value(batch)})
+                elif job.import_type == "oa_manual_import.create":
+                    result = self.application._oa_manual_import_service.import_row_ids(
+                        job.payload["row_ids"], actor_id=job.created_by)
+                    result["affected_scope_keys"] = sorted({str(row.get("application_date") or "")[:7] for row in result["rows"]} - {""})
+                    if result["failed"] and not result["imported"] and not result["already_imported"]:
+                        result["outcome"] = "failed"
+                        job.completion.fail(None, result, error="所有选中 OA 均未导入")
+                    else:
+                        result["outcome"] = "partial_success" if result["failed"] else "success"
+                        job.completion.succeed(None, result)
+                else:
+                    processors[job.import_type](job)
+                if self.get_job(job.import_job_id).status == "processing":
+                    raise RuntimeError("Processor did not persist its result")
             except Exception as exc:
-                self.jobs[index] = replace(job, status="failed", stage="processor_failed", last_error=str(exc))
+                self.update(job.import_job_id, status="failed", last_error=str(exc))
                 if raise_errors:
                     raise
-                continue
-            self.jobs[index] = replace(job, status="succeeded", stage="succeeded", result_payload=dict(result))
-            self._processed.add(job.import_job_id)
 
 
 def install_durable_import_queue(application: Application) -> DurableImportQueueHarness:
+    current = getattr(application, "_import_job_repository", None)
+    if isinstance(current, DurableImportQueueHarness):
+        return current
+    if application._state_store is None:
+        application._test_import_storage_tmp = TemporaryDirectory(prefix="finops-import-fixture-")
+        finalize(application, application._test_import_storage_tmp.cleanup)
+        application._state_store = ApplicationStateStore(Path(application._test_import_storage_tmp.name))
+        application._file_import_service._file_store = application._state_store
     harness = DurableImportQueueHarness(application)
-    current = getattr(application, "_runtime_repositories", None)
-    values = dict(vars(current)) if current is not None and hasattr(current, "__dict__") else {}
-    values.update(
-        {
-            "queue_repository": harness,
-            "queue_settings": SimpleNamespace(backend="postgres"),
-            "summary": getattr(current, "summary", lambda: {}),
-        }
-    )
-    application._runtime_repositories = SimpleNamespace(**values)  # noqa: SLF001
-    application._import_job_repository = harness  # noqa: SLF001
+    application._import_job_repository = harness
+    install_etc_import_test_uow(application)
     return harness
+
+
+def install_etc_import_test_uow(application):
+    """Local API fixture only; real transaction guarantees live in PostgreSQL tests."""
+    from copy import deepcopy
+
+    service = application._etc_service
+    def fixture_identity(prefix):
+        counters = {"etc_invoice": service._invoice_counter, "etc_import_batch": service._import_batch_counter,
+                    "etc_business_batch": service._business_batch_counter}
+        return f"{prefix}_{counters[prefix]:04d}"
+    service._new_import_identity = fixture_identity
+
+    class LocalEtcImportTestUow:
+        def commit(self, *, validated, owner_user_id, completion):
+            session = validated.session
+            processor = application._import_processing_service
+            task_service = application._etc_reconciliation_task_service
+            before = deepcopy(service.snapshot())
+            task_before = deepcopy(task_service.snapshot())
+            completion.lock(None)
+            try:
+                batch = next((batch for batch in service.list_business_batches(task_id=session.task_id)
+                              if batch.is_active), None)
+                if batch is None:
+                    batch = service.create_business_batch(task_id=session.task_id, owner_user_id=owner_user_id,
+                        idempotency_key=f"etc_business_task_import:{session.task_id}:{session.session_id}")
+                batch, result = service.confirm_business_batch_import(
+                    batch.business_batch_id, session.session_id, expected_version=batch.version,
+                    idempotency_key=f"etc_import_session:{session.session_id}",
+                    uploads=list(validated.uploads), manifest=validated.manifest, atomic=True)
+                months = application._link_etc_import_result_to_existing_invoices(result)
+                import_batch_id = next(batch.id for batch in service.list_import_batches()
+                                       if batch.source_session_id == session.session_id)
+                task_service.mark_imported(task_id=session.task_id, task_version=session.task_version,
+                    confirmed_item_set_hash=session.confirmed_item_set_hash, import_batch_id=import_batch_id,
+                    actor=owner_user_id)
+                processor._etc_import_preview_service.mark_status(session.session_id, status="succeeded", imported_by=owner_user_id)
+                summary = {"created": result.imported, "imported": result.imported, "updated": result.attachments_completed,
+                    "attachments_completed": result.attachments_completed, "duplicates": result.duplicates_skipped,
+                    "failed": 0, "total": validated.item_total, "batch_members": len(batch.invoice_ids),
+                    "affected_months": months, "affected_scope_keys": months}
+                completion.succeed(None, summary)
+                return summary
+            except Exception:
+                service._hydrate(before)
+                service._persist()
+                task_service._hydrate(task_before)
+                raise
+
+    application._import_processing_service._etc_import_uow = LocalEtcImportTestUow()

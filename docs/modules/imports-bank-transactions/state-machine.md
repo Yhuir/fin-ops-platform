@@ -1,107 +1,36 @@
-# 银行流水导入 状态机
+# 银行流水导入状态与恢复
 
-> 修改 `银行流水导入` 相关业务状态、UI 状态、read model 状态或 worker 状态前必须读取本文件。当前没有独立状态机时，在对应小节写明“不适用原因”，不要删除文件。
+## 当前执行合同（2026-09-21）
 
-## 业务状态
+导入执行的唯一事实源是 `job.import_jobs`。上传完成只说明原件和草稿登记完成；prepare 完成只说明逐项预览可读；正式 facts、来源、批次行和 job 成功必须在一个数据库事务中提交。
 
-| 状态 | 含义 | 事实源 |
+| 阶段/状态 | 含义 | 用户操作 |
 | --- | --- | --- |
-| `files_selected` | 用户在浏览器中选择了待导入文件，尚未预览。 | 前端本地 File state |
-| `files_configured` | 每个银行流水文件都选择了银行账户映射。 | 前端 file selections + settings bank account mappings |
-| `manual_editing` | 用户在右侧抽屉填写 1–50 笔流水，尚未生成服务端 preview。 | 前端草稿 state；不是 canonical fact |
-| `manual_previewing` | 正在调用 `/imports/bank-transactions/manual/preview`。 | 前端请求状态 |
-| `manual_preview_ready` | 服务端已为每笔手工流水生成独立 preview file，并返回可确认 file ids。 | `FileImportSession` + per-file row decision |
-| `previewing` | 正在调用 `/imports/files/preview`。 | 前端请求状态 |
-| `preview_ready` | 后端已创建 import session，文件级 preview 可确认。 | `FileImportSession.files[].status` |
-| `preview_no_changes` | 文件解析完成，但全部银行流水已存在，且没有疑似项、错误或账户冲突；无需创建确认任务。 | 前端基于 session/file audit 的只读派生状态 |
-| `reverted` | 用户在确认前显式放弃 preview，服务端已终结 session/file/pending batch。 | `app.import_files` + `app.import_batches`；不影响 canonical transaction |
-| `mapping_required` / `unrecognized_template` | 已定位银行表头但核心 canonical 字段不完整；后端返回候选列，等待用户补充映射，不生成可确认行。 | `FileImportSession.files[].mapping_fields` |
-| `file_error` / `unrecognized_template` | 文件损坏、无法定位表头或不是支持的文件类型；同 session 其他 ready 文件仍可确认。 | `FileImportService.preview_files` |
-| `preview_stale` | 预览后底层已存在记录或 audit 发生变化；确认被拒绝。 | `ImportPreviewStaleError` / API `409 preview_stale` |
-| `queued` | 确认后创建 background `file_import` job，银行流水 selected files 必须携带 `affected_domains=["imports_bank_transactions"]` 和 `/imports/bank-transactions` route；可能同时创建 `import.process.requested` durable event。 | background job + `job.import_jobs` / runtime queue |
-| `processing` | import worker 或 inline background job 正在确认 selected files。 | `ImportJobWorker` / background job service |
-| `confirmed` | selected files 已持久化并触发下游刷新/匹配。 | import session / import batch / row facts |
-| `failed` | 确认任务失败，job 记录错误，session 可重试或重新预览。 | background job / import job |
+| `prepare / pending` | 原件和 session 已登记，等待解析 | 查看进度；可以离开页面 |
+| `prepare / processing` | worker 读取已归档原件并解析 | 等待同一任务，禁止猜测导入成功 |
+| `awaiting_confirmation` | 预览已持久化，正式事实未写入 | 查看逐项新增/重复/错误，选择本次范围 |
+| `needs_review` | 字段、身份、财务或预览版本发生需复核的问题 | 修改映射/选择并重新预览 |
+| `commit / pending` | 已确认的精确选择范围待执行 | 重复确认返回同一意图 |
+| `commit / processing` | 短业务事务正式提交 | 查询同一任务；取消与提交由事务判定 |
+| `succeeded` | 正式数据与结果已一并提交 | 显示实际新增/更新/重复数量 |
+| `failed` | 无成功结果；错误和重试范围可读 | 可恢复故障重试原意图；业务冲突重新复核 |
+| `canceled` | 确认的取消已生效 | 不将取消误报为导入成功 |
 
-### 允许流转
+文件/session 的 `uploaded / preview_ready / preview_ready_with_errors / confirmed` 仅描述原件和预览业务状态，不再另设 background job 执行事实。未选择文件保留 `preview_ready`，不能被其它文件成功标成 confirmed 或 skipped。一个选择范围内有错误/疑似行时，整个范围不写事实；正常重复不是错误。
 
-- `files_selected -> files_configured`：银行流水模式下每个文件都选择有效银行账户映射。
-- `files_configured -> previewing -> preview_ready`：文件上传成功，后端能识别模板或保留文件级错误。
-- `manual_editing -> manual_previewing -> manual_preview_ready`：全部表单通过前端基础校验后，服务端再次校验 mapping、完整账号、秒级时间和 canonical 必填字段并批量判重；重复/疑似项展示但不进入可确认 file ids。
-- `manual_preview_ready -> queued`：至少一笔为 `created`，确认仍走现有 `/imports/files/confirm`；返回修改或关闭抽屉时先 discard，再回到 `manual_editing` 或关闭。
-- `preview_ready -> preview_no_changes`：`original_count > 0`、`confirmable_count=0`、`existing_duplicate_count=original_count`，且疑似、错误、账户冲突均为零；页面显示“无需导入”并保持零 confirm/job。
-- `previewing -> mapping_required -> preview_ready`：自动归一不完整时，用户提交当前文件的字段映射；后端重新校验并解析。相同标准化表头签名后续可直接复用已保存人工映射。
-- `preview_ready -> preview_stale`：确认前 audit 检测到底层事实变化。
-- `preview_ready -> queued`：至少一个 selected file 可确认，API 创建 idempotent background job。
-- `queued -> processing -> confirmed`：import worker 或 inline job 确认 selected files，持久化 import facts 与必要 Workbench matching 领域任务；不触发页面 read model fan-out，消费者访问时按 source version 收敛。
-- `suspected_duplicate -> completed_with_errors`：普通确认保留弱指纹疑似项且不写 canonical 流水；preview 可携带候选引用供复核，terminal row 必须清空 `linked_object_type/id`，用户点击确认不构成绕过去重的授权。
-- `failed -> files_configured/previewing`：用户重试 session files 或重新预览。
-- `preview_ready -> reverted`：只有 session owner 可显式放弃；重复请求幂等。
+确认时复核只加载当前 session 的批次和相关身份候选。同一强身份刚被别的导入合法创建，可以转为重复并返回实际计数；身份指向漂移、财务冲突或扩大写集仍需复核。worker 在业务写入前锁定任务的领取者和 claim version；旧进程不可提交。失败后从持久化草稿恢复，不从旧进程全量状态补写。
 
-### 禁止流转
+## 不允许的旧路径
 
-- 没有银行账户映射时禁止预览银行流水文件。
-- 手工录入缺完整本方账号、账号尾号不匹配、秒级交易时间或 canonical 必填字段时禁止创建 preview；不得为缺失的银行流水标识生成占位值；同批弱指纹重复在创建 session 前拒绝。
-- 任一 selected file 缺少银行映射时禁止预览。
-- 核心字段映射不完整、同一源列映射到多个互斥核心字段或映射列不存在时禁止产生 preview rows 和确认。
-- 银行流水页面禁止使用旧 `/imports/preview`、`/imports/confirm` JSON 状态流；页面 I/O 只能进入 file/session 状态机。
-- `preview_stale` 后禁止继续确认旧 session；必须重新预览。
-- `preview_no_changes` 禁止调用 confirm；多文件 session 只提交 `confirmable_count > 0` 的文件，不得把零变更文件送入后台 job。
-- unknown selected file id 必须返回 404，不得静默跳过。
-- 已有 idempotency key 的 confirm 不得创建重复 import job。
-- 任一银行流水 preview/retry 不得写回其它 session，更不得把其它进程已确认的发票或银行导入降级为 pending。
-- 不能把 `queued` / `processing` 展示成下游 read model 已 fresh。
-- 已 `reverted`、已确认或有 pending/processing/succeeded import job 时禁止 discard/confirm；GET/review/retry/confirm/discard 必须校验 session owner。
+- 不按已确认文件 SHA 拒绝整文件；每次主动重传都按业务项比较当前池。
+- 不创建导入专用 `import.process.requested` 事件，不使用双租约或第二份 background job 结果。
+- 不把 valid 行先提交、error 行跳过后显示整批成功。
+- 不在预览、清理草稿、较小的全量文件或文件删除时删除 canonical 事实。
+- 不将下游页面刷新任务当作事实提交成功的前提。页面按其 owner 的 canonical 查询读取；必要匹配任务保留既有边界。
 
-## UI 状态
+## 验证
 
-| 状态 | 页面行为 |
-| --- | --- |
-| settings loading | 银行流水模式进入页面后加载银行账户映射；未完成前不能完整配置文件。 |
-| manual editing | 抽屉按“流水 1…50”切换草稿；选择银行后填写完整本方账号和交易字段，不显示银行流水标识。所有表单字段留在浏览器草稿中，不写 canonical facts。 |
-| manual preview | 逐笔展示银行账户、时间、收支金额、对方和去重结果；重复/疑似项不可确认，合法项可一次提交。返回修改或关闭必须先成功 discard 当前 session。 |
-| empty | 未选择文件时展示上传区域和说明；不创建 session。 |
-| selected | 展示文件列表和每文件银行选择；清空/移除文件会清空 preview。 |
-| previewing | 预览按钮 loading，禁用重复预览和确认。 |
-| preview_ready | 展示 audit counts、文件状态、重复组、跳过明细、银行选择冲突；只允许确认 `preview_ready` 文件。 |
-| preview_no_changes | 保留真实的“新增 0”和“APP 已存在”统计及重复明细，文件显示“无需导入”，并禁用确认；账户冲突、疑似和错误状态优先，不得被该提示掩盖。 |
-| mapping required | 在当前文件下展示 HeroUI 字段选择；保存只重试该文件，成功后回到 `preview_ready`，失败保留映射草稿和明确错误。 |
-| account conflict blocked | 文件识别账号与用户选择账号冲突时显示明确警告并禁用确认；清空预览、改选正确账户、重新预览后才能进入 confirm。旧冲突确认弹窗已删除。 |
-| confirming | 确认按钮 loading；App Health `blocksMutations` 时禁止确认并提示重新进入。 |
-| job queued | 返回 `job` 时显示“已开始后台导入”，不立即宣称下游刷新完成。 |
-| success | inline 完成时提示导入完成；仅当响应声明 `operation_barrier_targets` 时等待这些 targets，禁止请求 Workbench 页面探测刷新。后台 job 由 App Status/Health 展示进度。 |
-| error | preview/confirm/retry/session fetch 失败展示错误；`preview_stale` 使用固定“重新预览”提示。 |
-| fresh entry | 每次页面激活都清空本地文件、选择、preview 和反馈；不读 sessionStorage，也不请求活跃 session 列表。离开页面后才完成的 preview 响应必须丢弃，返回页面仍为空白。 |
-| discard | 点击清空已预览内容时先调用服务端 discard；成功后才清本地，失败则保留预览并显示错误。 |
-| permission disabled/hidden | 当前页面通过 App Health `blocksMutations` 做系统不可用防护；若后续接入细粒度权限，需补 API 403 和前端 disabled/hidden。 |
-
-## Read Model / Worker 状态
-
-银行流水导入本身不是 read model 页面；它触发多个下游 read model 和后台任务。
-
-| 状态 | 含义 | 导入页处理 |
-| --- | --- | --- |
-| `queued` | `file_import` background job / `import.process.requested` event 已创建。 | 显示后台导入已开始，用户可去 App Status/App Health 查看。 |
-| `processing` | import worker 执行 `file_import.confirm` processor。 | 不阻塞页面离开；不能重放旧 confirm。 |
-| `succeeded` | selected files 已确认，结果 summary 写入 job。 | 下游 read model 可能仍在 refreshing。 |
-| `failed` | import job 或 background job 失败。 | 暴露错误，允许 retry 或重新预览。 |
-| `refreshing/stale` | 后续访问的消费页发现 canonical source version mismatch，并为自己的精确 scope 入队。 | 导入页不伪装这些页面 fresh；由被访问页面和 App Status 展示。 |
-| `fresh` | 被访问页面的 worker 完成对应 scope refresh。 | 由银行明细/关联台/成本统计等消费页读取。 |
-
-访问时 refresh 来源：
-
-- `/imports/files/confirm` inline 或 worker confirm selected files。
-- `ImportProcessingService.execute_file_import_confirm_job(...)` enqueue Workbench auto matching。
-- `ImportProcessingService` 输出所选 session/batch 的精确 persistence delta、source version 与空页面 targets；不调用 derived lifecycle。
-- 银行明细、账户余额、Workbench、成本统计等页面在进入/重新可见时，由各自 query owner 比较 canonical source proof 并只刷新当前精确 scope。
-
-失败恢复：
-
-1. 查看 background job / import job 的 `status`、`stage`、`last_error` 和 `result_summary`。
-2. 如果是 `preview_stale`，重新预览，不复用旧 session confirm。
-3. 如果是 worker/queue 失败，确认 `import` worker、`import.process.requested` event、RabbitMQ/Redis/Postgres queue 状态。
-4. 如果导入确认已成功但消费页 stale，先实际访问该页，再检查该页 query gateway 创建的精确 dirty scope 和 worker readiness。
-5. 禁止通过前端本地状态手动标记下游页面 fresh。
+`tests/test_import_closed_loop.py` 覆盖注册不解析、跨进程草稿恢复、原子选择范围、未选择文件、真实 PostgreSQL 提交/回滚/领取版本隔离。解析与计数见 `test_import_file_service.py`、`test_import_service.py`、`test_import_preview_audit.py`；API/页面/worker 回归由各 owner 维护。
 
 ## 变更记录
 

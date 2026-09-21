@@ -49,8 +49,8 @@
 | 复核明细分页 | `GET /imports/files/sessions/{session_id}/review-rows?kind=duplicate|unimported&offset&limit` | `limit` 最大 100；返回当前 session 的稳定切片和 `total/has_more`。发票行输出发票号码、开票日期、销方、购方、金额、税额、价税合计等用户复核字段；不得套用银行账户/交易方向字段。 |
 | 页面手动刷新 | `ImportWorkflowPage.tsx` | 有持久化 preview session 时精确重读 `/imports/files/sessions/{session_id}`；保留当前草稿和文件选择，不执行浏览器 reload 或跨页面 refresh。 |
 | 补充凭证统一查看 | `GET /api/workbench/oa-invoice-supplements/gallery` | 仅在发票导入页抽屉打开后按 9 条 cursor page 读取 active 元数据；图片/PDF 缩略图 lazy load，点击后读取既有 content API。零 mutation、零 import session、零 relation/matching/read-model/worker I/O。 |
-| Job event | import job queue | 后台可恢复处理；相同 import idempotency key 只接受相同 request fingerprint。瞬时失败归还 pending 并由 durable outbox 重试，达到最大次数才终态失败；用户再次确认同一请求时，terminal failed/partial job 必须原子复用原 job id 并重新 queued/pending，禁止新建冲突 job；活跃 processing lease 不得被并发 worker 接管。 |
-| Background job progress | background job repository | 只按 canonical `job_id` 单行更新；禁止全量回写历史 background job snapshot，历史 raw payload 的旧 id 不得污染发票导入事务。 |
+| Import job | `job.import_jobs` | 唯一 prepare/commit 状态源；worker 直接 claim、租约续期与 fencing。相同意图失败重试复用原 job；确认范围变化仅在前一任务成功且显式版本匹配后创建下一意图。业务事实、审计、必要 dirty scopes 与成功状态同事务提交。 |
+| 全局导入进度 | `ImportWorkflowService` | 只读投影 canonical import job；不维护第二套 background job。 |
 
 preview/confirm/retry 都属于 canonical 导入写链，必须在 multipart/JSON 解析前通过共享 mutation guard；`imported_by` 与 background job owner 只取已认证 session username，客户端 form/body 同名字段不具有身份语义。
 
@@ -73,7 +73,7 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 ## 持久化与投影
 
 - Own read model：无；App 内不存在 read model manifest。
-- Page Audit：`imports.invoices` 是 direct-canonical 页面；在同一 repeatable-read read-only snapshot 内证明 file/session/batch/row、canonical invoice、`manual_invoice_import` source-link 与本页 job/outbox。
+- Page Audit：`imports.invoices` 是 direct-canonical 页面；在同一 repeatable-read read-only snapshot 内证明 file/session/batch/row、canonical invoice、`manual_invoice_import` source-link 与本页 canonical import job。
 - 重复导入名称审计：已有正式 owner 的 `duplicate_skipped` 行不拥有名称覆盖权。仅在强身份、购销双方税号相同且原正式 owner 来源边完整时，购方/销方/对方名称差异报告 `invoice_import_duplicate_name_difference` warning，保留双方原值；新建、更新、首次正式化、身份/税号/金额及来源边不一致仍为 error。混合 created/updated 的同票明细组件不适用重复名称语义。审计不写数据，也不改变导入或关联接口。
 - 下游 direct-canonical consumer：税金抵扣与成本统计在 import job 提交 `app.invoices` 后由各自页面 GET 直接读取新事实，不等待页面 read model。
 - 其他消费者：Workbench、发票生命周期、待找发票、进/销项、OA 待付款、税金和成本均通过各自 canonical query API 读取；`workbench-matching` 只负责候选匹配领域任务。
@@ -122,7 +122,7 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 
 - 发票模板变更必须覆盖导入后首次访问进项/销项/待找时的 downstream 展示状态。
 - 普通导入不得恢复下游 operation barrier targets；显式运维 refresh 才能返回并等待其明确 targets。
-- 普通发票 XLS/XLSX 与银行文件共享签名、容器资源上限和 SHA-256 文件级防重；同内容改名后不得再次确认。
+- 普通发票 XLS/XLSX 与银行文件共享签名、容器资源上限与原件 SHA-256 完整性校验；同内容重传仍解析逐项查重。
 
 ## Canonical facts ownership
 
@@ -132,7 +132,7 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 - Downstream outputs: invoice lifecycle、pending invoice、input/output invoice usage、OA pending、tax、cost 直接读取 canonical facts；`workbench`、`workbench_relation` 按自身访问/maintenance 合同使用精确 dirty scope。
 - Forbidden paths: production API/worker 不得从 full snapshot、local pickle、`state:imports`、`state:full_state` 或 OA/ETC cache 直接构造第二发票池。
 - Old code deletion: 旧同步导入、直接状态写入、snapshot 发票池 fallback、已确认 batch 撤销链和从 `app.import_files.import_batch_id` 反推 file session 状态的 fallback 已删除；仅保留 owner 校验后对未确认 preview 的显式放弃，该路径不触及 canonical invoice。
-- Durable confirm：`/imports/files/confirm` 必须创建 `job.import_jobs(import_type=file_import.confirm)` 与 `job.outbox_events(event_type=import.process.requested)`；PostgreSQL polling 与 RabbitMQ wakeup 共用该 gateway，queue/repository 不可用返回 `503 import_queue_unavailable`，禁止进程内确认。
+- Durable confirm：上传登记和 prepare job 原子受理，解析后进入 awaiting_confirmation；确认同一 job 的版本后进入 commit。无导入 outbox/RabbitMQ 前置依赖；queue 不可用返回 503。
 - 2026-07-22：文件预览保存改为 `FileImportService.preview_session_persistence_payload(session_id)`，只写当前 session 和 `preview_batch_id`；删除 `ImportNormalizationService.snapshot(include_facts=False)` 与无参全量 preview writer。PostgreSQL `save_import_delta` 在同一事务写 batch 与 file/session，防止 stale API 覆盖其它已确认导入或形成半写状态。
 - 2026-07-22：历史上已被 stale preview 降级的单条生命周期事实通过现有 `import-audit-repair` 边界修复；必须显式提供 `--batch-id` 与 `--file-id`，dry-run 指纹和 execute 必须一致，且只允许 `pending/preview_ready -> completed/confirmed` 的精确转换。旧 preview 同时清空的 import row link 只能按 `(batch_id, source_unique_key/data_fingerprint)` 唯一匹配既存 `manual_invoice_import` source-link 后恢复；其它中间态、活跃 job、计数不符、多义匹配或 canonical/source-link 不闭环一律 fail closed。
 - 2026-08-11：放弃 preview 必须在同一事务同步 `app.import_batches.status` 与 batch formal payload status 为 `reverted`；Audit 将该状态视为合法终态。历史上已产生的精确 mismatch 只通过 `import-audit-repair --normalize-reverted-batch-id` 修复 payload 单字段，要求严格 file/session 均已 reverted、无 active/succeeded job、无 linked import row、无 canonical invoice/source-link；dry-run fingerprint 变化或任一前置条件不符时零写入。
@@ -171,3 +171,31 @@ ConfirmedInvoiceImportUnitOfWork 在导入事务内继续提交 promotion 与同
 ## 2026-09-21 原始发票缺失核对
 
 `import_audit_repair_ops --inspect-invoice-source --dry-run --file-id ... --invoice-id ...` 只读指定原始文件的“发票基础信息”表头和准确票号行，通过原 file object SHA 校验。拒绝混入执行/修复参数，不创建或修改发票。缺失发票仍须由普通导入预览、确认、job 形成正式事实；不能用 ETC 原始金额猜测税额。
+
+## 2026-09-21 导入闭环变更
+
+- 上传登记输出 `uploaded` session 与归档引用，不在请求中解析文件；登记草稿与 prepare job 同事务。worker prepare 保存逐项预览，并通过任务 completion 端口原子进入待确认。
+- `ImportProcessingService` 的普通提交只传当前 selected scope delta、精确影响月份和结果；`ConfirmedInvoiceImportUnitOfWork` 先 `completion.lock(tx)`，最后 `completion.succeed(tx, result)`，成功与正式事实同事务。显式关联台同步补录仍复用领域事务，不要求异步任务。
+- 当前 session 恢复通过 `load_file_import_session_snapshot(session_id)`，只读取本会话文件及其 batch/rows；相关现存发票/流水身份批量读取。不恢复全局历史 snapshot。
+- `FileImportService.confirm_session` 始终原子确认所选范围，删除 `atomic_batch=False` 旧分支。任何错误/疑似行阻断该范围，未选文件保留草稿。确认后文件行与实际 batch 结果重新绑定，防止跨进程恢复后继续显示预览 created。
+- 文件 SHA 仅用于原件完整性，不作业务去重。`find_confirmed_import_file_by_sha256` 端口与相同文件阻断已删除。每个业务项仍使用已有 invoice/bank identity 规则。
+- 发票金额+税额与价税合计不一致、同强身份财务字段冲突明确报错，不能静默覆盖。20 位票号仅在“发票号码”列仍可识别；缺身份数据行、多非标准事实 sheet 或混合进销方向明确拒绝，不再忽略。
+- 银行负借方+贷方字符串零（及对称负贷方情况）按真实冲正方向解析，保留银行 v3/v4 身份规则。
+- 删除普通导入独立 background job 写入；任务和全局状态由 canonical import job 查询呈现。历史 outbox/background 仅保留取证读取，不构成执行入口。
+- 直接回归：`tests/test_import_closed_loop.py`（含隔离真实 PostgreSQL）、`test_import_file_service.py`、`test_import_service.py`、`test_confirmed_invoice_import_uow.py`、`test_postgres_core_repository.py`、`test_postgres_state_store.py`。依赖及下游写权限未扩大。
+
+### 登记失败、剩余范围与无动作闭环
+
+- 原件先落不可变对象；`app.import_files`、preview session 与 prepare job 在一次事务登记。登记失败仅清理本次 UUID 原件且数据库证明未被任何 file/session/job 引用；响应丢失后已经提交的引用不得清理。
+- 选择部分文件成功后，未选文件保持 preview_ready。携最新版本再次选择剩余文件创建新 commit 意图，复用 session 的原件和候选；旧任务不可变。重复任一已受理精确范围始终返回原任务。
+- 纯银行强身份重复、无新增/更新/错误时 prepare 直接 succeeded + `outcome=no_changes`。发票重复仍可能补来源或元数据，不能按新增零机械判定无动作。
+- 预览变更先 CAS 入 prepare 后由 worker 解析；放弃预览与 cancel job 同事务。确认前财务冲突将 awaiting_confirmation CAS 为 needs_review，用户重新预览后确认；同身份且同事实的并发新增仅重分类为重复。
+- job 只保存 session 引用、范围、摘要和结果；候选明细只在 session/batch rows 存储。HTTP/worker request-local service 不重置全局实例。
+
+### 已证历史财务拆分修复
+
+`import_audit_repair_ops --repair-invoice-financial-source FILE_ID`（可重复）加精确 `--invoice-id` 是既有维护 CLI 的限定模式，不是新业务导入入口。它从已归档原件读取唯一“发票基础信息”，核对对象 SHA；所有目标必须唯一存在，日期、方向、价税合计不变，且原件明确给出未税金额、税额、合计。多个原件冲突、目标缺失、缺字段、SHA 漂移均停止，不反推税率。
+
+先 `--dry-run` 查看逐票 before/after 与 source_fingerprint，再使用相同目标和 `--execute --expected-fingerprint ... --operator-id ... --reason ...`。在 serializable 事务内复核快照，通过 core repository CAS 修改财务字段及税务来源 provenance，精准失效包含这些身份的 OA 解析 cache；保留发票 ID、来源关系、核销关系与总额。数据库 fact guard 记录 before/after，维护操作审计与修改同事务。再次 dry-run 必须零财务更新、零待失效 cache。工具不创建数据库备份或删除数据库。
+
+历史缺失导入审计行只能使用原有 row_results、normalized_rows 与明确 link 恢复可证部分；当前事实存在不证明当年是 created 还是 duplicate。证据不足的缺口保留并报告，不能写虚构成功记录让 Audit 变绿。
