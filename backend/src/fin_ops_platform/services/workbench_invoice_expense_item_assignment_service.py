@@ -120,7 +120,7 @@ class WorkbenchInvoiceExpenseItemAssignmentService:
         if updates and not dry_run:
             context.invoice_source_links.update_invoice_source_links_cas(
                 context.transaction, updates, actor_id="system:workbench-deterministic-relation",
-                reason="Assign unowned relation invoices by unique whole-item amount",
+                reason="Assign unowned relation invoices by unique remaining item amount",
             )
             context.operation_audit.append_operation_event({
                 "event_type": "workbench.invoice_expense_items.auto_assigned",
@@ -129,7 +129,7 @@ class WorkbenchInvoiceExpenseItemAssignmentService:
                 "trace_id": request_id, "request_id": request_id,
                 "action": "workbench.invoice_expense_items.assign", "page_key": "reconciliation-workbench",
                 "operation_location": "workbench-matching", "outcome": "success",
-                "payload": {"assignments": assignments, "rule": "unique_whole_item_amount"},
+                "payload": {"assignments": assignments, "rule": "unique_remaining_item_amount"},
             })
         return {"assigned_invoice_count": 0 if dry_run else len(updates), "planned_invoice_count": len(updates), "assignments": assignments}
 

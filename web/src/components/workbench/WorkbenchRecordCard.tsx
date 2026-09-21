@@ -74,9 +74,6 @@ function WorkbenchRecordCard({
   const attachmentStatusAnomalies = paneId === "invoice" && row.displayOnly
     ? row.workbenchAnomalies?.filter((anomaly) => isOaAttachmentStatus(anomaly.code)) ?? []
     : [];
-  const hasUnparsedAttachment = attachmentStatusAnomalies.some(
-    (anomaly) => anomaly.code === "oa_invoice_attachment_unparsed",
-  );
   const unassignedInvoiceAnomaly = paneId === "invoice" && !row.displayOnly
     ? row.workbenchAnomalies?.find((anomaly) => anomaly.code === "oa_invoice_attachment_unassigned")
     : undefined;
@@ -119,7 +116,7 @@ function WorkbenchRecordCard({
               externalUrl={row.externalUrl}
               levelLabel="该付款项"
             />
-            {hasUnparsedAttachment && row.availableActions.includes("enter_invoice") ? (
+            {row.availableActions.includes("enter_invoice") ? (
                 <InvoiceEntryAction disabled={invoiceResolutionDisabled} onPress={() => onRowAction(row, "enter-invoice")} />
               ) : null}
           </div>
@@ -153,10 +150,6 @@ function WorkbenchRecordCard({
             <div className={`record-card-cell-content${isApplicant ? " workbench-oa-applicant-content" : ""}${showLeadingControl ? " record-card-cell-content-with-inline-control" : ""}`}>
               {showLeadingControl ? <span className="record-card-inline-prefix-control">{leadingControl}</span> : null}
               {renderCellValue(column, value, row, paneId, zoneId, showInlineDetail, () => onOpenDetail(row), searchQuery)}
-              {paneId === "invoice" && columnIndex === 0 && !row.displayOnly && !hasOaAttachmentSource && (row.sourceExpenseItemIds?.length ?? 0) > 0 ? (
-                <Button size="sm" variant="tertiary" isDisabled={invoiceResolutionDisabled}
-                  onPress={() => onRowAction(row, "assign-invoice-expense-items")}>更改归属</Button>
-              ) : null}
               {isApplicant ? (
                 showApplicantDetail || anomalyIndicator ? (
                   <span className="workbench-oa-applicant-actions">

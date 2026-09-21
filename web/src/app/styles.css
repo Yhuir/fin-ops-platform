@@ -14626,6 +14626,21 @@ body.column-layout-dragging {
   width: 100%;
 }
 
+.candidate-group-cell-with-footer {
+  flex-direction: column;
+}
+
+.candidate-group-cell-with-footer .candidate-group-stack {
+  min-height: 0;
+}
+
+.workbench-invoice-entry-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 12px;
+}
+
 .record-card {
   display: grid;
   min-height: 56px;

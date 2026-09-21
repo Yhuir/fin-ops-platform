@@ -516,6 +516,53 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(link, {'source_type': 'oa_attachment_invoice', 'derived_from_oa_id': 'oa-new-34'})
         self.assertIsNotNone(relation)
 
+    def test_partial_item_multi_invoice_assignment_is_atomic_and_visible(self):
+        from fin_ops_platform.services.runtime_worker_handlers import WorkbenchMatchingWorkerFactory
+        owner = 'oa-partial-71'
+        item_id = owner + ':item:0'
+        payload = {'id': owner, 'expense_items': [{'id': item_id, 'row_index': '0', 'amount': '71'}]}
+        self.raw_connection.execute("""insert into app.oa_applications
+            (oa_source_id, form_id, form_type, row_id, status, workflow_status, application_date, scope_month, amount, normalized_payload, raw_payload)
+            values (%s, '32', '日常报销', %s, 'active', 'completed', '2026-08-21', '2026-08-01', 71, %s::jsonb, '{}'::jsonb)""",
+            (owner, owner, json.dumps(payload)))
+        ids = ['partial-owned', 'partial-23', 'partial-25']
+        for index, amount in enumerate((23, 23, 25)):
+            links = [{'source_type': 'manual_invoice_import', 'source_id': 'test-import'}]
+            if index == 0:
+                links.append({'source_type': 'oa_expense_item_invoice', 'source_oa_row_id': owner,
+                              'source_expense_item_id': item_id, 'source_relation_case_id': 'CASE-PARTIAL', 'entry_method': 'manual'})
+            self.raw_connection.execute("""insert into app.invoices
+                (legacy_mongo_id, invoice_type, invoice_no, invoice_date, invoice_month, amount, signed_amount, total_with_tax, status, workbench_visibility, source_links, raw_payload)
+                values (%s, 'input', %s, '2026-08-21', '2026-08-01', %s, %s, %s, 'active', 'visible', %s::jsonb, '{}'::jsonb)""",
+                (ids[index], ids[index], amount, amount, amount, json.dumps(links)))
+        self.raw_connection.execute("""insert into app.workbench_pair_relations
+            (case_id, relation_mode, status, row_ids, row_types, raw_payload)
+            values ('CASE-PARTIAL', 'manual_confirmed', 'active', %s, %s, '{}'::jsonb)""",
+            ([owner] + ids, ['oa', 'invoice', 'invoice', 'invoice']))
+
+        def assign():
+            with self.raw_connection.transaction() as transaction:
+                context = WorkbenchMatchingWorkerFactory._workbench_uow_repository_factory(transaction)
+                context.transaction = transaction
+                return WorkbenchInvoiceExpenseItemAssignmentService.assign_automatically(
+                    context, case_ids=['CASE-PARTIAL'], request_id='partial-multi-invoice')
+
+        before = self.raw_connection.fetch_all('select legacy_mongo_id, source_links from app.invoices order by legacy_mongo_id')
+        with patch.object(PostgresOperationsAuditRepository, 'append_operation_event', side_effect=RuntimeError('audit unavailable')):
+            with self.assertRaisesRegex(RuntimeError, 'audit unavailable'):
+                assign()
+        self.assertEqual(before, self.raw_connection.fetch_all('select legacy_mongo_id, source_links from app.invoices order by legacy_mongo_id'))
+        self.assertEqual(assign()['assigned_invoice_count'], 2)
+        self.assertEqual(assign()['assigned_invoice_count'], 0)
+        for invoice in self.raw_connection.fetch_all('select source_links from app.invoices where legacy_mongo_id = any(%s)', (ids,)):
+            links = invoice['source_links']
+            self.assertEqual(links[0]['source_type'], 'manual_invoice_import')
+            self.assertEqual(links[1]['source_expense_item_id'], item_id)
+            self.assertFalse(any(link['source_type'] == 'oa_attachment_invoice' for link in links))
+        group = self.repository.get_workbench_group_detail(scope_key='all', zone='unpaired', group_id='case:CASE-PARTIAL', detail_key='CASE-PARTIAL')['group']
+        self.assertEqual({row['id'] for row in group['invoice_rows']}, set(ids))
+        self.assertTrue(all(row['source_expense_item_ids'] == [item_id] for row in group['invoice_rows']))
+
     def test_late_invoice_bulk_assignment_uses_one_write_per_batch(self):
         from fin_ops_platform.services.runtime_worker_handlers import WorkbenchMatchingWorkerFactory
         for count in (100, 1000):

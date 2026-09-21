@@ -436,7 +436,6 @@ export type WorkbenchInvoiceExpenseItemAssignmentTarget = {
   sellerName: string;
   amount: string;
   anomalyFingerprint: string;
-  previousTargets?: WorkbenchInvoiceExpenseItemSelection[];
   idempotencyKey: string;
   candidates: WorkbenchInvoiceExpenseItemCandidate[];
 };
@@ -446,7 +445,6 @@ export type WorkbenchInvoiceExpenseItemAssignmentPayload = {
   invoiceRowId: string;
   targets: WorkbenchInvoiceExpenseItemSelection[];
   anomalyFingerprint: string;
-  previousTargets?: WorkbenchInvoiceExpenseItemSelection[];
   idempotencyKey: string;
 };
 

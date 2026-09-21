@@ -49,23 +49,6 @@ const target: WorkbenchInvoiceExpenseItemAssignmentTarget = {
 afterEach(() => vi.clearAllMocks());
 
 describe("WorkbenchInvoiceAssignmentDrawer", () => {
-  test("prefills current ownership and sends the original targets when correcting", async () => {
-    const user = userEvent.setup();
-    const previousTargets = [{ oaRowId: "oa-1", expenseItemId: "item-1" }];
-    vi.mocked(assignWorkbenchInvoiceExpenseItems).mockResolvedValue(undefined);
-    render(<WorkbenchInvoiceAssignmentDrawer open target={{ ...target, anomalyFingerprint: "", previousTargets }}
-      onClose={vi.fn()} onCompleted={vi.fn()} />);
-    expect(screen.getByText("更改发票归属")).toBeInTheDocument();
-    const old = screen.getByRole("checkbox", { name: "项目甲，27.05，交通费 · 明细 1" });
-    expect(old).toBeChecked();
-    await user.click(old);
-    await user.click(screen.getByRole("checkbox", { name: "项目乙，39.95，住宿费 · 明细 2" }));
-    await user.click(screen.getByRole("button", { name: "确认归属" }));
-    await waitFor(() => expect(assignWorkbenchInvoiceExpenseItems).toHaveBeenCalledWith(expect.objectContaining({
-      previousTargets, targets: [{ oaRowId: "oa-1", expenseItemId: "item-2" }],
-    })));
-  });
-
   test("starts unselected, supports explicit multi-selection, and rereads once after the command", async () => {
     const user = userEvent.setup();
     const onCompleted = vi.fn().mockResolvedValue(undefined);

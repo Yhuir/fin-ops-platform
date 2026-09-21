@@ -576,7 +576,7 @@ function missingInvoicePlaceholder(
     tableValues: {},
     detailFields: [],
     actionVariant: "detail-only" as const,
-    availableActions: anomaly.code === "oa_invoice_attachment_unparsed" ? ["enter_invoice"] : [],
+    availableActions: ["enter_invoice"],
     workbenchAnomalies: [anomaly],
     displayOnly: true,
   }];

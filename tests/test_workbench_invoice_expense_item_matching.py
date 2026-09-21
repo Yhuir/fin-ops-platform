@@ -65,11 +65,48 @@ def test_other_owner_special_type_or_currency_is_not_overwritten(fields):
     assert plan_invoice_expense_assignments([oa()], [invoice(**fields)]) == {}
 
 
-def test_partially_covered_item_does_not_use_residual_amount():
+def test_partially_covered_item_uses_unique_residual_amount():
     existing = invoice("10", "old", source_links=[{
         "source_type": "oa_expense_item_invoice", "derived_from_oa_id": "oa-1", "source_expense_item_id": "item-1",
     }])
-    assert plan_invoice_expense_assignments([oa()], [existing, invoice("24")]) == {}
+    assert plan_invoice_expense_assignments([oa()], [existing, invoice("24")]) == {"inv-1": [("oa-1", "item-1")]}
+
+
+def owned_invoice(amount, key, targets=("item-1",), **fields):
+    return invoice(amount, key, source_links=[{
+        "source_type": "oa_attachment_invoice", "derived_from_oa_id": "oa-1", "source_expense_item_id": target,
+    } for target in targets], **fields)
+
+
+def test_71_partial_three_tickets_preserves_separate_25_item_and_is_idempotent():
+    row = oa("71")
+    row["expense_items"].append({"id": "item-25", "amount": "25"})
+    rows = [owned_invoice("23", "first"), owned_invoice("25", "separate", ("item-25",)),
+            invoice("23", "second"), invoice("25", "third")]
+    before = deepcopy(rows)
+    expected = {"second": [("oa-1", "item-1")], "third": [("oa-1", "item-1")]}
+    for ordered in (rows, list(reversed(rows)), [*rows, rows[0]]):
+        assert plan_invoice_expense_assignments([row], ordered) == expected
+    assert rows == before
+    assert plan_invoice_expense_assignments([row], [rows[0], rows[1], owned_invoice("23", "second"), owned_invoice("25", "third")]) == {}
+
+
+@pytest.mark.parametrize("amount", ["71", "72", "0", "NaN", "-23"])
+def test_closed_overpaid_or_invalid_owned_amount_does_not_take_more(amount):
+    assert plan_invoice_expense_assignments([oa("71")], [owned_invoice(amount, "owned"), invoice("48")]) == {}
+
+
+def test_shared_invoice_has_no_invented_per_item_allocation():
+    row = oa("71")
+    row["expense_items"].append({"id": "item-2", "amount": "71"})
+    assert plan_invoice_expense_assignments([row], [owned_invoice("23", "shared", ("item-1", "item-2")), invoice("48")]) == {}
+
+
+def test_partial_remainder_ambiguity_currency_and_extra_tickets_are_not_guessed():
+    partial = owned_invoice("23", "owned")
+    assert plan_invoice_expense_assignments([oa("71"), oa("48", "other", "other-item")], [partial, invoice("48")]) == {}
+    assert plan_invoice_expense_assignments([oa("71")], [partial, invoice("48", currency="USD")]) == {}
+    assert plan_invoice_expense_assignments([oa("71")], [partial, invoice("23", "a"), invoice("25", "b"), invoice("1", "extra")]) == {}
 
 
 def test_empty_inputs():

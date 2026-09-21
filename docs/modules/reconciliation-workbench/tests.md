@@ -792,3 +792,10 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 `WorkbenchPaneFilter.test.ts` 覆盖两个区域旧 session 的全部 pane 年月/隐藏日期列清理、首请求 all、非日期搜索/筛选/排序保留，以及本次选月后搜索保留、卸载重进恢复全部。`WorkbenchSelection.test.tsx` 的具体月份、详情、选择和请求隔离回归继续保护现有行为。
 
 本次覆盖页面交互与既有功能回归；使用既有 API schema，不新增领域状态、写服务、read model 或 worker。导航、浏览器前后退与整页刷新由 App 进入规则浏览器验证补充。
+
+## 2026-09-21 部分归属多票补齐回归
+
+- Core：`test_workbench_invoice_expense_item_matching.py` 覆盖 71=23+23+25、另一独立 25 子项、重复 canonical ID、顺序不变性、已覆盖/超额/非法金额、共享票、币种和歧义。
+- Service/integration：`test_workbench_query_postgres_integration.py` 覆盖批量写入、审计失败全回滚、重复执行无新增、canonical 详情立即可见；既有 100/1000 票批量 SQL 检查及进行中 OA/8000 分期回归继续执行。`test_workbench_invoice_supplement_service.py` 覆盖继续追加多票保留既有成员。
+- UI：`RelationGroupGrid.test.tsx` 覆盖三张票同段、继续录入精确目标、只读/异常允许录入/无权限边界、旧按钮消失。主页面和异常共用 grid；初次待归属抽屉的失败与刷新回归保持。
+- API/worker/source：执行补录 API、附件 promotion、来源优先与现有 matching scope 测试；不引入新的 API 或 worker。

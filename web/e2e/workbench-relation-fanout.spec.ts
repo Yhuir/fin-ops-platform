@@ -46,6 +46,41 @@ test.describe("workbench relation browser flow", () => {
     expect(api.count("GET /api/workbench/oa-invoice-supplements/documents")).toBe(1);
   });
 
+  test("continues invoice entry from a multi-invoice child without losing its target", async ({ page }) => {
+    await installDeterministicApiMocks(page, { sessionMode: "user", workbenchOaInvoiceUnparsedScenario: true });
+    const responsePromise = page.waitForResponse(response => new URL(response.url()).pathname === "/api/workbench");
+    await page.goto("/");
+    const payload = await (await responsePromise).json();
+    const group = payload.unpaired.groups[0];
+    const owner = group.oa_rows[0];
+    const item = owner.expense_items[0];
+    owner.amount = item.amount = "71.00";
+    delete group.workbench_anomaly;
+    group.invoice_rows = ["23.00", "25.00", "23.00"].map((amount, index) => ({
+      id: `multi-invoice-${index}`, type: "invoice", invoice_type: "input", status: "active",
+      case_id: owner.case_id, amount, total_with_tax: amount, invoice_no: `TEST-MULTI-${index}`,
+      seller_name: "测试销方", buyer_name: "测试购方", source_kind: "oa_attachment_invoice",
+      source_oa_id: owner.id, source_expense_item_ids: [item.id], available_actions: [],
+    }));
+    payload.unpaired.row_counts.invoice = 3;
+    await page.route(/\/api\/workbench\?/, route => route.fulfill({ json: payload }));
+    await page.reload();
+    const segment = page.getByTestId(`candidate-group-segment-unpaired-${group.group_id}-${item.id}`);
+    await expect(segment.locator(".record-card-invoice")).toHaveCount(3);
+    await expect(segment.getByRole("button", { name: "更改归属" })).toHaveCount(0);
+    await segment.getByRole("button", { name: "继续录入 71 元付款项发票" }).click();
+    const drawer = page.getByRole("dialog", { name: "录入发票" });
+    await expect(drawer).toBeVisible();
+    await drawer.getByRole("button", { name: "添加发票" }).click();
+    await expect(drawer.getByRole("tab", { name: "新发票2" })).toBeVisible();
+    const targetRead = page.waitForRequest(request => request.url().includes("/oa-invoice-supplements/documents"));
+    await drawer.getByRole("tab", { name: "补充凭证" }).click();
+    const query = new URL((await targetRead).url()).searchParams;
+    expect(query.get("oa_row_id")).toBe(owner.id);
+    expect(query.get("expense_item_id")).toBe(item.id);
+    await expectNoUnexpectedSuccessUiErrors(page);
+  });
+
   test("aligns an explicitly owned bank fanout with its parent OA", async ({ page }) => {
     await installDeterministicApiMocks(page, {
       sessionMode: "user",
@@ -127,7 +162,9 @@ test.describe("workbench relation browser flow", () => {
     expect(invoicePaneBox).not.toBeNull();
     expect(invoiceRowBox).not.toBeNull();
     expect(Math.abs((invoicePaneBox?.height ?? 0) - (oaItemPaneBox?.height ?? 0))).toBeLessThanOrEqual(2);
-    expect(Math.abs((invoiceRowBox?.height ?? 0) - (invoicePaneBox?.height ?? 0))).toBeLessThanOrEqual(2);
+    const entryFooterBox = await invoicePane.locator(".workbench-invoice-entry-footer").boundingBox();
+    expect(entryFooterBox).not.toBeNull();
+    expect(Math.abs((invoiceRowBox?.height ?? 0) + (entryFooterBox?.height ?? 0) - (invoicePaneBox?.height ?? 0))).toBeLessThanOrEqual(2);
 
     const compositeBand = page.getByTestId(
       "candidate-group-segment-unpaired-row:oa-exp-2035-oa-exp-2035:item:2",
@@ -155,6 +192,7 @@ test.describe("workbench relation browser flow", () => {
     expect(Math.abs((compositeInvoiceBox?.height ?? 0) - (compositeOaBox?.height ?? 0))).toBeLessThanOrEqual(2);
     expect(Math.abs(
       compositeInvoiceRowBoxes.reduce((height, row) => height + row.height, 0)
+      + (await compositeInvoicePane.locator(".workbench-invoice-entry-footer").boundingBox())!.height
       - (compositeInvoiceBox?.height ?? 0),
     )).toBeLessThanOrEqual(4);
 
@@ -257,10 +295,10 @@ test.describe("workbench relation browser flow", () => {
     await expect(assignedSegment.getByText("531.92", { exact: true })).toBeVisible();
     await expect(assignedInvoicePane.getByText("193.92", { exact: true })).toHaveCount(1);
     await expect(assignedInvoicePane.getByText("338.00", { exact: true })).toHaveCount(1);
-    await assignedManualInvoice.getByRole("button", { name: "更改归属" }).click();
-    const correction = page.getByRole("dialog", { name: "更改发票归属" });
-    await expect(correction.getByRole("checkbox", { name: /^昭通卷烟厂能源集中监控平台系统维护采购项目，531\.92，/ })).toBeChecked();
-    await correction.getByRole("button", { name: "关闭选择 OA 明细" }).click();
+    await expect(assignedManualInvoice.getByRole("button", { name: "更改归属" })).toHaveCount(0);
+    await assignedInvoicePane.getByRole("button", { name: "继续录入 531.92 元付款项发票" }).click();
+    await expect(page.getByRole("dialog", { name: "录入发票" })).toBeVisible();
+    await page.getByRole("button", { name: "关闭录入发票" }).click();
 
     await expect(assignedAttachmentInvoice.getByText("OA附件", { exact: true })).toHaveCount(1);
     await expect(assignedAttachmentInvoice.getByText("人工导入", { exact: true })).toHaveCount(0);

@@ -1924,7 +1924,7 @@ export default function ReconciliationWorkbenchPage() {
 
     if (action === "enter-invoice" || action === "manage-supporting-documents") {
       const expenseItemId = row.sourceExpenseItemIds?.[0] ?? "";
-      if (!row.sourceOaId || !expenseItemId) {
+      if (!row.sourceOaId || !expenseItemId || row.sourceExpenseItemIds?.length !== 1) {
         openActionResultDialog("无法确定需要补录发票的 OA 子付款项，请刷新页面后重试。", "无法录入发票");
         return;
       }
@@ -1949,7 +1949,7 @@ export default function ReconciliationWorkbenchPage() {
         ?? group.rows.oa.find((candidate) => candidate.caseId)?.caseId
         ?? group.rows.bank.find((candidate) => candidate.caseId)?.caseId
         ?? "";
-      if (row.recordType !== "invoice" || (!anomaly && !row.sourceExpenseItemIds?.length) || !caseId || candidates.length === 0) {
+      if (row.recordType !== "invoice" || !anomaly || !caseId || candidates.length === 0) {
         openActionResultDialog(
           "无法确定这张发票可归属的 OA 付款明细，请刷新页面后重试。",
           "无法选择 OA 明细",
@@ -1965,10 +1965,7 @@ export default function ReconciliationWorkbenchPage() {
         invoiceNo: row.tableValues.invoiceNo ?? row.label,
         sellerName: row.tableValues.sellerName ?? row.counterparty,
         amount: row.tableValues.grossAmount ?? row.amount,
-        anomalyFingerprint: anomaly?.fingerprint ?? "",
-        ...(!anomaly ? { previousTargets: candidates.filter((candidate) => (
-          row.sourceExpenseItemIds?.includes(candidate.expenseItemId)
-        )).map(({ oaRowId, expenseItemId }) => ({ oaRowId, expenseItemId })) } : {}),
+        anomalyFingerprint: anomaly.fingerprint,
         idempotencyKey: crypto.randomUUID(),
         candidates,
       });

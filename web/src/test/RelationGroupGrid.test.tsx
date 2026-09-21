@@ -2090,15 +2090,49 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.queryByRole("button", { name: "更改归属" })).not.toBeInTheDocument();
   });
 
-  test("manual-only invoice retains ownership correction", () => {
+  test.each([
+    { readOnly: false, canOperateData: true, allowInvoiceEntryInReadOnly: false, enabled: true },
+    { readOnly: true, canOperateData: true, allowInvoiceEntryInReadOnly: true, enabled: true },
+    { readOnly: true, canOperateData: true, allowInvoiceEntryInReadOnly: false, enabled: false },
+    { readOnly: false, canOperateData: false, allowInvoiceEntryInReadOnly: false, enabled: false },
+  ])("continues entry for the exact item with three invoices: %j", (permissions) => {
+    const onAction = vi.fn();
+    const parent = { ...createOaRecord("oa-multi-71", "测试", "71.00"),
+      expenseItems: [{ id: "item-71", rowIndex: "0", projectName: "测试项目", amount: "71.00", expenseType: "交通费" }] };
+    const invoices = ["23.00", "25.00", "23.00"].map((amount, i) =>
+      createAttachmentInvoiceRecord(`multi-${i}`, "测试销方", amount, parent.id, "item-71"));
+    const group: WorkbenchRelationGroup = { id: "multi-71", groupType: "unpaired", matchConfidence: "high",
+      reason: "canonical_unpaired", rows: { oa: [parent], bank: [], invoice: invoices } };
+    render(<RelationGroupGrid {...permissions} groups={[group]} getRowState={() => "idle"}
+      panes={[{ id: "oa", title: "OA", rows: [parent] }, { id: "bank", title: "银行流水", rows: [] },
+        { id: "invoice", title: "发票", rows: invoices }]}
+      rowTemplateColumns="1fr 8px 1fr 8px 1fr" zoneId="unpaired"
+      onOpenDetail={vi.fn()} onRowAction={onAction} onSelectRow={vi.fn()} />);
+    const segment = screen.getByTestId("candidate-group-segment-unpaired-multi-71-item-71");
+    expect(segment.querySelectorAll(".record-card-invoice")).toHaveLength(3);
+    const button = within(segment).getByRole("button", { name: "继续录入 71.00 元付款项发票" });
+    if (permissions.enabled) {
+      fireEvent.click(button);
+      expect(onAction).toHaveBeenCalledWith(expect.objectContaining({ sourceOaId: parent.id,
+        sourceExpenseItemIds: ["item-71"], caseId: parent.caseId }), "enter-invoice", group);
+    } else {
+      expect(button).toBeDisabled();
+      fireEvent.click(button);
+      expect(onAction).not.toHaveBeenCalled();
+    }
+    expect(screen.queryByRole("button", { name: "更改归属" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "选择已有发票" })).not.toBeInTheDocument();
+  });
+
+  test("manual-only invoice does not offer ownership correction", () => {
     const onAction = vi.fn();
     const row = { ...createInvoiceRecord("invoice-manual", "123"), sourceKind: "manual_invoice_import",
       sourceExpenseItemIds: ["oa-1:item:0"] };
     render(<WorkbenchRecordCard canOperateData columnGridStyle={invoiceGridStyle} columns={invoiceColumns}
       paneId="invoice" row={row} rowState="idle" zoneId="unpaired" showWorkflowActions={false}
       onOpenDetail={() => undefined} onRowAction={onAction} onSelectRow={() => undefined} />);
-    fireEvent.click(screen.getByRole("button", { name: "更改归属" }));
-    expect(onAction).toHaveBeenCalledWith(row, "assign-invoice-expense-items");
+    expect(screen.queryByRole("button", { name: "更改归属" })).not.toBeInTheDocument();
+    expect(onAction).not.toHaveBeenCalled();
   });
 
   test("renders bank note column from structured bank text fields", () => {

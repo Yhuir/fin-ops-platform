@@ -188,6 +188,16 @@ class WorkbenchInvoiceSupplementServiceTests(unittest.TestCase):
         self.assertEqual(relation_call["row_ids"][2:], result["invoice_row_ids"])
         self.assertTrue(relation_call["replace_existing"])
 
+    def test_continued_batch_keeps_existing_invoice_members(self) -> None:
+        self.relation_repository.existing['row_ids'].append('existing-invoice')
+        self.relation_repository.existing['row_types'].append('invoice')
+        result = self._service().attach_manual_invoices(self._command())
+        relation = self.relation_commands.calls[0]
+        self.assertEqual(relation['row_ids'][:3], ['oa-405', 'bank-405', 'existing-invoice'])
+        self.assertEqual(relation['row_ids'][3:], result['invoice_row_ids'])
+        self.assertEqual(len(result['invoice_row_ids']), 2)
+        self.assertEqual(self.connection.transaction_count, 1)
+
     def test_manual_supplement_cannot_move_existing_oa_attachment_invoice(self) -> None:
         existing_preview = ManualInvoiceEntryService(
             file_import_service=self.files,

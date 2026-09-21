@@ -156,7 +156,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 
 ## 2026-09-20 后到发票归属闭环
 
-- `workbench_invoice_expense_item_matching.py` 是同组金额归属纯函数：输入完整 canonical OA 明细、正式进项发票及来源，输出 invoice→OA/item targets；无 HTTP/SQL/队列。固定已有明确归属，仅处理双向唯一同币种同额完整明细，或唯一剩余明细与全部剩余票合计一致；不做跨组金额碰撞、任意子集凑数、部分分摊或模糊兜底。
+- `workbench_invoice_expense_item_matching.py` 是同组金额归属纯函数：输入完整 canonical OA 明细、正式进项发票及来源，输出 invoice→OA/item targets；无 HTTP/SQL/队列。固定已有明确归属，以独立明细金额减去已明确归属的去重发票金额作为余额，仅处理双向唯一同币种同额余额，或唯一剩余明细余额与全部剩余票合计一致；共享发票和不完整归属不得虚构分摊；不做跨组金额碰撞、任意子集凑数、部分分摊或模糊兜底。
 - 正式 matcher 创建/扩展关系后，在同一个 UoW 中执行归属；已经完整的普通 active relation 也可只补归属，不改 relation version、成员和金额事实。锁定全部相关成员、OA items 和 invoice source links，重读候选后批量 CAS。审计失败回滚整个事务。
 - 发票 owner 仍为 `app.invoices.source_links`。新增 `oa_expense_item_invoice.entry_method=workbench_auto_unique_amount`；保留真实人工导入/OA 来源，不伪造解析结果。单票及批量来源读取共用 canonical source-links loader，不再从 raw payload 猜归属。
 - 人工 relation delta 与来源更改在同一事务按关系内发票真实月份登记现有 matching scope（expedite）；自动 actor 不反向登记自己。跨月 relation hydrate 按全体成员 ID 读取。

@@ -24,14 +24,15 @@ def invoice_needs_expense_assignment(links: Any) -> bool:
 def plan_invoice_expense_assignments(
     oa_rows: list[dict[str, Any]], invoice_rows: list[dict[str, Any]],
 ) -> dict[str, list[tuple[str, str]]]:
-    """Infer only unique whole-item ownership inside one established relation.
+    """Complete uniquely determined item balances inside one established relation.
 
     Supporting documents are deliberately irrelevant. No subset-sum search,
     allocations, fuzzy names, ordering tie-breaks, or cross-relation inference.
     """
     items: dict[tuple[str, str], tuple[str, Decimal]] = {}
     owner_aliases: dict[str, set[str]] = {}
-    covered: set[tuple[str, str]] = set()
+    assigned_totals: dict[tuple[str, str], Decimal] = defaultdict(Decimal)
+    non_independent: set[tuple[str, str]] = set()
     aliases_to_owners: dict[str, set[str]] = defaultdict(set)
     oa_by_id = {str(oa["id"]): oa for oa in oa_rows}
     for oa in oa_rows:
@@ -44,24 +45,49 @@ def plan_invoice_expense_assignments(
             amount = _positive_money(item.get("amount"))
             if item.get("id") and amount is not None:
                 items[(owner, str(item["id"]))] = (currency, amount)
-    for invoice in invoice_rows:
+    # Canonical rows may be repeated by a caller; an invoice contributes once.
+    invoice_by_id = {str(row["id"]): row for row in invoice_rows}
+    for invoice in invoice_by_id.values():
         links = effective_invoice_source_links(invoice.get("source_links"))
         explicit = [link for link in links if link.get("source_type") == "oa_expense_item_invoice"]
         ownership = explicit or [link for link in links if link.get("source_type") == "oa_attachment_invoice"]
+        targets: set[tuple[str, str]] = set()
+        unresolved = False
         for link in ownership:
             item_id = str(link.get("source_expense_item_id") or "")
-            for owner in aliases_to_owners.get(invoice_ownership_parent_oa_id(link), ()):
+            owners = aliases_to_owners.get(invoice_ownership_parent_oa_id(link), ())
+            if len(owners) != 1:
+                unresolved = True
+            for owner in owners:
                 if (owner, item_id) in items:
-                    covered.add((owner, item_id))
+                    targets.add((owner, item_id))
                 else:
                     # Historical item aliases retain the canonical linking contract.
-                    covered.update((owner, key) for key in canonical_oa_expense_item_ids(
+                    resolved = {(owner, key) for key in canonical_oa_expense_item_ids(
                         oa_row=oa_by_id[owner], invoice_row={"source_links": [link]},
-                    ))
-    remaining_items = {key: value for key, value in items.items() if key not in covered}
+                    ) if (owner, key) in items}
+                    targets.update(resolved)
+                    if not resolved:
+                        unresolved = True
+                        non_independent.update(key for key in items if key[0] == owner)
+        if not targets:
+            continue
+        amount = _positive_money(invoice.get("total_with_tax"))
+        currency = str(invoice.get("currency") or "CNY")
+        # Shared invoices have no per-item allocation; do not subtract their full
+        # amount from each item or infer a residual from incomplete source edges.
+        if unresolved or len(targets) != 1 or amount is None or any(items[key][0] != currency for key in targets):
+            non_independent.update(targets)
+            continue
+        assigned_totals[next(iter(targets))] += amount
+    remaining_items = {
+        key: (currency, total - assigned_totals[key])
+        for key, (currency, total) in items.items()
+        if key not in non_independent and total > assigned_totals[key]
+    }
     invoices: dict[str, tuple[str, Decimal]] = {}
     parents: dict[str, set[str]] = {}
-    for row in invoice_rows:
+    for row in invoice_by_id.values():
         links = source_links(row.get("source_links"))
         if not invoice_needs_expense_assignment(links):
             continue

@@ -29,6 +29,7 @@ type RelationGroupCellProps = {
   allowInvoiceEntryInReadOnly?: boolean;
   leadingControl?: ReactNode;
   rowControls?: Map<string, ReactNode>;
+  footer?: ReactNode;
 };
 
 function RelationGroupCell({
@@ -51,6 +52,7 @@ function RelationGroupCell({
   allowInvoiceEntryInReadOnly = false,
   leadingControl,
   rowControls,
+  footer,
 }: RelationGroupCellProps) {
   const isSingleRecord = records.length === 1;
 
@@ -69,7 +71,7 @@ function RelationGroupCell({
 
   return (
     <div
-      className={`candidate-group-cell candidate-group-cell-${paneId} candidate-group-cell-sheet ${isSingleRecord ? "candidate-group-cell-sheet-single" : "candidate-group-cell-sheet-multi"}`}
+      className={`candidate-group-cell candidate-group-cell-${paneId} candidate-group-cell-sheet${footer ? " candidate-group-cell-with-footer" : ""} ${isSingleRecord ? "candidate-group-cell-sheet-single" : "candidate-group-cell-sheet-multi"}`}
       data-scroll-pane={scrollPaneId}
       data-testid={scrollTestId}
     >
@@ -99,6 +101,7 @@ function RelationGroupCell({
           />
         ))}
       </div>
+      {footer}
     </div>
   );
 }

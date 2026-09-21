@@ -313,7 +313,7 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 
 ## 2026-09-20 后到发票与归属纠正
 
-- 缺票明细可“选择已有发票”：同组未归属票直接进入现有归属抽屉；组外票先使用正式关联流程。已有归属提供“更改归属”，预选当前 targets。
+- 缺票明细使用“录入发票”；已有发票或凭证的子付款项使用“继续录入”，复用同一补录抽屉及批量 append 服务。页面不再提供“选择已有发票”或“更改归属”。只有无 OA 来源且确实待归属的历史人工发票保留异常内初次“选择 OA 明细”。
 - `POST /api/workbench/actions/assign-invoice-expense-items` 保留初次归属 fingerprint 合同；纠正模式提供非空 `previous_targets`（同 targets 结构），锁内比较当前完整归属集合，再替换为用户 targets，冲突返回 409。非显式 provenance 保留，记录 before/after，后续自动任务不改回。现有认证、页面写权限和幂等键不变。
 - 补充凭证仅为资料证明，不排除正式发票归属。新增/软删除由凭证 repository 在其事务登记 matching scope；文件对象仍由既有 storage owner 管理。已有正式归属时删除凭证不会删除它。
 - 页面复用 App Health 的 matching 完成时间，时间变化后合并触发一次 canonical 回读；活动抽屉/选择期间复用现有延期机制，不轮询整个列表。
@@ -334,7 +334,7 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 
 ## 2026-09-20 OA 发票来源优先闭环
 
-- OA 附件发票不显示“更改归属”或异常中的“选择 OA 明细”；无 OA 来源的人工发票保留原操作及权限约束。后端同样拒绝人工改写，不能只靠隐藏按钮。
+- OA 附件发票不显示“更改归属”或异常中的“选择 OA 明细”；无 OA 来源且待归属的人工发票只保留异常内初次归属及权限约束。后端同样拒绝人工改写，不能只靠隐藏按钮。
 - SQL 列表/详情与 Python canonical/grouping 投影统一 OA 优先；付款项数组保持一对多。缺失原始子项证据仍报告异常，不猜测归属。
 - 进行中 OA 的关联组保持未配对，既有分期 8000/8000 对齐与 ETC 来源链路进入回归范围。
 
@@ -343,3 +343,10 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 页面挂载时，已配对/未配对两区各自通过现有 display session restore 将 OA、银行和发票 `timeFilterByPane` 归零，并移除银行 `loanRepaymentDate` 与发票 `issueDate` 日期列条件（包括已隐藏控件的旧条件）。首次 initial/groups 请求不携带旧 time_filters，仍使用现有 month=all 查询 owner。区域搜索、非日期列筛选、排序和栏显示偏好继续恢复；分页游标、选择、展开详情是本次挂载状态。页面内搜索、刷新、业务回读和抽屉关闭保留本次选择的年月，不另建全局日期状态或 effect 二次重置。
 
 通用进入边界见 [时间范围实施约定](../../dev/date-range-default-all-plan.md)。HTTP schema、权限、业务资格与事实写入边界不因此改变。
+
+## 2026-09-21 子付款项多票补齐
+
+- 展示沿用 `groupDisplayModel` 的子项/发票连通分量；不新增业务 DTO、表或缓存。`RelationGroupCell.footer` 是纯展示插槽，`RelationGroupGrid` 从该段 OA 子项取得唯一目标，不能从共享发票的首个 item 推断目标；主页面与异常抽屉共用该入口。没有操作权限时不可提交。
+- 普通“更改归属”的前端按钮、previousTargets 状态、预选逻辑和 API client 参数全部移除。后端显式纠正命令的既有 CAS/审计合同保持不变，供受控维护，不再由普通行触发。
+- 自动规则保留 OA 来源优先及明确归属。独立子项以 OA 金额减去已归属 canonical 发票去重金额计算余额；仅有唯一同额候选或唯一剩余子项与全部剩余票合计相等时补齐。共享发票、归属不完整、不同币种和歧义不做自动分摊。自动金额来源明确标识为 `workbench_auto_unique_amount`，不能冒充 OA 附件。
+- 沿用 relation UoW、一次批量 CAS 和一次审计；不增加 GET 查询、队列、worker 或 read model。进行中 OA 仍在未配对，银行及 ETC 规则不变。

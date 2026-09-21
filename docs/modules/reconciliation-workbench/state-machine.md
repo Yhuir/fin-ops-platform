@@ -135,7 +135,7 @@ row detail GET 是纯读操作：按 typed identity 窄查 latest committed cano
 
 ## 2026-09-20 明细归属状态
 
-未归属票进入同一 active 普通关联组后，matching 可独立提交唯一金额归属，即使关系拓扑已完整或补充凭证存在。已明确归属不因凭证删除而丢失，也不被后来的弱同额候选抢占。金额、资料异常和 paired/unpaired 每次按当前 canonical facts 计算；归属成功并不豁免银行缺失、金额差额或其他异常。人工纠正以 previous_targets 比较后替换，原始 provenance 和审计保留。
+未归属票进入同一 active 普通关联组后，matching 可独立提交唯一金额归属，即使关系拓扑已完整或补充凭证存在。已明确归属不因凭证删除而丢失，也不被后来的弱同额候选抢占。金额、资料异常和 paired/unpaired 每次按当前 canonical facts 计算；归属成功并不豁免银行缺失、金额差额或其他异常。普通行不再提供更改归属；受控纠正 API 仍以 previous_targets 比较后替换，原始 provenance 和审计保留。独立子项已有部分发票时，继续按真实剩余金额匹配唯一候选；不能把“已有票”当成“金额已覆盖”。
 
 ## 2026-09-21 凭证组金额状态
 

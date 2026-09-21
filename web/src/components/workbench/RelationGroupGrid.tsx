@@ -674,6 +674,22 @@ function RelationGroupGrid({
                           canOperateData={canOperateData}
                           readOnly={readOnly}
                           allowInvoiceEntryInReadOnly={allowInvoiceEntryInReadOnly}
+                          footer={paneId === "invoice" && segment.rows.oa.some((row) => row.displayRole === "expense-claim-item") && segment.rows.invoice.some((row) => !row.displayOnly || row.supportingDocuments?.length) ? (
+                            <div className="workbench-invoice-entry-footer">
+                              {segment.rows.oa.filter((row) => row.displayRole === "expense-claim-item").map((row) => (
+                                <Button
+                                  key={row.sourceExpenseItemIds![0]}
+                                  size="sm"
+                                  variant="tertiary"
+                                  isDisabled={!canOperateData || (readOnly && !allowInvoiceEntryInReadOnly)}
+                                  aria-label={`继续录入 ${row.amount} 元付款项发票`}
+                                  onPress={() => onRowAction({ ...row, sourceOaId: row.id }, "enter-invoice", group)}
+                                >
+                                  {segment.rows.oa.length > 1 ? `继续录入（${row.amount} 元）` : "继续录入"}
+                                </Button>
+                              ))}
+                            </div>
+                          ) : undefined}
                           zoneId={zoneId}
                         />
                       </div>,
