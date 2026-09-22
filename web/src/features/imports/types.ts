@@ -63,12 +63,17 @@ export type ImportPreviewDetailRow = {
   totalWithTax?: string | null;
 };
 
+export type ImportReviewCategory = "new" | "existing" | "review" | "batch_duplicate";
+
 export type ImportReviewRowsPage = {
+  summary: Record<ImportReviewCategory, number>;
   rows: Array<ImportPreviewDetailRow & {
     id: string;
     fileId: string;
-    fileName: string;
     rowNo: number;
+    category: ImportReviewCategory;
+    currentSource: string | null;
+    conflicts: Array<{ field: string; fileValue: string; currentValue: string }>;
     duplicateType?: string;
     recordType?: string;
   }>;
@@ -76,17 +81,6 @@ export type ImportReviewRowsPage = {
   offset: number;
   limit: number;
   hasMore: boolean;
-};
-
-export type ImportPreviewDuplicateGroup = {
-  identityKey: string;
-  recordType: string;
-  duplicateType: string;
-  rows: Array<ImportPreviewDetailRow & {
-    fileId: string;
-    fileName: string;
-    rowNo: number;
-  }>;
 };
 
 export type ImportRowResult = ImportPreviewDetailRow & {
@@ -177,7 +171,6 @@ export type MatchingRunSummary = {
 export type ImportSessionPayload = {
   session: ImportSessionSummary;
   files: ImportFilePreview[];
-  duplicateGroups: ImportPreviewDuplicateGroup[];
   matchingRun?: MatchingRunSummary;
   job?: BackgroundJob;
   affectedScopeKeys: string[];

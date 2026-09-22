@@ -1203,7 +1203,9 @@ class PostgresStateStore:
             if result_payload.get("outcome") == "no_changes":
                 completion.succeed(transaction, result_payload)
             else:
-                completion.preview(transaction, result_payload)
+                completion.preview(transaction, result_payload, status=(
+                    "needs_review" if result_payload.get("outcome") == "needs_review" else "awaiting_confirmation"
+                ))
 
     def save_confirmed_import_delta_with_oa_attachment_promotion(
         self,

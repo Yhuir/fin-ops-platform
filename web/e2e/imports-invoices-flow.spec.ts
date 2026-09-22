@@ -190,10 +190,10 @@ test.describe("invoice import browser flow", () => {
 
     await previewInvoiceFiles(page, { recordLatency });
     expect(api.count("GET /imports/files/sessions/import_session_e2e_invoice/review-rows")).toBe(0);
-    await page.getByRole("button", { name: "查看未处理明细" }).click();
-    await expect(page.getByRole("tab", { name: /重复项 2/ })).toBeVisible();
-    await expect(page.getByRole("grid", { name: "重复项明细" })).toContainText("同文件重复");
-    await expect(page.getByRole("grid", { name: "重复项明细" })).toContainText("浏览器销项客户");
+    await page.getByRole("button", { name: "查看导入明细" }).click();
+    await expect(page.getByLabel("导入明细图例")).toBeVisible();
+    await expect(page.getByRole("grid", { name: "导入文件全部明细" })).toContainText("新增项");
+    await expect(page.getByRole("grid", { name: "导入文件全部明细" })).toContainText("浏览器销项客户");
     expect(api.count("GET /imports/files/sessions/import_session_e2e_invoice/review-rows")).toBe(1);
     await page.getByRole("button", { name: "关闭抽屉" }).click();
     expect(api.count("POST /imports/files/preview")).toBe(1);
@@ -416,17 +416,8 @@ test.describe("invoice import browser flow", () => {
     await expect(fileResults).toContainText("文件损坏，无法读取发票明细。");
     await expect(fileResults).toContainText("二月发票.xlsx");
     await expect(fileResults).toContainText("待确认");
-    await page.getByRole("button", { name: "查看未处理明细" }).click();
-    await expect(page.getByRole("tab", { name: /未处理项 4/ })).toBeVisible();
-    await recordLatency({
-      operationId: "imports-invoices.open-skipped-files-tab",
-      visibleLabel: "未处理项 4",
-      actionType: "click",
-    }, async (mark) => {
-      await page.getByRole("tab", { name: /未处理项 4/ }).click();
-      await mark("finalSettledLatencyMs", expect(page.getByRole("grid", { name: "未处理项明细" })).toContainText("文件损坏，无法读取发票明细。"));
-    });
-    await expect(page.getByRole("grid", { name: "未处理项明细" })).toContainText("文件损坏，无法读取发票明细。");
+    await page.getByRole("button", { name: "查看导入明细" }).click();
+    await expect(page.getByRole("dialog").getByText("文件损坏，无法读取发票明细。").first()).toBeVisible();
     await page.getByRole("button", { name: "关闭抽屉" }).click();
 
     await recordLatency({

@@ -122,3 +122,7 @@ ImportJobWorker 显式捕获 RuntimeWorkerTaskTimeout，复用 owner+claim_versi
 - 刷新：沿用现有全局轮询，写后回读当前任务/列表；共享任务跨状态保持可见。不新增定时器、缓存、read model、队列、依赖、迁移或备份。
 - 旧链清理：删除导入任务 admin-only、共享任务 creator-only、跨用户无法继续预览文案与对应旧测试假设；非共享任务的 owner 校验保留。失败不能用普通已读绕过明确结束处理；原错误历史保留。
 - 验证：共享权限、私人草稿隔离、跨用户确认/异步审计、分页筛选、并发与回滚、丢失响应核实、旧页面导入回归；见[共享实施与验收](../../dev/import-task-disposition-plan.md#共享处理修订2026-09-23)。
+
+## 2026-09-23 导入准备结果
+
+文件 prepare 没有合格文件时，preview delta 与 `needs_review` 在既有 completion 事务内保存；存在可确认文件则保留 `awaiting_confirmation`，全量已存在银行文件保持 `succeeded/no_changes`。没有新 worker、queue 或 schema。明细及确认边界见 [导入复核记录](../../dev/import-review-details-repair.md)。

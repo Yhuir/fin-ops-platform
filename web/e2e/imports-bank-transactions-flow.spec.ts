@@ -216,10 +216,10 @@ test.describe("bank transaction import browser flow", () => {
 
     await previewBankStatementFiles(page, { recordLatency });
     expect(api.count("GET /imports/files/sessions/import_session_e2e_bank/review-rows")).toBe(0);
-    await page.getByRole("button", { name: "查看未处理明细" }).click();
-    await expect(page.getByRole("tab", { name: /重复项 2/ })).toBeVisible();
-    await expect(page.getByRole("grid", { name: "重复项明细" })).toContainText("同文件重复");
-    await expect(page.getByRole("grid", { name: "重复项明细" })).toContainText("导入浏览器测试客户");
+    await page.getByRole("button", { name: "查看导入明细" }).click();
+    await expect(page.getByLabel("导入明细图例")).toBeVisible();
+    await expect(page.getByRole("grid", { name: "导入文件全部明细" })).toContainText("新增项");
+    await expect(page.getByRole("grid", { name: "导入文件全部明细" })).toContainText("导入浏览器测试客户");
     expect(api.count("GET /imports/files/sessions/import_session_e2e_bank/review-rows")).toBe(1);
     await page.getByRole("button", { name: "关闭抽屉" }).click();
     expect(api.count("POST /imports/files/preview")).toBe(1);
@@ -368,17 +368,8 @@ test.describe("bank transaction import browser flow", () => {
     await expect(fileResults).toContainText("文件损坏，无法读取银行流水模板。");
     await expect(fileResults).toContainText("2026-01-01至2026-01-31交易明细.xlsx");
     await expect(fileResults).toContainText("待确认");
-    await page.getByRole("button", { name: "查看未处理明细" }).click();
-    await expect(page.getByRole("tab", { name: /未处理项 3/ })).toBeVisible();
-    await recordLatency({
-      operationId: "imports-bank-transactions.open-skipped-files-tab",
-      visibleLabel: "未处理项 3",
-      actionType: "click",
-    }, async (mark) => {
-      await page.getByRole("tab", { name: /未处理项 3/ }).click();
-      await mark("finalSettledLatencyMs", expect(page.getByRole("grid", { name: "未处理项明细" })).toContainText("文件损坏，无法读取银行流水模板。"));
-    });
-    await expect(page.getByRole("grid", { name: "未处理项明细" })).toContainText("文件损坏，无法读取银行流水模板。");
+    await page.getByRole("button", { name: "查看导入明细" }).click();
+    await expect(page.getByRole("dialog").getByText("文件损坏，无法读取银行流水模板。").first()).toBeVisible();
     await page.getByRole("button", { name: "关闭抽屉" }).click();
 
     await recordLatency({

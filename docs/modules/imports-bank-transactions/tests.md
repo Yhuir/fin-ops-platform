@@ -221,3 +221,7 @@ Nightly CI 通过 `scripts/verify.sh all` 执行后端、前端、Playwright bro
 `tests/test_bank_identity_repair.py` 覆盖字段保护、原始证据保留、缺失/冲突拒绝、时区等价、合法 v4、canonical 身份读取、事务失败及旧值 CAS、CLI 精确范围/恢复工件/审计、迁移后重复导入和幂等。需真实可丢弃 PostgreSQL；既有 file API/service 测试覆盖 preview stale、权限、任务恢复。前端没有新交互，运行现有导入、明细和工作台回归，不新增仅镜像实现的组件测试。
 
 `test_historical_weak_key_survives_v3_migration_without_rewriting_import_history` 补充早期弱身份引用迁移后流水的全页审计回归：合法引用通过且历史行不变；canonical 身份、金额或官方参考号任一漂移仍报告错误。
+
+## 2026-09-23 复核闭环回归
+
+`tests/test_import_review_closure.py` 覆盖 33/19/10/4、单票字段比较、文件隔离、分页边界、确认前零入队、零部分写入、修正后幂等提交与 PostgreSQL 原子状态。前端 `ImportReviewTable.test.tsx`、`ImportPreparation.test.ts`、`ImportsApi.test.ts`、`ImportCenterPage.test.tsx` 与 `web/e2e/import-review-details.spec.ts` 覆盖颜色/文字、完整金额、比较展开、文件参数、needs_review、只读按需加载。既有银行/发票/ETC/共享任务浏览器链路继续回归。

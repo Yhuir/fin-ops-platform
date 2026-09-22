@@ -51,7 +51,7 @@
 | 文件预览确认 | `ImportWorkflowPage.tsx`、`features/imports/api.ts` | 银行流水文件只能调用 `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/sessions/*`；`preview_ready` 只证明解析完成，前端仅提交 `audit.confirmable_count > 0` 且账户无冲突的文件；全量已存在时不调用 confirm、不创建 job |
 | 手工流水预览 | `POST /imports/bank-transactions/manual/preview` | body 为 `{transactions:[...]}`，1–50 笔。每笔必须绑定现有 `bank_mapping_id`，填写与 mapping 尾号一致的完整本方账号、收支、正金额、余额、秒级交易时间、三位币种和对方户名；不接收银行流水标识。服务端一次批量预载 canonical identities，再为每笔生成独立 preview file。既有弱指纹命中为 `suspected_duplicate`，同批弱指纹重复在 session 创建前拒绝；只返回 `created` 文件的 `file_ids`。 |
 | 当前预览读取/放弃 | `GET /imports/files/sessions/{session_id}`、`POST /imports/files/discard` | 只读取页面本次访问创建并持有 id 的 session；不提供活跃 session 列表或自动恢复。放弃必须校验 owner，对已确认文件或 pending/processing/succeeded job fail closed，重复放弃幂等。 |
-| 复核明细分页 | `GET /imports/files/sessions/{session_id}/review-rows?kind=duplicate|unimported&offset&limit` | `limit` 最大 100；返回当前 session 的稳定切片和 `total/has_more`。session 摘要不携带无界 `row_results`、`normalized_rows` 或 `duplicate_groups`，页面不得从摘要恢复全量复核列表。 |
+| 复核明细分页 | `GET /imports/files/sessions/{session_id}/review-rows?file_id={file_id}&offset&limit` | `limit` 最大 100；返回当前 session 的稳定切片和 `total/has_more`。session 摘要不携带无界 `row_results`、`normalized_rows` 或 `duplicate_groups`，页面不得从摘要恢复全量复核列表。 |
 | 不完整表头字段映射 | `ImportWorkflowPage.tsx`、`features/imports/api.ts` | 后端返回 `header_signature`、`mapping_candidates`、`mapping_fields`、`field_mapping`；页面只向 `/imports/files/retry` 提交当前文件的 canonical 字段到源列映射，不提交已解析交易事实。 |
 | 页面手动刷新 | `ImportWorkflowPage.tsx` | 重新读取银行映射配置；有持久化 preview session 时同时精确重读该 session，保留当前草稿和文件选择，不执行浏览器 reload 或跨页面 refresh。 |
 | Import job | `job.import_jobs` | 唯一 prepare/commit 状态源；worker 直接 claim、租约续期与 fencing。相同意图失败重试复用原 job；确认范围变化仅在前一任务成功且显式版本匹配后创建下一意图。业务事实、审计、必要 dirty scopes 与成功状态同事务提交。 |
@@ -235,3 +235,13 @@ worker 不写独立 background job；全局进度从同一 import job 投影，�
 - 刷新：沿用现有全局轮询，写后回读当前任务/列表；共享任务跨状态保持可见。不新增定时器、缓存、read model、队列、依赖、迁移或备份。
 - 旧链清理：删除导入任务 admin-only、共享任务 creator-only、跨用户无法继续预览文案与对应旧测试假设；非共享任务的 owner 校验保留。失败不能用普通已读绕过明确结束处理；原错误历史保留。
 - 验证：共享权限、私人草稿隔离、跨用户确认/异步审计、分页筛选、并发与回滚、丢失响应核实、旧页面导入回归；见[共享实施与验收](../../dev/import-task-disposition-plan.md#共享处理修订2026-09-23)。
+
+## 2026-09-23 文件全量复核与确认闭环
+
+- `review-rows` 必须指定当前 session 内的 `file_id`，删除旧 `kind=duplicates/unimported` 分流；返回全部逻辑记录的有界分页（最多 100），包含 `summary`、互斥 `category=new/existing/review/batch_duplicate`、`conflicts[{field,file_value,current_value}]` 和 `current_source`。不返回逐行文件名。分类复用 preview audit 的 identity 分组，需检查优先、原行号稳定排序。
+- 发票冲突复用 canonical invoice financial comparison；每页一次批量 identity preload，比较单票正式字段，不调用进项页面的关系组汇总，不读文件原件、不写事实、不新增 cache/read model。
+- `ImportReviewTable` 是导入页自有展示组件，复用 FinanceTable/AppDrawer；单文件直接查看，多文件显式选择。灰色已存在、绿色新增、橘色需检查，并显示文字图例；票号、公司名与金额完整展示。ETC 保持原抽屉合同。
+- API 入队前与 worker 确认共用 `assert_files_confirmable`；已知问题文件不入 commit queue，原 stale 校验/事务最终校验继续执行。prepare 没有可确认文件时以 `needs_review` 原子保存；混合文件保留只确认合格文件的已有能力，不能部分提交同一问题文件。全量已存在银行文件仍是 `no_changes`。
+- 前端 prepare 等待允许 `needs_review` 返回可查看预览；commit 不将其视为成功。当前真实记录仍需以原始凭证确定纠正方向，程序不自动覆盖财务冲突。
+- 删除旧明细 tabs、未处理差额公式、混入已存在的过滤、重复文件名列、固定 1520/1240px 表宽及旧测试假设。详情分页读写权限继续复用共享导入任务边界。
+- 七类测试、性能与发布证据见 [实施记录](../../dev/import-review-details-repair.md)。

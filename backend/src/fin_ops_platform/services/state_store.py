@@ -1578,7 +1578,9 @@ class ApplicationStateStore:
             if result_payload.get("outcome") == "no_changes":
                 completion.succeed(None, result_payload)
             else:
-                completion.preview(None, result_payload)
+                completion.preview(None, result_payload, status=(
+                    "needs_review" if result_payload.get("outcome") == "needs_review" else "awaiting_confirmation"
+                ))
         except Exception:
             self._save_local_pickle(previous)
             raise

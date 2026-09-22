@@ -63,9 +63,11 @@ class ImportProcessingService:
                 "duplicates": sum(item.duplicate_count for item in session.files),
                 "failed": sum(item.error_count for item in session.files),
             }}
+            if not session.files or all(self._file_import_service.file_requires_review(item) for item in session.files):
+                result["outcome"] = "needs_review"
             # Bank duplicates have no enrichment or provenance write. Invoice
             # duplicates may still enrich canonical facts and require confirmation.
-            if session.files and all(
+            if "outcome" not in result and session.files and all(
                 item.batch_type == BatchType.BANK_TRANSACTION
                 and item.status == "preview_ready" and item.row_results
                 and all(row.decision.value == "duplicate_skipped" for row in item.row_results)

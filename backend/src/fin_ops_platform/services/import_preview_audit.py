@@ -126,6 +126,7 @@ class ImportPreviewSessionAudit:
     files: list[ImportPreviewFileAudit] = field(default_factory=list)
     duplicate_groups: list[ImportPreviewDuplicateGroup] = field(default_factory=list)
     stale_row_change_counts: dict[str, int] = field(default_factory=dict)
+    row_categories: dict[tuple[str, int], str] = field(default_factory=dict)
 
 
 class ImportReviewRequiredError(ValueError):
@@ -286,6 +287,12 @@ def build_import_preview_session_audit(rows: list[ImportPreviewAuditRow]) -> Imp
             continue
         grouped[(row.record_type, row.identity_key)].append(row)
 
+    row_categories = {
+        (row.file_id, row.row_no): "review" if _decision_value(row.decision) in {
+            ImportDecision.ERROR.value, ImportDecision.SUSPECTED_DUPLICATE.value,
+        } else "new"
+        for row in rows
+    }
     duplicate_groups: list[ImportPreviewDuplicateGroup] = []
     for (record_type, identity_key), group_rows in grouped.items():
         sorted_rows = sorted(group_rows, key=lambda row: (file_order[row.file_id], row.row_no))
@@ -298,6 +305,14 @@ def build_import_preview_session_audit(rows: list[ImportPreviewAuditRow]) -> Imp
         suspected_issue = representative.identity_kind == "suspected" and (
             len(sorted_rows) > 1 or _is_suspected_decision(representative.decision)
         )
+        for index, row in enumerate(sorted_rows):
+            row_categories[(row.file_id, row.row_no)] = (
+                "review" if suspected_issue or _is_suspected_decision(row.decision)
+                else "batch_duplicate" if index else
+                "existing" if _decision_value(row.decision) in {
+                    ImportDecision.DUPLICATE_SKIPPED.value, ImportDecision.STATUS_UPDATED.value,
+                } else "new"
+            )
         file_audits[first_file_id].audit.unique_count += 1
         session_counts.unique_count += 1
         if not suspected_issue:
@@ -367,6 +382,7 @@ def build_import_preview_session_audit(rows: list[ImportPreviewAuditRow]) -> Imp
         audit=session_counts,
         files=[file_audits[file_id] for file_id in file_order],
         duplicate_groups=duplicate_groups,
+        row_categories=row_categories,
     )
 
 

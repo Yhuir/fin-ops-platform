@@ -23,7 +23,7 @@ async function waitForImportTask(accepted: ImportPreparationAccepted, phase: "pr
     await new Promise((resolve) => window.setTimeout(resolve, 300));
     job = await fetchBackgroundJob(job.jobId);
   }
-  if (job.status !== "succeeded" && !(phase === "commit" && job.status === "partial_success") && !(phase === "prepare" && job.status === "awaiting_confirmation")) {
+  if (job.status !== "succeeded" && !(phase === "commit" && job.status === "partial_success") && !(phase === "prepare" && (job.status === "awaiting_confirmation" || job.status === "needs_review"))) {
     throw new Error(job.error || job.message || "文件准备未完成，请查看导入任务。");
   }
   return job;

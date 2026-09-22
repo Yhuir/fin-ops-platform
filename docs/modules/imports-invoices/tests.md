@@ -239,3 +239,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 ## 管理员导入任务处理
 
 `tests/test_import_job_operations.py` 使用真实 PostgreSQL 验证详情/分页、权限、版本冲突、重复提交、并发重试、审计回滚、预览终结、明确处理后所有恢复入口拒绝。`web/src/test/ImportJobDiagnostics.test.tsx` 验证跨用户详情、结果不明先回读、刷新失败与旧响应隔离。`web/e2e/import-job-disposition.spec.ts` 验证浏览器处理闭环；原三类导入 E2E 继续回归。七类测试均适用；不新增 read model。
+
+## 2026-09-23 复核闭环回归
+
+`tests/test_import_review_closure.py` 覆盖 33/19/10/4、单票字段比较、文件隔离、分页边界、确认前零入队、零部分写入、修正后幂等提交与 PostgreSQL 原子状态。前端 `ImportReviewTable.test.tsx`、`ImportPreparation.test.ts`、`ImportsApi.test.ts`、`ImportCenterPage.test.tsx` 与 `web/e2e/import-review-details.spec.ts` 覆盖颜色/文字、完整金额、比较展开、文件参数、needs_review、只读按需加载。既有银行/发票/ETC/共享任务浏览器链路继续回归。

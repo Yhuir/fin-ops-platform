@@ -10584,40 +10584,6 @@ textarea {
   background: var(--fp-surface);
 }
 
-.import-workflow-detail-tabs-root {
-  border-bottom: 1px solid var(--fp-border);
-  background: var(--fp-surface-muted);
-}
-
-.import-workflow-detail-tabs-container {
-  padding: var(--fp-space-1) var(--fp-space-2) 0;
-}
-
-.import-workflow-detail-tabs {
-  min-height: 42px;
-  width: fit-content;
-  max-width: 100%;
-}
-
-.import-workflow-detail-tabs .tabs__tab {
-  min-height: 36px;
-  padding-inline: var(--fp-space-3);
-  color: var(--fp-text-secondary);
-  font-size: var(--fp-text-data);
-  font-weight: 700;
-  transition:
-    background-color var(--motion-fast) var(--ease-standard),
-    color var(--motion-fast) var(--ease-standard);
-}
-
-.import-workflow-detail-tabs .tabs__tab:hover {
-  background: var(--fp-surface-raised);
-  color: var(--fp-text-primary);
-}
-
-.import-workflow-detail-tabs .tabs__tab[aria-selected="true"] {
-  color: var(--fp-primary);
-}
 
 .import-workflow-issue-row {
   min-width: 0;
@@ -25977,3 +25943,18 @@ body.column-layout-dragging {
 .import-job-detail label { display: grid; gap: var(--fp-space-2); }
 .import-job-detail select, .import-job-detail textarea { width: 100%; border: 1px solid var(--fp-border); border-radius: 6px; padding: 8px; background: var(--fp-surface); color: inherit; }
 .import-job-detail p { overflow-wrap: anywhere; }
+
+/* File-scoped import review: full values and one mutually exclusive row state. */
+.import-workflow-review-drawer .import-review-legend { display: flex; flex-wrap: wrap; gap: 1rem; padding: .5rem 0; }
+.import-review-legend span { display: inline-flex; align-items: center; gap: .4rem; }
+.import-review-legend i { display: inline-block; width: .85rem; height: .85rem; border: 1px solid #8493a2; border-radius: 2px; }
+.import-review-swatch--review, .import-workflow-review-drawer .import-review-row--review > * { background: #fff0dc; }
+.import-review-swatch--new, .import-workflow-review-drawer .import-review-row--new > * { background: #eaf6ed; }
+.import-review-swatch--existing, .import-workflow-review-drawer .import-review-row--existing > * { background: #eef0f2; }
+.import-review-table .finance-table__cell { white-space: normal; overflow: visible; text-overflow: clip; vertical-align: top; overflow-wrap: anywhere; }
+.import-workflow-review-drawer .import-review-money { white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; }
+.import-workflow-review-drawer .import-review-identity { user-select: text; }
+.import-review-conflicts summary { cursor: pointer; color: #824414; font-weight: 600; }
+.import-review-conflict { margin-top: .5rem; padding-top: .4rem; border-top: 1px solid #e5caa5; }
+.import-review-file-select { display: flex; align-items: center; gap: .75rem; }
+.import-review-file-select select { max-width: 80%; padding: .4rem; border: 1px solid var(--fp-border); border-radius: .35rem; }

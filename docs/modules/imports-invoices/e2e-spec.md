@@ -19,3 +19,7 @@
 - 不在 deterministic Browser E2E 中连接真实 OA、真实发票文件或生产数据库。
 - 不把 mocked confirm 成功等同于真实 worker drain 完成。
 - 不使用真实业务 Excel 作为本地 fixture；需要真实样本时走 staging/manual smoke。
+
+## 文件全量复核修订（2026-09-23）
+
+`import-review-details.spec.ts` 对银行与发票各验证 33 行全量查看、4 橘色需检查、19 绿色新增、10 灰色已存在，header 图例、无逐行文件名、完整金额、需检查禁用确认、按需单次读取。发票逐字段比较展开显示文件与当前单票值。原重复/未处理 tabs 合同已替换；多文件按 file_id 切换，ETC 保留原明细。真实 worker、持久化与回滚通过隔离 PostgreSQL 测试及生产部署验证，页面读取不使用已退役 read model/RabbitMQ/Redis。

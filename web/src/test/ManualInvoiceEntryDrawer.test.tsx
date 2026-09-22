@@ -46,7 +46,6 @@ const sessionPayload: ImportSessionPayload = {
     fieldMapping: {},
     rowResults: [],
   }],
-  duplicateGroups: [],
   affectedScopeKeys: [],
 };
 

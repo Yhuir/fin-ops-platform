@@ -10,6 +10,12 @@ vi.mock("../features/backgroundJobs/api", async (original) => ({
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
 
 describe("durable import preparation", () => {
+  test("needs_review is a readable preparation result, never a successful commit", async () => {
+    const accepted = {job: {job_id: "import:review", status: "needs_review", source: {session_id: "review-session"}}};
+    expect((await waitForImportPreparation(accepted)).status).toBe("needs_review");
+    await expect(waitForImportCompletion(accepted)).rejects.toThrow();
+  });
+
   test("polls the accepted task until a versioned preview is ready", async () => {
     vi.useFakeTimers();
     vi.mocked(fetchBackgroundJob).mockResolvedValue({ jobId: "import:one", status: "awaiting_confirmation", version: 3 } as never);

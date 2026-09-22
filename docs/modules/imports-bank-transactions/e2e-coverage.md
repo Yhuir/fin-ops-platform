@@ -24,3 +24,5 @@
 1. 在 staging 跑真实基础设施 smoke：`FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed bash scripts/verify.sh infra-smoke`，确认导入 worker、Workbench matching 与关联台 active-generation refresh 正常、其它退休页面 refresh 事件为零，并分别测银行明细、账户余额、成本统计 canonical GET 以及关联台 read-model GET 的结果与延迟。
 2. 补更多文件边界：浏览器上传中断、超大文件真实耗时和内存。
 3. 新增导入进度 UI、search 浏览器 route 或银行模板时，按新用户流程追加对应 Browser E2E。
+
+2026-09-23：新增 `web/e2e/import-review-details.spec.ts`（invoice/bank 两个场景），覆盖同文件全部行、互斥状态计数、图例与金额可见、冲突展开、确认阻断；既有导入与共享任务浏览器回归继续保留。

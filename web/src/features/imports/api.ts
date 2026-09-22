@@ -3,7 +3,6 @@ import type {
   ImportFilePreviewOverride,
   ImportBatchType,
   ImportPreviewAuditCounts,
-  ImportPreviewDuplicateGroup,
   ImportReviewRowsPage,
   ImportSessionPayload,
   ImportTemplate,
@@ -103,38 +102,6 @@ type ApiImportPreviewAuditCounts = {
   skipped_count?: number;
 };
 
-type ApiImportPreviewDuplicateGroup = {
-  identity_key?: string;
-  record_type?: string;
-  duplicate_type?: string;
-  rows?: Array<{
-    file_id?: string;
-    file_name?: string;
-    row_no?: number;
-    decision?: "created" | "status_updated" | "duplicate_skipped" | "suspected_duplicate" | "error" | string | null;
-    decision_reason?: string | null;
-    linked_object_type?: string | null;
-    linked_object_id?: string | null;
-    identity_kind?: string | null;
-    account_no?: string | null;
-    account?: string | null;
-    trade_time?: string | null;
-    pay_receive_time?: string | null;
-    txn_date?: string | null;
-    direction?: string | null;
-    txn_direction?: string | null;
-    amount?: string | number | null;
-    counterparty_name?: string | null;
-    counterparty_name_raw?: string | null;
-    invoice_no?: string | null;
-    invoice_date?: string | null;
-    seller_name?: string | null;
-    buyer_name?: string | null;
-    tax_amount?: string | number | null;
-    total_with_tax?: string | number | null;
-  }>;
-};
-
 type ApiImportSessionPayload = {
   job?: ApiBackgroundJob;
   affected_scope_keys?: unknown;
@@ -148,7 +115,6 @@ type ApiImportSessionPayload = {
     audit?: ApiImportPreviewAuditCounts | null;
   };
   files: ApiImportFile[];
-  duplicate_groups?: ApiImportPreviewDuplicateGroup[];
   matching_run?: {
     id: string;
     triggered_by: string;
@@ -328,20 +294,6 @@ function mapAuditCounts(payload: ApiImportPreviewAuditCounts | null | undefined)
   };
 }
 
-function mapDuplicateGroups(groups?: ApiImportPreviewDuplicateGroup[]): ImportPreviewDuplicateGroup[] {
-  return (groups ?? []).map((group) => ({
-    identityKey: group.identity_key ?? "",
-    recordType: group.record_type ?? "",
-    duplicateType: group.duplicate_type ?? "",
-    rows: (group.rows ?? []).map((row) => ({
-      fileId: row.file_id ?? "",
-      fileName: row.file_name ?? "",
-      rowNo: numberOrZero(row.row_no),
-      ...mapPreviewDetailFields(row),
-    })),
-  }));
-}
-
 function mapMatchingRun(payload?: ApiImportSessionPayload["matching_run"]): MatchingRunSummary | undefined {
   if (!payload) {
     return undefined;
@@ -427,7 +379,6 @@ function mapImportPayload(payload: ApiImportSessionPayload): ImportSessionPayloa
         })),
       };
     }),
-    duplicateGroups: mapDuplicateGroups(payload.duplicate_groups),
     matchingRun: mapMatchingRun(payload.matching_run),
     ...(payload.job ? { job: mapBackgroundJob(payload.job) } : {}),
     affectedScopeKeys: stringList(payload.affected_scope_keys ?? payload.affectedScopeKeys),
@@ -724,11 +675,13 @@ export async function discardImportSession(sessionId: string): Promise<void> {
 }
 
 type ApiImportReviewRowsPage = {
+  summary: ImportReviewRowsPage["summary"];
   rows?: Array<{
-    file_id?: string;
-    file_name?: string;
-    row_no?: number;
-    duplicate_type?: string;
+    file_id: string;
+    row_no: number;
+    category: ImportReviewRowsPage["rows"][number]["category"];
+    current_source: string | null;
+    conflicts: Array<{field: string; file_value: string; current_value: string}>;
     record_type?: string;
     decision?: string | null;
     decision_reason?: string | null;
@@ -753,30 +706,34 @@ type ApiImportReviewRowsPage = {
 
 export async function fetchImportReviewRows(
   sessionId: string,
-  kind: "duplicates" | "unimported",
+  fileId: string,
   offset: number,
   signal?: AbortSignal,
 ): Promise<ImportReviewRowsPage> {
   const limit = 100;
-  const query = new URLSearchParams({ kind, offset: String(offset), limit: String(limit) });
+  const query = new URLSearchParams({ file_id: fileId, offset: String(offset), limit: String(limit) });
   const payload = await requestJson<ApiImportReviewRowsPage>(
     `/imports/files/sessions/${encodeURIComponent(sessionId)}/review-rows?${query}`,
     { method: "GET", signal },
   );
-  if (!Array.isArray(payload.rows)) {
+  if (!Array.isArray(payload.rows) || !payload.summary || payload.rows.some((row) => !Array.isArray(row.conflicts))) {
     throw new Error("导入复核数据响应格式错误，请刷新后重试。");
   }
-  const rows = payload.rows.map((row, index) => ({
+  const rows = payload.rows.map((row) => ({
     ...mapPreviewDetailFields(row),
-    id: `${row.file_id ?? "file"}-${row.row_no ?? offset + index}-${index}`,
-    fileId: row.file_id ?? "",
-    fileName: row.file_name ?? "",
-    rowNo: numberOrZero(row.row_no),
-    duplicateType: row.duplicate_type,
+    id: `${row.file_id}-${row.row_no}`,
+    fileId: row.file_id,
+    rowNo: row.row_no,
+    category: row.category,
+    currentSource: row.current_source,
+    conflicts: row.conflicts.map((conflict) => ({
+      field: conflict.field, fileValue: conflict.file_value, currentValue: conflict.current_value,
+    })),
     recordType: row.record_type,
   }));
   return {
     rows,
+    summary: payload.summary,
     total: numberOrZero(payload.total),
     offset: numberOrZero(payload.offset),
     limit: numberOrZero(payload.limit) || limit,

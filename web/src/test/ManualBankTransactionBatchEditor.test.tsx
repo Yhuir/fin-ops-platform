@@ -63,8 +63,7 @@ const previewPayload: ManualBankTransactionEntryBatchPreview = {
         normalizedPayload: {},
       }],
     }],
-    duplicateGroups: [],
-    affectedScopeKeys: [],
+      affectedScopeKeys: [],
   },
 };
 

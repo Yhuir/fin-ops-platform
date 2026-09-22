@@ -546,7 +546,7 @@ class ImportFileApiTests(unittest.TestCase):
         session_id = payload["session"]["id"]
         review_response = app.handle_request(
             "GET",
-            f"/imports/files/sessions/{session_id}/review-rows?kind=unimported&offset=0&limit=999",
+            f"/imports/files/sessions/{session_id}/review-rows?file_id={payload['files'][0]['id']}&offset=0&limit=999",
         )
         self.assertEqual(review_response.status_code, 200)
         review_payload = json.loads(review_response.body)
@@ -554,9 +554,15 @@ class ImportFileApiTests(unittest.TestCase):
         self.assertEqual(review_payload["offset"], 0)
         self.assertLessEqual(len(review_payload["rows"]), 100)
 
+        missing_file = app.handle_request("GET", f"/imports/files/sessions/{session_id}/review-rows?kind=unimported")
+        self.assertEqual(missing_file.status_code, 400)
+        unknown_file = app.handle_request("GET", f"/imports/files/sessions/{session_id}/review-rows?file_id=another-session-file")
+        self.assertEqual(unknown_file.status_code, 404)
+        self.assertEqual(sum(review_payload["summary"].values()), review_payload["total"])
+
         invalid_review_response = app.handle_request(
             "GET",
-            f"/imports/files/sessions/{session_id}/review-rows?kind=unimported&limit=bad",
+            f"/imports/files/sessions/{session_id}/review-rows?file_id={payload['files'][0]['id']}&limit=bad",
         )
         self.assertEqual(invalid_review_response.status_code, 400)
         self.assertEqual(json.loads(invalid_review_response.body)["error"], "invalid_import_review_rows_request")

@@ -2291,7 +2291,7 @@ function importAudit(
         importable_count: imported ? 0 : 11,
         update_count: 0,
         merge_count: 0,
-        suspected_duplicate_count: 1,
+        suspected_duplicate_count: 0,
         error_count: 1,
         confirmable_count: imported ? 0 : 11,
         skipped_count: 3,
@@ -2307,8 +2307,8 @@ function importAudit(
       importable_count: imported ? 0 : 22,
       update_count: 0,
       merge_count: 0,
-      suspected_duplicate_count: 1,
-      error_count: 1,
+      suspected_duplicate_count: 0,
+      error_count: 0,
       confirmable_count: imported ? 0 : 22,
       skipped_count: 4,
     };
@@ -2446,9 +2446,9 @@ function importPreviewFile(
       message: imported ? "已确认导入。" : "发票模板识别成功。",
       row_count: 14,
       success_count: 11,
-      error_count: index === 0 ? 1 : 0,
+      error_count: 0,
       duplicate_count: 1,
-      suspected_duplicate_count: index === 1 ? 1 : 0,
+      suspected_duplicate_count: 0,
       updated_count: 0,
       audit: {
         original_count: 14,
@@ -2460,8 +2460,8 @@ function importPreviewFile(
         importable_count: imported ? 0 : 11,
         update_count: 0,
         merge_count: 0,
-        suspected_duplicate_count: index === 1 ? 1 : 0,
-        error_count: index === 0 ? 1 : 0,
+        suspected_duplicate_count: 0,
+        error_count: 0,
         confirmable_count: imported ? 0 : 11,
         skipped_count: 2,
       },
@@ -2747,84 +2747,19 @@ function importSessionPayload(
 }
 
 function importReviewRowsPayload(
-  scenario: ImportScenario,
-  kind: "duplicates" | "unimported",
-  offset: number,
-  limit: number,
+  scenario: ImportScenario, fileId: string, offset: number, limit: number,
   options: { corruptBankFile?: boolean; corruptInvoiceFile?: boolean; noBankAccountConflict?: boolean } = {},
 ) {
   const payload = importSessionPayload(scenario, false, options);
-  const duplicateRows = payload.duplicate_groups.flatMap((group) => group.rows.map((row) => ({
-      ...row,
-      record_type: group.record_type,
-      duplicate_type: group.duplicate_type,
-    })));
-  const failedRows = payload.files.flatMap((file) => file.row_results
-      .filter((row) => ["duplicate_skipped", "suspected_duplicate", "error"].includes(row.decision))
-      .map((row) => ({
-        ...row,
-        file_id: file.id,
-        file_name: file.file_name,
-        record_type: row.source_record_type,
-      })));
-  const reviewOnlyRows = scenario === "invoice"
-    ? [
-      {
-        id: "invoice_import_suspected_row_e2e_1",
-        file_id: "invoice_import_file_e2e_2",
-        file_name: importFiles.invoice[1],
-        row_no: 5,
-        record_type: "invoice",
-        decision: "suspected_duplicate",
-        decision_reason: "关键字段相似，需人工复核。",
-        direction: "input_invoice",
-        amount: "3200.00",
-        counterparty_name: "浏览器待复核供应商",
-        invoice_no: "INV-E2E-REVIEW-001",
-        invoice_date: "2026-05-21",
-        seller_name: "浏览器待复核供应商",
-        buyer_name: "云南溯源科技有限公司",
-        tax_amount: "181.13",
-        total_with_tax: "3200.00",
-      },
-      ...(!options.corruptInvoiceFile ? [{
-        id: "invoice_import_error_row_e2e_1",
-        file_id: "invoice_import_file_e2e_1",
-        file_name: importFiles.invoice[0],
-        row_no: 6,
-        record_type: "invoice",
-        decision: "error",
-        decision_reason: "发票号码缺失。",
-        direction: "output_invoice",
-        amount: null,
-        counterparty_name: "浏览器销项客户",
-      }] : []),
-    ]
-    : options.corruptBankFile
-      ? []
-      : [1, 2].map((index) => ({
-        id: `bank_import_existing_duplicate_row_e2e_${index}`,
-        file_id: "import_file_e2e_1",
-        file_name: importFiles.bank[0],
-        row_no: 4 + index,
-        record_type: "bank_transaction",
-        decision: "duplicate_skipped",
-        decision_reason: "系统中已存在相同流水。",
-        account_no: "6222********4080",
-        trade_time: `2026-05-18 09:${40 + index}:00`,
-        direction: "income",
-        amount: "1688.00",
-        counterparty_name: "导入浏览器测试客户",
-      }));
-  const rows = kind === "duplicates" ? duplicateRows : [...duplicateRows, ...reviewOnlyRows, ...failedRows];
-  const pageRows = rows.slice(offset, offset + limit);
-  return {
-    rows: pageRows,
-    total: rows.length,
-    offset,
-    limit,
-    has_more: offset + pageRows.length < rows.length,
-  };
+  const file = payload.files.find((item) => item.id === fileId)!;
+  const rows = file.row_results.map((row) => ({ ...row, file_id: file.id, record_type: row.source_record_type,
+    invoice_no: scenario === "invoice" ? "26990000000000000001" : null,
+    invoice_date: "2026-05-20", seller_name: "浏览器销项客户", buyer_name: "云南溯源科技有限公司",
+    tax_amount: "0.00", total_with_tax: row.amount,
+    category: row.decision === "error" ? "review" : row.decision === "duplicate_skipped" ? "existing" : "new", current_source: null, conflicts: [] }));
+  const summary = { new: 0, existing: 0, review: 0, batch_duplicate: 0 };
+  for (const row of rows) summary[row.category as keyof typeof summary]++;
+  return { rows: rows.slice(offset, offset + limit), summary, total: rows.length, offset, limit, has_more: offset + limit < rows.length };
 }
 
 function etcReadyTasksPayload() {
@@ -9999,10 +9934,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     const importReviewMatch = path.match(/^\/imports\/files\/sessions\/([^/]+)\/review-rows$/);
     if (importReviewMatch) {
       const scenario = importReviewMatch[1] === importSessionIds.invoice ? "invoice" : "bank";
-      const kind = url.searchParams.get("kind") === "unimported" ? "unimported" : "duplicates";
+      const fileId = url.searchParams.get("file_id")!;
       const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
       const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit")) || 100));
-      return json(route, importReviewRowsPayload(scenario, kind, offset, limit, {
+      return json(route, importReviewRowsPayload(scenario, fileId, offset, limit, {
         corruptBankFile: scenario === "bank" && options.bankImportIncludeCorruptFile,
         corruptInvoiceFile: scenario === "invoice" && options.invoiceImportIncludeCorruptFile,
         noBankAccountConflict: options.bankImportNoAccountConflict,

@@ -8020,30 +8020,18 @@ class Application:
             )
 
         selected = set(normalized_selected_file_ids)
-        unknown_ids = sorted(selected - {item.id for item in session.files})
-        if unknown_ids:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "import_file_session_not_found", "message": f"Unknown selected file ids: {', '.join(unknown_ids)}"},
-            )
-        invalid_ids = sorted(
-            item.id
-            for item in session.files
-            if item.id in selected and item.status not in {"preview_ready", "confirmed"}
-        )
-        if invalid_ids:
-            return self._json_response(
-                HTTPStatus.CONFLICT,
-                {
-                    "error": "import_file_session_not_confirmable",
-                    "message": f"Selected files are not confirmable: {', '.join(invalid_ids)}",
-                },
-            )
         try:
+            file_service.assert_files_confirmable(
+                session_id=normalized_session_id, selected_file_ids=normalized_selected_file_ids,
+            )
             if any(item.id in selected and item.status == "preview_ready" for item in session.files):
                 file_service.assert_session_preview_current(
                     session_id=normalized_session_id, selected_file_ids=normalized_selected_file_ids,
                 )
+        except KeyError as exc:
+            return self._json_response(HTTPStatus.NOT_FOUND, {
+                "error": "import_file_session_not_found", "message": str(exc),
+            })
         except ImportPreviewStaleError as exc:
             current_job = self._import_workflow().session_job(normalized_session_id, owner_user_id, "file_import.confirm")
             if current_job is not None and current_job.status == "awaiting_confirmation":
@@ -8196,7 +8184,9 @@ class Application:
         *,
         owner_user_id: str,
     ) -> Response:
-        kind = str((query.get("kind") or [""])[0] or "").strip()
+        file_id = str((query.get("file_id") or [""])[0] or "").strip()
+        if not file_id:
+            return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "invalid_import_review_rows_request", "message": "file_id is required."})
         try:
             offset = max(int((query.get("offset") or ["0"])[0] or 0), 0)
             limit = min(max(int((query.get("limit") or ["100"])[0] or 100), 1), 100)
@@ -8212,7 +8202,7 @@ class Application:
             )
             payload = file_service.review_rows(
                 session_id=session_id,
-                kind=kind,
+                file_id=file_id,
                 offset=offset,
                 limit=limit,
             )

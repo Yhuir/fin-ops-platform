@@ -23,3 +23,5 @@
 1. 在 staging 跑真实基础设施 smoke：真实 import worker、derived lifecycle worker、`write_operation_slo_audit --operation invoice_import_confirmed`、下游 read model drain、App Status 导入进度。
 2. 补更多真实文件边界：信息汇总表真实样本、超大文件耗时、浏览器上传中断和历史模板变体；损坏文件 + 正常文件混合已由 deterministic Browser E2E 覆盖。
 3. 新增真实导入进度页或更多发票模板时，再追加对应 Browser E2E；销项收款、进项使用、税金抵扣、待找发票、OA 待付款和成本统计已验证 deterministic Browser 状态与导入影响行。
+
+2026-09-23：新增 `web/e2e/import-review-details.spec.ts`（invoice/bank 两个场景），覆盖同文件全部行、互斥状态计数、图例与金额可见、冲突展开、确认阻断；既有导入与共享任务浏览器回归继续保留。

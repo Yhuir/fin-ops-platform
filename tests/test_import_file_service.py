@@ -834,7 +834,7 @@ class ImportFileServiceTests(unittest.TestCase):
 
         review = service.review_rows(
             session_id=session.id,
-            kind="duplicates",
+            file_id=preview_file.id,
             offset=20,
             limit=25,
         )

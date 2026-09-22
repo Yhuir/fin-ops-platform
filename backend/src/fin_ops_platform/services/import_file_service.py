@@ -660,57 +660,77 @@ class FileImportService:
         return session
 
     def review_rows(
-        self,
-        *,
-        session_id: str,
-        kind: str,
-        offset: int,
-        limit: int,
+        self, *, session_id: str, file_id: str, offset: int, limit: int,
     ) -> dict[str, Any]:
+        if offset < 0 or not 1 <= limit <= 100:
+            raise ValueError("offset must be nonnegative and limit must be between 1 and 100")
         session = self._sessions[session_id]
-        if kind == "duplicates":
-            rows = [
-                {
-                    **dict(row),
-                    "record_type": group.record_type,
-                    "duplicate_type": group.duplicate_type,
-                }
-                for group in session.duplicate_groups
-                for row in group.rows
-            ]
-        elif kind == "unimported":
-            rows = []
-            for item in session.files:
-                for row_result, normalized in zip(item.row_results, item.normalized_rows, strict=True):
-                    decision = (
-                        row_result.decision.value
-                        if isinstance(row_result.decision, ImportDecision)
-                        else str(row_result.decision)
-                    )
-                    if decision not in {"duplicate_skipped", "suspected_duplicate", "error"}:
-                        continue
-                    rows.append(
-                        {
-                            "file_id": item.id,
-                            "file_name": item.file_name,
-                            "row_no": row_result.row_no,
-                            "record_type": row_result.source_record_type,
-                            "decision": decision,
-                            "decision_reason": row_result.decision_reason,
-                            "identity_kind": row_result.identity_kind,
-                            **self._audit_row_display_fields(row_result.source_record_type, normalized),
-                        }
-                    )
-        else:
-            raise ValueError("kind must be duplicates or unimported")
-        page_rows = rows[offset : offset + limit]
+        item = next((item for item in session.files if item.id == file_id), None)
+        if item is None:
+            raise KeyError(file_id)
+        audit = self._build_session_audit(session, refresh_existing=False)
+        categories = audit.row_categories
+        summary = dict.fromkeys(("new", "existing", "review", "batch_duplicate"), 0)
+        pairs = list(zip(item.row_results, item.normalized_rows, strict=True))
+        for result, _ in pairs:
+            summary[categories[(file_id, result.row_no)]] += 1
+        pairs.sort(key=lambda pair: (categories[(file_id, pair[0].row_no)] != "review", pair[0].row_no))
+        page = pairs[offset:offset + limit]
+        invoice_rows = [normalized for result, normalized in page if result.source_record_type == "invoice"]
+        rows = []
+        with self._import_service.preload_normalized_identities({BatchType.INPUT_INVOICE: invoice_rows}):
+            for result, normalized in page:
+                conflicts = []
+                current_source = None
+                if result.source_record_type == "invoice" and normalized.get("source_unique_key"):
+                    existing = self._import_service.find_invoice_by_identity(canonical_key=normalized["source_unique_key"])
+                    if existing is not None:
+                        current_source = existing.invoice_source
+                    for name in self._import_service.invoice_financial_conflicts(normalized, existing):
+                        current = getattr(existing, name)
+                        conflicts.append({
+                            "field": name, "file_value": str(normalized[name]),
+                            "current_value": str(getattr(current, "value", current)),
+                        })
+                rows.append({
+                    "file_id": file_id, "row_no": result.row_no,
+                    "record_type": result.source_record_type,
+                    "category": categories[(file_id, result.row_no)],
+                    "decision": result.decision.value,
+                    "decision_reason": result.decision_reason,
+                    "conflicts": conflicts, "current_source": current_source,
+                    **self._audit_row_display_fields(result.source_record_type, normalized),
+                })
         return {
-            "rows": page_rows,
-            "total": len(rows),
-            "offset": offset,
-            "limit": limit,
-            "has_more": offset + len(page_rows) < len(rows),
+            "rows": rows, "summary": summary, "total": len(pairs), "offset": offset,
+            "limit": limit, "has_more": offset + len(rows) < len(pairs),
         }
+
+    @staticmethod
+    def file_requires_review(item: FileImportPreviewItem) -> bool:
+        return bool(
+            item.status != "preview_ready" or not item.preview_batch_id or item.bank_selection_conflict
+            or item.error_count or item.suspected_duplicate_count
+            or item.audit.error_count or item.audit.suspected_duplicate_count
+        )
+
+    def assert_files_confirmable(self, *, session_id: str, selected_file_ids: list[str]) -> None:
+        session = self._sessions[session_id]
+        selected = set(selected_file_ids)
+        if not selected:
+            raise ValueError("at least one selected file is required")
+        unknown = selected - {item.id for item in session.files}
+        if unknown:
+            raise KeyError(f"Unknown selected file ids: {', '.join(sorted(unknown))}")
+        for item in session.files:
+            if item.id not in selected or item.status == "confirmed":
+                continue
+            if item.status != "preview_ready":
+                raise ImportReviewRequiredError("文件尚未完成有效预览，请重新预览。")
+            if item.bank_selection_conflict:
+                raise ImportReviewRequiredError("bank account selection conflicts must be resolved before confirmation")
+            if self.file_requires_review(item):
+                raise ImportReviewRequiredError("selected files require review before confirmation: 请查看导入明细中的需检查项。")
 
     def confirm_session(
         self,
@@ -721,29 +741,9 @@ class FileImportService:
     ) -> FileImportSession:
         session = self._sessions[session_id]
         selected = set(selected_file_ids)
-        if not selected:
-            raise ValueError("at least one selected file is required")
-        known_ids = {item.id for item in session.files}
-        unknown_ids = sorted(selected - known_ids)
-        if unknown_ids:
-            raise KeyError(f"Unknown selected file ids: {', '.join(unknown_ids)}")
-
+        self.assert_files_confirmable(session_id=session_id, selected_file_ids=selected_file_ids)
         confirmed_any = False
         selected_items = [item for item in session.files if item.id in selected]
-        invalid_items = [item.id for item in selected_items if item.status not in {"preview_ready", "confirmed"}]
-        if invalid_items:
-            raise ValueError(f"selected files are not confirmable: {', '.join(sorted(invalid_items))}")
-        conflicting_items = [item.id for item in selected_items if item.bank_selection_conflict]
-        if conflicting_items:
-            raise ValueError(
-                "bank account selection conflicts must be resolved before confirmation: "
-                + ", ".join(sorted(conflicting_items))
-            )
-        incomplete = [item.id for item in selected_items if item.status == "preview_ready" and (
-            not item.preview_batch_id or item.error_count or item.suspected_duplicate_count
-        )]
-        if incomplete:
-            raise ImportReviewRequiredError("selected files require review before confirmation: " + ", ".join(incomplete))
         if any(item.status == "preview_ready" for item in selected_items):
             self.assert_session_preview_current(session_id=session_id, selected_file_ids=selected_file_ids)
         progress_total = len(selected_items)

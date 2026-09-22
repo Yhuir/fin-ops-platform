@@ -108,11 +108,6 @@ function expectProjectPreviewTable(name: string) {
   expect(table).not.toHaveClass("MuiDataGrid-root");
 }
 
-function expectProjectDetailTabs() {
-  const tabs = screen.getByRole("tablist", { name: "导入预览明细" });
-  expect(tabs).toHaveClass("import-workflow-detail-tabs");
-  expect(tabs).not.toHaveClass("MuiTabs-root");
-}
 
 async function selectReadyEtcTask(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByLabelText("ETC对账任务");
@@ -131,7 +126,7 @@ describe("Import pages", () => {
     expect(css).toContain(".import-workflow-summary__value {\n  margin-top: var(--fp-space-1);\n  color: var(--fp-ink);\n  font-family: var(--fp-font-data);\n  font-size: 22px;");
     expect(css).toContain(".import-workflow-grid-shell--review {\n  min-height: 320px;");
     expect(css).toContain(".import-workflow-review-drawer .finance-drawer__body");
-    expect(css).toContain(".import-workflow-detail-tabs .tabs__tab:hover");
+    expect(css).toContain(".import-review-row--review");
   });
 
   test("retrying an interrupted upload preserves its request identity", async () => {
@@ -252,14 +247,14 @@ describe("Import pages", () => {
     expect(await screen.findByLabelText("新增 14")).toBeInTheDocument();
     expectProjectSummaryMetric("新增 14");
     expect(screen.getByLabelText("APP 已存在 2")).toBeInTheDocument();
-    expect(screen.getByLabelText("本批重复 3")).toBeInTheDocument();
+    expect(screen.getByLabelText("本批重复 2")).toBeInTheDocument();
     expect(screen.queryByRole("grid", { name: "导入预览结果" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/review-rows"))).toBe(false);
 
-    await user.click(screen.getByRole("button", { name: "查看未处理明细" }));
-    expect(await screen.findByRole("heading", { name: "未处理明细" })).toBeInTheDocument();
-    expectProjectDetailTabs();
-    expectProjectPreviewTable("重复项明细");
+    await user.click(screen.getByRole("button", { name: "查看导入明细" }));
+    expect(await screen.findByRole("heading", { name: "流水导入明细" })).toBeInTheDocument();
+    expect(screen.getByLabelText("导入明细图例")).toBeInTheDocument();
+    expectProjectPreviewTable("导入文件全部明细");
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/review-rows"))).toBe(true);
     });
@@ -465,14 +460,14 @@ describe("Import pages", () => {
     expect(await screen.findByLabelText("新增 22")).toBeInTheDocument();
     expectProjectSummaryMetric("新增 22");
     expect(screen.getByLabelText("APP 已存在 2")).toBeInTheDocument();
-    expect(screen.getByLabelText("本批重复 3")).toBeInTheDocument();
-    expect(screen.getByLabelText("需检查 2")).toBeInTheDocument();
+    expect(screen.getByLabelText("本批重复 4")).toBeInTheDocument();
+    expect(screen.queryByLabelText("需检查 2")).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/review-rows"))).toBe(false);
 
-    await user.click(screen.getByRole("button", { name: "查看未处理明细" }));
-    expect(await screen.findByRole("heading", { name: "未处理明细" })).toBeInTheDocument();
-    expectProjectDetailTabs();
-    expectProjectPreviewTable("重复项明细");
+    await user.click(screen.getByRole("button", { name: "查看导入明细" }));
+    expect(await screen.findByRole("heading", { name: "发票导入明细" })).toBeInTheDocument();
+    expect(screen.getByLabelText("导入明细图例")).toBeInTheDocument();
+    expectProjectPreviewTable("导入文件全部明细");
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/review-rows"))).toBe(true);
     });

@@ -1238,8 +1238,8 @@ function buildImportPreviewPayload(
     importable_count: knownFileNames.reduce((total, fileName) => total + (fileName.includes("发票") ? 11 : bankImportAllExisting ? 0 : 7), 0),
     update_count: 0,
     merge_count: 0,
-    suspected_duplicate_count: knownFileNames.some((fileName) => fileName.includes("发票")) ? 1 : 0,
-    error_count: knownFileNames.some((fileName) => fileName.includes("发票")) ? 1 : 0,
+    suspected_duplicate_count: 0,
+    error_count: 0,
     confirmable_count: knownFileNames.reduce((total, fileName) => total + (fileName.includes("发票") ? 11 : bankImportAllExisting ? 0 : 7), 0),
     skipped_count: bankImportAllExisting ? knownFileNames.length * 48 : knownFileNames.length + 2,
   };
@@ -1386,9 +1386,9 @@ function buildImportPreviewPayload(
         message: "模板识别成功。",
         row_count: isInvoice ? 14 : bankImportAllExisting ? 48 : 9,
         success_count: isInvoice ? 12 : bankImportAllExisting ? 0 : 8,
-        error_count: isInvoice ? 1 : 0,
+        error_count: 0,
         duplicate_count: !isInvoice && bankImportAllExisting ? 48 : 0,
-        suspected_duplicate_count: isInvoice ? 1 : 0,
+        suspected_duplicate_count: 0,
         updated_count: 0,
         audit: {
           original_count: isInvoice ? 14 : bankImportAllExisting ? 48 : 9,
@@ -1400,8 +1400,8 @@ function buildImportPreviewPayload(
           importable_count: isInvoice ? 11 : bankImportAllExisting ? 0 : 7,
           update_count: 0,
           merge_count: 0,
-          suspected_duplicate_count: isInvoice ? 1 : 0,
-          error_count: isInvoice ? 1 : 0,
+          suspected_duplicate_count: 0,
+          error_count: 0,
           confirmable_count: isInvoice ? 11 : bankImportAllExisting ? 0 : 7,
           skipped_count: !isInvoice && bankImportAllExisting ? 48 : index === 0 ? 3 : 1,
         },
@@ -7786,36 +7786,16 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     }
     const importReviewRowsMatch = url.pathname.match(/^\/imports\/files\/sessions\/([^/]+)\/review-rows$/);
     if (importReviewRowsMatch) {
-      const kind = url.searchParams.get("kind") === "unimported" ? "unimported" : "duplicates";
-      return jsonResponse({
-        body: {
-          rows: kind === "duplicates"
-            ? [{
-                file_id: "import_file_0001",
-                file_name: latestImportSession.files[0]?.file_name ?? "一月发票.xlsx",
-                row_no: 2,
-                duplicate_type: "duplicate_in_file",
-                record_type: "invoice",
-                decision: "skipped",
-                decision_reason: "duplicate_in_file",
-                invoice_no: "26532000000000000001",
-              }]
-            : [{
-                file_id: "import_file_0001",
-                file_name: latestImportSession.files[0]?.file_name ?? "一月发票.xlsx",
-                row_no: 3,
-                record_type: "invoice",
-                decision: "manual_review",
-                decision_reason: "missing_required_field",
-                invoice_no: "26532000000000000002",
-              }],
-          total: 1,
-          offset: Number(url.searchParams.get("offset") ?? 0),
-          limit: Number(url.searchParams.get("limit") ?? 100),
-          has_more: false,
-        },
-      });
+      const fileId = url.searchParams.get("file_id");
+      const file = latestImportSession.files.find((item) => item.id === fileId);
+      if (!file) return jsonResponse({ status: 404, body: { error: "file_not_found" } });
+      return jsonResponse({ body: {
+        rows: [{file_id: file.id, row_no: 1, category: "new", conflicts: [], record_type: file.batch_type === "bank_transaction" ? "bank_transaction" : "invoice", decision: "created", invoice_no: "26532000000000000001", amount: "133.03", tax_amount: "11.97", total_with_tax: "145.00"}],
+        summary: { new: 1, existing: 0, review: 0, batch_duplicate: 0 },
+        total: 1, offset: Number(url.searchParams.get("offset") ?? 0), limit: 100, has_more: false,
+      } });
     }
+
     if (url.pathname.startsWith("/imports/files/sessions/")) {
       return jsonResponse({ body: { ...latestImportSession, job: {
         job_id: "import:file-preview", version: 2, status: "awaiting_confirmation",

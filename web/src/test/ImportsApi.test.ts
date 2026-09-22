@@ -52,6 +52,20 @@ function acceptPreparation(fetchMock: ReturnType<typeof vi.fn>) {
 }
 
 describe("imports api", () => {
+  test("review rows request selects one file and preserves structured financial differences", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      rows: [{ file_id: "file-1", row_no: 16, category: "review", current_source: "OA附件解析", amount: "133.03",
+        conflicts: [{field: "amount", file_value: "133.03", current_value: "145.00"}] }],
+      summary: {new: 19, existing: 10, review: 4, batch_duplicate: 0}, total: 33, offset: 0, limit: 100, has_more: false,
+    }), {status: 200, headers: {"Content-Type": "application/json"}}));
+    global.fetch = fetchMock;
+    const result = await fetchImportReviewRows("session-1", "file-1", 0);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("file_id=file-1&offset=0&limit=100");
+    expect(result.summary.review).toBe(4);
+    expect(result.rows[0].conflicts).toEqual([{field: "amount", fileValue: "133.03", currentValue: "145.00"}]);
+    expect(result.rows[0].currentSource).toBe("OA附件解析");
+  });
+
   test("serializes manual bank entries and maps the server-authoritative preview", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       values: [{
@@ -559,21 +573,7 @@ describe("imports api", () => {
     ]);
 
     expect(payload.session.audit?.skippedCount).toBe(1);
-    expect(payload.duplicateGroups[0].rows[0]).toMatchObject({
-      fileId: "import_file_0001",
-      fileName: "建行流水.xlsx",
-      rowNo: 2,
-      decision: "duplicate_skipped",
-      decisionReason: "文件内重复",
-      linkedObjectType: "bank_transaction",
-      linkedObjectId: "bank_001",
-      identityKind: "stable",
-      accountNo: "6222",
-      tradeTime: "2026-03-01 09:00:00",
-      direction: "outflow",
-      amount: "100.00",
-      counterpartyName: "云南供应商",
-    });
+    expect(payload).not.toHaveProperty("duplicateGroups");
     expect(payload.files[0].rowResults[0]).toMatchObject({
       decision: "duplicate_skipped",
       accountNo: "6222",
@@ -593,7 +593,7 @@ describe("imports api", () => {
       }),
     ) as typeof fetch;
 
-    await expect(fetchImportReviewRows("import_session_0001", "duplicates", 0)).rejects.toThrow(
+    await expect(fetchImportReviewRows("import_session_0001", "file-1", 0)).rejects.toThrow(
       "导入复核数据响应格式错误，请刷新后重试。",
     );
   });
