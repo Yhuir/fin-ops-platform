@@ -4,32 +4,77 @@ import { useCashQuery } from "../../features/cash/hooks";
 import { FinanceTablePagination } from "../common/FinanceTable";
 import { CashInput, CashNotice, CashSelect } from "./CashUi";
 import type { CashPageRows } from "./CashItems.types";
-import type { CashProjectsPage } from "./CashSettingsTypes";
+import { cashCategoryGroupLabels, type CashCategorySetting, type CashProjectsPage } from "./CashSettingsTypes";
 import { CashFilterPopover, type CashFilterOption, type CashFilterValue } from "./CashFilters";
 import type { CashQueryParams } from "../../features/cash/api";
 
-export function CashConfigurationSelect({ name, label, value, onChange, selected, group, groups, required, disabled }: {
-  name: "accounts" | "categories" | "bill-labels"; label: string; value: string; onChange: (value: string, selected: { id: string; name: string } | null) => void;
-  selected?: { id: string; name: string } | null; group?: string; groups?: string[]; required?: boolean; disabled?: boolean;
-}) {
+type ConfigurationReference = { id: string; name: string; group?: string; enabled?: boolean };
+type ConfigurationRow = ConfigurationReference & { label?: string; bank_name?: string };
+
+type ConfigurationSelectProps = {
+  name: "accounts" | "categories" | "bill-labels"; label: string; value: string; onChange: (value: string, selected: ConfigurationReference | null) => void;
+  selected?: ConfigurationReference | null; group?: string; groups?: string[]; required?: boolean; disabled?: boolean;
+};
+export function CashConfigurationSelect(props: ConfigurationSelectProps) {
+  return <CashConfigurationSelectInput key={JSON.stringify([props.name, props.group, props.groups])} {...props} />;
+}
+
+function CashConfigurationSelectInput({ name, label, value, onChange, selected, group, groups, required, disabled }: ConfigurationSelectProps) {
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
   const [keyword, setKeyword] = useState("");
-  const query = useCashQuery<CashPageRows<{ id: string; name?: string; label?: string; bank_name?: string; group?: string }>>(`/settings/${name}`, {
-    enabled: true, page, page_size: 100, keyword,
-    groups: groups ?? (name === "categories" && group ? group === "turnover" ? [group] : [group, "turnover"] : undefined),
+  const [remembered, setRemembered] = useState<ConfigurationReference | null>(null);
+  const allowedGroups = groups ?? (name === "categories" && group ? group === "turnover" ? [group] : [group, "turnover"] : undefined);
+  useEffect(() => {
+    if (search.trim() === keyword) return;
+    const timer = window.setTimeout(() => { setKeyword(search.trim()); setPage(1); }, 250);
+    return () => window.clearTimeout(timer);
+  }, [search, keyword]);
+  const query = useCashQuery<CashPageRows<ConfigurationRow>>(`/settings/${name}`, {
+    enabled: true, page, page_size: 100, keyword, groups: allowedGroups,
   });
-  const options = query.data ? query.data.rows.map(row => ({ value: row.id, label: name === "bill-labels" ? `${row.bank_name} · ${row.label}` : row.name! })) : [];
-  if (selected && !options.some(option => option.value === selected.id)) options.unshift({ value: selected.id, label: `${selected.name}（原值）` });
+  const rows = query.data?.rows ?? [];
+  const currentRow = rows.find(row => row.id === value);
+  const original = selected?.id === value ? selected : null;
+  const known = currentRow ?? (remembered?.id === value ? remembered : null) ?? original;
+  const needsExact = name === "categories" && Boolean(value) && !known?.group && !query.loading;
+  const exact = useCashQuery<CashPageRows<CashCategorySetting>>(needsExact ? "/settings/categories" : null, { category_id: value || undefined });
+  const exactRow = exact.data?.rows.find(row => row.id === value);
+  const chosen = known?.group || name !== "categories" ? known : exactRow;
+  useEffect(() => {
+    const row: ConfigurationRow | undefined = currentRow ?? exactRow;
+    if (row) {
+      const next = { id: row.id, name: name === "bill-labels" ? `${row.bank_name} · ${row.label}` : row.name, group: row.group, enabled: row.enabled };
+      setRemembered(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
+    }
+  }, [currentRow, exactRow, name]);
+  const reference = (row: ConfigurationRow): ConfigurationReference => ({ id: row.id, name: name === "bill-labels" ? `${row.bank_name} · ${row.label}` : row.name, group: row.group, enabled: row.enabled });
+  const candidates: ConfigurationReference[] = rows.map(reference);
+  if (chosen && !candidates.some(row => row.id === chosen.id)) candidates.unshift(chosen);
+  const categoryError = name !== "categories" || !value ? undefined
+    : exact.error ? exact.error.message
+    : !chosen?.group ? needsExact && !exact.loading && exact.data ? "所选费用类型不存在，请重新选择。" : "正在读取所选费用类型…"
+    : !original && chosen.enabled === false ? "所选费用类型已停用，请重新选择。"
+    : !original && allowedGroups && !allowedGroups.includes(chosen.group) ? "所选费用类型不适用于当前收付方向，请重新选择。" : undefined;
+  const options = candidates.map(row => ({ value: row.id, label: row.name + (original?.id === row.id && !rows.some(candidate => candidate.id === row.id) ? "（原值）" : ""),
+    disabled: !original && row.enabled === false,
+    group: name === "categories" && row.group ? { id: row.group, label: cashCategoryGroupLabels[row.group as keyof typeof cashCategoryGroupLabels] } : undefined,
+  }));
+  if (name === "categories") options.sort((a, b) => Object.keys(cashCategoryGroupLabels).indexOf(a.group?.id ?? "") - Object.keys(cashCategoryGroupLabels).indexOf(b.group?.id ?? ""));
   return <div className="cash-config-select">
-    <CashSelect label={label} value={value} onChange={value => onChange(value, value ? { id: value, name: options.find(option => option.value === value)!.label } : null)} options={options} required={required} disabled={disabled}>
-      <CashInput label={`搜索${label}`} value={keyword} onChange={value => { setKeyword(value); setPage(1); }} />
-      {query.loading && <p role="status">正在读取{label}…</p>}
+    <CashSelect label={label} value={value} onChange={next => {
+      const row = candidates.find(candidate => candidate.id === next) ?? null;
+      setRemembered(row); onChange(next, row);
+    }} options={options} required={required} disabled={disabled} validationError={categoryError}>
+      <CashInput label={`搜索${label}`} value={search} onChange={setSearch} />
+      {(query.loading || search.trim() !== keyword) && <p role="status">正在读取{label}…</p>}
       {query.data && query.data.pagination.total > 100 &&
-      <FinanceTablePagination page={page} pageSize={100} total={query.data.pagination.total} onPageChange={setPage} compact />
-      }
+        <FinanceTablePagination page={page} pageSize={100} total={query.data.pagination.total} onPageChange={setPage} compact isDisabled={query.loading} />}
     </CashSelect>
     <CashNotice error={query.error?.message} />
+    {categoryError && <CashNotice error={exact.loading || query.loading ? undefined : categoryError}>{categoryError}</CashNotice>}
     {query.error && <Button size="sm" variant="tertiary" onPress={query.reload}>重新读取{label}</Button>}
+    {exact.error && <Button size="sm" variant="tertiary" onPress={exact.reload}>重新读取所选费用类型</Button>}
     {query.data && query.data.pagination.total === 0 && <small>暂无启用的{label}，请在基础设置中添加。</small>}
   </div>;
 }

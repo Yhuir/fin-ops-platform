@@ -1,5 +1,5 @@
-import { Input, ListBox, Select, Tabs } from "@heroui/react";
-import type { HTMLInputTypeAttribute, ReactNode } from "react";
+import { Header, Input, ListBox, Select, Tabs } from "@heroui/react";
+import { useCallback, type HTMLInputTypeAttribute, type ReactNode } from "react";
 
 export function CashInput({ label, value, onChange, type = "text", required, disabled, placeholder }: {
   label: string; value: string; onChange: (value: string) => void;
@@ -10,16 +10,22 @@ export function CashInput({ label, value, onChange, type = "text", required, dis
   </label>;
 }
 
-export function CashSelect({ label, value, onChange, options, required, disabled, children, onOpenChange }: {
+export function CashSelect({ label, value, onChange, options, required, disabled, children, onOpenChange, validationError }: {
   label: string; value: string; onChange: (value: string) => void;
-  options: { value: string; label: string; disabled?: boolean }[]; required?: boolean; disabled?: boolean; children?: ReactNode; onOpenChange?: (open: boolean) => void;
+  options: { value: string; label: string; disabled?: boolean; group?: { id: string; label: string } }[]; required?: boolean; disabled?: boolean; children?: ReactNode; onOpenChange?: (open: boolean) => void; validationError?: string;
 }) {
+  const validate = useCallback(() => validationError || null, [validationError]);
+  const sections = [...new Map(options.filter(option => option.group).map(option => [option.group!.id, option.group!])).values()];
+  const item = (option: typeof options[number]) => <ListBox.Item key={option.value} id={option.value} textValue={option.label} isDisabled={option.disabled}>{option.label}</ListBox.Item>;
   return <div className="cash-field"><span>{label}{required ? " *" : ""}</span>
     <Select aria-label={label} selectedKey={value === "" && !options.some(option => option.value === "") ? null : value} isRequired={required} isDisabled={disabled}
-      placeholder="请选择" onOpenChange={onOpenChange} onSelectionChange={key => onChange(key === null ? "" : String(key))}>
+      placeholder="请选择" validationBehavior="native" validate={validate} onOpenChange={onOpenChange} onSelectionChange={key => onChange(key === null ? "" : String(key))}>
       <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
       <Select.Popover className="cash-select-popover"><ListBox>
-        {options.map(option => <ListBox.Item key={option.value} id={option.value} textValue={option.label} isDisabled={option.disabled}>{option.label}</ListBox.Item>)}
+        {options.filter(option => !option.group).map(item)}
+        {sections.map(section => <ListBox.Section key={section.id} id={section.id} aria-label={section.label}>
+          <Header>{section.label}</Header>{options.filter(option => option.group?.id === section.id).map(item)}
+        </ListBox.Section>)}
       </ListBox>{children}</Select.Popover>
     </Select>
   </div>;

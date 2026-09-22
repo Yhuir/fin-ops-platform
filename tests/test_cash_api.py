@@ -92,6 +92,43 @@ class CashApiTests(unittest.TestCase):
         self.assertEqual(json.loads(response.body)["rows"][0]["amount"], "1.20")
         self.assertEqual(response.headers["Cache-Control"], "no-store")
 
+    def test_category_exact_id_preserves_list_contract_and_validates_before_io(self):
+        category_id = str(uuid4())
+        repository = Mock()
+        self.routes.queries = CashQueryService(repository)
+        payload = {"rows": [{"id": category_id, "name": "Disabled original", "group": "payment", "enabled": False}],
+                   "pagination": {"page": 1, "page_size": 50, "total": 1}}
+        repository.list_configuration.return_value = payload
+        path = "/api/cash/settings/categories"
+        response = self.call(path=path, query={"category_id": [category_id.upper()]})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.body), payload)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        repository.list_configuration.assert_called_once_with("categories", {
+            "category_id": category_id, "page": 1, "page_size": 50, "sort": "name", "order": "desc",
+        })
+        repository.reset_mock()
+        for invalid in ("", "not-a-uuid", "null", "' or true --"):
+            with self.subTest(invalid=invalid):
+                rejected = self.call(path=path, query={"category_id": [invalid]})
+                self.assertEqual(rejected.status_code, 400)
+                self.assertEqual(json.loads(rejected.body)["error"], "cash_invalid_input")
+        duplicate = self.call(path=path, query={"category_id": [category_id, category_id]})
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertEqual(json.loads(duplicate.body)["error"], "cash_invalid_input")
+        for kind in ("accounts", "bill-labels"):
+            with self.subTest(kind=kind):
+                rejected = self.call(path="/api/cash/settings/" + kind, query={"category_id": [category_id]})
+                self.assertEqual(rejected.status_code, 400)
+                self.assertEqual(json.loads(rejected.body)["error"], "cash_invalid_input")
+        forbidden = self.call(path=path, query={"category_id": [category_id]}, identity=session(allowed=False))
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(json.loads(forbidden.body)["error"], "cash_access_denied")
+        unauthenticated = self.routes.route("GET", path, {"category_id": [category_id]}, None, session=None)
+        self.assertEqual(unauthenticated.status_code, 401)
+        self.assertEqual(json.loads(unauthenticated.body)["error"], "cash_session_required")
+        repository.list_configuration.assert_not_called()
+
     def test_no_authority_no_dependency_io(self):
         response = self.call(identity=session(allowed=False))
         self.assertEqual(response.status_code, 403)

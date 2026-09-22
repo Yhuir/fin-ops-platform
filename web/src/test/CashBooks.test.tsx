@@ -3,12 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import CashBooks, { initialCashBooksCriteria } from "../components/cash/CashBooks";
-import { cashToday } from "../components/cash/CashItems.types";
+import { cashToday, type CashItem } from "../components/cash/CashItems.types";
 import { cashQueryString } from "../features/cash/api";
 
-const mocks = vi.hoisted(() => ({ query: vi.fn(), reload: vi.fn() }));
+const mocks = vi.hoisted(() => ({ query: vi.fn(), reload: vi.fn(), flow: vi.fn() }));
 vi.mock("../features/cash/hooks", () => ({ useCashQuery: (path: string | null, params: unknown) => mocks.query(path, params), useCashMutation: () => ({ run: vi.fn(), busy: false, error: null, clearError: vi.fn() }) }));
-vi.mock("../components/cash/CashFlowDrawer", () => ({ CashFlowDrawer: () => <p>统一现金录入</p> }));
+vi.mock("../components/cash/CashFlowDrawer", () => ({ CashFlowDrawer: (props: { originItem?: CashItem; onClose: () => void }) => { mocks.flow(props); return <div><p>统一现金录入</p><button onClick={props.onClose}>返回借款详情</button></div>; } }));
 const pagination = { page: 1, page_size: 50, total: 3 };
 const rowBase = { row_kind: "principal", ledger_group: "personal", personal_variant: "principal", occurred_on: "2026-01-01", item_id: "item-a", counterparty: "测试人员", project: null, content: "实际借款", state: "partial", original_amount: "12000.00", repayment_amount: null, reimbursement_received_amount: null, ticket_offset_amount: null, non_ticket_offset_amount: null, real_expense_amount: null, cash_received_amount: null, cash_paid_amount: "12000.00", remaining_after_event: "12000.00", flow_id: "flow-a", settlement_id: null, expense_item_id: null, category: { id: "category-a", name: "借款", group: "turnover" }, remark: null, ticket_collection_state: null };
 const turnover = {
@@ -21,11 +21,25 @@ const projects = { rows: [{ id: "project-a", name: "历史项目甲" }, { id: "p
 const ticketReport = { rows: [], pagination: { ...pagination, total: 0 }, summary: { provided_amount: "0.00", used_amount: "0.00", offset_amount: "0.00", available_source_amount: "0.00", receivable_amount: "0.00", cash_received_amount: "0.00", noncash_settled_amount: "0.00", remaining_receivable_amount: "0.00" } };
 const lastParams = (path: string) => mocks.query.mock.calls.filter(([url]) => url === path).at(-1)![1] as Record<string, unknown>;
 beforeEach(() => {
-  mocks.query.mockReset(); mocks.reload.mockReset();
+  mocks.query.mockReset(); mocks.reload.mockReset(); mocks.flow.mockReset();
   mocks.query.mockImplementation((path: string | null) => result(path === "/reports/turnover" ? turnover : path === "/reports/project-options" ? projects : path === "/reports/ticket-payments" ? ticketReport : path === "/settings/categories" ? { rows: [{ id: "category-a", name: "借款" }, { id: "category-b", name: "费用" }], pagination: { ...pagination, total: 2 } } : path === "/reports/personal" ? { rows: [], summary: personalSummary, pagination: { ...pagination, total: 0 } } : null));
 });
 
 describe("cash books", () => {
+  test("账簿借款详情补来源打开统一抽屉并返回原事项，不产生重复事项", async () => {
+    const item = { id: "item-a", type: "loan", origin_date: "2026-01-01", is_opening: false, origin_flow_id: null, counterparty: "测试人员", content: "待补现金来源借款", original_amount: "12000.00", project_name_snapshot: null, category: null, remark: null } as CashItem;
+    const original = mocks.query.getMockImplementation()!;
+    mocks.query.mockImplementation((path, params) => path === "/items/item-a" ? result({ item, amounts: {} }) : path === "/settlements" ? result({ rows: [], pagination: { ...pagination, total: 0 } }) : original(path, params));
+    const user = userEvent.setup(); render(<CashBooks />);
+    await user.click(screen.getAllByRole("button", { name: "详情", exact: true })[0]);
+    await user.click(screen.getByRole("button", { name: "补记这笔借款的原始收付" }));
+    expect(mocks.flow.mock.calls.at(-1)![0]).toMatchObject({ originItem: item });
+    expect(screen.queryByRole("dialog", { name: "事项详情" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "返回借款详情" }));
+    expect(screen.getByRole("dialog", { name: "事项详情" })).toHaveTextContent(item.content);
+    expect(screen.queryByText("统一现金录入")).not.toBeInTheDocument();
+  });
+
   test("top date and keyword query does not restore obsolete column filters from entry criteria", async () => {
     const user = userEvent.setup(); const initial = initialCashBooksCriteria();
     initial.turnover.filters.states = ["open"];

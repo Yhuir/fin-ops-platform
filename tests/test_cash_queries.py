@@ -351,6 +351,27 @@ class CashQueryPostgresTests(CashPostgresCase):
         self.assertEqual(entry["pagination"]["total"], 3)
         self.assertEqual(entry["rows"][0]["id"], first["id"])
 
+    def test_category_exact_id_filters_real_rows_count_and_other_filters(self):
+        category = self.payment_category
+        self.connection.execute("update cash.categories set enabled=false where id=%s", (category["id"],))
+        exact = {"category_id": category["id"]}
+        result = self.query.list_configuration("categories", exact)
+        self.assertEqual(result["pagination"], {"page": 1, "page_size": 50, "total": 1})
+        self.assertEqual(len(result["rows"]), 1)
+        self.assertEqual({key: result["rows"][0][key] for key in ("id", "name", "group", "enabled")},
+                         {"id": category["id"], "name": category["name"], "group": "payment", "enabled": False})
+        matched = self.query.list_configuration("categories", {**exact, "enabled": "false", "groups": '["payment","turnover"]', "keyword": "expense"})
+        self.assertEqual(matched, result)
+        for extra in ({"enabled": "true"}, {"group": "receipt"}, {"keyword": "unmatched"}, {"category_id": self.uid()}):
+            with self.subTest(extra=extra):
+                empty = self.query.list_configuration("categories", {**exact, **extra})
+                self.assertEqual(empty, {"rows": [], "pagination": {"page": 1, "page_size": 50, "total": 0}})
+        second = self.query.list_configuration("categories", {**exact, "page_size": 1, "page": 2})
+        self.assertEqual(second, {"rows": [], "pagination": {"page": 2, "page_size": 1, "total": 1}})
+        ordinary = self.query.list_configuration("categories", {})
+        self.assertEqual(ordinary["pagination"]["total"], 2)
+        self.assertEqual({row["id"] for row in ordinary["rows"]}, {category["id"], self.category["id"]})
+
     def test_multi_report_states_null_categories_and_project_sets_before_paging(self):
         self.cash.project_resolver = lambda project_id, **_: {"id": project_id, "name": project_id, "selection_settings_version": 1}
         self.item(oa_project_id="A")

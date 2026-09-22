@@ -7,7 +7,6 @@ import { CashRequestError, cashRequest } from "../features/cash/api";
 import { CashProvider } from "../features/cash/hooks";
 
 vi.mock("../features/cash/api", async (original) => ({ ...await original<typeof import("../features/cash/api")>(), cashRequest: vi.fn() }));
-vi.mock("../components/cash/CashItems", () => ({ CashItemEditor: () => <div>期初未结编辑器</div> }));
 
 const request = vi.mocked(cashRequest);
 const page = <T,>(rows: T[]) => ({ rows, pagination: { page: 1, page_size: 50, total: rows.length } });
@@ -144,6 +143,34 @@ describe("现金项目选择设置", () => {
 });
 
 describe("现金配置表单", () => {
+  it("期初事项保存后配置重读失败不卸载完成态，也不重新显示可提交草稿", async () => {
+    const user = userEvent.setup(); let saved = false;
+    request.mockImplementation(async (path, options = {}) => {
+      if (path === "/items" && options.method === "POST") { saved = true; return { item: { ...(options.body as object), version: 1 } }; }
+      if (path === "/settings/personal-opening") {
+        if (saved) throw new CashRequestError(503, "cash_busy", "合成个人配置重读失败");
+        return { opening_date: "2026-01-01", counterparty: "合成期初归属人", version: 4 };
+      }
+      if (path.startsWith("/settings/accounts")) return page([]);
+      throw new Error(`Unexpected test request ${path}`);
+    });
+    render(<CashProvider><CashSettings /></CashProvider>);
+    const open = screen.getByRole("button", { name: "登记期初未结" });
+    await waitFor(() => expect(open).toBeEnabled()); await user.click(open);
+    const editor = screen.getByRole("dialog", { name: "新建事项" });
+    expect(within(editor).getByRole("textbox", { name: "往来对象" })).toHaveValue("合成期初归属人");
+    await user.type(within(editor).getByRole("textbox", { name: "期初未结金额" }), "50");
+    await user.type(within(editor).getByRole("textbox", { name: "事项内容" }), "合成历史欠款");
+    await user.click(within(editor).getByRole("button", { name: "保存事项" }));
+    await screen.findByText("合成个人配置重读失败");
+    expect(within(editor).getByRole("status")).toHaveTextContent("事项已保存");
+    expect(within(editor).queryByRole("button", { name: "保存事项" })).not.toBeInTheDocument();
+    expect(request.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
+    await user.click(within(editor).getByRole("button", { name: "关闭抽屉", exact: true }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "新建事项" })).not.toBeInTheDocument());
+    expect(open).toBeDisabled();
+  });
+
   const account = { id: "7da9bed9-86e7-4093-bd23-fec143c918fb", version: 2, name: "合成测试账户", kind: "cash", opening_date: "2026-01-01", opening_amount: "0.00", enabled: true, remark: null };
   function installAccounts() {
     request.mockImplementation(async (path, options = {}) => {
@@ -235,27 +262,82 @@ describe("现金配置表单", () => {
     expect(request.mock.calls.some(([, options]) => options?.method)).toBe(false);
   });
 
-  it("费用类型按适用范围集合查询，不逐字读取，失败仍保留表头", async () => {
+  it("三组独立分页，共用查询与状态，组内新增带入大类", async () => {
     const user = userEvent.setup();
-    request.mockResolvedValue(page([]));
+    request.mockImplementation(async (path, options = {}) => {
+      if (options.method === "POST") return { category: { id: "created" }, version: 1, created: true };
+      const params = new URL(path, "http://test").searchParams;
+      const group = params.get("group"); const currentPage = Number(params.get("page"));
+      return { rows: [{ id: `${group}-${currentPage}`, name: `${group}第${currentPage}页`, group, enabled: true, version: 1, remark: null }],
+        pagination: { page: currentPage, page_size: 50, total: 51 } };
+    });
+    const criteria = initialCashSettingsCriteria(); criteria.tab = "categories";
+    const saveCriteria = vi.fn();
+    render(<CashProvider><CashSettings initialCriteria={criteria} onCriteriaChange={saveCriteria} /></CashProvider>);
+    await screen.findByText("receipt第1页"); await screen.findByText("payment第1页"); await screen.findByText("turnover第1页");
+    expect(request.mock.calls).toHaveLength(3);
+    const receipt = screen.getByRole("region", { name: "收入费用类型" });
+    await user.click(within(receipt).getByRole("button", { name: "下一页" }));
+    await screen.findByText("receipt第2页");
+    expect(request.mock.calls).toHaveLength(4);
+    expect(saveCriteria.mock.calls.at(-1)![0].categories.pages).toEqual({ receipt: 2, payment: 1, turnover: 1 });
+    await user.type(screen.getByRole("textbox", { name: "费用类型名称" }), "关键词");
+    expect(request.mock.calls).toHaveLength(4);
+    await user.click(screen.getByRole("button", { name: "查询", exact: true }));
+    await waitFor(() => expect(request.mock.calls).toHaveLength(7));
+    for (const [path] of request.mock.calls.slice(-3)) {
+      const params = new URL(path, "http://test").searchParams;
+      expect(params.get("keyword")).toBe("关键词"); expect(params.get("page")).toBe("1"); expect(params.get("page_size")).toBe("50");
+    }
+    await user.click(screen.getByRole("button", { name: "筛选费用类型状态" }));
+    const popup = await screen.findByRole("dialog", { name: "筛选费用类型状态" });
+    await user.click(within(popup).getByRole("checkbox", { name: "停用", exact: true }));
+    await user.click(within(popup).getByRole("button", { name: "应用" }));
+    await waitFor(() => expect(request.mock.calls).toHaveLength(10));
+    expect(request.mock.calls.slice(-3).every(([path]) => new URL(path, "http://test").searchParams.get("enabled") === "false")).toBe(true);
+    await user.click(within(screen.getByRole("region", { name: "支出费用类型" })).getByRole("button", { name: "新增费用类型" }));
+    const drawer = await screen.findByRole("dialog", { name: "新增费用类型" });
+    expect(within(drawer).getByText("所属大类：支出")).toBeInTheDocument();
+    expect(within(drawer).queryByRole("button", { name: "适用范围" })).not.toBeInTheDocument();
+    await user.type(within(drawer).getByRole("textbox", { name: "费用类型名称" }), "合成支出");
+    await user.click(within(drawer).getByRole("button", { name: "保存费用类型" }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith("/settings/categories", expect.objectContaining({ method: "POST", body: expect.objectContaining({ group: "payment", name: "合成支出" }) })));
+    await screen.findByText("操作已完成");
+  });
+
+  it("停用筛选下末页最后一项保存后，读取最新总数并回到有效页", async () => {
+    const user = userEvent.setup(); let disabled = false;
+    request.mockImplementation(async (path, options = {}) => {
+      if (options.method === "PUT") { disabled = true; return { changed: true, version: 2 }; }
+      const params = new URL(path, "http://test").searchParams;
+      const group = params.get("group"); const currentPage = Number(params.get("page"));
+      return { rows: group === "payment" && currentPage === 2 && disabled ? [] : [{ id: `${group}-${currentPage}`, name: `${group}第${currentPage}页`, group, enabled: true, version: 1, remark: null }],
+        pagination: { page: currentPage, page_size: 50, total: group === "payment" && disabled ? 50 : 51 } };
+    });
+    const criteria = initialCashSettingsCriteria(); criteria.tab = "categories"; criteria.categories.enabled = "true"; criteria.categories.pages.payment = 2;
+    render(<CashProvider><CashSettings initialCriteria={criteria} /></CashProvider>);
+    await screen.findByText("payment第2页");
+    await user.click(within(screen.getByRole("region", { name: "支出费用类型" })).getByRole("button", { name: "编辑" }));
+    await user.click(screen.getByRole("checkbox", { name: "启用费用类型" }));
+    await user.click(screen.getByRole("button", { name: "保存费用类型" }));
+    await screen.findByText("操作已完成");
+    await user.click(screen.getByRole("button", { name: "关闭抽屉" }));
+    expect(await screen.findByText("payment第1页")).toBeInTheDocument();
+    expect(request.mock.calls.filter(([, options]) => options?.method === "PUT")).toHaveLength(1);
+  });
+
+  it("某组读取失败不伪装空态，其它组继续展示和管理", async () => {
+    request.mockImplementation(async path => {
+      const group = new URL(path, "http://test").searchParams.get("group");
+      if (group === "payment") throw new CashRequestError(503, "cash_dependency_unavailable", "支出配置读取暂不可用");
+      return page([{ id: group, name: `${group}现有类型`, group, enabled: true, version: 1, remark: null }]);
+    });
     const criteria = initialCashSettingsCriteria(); criteria.tab = "categories";
     render(<CashProvider><CashSettings initialCriteria={criteria} /></CashProvider>);
-    await screen.findByText(/暂无匹配费用类型/);
-    await user.type(screen.getByRole("textbox", { name: "费用类型名称" }), "尚未查询");
-    const before = request.mock.calls.length;
-    await user.click(screen.getByRole("button", { name: "筛选适用范围" }));
-    const popup = await screen.findByRole("dialog", { name: "筛选适用范围" });
-    await user.click(within(popup).getByRole("checkbox", { name: "收入", exact: true }));
-    await user.click(within(popup).getByRole("checkbox", { name: "往来（收付均可）" }));
-    await user.click(within(popup).getByRole("button", { name: "应用" }));
-    await waitFor(() => expect(request.mock.calls.length).toBe(before + 1));
-    const params = new URL(request.mock.calls.at(-1)![0], "http://test").searchParams;
-    expect(params.get("groups")).toBe('["receipt","turnover"]');
-    expect(params.has("keyword")).toBe(false);
-    request.mockRejectedValue(new CashRequestError(503, "cash_dependency_unavailable", "配置读取暂不可用"));
-    await user.click(screen.getByRole("button", { name: "刷新", exact: true }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("配置读取暂不可用");
-    expect(screen.getByRole("columnheader", { name: /适用范围/ })).toBeInTheDocument();
-    expect(screen.queryByText(/暂无匹配费用类型/)).not.toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("支出配置读取暂不可用");
+    expect(screen.getByText("receipt现有类型")).toBeInTheDocument();
+    expect(screen.getByText("turnover现有类型")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "支出费用类型" })).queryByText(/暂无匹配/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: /适用范围/ })).not.toBeInTheDocument();
   });
 });

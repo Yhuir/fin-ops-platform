@@ -77,3 +77,7 @@ CashFlows.test.tsx 新增直接打开/关闭清空、收入切支出保留输入
 生产 Chromium 1440×1000 实测：新增点击至抽屉显示 136ms（单次），账户配置返回 141ms（单次）；20 次类型切换 p50 30.5ms / p95 31.1ms / max 31.4ms。默认收入、三种类型字段、关闭及账目页返回检查通过，页面错误和写入尝试均为 0；截图已审阅。当前生产无启用的转入账户，明确显示配置缺失，未创建真实现金业务数据；配置返回时间不代表可完成转账。
 
 生产四子页面只读回归使用本机 token wrapper 注入 `FIN_OPS_E2E_OA_TOKEN`，运行 `FIN_OPS_E2E_PRODUCTION_SMOKE=1 FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=https://www.yn-sourcing.com npx playwright test e2e/production-cash-readonly.spec.ts --project=chromium`：1 项通过，224 个现金 GET、0 失败、0 写入；现金页面不请求普通财务数据，切回银行明细卸载现金子树。流水冷开 782.64ms（单次）；现金流水与往来总表各 100 样本 click-to-paint p95 为 135.4ms / 149.6ms，p99 为 297.96ms / 168.5ms。本次无生产写入/大数据量或高并发承诺，真实写入由上述独立 HTTP/PG 浏览器链路覆盖。
+
+## 2026-09-22 分类与录入简化
+
+七类测试沿用上表：新增categories-only category_id输入/API/真实PG过滤交集与分页合同；组件覆盖三个独立分区、单列分组候选、缺元数据精确读取、停用/未知原值和请求取消。流程覆盖内容说明、唯一办理入口、逐条个人归属、来源详情入口和两个owner；真实HTTP/PG验证来源补录删除及金额更正、还款/任务恢复。旧现金日期合同与普通银行/工作台继续回归。无新增后台/cache/read model，相关任务状态测试不适用；查询刷新责任仍适用。实际运行命令、数量和生产证据统一记入[本轮实施记录](../../dev/cash-entry-simplification-plan.md)。

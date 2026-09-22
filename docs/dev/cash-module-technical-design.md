@@ -243,7 +243,7 @@ settings/personal-opening独立命令设置/更正个人起算日期：先声明
 | category_id | UUID FK C，null | receipt/payment必填且类别适用；transfer必须null（不将其伪装收入/费用） |
 | oa_project_id/project_name_snapshot | SourceId/SourceLabel O，null | 同空/同有；一flow一个项目，可无；selection由OA只读确认，existing_item由服务端继承本地事项快照 |
 | person_name | Label O，null | 业务报销/经办对象，不等于录入账号，不按人名自动归类 |
-| content/remark | Content NN / Note O null | 用途必填、补充可空，无“其他”默认 |
+| content/remark | Content NN / Note O null | 内容说明必填、备注可空，无“其他”默认 |
 | source_kind | manual/monthly_task NN | 由入口设定，任何编辑/认领不得改 |
 | task_occurrence_id | UUID FK O，null | 一flow至多一月任务；monthly_task创建必须有，manual可后认领 |
 | created_by_account/created_by_name | text NN / SourceLabel O | 可信session账号与可用名称；不从请求/audit反查 |
@@ -1112,7 +1112,7 @@ FinanceTable继续是纯UI，表头可直接放上述现金筛选组件。已核
 
 首次保存个人归属前，在同一settings锁与现金事务内检查已有personal loan：无数据可以保存；全部属于用户填写的同一人可以确认；有其他姓名时返回冲突，不自动迁移债务。有历史后不能用改设置切换真实归属；若确为同一人的姓名纠错，需另行明确受影响来源与记录，不在普通配置保存中批量改名。此限制是一本专账的业务边界，不增加角色或多账套。
 
-任务模板/当月快照不加新字段。本轮以每次确认中的显式办理用途完成闭环；将来若用户要求保存更多预填，再讨论模板默认，不现在引入快照迁移。现金流水本体字段、双预算算法和删除身份表不变。
+任务模板/当月快照不加新字段。本轮以每次确认中显式添加的借款、费用或结算项完成闭环；将来若用户要求保存更多预填，再讨论模板默认，不现在引入快照迁移。现金流水本体字段、双预算算法和删除身份表不变。
 
 ### 14.2 查询I/O与金额范围
 
@@ -1144,7 +1144,7 @@ CashService仍负责写规则、CashQueryService负责读参、cash repository�
 2. `_validate_settlement`按现有类型分支校验。个人ticket_offset要求source.ticket_provider等于target.counterparty及专账归属；个人non_ticket_offset有来源时，source必须expense且related_obligation_id指向同一归属人的personal loan。无来源调整保留明确原因及新增分类，不猜费用来源。
 3. 仅上述个人冲抵允许source/target项目不同；`_validate_item`中expense.related_obligation_id的同项目限制对应收窄。其他引用、cash.origin_flow、CASH_SETTLEMENTS、company_receivable.ticket_source_id继续同项目。关系选择器同步显示可用源并分别标来源/目标项目；不能只改保存规则而候选仍过滤掉合法来源。
 4. 新建/编辑/删除来源及目标均复核影响关系：改ticket_provider、个人归属、related_obligation_id、项目、日期、金额、分类时读取必要依赖；非法半状态整体409回滚，提示受影响关系，不自动解绑或改目标。冲抵/撤销涉及两端，按既有稳定锁序取得来源/目标/关联义务必要锁；并发占额与修改归属不能分别通过后形成违规关系。只锁本命令涉及行，只有个人操作读取settings共享锁。
-5. 手工和任务确认的“办理用途”仅是表单到现有FlowCreate复合DTO的确定性转换：普通收付不建事项；实际费用建expense；个人实际代付建personal loan并按实际情况绑定账单；收回/归还选既有目标建allocation。不是新的服务/通用规则引擎。一次写入共用CashService，任务继续在同事务计算当月实际累计；资金只计一次。
+5. 手工和任务确认的借款、费用与还款操作仅是表单到现有FlowCreate复合DTO的确定性转换：普通收付不建事项；实际费用建expense；个人实际代付建personal loan并按实际情况绑定账单；收回/归还选既有目标建allocation。不是新的服务/通用规则引擎。一次写入共用CashService，任务继续在同事务计算当月实际累计；资金只计一次。
 6. 已录流水认领任务保持source_kind和原关系，不隐式增补事项；未办/核对不造现金，分次和超目标提示不改变。编辑删除继续复用现有source correction/CAS/tombstone，不新增批量删除或逐表删除接口。保存成功后读失败只重读，不重发写命令。
 
 ### 14.4 有界读取、迁移与回退
@@ -1160,3 +1160,9 @@ CashService仍负责写规则、CashQueryService负责读参、cash repository�
 3. **余额覆盖和期间表达。** 所有“全部未结”均指系统已登记且满足条件的事项；不代表未录入的Excel债务已知为0。历史截至日与当前详情分开标注：列表显示“截至某日”，进入详情显示当前事实及可办理额，不能拿历史余额直接提交当下冲抵。提交时按当下事实/版本复核。个人起算以前的完整余额仍未知，不能把无匹配行误称该人历史欠款为0。
 4. **个人跨项目不能改变来源选择资格。** 合法来源仍须先按原OA新增/历史规则登记；放宽source-target关系不等于自由新增已结束项目。CashService._item_values目前禁止expense/ticket_source为is_opening；create_item只用is_opening决定historical项目读取。已结束项目未处理票据/费用的开账能力尚不在现有三列方案内，按业务§13末段核对真实存量后再定窄方案，不增加隐藏historical开关或管理员绕过。
 5. **错误和资源边界。** 个人归属配置缺失/冲突只影响依赖它的个人写入或报表，不阻断普通现金收付和公司/外部账。失败不写全局业务历史。浏览器等待/读失败不重发任务确认或删除；离开现金/撤权继续取消请求并卸载Portal。SQL/连接超时和池上限保留，新增聚合不能扩大成全局写锁。
+
+## 2026-09-22 分类精确读取与来源上下文
+
+GET `/api/cash/settings/categories` 新增可选 `category_id`（UUID）；仅categories接受，沿用UUID归一化、参数化 `cash.categories.id` 等值过滤，与启停/分组/关键词取交集。rows/pagination和原DTO不变，未找到返回空列表；accounts/bill-labels拒绝该参数。分类选择器独立维护候选和原值查询：已知id/name/group不重复查，未知ID精确查，不从候选页缺席推断不存在。新建不可使用停用默认分类；已存引用仍按原编辑合同保留。
+
+FlowPart只含loan/expense/settlement；删除通用origin行与purpose/purposePartId/personalEntry。补来源由指定loan的originItem上下文提交原POST `/flows`，`project_mode=selection`、原项目、`origin_items=[{item_id,expected_item_version}]`、空related_items/allocations。不使用existing_item结算模式。两个详情owner经onOriginFlow回调打开统一表单，CashItems不反向导入Drawer。所有资金计算、版本、任务同事务、linked来源删除语义保持原实现，无迁移、索引、worker或普通财务I/O变化。

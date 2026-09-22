@@ -109,7 +109,10 @@ class CashQueryRepository:
     def list_configuration(self, kind: str, query: dict[str, Any]) -> dict[str, Any]:
         table = {"accounts": "accounts", "categories": "categories", "bill-labels": "bill_labels"}[kind]
         with self.snapshot() as tx:
-            where, params = _where(query, {"enabled": "enabled", "group": '"group"'})
+            fields = {"enabled": "enabled", "group": '"group"'}
+            if kind == "categories":
+                fields["category_id"] = "id"
+            where, params = _where(query, fields)
             if "keyword" in query:
                 text = "concat_ws(' ',bank_name,label)" if kind == "bill-labels" else "name"
                 where += f" and {text} ilike %s"

@@ -69,7 +69,7 @@ async function installCashFixtures(page: Page, options: { firstCreateFailure?: b
     }
     if (path === "/items" || path === "/settlements" || path === "/reports/project-options") return json({ ...paginate([], url), ...(path === "/settlements" ? { summary: { amounts_by_kind: [] } } : {}) });
     if (path === "/settings/accounts") return json(paginate([account], url));
-    if (path === "/settings/categories") return json(paginate([category], url));
+    if (path === "/settings/categories") return json(paginate(!url.searchParams.has("group") || url.searchParams.get("group") === category.group ? [category] : [], url));
     if (path === "/settings/bill-labels") return json(paginate([], url));
     if (path === "/settings/personal-opening") return json({ opening_date: null, counterparty: null, version: 1 });
     if (path === "/settings/project-selection") return json({ allowed_stage_codes: ["implementation"], configured: true, version: 1 });
@@ -94,7 +94,7 @@ test.describe("cash module deterministic browser flow", () => {
     await expect(drawer.getByRole("radio", { name: "收入", exact: true })).toBeChecked();
     await expect(page.getByRole("menuitem")).toHaveCount(0);
     await drawer.getByRole("textbox", { name: "金额（元）" }).fill("88.60");
-    await drawer.getByRole("textbox", { name: "用途", exact: true }).fill("合成类型切换");
+    await drawer.getByRole("textbox", { name: "内容说明", exact: true }).fill("合成类型切换");
     await drawer.getByRole("radio", { name: "收入", exact: true }).focus();
     await page.keyboard.press("ArrowRight");
     await expect(drawer.getByRole("radio", { name: "支出", exact: true })).toBeChecked();
@@ -105,7 +105,7 @@ test.describe("cash module deterministic browser flow", () => {
     await expect(drawer.getByRole("button", { name: /转入账户$/ })).toBeVisible();
     await expect(drawer.getByRole("button", { name: /费用分类$/ })).toHaveCount(0);
     await expect(drawer.getByRole("textbox", { name: "金额（元）" })).toHaveValue("88.60");
-    await expect(drawer.getByRole("textbox", { name: "用途", exact: true })).toHaveValue("合成类型切换");
+    await expect(drawer.getByRole("textbox", { name: "内容说明", exact: true })).toHaveValue("合成类型切换");
     for (const width of [1440, 780, 390]) {
       await page.setViewportSize({ width, height: 900 });
       await page.screenshot({ path: testInfo.outputPath(`cash-entry-transfer-${width}.png`) });
@@ -134,7 +134,7 @@ test.describe("cash module deterministic browser flow", () => {
     await navigation.getByRole("link", { name: "每月任务", exact: true }).click(); await expect(page.getByRole("tab", { name: "本月处理" })).toBeVisible();
     await page.getByRole("tab", { name: "任务配置" }).click(); await expect(page.getByRole("grid", { name: "任务模板" })).toBeVisible();
     await navigation.getByRole("link", { name: "基础设置", exact: true }).click(); await expect(page.getByRole("grid", { name: "现金账户", exact: true })).toBeVisible();
-    await page.getByRole("tab", { name: "费用类型", exact: true }).click(); await expect(page.getByRole("grid", { name: "费用类型", exact: true })).toBeVisible();
+    await page.getByRole("tab", { name: "费用类型", exact: true }).click(); await expect(page.getByRole("grid", { name: "往来（收付均可）费用类型", exact: true })).toBeVisible();
     await page.getByRole("tab", { name: "OA 项目与可选阶段" }).click(); await expect(page.getByRole("grid", { name: "OA 项目列表" })).toBeVisible();
     await expect(page.getByRole("checkbox", { name: "实施", exact: true })).toBeChecked(); await expect(page.getByRole("checkbox", { name: "已结束（不允许新增）" })).toBeDisabled();
     await page.screenshot({ path: testInfo.outputPath("cash-project-settings.png"), fullPage: true });
@@ -152,12 +152,12 @@ test.describe("cash module deterministic browser flow", () => {
     await page.getByRole("link", { name: "现金流水", exact: true }).click(); await expect(page.getByRole("grid", { name: "现金流水明细" })).toBeVisible();
     await page.getByRole("button", { name: "新增流水", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "新增现金流水" }); await expect(dialog).toBeVisible();
-    await dialog.getByRole("textbox", { name: "金额（元）" }).fill("88.60"); await dialog.getByRole("textbox", { name: "用途", exact: true }).fill("合成新增现金流水");
+    await dialog.getByRole("textbox", { name: "金额（元）" }).fill("88.60"); await dialog.getByRole("textbox", { name: "内容说明", exact: true }).fill("合成新增现金流水");
     await dialog.getByRole("button", { name: /收款账户$/ }).click(); await page.getByRole("option", { name: account.name }).click();
     await dialog.getByRole("button", { name: /费用分类$/ }).click(); await page.getByRole("option", { name: category.name }).click();
     await page.screenshot({ path: testInfo.outputPath("cash-entry-drawer.png"), fullPage: true });
     await dialog.getByRole("button", { name: "保存", exact: true }).click(); await expect(dialog.getByRole("alert")).toContainText("现金暂忙");
-    await expect(dialog.getByRole("textbox", { name: "用途", exact: true })).toHaveValue("合成新增现金流水");
+    await expect(dialog.getByRole("textbox", { name: "内容说明", exact: true })).toHaveValue("合成新增现金流水");
     await dialog.getByRole("button", { name: "保存", exact: true }).click();
     await expect(dialog.getByRole("status")).toHaveText("现金流水已保存");
     await expect(dialog.getByRole("button", { name: "保存", exact: true })).toHaveCount(0);
@@ -216,8 +216,9 @@ test.describe("cash module deterministic browser flow", () => {
     await page.getByRole("row").filter({ hasText: "合成个人代付任务" }).getByRole("button", { name: "已付 / 已还", exact: true }).click();
     const drawer = page.getByRole("dialog", { name: "办理任务 · 合成个人代付任务" });
     await drawer.getByRole("textbox", { name: "金额（元）" }).fill("500.00");
-    await drawer.getByRole("textbox", { name: "用途", exact: true }).fill("合成任务实际代付");
-    await drawer.getByRole("button", { name: /办理用途$/ }).click(); await page.getByRole("option", { name: "个人实际代付 / 借出（含替个人还卡）", exact: true }).click();
+    await drawer.getByRole("textbox", { name: "内容说明", exact: true }).fill("合成任务实际代付");
+    await drawer.getByRole("button", { name: "新增借款 / 代付", exact: true }).click();
+    await drawer.getByRole("button", { name: /账簿分类$/ }).click(); await page.getByRole("option", { name: "个人借款 / 代付", exact: true }).click();
     await expect(drawer.getByRole("textbox", { name: "往来对象", exact: true })).toHaveValue("合成测试人员");
     await page.screenshot({ path: testInfo.outputPath("cash-closure-task-purpose.png"), fullPage: true });
     expect(api.calls.filter(call => call.method !== "GET")).toEqual([]);
@@ -431,7 +432,7 @@ test.describe("cash module deterministic browser flow", () => {
     await check("筛选任务类别"); await check("筛选任务状态");
     await page.getByRole("tab", { name: "任务配置" }).click(); await check("筛选模板类别"); await check("筛选模板状态");
     await page.getByRole("link", { name: "基础设置", exact: true }).click(); await check("筛选账户状态");
-    await page.getByRole("tab", { name: "费用类型", exact: true }).click(); await check("筛选适用范围"); await check("筛选费用类型状态");
+    await page.getByRole("tab", { name: "费用类型", exact: true }).click(); await check("筛选费用类型状态");
     await page.getByRole("tab", { name: "OA 项目与可选阶段" }).click(); await check("筛选项目阶段"); await check("筛选新增资格");
     console.log("cash overlay geometry", JSON.stringify(measures));
     await testInfo.attach("cash-overlay-geometry", { body: JSON.stringify(measures, null, 2), contentType: "application/json" });

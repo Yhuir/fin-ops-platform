@@ -1,5 +1,11 @@
 # 现金账边界与 I/O
 
+## 分类与录入简化（2026-09-22）
+
+CashSettings拥有三组独立分页与共用搜索/状态/排序；CashConfigurationSelect拥有有界候选和独立原值查询，CashUi仅消费分组展示，不读取API。categories列表新增category_id UUID筛选，service验证、repository参数化主键查询，响应shape不变，其它配置列表不接受该参数。CashFlowEditor拥有每项个人配置依赖和唯一复合命令；Composition只组装显式loan/expense/settlement。删除purpose/purposePartId/personalEntry和通用origin行。
+
+非期初无来源loan详情经onOriginFlow交给CashBooks/CashFlowDetailDrawer打开指定originItem上下文；来源日期/项目只读，POST flows复用原origin_items，不创建新本金。关闭回当前借款详情，删除来源按原linked规则保留借款。无反向Drawer依赖、无新服务/表/迁移/worker/缓存；普通页面及FinanceTable/AppDrawer实现不变。保留9月21日time_scope=all及本页日期恢复合同。个人期初编辑器在打开时持有明确初始上下文，保存后设置重读不卸载其完成态；后端仍校验当前配置。验证及旧链移除记录见[实施计划](../../dev/cash-entry-simplification-plan.md)。
+
 ## 普通历史范围默认全部（2026-09-21）
 
 `GET /flows`、周转 `view=events` 和有票支付 `view=period` 接受 `time_scope=all`，与任何 `date_from/date_to` 互斥。服务按上海业务日注入今天作为截止，无起点；未提供 all 时，原成对日期及最多 366 天校验保留。独立普通列表缺少两种时间表达仍为 400；明确事项/任务父对象的无日期历史合同不变。纠错候选复用 flows 的 all，任务关联仍传任务月身份；个人年、未结/待回款截止日及所有写命令日期不变。

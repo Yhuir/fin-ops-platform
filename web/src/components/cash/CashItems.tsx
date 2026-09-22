@@ -242,7 +242,7 @@ export function CashSettlementTable({ params, onItem, onFlow }: { params: QueryP
 
 const amountLabels: Record<string, string> = { original_amount: "原始金额", cash_settled_amount: "现金已结", ticket_offset_amount: "票抵", non_ticket_offset_amount: "无票 / 其他冲抵", remaining_obligation_amount: "当前未结", paid_amount: "已付款", refund_amount: "已退款", net_expense_amount: "真实花销", available_offset_amount: "可冲抵费用", provided_amount: "提供金额", used_amount: "已使用", offset_amount: "用于抵债", available_source_amount: "来源可用" };
 
-export function CashItemDetail({ itemId, onClose, onFlow, onActualFlow }: { itemId: string; onClose: () => void; onFlow?: (id: string) => void; onActualFlow?: (item: CashItem, kind: CashSettlementKind) => void }) {
+export function CashItemDetail({ itemId, onClose, onFlow, onActualFlow, onOriginFlow }: { itemId: string; onClose: () => void; onFlow?: (id: string) => void; onActualFlow?: (item: CashItem, kind: CashSettlementKind) => void; onOriginFlow?: (item: CashItem) => void }) {
   const [deleted, setDeleted] = useState(false);
   const [currentId, setCurrentId] = useState(itemId);
   const query = useCashQuery<CashItemDetailData>(deleted ? null : `/items/${currentId}`);
@@ -262,6 +262,7 @@ export function CashItemDetail({ itemId, onClose, onFlow, onActualFlow }: { item
       {item.bill_month && <p>实际代付月份：{item.origin_date.slice(0, 7)} · 账单月份：{item.bill_month}{item.origin_date.slice(0, 7) < item.bill_month ? " · 提前代付（计入实际发生月份）" : ""}</p>}
       <p>{item.remark ?? "无备注"}</p>
       <div className="cash-toolbar"><Button size="sm" variant="secondary" onPress={() => setEditing(item)}>更正事项</Button>{item.origin_flow_id && onFlow ? <Button size="sm" variant="tertiary" onPress={() => onFlow(item.origin_flow_id!)}>来源流水 / 纠错</Button> : !item.origin_flow_id && <Button size="sm" variant="tertiary" onPress={() => setDeleteConfirm(true)}>删除错误事项</Button>}
+        {item.type === "loan" && !item.is_opening && !item.origin_flow_id && onOriginFlow && <Button size="sm" variant="secondary" onPress={() => onOriginFlow(item)}>补记这笔借款的原始收付</Button>}
         {cashKind && <><Button size="sm" variant="secondary" onPress={() => setActionKind(cashKind)}>关联已录现金</Button>{onActualFlow && <Button size="sm" onPress={() => onActualFlow(item, cashKind)}>登记实际收付</Button>}</>}
         {item.type === "expense" && <Button size="sm" variant="secondary" onPress={() => setActionKind("expense_refund")}>关联费用退款</Button>}
         {(item.type === "loan" || item.type === "company_receivable") && <><Button size="sm" variant="secondary" onPress={() => setActionKind("ticket_offset")}>票据抵债</Button><Button size="sm" variant="secondary" onPress={() => setActionKind("non_ticket_offset")}>无票 / 其他冲抵</Button></>}

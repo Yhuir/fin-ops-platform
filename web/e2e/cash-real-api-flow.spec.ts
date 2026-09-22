@@ -115,6 +115,53 @@ test.describe("cash browser -> real HTTP -> PostgreSQL", () => {
     expect(reads[beforeReload].searchParams.get("time_scope")).toBe("all");
   });
 
+  test("existing loan origin backfill uses fixed context, returns to detail and reverses without deleting the loan", async ({ page, baseURL }) => {
+    test.setTimeout(180_000);
+    if (!baseURL || new URL(baseURL).hostname !== "127.0.0.1" || process.env.FIN_OPS_CASH_REAL_TOKEN !== "test-suite-oa-token") throw new Error("Origin backfill requires isolated loopback cash fixture.");
+    const token = process.env.FIN_OPS_CASH_REAL_TOKEN;
+    const account = JSON.parse(process.env.FIN_OPS_CASH_REAL_ACCOUNT!) as { id: string; name: string };
+    const category = JSON.parse(process.env.FIN_OPS_CASH_REAL_CATEGORY!) as { id: string; name: string };
+    await page.context().setExtraHTTPHeaders({ Authorization: `Bearer ${token}` });
+    await page.context().addCookies([{ name: "Admin-Token", value: token, domain: "127.0.0.1", path: "/", sameSite: "Lax" }]);
+    await page.clock.setFixedTime(new Date("2026-09-07T08:00:00.000Z"));
+    const created = await page.request.post("/api/cash/items", { data: { id: crypto.randomUUID(), type: "loan", origin_date: "2026-09-03", original_amount: "15.00", content: "合成来源补录借款", oa_project_id: null, counterparty: "合成公司", ledger_group: "company", obligation_direction: "receivable" } });
+    expect(created.status()).toBe(201); const item = (await created.json()).item;
+    await page.goto("/cash?section=accounts");
+    await page.getByRole("button", { name: "事项管理", exact: true }).click();
+    await page.getByRole("row").filter({ hasText: "合成来源补录借款" }).getByRole("button", { name: "选择", exact: true }).click();
+    const detail = page.getByRole("dialog", { name: "事项详情", exact: true });
+    await detail.getByRole("button", { name: "补记这笔借款的原始收付", exact: true }).click();
+    const entry = page.getByRole("dialog", { name: "新增现金流水", exact: true });
+    await expect(entry.getByLabel("实际发生日", { exact: true })).toBeDisabled();
+    await expect(entry.getByLabel("实际发生日", { exact: true })).toHaveValue("2026-09-03");
+    await expect(entry.getByRole("radio")).toHaveCount(0);
+    await expect(entry.getByRole("button", { name: "选择项目", exact: true })).toHaveCount(0);
+    await entry.getByRole("button", { name: /付款账户$/ }).click(); await page.getByRole("option", { name: account.name, exact: true }).click();
+    await entry.getByRole("button", { name: /费用分类$/ }).click(); await page.getByRole("option", { name: category.name, exact: true }).click();
+    const saving = page.waitForResponse(response => new URL(response.url()).pathname === "/api/cash/flows" && response.request().method() === "POST");
+    await entry.getByRole("button", { name: "保存", exact: true }).click();
+    const response = await saving; expect(response.status()).toBe(201); const flow = (await response.json()).flow;
+    await expect(entry.getByRole("status")).toHaveText("现金流水已保存");
+    await entry.getByRole("button", { name: "关闭抽屉", exact: true }).click();
+    await expect(detail).toBeVisible();
+    await expect(detail.getByRole("button", { name: "补记这笔借款的原始收付", exact: true })).toHaveCount(0);
+    const linked = await page.request.get(`/api/cash/items/${item.id}`); const linkedItem = await linked.json();
+    expect(linkedItem.item.origin_flow_id).toBe(flow.id); expect(linkedItem.item.original_amount).toBe("15.00");
+    expect(linkedItem.amounts.remaining_obligation_amount).toBe("15.00");
+    await detail.getByRole("button", { name: "来源流水 / 纠错", exact: true }).click();
+    await page.getByRole("dialog", { name: "现金流水详情", exact: true }).getByRole("button", { name: "删除", exact: true }).click();
+    const removal = page.waitForResponse(result => new URL(result.url()).pathname === `/api/cash/flows/${flow.id}/delete`);
+    await page.getByRole("dialog", { name: "删除现金流水", exact: true }).getByRole("button", { name: "确认删除", exact: true }).click();
+    expect((await removal).status()).toBe(200);
+    const restored = await page.request.get(`/api/cash/items/${item.id}`); expect(restored.status()).toBe(200); const old = await restored.json();
+    expect(old.item.origin_flow_id).toBeNull(); expect(old.item.original_amount).toBe("15.00");
+    expect(old.amounts.remaining_obligation_amount).toBe("15.00");
+    const cleanup = await page.request.post(`/api/cash/items/${item.id}/remove`, { data: { expected_version: old.item.version } });
+    expect(cleanup.status()).toBe(200);
+    expect((await page.request.get(`/api/cash/flows/${flow.id}`)).status()).toBe(404);
+    await expectNoUnexpectedSuccessUiErrors(page);
+  });
+
   test("personal opening, task advance, classified noncash adjustment and old pending tickets form one real chain", async ({ page, baseURL }) => {
     test.setTimeout(180_000);
     if (!baseURL || new URL(baseURL).hostname !== "127.0.0.1" || process.env.FIN_OPS_CASH_REAL_TOKEN !== "test-suite-oa-token") throw new Error("Real cash write E2E requires the loopback test fixture.");
@@ -153,9 +200,10 @@ test.describe("cash browser -> real HTTP -> PostgreSQL", () => {
     await page.getByRole("row").filter({ hasText: "合成信用卡代付任务" }).getByRole("button", { name: "已付 / 已还", exact: true }).click();
     const task = page.getByRole("dialog", { name: "办理任务 · 合成信用卡代付任务" });
     await task.getByRole("textbox", { name: "金额（元）" }).fill("100.00");
-    await task.getByRole("textbox", { name: "用途", exact: true }).fill("合成明确个人代付");
-    await task.getByRole("button", { name: /本次办理用途$/ }).click();
-    await page.getByRole("option", { name: "个人实际代付 / 借出（含替个人还卡）", exact: true }).click();
+    await task.getByRole("textbox", { name: "内容说明", exact: true }).fill("合成明确个人代付");
+    await task.getByRole("button", { name: "新增借款 / 代付", exact: true }).click();
+    await task.getByRole("button", { name: /账簿分类$/ }).click();
+    await page.getByRole("option", { name: "个人借款 / 代付", exact: true }).click();
     await expect(task.getByRole("textbox", { name: "往来对象" })).toHaveValue("真实浏览器合成人员");
     const confirmed = page.waitForResponse(response => new URL(response.url()).pathname === "/api/cash/task-occurrences/confirm");
     await task.getByRole("button", { name: "保存并确认任务", exact: true }).click();
@@ -191,7 +239,7 @@ test.describe("cash browser -> real HTTP -> PostgreSQL", () => {
     await detail.getByRole("button", { name: "登记实际收付", exact: true }).click();
     const repayment = page.getByRole("dialog", { name: "新增现金流水" });
     await repayment.getByRole("textbox", { name: "金额（元）" }).fill("25.00");
-    await repayment.getByRole("textbox", { name: "用途", exact: true }).fill("合成旧借款实际现金归还");
+    await repayment.getByRole("textbox", { name: "内容说明", exact: true }).fill("合成旧借款实际现金归还");
     await repayment.getByRole("button", { name: /收款账户$/ }).click(); await page.getByRole("option", { name: account.name, exact: true }).click();
     await repayment.getByRole("button", { name: /费用分类$/ }).click(); await page.getByRole("option", { name: category.name, exact: true }).click();
     await repayment.getByRole("textbox", { name: "本次处理金额" }).fill("25.00");
@@ -232,7 +280,7 @@ async function enterReceipt(page: Page, account: string, category: string, amoun
   const dialog = page.getByRole("dialog", { name: "新增现金流水" });
   await dialog.getByLabel("实际发生日", { exact: true }).fill("2026-09-03");
   await dialog.getByRole("textbox", { name: "金额（元）" }).fill(amount);
-  await dialog.getByRole("textbox", { name: "用途", exact: true }).fill(content);
+  await dialog.getByRole("textbox", { name: "内容说明", exact: true }).fill(content);
   await dialog.getByRole("button", { name: /收款账户$/ }).click();
   await page.getByRole("option", { name: account, exact: true }).click();
   await dialog.getByRole("button", { name: /费用分类$/ }).click();

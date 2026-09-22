@@ -1,7 +1,7 @@
 import { expect, test, type Page, type Locator } from "./fixtures/strictTest";
 
 const enabled = process.env.FIN_OPS_E2E_PRODUCTION_SMOKE === "1";
-const token = process.env.FIN_OPS_E2E_OA_TOKEN ?? "";
+const token = process.env.FIN_OPS_E2E_ADMIN_TOKEN ?? "";
 test.use({ screenshot: "off", trace: "off", video: "off" });
 
 // Opt-in verification only. Never create accounts, roles, flows or OA records here.
@@ -31,6 +31,7 @@ test.describe("production cash read-only verification", () => {
     const samples: Record<string, { clickToPaint: number; responseToPaint: number }[]> = {};
     const menuPaint: number[] = [];
     const menuPointerPaint: number[] = [];
+    const categoryMenuPaint: number[] = [];
     async function checkMenu(label: string) {
       const trigger = page.getByRole("button", { name: label, exact: true });
       await trigger.scrollIntoViewIfNeeded();
@@ -78,6 +79,31 @@ test.describe("production cash read-only verification", () => {
     for (const name of ["现金流水", "现金账目", "每月任务", "基础设置"]) await expect(nav().getByRole("link", { name, exact: true })).toBeVisible();
     await expect(page.getByRole("tab")).toHaveCount(0);
     await checkMenu("筛选账户"); await checkMenu("筛选来源");
+    // Opening and cancelling the actual editor checks grouped categories without any write.
+    await page.getByRole("button", { name: "新增流水", exact: true }).click();
+    const entry = page.getByRole("dialog", { name: "新增现金流水", exact: true });
+    await expect(entry.getByRole("textbox", { name: "内容说明", exact: true })).toHaveAttribute("required", "");
+    await expect(entry.getByRole("textbox", { name: "备注（可选）", exact: true })).not.toHaveAttribute("required", "");
+    await expect(entry.getByRole("button", { name: /本次办理用途/ })).toHaveCount(0);
+    await expect(entry.getByRole("button", { name: /补记.*来源/ })).toHaveCount(0);
+    const category = entry.getByRole("button", { name: /费用分类$/ });
+    await expect(category).toBeEnabled();
+    for (let index = 0; index < 20; index += 1) {
+      await category.evaluate(button => button.addEventListener("pointerdown", () => {
+        (window as Window & { cashOpenStarted?: number }).cashOpenStarted = performance.now();
+      }, { once: true }));
+      await category.click();
+      const choices = page.getByRole("listbox"); await expect(choices).toBeVisible();
+      await expect(choices.getByRole("option")).not.toHaveCount(0);
+      await expect(choices.getByRole("group").first()).toBeVisible();
+      await expect(choices.getByRole("group", { name: "支出", exact: true })).toHaveCount(0);
+      await twoFrames(page);
+      categoryMenuPaint.push(await category.evaluate(() => performance.now() - (window as Window & { cashOpenStarted?: number }).cashOpenStarted!));
+      await page.keyboard.press("Escape"); await expect(choices).toHaveCount(0);
+    }
+    await entry.getByRole("button", { name: "关闭抽屉", exact: true }).click();
+    await expect(entry).toHaveCount(0);
+
     await show("turnover", "reports/turnover", () => nav().getByRole("link", { name: "现金账目", exact: true }).click(), page.getByRole("grid", { name: "往来账总表" }));
     await expect(page.getByRole("tab")).toHaveCount(3);
     await checkMenu("筛选项目");
@@ -104,7 +130,11 @@ test.describe("production cash read-only verification", () => {
     await show("accounts", "settings/accounts", () => nav().getByRole("link", { name: "基础设置", exact: true }).click(), page.getByRole("grid", { name: "现金账户", exact: true }));
     await checkMenu("筛选账户状态");
     await show("categories", "settings/categories", () => page.getByRole("tab", { name: "费用类型", exact: true }).click());
-    await checkMenu("筛选适用范围");
+    for (const label of ["收入", "支出", "往来（收付均可）"]) {
+      await expect(page.getByRole("grid", { name: `${label}费用类型`, exact: true })).toBeVisible();
+    }
+    await expect(page.getByRole("button", { name: "筛选适用范围", exact: true })).toHaveCount(0);
+    await checkMenu("筛选费用类型状态");
     await show("projects", "projects", () => page.getByRole("tab", { name: "OA 项目与可选阶段", exact: true }).click(), page.getByRole("grid", { name: "OA 项目列表" }));
     expect(await page.locator(".cash-checkbox-grid").getByRole("checkbox").count()).toBeGreaterThan(0);
     await checkMenu("筛选项目阶段");
@@ -130,7 +160,7 @@ test.describe("production cash read-only verification", () => {
     const metrics = Object.fromEntries(Object.entries(samples).map(([name, rows]) => [name, {
       count: rows.length, clickToPaintMs: percentiles(rows.map(row => row.clickToPaint)), responseToPaintMs: percentiles(rows.map(row => row.responseToPaint)),
     }]));
-    console.log("CASH_READONLY_METRICS", JSON.stringify({ metrics, menuSamples: menuPaint.length, menuClickToVisibleMs: percentiles(menuPaint), menuPointerToVisibleMs: percentiles(menuPointerPaint), cashGetCount: cashCalls.length, blockedWrites: writes.length, failures: failed.length }));
+    console.log("CASH_READONLY_METRICS", JSON.stringify({ metrics, menuSamples: menuPaint.length, menuClickToVisibleMs: percentiles(menuPaint), menuPointerToVisibleMs: percentiles(menuPointerPaint), categoryMenuPointerToVisibleMs: percentiles(categoryMenuPaint), categoryMenuSamples: categoryMenuPaint.length, cashGetCount: cashCalls.length, blockedWrites: writes.length, failures: failed.length }));
   });
 });
 

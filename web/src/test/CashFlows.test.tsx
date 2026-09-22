@@ -90,13 +90,89 @@ async function select(user: ReturnType<typeof userEvent.setup>, label: string, o
 }
 async function inputCash(user: ReturnType<typeof userEvent.setup>, amount = "125.5") {
   await user.type(screen.getByRole("textbox", { name: "金额（元）" }), amount);
-  await user.type(screen.getByRole("textbox", { name: "用途" }), "真实控件合成收付");
+  await user.type(screen.getByRole("textbox", { name: "内容说明" }), "真实控件合成收付");
 }
 
 beforeEach(() => http.mockReset());
 afterEach(cleanup);
 
 describe("现金实际录入 HTTP 字段", () => {
+  it("流水关联事项入口补来源取消后返回原借款详情", async () => {
+    const user = userEvent.setup(); const writes = installHttp({ getDetail: () => ({ ...detail(), allocation_count: 1 }) });
+    const original = http.getMockImplementation()!;
+    const item = { id: itemId, version: 9, type: "loan", is_opening: false, original_amount: "75.60", origin_date: "2026-01-02", content: "需补来源的关联借款", obligation_direction: "receivable", ledger_group: "company", counterparty: "公司", oa_project_id: null, project_name_snapshot: null, origin_flow_id: null, category: null, remark: null } as CashItem;
+    http.mockImplementation(async (url, init) => {
+      const path = new URL(url, "http://cash-test.invalid").pathname;
+      if (path === `/api/cash/items/${itemId}`) return json({ item, amounts: {} });
+      if (path === "/api/cash/settlements") return json(rowsPage([{ id: "settlement-a", occurred_on: "2026-01-05", kind: "cash_repayment", amount: "5.00", item_id: itemId, item_content: item.content }], 20));
+      return original(url, init);
+    });
+    render(<DrawerHarness flowId={flowId} />);
+    await user.click(await screen.findByRole("tab", { name: "对应处理（1）" }));
+    await user.click(await screen.findByRole("button", { name: item.content }));
+    await user.click(await screen.findByRole("button", { name: "补记这笔借款的原始收付" }));
+    expect(screen.getByRole("dialog", { name: "新增现金流水" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭抽屉", exact: true }));
+    expect(await screen.findByRole("dialog", { name: "事项详情" })).toHaveTextContent(item.content);
+    expect(writes).toHaveLength(0);
+  });
+
+  it("保留必填内容说明与选填备注，普通录入不读取个人配置且无旧入口", async () => {
+    const user = userEvent.setup(); const writes = installHttp({ write: ({ body }) => created(body) });
+    render(<DrawerHarness />);
+    expect(screen.getByRole("textbox", { name: "内容说明" })).toBeRequired();
+    expect(screen.getByRole("textbox", { name: "备注（可选）" })).not.toBeRequired();
+    expect(screen.queryByLabelText("本次办理用途")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /补记.*来源/ })).not.toBeInTheDocument();
+    await select(user, "收款账户", "合成现金账户"); await select(user, "费用分类", "合成往来类型");
+    await inputCash(user); await user.type(screen.getByRole("textbox", { name: "备注（可选）" }), "独立补充备注");
+    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0].body).toMatchObject({ content: "真实控件合成收付", remark: "独立补充备注", related_items: [] });
+    expect(http.mock.calls.some(([url]) => url.includes("personal-opening"))).toBe(false);
+  });
+
+  it.each(["receivable", "payable"] as const)("补记%s来源固定日期项目方向，只绑定原借款", async direction => {
+    const user = userEvent.setup(); const writes = installHttp({ write: ({ body }) => created(body) });
+    const item = { id: itemId, version: 9, type: "loan", is_opening: false, original_amount: "75.60", origin_date: "2026-01-02", content: "旧借款来源", obligation_direction: direction, oa_project_id: "507f1f77bcf86cd799439011", project_name_snapshot: "既有项目" } as CashItem;
+    render(<DrawerHarness originItem={item} />);
+    expect(screen.getByLabelText("实际发生日")).toBeDisabled();
+    expect(screen.getByLabelText("实际发生日")).toHaveValue("2026-01-02");
+    expect(screen.getByText("既有项目")).toBeInTheDocument();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "选择项目" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "新增借款 / 代付" })).not.toBeInTheDocument();
+    await select(user, direction === "receivable" ? "付款账户" : "收款账户", "合成现金账户");
+    await select(user, "费用分类", "合成往来类型");
+    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0].body).toMatchObject({ kind: direction === "receivable" ? "payment" : "receipt", occurred_on: item.origin_date, amount: "75.60", content: item.content, oa_project_id: item.oa_project_id, project_mode: "selection", related_items: [], allocations: [], origin_items: [{ item_id: itemId, expected_item_version: 9 }] });
+    expect(http.mock.calls.some(([url]) => url.includes("/projects"))).toBe(false);
+  });
+
+  it("首项一次预填，第二项不复制整笔金额；个人归属适用于任意行且切组不泄漏", async () => {
+    const user = userEvent.setup(); const writes = installHttp(); render(<DrawerHarness kind="payment" />);
+    await inputCash(user, "80");
+    await user.type(screen.getByRole("textbox", { name: "人员 / 经办对象（可选）" }), "只是经办人");
+    await user.click(screen.getByRole("button", { name: "新增借款 / 代付" }));
+    expect(screen.getByRole("textbox", { name: "事项金额" })).toHaveValue("80");
+    expect(screen.getByRole("textbox", { name: "往来对象" })).toHaveValue("");
+    await user.clear(screen.getByRole("textbox", { name: "事项金额" })); await user.type(screen.getByRole("textbox", { name: "事项金额" }), "30");
+    await user.clear(screen.getByRole("textbox", { name: "金额（元）" })); await user.type(screen.getByRole("textbox", { name: "金额（元）" }), "90");
+    expect(screen.getByRole("textbox", { name: "事项金额" })).toHaveValue("30");
+    await user.click(screen.getByRole("button", { name: "新增借款 / 代付" }));
+    expect(screen.getAllByRole("textbox", { name: "事项金额" })[1]).toHaveValue("");
+    expect(screen.getAllByRole("textbox", { name: "事项内容" })[1]).toHaveValue("");
+    await user.click(screen.getAllByLabelText("账簿分类", { selector: "button" })[1]);
+    await user.click(screen.getByRole("option", { name: "个人借款 / 代付", exact: true }));
+    await waitFor(() => expect(screen.getAllByRole("textbox", { name: "往来对象" })[1]).toHaveValue("明确归属人"));
+    expect(screen.getAllByRole("textbox", { name: "往来对象" })[0]).toHaveValue("");
+    await user.click(screen.getAllByLabelText("账簿分类", { selector: "button" })[1]); await user.click(screen.getByRole("option", { name: "公司", exact: true }));
+    expect(screen.getAllByRole("textbox", { name: "往来对象" })[1]).toHaveValue("");
+    expect(screen.getAllByRole("textbox", { name: "往来对象" })[1]).toBeEnabled();
+    expect(writes).toHaveLength(0);
+  });
+
   it("新增按钮直接打开默认收入，关闭不保留录入草稿", async () => {
     const user = userEvent.setup(); installHttp();
     render(<CashProvider><CashFlows initialCriteria={initialCashFlowCriteria()} onCriteriaChange={() => {}} /></CashProvider>);
@@ -118,7 +194,7 @@ describe("现金实际录入 HTTP 字段", () => {
     await select(user, "费用分类", "合成往来类型"); await inputCash(user, "42.35");
     await user.click(screen.getByRole("radio", { name: "支出", exact: true }));
     expect(screen.getByRole("textbox", { name: "金额（元）" })).toHaveValue("42.35");
-    expect(screen.getByRole("textbox", { name: "用途", exact: true })).toHaveValue("真实控件合成收付");
+    expect(screen.getByRole("textbox", { name: "内容说明", exact: true })).toHaveValue("真实控件合成收付");
     expect(screen.getByLabelText("付款账户", { selector: "button" })).not.toHaveTextContent("合成现金账户");
     expect(screen.getByLabelText("费用分类", { selector: "button" })).not.toHaveTextContent("合成往来类型");
     await select(user, "付款账户", "合成储蓄账户"); await select(user, "费用分类", "合成往来类型");
@@ -130,12 +206,12 @@ describe("现金实际录入 HTTP 字段", () => {
     const user = userEvent.setup(); const writes = installHttp({ write: ({ body }) => created(body) });
     render(<DrawerHarness kind="payment" />);
     await inputCash(user, "42.35"); await select(user, "付款账户", "合成现金账户");
-    await select(user, "本次办理用途", "登记实际费用");
+    await user.click(screen.getByRole("button", { name: "登记实际费用" }));
     await user.click(screen.getByRole("radio", { name: "内部转账" }));
     expect(screen.getByRole("radio", { name: "支出", exact: true })).toBeChecked();
     expect(screen.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "保留并返回" }));
-    expect(screen.getByLabelText("本次办理用途", { selector: "button" })).toHaveTextContent("登记实际费用");
+    expect(screen.getByRole("textbox", { name: "事项内容" })).toHaveValue("真实控件合成收付");
     await user.click(screen.getByRole("radio", { name: "内部转账" }));
     await user.click(screen.getByRole("button", { name: "清除并切换" }));
     expect(screen.queryByLabelText("本次办理用途")).not.toBeInTheDocument();
@@ -152,7 +228,8 @@ describe("现金实际录入 HTTP 字段", () => {
     expect(screen.queryByRole("radio")).not.toBeInTheDocument();
     await inputCash(user);
     expect(screen.queryByRole("textbox", { name: "往来对象" })).not.toBeInTheDocument();
-    await select(user, "本次办理用途", "个人实际代付 / 借出（含替个人还卡）");
+    await user.click(screen.getByRole("button", { name: "新增借款 / 代付" }));
+    await select(user, "账簿分类", "个人借款 / 代付");
     await waitFor(() => expect(screen.getByRole("textbox", { name: "往来对象" })).toHaveValue("明确归属人"));
     expect(screen.getByRole("textbox", { name: "往来对象" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "保存并确认任务" }));
@@ -169,7 +246,8 @@ describe("现金实际录入 HTTP 字段", () => {
     });
     render(<DrawerHarness task={{ template_id: templateId, month: "2026-09", expected_version: 1, planned_amount: "125.50", title: "配置故障测试", kind: "payment", default_account_id: accountA, default_category_id: categoryId }} />);
     await inputCash(user);
-    await select(user, "本次办理用途", "个人实际代付 / 借出（含替个人还卡）");
+    await user.click(screen.getByRole("button", { name: "新增借款 / 代付" }));
+    await select(user, "账簿分类", "个人借款 / 代付");
     await screen.findByText("合成配置读取失败");
     await user.click(screen.getByRole("button", { name: "保存并确认任务" }));
     expect(writes).toHaveLength(0);

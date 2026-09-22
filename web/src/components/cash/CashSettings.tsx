@@ -2,7 +2,7 @@ import { Button, Checkbox } from "@heroui/react";
 import { useEffect, useState } from "react";
 
 import { useCashMutation, useCashQuery, useCashScope } from "../../features/cash/hooks";
-import { cashAmount, type CashPersonalSetting } from "./CashItems.types";
+import { cashAmount, type CashPersonalSetting, type CashPersonalContext } from "./CashItems.types";
 import AppDrawer from "../common/AppDrawer";
 import { FinanceTable, FinanceTableBody, FinanceTableCell, FinanceTableColumn, FinanceTableHeader, FinanceTablePagination, FinanceTableRow } from "../common/FinanceTable";
 import { CashInput, CashNotice, CashSelect, CashTabs } from "./CashUi";
@@ -21,12 +21,14 @@ const settingTabs = [
 ];
 
 type AccountCriteria = { page: number; keyword: string; enabled: string; order: "asc" | "desc" };
-type CategoryCriteria = AccountCriteria & { groups: string[] };
+type CategoryGroup = CashCategorySetting["group"];
+type CategoryCriteria = Omit<AccountCriteria, "page"> & { pages: Record<CategoryGroup, number> };
+const firstCategoryPages = (): Record<CategoryGroup, number> => ({ receipt: 1, payment: 1, turnover: 1 });
 type ProjectCriteria = { page: number; keyword: string; stages: (string | null)[]; selectable: string };
 export type CashSettingsCriteria = { tab: string; accounts: AccountCriteria; categories: CategoryCriteria; projects: ProjectCriteria; guide: string };
 export function initialCashSettingsCriteria(): CashSettingsCriteria {
   return { tab: "accounts", accounts: { page: 1, keyword: "", enabled: "", order: "asc" },
-    categories: { page: 1, keyword: "", enabled: "", groups: [], order: "asc" },
+    categories: { pages: firstCategoryPages(), keyword: "", enabled: "", order: "asc" },
     projects: { page: 1, keyword: "", stages: [], selectable: "" }, guide: "" };
 }
 export default function CashSettings({ initialCriteria, onCriteriaChange }: { initialCriteria?: CashSettingsCriteria; onCriteriaChange?: (value: CashSettingsCriteria) => void }) {
@@ -118,46 +120,63 @@ function CashAccountEditor({ account, onClose }: { account: CashAccountSetting |
 }
 
 function CashCategories({ initial, onChange }: { initial: CategoryCriteria; onChange: (value: CategoryCriteria) => void }) {
-  const { revision } = useCashScope();
-  const [page, setPage] = useState(initial.page);
-  const [keyword, setKeyword] = useState(initial.keyword);
+  const [criteria, setCriteria] = useState(initial);
   const [search, setSearch] = useState(initial.keyword);
-  const [groups, setGroups] = useState(initial.groups);
-  const [enabled, setEnabled] = useState(initial.enabled);
-  const [order, setOrder] = useState(initial.order);
-  const [editing, setEditing] = useState<CashCategorySetting | "new" | null>(null);
-  useEffect(() => { onChange({ page, keyword, enabled, groups, order }); }, [page, keyword, enabled, groups, order, onChange]);
-  const query = useCashQuery<CashTasksPage<CashCategorySetting>>("/settings/categories", { page, page_size: 50, sort: "name", order, keyword: keyword || undefined, groups: groups.length ? groups : undefined, enabled: enabled || undefined }, revision);
+  const [refresh, setRefresh] = useState(0);
+  const [editing, setEditing] = useState<{ category: CashCategorySetting | null; group: CategoryGroup } | null>(null);
+  useEffect(() => { onChange(criteria); }, [criteria, onChange]);
+  const change = (next: Partial<Omit<CategoryCriteria, "pages">>) => setCriteria(current => ({ ...current, ...next, pages: firstCategoryPages() }));
   return <section className="cash-section" aria-label="费用类型">
-    <form className="cash-toolbar" onSubmit={(event) => { event.preventDefault(); setKeyword(search.trim()); setPage(1); }}>
+    <form className="cash-toolbar" onSubmit={event => { event.preventDefault(); change({ keyword: search.trim() }); }}>
       <CashInput label="费用类型名称" value={search} onChange={setSearch} placeholder="搜索费用类型" />
       <Button type="submit" variant="secondary">查询</Button>
-      <Button variant="tertiary" onPress={() => { setKeyword(""); setSearch(""); setGroups([]); setEnabled(""); setOrder("asc"); setPage(1); }}>重置</Button>
-      <Button variant="tertiary" onPress={query.reload} isDisabled={query.loading}>刷新</Button><Button onPress={() => setEditing("new")}>新增费用类型</Button>
+      <Button variant="tertiary" onPress={() => { setSearch(""); change({ keyword: "", enabled: "", order: "asc" }); }}>重置</Button>
+      <Button variant="tertiary" onPress={() => setRefresh(value => value + 1)}>刷新</Button>
+      <CashFilterPopover label="费用类型状态" value={criteria.enabled ? [criteria.enabled] : []} options={[{ value: "true", label: "启用" }, { value: "false", label: "停用" }]} onApply={value => change({ enabled: value.length === 1 ? value[0] : "" })} />
     </form>
-    <CashNotice error={query.error?.message} />
-    <FinanceTable ariaLabel="费用类型" minWidth={760} sortDescriptor={{ column: "name", direction: order === "asc" ? "ascending" : "descending" }} onSortChange={value => { setOrder(value.direction === "ascending" ? "asc" : "desc"); setPage(1); }} footer={<FinanceTablePagination page={page} pageSize={50} total={query.data?.pagination.total ?? 0} onPageChange={setPage} isDisabled={query.loading || Boolean(query.error)} />}>
-      <FinanceTableHeader>
-        <FinanceTableColumn id="name" isRowHeader allowsSorting>名称</FinanceTableColumn>
-        <FinanceTableColumn id="group"><CashColumnHeader label="适用范围"><CashFilterPopover label="适用范围" column value={groups} options={Object.entries(cashCategoryGroupLabels).map(([value, label]) => ({ value, label }))} onApply={value => { setGroups(value); setPage(1); }} /></CashColumnHeader></FinanceTableColumn>
-        <FinanceTableColumn id="enabled"><CashColumnHeader label="状态"><CashFilterPopover label="费用类型状态" column value={enabled ? [enabled] : []} options={[{ value: "true", label: "启用" }, { value: "false", label: "停用" }]} onApply={value => { setEnabled(value.length === 1 ? value[0] : ""); setPage(1); }} /></CashColumnHeader></FinanceTableColumn>
-        <FinanceTableColumn id="remark">说明</FinanceTableColumn><FinanceTableColumn id="actions">操作</FinanceTableColumn>
-      </FinanceTableHeader>
-      <FinanceTableBody renderEmptyState={() => query.loading ? "正在读取费用类型…" : query.error ? "费用类型读取失败，请刷新。" : "暂无匹配费用类型。请按实际收付或往来用途新增。"}>{(query.data?.rows ?? []).map((row) => <FinanceTableRow key={row.id} id={row.id}>
-        <FinanceTableCell columnRole="identity">{row.name}</FinanceTableCell><FinanceTableCell columnRole="direction">{cashCategoryGroupLabels[row.group]}</FinanceTableCell>
-        <FinanceTableCell columnRole="status">{row.enabled ? "启用" : "停用"}</FinanceTableCell><FinanceTableCell columnRole="description">{row.remark ?? "—"}</FinanceTableCell>
-        <FinanceTableCell columnRole="action"><Button variant="tertiary" size="sm" onPress={() => setEditing(row)}>编辑</Button></FinanceTableCell>
-      </FinanceTableRow>)}</FinanceTableBody>
-    </FinanceTable>
-    {editing && <CashCategoryEditor category={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}
+    {(Object.keys(cashCategoryGroupLabels) as CategoryGroup[]).map(group => <CashCategoryGroup key={group} group={group} criteria={criteria} refresh={refresh}
+      onPageChange={page => setCriteria(current => ({ ...current, pages: { ...current.pages, [group]: page } }))}
+      onOrderChange={order => change({ order })} onEdit={category => setEditing({ category, group })} />)}
+    {editing && <CashCategoryEditor category={editing.category} initialGroup={editing.group} onClose={() => setEditing(null)} />}
   </section>;
 }
 
-function CashCategoryEditor({ category, onClose }: { category: CashCategorySetting | null; onClose: () => void }) {
+function CashCategoryGroup({ group, criteria, refresh, onPageChange, onOrderChange, onEdit }: {
+  group: CategoryGroup; criteria: CategoryCriteria; refresh: number; onPageChange: (page: number) => void;
+  onOrderChange: (order: "asc" | "desc") => void; onEdit: (category: CashCategorySetting | null) => void;
+}) {
+  const { revision } = useCashScope();
+  const page = criteria.pages[group];
+  const query = useCashQuery<CashTasksPage<CashCategorySetting>>("/settings/categories", {
+    group, page, page_size: 50, sort: "name", order: criteria.order, keyword: criteria.keyword, enabled: criteria.enabled || undefined,
+  }, revision + refresh);
+  const total = query.data?.pagination.total;
+  useEffect(() => {
+    if (total !== undefined && page > Math.max(1, Math.ceil(total / 50))) onPageChange(Math.max(1, Math.ceil(total / 50)));
+  }, [total, page, onPageChange]);
+  const label = cashCategoryGroupLabels[group];
+  return <section className="cash-section cash-settings-subsection" aria-label={`${label}费用类型`}>
+    <div className="cash-toolbar"><h3>{label}</h3>{query.data && <span>{query.data.pagination.total} 项</span>}<Button onPress={() => onEdit(null)}>新增费用类型</Button></div>
+    <CashNotice error={query.error?.message} />
+    {query.error && <Button variant="tertiary" onPress={query.reload}>重新读取{label}费用类型</Button>}
+    <FinanceTable ariaLabel={`${label}费用类型`} minWidth={760} sortDescriptor={{ column: "name", direction: criteria.order === "asc" ? "ascending" : "descending" }} onSortChange={value => onOrderChange(value.direction === "ascending" ? "asc" : "desc")} footer={<FinanceTablePagination page={page} pageSize={50} total={query.data?.pagination.total ?? 0} onPageChange={onPageChange} isDisabled={query.loading || Boolean(query.error)} />}>
+      <FinanceTableHeader>
+        <FinanceTableColumn id="name" isRowHeader allowsSorting>名称</FinanceTableColumn><FinanceTableColumn id="enabled">状态</FinanceTableColumn>
+        <FinanceTableColumn id="remark">说明</FinanceTableColumn><FinanceTableColumn id="actions">操作</FinanceTableColumn>
+      </FinanceTableHeader>
+      <FinanceTableBody renderEmptyState={() => query.loading ? "正在读取费用类型…" : query.error ? "费用类型读取失败，请刷新。" : "暂无匹配费用类型。请按实际收付或往来用途新增。"}>{(query.data?.rows ?? []).map(row => <FinanceTableRow key={row.id} id={row.id}>
+        <FinanceTableCell columnRole="identity">{row.name}</FinanceTableCell><FinanceTableCell columnRole="status">{row.enabled ? "启用" : "停用"}</FinanceTableCell>
+        <FinanceTableCell columnRole="description">{row.remark ?? "—"}</FinanceTableCell><FinanceTableCell columnRole="action"><Button variant="tertiary" size="sm" onPress={() => onEdit(row)}>编辑</Button></FinanceTableCell>
+      </FinanceTableRow>)}</FinanceTableBody>
+    </FinanceTable>
+  </section>;
+}
+
+function CashCategoryEditor({ category, initialGroup, onClose }: { category: CashCategorySetting | null; initialGroup: CategoryGroup; onClose: () => void }) {
   const [completed, setCompleted] = useState(false);
   const [id] = useState(() => crypto.randomUUID());
   const [name, setName] = useState(category?.name ?? "");
-  const [group, setGroup] = useState<string>(category?.group ?? "");
+  const [group, setGroup] = useState<string>(category?.group ?? initialGroup);
   const [enabled, setEnabled] = useState(category?.enabled ?? true);
   const [remark, setRemark] = useState(category?.remark ?? "");
   const mutation = useCashMutation();
@@ -169,7 +188,7 @@ function CashCategoryEditor({ category, onClose }: { category: CashCategorySetti
     })(); }}>
       <CashNotice error={mutation.error?.message} />
       <CashInput label="费用类型名称" value={name} onChange={setName} required disabled={mutation.busy} />
-      <CashSelect label="适用范围" value={group} onChange={setGroup} required disabled={mutation.busy} options={[{ value: "", label: "请选择范围" }, ...Object.entries(cashCategoryGroupLabels).map(([value, label]) => ({ value, label }))]} />
+      {!category ? <p className="cash-hint">所属大类：{cashCategoryGroupLabels[initialGroup]}</p> : <CashSelect label="适用范围" value={group} onChange={setGroup} required disabled={mutation.busy} options={[{ value: "", label: "请选择范围" }, ...Object.entries(cashCategoryGroupLabels).map(([value, label]) => ({ value, label }))]} />}
       <CashInput label="说明" value={remark} onChange={setRemark} disabled={mutation.busy} />
       <Checkbox isSelected={enabled} onChange={setEnabled} isDisabled={mutation.busy}><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control><span>启用费用类型</span></Checkbox>
       <p className="cash-hint">已引用类型只能更名或停用；改变业务含义请新增类型。</p>
@@ -182,14 +201,14 @@ function CashPersonalOpening() {
   const { revision } = useCashScope();
   const query = useCashQuery<CashPersonalSetting>("/settings/personal-opening", undefined, revision);
   const [editing, setEditing] = useState<CashPersonalSetting | null>(null);
-  const [openingItem, setOpeningItem] = useState(false);
+  const [openingItem, setOpeningItem] = useState<CashPersonalContext | null>(null);
   const [billLabels, setBillLabels] = useState(false);
   return <section className="cash-section cash-settings-subsection" aria-label="个人账起算">
-    <div className="cash-toolbar"><h3>个人账起算</h3><span>{query.data ? `${query.data.counterparty ?? "归属人未设置"} · ${query.data.opening_date ?? "起算未设置"}` : "正在读取…"}</span><Button variant="tertiary" onPress={() => setEditing(query.data)} isDisabled={!query.data || query.loading}>设置起算日期</Button><Button variant="tertiary" isDisabled={!query.data?.opening_date || !query.data.counterparty || query.loading} onPress={() => setOpeningItem(true)}>登记期初未结</Button><Button variant="tertiary" onPress={() => setBillLabels(true)}>管理账单分组</Button></div>
+    <div className="cash-toolbar"><h3>个人账起算</h3><span>{query.data ? `${query.data.counterparty ?? "归属人未设置"} · ${query.data.opening_date ?? "起算未设置"}` : "正在读取…"}</span><Button variant="tertiary" onPress={() => setEditing(query.data)} isDisabled={!query.data || query.loading}>设置起算日期</Button><Button variant="tertiary" isDisabled={!query.data?.opening_date || !query.data.counterparty || query.loading} onPress={() => { if (query.data?.counterparty && query.data.opening_date) setOpeningItem({ counterparty: query.data.counterparty, opening_date: query.data.opening_date }); }}>登记期初未结</Button><Button variant="tertiary" onPress={() => setBillLabels(true)}>管理账单分组</Button></div>
     <CashNotice error={query.error?.message} />
     <p className="cash-hint">声明个人账的记账范围，不改变现金账户期初；旧欠款需逐项登记，不会自动生成现金流水。</p>
     {editing && <CashOpeningDateEditor setting={editing} onClose={() => setEditing(null)} />}
-    {openingItem && query.data?.counterparty && query.data.opening_date && <CashItemEditor opening initialType="loan" personalContext={{ counterparty: query.data.counterparty, opening_date: query.data.opening_date }} onClose={() => setOpeningItem(false)} />}
+    {openingItem && <CashItemEditor opening initialType="loan" personalContext={openingItem} onClose={() => setOpeningItem(null)} />}
     {billLabels && <AppDrawer open title="账单分组" width={760} className="cash-drawer" onClose={() => setBillLabels(false)}><CashBillLabels /></AppDrawer>}
   </section>;
 }

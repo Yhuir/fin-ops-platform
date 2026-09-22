@@ -333,6 +333,107 @@ class CashHttpPostgresTests(unittest.TestCase):
         for invalid in ("account_ids=[]", "account_ids=invalid", plural + "&account_id=" + self.account["id"], plural + "&" + plural):
             self.assertEqual(self.call("GET", "/flows?" + self.period + "&" + invalid, status=400)["error"], "cash_invalid_input")
 
+    def test_late_origin_binding_duplicate_rollback_and_delete_preserve_independent_loan(self):
+        ordinary_before = self.connection.fetch_one("SELECT (SELECT count(*) FROM app.bank_transactions) AS bank_count,(SELECT count(*) FROM audit.events) AS audit_count")
+        loan = self.call("POST", "/items", self.loan_payload(), status=201)["item"]
+        self.assertIsNone(loan["origin_flow_id"])
+        self.assert_balance("1000.00", flow_count=0)
+        # The dedicated source form keeps the item's date/project and uses selection mode.
+        payload = self.flow_payload(occurred_on=loan["origin_date"], oa_project_id=loan["oa_project_id"],
+                                    origin_items=[{"item_id": loan["id"], "expected_item_version": loan["version"]}])
+        source = self.call("POST", "/flows", payload, status=201)["flow"]
+        linked = self.item(loan["id"])
+        self.assertEqual(linked["item"]["origin_flow_id"], source["id"])
+        self.assertEqual(linked["item"]["origin_mode"], "linked")
+        self.assertEqual(linked["item"]["original_amount"], "100.00")
+        self.assertEqual(linked["amounts"]["remaining_obligation_amount"], "100.00")
+        self.assertEqual(self.call("GET", "/items?purpose=list")["pagination"]["total"], 1)
+        self.assertEqual(self.call("GET", "/reports/turnover?" + self.period)["summary"]["principal_amount"], "100.00")
+        self.assert_balance("900.00", flow_count=1)
+
+        duplicate = {**payload, "id": self.uid(), "origin_items": [{"item_id": loan["id"], "expected_item_version": linked["item"]["version"]}]}
+        self.assertEqual(self.call("POST", "/flows", duplicate, status=409)["error"], "cash_allocation_conflict")
+        self.call("GET", "/flows/" + duplicate["id"], status=404)
+        self.assertEqual(self.item(loan["id"]), linked)
+        self.assertEqual(self.connection.fetch_one("SELECT count(*) AS n FROM cash.settlements")["n"], 0)
+        self.assert_balance("900.00", flow_count=1)
+
+        self.delete_flow(source["id"])
+        independent = self.item(loan["id"])
+        self.assertIsNone(independent["item"]["origin_flow_id"])
+        self.assertIsNone(independent["item"]["origin_mode"])
+        self.assertEqual(independent["item"]["original_amount"], "100.00")
+        self.assertEqual(independent["amounts"]["remaining_obligation_amount"], "100.00")
+        self.assert_balance("1000.00", flow_count=0)
+        self.call("POST", f"/items/{loan['id']}/remove", {"expected_version": independent["item"]["version"]})
+        self.assert_empty_reports()
+        self.assertEqual(self.connection.fetch_one("SELECT (SELECT count(*) FROM app.bank_transactions) AS bank_count,(SELECT count(*) FROM audit.events) AS audit_count"), ordinary_before)
+
+    def test_source_and_task_repayment_amount_corrections_restore_balances_on_delete(self):
+        ordinary_before = self.connection.fetch_one("SELECT (SELECT count(*) FROM app.bank_transactions) AS bank_count,(SELECT count(*) FROM audit.events) AS audit_count")
+        loan_input = self.loan_payload()
+        source = self.call("POST", "/flows", self.flow_payload(related_items=[loan_input]), status=201)["flow"]
+        template = self.call("POST", "/tasks", {
+            "id": self.uid(), "title": "Synthetic correction repayment", "kind": "receipt", "execution_day": 5,
+            "remind_days": 2, "effective_from_month": "2026-09", "default_amount": "100.00",
+            "default_account_id": self.account["id"], "default_category_id": self.category["id"],
+        }, status=201)["template"]
+        repayment = self.call("POST", "/task-occurrences/confirm", {
+            "template_id": template["id"], "month": "2026-09", "expected_version": None,
+            "expected_template_version": template["version"], "mode": "new_flow",
+            "new_flow": self.repayment_payload(loan_input["id"], "30.00"),
+        })
+        self.assertEqual(repayment["occurrence"]["actual_amount"], "30.00")
+        self.assertEqual(self.item(loan_input["id"])["amounts"]["remaining_obligation_amount"], "70.00")
+        self.assert_balance("930.00", flow_count=2)
+
+        loan = self.item(loan_input["id"])["item"]
+        corrected_source = self.call("PUT", "/flows/" + source["id"], {
+            "expected_version": source["version"], "amount": "80.00", "source_corrections": [{
+                "action": "correct_amount", "item_id": loan["id"], "expected_version": loan["version"],
+                "original_amount": "80.00",
+            }],
+        })
+        self.assertEqual(corrected_source["flow"]["amount"], "80.00")
+        self.assertEqual(self.item(loan["id"])["item"]["original_amount"], "80.00")
+        self.assertEqual(self.item(loan["id"])["amounts"]["remaining_obligation_amount"], "50.00")
+        self.assertEqual(self.call("GET", "/task-occurrences?month=2026-09")["rows"][0]["actual_amount"], "30.00")
+        self.assert_balance("950.00", flow_count=2)
+
+        flow = self.flow(repayment["flow"]["id"])["flow"]
+        allocation = self.call("GET", "/settlements?flow_id=" + flow["id"])["rows"][0]
+        loan = self.item(loan["id"])["item"]
+        occurrence = self.call("GET", "/task-occurrences?month=2026-09")["rows"][0]
+        corrected_repayment = self.call("PUT", "/flows/" + flow["id"], {
+            "expected_version": flow["version"], "amount": "20.00",
+            "settlement_changes": [{"id": allocation["id"], "expected_version": allocation["version"],
+                                    "action": "update", "fields": {"amount": "20.00"}}],
+            "expected_related_versions": {"items": [{"id": loan["id"], "version": loan["version"]}],
+                                          "flows": [{"id": flow["id"], "version": flow["version"]}],
+                                          "occurrences": [{"id": occurrence["occurrence_id"], "version": occurrence["version"]}]},
+        })
+        self.assertEqual(corrected_repayment["flow"]["amount"], "20.00")
+        self.assertEqual(self.call("GET", "/settlements?flow_id=" + flow["id"])["rows"][0]["amount"], "20.00")
+        current_task = self.call("GET", "/task-occurrences?month=2026-09")["rows"][0]
+        self.assertEqual(current_task["actual_amount"], "20.00")
+        self.assertEqual(current_task["state"], "partial")
+        self.assertEqual(current_task["flow_count"], 1)
+        self.assertGreater(current_task["version"], occurrence["version"])
+        self.assertEqual(self.item(loan["id"])["amounts"]["remaining_obligation_amount"], "60.00")
+        self.assert_balance("940.00", flow_count=2)
+
+        self.delete_flow(flow["id"])
+        pending = self.call("GET", "/task-occurrences?month=2026-09")["rows"][0]
+        self.assertEqual(pending["actual_amount"], "0.00")
+        self.assertEqual(pending["state"], "pending")
+        self.assertEqual(pending["flow_count"], 0)
+        self.assertEqual(self.item(loan["id"])["amounts"]["remaining_obligation_amount"], "80.00")
+        self.assert_balance("920.00", flow_count=1)
+        self.delete_flow(source["id"])
+        self.assert_balance("1000.00", flow_count=0)
+        self.assert_empty_reports()
+        self.assertEqual(self.connection.fetch_one("SELECT (SELECT count(*) FROM app.bank_transactions) AS bank_count,(SELECT count(*) FROM audit.events) AS audit_count"), ordinary_before)
+
 
     def test_personal_task_cash_noncash_and_undo_are_one_real_http_chain(self):
         ordinary_before = self.connection.fetch_one("SELECT (SELECT count(*) FROM app.bank_transactions) AS bank_count,(SELECT count(*) FROM audit.events) AS audit_count")

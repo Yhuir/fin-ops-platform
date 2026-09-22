@@ -134,7 +134,7 @@ class CashQueryService:
     def list_configuration(self, kind: str, raw: dict[str, Any]) -> dict[str, Any]:
         if kind not in {"accounts", "categories", "bill-labels"}:
             invalid("Unknown cash configuration list.")
-        allowed = {"enabled", "keyword"} | ({"group", "groups"} if kind == "categories" else set())
+        allowed = {"enabled", "keyword"} | ({"group", "groups", "category_id"} if kind == "categories" else set())
         sorts = {"bank_name", "label"} if kind == "bill-labels" else {"name", "created_at"}
         query = query_input(raw, allowed, sorts, "bank_name" if kind == "bill-labels" else "name")
         enum_fields(query, group={"receipt", "payment", "turnover"})

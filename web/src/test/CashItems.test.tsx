@@ -123,7 +123,7 @@ describe("cash item and settlement interaction", () => {
     expect(mocks.query.mock.calls.some(([path]) => path === "/flows")).toBe(false);
   });
   test("noncash adjustment requires an explicit target and explanation without cash", async () => {
-    mocks.query.mockImplementation((path: string | null) => result(path === "/settings/categories" ? { rows: [{ id: "adjustment-category", name: "明确调整", group: "turnover" }], pagination } : null));
+    mocks.query.mockImplementation((path: string | null) => result(path === "/settings/categories" ? { rows: [{ id: "adjustment-category", name: "明确调整", group: "turnover", enabled: true, version: 1 }], pagination } : null));
     render(<CashSettlementEditor target={target} initialKind="non_ticket_offset" onClose={vi.fn()} />);
     await userEvent.type(screen.getByRole("textbox", { name: "本次处理金额" }), "2500");
     await userEvent.type(screen.getByRole("textbox", { name: "用途 / 说明" }), "已确认的非现金冲抵");
@@ -150,5 +150,24 @@ describe("cash item and settlement interaction", () => {
     await userEvent.type(screen.getByRole("textbox", { name: "选择义务" }), "另一个项目");
     await userEvent.click(screen.getByRole("button", { name: "查询" }));
     expect(mocks.query).toHaveBeenLastCalledWith("/items", expect.objectContaining({ keyword: "另一个项目", page: 1, purpose: "settlement_target" })); expect(select).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("借款来源补录入口", () => {
+  test.each([
+    { label: "非期初未绑定借款", patch: {}, visible: true },
+    { label: "期初借款", patch: { is_opening: true }, visible: false },
+    { label: "已绑定借款", patch: { origin_flow_id: "existing-flow" }, visible: false },
+    { label: "实际费用", patch: { type: "expense" as const }, visible: false },
+    { label: "票据", patch: { type: "ticket_source" as const }, visible: false },
+  ])("$label", async ({ patch, visible }) => {
+    const item = { ...target, ...patch }; const onOrigin = vi.fn();
+    mocks.query.mockImplementation((path: string | null) => result(path === `/items/${target.id}` ? { item, amounts: { remaining_obligation_amount: "9000.00" } } : { rows: [], pagination: { ...pagination, total: 0 } }));
+    render(<CashItemDetail itemId={target.id} onClose={vi.fn()} onOriginFlow={onOrigin} />);
+    const button = screen.queryByRole("button", { name: "补记这笔借款的原始收付" });
+    if (visible) { expect(button).toBeInTheDocument(); await userEvent.click(button!); expect(onOrigin).toHaveBeenCalledWith(item); }
+    else expect(button).not.toBeInTheDocument();
+    expect(mocks.run).not.toHaveBeenCalled();
   });
 });

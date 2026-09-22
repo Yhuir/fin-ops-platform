@@ -83,7 +83,7 @@ export default function CashFlowTable({ itemId, taskOccurrenceId, initialCriteri
       <CashSelect label="时间范围" value={rangeMode} onChange={setRangeMode} options={[{ value: "all", label: "全部" }, { value: "custom", label: "自定义" }]} />
       {rangeMode === "custom" && <><CashInput label="起始日期" type="date" value={dateFrom} onChange={setDateFrom} />
       <CashInput label="截止日期" type="date" value={dateTo} onChange={setDateTo} /></>}
-      <CashInput label="搜索流水" value={search} onChange={setSearch} placeholder="用途、人员或项目" />
+      <CashInput label="搜索流水" value={search} onChange={setSearch} placeholder="内容说明、人员或项目" />
       <Button type="submit" size="sm" variant="secondary">查询</Button>
       <Button size="sm" variant="tertiary" onPress={reset}>重置</Button><Button size="sm" variant="tertiary" onPress={query.reload}>刷新</Button>
       <CashFilterPopover label="方向" value={criteria.kinds} onApply={kinds => applyCriteria({ kinds, page: 1 })} options={[{ value: "receipt", label: "收入" }, { value: "payment", label: "支出" }, { value: "transfer", label: "内部转账" }]} />
@@ -108,7 +108,7 @@ export default function CashFlowTable({ itemId, taskOccurrenceId, initialCriteri
         onSortChange={value => applySort(String(value.column), value.direction === "ascending" ? "asc" : "desc")} footer={
         data && <FinanceTablePagination page={page} pageSize={50} total={data.pagination.total} onPageChange={setPage} />
       }>
-        <FinanceTableHeader>{["日期", "账户", "项目", "人员", "分类", "用途", "收入", "支出", "互转金额", "来源 / 任务", "账户余额", "操作"].map((label, index) => <FinanceTableColumn key={label} id={index === 0 ? "occurred_on" : `flow-${index}`} allowsSorting={index === 0} isRowHeader={index === 0} columnRole={index >= 6 && index <= 8 || index === 10 ? "amount" : index === 11 ? "action" : index === 0 ? "date" : index === 1 ? "account" : "description"}>
+        <FinanceTableHeader>{["日期", "账户", "项目", "人员", "分类", "内容说明", "收入", "支出", "互转金额", "来源 / 任务", "账户余额", "操作"].map((label, index) => <FinanceTableColumn key={label} id={index === 0 ? "occurred_on" : `flow-${index}`} allowsSorting={index === 0} isRowHeader={index === 0} columnRole={index >= 6 && index <= 8 || index === 10 ? "amount" : index === 11 ? "action" : index === 0 ? "date" : index === 1 ? "account" : "description"}>
           <CashColumnHeader label={label}>
             {index === 1 && <CashConfigurationFilter column name="accounts" label="账户" value={criteria.account_ids} selected={selected.account_ids} onApply={(value, labels) => applyResource("account_ids", value, labels)} />}
             {index === 2 && <CashHistoricalProjectFilter column label="项目" value={criteria.project_ids} selected={selected.project_ids} scope={{ date_from: criteria.date_from, date_to: criteria.time_scope === "all" ? cashToday() : criteria.date_to, item_id: itemId, task_occurrence_id: taskOccurrenceId }} onApply={(value, labels) => applyResource("project_ids", value, labels)} />}

@@ -1,12 +1,12 @@
 # 现金账分类与录入简化实施计划
 
-日期：2026-09-20。状态：**计划已编写并自审，尚未实施、测试或发布。**
+编写日期：2026-09-20；最近复审：2026-09-22。状态：**已实施并通过本地验证；证据见第 10 节，生产结果以正式发布记录和本次交付报告为准。**
 
 最终复审：保留既定范围，补明确经办人不等于借款对象、候选精确读取的请求隔离、备份清理和验证边界；不新增实施阶段或审批节点。
 
 本计划以本轮用户确认优先：保留“内容说明（必填）”“备注（选填）”；费用类型按收入、支出、往来分组；删除重复办理入口；借款、还款、补录能力保持闭环。不使用 GSD，不增加审批流程、规则引擎或新门禁。
 
-模块事实入口：[现金边界](../modules/cash/boundary-io.md)、[现金业务设计](../product-specs/cash-module-design.md)、[UI 设计](../product-specs/cash-module-ui-spec.md)、[技术合同](cash-module-technical-design.md)、[测试入口](../modules/cash/tests.md)。本文是待实施增量；与旧文档中的“必须选择本次办理用途”等界面描述冲突时，以本轮确认及本文为准，不把待实施方案写成现状。
+模块事实入口：[现金边界](../modules/cash/boundary-io.md)、[现金业务设计](../product-specs/cash-module-design.md)、[UI 设计](../product-specs/cash-module-ui-spec.md)、[技术合同](cash-module-technical-design.md)、[测试入口](../modules/cash/tests.md)。本文记录本轮实施增量；与旧文档中的“必须选择本次办理用途”等界面描述冲突时，以本轮确认及本文为准，实际运行结果以第 10 节为准。
 
 ## 1. 范围与完成定义
 
@@ -20,6 +20,8 @@
 6. 完成任务录入、个人代付、历史结算、编辑/删除、权限撤销和其它页面的相关回归。
 
 以下问题不纳入：双账户逐笔余额重排、有票支付重做、个人矩阵月份口径、账户 cash/savings 枚举、OA 项目资格放宽、Excel 导入、共享备注/报销组、其它页面重构。往来大类不意味着按分类自动生成借款。
+
+2026-09-22 现状校准：当前现金边界已包含 9 月 21 日的“普通历史范围默认全部”改动。修改 CashFlowTable、CashBooks、cash_queries 等相同文件时，必须保留 `time_scope=all`、自定义日期、section 重新进入与本页刷新/抽屉关闭的现有不同语义；不得从 9 月 20 日旧文件整段覆盖当前代码。此项只做旧功能保护，不重做日期功能。
 
 完成标准：新界面路径真实写入后，现金、往来/个人/费用账与任务关联正确；错误和取消不产生半笔账；被替代代码实际删除；相关测试、浏览器检查和耗时测量完成并记录。计划自审不代表实现验收通过。
 
@@ -160,10 +162,12 @@
 8. 费用付款/退款及有票、无票冲抵既有路径不丢；现金写入失败整体回滚，成功后重读失败不重复 POST；未授权无现金正文。
 9. 内部转账只登记一笔、不建立债务、不显示分类/办理项；改方向丢弃办理项仍按既有确认，不引入新连环确认。
 10. 经办人与实际借款对象不同：借款对象不从经办人推断；分类精确读取较慢时切换方向/ID，旧响应不能覆盖新选择或重新挂入旧分组。
+11. 来源金额更正、还款金额更正及删除还款：通过原更正命令一次更新现金贡献、剩余欠款和适用的任务累计；重新打开详情及账簿结果一致，失败时全部不变。不只测试新增和删除原始来源。
+12. 保护 9 月 21 日已实现的历史范围：普通流水/往来处理/有票期间台账首次按全部历史查询；用户本页选定日期后，保存和关闭抽屉不清除它；切走 section 再进入恢复全部；事项/任务父对象范围、个人年视图、未结和待回款截至日保持各自合同。分类分组和来源上下文不能改变这些请求。
 
 主要测试文件：`web/src/test/CashSettings.test.tsx`、`CashFlows.test.tsx`、`CashFlowComposition.test.ts`、`CashItems.test.tsx`、`CashTasks.test.tsx`、`CashBooks.test.tsx`；`tests/test_cash_api.py`、`test_cash_queries.py`、`test_cash_core.py`、`test_cash_tasks.py`、`test_cash_permissions.py`、`test_cash_http_integration.py`；`web/e2e/cash-module-flow.spec.ts`、`cash-real-api-flow.spec.ts`。必要时给分类选择器新增一个聚焦的组件测试文件，不测试私有实现镜像。
 
-执行命令（均为后续实施时运行，本文没有运行这些业务测试）：
+验证命令（实际运行结果见第 10 节）：
 
 ```bash
 npm --prefix web test -- --run src/test/CashSettings.test.tsx src/test/CashFlows.test.tsx src/test/CashFlowComposition.test.ts src/test/CashItems.test.tsx src/test/CashTasks.test.tsx src/test/CashBooks.test.tsx
@@ -207,4 +211,43 @@ npx playwright test e2e/cash-module-flow.spec.ts e2e/finance-table-system-flow.s
 
 最终复审补正：去除经办人到借款对象的隐含映射；明确候选与精确引用两类读取的状态隔离和过期响应取消。其余七步保持原顺序，不扩大范围。
 
+2026-09-22 复审补正：按当前代码补入“默认全部历史”的既有合同保护，并将更正来源/还款金额、删除归还记录后的账簿及任务恢复列为单独验收项。工作包数量、业务范围、数据库与模块边界不变。
+
 结论：**本计划在设计层面可执行，未发现必须靠新表、新引擎或 GSD 才能解决的前置问题。实现正确性、性能数值及页面回归须按上述检查完成后再下结论。**
+
+## 10. 实施与验证记录（2026-09-22）
+
+已按本计划实现分类三分区、单列分类菜单、categories-only精确ID查询、内容说明/备注、唯一办理入口、逐项个人归属、指定借款来源补录及两个详情owner返回。`purpose/purposePartId/personalEntry`和通用`origin`行已移除，原后端origin_items/linked与合法query purpose保留。只改cash模块与其测试/文档，不改变共享FinanceTable/AppDrawer、普通财务DTO、数据库schema或worker。
+
+增加真实HTTP/PG算例：独立借款补来源→重复绑定409零写→删除来源保留借款；来源100→80，任务还款30→20，同时核对账户余额、剩余债务、任务累计，更正后删除恢复。两条均验证普通银行和审计计数不变。浏览器额外覆盖旧借款详情补来源和删除还原。七类测试责任全部有对应覆盖；第4类涉及查询与写后重读，没有新增缓存/read model/后台任务，相关后台状态专项不适用。
+
+测试库为本次独占本机PostgreSQL 17 UTF8集群，数据库名以fin_ops_cash_test_开头；未连接生产DSN。最初空集群默认SQL_ASCII及缺少历史迁移需要的测试角色导致环境失败，已正确初始化UTF8与测试角色，未修改迁移或放宽测试断言。全量后端无DSN运行暴露7项显式PG依赖错误，因此改用第二个独立完整测试库运行，不将跳过算通过。
+
+分类规模测量采用真实loopback HTTP→Application→CashQueryService→PG，3次热身、20次样本。不是生产公网或浏览器渲染结果：
+
+| 分类数 | 三组50条并发全部完成 p50 / p95 | 候选最多100条 p95 / 响应bytes | 精确ID p95 / 响应bytes |
+| --- | --- | --- | --- |
+| 30 | 6.96 / 8.43ms | 3.64ms / 5038 | 3.80ms / 314 |
+| 1500 | 10.05 / 13.28ms | 5.08ms / 24920 | 4.69ms / 314 |
+
+1500分类时三个分区总响应37454 bytes，分别只返回50行；候选只返回100行；精确查询唯一命中。没有逐页扫描、逐行查询或新缓存。生产验证使用用户授权账号与正式发布入口；不创建无法删除的临时分类、账户、任务模板，不改已有业务记录。受控现金写入若执行，仅使用自建UUID、最小金额与无项目上下文，完成后删除测试正文并核对余额/条数恢复；原防重UUID墓碑按既有合同保留，不清除。
+
+实际本地检查：
+
+- 独立PG现金定向回归144项通过；新增HTTP闭环后单独6项通过。
+- `scripts/verify.sh backend` 在独立完整PG测试库运行4473项全部通过（480.596s）。
+- `scripts/verify.sh frontend`：108文件、1461项全部通过，TypeScript与生产构建通过；构建仍输出CSS语法及大chunk提示，未为本轮调整构建规则。
+- Playwright现金/普通银行/共享表格/工作台现金特殊业务合计16项通过；真实HTTP/PG浏览器3项通过（24.9s）。
+- `scripts/verify.sh lint`、`scripts/verify.sh docs`、`git diff --check`通过。
+- 旧符号扫描确认Drawer的purpose/purposePartId、Composition的personalEntry和通用origin入口无残留；Books既有personalEntryContext是有效的个人事项初始上下文，不误删。
+
+浏览器回归额外发现并修正CashPersonalOpening已有完成态丢失：打开期初事项时固定该owner的明确人员/起算上下文，保存后的配置重读不再卸载编辑器。不是缓存、旧数据降级或吞错；后端继续验证当前配置。新增“POST成功、配置重读503，完成提示仍在且只有一次POST”的回归。
+
+最新正式build + preview + Chromium + 真HTTP/PG的界面测量（20次warm，pointerdown至完整呈现+双rAF）：
+
+| 分类数 | 三组首次 / warm p50 / p95 | 菜单首次 / warm p50 / p95 |
+| --- | --- | --- |
+| 30 | 108 / 60 / 69ms | 49 / 41 / 48ms |
+| 1500 | 174 / 112.5 / 122ms | 51 / 46.5 / 54ms |
+
+每组21次进入共63个请求（每轮3×50），菜单只请求一次最多100条候选，随后20次重开无新增请求；0 pageerror。上述本地设置≤500ms、菜单≤100ms目标均达成。生产验证脚本亦已先在独立库实跑：3笔自有流水、2个自有借款，金额更正、还款及来源补记均通过，删除后账户摘要与条数恢复、测试业务正文清理完成。生产实际执行与耗时必须另外报告，不能拿本地结果代替。

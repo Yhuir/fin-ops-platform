@@ -13,7 +13,7 @@ beforeEach(() => {
   candidateQuery.mockImplementation((path: string | null, params: { page: number; page_size: number; keyword: string }) => {
     const rows = Array.from({ length: params.page_size }, (_, index) => {
       const number = (params.page - 1) * params.page_size + index + 1;
-      return { id: `candidate-${number}`, name: `选项${number}`, label: `选项${number}`, bank_name: "合成银行" };
+      return { id: `candidate-${number}`, name: `选项${number}`, label: `选项${number}`, bank_name: "合成银行", group: "receipt" };
     });
     return { data: path ? { rows, pagination: { page: params.page, page_size: params.page_size, total: params.page_size * 2 } } : null, loading: false, error: null, reload: vi.fn() };
   });
@@ -22,8 +22,8 @@ afterEach(() => vi.useRealTimers());
 describe("现金录入配置选择", () => {
   test.each(["accounts", "categories", "bill-labels"] as const)("%s only requests enabled candidates and preserves the original saved value", async name => {
     const user = userEvent.setup();
-    render(<CashConfigurationSelect name={name} label="录入配置" value="saved-value" selected={{ id: "saved-value", name: "已保存配置" }} group={name === "categories" ? "receipt" : undefined} onChange={vi.fn()} />);
-    expect(candidateQuery).toHaveBeenLastCalledWith(`/settings/${name}`, expect.objectContaining({
+    render(<CashConfigurationSelect name={name} label="录入配置" value="saved-value" selected={{ id: "saved-value", name: "已保存配置", group: name === "categories" ? "receipt" : undefined }} group={name === "categories" ? "receipt" : undefined} onChange={vi.fn()} />);
+    expect(candidateQuery).toHaveBeenCalledWith(`/settings/${name}`, expect.objectContaining({
       enabled: true, page: 1, page_size: 100, keyword: "", groups: name === "categories" ? ["receipt", "turnover"] : undefined,
     }));
     const trigger = screen.getByLabelText("录入配置", { selector: "button" });
