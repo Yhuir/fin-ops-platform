@@ -87,7 +87,7 @@ class EtcImportApiRoutes:
                     idempotency_key=key, created_by=owner_user_id, stage="prepare", transaction=transaction,
                     payload={"session_id": session.session_id, "task_id": task_id,
                              "upload_manifest": descriptor,
-                             "owner_user_id": owner_user_id, "route": "/imports/etc-invoices",
+                             "owner_user_id": owner_user_id, **workflow.command_context(owner_user_id), "route": "/imports/etc-invoices",
                              "affected_domains": ["imports_etc_invoices", "etc_tickets"]},
                 )
                 if registered.import_session_id != session.session_id:
@@ -137,7 +137,7 @@ class EtcImportApiRoutes:
                 job = workflow.retry(existing.import_job_id, owner_user_id)
                 return self._json_response(HTTPStatus.ACCEPTED, {"job": import_job_payload(job)})
             validated = self._preview_service.validate(
-                session_id=normalized_session_id, task_id=normalized_task_id, imported_by=owner_user_id,
+                session_id=normalized_session_id, task_id=normalized_task_id, imported_by=owner_user_id, authorized_job=existing,
             )
             job = workflow.confirm(
                 session_id=normalized_session_id, owner=owner_user_id,
@@ -186,9 +186,9 @@ class EtcImportApiRoutes:
             job = workflow.session_job(normalized_session_id, owner_user_id, "etc_invoice_import.confirm")
             def cancel(transaction):
                 if job is not None and job.status != "canceled":
-                    workflow.repository.cancel_job(job.import_job_id, created_by=owner_user_id, transaction=transaction)
+                    workflow.repository.cancel_job(job.import_job_id, created_by=job.created_by, transaction=transaction)
             self._preview_service.discard(
-                session_id=normalized_session_id, imported_by=owner_user_id, on_discard=cancel,
+                session_id=normalized_session_id, imported_by=owner_user_id, on_discard=cancel, authorized_job=job,
             )
         except KeyError:
             return self._json_response(

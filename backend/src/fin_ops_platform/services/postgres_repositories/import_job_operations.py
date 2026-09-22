@@ -13,6 +13,7 @@ _JOB_COLUMNS = """id::text as job_id, import_type, import_session_id as session_
     result_payload->'disposition' as disposition, affected_domains,
     case when position('selected files require review before confirmation: ' in last_error)=1
       then 'review_required' else result_payload->>'error_code' end as error_code"""
+_SHARED = "import_type in ('file_import.confirm','etc_invoice_import.confirm')"
 _ACTIVE = "acknowledged_at is null and status in ('pending','processing','failed','awaiting_confirmation','needs_review')"
 
 
@@ -20,25 +21,28 @@ class ImportJobOperationsRepository:
     def __init__(self, connection: Any) -> None:
         self.connection = connection
 
-    def list_jobs(self, *, page: int, page_size: int) -> dict[str, Any]:
+    def list_jobs(self, *, page: int, page_size: int, domain: str | None = None) -> dict[str, Any]:
         # Count and page share one statement snapshot, including an empty last page.
         rows = self.connection.fetch_all(scoped_import_jobs(f"""
-            select * from job.import_jobs where {_ACTIVE}
-            order by updated_at desc,id desc limit %s offset %s
-        """) + f"""
+            select * from job.import_jobs where {_ACTIVE} and {_SHARED}
+        """) + f""", filtered as materialized (
+              select * from scoped_jobs where (%s::text is null or %s=any(affected_domains))
+            ), selected_page as (
+              select * from filtered order by updated_at desc,id desc limit %s offset %s
+            )
             select totals.total, page.* from
-              (select count(*)::int as total from job.import_jobs where {_ACTIVE}) totals
+              (select count(*)::int as total from filtered) totals
             left join lateral (
               select {_JOB_COLUMNS},
-                (select min(f.original_filename) from app.import_files f where f.session_id=scoped_jobs.import_session_id
+                (select min(f.original_filename) from app.import_files f where f.session_id=selected_page.import_session_id
                  and (coalesce(payload->'selected_file_ids','[]'::jsonb)='[]'::jsonb
                       or payload->'selected_file_ids' ? coalesce(f.legacy_mongo_id,f.id::text))) as file_name,
-                (select count(*)::int from app.import_files f where f.session_id=scoped_jobs.import_session_id
+                (select count(*)::int from app.import_files f where f.session_id=selected_page.import_session_id
                  and (coalesce(payload->'selected_file_ids','[]'::jsonb)='[]'::jsonb
                       or payload->'selected_file_ids' ? coalesce(f.legacy_mongo_id,f.id::text))) as file_count
-              from scoped_jobs order by updated_at desc,id desc
+              from selected_page order by updated_at desc,id desc
             ) page on true
-        """, (page_size, (page - 1) * page_size))
+        """, (domain, domain, page_size, (page - 1) * page_size))
         total = rows[0]['total']
         return {'rows': [{k: v for k, v in row.items() if k != 'total'} for row in rows if row['job_id']],
                 'pagination': {'page': page, 'page_size': page_size, 'total': total,
@@ -47,7 +51,7 @@ class ImportJobOperationsRepository:
     def detail(self, job_id: str, *, file_page: int, page_size: int = 20) -> dict[str, Any]:
         with self.connection.transaction() as tx:
             tx.execute('set transaction isolation level repeatable read read only')
-            job = tx.fetch_one(scoped_import_jobs('select * from job.import_jobs where id=%s')
+            job = tx.fetch_one(scoped_import_jobs(f'select * from job.import_jobs where id=%s and {_SHARED}')
                               + f'select {_JOB_COLUMNS}, last_error from scoped_jobs', (job_id,))
             if job is None:
                 raise KeyError(job_id)
@@ -92,7 +96,7 @@ class ImportJobOperationsRepository:
     def dispose(self, job_id: str, *, expected_version: int, action: str, reason: str, note: str,
                 actor: dict[str, str], request_id: str, on_dispose: Callable[..., None]) -> dict[str, Any]:
         with self.connection.transaction() as tx:
-            row = tx.fetch_one('select *, id::text as job_id from job.import_jobs where id=%s for update', (job_id,))
+            row = tx.fetch_one(f'select *, id::text as job_id from job.import_jobs where id=%s and {_SHARED} for update', (job_id,))
             if row is None:
                 raise KeyError(job_id)
             previous = row['result_payload'].get('disposition')

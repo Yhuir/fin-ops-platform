@@ -258,7 +258,7 @@ test("shows failed imports as attention with a task link, never as active progre
   renderAppAt("/");
   await user.click(await screen.findByRole("button", { name: "发票导入失败待处理" }));
   const dialog=await screen.findByRole("dialog", { name: "全局运行状态" });
-  expect(within(dialog).getByRole("link",{name:/需要重新预览/})).toHaveAttribute("href",expect.stringContaining("import_job=import%3Afailed"));
+  expect(within(dialog).getByRole("button",{name:/需要重新预览/})).toBeEnabled();
   expect(within(dialog).queryByRole("progressbar")).not.toBeInTheDocument();
   expect(dialog).toHaveTextContent("执行 2 / 失败待处理 1");
   expect(dialog).not.toHaveTextContent("同步中");

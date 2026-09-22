@@ -56,7 +56,7 @@ class EtcImportSessionStorePort(Protocol):
         last_error: str | None = None,
     ) -> StoredEtcImportSession: ...
 
-    def discard_preview(self, session_id: str, *, imported_by: str, on_discard: Any = None) -> None: ...
+    def discard_preview(self, session_id: str, *, imported_by: str, on_discard: Any = None, authorized_job=None) -> None: ...
 
 
 class InMemoryEtcImportSessionStore:
@@ -100,12 +100,13 @@ class InMemoryEtcImportSessionStore:
         self._sessions[updated.session_id] = _copy_session(updated)
         return _copy_session(updated)
 
-    def discard_preview(self, session_id: str, *, imported_by: str, on_discard: Any = None) -> None:
+    def discard_preview(self, session_id: str, *, imported_by: str, on_discard: Any = None, authorized_job=None) -> None:
         current = self._sessions.get(str(session_id or "").strip())
         if current is None:
             raise KeyError(session_id)
-        if current.imported_by != str(imported_by or "").strip():
-            raise PermissionError("ETC import session belongs to another user")
+        from fin_ops_platform.services.import_workflow_service import assert_import_session_access
+        assert_import_session_access(session_id=session_id, creator=current.imported_by,
+                                     actor=imported_by, job=authorized_job)
         if current.status == "reverted":
             return
         if current.status not in {"preparing", "preview_ready", "failed"}:
@@ -251,11 +252,12 @@ class PostgresEtcImportSessionStore:
             raise KeyError(session_id)
         return loaded
 
-    def discard_preview(self, session_id: str, *, imported_by: str, on_discard: Any = None) -> None:
+    def discard_preview(self, session_id: str, *, imported_by: str, on_discard: Any = None, authorized_job=None) -> None:
         self._repository.discard_preview(
             str(session_id or "").strip(),
             imported_by=str(imported_by or "").strip(),
             **({"on_discard": on_discard} if on_discard is not None else {}),
+            **({"authorized_job": authorized_job} if authorized_job is not None else {}),
         )
 
 

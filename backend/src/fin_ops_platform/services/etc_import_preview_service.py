@@ -105,14 +105,15 @@ class EtcImportPreviewService:
             raise StaleReconciliationPreviewError("stale_reconciliation_task_preview")
 
     def validate(self, *, session_id: str, task_id: str, imported_by: str,
-                 load_manifest: bool = False) -> ValidatedEtcImportPreview:
+                 load_manifest: bool = False, authorized_job=None) -> ValidatedEtcImportPreview:
         from fin_ops_platform.services.etc_import_manifest import decode_manifest
 
         session = self._session_store.get(session_id, load_uploads=False, load_manifest=load_manifest)
         if session is None:
             raise KeyError("etc_import_session_not_found")
-        if session.imported_by != str(imported_by or "").strip():
-            raise PermissionError("ETC import session belongs to another user")
+        from fin_ops_platform.services.import_workflow_service import assert_import_session_access
+        assert_import_session_access(session_id=session_id, creator=session.imported_by,
+                                     actor=imported_by, job=authorized_job)
         if session.task_id != task_id or session.status not in {"preview_ready", "queued", "processing", "failed"}:
             raise StaleReconciliationPreviewError("stale_reconciliation_task_preview")
         task = self._task_service.get_task(task_id)
@@ -152,8 +153,8 @@ class EtcImportPreviewService:
             last_error=last_error,
         )
 
-    def discard(self, *, session_id: str, imported_by: str, on_discard: Any = None) -> None:
-        self._session_store.discard_preview(session_id, imported_by=imported_by, on_discard=on_discard)
+    def discard(self, *, session_id: str, imported_by: str, on_discard: Any = None, authorized_job=None) -> None:
+        self._session_store.discard_preview(session_id, imported_by=imported_by, on_discard=on_discard, authorized_job=authorized_job)
 
     def _build_preview(
         self,

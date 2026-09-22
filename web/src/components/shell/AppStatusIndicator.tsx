@@ -12,6 +12,7 @@ import { Link as RouterLink } from "react-router-dom";
 import { useAppHealthStatus, useAppStatusOverview } from "../../contexts/AppHealthStatusContext";
 import { useOptionalSessionPermissions } from "../../contexts/SessionContext";
 import type { AppStatusDomain, AppStatusQueueSummary, AppStatusRuntimeSummaryGroup, AppStatusTask } from "../../features/appStatus/types";
+import { SharedImportTasksButton } from "../imports/ImportJobDiagnostics";
 import financePlatformMark from "./finance-platform-mark.svg";
 
 function toneFromLevel(level: string) {
@@ -215,22 +216,20 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
                   <Separator />
                   <section className="app-status-section">
                     <h3>任务</h3>
-                    {tasks.map((task) => (
-                      <RouterLink key={task.jobId} to={task.jobId.startsWith("import:") && task.route.startsWith("/imports/") ? `${task.route}?import_job=${encodeURIComponent(task.jobId)}` : task.route} className="app-status-task-link">
+                    {tasks.map((task) => {
+                      const content = <>
                         <span className="app-status-task-main">
                           <span className="app-status-task-label">{taskPrimaryLabel(task)}</span>
                           <Chip size="sm" variant="soft">{taskStatusLabel(task)}</Chip>
                         </span>
                         {task.percent !== null && task.status === "running" ? (
-                          <ProgressBar
-                            aria-label={`${task.shortLabel} 进度`}
-                            className="app-status-task-progress"
-                            maxValue={100}
-                            value={task.percent}
-                          />
+                          <ProgressBar aria-label={`${task.shortLabel} 进度`} className="app-status-task-progress" maxValue={100} value={task.percent} />
                         ) : null}
-                      </RouterLink>
-                    ))}
+                      </>;
+                      return task.jobId.startsWith("import:") && task.route.startsWith("/imports/")
+                        ? <SharedImportTasksButton key={task.jobId} jobId={task.jobId} label={content} />
+                        : <RouterLink key={task.jobId} to={task.route} className="app-status-task-link">{content}</RouterLink>;
+                    })}
                   </section>
                 </>
               ) : null}
@@ -268,10 +267,13 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
                 </div>
                 <div className="app-status-domain-grid">
                   {domains.map((domain) => {
+                    if (["imports_invoices", "imports_bank_transactions", "imports_etc_invoices"].includes(domain.key) && domain.status !== "ready") {
+                      return <SharedImportTasksButton key={domain.key} domain={domain.key} label={`${domain.label} ${domainStatusLabel(domain.status)} ${Object.entries(domain.counts ?? {}).filter(([, count]) => count > 0).map(([state, count]) => `${domainStatusLabel(state)} ${count}`).join(" / ")}`} />;
+                    }
                     return (
                       <RouterLink
                         key={domain.key}
-                        aria-label={`${domain.label} ${domainStatusLabel(domain.status)}`}
+                        aria-label={`${domain.label} ${domainStatusLabel(domain.status)} ${Object.entries(domain.counts ?? {}).filter(([, count]) => count > 0).map(([state, count]) => `${domainStatusLabel(state)} ${count}`).join(" / ")}`}
                         to={domain.route}
                         title={domainDebugTitle(domain)}
                         className="app-status-domain-link"
@@ -292,12 +294,11 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
                 </div>
               </section>
 
+              <SharedImportTasksButton />
               {canAdminAccess ? (
                 <>
                   <Separator />
-                  {queueIssues > 0 && <RouterLink className="app-status-admin-link" to="/operations/app-health#import-job-diagnostics" onClick={() => onOpenChange(false)}>
-                    查看待处理任务
-                  </RouterLink>}
+
                   <RouterLink className="app-status-admin-link" to="/operations/app-health">
                     App Health
                   </RouterLink>

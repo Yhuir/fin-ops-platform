@@ -46,12 +46,15 @@ class ImportWorkflowApiTests(unittest.TestCase):
         result = self.app.handle_request("GET", f"/api/background-jobs/import:{job.import_job_id}/result")
         self.assertEqual(json.loads(result.body)["result"]["session"], {"private": "preview"})
 
-    def test_other_owner_cannot_read_cancel_or_retry(self):
+    def test_shared_task_is_visible_but_unrelated_jobs_stay_private(self):
         job = self.make_job(owner="another-user")
-        for method, suffix in [("GET", ""), ("GET", "/result"), ("POST", "/cancel"), ("POST", "/retry")]:
-            response = self.app.handle_request(method, f"/api/background-jobs/import:{job.import_job_id}{suffix}", body="{}")
-            self.assertEqual(response.status_code, 404)
-        self.assertEqual(self.queue.get_job(job.import_job_id).status, "awaiting_confirmation")
+        for suffix in ["", "/result"]:
+            response = self.app.handle_request("GET", f"/api/background-jobs/import:{job.import_job_id}{suffix}")
+            self.assertEqual(response.status_code, 200, response.body)
+        private = self.queue.create_or_get_job(import_type="oa_manual_import.create", created_by="another-user")
+        for method, suffix in [("GET", ""), ("GET", "/result"), ("POST", "/retry"), ("POST", "/cancel")]:
+            response = self.app.handle_request(method, f"/api/background-jobs/import:{private.import_job_id}{suffix}", body="{}")
+            self.assertEqual(response.status_code, 404, response.body)
 
     def test_retry_preserves_confirmed_selection_and_success_is_idempotent(self):
         job = self.make_job()
@@ -72,6 +75,18 @@ class ImportWorkflowApiTests(unittest.TestCase):
         self.workflow.confirm(**args, payload={"session_id": "session-1", "selected_file_ids": ["file-1"]})
         with self.assertRaises(ImportJobIdempotencyConflict):
             self.workflow.confirm(**args, payload={"session_id": "session-1", "selected_file_ids": ["file-2"]})
+
+    def test_remaining_selection_keeps_session_creator_after_cross_user_confirmation(self):
+        job = self.make_job(owner="original")
+        first = self.workflow.confirm(session_id="session-1", owner="second", import_type="file_import.confirm",
+            expected_version=job.version, payload={"session_id":"session-1", "selected_file_ids":["file-1"]})
+        first = self.queue.update(first.import_job_id, status="succeeded")
+        second = self.workflow.confirm(session_id="session-1", owner="third", import_type="file_import.confirm",
+            expected_version=first.version, payload={"session_id":"session-1", "selected_file_ids":["file-2"]})
+        self.assertEqual(second.created_by, "original")
+        self.assertEqual(second.payload["owner_user_id"], "original")
+        self.assertEqual(second.payload["actor_account"], "third")
+        self.assertNotEqual(first.import_job_id, second.import_job_id)
 
 
 if __name__ == "__main__":

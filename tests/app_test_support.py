@@ -471,8 +471,8 @@ class DurableImportQueueHarness:
     def list_by_session(self, session_id):
         return [job for job in reversed(self.jobs) if job.import_session_id == session_id]
 
-    def list_jobs(self, *, created_by, limit=100, statuses=None):
-        return [job for job in reversed(self.jobs) if job.created_by == created_by
+    def list_jobs(self, *, created_by, limit=100, statuses=None, include_shared=False):
+        return [job for job in reversed(self.jobs) if (job.created_by == created_by or include_shared and job.import_type in {"file_import.confirm", "etc_invoice_import.confirm"})
                 and (statuses is None or job.status in statuses)][:limit]
 
     def confirm_job(self, job_id, *, expected_version, payload):
@@ -481,11 +481,11 @@ class DurableImportQueueHarness:
             raise ImportJobIdempotencyConflict("Preview changed")
         return self.update(job_id, payload=dict(payload), status="pending", stage="commit", acknowledged_at=None)
 
-    def retry_job(self, job_id, *, expected_version):
+    def retry_job(self, job_id, *, expected_version, command_context=None):
         job = self.get_job(job_id)
         if job.version != expected_version or "disposition" in job.result_payload:
             raise ImportJobIdempotencyConflict("Task changed or disposed")
-        return self.update(job_id, status="pending", last_error=None, acknowledged_at=None)
+        return self.update(job_id, status="pending", payload={**job.payload, **(command_context or {})}, last_error=None, acknowledged_at=None)
 
     def acknowledge_job(self, job_id, *, created_by):
         job = self.get_job(job_id)

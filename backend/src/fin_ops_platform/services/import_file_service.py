@@ -641,8 +641,11 @@ class FileImportService:
             reverse=True,
         )
 
-    def discard_session(self, *, session_id: str, imported_by: str) -> FileImportSession:
-        session = self.assert_session_owner(session_id=session_id, imported_by=imported_by)
+    def discard_session(self, *, session_id: str, imported_by: str, authorized_job=None) -> FileImportSession:
+        from fin_ops_platform.services.import_workflow_service import assert_import_session_access
+        session = self.get_session(session_id)
+        assert_import_session_access(session_id=session_id, creator=session.imported_by,
+                                     actor=imported_by, job=authorized_job)
         if session.status == "reverted":
             return session
         if any(item.status == "confirmed" for item in session.files):

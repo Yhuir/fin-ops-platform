@@ -44,10 +44,10 @@ class PermissionsWriteEntryInventoryTests(unittest.TestCase):
         self.assertEqual(missing_page_keys(), frozenset())
         self.assertNotIn("operation-history", ASSIGNABLE_PAGE_KEYS)
 
-    def test_import_job_administration_is_admin_only_and_disposition_is_audited_mutation(self):
+    def test_shared_import_tasks_use_platform_access_and_audited_mutations(self):
         for path in ("/api/imports/jobs", "/api/imports/jobs/job-id", "/api/imports/jobs/job-id/dispose"):
-            self.assertTrue(is_admin_only_route(path))
-            self.assertEqual(page_keys_for_route(path), ("app-health-operations",))
+            self.assertFalse(is_admin_only_route(path))
+            self.assertEqual(page_keys_for_route(path), ())
         self.assertTrue(is_state_changing_request("POST", "/api/imports/jobs/job-id/dispose"))
         self.assertFalse(is_admin_only_route("/api/background-jobs/import:job-id"))
         self.assertFalse(is_admin_only_route("/api/imports/jobs-other"))

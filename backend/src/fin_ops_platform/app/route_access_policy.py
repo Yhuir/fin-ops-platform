@@ -17,7 +17,6 @@ _READ_ONLY_POST_ROUTES = frozenset(
 )
 
 _ADMIN_ONLY_PREFIXES = (
-    "/api/imports/jobs",
     "/api/operations/history",
     "/api/workbench/settings/access-control",
     "/api/workbench/settings/oa-applicant-credentials",
@@ -25,7 +24,13 @@ _ADMIN_ONLY_PREFIXES = (
 )
 
 _ROUTE_PAGE_PREFIXES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("/api/imports/jobs", ("app-health-operations",)),
+    ("/api/imports/jobs", ()),
+    ("/imports/files/sessions", ()),
+    ("/imports/files/confirm", ()),
+    ("/imports/files/retry", ()),
+    ("/imports/files/discard", ()),
+    ("/api/etc/import/confirm", ()),
+    ("/api/etc/import/discard", ()) ,
     ("/api/workbench/settings", ("settings",)),
     ("/api/workbench/oa-invoice-supplements", ("reconciliation-workbench",)),
     ("/api/workbench", ("reconciliation-workbench",)),

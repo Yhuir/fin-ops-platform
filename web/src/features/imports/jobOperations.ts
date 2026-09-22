@@ -5,7 +5,7 @@ export type ImportOperationJob = {
   job_id: string; import_type: string; session_id: string | null; created_by: string | null;
   status: string; stage: string; version: number; updated_at: string; file_count?: number; file_name?: string | null;
   affected_domains: string[]; error_code: string | null; last_error?: string | null;
-  disposition: ImportDisposition | null; allowed_actions?: Array<"close" | "discard">; continue_route?: string | null;
+  disposition: ImportDisposition | null; allowed_actions?: Array<"close" | "discard">;
 };
 export type ImportJobPage = { rows: ImportOperationJob[]; pagination: { page: number; page_size: number; total: number; has_more: boolean } };
 export type ImportJobDetail = {
@@ -16,8 +16,8 @@ export type ImportJobDetail = {
   file_pagination: ImportJobPage["pagination"];
 };
 const root = "/api/imports/jobs";
-export function fetchImportJobs(page: number, signal?: AbortSignal) {
-  return apiRequestJson<ImportJobPage>(`${root}?page=${page}&page_size=20`, { signal });
+export function fetchImportJobs(page: number, signal?: AbortSignal, domain?: string) {
+  return apiRequestJson<ImportJobPage>(`${root}?page=${page}&page_size=20${domain ? `&domain=${encodeURIComponent(domain)}` : ""}`, { signal });
 }
 export function fetchImportJobDetail(id: string, page = 1, signal?: AbortSignal) {
   return apiRequestJson<ImportJobDetail>(`${root}/${encodeURIComponent(id)}?file_page=${page}`, { signal });
@@ -28,4 +28,10 @@ export function disposeImportJob(job: ImportOperationJob, action: "close" | "dis
     { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version: job.version, action, reason, note }) },
     { allowHtmlFallback: false, timeoutMs: 15000, defaultErrorMessage: "任务处理失败，请核实当前结果。" },
   );
+}
+
+export async function fetchImportBankMappings(jobId: string, signal?: AbortSignal) {
+  const result = await apiRequestJson<{ bank_account_mappings: Array<{ id: string; last4: string; bank_name: string; short_name: string }> }>(
+    `${root}/${encodeURIComponent(jobId.replace(/^import:/, ""))}/bank-mappings`, { signal });
+  return { bankAccountMappings: result.bank_account_mappings.map(item => ({ id: item.id, last4: item.last4, bankName: item.bank_name, shortName: item.short_name })) };
 }

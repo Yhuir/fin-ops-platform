@@ -108,7 +108,7 @@ class EtcImportUow:
                 task["import_batch_id"] = next(identity for identity, value in after["import_batches"].items()
                                                 if value.get("source_session_id") == session.session_id)
                 task.setdefault("audit_events", []).append({"event_id": uuid4().hex, "task_id": session.task_id,
-                    "event_type": "zip_import_confirmed", "actor": owner_user_id, "created_at": now,
+                    "event_type": "zip_import_confirmed", "actor": completion.job.payload.get("actor_account") or owner_user_id, "created_at": now,
                     "before_status": "ready_for_import", "after_status": "imported"})
                 repository.save_etc_reconciliation_task(task, expected_version=session.task_version, expected_status="ready_for_import")
                 PostgresEtcImportSessionRepository(transaction).update_status(

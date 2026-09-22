@@ -105,10 +105,11 @@ class ImportDirectQueuePostgresTests(unittest.TestCase):
         current=self.repository.get_job(job.import_job_id)
         self.assertEqual(import_job_payload(current)['retry_mode'],'reprepare')
         workflow=ImportWorkflowService(self.repository)
-        with self.assertRaises(KeyError): workflow.retry(job.import_job_id,'other')
         with self.assertRaises(ImportJobIdempotencyConflict):
             workflow.confirm(session_id='review-session', owner='owner',import_type='file_import.confirm',payload=current.payload,expected_version=current.version)
-        prepared=workflow.retry(job.import_job_id,'owner')
+        prepared=workflow.retry(job.import_job_id,'other')
+        self.assertEqual(prepared.created_by, job.created_by)
+        self.assertEqual(prepared.payload['actor_account'], 'other')
         self.assertEqual((prepared.status,prepared.stage),('pending','prepare'))
 
     def test_prepare_review_cannot_be_confirmed_without_new_preview(self):

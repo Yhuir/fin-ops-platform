@@ -60,7 +60,7 @@ def import_job_payload(job: ImportJob) -> dict[str, Any]:
     result = {key: value for key, value in job.result_payload.items() if key not in {"preview", "session"}}
     if status == "succeeded" and result.get("outcome") == "partial_success":
         status = "partial_success"
-    source = {key: value for key, value in job.payload.items() if key != "upload_manifest"}
+    source = {key: value for key, value in job.payload.items() if key not in {"upload_manifest", "command_actor"}}
     source["session_id"] = job.import_session_id
     domains = list(job.affected_domains) if job.affected_domains is not None else [
         key for key, value in IMPORT_DOMAIN_ROUTES.items() if value == source.get("route", route)
@@ -94,7 +94,8 @@ def import_job_payload(job: ImportJob) -> dict[str, Any]:
         "message": message, "result_summary": result, "source": source,
         "affected_domains": source.get("affected_domains", []), "route": source["route"],
         "retryable": not disposed and status in {"failed", "needs_review"}, "retry_mode": "reprepare" if requires_repreview(job) else "same_intent",
-        "acknowledgeable": not disposed and status in {"failed", "succeeded", "partial_success", "cancelled"},
+        "acknowledgeable": not disposed and status in {"failed", "succeeded", "partial_success", "cancelled"}
+            and not (job.import_type in SHARED_IMPORT_TYPES and status == "failed"),
         "attention": not disposed and status in {"failed", "partial_success", "awaiting_confirmation", "needs_review"},
         "error": job.last_error,
         "created_at": str(job.created_at or ""), "updated_at": str(job.updated_at or ""),
@@ -102,11 +103,30 @@ def import_job_payload(job: ImportJob) -> dict[str, Any]:
     }
 
 
+SHARED_IMPORT_TYPES = frozenset({"file_import.confirm", "etc_invoice_import.confirm"})
+
+
+def assert_import_session_access(*, session_id: str, creator: str, actor: str, job: ImportJob | None) -> None:
+    """A registered shared task grants session access; unregistered drafts remain private."""
+    if job is not None:
+        if (job.import_type not in SHARED_IMPORT_TYPES or job.import_session_id != session_id
+                or job.created_by != creator):
+            raise PermissionError("Import task and session provenance do not match.")
+    elif creator != actor:
+        raise PermissionError("Import draft belongs to another user.")
+
+
 class ImportWorkflowService:
     """Own import commands; domain services own previews and financial writes."""
 
-    def __init__(self, repository: Any) -> None:
+    def __init__(self, repository: Any, *, command_actor: dict[str, str] | None = None) -> None:
         self.repository = repository
+        self.command_actor = command_actor
+
+    def command_context(self, actor: str) -> dict[str, Any]:
+        if self.command_actor is not None and self.command_actor["actor_account"] != actor:
+            raise ValueError("Command actor does not match the authenticated account.")
+        return {"actor_account": actor, **({"command_actor": self.command_actor} if self.command_actor is not None else {})}
 
     def register_files(self, *, file_service: Any, store: Any, owner: str,
                        uploads: list[Any], request_id: str | None = None) -> tuple[Any, ImportJob]:
@@ -119,7 +139,7 @@ class ImportWorkflowService:
             return None, existing
         session = file_service.register_uploads(imported_by=owner, uploads=uploads)
         payload = {
-            "session_id": session.id, "owner_user_id": owner, "total": len(session.files),
+            "session_id": session.id, "owner_user_id": owner, **self.command_context(owner), "total": len(session.files),
             "upload_manifest": descriptor,
             "selected_file_ids": [item.id for item in session.files],
             "route": "/imports/bank-transactions" if all(
@@ -152,7 +172,7 @@ class ImportWorkflowService:
 
     def revise_files(self, *, file_service: Any, store: Any, session_id: str, owner: str,
                      selected_file_ids: list[str], overrides: dict[str, Any] | None = None) -> ImportJob:
-        file_service.assert_session_owner(session_id=session_id, imported_by=owner)
+        self.assert_file_session_access(file_service, session_id=session_id, actor=owner)
         job = self.session_job(session_id, owner, "file_import.confirm")
         if job is not None:
             assert_import_not_disposed(job)
@@ -162,7 +182,7 @@ class ImportWorkflowService:
         before = file_service.draft_checkpoint(session_id)
         try:
             session = file_service.register_reprepare(session_id=session_id, selected_file_ids=selected_file_ids, overrides=overrides)
-            payload = {"session_id": session_id, "owner_user_id": owner, "selected_file_ids": selected_file_ids,
+            payload = {"session_id": session_id, "owner_user_id": session.imported_by, **self.command_context(owner), "selected_file_ids": selected_file_ids,
                        "total": len(selected_file_ids), "route": (job.payload.get("route") if job else "/imports/invoices")}
             def change(transaction):
                 if job is None:
@@ -176,16 +196,16 @@ class ImportWorkflowService:
             raise
 
     def discard_files(self, *, file_service: Any, store: Any, session_id: str, owner: str) -> Any:
-        file_service.assert_session_owner(session_id=session_id, imported_by=owner)
+        self.assert_file_session_access(file_service, session_id=session_id, actor=owner)
         before = file_service.draft_checkpoint(session_id)
         job = self.session_job(session_id, owner, "file_import.confirm")
         if job is not None:
             assert_import_not_disposed(job)
         try:
-            session = file_service.discard_session(session_id=session_id, imported_by=owner)
+            session = file_service.discard_session(session_id=session_id, imported_by=owner, authorized_job=job)
             def cancel(transaction):
                 if job is not None and job.status != "canceled":
-                    return self.repository.cancel_job(job.import_job_id, created_by=owner, transaction=transaction)
+                    return self.repository.cancel_job(job.import_job_id, created_by=job.created_by, transaction=transaction)
                 return None
             store.save_import_draft_change(file_service.preview_session_persistence_payload(session.id), job_command=cancel)
             return session
@@ -193,15 +213,21 @@ class ImportWorkflowService:
             file_service.restore_draft(before)
             raise
 
-    def get_owned(self, job_id: str, owner: str) -> ImportJob:
+    def assert_file_session_access(self, file_service: Any, *, session_id: str, actor: str) -> Any:
+        session = file_service.get_session(session_id)
+        job = self.session_job(session_id, actor, "file_import.confirm")
+        assert_import_session_access(session_id=session_id, creator=session.imported_by, actor=actor, job=job)
+        return session
+
+    def get_accessible(self, job_id: str, owner: str) -> ImportJob:
         job = self.repository.get_job(job_id.removeprefix(IMPORT_JOB_PREFIX))
-        if job is None or job.created_by != owner:
+        if job is None or (job.import_type not in SHARED_IMPORT_TYPES and job.created_by != owner):
             raise KeyError(job_id)
         return job
 
     def session_job(self, session_id: str, owner: str, import_type: str) -> ImportJob | None:
         jobs = [job for job in self.repository.list_by_session(session_id)
-                if job.created_by == owner and job.import_type == import_type]
+                if job.import_type == import_type and (import_type in SHARED_IMPORT_TYPES or job.created_by == owner)]
         return jobs[0] if jobs else None
 
     def confirm(
@@ -209,8 +235,11 @@ class ImportWorkflowService:
         payload: dict[str, Any], expected_version: int | None,
     ) -> ImportJob:
         jobs = [item for item in self.repository.list_by_session(session_id)
-                if item.created_by == owner and item.import_type == import_type]
+                if item.import_type == import_type and (import_type in SHARED_IMPORT_TYPES or item.created_by == owner)]
         job = jobs[0] if jobs else None
+        payload = {**payload, **self.command_context(owner)}
+        if job is not None:
+            payload["owner_user_id"] = job.created_by
         keys = ("session_id", "selected_file_ids", "task_id", "task_version", "confirmed_item_set_hash")
         def same_scope(item):
             return all(
@@ -224,7 +253,7 @@ class ImportWorkflowService:
             if requires_repreview(exact):
                 raise ImportJobIdempotencyConflict("所选文件需要复核，请重新预览后确认。")
             if exact.status == "failed":
-                return self.repository.retry_job(exact.import_job_id, expected_version=exact.version)
+                return self.repository.retry_job(exact.import_job_id, expected_version=exact.version, command_context=self.command_context(owner))
             if exact.status in {"pending", "processing", "succeeded"}:
                 return exact
             job = exact
@@ -236,7 +265,7 @@ class ImportWorkflowService:
             return self.repository.create_or_get_job(
                 import_type=import_type, import_session_id=session_id,
                 idempotency_key=f"{import_type}:{session_id}:after:{job.import_job_id}",
-                payload=payload, created_by=owner, stage="commit",
+                payload=payload, created_by=job.created_by, stage="commit",
             )
         if job is None:
             # Structured manual input and pre-migration previews already have a
@@ -257,16 +286,16 @@ class ImportWorkflowService:
         )
 
     def retry(self, job_id: str, owner: str) -> ImportJob:
-        job = self.get_owned(job_id, owner)
+        job = self.get_accessible(job_id, owner)
         assert_import_not_disposed(job)
         if requires_repreview(job):
-            return self.repository.reprepare_job(job.import_job_id, expected_version=job.version)
+            return self.repository.reprepare_job(job.import_job_id, expected_version=job.version, payload={**job.payload, **self.command_context(owner)})
         if job.status in {"pending", "processing", "succeeded", "awaiting_confirmation"}:
             return job
         if job.status != "failed":
             raise ValueError("当前任务不可重试。")
-        return self.repository.retry_job(job.import_job_id, expected_version=job.version)
+        return self.repository.retry_job(job.import_job_id, expected_version=job.version, command_context=self.command_context(owner))
 
     def active_payloads(self, owner: str) -> list[dict[str, Any]]:
-        return [import_job_payload(job) for job in self.repository.list_jobs(created_by=owner, limit=100)
+        return [import_job_payload(job) for job in self.repository.list_jobs(created_by=owner, limit=100, include_shared=True)
                 if not job.acknowledged_at and job.status != "canceled"]

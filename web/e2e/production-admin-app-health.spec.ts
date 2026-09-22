@@ -57,6 +57,14 @@ test.describe("production admin AppHealth smoke", () => {
       await expect(page.getByRole("heading", { name: "导入任务详情" })).toBeVisible();
       await expect(page.getByRole("heading", { name: "当前文件与导入证据" })).toBeVisible();
       await expect(page.getByText("任务编号：", { exact: false })).toBeVisible();
+      const preview = page.getByRole("button", { name: "查看发票导入预览", exact: true });
+      if (await preview.count()) {
+        await preview.click();
+        const taskDrawer = page.getByRole("dialog", { name: "处理导入任务", exact: true });
+        await expect(taskDrawer.getByText("已恢复指定导入任务，请核对预览。")).toBeVisible();
+        await expect(taskDrawer.getByRole("heading", { name: "导入统计", exact: true })).toBeVisible();
+        await expect(taskDrawer.getByText("Import session belongs to another user.", { exact: true })).toHaveCount(0);
+      }
     }
 
 

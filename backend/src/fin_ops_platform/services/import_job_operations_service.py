@@ -1,4 +1,4 @@
-"""Administrator disposition does not grant permission to confirm another user's import."""
+"""Shared import-task diagnostics and audited disposition for platform users."""
 from __future__ import annotations
 
 from typing import Any
@@ -6,7 +6,6 @@ from uuid import UUID
 
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.import_job_queue import ImportJobIdempotencyConflict
-from fin_ops_platform.services.import_workflow_service import IMPORT_DOMAIN_ROUTES
 from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
 
 REASONS = {'completed_elsewhere': '已另行完成', 'not_needed': '不再继续导入'}
@@ -18,10 +17,12 @@ class ImportJobOperationsService:
         self.file_lifecycle = file_lifecycle
         self.etc_sessions = etc_sessions
 
-    def list_jobs(self, *, page: int, page_size: int) -> dict[str, Any]:
+    def list_jobs(self, *, page: int, page_size: int, domain: str | None = None) -> dict[str, Any]:
         if page < 1 or not 1 <= page_size <= 100:
             raise ValueError('分页参数无效。')
-        return self.repository.list_jobs(page=page, page_size=page_size)
+        if domain is not None and domain not in {"imports_invoices", "imports_bank_transactions", "imports_etc_invoices"}:
+            raise ValueError("导入类型无效。")
+        return self.repository.list_jobs(page=page, page_size=page_size, domain=domain)
 
     def detail(self, job_id: str, *, actor_account: str, file_page: int = 1) -> dict[str, Any]:
         UUID(job_id)
@@ -36,11 +37,6 @@ class ImportJobOperationsService:
             elif job['status'] == 'needs_review' and job['import_type'] in {'file_import.confirm', 'etc_invoice_import.confirm'}:
                 actions = ['discard']
         job['allowed_actions'] = actions
-        domains = job['affected_domains']
-        job['continue_route'] = (IMPORT_DOMAIN_ROUTES.get(domains[0]) if len(domains) == 1 else
-                                 '/imports/etc-invoices' if job['import_type'] == 'etc_invoice_import.confirm' else None)
-        if job['created_by'] != actor_account or job['disposition'] or job['status'] in {'canceled','succeeded'}:
-            job['continue_route'] = None
         return result
 
     def dispose(self, job_id: str, payload: dict[str, Any], *, actor: dict[str, str], request_id: str) -> dict[str, Any]:

@@ -54,7 +54,7 @@
 
 preview/confirm/retry 都属于 canonical 导入写链，必须在 multipart/JSON 解析前通过共享 mutation guard；`imported_by` 与 background job owner 只取已认证 session username，客户端 form/body 同名字段不具有身份语义。
 
-preview 首次登记 `app.import_files` 时必须同时写入认证 username 到 `uploaded_by` 与 `raw_payload.normalized_payload.imported_by`，最终 session delta 必须保持同值；当前 session 读取和放弃只使用该服务端 owner 事实。session/file/batch/canonical candidate ID 使用带业务前缀的 UUID，不使用进程内顺序号或“先查询再递增”的多 worker 竞态分配。
+preview 首次登记 `app.import_files` 时必须同时写入认证 username 到 `uploaded_by` 与 `raw_payload.normalized_payload.imported_by`，最终 session delta 必须保持同值；当前 session 读取和放弃使用同一已登记共享任务与服务端 provenance 事实；未登记草稿仍校验本人。session/file/batch/canonical candidate ID 使用带业务前缀的 UUID，不使用进程内顺序号或“先查询再递增”的多 worker 竞态分配。
 
 file/session preview/retry 只允许通过当前 `session_id` 持久化该 session、files 与其 `preview_batch_id` 的精确 delta，且不得携带 canonical `invoices` / `transactions`；不得把进程内其它历史 session/batch 的 snapshot 写回 PostgreSQL。preview 的 `suspected_duplicate` 可保留候选 invoice 引用作为复核证据，confirm 后 terminal row 必须清空该非权威引用；`created`、`status_updated`、`duplicate_skipped` 的正式引用保持不变。发票 confirm 必须在同一事务内锁定本批强身份命中的 canonical 发票、持久化所选 session / batch / invoice delta，并只对本批身份集合式读取当前 OA attachment cache；命中强身份和明确 OA 子付款项时合并 OA 来源边，以 OA 来源替换当前人工来源/人工明细归属，保留独立 ETC 来源及原导入 batch / row 历史，再在同一事务标记必要的 Workbench matching scope。`disabled` promotion mode 不合并 OA 来源；其它模式在本批 canonical 已存在后只允许 link-existing，不得借此创建 cache 中其它发票。持久化或来源合并失败时 batch、file/session、canonical invoice、来源边和 matching dirty 必须整体回滚，领域任务不得半发布。普通 confirm 不发布 tax/read-model refresh。
 
@@ -216,6 +216,17 @@ ConfirmedInvoiceImportUnitOfWork 在导入事务内继续提交 promotion 与同
 
 ## 2026-09-22 管理员导入任务处理
 
-管理员 GET /api/imports/jobs（page/page_size）、GET /api/imports/jobs/{uuid}（file_page）只读；POST /api/imports/jobs/{uuid}/dispose 接受 version/action/reason/note，actor/request_id 来自认证请求。failed close 保留 failed/last_error，needs_review discard 同事务终结预览并 canceled；result_payload.disposition 与 acknowledged_at、版本和领域审计原子提交。与普通确认已知区分，明确处置任务禁止 confirm/reprepare/retry/cancel 重新激活。个人 owner 权限不变，管理员不代他人确认导入。
+管理员 GET /api/imports/jobs（page/page_size）、GET /api/imports/jobs/{uuid}（file_page）只读；POST /api/imports/jobs/{uuid}/dispose 接受 version/action/reason/note，actor/request_id 来自认证请求。failed close 保留 failed/last_error，needs_review discard 同事务终结预览并 canceled；result_payload.disposition 与 acknowledged_at、版本和领域审计原子提交。与普通确认已知区分，明确处置任务禁止 confirm/reprepare/retry/cancel 重新激活。此处创建人/管理员限制已由下述共享导入任务合同替代；未登记私人草稿仍隔离。
 
 实施、验证与旧链路清理见[处理闭环](../../dev/import-task-disposition-plan.md)。
+
+## 2026-09-23 共享导入任务
+
+银行、发票和 ETC 的已登记 durable import task 向所有已获平台访问权的登录用户开放查看、复核、重新预览、重试、确认和结束处理；不按创建人或管理员分层。未登记的私人草稿继续校验创建人；OA、税务和其他任务保留原权限。原页面权限、App Health 管理权限、设置和现金边界不扩大。
+
+- 输入：`GET /api/imports/jobs?page&page_size&domain`、按任务 UUID 读取详情/银行映射、既有 session/review/confirm/retry/discard API。session 访问必须由同一 durable task 的类型、session ID 和原创建人事实证明；没有 task 时仅允许原草稿本人。`domain` 在分页与计数之前筛选，详情按需读取。
+- 输出：共享任务摘要与分页详情、既有预览/任务 DTO、状态变化与真实操作人审计。创建人与文件 provenance 不修改；确认/重试的 actor 快照随任务持久化，worker 按实际操作人的当前平台授权执行，成功结果和领域审计与事实同事务。
+- 前端：全局状态、银行/发票/ETC 页和 App Health 复用 `ImportJobDiagnostics`；共享抽屉复用 `ImportWorkflowPage` 的任务模式，不要求进入受页面 ACL 限制的原页。正常上传页仍为空白草稿；打开共享任务使用独立组件实例，不覆盖当前未保存内容。
+- 刷新：沿用现有全局轮询，写后回读当前任务/列表；共享任务跨状态保持可见。不新增定时器、缓存、read model、队列、依赖、迁移或备份。
+- 旧链清理：删除导入任务 admin-only、共享任务 creator-only、跨用户无法继续预览文案与对应旧测试假设；非共享任务的 owner 校验保留。失败不能用普通已读绕过明确结束处理；原错误历史保留。
+- 验证：共享权限、私人草稿隔离、跨用户确认/异步审计、分页筛选、并发与回滚、丢失响应核实、旧页面导入回归；见[共享实施与验收](../../dev/import-task-disposition-plan.md#共享处理修订2026-09-23)。

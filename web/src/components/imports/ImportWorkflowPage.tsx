@@ -2,6 +2,8 @@ import { Alert, Button, Chip, ListBox, Select, Tabs } from "@heroui/react";
 import { ArrowLeft, FilePlus2, Files, RefreshCw, Search, Trash2, UploadCloud } from "lucide-react";
 import { type DragEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link as RouterLink, useSearchParams } from "react-router-dom";
+import { fetchImportBankMappings } from "../../features/imports/jobOperations";
+import { SharedImportTasksButton } from "./ImportJobDiagnostics";
 import { fetchBackgroundJob } from "../../features/backgroundJobs/api";
 
 import {
@@ -67,6 +69,7 @@ import type { ImportWorkflowMode } from "../../features/imports/importRoutes";
 
 type ImportWorkflowPageProps = {
   mode: ImportWorkflowMode;
+  taskId?: string;
 };
 
 type ImportPreviewDetailGridRow = ImportPreviewDetailRow & {
@@ -634,7 +637,7 @@ function EtcPreviewTable({ rows, loading }: { rows: EtcPreviewRow[]; loading: bo
   );
 }
 
-export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
+export default function ImportWorkflowPage({ mode, taskId }: ImportWorkflowPageProps) {
   const { active: pageActive, activationGeneration } = useOptionalPageActivation();
   const inputId = useId();
   const { setProgress, clearProgress } = useImportProgress();
@@ -654,13 +657,15 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setIsConfirming,
   } = useImportWorkflowDraft();
   const [searchParams, setSearchParams] = useSearchParams();
-  const requestedJobId = searchParams.get("import_job");
+  const [contextRefreshToken, setContextRefreshToken] = useState(0);
+  const requestedJobId = taskId ?? searchParams.get("import_job");
   useEffect(() => {
     if (!requestedJobId || !pageActive) return;
     let current = true;
     void (async () => {
       try {
         const job = await fetchBackgroundJob(requestedJobId);
+        if (["queued", "running"].includes(job.status)) throw new Error("任务正在处理，请完成后刷新预览。");
         if (mode === "etc_invoice") {
           const preview = await fetchEtcImportPreview(requestedJobId);
           if (!current) return;
@@ -676,14 +681,14 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
         if (current) {
           setErrorMessage(null);
           setFeedbackMessage("已恢复指定导入任务，请核对预览。");
-          setSearchParams((params) => { params.delete("import_job"); return params; }, { replace: true });
+          if (!taskId) setSearchParams((params) => { params.delete("import_job"); return params; }, { replace: true });
         }
       } catch (error) {
         if (current) setErrorMessage(resolveImportApiErrorMessage(error, "导入任务暂时不可读，请重试。"));
       }
     })();
     return () => { current = false; };
-  }, [requestedJobId, pageActive, mode, setSelectedEtcTaskId, setEtcPreviewPayload, setEtcImported,
+  }, [requestedJobId, taskId, contextRefreshToken, pageActive, mode, setSelectedEtcTaskId, setEtcPreviewPayload, setEtcImported,
       setPreviewPayload, setErrorMessage, setFeedbackMessage, setSearchParams]);
   const healthStatus = useAppHealthStatus();
   const { canOperateData } = useSessionPermissions();
@@ -709,7 +714,6 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   const [previewDetailPage, setPreviewDetailPage] = useState<ImportReviewRowsPage | null>(null);
   const [previewDetailLoading, setPreviewDetailLoading] = useState(false);
   const [previewDetailError, setPreviewDetailError] = useState<string | null>(null);
-  const [contextRefreshToken, setContextRefreshToken] = useState(0);
   const [isRefreshingContext, setIsRefreshingContext] = useState(false);
   const [mappingDrafts, setMappingDrafts] = useState<Record<string, Record<string, string>>>({});
   const [mappingRetryingFileId, setMappingRetryingFileId] = useState<string | null>(null);
@@ -766,7 +770,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     }
 
     setSettingsLoading(true);
-    fetchWorkbenchSettings(controller.signal)
+    (taskId ? fetchImportBankMappings(taskId, controller.signal) : fetchWorkbenchSettings(controller.signal))
       .then((settings) => {
         setBankOptions(
           [...settings.bankAccountMappings].sort((left, right) => (
@@ -786,11 +790,11 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       });
 
     return () => controller.abort();
-  }, [activationGeneration, contextRefreshToken, mode, pageActive, setErrorMessage]);
+  }, [activationGeneration, contextRefreshToken, mode, pageActive, taskId, setErrorMessage]);
 
   useEffect(() => {
     const controller = new AbortController();
-    if (!pageActive || mode !== "etc_invoice") {
+    if (!pageActive || mode !== "etc_invoice" || taskId) {
       setReadyEtcTasks([]);
       setReadyEtcTasksLoading(false);
       return () => controller.abort();
@@ -816,7 +820,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       });
 
     return () => controller.abort();
-  }, [activationGeneration, contextRefreshToken, mode, pageActive, setErrorMessage]);
+  }, [activationGeneration, contextRefreshToken, mode, pageActive, taskId, setErrorMessage]);
 
   useEffect(() => {
     const sessionId = previewPayload?.session.id;
@@ -863,7 +867,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     const selection = fileSelections[buildSelectedFileKey(file)];
     return mode === "bank_transaction" ? Boolean(selection?.bankMappingId) : Boolean(selection?.invoiceBatchType);
   });
-  const canPreview = canUseBankImport
+  const canPreview = !taskId && canUseBankImport
     && canOperateData
     && hasSelectedEtcTask
     && allFilesConfigured
@@ -905,6 +909,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     [previewPayload],
   );
   const canConfirm = canOperateData
+    && (!taskId || previewPayload?.job?.status === "awaiting_confirmation" || previewPayload?.job?.status === "succeeded")
     && confirmableFileIds.length > 0
     && conflictingPreviewFiles.length === 0
     && !isPreviewing
@@ -912,7 +917,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   const canConfirmEtc = Boolean(etcPreviewPayload?.sessionId)
     && canOperateData
     && Boolean(selectedEtcTaskId)
-    && Boolean(selectedEtcTask)
+    && (Boolean(taskId) || Boolean(selectedEtcTask))
     && etcBlockingIssues.length === 0
     && !etcImported
     && !isPreviewing
@@ -1083,6 +1088,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   async function handleRefresh() {
     if (isRefreshingContext || isPreviewing || isConfirming || isDiscarding) return;
     setContextRefreshToken((current) => current + 1);
+    if (taskId) return;
     if (mode === "etc_invoice" || !previewPayload?.session.id) return;
     setIsRefreshingContext(true);
     setErrorMessage(null);
@@ -1124,7 +1130,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       && pageActiveRef.current
       && activationGenerationRef.current === requestGeneration;
     if (mode === "etc_invoice") {
-      if (!selectedEtcTask) {
+      if (!selectedEtcTask && !taskId) {
         setErrorMessage("请选择已确认的 ETC 对账任务后再预览 ETC zip。");
         return;
       }
@@ -1140,7 +1146,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       setErrorMessage(null);
       setFeedbackMessage(null);
       try {
-        const payload = await previewEtcZipFiles(selectedFiles, selectedEtcTask.taskId, draft.uploadRequestId);
+        const payload = await previewEtcZipFiles(selectedFiles, selectedEtcTaskId, draft.uploadRequestId);
         if (!isCurrentRequest()) {
           return;
         }
@@ -1252,7 +1258,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       return;
     }
     if (mode === "etc_invoice") {
-      if (!selectedEtcTask) {
+      if (!selectedEtcTask && !taskId) {
         setErrorMessage("请选择已确认的 ETC 对账任务后再预览 ETC zip。");
         return;
       }
@@ -1263,7 +1269,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       setIsConfirming(true);
       setErrorMessage(null);
       try {
-        const payload = await confirmEtcImportSession(etcPreviewPayload.sessionId, selectedEtcTask.taskId, etcPreviewPayload.job?.version);
+        const payload = await confirmEtcImportSession(etcPreviewPayload.sessionId, selectedEtcTaskId, etcPreviewPayload.job?.version);
         setEtcImported(true);
         setFeedbackMessage(payload.job ? "已开始后台导入" : "已导入 ETC票据管理");
       } catch (error) {
@@ -1320,11 +1326,12 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
         title={title}
         actions={
           <div className="import-workflow-actions" data-testid="import-workflow-actions">
-            <RouterLink className="button button--secondary button--sm import-workflow-back-link" to="/">
+            {!taskId && <SharedImportTasksButton domain={mode === "bank_transaction" ? "imports_bank_transactions" : mode === "etc_invoice" ? "imports_etc_invoices" : "imports_invoices"} />}
+            {!taskId && <RouterLink className="button button--secondary button--sm import-workflow-back-link" to="/">
               <ArrowLeft aria-hidden="true" size={16} strokeWidth={2.2} />
               返回关联台
-            </RouterLink>
-            {mode === "invoice" && canOperateData ? (
+            </RouterLink>}
+            {mode === "invoice" && canOperateData && !taskId ? (
               <Button
                 isDisabled={healthStatus.blocksMutations || isPreviewing || isConfirming || isDiscarding}
                 onPress={() => setManualInvoiceEntryOpen(true)}
@@ -1336,7 +1343,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                 发票录入
               </Button>
             ) : null}
-            {mode === "bank_transaction" && canOperateData ? (
+            {mode === "bank_transaction" && canOperateData && !taskId ? (
               <Button
                 isDisabled={healthStatus.blocksMutations || isPreviewing || isConfirming || isDiscarding || settingsLoading}
                 onPress={() => setManualBankTransactionEntryOpen(true)}
@@ -1348,7 +1355,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                 流水录入
               </Button>
             ) : null}
-            {mode === "invoice" ? (
+            {mode === "invoice" && !taskId ? (
               <Button
                 onPress={() => setSupportingDocumentGalleryOpen(true)}
                 size="sm"
@@ -1376,11 +1383,11 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
               type="button"
               variant="secondary"
             >
-              {isDiscarding ? "放弃中..." : "清空"}
+              {isDiscarding ? "放弃中..." : taskId ? "放弃预览" : "清空"}
             </Button>
-            <Button isDisabled={!canPreview} onPress={handlePreview} size="sm" type="button" variant="secondary">
+            {!taskId && <Button isDisabled={!canPreview} onPress={handlePreview} size="sm" type="button" variant="secondary">
               {isPreviewing ? "预览中..." : "开始预览"}
-            </Button>
+            </Button>}
             <Button
               isDisabled={healthStatus.blocksMutations || (mode === "etc_invoice" ? !canConfirmEtc : !canConfirm)}
               onPress={handleConfirm}
@@ -1402,7 +1409,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
           {settingsLoading ? <ImportNotice tone="accent">正在加载银行账户映射...</ImportNotice> : null}
           {!settingsLoading && !canUseBankImport ? <ImportNotice tone="warning">设置里还没有银行账户映射，请先在设置中维护银行。</ImportNotice> : null}
           {mode === "etc_invoice" && readyEtcTasksLoading ? <ImportNotice tone="accent">正在加载可导入的 ETC 对账任务...</ImportNotice> : null}
-          {mode === "etc_invoice" && !readyEtcTasksLoading && readyEtcTasks.length === 0 ? (
+          {mode === "etc_invoice" && !taskId && !readyEtcTasksLoading && readyEtcTasks.length === 0 ? (
             <ImportNotice tone="warning">
               当前没有可导入的 ETC 对账任务。
               <RouterLink className="import-workflow-inline-link" to="/etc-tickets">前往 ETC 对账</RouterLink>
@@ -1415,8 +1422,8 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
             <ImportNotice tone="accent">当前页面暂不可导入文件。</ImportNotice>
           ) : null}
 
-          <div className="import-workflow-layout">
-            <section className="import-workflow-panel">
+          <div className="import-workflow-layout" style={taskId ? { gridTemplateColumns: "minmax(0, 1fr)" } : undefined}>
+            <section className="import-workflow-panel" hidden={Boolean(taskId)}>
               <div className="import-workflow-panel__content">
                 <div className="import-workflow-panel__header">
                   <h2 className="import-workflow-panel__title">文件</h2>

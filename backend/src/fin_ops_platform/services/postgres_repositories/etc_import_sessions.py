@@ -169,7 +169,7 @@ class PostgresEtcImportSessionRepository:
             raise KeyError(session_id)
         return row
 
-    def discard_preview(self, session_id: str, *, imported_by: str, on_discard: Any = None, transaction: Any = None) -> None:
+    def discard_preview(self, session_id: str, *, imported_by: str, on_discard: Any = None, transaction: Any = None, authorized_job=None) -> None:
         def discard(connection: Any) -> None:
             if on_discard is not None:
                 on_discard(connection)
@@ -184,8 +184,9 @@ class PostgresEtcImportSessionRepository:
             )
             if current is None:
                 raise KeyError(session_id)
-            if str(current.get("imported_by") or "") != imported_by:
-                raise PermissionError("ETC import session belongs to another user")
+            from fin_ops_platform.services.import_workflow_service import assert_import_session_access
+            assert_import_session_access(session_id=session_id, creator=current["imported_by"],
+                                         actor=imported_by, job=authorized_job)
             status = str(current.get("status") or "")
             if status == "reverted":
                 return

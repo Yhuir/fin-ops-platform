@@ -251,14 +251,15 @@ class ImportJobRepository:
             raise ImportJobIdempotencyConflict("Import preview changed or confirmation already accepted.")
         return _job_from_row(row)
 
-    def retry_job(self, import_job_id: str, *, expected_version: int) -> ImportJob:
+    def retry_job(self, import_job_id: str, *, expected_version: int, command_context: dict[str, Any] | None = None) -> ImportJob:
         with self._connection.transaction() as transaction:
             row = transaction.fetch_one("""
                 update job.import_jobs set status='pending', attempt_count=0, last_error=null,
+                    payload=payload || %s::jsonb,
                     version=version+1, available_at=now(), finished_at=null, acknowledged_at=null, updated_at=now()
                 where id=%s and version=%s and status='failed' and not (result_payload ? 'disposition')
                 returning *, id::text as import_job_id
-            """, (import_job_id, expected_version))
+            """, (self._json_param(command_context or {}), import_job_id, expected_version))
         if row is None:
             raise ImportJobIdempotencyConflict("Only a failed import can be retried.")
         return _job_from_row(row)
@@ -317,10 +318,10 @@ class ImportJobRepository:
                 and status in ('succeeded','failed','canceled')
         """, (import_job_id, created_by)))
 
-    def list_jobs(self, *, created_by: str, limit: int = 100, statuses: list[str] | None = None) -> list[ImportJob]:
+    def list_jobs(self, *, created_by: str, limit: int = 100, statuses: list[str] | None = None, include_shared: bool = False) -> list[ImportJob]:
         rows = self._connection.fetch_all(scoped_import_jobs("""
             select * from job.import_jobs
-            where created_by=%s and acknowledged_at is null and (%s::text[] is null or status=any(%s))
+            where (created_by=%s or (%s and import_type in ('file_import.confirm','etc_invoice_import.confirm'))) and acknowledged_at is null and (%s::text[] is null or status=any(%s))
             order by case when status in ('pending','processing','awaiting_confirmation','needs_review','failed') then 0 else 1 end,
                 created_at desc limit %s
         """) + """
@@ -333,7 +334,7 @@ class ImportJobRepository:
             from scoped_jobs
             order by case when status in ('pending','processing','awaiting_confirmation','needs_review','failed') then 0 else 1 end,
                 created_at desc
-        """, (created_by, statuses, statuses, min(200, max(1, int(limit)))))
+        """, (created_by, include_shared, statuses, statuses, min(200, max(1, int(limit)))))
         return [_job_from_row(row) for row in rows]
 
     def get_by_idempotency_key(self, idempotency_key: str, *, created_by: str) -> ImportJob | None:
@@ -378,7 +379,7 @@ class ImportJobCompletion:
         from fin_ops_platform.services.access_control_service import AccessControlService
         from fin_ops_platform.services.oa_identity_service import OAUserIdentity
         from fin_ops_platform.services.state_store_protocol import PROTECTED_ADMIN_USERNAME
-        owner = str(self.job.created_by or "").strip()
+        owner = str(self.job.payload.get("actor_account") or self.job.created_by or "").strip()
         if owner == PROTECTED_ADMIN_USERNAME:
             return
         # FOR SHARE makes revocation and financial commit have a defined order,
@@ -390,26 +391,14 @@ class ImportJobCompletion:
         decision = AccessControlService(access_control_snapshot_provider=lambda: snapshot).evaluate(
             OAUserIdentity(user_id=owner, username=owner, nickname=owner, display_name=owner)
         )
+        if self.job.import_type in {"file_import.confirm", "etc_invoice_import.confirm"}:
+            if not decision.can_access_app:
+                raise PermissionError("Import actor no longer has platform access.")
+            return
         required = {
-            "etc_invoice_import.confirm": {"imports.etc-invoices"},
             "tax_certified_import.confirm": {"tax-offset"},
             "oa_manual_import.create": {"settings"},
         }.get(self.job.import_type, set())
-        if self.job.import_type == "file_import.confirm":
-            route = self.job.payload.get("route")
-            if route == "/imports/bank-transactions":
-                required.add("imports.bank-transactions")
-            elif route == "/imports/invoices":
-                required.add("imports.invoices")
-            for file_row in transaction.fetch_all("""
-                select distinct coalesce(nullif(raw_payload->'normalized_payload'->>'batch_type',''),
-                    nullif(raw_payload->'normalized_payload'->>'override_batch_type','')) as batch_type
-                from app.import_files where legacy_mongo_id=any(%s)
-            """, (list(self.job.payload.get("selected_file_ids") or []),)):
-                if file_row["batch_type"] == "bank_transaction":
-                    required.add("imports.bank-transactions")
-                elif file_row["batch_type"] in {"input_invoice", "output_invoice"}:
-                    required.add("imports.invoices")
         if not required or not all(decision.can_access_page(page) for page in required):
             raise PermissionError("Import authorization was revoked or its target page is not authorized.")
 
@@ -437,6 +426,15 @@ class ImportJobCompletion:
               self.job.locked_by, self.job.claim_version))
         if row is None:
             raise ImportJobLeaseLost("Import ownership changed during commit.")
+        actor = self.job.payload.get("command_actor")
+        if actor:
+            from fin_ops_platform.services.audit import AuditTrailService
+            from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
+            AuditTrailService(PostgresOperationsAuditRepository(transaction)).record_action(
+                actor_id=actor["actor_id"], action="import_job.completed", entity_type="import_job",
+                entity_id=self.job.import_job_id, metadata={**actor, "creator": self.job.created_by,
+                    "stage": self.job.stage, "status": status, "summary": "导入任务执行结果"},
+            )
 
 
 class ImportJobWorker(RuntimeWorker):
@@ -573,7 +571,7 @@ def _import_request_fingerprint(
     source_file_id: str | None,
     payload: dict[str, Any],
 ) -> str:
-    business_payload = {key: value for key, value in payload.items() if key != "background_job_id"}
+    business_payload = {key: value for key, value in payload.items() if key not in {"background_job_id", "actor_account", "command_actor"}}
     encoded = json.dumps(
         {
             "tenant_id": tenant_id,

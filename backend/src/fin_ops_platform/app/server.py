@@ -1887,7 +1887,7 @@ class Application:
         if method == "GET" and route_path.startswith("/api/background-jobs/") and route_path.endswith("/result"):
             job_id = unquote(route_path.rsplit("/", 2)[-2])
             try:
-                job = self._import_workflow().get_owned(job_id, request_actor_id)
+                job = self._import_workflow().get_accessible(job_id, request_actor_id)
             except KeyError:
                 return self._json_response(HTTPStatus.NOT_FOUND, {"error": "import_job_not_found"})
             return self._json_response(HTTPStatus.OK, {"job": import_job_payload(job), "result": job.result_payload})
@@ -3358,7 +3358,7 @@ class Application:
         return self._json_response(HTTPStatus.OK, self._cached_operations_app_health_dashboard_payload(service))
 
     def _handle_import_job_operations(self, method, route_path, query, body, headers, *, request_id):
-        session, error = self._resolve_admin_session(headers)
+        session, error = self._resolve_fin_ops_read_session(headers, denied_message="当前账户不能处理导入任务。")
         if error is not None:
             return error
         connection = getattr(self._state_store, "_connection", None)
@@ -3372,7 +3372,12 @@ class Application:
         parts = route_path.removeprefix("/api/imports/jobs").strip("/").split("/")
         try:
             if method == "GET" and route_path == "/api/imports/jobs":
-                result = service.list_jobs(page=int(query.get("page", ["1"])[0]), page_size=int(query.get("page_size", ["20"])[0]))
+                result = service.list_jobs(page=int(query.get("page", ["1"])[0]), page_size=int(query.get("page_size", ["20"])[0]), domain=query.get("domain", [None])[0])
+            elif method == "GET" and len(parts) == 2 and parts[1] == "bank-mappings":
+                detail = service.detail(parts[0], actor_account=session.identity.username)
+                if "imports_bank_transactions" not in detail["job"]["affected_domains"]:
+                    raise ValueError("此任务不是银行流水导入。")
+                result = {"bank_account_mappings": self._app_settings_service.get_bank_account_mappings_payload()}
             elif method == "GET" and len(parts) == 1:
                 result = service.detail(parts[0], actor_account=session.identity.username,
                                         file_page=int(query.get("file_page", ["1"])[0]))
@@ -4364,7 +4369,7 @@ class Application:
     def _handle_api_background_job(self, job_id: str, owner_user_id: str) -> Response:
         try:
             if job_id.startswith(IMPORT_JOB_PREFIX):
-                payload = import_job_payload(self._import_workflow().get_owned(job_id, owner_user_id))
+                payload = import_job_payload(self._import_workflow().get_accessible(job_id, owner_user_id))
             else:
                 payload = self._serialize_background_job(self._background_job_service.get_job(job_id, owner_user_id))
         except (KeyError, BackgroundJobNotFoundError, BackgroundJobAccessError):
@@ -4375,8 +4380,10 @@ class Application:
         try:
             if job_id.startswith(IMPORT_JOB_PREFIX):
                 workflow = self._import_workflow()
-                job = workflow.get_owned(job_id, owner_user_id)
-                if not workflow.repository.acknowledge_job(job.import_job_id, created_by=owner_user_id):
+                job = workflow.get_accessible(job_id, owner_user_id)
+                if job.import_type in {"file_import.confirm", "etc_invoice_import.confirm"} and job.status == "failed":
+                    raise ValueError("失败任务请通过共享任务详情重试或结束处理。")
+                if not workflow.repository.acknowledge_job(job.import_job_id, created_by=job.created_by):
                     raise ValueError("任务仍未完成，不能关闭其执行状态。")
                 payload = {**import_job_payload(job), "status": "acknowledged"}
             else:
@@ -4395,9 +4402,9 @@ class Application:
             })
         try:
             workflow = self._import_workflow()
-            previous = workflow.get_owned(job_id, owner_user_id)
+            previous = workflow.get_accessible(job_id, owner_user_id)
             if previous.import_type == "file_import.confirm" and (
-                previous.status == "needs_review" or (previous.status == "failed" and previous.stage == "prepare")
+                previous.status == "needs_review" or (previous.status == "failed" and (previous.stage == "prepare" or str(previous.last_error or "").startswith("selected files require review before confirmation:")))
             ):
                 session_id = str(previous.import_session_id or "")
                 job = workflow.revise_files(
@@ -4416,21 +4423,21 @@ class Application:
     def _handle_api_import_job_cancel(self, job_id: str, owner_user_id: str) -> Response:
         try:
             workflow = self._import_workflow()
-            job = workflow.get_owned(job_id, owner_user_id)
+            job = workflow.get_accessible(job_id, owner_user_id)
             if job.import_type == "file_import.confirm":
                 session_id = str(job.import_session_id or "")
                 workflow.discard_files(
                     file_service=self._reload_file_import_runtime_state(session_id), store=self._state_store,
                     session_id=session_id, owner=owner_user_id,
                 )
-                job = workflow.get_owned(job_id, owner_user_id)
+                job = workflow.get_accessible(job_id, owner_user_id)
             elif job.import_type == "etc_invoice_import.confirm":
                 response = self._etc_import_routes().discard(
                     json.dumps({"sessionId": job.import_session_id}), owner_user_id=owner_user_id,
                 )
                 if response.status_code != HTTPStatus.OK:
                     return response
-                job = workflow.get_owned(job_id, owner_user_id)
+                job = workflow.get_accessible(job_id, owner_user_id)
             elif job.status != "canceled":
                 job = workflow.repository.cancel_job(job.import_job_id, created_by=owner_user_id)
         except KeyError:
@@ -5115,6 +5122,14 @@ class Application:
                 {"error": "admin_access_required", "message": "当前功能仅限权限管理员 005。"},
             )
         required_page_keys = page_keys_for_route(route_path)
+        if unquote(route_path).startswith("/api/background-jobs/import:"):
+            task_id = unquote(route_path).removeprefix("/api/background-jobs/").split("/")[0]
+            try:
+                task = self._import_workflow().get_accessible(task_id, session.identity.username)
+            except KeyError:
+                return None, self._json_response(HTTPStatus.NOT_FOUND, {"error": "import_job_not_found"})
+            if task.import_type in {"file_import.confirm", "etc_invoice_import.confirm"}:
+                required_page_keys = ()
         if required_page_keys is None:
             return None, self._json_response(
                 HTTPStatus.FORBIDDEN,
@@ -7316,7 +7331,11 @@ class Application:
         return import_job
 
     def _import_workflow(self) -> ImportWorkflowService:
-        return ImportWorkflowService(self._get_import_job_repository())
+        actor_id, actor_name, actor_account = _REQUEST_AUDIT_ACTOR.get()
+        return ImportWorkflowService(self._get_import_job_repository(), command_actor={
+            "actor_id": actor_id, "actor_name": actor_name, "actor_account": actor_account,
+            "request_id": _REQUEST_AUDIT_REQUEST_ID.get(),
+        })
 
     @staticmethod
     def _serialize_import_job(import_job: ImportJob) -> dict[str, object]:
@@ -7992,7 +8011,9 @@ class Application:
                 HTTPStatus.NOT_FOUND,
                 {"error": "import_file_session_not_found", "message": str(exc)},
             )
-        if str(session.imported_by) != str(owner_user_id):
+        try:
+            self._import_workflow().assert_file_session_access(file_service, session_id=normalized_session_id, actor=owner_user_id)
+        except PermissionError:
             return self._json_response(
                 HTTPStatus.FORBIDDEN,
                 {"error": "import_file_session_forbidden", "message": "Import session belongs to another user."},
@@ -8149,9 +8170,8 @@ class Application:
     def _handle_import_file_session(self, session_id: str, *, owner_user_id: str) -> Response:
         try:
             file_service = self._reload_file_import_runtime_state(session_id)
-            session = file_service.assert_session_owner(
-                session_id=session_id,
-                imported_by=owner_user_id,
+            session = self._import_workflow().assert_file_session_access(
+                file_service, session_id=session_id, actor=owner_user_id,
             )
         except KeyError:
             return self._json_response(
@@ -8187,9 +8207,8 @@ class Application:
             )
         try:
             file_service = self._reload_file_import_runtime_state(session_id)
-            file_service.assert_session_owner(
-                session_id=session_id,
-                imported_by=owner_user_id,
+            self._import_workflow().assert_file_session_access(
+                file_service, session_id=session_id, actor=owner_user_id,
             )
             payload = file_service.review_rows(
                 session_id=session_id,
