@@ -194,3 +194,8 @@
 - Playwright 三类导入流程 22 项通过；app-shell 权限与管理员面板 6 项通过。队列列头“失败”被全页错误正则误识别，已精确排除列头并保留真实错误检测。
 - `bash scripts/verify.sh lint`、`bash scripts/verify.sh docs`、`git diff --check` 通过。
 - 正式发布使用 `scripts/with-production-admin-token.sh ./scripts/deploy-oa.sh`；线上证据由其 root-owned release checkpoint 保存，最终交付另报告实际 release、commit、两页 audit 与性能。生产故障注入不在本次验证范围。
+
+
+生产性能复核补充：首次发布后回环采样发现 `/api/background-jobs/active` p95 为 171.87ms，未满足预热后 100ms 目标。定位到同一请求分别调用 `list_active_jobs` 与 `list_attention_jobs`，重复读取和反序列化相同后台任务快照。改为复用已有 `list_app_health_jobs` 一次生成两视图，删除重复查询；保持 owner/system 权限、提醒、排序和 DTO。API 回归同时验证一次读取、活动/失败列表与其他 owner 隔离；不新增缓存或抽象。后续发布须再次实测，不能用多发请求覆盖滚动统计来获得通过。
+
+该补充的 app_health_api/background_job_service/app_health_service/import_file_api/etc_backend 五组共 226 项测试通过，lint/docs/diff check 通过。

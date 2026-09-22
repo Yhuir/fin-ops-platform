@@ -344,6 +344,22 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(domains['imports_invoices']['status'],'needs_review')
         self.assertFalse(payload['app_status']['overall']['blocks_mutations'])
 
+    def test_active_jobs_loads_one_snapshot_and_preserves_owner_and_attention(self) -> None:
+        app = build_application()
+        service = app._background_job_service
+        active = service.create_job(job_type="settings_data_reset", label="active", owner_user_id="test_finops_user")
+        failed = service.create_job(job_type="settings_data_reset", label="failed", owner_user_id="test_finops_user")
+        hidden = service.create_job(job_type="settings_data_reset", label="hidden", owner_user_id="other")
+        service.fail_job(failed.job_id, "failed", "test failure")
+        with patch.object(service, "_load_jobs", wraps=service._load_jobs) as load:
+            response = app.handle_request("GET", "/api/background-jobs/active")
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(load.call_count, 1)
+        self.assertIn(active.job_id, [job["job_id"] for job in payload["active_jobs"]])
+        self.assertIn(failed.job_id, [job["job_id"] for job in payload["attention_jobs"]])
+        self.assertNotIn(hidden.job_id, [job["job_id"] for job in payload["jobs"]])
+
     def test_app_health_builds_snapshot_once_per_request(self) -> None:
         app = build_application()
 

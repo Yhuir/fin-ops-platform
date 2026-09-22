@@ -4305,8 +4305,9 @@ class Application:
         )
 
     def _handle_api_background_jobs_active(self, owner_user_id: str) -> Response:
-        active_jobs = self._background_job_service.list_active_jobs(owner_user_id, include_system=True)
-        attention_jobs = self._background_job_service.list_attention_jobs(owner_user_id, include_system=True)
+        active_jobs, attention_jobs = self._background_job_service.list_app_health_jobs(
+            owner_user_id, include_system=True,
+        )
         import_types = LEGACY_IMPORT_JOB_TYPES
         active_payloads = [self._serialize_background_job(job) for job in active_jobs if job.type not in import_types]
         attention_payloads = [self._serialize_background_job(job) for job in attention_jobs if job.type not in import_types]
