@@ -76,3 +76,5 @@
 2. 如影响模块列表，更新本清单。
 3. 如扫描到 read model 运行时回归，更新删除面 guard、`read-model-contracts.md`、测试和运维文档；禁止恢复 manifest/registry。
 4. 在最终说明中写明边界文档已更新，或明确说明 docs 不适用的理由。
+
+- 2026-09-22：管理员导入任务查询/处理归属 imports，App Health 提供 UI；新增窄 service/repository 与 typed client，复用已有任务、版本、生命周期和审计；GET 不执行修复。见[处理计划](../../dev/import-task-disposition-plan.md)。

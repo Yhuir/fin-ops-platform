@@ -235,3 +235,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 ## 2026-09-21 确认前复核拒绝的审计分类
 
 明确的 `selected files require review before confirmation: ...` commit 失败，只有所选文件全部存在、同属本会话、仍为 preview_ready、无正式 batch_id、对应预览批次仍 pending，且存在 error_count/suspected_duplicate_count 时，报告可见 warning `invoice_import_job_review_required`。其他任务失败、孤立引用、已提交/终结状态异常仍为 error。审计只读，不修改任务状态、导入行或正式发票；沿用输入错误不阻断全站的现有合同。`test_uncommitted_review_rejection_is_visible_warning_only` 覆盖正向与七种反向证据。
+
+## 管理员导入任务处理
+
+`tests/test_import_job_operations.py` 使用真实 PostgreSQL 验证详情/分页、权限、版本冲突、重复提交、并发重试、审计回滚、预览终结、明确处理后所有恢复入口拒绝。`web/src/test/ImportJobDiagnostics.test.tsx` 验证跨用户详情、结果不明先回读、刷新失败与旧响应隔离。`web/e2e/import-job-disposition.spec.ts` 验证浏览器处理闭环；原三类导入 E2E 继续回归。七类测试均适用；不新增 read model。

@@ -583,6 +583,11 @@ _DYNAMIC_RULES = (
         "/withdraw",
     ),
     _RouteRule(
+        "POST", "/api/imports/jobs/",
+        _semantic("import_job.dispose", "结束导入任务处理", "import_job", "导入任务", "结束本次任务处理并保留原执行结果。"),
+        "/dispose",
+    ),
+    _RouteRule(
         "POST",
         "/api/background-jobs/",
         _semantic(

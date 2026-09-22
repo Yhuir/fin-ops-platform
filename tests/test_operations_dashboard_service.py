@@ -107,9 +107,6 @@ class FakeDashboardConnection:
 
 
 class FakeRuntimeRepository:
-    def dashboard_import_jobs(self):
-        return []
-
     def dashboard_outbox_metric(self) -> dict[str, object]:
         return {
             "pending_count": 3,

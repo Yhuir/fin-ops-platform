@@ -169,7 +169,7 @@ class PostgresEtcImportSessionRepository:
             raise KeyError(session_id)
         return row
 
-    def discard_preview(self, session_id: str, *, imported_by: str, on_discard: Any = None) -> None:
+    def discard_preview(self, session_id: str, *, imported_by: str, on_discard: Any = None, transaction: Any = None) -> None:
         def discard(connection: Any) -> None:
             if on_discard is not None:
                 on_discard(connection)
@@ -218,7 +218,10 @@ class PostgresEtcImportSessionRepository:
                 (_jsonb({"normalized_payload": payload}), session_id),
             )
 
-        run_in_transaction(self._connection, discard)
+        if transaction is not None:
+            discard(transaction)
+        else:
+            run_in_transaction(self._connection, discard)
 
 
 def _datetime_text(value: Any) -> str | None:

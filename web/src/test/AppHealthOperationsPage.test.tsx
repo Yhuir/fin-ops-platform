@@ -344,7 +344,7 @@ describe("AppHealthOperationsPage", () => {
           ],
           workers: [{ worker_kind: "runtime-worker", heartbeat_lag_seconds: null, status: "unknown" }],
         },
-        freshness: { warnings: ["queue_metrics_unavailable", "import_jobs_unavailable"] },
+        freshness: { warnings: ["queue_metrics_unavailable"] },
       },
     });
 
@@ -355,8 +355,7 @@ describe("AppHealthOperationsPage", () => {
     expect(within(screen.getByTestId("app-health-requests")).getAllByText("--")[0].closest("td")).toHaveAttribute("data-tone", "unknown");
     expect(screen.getByTestId("app-health-runtime")).toHaveTextContent("--");
     expect(screen.getByTestId("app-health-runtime-overview")).toHaveTextContent("队列状态未知");
-    expect(screen.getByRole("alert")).toHaveTextContent("导入任务诊断暂不可用");
-    expect(screen.queryByText("无待处理导入任务")).not.toBeInTheDocument();
+    expect(await screen.findByText("无待处理导入任务")).toBeInTheDocument();
   });
 
   test("keeps the current dashboard visible when refresh fails", async () => {

@@ -148,3 +148,9 @@ ETC preview、confirm 与 discard 都是写入操作，必须在 multipart/JSON 
 共享任务 DTO 明确保留 needs_review；重新预览、确认、取消沿用现有 owner 权限。ETC 原 affected_domains=[imports_etc_invoices,etc_tickets] 及预览路由保留。Import worker 超时通过原有限重试边界收敛，不改变ETC解析、对账匹配或正式发票事务。
 
 实施和验收见 [修复计划](../../dev/import-runtime-status-repair-plan.md)。
+
+## 2026-09-22 管理员导入任务处理
+
+管理员放弃 needs_review 时复用 PostgresEtcImportSessionRepository.discard_preview 的显式 transaction 参数，与任务处置和审计同事务。原 owner discard 和正式确认合同不变；不新建 worker，不改变对账和发票业务事实。
+
+实施、验证与旧链路清理见[处理闭环](../../dev/import-task-disposition-plan.md)。

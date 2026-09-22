@@ -134,22 +134,6 @@ class RuntimeMonitoringRepository:
             from scoped_jobs group by affected_domains,status
         """)
 
-    def dashboard_import_jobs(self) -> list[dict[str, Any]]:
-        # Administrative diagnostics only. No upload manifest, file bytes or raw error payload.
-        rows = self._connection.fetch_all(scoped_import_jobs("""
-            select * from job.import_jobs where acknowledged_at is null
-                and status in ('pending','processing','failed','awaiting_confirmation','needs_review')
-            order by case when status='failed' then 0 when status='needs_review' then 1 else 2 end,
-                updated_at desc, id limit 20
-        """) + """
-            select id::text as job_id, affected_domains, status, stage, attempt_count,max_attempts,
-                   created_at::text,updated_at::text,finished_at::text,
-                   case when position('selected files require review before confirmation: ' in last_error)=1
-                     then 'review_required' else result_payload->>'error_code' end as error_code
-            from scoped_jobs order by updated_at desc,id
-        """)
-        return rows
-
     def _app_status_worker_statuses(self) -> dict[str, dict[str, Any]]:
         statuses: dict[str, dict[str, Any]] = {}
         registered_instances = {registration.instance_name for registration in worker_registrations(required_only=True)}

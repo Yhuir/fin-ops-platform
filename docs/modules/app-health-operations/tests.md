@@ -70,3 +70,7 @@ bash scripts/verify.sh docs
 ## 2026-09-22 导入运行状态闭环
 
 业务单测覆盖单域失败隔离、混合状态精确计数、待确认不执行、未知归属和完成任务不忙。API测试覆盖durable导入DTO、needs_review和不阻断写入。真实PostgreSQL测试覆盖按文件事实归属、权限隔离、确认提示后统计收敛、超时重试耗尽与显式恢复只写一次、历史复核拒绝重新预览。前端覆盖合法状态解析、失败不显示百分比、混合计数、任务链接、待复核的查看/重新预览动作。复用三类导入与Shell浏览器回归，不新增read model或缓存测试设施。
+
+## 管理员导入任务处理
+
+`tests/test_import_job_operations.py` 使用真实 PostgreSQL 验证详情/分页、权限、版本冲突、重复提交、并发重试、审计回滚、预览终结、明确处理后所有恢复入口拒绝。`web/src/test/ImportJobDiagnostics.test.tsx` 验证跨用户详情、结果不明先回读、刷新失败与旧响应隔离。`web/e2e/import-job-disposition.spec.ts` 验证浏览器处理闭环；原三类导入 E2E 继续回归。七类测试均适用；不新增 read model。

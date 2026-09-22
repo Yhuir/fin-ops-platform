@@ -1,3 +1,4 @@
+import ImportJobDiagnostics from "../components/imports/ImportJobDiagnostics";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, Button, Spinner, Tooltip } from "@heroui/react";
@@ -649,26 +650,6 @@ function QueueTable({ payload }: { payload: OperationsDashboardPayload }) {
   );
 }
 
-function ImportJobDiagnostics({ payload }: { payload: OperationsDashboardPayload }) {
-  if (payload.freshness.warnings.includes("import_jobs_unavailable")) {
-    return <p role="alert">导入任务诊断暂不可用，请刷新后重试。</p>;
-  }
-  return (
-    <section aria-label="导入任务诊断">
-      <h3>导入任务诊断（最多 20 条，总数见队列统计）</h3>
-      {payload.runtime_performance.import_jobs.map((job) => (
-        <div key={job.job_id}>
-          <strong>{job.affected_domains.join("、")}</strong>{" · "}
-          <span>{job.status} / {job.stage} · 尝试 {job.attempt_count}/{job.max_attempts}</span>
-          <p>任务 {job.job_id} · 更新 {job.updated_at}</p>
-          <p>{["preview_stale", "review_required"].includes(job.error_code ?? "") ? "需要重新核对预览，由任务创建人处理。" : job.status === "failed" ? "任务已失败；创建人可在导入进度中查看原因和处理。" : "由任务创建人在对应导入页面查看预览或进度。"}</p>
-        </div>
-      ))}
-      {payload.runtime_performance.import_jobs.length === 0 ? <p>无待处理导入任务</p> : null}
-    </section>
-  );
-}
-
 function WorkerTable({ payload }: { payload: OperationsDashboardPayload }) {
   return (
     <FinanceTable ariaLabel="Worker 状态" minWidth={900}>
@@ -720,7 +701,6 @@ function RuntimePerformance({ payload }: { payload: OperationsDashboardPayload }
       <div className="app-health-runtime-grid app-health-runtime-grid--primary">
         <OutboxTable payload={payload} />
         <QueueTable payload={payload} />
-      <ImportJobDiagnostics payload={payload} />
       </div>
       <WorkerTable payload={payload} />
     </Section>
@@ -749,14 +729,16 @@ export default function AppHealthOperationsPage() {
   const importHistoryInFlightRef = useRef<AbortController | null>(null);
 
   const loadDashboard = useCallback(async () => {
-    if (!permissions.canAdminAccess || inFlightRef.current) {
+    if (!permissions.canAdminAccess) {
       return;
     }
+    inFlightRef.current?.abort();
     const controller = new AbortController();
     inFlightRef.current = controller;
     setIsLoading(true);
     try {
       const nextPayload = await fetchAppHealthDashboard(controller.signal);
+      if (controller.signal.aborted) return;
       setPayload(nextPayload);
       setLoadError(null);
     } catch (error) {
@@ -915,6 +897,7 @@ export default function AppHealthOperationsPage() {
           />
           <RequestPerformance rows={payload.request_performance.endpoints} />
           <RuntimePerformance payload={payload} />
+          <ImportJobDiagnostics refreshToken={payload} onHandled={loadDashboard} />
           <AppDrawer
             className="app-health-import-history-drawer"
             closeLabel="关闭导入历史"

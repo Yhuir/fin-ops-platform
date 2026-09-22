@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from fin_ops_platform.services.access_control_service import ALL_PAGE_KEYS, ASSIGNABLE_PAGE_KEYS
 
-
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 _READ_ONLY_POST_ROUTES = frozenset(
     {
@@ -18,6 +17,7 @@ _READ_ONLY_POST_ROUTES = frozenset(
 )
 
 _ADMIN_ONLY_PREFIXES = (
+    "/api/imports/jobs",
     "/api/operations/history",
     "/api/workbench/settings/access-control",
     "/api/workbench/settings/oa-applicant-credentials",
@@ -25,6 +25,7 @@ _ADMIN_ONLY_PREFIXES = (
 )
 
 _ROUTE_PAGE_PREFIXES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("/api/imports/jobs", ("app-health-operations",)),
     ("/api/workbench/settings", ("settings",)),
     ("/api/workbench/oa-invoice-supplements", ("reconciliation-workbench",)),
     ("/api/workbench", ("reconciliation-workbench",)),

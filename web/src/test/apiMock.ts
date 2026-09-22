@@ -5235,6 +5235,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       };
     },
+    "/api/imports/jobs": () => ({ body: { rows: [], pagination: { page: 1, page_size: 20, total: 0, has_more: false } } }),
     "/api/operations/app-health-dashboard": () => {
       if (options.appHealthDashboardSequence && options.appHealthDashboardSequence.length > 0) {
         const item = options.appHealthDashboardSequence[

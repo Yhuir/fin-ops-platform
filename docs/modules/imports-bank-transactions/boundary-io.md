@@ -218,3 +218,9 @@ worker 不写独立 background job；全局进度从同一 import job 投影，�
 导入状态查询以 canonical import job + 已选文件类型投影归属，银行/发票不能仅因共享 file_import.confirm 类型互相显示运行中。确认前复核拒绝使用 ImportReviewRequiredError，worker 转 needs_review；显式重新预览后仍需用户确认。历史同类型复核拒绝保留 failed，显式重试走 prepare，不直接重跑 commit。任务 source.route/affected_domains 在读取时由已登记归属输出，未知归属不猜成银行/发票。
 
 实施和验收见 [修复计划](../../dev/import-runtime-status-repair-plan.md)。
+
+## 2026-09-22 管理员导入任务处理
+
+共享导入管理员处理与发票采用同一 job operations 边界；正式流水与已确认批次不修改。retry_job 要求 expected_version，所有生产/工具/测试调用点同步迁移。普通确认已知仍可显式重试，disposition 表示明确结束，不允许恢复。
+
+实施、验证与旧链路清理见[处理闭环](../../dev/import-task-disposition-plan.md)。

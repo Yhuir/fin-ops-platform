@@ -170,6 +170,7 @@ from fin_ops_platform.services.health_payload_compaction import compact_ready_pa
 from fin_ops_platform.services.historical_etc_repair_service import HistoricalEtcRepairService
 from fin_ops_platform.services.http_runtime_metrics import HTTP_RUNTIME_METRICS
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile
+from fin_ops_platform.services.import_job_operations_service import ImportJobOperationsService
 from fin_ops_platform.services.import_job_queue import ImportJob, ImportJobIdempotencyConflict, ImportJobRepository
 from fin_ops_platform.services.import_lifecycle_service import ImportLifecycleService
 from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
@@ -317,6 +318,8 @@ from fin_ops_platform.services.postgres_repositories.cost_statistics_manual_allo
     InMemoryCostStatisticsManualAllocationRepository,
     PostgresCostStatisticsManualAllocationRepository,
 )
+from fin_ops_platform.services.postgres_repositories.etc_import_sessions import PostgresEtcImportSessionRepository
+from fin_ops_platform.services.postgres_repositories.import_job_operations import ImportJobOperationsRepository
 from fin_ops_platform.services.postgres_repositories.import_lifecycle import PostgresImportLifecycleRepository
 from fin_ops_platform.services.postgres_repositories.input_invoice_usage_oa_reverse import (
     PostgresInputInvoiceUsageOaReverseBatchRepository,
@@ -1847,6 +1850,8 @@ class Application:
             return self._handle_api_app_health(headers)
         if method == "GET" and route_path == "/api/operations/app-health-dashboard":
             return self._handle_api_operations_app_health_dashboard(headers)
+        if route_path == "/api/imports/jobs" or route_path.startswith("/api/imports/jobs/"):
+            return self._handle_import_job_operations(method, route_path, query, body, headers, request_id=request_id)
         if method == "GET" and route_path == "/api/operations/import-history":
             return self._handle_api_operations_import_history(query, headers)
         if (
@@ -3352,6 +3357,43 @@ class Application:
         )
         return self._json_response(HTTPStatus.OK, self._cached_operations_app_health_dashboard_payload(service))
 
+    def _handle_import_job_operations(self, method, route_path, query, body, headers, *, request_id):
+        session, error = self._resolve_admin_session(headers)
+        if error is not None:
+            return error
+        connection = getattr(self._state_store, "_connection", None)
+        if connection is None:
+            return self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "postgres_required", "message": "任务处理需要 PostgreSQL。"})
+        service = ImportJobOperationsService(
+            ImportJobOperationsRepository(connection),
+            file_lifecycle=PostgresImportLifecycleRepository(connection),
+            etc_sessions=PostgresEtcImportSessionRepository(connection),
+        )
+        parts = route_path.removeprefix("/api/imports/jobs").strip("/").split("/")
+        try:
+            if method == "GET" and route_path == "/api/imports/jobs":
+                result = service.list_jobs(page=int(query.get("page", ["1"])[0]), page_size=int(query.get("page_size", ["20"])[0]))
+            elif method == "GET" and len(parts) == 1:
+                result = service.detail(parts[0], actor_account=session.identity.username,
+                                        file_page=int(query.get("file_page", ["1"])[0]))
+            elif method == "POST" and len(parts) == 2 and parts[1] == "dispose":
+                payload, body_error = self._load_json_body(body)
+                if body_error is not None:
+                    return body_error
+                actor_id, actor_name, actor_account = _REQUEST_AUDIT_ACTOR.get()
+                result = service.dispose(parts[0], payload,
+                    actor={"actor_id": actor_id, "actor_name": actor_name, "actor_account": actor_account}, request_id=request_id)
+                _REQUEST_AUDIT_EVIDENCE.set(build_operation_evidence(**result.pop("evidence")))
+            else:
+                return self._json_response(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "import_job_not_found", "message": "任务或预览不存在，请刷新核实。"})
+        except ImportJobIdempotencyConflict as exc:
+            return self._json_response(HTTPStatus.CONFLICT, {"error": "import_job_state_conflict", "message": str(exc)})
+        except (ValueError, PermissionError) as exc:
+            return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "invalid_import_job_operation", "message": str(exc)})
+        return self._json_response(HTTPStatus.OK, self._serialize_value(result))
+
     def _handle_api_operations_import_history(
         self,
         query: dict[str, list[str]],
@@ -3635,12 +3677,12 @@ class Application:
         cached_entry = self._app_health_dashboard_cache_entry()
         cached_payload = cached_entry[0] if cached_entry is not None else None
         if cached_entry is not None and cached_entry[1]:
-            return cached_payload
+            return service.with_current_runtime(cached_payload)
         try:
             payload = service.build_payload()
         except Exception:
             if cached_payload is not None:
-                return self._app_health_dashboard_stale_payload(cached_payload)
+                return service.with_current_runtime(self._app_health_dashboard_stale_payload(cached_payload))
             raise
         expires_at = monotonic() + ttl_seconds
         with self._app_health_dashboard_cache_lock:

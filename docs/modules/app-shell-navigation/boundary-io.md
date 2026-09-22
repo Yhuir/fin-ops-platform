@@ -106,3 +106,9 @@
 Shell 精确展示导入 pending/processing/awaiting_confirmation/needs_review/failed 状态；busy 黄灯统称需关注，不据此伪称同步中。状态弹层消费后端分状态计数，失败不显示0%进度条，任务链接携带 import_job 进入现有显式恢复预览入口。原五秒有界轮询和写入权限边界保持；现金业务 DTO 不进入全局状态。
 
 实施和验收见 [修复计划](../../dev/import-runtime-status-repair-plan.md)。
+
+## 2026-09-22 管理员导入任务处理
+
+管理员运行状态弹层有待处理项时提供查看待处理任务链接，跳转现有 App Health 导入任务诊断。保留原5秒轮询和权限；不增加业务写入或跨页刷新广播。
+
+实施、验证与旧链路清理见[处理闭环](../../dev/import-task-disposition-plan.md)。

@@ -485,6 +485,19 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(json.loads(response.body)["error"], "page_access_policy_missing")
 
+    def test_dashboard_cached_inventory_does_not_cache_import_queue_state(self):
+        with self._temporary_env(FIN_OPS_APP_HEALTH_DASHBOARD_CACHE_TTL_SECONDS="30"), tempfile.TemporaryDirectory() as directory:
+            app = self._build_admin_application(data_dir=Path(directory))
+            app._state_store._connection = FakeOperationsDashboardConnection()
+            with patch("fin_ops_platform.services.runtime_monitoring.RuntimeMonitoringRepository.dashboard_queue_metrics",
+                       side_effect=[[{"failed_count": 1}], [{"failed_count": 0}]]):
+                first = json.loads(app.handle_request("GET", "/api/operations/app-health-dashboard").body)
+                second = json.loads(app.handle_request("GET", "/api/operations/app-health-dashboard").body)
+            self.assertEqual(first["runtime_performance"]["queues"][0]["failed_count"], 1)
+            self.assertEqual(second["runtime_performance"]["queues"][0]["failed_count"], 0)
+            self.assertEqual(first["data_inventory"], second["data_inventory"])
+            self.assertNotIn("import_jobs", second["runtime_performance"])
+
     def test_operations_app_health_dashboard_returns_stale_cached_payload_after_refresh_error(self) -> None:
         current_time = {"value": 100.0}
 

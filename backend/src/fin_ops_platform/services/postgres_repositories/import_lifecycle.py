@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any
 
 
@@ -88,8 +89,8 @@ class PostgresImportLifecycleRepository:
         ) or []
         return [dict(row) for row in rows], int(total_row.get("total") or 0)
 
-    def discard_preview_session(self, *, session_id: str, imported_by: str) -> int:
-        with self._connection.transaction() as transaction:
+    def discard_preview_session(self, *, session_id: str, imported_by: str, transaction: Any = None) -> int:
+        with (nullcontext(transaction) if transaction is not None else self._connection.transaction()) as transaction:
             rows = transaction.fetch_all(
                 """
                 select

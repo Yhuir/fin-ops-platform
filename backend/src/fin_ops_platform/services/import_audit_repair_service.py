@@ -243,7 +243,10 @@ def execute_failed_import_job_recovery(connection: Any, plan: dict[str, Any]) ->
 
     target = dict(plan["target"])
     import_jobs = ImportJobRepository(connection)
-    recovered_job = import_jobs.retry_job(target["import_job_id"])
+    current_job = import_jobs.get_job(target["import_job_id"])
+    if current_job is None:
+        raise RuntimeError("Import job no longer exists.")
+    recovered_job = import_jobs.retry_job(target["import_job_id"], expected_version=current_job.version)
     if recovered_job.import_job_id != target["import_job_id"] or recovered_job.status != "pending":
         raise RuntimeError("Failed import job did not re-enter the exact pending row.")
 

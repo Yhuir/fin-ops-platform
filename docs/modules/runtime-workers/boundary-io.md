@@ -105,3 +105,9 @@ retry、release 和 manual requeue 保留 event UUID、payload、source version�
 ImportJobWorker 显式捕获 RuntimeWorkerTaskTimeout，复用 owner+claim_version 的失败更新及有限重试，耗尽后终态失败。ImportReviewRequiredError 和已知预览冲突进入 needs_review，不自动确认。租约恢复、取消隔离、权限复核及正式数据与任务终态同事务保持不变。无新增 Worker、队列、迁移或 read model。
 
 实施和验收见 [修复计划](../../dev/import-runtime-status-repair-plan.md)。
+
+## 2026-09-22 管理员导入任务处理
+
+共享 ImportJobRepository retry_job 新增必须的 expected_version；retry/confirm/reprepare/cancel 均拒绝 result_payload 中明确结束的 disposition。普通 acknowledged_at 不等同结束。worker claim/lease/fencing 不变，不增加 worker。
+
+实施、验证与旧链路清理见[处理闭环](../../dev/import-task-disposition-plan.md)。

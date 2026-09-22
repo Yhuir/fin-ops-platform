@@ -49,6 +49,16 @@ test.describe("production admin AppHealth smoke", () => {
 
     await expect(page.getByRole("heading", { name: "导入任务诊断" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "失败", exact: true })).toBeVisible();
+    const taskList = page.getByRole("table", { name: "待处理导入任务" });
+    await expect(taskList).toBeVisible();
+    const detailButton = taskList.getByRole("button", { name: "查看详情" }).first();
+    if (await detailButton.count()) {
+      await detailButton.click();
+      await expect(page.getByRole("heading", { name: "导入任务详情" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "当前文件与导入证据" })).toBeVisible();
+      await expect(page.getByText("任务编号：", { exact: false })).toBeVisible();
+    }
+
 
     for (const [route, heading] of [
       ["bank-transactions", "银行流水导入"],

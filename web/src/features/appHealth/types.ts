@@ -254,11 +254,6 @@ export type OperationsDashboardPayload = {
   runtime_performance: {
     outbox: OperationsDashboardOutboxMetric;
     queues: OperationsDashboardQueueMetric[];
-    import_jobs: Array<{
-      job_id: string; affected_domains: string[]; status: string; stage: string;
-      attempt_count: number; max_attempts: number; updated_at: string;
-      error_code: string | null;
-    }>;
     workers: OperationsDashboardWorkerMetric[];
   };
   freshness: {

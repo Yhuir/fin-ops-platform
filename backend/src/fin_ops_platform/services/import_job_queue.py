@@ -244,19 +244,21 @@ class ImportJobRepository:
                     version=version+1, available_at=now(), attempt_count=0,
                     acknowledged_at=null, last_error=null, updated_at=now()
                 where id=%s and version=%s and status in ('awaiting_confirmation','needs_review')
+                  and not (result_payload ? 'disposition')
                 returning *, id::text as import_job_id
             """, (self._json_param(payload), import_job_id, expected_version))
         if row is None:
             raise ImportJobIdempotencyConflict("Import preview changed or confirmation already accepted.")
         return _job_from_row(row)
 
-    def retry_job(self, import_job_id: str) -> ImportJob:
+    def retry_job(self, import_job_id: str, *, expected_version: int) -> ImportJob:
         with self._connection.transaction() as transaction:
             row = transaction.fetch_one("""
                 update job.import_jobs set status='pending', attempt_count=0, last_error=null,
                     version=version+1, available_at=now(), finished_at=null, acknowledged_at=null, updated_at=now()
-                where id=%s and status='failed' returning *, id::text as import_job_id
-            """, (import_job_id,))
+                where id=%s and version=%s and status='failed' and not (result_payload ? 'disposition')
+                returning *, id::text as import_job_id
+            """, (import_job_id, expected_version))
         if row is None:
             raise ImportJobIdempotencyConflict("Only a failed import can be retried.")
         return _job_from_row(row)
@@ -289,6 +291,7 @@ class ImportJobRepository:
                     payload=coalesce(%s,payload), available_at=now(), finished_at=null,
                     acknowledged_at=null, updated_at=now()
                 where id=%s and version=%s and status in ('needs_review','awaiting_confirmation','failed')
+                  and not (result_payload ? 'disposition')
                 returning *, id::text as import_job_id
             """, (self._json_param(payload) if payload is not None else None, import_job_id, expected_version))
         if row is None:
@@ -300,7 +303,7 @@ class ImportJobRepository:
             row = transaction.fetch_one("""
                 update job.import_jobs set status='canceled', claim_version=claim_version+1,
                     version=version+1, locked_by=null, locked_at=null, finished_at=now(), updated_at=now()
-                where id=%s and created_by=%s and status in
+                where id=%s and created_by=%s and not (result_payload ? 'disposition') and status in
                     ('pending','processing','awaiting_confirmation','needs_review','failed')
                 returning *, id::text as import_job_id
             """, (import_job_id, created_by))

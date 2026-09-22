@@ -105,3 +105,9 @@
 - Audit owner 接收 settings transaction 提交的 session actor、版本摘要、changed username hashes、mutation id 和 server request id；不接收 token、密码或完整 ACL payload。
 - route access policy 的只读 POST allowlist 只能登记无 canonical 写入、无 durable job 创建、无状态持久化的查询/preview/calculate；导入 preview、ETC preview 和后台 job acknowledge/retry 均属于写入。
 - 后端 route 从已解析 session 传递 actor/owner；客户端 actor 字段不得重新成为业务或审计身份源。
+
+## 2026-09-22 管理员导入任务处理
+
+/api/imports/jobs 精确前缀登记 app-health-operations 且 admin-only，body 解析前检查；普通个人任务接口不放宽。新 import_job.dispose 语义登记操作历史，真实 actor/request_id 来自服务器；领域处理审计与任务事务同成同败。
+
+实施、验证与旧链路清理见[处理闭环](../../dev/import-task-disposition-plan.md)。

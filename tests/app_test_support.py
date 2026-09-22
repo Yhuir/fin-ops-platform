@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from weakref import finalize
 from types import SimpleNamespace
 from unittest.mock import patch
+from weakref import finalize
 
 from fin_ops_platform.app.server import Application
 from fin_ops_platform.app.server import build_application as _build_application
@@ -481,7 +481,10 @@ class DurableImportQueueHarness:
             raise ImportJobIdempotencyConflict("Preview changed")
         return self.update(job_id, payload=dict(payload), status="pending", stage="commit", acknowledged_at=None)
 
-    def retry_job(self, job_id):
+    def retry_job(self, job_id, *, expected_version):
+        job = self.get_job(job_id)
+        if job.version != expected_version or "disposition" in job.result_payload:
+            raise ImportJobIdempotencyConflict("Task changed or disposed")
         return self.update(job_id, status="pending", last_error=None, acknowledged_at=None)
 
     def acknowledge_job(self, job_id, *, created_by):

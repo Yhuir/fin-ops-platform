@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import inspect
-from pathlib import Path
 import re
 import unittest
+from pathlib import Path
 
-from fin_ops_platform.app.route_access_policy import missing_page_keys, registered_page_keys
+from fin_ops_platform.app.route_access_policy import (
+    is_admin_only_route,
+    is_state_changing_request,
+    missing_page_keys,
+    page_keys_for_route,
+    registered_page_keys,
+)
 from fin_ops_platform.services.access_control_service import (
     ALL_PAGE_KEYS,
     ASSIGNABLE_PAGE_KEYS,
     AccessControlService,
 )
 from fin_ops_platform.services.app_settings_service import AppSettingsService
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PAGE_REGISTRY_PATH = REPO_ROOT / "web/src/app/pageRegistry.tsx"
@@ -38,6 +43,14 @@ class PermissionsWriteEntryInventoryTests(unittest.TestCase):
         self.assertEqual(registered_page_keys(), ALL_PAGE_KEYS)
         self.assertEqual(missing_page_keys(), frozenset())
         self.assertNotIn("operation-history", ASSIGNABLE_PAGE_KEYS)
+
+    def test_import_job_administration_is_admin_only_and_disposition_is_audited_mutation(self):
+        for path in ("/api/imports/jobs", "/api/imports/jobs/job-id", "/api/imports/jobs/job-id/dispose"):
+            self.assertTrue(is_admin_only_route(path))
+            self.assertEqual(page_keys_for_route(path), ("app-health-operations",))
+        self.assertTrue(is_state_changing_request("POST", "/api/imports/jobs/job-id/dispose"))
+        self.assertFalse(is_admin_only_route("/api/background-jobs/import:job-id"))
+        self.assertFalse(is_admin_only_route("/api/imports/jobs-other"))
 
     def test_authorization_uses_only_the_canonical_page_snapshot(self) -> None:
         evaluator_source = inspect.getsource(AccessControlService.evaluate)

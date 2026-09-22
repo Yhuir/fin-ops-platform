@@ -21,3 +21,9 @@
 Own read model：无。Redis/RabbitMQ/后台 worker：无。事实源为 PostgreSQL `audit.events`。
 
 旧链路删除条件：生产不得使用 `AuditTrailService._entries`；它只保留给无 repository 的隔离单元测试。前端不得按 raw event 逐行显示 requested/completed，不得使用旧 `items` DTO/操作明细表格、维护 route/object type 文案映射或展示内部审计标识，也不得恢复 audit 表 UPDATE/DELETE 权限或页面端自行拼接 actor。
+
+## 2026-09-22 管理员导入任务处理
+
+import_job.dispose 为结束导入任务处理，HTTP completion 固化处理原因、补充说明、原执行结果和处理状态证据；领域成功事件与 job disposition 同事务。不删除失败历史，不把关闭提醒解释为导入成功。
+
+实施、验证与旧链路清理见[处理闭环](../../dev/import-task-disposition-plan.md)。

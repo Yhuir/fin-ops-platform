@@ -67,9 +67,11 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
 
     def test_cold_oa_attachments_continue_same_event_before_snapshot_commit(self) -> None:
         from unittest.mock import patch
+
         from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
         from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
         from fin_ops_platform.services.runtime_worker import RuntimeWorker, RuntimeWorkerConfig, RuntimeWorkerResult
+
         from tests.test_mongo_oa_adapter import StubMongoOAAdapter
         from tests.test_oa_projection_sync_service import FakeProjectionRepository, FakeSourceAdapter, _oa
 
@@ -793,7 +795,7 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
                 error="terminal integration failure",
             )
         )
-        manual_retry = repository.retry_job(job.import_job_id)
+        manual_retry = repository.retry_job(job.import_job_id, expected_version=repository.get_job(job.import_job_id).version)
         self.assertEqual(manual_retry.import_job_id, job.import_job_id)
         self.assertEqual(manual_retry.status, "pending")
         self.assertEqual(manual_retry.attempt_count, 0)

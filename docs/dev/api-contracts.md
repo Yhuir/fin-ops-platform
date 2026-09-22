@@ -1560,5 +1560,13 @@ OA 成本标签覆盖：`oa_cost_tag_overrides` 为必填数组，每项 `{unit_
 
 - `/api/app-health.app_status`：queue计数新增awaiting_confirmation/needs_review；backlog=pending+processing，failed单独统计。domain新增counts，status明确区分pending/processing/awaiting_confirmation/needs_review/failed。后台任务来自当前用户的durable import job与有效非导入任务，不再使用旧导入BackgroundJob事实。
 - `/api/background-jobs/*`：needs_review作为明确合法状态；retry_mode=reprepare表示重新准备，仍需用户确认；历史确认前复核拒绝不以相同commit无限重试。owner权限不变。
-- `/api/operations/app-health-dashboard.runtime_performance`：queues保持来源queue和分状态计数；新增import_jobs有界诊断样本（最多20条），字段为job_id/affected_domains/status/stage/attempt_count/max_attempts/created_at/updated_at/finished_at/error_code。总数以queues为准。权限保持admin-only，错误原因仅返回分类，不返回原文件或原始业务payload。
+- `/api/operations/app-health-dashboard.runtime_performance`：queues 保持来源 queue 和分状态计数；旧 import_jobs 样本已由下述管理员分页接口替代。库存缓存命中时仍重读 runtime，避免任务处理后缓存旧计数。
 - `/health/ready.runtime_infrastructure.import_queue` 保留直接导入摘要，不因用户输入失败扩大readiness门禁。
+
+## 管理员导入任务处理（2026-09-22）
+
+- `GET /api/imports/jobs?page=1&page_size=20`：admin-only；`rows/pagination`，每页1–100条；只查询未确认提醒的活动/待处理任务，稳定时间+ID排序。
+- `GET /api/imports/jobs/{uuid}?file_page=1`：admin-only，`job/files/file_pagination`；文件每页20条。历史错误与当前预览分开，批次记录引用和当前强身份匹配只作证据，不推断原任务成功。GET 不修复、不解析文件。
+- `POST /api/imports/jobs/{uuid}/dispose`：admin-only mutation；body `{version,action,reason,note?}`，version 正整数，action=close|discard，reason=completed_elsewhere|not_needed，note最多500字。close只处理failed，discard只处理文件/ETC的needs_review并事务终结预览。返回 `{job_id,status,version,disposition,idempotent_replay}`；保留失败原文，不写正式财务事实。
+- 同一版本、动作、原因、说明重复提交返回已处理结果；不同请求争用或版本/状态变化返回409。非法输入400、目标不存在404、非管理员403。操作者来自认证session，不能由body冒充。
+- 个人确认已知仅隐藏提醒；管理员 disposition 明确结束原任务，原 confirm/retry/reprepare/cancel 不得重新激活。后续需要导入时创建新导入。审计与状态同事务，HTTP completion 保存业务可读处理证据。

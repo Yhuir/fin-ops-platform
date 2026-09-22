@@ -295,6 +295,9 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
               {canAdminAccess ? (
                 <>
                   <Separator />
+                  {queueIssues > 0 && <RouterLink className="app-status-admin-link" to="/operations/app-health#import-job-diagnostics" onClick={() => onOpenChange(false)}>
+                    查看待处理任务
+                  </RouterLink>}
                   <RouterLink className="app-status-admin-link" to="/operations/app-health">
                     App Health
                   </RouterLink>

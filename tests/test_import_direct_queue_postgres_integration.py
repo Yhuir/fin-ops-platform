@@ -58,7 +58,6 @@ class ImportDirectQueuePostgresTests(unittest.TestCase):
         payload = import_job_payload(self.repository.get_job(invoice.import_job_id))
         self.assertEqual(payload['route'], '/imports/invoices')
         self.assertEqual(payload['affected_domains'], ['imports_invoices'])
-        self.assertEqual(len(repository.dashboard_import_jobs()),2)
         self.assertEqual(len(repository.dashboard_queue_metrics()),2)
         self.assertEqual(len(self.repository.list_jobs(created_by='other')),0)
         self.repository.acknowledge_job(invoice.import_job_id, created_by='owner')
@@ -78,7 +77,7 @@ class ImportDirectQueuePostgresTests(unittest.TestCase):
         self.assertEqual(worker.run_once(), RuntimeWorkerResult.FAILED_PERMANENT)
         self.assertEqual(self.repository.get_job(job.import_job_id).status,'failed')
         self.assertEqual(worker.run_once(),RuntimeWorkerResult.IDLE)
-        self.repository.retry_job(job.import_job_id)
+        self.repository.retry_job(job.import_job_id, expected_version=self.repository.get_job(job.import_job_id).version)
         def finish(claim):
             with self.connection.transaction() as tx:
                 claim.completion.lock(tx)
@@ -195,7 +194,7 @@ class ImportDirectQueuePostgresTests(unittest.TestCase):
             with self.connection.transaction() as tx:
                 ImportJobCompletion(claim).lock(tx)
         with self.assertRaises(ImportJobIdempotencyConflict):
-            self.repository.retry_job(job.import_job_id)
+            self.repository.retry_job(job.import_job_id, expected_version=self.repository.get_job(job.import_job_id).version)
 
     def test_business_write_and_success_rollback_together(self):
         job = self.create()
@@ -445,7 +444,7 @@ class ImportDirectQueuePostgresTests(unittest.TestCase):
         self.assertEqual(self.connection.fetch_one('select count(*) n from app.manual_oa_imports')['n'],0)
         self.assertEqual(self.connection.fetch_one("select outcome from audit.events where object_id=%s",(job.import_job_id,))['outcome'],'failed')
         records.append(oa_record('later',status='已完成'))
-        self.repository.retry_job(job.import_job_id)
+        self.repository.retry_job(job.import_job_id, expected_version=self.repository.get_job(job.import_job_id).version)
         self.assertEqual(worker.run_once(), RuntimeWorkerResult.PROCESSED)
         self.assertEqual(self.repository.get_job(job.import_job_id).result_payload['imported'],['later'])
 

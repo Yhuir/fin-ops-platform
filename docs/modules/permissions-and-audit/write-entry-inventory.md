@@ -8,6 +8,7 @@
 
 ## 管理员专属页面与接口
 
+- `/api/imports/jobs` 及其详情/处理：管理员专属，映射 `app-health-operations`；GET 只读，dispose 为真实 mutation。
 - `operation-history`
 - `/api/workbench/settings/access-control*`
 - `/api/workbench/settings/oa-applicant-credentials*`

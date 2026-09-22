@@ -94,3 +94,5 @@
 - `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。
 
 当前实施的生命周期和跨进程恢复合同见 [state-machine.md](state-machine.md) 的 2026-09-21 合同；普通上传/提交不再维护独立 background job 或导入 outbox。
+
+管理员任务处理入口：`services/import_job_operations_service.py`、`services/postgres_repositories/import_job_operations.py`、`components/imports/ImportJobDiagnostics.tsx`、`features/imports/jobOperations.ts`。详见本模块 boundary-io 与[实施记录](../../dev/import-task-disposition-plan.md)。

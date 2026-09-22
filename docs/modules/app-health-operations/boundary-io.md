@@ -65,6 +65,12 @@ Shell 接受后端关联域 `error/rebuilding` 与 worker `mismatch` 状态，�
 
 ## 2026-09-22 导入状态与恢复闭环
 
-运行状态、个人任务进度和管理员诊断的导入执行事实统一为 `job.import_jobs`。`scoped_import_jobs` 根据选中文件所属会话及已登记类型批量投影归属，未知归属返回 import_unknown，不广播到银行/发票两域。不同状态分别计数，backlog=pending+processing；failed/needs_review/awaiting_confirmation 是待处理而非运行中。全局计数不受个人详情权限/样本上限影响，不泄露原文件或其他用户业务错误内容。Dashboard 复用原 admin-only GET，增加最多20条 import_jobs 诊断样本；只读、零修复命令。前端旧 RabbitMQ 字段已移除，展示真实 PostgreSQL 队列字段。业务失败不新增全站写入门禁。
+运行状态、个人任务进度和管理员诊断的导入执行事实统一为 `job.import_jobs`。`scoped_import_jobs` 根据选中文件所属会话及已登记类型批量投影归属，未知归属返回 import_unknown，不广播到银行/发票两域。不同状态分别计数，backlog=pending+processing；failed/needs_review/awaiting_confirmation 是待处理而非运行中。全局计数不受个人详情权限/样本上限影响，不泄露原文件或其他用户业务错误内容。管理员诊断采用独立的分页导入任务 GET；Dashboard 不再携带旧 import_jobs 样本。健康读取只读、零修复命令。前端旧 RabbitMQ 字段已移除，展示真实 PostgreSQL 队列字段。业务失败不新增全站写入门禁。
 
 实施和验收见 [修复计划](../../dev/import-runtime-status-repair-plan.md)。
+
+## 2026-09-22 管理员导入任务处理
+
+现有系统状态页的任务诊断改为独立的导入管理员查询（默认20条可翻页），详情与处理命令由 imports owner 提供。健康 GET/Audit 仍只读。Dashboard 库存和请求统计保持原缓存，runtime 在缓存命中时重新读取；移除旧 dashboard import_jobs 20条样本查询、DTO 和展示，避免已处理任务被整页缓存恢复。
+
+实施、验证与旧链路清理见[处理闭环](../../dev/import-task-disposition-plan.md)。

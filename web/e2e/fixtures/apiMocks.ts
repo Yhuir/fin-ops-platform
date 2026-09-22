@@ -10877,6 +10877,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, batchAccountingWithdrawPayload());
     }
 
+    if (path === "/api/imports/jobs") {
+      return json(route, { rows: [], pagination: { page: 1, page_size: 20, total: 0, has_more: false } });
+    }
+
     if (path === "/api/operations/app-health-dashboard") {
       if (options.dashboardError) {
         return json(route, { error: "dashboard_unavailable", message: "dashboard unavailable" }, 503);

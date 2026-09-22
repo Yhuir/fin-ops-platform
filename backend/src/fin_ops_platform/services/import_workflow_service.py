@@ -26,6 +26,11 @@ IMPORT_DOMAIN_ROUTES = {
 LEGACY_IMPORT_JOB_TYPES = frozenset({"file_import", "etc_invoice_import", "tax_certified_import", "oa_manual_import"})
 
 
+def assert_import_not_disposed(job: ImportJob) -> None:
+    if "disposition" in job.result_payload:
+        raise ImportJobIdempotencyConflict("该任务已结束处理；如需导入，请发起新的导入。")
+
+
 def requires_repreview(job: ImportJob) -> bool:
     # Historical review rejection is an explicit, known contract; never auto-confirm it.
     return job.status == "needs_review" or (
@@ -76,6 +81,9 @@ def import_job_payload(job: ImportJob) -> dict[str, Any]:
     }[status]
     if requires_repreview(job):
         message = "预览需要复核，请修正后重新预览并确认。"
+    disposed = "disposition" in job.result_payload
+    if disposed:
+        message = "任务已结束处理，原执行结果保留。"
     return {
         "job_id": IMPORT_JOB_PREFIX + job.import_job_id,
         "import_job_id": job.import_job_id,
@@ -85,9 +93,9 @@ def import_job_payload(job: ImportJob) -> dict[str, Any]:
         "total": total, "percent": 100 if status in {"succeeded", "partial_success"} else 0,
         "message": message, "result_summary": result, "source": source,
         "affected_domains": source.get("affected_domains", []), "route": source["route"],
-        "retryable": status in {"failed", "needs_review"}, "retry_mode": "reprepare" if requires_repreview(job) else "same_intent",
-        "acknowledgeable": status in {"failed", "succeeded", "partial_success", "cancelled"},
-        "attention": status in {"failed", "partial_success", "awaiting_confirmation", "needs_review"},
+        "retryable": not disposed and status in {"failed", "needs_review"}, "retry_mode": "reprepare" if requires_repreview(job) else "same_intent",
+        "acknowledgeable": not disposed and status in {"failed", "succeeded", "partial_success", "cancelled"},
+        "attention": not disposed and status in {"failed", "partial_success", "awaiting_confirmation", "needs_review"},
         "error": job.last_error,
         "created_at": str(job.created_at or ""), "updated_at": str(job.updated_at or ""),
         "finished_at": str(job.finished_at) if job.finished_at else None,
@@ -146,6 +154,8 @@ class ImportWorkflowService:
                      selected_file_ids: list[str], overrides: dict[str, Any] | None = None) -> ImportJob:
         file_service.assert_session_owner(session_id=session_id, imported_by=owner)
         job = self.session_job(session_id, owner, "file_import.confirm")
+        if job is not None:
+            assert_import_not_disposed(job)
         if job is not None and job.status not in {"awaiting_confirmation", "needs_review", "failed"}:
             raise ImportJobIdempotencyConflict("当前导入任务不能修改预览，请等待任务结束。")
         # Work on a session copy; failed persistence must not change this process's draft.
@@ -169,6 +179,8 @@ class ImportWorkflowService:
         file_service.assert_session_owner(session_id=session_id, imported_by=owner)
         before = file_service.draft_checkpoint(session_id)
         job = self.session_job(session_id, owner, "file_import.confirm")
+        if job is not None:
+            assert_import_not_disposed(job)
         try:
             session = file_service.discard_session(session_id=session_id, imported_by=owner)
             def cancel(transaction):
@@ -208,10 +220,11 @@ class ImportWorkflowService:
             )
         exact = next((item for item in jobs if item.stage == "commit" and same_scope(item)), None)
         if exact is not None:
+            assert_import_not_disposed(exact)
             if requires_repreview(exact):
                 raise ImportJobIdempotencyConflict("所选文件需要复核，请重新预览后确认。")
             if exact.status == "failed":
-                return self.repository.retry_job(exact.import_job_id)
+                return self.repository.retry_job(exact.import_job_id, expected_version=exact.version)
             if exact.status in {"pending", "processing", "succeeded"}:
                 return exact
             job = exact
@@ -233,6 +246,7 @@ class ImportWorkflowService:
                 idempotency_key=f"{import_type}:{session_id}", payload=payload,
                 created_by=owner, stage="commit",
             )
+        assert_import_not_disposed(job)
         if requires_repreview(job):
             raise ImportJobIdempotencyConflict("所选文件需要复核，请重新预览后确认。")
         if type(expected_version) is not int or expected_version < 1:
@@ -244,13 +258,14 @@ class ImportWorkflowService:
 
     def retry(self, job_id: str, owner: str) -> ImportJob:
         job = self.get_owned(job_id, owner)
+        assert_import_not_disposed(job)
         if requires_repreview(job):
             return self.repository.reprepare_job(job.import_job_id, expected_version=job.version)
         if job.status in {"pending", "processing", "succeeded", "awaiting_confirmation"}:
             return job
         if job.status != "failed":
             raise ValueError("当前任务不可重试。")
-        return self.repository.retry_job(job.import_job_id)
+        return self.repository.retry_job(job.import_job_id, expected_version=job.version)
 
     def active_payloads(self, owner: str) -> list[dict[str, Any]]:
         return [import_job_payload(job) for job in self.repository.list_jobs(created_by=owner, limit=100)

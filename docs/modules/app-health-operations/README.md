@@ -98,3 +98,5 @@
 - `e2e-spec.md`：维护系统状态页 Spec-first Browser 业务验收合同。
 - `e2e-coverage.md`：维护系统状态页 Spec-first 合同到自动化覆盖的映射。
 - `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。
+
+管理员任务处理入口：`services/import_job_operations_service.py`、`services/postgres_repositories/import_job_operations.py`、`components/imports/ImportJobDiagnostics.tsx`、`features/imports/jobOperations.ts`。详见本模块 boundary-io 与[实施记录](../../dev/import-task-disposition-plan.md)。

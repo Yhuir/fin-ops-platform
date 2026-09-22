@@ -47,6 +47,12 @@ class OperationsDashboardService:
             "freshness": {"warnings": sorted(set(warnings))},
         }
 
+    def with_current_runtime(self, payload: dict[str, Any]) -> dict[str, Any]:
+        warnings = [item for item in payload["freshness"]["warnings"]
+                    if item not in {"outbox_metrics_unavailable", "queue_metrics_unavailable", "worker_metrics_unavailable"}]
+        return {**payload, "runtime_performance": self._runtime_performance(warnings),
+                "freshness": {"warnings": sorted(set(warnings))}}
+
     def _data_inventory(self, warnings: list[str]) -> dict[str, Any]:
         return {
             "bank": self._safe_block("bank_inventory_unknown", warnings, self._bank_inventory),
@@ -298,7 +304,6 @@ class OperationsDashboardService:
         return {
             "outbox": self._safe_metric("outbox_metrics_unavailable", warnings, self._runtime_repository.dashboard_outbox_metric),
             "queues": self._runtime_rows("queue_metrics_unavailable", warnings, self._runtime_repository.dashboard_queue_metrics),
-            "import_jobs": self._runtime_rows("import_jobs_unavailable", warnings, self._runtime_repository.dashboard_import_jobs),
             "workers": self._runtime_rows("worker_metrics_unavailable", warnings, self._runtime_repository.dashboard_worker_metrics),
         }
 

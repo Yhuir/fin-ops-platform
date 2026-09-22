@@ -25971,3 +25971,9 @@ body.column-layout-dragging {
 .workbench-supporting-files__amount { font-variant-numeric: tabular-nums; }
 .workbench-supporting-files__amount strong,
 .workbench-supporting-documents__item > span { overflow-wrap: anywhere; }
+
+/* Import operations detail owns its form; shared drawer/table behavior is unchanged. */
+.import-job-detail { display: grid; gap: var(--fp-space-3); }
+.import-job-detail label { display: grid; gap: var(--fp-space-2); }
+.import-job-detail select, .import-job-detail textarea { width: 100%; border: 1px solid var(--fp-border); border-radius: 6px; padding: 8px; background: var(--fp-surface); color: inherit; }
+.import-job-detail p { overflow-wrap: anywhere; }

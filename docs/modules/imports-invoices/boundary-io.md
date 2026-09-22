@@ -213,3 +213,9 @@ ConfirmedInvoiceImportUnitOfWork 在导入事务内继续提交 promotion 与同
 导入状态查询以 canonical import job + 已选文件类型投影归属，失败只影响实际业务域，不被映射成刷新。确认前复核拒绝使用 ImportReviewRequiredError，worker 转 needs_review；显式重新预览后仍需用户确认。历史相同复核拒绝保留 failed，显式重试走 prepare，不直接重跑 commit。只读审计与历史事实不改写；未处理警告不自动确认或删除。
 
 实施和验收见 [修复计划](../../dev/import-runtime-status-repair-plan.md)。
+
+## 2026-09-22 管理员导入任务处理
+
+管理员 GET /api/imports/jobs（page/page_size）、GET /api/imports/jobs/{uuid}（file_page）只读；POST /api/imports/jobs/{uuid}/dispose 接受 version/action/reason/note，actor/request_id 来自认证请求。failed close 保留 failed/last_error，needs_review discard 同事务终结预览并 canceled；result_payload.disposition 与 acknowledged_at、版本和领域审计原子提交。与普通确认已知区分，明确处置任务禁止 confirm/reprepare/retry/cancel 重新激活。个人 owner 权限不变，管理员不代他人确认导入。
+
+实施、验证与旧链路清理见[处理闭环](../../dev/import-task-disposition-plan.md)。
