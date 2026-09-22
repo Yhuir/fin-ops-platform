@@ -59,7 +59,7 @@
 ## 运行事实源
 
 - PostgreSQL durable queue：`job.outbox_events`。已退役的 `job.read_model_dirty_scopes` 不属于当前运行事实源。
-- Runtime monitoring：`RuntimeMonitoringRepository.app_status_runtime_snapshot()`、`health_summary()` 和 `ready_health_summary()`；只读取通用 outbox 与 required worker heartbeat。查询失败必须暴露为 runtime unavailable，不能被空 payload 解释成绿色。
+- Runtime monitoring：`RuntimeMonitoringRepository.app_status_runtime_snapshot()`、`health_summary()` 和 `ready_health_summary()`；只读取通用 outbox、直接 import jobs 与 required worker heartbeat。查询失败必须暴露为 runtime unavailable，不能被空 payload 解释成绿色。
 - Worker registry：`runtime_worker_registry.py`。
 - Domain/job/dependency registries：`app_status_domain_registry.py`、`app_status_job_registry.py`、`app_status_dependency_registry.py`。
 - 发票 inventory：读取 `app.invoices.source_links`，只统计已进入统一发票池且未删除的 canonical invoice facts；OA 附件 OCR cache 只作为解析缓存，不作为 App Health 发票 inventory 事实源。
@@ -74,7 +74,7 @@
 | 来源 | App Health / Status 影响 | 受影响体验 |
 | --- | --- | --- |
 | required worker missing/stale/mismatch | domain blocked/red 或 busy/yellow | 所有依赖该 worker 的页面不能假设会收敛 |
-| outbox backlog | domain busy/yellow；只统计当前 pending/processing/failed/dead-lettered 记录 | 用户看到真实后台任务，不把已完成历史事件当作当前 backlog |
+| outbox backlog | domain busy/yellow；只统计当前 pending/processing/failed/dead-lettered 记录 | 用户看到真实后台任务，失败单独计数，backlog只包含pending/processing，不把已完成历史事件当作当前 backlog |
 | runtime summary counts | `/api/app-health.app_status.runtime_summary` 聚合 worker、queue 状态 | 左上角 popover 和 `/operations/app-health` 必须能直接看出 active/working/stale/missing 与 pending/processing/failed/backlog |
 | background job queued/running/attention | overall/domain busy 或 attention | 导入、数据重置、ETC 等异步任务状态可见 |
 | dependency unavailable | blocked/red 或 degraded | OA/session/PostgreSQL/必要 API 依赖异常可见；Worker 不依赖 RabbitMQ/Redis |

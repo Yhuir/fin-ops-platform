@@ -142,3 +142,9 @@ ETC preview、confirm 与 discard 都是写入操作，必须在 multipart/JSON 
 - 包含整包 120 张票的金额组合匹配先按左右子集可完成数量剪枝，不能枚举不可能满足张数的所有子集；仍使用已有 matching_complexity_exceeded 反馈复杂匹配。
 
 - discard 在同一 PostgreSQL 事务取消 job 和标记 session reverted；准备中允许取消，重复取消幂等，正式成功后拒绝取消。被取消的未完成预览不要求存在 fingerprint/match 结果。
+
+## 2026-09-22 导入状态与恢复闭环
+
+共享任务 DTO 明确保留 needs_review；重新预览、确认、取消沿用现有 owner 权限。ETC 原 affected_domains=[imports_etc_invoices,etc_tickets] 及预览路由保留。Import worker 超时通过原有限重试边界收敛，不改变ETC解析、对账匹配或正式发票事务。
+
+实施和验收见 [修复计划](../../dev/import-runtime-status-repair-plan.md)。

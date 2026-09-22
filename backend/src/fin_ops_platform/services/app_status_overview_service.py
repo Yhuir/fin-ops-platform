@@ -3,20 +3,19 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from fin_ops_platform.services.app_status_dependency_registry import (
+    APP_STATUS_DEPENDENCY_REGISTRY,
+    AppStatusDependencyDefinition,
+)
 from fin_ops_platform.services.app_status_domain_registry import (
     APP_STATUS_DOMAIN_REGISTRY,
     AppStatusDomainDefinition,
     domains_by_job_type,
 )
-from fin_ops_platform.services.app_status_dependency_registry import (
-    APP_STATUS_DEPENDENCY_REGISTRY,
-    AppStatusDependencyDefinition,
-)
 from fin_ops_platform.services.runtime_state_policy import RETIRED_BACKGROUND_JOB_TYPES
 
-
 APP_STATUS_VERSION = 1
-ATTENTION_JOB_STATUSES = {"failed", "partial_success"}
+ATTENTION_JOB_STATUSES = {"failed", "partial_success", "awaiting_confirmation", "needs_review"}
 ACTIVE_JOB_STATUSES = {"queued", "running"}
 BUSY_WORKER_STATUSES = {"stale"}
 BLOCKED_WORKER_STATUSES = {"missing", "mismatch", "unavailable"}
@@ -83,6 +82,10 @@ class AppStatusOverviewService:
                 resolved_outbox,
             ),
         )
+        if overall["level"] == "ok" and any(
+            "import_unknown" in payload.get("affected_domains", []) for payload in resolved_outbox.values()
+        ):
+            overall.update(level="busy", color="yellow", reason="导入任务归属待诊断，请管理员查看 App Health")
         return {
             "version": APP_STATUS_VERSION,
             "generated_at": generated_at,
@@ -167,6 +170,8 @@ class AppStatusOverviewService:
     def _queue_summary_payload(self, outbox_statuses: dict[str, dict[str, Any]]) -> dict[str, Any]:
         counts = {
             "event_type_count": 0,
+            "awaiting_confirmation": 0,
+            "needs_review": 0,
             "pending": 0,
             "processing": 0,
             "failed": 0,
@@ -176,16 +181,11 @@ class AppStatusOverviewService:
             if event_type == "__runtime__" or not isinstance(payload, dict):
                 continue
             counts["event_type_count"] += 1
-            status = self._normalize_status(payload)
-            count = self._int_value(payload.get("count"))
-            if status == "pending":
-                counts["pending"] += count
-            elif status in {"processing", "publishing"}:
-                counts["processing"] += count
-            elif status in FAILED_STATUSES:
-                counts["failed"] += count
-            if status not in FRESH_STATUSES:
-                counts["backlog"] += count
+            for status, count in payload["counts"].items():
+                if status in counts and status != "backlog":
+                    counts[status] += self._int_value(count)
+                if status in {"pending", "processing", "publishing"}:
+                    counts["backlog"] += self._int_value(count)
         return counts
 
     def _domain_payload(
@@ -203,15 +203,36 @@ class AppStatusOverviewService:
             str(task.get("job_id") or "")
             for task in tasks
             if domain.key in set(task.get("affected_domains") or [])
+            and task.get("status") in ACTIVE_JOB_STATUSES | ATTENTION_JOB_STATUSES
         ]
         worker_values = [
             self._normalize_status(worker_statuses.get(key))
             for key in domain.worker_instances
         ]
-        outbox_values = [
-            self._normalize_status(outbox_statuses.get(job_type))
-            for job_type in domain.job_types
+        queue_payloads = [
+            payload for key, payload in outbox_statuses.items()
+            if key in domain.job_types or domain.key in payload.get("affected_domains", [])
         ]
+        queue_counts: dict[str, int] = {}
+        for payload in queue_payloads:
+            for state, count in payload["counts"].items():
+                queue_counts[state] = queue_counts.get(state, 0) + self._int_value(count)
+        task_states = {
+            str(task["status"]) for task in tasks if task["job_id"] in domain_task_ids
+        }
+        state_labels = {"failed": "失败待处理", "needs_review": "待复核", "processing": "处理中",
+                        "pending": "排队中", "awaiting_confirmation": "等待确认"}
+        for state, label in state_labels.items():
+            if queue_counts.get(state):
+                details.append(f"{label} {queue_counts[state]}")
+        states = {state for state, count in queue_counts.items() if count} | task_states
+        if "running" in states:
+            states.add("processing")
+        if "queued" in states:
+            states.add("pending")
+        if "partial_success" in states:
+            states.add("failed")
+        task_status = next((state for state in state_labels if state in states), None)
         dependency_values = [
             self._normalize_dependency_status(key, dependencies.get(key))
             for key in domain.dependencies
@@ -234,9 +255,8 @@ class AppStatusOverviewService:
 
         has_blocked = any(status in BLOCKED_WORKER_STATUSES for status in worker_values)
         has_blocked = has_blocked or any(status == "unavailable" for status in dependency_values)
-        has_busy = bool(domain_task_ids)
+        has_busy = task_status is not None
         has_busy = has_busy or any(status in BUSY_WORKER_STATUSES.union(BLOCKED_WORKER_STATUSES) for status in worker_values)
-        has_busy = has_busy or any(status in {"pending", "publishing", "failed"} for status in outbox_values)
 
         if has_blocked and domain.critical:
             level = "blocked"
@@ -249,9 +269,9 @@ class AppStatusOverviewService:
             level = "busy"
             status = (
                 self._first_status(worker_values, BUSY_WORKER_STATUSES.union(BLOCKED_WORKER_STATUSES))
-                or "refreshing"
+                or task_status or "unavailable"
             )
-            reason = f"{domain.label}正在同步"
+            reason = f"{domain.label}{state_labels.get(status, '运行状态异常')}"
         else:
             level = "ok"
             status = "ready"
@@ -265,6 +285,7 @@ class AppStatusOverviewService:
             "status": status,
             "reason": reason,
             "details": self._unique(details),
+            "counts": queue_counts,
             "workers": list(domain.worker_instances),
             "job_ids": [job_id for job_id in domain_task_ids if job_id],
             "updated_at": generated_at,
@@ -302,16 +323,13 @@ class AppStatusOverviewService:
                 for key in explicit_domain_keys
                 if key in self._domains_by_key
             )
-            if explicit_domains:
-                return explicit_domains
+            return explicit_domains
         return self._domains_for_job_type(job_type)
 
     def _domains_for_job_type(self, job_type: str) -> tuple[AppStatusDomainDefinition, ...]:
         exact = self._domains_by_job_type.get(job_type)
         if exact:
             return exact
-        if job_type == "file_import":
-            return tuple(domain for domain in self._domains if domain.key.startswith("imports_"))
         return ()
 
     def _overall_payload(
@@ -374,7 +392,10 @@ class AppStatusOverviewService:
                 "blocks_mutations": bool(write_safety["blocks_mutations"]),
                 "write_safety": write_safety,
             }
-        if any(str(task.get("status") or "") in ACTIVE_JOB_STATUSES.union(ATTENTION_JOB_STATUSES) for task in tasks):
+        if any(str(task.get("status") or "") in ATTENTION_JOB_STATUSES for task in tasks):
+            return {"level": "busy", "color": "yellow", "reason": "有后台任务待处理",
+                    "blocks_mutations": False, "write_safety": write_safety}
+        if any(str(task.get("status") or "") in ACTIVE_JOB_STATUSES for task in tasks):
             return {
                 "level": "busy",
                 "color": "yellow",

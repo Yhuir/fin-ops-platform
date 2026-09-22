@@ -107,6 +107,9 @@ class FakeDashboardConnection:
 
 
 class FakeRuntimeRepository:
+    def dashboard_import_jobs(self):
+        return []
+
     def dashboard_outbox_metric(self) -> dict[str, object]:
         return {
             "pending_count": 3,
@@ -290,7 +293,7 @@ class OperationsDashboardServiceTests(unittest.TestCase):
                 normalized = " ".join(sql.lower().split())
                 if "metric_windows(window_name" in normalized:
                     return []
-                if "from job.runtime_worker_heartbeats" in normalized:
+                if "from job.runtime_worker_heartbeats" in normalized or "scoped_jobs" in normalized:
                     return []
                 if "from job.outbox_events" in normalized:
                     return []
@@ -330,7 +333,7 @@ class OperationsDashboardServiceTests(unittest.TestCase):
                             "failed_count": 0,
                         }
                     ]
-                if "from job.runtime_worker_heartbeats" in normalized:
+                if "from job.runtime_worker_heartbeats" in normalized or "scoped_jobs" in normalized:
                     return []
                 raise AssertionError(sql)
 

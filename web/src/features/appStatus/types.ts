@@ -26,6 +26,7 @@ export type AppStatusDomain = {
   details: string[];
   workers: string[];
   jobIds: string[];
+  counts?: Record<string, number>;
   updatedAt: string;
 };
 
@@ -67,6 +68,8 @@ export type AppStatusRuntimeSummaryGroup = {
 
 export type AppStatusQueueSummary = {
   eventTypeCount: number;
+  awaitingConfirmation?: number;
+  needsReview?: number;
   pending: number;
   processing: number;
   failed: number;

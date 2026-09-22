@@ -118,3 +118,7 @@ production scenario 和审批输入下运行；它必须使用测试自有数据
 ## OA 附件冷缓存续跑（2026-09-21）
 
 parser version 变化后的正常 OA 同步分批准备附件，沿同一 durable event 释放/重领，不消耗失败重试次数；每轮最多 20 个新附件，已取得进展后在 45 秒边界让出。准备阶段不提交部分 canonical snapshot。任务 300 秒硬限额保留，真实超时明确记录，不包装成 OCR 故障。retry/release/requeue 使用事件 UUID 的独立重试 key，周期新事件保持原 enqueue key；不要手工清空死信、伪造成功或全量删除 OCR 缓存。
+
+## 导入异常展示与恢复（2026-09-22）
+
+业务输入失败保留在import queue待处理计数，不计为执行中或全站readiness阻断。瞬时错误与任务超时使用既有有限重试/退避；进程退出依靠租约恢复。needs_review/awaiting_confirmation不自动执行。管理员在App Health队列分状态总数和最多20条导入诊断中定位任务，由任务所有者通过原导入入口复核、重新预览或确认提示。不得清失败记录、伪造成功或在状态GET里重排任务。

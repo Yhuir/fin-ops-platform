@@ -1555,3 +1555,10 @@ System Audit 的 `overall_status=pass` 只证明该 immutable snapshot 内 18 �
 `GET /api/app-health` 的 workbench_matching 增加可空 last_completed_at；它只通知业务完成后的回读，不作为业务事实或写前置版本。
 
 OA 成本标签覆盖：`oa_cost_tag_overrides` 为必填数组，每项 `{unit_id,bank_transaction_id,cost_tag_code}`。空集合表示当前可编辑范围恢复来源标签，范围外有效覆盖保留。GET/成功PUT另返回服务端解析的 `cost_tag_primary_label/cost_tag_sub_label` 历史快照。人工选择不改银行标签或来源准入，三成本视角和导出使用有效成本标签；仅改标签也产生分配版本和审计，未知保存结果核对必须比较覆盖。详情见成本模块 boundary-io。
+
+## 导入运行状态（2026-09-22）
+
+- `/api/app-health.app_status`：queue计数新增awaiting_confirmation/needs_review；backlog=pending+processing，failed单独统计。domain新增counts，status明确区分pending/processing/awaiting_confirmation/needs_review/failed。后台任务来自当前用户的durable import job与有效非导入任务，不再使用旧导入BackgroundJob事实。
+- `/api/background-jobs/*`：needs_review作为明确合法状态；retry_mode=reprepare表示重新准备，仍需用户确认；历史确认前复核拒绝不以相同commit无限重试。owner权限不变。
+- `/api/operations/app-health-dashboard.runtime_performance`：queues保持来源queue和分状态计数；新增import_jobs有界诊断样本（最多20条），字段为job_id/affected_domains/status/stage/attempt_count/max_attempts/created_at/updated_at/finished_at/error_code。总数以queues为准。权限保持admin-only，错误原因仅返回分类，不返回原文件或原始业务payload。
+- `/health/ready.runtime_infrastructure.import_queue` 保留直接导入摘要，不因用户输入失败扩大readiness门禁。

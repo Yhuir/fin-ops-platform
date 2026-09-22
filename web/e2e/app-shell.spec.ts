@@ -168,7 +168,9 @@ test.describe("app shell browser smoke", () => {
     await expect(page.getByRole("grid", { name: "发票统计" })).not.toContainText("口径未闭合");
     expect(api.count("GET /api/operations/app-health/page-audit")).toBe(1);
     expect(api.count("POST /api/operations/app-health/page-audit")).toBe(0);
-    await expectNoUnexpectedSuccessUiErrors(page, { allowText: /Read model/gi });
+    // Queue column headers are labels, not an operation failure notification.
+    await expect(page.getByRole("columnheader", { name: "失败", exact: true })).toBeVisible();
+    await expectNoUnexpectedSuccessUiErrors(page, { allowText: /Read model|排队 执行 失败 待确认／复核/gi });
     expect(browserErrors).toEqual([]);
   });
 

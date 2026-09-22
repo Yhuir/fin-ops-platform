@@ -158,7 +158,7 @@ describe("global app status indicator", () => {
     expect(runtimeSummary).toHaveTextContent("Worker");
     expect(runtimeSummary).toHaveTextContent("1 stale / 1 missing / 0 mismatch");
     expect(runtimeSummary).toHaveTextContent("Queue");
-    expect(runtimeSummary).toHaveTextContent("3 failed / 6 backlog");
+    expect(runtimeSummary).toHaveTextContent("排队 2 / 执行 1 / 失败待处理 3");
     expect(within(statusDialog).getByText("银行明细")).toBeInTheDocument();
     expect(within(statusDialog).getByRole("link", { name: "银行明细 已同步" })).toBeInTheDocument();
     expect(within(statusDialog).getByText("税金抵扣")).toBeInTheDocument();
@@ -241,4 +241,26 @@ describe("global app status indicator", () => {
     expect(within(dialog).queryByText("已同步 0")).not.toBeInTheDocument();
   });
 
+});
+
+test("shows failed imports as attention with a task link, never as active progress", async () => {
+  const user = userEvent.setup();
+  installMockApiFetch({ appHealth: {
+    status: "ok", generated_at: "2026-09-22T10:00:00+08:00", session: { status: "authenticated" },
+    oa_sync: { status: "synced" }, dependencies: {},
+    app_status: { ...globalAppStatus,
+      overall: { level: "busy", color: "yellow", reason: "发票导入失败待处理", blocks_mutations: false },
+      domains: [{ ...globalAppStatus.domains[0], key: "imports_invoices", label: "发票导入", route: "/imports/invoices", level: "busy", status: "failed", counts: { failed: 1, processing: 2 } }],
+      background_tasks: [{ ...globalAppStatus.background_tasks[0], job_id: "import:failed", status: "failed", short_label: "需要重新预览", percent: 0, route: "/imports/invoices" }],
+      runtime_summary: { ...globalAppStatus.runtime_summary, queue: { event_type_count: 1, pending: 0, processing: 2, failed: 1, backlog: 2 } },
+    },
+  } });
+  renderAppAt("/");
+  await user.click(await screen.findByRole("button", { name: "发票导入失败待处理" }));
+  const dialog=await screen.findByRole("dialog", { name: "全局运行状态" });
+  expect(within(dialog).getByRole("link",{name:/需要重新预览/})).toHaveAttribute("href",expect.stringContaining("import_job=import%3Afailed"));
+  expect(within(dialog).queryByRole("progressbar")).not.toBeInTheDocument();
+  expect(dialog).toHaveTextContent("执行 2 / 失败待处理 1");
+  expect(dialog).not.toHaveTextContent("同步中");
+  expect(dialog).toHaveTextContent("失败 1 / 处理中 2");
 });

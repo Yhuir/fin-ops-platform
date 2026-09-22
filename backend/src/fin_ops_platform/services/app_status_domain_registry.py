@@ -27,14 +27,14 @@ APP_STATUS_DOMAIN_REGISTRY: tuple[AppStatusDomainDefinition, ...] = (
         label="银行流水导入",
         route="/imports/bank-transactions",
         worker_instances=("import",),
-        job_types=("file_import", "bank_transaction_import", "file_import.confirm"),
+        job_types=(),
     ),
     AppStatusDomainDefinition(
         key="imports_invoices",
         label="发票导入",
         route="/imports/invoices",
         worker_instances=("import",),
-        job_types=("file_import", "invoice_import", "file_import.confirm"),
+        job_types=(),
     ),
     AppStatusDomainDefinition(
         key="imports_etc_invoices",

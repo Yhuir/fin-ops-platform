@@ -9,6 +9,7 @@ MAX_READY_SAMPLE_STRING_LENGTH = 500
 
 _RUNTIME_KEEP_KEYS = (
     "queue_backlog",
+    "import_queue",
     "oldest_pending_event_age_seconds",
     "worker_heartbeat_lag_seconds",
     "missing_required_worker_count",

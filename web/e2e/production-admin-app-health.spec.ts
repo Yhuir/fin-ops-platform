@@ -47,6 +47,17 @@ test.describe("production admin AppHealth smoke", () => {
     await expect(page.getByTestId("app-health-requests")).toBeVisible();
     await expect(page.getByTestId("app-health-runtime")).toBeVisible();
 
+    await expect(page.getByRole("heading", { name: "导入任务诊断" })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "失败", exact: true })).toBeVisible();
+
+    for (const [route, heading] of [
+      ["bank-transactions", "银行流水导入"],
+      ["invoices", "发票导入"],
+    ]) {
+      await page.goto(`/fin-ops/imports/${route}`, { waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
+    }
+
     const bodyText = (await page.locator("body").innerText()).replace(/\s+/g, " ").trim();
     expect(
       /缺少 OA 登录态|请返回 OA 系统重新登录|会话校验失败|没有权限访问|当前账号没有管理员权限，不能查看 AppHealth 运维状态。/.test(bodyText),

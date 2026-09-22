@@ -99,3 +99,9 @@ Migration `0151_workbench_matching_worker_idempotency_grant.sql` 修复历史只
 事件 handler 可返回 `status=deferred` 与非空 `reason`，worker 释放同一事件并撤回本轮领取增加的 attempt，不 ACK、不登记失败；后续轮次继续。`RuntimeWorkerTaskTimeout` 是 worker 控制信号，继承 BaseException，避免被第三方 Exception 包装吞掉；worker 显式捕获并通过原失败/有限重试通道记录真实超时。
 
 retry、release 和 manual requeue 保留 event UUID、payload、source version，改用 `runtime.retry:<event UUID>` 作为重试队列去重键。新周期任务仍使用原 enqueue key，两者均保留且可实际执行，禁止覆盖新任务或以成功代替失败处理。release 沿用现有 runtime_shutdown_release 证据字段和 released attempt outcome。无新 worker、schema 或 read model。
+
+## 2026-09-22 导入状态与恢复闭环
+
+ImportJobWorker 显式捕获 RuntimeWorkerTaskTimeout，复用 owner+claim_version 的失败更新及有限重试，耗尽后终态失败。ImportReviewRequiredError 和已知预览冲突进入 needs_review，不自动确认。租约恢复、取消隔离、权限复核及正式数据与任务终态同事务保持不变。无新增 Worker、队列、迁移或 read model。
+
+实施和验收见 [修复计划](../../dev/import-runtime-status-repair-plan.md)。

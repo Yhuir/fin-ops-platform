@@ -53,7 +53,8 @@ function toNumber(value: unknown) {
 function toBackgroundJobStatus(value: unknown): BackgroundJobStatus {
   const status = typeof value === "string" ? value : "";
   if (
-    status === "awaiting_confirmation"
+    status === "needs_review"
+    || status === "awaiting_confirmation"
     || status === "queued"
     || status === "running"
     || status === "succeeded"

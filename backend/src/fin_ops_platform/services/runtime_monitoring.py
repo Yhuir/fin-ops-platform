@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from fin_ops_platform.services.postgres_repositories.import_job_status import scoped_import_jobs
 from fin_ops_platform.services.runtime_worker_registry import registration_by_worker_kind, worker_registrations
 
 
@@ -78,11 +79,6 @@ class RuntimeMonitoringRepository:
                 and coalesce(payload->>'operation', '') = 'refresh_attachments'
               )
             group by event_type, 2, 3, 4
-            union all
-            select import_type as event_type, 'import' as scope_type, import_type as scope_key,
-                status, count(*)::bigint as count, max(last_error), max(updated_at)::text
-            from job.import_jobs where status in ('pending','processing','failed')
-                and acknowledged_at is null group by import_type,status
             """
         )
         grouped: dict[str, dict[str, Any]] = {}
@@ -92,7 +88,9 @@ class RuntimeMonitoringRepository:
             if not event_type:
                 continue
             row_status = str(row.get("status") or "ready").strip().lower()
-            current = grouped.setdefault(event_type, {"status": "ready", "count": 0})
+            current = grouped.setdefault(event_type, {"status": "ready", "count": 0, "counts": {}})
+            count_status = "failed" if row_status == "dead_lettered" else row_status
+            current["counts"][count_status] = current["counts"].get(count_status, 0) + int(row.get("count") or 0)
             current["count"] = int(current.get("count") or 0) + int(row.get("count") or 0)
             current["status"] = _max_app_outbox_status(str(current.get("status") or "ready"), row_status)
             if row.get("last_error"):
@@ -115,7 +113,42 @@ class RuntimeMonitoringRepository:
                 )
         for event_type, scopes in scopes_by_event.items():
             grouped[event_type]["scopes"] = scopes
+        for row in self.import_status_counts():
+            domains = row["affected_domains"]
+            key = "import:" + ",".join(sorted(domains))
+            current = grouped.setdefault(key, {"status": "ready", "count": 0, "counts": {}, "affected_domains": domains})
+            status, count = row["status"], int(row["count"])
+            current["counts"][status] = current["counts"].get(status, 0) + count
+            current["count"] += count
+            current["status"] = _max_app_outbox_status(current["status"], status)
         return grouped
+
+    def import_status_counts(self) -> list[dict[str, Any]]:
+        return self._connection.fetch_all(scoped_import_jobs("""
+            select id, import_type, import_session_id,
+                jsonb_build_object('selected_file_ids', coalesce(payload->'selected_file_ids','[]'::jsonb)) as payload,
+                status from job.import_jobs where acknowledged_at is null
+                and status in ('pending','processing','failed','awaiting_confirmation','needs_review')
+        """) + """
+            select affected_domains, status, count(*)::bigint as count
+            from scoped_jobs group by affected_domains,status
+        """)
+
+    def dashboard_import_jobs(self) -> list[dict[str, Any]]:
+        # Administrative diagnostics only. No upload manifest, file bytes or raw error payload.
+        rows = self._connection.fetch_all(scoped_import_jobs("""
+            select * from job.import_jobs where acknowledged_at is null
+                and status in ('pending','processing','failed','awaiting_confirmation','needs_review')
+            order by case when status='failed' then 0 when status='needs_review' then 1 else 2 end,
+                updated_at desc, id limit 20
+        """) + """
+            select id::text as job_id, affected_domains, status, stage, attempt_count,max_attempts,
+                   created_at::text,updated_at::text,finished_at::text,
+                   case when position('selected files require review before confirmation: ' in last_error)=1
+                     then 'review_required' else result_payload->>'error_code' end as error_code
+            from scoped_jobs order by updated_at desc,id
+        """)
+        return rows
 
     def _app_status_worker_statuses(self) -> dict[str, dict[str, Any]]:
         statuses: dict[str, dict[str, Any]] = {}
@@ -170,7 +203,8 @@ class RuntimeMonitoringRepository:
             select count(*) filter(where status='pending')::bigint as pending,
                 count(*) filter(where status='processing')::bigint as processing,
                 count(*) filter(where status='failed' and acknowledged_at is null)::bigint as failed,
-                count(*) filter(where status in ('awaiting_confirmation','needs_review'))::bigint as awaiting_confirmation,
+                count(*) filter(where status='awaiting_confirmation')::bigint as awaiting_confirmation,
+                count(*) filter(where status='needs_review')::bigint as needs_review,
                 extract(epoch from max(now()-available_at) filter(where status='pending'))::float as oldest_pending_age_seconds
             from job.import_jobs where status in ('pending','processing','failed','awaiting_confirmation','needs_review')
         """) or {}
@@ -311,7 +345,7 @@ class RuntimeMonitoringRepository:
             order by event_type
             """
         )
-        return [
+        result = [
             {
                 "event_type": str(row.get("event_type") or ""),
                 "queue": "job.outbox_events",
@@ -322,6 +356,16 @@ class RuntimeMonitoringRepository:
             }
             for row in rows
         ]
+        imports: dict[str, dict[str, Any]] = {}
+        for row in self.import_status_counts():
+            key = ",".join(sorted(row["affected_domains"]))
+            metric = imports.setdefault(key, {
+                "event_type": key, "queue": "job.import_jobs", "pending_count": 0,
+                "processing_count": 0, "failed_count": 0, "awaiting_confirmation_count": 0,
+                "needs_review_count": 0, "status": "available",
+            })
+            metric[row["status"] + "_count"] += int(row["count"])
+        return result + list(imports.values())
 
     def dashboard_worker_metrics(self, *, worker_instances: set[str] | None = None) -> list[dict[str, Any]]:
         normalized_instances = {str(instance).strip() for instance in set(worker_instances or set()) if str(instance).strip()}
@@ -423,7 +467,7 @@ def _optional_float(value: object) -> float | None:
 
 def _max_app_outbox_status(left: str, right: str) -> str:
     normalized = "failed" if right in {"failed", "dead_lettered"} else right
-    rank = {"ready": 0, "pending": 1, "processing": 2, "failed": 3}
+    rank = {"ready": 0, "awaiting_confirmation": 1, "pending": 2, "processing": 3, "needs_review": 4, "failed": 5}
     return normalized if rank.get(normalized, 0) > rank.get(left, 0) else left
 
 

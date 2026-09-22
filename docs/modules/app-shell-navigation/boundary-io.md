@@ -100,3 +100,9 @@
 ## 右侧抽屉交互（2026-09-15）
 
 本模块复用的右侧抽屉遵循[统一关闭行为](../../dev/right-drawer-dismissal.md)：外部点击/Esc 不关闭，X 继续执行已有关闭保护。业务 owner 持有保存/确认完成状态，公共 AppDrawer 仅展示 `completion`；不改变本模块后端 API、权限、事实写入及查询 I/O。旧的重复退出按钮和成功自动关闭路径已移除，内部编辑取消仍按局部职责处理。
+
+## 2026-09-22 导入状态与恢复闭环
+
+Shell 精确展示导入 pending/processing/awaiting_confirmation/needs_review/failed 状态；busy 黄灯统称需关注，不据此伪称同步中。状态弹层消费后端分状态计数，失败不显示0%进度条，任务链接携带 import_job 进入现有显式恢复预览入口。原五秒有界轮询和写入权限边界保持；现金业务 DTO 不进入全局状态。
+
+实施和验收见 [修复计划](../../dev/import-runtime-status-repair-plan.md)。

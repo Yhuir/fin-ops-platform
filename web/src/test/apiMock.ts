@@ -5377,11 +5377,11 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             ],
           },
           runtime_performance: {
+          import_jobs: [],
             outbox: {
               pending_count: 3,
-              publishing_count: 1,
+              processing_count: 1,
               failed_count: 0,
-              publish_failed_count: 0,
               oldest_pending_age_seconds: 42,
               status: "available",
             },
@@ -5389,10 +5389,10 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               {
                 event_type: "oa.sync",
                 queue: "finops.oa.sync",
-                messages: 2,
-                unacked: 1,
-                consumers: 1,
-                dlq_messages: 0,
+                pending_count: 2,
+                processing_count: 1,
+                failed_count: 1,
+                needs_review_count: 0,
                 status: "available",
               },
             ],

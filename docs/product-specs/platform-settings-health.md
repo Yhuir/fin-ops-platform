@@ -54,3 +54,7 @@ hover 面板是只读全局状态面板，展示后台任务进度、worker/queu
 - Runtime：`../app-architecture/runtime-and-ownership.md`
 - 运维治理：`../operations/runtime-worker-governance.md`
 - 数据安全：`../operations/data-safety.md`
+
+## 导入状态口径（2026-09-22）
+
+导入任务失败不等于仍在同步。银行流水与发票按实际选中文件分域；排队、执行、等待确认、待复核和失败分别展示。黄灯表示需关注，失败或等待用户操作不阻断其他正常页面。自动恢复只处理明确可重试技术故障，不能代替用户确认疑似重复或错误文件。确认提示只结束提醒，不改变历史任务结果。

@@ -158,3 +158,14 @@ describe("global background job page header", () => {
     expect(screen.queryByTestId("background-progress-block")).not.toBeInTheDocument();
   });
 });
+
+test("review-required import offers preview and reprepare, not blind commit retry", async () => {
+  installMockApiFetch({ backgroundJobs: [{ ...failedImportJob, job_id: "import:review", status: "needs_review",
+    short_label: "预览需要复核", retry_mode: "reprepare", acknowledgeable: false,
+    source: { session_id: "session-1", route: "/imports/invoices" } }] });
+  renderAppAt("/");
+  expect(await screen.findByRole("button", { name: "重新预览" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "查看预览" })).toHaveAttribute("href", expect.stringContaining("import_job=import%3Areview"));
+  expect(screen.queryByRole("button", { name: "重新执行" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "确认已知" })).not.toBeInTheDocument();
+});

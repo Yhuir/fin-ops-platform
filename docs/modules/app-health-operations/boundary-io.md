@@ -62,3 +62,9 @@
 ## 2026-09-21 Shell 状态完整性
 
 Shell 接受后端关联域 `error/rebuilding` 与 worker `mismatch` 状态，不因这些有效状态丢弃整份 overview。运行摘要缺失时前端模型为 null，Worker、Queue 和空数据域显示“状态未知”；有明确队列摘要且计数为零时仍显示“无队列积压”。权限和写入门禁不变。
+
+## 2026-09-22 导入状态与恢复闭环
+
+运行状态、个人任务进度和管理员诊断的导入执行事实统一为 `job.import_jobs`。`scoped_import_jobs` 根据选中文件所属会话及已登记类型批量投影归属，未知归属返回 import_unknown，不广播到银行/发票两域。不同状态分别计数，backlog=pending+processing；failed/needs_review/awaiting_confirmation 是待处理而非运行中。全局计数不受个人详情权限/样本上限影响，不泄露原文件或其他用户业务错误内容。Dashboard 复用原 admin-only GET，增加最多20条 import_jobs 诊断样本；只读、零修复命令。前端旧 RabbitMQ 字段已移除，展示真实 PostgreSQL 队列字段。业务失败不新增全站写入门禁。
+
+实施和验收见 [修复计划](../../dev/import-runtime-status-repair-plan.md)。

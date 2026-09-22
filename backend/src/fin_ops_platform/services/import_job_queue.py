@@ -9,12 +9,14 @@ from threading import Event, Thread
 from typing import Any
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection
+from fin_ops_platform.services.postgres_repositories.import_job_status import scoped_import_jobs
 from fin_ops_platform.services.runtime_queue import PRIORITY_VALUES
 from fin_ops_platform.services.runtime_worker import (
     RuntimeWorker,
     RuntimeWorkerConfig,
     RuntimeWorkerResult,
     RuntimeWorkerShutdownRequested,
+    RuntimeWorkerTaskTimeout,
 )
 
 
@@ -49,6 +51,7 @@ class ImportJob:
     version: int = 1
     claim_version: int = 0
     locked_by: str | None = None
+    affected_domains: tuple[str, ...] | None = None
     acknowledged_at: Any = None
     created_at: Any = None
     updated_at: Any = None
@@ -171,29 +174,8 @@ class ImportJobRepository:
         normalized_id = _required_text(import_job_id, "import_job_id")
         with self._connection.transaction() as transaction:
             row = transaction.fetch_one(
-                """
-                select
-                    id::text as import_job_id,
-                    tenant_id,
-                    import_type,
-                    import_session_id,
-                    source_file_id,
-                    idempotency_key,
-                    request_fingerprint,
-                    status,
-                    stage,
-                    priority,
-                    attempt_count,
-                    max_attempts,
-                    last_error,
-                    payload,
-                    result_payload,
-                    raw_payload,
-                    created_by,
-                    trace_id, version, claim_version, locked_by, acknowledged_at, created_at, updated_at, finished_at
-                from job.import_jobs
-                where id = %s
-                """,
+                scoped_import_jobs("select * from job.import_jobs where id=%s")
+                + "select *, id::text as import_job_id from scoped_jobs",
                 (normalized_id,),
             )
         return _job_from_row(row) if row is not None else None
@@ -282,6 +264,7 @@ class ImportJobRepository:
     def require_review(self, job: ImportJob, *, error: str) -> bool:
         return bool(self._connection.execute("""
             update job.import_jobs set status='needs_review', last_error=%s,
+                result_payload=jsonb_build_object('error_code','review_required'),
                 locked_by=null, locked_at=null, version=version+1, updated_at=now()
             where id=%s and status='processing' and locked_by=%s and claim_version=%s
         """, (error, job.import_job_id, job.locked_by, job.claim_version)))
@@ -332,15 +315,21 @@ class ImportJobRepository:
         """, (import_job_id, created_by)))
 
     def list_jobs(self, *, created_by: str, limit: int = 100, statuses: list[str] | None = None) -> list[ImportJob]:
-        rows = self._connection.fetch_all("""
-            select id::text as import_job_id, tenant_id, import_type, import_session_id, source_file_id,
-                idempotency_key, request_fingerprint, status, stage, priority, attempt_count, max_attempts,
-                last_error, payload - 'upload_manifest' as payload, result_payload - 'session' - 'preview' as result_payload,
-                '{}'::jsonb as raw_payload, created_by, trace_id, version, claim_version, locked_by,
-                acknowledged_at, created_at, updated_at, finished_at from job.import_jobs
+        rows = self._connection.fetch_all(scoped_import_jobs("""
+            select * from job.import_jobs
             where created_by=%s and acknowledged_at is null and (%s::text[] is null or status=any(%s))
             order by case when status in ('pending','processing','awaiting_confirmation','needs_review','failed') then 0 else 1 end,
                 created_at desc limit %s
+        """) + """
+            select id::text as import_job_id, tenant_id, import_type, import_session_id, source_file_id,
+                idempotency_key, request_fingerprint, status, stage, priority, attempt_count, max_attempts,
+                last_error, created_by, trace_id, version, claim_version, locked_by,
+                acknowledged_at, created_at, updated_at, finished_at, affected_domains,
+                payload - 'upload_manifest' as payload,
+                result_payload - 'session' - 'preview' as result_payload, '{}'::jsonb as raw_payload
+            from scoped_jobs
+            order by case when status in ('pending','processing','awaiting_confirmation','needs_review','failed') then 0 else 1 end,
+                created_at desc
         """, (created_by, statuses, statuses, min(200, max(1, int(limit)))))
         return [_job_from_row(row) for row in rows]
 
@@ -501,11 +490,14 @@ class ImportJobWorker(RuntimeWorker):
         except RuntimeWorkerShutdownRequested as exc:
             self._repository.fail_claim(job, error=str(exc), retry=True, delay_seconds=0)
             raise
-        except Exception as exc:
+        except (Exception, RuntimeWorkerTaskTimeout) as exc:
             from fin_ops_platform.services.etc_reconciliation_zip_filter import StaleReconciliationPreviewError
             from fin_ops_platform.services.etc_service import EtcImportPreviewStaleError
-            from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
-            if isinstance(exc, (ImportPreviewStaleError, EtcImportPreviewStaleError, StaleReconciliationPreviewError)):
+            from fin_ops_platform.services.import_preview_audit import (
+                ImportPreviewStaleError,
+                ImportReviewRequiredError,
+            )
+            if isinstance(exc, (ImportPreviewStaleError, ImportReviewRequiredError, EtcImportPreviewStaleError, StaleReconciliationPreviewError)):
                 self._repository.require_review(job, error=str(exc))
                 return RuntimeWorkerResult.DEFERRED
             retry = _is_transient_import_failure(exc) and job.attempt_count < job.max_attempts
@@ -518,12 +510,12 @@ class ImportJobWorker(RuntimeWorker):
             renewal.join(timeout=1)
 
 
-def _is_transient_import_failure(error: Exception) -> bool:
+def _is_transient_import_failure(error: BaseException) -> bool:
     from psycopg import OperationalError
     from psycopg.errors import DeadlockDetected, LockNotAvailable, QueryCanceled, SerializationFailure
 
     from fin_ops_platform.services.object_storage import ObjectStorageReadError, ObjectStorageWriteError
-    return isinstance(error, (ConnectionError, TimeoutError, OperationalError, DeadlockDetected,
+    return isinstance(error, (RuntimeWorkerTaskTimeout, ConnectionError, TimeoutError, OperationalError, DeadlockDetected,
                               LockNotAvailable, QueryCanceled, SerializationFailure,
                               ObjectStorageReadError, ObjectStorageWriteError))
 
@@ -554,6 +546,7 @@ def _job_from_row(row: dict[str, Any]) -> ImportJob:
         version=int(row.get("version") or 1),
         claim_version=int(row.get("claim_version") or 0),
         locked_by=_optional_text(row.get("locked_by")),
+        affected_domains=tuple(row["affected_domains"]) if "affected_domains" in row else None,
         acknowledged_at=row.get("acknowledged_at"),
         created_at=row.get("created_at"),
         updated_at=row.get("updated_at"),

@@ -12,6 +12,8 @@ import type {
 type RawRecord = Record<string, unknown>;
 
 const DOMAIN_STATUSES = new Set([
+  "awaiting_confirmation",
+  "needs_review",
   "error",
   "rebuilding",
   "mismatch",
@@ -30,6 +32,8 @@ const DOMAIN_STATUSES = new Set([
 ]);
 
 const TASK_STATUSES = new Set([
+  "awaiting_confirmation",
+  "needs_review",
   "queued",
   "running",
   "succeeded",
@@ -103,6 +107,7 @@ function mapDomain(rawValue: unknown): AppStatusDomain | null {
   }
   return {
     key,
+    counts: Object.fromEntries(Object.entries(record(raw.counts)).map(([key, value]) => [key, numberValue(value)])),
     label: stringValue(raw.label, "状态域"),
     route: stringValue(raw.route, "/operations/app-health"),
     level,
@@ -183,6 +188,8 @@ function mapQueueSummary(value: unknown): AppStatusQueueSummary {
     pending: numberValue(raw.pending),
     processing: numberValue(raw.processing),
     failed: numberValue(raw.failed),
+    awaitingConfirmation: numberValue(raw.awaiting_confirmation),
+    needsReview: numberValue(raw.needs_review),
     backlog: numberValue(raw.backlog),
   };
 }

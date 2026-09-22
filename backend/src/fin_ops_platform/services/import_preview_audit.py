@@ -128,6 +128,10 @@ class ImportPreviewSessionAudit:
     stale_row_change_counts: dict[str, int] = field(default_factory=dict)
 
 
+class ImportReviewRequiredError(ValueError):
+    """The selected preview requires user correction before confirmation."""
+
+
 class ImportPreviewStaleError(ValueError):
     def __init__(
         self,

@@ -331,8 +331,9 @@ function AppHealthSystemAuditPanel({
 function RuntimeOverview({ payload }: { payload: OperationsDashboardPayload }) {
   const workers = payload.runtime_performance.workers;
   const workerIssues = workers.filter((row) => row.warning_code || row.status === "unknown" || row.status === "missing" || row.status === "stale" || row.status === "mismatch").length;
-  const outbox = payload.runtime_performance.outbox;
-  const queueBacklog = (outbox.pending_count ?? 0) + (outbox.publishing_count ?? 0) + (outbox.failed_count ?? 0) + (outbox.publish_failed_count ?? 0);
+  const queueBacklog = payload.runtime_performance.queues.reduce((sum, queue) => sum + (queue.pending_count ?? 0) + (queue.processing_count ?? 0), 0);
+  const queueUnavailable = payload.freshness.warnings.includes("queue_metrics_unavailable");
+  const queueAttention = payload.runtime_performance.queues.reduce((sum, queue) => sum + (queue.failed_count ?? 0) + (queue.needs_review_count ?? 0) + (queue.awaiting_confirmation_count ?? 0), 0);
   const rows = [
     {
       key: "workers",
@@ -343,8 +344,8 @@ function RuntimeOverview({ payload }: { payload: OperationsDashboardPayload }) {
     {
       key: "queue",
       label: "Queue",
-      value: queueBacklog > 0 ? `${queueBacklog} backlog` : "no backlog",
-      tone: queueBacklog > 0 ? "warning" as const : "success" as const,
+      value: queueUnavailable ? "队列状态未知" : `执行或排队 ${queueBacklog} / 待处理 ${queueAttention}`,
+      tone: queueUnavailable || queueBacklog + queueAttention > 0 ? "warning" as const : "success" as const,
     },
   ];
   return (
@@ -599,9 +600,8 @@ function OutboxTable({ payload }: { payload: OperationsDashboardPayload }) {
   const outbox = payload.runtime_performance.outbox;
   const rows = [
     ["pending", outbox.pending_count],
-    ["publishing", outbox.publishing_count],
+    ["processing", outbox.processing_count],
     ["failed", outbox.failed_count],
-    ["publish_failed", outbox.publish_failed_count],
     ["oldest_pending", outbox.oldest_pending_age_seconds],
   ] as const;
   return (
@@ -624,28 +624,48 @@ function OutboxTable({ payload }: { payload: OperationsDashboardPayload }) {
 
 function QueueTable({ payload }: { payload: OperationsDashboardPayload }) {
   return (
-    <FinanceTable ariaLabel="RabbitMQ 队列" minWidth={720}>
+    <FinanceTable ariaLabel="PostgreSQL 任务队列" minWidth={720}>
       <FinanceTableHeader>
-        <FinanceTableColumn columnRole="identity" isRowHeader>RabbitMQ</FinanceTableColumn>
+        <FinanceTableColumn columnRole="identity" isRowHeader>任务类型</FinanceTableColumn>
         <FinanceTableColumn columnRole="description">queue</FinanceTableColumn>
-        <FinanceTableColumn columnRole="quantity">ready</FinanceTableColumn>
-        <FinanceTableColumn columnRole="quantity">unacked</FinanceTableColumn>
-        <FinanceTableColumn columnRole="quantity">consumer</FinanceTableColumn>
-        <FinanceTableColumn columnRole="quantity">DLQ</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity">排队</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity">执行</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity">失败</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity">待确认／复核</FinanceTableColumn>
       </FinanceTableHeader>
       <FinanceTableBody>
           {payload.runtime_performance.queues.map((row) => (
             <FinanceTableRow key={`${row.event_type}:${row.queue}`} id={`${row.event_type}:${row.queue}`}>
               <FinanceTableCell columnRole="identity">{row.event_type}</FinanceTableCell>
               <FinanceTableCell columnRole="description" textValue={row.queue}>{row.queue}</FinanceTableCell>
-              <FinanceTableCell columnRole="quantity">{formatNumber(row.messages)}</FinanceTableCell>
-              <FinanceTableCell columnRole="quantity">{formatNumber(row.unacked)}</FinanceTableCell>
-              <FinanceTableCell columnRole="quantity">{formatNumber(row.consumers)}</FinanceTableCell>
-              <FinanceTableCell columnRole="quantity">{formatNumber(row.dlq_messages)}</FinanceTableCell>
+              <FinanceTableCell columnRole="quantity">{formatNumber(row.pending_count)}</FinanceTableCell>
+              <FinanceTableCell columnRole="quantity">{formatNumber(row.processing_count)}</FinanceTableCell>
+              <FinanceTableCell columnRole="quantity">{formatNumber(row.failed_count)}</FinanceTableCell>
+              <FinanceTableCell columnRole="quantity">{formatNumber((row.awaiting_confirmation_count ?? 0) + (row.needs_review_count ?? 0))}</FinanceTableCell>
             </FinanceTableRow>
           ))}
       </FinanceTableBody>
     </FinanceTable>
+  );
+}
+
+function ImportJobDiagnostics({ payload }: { payload: OperationsDashboardPayload }) {
+  if (payload.freshness.warnings.includes("import_jobs_unavailable")) {
+    return <p role="alert">导入任务诊断暂不可用，请刷新后重试。</p>;
+  }
+  return (
+    <section aria-label="导入任务诊断">
+      <h3>导入任务诊断（最多 20 条，总数见队列统计）</h3>
+      {payload.runtime_performance.import_jobs.map((job) => (
+        <div key={job.job_id}>
+          <strong>{job.affected_domains.join("、")}</strong>{" · "}
+          <span>{job.status} / {job.stage} · 尝试 {job.attempt_count}/{job.max_attempts}</span>
+          <p>任务 {job.job_id} · 更新 {job.updated_at}</p>
+          <p>{["preview_stale", "review_required"].includes(job.error_code ?? "") ? "需要重新核对预览，由任务创建人处理。" : job.status === "failed" ? "任务已失败；创建人可在导入进度中查看原因和处理。" : "由任务创建人在对应导入页面查看预览或进度。"}</p>
+        </div>
+      ))}
+      {payload.runtime_performance.import_jobs.length === 0 ? <p>无待处理导入任务</p> : null}
+    </section>
   );
 }
 
@@ -700,6 +720,7 @@ function RuntimePerformance({ payload }: { payload: OperationsDashboardPayload }
       <div className="app-health-runtime-grid app-health-runtime-grid--primary">
         <OutboxTable payload={payload} />
         <QueueTable payload={payload} />
+      <ImportJobDiagnostics payload={payload} />
       </div>
       <WorkerTable payload={payload} />
     </Section>

@@ -52,6 +52,8 @@ class FakeConnection:
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
         self.calls.append((sql, params))
         normalized = " ".join(sql.lower().split())
+        if "scoped_jobs" in normalized:
+            return []
         if "from job.runtime_worker_heartbeats" in normalized:
             return [
                 _worker(

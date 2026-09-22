@@ -29,6 +29,7 @@ from fin_ops_platform.services.import_preview_audit import (
     ImportPreviewSessionAudit,
     ImportPreviewStaleError,
     ImportRecordIdentity,
+    ImportReviewRequiredError,
     InvoiceIdentityStrategy,
     build_import_preview_session_audit,
 )
@@ -739,7 +740,7 @@ class FileImportService:
             not item.preview_batch_id or item.error_count or item.suspected_duplicate_count
         )]
         if incomplete:
-            raise ValueError("selected files require review before confirmation: " + ", ".join(incomplete))
+            raise ImportReviewRequiredError("selected files require review before confirmation: " + ", ".join(incomplete))
         if any(item.status == "preview_ready" for item in selected_items):
             self.assert_session_preview_current(session_id=session_id, selected_file_ids=selected_file_ids)
         progress_total = len(selected_items)

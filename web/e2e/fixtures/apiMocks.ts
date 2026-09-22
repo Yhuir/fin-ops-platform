@@ -444,11 +444,11 @@ function operationsDashboardPayload() {
       ],
     },
     runtime_performance: {
+      import_jobs: [],
       outbox: {
         pending_count: 0,
-        publishing_count: 0,
+        processing_count: 0,
         failed_count: 0,
-        publish_failed_count: 0,
         oldest_pending_age_seconds: null,
         status: "available",
       },

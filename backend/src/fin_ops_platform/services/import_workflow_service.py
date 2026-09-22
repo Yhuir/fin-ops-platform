@@ -16,6 +16,24 @@ IMPORT_JOB_TYPES = {
 }
 
 
+IMPORT_DOMAIN_ROUTES = {
+    "imports_bank_transactions": "/imports/bank-transactions",
+    "imports_invoices": "/imports/invoices",
+    "imports_etc_invoices": "/imports/etc-invoices",
+    "tax_offset": "/tax-offset",
+    "settings": "/settings",
+}
+LEGACY_IMPORT_JOB_TYPES = frozenset({"file_import", "etc_invoice_import", "tax_certified_import", "oa_manual_import"})
+
+
+def requires_repreview(job: ImportJob) -> bool:
+    # Historical review rejection is an explicit, known contract; never auto-confirm it.
+    return job.status == "needs_review" or (
+        job.status == "failed" and job.import_type == "file_import.confirm" and job.stage == "commit"
+        and (job.last_error or "").startswith("selected files require review before confirmation: ")
+    )
+
+
 def upload_request_descriptor(uploads: list[Any]) -> list[dict[str, Any]]:
     """Identify request bytes/options; never used for business item deduplication."""
     descriptors = []
@@ -31,7 +49,7 @@ def import_job_payload(job: ImportJob) -> dict[str, Any]:
     job_type, label, route = IMPORT_JOB_TYPES[job.import_type]
     status = {
         "pending": "queued", "processing": "running", "canceled": "cancelled",
-        "awaiting_confirmation": "awaiting_confirmation", "needs_review": "awaiting_confirmation",
+        "awaiting_confirmation": "awaiting_confirmation", "needs_review": "needs_review",
         "succeeded": "succeeded", "failed": "failed",
     }[job.status]
     result = {key: value for key, value in job.result_payload.items() if key not in {"preview", "session"}}
@@ -39,18 +57,25 @@ def import_job_payload(job: ImportJob) -> dict[str, Any]:
         status = "partial_success"
     source = {key: value for key, value in job.payload.items() if key != "upload_manifest"}
     source["session_id"] = job.import_session_id
-    source.setdefault("route", route)
+    domains = list(job.affected_domains) if job.affected_domains is not None else [
+        key for key, value in IMPORT_DOMAIN_ROUTES.items() if value == source.get("route", route)
+    ]
+    if job.import_type == "etc_invoice_import.confirm":
+        domains = ["imports_etc_invoices", "etc_tickets"]
+    source["affected_domains"] = domains
+    source["route"] = IMPORT_DOMAIN_ROUTES[domains[0]] if len(domains) == 1 and domains[0] in IMPORT_DOMAIN_ROUTES else route
     source["import_job_id"] = job.import_job_id
     total = int(source.get("total") or len(source.get("selected_file_ids") or []))
     message = {
         "queued": "已受理，等待处理。", "running": "正在解析文件。" if job.stage == "prepare" else "正在导入。",
+        "needs_review": "预览需要复核，请修正后重新预览。",
         "awaiting_confirmation": "预览已就绪，请查看并确认。", "failed": "导入失败，请查看原因后重试。",
         "succeeded": "检查完成，无需导入。" if result.get("outcome") == "no_changes" else "导入完成。",
         "partial_success": f"部分导入完成，{len(result.get('failed') or [])} 项失败，请查看明细后重新选择失败项。",
         "cancelled": "导入已取消。",
     }[status]
-    if job.status == "needs_review":
-        message = "数据已变化，请重新核对预览后确认。"
+    if requires_repreview(job):
+        message = "预览需要复核，请修正后重新预览并确认。"
     return {
         "job_id": IMPORT_JOB_PREFIX + job.import_job_id,
         "import_job_id": job.import_job_id,
@@ -60,9 +85,9 @@ def import_job_payload(job: ImportJob) -> dict[str, Any]:
         "total": total, "percent": 100 if status in {"succeeded", "partial_success"} else 0,
         "message": message, "result_summary": result, "source": source,
         "affected_domains": source.get("affected_domains", []), "route": source["route"],
-        "retryable": status == "failed" or job.status == "needs_review", "retry_mode": "reprepare" if job.status == "needs_review" else "same_intent",
+        "retryable": status in {"failed", "needs_review"}, "retry_mode": "reprepare" if requires_repreview(job) else "same_intent",
         "acknowledgeable": status in {"failed", "succeeded", "partial_success", "cancelled"},
-        "attention": status in {"failed", "partial_success", "awaiting_confirmation"},
+        "attention": status in {"failed", "partial_success", "awaiting_confirmation", "needs_review"},
         "error": job.last_error,
         "created_at": str(job.created_at or ""), "updated_at": str(job.updated_at or ""),
         "finished_at": str(job.finished_at) if job.finished_at else None,
@@ -183,6 +208,8 @@ class ImportWorkflowService:
             )
         exact = next((item for item in jobs if item.stage == "commit" and same_scope(item)), None)
         if exact is not None:
+            if requires_repreview(exact):
+                raise ImportJobIdempotencyConflict("所选文件需要复核，请重新预览后确认。")
             if exact.status == "failed":
                 return self.repository.retry_job(exact.import_job_id)
             if exact.status in {"pending", "processing", "succeeded"}:
@@ -206,6 +233,8 @@ class ImportWorkflowService:
                 idempotency_key=f"{import_type}:{session_id}", payload=payload,
                 created_by=owner, stage="commit",
             )
+        if requires_repreview(job):
+            raise ImportJobIdempotencyConflict("所选文件需要复核，请重新预览后确认。")
         if type(expected_version) is not int or expected_version < 1:
             raise ValueError("preview_version is required for this import preview.")
         return self.repository.confirm_job(
@@ -215,7 +244,7 @@ class ImportWorkflowService:
 
     def retry(self, job_id: str, owner: str) -> ImportJob:
         job = self.get_owned(job_id, owner)
-        if job.status == "needs_review":
+        if requires_repreview(job):
             return self.repository.reprepare_job(job.import_job_id, expected_version=job.version)
         if job.status in {"pending", "processing", "succeeded", "awaiting_confirmation"}:
             return job

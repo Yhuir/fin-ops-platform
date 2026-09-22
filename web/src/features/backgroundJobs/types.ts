@@ -1,4 +1,5 @@
 export type BackgroundJobStatus =
+  | "needs_review"
   | "awaiting_confirmation"
   | "queued"
   | "running"

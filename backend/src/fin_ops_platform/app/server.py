@@ -174,7 +174,12 @@ from fin_ops_platform.services.import_job_queue import ImportJob, ImportJobIdemp
 from fin_ops_platform.services.import_lifecycle_service import ImportLifecycleService
 from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
 from fin_ops_platform.services.import_processing_service import ImportProcessingService
-from fin_ops_platform.services.import_workflow_service import IMPORT_JOB_PREFIX, ImportWorkflowService, import_job_payload
+from fin_ops_platform.services.import_workflow_service import (
+    IMPORT_JOB_PREFIX,
+    LEGACY_IMPORT_JOB_TYPES,
+    ImportWorkflowService,
+    import_job_payload,
+)
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_canonical_query_service import (
     InputInvoiceUsageCanonicalQueryService,
@@ -3721,6 +3726,11 @@ class Application:
             owner_user_id,
             include_system=True,
         )
+        active_jobs = [job for job in active_jobs if job.type not in LEGACY_IMPORT_JOB_TYPES]
+        attention_jobs = [job for job in attention_jobs if job.type not in LEGACY_IMPORT_JOB_TYPES]
+        imports = self._import_workflow().active_payloads(owner_user_id)
+        active_jobs.extend(job for job in imports if job["status"] in {"queued", "running"})
+        attention_jobs.extend(job for job in imports if job["attention"])
         runtime_statuses = self._app_status_runtime_statuses()
         oa_sync_payload = self._app_health_oa_sync_payload(runtime_statuses=runtime_statuses)
         state_store_info = {
@@ -4297,7 +4307,7 @@ class Application:
     def _handle_api_background_jobs_active(self, owner_user_id: str) -> Response:
         active_jobs = self._background_job_service.list_active_jobs(owner_user_id, include_system=True)
         attention_jobs = self._background_job_service.list_attention_jobs(owner_user_id, include_system=True)
-        import_types = {"file_import", "etc_invoice_import", "tax_certified_import", "oa_manual_import"}
+        import_types = LEGACY_IMPORT_JOB_TYPES
         active_payloads = [self._serialize_background_job(job) for job in active_jobs if job.type not in import_types]
         attention_payloads = [self._serialize_background_job(job) for job in attention_jobs if job.type not in import_types]
         imports = self._import_workflow().active_payloads(owner_user_id)

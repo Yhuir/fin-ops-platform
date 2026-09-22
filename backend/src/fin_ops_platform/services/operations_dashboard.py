@@ -10,7 +10,6 @@ from fin_ops_platform.services.postgres_repositories.import_lifecycle import Pos
 from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_ALIASES
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 
-
 DEFAULT_OPERATION_ENDPOINTS = (
     "GET /api/workbench",
     "GET /api/workbench/groups",
@@ -299,6 +298,7 @@ class OperationsDashboardService:
         return {
             "outbox": self._safe_metric("outbox_metrics_unavailable", warnings, self._runtime_repository.dashboard_outbox_metric),
             "queues": self._runtime_rows("queue_metrics_unavailable", warnings, self._runtime_repository.dashboard_queue_metrics),
+            "import_jobs": self._runtime_rows("import_jobs_unavailable", warnings, self._runtime_repository.dashboard_import_jobs),
             "workers": self._runtime_rows("worker_metrics_unavailable", warnings, self._runtime_repository.dashboard_worker_metrics),
         }
 

@@ -17,8 +17,11 @@ from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
+
 from tests.app_test_support import (
     build_local_state_application as build_application,
+)
+from tests.app_test_support import (
     configure_access_control,
 )
 
@@ -93,6 +96,8 @@ class FakeOperationsDashboardConnection:
             raise AssertionError("dashboard import events must not read OA attachment source links")
         if "from app.oa_sync_runs" in normalized and "sync_type = 'oa_projection'" in normalized:
             raise AssertionError("dashboard import events must not read OA sync runs")
+        if "scoped_jobs" in normalized:
+            return []
         if "from job.outbox_events" in normalized:
             return []
         if "from job.read_model_dirty_scopes" in normalized:
@@ -260,6 +265,7 @@ def inject_oa_sync_runtime_status(
     outbox_payload = {
         "status": outbox_status,
         "count": 1,
+        "counts": {outbox_status: 1},
         "scopes": [scope_payload],
     }
     if last_error:
@@ -319,6 +325,24 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["version"], 1)
         self.assertIn("metrics", payload)
         self.assertEqual(payload["alerts"]["active"], [])
+
+    def test_app_health_uses_durable_import_payload_and_preserves_review_state(self) -> None:
+        app = build_application()
+        job = {"job_id":"import:review", "type":"file_import", "label":"发票导入",
+               "short_label":"请复核预览", "status":"needs_review", "phase":"commit",
+               "source":{"route":"/imports/invoices"}, "affected_domains":["imports_invoices"],
+               "route":"/imports/invoices", "attention":True, "retryable":True,
+               "retry_mode":"reprepare", "acknowledgeable":False}
+        with patch.object(app, "_import_workflow", return_value=SimpleNamespace(active_payloads=lambda owner:[job])):
+            response=app.handle_request("GET", "/api/app-health")
+        payload=json.loads(response.body)
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(payload['background_jobs']['attention'],1)
+        self.assertEqual(payload['app_status']['background_tasks'][0]['status'],'needs_review')
+        domains={item['key']:item for item in payload['app_status']['domains']}
+        self.assertEqual(domains['imports_bank_transactions']['status'],'ready')
+        self.assertEqual(domains['imports_invoices']['status'],'needs_review')
+        self.assertFalse(payload['app_status']['overall']['blocks_mutations'])
 
     def test_app_health_builds_snapshot_once_per_request(self) -> None:
         app = build_application()

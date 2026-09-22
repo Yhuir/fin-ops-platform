@@ -6,12 +6,15 @@ from typing import Any
 from fin_ops_platform.services.app_status_dependency_registry import APP_STATUS_DEPENDENCY_REGISTRY
 from fin_ops_platform.services.runtime_state_policy import RETIRED_BACKGROUND_JOB_TYPES
 
-
 APP_HEALTH_SCHEMA_VERSION = 1
 REBUILD_JOB_TYPES = {
     "workbench_rebuild",
     "oa_sync_workbench_rebuild",
 }
+
+
+def _job_value(job: object, key: str, default: Any = None) -> Any:
+    return job.get(key, default) if isinstance(job, dict) else getattr(job, key, default)
 
 
 class AppHealthService:
@@ -32,29 +35,29 @@ class AppHealthService:
         active_jobs = [
             job
             for job in active_jobs
-            if str(getattr(job, "type", "") or "").strip() not in RETIRED_BACKGROUND_JOB_TYPES
+            if str(_job_value(job, "type", "") or "").strip() not in RETIRED_BACKGROUND_JOB_TYPES
         ]
         resolved_attention_jobs = (
             [
                 job
                 for job in attention_jobs
-                if str(getattr(job, "type", "") or "").strip() not in RETIRED_BACKGROUND_JOB_TYPES
+                if str(_job_value(job, "type", "") or "").strip() not in RETIRED_BACKGROUND_JOB_TYPES
             ]
             if attention_jobs is not None
             else [
                 job
                 for job in active_jobs
-                if getattr(job, "status", None) in {"failed", "partial_success"}
+                if _job_value(job, "status", None) in {"failed", "partial_success"}
             ]
         )
-        running_jobs = [job for job in active_jobs if getattr(job, "status", None) == "running"]
-        queued_jobs = [job for job in active_jobs if getattr(job, "status", None) == "queued"]
+        running_jobs = [job for job in active_jobs if _job_value(job, "status", None) == "running"]
+        queued_jobs = [job for job in active_jobs if _job_value(job, "status", None) == "queued"]
         primary_running = self.primary_running_job([*queued_jobs, *running_jobs])
         primary_attention = self.primary_attention_job(resolved_attention_jobs)
         rebuild_jobs = [
             job
             for job in active_jobs
-            if getattr(job, "status", None) in {"queued", "running"}
+            if _job_value(job, "status", None) in {"queued", "running"}
             and self.is_workbench_rebuild_job(job)
         ]
         matching_dirty_scope_entries = self.matching_dirty_scope_entries(oa_sync_payload)
@@ -119,9 +122,9 @@ class AppHealthService:
 
         dirty_scope_ages = self.dirty_scope_ages(oa_sync_payload, dirty_scopes)
         rebuild_running_seconds = [
-            self.seconds_since(getattr(job, "started_at", None) or getattr(job, "created_at", None), now)
+            self.seconds_since(_job_value(job, "started_at", None) or _job_value(job, "created_at", None), now)
             for job in rebuild_jobs
-            if getattr(job, "status", None) == "running"
+            if _job_value(job, "status", None) == "running"
         ]
         metrics = {
             "app_health_duration_ms": round(float(duration_ms), 2),
@@ -151,7 +154,7 @@ class AppHealthService:
                 "matching_running_scopes": matching_running_scopes,
                 "last_matching_error": self.last_matching_error(matching_dirty_scope_entries),
                 "last_completed_at": oa_sync_payload.get("workbench_matching_last_completed_at"),
-                "rebuild_job_ids": [str(getattr(job, "job_id", "")) for job in rebuild_jobs],
+                "rebuild_job_ids": [str(_job_value(job, "job_id", "")) for job in rebuild_jobs],
             },
             "background_jobs": {
                 "active": len(active_jobs),
@@ -213,7 +216,7 @@ class AppHealthService:
 
     @staticmethod
     def is_workbench_rebuild_job(job: object) -> bool:
-        job_type = str(getattr(job, "type", "") or "").strip().lower()
+        job_type = str(_job_value(job, "type", "") or "").strip().lower()
         return job_type in REBUILD_JOB_TYPES or ("workbench" in job_type and "rebuild" in job_type)
 
     @classmethod
@@ -226,11 +229,11 @@ class AppHealthService:
     def primary_attention_job(cls, jobs: list[object]) -> object | None:
         if not jobs:
             return None
-        status_priority = {"failed": 1, "partial_success": 0}
+        status_priority = {"failed": 3, "needs_review": 2, "partial_success": 1, "awaiting_confirmation": 0}
         return max(
             jobs,
             key=lambda job: (
-                status_priority.get(str(getattr(job, "status", "") or ""), -1),
+                status_priority.get(str(_job_value(job, "status", "") or ""), -1),
                 cls._job_sort_time(job),
             ),
         )
@@ -268,8 +271,10 @@ class AppHealthService:
 
     @staticmethod
     def _job_payload(job: object) -> dict[str, Any]:
+        if isinstance(job, dict):
+            return dict(job)
         payload: dict[str, Any]
-        to_payload = getattr(job, "to_payload", None)
+        to_payload = _job_value(job, "to_payload", None)
         if callable(to_payload):
             raw_payload = to_payload()
             if isinstance(raw_payload, dict):
@@ -280,13 +285,13 @@ class AppHealthService:
             payload = {}
         if not payload:
             payload = {
-                "job_id": getattr(job, "job_id", None),
-                "type": getattr(job, "type", None),
-                "label": getattr(job, "label", None),
-                "status": getattr(job, "status", None),
-                "created_at": getattr(job, "created_at", None),
-                "started_at": getattr(job, "started_at", None),
-                "updated_at": getattr(job, "updated_at", None),
+                "job_id": _job_value(job, "job_id", None),
+                "type": _job_value(job, "type", None),
+                "label": _job_value(job, "label", None),
+                "status": _job_value(job, "status", None),
+                "created_at": _job_value(job, "created_at", None),
+                "started_at": _job_value(job, "started_at", None),
+                "updated_at": _job_value(job, "updated_at", None),
             }
         payload["retryable"] = AppHealthService._is_retryable_job(job)
         payload["acknowledgeable"] = AppHealthService._is_acknowledgeable_job(job)
@@ -298,23 +303,25 @@ class AppHealthService:
         if job is None:
             return None
         return {
-            "job_id": getattr(job, "job_id", None),
-            "type": getattr(job, "type", None),
-            "label": getattr(job, "label", None),
-            "short_label": getattr(job, "short_label", None),
-            "status": getattr(job, "status", None),
-            "message": getattr(job, "message", None),
-            "error": getattr(job, "error", None),
+            "job_id": _job_value(job, "job_id", None),
+            "type": _job_value(job, "type", None),
+            "label": _job_value(job, "label", None),
+            "short_label": _job_value(job, "short_label", None),
+            "status": _job_value(job, "status", None),
+            "message": _job_value(job, "message", None),
+            "error": _job_value(job, "error", None),
             "retryable": cls._is_retryable_job(job),
             "acknowledgeable": cls._is_acknowledgeable_job(job),
-            "affected_months": list(getattr(job, "affected_months", []) or []),
-            "updated_at": getattr(job, "updated_at", None),
+            "affected_months": list(_job_value(job, "affected_months", []) or []),
+            "updated_at": _job_value(job, "updated_at", None),
         }
 
     @classmethod
     def _is_retryable_job(cls, job: object) -> bool:
-        job_type = str(getattr(job, "type", "") or "").strip().lower()
-        source = getattr(job, "source", {})
+        if isinstance(job, dict):
+            return job["retryable"]
+        job_type = str(_job_value(job, "type", "") or "").strip().lower()
+        source = _job_value(job, "source", {})
         if not isinstance(source, dict):
             source = {}
         if job_type == "file_import":
@@ -323,13 +330,15 @@ class AppHealthService:
 
     @staticmethod
     def _is_acknowledgeable_job(job: object) -> bool:
-        return str(getattr(job, "status", "") or "") in {"failed", "partial_success"}
+        if isinstance(job, dict):
+            return job["acknowledgeable"]
+        return str(_job_value(job, "status", "") or "") in {"failed", "partial_success"}
 
     @staticmethod
     def _is_attention_job(job: object) -> bool:
-        if str(getattr(job, "status", "") or "") not in {"failed", "partial_success"}:
+        if str(_job_value(job, "status", "") or "") not in {"failed", "partial_success", "needs_review", "awaiting_confirmation"}:
             return False
-        return not bool(getattr(job, "acknowledged_at", None) or getattr(job, "superseded_at", None))
+        return not bool(_job_value(job, "acknowledged_at", None) or _job_value(job, "superseded_at", None))
 
     @staticmethod
     def _combine_job_payloads(
@@ -355,7 +364,7 @@ class AppHealthService:
 
     @classmethod
     def _job_sort_time(cls, job: object) -> datetime:
-        value = str(getattr(job, "updated_at", None) or getattr(job, "created_at", None) or "")
+        value = str(_job_value(job, "updated_at", None) or _job_value(job, "created_at", None) or "")
         try:
             parsed = datetime.fromisoformat(value)
         except ValueError:

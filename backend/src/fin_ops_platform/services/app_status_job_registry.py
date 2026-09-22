@@ -17,7 +17,7 @@ APP_STATUS_BACKGROUND_JOB_REGISTRY: dict[str, AppStatusBackgroundJobDefinition] 
     "file_import": AppStatusBackgroundJobDefinition(
         "file_import",
         "文件导入",
-        ("imports_bank_transactions", "imports_invoices", "imports_etc_invoices"),
+        (),
         "/operations/app-health",
         legacy=True,
     ),
@@ -25,7 +25,7 @@ APP_STATUS_BACKGROUND_JOB_REGISTRY: dict[str, AppStatusBackgroundJobDefinition] 
     "invoice_import": AppStatusBackgroundJobDefinition("invoice_import", "发票导入", ("imports_invoices",), "/imports/invoices"),
     "etc_invoice_import": AppStatusBackgroundJobDefinition("etc_invoice_import", "ETC发票导入", ("imports_etc_invoices", "etc_tickets"), "/imports/etc-invoices"),
     "file_import.confirm": AppStatusBackgroundJobDefinition(
-        "file_import.confirm", "文件导入", ("imports_bank_transactions", "imports_invoices"), "/operations/app-health",
+        "file_import.confirm", "文件导入", (), "/operations/app-health",
     ),
     "etc_invoice_import.confirm": AppStatusBackgroundJobDefinition(
         "etc_invoice_import.confirm", "ETC发票导入", ("imports_etc_invoices", "etc_tickets"), "/imports/etc-invoices",

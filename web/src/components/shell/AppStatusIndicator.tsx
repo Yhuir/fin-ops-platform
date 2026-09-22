@@ -35,7 +35,9 @@ function domainTone(domain: AppStatusDomain) {
 }
 
 function taskStatusLabel(task: AppStatusTask) {
-  if (task.percent !== null) {
+  if (task.status === "awaiting_confirmation") return "等待确认";
+  if (task.status === "needs_review") return "待复核";
+  if (task.percent !== null && task.status === "running") {
     return `${task.percent}%`;
   }
   if (task.status === "queued") {
@@ -76,6 +78,7 @@ function importTaskObjectName(task: AppStatusTask) {
 }
 
 function taskPrimaryLabel(task: AppStatusTask) {
+  if (!["queued", "running"].includes(task.status)) return task.shortLabel;
   const importObjectName = importTaskObjectName(task);
   if (importObjectName && task.total > 0) {
     return `正在导入${importObjectName} ${task.current}/${task.total}`;
@@ -91,12 +94,15 @@ function overallStatusLabel(level: string) {
     return "阻断";
   }
   if (level === "busy") {
-    return "同步中";
+    return "需关注";
   }
   return "正常";
 }
 
 function domainStatusLabel(status: string) {
+  if (status === "pending") return "排队中";
+  if (status === "awaiting_confirmation") return "等待确认";
+  if (status === "needs_review") return "待复核";
   if (status === "ready" || status === "fresh") {
     return "已同步";
   }
@@ -104,7 +110,7 @@ function domainStatusLabel(status: string) {
     return "缺失";
   }
   if (status === "refreshing" || status === "loading" || status === "processing" || status === "rebuilding") {
-    return "同步";
+    return "处理中";
   }
   if (status === "stale") {
     return "过期";
@@ -146,13 +152,14 @@ function queueSummaryLabel(summary: AppStatusQueueSummary | undefined) {
   if (!summary) {
     return "状态未知";
   }
-  if (summary.failed > 0) {
-    return `${summary.failed} failed / ${summary.backlog} backlog`;
-  }
-  if (summary.pending > 0 || summary.processing > 0) {
-    return `${summary.pending} pending / ${summary.processing} processing`;
-  }
-  return "无队列积压";
+  const labels = [
+    summary.pending ? `排队 ${summary.pending}` : "",
+    summary.processing ? `执行 ${summary.processing}` : "",
+    summary.failed ? `失败待处理 ${summary.failed}` : "",
+    summary.needsReview ? `待复核 ${summary.needsReview}` : "",
+    summary.awaitingConfirmation ? `等待确认 ${summary.awaitingConfirmation}` : "",
+  ].filter(Boolean);
+  return labels.length ? labels.join(" / ") : "无队列积压";
 }
 
 function summaryTone(value: number | undefined) {
@@ -177,7 +184,7 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
   const busyDomainCount = domains.filter((domain) => domain.level === "busy").length;
   const blockedDomainCount = domains.filter((domain) => domain.level === "blocked").length;
   const workerIssues = runtimeSummary?.workers.issueCount ?? 0;
-  const queueIssues = runtimeSummary ? runtimeSummary.queue.failed + runtimeSummary.queue.backlog : 0;
+  const queueIssues = runtimeSummary ? runtimeSummary.queue.failed + runtimeSummary.queue.backlog + (runtimeSummary.queue.needsReview ?? 0) + (runtimeSummary.queue.awaitingConfirmation ?? 0) : 0;
 
   return (
     <PopoverRoot isOpen={isOpen} onOpenChange={onOpenChange}>
@@ -209,12 +216,12 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
                   <section className="app-status-section">
                     <h3>任务</h3>
                     {tasks.map((task) => (
-                      <RouterLink key={task.jobId} to={task.route} className="app-status-task-link">
+                      <RouterLink key={task.jobId} to={task.jobId.startsWith("import:") && task.route.startsWith("/imports/") ? `${task.route}?import_job=${encodeURIComponent(task.jobId)}` : task.route} className="app-status-task-link">
                         <span className="app-status-task-main">
                           <span className="app-status-task-label">{taskPrimaryLabel(task)}</span>
                           <Chip size="sm" variant="soft">{taskStatusLabel(task)}</Chip>
                         </span>
-                        {task.percent !== null ? (
+                        {task.percent !== null && task.status === "running" ? (
                           <ProgressBar
                             aria-label={`${task.shortLabel} 进度`}
                             className="app-status-task-progress"
@@ -255,7 +262,7 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
                   <h3>数据域</h3>
                   <div className="app-status-summary-chips">
                     {blockedDomainCount > 0 ? <Chip size="sm" color="danger" variant="soft">{`阻断 ${blockedDomainCount}`}</Chip> : null}
-                    {busyDomainCount > 0 ? <Chip size="sm" color="warning" variant="soft">{`同步 ${busyDomainCount}`}</Chip> : null}
+                    {busyDomainCount > 0 ? <Chip size="sm" color="warning" variant="soft">{`需关注 ${busyDomainCount}`}</Chip> : null}
                     {domains.length === 0 ? <Chip size="sm" color="warning" variant="soft">状态未知</Chip> : blockedDomainCount === 0 && busyDomainCount === 0 ? <Chip size="sm" color="success" variant="soft">{`已同步 ${domains.length}`}</Chip> : null}
                   </div>
                 </div>
@@ -274,6 +281,10 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
                           <Chip className="app-status-domain-chip" size="sm" color={domainTone(domain)} variant="soft">
                             {domainStatusLabel(domain.status)}
                           </Chip>
+                          {Object.entries(domain.counts ?? {}).filter(([, count]) => count > 0).length > 1 ? (
+                            <span>{Object.entries(domain.counts ?? {}).filter(([, count]) => count > 0)
+                              .map(([state, count]) => `${domainStatusLabel(state)} ${count}`).join(" / ")}</span>
+                          ) : null}
                         </span>
                       </RouterLink>
                     );

@@ -199,9 +199,8 @@ export type OperationsDashboardEndpointPerformance = {
 
 export type OperationsDashboardOutboxMetric = {
   pending_count: number | null;
-  publishing_count: number | null;
+  processing_count: number | null;
   failed_count: number | null;
-  publish_failed_count: number | null;
   oldest_pending_age_seconds: number | null;
   status: OperationsDashboardAvailability;
   warning_code?: string;
@@ -210,10 +209,11 @@ export type OperationsDashboardOutboxMetric = {
 export type OperationsDashboardQueueMetric = {
   event_type: string;
   queue: string;
-  messages: number | null;
-  unacked: number | null;
-  consumers: number | null;
-  dlq_messages: number | null;
+  pending_count: number | null;
+  processing_count: number | null;
+  failed_count: number | null;
+  awaiting_confirmation_count?: number;
+  needs_review_count?: number;
   status: OperationsDashboardWorkerStatus;
   warning_code?: string;
 };
@@ -254,6 +254,11 @@ export type OperationsDashboardPayload = {
   runtime_performance: {
     outbox: OperationsDashboardOutboxMetric;
     queues: OperationsDashboardQueueMetric[];
+    import_jobs: Array<{
+      job_id: string; affected_domains: string[]; status: string; stage: string;
+      attempt_count: number; max_attempts: number; updated_at: string;
+      error_code: string | null;
+    }>;
     workers: OperationsDashboardWorkerMetric[];
   };
   freshness: {

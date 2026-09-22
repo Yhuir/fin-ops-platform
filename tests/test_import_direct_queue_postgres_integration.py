@@ -41,6 +41,116 @@ class ImportDirectQueuePostgresTests(unittest.TestCase):
         kwargs.setdefault('payload', {'route':'/imports/invoices'})
         return self.repository.create_or_get_job(import_type='file_import.confirm', created_by='owner', **kwargs)
 
+    def test_status_counts_use_file_facts_not_shared_type_or_wrong_route(self):
+        from fin_ops_platform.services.import_workflow_service import import_job_payload
+        from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
+        from psycopg.types.json import Jsonb
+        for file_id, session, batch_type in [('invoice-file','invoice-session','input_invoice'),('bank-file','bank-session','bank_transaction')]:
+            self.connection.execute("insert into app.import_files(legacy_mongo_id,session_id,raw_payload) values (%s,%s,%s)",
+                (file_id, session, Jsonb({'normalized_payload':{'batch_type':batch_type}})))
+        invoice = self.create(import_session_id='invoice-session', payload={'selected_file_ids':['invoice-file'],'route':'/imports/bank-transactions'})
+        self.connection.execute("update job.import_jobs set status='failed' where id=%s", (invoice.import_job_id,))
+        self.create(import_session_id='bank-session', payload={'selected_file_ids':['bank-file']})
+        repository = RuntimeMonitoringRepository(self.connection)
+        counts = repository.import_status_counts()
+        self.assertEqual({(tuple(r['affected_domains']),r['status']):r['count'] for r in counts},
+                         {(('imports_invoices',),'failed'):1,(('imports_bank_transactions',),'pending'):1})
+        payload = import_job_payload(self.repository.get_job(invoice.import_job_id))
+        self.assertEqual(payload['route'], '/imports/invoices')
+        self.assertEqual(payload['affected_domains'], ['imports_invoices'])
+        self.assertEqual(len(repository.dashboard_import_jobs()),2)
+        self.assertEqual(len(repository.dashboard_queue_metrics()),2)
+        self.assertEqual(len(self.repository.list_jobs(created_by='other')),0)
+        self.repository.acknowledge_job(invoice.import_job_id, created_by='owner')
+        self.assertEqual(len(repository.import_status_counts()),1)
+
+    def test_timeout_retries_then_commits_once_and_exhaustion_is_terminal(self):
+        from fin_ops_platform.services.runtime_worker import RuntimeWorkerTaskTimeout
+        job=self.create(max_attempts=2)
+        def timeout(_job):
+            raise RuntimeWorkerTaskTimeout('test bounded timeout')
+        worker=ImportJobWorker(repository=self.repository, worker_id='worker', processors={'file_import.confirm':timeout})
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.FAILED_RETRYABLE)
+        failed=self.repository.get_job(job.import_job_id)
+        self.assertEqual(failed.status,'pending')
+        self.assertIn('timeout',failed.last_error)
+        self.connection.execute("update job.import_jobs set available_at=now() where id=%s",(job.import_job_id,))
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.FAILED_PERMANENT)
+        self.assertEqual(self.repository.get_job(job.import_job_id).status,'failed')
+        self.assertEqual(worker.run_once(),RuntimeWorkerResult.IDLE)
+        self.repository.retry_job(job.import_job_id)
+        def finish(claim):
+            with self.connection.transaction() as tx:
+                claim.completion.lock(tx)
+                tx.execute("insert into app.app_settings(settings_key,settings_payload) values ('timeout-result','{}')")
+                claim.completion.succeed(tx,{'created_count':1})
+        worker=ImportJobWorker(repository=self.repository,worker_id='worker',processors={'file_import.confirm':finish})
+        self.assertEqual(worker.run_once(),RuntimeWorkerResult.PROCESSED)
+        self.assertEqual(worker.run_once(),RuntimeWorkerResult.IDLE)
+        self.assertEqual(self.connection.fetch_one("select count(*) n from app.app_settings where settings_key='timeout-result'")['n'],1)
+
+    def test_review_rejection_and_historical_rejection_require_repreview(self):
+        from fin_ops_platform.services.import_preview_audit import ImportReviewRequiredError
+        from fin_ops_platform.services.import_workflow_service import ImportWorkflowService, import_job_payload
+        job=self.create(import_session_id='review-session', payload={'session_id':'review-session','route':'/imports/invoices'})
+        def reject(_job):
+            raise ImportReviewRequiredError('selected files require review before confirmation: selected-file')
+        worker=ImportJobWorker(repository=self.repository,worker_id='worker',processors={'file_import.confirm':reject})
+        self.assertEqual(worker.run_once(),RuntimeWorkerResult.DEFERRED)
+        current=self.repository.get_job(job.import_job_id)
+        self.assertEqual(current.status,'needs_review')
+        self.assertEqual(import_job_payload(current)['status'],'needs_review')
+        self.assertEqual(worker.run_once(),RuntimeWorkerResult.IDLE)
+        # Pre-fix records retain their failure history until an explicit operation.
+        self.connection.execute("update job.import_jobs set status='failed' where id=%s",(job.import_job_id,))
+        current=self.repository.get_job(job.import_job_id)
+        self.assertEqual(import_job_payload(current)['retry_mode'],'reprepare')
+        workflow=ImportWorkflowService(self.repository)
+        with self.assertRaises(KeyError): workflow.retry(job.import_job_id,'other')
+        with self.assertRaises(ImportJobIdempotencyConflict):
+            workflow.confirm(session_id='review-session', owner='owner',import_type='file_import.confirm',payload=current.payload,expected_version=current.version)
+        prepared=workflow.retry(job.import_job_id,'owner')
+        self.assertEqual((prepared.status,prepared.stage),('pending','prepare'))
+
+    def test_prepare_review_cannot_be_confirmed_without_new_preview(self):
+        from fin_ops_platform.services.import_workflow_service import ImportWorkflowService
+        job = self.create(import_session_id='prepare-review', stage='prepare')
+        self.connection.execute("update job.import_jobs set status='needs_review' where id=%s", (job.import_job_id,))
+        with self.assertRaises(ImportJobIdempotencyConflict):
+            ImportWorkflowService(self.repository).confirm(session_id='prepare-review', owner='owner',
+                import_type='file_import.confirm', payload=job.payload, expected_version=job.version)
+        self.assertEqual(self.repository.get_job(job.import_job_id).status, 'needs_review')
+
+    def test_timeout_automatically_recovers_on_next_attempt_without_duplicate_write(self):
+        from fin_ops_platform.services.runtime_worker import RuntimeWorkerTaskTimeout
+        job = self.create(max_attempts=2)
+        def process(claim):
+            if claim.attempt_count == 1:
+                raise RuntimeWorkerTaskTimeout('temporary timeout')
+            with self.connection.transaction() as tx:
+                claim.completion.lock(tx)
+                tx.execute("insert into app.app_settings(settings_key,settings_payload) values ('auto-result','{}')")
+                claim.completion.succeed(tx, {'created_count':1})
+        worker = ImportJobWorker(repository=self.repository, worker_id='worker', processors={'file_import.confirm':process})
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.FAILED_RETRYABLE)
+        self.connection.execute("update job.import_jobs set available_at=now() where id=%s", (job.import_job_id,))
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.PROCESSED)
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.IDLE)
+        self.assertEqual(self.repository.get_job(job.import_job_id).status, 'succeeded')
+        self.assertEqual(self.connection.fetch_one("select count(*) n from app.app_settings where settings_key='auto-result'")['n'], 1)
+
+    def test_mixed_session_counts_one_job_globally_and_only_selected_domains(self):
+        from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
+        from psycopg.types.json import Jsonb
+        for file_id, kind in [('bank','bank_transaction'), ('invoice','input_invoice')]:
+            self.connection.execute("insert into app.import_files(legacy_mongo_id,session_id,raw_payload) values (%s,'mixed',%s)",
+                (file_id, Jsonb({'normalized_payload':{'batch_type':kind}})))
+        self.create(import_session_id='mixed', payload={'selected_file_ids':['bank','invoice']})
+        counts = RuntimeMonitoringRepository(self.connection).import_status_counts()
+        self.assertEqual(len(counts), 1)
+        self.assertEqual(counts[0]['count'], 1)
+        self.assertEqual(set(counts[0]['affected_domains']), {'imports_invoices','imports_bank_transactions'})
+
     def test_upload_and_job_roll_back_together_and_replay_keeps_confirmed_payload(self):
         with self.assertRaisesRegex(RuntimeError, 'rollback'):
             with self.connection.transaction() as tx:
@@ -314,8 +424,10 @@ class ImportDirectQueuePostgresTests(unittest.TestCase):
 
     def test_oa_all_failed_is_durable_failure_and_explicit_retry_can_succeed(self):
         from types import SimpleNamespace
-        from tests.test_oa_manual_import_service import oa_record
+
         from fin_ops_platform.services.shared_import_processor import SharedImportProcessor
+
+        from tests.test_oa_manual_import_service import oa_record
         records = []
         processor = SharedImportProcessor(self.connection, oa_source_adapter=SimpleNamespace(
             list_application_records_by_row_ids=lambda ids: records))

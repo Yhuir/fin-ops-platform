@@ -20,7 +20,7 @@ function statusTone(status: BackgroundJobStatus) {
   if (status === "partial_success") {
     return "partial_success";
   }
-  if (status === "failed") {
+  if (status === "failed" || status === "needs_review") {
     return "failed";
   }
   if (status === "queued") {
@@ -70,7 +70,7 @@ export default function BackgroundProgressBlock(props: BackgroundProgressBlockPr
       <span className="background-progress-dot" aria-hidden="true" />
       <strong>{label}</strong>
       {extraCount > 0 ? <span className="background-progress-extra">+{extraCount}</span> : null}
-      {job.status === "awaiting_confirmation" && typeof job.source.route === "string" ? (
+      {(job.status === "awaiting_confirmation" || job.status === "needs_review" || job.retryMode === "reprepare") && typeof job.source.route === "string" ? (
         <a className="background-progress-action"
           href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}${job.source.route}?import_job=${encodeURIComponent(job.jobId)}`}>
           查看预览

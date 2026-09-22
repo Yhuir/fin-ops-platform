@@ -141,9 +141,9 @@ describe("AppHealthOperationsPage", () => {
     expect(runtimeOverview).toHaveTextContent("Worker");
     expect(runtimeOverview).toHaveTextContent("active 1");
     expect(runtimeOverview).toHaveTextContent("Queue");
-    expect(runtimeOverview).toHaveTextContent("4 backlog");
+    expect(runtimeOverview).toHaveTextContent("执行或排队 3 / 待处理 1");
     expect(within(runtime).getByRole("grid", { name: "Outbox 状态" })).toBeInTheDocument();
-    expect(within(runtime).getByRole("grid", { name: "RabbitMQ 队列" })).toBeInTheDocument();
+    expect(within(runtime).getByRole("grid", { name: "PostgreSQL 任务队列" })).toBeInTheDocument();
     expect(within(runtime).getByRole("grid", { name: "Worker 状态" })).toBeInTheDocument();
     expect(runtime).toHaveTextContent("pending");
     expect(runtime).toHaveTextContent("runtime-worker");
@@ -321,11 +321,11 @@ describe("AppHealthOperationsPage", () => {
           ],
         },
         runtime_performance: {
+          import_jobs: [],
           outbox: {
             pending_count: null,
-            publishing_count: null,
+            processing_count: null,
             failed_count: null,
-            publish_failed_count: null,
             oldest_pending_age_seconds: null,
             status: "unknown",
             warning_code: "outbox_metrics_unavailable",
@@ -333,18 +333,18 @@ describe("AppHealthOperationsPage", () => {
           queues: [
             {
               event_type: "oa.sync",
-              queue: "finops.oa.sync",
-              messages: null,
-              unacked: null,
-              consumers: null,
-              dlq_messages: null,
+              queue: "job.outbox_events",
+              pending_count: null,
+              processing_count: null,
+              failed_count: null,
+              needs_review_count: null,
               status: "unknown",
-              warning_code: "rabbitmq_metrics_unavailable",
+              warning_code: "queue_metrics_unavailable",
             },
           ],
           workers: [{ worker_kind: "runtime-worker", heartbeat_lag_seconds: null, status: "unknown" }],
         },
-        freshness: { warnings: ["rabbitmq_metrics_unavailable"] },
+        freshness: { warnings: ["queue_metrics_unavailable", "import_jobs_unavailable"] },
       },
     });
 
@@ -354,6 +354,9 @@ describe("AppHealthOperationsPage", () => {
     expect(screen.getByTestId("app-health-requests")).toHaveTextContent("--");
     expect(within(screen.getByTestId("app-health-requests")).getAllByText("--")[0].closest("td")).toHaveAttribute("data-tone", "unknown");
     expect(screen.getByTestId("app-health-runtime")).toHaveTextContent("--");
+    expect(screen.getByTestId("app-health-runtime-overview")).toHaveTextContent("队列状态未知");
+    expect(screen.getByRole("alert")).toHaveTextContent("导入任务诊断暂不可用");
+    expect(screen.queryByText("无待处理导入任务")).not.toBeInTheDocument();
   });
 
   test("keeps the current dashboard visible when refresh fails", async () => {
@@ -399,7 +402,8 @@ describe("AppHealthOperationsPage", () => {
               endpoints: [],
             },
             runtime_performance: {
-              outbox: { pending_count: 3, publishing_count: 0, failed_count: 0, publish_failed_count: 0, oldest_pending_age_seconds: 42, status: "available" },
+          import_jobs: [],
+              outbox: { pending_count: 3, processing_count: 0, failed_count: 0, oldest_pending_age_seconds: 42, status: "available" },
               queues: [],
               workers: [],
             },

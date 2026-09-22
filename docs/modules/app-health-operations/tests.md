@@ -66,3 +66,7 @@ bash scripts/verify.sh docs
 - API/组件：`AppStatusApi.test.ts`、`AppStatusIndicator.test.tsx` 覆盖 error/rebuilding/mismatch、摘要缺失和状态弹层；既有 app health API/service 与 OA API 权限测试回归。
 - Read model/cache/job：复用附件缓存与 durable queue，无 read model 新增或刷新策略变化；已保存进展、失败不缓存、恢复后提交均需验证。
 - 生产：真实 OCR 只读识别、OA 同步状态/四 worker/队列、部署 T0/T30 和成本页面回归。
+
+## 2026-09-22 导入运行状态闭环
+
+业务单测覆盖单域失败隔离、混合状态精确计数、待确认不执行、未知归属和完成任务不忙。API测试覆盖durable导入DTO、needs_review和不阻断写入。真实PostgreSQL测试覆盖按文件事实归属、权限隔离、确认提示后统计收敛、超时重试耗尽与显式恢复只写一次、历史复核拒绝重新预览。前端覆盖合法状态解析、失败不显示百分比、混合计数、任务链接、待复核的查看/重新预览动作。复用三类导入与Shell浏览器回归，不新增read model或缓存测试设施。

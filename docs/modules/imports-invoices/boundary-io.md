@@ -207,3 +207,9 @@ ConfirmedInvoiceImportUnitOfWork 在导入事务内继续提交 promotion 与同
 ## 2026-09-21：人工识别共用的身份提取修复
 
 `POST /imports/invoices/manual/recognize` 的请求、响应白名单和权限不变。共用附件解析器现在按 PDF 位置/OCR 同行坐标读取标签对应的票号，缺少票号标签时不从银行账号、校验码等数字猜测身份；无法识别时继续走现有人工填写反馈。税号不截断、不从未标注正文补齐。原生 PDF 识别成功仍不运行 OCR，上传不保留文件、不产生 canonical 写入。
+
+## 2026-09-22 导入状态与恢复闭环
+
+导入状态查询以 canonical import job + 已选文件类型投影归属，失败只影响实际业务域，不被映射成刷新。确认前复核拒绝使用 ImportReviewRequiredError，worker 转 needs_review；显式重新预览后仍需用户确认。历史相同复核拒绝保留 failed，显式重试走 prepare，不直接重跑 commit。只读审计与历史事实不改写；未处理警告不自动确认或删除。
+
+实施和验收见 [修复计划](../../dev/import-runtime-status-repair-plan.md)。

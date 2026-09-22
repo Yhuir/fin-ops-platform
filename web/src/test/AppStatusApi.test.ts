@@ -159,6 +159,8 @@ describe("app status API mapper", () => {
     });
     expect(mapped?.runtimeSummary?.queue).toEqual({
       eventTypeCount: 3,
+      awaitingConfirmation: 0,
+      needsReview: 0,
       pending: 2,
       processing: 1,
       failed: 3,
@@ -183,4 +185,17 @@ describe("app status API mapper", () => {
     })?.runtimeSummary).toBeNull();
   });
 
+});
+
+test.each(["awaiting_confirmation", "needs_review"])("accepts durable import state %s without dropping the overview", (status) => {
+  const result = mapAppStatusOverview({
+    overall: { level: "busy", color: "yellow", reason: "导入待处理", blocks_mutations: false },
+    domains: [{ key: "imports_invoices", label: "发票导入", route: "/imports/invoices", level: "busy", status, reason: "待处理", counts: { [status]: 1 } }],
+    background_tasks: [{ job_id: "import:one", type: "file_import", status, label: "导入", route: "/imports/invoices" }],
+    runtime_summary: { workers: { total: 4 }, queue: { pending: 0, processing: 0, failed: 0, backlog: 0, awaiting_confirmation: 1, needs_review: 0 } },
+  });
+  expect(result?.domains[0].status).toBe(status);
+  expect(result?.backgroundTasks[0].status).toBe(status);
+  expect(result?.overall.blocksMutations).toBe(false);
+  expect(result?.runtimeSummary?.queue.backlog).toBe(0);
 });
