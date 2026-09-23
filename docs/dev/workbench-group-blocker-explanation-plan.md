@@ -1,6 +1,6 @@
 # 关联组未配对原因解释闭环实施计划
 
-日期：2026-09-23。状态：修复已实施并通过发布前验证，发布与生产验收以第8节及正式release evidence为准。不使用 GSD。
+日期：2026-09-23。状态：已实施、已部署，生产功能与性能验收完成。不使用 GSD。
 
 ## 1. 已确认事实与目标
 
@@ -162,3 +162,13 @@ npx playwright test e2e/workbench-supporting-documents-flow.spec.ts \
 - 无生产数据库备份、迁移或财务写入。隔离测试资源与临时测量文件结束后精确清理。发布及部署后只读验收执行正式发布工具，最终版本与生产性能结果记录于发布证据和本任务交付报告。
 
 - 发布前正式检查：`bash scripts/verify.sh lint`、`frontend`、`docs`、`git diff --check`通过；`FIN_OPS_TEST_DATABASE_URL=<独立测试库> bash scripts/verify.sh backend`运行4528项，原55项现金专用DSN测试跳过；随后用另一个独立现金测试库设置`FIN_OPS_CASH_TEST_DATABASE_URL`运行`test_cash_core test_cash_http_integration test_cash_runtime`，62项全部通过，覆盖上述环境限定测试。两次隔离库均与生产主库无关。
+
+
+### 生产发布与验收完成
+
+- 功能代码提交：`ff6992d3f3e48b9c67ecdd9e422114a964db7b9e`，已推送 remote main。正式 release：`main-ff6992d3-20260923131714`，frontend profile 的 pre/t0 均 PASS，public index/asset、发布目录、active release、API ready及四个worker检查通过，未回滚。该profile不要求T+30队列检查，不能将未执行项记作通过。
+- 首次直接调用发布入口完成候选上传和校验，因没有通过本地凭据包装器而在激活前停止；随后使用 `scripts/with-production-admin-token.sh ./scripts/deploy-oa.sh --activate-existing --release-name main-ff6992d3-20260923131714` 激活同一已验证候选，无重复上传。
+- 生产浏览器核实：本组可见“OA 流水一致，票多 · 差额6.57元”；Popover列出正式发票1139.63、补充凭证140.00、合计1279.63，准确定位莫永洪交通费182.44与票据189.01；五份凭证各自“本项差额0.00”。新旧DTO的OA/流水/发票成员集合、amount_check、completion、workbench_anomaly逐项一致，仍为`anomaly_review_required`，没有擅自接受真实差额。
+- 同一查询各5次：部署前823–1020ms/中位924ms，部署后852–1114ms/中位919ms。部署后5次说明打开30–90ms/中位40ms；20次滚动帧间隔中位16.7ms、滚动新增请求0；浏览器JS异常0、财务写请求0。小样本且本地并发测试负载不同，只证明本次交互可用与没有新增后端I/O，不能宣称查询提速或整体容量SLO已达标。
+- 生产银行明细、待找发票页面打开且数据GET返回200；异常接受/撤回、写失败、权限、过期状态依赖隔离测试证据，不在生产做财务写入演示。
+- 根证据保留于服务器 `/opt/fin-ops/runtime-smoke/release-gates/main-ff6992d3-20260923131714/`。隔离PostgreSQL实例已停止并精确删除；任务发布tar包、临时截图/数据/日志在交付前删除，保留一张用户可读的生产界面截图。没有创建或删除生产数据库备份，未删除主数据库。
