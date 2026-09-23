@@ -341,6 +341,7 @@ class ImportFileApiTests(unittest.TestCase):
 
     def test_manual_recognition_never_prefills_bank_account_as_invoice_or_writes_facts(self) -> None:
         from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
+
         from tests.test_oa_attachment_invoice_service import VALID_PNG, _digital_invoice_text
         app = build_application()
         fixture = getattr(app, "_test_import_storage_tmp", None)
@@ -553,6 +554,7 @@ class ImportFileApiTests(unittest.TestCase):
         self.assertEqual(review_payload["limit"], 100)
         self.assertEqual(review_payload["offset"], 0)
         self.assertLessEqual(len(review_payload["rows"]), 100)
+        self.assertTrue(all(isinstance(row["name_differences"], list) for row in review_payload["rows"]))
 
         missing_file = app.handle_request("GET", f"/imports/files/sessions/{session_id}/review-rows?kind=unimported")
         self.assertEqual(missing_file.status_code, 400)

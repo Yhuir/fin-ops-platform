@@ -74,6 +74,7 @@ export type ImportReviewRowsPage = {
     category: ImportReviewCategory;
     currentSource: string | null;
     conflicts: Array<{ field: string; fileValue: string; currentValue: string }>;
+    nameDifferences: Array<{ field: string; fileValue: string; currentValue: string }>;
     duplicateType?: string;
     recordType?: string;
   }>;

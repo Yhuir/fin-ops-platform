@@ -192,3 +192,7 @@ Nightly CI 应至少覆盖：
 - `test_oa_attachment_invoice_promotion_service.py`：真实 PostgreSQL 页区冲突不落库、重复写幂等、不同页可落不同发票，同批冲突整体失败。
 - `test_oa_bank_account_invoice_repair.py`：原件身份、金额日期、来源独占及下游引用校验；正确票不改；关联成员/绑定/历史与发票删除同事务，matching 写失败回滚，重复执行不删替代票。
 - `test_manual_invoice_entry_service.py` 与 `test_import_file_api.py`：保留人工识别和人工导入 API 既有边界。前端未改；使用既有前端与浏览器回归验证消费者。
+
+## 2026-09-23 主体识别回归
+
+`test_oa_attachment_invoice_service` 覆盖车站干扰、只有购方、销方先出现、显式税号角色反序、无标签不猜测、完整分公司/个体工商户名称，以及解析后重复关联不覆盖已验证正式票。现有 `test_mongo_oa_adapter` 和 `test_oa_attachment_invoice_promotion_service` 保护缓存版本与来源/关系合同。名称缺失不替代财务准入条件。生产定向附件刷新验证按现有 durable worker 执行，不以本地模拟替代。

@@ -9,6 +9,7 @@ const CATEGORY_LABELS: Record<ImportReviewCategory, string> = {
   review: "需检查", new: "新增项", existing: "App 内已存在", batch_duplicate: "本批重复",
 };
 const FIELD_LABELS: Record<string, string> = {
+  seller_name: "销方名称", buyer_name: "购方名称",
   amount: "金额", tax_amount: "税额", total_with_tax: "价税合计", invoice_date: "开票日期",
   invoice_type: "发票类型", seller_tax_no: "销方税号", buyer_tax_no: "购方税号",
 };
@@ -65,6 +66,13 @@ export default function ImportReviewTable({ rows, loading, invoiceMode, page, pa
                 : row.decision === "status_updated" ? "确认后更新状态"
                 : row.category === "batch_duplicate" ? "同批已有相同记录，不重复新增"
                 : row.category === "new" ? "确认成功后写入" : "不重复新增"}
+              {row.nameDifferences.length > 0 ? <details>
+                <summary>名称差异提示（不影响确认）</summary>
+                {row.nameDifferences.map((item) => <div key={item.field} className="import-review-conflict">
+                  <strong>{FIELD_LABELS[item.field]}</strong>
+                  <div>文件：{item.fileValue}</div><div>App 当前：{item.currentValue || "未填写"}</div>
+                </div>)}
+              </details> : null}
             </FinanceTableCell>
           </FinanceTableRow>
         ))}

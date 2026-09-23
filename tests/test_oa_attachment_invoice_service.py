@@ -702,7 +702,7 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         assert invoice is not None
         self.assertEqual(invoice["invoice_no"], "26532000000423491746")
         self.assertEqual(invoice["buyer_name"], "云南溯源科技有限公司")
-        self.assertEqual(invoice["seller_name"], "弥勒市豪荟酒店")
+        self.assertEqual(invoice["seller_name"], "弥勒市豪荟酒店（个体工商户）")
         self.assertEqual(invoice["amount"], "289.11")
         self.assertEqual(invoice["net_amount"], "289.11")
         self.assertEqual(invoice["tax_amount"], "2.89")
@@ -731,6 +731,67 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         self.assertEqual(invoice["total_with_tax"], "38.00")
         self.assertEqual(invoice["invoice_kind"], "电子发票（铁路电子客票）")
 
+    def test_party_labels_exclude_stations_and_preserve_full_legal_name(self):
+        service = OAAttachmentInvoiceService()
+        invoice = service._parse_invoice_text(RAILWAY_E_TICKET_PRICE_PREFIX_TEXT)
+        self.assertEqual(invoice["buyer_name"], "云南溯源科技有限公司")
+        self.assertEqual(invoice["seller_name"], "")
+        self.assertEqual(invoice["seller_tax_no"], "")
+        text = RAILWAY_E_TICKET_PRICE_PREFIX_TEXT + "\n销售方名称:中国铁路昆明局集团有限公司昆明站\n销售方纳税人识别号:91530000X22600103R"
+        invoice = service._parse_invoice_text(text)
+        self.assertEqual(invoice["seller_name"], "中国铁路昆明局集团有限公司昆明站")
+        self.assertEqual(invoice["seller_tax_no"], "91530000X22600103R")
+
+    def test_explicit_party_roles_override_reading_order_and_missing_buyer(self):
+        service = OAAttachmentInvoiceService()
+        base = "电子发票（普通发票）\n发票号码:26539150014000355216\n开票日期:2026年06月08日\n金额:133.03\n税额:11.97\n价税合计¥145.00\n"
+        seller = "销售方信息\n名称:中国铁路昆明局集团有限公司昆明站\n纳税人识别号:91530000X22600103R\n"
+        buyer = "购买方信息\n名称:云南溯源科技有限公司\n纳税人识别号:915300007194052520\n"
+        for body in (seller + buyer, seller):
+            invoice = service._parse_invoice_text(base + body)
+            self.assertEqual(invoice["seller_name"], "中国铁路昆明局集团有限公司昆明站")
+            self.assertEqual(invoice["seller_tax_no"], "91530000X22600103R")
+            self.assertEqual(invoice["buyer_name"], "云南溯源科技有限公司" if body.endswith(buyer) else "")
+            self.assertEqual(invoice["buyer_tax_no"], "915300007194052520" if body.endswith(buyer) else "")
+
+    def test_corrected_party_parse_links_existing_invoice_without_rewriting_verified_fields(self):
+        from fin_ops_platform.domain.enums import BatchType
+        from fin_ops_platform.services.imports import ImportNormalizationService
+
+        from tests.test_import_closed_loop import invoice_row
+        imports = ImportNormalizationService()
+        row = invoice_row("26539150014000355216")
+        row.update(invoice_date="2026-06-08", seller_name="云南铁路发展有限公司",
+                   seller_tax_no="915300002165678829", buyer_name="云南溯源科技有限公司",
+                   amount="133.03", tax_amount="11.97", total_with_tax="145")
+        preview = imports.preview_import(batch_type=BatchType.INPUT_INVOICE, source_name="tax-original", imported_by="test", rows=[row])
+        imports.confirm_import(preview.id)
+        existing = imports.list_invoices()[0]
+        evidence = OAAttachmentInvoiceService()._invoice_to_evidence(
+            OAAttachmentInvoiceService()._parse_invoice_text(RAILWAY_E_TICKET_PRICE_PREFIX_TEXT))
+        for _ in range(2):
+            linked = imports.upsert_oa_attachment_invoice(evidence, oa_form_id="f", oa_row_id="oa-1", source_workbench_row_id="oa-1", allow_create=True)
+            self.assertEqual(linked.id, existing.id)
+            self.assertEqual(linked.seller_name, "云南铁路发展有限公司")
+            self.assertEqual(linked.buyer_name, "云南溯源科技有限公司")
+            self.assertEqual(str(linked.amount), "133.03")
+        self.assertEqual(len(imports.list_invoices()), 1)
+        self.assertEqual(sum(link["source_type"] == "oa_attachment_invoice" for link in linked.source_links), 1)
+
+    def test_explicit_tax_roles_are_not_reassigned_by_name_order(self):
+        text = "购买方名称:测试购买有限公司\n销售方名称:测试销售有限公司\n销售方纳税人识别号:91530000X22600103R\n购买方纳税人识别号:915300007194052520"
+        parties = OAAttachmentInvoiceService()._extract_invoice_parties(text)
+        self.assertEqual(parties["buyer_tax_no"], "915300007194052520")
+        self.assertEqual(parties["seller_tax_no"], "91530000X22600103R")
+
+    def test_unlabelled_names_are_not_invoice_parties(self):
+        invoice = OAAttachmentInvoiceService()._parse_invoice_text(
+            RAILWAY_E_TICKET_PRICE_PREFIX_TEXT.replace("购买方名称:", "备注:"))
+        self.assertEqual(invoice["buyer_name"], "")
+        self.assertEqual(invoice["seller_name"], "")
+        parties = OAAttachmentInvoiceService()._extract_invoice_parties("项目名称:列车服务\n商品名称:铁路服务")
+        self.assertTrue(all(not value for value in parties.values()))
+
     def test_parse_invoice_text_stops_railway_price_before_following_ticket_number(self) -> None:
         service = OAAttachmentInvoiceService()
 
@@ -752,7 +813,7 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         self.assertIsNotNone(invoice)
         assert invoice is not None
         self.assertEqual(invoice["invoice_no"], "26537000000124998164")
-        self.assertEqual(invoice["seller_name"], "中国邮政速递物流股份有限公司")
+        self.assertEqual(invoice["seller_name"], "中国邮政速递物流股份有限公司昆明市分公司")
         self.assertEqual(invoice["net_amount"], "23.58")
         self.assertEqual(invoice["tax_amount"], "1.42")
         self.assertEqual(invoice["total_with_tax"], "25.00")

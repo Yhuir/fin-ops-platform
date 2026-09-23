@@ -682,6 +682,7 @@ type ApiImportReviewRowsPage = {
     category: ImportReviewRowsPage["rows"][number]["category"];
     current_source: string | null;
     conflicts: Array<{field: string; file_value: string; current_value: string}>;
+    name_differences: Array<{field: string; file_value: string; current_value: string}>;
     record_type?: string;
     decision?: string | null;
     decision_reason?: string | null;
@@ -716,7 +717,7 @@ export async function fetchImportReviewRows(
     `/imports/files/sessions/${encodeURIComponent(sessionId)}/review-rows?${query}`,
     { method: "GET", signal },
   );
-  if (!Array.isArray(payload.rows) || !payload.summary || payload.rows.some((row) => !Array.isArray(row.conflicts))) {
+  if (!Array.isArray(payload.rows) || !payload.summary || payload.rows.some((row) => (!Array.isArray(row.conflicts) || !Array.isArray(row.name_differences)))) {
     throw new Error("导入复核数据响应格式错误，请刷新后重试。");
   }
   const rows = payload.rows.map((row) => ({
@@ -726,6 +727,9 @@ export async function fetchImportReviewRows(
     rowNo: row.row_no,
     category: row.category,
     currentSource: row.current_source,
+    nameDifferences: row.name_differences.map((item) => ({
+      field: item.field, fileValue: item.file_value, currentValue: item.current_value,
+    })),
     conflicts: row.conflicts.map((conflict) => ({
       field: conflict.field, fileValue: conflict.file_value, currentValue: conflict.current_value,
     })),

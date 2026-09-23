@@ -15,6 +15,7 @@ for (const mode of ["invoice", "bank"] as const) {
       seller_name: "云南铁路发展有限公司", buyer_name: "云南溯源科技有限公司", amount: "133.03", tax_amount: "11.97", total_with_tax: "145.00",
       account_no: "622200000000000001", trade_time: "2026-09-16 10:00:00", direction: "outflow", counterparty_name: "云南铁路发展有限公司",
       current_source: "OA附件解析", decision_reason: "关键字段不一致，请核对来源。",
+      name_differences: index === 32 && mode === "invoice" ? [{field: "buyer_name", file_value: "云南溯源科技有限公司", current_value: "大理站"}] : [],
       conflicts: index < 4 && mode === "invoice" ? [{field: "amount", file_value: "133.03", current_value: "145.00"}, {field: "tax_amount", file_value: "11.97", current_value: "0.00"}] : [],
     }));
     await page.route("**/imports/files/sessions/*", route => route.fulfill({json: {
@@ -50,6 +51,10 @@ for (const mode of ["invoice", "bank"] as const) {
       await issue.locator("summary").click();
       await expect(issue.getByText("App 当前：145.00", {exact: true})).toBeVisible();
       await expect(issue).toContainText("合计 145.00");
+      const nameWarning = grid.locator(".import-review-row--existing").last();
+      await nameWarning.getByText("名称差异提示（不影响确认）").click();
+      await expect(nameWarning.getByText("App 当前：大理站")).toBeVisible();
+      await expect(grid.locator(".import-review-row--review")).toHaveCount(4);
     }
     const colors = await grid.locator("tbody tr td:first-child").evaluateAll(cells => [...new Set(cells.map(cell => getComputedStyle(cell).backgroundColor))]);
     expect(colors.length).toBe(3);

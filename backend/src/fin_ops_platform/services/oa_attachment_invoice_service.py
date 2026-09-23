@@ -62,7 +62,7 @@ class OAAttachmentOCRRuntimeError(RuntimeError):
 
 
 class OAAttachmentInvoiceService:
-    PARSER_VERSION = "2026-09-21-labelled-invoice-identity-v5"
+    PARSER_VERSION = "2026-09-23-labelled-invoice-parties-v6"
 
     def __init__(
         self,
@@ -592,24 +592,16 @@ class OAAttachmentInvoiceService:
                 return machine_printed_invoices[0]
             return None
 
-        names = self._extract_names(compact_text)
-        line_names = self._extract_names_from_lines(extracted_text)
-        if len(names) < 2 or any(self._is_suspicious_company_name(name) for name in names[:2]):
-            names = line_names or names
-        tax_ids = self._extract_tax_ids(identity_text)
-        buyer_name = names[0] if len(names) >= 1 else ""
-        seller_name = names[1] if len(names) >= 2 else ""
-        buyer_tax_no = tax_ids[0] if len(tax_ids) >= 1 else ""
-        seller_tax_no = tax_ids[1] if len(tax_ids) >= 2 else ""
+        parties = self._extract_invoice_parties(identity_text)
         net_amount, tax_amount, total_with_tax = totals
 
         parsed = {
             "invoice_code": invoice_code,
             "invoice_no": invoice_no,
-            "seller_tax_no": seller_tax_no,
-            "seller_name": seller_name,
-            "buyer_tax_no": buyer_tax_no,
-            "buyer_name": buyer_name,
+            "seller_tax_no": parties["seller_tax_no"],
+            "seller_name": parties["seller_name"],
+            "buyer_tax_no": parties["buyer_tax_no"],
+            "buyer_name": parties["buyer_name"],
             "issue_date": issue_date,
             "amount": net_amount,
             "net_amount": net_amount,
@@ -794,15 +786,76 @@ class OAAttachmentInvoiceService:
                     names.append(company_name)
         return names
 
-    @staticmethod
-    def _is_suspicious_company_name(value: str) -> bool:
-        normalized = clean_string(value)
-        return (
-            not normalized
-            or normalized[0].isdigit()
-            or "国家税务总局" in normalized
-            or "统一发票监制" in normalized
-        )
+    def _extract_invoice_parties(self, text: str) -> dict[str, str]:
+        """Read labelled party fields; never scan company-like prose or stations.
+
+        Older VAT forms have two unqualified name fields in the fixed buyer/seller
+        layout. Explicit party headings override that layout, including reversed
+        sections. Missing labelled values retain their slot.
+        """
+        role_pattern = r"购买方|销售方|购方|销方|购|销"
+        tax_label = r"统一社会信用代码/纳税人识别号|纳税人识别号|统一社会信用代码"
+        name_pattern = re.compile(rf"(?:(?P<role>{role_pattern})(?:信息)?(?:名称|称)|(?<!项目)(?<!商品)(?<!服务)(?:名称|(?<!名)称)):")
+        role_heading = re.compile(r"^(购买方|销售方|购方|销方)(?:信息)?$")
+        field_end = re.compile(rf"(?:{tax_label}|地址[、,]?电话|开户银行|开户行及账号|备注|项目名称):?")
+        lines = text.splitlines()
+        names: list[tuple[str, str, int]] = []
+        active_role = ""
+        for index, line in enumerate(lines):
+            heading = role_heading.fullmatch(line)
+            if heading:
+                active_role = "buyer" if heading[1].startswith("购") else "seller"
+                if names and not names[-1][0]:
+                    _, value, row = names[-1]
+                    names[-1] = (active_role, value, row)
+                continue
+            matches = list(name_pattern.finditer(line))
+            for position, match in enumerate(matches):
+                role = match.group("role")
+                resolved_role = ("buyer" if role.startswith("购") else "seller") if role else active_role
+                # Some OCR forms place the vertical party heading after its name.
+                if not role and (not active_role or any(owner == active_role for owner, _, _ in names)) and index + 1 < len(lines):
+                    following = role_heading.fullmatch(lines[index + 1])
+                    if following:
+                        resolved_role = "buyer" if following[1].startswith("购") else "seller"
+                end = matches[position + 1].start() if position + 1 < len(matches) else len(line)
+                value = field_end.split(line[match.end():end], maxsplit=1)[0].strip()
+                names.append((resolved_role, value, index))
+        if len(names) == 2 and all(not role for role, _, _ in names):
+            names = [(role, value, index) for role, (_, value, index) in zip(("buyer", "seller"), names, strict=True)]
+        result = {f"{role}_{field}": "" for role in ("buyer", "seller") for field in ("name", "tax_no")}
+        for role in ("buyer", "seller"):
+            values = {value for owner, value, _ in names if owner == role and value}
+            if len(values) == 1:
+                result[f"{role}_name"] = values.pop()
+
+        taxes: list[tuple[str, str]] = []
+        explicit_tax_roles = False
+        active_role = ""
+        for index, line in enumerate(lines):
+            heading = role_heading.fullmatch(line)
+            if heading:
+                active_role = "buyer" if heading[1].startswith("购") else "seller"
+            line_names = [role for role, _, row in names if row == index and role]
+            if len(line_names) == 1:
+                active_role = line_names[0]
+            for match in re.finditer(rf"(?:(?P<role>{role_pattern}))?(?:{tax_label}):", line):
+                explicit = match.group("role")
+                explicit_tax_roles = explicit_tax_roles or bool(explicit)
+                owner = ("buyer" if explicit.startswith("购") else "seller") if explicit else active_role
+                values = self._extract_tax_ids(line[match.start():])
+                taxes.append((owner, values[0]))
+        # Two columns may flatten as names first, then two tax fields. Only the
+        # complete pair of labelled slots establishes the corresponding order.
+        owners = [role for role, _, _ in names]
+        if (not explicit_tax_roles and len(taxes) == 2 and len(names) == 2
+                and set(owners) == {"buyer", "seller"} and {role for role, _ in taxes} != {"buyer", "seller"}):
+            taxes = [(owner, value) for owner, (_, value) in zip(owners, taxes, strict=True)]
+        for role in ("buyer", "seller"):
+            values = {value for owner, value in taxes if owner == role and value}
+            if len(values) == 1:
+                result[f"{role}_tax_no"] = values.pop()
+        return result
 
     @staticmethod
     def _extract_tax_ids(text: str) -> list[str]:

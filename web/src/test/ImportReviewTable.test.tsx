@@ -11,6 +11,7 @@ function rows(): ImportReviewRowsPage["rows"] {
     invoiceNo: `2699000000000000${String(index).padStart(4, "0")}`, invoiceDate: "2026-09-16",
     sellerName: "一个很长但必须完整显示的销方公司名称", buyerName: "云南溯源科技有限公司",
     amount: "133.03", taxAmount: "11.97", totalWithTax: "145.00", currentSource: "OA附件解析",
+    nameDifferences: [],
     conflicts: index < 4 ? [{ field: "amount", fileValue: "133.03", currentValue: "145.00" }, { field: "tax_amount", fileValue: "11.97", currentValue: "0.00" }] : [],
   }));
 }
@@ -41,4 +42,15 @@ test("bank mode uses bank fields, full amount, review state and bounded paginati
   expect(screen.queryByText("销方 / 购方")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "下一页" }));
   expect(onPageChange).toHaveBeenCalledWith(2);
+});
+
+
+test("name differences remain existing and do not become blocking conflicts", async () => {
+  const row = { ...rows()[32], conflicts: [], nameDifferences: [{ field: "buyer_name", fileValue: "云南溯源科技有限公司", currentValue: "大理站" }] };
+  render(<ImportReviewTable rows={[row]} loading={false} invoiceMode page={1} pageSize={100} total={1} onPageChange={vi.fn()} />);
+  await userEvent.click(screen.getByText("名称差异提示（不影响确认）"));
+  expect(screen.getByText("App 当前：大理站")).toBeVisible();
+  expect(screen.getByText("文件：云南溯源科技有限公司")).toBeVisible();
+  expect(screen.getByText("App 内已存在")).toBeVisible();
+  expect(screen.queryByText("需检查")).not.toBeInTheDocument();
 });

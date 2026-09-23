@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 import unittest
+from dataclasses import replace
 from io import BytesIO
 from unittest.mock import patch
-
-from openpyxl import Workbook
 
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile
 from fin_ops_platform.services.imports import ImportNormalizationService
+from openpyxl import Workbook
+
 from tests.app_test_support import build_local_state_application
 from tests.test_import_closed_loop import HEADERS, invoice_row
 
@@ -65,6 +65,19 @@ class ImportReviewClosureTests(unittest.TestCase):
         self.assertEqual(page["summary"], result["summary"])
         self.assertTrue(page["has_more"])
 
+    def test_name_difference_is_visible_without_blocking_or_extra_identity_queries(self):
+        session = self.files.preview_files(imported_by="owner", uploads=[UploadedImportFile("corrected.xlsx", review_workbook(corrected=True))])
+        existing = self.imports.list_invoices()[0]
+        existing.buyer_name = "大理站"
+        result = self.files.review_rows(session_id=session.id, file_id=session.files[0].id, offset=0, limit=100)
+        self.assertEqual(result["summary"]["review"], 0)
+        changed = [row for row in result["rows"] if any(item["current_value"] == "大理站" for item in row["name_differences"])]
+        self.assertEqual(len(changed), 1)
+        self.assertEqual(changed[0]["category"], "existing")
+        self.assertEqual(changed[0]["conflicts"], [])
+        self.files.assert_files_confirmable(session_id=session.id, selected_file_ids=[session.files[0].id])
+        self.assertEqual(existing.buyer_name, "大理站")
+
     def test_error_cannot_write_partial_facts_then_corrected_file_imports_once(self):
         with self.assertRaisesRegex(ValueError, "require review"):
             self.files.confirm_session(session_id=self.session.id, selected_file_ids=[self.session.files[0].id])
@@ -109,8 +122,10 @@ class ImportReviewPostgresTests(unittest.TestCase):
     def setUp(self):
         from pathlib import Path
         from tempfile import TemporaryDirectory
+
         from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
         from fin_ops_platform.services.postgres_state_store import PostgresStateStore
+
         from tests.postgres_test_utils import truncate_test_database
         truncate_test_database(self.url)
         self.directory = TemporaryDirectory()

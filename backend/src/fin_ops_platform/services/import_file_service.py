@@ -681,11 +681,17 @@ class FileImportService:
         with self._import_service.preload_normalized_identities({BatchType.INPUT_INVOICE: invoice_rows}):
             for result, normalized in page:
                 conflicts = []
+                name_differences = []
                 current_source = None
                 if result.source_record_type == "invoice" and normalized.get("source_unique_key"):
                     existing = self._import_service.find_invoice_by_identity(canonical_key=normalized["source_unique_key"])
                     if existing is not None:
                         current_source = existing.invoice_source
+                        for name in ("seller_name", "buyer_name"):
+                            incoming = str(normalized.get(name) or "").strip()
+                            current = str(getattr(existing, name) or "").strip()
+                            if incoming and incoming != current:
+                                name_differences.append({"field": name, "file_value": incoming, "current_value": current})
                     for name in self._import_service.invoice_financial_conflicts(normalized, existing):
                         current = getattr(existing, name)
                         conflicts.append({
@@ -698,7 +704,7 @@ class FileImportService:
                     "category": categories[(file_id, result.row_no)],
                     "decision": result.decision.value,
                     "decision_reason": result.decision_reason,
-                    "conflicts": conflicts, "current_source": current_source,
+                    "conflicts": conflicts, "name_differences": name_differences, "current_source": current_source,
                     **self._audit_row_display_fields(result.source_record_type, normalized),
                 })
         return {

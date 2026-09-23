@@ -55,6 +55,7 @@ describe("imports api", () => {
   test("review rows request selects one file and preserves structured financial differences", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       rows: [{ file_id: "file-1", row_no: 16, category: "review", current_source: "OA附件解析", amount: "133.03",
+        name_differences: [{field: "buyer_name", file_value: "公司", current_value: "车站"}],
         conflicts: [{field: "amount", file_value: "133.03", current_value: "145.00"}] }],
       summary: {new: 19, existing: 10, review: 4, batch_duplicate: 0}, total: 33, offset: 0, limit: 100, has_more: false,
     }), {status: 200, headers: {"Content-Type": "application/json"}}));
@@ -63,6 +64,7 @@ describe("imports api", () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain("file_id=file-1&offset=0&limit=100");
     expect(result.summary.review).toBe(4);
     expect(result.rows[0].conflicts).toEqual([{field: "amount", fileValue: "133.03", currentValue: "145.00"}]);
+    expect(result.rows[0].nameDifferences).toEqual([{field: "buyer_name", fileValue: "公司", currentValue: "车站"}]);
     expect(result.rows[0].currentSource).toBe("OA附件解析");
   });
 

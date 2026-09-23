@@ -246,3 +246,9 @@ ConfirmedInvoiceImportUnitOfWork 在导入事务内继续提交 promotion 与同
 既有 `import_audit_repair_ops --repair-invoice-financial-source` 增加显式 `--repair-invoice-party-fields`。仅接受精确现有 invoice IDs 和归档原件 `发票基础信息` 的完整销购方名称/税号；校验原件摘要、同票日期和总额，多个原件的字段冲突直接拒绝。默认金额修复合同不变；不改变普通导入覆盖或 OA promotion 行为。
 
 修复计划 service 负责证据比对，repository 在同一 serializable 事务内 CAS 写入四个主体字段、counterparty_name 与 normalized payload/内嵌 counterparty 的一致值，保留 invoice ID、关系、source_links 和 counterparty ID。现有金额纠正审计及 operation audit 保存前后值/原件依据；旧附件解析 cache 仅按命中身份精确失效。不新增 schema/API/worker，页面直接读 canonical facts；原导入任务必须重新预览，不自动确认其它新增票。
+
+## 2026-09-23 主体名称差异提示
+
+`review-rows` 每行新增必有数组 `name_differences[{field,file_value,current_value}]`，只比较购方/销方名称（去首尾空白）；文件有值而当前空值也提示。银行行和无差异行返回空数组。复用当前页单次 identity preload，不增加 SQL 往返或读取原件。名称提示不进入 `conflicts`、阻断计数或确认规则；当前值不因 GET 改写。前端在原抽屉展开文件值/App 当前值，标签为“名称差异提示（不影响确认）”，原分类和配色保持。DTO 缺少该数组明确报错，不使用兼容兜底。
+
+历史主体修复继续复用显式税务原件修复工具，不修改普通导入覆盖权、不确认其他新增发票。核对范围、证据缺口与验证记录见 [主体修复记录](implementation-notes.md#2026-09-23-主体识别与历史核对)。
