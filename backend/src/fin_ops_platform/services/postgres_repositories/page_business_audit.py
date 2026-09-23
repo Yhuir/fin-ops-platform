@@ -537,6 +537,10 @@ def _turnover_ledger_direct_canonical_issues(
                     end
                 ) member(row_id) on true
                 where relation.status <> 'deleted'
+                  and (
+                    relation.raw_payload->'normalized_payload'->>'source' = 'manual'
+                    or relation.status in ('confirmed', 'withdrawn')
+                  )
             )
             select member.relation_id as subject_id, to_char(member.scope_month, 'YYYY-MM') as scope_key,
                    member.row_id

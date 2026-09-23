@@ -126,3 +126,9 @@
 ## 2026-09 流水拆分合同
 
 新增银行拆分 GET/PUT 与批量查询 POST 复用现有页面授权集合及服务器会话 actor；金额守恒、版本冲突与审计均在银行 owner 事务内执行。 具体输入/输出、跨模块消费、旧链路清理及测试见 [流水拆分 I/O](../../dev/bank-transaction-splits.md)。
+
+## 2026-09-24 往来手工事实审计范围
+
+`manual_turnover_relation_bank_member_exists` 与 `TurnoverRelationService.rebuild_from_bank_rows` 的持久事实准入一致：只检查未删除且 `source=manual` 或 `status in (confirmed, withdrawn)` 的记录。`source=system,status=suggested` 是根据当前银行用途重新生成的建议快照，不作为手工关系事实；不能因为历史建议引用已被拆分替代的父用途就报手工成员丢失。真正手工、confirmed、withdrawn 的缺失成员仍报告阻断问题，统一 active case 的成员检查不变；不通过删除银行或忽略全部父身份消除问题。
+
+`tests/test_turnover_suggestion_retirement_postgres.py` 以真实 PostgreSQL 覆盖系统建议排除、手工/confirmed/withdrawn 缺失保持告警和有效 child 通过；原 audit API/只读快照和报告形状不变。

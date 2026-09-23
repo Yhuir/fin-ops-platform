@@ -149,3 +149,9 @@
 
 拆分 owner 在 `app.bank_transaction_split_items.category_payload` 持久化完整人工分类实例，通过 `app.bank_transaction_units.split_category_payload` 与公共 effective classifier 提供当前标签、第三层、action/family。标签 definition 只定义选项，不能代替每笔用途的往来归属；禁止用父流水或对方银行名称在查询时补猜。输入完整 `category_label_path`，服务按现有分类规范校验与派生；同 code 同金额修改第三层也版本化并保留子身份。GET/PUT、迁移限制及测试见 [流水拆分 I/O](../../dev/bank-transaction-splits.md#分类实例合同0180)。
 往来准入读取持久化实例的 family/action；拆分前后 extras/手工关系迁移读取完整 before 分类实例，不再从 definition 重建缺失归属。
+
+## 2026-09-24 退役拆分前的系统建议快照
+
+业务 owner 提供 `PostgresTurnoverSuggestionRetirementRepository.run(apply, actor_id)` 与运维 CLI `python3 -m fin_ops_platform.tools.retire_split_turnover_suggestions [--apply --operator <actor>]`。默认仅预览；apply 使用 serializable 事务并锁定候选关系，仅退役列状态和 normalized 状态均为 suggested、source=system，且至少一个旧父用途已经被两项以上、合计守恒的真实子项替代的历史快照。未拆分建议、当前子项、manual/confirmed/withdrawn、无银行证据或不守恒拆分不属于候选。
+
+退役仅物理移除该过时系统建议行，在同一事务写 `audit.events` 的完整 before 和明确 retired 标记。存在 extras 人工补充或领域事件外键引用时不处理，避免破坏用户数据或历史证据；不引入领域不支持的 deleted 状态，也不会被常规 load/save 重新载入。预览不写、重复执行无新增审计、失败整体回滚，不创建人工关系、不删除银行或子项。不读取 0180 category_payload，允许候选发布在 0179 schema 上执行，再走正常发布验证。真实 PG 测试覆盖精确集合、预览、幂等、回滚以及事务内还原 0179 schema 的运行验证。
