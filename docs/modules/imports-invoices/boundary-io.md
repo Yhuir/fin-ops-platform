@@ -252,3 +252,5 @@ ConfirmedInvoiceImportUnitOfWork 在导入事务内继续提交 promotion 与同
 `review-rows` 每行新增必有数组 `name_differences[{field,file_value,current_value}]`，只比较购方/销方名称（去首尾空白）；文件有值而当前空值也提示。银行行和无差异行返回空数组。复用当前页单次 identity preload，不增加 SQL 往返或读取原件。名称提示不进入 `conflicts`、阻断计数或确认规则；当前值不因 GET 改写。前端在原抽屉展开文件值/App 当前值，标签为“名称差异提示（不影响确认）”，原分类和配色保持。DTO 缺少该数组明确报错，不使用兼容兜底。
 
 历史主体修复继续复用显式税务原件修复工具，不修改普通导入覆盖权、不确认其他新增发票。核对范围、证据缺口与验证记录见 [主体修复记录](implementation-notes.md#2026-09-23-主体识别与历史核对)。
+
+预览引用与正式来源审计边界：`pending/failed/reverted` batch 的查重引用不将已有 OA 发票纳入“本批已写入”的集合。只有 completed/completed_with_errors 的 terminal row 引用参与该集合；正式 source batch/manual source link 的独立约束仍然保留。修复未确认预览误报 canonical invoice orphan，不忽略真实孤立或缺失来源。

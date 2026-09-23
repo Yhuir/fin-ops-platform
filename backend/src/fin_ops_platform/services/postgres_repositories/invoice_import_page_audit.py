@@ -90,9 +90,14 @@ def _audit_snapshot(
     }
     formal_batches = [row for row in batches if _text(row.get("batch_id")) in formal_batch_ids]
     formal_rows = [row for row in rows if _text(row.get("batch_id")) in formal_batch_ids]
+    terminal_batch_ids = {
+        _text(row.get("batch_id")) for row in formal_batches
+        if _text(row.get("status")) in TERMINAL_BATCH_STATUSES
+    }
     referenced_invoice_ids = {
         _text(row.get("linked_object_id")) for row in formal_rows
-        if _text(row.get("linked_object_type")) == "invoice"
+        if _text(row.get("batch_id")) in terminal_batch_ids
+        and _text(row.get("linked_object_type")) == "invoice"
         and _text(row.get("decision")) in LINKED_TERMINAL_DECISIONS
     }
     formal_invoices = [

@@ -253,3 +253,5 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 - 前端/E2E：`ImportReviewTable.test.tsx`、`e2e/import-review-details.spec.ts` 覆盖名称提示展开、保持 existing 分类及发票/银行两抽屉回归。
 - 缓存/后台：复用 OA adapter/promotion 测试保护版本失效、来源归属；不新增 worker。
 - 回归：普通导入、分页/统计、未确认业务事实、OA 来源关联保持。七类测试均适用其受影响部分。
+
+`test_audit_invoice_import_page` 覆盖 pending/failed/reverted 预览引用已有 OA 票不冒充正式写入，并证明真正没有行证据的正式票仍报告 orphan。生产发布发现该误报，修复范围限定为审计集合口径，不改变发票或导入状态。

@@ -255,6 +255,21 @@ class FakeConnection:
 
 
 class InvoiceImportPageAuditTests(unittest.TestCase):
+    def test_preview_reference_to_existing_oa_invoice_is_not_formal_import_ownership(self):
+        for status in ("pending", "failed", "reverted"):
+            with self.subTest(status=status):
+                connection = FakeConnection()
+                connection.batches[0]["status"] = status
+                connection.invoices[0]["source_batch_id"] = None
+                connection.invoices[0]["source_links"] = [{"source_type": "oa_attachment_invoice", "source_id": "oa-attachment"}]
+                connection.rows[0]["decision"] = "duplicate_skipped"
+                report = invoice_import_page_audit.audit_invoice_import_page(connection)
+                self.assertNotIn("invoice_import_canonical_invoice_orphan", report["summary"]["issue_sample_counts_by_code"])
+        connection = FakeConnection()
+        connection.rows = []
+        report = invoice_import_page_audit.audit_invoice_import_page(connection)
+        self.assertIn("invoice_import_canonical_invoice_orphan", report["summary"]["issue_sample_counts_by_code"])
+
     def test_uncommitted_review_rejection_is_visible_warning_only(self) -> None:
         job = {"job_id": "job-review", "import_session_id": "session-1", "status": "failed", "stage": "commit",
                "last_error": "selected files require review before confirmation: file-1", "payload": {"selected_file_ids": ["file-1"]}}
