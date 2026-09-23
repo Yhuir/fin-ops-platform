@@ -6,9 +6,32 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from fin_ops_platform.app.routes_bank_transaction_splits import BankTransactionSplitApiRoutes
+from fin_ops_platform.services.bank_transaction_category_service import default_bank_transaction_tag_dictionary_payload
 from fin_ops_platform.services.bank_transaction_split_service import BankTransactionSplitError, validate_split_parts
+from fin_ops_platform.services.postgres_repositories.bank_transaction_splits import (
+    PostgresBankTransactionSplitRepository,
+)
 
 DEFINITIONS = [{"code": "principal", "status": "active"}, {"code": "interest", "status": "active"}]
+
+
+class SplitTagDisplayTests(unittest.TestCase):
+    def test_default_dictionary_supports_flat_and_hierarchical_tags(self):
+        dictionary = default_bank_transaction_tag_dictionary_payload()
+        tags = PostgresBankTransactionSplitRepository.tag_definitions(dictionary)
+        by_code = {tag["code"]: tag for tag in tags}
+        self.assertEqual(len(tags), len(dictionary["definitions"]))
+        for definition in dictionary["definitions"]:
+            tag = by_code[definition["code"]]
+            self.assertTrue(tag["primary_label"])
+            if not definition["path"] and not definition.get("output_primary_label"):
+                self.assertEqual(tag["path"], [definition["label"]])
+                self.assertEqual(tag["primary_label"], definition["label"])
+                self.assertEqual(tag["sub_label"], "")
+                part = PostgresBankTransactionSplitRepository.decorate_parts(
+                    [{"id": "part", "category_code": tag["code"], "amount": Decimal("1.00")}], tags,
+                )[0]
+                self.assertEqual(part["category_path"], [definition["label"]])
 
 
 class SplitValidationTests(unittest.TestCase):

@@ -8,6 +8,7 @@
 - PUT 同一路径：输入 version、parts[{id?,category_code,amount}]；金额为十进制字符串；空 parts 撤销时提供 category_code。actor 来自登录身份。成功返回持久化完整对象、changed、affected_months；旧版本 409、不合法合计/金额/标签 400、流水不存在 404、无认证 401、无页面授权 403。
 - POST /api/bank-transactions/splits/query：输入 transaction_ids[]，输出 rows[] 与输入顺序一一对应。两个子项属于同一父项时仍按请求数返回，避免位置错绑。固定次数 SQL，无逐行 load。
 - tag_definitions 是显示合同，含 code、label、path、primary_label、sub_label、status 与配置语义，不暴露自动分类规则全文。子项与配置分开持久化，标签更新不复制成银行原始事实。
+- 平级系统标签在字典中允许 `path=[]`，拆分显示投影使用该标签自身的 `label` 作为唯一层级；有输出层级的标签使用配置层级。两种现有标签形态均纳入单元与真实 PostgreSQL 测试，不修改分类语义。
 
 ## 模块与事务
 

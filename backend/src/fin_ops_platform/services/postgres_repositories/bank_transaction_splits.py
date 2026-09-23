@@ -112,6 +112,9 @@ class PostgresBankTransactionSplitRepository:
         result = []
         for definition in definitions:
             path = [definition[key] for key in ("output_primary_label", "output_sub_label", "output_third_label") if definition.get(key)] if definition.get("output_primary_label") else definition["path"]
+            # A flat system tag has an empty taxonomy path and its own label.
+            if not path:
+                path = [definition["label"]]
             result.append({**definition, "path": path, "label": " / ".join(path),
                            "primary_label": path[0], "sub_label": " / ".join(path[1:])})
         return result

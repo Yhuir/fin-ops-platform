@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.bank_details_canonical_query import PostgresBankDetailsCanonicalQueryRepository
+from fin_ops_platform.services.bank_transaction_category_service import default_bank_transaction_tag_dictionary_payload
 from fin_ops_platform.services.bank_transaction_split_relation_service import BankTransactionSplitRelationService
 from fin_ops_platform.services.bank_transaction_split_service import (
     BankTransactionSplitError,
@@ -37,7 +38,7 @@ class BankTransactionSplitPostgresTests(unittest.TestCase):
         truncate_test_database(self.database_url)
         self.connection = PostgresConnection(PostgresSettings(database_url=self.database_url, pool_enabled=False))
         self.parent = str(uuid4())
-        self.settings = {"access_control_version": 1, "page_access_accounts": [], "bank_transaction_tags": {"version": 1, "definitions": [
+        self.settings = {"access_control_version": 1, "page_access_accounts": [], "bank_transaction_tags": {"version": 1, "definitions": [*default_bank_transaction_tag_dictionary_payload()["definitions"],
             {"code": "test_principal", "label": "本金", "path": ["往来", "本金"], "status": "active", "source": "custom", "rules": {}, "output_primary_label": "往来", "output_sub_label": "本金", "turnover_role": "external_turnover"},
             {"code": "test_interest", "label": "利息", "path": ["费用", "利息"], "status": "active", "source": "custom", "rules": {}, "output_primary_label": "费用", "output_sub_label": "利息"},
         ]}}
