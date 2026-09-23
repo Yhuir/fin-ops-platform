@@ -1,3 +1,4 @@
+import BankSplitChips from "../../features/bankSplits/BankSplitChips";
 import { ListBox, Select } from "@heroui/react";
 import { ArrowUpDown, Info } from "lucide-react";
 import type { ReactNode } from "react";
@@ -328,6 +329,7 @@ function DataRow({
         {bank ? (
           <>
             <TextLine numeric strong value={formatMoney(row.bank.receivedTotal || bank.amount)} />
+{bank.bankSplitParts?.length ? <BankSplitChips parts={bank.bankSplitParts} /> : null}
             <span className="output-invoice-collections-tag-row output-invoice-collections-tag-row--right">
               <FinanceTag tone={bank.directionLabel === "收入" ? "success" : "neutral"}>{bank.directionLabel || "收入"}</FinanceTag>
               {accountLabel(bank.bankName, bank.accountLast4) ? <FinanceTag>{accountLabel(bank.bankName, bank.accountLast4)}</FinanceTag> : null}

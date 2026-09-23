@@ -51,3 +51,7 @@ canonical relation producer，不属于页面读取链。Search API/index runtim
 ## 使用规则
 
 新增或修改页面、API、canonical repository、worker 或 domain job 时，先做文档影响评估；影响当前事实源时更新本目录和对应产品、开发或运维文档。历史 prompt、阶段计划和旧归档不再作为当前事实源。
+
+## 持久化流水拆分（2026-09-23）
+
+银行金额、余额及导入身份保留原金融事实。拆分子项通过统一银行 owner 写入，业务用途消费者统一读取子项视图；列表合并显示原流水，抽屉共用同一持久化编辑器。详见 [I/O 与测试矩阵](../dev/bank-transaction-splits.md)。

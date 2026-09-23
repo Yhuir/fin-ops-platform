@@ -1,3 +1,4 @@
+import { useBankSplitClose } from "../../features/bankSplits/useBankSplitClose";
 import { Button } from "@heroui/react";
 
 import type { CostEntryDetail, CostExplorerEntryRow } from "../../features/cost-statistics/types";
@@ -12,10 +13,12 @@ type Props = {
   error: string | null;
   onClose: () => void;
   onRetry: () => void;
+  onBankSplitSaved?: () => void | Promise<void>;
   onAdjust?: (caseId: string) => void;
 };
 
-export default function CostEntryDetailDrawer({ open, rowKind, detail, loading, error, onClose, onRetry, onAdjust }: Props) {
+export default function CostEntryDetailDrawer({ open, rowKind, detail, loading, error, onClose, onRetry, onAdjust, onBankSplitSaved }: Props) {
+  const { close, setDirty } = useBankSplitClose(onClose);
   const allocationView = rowKind !== "bank_transaction";
   const title = rowKind === "manual_allocation" ? "人工成本明细" : allocationView ? "OA 成本归集明细" : "银行流水详情";
   return (
@@ -23,7 +26,7 @@ export default function CostEntryDetailDrawer({ open, rowKind, detail, loading, 
       ariaBusy={loading}
       className="cost-transaction-detail-drawer"
       closeLabel={`关闭${title}`}
-      onClose={onClose}
+      onClose={close}
       open={open}
       title={title}
       width="min(800px, 100vw)"
@@ -41,7 +44,7 @@ export default function CostEntryDetailDrawer({ open, rowKind, detail, loading, 
           </div>
         ) : null}
         {!loading && !error && detail ? <>
-          <CostEntryDetailPanel detail={detail} />
+          <CostEntryDetailPanel onSplitDirtyChange={setDirty} onBankSplitSaved={onBankSplitSaved} detail={detail} />
           {detail.kind !== "bank_transaction" && onAdjust ? <Button size="sm" variant="secondary" onPress={() => onAdjust(detail.reconciliation.relationCaseId)}>调整分配</Button> : null}
         </> : null}
       </div>

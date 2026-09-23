@@ -183,7 +183,7 @@ def _canonical_relation_issues(
                 member.row_type in ('bank', 'bank_transaction')
                 and not exists (
                     select 1
-                    from app.bank_transactions bank
+                    from app.bank_transaction_units bank
                     where bank.status <> 'deleted'
                       and coalesce(bank.legacy_mongo_id, bank.id::text) = member.row_id
                 )

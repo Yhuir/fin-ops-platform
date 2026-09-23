@@ -1,3 +1,4 @@
+import type { BankSplitPart } from '../bankSplits/api';
 import type { BankTransactionTagDictionary } from "../pendingInvoices/types";
 
 export type BankBalanceStatus = "confirmed" | "last_known" | "unresolved" | "missing";
@@ -80,6 +81,8 @@ export type BankDetailAutoCandidateCategory = {
 };
 
 export type BankDetailTransaction = {
+  bankSplitParts?: BankSplitPart[];
+  bankSplitVersion?: number;
   id: string;
   tradeTime: string;
   sameTimeOrderStatus: BankSameTimeOrderStatus;

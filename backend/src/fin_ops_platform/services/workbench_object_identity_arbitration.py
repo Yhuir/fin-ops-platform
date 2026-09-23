@@ -7,7 +7,6 @@ from typing import Any
 
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy, ObjectIdentity
 
-
 HARD_INVOICE_IDENTITY_KINDS = frozenset({"digital_invoice_no", "invoice_code_no"})
 
 
@@ -88,6 +87,16 @@ class WorkbenchObjectIdentityArbitrationService:
                 )
             return self._with_source_row_fallback(identity, row_type=row_type, row_id=row_id)
         if row_type == "bank":
+            if row.get("is_split"):
+                return ObjectIdentity(
+                    object_type="bank_transaction",
+                    source_kind="bank_split_item",
+                    source_row_id=row_id,
+                    canonical_key=f"bank:split:{row_id}",
+                    canonical_key_kind="bank_split_item_id",
+                    confidence="canonical",
+                    audit_fields={"parent_row_id": _text(row.get("parent_row_id"))},
+                )
             identity = self._identity_policy.identify_bank_transaction_mapping(
                 {
                     **row,

@@ -142,3 +142,14 @@
 ## 成本分配变更（2026-09-21）
 
 成本有效分类批量 projection 新增 `turnover_role`，从当前有效确认/人工分类/定义输出已有结构化语义。银行明细自身金额、分类规则和列表 DTO 不变。
+
+
+## 2026-09-23 流水子项用途边界
+
+银行列表、余额、导出原始金额继续读取 `app.bank_transactions`，保持一笔原始流水一行；`app.bank_transaction_units` 仅作为用途消费视图，未拆分输出父身份、拆分输出持久化 child UUID。分类统一通过 `bank_category_classification_cte(use_units=True)`，子项显式分类优先，不复制父分类或金融事实。列表按子项标签/金额过滤但分页计数按父身份，批量附带 `bank_split_parts/category_path` 和版本，关系徽标批量映射子身份到父行。
+
+验证：`tests/test_bank_split_consumers_postgres.py` 使用隔离 PostgreSQL 数据库覆盖原始金额不变、子项标签筛选、成本待分配、待票金额和详情父身份、往来补充信息迁移。往来手工成员重建和含利息 case 的本金闭环由对应 service/query 单元测试覆盖。
+
+## 2026-09 流水拆分合同
+
+银行原金融事实与导入身份不变；银行拆分 owner 的持久化子项通过用途视图进入业务关联。详情使用父交易，列表标签显示当前子项；金额统计不得父子重复相加。 具体输入/输出、跨模块消费、旧链路清理及测试见 [流水拆分 I/O](../../dev/bank-transaction-splits.md)。

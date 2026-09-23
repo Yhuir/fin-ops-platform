@@ -1,3 +1,4 @@
+import BankTransactionDrawer from "../features/bankSplits/BankTransactionDrawer";
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type MouseEvent } from "react";
 import { Button, Checkbox, Chip, ToggleButton, ToggleButtonGroup } from "@heroui/react";
 import { AlertTriangle, ChevronLeft, ChevronRight, RefreshCw, X } from "lucide-react";
@@ -218,6 +219,7 @@ function AmountMismatchWarning({
 }
 
 export default function BatchAccountingPage() {
+  const [bankDetailRow, setBankDetailRow] = useState<BatchAccountingBankRow | null>(null);
   const { active, activationGeneration } = useOptionalPageActivation("batch-accounting");
   const { runOperation } = useGlobalOperationOverlay();
   const { canOperateData } = useSessionPermissions();
@@ -769,6 +771,7 @@ export default function BatchAccountingPage() {
             <div className="batch-accounting-oa-panel__controls">
               <div className="batch-accounting-summary">
                 <span className="batch-accounting-summary-tag">{`银行流水金额 ${formatCents(bankAmountCents)}`}</span>
+                {selectedBankRow ? <button type="button" aria-label="查看银行流水详情" onClick={() => setBankDetailRow(selectedBankRow)}>详情</button> : null}
                 <span className="batch-accounting-summary__warning-slot">
                   {submittedAmountMismatch && selectedRelationAmountCheck ? (
                     <AmountMismatchWarning
@@ -911,6 +914,12 @@ export default function BatchAccountingPage() {
         </section>
       </div>
 
+      <BankTransactionDrawer transactionId={bankDetailRow?.id ?? null} onClose={() => setBankDetailRow(null)}
+        onSaved={async () => { await reloadDataAfterMutation(); }}
+        sections={bankDetailRow ? [{ title: "交易信息", fields: [
+          { label: "金额", value: bankDetailRow.amount }, { label: "对方户名", value: bankDetailRow.counterpartyName },
+          { label: "交易时间", value: bankDetailRow.tradeTime }, { label: "银行", value: bankDetailRow.bankName },
+        ] }] : []} />
       <AppDialog
         actions={(
           <>

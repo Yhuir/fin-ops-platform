@@ -188,6 +188,8 @@ EXPECTED_MIGRATION_FILES = [
     "0175_import_jobs_direct_claim.sql",
     "0176_cost_statistics_oa_amount_locks.sql",
     "0177_cost_statistics_oa_cost_tags.sql",
+    "0178_bank_transaction_splits.sql",
+    "0179_bank_transaction_units.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "app", "staging", "cash")
 TEST_TABLES = (

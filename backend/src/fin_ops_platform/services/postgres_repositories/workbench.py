@@ -60,6 +60,37 @@ class PostgresWorkbenchRepository:
         self._connection = connection
         self._relation_repository = PostgresWorkbenchRelationRepository(connection)
 
+    def invalidate_bank_split_batches(self, row_ids: list[str], *, actor_id: str, parent_id: str) -> list[str]:
+        """Mark affected submitted bank batches stale without rewriting evidence."""
+        from copy import deepcopy
+        from datetime import UTC, datetime
+
+        rows = self._connection.fetch_all(
+            """select batch_id, raw_payload from app.bank_flow_rule_batches
+               where status = 'submitted' and bank_transaction_ids && %s::text[]
+               order by batch_id for update""", (row_ids,),
+        )
+        changed: list[str] = []
+        for row in rows:
+            before = row_payload(row, "raw_payload")
+            after = deepcopy(before)
+            after.update(status="stale", status_bucket="unsubmitted", version=int(before["version"]) + 1,
+                         updated_at=datetime.now(UTC).isoformat())
+            # Preserve the frozen members, amounts and source proof for audit.
+            self._upsert_bank_flow_rule_batch_items(self._connection, [(row["batch_id"], after)])
+            event = {"batch_id": row["batch_id"], "event_type": "bank_transaction_split_changed",
+                     "actor_id": actor_id, "parent_transaction_id": parent_id,
+                     "before": before, "after": after}
+            self._connection.execute(
+                """insert into app.bank_flow_rule_batch_events
+                   (bank_flow_rule_batch_id, batch_id, event_type, actor_id, payload, raw_payload)
+                   select id, batch_id, 'bank_transaction_split_changed', %s, %s, %s
+                   from app.bank_flow_rule_batches where batch_id = %s""",
+                (actor_id, jsonb(event), jsonb({"normalized_payload": event}), row["batch_id"]),
+            )
+            changed.append(row["batch_id"])
+        return changed
+
     def load_workbench_pair_relations(self) -> dict[str, Any]:
         return self._relation_repository.load_workbench_pair_relations()
 

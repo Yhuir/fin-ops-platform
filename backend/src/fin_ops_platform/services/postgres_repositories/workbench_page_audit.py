@@ -229,7 +229,7 @@ def _canonical_relation_issues(
                        else null
                    end as mismatch_kind
             from members member
-            left join app.bank_transactions bank
+            left join app.bank_transaction_units bank
               on coalesce(bank.legacy_mongo_id, bank.id::text) = member.row_id
              and bank.status <> 'deleted'
             left join lateral (

@@ -1,3 +1,4 @@
+import BankSplitChips from "../../features/bankSplits/BankSplitChips";
 import { Eye, FilePlus2 } from "lucide-react";
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, Chip, Tooltip } from "@heroui/react";
@@ -48,6 +49,7 @@ type WorkbenchRecordCardProps = {
   readOnly?: boolean;
   allowInvoiceEntryInReadOnly?: boolean;
   leadingControl?: ReactNode;
+  bankPartsContent?: ReactNode;
 };
 
 function WorkbenchRecordCard({
@@ -68,6 +70,7 @@ function WorkbenchRecordCard({
   readOnly = false,
   allowInvoiceEntryInReadOnly = false,
   leadingControl,
+  bankPartsContent,
 }: WorkbenchRecordCardProps) {
   const columns = columnsProp ?? getWorkbenchColumns(paneId);
   const isSummaryRow = row.sourceKind === "etc_invoice_summary" || row.sourceKind === "bank_fold_summary";
@@ -97,7 +100,7 @@ function WorkbenchRecordCard({
       data-search-highlighted={highlighted ? "true" : "false"}
       role="row"
       style={columnGridStyle}
-      onClick={readOnly || row.displayOnly ? undefined : () => onSelectRow(row, zoneId)}
+      onClick={readOnly || row.displayOnly || bankPartsContent ? undefined : () => onSelectRow(row, zoneId)}
     >
       {paneId === "invoice" && row.supportingDocuments ? (
         <WorkbenchSupportingDocumentFiles
@@ -149,7 +152,7 @@ function WorkbenchRecordCard({
           >
             <div className={`record-card-cell-content${isApplicant ? " workbench-oa-applicant-content" : ""}${showLeadingControl ? " record-card-cell-content-with-inline-control" : ""}`}>
               {showLeadingControl ? <span className="record-card-inline-prefix-control">{leadingControl}</span> : null}
-              {renderCellValue(column, value, row, paneId, zoneId, showInlineDetail, () => onOpenDetail(row), searchQuery)}
+              {renderCellValue(column, value, row, paneId, zoneId, showInlineDetail, () => onOpenDetail(row), searchQuery, bankPartsContent)}
               {isApplicant ? (
                 showApplicantDetail || anomalyIndicator ? (
                   <span className="workbench-oa-applicant-actions">
@@ -310,6 +313,7 @@ export default memo(WorkbenchRecordCard, (previousProps, nextProps) => (
   && previousProps.canOperateData === nextProps.canOperateData
   && previousProps.readOnly === nextProps.readOnly
   && previousProps.allowInvoiceEntryInReadOnly === nextProps.allowInvoiceEntryInReadOnly
+  && previousProps.bankPartsContent === nextProps.bankPartsContent
   && previousProps.leadingControl === nextProps.leadingControl
   && previousProps.onSelectRow === nextProps.onSelectRow
   && previousProps.onOpenDetail === nextProps.onOpenDetail
@@ -372,6 +376,7 @@ function renderCellValue(
   showInlineDetail: boolean,
   onOpenDetail: () => void,
   searchQuery = "",
+  bankPartsContent?: ReactNode,
 ) {
   if (column.kind === "status") {
     return <span className="status-tag">{highlightSearchText(value, searchQuery)}</span>;
@@ -417,6 +422,7 @@ function renderCellValue(
       row.tableValues.paymentAccount ?? "",
       row,
       searchQuery,
+      bankPartsContent,
     );
   }
 
@@ -599,9 +605,10 @@ function renderBankMoneyValue(
   paymentAccount: string,
   row: WorkbenchRecord,
   searchQuery = "",
+  bankPartsContent?: ReactNode,
 ) {
   const hasValue = value !== "--" && value !== "—" && value !== "";
-  const displayedValue = hasValue ? formatMoney(value) : "--";
+  const displayedValue = hasValue ? formatMoney(bankPartsContent && row.parentAmount ? row.parentAmount : value) : "--";
   const normalizedDirection = resolveDirectionForMoneyCell(columnKey, direction, hasValue);
   const shouldShowDirectionTag = hasValue && normalizedDirection !== null;
   const shouldShowAccount = hasValue && paymentAccount !== "--" && paymentAccount !== "—" && paymentAccount !== "";
@@ -628,7 +635,7 @@ function renderBankMoneyValue(
           ) : null}
         </span>
       ) : null}
-      {shouldShowCategory ? (
+      {bankPartsContent ?? (row.bankSplitParts?.length ? <BankSplitChips parts={row.bankSplitParts} /> : shouldShowCategory ? (
         <span className="money-cell-category-row">
           <Chip
             aria-label={`流水分类：${normalizedCategoryLabel}`}
@@ -643,7 +650,7 @@ function renderBankMoneyValue(
             </Chip.Label>
           </Chip>
         </span>
-      ) : null}
+      ) : null)}
     </span>
   );
 }

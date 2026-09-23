@@ -235,7 +235,7 @@ class PostgresCostStatisticsCanonicalRepository:
             bank_ids = _relation_member_ids(relations, {"bank", "bank_transaction"})
             if for_update:
                 # SHARE blocks amount/date edits too; KEY SHARE would only protect identity.
-                transaction.fetch_all("select id from app.bank_transactions where legacy_mongo_id = any(%s::text[]) order by id for share", (bank_ids,))
+                transaction.fetch_all("select bank.id from app.bank_transactions bank where bank.id in (select parent_bank_transaction_id from app.bank_transaction_units where coalesce(legacy_mongo_id,id::text) = any(%s::text[])) order by bank.id for share", (bank_ids,))
                 transaction.fetch_all("select id from app.oa_applications where row_id = any(%s::text[]) order by id for share", (_relation_member_ids(relations, {"oa"}),))
                 transaction.fetch_all("select oa_id from app.oa_pending_payment_admissions where tenant_id = 'default' and oa_id = any(%s::text[]) order by oa_id for share", (_relation_member_ids(relations, {"oa"}),))
             bank_rows = _postgres_bank_rows(
@@ -661,6 +661,8 @@ def _postgres_bank_rows(
         f"""
         select
             coalesce(legacy_mongo_id, id::text) as row_id,
+            parent_row_id, parent_bank_transaction_id::text, parent_amount,
+            split_version, split_category_code, is_split,
             account_no,
             account_name,
             txn_direction,
@@ -685,7 +687,7 @@ def _postgres_bank_rows(
                 'source_workbench_row_id', coalesce(raw_payload->'normalized_payload', raw_payload)->>'source_workbench_row_id'
             )) as detail_fields
             {source_projection}
-        from app.bank_transactions
+        from app.bank_transaction_units
         where status <> 'deleted'
           {where_sql}
         order by coalesce(trade_time, txn_date::timestamptz) desc, row_id
@@ -1017,7 +1019,7 @@ def _bank_statistics_from_rows(bank_rows: list[dict[str, Any]]) -> dict[str, int
     row_ids_by_direction = {"inflow": set(), "outflow": set()}
     for row in bank_rows:
         row_id = _text(
-            row.get("id") or row.get("transaction_id") or row.get("row_id")
+            row.get("parent_row_id") or row.get("id") or row.get("transaction_id") or row.get("row_id")
         )
         if row_id:
             row_ids_by_direction[_direction(row)].add(row_id)

@@ -152,7 +152,7 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
         self.assertEqual(commands[2][0], "set local max_parallel_workers_per_gather = 0")
         self.assertEqual(len([sql for sql, _params in commands if sql.lstrip().lower().startswith(("select", "with"))]), 2)
         page_sql, page_params = commands[4]
-        self.assertIn("from app.bank_transactions", page_sql)
+        self.assertIn("from app.bank_transaction_units", page_sql)
         self.assertIn("from app.bank_transaction_categories", page_sql)
         self.assertIn("bank_legacy_identities as materialized", page_sql)
         self.assertIn("manual_category_candidates as materialized", page_sql)
@@ -170,7 +170,7 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
         self.assertIn("jsonb_path_query_array", page_sql)
         self.assertNotIn("from bank_case_members member", page_sql)
         self.assertIn("r.status = 'active'", page_sql)
-        self.assertIn("r.relation_mode <> 'turnover_manual_closure'", page_sql)
+        self.assertNotIn("r.relation_mode <> 'turnover_manual_closure'", page_sql)
         self.assertIn("as rule_counterparty_name", page_sql)
         self.assertIn("as rule_account_type", page_sql)
         self.assertIn("compiled_rule_matches as materialized", page_sql)
@@ -340,7 +340,7 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
         self.assertIn("from app.invoices", CANDIDATE_QUERY_SQL)
         self.assertIn("from app.workbench_pair_relations", CANDIDATE_QUERY_SQL)
         self.assertIn("status = 'active'", CANDIDATE_QUERY_SQL)
-        self.assertIn("relation_mode <> 'turnover_manual_closure'", CANDIDATE_QUERY_SQL)
+        self.assertNotIn("relation_mode <> 'turnover_manual_closure'", CANDIDATE_QUERY_SQL)
         for sql in (CANDIDATE_QUERY_SQL, BANK_DETAIL_SQL, INVOICE_DETAIL_SQL, OA_DETAIL_SQL):
             self.assertNotIn("read_model.", sql)
 

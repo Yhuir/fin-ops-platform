@@ -46,3 +46,7 @@ Nginx示例采用归一化`$uri`条件access_log，精确排除三种cash API前
 
 `tests/test_deploy_oa_script.py`、`tests/test_deploy_runtime_examples.py`、
 `tests/test_read_model_runtime_removal.py` 与生产 T+0/T+30 evidence。
+
+## 流水拆分发布（2026-09-23）
+
+0178/0179 纳入既有 forward-only 清单。新增固定运维入口 `external-turnover-cost-revoke <release> [--apply --operator <actor>]`，默认只读预览，经领域 owner 同事务标记/撤销历史外部分配；执行后重启刷新进程镜像。`bank-transaction-split-smoke <release>` 仅创建事务内测试自有数据，100 次检查后强制回滚并校验无残留。两者不接受任意 SQL/shell；不创建或删除主数据库。输入/输出与性能范围见 [拆分验证](../../dev/bank-transaction-splits.md)。

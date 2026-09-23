@@ -396,6 +396,7 @@ export default function CostStatisticsPage() {
   const [exportPreview, setExportPreview] = useState<CostStatisticsExportPreview | null>(null);
   const [exportCenterMode, setExportCenterMode] = useState<ExportCenterMode>("bank_account");
   const [domainRefreshNonce, setDomainRefreshNonce] = useState(0);
+  const splitRefreshRequestKeyRef = useRef<string | null>(null);
   const [scopeOpen, setScopeOpen] = useState(false);
   const [projectScope, setProjectScope] = useState<ProjectCostScope | null>(null);
   const [scopeDraft, setScopeDraft] = useState<string[]>([]);
@@ -762,7 +763,9 @@ export default function CostStatisticsPage() {
       setFailedExplorerPage(null);
       setLoadError(null);
       setExportFeedback(null);
-      resetDetailSelection();
+      const preserveSplitDrafts = splitRefreshRequestKeyRef.current === explorerRequestKey;
+      splitRefreshRequestKeyRef.current = null;
+      if (!preserveSplitDrafts) resetDetailSelection();
       setIsExplorerLoading(true);
 
       try {
@@ -1895,6 +1898,7 @@ export default function CostStatisticsPage() {
       </div>
 
       <CostEntryDetailDrawer
+        onBankSplitSaved={() => { splitRefreshRequestKeyRef.current = explorerRequestKey; setDomainRefreshNonce(value => value + 1); }}
         onAdjust={!isBankFlowView && canOperateData && !interactionLocked ? caseId => { resetDetailSelection(); setAllocationCaseId(caseId); } : undefined}
         detail={entryDetail}
         error={detailError}

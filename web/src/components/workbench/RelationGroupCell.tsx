@@ -1,3 +1,4 @@
+import BankCategoryTag from "../../features/bankDetails/BankCategoryTag";
 import { memo, type ReactNode } from "react";
 
 import type { WorkbenchRecord, WorkbenchRecordType } from "../../features/workbench/types";
@@ -54,7 +55,14 @@ function RelationGroupCell({
   rowControls,
   entryControl,
 }: RelationGroupCellProps) {
-  const isSingleRecord = records.length === 1;
+  const splitGroups = new Map<string, WorkbenchRecord[]>();
+  const displayRecords = records.filter(row => {
+    if (paneId !== "bank" || !row.isSplit || !row.parentRowId) return true;
+    const members = splitGroups.get(row.parentRowId);
+    if (members) { members.push(row); return false; }
+    splitGroups.set(row.parentRowId, [row]); return true;
+  });
+  const isSingleRecord = displayRecords.length === 1;
 
   if (records.length === 0) {
     return (
@@ -79,11 +87,19 @@ function RelationGroupCell({
       <div
         className={`candidate-group-stack candidate-group-stack-sheet ${isSingleRecord ? "candidate-group-stack-sheet-single" : "candidate-group-stack-sheet-multi"}`}
       >
-        {records.map((row, index) => (
+        {displayRecords.map((row, index) => (
           <WorkbenchRecordCard
+            bankPartsContent={row.isSplit && row.parentRowId ? <span className="bank-split-chips">
+              {splitGroups.get(row.parentRowId)?.map(part => <label key={part.id} onClick={event => event.stopPropagation()}>
+                <input type="checkbox" aria-label={`选择流水子项 ${part.categoryLabel ?? part.id} ${part.amount}`} checked={getRowState(part, zoneId) === "selected"}
+                  disabled={readOnly || !canOperateData || part.displayOnly} onChange={() => onSelectRow(part, zoneId)} />
+                <BankCategoryTag compact categoryCode={part.categoryCode ?? null} label={part.categoryLabel ?? ""} />
+                <span>{part.amount}</span>
+              </label>)}
+            </span> : undefined}
             columnGridStyle={columnGridStyle}
             columns={columns}
-            highlighted={highlightedRowId === row.id}
+            highlighted={highlightedRowId === row.id || Boolean(row.parentRowId && splitGroups.get(row.parentRowId)?.some(part => part.id === highlightedRowId))}
             searchQuery={searchQuery}
             key={row.id}
             onOpenDetail={onOpenDetail}

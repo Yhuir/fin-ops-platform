@@ -520,7 +520,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 "load_full_snapshot": 0,
                 "MongoOAAdapter": 0,
                 "WorkbenchPairRelationService": 3,
-                "pair_relation_service": 27,
+                "pair_relation_service": 28,
             },
             "backend/src/fin_ops_platform/app/worker.py": {
                 "GridFSObjectMigrationService": 0,
@@ -1330,6 +1330,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 "composition_root": "cash_runtime.py",
                 "composition_markers": ("def routes(", "return CashApiRoutes("),
                 "server_markers": ("def _handle_cash_request", "self._cash_runtime.routes(session, self._json_response)", "return routes.route(method, route_path, query, body, session=session)"),
+            },
+            "routes_bank_transaction_splits.py": {
+                "module": "fin_ops_platform.app.routes_bank_transaction_splits",
+                "class": "BankTransactionSplitApiRoutes",
+                "server_markers": ("def _bank_transaction_split_routes", "_bank_transaction_split_routes()."),
             },
             "routes_bank_details.py": {
                 "module": "fin_ops_platform.app.routes_bank_details",
@@ -3967,7 +3972,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             if removed_reader in service_source or removed_reader in routes_source or removed_reader in service_factory_source:
                 violations.append(f"batch accounting runtime keeps removed read-model reader {removed_reader}")
         for required_table in (
-            "app.bank_transactions",
+            "app.bank_transaction_units",
             "app.oa_applications",
             "app.oa_attachments",
             "app.invoices",

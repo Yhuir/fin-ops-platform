@@ -104,3 +104,7 @@
 ## 2026-09-22 银行身份窄修复边界
 
 银行历史 v2→v3 迁移由 `bank_identity_repair_service` 生成纯计划，专用 `postgres_repositories/bank_identity_repair` adapter 在调用者事务中更新身份列及 normalized payload 身份副本，既有财务纠错 actor/reason 与审计继续生效。不经全量 snapshot 或整行 upsert，不改变金融事实、主键、来源归属或关系。canonical loader 的身份仅以表列为准，JSON 副本不再覆盖正式身份；运维/恢复合同见 `docs/operations/object-identity-dedup.md`。
+
+## 持久化流水拆分（2026-09-23）
+
+银行事实保留原身份、金额和余额；`bank_transaction_split_sets/items` 持久化人工子项，`bank_transaction_units` 是派生用途视图。各页面共用 `web/src/features/bankSplits/` 抽屉编辑器，银行 owner 编排关系/成本/往来/批次 owner 的原子变更。无新增 worker/read model。详见 [I/O 与测试矩阵](../../dev/bank-transaction-splits.md)。

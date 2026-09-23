@@ -2,6 +2,7 @@ import json
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
+from uuid import uuid4
 
 from fin_ops_platform.services.cost_statistics_canonical_repository import PostgresCostStatisticsCanonicalRepository
 from fin_ops_platform.services.cost_statistics_manual_allocation_service import (
@@ -51,7 +52,7 @@ class CostSourcePostgresTests(unittest.TestCase):
             values ('cost-source-case',1,'manual_confirmed',%s::text[],%s::text[],'2026-08-01','active','{}'::jsonb)""",
             (["oa-a", "oa-b", "bank-1", "bank-2"], ["oa", "oa", "bank", "bank"]))
 
-    def loan_fixture(self, oa_amount="1001497.22"):
+    def loan_fixture(self, oa_amount="1001497.22", *, split=False):
         definition = {"code": "loan-repayment", "label": "归还借款", "path": ["外部往来款付款", "归还借款"],
                       "status": "active", "output_primary_label": "外部往来款付款", "output_sub_label": "归还借款",
                       "turnover_role": "external_turnover", "turnover_action_type": "repaid", "rules": {}}
@@ -67,50 +68,36 @@ class CostSourcePostgresTests(unittest.TestCase):
                 (bank_transaction_id,legacy_transaction_id,category,source,status,raw_payload)
                 select id,legacy_mongo_id,'loan-repayment','manual','active','{"manual_assignment":true}'::jsonb
                 from app.bank_transactions where legacy_mongo_id='bank-1'""")
-        return self.service.get_task("cost-source-case", can_save=True)
+        if split:
+            self.add_interest_tag()
+            self.principal_child, self.interest_child = str(uuid4()), str(uuid4())
+            self.connection.execute("""insert into app.bank_transaction_split_sets(bank_transaction_id,version,updated_by)
+                select id,1,'test' from app.bank_transactions where legacy_mongo_id='bank-1'""")
+            for child,code,amount,position in ((self.principal_child,'loan-repayment','1000000.00',0),(self.interest_child,'interest-test','1497.22',1)):
+                self.connection.execute("""insert into app.bank_transaction_split_items(id,bank_transaction_id,category_code,amount,position)
+                    select %s::uuid,id,%s,%s::numeric,%s from app.bank_transactions where legacy_mongo_id='bank-1'""",(child,code,amount,position))
+            self.connection.execute("""update app.workbench_pair_relations set row_ids=%s::text[],row_types=array['oa','bank','bank'],
+                special_metadata='{"bank_split_requires_cost_confirmation":true}'::jsonb""",(['oa-a',self.principal_child,self.interest_child],))
+            self.connection.execute("""update app.app_settings set settings_payload=jsonb_set(settings_payload,
+                '{cost_statistics_project_cost_scope,selected_tag_codes}','["interest-test"]'::jsonb)""")
+            return self.service.get_task("cost-source-case", can_save=True)
 
-    def test_loan_manual_confirmation_locks_zero_cost_and_withdrawal(self):
-        from tests.app_test_support import build_local_state_application
-        task = self.loan_fixture()
-        self.assertEqual(task['bank_events'][0]['turnover_role'], 'external_turnover')
-        self.assertIn('external_turnover_requires_confirmation', task['pending_reasons'])
-        self.assertIsNone(task['source_allocations'])
-        self.assertTrue(task['units'][0]['lock_oa_amount'])
-        self.assertEqual(self.query.get_explorer_page(scope='all', view='project', filters={}, cursor=None, page_size=20)['summary']['total_amount'], '0.00')
-        app = build_local_state_application()
-        app._cost_statistics_api_routes._manual_allocation_service = self.service
-        path = '/api/cost-statistics/manual-allocations/cost-source-case'
-        payload = self.current_payload()
-        payload.update(allocations=[{'unit_id':'oa:oa-a','amount':'1497.22'}], non_cost_amount='1000000.00', non_cost_reason='贷款本金',
-            source_allocations={'cost_lines':[{'unit_id':'oa:oa-a','bank_transaction_id':'bank-1','amount':'1497.22'}], 'refund_links':[], 'non_cost_lines':[{'bank_transaction_id':'bank-1','amount':'1000000.00'}]})
-        self.assertEqual(app.handle_request('PUT', path, body=json.dumps(payload)).status_code, 400)
-        missing = dict(payload); missing.pop('oa_amount_locks')
-        self.assertEqual(app.handle_request('PUT', path, body=json.dumps(missing)).status_code, 400)
-        self.assertEqual(self.connection.fetch_one('select count(*) as n from app.cost_statistics_manual_allocations')['n'], 0)
-        payload['oa_amount_locks'][0]['locked'] = False
-        response = app.handle_request('PUT', path, body=json.dumps(payload))
-        self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(app.handle_request('PUT', path, body=json.dumps(payload)).status_code, 409)
-        reread = self.service.get_task('cost-source-case', can_save=True)
-        self.assertFalse(reread['units'][0]['lock_oa_amount'])
-        self.assertEqual(reread['units'][0]['oa_original_amount'], '1001497.22')
-        self.assertEqual(reread['status'], 'allocated')
-        for view in ('project', 'cost_tag', 'bank_account'):
-            self.assertEqual(self.query.get_explorer_page(scope='all',view=view,filters={},cursor=None,page_size=20)['summary']['total_amount'], '1497.22')
-        zero = self.current_payload()
-        zero['allocations'][0]['amount'] = '0.00'
-        zero['non_cost_amount'] = '1001497.22'
-        zero['source_allocations'] = {'cost_lines':[], 'refund_links':[], 'non_cost_lines':[{'bank_transaction_id':'bank-1','amount':'1001497.22'}]}
-        self.assertEqual(self.save(zero)['status'], 'allocated')
-        self.assertEqual(self.query.get_explorer_page(scope='all',view='project',filters={},cursor=None,page_size=20)['summary']['total_amount'], '0.00')
+    def test_unsplit_external_principal_has_no_cost_task_before_or_after_withdrawal(self):
+        self.loan_fixture()
+        with self.assertRaises(KeyError):
+            self.service.get_task('cost-source-case',can_save=True)
+        for view in ('project','cost_tag','bank_account'):
+            self.assertEqual(self.query.get_explorer_page(scope='all',view=view,filters={},cursor=None,page_size=20)['summary']['total_amount'],'0.00')
+        self.assertEqual(self.connection.fetch_one('select count(*) as n from app.cost_statistics_manual_allocations')['n'],0)
         self.connection.execute("update app.workbench_pair_relations set status='cancelled',version=version+1")
-        self.assertEqual(app.handle_request('GET', path).status_code, 404)
+        with self.assertRaises(KeyError):
+            self.service.get_task('cost-source-case',can_save=True)
 
     def test_interest_only_oa_keeps_original_lock(self):
-        self.loan_fixture('1497.22')
+        self.loan_fixture('1497.22', split=True)
         payload = self.current_payload()
-        payload.update(allocations=[{'unit_id':'oa:oa-a','amount':'1497.22'}], non_cost_amount='1000000.00', non_cost_reason='贷款本金',
-            source_allocations={'cost_lines':[{'unit_id':'oa:oa-a','bank_transaction_id':'bank-1','amount':'1497.22'}], 'refund_links':[], 'non_cost_lines':[{'bank_transaction_id':'bank-1','amount':'1000000.00'}]})
+        payload.update(allocations=[{'unit_id':'oa:oa-a','amount':'1497.22'}], non_cost_amount='0.00', non_cost_reason='' ,
+            source_allocations={'cost_lines':[{'unit_id':'oa:oa-a','bank_transaction_id':self.interest_child,'amount':'1497.22'}], 'refund_links':[], 'non_cost_lines':[]})
         saved = self.save(payload)
         self.assertEqual(saved['status'], 'allocated')
         self.assertTrue(saved['units'][0]['lock_oa_amount'])
@@ -125,11 +112,10 @@ class CostSourcePostgresTests(unittest.TestCase):
         from fin_ops_platform.services.cost_statistics_policy import CostStatisticsPolicy
 
         from tests.app_test_support import build_local_state_application
-        self.loan_fixture('1497.22')
-        self.add_interest_tag()
+        self.loan_fixture('1497.22', split=True)
         payload = self.current_payload()
-        payload.update(allocations=[{'unit_id':'oa:oa-a','amount':'1497.22'}], non_cost_amount='1000000.00', non_cost_reason='贷款本金',
-            source_allocations={'cost_lines':[{'unit_id':'oa:oa-a','bank_transaction_id':'bank-1','amount':'1497.22'}], 'refund_links':[], 'non_cost_lines':[{'bank_transaction_id':'bank-1','amount':'1000000.00'}]})
+        payload.update(allocations=[{'unit_id':'oa:oa-a','amount':'1497.22'}], non_cost_amount='0.00', non_cost_reason='',
+            source_allocations={'cost_lines':[{'unit_id':'oa:oa-a','bank_transaction_id':self.interest_child,'amount':'1497.22'}], 'refund_links':[], 'non_cost_lines':[]})
         saved = self.save(payload)
         before = {table:self.connection.fetch_all(f'select to_jsonb(t) as row from {table} t') for table in
                   ('app.bank_transactions','app.bank_transaction_categories','app.oa_applications','app.workbench_pair_relations')}
@@ -139,12 +125,12 @@ class CostSourcePostgresTests(unittest.TestCase):
         self.service._audit_repository = PostgresOperationsAuditRepository(self.connection)
         path = '/api/cost-statistics/manual-allocations/cost-source-case'
         payload = self.current_payload()
-        payload['oa_cost_tag_overrides'] = [{'unit_id':'oa:oa-a','bank_transaction_id':'bank-1','cost_tag_code':'interest-test'}]
+        payload['oa_cost_tag_overrides'] = [{'unit_id':'oa:oa-a','bank_transaction_id':self.interest_child,'cost_tag_code':'interest-test'}]
         response = app.handle_request('PUT', path, body=json.dumps(payload))
         self.assertEqual(response.status_code,200,response.body)
         edited = json.loads(response.body)
         self.assertEqual(edited['version'],saved['version']+1)
-        self.assertEqual(edited['non_cost_amount'],'1000000.00')
+        self.assertEqual(edited['non_cost_amount'],'0.00')
         self.assertEqual(edited['allocations'],saved['allocations'])
         self.assertEqual(json.loads(app.handle_request('GET',path).body)['oa_cost_tag_overrides'],edited['oa_cost_tag_overrides'])
         rows = CostStatisticsPolicy(self.repository.load_snapshot()).serialized_cost_rows
@@ -172,7 +158,7 @@ class CostSourcePostgresTests(unittest.TestCase):
         with self.assertRaises(CostStatisticsManualAllocationConflictError): self.save(stale)
         restored=self.current_payload();restored['oa_cost_tag_overrides']=[]
         self.save(restored)
-        self.assertEqual(CostStatisticsPolicy(self.repository.load_snapshot()).serialized_cost_rows[0]['bank_tag_primary_label'],'外部往来款付款')
+        self.assertEqual(CostStatisticsPolicy(self.repository.load_snapshot()).serialized_cost_rows[0]['bank_tag_primary_label'],'费用')
 
     def test_oa_tag_scope_preserves_outside_and_invalid_changes_are_atomic(self):
         self.add_interest_tag()

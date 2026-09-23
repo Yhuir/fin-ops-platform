@@ -836,8 +836,9 @@ class WorkbenchCanonicalRowsBuilder:
             """
             select coalesce(legacy_mongo_id, id::text) as row_id, account_no, account_name,
                    txn_direction, counterparty_name_raw, amount, txn_date, trade_time,
-                   currency, summary, remark, project_id, raw_payload
-            from app.bank_transactions
+                   currency, summary, remark, project_id, raw_payload,
+                   parent_row_id, parent_bank_transaction_id::text, parent_amount, is_split, split_version, split_category_code
+            from app.bank_transaction_units
             where txn_month = %s::date
               and status <> 'deleted'
             order by coalesce(trade_time, txn_date::timestamptz) desc, row_id
@@ -858,8 +859,9 @@ class WorkbenchCanonicalRowsBuilder:
             """
             select coalesce(legacy_mongo_id, id::text) as row_id, account_no, account_name,
                    txn_direction, counterparty_name_raw, amount, signed_amount, txn_date, trade_time,
-                   pay_receive_time, currency, summary, remark, project_id, raw_payload
-            from app.bank_transactions
+                   pay_receive_time, currency, summary, remark, project_id, raw_payload,
+                   parent_row_id, parent_bank_transaction_id::text, parent_amount, is_split, split_version, split_category_code
+            from app.bank_transaction_units
             where coalesce(legacy_mongo_id, id::text) = any(%s)
               and status <> 'deleted'
             order by coalesce(trade_time, txn_date::timestamptz) desc, row_id
@@ -887,6 +889,12 @@ class WorkbenchCanonicalRowsBuilder:
             "id": row_id,
             "type": "bank",
             "source_kind": "bank_transaction",
+            "parent_row_id": row.get("parent_row_id"),
+            "parent_bank_transaction_id": row.get("parent_bank_transaction_id"),
+            "parent_amount": str(row["parent_amount"]) if row.get("parent_amount") is not None else None,
+            "is_split": bool(row.get("is_split")),
+            "split_version": row.get("split_version", 0),
+            "split_category_code": row.get("split_category_code"),
             "status": "unpaired",
             "case_id": None,
             "txn_direction": direction,
@@ -1100,7 +1108,7 @@ class WorkbenchCanonicalRowsBuilder:
                  or exists (
                         select 1
                         from unnest(relation.row_ids) member(row_id)
-                        join app.bank_transactions bank
+                        join app.bank_transaction_units bank
                           on coalesce(bank.legacy_mongo_id, bank.id::text) = member.row_id
                          and bank.status <> 'deleted'
                          and bank.txn_month = %s::date

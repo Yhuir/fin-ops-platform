@@ -110,6 +110,10 @@ commands:
   import-audit-repair-artifact-delete <artifact-name> <rollback-manifest-fingerprint>
                                       verify and delete one task-scoped rollback artifact
                                       repair strict import facts through the canonical PostgreSQL boundary
+  bank-transaction-split-smoke <release-name>
+                                      test-owned split SQL probe, always rollback
+  external-turnover-cost-revoke <release-name> [--apply --operator <actor>]
+                                      preview/revoke obsolete external-turnover cost decisions
   bank-transaction-category-repair <release-name> [--dry-run|--apply --operator <actor> --expected-candidate-count <count>]
                                       repair proven historical manual category clears through the canonical writer
   restart                              restart API and active workers
@@ -389,7 +393,7 @@ for migration in migrations:
 
 server_version_num = int(run_psql(database_url, sql="show server_version_num;"))
 applied_versions = sorted(applied)
-forward_only_versions = {"0149", "0160", "0161", "0162", "0163", "0164", "0165", "0175", "0176", "0177"}
+forward_only_versions = {"0149", "0160", "0161", "0162", "0163", "0164", "0165", "0175", "0176", "0177", "0178", "0179"}
 forward_only = bool(pending) and all(
     item["version"] in forward_only_versions for item in pending
 )
@@ -2292,6 +2296,26 @@ PY
     "$artifact_name" "$expected_fingerprint"
 }
 
+bank_transaction_split_smoke() {
+  [[ "$#" -eq 1 ]] || die "bank-transaction-split-smoke requires only release name"
+  local src
+  src="$(release_src "$1")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" -m fin_ops_platform.tools.bank_transaction_split_smoke
+}
+
+external_turnover_cost_revoke() {
+  local release="${1:-}"
+  [[ -n "$release" ]] || die "external-turnover-cost-revoke requires release name"
+  shift
+  [[ "$#" -eq 0 || ( "$#" -eq 3 && "${1:-}" == "--apply" && "${2:-}" == "--operator" && -n "${3:-}" ) ]] \
+    || die "external-turnover-cost-revoke accepts preview or --apply --operator only"
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" -m fin_ops_platform.tools.revoke_external_turnover_cost_allocations "$@"
+}
+
 bank_transaction_category_repair() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "bank-transaction-category-repair requires release name"
@@ -3365,6 +3389,14 @@ case "$cmd" in
   import-audit-repair-artifact-delete)
     shift
     import_audit_repair_artifact_delete "$@"
+    ;;
+  bank-transaction-split-smoke)
+    shift
+    bank_transaction_split_smoke "$@"
+    ;;
+  external-turnover-cost-revoke)
+    shift
+    external_turnover_cost_revoke "$@"
     ;;
   bank-transaction-category-repair)
     shift

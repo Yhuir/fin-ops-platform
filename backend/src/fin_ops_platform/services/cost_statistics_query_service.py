@@ -187,12 +187,13 @@ class CostStatisticsQueryService:
             "month": month,
             "kind": "bank_transaction",
             "bank_transaction": {
-                "id": normalized_transaction_id,
+                "id": str(row.get("bank_transaction_id") or normalized_transaction_id),
+                "bank_transaction_unit_id": normalized_transaction_id,
                 "expense_content": str(row.get("expense_content") or ""),
                 "trade_time": str(row.get("trade_time") or ""),
                 "direction": str(row.get("direction") or ""),
                 "amount": _plain_money(
-                    _decimal_from_value(row.get("amount"))
+                    _decimal_from_value(row.get("parent_amount", row.get("amount")))
                     or Decimal("0.00")
                 ),
                 "counterparty_name": str(

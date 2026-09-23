@@ -107,9 +107,10 @@ def test_unknown_refund_in_mixed_scope_is_not_guessed():
 
 def test_explicit_refund_split_follows_source_and_preserves_original_fact():
     from fin_ops_platform.services.cost_statistics_allocation_scope import project_source_task
+
     from tests.test_cost_statistics_source_allocation import task_fixture
     task = task_fixture()
-    task.update(version=1, non_cost_amount='0.00')
+    task.update(version=1, non_cost_amount='0.00', oa_cost_tag_overrides=[])
     task['units'] = [{**u, 'lock_oa_amount': False} for u in task['units']]
     task['bank_events'][0]['in_project_cost_scope'] = True
     task['bank_events'][1]['in_project_cost_scope'] = False
@@ -130,7 +131,7 @@ def test_explicit_refund_split_follows_source_and_preserves_original_fact():
     assert task == original
 
 
-def test_external_component_requires_confirmation_but_independent_ordinary_cost_survives():
+def test_external_component_is_excluded_but_independent_ordinary_cost_survives():
     f = fixtures.CostStatisticsPolicyTests
     ordinary = f._bank('normal', '100.00')
     external = {**f._bank('loan', '200.00'), 'turnover_role': 'external_turnover'}
@@ -139,8 +140,28 @@ def test_external_component_requires_confirmation_but_independent_ordinary_cost_
     group['source_relation_groups'] = [{'oa_row_ids':['a'], 'bank_row_ids':['normal']}, {'oa_row_ids':['b'], 'bank_row_ids':['loan']}]
     policy = f._policy([group])
     assert total(policy) == '100.00'
-    assert policy.manual_allocation_tasks[0]['status'] == 'pending'
-    assert 'external_turnover_requires_confirmation' in policy.manual_allocation_tasks[0]['pending_reasons']
+    assert policy.manual_allocation_tasks == []
+    task = policy.allocation_tasks[0]
+    assert task['status'] == 'allocated'
+    assert [unit['oa_id'] for unit in task['units']] == ['a']
+    assert [event['transaction_id'] for event in task['bank_events']] == ['normal']
+    assert task['pending_reasons'] == []
+
+
+def test_shared_oa_is_not_removed_when_external_principal_is_excluded():
+    f = fixtures.CostStatisticsPolicyTests
+    group = f._group(oa_rows=[f._oa('a', amount='100.00'), f._oa('b', amount='200.00')], bank_rows=[
+        f._bank('normal', '100.00'), {**f._bank('loan', '200.00'), 'turnover_role':'external_turnover'}])
+    group['source_relation_groups'] = [
+        {'oa_row_ids':['a','b'], 'bank_row_ids':['normal']},
+        {'oa_row_ids':['b'], 'bank_row_ids':['loan']}]
+    original = deepcopy(group)
+    policy = f._policy([group])
+    assert total(policy) == '0.00'
+    task = policy.manual_allocation_tasks[0]
+    assert task['status'] == 'pending'
+    assert {unit['oa_id'] for unit in task['units']} == {'a','b'}
+    assert group == original
 
 
 def test_no_oa_external_turnover_never_becomes_full_cost_from_virtual_mapping():

@@ -1,3 +1,4 @@
+import type { BankSplitPart } from '../bankSplits/api';
 import type {
   AttachExistingInvoiceConfirmRequest,
   AttachExistingInvoicePreview,
@@ -97,6 +98,7 @@ type ApiOaSummary = Partial<{
 }>;
 
 type ApiBankTransactionPayload = Partial<{
+  bank_split_parts: BankSplitPart[];
   id: string | null;
   account_no: string | null;
   counterparty_name: string | null;
@@ -254,6 +256,7 @@ type ApiDetailPayload = {
   detail_available?: boolean | null;
   unavailable_reason?: string | null;
   sections?: Array<{
+    bank_transaction_id?: string;
     title?: string | null;
     fields?: Array<{ label?: string | null; value?: string | number | null }> | null;
   }> | null;
@@ -470,6 +473,7 @@ function mapBankTransaction(value: ApiBankTransactionPayload | null | undefined,
     enterpriseSerialNo: stringValue(value?.enterprise_serial_no),
     voucherType: stringValue(value?.voucher_type),
     voucherNo: stringValue(value?.voucher_no),
+    bankSplitParts: value?.bank_split_parts,
     effectiveTagCode: value?.effective_tag_code ?? null,
     effectiveTagLabel: value?.effective_tag_label ?? null,
     effectiveTagPrimaryLabel: value?.effective_tag_primary_label ?? null,
@@ -874,6 +878,7 @@ function detailPath(target: PendingInvoiceObjectDetailTarget) {
 function mapDetailPayload(payload: ApiDetailPayload, fallbackTitle: string): PendingInvoiceObjectDetail {
   const sections: PendingInvoiceDetailSection[] = (payload.sections ?? []).map((section) => ({
     title: stringValue(section.title, "详情"),
+    bank_transaction_id: section.bank_transaction_id,
     fields: (section.fields ?? []).map((field) => ({
       label: stringValue(field.label),
       value: field.value,

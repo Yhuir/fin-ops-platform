@@ -39,7 +39,7 @@ class PostgresWorkbenchMatchingQueueRepository:
                 where invoice.status <> 'deleted'
                 union all
                 select coalesce(bank.txn_date, bank.trade_time::date, bank.pay_receive_time::date)
-                from members join app.bank_transactions bank on members.row_type = 'bank'
+                from members join app.bank_transaction_units bank on members.row_type = 'bank'
                   and coalesce(bank.legacy_mongo_id, bank.id::text) = members.row_id
                 where bank.status <> 'deleted'
                 union all

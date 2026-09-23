@@ -21,3 +21,5 @@
 ## 待批准功能设计
 
 - [现金模块业务总设计](cash-module-design.md)：现金池隔离、Excel 全表覆盖、业务口径与待定项；待用户确认，不代表已实现。配套 [UI 与 Figma Make 交接](cash-module-ui-spec.md)、[后端/API/数据库设计](../dev/cash-module-technical-design.md)、[实施与验证计划](../dev/cash-module-implementation-plan.md)，四份分工维护。
+
+- [银行流水拆分](bank-transaction-splits.md)：原始事实、子项用途、全页面显示与成本/往来口径。

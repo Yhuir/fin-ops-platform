@@ -148,8 +148,9 @@ class VerifiedFinancialRepairPostgresTests(unittest.TestCase):
         import json
         from types import SimpleNamespace
         from unittest.mock import patch
-        from openpyxl import Workbook
+
         from fin_ops_platform.tools import import_audit_repair_ops as cli
+        from openpyxl import Workbook
 
         workbook=Workbook()
         workbook.active.title='发票基础信息'

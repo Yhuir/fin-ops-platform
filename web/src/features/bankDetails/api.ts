@@ -1,3 +1,4 @@
+import type { BankSplitPart } from '../bankSplits/api';
 import type {
   BankDetailAccount,
   BankBalanceStatus,
@@ -61,6 +62,8 @@ type ApiBankDetailCategoryMutationResponse = {
 };
 
 type ApiBankDetailTransaction = {
+  bank_split_parts?: BankSplitPart[];
+  bank_split_version?: number;
   id: string;
   trade_time: string;
   same_time_order_status: BankSameTimeOrderStatus;
@@ -488,6 +491,8 @@ function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
   const relationStatus = normalizeRelationStatus(row.relation_status ?? row.relationStatus);
   return {
     id: row.id,
+    bankSplitParts: row.bank_split_parts,
+    bankSplitVersion: row.bank_split_version,
     tradeTime: formatBankDetailTradeTime(row.trade_time),
     sameTimeOrderStatus: row.same_time_order_status,
     counterpartyName: row.counterparty_name,

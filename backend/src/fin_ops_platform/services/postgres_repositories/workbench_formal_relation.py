@@ -205,7 +205,7 @@ class PostgresWorkbenchFormalRelationFactRepository:
                 bank_text_fields,
                 raw_payload,
                 updated_at as source_version
-            from app.bank_transactions
+            from app.bank_transaction_units
             where coalesce(txn_date, trade_time::date, pay_receive_time::date) between %s::date and %s::date
               and status <> 'deleted'
             order by coalesce(legacy_mongo_id, id::text)
@@ -457,10 +457,11 @@ class PostgresWorkbenchFormalRelationFactRepository:
                 from app.oa_pending_payment_admissions
                 where tenant_id = 'default' and workflow_status = 'in_progress' and oa_id = any(%s::text[])
                 order by oa_id for share""", ids["oa"]),
-            ("""select 'bank' as row_type, coalesce(legacy_mongo_id, id::text) as row_id, updated_at as source_version
-                from app.bank_transactions
-                where coalesce(legacy_mongo_id, id::text) = any(%s::text[]) and status <> 'deleted'
-                order by id for share""", ids["bank"]),
+            ("""select 'bank' as row_type, coalesce(unit.legacy_mongo_id, unit.id::text) as row_id, unit.updated_at as source_version
+                from app.bank_transaction_units unit
+                join app.bank_transactions parent on parent.id = unit.parent_bank_transaction_id
+                where coalesce(unit.legacy_mongo_id, unit.id::text) = any(%s::text[]) and unit.status <> 'deleted'
+                order by parent.id, unit.id for share of parent""", ids["bank"]),
             ("""select 'invoice' as row_type, coalesce(legacy_mongo_id, id::text) as row_id, updated_at as source_version
                 from app.invoices
                 where coalesce(legacy_mongo_id, id::text) = any(%s::text[]) and status <> 'deleted'
@@ -683,7 +684,7 @@ class PostgresWorkbenchFormalRelationFactRepository:
                 bank_text_fields,
                 raw_payload,
                 updated_at as source_version
-            from app.bank_transactions
+            from app.bank_transaction_units
             where coalesce(legacy_mongo_id, id::text) = any(%s::text[])
               and status <> 'deleted'
             order by coalesce(legacy_mongo_id, id::text)

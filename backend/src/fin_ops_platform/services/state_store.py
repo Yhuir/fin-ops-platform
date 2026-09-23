@@ -925,6 +925,13 @@ class ApplicationStateStore:
         with self._app_health_alerts_path.open("wb") as handle:
             pickle.dump(normalized_snapshot, handle)
 
+    def current_bank_relation_requirements(self, bank_ids_by_case: dict[str, list[str]]) -> dict[str, dict[str, object]]:
+        raise RuntimeError("Split relation restoration requires the PostgreSQL backend.")
+
+    def resolve_current_bank_unit_ids(self, row_ids: list[str]) -> list[str]:
+        """The local JSON backend stores unsplit bank identities only."""
+        return list(dict.fromkeys(row_ids))
+
     def load_workbench_pair_relations(self) -> dict[str, Any]:
         current_payload = self._load_local_pickle()
         snapshot = current_payload.get("workbench_pair_relations")

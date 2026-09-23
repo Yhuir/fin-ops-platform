@@ -283,7 +283,7 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
             )
             self.assertIn("bank.raw_payload->'normalized_payload'", raw_field_sql)
 
-    def test_money_keyword_prefilters_rule_classification_candidates(self) -> None:
+    def test_money_keyword_filters_purpose_amounts_without_dropping_split_parent(self) -> None:
         connection = _Connection()
         repository = PostgresBankDetailsCanonicalQueryRepository(connection)
 
@@ -301,12 +301,11 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
         )
 
         sql, params = connection.transaction_object.reads[1]
-        target_sql = sql.split("query_target_rows as materialized", 1)[1].split(
-            "canonical_rule_banks as materialized",
-            1,
-        )[0]
+        target_sql = sql.split("filtered as materialized", 1)[1].split("ordering_candidates", 1)[0]
+        self.assertIn("purpose_filters purpose", target_sql)
         self.assertIn("amount::text", target_sql)
         self.assertIn("balance::text", target_sql)
+        self.assertIn("item.amount as amount", sql)
         self.assertIn("%2100.00%", params)
         self.assertEqual(sql.count("%s"), len(params))
 

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 from copy import deepcopy
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-import hashlib
 from typing import Any
 
 from fin_ops_platform.services.bank_internal_transfer_detector import INTERNAL_TRANSFER_MATCH_WINDOW
@@ -14,7 +14,6 @@ from fin_ops_platform.services.no_oa_managed_rule_policy import (
 )
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
-
 
 NO_OA_BANK_BATCH_SCHEMA_VERSION = "2026-05-no-oa-bank-batch-v1"
 NO_OA_BANK_BATCH_RELATION_MODE = "no_oa_bank_batch"
@@ -673,7 +672,7 @@ class BankBatchService:
             return batch
         if batch.get("status") not in {"submitted", "stale"}:
             raise ValueError(f"only_submitted_{self._relation_mode}_can_be_withdrawn")
-        if batch.get("status") == "stale" and not self._has_active_relation_for_batch(batch):
+        if batch.get("status") == "stale" and not self._has_active_relation_for_batch(batch) and not self._is_submitted_bank_flow_batch(batch):
             raise ValueError(f"stale_{self._relation_mode}_has_no_active_relation_to_withdraw")
         self._check_expected_version(batch, expected_version)
 
@@ -2754,15 +2753,19 @@ class BankBatchService:
     def _enrich_batch(self, batch: dict[str, Any]) -> dict[str, Any]:
         enriched = deepcopy(batch)
         has_active_relation = self._has_active_relation_for_batch(enriched)
-        if enriched["status"] == "stale" and has_active_relation:
+        if enriched["status"] == "stale" and (has_active_relation or self._is_submitted_bank_flow_batch(enriched)):
             enriched["status"] = "submitted"
             enriched["status_bucket"] = "submitted"
             enriched["relation_backed_status"] = "stale"
         enriched["can_withdraw"] = enriched["status"] == "submitted" or (
-            enriched["status"] == "stale" and has_active_relation
+            enriched["status"] == "stale" and (has_active_relation or self._is_submitted_bank_flow_batch(enriched))
         )
         enriched["blocked_reason"] = self._blocked_reason(enriched)
         return enriched
+
+    @staticmethod
+    def _is_submitted_bank_flow_batch(batch: dict[str, Any]) -> bool:
+        return batch.get("relation_mode") == BANK_FLOW_RULE_BATCH_RELATION_MODE and bool(batch.get("submitted_at"))
 
     def _has_active_relation_for_batch(self, batch: dict[str, Any]) -> bool:
         relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()

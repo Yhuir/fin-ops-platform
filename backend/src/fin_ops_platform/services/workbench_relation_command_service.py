@@ -4,7 +4,7 @@ import json
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Any
+from typing import Any, Callable
 
 from fin_ops_platform.services.workbench_etc_batch_link import (
     etc_source_links,
@@ -311,7 +311,9 @@ class WorkbenchRelationCommandService:
         etc_batch_link_repository: Any | None = None,
         idempotency_store: Any | None = None,
         tenant_id: str | None = None,
+        bank_requirements_resolver: Callable[[dict[str, list[str]]], dict[str, dict[str, object]]] | None = None,
     ) -> None:
+        self._bank_requirements_resolver = bank_requirements_resolver
         self._relation_repository = relation_repository
         self._etc_batch_link_repository = etc_batch_link_repository
         self._idempotency_store = idempotency_store or _InMemoryIdempotencyStore()
@@ -1210,11 +1212,18 @@ class WorkbenchRelationCommandService:
         self, *, case_id: str, row_ids: list[str], actor_id: str, reason: str | None = None,
     ) -> dict[str, Any]:
         """Unwind later merges before releasing the original batch, in the owner's UoW."""
-        members = set(row_ids)
-        if not members:
+        if not row_ids:
             raise WorkbenchRelationCommandError("invalid_bank_flow_batch", "批次缺少真实流水成员。")
+        members = set(self._relation_repository.resolve_current_bank_unit_ids(row_ids))
         self._acquire_relation_member_locks(sorted(members), case_ids=[case_id])
-        pair_service = self._pair_service_for_row_ids(sorted(members))
+        pair_service = self._pair_service_for_row_ids(sorted(members), case_ids=[case_id])
+        direct = pair_service.get_active_relation_by_case_id(case_id)
+        if (direct is not None and direct.get("relation_mode") == "bank_flow_rule_batch"
+                and direct.get("special_metadata", {}).get("bank_split_versions")
+                and all(kind == "bank" for kind in direct["row_types"])):
+            # The stable batch case remains authoritative after its frozen
+            # source members have been split or removed.
+            members = set(direct["row_ids"])
         owner_members = {row_id for relation in pair_service.list_active_relations() for row_id in relation["row_ids"]}
         if owner_members - members:
             pair_service = self._pair_service_for_row_ids(sorted(owner_members), case_ids=[case_id])
@@ -1244,6 +1253,9 @@ class WorkbenchRelationCommandService:
                 break
             preview = pair_service.preview_withdraw_for_active_relation(active)
             restored = list(preview["after_relations"])
+            restored_ids, restored_types = self._canonical_relation_members(restored, row_id_aliases=None)
+            if restored_ids:
+                self._assert_canonical_relation_members_available(restored_ids, row_types=restored_types)
             batch_owners = [item for item in restored if members.intersection(item["row_ids"])]
             if (len(batch_owners) != 1 or not members.issubset(set(batch_owners[0]["row_ids"]))
                     or len(batch_owners[0]["row_ids"]) >= len(active["row_ids"])):
@@ -1254,6 +1266,7 @@ class WorkbenchRelationCommandService:
             restored, history = pair_service.withdraw_latest_for_active_relation(
                 active, created_by=actor_id, note=reason,
             )
+            self._refresh_split_restored_requirements(pair_service, restored, history)
             histories.append(history)
             changed.update(str(item["case_id"]) for item in restored)
         if changed - original_relations.keys():
@@ -1942,6 +1955,7 @@ class WorkbenchRelationCommandService:
             created_at=occurred_at,
             row_id_aliases=row_id_aliases,
         )
+        self._refresh_split_restored_requirements(pair_service, restored_relations, history)
         if canonical_scope_months is not None:
             canonical_scope_months = dict(canonical_scope_months)
             all_ids, all_types = self._canonical_relation_members(
@@ -2574,6 +2588,27 @@ class WorkbenchRelationCommandService:
                 case_ids=list(case_ids or []),
             )
         )
+
+    def _refresh_split_restored_requirements(
+        self, pair_service: WorkbenchPairRelationService, restored: list[dict[str, Any]], history: dict[str, Any],
+    ) -> None:
+        groups = {item["case_id"]: [row_id for row_id, kind in zip(item["row_ids"], item["row_types"], strict=True) if kind == "bank"]
+                  for item in restored if item.get("special_metadata", {}).get("bank_split_versions") and "bank" in item["row_types"]}
+        if not groups:
+            return
+        if self._bank_requirements_resolver is None:
+            raise RuntimeError("Split relation restoration requires a canonical bank requirements resolver.")
+        current = self._bank_requirements_resolver(groups)
+        for item in restored:
+            if item["case_id"] not in groups:
+                continue
+            metadata = item["special_metadata"]
+            for key in ("paired_requirement_tag_code", "paired_requires_oa", "paired_requires_invoice"):
+                metadata.pop(key, None)
+            metadata.update(current[item["case_id"]])
+        history["after_relations"] = deepcopy(restored)
+        pair_service.apply_snapshot_delta({"pair_relations": {item["case_id"]: item for item in restored},
+                                           "pair_relation_history": [history]}, replace_history=False)
 
     def _save_changed_cases(
         self,

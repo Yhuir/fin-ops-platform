@@ -10,6 +10,7 @@ import { buildPageSessionStorageKey, createStoredPayload } from "../contexts/pag
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import type { SessionPayload } from "../features/session/api";
 import CostStatisticsPage from "../pages/CostStatisticsPage";
+import * as bankSplitsApi from "../features/bankSplits/api";
 import { installMockApiFetch } from "./apiMock";
 
 vi.mock("../features/dateTime", async (importOriginal) => ({
@@ -459,4 +460,36 @@ describe("Cost statistics page", () => {
     expect(screen.getByRole("button", { name: "导出中心" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "无 OA 成本范围" })).toBeInTheDocument();
   });
+});
+
+
+test('saving a split refreshes cost lists without closing or remounting the active bank editor', async () => {
+  const user = userEvent.setup();
+  const fetchMock = installMockApiFetch();
+  const split = {
+    transaction_id: 'bank-test', canonical_transaction_id: 'bank-canonical', amount: '100.00', direction: 'expense', version: 0,
+    category_code: 'fee', can_edit: true,
+    tag_definitions: [{ code: 'fee', label: '费用 / 利息', path: ['费用', '利息'], primary_label: '费用', sub_label: '利息', status: 'active' }],
+    parts: [{ id: 'one', category_code: 'fee', category_label: '费用 / 利息', category_path: ['费用', '利息'], amount: '50.00' },
+      { id: 'two', category_code: 'fee', category_label: '费用 / 利息', category_path: ['费用', '利息'], amount: '50.00' }],
+  };
+  const read = vi.spyOn(bankSplitsApi, 'fetchBankSplits').mockResolvedValue(split);
+  const write = vi.spyOn(bankSplitsApi, 'saveBankSplits').mockResolvedValue({ ...split, version: 1, changed: true, affected_months: ['2026-03'] });
+  renderPage();
+  await waitUntilReady();
+  await user.click(screen.getByRole('radio', { name: '按时间' }));
+  const grid = await screen.findByRole('grid', { name: '按时间银行流水表' });
+  await user.click(within(grid).getAllByRole('button')[0]);
+  const drawer = await screen.findByRole('dialog', { name: '银行流水详情' });
+  await within(drawer).findByLabelText('子项 1 金额');
+  const listReads = () => fetchMock.mock.calls.filter(call => String(call[0]).includes('/api/cost-statistics/explorer')).length;
+  const before = listReads();
+  fireEvent.change(within(drawer).getByLabelText('子项 1 金额'), { target: { value: '50.0' } });
+  await user.click(within(drawer).getByRole('button', { name: '保存', exact: true }));
+  await waitFor(() => expect(listReads()).toBeGreaterThan(before));
+  expect(await within(drawer).findByText('已保存')).toBeInTheDocument();
+  expect(screen.getByRole('dialog', { name: '银行流水详情' })).toBe(drawer);
+  expect(read).toHaveBeenCalledOnce();
+  expect(write).toHaveBeenCalledOnce();
+  read.mockRestore(); write.mockRestore();
 });

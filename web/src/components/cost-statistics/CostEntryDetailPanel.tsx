@@ -1,12 +1,13 @@
+import BankTransactionDetailContent from "../../features/bankSplits/BankTransactionDetailContent";
 import type { CostEntryDetail } from "../../features/cost-statistics/types";
 import { formatCostAmount } from "../../features/cost-statistics/format";
-import EntityDetailContent, {
+import {
   preparePublicDetailSections,
   type EntityDetailSection,
 } from "../common/EntityDetailContent";
 
-export default function CostEntryDetailPanel({ detail }: { detail: CostEntryDetail }) {
-  return <EntityDetailContent sections={costDetailSections(detail)} />;
+export default function CostEntryDetailPanel({ detail, onBankSplitSaved, onSplitDirtyChange }: { detail: CostEntryDetail; onBankSplitSaved?: () => void | Promise<void>; onSplitDirtyChange?: (dirty: boolean, source?: string) => void }) {
+  return <BankTransactionDetailContent onBankSplitSaved={onBankSplitSaved} onSplitDirtyChange={onSplitDirtyChange} bankTransactionId={detail.kind === "bank_transaction" ? detail.bankTransaction.id : undefined} sections={costDetailSections(detail)} />;
 }
 
 function costDetailSections(detail: CostEntryDetail) {
@@ -58,6 +59,7 @@ function costDetailSections(detail: CostEntryDetail) {
   }];
   detail.paymentEvidence.forEach((evidence, index) => {
     sections.push({
+      bank_transaction_id: evidence.transactionId,
       title: detail.paymentEvidence.length > 1 ? `关系内银行流水 ${index + 1}` : "关系内银行流水",
       fields: [
         { label: "交易时间", value: evidence.tradeTime },

@@ -81,7 +81,7 @@ class FakeConnection:
             return list(self.historical_oa_rows if historical else self.oa_rows)
         if "from app.oa_pending_payment_admissions" in normalized:
             return []
-        if "from app.bank_transactions" in normalized:
+        if "from app.bank_transaction_units" in normalized:
             return list(self.historical_bank_rows if historical else self.bank_rows)
         if "from app.invoices" in normalized:
             return list(self.historical_invoice_rows if historical else self.invoice_rows)
@@ -203,6 +203,18 @@ def invoice_row(
 
 
 class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
+    def test_split_children_keep_separate_fact_identities_with_shared_bank_serial(self):
+        first = bank_row("child-principal")
+        second = bank_row("child-interest")
+        first.update(amount=Decimal("1000000.00"), signed_amount=Decimal("-1000000.00"))
+        second.update(amount=Decimal("1497.22"), signed_amount=Decimal("-1497.22"))
+        connection = FakeConnection(bank_rows=[first, second])
+        result = PostgresWorkbenchFormalRelationFactRepository(connection).load_batch(["2026-05"])
+        bank_facts = [fact for fact in result.facts if fact.row_type == "bank"]
+        self.assertEqual({fact.canonical_object_identity for fact in bank_facts}, {"child-principal", "child-interest"})
+        self.assertEqual({fact.amount_minor for fact in bank_facts}, {100000000, 149722})
+        self.assertEqual(len(bank_facts), 2)
+
     def test_bank_account_from_canonical_envelope_prevents_conflicting_payee_match(self) -> None:
         oa = oa_row(payload={
             "apply_type": "支付申请",
@@ -432,7 +444,7 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
         self.assertEqual(result.source_versions, (("matching", "v1"),))
         sql = "\n".join(query for query, _params in connection.queries)
         self.assertIn("app.oa_applications", sql)
-        self.assertIn("app.bank_transactions", sql)
+        self.assertIn("app.bank_transaction_units", sql)
         self.assertIn("app.invoices", sql)
         self.assertIn("app.workbench_pair_relations", sql)
         self.assertIn("app.workbench_pair_relation_history", sql)

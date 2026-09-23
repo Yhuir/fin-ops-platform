@@ -1441,10 +1441,17 @@ def _fact_cte(
                 ) as amount_matched
             from group_relation_ids relation
             join relation_members member on member.relation_id = relation.relation_id
-            join app.bank_transactions bank
+            join app.bank_transaction_units bank
               on member.row_id in (coalesce(bank.legacy_mongo_id, ''), bank.id::text)
             where member.row_type in ('bank', 'bank_transaction')
               and bank.status <> 'deleted'
+              and (not bank.is_split or not exists (
+                  select 1 from app.app_settings settings,
+                  lateral jsonb_array_elements(settings.settings_payload#>'{{bank_transaction_tags,definitions}}') definition
+                  where settings.settings_key='app_settings'
+                    and definition->>'code'=bank.split_category_code
+                    and definition->>'turnover_role'='external_turnover'
+              ))
             group by
                 relation.group_key,
                 coalesce(bank.legacy_mongo_id, bank.id::text),
@@ -1792,7 +1799,7 @@ def _load_facts(
         for row_id, row_type in _typed_relation_rows(relation)
         if row_type == "oa"
     )
-    transactions = core.list_bank_transactions_by_ids(bank_ids)
+    transactions = core.list_bank_transaction_units_by_ids(bank_ids)
     oa_records = (
         PostgresOAWorkflowRepository(
             transaction,

@@ -4,6 +4,11 @@ from contextlib import contextmanager
 from typing import Any, Iterator
 
 from fin_ops_platform.services.postgres_repositories.common import jsonb
+from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
+
+
+class BankImportWithdrawalStateChanged(ValueError):
+    pass
 
 
 class PostgresBankImportWithdrawalRepository:
@@ -44,13 +49,33 @@ class PostgresBankImportWithdrawalRepository:
         return dict(row) if row else None
 
     def created_transactions(self, batch_uuid: str, batch_id: str) -> list[dict[str, Any]]:
+        observed = self._created_transaction_rows(batch_uuid, batch_id, for_update=False)
+        member_ids = sorted({identity for row in observed
+            for identity in [row["transaction_uuid"], row["row_id"], *row["split_row_ids"]]})
+        if not member_ids:
+            return []
+        relations = PostgresWorkbenchRelationRepository(self._connection)
+        related = relations.load_active_workbench_pair_relations_for_typed_rows(
+            member_ids, row_types=["bank"] * len(member_ids))
+        relations.acquire_relation_member_locks(member_ids, row_types=["bank"] * len(member_ids),
+            case_ids=sorted(related["pair_relations"]))
+        locked = self._created_transaction_rows(batch_uuid, batch_id, for_update=True)
+        current_related = relations.load_active_workbench_pair_relations_for_typed_rows(
+            member_ids, row_types=["bank"] * len(member_ids))
+        if locked != observed or current_related != related:
+            raise BankImportWithdrawalStateChanged("流水拆分或关联已变化，请重新读取导入批次后撤回。")
+        return locked
+
+    def _created_transaction_rows(self, batch_uuid: str, batch_id: str, *, for_update: bool) -> list[dict[str, Any]]:
         rows = self._connection.fetch_all(
             """
             select
               bank.id::text as transaction_uuid,
               coalesce(bank.legacy_mongo_id, bank.id::text) as row_id,
               bank.txn_month::text as txn_month,
-              bank.written_off_amount
+              bank.written_off_amount,
+              array(select item.id::text from app.bank_transaction_split_items item
+                    where item.bank_transaction_id=bank.id order by item.position) as split_row_ids
             from app.import_batch_rows batch_row
             join app.bank_transactions bank
               on batch_row.linked_object_type = 'bank_transaction'
@@ -59,8 +84,7 @@ class PostgresBankImportWithdrawalRepository:
               and batch_row.decision = 'created'
               and (bank.source_batch_id = %s::uuid or bank.legacy_source_batch_id = %s)
             order by row_id
-            for update of bank
-            """,
+            """ + (" for update of bank" if for_update else ""),
             (batch_uuid, batch_id, batch_uuid, batch_id),
         ) or []
         return [dict(row) for row in rows]

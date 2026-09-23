@@ -41,7 +41,7 @@ class PostgresOAPaymentStatusReconcileRepository:
                       and exists (
                           select 1
                           from unnest(relation.row_ids, relation.row_types) member(row_id, row_type)
-                          join app.bank_transactions bank
+                          join app.bank_transaction_units bank
                             on member.row_id in (bank.id::text, bank.legacy_mongo_id)
                            and bank.status <> 'deleted'
                            and bank.txn_direction = 'outflow'

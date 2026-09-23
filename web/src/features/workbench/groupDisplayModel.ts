@@ -129,7 +129,7 @@ export function buildWorkbenchGroupDisplayLayout(
     // their shared group pane unless they have explicit expense-item ownership.
     const oaRows = new Map(group.rows.oa.map((row) => [row.id, row]));
     const bankRows = new Map(group.rows.bank.map((row) => [row.id, row]));
-    return {
+    return keepSplitBankParentsTogether({
       segmentedPaneIds: ["oa", "bank"],
       segments: sourceGroup.displaySubgroups.map((part, index) => {
         return {
@@ -141,7 +141,7 @@ export function buildWorkbenchGroupDisplayLayout(
           },
         };
       }).filter((part) => part.rows.oa.length > 0 || part.rows.bank.length > 0),
-    };
+    });
   }
   const segments = buildWorkbenchGroupSourceSegments(group);
   const sourceSegments = sourceGroup === group ? segments : buildWorkbenchGroupSourceSegments(sourceGroup);
@@ -248,9 +248,27 @@ export function buildWorkbenchGroupDisplayLayout(
     });
   });
 
-  return {
+  return keepSplitBankParentsTogether({
     segments: displaySegments,
     segmentedPaneIds: ["oa", ...segmentedPaneIds],
+  });
+}
+
+function keepSplitBankParentsTogether(layout: WorkbenchGroupDisplayLayout): WorkbenchGroupDisplayLayout {
+  const parentSegments = new Map<string, string>();
+  const crossesSegments = layout.segments.some(segment => segment.rows.bank.some(row => {
+    if (!row.isSplit || !row.parentRowId) return false;
+    const previous = parentSegments.get(row.parentRowId);
+    parentSegments.set(row.parentRowId, segment.id);
+    return previous !== undefined && previous !== segment.id;
+  }));
+  if (!crossesSegments) return layout;
+  // One physical bank transaction spans the existing OA/invoice sections;
+  // its children remain independently selectable inside that group bank cell.
+  const segmentedPaneIds = layout.segmentedPaneIds.filter(paneId => paneId !== "bank");
+  return {
+    segmentedPaneIds,
+    segments: layout.segments.filter(segment => segmentedPaneIds.some(paneId => segment.rows[paneId].length > 0)),
   };
 }
 

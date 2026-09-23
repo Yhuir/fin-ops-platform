@@ -1,23 +1,18 @@
 from __future__ import annotations
 
+import inspect
 import json
 import pickle
-import inspect
-from io import BytesIO
+import unittest
 from contextlib import contextmanager
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
-
-from openpyxl import load_workbook
 
 from fin_ops_platform.app.routes_turnover_ledger import TurnoverLedgerApiRoutes
 from fin_ops_platform.app.server import Application
-from tests.app_test_support import (
-    build_local_state_application as build_application,
-    configure_access_control,
-)
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
@@ -31,6 +26,14 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerWithdrawRequestBoundaryFacade,
 )
 from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
+from openpyxl import load_workbook
+
+from tests.app_test_support import (
+    build_local_state_application as build_application,
+)
+from tests.app_test_support import (
+    configure_access_control,
+)
 
 
 class _QueueRecorder:
@@ -69,6 +72,10 @@ class _PostgresFakeTransaction:
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
         self.fetch_all_calls.append({"sql": sql, "params": params})
         normalized_sql = " ".join(sql.lower().split())
+        if "from classified_with_semantics" in normalized_sql and "where row_id = any" in normalized_sql:
+            return [{"row_id":row_id,"effective_category_code":"external_turnover",
+                     "effective_category_primary_label":"外部往来款","turnover_role":"external_turnover"}
+                    for row_id in params[-1]]
         if "from app.workbench_pair_relations" in normalized_sql:
             snapshot = self._workbench_pair_relation_snapshot()
             relations = (
@@ -95,7 +102,7 @@ class _PostgresFakeTransaction:
         self.fetch_one_calls.append({"sql": sql, "params": params})
         return {"source_version": len(self.fetch_one_calls)}
 
-    def execute(self, sql: str, params: tuple[object, ...]) -> None:
+    def execute(self, sql: str, params: tuple[object, ...] = ()) -> None:
         self.executed.append({"sql": sql, "params": params})
 
     def _workbench_pair_relation_snapshot(self) -> dict[str, object]:
@@ -376,7 +383,21 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             ],
         )
         app._import_service.confirm_import(preview.id)
+        self._configure_turnover_tags(app)
         return [transaction.id for transaction in app._import_service.list_transactions()]
+
+    @staticmethod
+    def _configure_turnover_tags(app: Application) -> None:
+        dictionary = app._bank_transaction_category_service.tag_dictionary_payload()
+        for code, action, primary, sub in (
+            ("configured_company_pending_repayment", "pending_repayment", "外部往来款收款", "借入款"),
+            ("configured_company_repaid", "repaid", "外部往来款付款", "归还借款"),
+        ):
+            dictionary["definitions"].append({"code":code,"label":sub,"path":[primary,sub,"公司往来"],
+                "source":"custom","status":"active","direction":"any","rules":{},
+                "turnover_role":"external_turnover","turnover_action_type":action,
+                "output_primary_label":primary,"output_sub_label":sub,"output_third_label":"公司往来"})
+        app._bank_transaction_category_service.configure_tag_dictionary(dictionary)
 
     def _tag_rows(
         self,
@@ -386,23 +407,26 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         headers: dict[str, str] | None = None,
     ) -> None:
         _ = headers
+        self._configure_turnover_tags(app)
         app._bank_transaction_category_service.apply_updates(
             [
                 {
                     "transaction_id": transaction_ids[0],
-                    "category_code": "borrow_in_company_pending_repayment",
-                    "expected_version": 0,
+                    "category_code": "configured_company_pending_repayment",
+                    "expected_version": 0, "manual_assignment": True,
+                    "category_label_path": ["外部往来款收款", "借入款", "公司往来"],
                 },
                 {
                     "transaction_id": transaction_ids[1],
-                    "category_code": "borrow_in_company_repaid",
-                    "expected_version": 0,
+                    "category_code": "configured_company_repaid",
+                    "expected_version": 0, "manual_assignment": True,
+                    "category_label_path": ["外部往来款付款", "归还借款", "公司往来"],
                 },
             ],
             actor="test",
         )
         app._turnover_ledger_service._category_provider = None
-        app._turnover_ledger_service._selected_tag_codes_provider = None
+        app._turnover_ledger_service._selected_tag_codes_provider = lambda: ["configured_company_pending_repayment", "configured_company_repaid"]
         app._state_store.save_bank_transaction_categories(app._bank_transaction_category_service.snapshot())
         app._turnover_ledger_service.list_ledger()
         app._state_store.save_turnover_relations(app._turnover_relation_service.snapshot())
@@ -1230,7 +1254,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "turnover tag selection write facade is unavailable"):
             facade.update_tag_selection_from_request(
-                payload={"selected_tag_codes": ["borrow_in_company_pending_repayment"]},
+                payload={"selected_tag_codes": ["configured_company_pending_repayment"]},
                 actor_id="user-1",
                 tenant_id="default",
             )
@@ -1745,6 +1769,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                         "category_code": "borrow_out_personal_pending_collection",
                         "category_label": "借出款",
                         "category_version": 7,
+                        "turnover_role": "external_turnover",
                     }
                 }
 
@@ -1754,6 +1779,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 return {}
 
         app = object.__new__(Application)
+        app._state_store = SimpleNamespace(storage_backend="local")
         app._import_service = _ImportService()
         app._serialize_value = lambda value: dict(value)
         app._bank_transaction_tag_reader = lambda: _CategoryProvider()
@@ -2017,7 +2043,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                         "updates": [
                             {
                                 "transaction_id": transaction_ids[0],
-                                "category_code": "borrow_in_company_pending_repayment",
+                                "category_code": "configured_company_pending_repayment",
                                 "expected_version": 0,
                             }
                         ]
@@ -2029,10 +2055,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app.close()
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["updated_categories"][0]["category_code"], "borrow_in_company_pending_repayment")
+        self.assertEqual(payload["updated_categories"][0]["category_code"], "configured_company_pending_repayment")
         self.assertNotIn("turnover_ledger_invalidated", payload)
-        self.assertEqual(saved_category["category_code"], "borrow_in_company_pending_repayment")
-        self.assertEqual(saved_category["category_label"], "公司暂借款：待还款")
+        self.assertEqual(saved_category["category_code"], "configured_company_pending_repayment")
+        self.assertEqual(saved_category["category_label"], "借入款")
 
     def test_turnover_bank_row_tag_batch_does_not_depend_on_queue(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -2052,7 +2078,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                         "updates": [
                             {
                                 "transaction_id": transaction_ids[0],
-                                "category_code": "borrow_in_company_pending_repayment",
+                                "category_code": "configured_company_pending_repayment",
                                 "expected_version": 0,
                             }
                         ]
@@ -2064,7 +2090,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(read_repository.clear_calls, 0)
         self.assertEqual(queue.attempts, [])
-        self.assertEqual(saved_category["category_code"], "borrow_in_company_pending_repayment")
+        self.assertEqual(saved_category["category_code"], "configured_company_pending_repayment")
 
     def test_target_turnover_bank_row_tag_batch_has_zero_queue_io(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -2081,7 +2107,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                         "updates": [
                             {
                                 "transaction_id": transaction_ids[0],
-                                "category_code": "borrow_in_company_pending_repayment",
+                                "category_code": "configured_company_pending_repayment",
                                 "expected_version": 0,
                             }
                         ]
@@ -2091,7 +2117,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             saved_category = app._bank_transaction_category_service.get(transaction_ids[0])
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(saved_category["category_code"], "borrow_in_company_pending_repayment")
+        self.assertEqual(saved_category["category_code"], "configured_company_pending_repayment")
         self.assertEqual(queue.attempts, [])
 
     def test_target_turnover_bank_row_tag_batch_commits_snapshots_without_queue_io(self) -> None:
@@ -2126,8 +2152,12 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                         "updates": [
                             {
                                 "transaction_id": transaction_ids[0],
-                                "category_code": "borrow_in_company_pending_repayment",
+                                "category_code": "configured_company_pending_repayment",
                                 "expected_version": 0,
+                                "manual_assignment": True,
+                                "category_label_path": ["外部往来款收款", "借入款", "公司往来"],
+                                "turnover_action_type": "pending_repayment",
+                                "turnover_family": "company",
                             }
                         ]
                     }
@@ -2188,7 +2218,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                         "updates": [
                             {
                                 "transaction_id": transaction_ids[0],
-                                "category_code": "borrow_in_company_pending_repayment",
+                                "category_code": "configured_company_pending_repayment",
                                 "expected_version": 0,
                             }
                         ]
@@ -2239,7 +2269,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                             "updates": [
                                 {
                                     "transaction_id": transaction_ids[0],
-                                    "category_code": "borrow_in_company_pending_repayment",
+                                    "category_code": "configured_company_pending_repayment",
                                     "expected_version": 0,
                                 }
                             ]
@@ -2267,12 +2297,12 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                         "updates": [
                             {
                                 "transaction_id": transaction_ids[0],
-                                "category_code": "borrow_in_company_pending_repayment",
+                                "category_code": "configured_company_pending_repayment",
                                 "expected_version": 0,
                             },
                             {
                                 "transaction_id": transaction_ids[1],
-                                "category_code": "borrow_in_company_repaid",
+                                "category_code": "configured_company_repaid",
                                 "expected_version": 0,
                             },
                         ]
@@ -2296,12 +2326,12 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                     "updates": [
                         {
                             "transaction_id": transaction_ids[0],
-                            "category_code": "borrow_in_company_pending_repayment",
+                            "category_code": "configured_company_pending_repayment",
                             "expected_version": 0,
                         },
                         {
                             "transaction_id": transaction_ids[1],
-                            "category_code": "borrow_in_company_repaid",
+                            "category_code": "configured_company_repaid",
                             "expected_version": 0,
                         },
                     ],
@@ -2349,7 +2379,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                         "updates": [
                             {
                                 "transaction_id": transaction_ids[0],
-                                "category_code": "borrow_in_company_pending_repayment",
+                                "category_code": "configured_company_pending_repayment",
                                 "expected_version": 0,
                             }
                         ]
@@ -2439,7 +2469,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                         "updates": [
                             {
                                 "transaction_id": transaction_ids[0],
-                                "category_code": "borrow_in_company_pending_repayment",
+                                "category_code": "configured_company_pending_repayment",
                                 "expected_version": 0,
                             }
                         ]
@@ -2467,7 +2497,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 "updates": [
                     {
                         "transaction_id": transaction_ids[0],
-                        "category_code": "borrow_in_company_pending_repayment",
+                        "category_code": "configured_company_pending_repayment",
                         "expected_version": 0,
                     }
                 ],
@@ -2502,7 +2532,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 "updates": [
                     {
                         "transaction_id": transaction_ids[0],
-                        "category_code": "borrow_in_company_pending_repayment",
+                        "category_code": "configured_company_pending_repayment",
                         "expected_version": 0,
                     }
                 ],
@@ -2553,7 +2583,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                         "updates": [
                             {
                                 "transaction_id": transaction_ids[0],
-                                "category_code": "borrow_in_company_pending_repayment",
+                                "category_code": "configured_company_pending_repayment",
                                 "expected_version": 0,
                             }
                         ]
@@ -2567,7 +2597,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(queue.attempts, [])
         self.assertEqual(
             category_snapshot.get("categories", {}).get(transaction_ids[0], {}).get("category_code"),
-            "borrow_in_company_pending_repayment",
+            "configured_company_pending_repayment",
         )
 
     def test_target_turnover_bank_row_tag_batch_uow_path_does_not_clear_read_model_directly(self) -> None:
@@ -2588,7 +2618,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                         "updates": [
                             {
                                 "transaction_id": transaction_ids[0],
-                                "category_code": "borrow_in_company_pending_repayment",
+                                "category_code": "configured_company_pending_repayment",
                                 "expected_version": 0,
                             }
                         ]
@@ -2619,7 +2649,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                         "updates": [
                             {
                                 "transaction_id": transaction_ids[0],
-                                "category_code": "borrow_in_company_pending_repayment",
+                                "category_code": "configured_company_pending_repayment",
                                 "expected_version": 0,
                             }
                         ]
@@ -2647,7 +2677,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                         "updates": [
                             {
                                 "transaction_id": transaction_ids[0],
-                                "category_code": "borrow_in_company_pending_repayment",
+                                "category_code": "configured_company_pending_repayment",
                                 "expected_version": 0,
                             }
                         ]
@@ -4388,7 +4418,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                         "updates": [
                             {
                                 "transaction_id": transaction_id,
-                                "category_code": "borrow_in_company_pending_repayment",
+                                "category_code": "configured_company_pending_repayment",
                                 "expected_version": 0,
                             }
                         ]

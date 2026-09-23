@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from io import StringIO
 import json
+from io import StringIO
 from types import SimpleNamespace
 
 from fin_ops_platform.services.bank_transaction_category_mutation_writer import (
@@ -11,7 +11,6 @@ from fin_ops_platform.services.postgres_repositories.bank_transaction_category i
     PostgresBankTransactionCategoryRepository,
 )
 from fin_ops_platform.tools.repair_unknown_bank_transaction_categories import main as repair_main
-
 
 BANK_TRANSACTION_UUID = "11111111-1111-1111-1111-111111111111"
 CATEGORY_UUID = "22222222-2222-2222-2222-222222222222"
@@ -335,7 +334,7 @@ def test_turnover_selection_proofs_lock_and_return_both_bank_identities() -> Non
 
     assert proofs["bank-row-1"] is proofs[BANK_TRANSACTION_UUID]
     assert proofs["bank-row-1"]["category_version"] == 7
-    assert "for share of b" in transaction.calls[0][0]
+    assert "for share of parent" in transaction.calls[0][0]
     assert transaction.calls[0][1] == ("default", ["bank-row-1"], ["bank-row-1"])
 
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 import unittest
+from contextlib import contextmanager
 from unittest.mock import patch
 
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
@@ -100,7 +100,7 @@ class _PopulatedCostSnapshotTransaction(_SnapshotTransaction):
                     "raw_payload": {},
                 }
             ]
-        if "from app.bank_transactions" in normalized:
+        if "from app.bank_transaction_units" in normalized:
             return [
                 {
                     "row_id": "bank-1",
@@ -202,7 +202,7 @@ class _NoOaCandidateTransaction(_SnapshotTransaction):
                     "raw_payload": {},
                 }
             ]
-        if "from app.bank_transactions" in normalized:
+        if "from app.bank_transaction_units" in normalized:
             return [
                 self._bank_row("bank-unpaired-outflow", "outflow", "8.00"),
                 self._bank_row("bank-protected", "outflow", "9.00"),
@@ -281,7 +281,7 @@ class _ConfiguredMixedCostSnapshotTransaction(_NoOaCandidateTransaction):
             ]
         if "from app.oa_applications" in normalized:
             return []
-        if "from app.bank_transactions" in normalized:
+        if "from app.bank_transaction_units" in normalized:
             return [
                 self._bank_row("bank-unpaired-outflow", "outflow", "8.00"),
                 self._bank_row("bank-protected", "outflow", "9.00"),
@@ -352,7 +352,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         bank_sql, bank_params = next(
             (query, params)
             for query, params in connection.snapshot_transaction.fetch_calls
-            if "from app.bank_transactions" in query
+            if "from app.bank_transaction_units" in query
             and "select row_id, effective_category_code" not in query
         )
         self.assertIn("legacy_mongo_id = any(%s::text[])", bank_sql)
@@ -375,7 +375,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         bank_sql, bank_params = next(
             (query, params)
             for query, params in connection.snapshot_transaction.fetch_calls
-            if "from app.bank_transactions" in query
+            if "from app.bank_transaction_units" in query
             and "count(*)" not in query
             and "select row_id, effective_category_code" not in query
         )
@@ -408,7 +408,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         bank_sql = next(
             query
             for query in connection.snapshot_transaction.fetched
-            if "from app.bank_transactions" in query
+            if "from app.bank_transaction_units" in query
             and "select row_id, effective_category_code" not in query
         )
         self.assertNotIn("legacy_mongo_id = any(%s::text[])", bank_sql)
@@ -466,7 +466,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         bank_sql = next(
             query
             for query in connection.snapshot_transaction.fetched
-            if "from app.bank_transactions" in query
+            if "from app.bank_transaction_units" in query
             and "select row_id, effective_category_code" not in query
         )
         self.assertIn("legacy_mongo_id = any(%s::text[])", bank_sql)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import unittest
+from copy import deepcopy
 
 from fin_ops_platform.services.postgres_repositories.workbench_relation_receipt import (
     PostgresWorkbenchRelationReceiptRepository,
@@ -42,7 +42,7 @@ class _Connection:
 
     def fetch_all(self, sql: str, params: tuple[object, ...]) -> list[dict[str, object]]:
         self.calls.append((sql, params))
-        if "from app.bank_transactions" in sql:
+        if "from app.bank_transaction_units" in sql:
             return [{
                 "id": "bank-id",
                 "legacy_mongo_id": "bank-legacy",

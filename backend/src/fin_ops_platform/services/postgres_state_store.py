@@ -644,6 +644,12 @@ class PostgresStateStore:
             )
         return {}
 
+    def current_bank_relation_requirements(self, bank_ids_by_case: dict[str, list[str]]) -> dict[str, dict[str, object]]:
+        return self._workbench_relation_repository.current_bank_relation_requirements(bank_ids_by_case)
+
+    def resolve_current_bank_unit_ids(self, row_ids: list[str]) -> list[str]:
+        return self._workbench_relation_repository.resolve_current_bank_unit_ids(row_ids)
+
     def load_workbench_pair_relations_for_row_ids(
         self,
         row_ids: list[str],

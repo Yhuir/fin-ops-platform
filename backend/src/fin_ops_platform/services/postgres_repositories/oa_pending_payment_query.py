@@ -3,7 +3,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Any, Iterator
 
-from fin_ops_platform.domain.enums import InvoiceType
+from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
+from fin_ops_platform.domain.models import BankTransaction
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord, oa_flow_id_candidates
 from fin_ops_platform.services.oa_pending_payment_canonical_rows import relation_member_ids
 from fin_ops_platform.services.postgres_repositories.common import decimal_text, int_value, text
@@ -56,6 +57,21 @@ class PostgresOaPendingPaymentQueryRepository:
 
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+
+    def bank_transactions_for_command(self, row_ids: list[str]) -> list[BankTransaction]:
+        if not row_ids:
+            return []
+        rows = self._connection.fetch_all("""
+            select coalesce(legacy_mongo_id,id::text) as row_id, account_no, txn_direction,
+                   counterparty_name_raw, amount, signed_amount
+            from app.bank_transaction_units
+            where coalesce(legacy_mongo_id,id::text) = any(%s::text[]) and status <> 'deleted'
+            order by row_id
+        """, (row_ids,))
+        return [BankTransaction(
+            id=row["row_id"], account_no=row["account_no"], txn_direction=TransactionDirection(row["txn_direction"]),
+            counterparty_name_raw=row["counterparty_name_raw"], amount=row["amount"], signed_amount=row["signed_amount"],
+        ) for row in rows]
 
     @contextmanager
     def snapshot(self) -> Iterator["PostgresOaPendingPaymentQueryRepository"]:
@@ -531,7 +547,7 @@ class PostgresOaPendingPaymentQueryRepository:
                     relation.relation_case_id,
                     coalesce(relation.oa_row_ids, array[]::text[]) as linked_oa_row_ids,
                     coalesce(relation.relation_status, 'unmatched') as relation_status
-                from app.bank_transactions bank
+                from app.bank_transaction_units bank
                 left join relation_by_bank relation
                   on relation.bank_id = coalesce(
                       nullif(bank.raw_payload->'normalized_payload'->>'id', ''),
@@ -661,7 +677,7 @@ class PostgresOaPendingPaymentQueryRepository:
         ]
         relations = expand_relation_invoices(self._connection, relations)
         core = PostgresCoreRepository(self._connection)
-        bank_transactions = core.list_bank_transactions_by_ids(
+        bank_transactions = core.list_bank_transaction_units_by_ids(
             relation_member_ids(relations, row_types={"bank", "bank_transaction"})
         )
         invoices = core.list_invoices_by_ids(relation_member_ids(relations, row_types={"invoice"}))
@@ -951,7 +967,7 @@ bank_edges as materialized (
         ) as primary_rank
     from group_members members
     join group_oa on group_oa.row_id = members.row_id
-    join app.bank_transactions bank
+    join app.bank_transaction_units bank
       on coalesce(bank.legacy_mongo_id, bank.id::text) = members.member_id
     where (
         members.member_type in ('bank', 'bank_transaction')
@@ -1122,7 +1138,7 @@ def list_oa_pending_payment_relation_visibility_gaps(
                   select 1
                   from unnest(relation.row_ids) with ordinality
                       as bank_member(row_id, ordinality)
-                  join app.bank_transactions bank
+                  join app.bank_transaction_units bank
                     on coalesce(bank.legacy_mongo_id, bank.id::text) = bank_member.row_id
                   where relation.row_types[bank_member.ordinality]
                             in ('bank', 'bank_transaction')

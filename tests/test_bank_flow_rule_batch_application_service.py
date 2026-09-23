@@ -267,6 +267,18 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["draft"], 1)
         self.assertEqual(payload["summary"]["submitted"], 1)
 
+    def test_stale_submitted_split_batch_can_withdraw_without_original_case_owner(self) -> None:
+        service = BankBatchService(
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+            batches={"split-batch": {"batch_id": "split-batch", "status": "stale", "version": 2,
+                "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                "bank_transaction_ids": ["parent"], "submitted_at": "2026-09-23T00:00:00Z"}},
+        )
+        self.assertTrue(service.get_batch("split-batch")["can_withdraw"])
+        withdrawn = service.withdraw_batch("split-batch", actor="tester", expected_version=2)
+        self.assertEqual(withdrawn["status"], "withdrawn")
+        self.assertFalse(withdrawn["can_withdraw"])
+
     def test_build_can_skip_unused_normalized_return_and_reuse_current_row_ids(self) -> None:
         service = BankBatchService(
             schema_version=BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,

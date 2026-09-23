@@ -19,6 +19,7 @@ from fin_ops_platform.services.state_store import ApplicationStateStore
 
 class LoadTrackingStore:
     def __init__(self) -> None:
+        self._sql_read_connection = object()
         self.load_calls = 0
         self.bootstrap_load_calls = 0
 
@@ -99,6 +100,14 @@ class MissingBankAccountBalanceRepository:
 
 
 class RuntimeBootstrapTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Bootstrap owns dependency assembly; canonical SQL reads are covered by
+        # the turnover consumer integration tests rather than this store double.
+        self.canonical_turnover = self.enterContext(
+            patch("fin_ops_platform.app.server.TurnoverLedgerQueryService", autospec=True)
+        )
+        self.canonical_turnover.return_value.selected_bank_rows.return_value = []
+
     def test_postgres_file_import_boundary_reloads_current_session_without_full_state_load(self) -> None:
         session = FileImportSession(
             id="import_session_0021",
@@ -143,6 +152,8 @@ class RuntimeBootstrapTests(unittest.TestCase):
             app = build_application(data_dir=Path("/tmp/ignored"))
 
         self.assertEqual(store.load_calls, 0)
+        self.canonical_turnover.assert_any_call(connection=store._sql_read_connection)
+        self.canonical_turnover.return_value.selected_bank_rows.assert_called_once_with()
         summary = app.readiness_summary()
         self.assertEqual(summary["bootstrap"]["mode"], "production")
         self.assertTrue(summary["bootstrap"]["legacy_snapshot_disabled"])

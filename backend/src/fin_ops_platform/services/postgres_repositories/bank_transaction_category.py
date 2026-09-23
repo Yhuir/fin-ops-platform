@@ -42,13 +42,15 @@ class PostgresBankTransactionCategoryRepository:
                 b.id::text as canonical_transaction_id,
                 coalesce(b.legacy_mongo_id, b.id::text) as transaction_id,
                 b.updated_at::text as bank_transaction_updated_at,
-                coalesce(confirmation.category_code, manual.category) as category_code,
+                coalesce(b.split_category_code, confirmation.category_code, manual.category) as category_code,
                 case
+                    when b.is_split then 'bank_split'
                     when confirmation.id is not null then 'auto_confirmation'
                     else coalesce(manual.source, '')
                 end as category_source,
-                coalesce(confirmation.version, manual.version, 0)::integer as category_version
-            from app.bank_transactions b
+                coalesce(case when b.is_split then b.split_version end, confirmation.version, manual.version, 0)::integer as category_version
+            from app.bank_transaction_units b
+            join app.bank_transactions parent on parent.id = b.parent_bank_transaction_id
             left join lateral (
                 select c.id, c.category, c.source, c.version
                 from app.bank_transaction_categories c
@@ -75,7 +77,7 @@ class PostgresBankTransactionCategoryRepository:
             where b.status <> 'deleted'
               and (b.id::text = any(%s::text[]) or b.legacy_mongo_id = any(%s::text[]))
             order by b.created_at, b.id
-            for share of b
+            for share of parent
             """,
             (tenant_id, normalized_ids, normalized_ids),
         )
@@ -267,8 +269,9 @@ class PostgresBankTransactionCategoryRepository:
             """
             select id::text as bank_transaction_id,
                    coalesce(legacy_mongo_id, id::text) as public_transaction_id,
-                   to_char(coalesce(txn_month, date_trunc('month', txn_date)), 'YYYY-MM') as scope_month
-            from app.bank_transactions
+                   to_char(coalesce(txn_month, date_trunc('month', txn_date)), 'YYYY-MM') as scope_month,
+                   exists (select 1 from app.bank_transaction_split_items item where item.bank_transaction_id=bank.id) as is_split
+            from app.bank_transactions bank
             where status <> 'deleted'
               and (id::text = %s or legacy_mongo_id = %s)
             limit 1
@@ -283,6 +286,10 @@ class PostgresBankTransactionCategoryRepository:
                 transaction_id=transaction_id,
             )
         bank_transaction_id = str(target["bank_transaction_id"])
+        if target.get("is_split"):
+            raise BankTransactionCategoryValidationError(
+                "bank_transaction_is_split", "请在流水详情中编辑子项标签。", transaction_id=transaction_id,
+            )
         public_transaction_id = str(target["public_transaction_id"])
         scope_month = str(target.get("scope_month") or "").strip()
         if len(scope_month) != 7:

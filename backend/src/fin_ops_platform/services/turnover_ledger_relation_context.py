@@ -3,7 +3,6 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-
 CENT = Decimal("0.01")
 TURNOVER_MANUAL_CLOSURE_RELATION_MODE = "turnover_manual_closure"
 _RELATION_DETAILS_KEY = "__workbench_relation_details"
@@ -168,6 +167,8 @@ def _relations_by_row_id_from_source_rows(
             continue
         relation = {
             "case_id": case_id,
+            **({"turnover_bank_row_ids": _text_list(source_row["turnover_bank_row_ids"])}
+               if "turnover_bank_row_ids" in source_row else {}),
             "relation_mode": _text(source_row.get("relation_mode") or normalized_payload.get("relation_mode")),
             "status": "active",
             "relation_status": "linked",
@@ -246,6 +247,8 @@ def _with_group_cash_closure_context(
             )
             if row_type == "bank"
         ]
+        if "turnover_bank_row_ids" in relation:
+            relation_bank_row_ids = _text_list(relation["turnover_bank_row_ids"])
         if (
             len(relation_bank_row_ids) < 2
             or len(relation_bank_row_ids) != len(set(relation_bank_row_ids))
@@ -531,6 +534,8 @@ def _without_internal_relation_details(row: dict[str, Any]) -> dict[str, Any]:
 def _relation_detail(relation: dict[str, Any]) -> dict[str, Any]:
     return {
         "case_id": _text(relation.get("case_id")),
+        **({"turnover_bank_row_ids": _text_list(relation["turnover_bank_row_ids"])}
+           if "turnover_bank_row_ids" in relation else {}),
         "relation_status": _text(relation.get("relation_status") or relation.get("status")) or "linked",
         "relation_mode": _text(relation.get("relation_mode")),
         "relation_source": _text(relation.get("relation_source")),

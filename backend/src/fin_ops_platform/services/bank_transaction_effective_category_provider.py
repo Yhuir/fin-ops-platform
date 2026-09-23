@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, is_dataclass
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
-import json
 from typing import Any
 
 from fin_ops_platform.domain.enums import TransactionDirection
@@ -54,7 +54,19 @@ class BankTransactionEffectiveCategoryProvider:
         }
         transaction_ids = list(rows_by_id.keys())
         manual_by_id = self._category_service.bulk_get(transaction_ids)
-        auto_by_id = self._auto_category_service.suggestions_by_transaction_id(list(rows_by_id.values()))
+        ordinary_rows = [row for row in rows_by_id.values() if not row.get("is_split")]
+        auto_by_id = self._auto_category_service.suggestions_by_transaction_id(ordinary_rows)
+        for transaction_id, row in rows_by_id.items():
+            if not row.get("is_split"):
+                continue
+            code = row["split_category_code"]
+            if not self._category_service.has_tag_definition(code):
+                raise ValueError("Persisted split item references an unknown bank tag.")
+            manual_by_id[transaction_id] = {
+                **self._category_service.category_semantics_for_code(code),
+                "source": "manual", "manual_assignment": True,
+                "category_version": row.get("split_version", row.get("bank_split_version", 0)),
+            }
         return {
             transaction_id: self._category_record(
                 transaction_id=transaction_id,

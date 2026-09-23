@@ -8,14 +8,17 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
+from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.turnover_bank_row_version import (
     turnover_bank_row_selection_version,
 )
+
 from tests.app_test_support import (
     build_grouped_workbench_projection,
+)
+from tests.app_test_support import (
     build_local_state_application as build_application,
 )
-from fin_ops_platform.domain.enums import BatchType
 
 
 class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
@@ -23,6 +26,21 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
     def _temporary_app(self):
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            dictionary = app._bank_transaction_category_service.tag_dictionary_payload()
+            for family, family_label in (("company", "公司往来"), ("personal", "个人往来")):
+                for action, primary, sub in (("pending_repayment", "外部往来款收款", "借入款"), ("repaid", "外部往来款付款", "归还借款")):
+                    dictionary["definitions"].append({
+                        "code": f"configured_{family}_{action}", "label": sub,
+                        "path": [primary, sub, family_label], "source": "custom", "status": "active",
+                        "direction": "any", "rules": {}, "turnover_role": "external_turnover",
+                        "turnover_action_type": action, "turnover_family": family,
+                        "output_primary_label": primary, "output_sub_label": sub, "output_third_label": family_label,
+                    })
+            app._bank_transaction_category_service.configure_tag_dictionary(dictionary)
+            app._turnover_ledger_service._selected_tag_codes_provider = lambda: [
+                f"configured_{family}_{action}" for family in ("company", "personal")
+                for action in ("pending_repayment", "repaid")
+            ]
             try:
                 yield app
             finally:
@@ -79,18 +97,19 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             [
                 {
                     "transaction_id": transaction_ids[0],
-                    "category_code": "borrow_in_company_pending_repayment",
-                    "expected_version": 0,
+                    "category_code": "configured_company_pending_repayment",
+                    "category_label_path": ["外部往来款收款", "借入款", "公司往来"],
+                    "expected_version": 0, "manual_assignment": True,
                 },
                 {
                     "transaction_id": transaction_ids[1],
-                    "category_code": "borrow_in_company_repaid",
-                    "expected_version": 0,
+                    "category_code": "configured_company_repaid",
+                    "category_label_path": ["外部往来款付款", "归还借款", "公司往来"],
+                    "expected_version": 0, "manual_assignment": True,
                 },
             ],
             actor="YNSYLP005",
         )
-        app._turnover_ledger_service._selected_tag_codes_provider = None
         app._state_store.save_bank_transaction_categories(
             app._bank_transaction_category_service.snapshot()
         )
@@ -182,23 +201,25 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             [
                 {
                     "transaction_id": transaction_ids[0],
-                    "category_code": "borrow_in_personal_pending_repayment",
-                    "expected_version": 0,
+                    "category_code": "configured_personal_pending_repayment",
+                    "category_label_path": ["外部往来款收款", "借入款", "个人往来"],
+                    "expected_version": 0, "manual_assignment": True,
                 },
                 {
                     "transaction_id": transaction_ids[1],
-                    "category_code": "borrow_in_personal_pending_repayment",
-                    "expected_version": 0,
+                    "category_code": "configured_personal_pending_repayment",
+                    "category_label_path": ["外部往来款收款", "借入款", "个人往来"],
+                    "expected_version": 0, "manual_assignment": True,
                 },
                 {
                     "transaction_id": transaction_ids[2],
-                    "category_code": "borrow_in_personal_repaid",
-                    "expected_version": 0,
+                    "category_code": "configured_personal_repaid",
+                    "category_label_path": ["外部往来款付款", "归还借款", "个人往来"],
+                    "expected_version": 0, "manual_assignment": True,
                 },
             ],
             actor="YNSYLP005",
         )
-        app._turnover_ledger_service._selected_tag_codes_provider = None
         app._state_store.save_bank_transaction_categories(
             app._bank_transaction_category_service.snapshot()
         )
@@ -238,7 +259,8 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             {
                 "id": "txn_imported_1277",
                 "source_bank_row_id": "txn_imported_1277",
-                "category_code": "borrow_in_personal_pending_repayment",
+                "category_code": "configured_personal_pending_repayment",
+                "category_label_path": ["外部往来款收款", "借入款", "个人往来"],
                 "category_version": 0,
                 "manual_category_version": 4,
                 "version": 1,
@@ -255,7 +277,8 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             {
                 "id": "txn_imported_1292",
                 "source_bank_row_id": "txn_imported_1292",
-                "category_code": "borrow_in_personal_pending_repayment",
+                "category_code": "configured_personal_pending_repayment",
+                "category_label_path": ["外部往来款收款", "借入款", "个人往来"],
                 "category_version": 0,
                 "manual_category_version": 5,
                 "version": 1,
@@ -272,7 +295,8 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             {
                 "id": "txn_imported_1344",
                 "source_bank_row_id": "txn_imported_1344",
-                "category_code": "borrow_in_personal_repaid",
+                "category_code": "configured_personal_repaid",
+                "category_label_path": ["外部往来款付款", "归还借款", "个人往来"],
                 "category_version": 0,
                 "manual_category_version": 6,
                 "version": 1,
@@ -605,23 +629,25 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
                 [
                     {
                         "transaction_id": transaction_ids[0],
-                        "category_code": "borrow_in_company_pending_repayment",
-                        "expected_version": 0,
+                        "category_code": "configured_company_pending_repayment",
+                        "category_label_path": ["外部往来款收款", "借入款", "公司往来"],
+                        "expected_version": 0, "manual_assignment": True,
                     },
                     {
                         "transaction_id": transaction_ids[1],
-                        "category_code": "borrow_in_company_pending_repayment",
-                        "expected_version": 0,
+                        "category_code": "configured_company_pending_repayment",
+                        "category_label_path": ["外部往来款收款", "借入款", "公司往来"],
+                        "expected_version": 0, "manual_assignment": True,
                     },
                     {
                         "transaction_id": transaction_ids[2],
-                        "category_code": "borrow_in_company_repaid",
-                        "expected_version": 0,
+                        "category_code": "configured_company_repaid",
+                        "category_label_path": ["外部往来款付款", "归还借款", "公司往来"],
+                        "expected_version": 0, "manual_assignment": True,
                     },
                 ],
                 actor="YNSYLP005",
             )
-            app._turnover_ledger_service._selected_tag_codes_provider = None
             app._state_store.save_bank_transaction_categories(
                 app._bank_transaction_category_service.snapshot()
             )

@@ -213,6 +213,17 @@ class WorkbenchRelationCommandRepositoryAdapter:
             row_ids, row_types=row_types, tenant_id=tenant_id,
         )
 
+    def current_bank_relation_requirements(self, bank_ids_by_case: dict[str, list[str]]) -> dict[str, dict[str, object]]:
+        if self._repository is None:
+            raise RuntimeError("Split relation restoration requires a canonical bank requirements reader.")
+        return self._repository.current_bank_relation_requirements(bank_ids_by_case)
+
+    def resolve_current_bank_unit_ids(self, row_ids: list[str]) -> list[str]:
+        if self._repository is None:
+            # The explicit in-memory domain adapter has no persisted bank splits.
+            return list(row_ids)
+        return self._repository.resolve_current_bank_unit_ids(row_ids)
+
     def lock_canonical_relation_members(
         self,
         row_ids: list[str],

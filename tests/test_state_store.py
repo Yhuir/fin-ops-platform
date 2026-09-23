@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 import os
 import pickle
+import unittest
 from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.services.import_file_service import FileImportPreviewItem
@@ -15,6 +15,11 @@ from fin_ops_platform.services.state_store import ApplicationStateStore
 
 
 class StateStoreTests(unittest.TestCase):
+    def test_local_bank_unit_resolver_preserves_unsplit_identity(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = ApplicationStateStore(Path(temp_dir))
+            self.assertEqual(store.resolve_current_bank_unit_ids(["parent", "parent", "other"]), ["parent", "other"])
+
     def test_default_data_dir_honors_environment_override(self) -> None:
         with TemporaryDirectory() as temp_dir:
             with patch.dict(os.environ, {"FIN_OPS_DATA_DIR": temp_dir}):

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 import unicodedata
+from typing import Any
 
 from fin_ops_platform.services.bank_internal_transfer_detector import BankInternalTransferDetector
 from fin_ops_platform.services.bank_transaction_category_service import (
@@ -17,7 +17,6 @@ from fin_ops_platform.services.bank_turnover_tag_semantics import (
     is_external_turnover_definition,
     normalize_turnover_action_type,
 )
-
 
 BANK_TRANSACTION_AUTO_CATEGORY_RULE_VERSION = "2026-05-bank-auto-category-internal-transfer-first"
 
@@ -756,8 +755,8 @@ def resolve_effective_category(
     auto_code = auto.get("category_code")
     if manual_code and manual_source == "auto_confirmation":
         return payload_from(manual, effective_source="manual_confirmation")
-    if manual_code and manual_source == "manual" and bool(manual.get("manual_assignment")):
-        return payload_from(manual, effective_source="manual")
+    if manual_code and manual_source in {"manual", "turnover_ledger"} and bool(manual.get("manual_assignment")):
+        return payload_from(manual, effective_source=manual_source)
     if manual_code in BANK_TRANSACTION_CATEGORY_DEFINITIONS and (
         manual_source == "turnover_ledger" or auto_code == "external_turnover"
     ):

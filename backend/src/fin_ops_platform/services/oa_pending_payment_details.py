@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from fin_ops_platform.services.bank_transaction_unit import original_bank_summaries, original_bank_summary
 from fin_ops_platform.services.oa_expense_details import oa_expense_detail_sections
 
 
@@ -34,7 +35,7 @@ def oa_pending_payment_oa_detail_from_row(row: dict[str, Any]) -> dict[str, Any]
 
 
 def oa_pending_payment_bank_detail_from_row(row: dict[str, Any], bank_transaction_id: str) -> dict[str, Any]:
-    bank = _bank_summary_for_detail(row, bank_transaction_id)
+    bank = original_bank_summary(_bank_summary_for_detail(row, bank_transaction_id))
     bank_id = _text(bank.get("bankTransactionId") or bank.get("primaryBankTransactionId") or bank_transaction_id)
     return {
         "id": bank_id,
@@ -179,9 +180,11 @@ def _relation_detail_sections(kind: str, summaries: list[dict[str, Any]]) -> lis
             for index, summary in enumerate(summaries, start=1)
         ]
     if kind == "bank":
+        summaries = original_bank_summaries(summaries)
         return [
             {
                 "title": f"支出流水 {index}",
+                "bank_transaction_id": summary["bankTransactionId"],
                 "fields": [
                     {"label": "支出银行", "value": summary.get("bankName")},
                     {"label": "交易时间", "value": summary.get("tradeTime")},

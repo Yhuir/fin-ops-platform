@@ -49,3 +49,16 @@ npm run build
 - `../docs/product-specs/workbench.md`
 - `../docs/product-specs/settings-and-access-control.md`
 - `../deploy/oa/README.md`
+
+## 银行流水拆分
+
+`src/features/bankSplits/` 是银行拆分编辑与读取的前端边界。所有银行详情通过 `BankTransactionDetailContent` 注入现有字段表格；`EntityDetailContent` 只提供纯展示插槽，不读写银行 API。
+
+- 单笔详情：`GET /api/bank-transactions/{id}/splits`，父流水或用途子项身份均由后端解析为完整原流水。
+- 多笔详情：`POST /api/bank-transactions/splits/query` 一次读取抽屉中的银行身份，响应与请求顺序对应；不逐个子项请求。
+- 保存：`PUT /api/bank-transactions/{id}/splits` 提交版本与完整子项，金额为十进制字符串。前端用整数分校验，后端仍为最终校验与事务 owner。取消拆分明确提交整笔标签。
+- `BankSplitEditor` 不自动选择标签或填差额；冲突保留草稿，显式重读。所有标签选项来自后端；共享 `TwoColumnTagPicker` 同时用于原成本表单。
+- 银行列表保留父流水记录；关联台在同一关系组内按父流水合并显示；若子项分属多个对齐段，银行父容器跨段展示，OA/发票原有分段保持。不同关系组不合并。子项选择继续传原子项身份及金额，不把父原额写入选中金额。
+- 保存后的列表回读由所在页面显式负责；当前拆分编辑器采用 PUT 响应更新，列表刷新不重挂载抽屉，不丢弃同抽屉其他银行草稿。关闭重开重新读取详情。原银行余额、流水笔数及非银行详情不在编辑器中计算。
+
+验证入口：`BankSplitEditor.test.tsx`、`BankSplitsApi.test.ts`、`BankSplitRelationCell.test.tsx`、各消费页回归，以及 `e2e/bank-transaction-splits.spec.ts`。浏览器测试使用可持久化的模拟 API，只证明交互与提交合同；真实数据库闭环由后端集成测试证明。

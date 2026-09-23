@@ -47,7 +47,7 @@ _OA_NOT_LINKED_TO_BANK_SQL = f"""
           and relation.row_ids @> array[oa.row_id]::text[]
           and exists (
               select 1
-              from app.bank_transactions linked_bank
+              from app.bank_transaction_units linked_bank
               where relation.row_ids @> array[
                         coalesce(linked_bank.legacy_mongo_id, linked_bank.id::text)
                     ]::text[]
@@ -79,7 +79,7 @@ class PostgresBatchAccountingQueryRepository:
         return (
             f"""batch_bank_candidates as materialized (
             select {_BANK_ID_SQL} as row_id
-            from app.bank_transactions bank
+            from app.bank_transaction_units bank
             where bank.status <> 'deleted' and btrim(bank.counterparty_name_raw) = %s
               and bank.txn_direction = 'outflow' and bank.amount > 0
               and (%s::date is null or ({_BANK_DATE_SQL} >= %s::date
@@ -123,7 +123,7 @@ class PostgresBatchAccountingQueryRepository:
                           and relation.relation_mode = 'batch_accounting'
                           and exists (
                               select 1
-                              from app.bank_transactions submitted_bank
+                              from app.bank_transaction_units submitted_bank
                               where relation.row_ids @> array[
                                         coalesce(
                                             submitted_bank.legacy_mongo_id,
@@ -165,6 +165,7 @@ class PostgresBatchAccountingQueryRepository:
             settings = AppSettingsService.normalize_settings_payload(source.get("settings_payload") or {})
             candidates, candidate_params = self._candidate_cte(bank_year)
             classifier, classifier_params = bank_category_classification_cte(
+            use_units=True,
                 definitions=settings["bank_transaction_tags"]["definitions"],
                 date_from=None,
                 date_to=None,
@@ -193,7 +194,7 @@ class PostgresBatchAccountingQueryRepository:
                 page_params = (bank_start, bank_start, bank_start, bank_page_size, (bank_page - 1) * bank_page_size)
             else:
                 page_cte = f"""selected_keys as materialized (
-                    select e.row_id from eligible e join app.bank_transactions bank
+                    select e.row_id from eligible e join app.bank_transaction_units bank
                       on {_BANK_ID_SQL}=e.row_id
                     order by {_BANK_DATE_SQL} desc nulls last, e.row_id
                     limit %s offset %s
@@ -232,7 +233,7 @@ class PostgresBatchAccountingQueryRepository:
                     to_char({_BANK_DATE_SQL}, 'YYYY') as bank_year,
                     {_BANK_DATE_SQL} as bank_date,
                     {tag_columns}
-                    from selected_keys p join app.bank_transactions bank on {_BANK_ID_SQL}=p.row_id
+                    from selected_keys p join app.bank_transaction_units bank on {_BANK_ID_SQL}=p.row_id
                     join classified_with_semantics c on c.row_id=p.row_id)"""
                 page_output = """coalesce((select jsonb_agg(to_jsonb(p)-'bank_date'
                     order by p.bank_date desc nulls last,p.id)
@@ -243,7 +244,7 @@ class PostgresBatchAccountingQueryRepository:
                     f"""with {candidates}, {classifier},
                 eligible as materialized (select c.row_id from classified_with_semantics c
                     join batch_bank_candidates candidate on candidate.row_id=c.row_id
-                    join app.bank_transactions bank on {_BANK_ID_SQL}=c.row_id
+                    join app.bank_transaction_units bank on {_BANK_ID_SQL}=c.row_id
                     where c.effective_category_code=any(%s::text[]) and {_BANK_NOT_LINKED_SQL}),
                 {page_cte}
                 select (select count(*) from eligible) as unsubmitted_count, {page_output}
@@ -353,7 +354,7 @@ class PostgresBatchAccountingQueryRepository:
                         ),
                         '{{}}'::jsonb
                     ) as settings_payload
-                from app.bank_transactions bank
+                from app.bank_transaction_units bank
                 where {_BANK_ID_SQL} = %s
                   and bank.status <> 'deleted'
                   and {_BANK_DATE_SQL} >= %s::date
@@ -434,6 +435,7 @@ class PostgresBatchAccountingQueryRepository:
             settings = AppSettingsService.normalize_settings_payload(source.get("settings_payload") or {})
             candidates, params = self._candidate_cte(None)
             classifier, classifier_params = bank_category_classification_cte(
+            use_units=True,
                 definitions=settings["bank_transaction_tags"]["definitions"],
                 date_from=None,
                 date_to=None,
@@ -661,7 +663,7 @@ class PostgresBatchAccountingQueryRepository:
                     ) as account_last4,
                     source.account_no,
                     to_char(coalesce(source.txn_date, source.trade_time::date, source.pay_receive_time::date), 'YYYY') as bank_year
-                from app.bank_transactions source
+                from app.bank_transaction_units source
                 where coalesce(source.legacy_mongo_id, source.id::text) = any(relation.row_ids)
                   and source.status <> 'deleted'
                   and (%s::date is null or (coalesce(source.txn_date, source.trade_time::date, source.pay_receive_time::date)

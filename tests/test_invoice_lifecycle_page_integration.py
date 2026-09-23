@@ -69,6 +69,7 @@ class InvoiceLifecyclePageIntegrationTests(unittest.TestCase):
         transaction = _bank("bank-expense", "88.00", TransactionDirection.OUTFLOW)
         service = PendingInvoiceQueryService(
             import_service=ImportNormalizationService(existing_transactions=[transaction]),
+            bank_units_by_ids=lambda ids: [transaction] if transaction.id in ids else [],
             category_service=BankTransactionCategoryService(),
             app_settings_provider=lambda: {},
             lifecycle_policy=policy,

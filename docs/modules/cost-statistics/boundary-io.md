@@ -307,3 +307,21 @@ Cost 的关系展示复用统一 OA—银行对应规则；canonical repository 
 - 前端复用 `CostManualTagPicker` 左主右子，OA 来源行可选择或恢复来源，金额/原额锁定互相独立。覆盖跟随草稿行，更换来源时由服务端重新验证，保存请求结果核对包含覆盖代码。待分配、已完成、明细调整复用同一表单。
 - 删除 OA 行只能只读银行标签的 UI 分支和无条件银行分类的成本构建限制；不删除银行凭据、非成本、退款的只读标签。无新 API、表、索引、worker、缓存或跨页刷新。
 - 标签解析为批量映射，无逐行 I/O；两个银行视角不加载成本人工分配。发布沿用既有 forward-only 清单防止旧代码忽略新事实，不新增审批门禁。
+
+## 银行拆分后的旧分配撤销（2026-09-23）
+
+- 拆分事务通过成本 owner `revoke_for_bank_split` 撤销受影响 case 当前人工决定，并同事务把完整旧决定写入操作审计。数据变化不得继续使用旧 fingerprint；只有展示顺序变化不撤销成本。
+- 历史清理入口 `python -m fin_ops_platform.tools.revoke_external_turnover_cost_allocations` 默认只读，`--apply --operator <actor>` 在 SERIALIZABLE 事务应用。按 canonical 标签语义 `turnover_role` 识别外部往来，包含历史/完成分配，禁止以标签名称或当前页面范围代替。
+- 预览返回 affected/mixed case 清单。现有人工决定以整 case fingerprint 确认，混合且无法独立证明的 case 整体回待确认；无外部往来来源的 case 不变。删除的是当前决定，审计保留原始金额、来源、标签和版本，不修改银行/OA/发票事实，不生成推断的拆分。
+- 重复运行在无候选时零撤销；撤销后尚未重新拆分和确认的利息不继续暗中计成本。测试：`tests/test_bank_split_cost_migration_service.py`、`tests/test_bank_split_relations_postgres.py`。
+
+
+## 2026-09-23 流水子项用途边界
+
+银行用途与分类读取 `app.bank_transaction_units`；真实流水数量/余额来源仍是原始银行事实，统计流水数量去重父身份。按配置语义 `turnover_role=external_turnover` 排除本金，不能因同一 case 含本金而剔除利息子项。拆分后的 case 标记 `bank_split_requires_cost_confirmation` 时取消自动按 OA 金额分配，进入待分配；有效人工分配优先。指纹不包含整笔拆分版本，排序或无关子项修改不使既有分配失效。成本详情以父身份和原始金额展示，`bank_transaction_unit_id` 保留成本用途追踪。
+
+验证：`tests/test_bank_split_consumers_postgres.py` 使用隔离 PostgreSQL 数据库覆盖原始金额不变、子项标签筛选、成本待分配、待票金额和详情父身份、往来补充信息迁移。往来手工成员重建和含利息 case 的本金闭环由对应 service/query 单元测试覆盖。
+
+- 一次性旧外部往来成本迁移在删除当前分配前，经 relation owner 将 active case 标记 `bank_split_requires_cost_confirmation=true` 并增加关系版本/审计；混合普通费用的 case 也回到人工确认，不自动重新分配。CLI 输出 `marked_case_ids`，dry-run 不写；标记与删除任一失败均整事务回滚。
+
+拆分用途过滤与 OA 来源范围同步：已有正式来源分组能证明某 OA 仅属于外部本金、且未被普通来源共享时，成本投影排除该 OA 目标，使独立普通成本继续统计。缺少来源分组或共享 OA 时不按金额猜归属，仍保留未定目标进入待分配。原始 OA、银行事实及正式关联均不改写。

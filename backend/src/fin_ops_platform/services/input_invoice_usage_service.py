@@ -10,6 +10,11 @@ from typing import Any
 
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import BankTransaction, Invoice
+from fin_ops_platform.services.bank_transaction_unit import (
+    bank_unit_display,
+    bank_unit_matches_invoice,
+    original_bank_summaries,
+)
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     InputInvoiceUsagePaymentRulesProvider,
@@ -645,7 +650,7 @@ class InputInvoiceUsageQueryService:
         for relation in relations:
             for row_id in list(relation.get("row_ids") or []):
                 bank = bank_map.get(str(row_id))
-                if bank is not None and bank.id not in seen:
+                if bank is not None and bank.id not in seen and bank_unit_matches_invoice(bank):
                     seen.add(bank.id)
                     summaries.append(self._bank_summary(bank, primary_invoice, line_items, relation))
         summaries.sort(key=lambda item: item["_sort"])
@@ -654,6 +659,7 @@ class InputInvoiceUsageQueryService:
         total_amount = sum((_decimal(summary.get("amount")) for summary in public_summaries), start=ZERO)
         return {
             "primaryBankTransactionId": primary.get("bankTransactionId"),
+            "bank_split_parts": primary.get("bank_split_parts", []),
             "counterpartyName": primary.get("counterpartyName", ""),
             "tradeTime": primary.get("tradeTime", ""),
             "amount": _money(total_amount) if public_summaries else "",
@@ -689,6 +695,7 @@ class InputInvoiceUsageQueryService:
         timestamp = _sortable_time(bank.trade_time or bank.txn_date)
         return {
             "bankTransactionId": bank.id,
+            **bank_unit_display(bank),
             "counterpartyName": bank.counterparty_name_raw,
             "tradeTime": bank.trade_time or bank.txn_date or "",
             "amount": _money(bank.amount),
@@ -1420,9 +1427,11 @@ def _relation_detail_sections(kind: str, summaries: list[Any]) -> list[dict[str,
             for index, summary in enumerate(typed_summaries, start=1)
         ]
     if kind == "bank":
+        typed_summaries = original_bank_summaries(typed_summaries)
         return [
             {
                 "title": f"银行流水 {index}",
+                "bank_transaction_id": summary["bankTransactionId"],
                 "fields": [
                     {"label": "对方户名", "value": summary.get("counterpartyName")},
                     {"label": "交易时间", "value": summary.get("tradeTime")},

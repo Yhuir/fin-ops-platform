@@ -78,3 +78,5 @@
 4. 在最终说明中写明边界文档已更新，或明确说明 docs 不适用的理由。
 
 - 2026-09-22：管理员导入任务查询/处理归属 imports，App Health 提供 UI；新增窄 service/repository 与 typed client，复用已有任务、版本、生命周期和审计；GET 不执行修复。见[处理计划](../../dev/import-task-disposition-plan.md)。
+
+- 2026-09-23：银行拆分事实仍由 `bank-details` owner 持有；`app.bank_transaction_units` 只投影用途子项。详情/列表显示原金融事实，成本/关联/OA/发票/往来消费用途事实。统一 I/O 与调用方测试见 [流水拆分](../../dev/bank-transaction-splits.md)。没有新增页面 read model 或 worker。

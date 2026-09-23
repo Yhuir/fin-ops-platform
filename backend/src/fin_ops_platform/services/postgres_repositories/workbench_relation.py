@@ -47,6 +47,19 @@ class PostgresWorkbenchRelationRepository:
         """, (sorted(set(oa_ids)),))
         return [row_payload(row, "raw_payload") for row in rows]
 
+    def resolve_current_bank_unit_ids(self, row_ids: list[str]) -> list[str]:
+        """Expand an original bank identity for withdrawal; never merge children."""
+        rows = self._connection.fetch_all("""
+            select distinct coalesce(unit.legacy_mongo_id,unit.id::text) as row_id
+            from app.bank_transaction_units unit
+            where unit.status <> 'deleted' and (
+                coalesce(unit.legacy_mongo_id,unit.id::text) = any(%s::text[])
+                or unit.parent_row_id = any(%s::text[])
+                or unit.parent_bank_transaction_id::text = any(%s::text[])
+            ) order by row_id
+        """, (row_ids, row_ids, row_ids))
+        return [row["row_id"] for row in rows]
+
     def bind_post_commit_callback_registrar(
         self,
         registrar: Callable[[Callable[[], None]], None],
@@ -196,7 +209,7 @@ class PostgresWorkbenchRelationRepository:
                 coalesce(
                     array(
                         select distinct to_char(bank.txn_month, 'YYYY-MM')
-                        from app.bank_transactions bank
+                        from app.bank_transaction_units bank
                         where coalesce(bank.legacy_mongo_id, bank.id::text)
                               = any(relation.row_ids)
                           and bank.status <> 'deleted'
@@ -507,12 +520,13 @@ class PostgresWorkbenchRelationRepository:
         found: set[tuple[str, str]] = set()
         queries = {
             "bank": """
-                select coalesce(legacy_mongo_id, id::text) as row_id
-                from app.bank_transactions
-                where coalesce(legacy_mongo_id, id::text) = any(%s::text[])
-                  and status <> 'deleted'
-                order by coalesce(legacy_mongo_id, id::text)
-                for key share
+                select coalesce(unit.legacy_mongo_id, unit.id::text) as row_id
+                from app.bank_transaction_units unit
+                join app.bank_transactions parent on parent.id = unit.parent_bank_transaction_id
+                where coalesce(unit.legacy_mongo_id, unit.id::text) = any(%s::text[])
+                  and unit.status <> 'deleted'
+                order by parent.id, unit.id
+                for share of parent
             """,
             "invoice": """
                 select coalesce(legacy_mongo_id, id::text) as row_id
@@ -648,6 +662,69 @@ class PostgresWorkbenchRelationRepository:
             actor_id=actor_id, reason=reason,
         )
         self.save_workbench_pair_relation_delta(service.snapshot(), changed_case_ids=[before["case_id"]])
+
+    def current_bank_relation_requirements(self, bank_ids_by_case: dict[str, list[str]]) -> dict[str, dict[str, object]]:
+        """Read one current tag-policy snapshot for all restored bank groups."""
+        from fin_ops_platform.services.bank_details_canonical_query import PostgresBankDetailsCanonicalQueryRepository
+        from fin_ops_platform.services.workbench_relation_requirements import build_bank_relation_requirement_metadata
+
+        settings = PostgresBankDetailsCanonicalQueryRepository.settings_payload(self._connection)
+        ids = sorted({value for values in bank_ids_by_case.values() for value in values})
+        categories = PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
+            self._connection, settings=settings, transaction_ids=ids,
+        )
+        return {case_id: build_bank_relation_requirement_metadata(
+            tag_codes=[categories[row_id]["effective_category_code"] for row_id in members],
+            rules_payload=settings["paired_policy"],
+        ) for case_id, members in bank_ids_by_case.items()}
+
+    def require_cost_reconfirmation(self, case_ids: list[str], *, actor_id: str) -> list[str]:
+        """Mark active migrated decisions through the relation metadata owner."""
+        from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+
+        if not case_ids:
+            return []
+        self.acquire_relation_member_locks([], case_ids=sorted(case_ids))
+        rows = self._connection.fetch_all(
+            "select raw_payload from app.workbench_pair_relations where case_id = any(%s::text[]) and status = 'active' order by case_id for update",
+            (sorted(case_ids),),
+        )
+        relations = {payload["case_id"]: payload for row in rows if isinstance((payload := row_payload(row, "raw_payload")), dict)}
+        service = WorkbenchPairRelationService(pair_relations=relations)
+        changed = []
+        for case_id, relation in relations.items():
+            if relation.get("special_metadata", {}).get("bank_split_requires_cost_confirmation") is True:
+                continue
+            service.update_relation_metadata_for_case_id(
+                case_id, special_metadata={"bank_split_requires_cost_confirmation": True},
+                updated_by=actor_id, note="撤销旧外部往来成本分配，等待重新确认。",
+                operation_type="external_turnover_cost_allocation_revoked", advance_version=True,
+            )
+            changed.append(case_id)
+        if changed:
+            self.save_workbench_pair_relation_delta(service.snapshot(), changed_case_ids=changed)
+        return sorted(changed)
+
+    def replace_bank_split_members(
+        self, *, before: dict[str, Any], row_ids: list[str], row_types: list[str],
+        special_metadata: dict[str, Any], actor_id: str, parent_id: str,
+        source_bank_ids: list[str], target_bank_ids: list[str],
+    ) -> dict[str, Any]:
+        """Bank owner transaction port; use the relation domain and delta writer."""
+        from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+
+        current = self.load_active_workbench_pair_relation_by_case_id_for_update(before["case_id"])
+        if not current or current["version"] != before["version"] or current["row_ids"] != before["row_ids"]:
+            raise ValueError("The relation changed before the bank split was saved.")
+        service = WorkbenchPairRelationService(pair_relations={before["case_id"]: current})
+        service.replace_bank_split_members(
+            case_id=before["case_id"], row_ids=row_ids, row_types=row_types,
+            special_metadata=special_metadata, actor_id=actor_id, parent_id=parent_id,
+            source_bank_ids=source_bank_ids, target_bank_ids=target_bank_ids,
+        )
+        delta = service.snapshot()
+        self.save_workbench_pair_relation_delta(delta, changed_case_ids=[before["case_id"]])
+        return delta
 
     def save_workbench_pair_relations(
         self,

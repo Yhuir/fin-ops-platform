@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from copy import deepcopy
-from datetime import UTC, datetime
 import hashlib
 import json
-from pathlib import Path
 import re
+from copy import deepcopy
+from datetime import UTC, datetime
+from pathlib import Path
 from threading import RLock
 from typing import Any, Callable
 
@@ -17,12 +17,13 @@ from fin_ops_platform.services.bank_turnover_tag_semantics import (
     infer_turnover_action_type,
     is_external_turnover_definition,
     is_external_turnover_primary_label,
-    label_path as turnover_label_path,
     normalize_external_third_label,
     normalize_turnover_action_type,
     turnover_family_for_third_label,
 )
-
+from fin_ops_platform.services.bank_turnover_tag_semantics import (
+    label_path as turnover_label_path,
+)
 
 BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION = "2026-05-bank-transaction-category-taxonomy"
 BANK_TRANSACTION_CATEGORY_TAXONOMY: list[dict[str, Any]] = [
@@ -1291,13 +1292,20 @@ class BankTransactionCategoryService:
         return self._apply_updates(updates, actor=actor)
 
     def apply_turnover_updates(self, updates: list[dict[str, Any]], *, actor: str) -> dict[str, Any]:
+        allowed = {
+            definition["code"]
+            for definition in self.tag_dictionary_payload()["definitions"]
+            if definition.get("status") == "active"
+            and self.category_semantics_for_code(definition["code"]).get("turnover_role") == "external_turnover"
+            and self.category_semantics_for_code(definition["code"]).get("turnover_action_type")
+        }
         return self._apply_updates(
-            updates,
+            [{**update, "manual_assignment": True} for update in updates],
             actor=actor,
             source="turnover_ledger",
-            allowed_category_codes=set(BANK_TRANSACTION_CATEGORY_DEFINITIONS),
+            allowed_category_codes=allowed,
             invalid_category_error="invalid_turnover_category_code",
-            invalid_category_message="Only turnover leaf category codes can be selected from turnover ledger.",
+            invalid_category_message="请选择当前配置中有效的外部往来款标签。",
         )
 
     def assign_manual_category(

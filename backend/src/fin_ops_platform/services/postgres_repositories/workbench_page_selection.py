@@ -1056,7 +1056,7 @@ class PostgresWorkbenchPageSelectionRepository:
                        'bank_transaction'::text, null::text,
                        bank.txn_month, bank.updated_at
                 from requested
-                join app.bank_transactions bank
+                join app.bank_transaction_units bank
                   on coalesce(bank.legacy_mongo_id, bank.id::text) = requested.row_id
                 where (requested.row_type is null or requested.row_type = 'bank')
                   and bank.status <> 'deleted'

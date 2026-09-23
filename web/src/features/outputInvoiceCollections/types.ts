@@ -1,3 +1,4 @@
+import type { BankSplitPart } from '../bankSplits/api';
 export type OutputInvoiceCollectionSortDirection = "asc" | "desc";
 
 export type OutputInvoiceCollectionFilterOperator =
@@ -67,6 +68,7 @@ export type OutputInvoiceCollectionStatus = {
 };
 
 export type OutputInvoiceCollectionBankSummary = {
+  bankSplitParts?: BankSplitPart[];
   id: string;
   counterpartyName: string;
   tradeTime: string;

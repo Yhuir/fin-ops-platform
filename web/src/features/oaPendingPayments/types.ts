@@ -1,3 +1,4 @@
+import type { BankSplitPart } from '../bankSplits/api';
 export type OaPendingPaymentSortDirection = "asc" | "desc";
 export type OaPendingPaymentViewMode = "completed" | "in_progress";
 
@@ -79,6 +80,7 @@ export type OaPendingPaymentWritebackStatus = {
 };
 
 export type OaPendingPaymentBankTransaction = {
+  bank_split_parts?: BankSplitPart[];
   primaryBankTransactionId?: string | null;
   accountDetailNo: string;
   enterpriseSerialNo: string;

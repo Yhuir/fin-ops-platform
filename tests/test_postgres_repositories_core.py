@@ -70,7 +70,6 @@ def test_confirm_prepare_uses_fresh_formal_fields_and_preserves_all_manual_prove
                 }},
                 "source_links": [
                     {"source_type": "manual_invoice_import", "source_id": "file-first"},
-                    {"source_type": "oa_attachment_invoice", "derived_from_oa_id": "oa-1"},
                     {
                         "source_type": "oa_expense_item_invoice",
                         "source_expense_item_id": "item-1",
@@ -118,7 +117,6 @@ def test_confirm_prepare_uses_fresh_formal_fields_and_preserves_all_manual_prove
     ]
     assert [link["source_type"] for link in incoming["source_links"]] == [
         "manual_invoice_import",
-        "oa_attachment_invoice",
         "oa_expense_item_invoice",
         "manual_invoice_import",
     ]
@@ -138,7 +136,6 @@ def test_confirm_prepare_uses_fresh_formal_fields_and_preserves_all_manual_prove
     })
     assert [link["source_type"] for link in reloaded.source_links] == [
         "manual_invoice_import",
-        "oa_attachment_invoice",
         "oa_expense_item_invoice",
         "manual_invoice_import",
     ]
@@ -157,7 +154,7 @@ def test_confirm_prepare_uses_fresh_formal_fields_and_preserves_all_manual_prove
     assert incoming_without_status["invoice_status_from_source"] == "valid"
 
 
-def test_first_formal_prepare_keeps_fresh_downstream_state_but_replaces_oa_ticket_fields() -> None:
+def test_formal_prepare_skips_oa_owned_invoice_without_overwriting_snapshot() -> None:
     class Transaction:
         def execute(self, _sql: str, _params: tuple = ()) -> int:
             return 1
@@ -219,28 +216,20 @@ def test_first_formal_prepare_keeps_fresh_downstream_state_but_replaces_oa_ticke
         }],
     }
 
-    PostgresCoreRepository(Transaction()).prepare_confirmed_invoice_upserts_in_transaction(
-        Transaction(),
-        imports_snapshot={"invoices": {"invoice-oa-first": incoming}},
+    from copy import deepcopy
+    before = deepcopy(incoming)
+    snapshot = {"invoices": {"invoice-oa-first": incoming}}
+    locked_identity_keys = PostgresCoreRepository(Transaction()).prepare_confirmed_invoice_upserts_in_transaction(
+        Transaction(), imports_snapshot=snapshot,
     )
-
-    assert incoming["seller_name"] == "Excel权威销方"
-    assert incoming["amount"] == "1000.00"
-    assert incoming["written_off_amount"] == "312.00"
-    assert incoming["oa_form_id"] == "oa-owner-1"
-    assert incoming["source_expense_item_id"] == "oa-owner-1:item:0"
-    assert incoming["etc_invoice_id"] == "etc-invoice-1"
-    assert incoming["etc_import_batch_id"] == "etc-import-1"
-    assert incoming["etc_submission_batch_id"] == "etc-submit-1"
-    assert incoming["etc_submission_status"] == "submitted"
-    assert incoming["workbench_visibility"] == "hidden_after_etc_submission"
-    assert incoming["status"] == "partially_reconciled"
-    assert incoming["invoice_status_from_source"] == "cancelled"
-    assert incoming["tags"] == ["OA附件", "ETC", "人工导入"]
-    assert [link["source_type"] for link in incoming["source_links"]] == [
-        "oa_attachment_invoice",
-        "manual_invoice_import",
-    ]
+    assert locked_identity_keys == {incoming["digital_invoice_no"]}
+    assert snapshot["invoices"] == {}
+    assert incoming == before
+    with pytest.raises(InvoiceSourceLinksCasConflict, match="reload the import decision"):
+        PostgresCoreRepository(Transaction()).prepare_confirmed_invoice_upserts_in_transaction(
+            Transaction(), imports_snapshot={"invoices": {"invoice-oa-first": incoming},
+                "batches": {"batch": {"row_results": [{"linked_object_id": incoming["id"], "decision": "created"}]}}},
+        )
 
 
 def test_locked_oa_promotion_rejects_two_distinct_active_oa_contexts() -> None:
@@ -257,21 +246,21 @@ def test_locked_oa_promotion_rejects_two_distinct_active_oa_contexts() -> None:
         )
 
 
-def test_locked_oa_promotion_rejects_explicit_owner_from_another_oa() -> None:
+def test_locked_oa_promotion_does_not_infer_parent_from_expense_item_identity() -> None:
     class Transaction:
         def fetch_all(self, _sql: str, _params: tuple = ()) -> list[dict[str, str]]:
             return []
 
-    with pytest.raises(InvoiceSourceLinksCasConflict, match="context changed"):
-        PostgresCoreRepository._assert_single_active_oa_context(
-            Transaction(),
-            [{
-                "source_type": "oa_expense_item_invoice",
-                "source_expense_item_id": "oa-1:item:0:explicit",
-            }],
-            [{"source_type": "oa_attachment_invoice", "derived_from_oa_id": "oa-2"}],
-            invoice_id="invoice-1",
-        )
+    PostgresCoreRepository._assert_single_active_oa_context(
+        Transaction(),
+        [{
+            "source_type": "oa_expense_item_invoice",
+            "source_expense_item_id": "oa-1:item:0:explicit",
+        }],
+        [{"source_type": "oa_attachment_invoice", "derived_from_oa_id": "oa-2"}],
+        invoice_id="invoice-1",
+    )
+
 
 
 def test_locked_oa_promotion_accepts_active_aliases_of_the_same_oa() -> None:
@@ -1069,7 +1058,7 @@ def test_invoice_source_links_cas_updates_structured_and_raw_mirror_together() -
 
     sql, params = next(call for call in connection.calls if "update app.invoices" in call[0])
     assert "set source_links = change.source_links" in sql
-    assert "jsonb_build_object('source_links', change.source_links)" in sql
+    assert "jsonb_build_object('source_links', change.source_links, 'tags'," in sql
     assert params[0].obj[0]["invoice_id"] == "invoice-structured-provenance"
     assert params[0].obj[0]["source_links"] == source_links
     assert params[0].obj[0]["before_source_links"] == source_links
@@ -1340,9 +1329,9 @@ def test_save_file_imports_persists_session_owner_for_recovery() -> None:
     })
 
     params = connection.executed_params[-1]
-    payload = getattr(params[-1], "obj", params[-1])
-    assert params[-3] == "YNSYLP005"
-    assert params[-2] == FILE_IMPORT_AUDIT_CONTRACT_REVISION
+    payload = getattr(params[8], "obj", params[8])
+    assert params[6] == "YNSYLP005"
+    assert params[7] == FILE_IMPORT_AUDIT_CONTRACT_REVISION
     assert payload["normalized_payload"]["imported_by"] == "YNSYLP005"
     assert payload["normalized_payload"]["created_at"] == "2026-08-11T05:00:00+00:00"
 
@@ -1368,7 +1357,7 @@ def test_save_manual_bank_entry_uses_non_file_audit_contract() -> None:
     })
 
     params = connection.executed_params[-1]
-    assert params[-2] == MANUAL_BANK_ENTRY_AUDIT_CONTRACT_REVISION
+    assert params[7] == MANUAL_BANK_ENTRY_AUDIT_CONTRACT_REVISION
 
 
 def test_import_batch_row_upsert_refuses_cross_batch_reparent() -> None:

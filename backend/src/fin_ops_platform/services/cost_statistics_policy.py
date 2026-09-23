@@ -568,6 +568,19 @@ def _cost_entries(
                 excluded_by_reason.get("incomplete_oa_members", 0) + 1
             )
             continue
+        # Formal independent ownership lets us omit principal-only OA targets.
+        # Keep shared or unproven targets: their allocation still needs a decision.
+        external_ids = {_bank_transaction_id(row) for row in group_bank_rows
+                        if _outflow_amount(row) is not None and row.get("turnover_role") == "external_turnover"}
+        external_oa_ids: set[str] = set()
+        other_oa_ids: set[str] = set()
+        for source_group in group.get("source_relation_groups", []):
+            bank_ids = set(source_group["bank_row_ids"])
+            target = external_oa_ids if bank_ids and bank_ids <= external_ids else other_oa_ids
+            target.update(source_group["oa_row_ids"])
+        principal_only_oa_ids = external_oa_ids - other_oa_ids
+        oa_rows = [row for row in oa_rows
+                   if _clean_text(row.get("id") or row.get("row_id")) not in principal_only_oa_ids]
         if not oa_rows:
             continue
         completed_ids = {_clean_text(row.get("id") or row.get("row_id")) for row in oa_rows if _is_completed_oa_cost_row(row)}
@@ -576,7 +589,9 @@ def _cost_entries(
             continue
         waiting_ids = {_clean_text(row.get("id") or row.get("row_id")) for row in oa_rows} - completed_ids
         outflows = [
-            row for row in group_bank_rows if _outflow_amount(row) is not None
+            row for row in group_bank_rows
+            if _outflow_amount(row) is not None
+            and row.get("turnover_role") != "external_turnover"
         ]
         contexts: list[dict[str, Any]] = []
         group_reasons: list[str] = []
@@ -956,6 +971,9 @@ def _manual_allocation_task(
         unit["lock_oa_amount"] = default_lock
         unit["outside_cost_amount"] = "0.00"
     if manual_record is None:
+        if (group.get("special_metadata") or {}).get("bank_split_requires_cost_confirmation"):
+            task["requires_manual_confirmation"] = True
+            return project_source_task(task, None)
         decision = automatic_relation_sources(task, [*outflows, *refunds], group.get("source_relation_groups", []))
         return project_source_task(task, decision, automatic=True)
     task.update(
@@ -1073,6 +1091,8 @@ def _manual_allocation_bank_event(
     ]
     return {
         "transaction_id": transaction_id,
+        "bank_transaction_id": _clean_text(row.get("parent_row_id")) or transaction_id,
+        "split_version": int(row.get("split_version") or 0),
         "event_kind": event_kind,
         "turnover_role": _clean_text(row.get("turnover_role")),
         "amount": _money(amount),
@@ -1284,6 +1304,8 @@ def _serialize_bank_row(row: dict[str, Any]) -> dict[str, Any]:
         "row_key": transaction_id,
         "group_id": _clean_text(row.get("group_id")),
         "transaction_id": transaction_id,
+        "bank_transaction_id": _clean_text(row.get("parent_row_id")) or transaction_id,
+        "parent_amount": _money(_decimal(row.get("parent_amount")) or amount),
         "month": trade_time[:7],
         "occurred_at": trade_time,
         "trade_time": trade_time,

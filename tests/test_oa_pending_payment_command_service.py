@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from decimal import Decimal
 import unittest
+from decimal import Decimal
 
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction
@@ -56,6 +56,33 @@ class FakeRelationCommandService:
 
 
 class OaPendingPaymentCommandServiceTests(unittest.TestCase):
+    def test_links_selected_child_amount_with_one_bulk_read(self):
+        from unittest.mock import Mock
+
+        reader = Mock(return_value=[_bank("child-interest", "1497.22")])
+        command = FakeRelationCommandService()
+        service = OaPendingPaymentCommandService(
+            bank_transaction_reader=reader,
+            oa_projection=StaticOAProjection([_oa("oa-interest", "1497.22", workflow_status="in_progress")]),
+            relation_command_service=command,
+        )
+        service.link_bank_transactions({'oa_row_ids': ['oa-interest'], 'bank_transaction_ids': ['child-interest']}, actor_id='test')
+        reader.assert_called_once_with(['child-interest'])
+        self.assertEqual(command.confirm_calls[0]['row_ids'], ['oa-interest', 'child-interest'])
+        self.assertEqual(command.confirm_calls[0]['amount_check']['bank_paid_total'], '1497.22')
+
+    def test_missing_child_does_not_use_parent_or_create_relation(self):
+        command = FakeRelationCommandService()
+        service = OaPendingPaymentCommandService(
+            bank_transaction_reader=lambda ids: [],
+            oa_projection=StaticOAProjection([_oa('oa', '1.00', workflow_status='in_progress')]),
+            relation_command_service=command,
+        )
+        with self.assertRaises(OaPendingPaymentError) as error:
+            service.link_bank_transactions({'oa_row_ids': ['oa'], 'bank_transaction_ids': ['deleted-child']}, actor_id='test')
+        self.assertEqual(error.exception.error_code, 'bank_transaction_not_found')
+        self.assertEqual(command.confirm_calls, [])
+
     def test_manual_writeback_commands_are_not_exposed(self) -> None:
         self.assertFalse(hasattr(OaPendingPaymentCommandService, "confirm_paid"))
         self.assertFalse(hasattr(OaPendingPaymentCommandService, "writeback_paid"))
@@ -168,7 +195,7 @@ def _service(
     relation_command: FakeRelationCommandService,
 ) -> OaPendingPaymentCommandService:
     return OaPendingPaymentCommandService(
-        import_service=ImportNormalizationService(existing_transactions=transactions),
+        bank_transaction_reader=ImportNormalizationService(existing_transactions=transactions).list_transactions_by_ids,
         oa_projection=StaticOAProjection(oa_records),
         relation_command_service=relation_command,
     )

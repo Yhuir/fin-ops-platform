@@ -5,11 +5,11 @@ from types import SimpleNamespace
 from typing import Any, Iterator
 
 from fin_ops_platform.services.app_settings_service import AppSettingsService
-from fin_ops_platform.services.bank_transaction_category_service import (
-    BankTransactionCategoryService,
-)
 from fin_ops_platform.services.bank_details_canonical_query import (
     PostgresBankDetailsCanonicalQueryRepository,
+)
+from fin_ops_platform.services.bank_transaction_category_service import (
+    BankTransactionCategoryService,
 )
 from fin_ops_platform.services.bank_turnover_tag_semantics import (
     turnover_family_for_third_label,
@@ -65,6 +65,10 @@ class TurnoverLedgerQueryService:
                 )
         return payload
 
+    def selected_bank_rows(self) -> list[dict[str, Any]]:
+        with self._ledger_snapshot() as ledger_service:
+            return ledger_service.selected_bank_rows()
+
     def get_relation_detail(self, relation_id: str) -> dict[str, Any]:
         with self._ledger_snapshot() as ledger_service:
             return ledger_service.get_relation_detail(relation_id)
@@ -111,11 +115,24 @@ class TurnoverLedgerQueryService:
                 pair_relations = snapshot.get("pair_relations")
                 if not isinstance(pair_relations, dict):
                     return []
-                return [
-                    dict(relation)
-                    for relation in pair_relations.values()
-                    if isinstance(relation, dict)
-                ]
+                relations = [dict(relation) for relation in pair_relations.values() if isinstance(relation, dict)]
+                member_ids = list(dict.fromkeys(
+                    str(row_id) for relation in relations
+                    for row_id, row_type in zip(relation.get("row_ids", []), relation.get("row_types", []), strict=True)
+                    if row_type in {"bank", "bank_transaction"}
+                ))
+                categories = PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
+                    transaction, settings=settings_snapshot, transaction_ids=member_ids,
+                )
+                if set(categories) != set(member_ids):
+                    raise RuntimeError("turnover_relation_bank_member_missing")
+                for relation in relations:
+                    relation["turnover_bank_row_ids"] = [
+                        str(row_id) for row_id, row_type in zip(relation.get("row_ids", []), relation.get("row_types", []), strict=True)
+                        if row_type in {"bank", "bank_transaction"}
+                        and categories[str(row_id)].get("turnover_role") == "external_turnover"
+                    ]
+                return relations
 
             yield TurnoverLedgerService(
                 import_service=SimpleNamespace(

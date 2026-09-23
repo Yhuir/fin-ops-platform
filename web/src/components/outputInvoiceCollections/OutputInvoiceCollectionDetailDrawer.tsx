@@ -1,7 +1,9 @@
+import { useBankSplitClose } from "../../features/bankSplits/useBankSplitClose";
+import BankTransactionDetailContent from "../../features/bankSplits/BankTransactionDetailContent";
 import { useEffect, useState } from "react";
 
 import AppDrawer from "../common/AppDrawer";
-import EntityDetailContent, { preparePublicDetailSections } from "../common/EntityDetailContent";
+import { preparePublicDetailSections } from "../common/EntityDetailContent";
 import type {
   OutputInvoiceCollectionDetailResponse,
   OutputInvoiceCollectionDetailTarget,
@@ -12,6 +14,7 @@ type OutputInvoiceCollectionDetailDrawerProps = {
   target: OutputInvoiceCollectionDetailTarget | null;
   loadDetail: (target: OutputInvoiceCollectionDetailTarget) => Promise<OutputInvoiceCollectionDetailResponse>;
   onClose: () => void;
+  onBankSplitSaved?: () => void | Promise<void>;
 };
 
 export default function OutputInvoiceCollectionDetailDrawer({
@@ -19,7 +22,9 @@ export default function OutputInvoiceCollectionDetailDrawer({
   target,
   loadDetail,
   onClose,
+  onBankSplitSaved,
 }: OutputInvoiceCollectionDetailDrawerProps) {
+  const { close, setDirty } = useBankSplitClose(onClose);
   const [detail, setDetail] = useState<OutputInvoiceCollectionDetailResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,13 +70,13 @@ export default function OutputInvoiceCollectionDetailDrawer({
     <AppDrawer
       className="output-invoice-collection-drawer"
       closeLabel="关闭详情抽屉"
-      onClose={onClose}
+      onClose={close}
       open={open}
       title={title}
       width="min(800px, 100vw)"
     >
       <div className="output-invoice-collection-drawer__body">
-        <EntityDetailContent
+        <BankTransactionDetailContent onSplitDirtyChange={setDirty} onBankSplitSaved={onBankSplitSaved} bankTransactionId={target?.kind === "bank" ? target.id : undefined}
           detailAvailable={detail?.detailAvailable}
           error={error}
           loading={loading}

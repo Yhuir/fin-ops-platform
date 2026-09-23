@@ -2628,7 +2628,7 @@ export default function ReconciliationWorkbenchPage() {
         ) : null}
       </div>
 
-      <DetailDrawer error={detailError} loading={isDetailLoading} row={detailRow} onClose={handleCloseDetail} />
+      <DetailDrawer onBankSplitSaved={() => refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH)} error={detailError} loading={isDetailLoading} row={detailRow} onClose={handleCloseDetail} />
       {relationPreviewDialog ? (
         <RelationPreviewDialog
           preview={relationPreviewDialog.preview}

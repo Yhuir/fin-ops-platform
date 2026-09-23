@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Any, Callable
 
 from fin_ops_platform.services.postgres_repositories.bank_import_withdrawal import (
+    BankImportWithdrawalStateChanged,
     PostgresBankImportWithdrawalRepository,
 )
 
@@ -65,10 +66,13 @@ class BankImportWithdrawalService:
             if int(batch.get("updated_count") or 0) > 0:
                 raise BankImportWithdrawalConflict("该批次更新过既有流水，缺少更新前快照，不能安全撤回。")
 
-            transactions = repository.created_transactions(
-                str(batch["batch_uuid"]),
-                normalized_batch_id,
-            )
+            try:
+                transactions = repository.created_transactions(
+                    str(batch["batch_uuid"]),
+                    normalized_batch_id,
+                )
+            except BankImportWithdrawalStateChanged as exc:
+                raise BankImportWithdrawalConflict(str(exc)) from exc
             expected_count = int(batch.get("success_count") or 0)
             if len(transactions) != expected_count:
                 raise BankImportWithdrawalConflict(
@@ -84,7 +88,7 @@ class BankImportWithdrawalService:
                 )
 
             transaction_uuids = [str(row["transaction_uuid"]) for row in transactions]
-            row_ids = [str(row["row_id"]) for row in transactions]
+            row_ids = [identity for row in transactions for identity in [str(row["row_id"]), *row.get("split_row_ids", [])]]
             blockers = repository.blocking_references(
                 row_ids=row_ids,
             ) if row_ids else {}

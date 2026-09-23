@@ -1086,7 +1086,7 @@ def test_requirement_recalculation_query_selects_formal_relation_modes_regardles
     assert "case_id !~" not in sql
     assert "paired_requirement_source" in sql
     assert "canonical_bank_months" in sql
-    assert "from app.bank_transactions bank" in sql
+    assert "from app.bank_transaction_units bank" in sql
     assert "bank.txn_month is not null" in sql
     assert "manual_confirmed" in params[0]
     assert "bank_flow_rule_batch" in params[0]

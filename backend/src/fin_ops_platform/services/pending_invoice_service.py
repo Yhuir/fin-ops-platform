@@ -11,6 +11,11 @@ from typing import Any, Callable
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
+from fin_ops_platform.services.bank_transaction_unit import (
+    bank_unit_display,
+    bank_unit_matches_invoice,
+    original_bank_transaction,
+)
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
@@ -164,6 +169,7 @@ class PendingInvoiceQueryService:
         self,
         *,
         import_service: ImportNormalizationService,
+        bank_units_by_ids: Callable[[list[str]], list[BankTransaction]],
         category_service: BankTransactionCategoryService,
         app_settings_provider: Callable[[], dict[str, Any]],
         effective_category_provider: Any | None = None,
@@ -173,6 +179,7 @@ class PendingInvoiceQueryService:
         lifecycle_policy: Any | None = None,
     ) -> None:
         self._import_service = import_service
+        self._bank_units_by_ids = bank_units_by_ids
         self._category_service = category_service
         self._app_settings_provider = app_settings_provider
         self._effective_category_provider = effective_category_provider
@@ -242,15 +249,20 @@ class PendingInvoiceQueryService:
                     self._apply_bank_identity(summary, bank_account_mappings=bank_account_mappings)
         return payload
 
+    def _get_transactions(self, transaction_ids: list[str]) -> list[BankTransaction]:
+        ids = [str(value or "").strip() for value in transaction_ids]
+        rows = {row.id: row for row in self._bank_units_by_ids(ids)}
+        for transaction_id in ids:
+            if transaction_id not in rows:
+                raise PendingInvoiceError(
+                    "bank_transaction_not_found",
+                    f"Bank transaction not found: {transaction_id}",
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+        return [rows[transaction_id] for transaction_id in ids]
+
     def _get_transaction(self, transaction_id: str) -> BankTransaction:
-        try:
-            return self._import_service.get_transaction(str(transaction_id or "").strip())
-        except KeyError as exc:
-            raise PendingInvoiceError(
-                "bank_transaction_not_found",
-                f"Bank transaction not found: {transaction_id}",
-                status_code=HTTPStatus.NOT_FOUND,
-            ) from exc
+        return self._get_transactions([transaction_id])[0]
 
     @staticmethod
     def _normalize_direction(direction: str) -> str:
@@ -391,6 +403,8 @@ class PendingInvoiceQueryService:
         }
         self._apply_bank_identity(bank_identity)
         bank_transaction = {
+            **bank_unit_display(transaction),
+            "bank_transaction_id": original_bank_transaction(transaction).id,
             "id": transaction.id,
             "account_no": transaction.account_no,
             "counterparty_name": transaction.counterparty_name_raw,
@@ -468,12 +482,8 @@ class PendingInvoiceQueryService:
                 transaction_id = str(item.get("id") or item.get("transaction_id") or "").strip()
                 if transaction_id:
                     paid_transaction_ids.add(transaction_id)
-        paid_total = Decimal("0.00")
-        for transaction_id in sorted(paid_transaction_ids):
-            try:
-                paid_total += self._import_service.get_transaction(transaction_id).amount
-            except KeyError:
-                continue
+        paid_units = [row for row in self._bank_units_by_ids(sorted(paid_transaction_ids)) if bank_unit_matches_invoice(row)]
+        paid_total = sum((row.amount for row in paid_units), Decimal("0.00"))
         remaining = invoice_total - paid_total
         if remaining < Decimal("0.00"):
             remaining = Decimal("0.00")
@@ -482,7 +492,7 @@ class PendingInvoiceQueryService:
             "paid_total": _decimal_to_str(paid_total),
             "remaining_amount": _decimal_to_str(remaining),
             "difference_amount": _decimal_to_str(invoice_total - paid_total),
-            "payment_transaction_count": len(paid_transaction_ids),
+            "payment_transaction_count": len(paid_units),
         }
 
     @staticmethod
@@ -519,6 +529,7 @@ class PendingInvoiceQueryService:
             return None
         identity = pending_invoice_relation_identity(relations)
         oa_records = self._oa_records_by_id(identity.oa_row_ids)
+        bank_units = {row.id: row for row in self._bank_units_by_ids(identity.bank_transaction_ids)}
         context: dict[str, Any] = {
             "row_id": normalized_row_id,
             "relation_status": "linked",
@@ -564,14 +575,12 @@ class PendingInvoiceQueryService:
                     "relation_source": relation_mode,
                 }
                 if member_type == "bank":
-                    try:
-                        transaction = self._import_service.get_transaction(member_id)
-                    except KeyError:
-                        transaction = None
+                    transaction = bank_units.get(member_id)
                     context["linked_bank_transactions"].append(
                         {
                             **common,
                             "transaction_id": member_id,
+                            "invoice_payment_eligible": transaction is None or bank_unit_matches_invoice(transaction),
                             "amount": _decimal_to_str(transaction.amount) if transaction is not None else "0.00",
                             "trade_time": (transaction.trade_time or transaction.txn_date) if transaction is not None else "",
                             "counterparty_name": transaction.counterparty_name_raw if transaction is not None else "",
@@ -736,9 +745,16 @@ class PendingInvoiceQueryService:
                     break
         return summaries
 
+    def _relation_bank_units(self, row: dict[str, Any]) -> dict[str, BankTransaction]:
+        ids = sorted({str(item.get("id") or item.get("transaction_id") or "").strip()
+                      for item in list(row.get("linked_bank_transactions") or [])
+                      if isinstance(item, dict) and _distribution_item_is_linked(item)})
+        return {unit.id: unit for unit in self._bank_units_by_ids(ids) if unit.id}
+
     def _payment_rows_from_relation_context(self, row: dict[str, Any]) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         seen: set[str] = set()
+        bank_units = self._relation_bank_units(row)
         for item in list(row.get("linked_bank_transactions") or []):
             if not isinstance(item, dict):
                 continue
@@ -748,10 +764,9 @@ class PendingInvoiceQueryService:
             if not transaction_id or transaction_id in seen:
                 continue
             seen.add(transaction_id)
-            try:
-                transaction = self._import_service.get_transaction(transaction_id)
-            except KeyError:
-                transaction = None
+            transaction = bank_units.get(transaction_id)
+            if transaction is not None and not bank_unit_matches_invoice(transaction):
+                continue
             rows.append(
                 {
                     "id": transaction_id,
@@ -776,6 +791,7 @@ class PendingInvoiceQueryService:
         summaries: list[dict[str, Any]] = []
         seen: set[str] = set()
         linked_count = 0
+        bank_units = self._relation_bank_units(row or {})
         if isinstance(row, dict):
             for item in list(row.get("linked_bank_transactions") or []):
                 if not isinstance(item, dict):
@@ -787,15 +803,14 @@ class PendingInvoiceQueryService:
                     continue
                 seen.add(transaction_id)
                 linked_count += 1
-                try:
-                    transaction = self._import_service.get_transaction(transaction_id)
-                except KeyError:
-                    transaction = None
+                transaction = bank_units.get(transaction_id)
                 amount = transaction.amount if transaction is not None else _decimal_from_text(item.get("amount"))
                 debit_amount = amount if direction == "expense" else Decimal("0.00")
                 credit_amount = amount if direction == "income" else Decimal("0.00")
                 summaries.append(
                     {
+                        **(bank_unit_display(transaction) if transaction is not None else {}),
+                        "bank_transaction_id": original_bank_transaction(transaction).id if transaction is not None else transaction_id,
                         "id": transaction_id,
                         "trade_time": (transaction.trade_time or transaction.txn_date) if transaction is not None else str(item.get("trade_time") or ""),
                         "booked_date": (transaction.booked_date or transaction.txn_date or "") if transaction is not None else str(item.get("booked_date") or ""),
@@ -835,6 +850,8 @@ class PendingInvoiceQueryService:
             if not isinstance(item, dict):
                 continue
             if not _distribution_item_is_linked(item):
+                continue
+            if item.get("invoice_payment_eligible") is False:
                 continue
             transaction_id = str(item.get("id") or item.get("transaction_id") or "").strip()
             if transaction_id and transaction_id in paid_transaction_ids:
@@ -1151,7 +1168,7 @@ class PendingInvoiceQueryService:
         page_size: int | str | None = 50,
     ) -> dict[str, Any]:
         normalized_transaction_ids = _normalize_id_list(transaction_ids, "transaction_ids")
-        transactions = [self._get_transaction(transaction_id) for transaction_id in normalized_transaction_ids]
+        transactions = self._get_transactions(normalized_transaction_ids)
         if any(transaction.txn_direction != TransactionDirection.OUTFLOW for transaction in transactions):
             raise PendingInvoiceError("invalid_direction", "invoice candidates are only supported for expense rows.")
         selected_bank_total = sum((transaction.amount for transaction in transactions), Decimal("0.00")).quantize(Decimal("0.01"))
@@ -1356,7 +1373,7 @@ class PendingInvoiceQueryService:
         return self._payment_rows_from_relation_context(relation_row) if relation_row is not None else []
 
     def bank_transaction_detail(self, bank_transaction_id: str) -> dict[str, Any]:
-        transaction = self._get_transaction(bank_transaction_id)
+        transaction = original_bank_transaction(self._get_transaction(bank_transaction_id))
         detail = {
             "id": transaction.id,
             "account_no": transaction.account_no,
@@ -1382,7 +1399,7 @@ class PendingInvoiceQueryService:
             "title": transaction.counterparty_name_raw or transaction.id,
             "subtitle": transaction.trade_time or transaction.txn_date or "",
             "detail_available": True,
-            "sections": [{"title": "支出流水", "fields": _detail_fields(detail)}],
+            "sections": [{"title": "支出流水", "fields": _detail_fields(detail), "bank_transaction_id": transaction.id}],
             "bank_transaction": detail,
         }
 
@@ -1681,6 +1698,7 @@ class PendingInvoiceApplicationService:
         self,
         *,
         import_service: ImportNormalizationService,
+        bank_units_by_ids: Callable[[list[str]], list[BankTransaction]],
         command_store: dict[str, dict[str, Any]] | None = None,
         command_repository: Any | None = None,
         audit_recorder: Callable[[dict[str, Any]], None] | None = None,
@@ -1689,6 +1707,7 @@ class PendingInvoiceApplicationService:
         fault_injector: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
         self._import_service = import_service
+        self._bank_units_by_ids = bank_units_by_ids
         self._relation_command_service = relation_command_service
         self._command_repository = command_repository or InMemoryPendingInvoiceCommandRepository(command_store)
         self._audit_recorder = audit_recorder
@@ -1871,7 +1890,7 @@ class PendingInvoiceApplicationService:
     def preview_attach_existing_invoices(self, *, payload: dict[str, Any]) -> dict[str, Any]:
         transaction_ids = _normalize_id_list(payload.get("transaction_ids"), "transaction_ids")
         invoice_ids = _normalize_id_list(payload.get("invoice_ids"), "invoice_ids")
-        transactions = [self._get_transaction(transaction_id) for transaction_id in transaction_ids]
+        transactions = self._get_transactions(transaction_ids)
         invoices = [self._get_invoice(invoice_id) for invoice_id in invoice_ids]
         if any(self.direction_for_transaction(transaction) != "expense" for transaction in transactions):
             raise PendingInvoiceError("invalid_direction", "Only expense rows can attach existing input invoices.")
@@ -2155,7 +2174,7 @@ class PendingInvoiceApplicationService:
             if command.get("status") == "completed":
                 return _with_pending_invoice_affected_scopes(deepcopy(command["result"]))
 
-        transactions = [self._get_transaction(transaction_id) for transaction_id in transaction_ids]
+        transactions = self._get_transactions(transaction_ids)
         for transaction in transactions:
             if self.direction_for_transaction(transaction) != "income":
                 raise PendingInvoiceError("invalid_direction", "Only income rows can be manually marked.")
@@ -2263,17 +2282,20 @@ class PendingInvoiceApplicationService:
         digest = hashlib.sha1(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:24]
         return f"pending_invoice_income_status_batch:{digest}"
 
+    def _get_transactions(self, transaction_ids: list[str]) -> list[BankTransaction]:
+        ids = [str(value or "").strip() for value in transaction_ids]
+        rows = {row.id: row for row in self._bank_units_by_ids(ids)}
+        for transaction_id in ids:
+            if transaction_id not in rows:
+                raise PendingInvoiceError(
+                    "bank_transaction_not_found",
+                    f"Bank transaction not found: {transaction_id}",
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+        return [rows[transaction_id] for transaction_id in ids]
+
     def _get_transaction(self, transaction_id: str) -> BankTransaction:
-        if not transaction_id:
-            raise PendingInvoiceError("bank_transaction_not_found", "bank_transaction_id is required.", status_code=HTTPStatus.NOT_FOUND)
-        try:
-            return self._import_service.get_transaction(transaction_id)
-        except KeyError as exc:
-            raise PendingInvoiceError(
-                "bank_transaction_not_found",
-                f"Bank transaction not found: {transaction_id}",
-                status_code=HTTPStatus.NOT_FOUND,
-            ) from exc
+        return self._get_transactions([transaction_id])[0]
 
     def _get_invoice(self, invoice_id: str) -> Invoice:
         if not invoice_id:
@@ -2539,10 +2561,8 @@ class PendingInvoiceApplicationService:
                 if row_type != "bank" or not row_id or row_id in seen_transaction_ids:
                     continue
                 seen_transaction_ids.add(row_id)
-                try:
-                    paid_total += self._import_service.get_transaction(row_id).amount
-                except KeyError:
-                    continue
+        paid_total = sum((unit.amount for unit in self._bank_units_by_ids(sorted(seen_transaction_ids))
+                          if bank_unit_matches_invoice(unit)), Decimal("0.00"))
         return paid_total.quantize(Decimal("0.01"))
 
     def _record_attach_existing_audit(

@@ -34,7 +34,7 @@ class RecordingTransaction:
 
     def fetch_one(self, sql: str, _params: object = None) -> dict[str, object]:
         self.statements.append(sql)
-        if "from app.app_settings" in sql:
+        if "select settings_payload" in sql and "from app.app_settings" in sql:
             return {"settings_payload": {}}
         return {}
 
@@ -57,7 +57,7 @@ class RecordingConnection:
 class InputSummaryTransaction(RecordingTransaction):
     def fetch_one(self, sql: str, _params: object = None) -> dict[str, object]:
         self.statements.append(sql)
-        if "from app.app_settings" in sql:
+        if "select settings_payload" in sql and "from app.app_settings" in sql:
             return {"settings_payload": {}}
         if "selected_members as" in sql:
             return {
@@ -209,7 +209,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertIn("from app.oa_applications", sql)
         self.assertIn("from app.oa_pending_payment_admissions admission", sql)
         self.assertIn("join workflow_oa oa", sql)
-        self.assertIn("join app.bank_transactions bank", sql)
+        self.assertIn("join app.bank_transaction_units bank", sql)
         self.assertIn("with recursive", sql)
         self.assertIn("relation_reach(root_relation_id, relation_id)", sql)
         self.assertIn("join relation_members neighbour", sql)

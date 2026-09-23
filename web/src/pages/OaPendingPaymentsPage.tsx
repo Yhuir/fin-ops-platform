@@ -401,7 +401,7 @@ export default function OaPendingPaymentsPage() {
           </div>
         </PageScaffold>
       </div>
-      <InputInvoiceUsageDetailDrawer
+      <InputInvoiceUsageDetailDrawer onBankSplitSaved={() => loadRows("refresh")}
         open={detailTarget !== null}
         target={detailTarget}
         loadDetail={fetchOaPendingPaymentDetail}

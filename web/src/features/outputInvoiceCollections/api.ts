@@ -1,3 +1,4 @@
+import { mapBankSplitParts } from '../bankSplits/api';
 import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
 import type {
   OutputInvoiceCollectionDetailResponse,
@@ -204,6 +205,7 @@ function mapBank(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"]
   }
   return {
     id,
+    bankSplitParts: mapBankSplitParts(raw.bank_split_parts),
     counterpartyName,
     tradeTime,
     amount,
@@ -430,7 +432,7 @@ function relationSummarySection(kind: string, item: unknown, index: number) {
 
   const raw = objectValue(item);
   if (kind === "bank") {
-    return detailSection(`流水 ${index + 1}`, [
+    return { bank_transaction_id: stringValue(raw.id), ...detailSection(`流水 ${index + 1}`, [
       detailField("对方户名", camelOrSnake(raw, "counterpartyName", "counterparty_name")),
       detailField("交易时间", camelOrSnake(raw, "tradeTime", "trade_time")),
       detailField("金额", raw.amount),
@@ -439,7 +441,7 @@ function relationSummarySection(kind: string, item: unknown, index: number) {
       detailField("账号后四位", camelOrSnake(raw, "accountLast4", "account_last4")),
       detailField("摘要", raw.summary),
       detailField("备注", raw.remark),
-    ]);
+    ]) };
   }
   return detailSection(`发票 ${index + 1}`, [
     detailField("发票号码", camelOrSnake(raw, "digitalInvoiceNo", "digital_invoice_no") ?? camelOrSnake(raw, "displayNo", "display_no") ?? camelOrSnake(raw, "invoiceNo", "invoice_no")),

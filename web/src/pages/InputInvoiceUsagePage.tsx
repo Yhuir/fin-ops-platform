@@ -510,7 +510,7 @@ export default function InputInvoiceUsagePage() {
           </div>
         </PageScaffold>
       </div>
-      <InputInvoiceUsageDetailDrawer
+      <InputInvoiceUsageDetailDrawer onBankSplitSaved={() => loadRows("refresh")}
         open={Boolean(query.detailTarget)}
         target={query.detailTarget}
         loadDetail={loadDetail}

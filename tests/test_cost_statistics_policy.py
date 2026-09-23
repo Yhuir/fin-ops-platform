@@ -13,6 +13,27 @@ from fin_ops_platform.services.cost_statistics_policy import (
 
 
 class CostStatisticsPolicyTests(unittest.TestCase):
+    def test_split_principal_is_excluded_but_interest_stays_pending(self) -> None:
+        principal = {**self._bank("principal-unit", "1000000.00", tag_code="custom-principal"),
+                     "turnover_role": "external_turnover", "parent_row_id": "bank-parent", "is_split": True}
+        interest = {**self._bank("interest-unit", "1497.22", tag_code="custom-interest"),
+                    "parent_row_id": "bank-parent", "is_split": True}
+        group = self._group(oa_rows=[self._oa("oa-interest", amount="1497.22")], bank_rows=[principal, interest])
+        group["special_metadata"] = {"bank_split_requires_cost_confirmation": True}
+        policy = self._policy([group])
+        self.assertEqual(policy.serialized_cost_rows, [])
+        self.assertEqual(len(policy.manual_allocation_tasks), 1)
+        task = policy.manual_allocation_tasks[0]
+        self.assertEqual(task["net_outflow_total"], "1497.22")
+        self.assertEqual([event["transaction_id"] for event in task["bank_events"]], ["interest-unit"])
+        self.assertIsNone(task["source_allocations"])
+
+    def test_unsplit_external_principal_does_not_create_cost_task(self) -> None:
+        principal = {**self._bank("principal", "260000.00"), "turnover_role": "external_turnover"}
+        policy = self._policy([self._group(oa_rows=[self._oa("oa-principal", amount="260000.00")], bank_rows=[principal])])
+        self.assertEqual(policy.manual_allocation_tasks, [])
+        self.assertEqual(policy.serialized_cost_rows, [])
+
     def test_external_turnover_primary_tags_stay_last_without_changing_facts(self) -> None:
         payment, receipt = "外部往来款付款", "外部往来款收款"
         scenarios = [

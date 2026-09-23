@@ -1,3 +1,4 @@
+import type { BankSplitPart } from '../bankSplits/api';
 export type PendingInvoiceDirection = "expense" | "income" | "all";
 
 export type PendingInvoiceFilter =
@@ -116,6 +117,7 @@ export type PendingInvoiceRulesPayload = {
 };
 
 export type PendingInvoiceBankTransaction = {
+  bankSplitParts?: BankSplitPart[];
   id: string;
   accountNo: string;
   counterpartyName: string;
@@ -344,6 +346,7 @@ export type PendingInvoiceDetailField = {
 };
 
 export type PendingInvoiceDetailSection = {
+  bank_transaction_id?: string;
   title: string;
   fields: PendingInvoiceDetailField[];
 };

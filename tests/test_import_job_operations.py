@@ -287,9 +287,10 @@ class ImportJobOperationsTests(unittest.TestCase):
         self.assertEqual(replay.payload['actor_account'], 'YNSYLP005')
 
     def test_a_upload_b_repreview_c_confirm_commits_facts_and_real_actors(self):
-        from psycopg.types.json import Jsonb
         from fin_ops_platform.services.import_file_service import UploadedImportFile
         from fin_ops_platform.services.import_job_queue import ImportJobCompletion
+        from psycopg.types.json import Jsonb
+
         from tests.test_import_closed_loop import workbook_bytes
         self.connection.execute("insert into app.app_settings(settings_key,settings_payload) values ('app_settings',%s)",
             (Jsonb({'access_control_version':1,'page_access_accounts':[

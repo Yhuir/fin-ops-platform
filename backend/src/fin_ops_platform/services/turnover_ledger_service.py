@@ -16,15 +16,14 @@ from fin_ops_platform.services.turnover_bank_row_version import (
     turnover_bank_row_selection_version,
     turnover_bank_row_version,
 )
-from fin_ops_platform.services.turnover_relation_service import (
-    TURNOVER_CATEGORY_RULES,
-    TurnoverRelationService,
-)
 from fin_ops_platform.services.turnover_ledger_relation_context import (
     apply_workbench_relation_context,
     bank_row_ids,
 )
-
+from fin_ops_platform.services.turnover_relation_service import (
+    TURNOVER_CATEGORY_RULES,
+    TurnoverRelationService,
+)
 
 MONEY_QUANT = Decimal("0.01")
 RATE_QUANT = Decimal("0.000001")
@@ -298,18 +297,18 @@ class TurnoverLedgerService:
             return {
                 "relation": relation_payload,
                 "row": row_payload,
-                "bank_rows": [
-                    self._bank_row_detail_payload(rows_by_id[row_id])
+                "bank_rows": list({
+                    str(rows_by_id[row_id].get("parent_row_id") or row_id): self._bank_row_detail_payload(rows_by_id[row_id])
                     for row_id in list(relation.get("bank_row_ids") or [])
                     if row_id in rows_by_id
-                ],
+                }.values()),
                 "extra": self._extra_for_relation(normalized_relation_id),
             }
         raise KeyError(normalized_relation_id)
 
     def _bank_row_detail_payload(self, row: dict[str, Any]) -> dict[str, Any]:
         direction = self._direction(row)
-        amount = self._row_amount(row)
+        amount = Decimal(str(row["parent_amount"])) if row.get("is_split") else self._row_amount(row)
         imported_bank_name = str(row.get("imported_bank_name") or row.get("bank_name") or "").strip()
         imported_bank_last4 = str(
             row.get("imported_bank_last4")
@@ -321,7 +320,7 @@ class TurnoverLedgerService:
             part for part in (imported_bank_name, imported_bank_last4) if part
         )
         return {
-            "id": self._row_id(row),
+            "id": str(row.get("parent_row_id") or self._row_id(row)),
             "trade_time": self._transaction_at(row),
             "counterparty_name": str(
                 row.get("counterparty_name") or row.get("counterparty_name_raw") or ""

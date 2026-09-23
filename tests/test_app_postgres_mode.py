@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application, build_application
@@ -18,6 +18,7 @@ class FakeStore:
         runtime_infrastructure: dict[str, object] | None = None,
         postgres_status: str = "ready",
     ) -> None:
+        self._sql_read_connection = object()
         self.runtime_snapshots = runtime_snapshots or {}
         self.runtime_infrastructure = runtime_infrastructure
         self.postgres_status = postgres_status
@@ -142,6 +143,12 @@ class FakeStore:
 
 
 class AppPostgresModeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Bootstrap tests stub the canonical turnover read port; its SQL contract
+        # is exercised against PostgreSQL in the consumer integration tests.
+        canonical_turnover = self.enterContext(patch("fin_ops_platform.app.server.TurnoverLedgerQueryService"))
+        canonical_turnover.return_value.selected_bank_rows.return_value = []
+
     def test_default_build_application_requires_postgres_backend(self) -> None:
         with TemporaryDirectory() as temp_dir, patch.dict("os.environ", {}, clear=True):
             with self.assertRaisesRegex(ValueError, "requires FIN_OPS_APP_STORAGE_BACKEND=postgres"):

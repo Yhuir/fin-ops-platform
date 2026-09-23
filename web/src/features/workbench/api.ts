@@ -1,3 +1,4 @@
+import type { BankSplitPart } from '../bankSplits/api';
 import { fetchImportTaskResult, waitForImportCompletion, type ImportPreparationAccepted } from "../imports/preparation";
 import type {
   WorkbenchActionVariant,
@@ -110,6 +111,11 @@ type ApiRelation = {
 };
 
 type ApiWorkbenchRow = {
+  parent_row_id?: string;
+  parent_amount?: string;
+  is_split?: boolean;
+  bank_split_parts?: BankSplitPart[];
+  bank_split_version?: number;
   id: string;
   type: WorkbenchRecordType;
   source_kind?: WorkbenchSourceKind | null;
@@ -1524,6 +1530,11 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     amount: rowAmount(row),
     counterparty: rowCounterparty(row),
     tableValues: mapTableValues(row),
+    parentRowId: row.parent_row_id,
+    parentAmount: row.parent_amount,
+    isSplit: row.is_split,
+    bankSplitParts: row.bank_split_parts,
+    bankSplitVersion: row.bank_split_version,
     detailFields: mapDetailFields(row.detail_fields, row.type),
     actionVariant: rowActionVariant(row, availableActions),
     availableActions,

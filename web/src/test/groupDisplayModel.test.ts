@@ -1173,3 +1173,38 @@ test("supplement compares invoice gross amount with the OA payment and preserves
   evidence[1].tableValues.grossAmount = "unknown";
   expect(canSupplementWorkbenchItem(row, evidence)).toBe(false);
 });
+
+
+describe('split bank parent presentation', () => {
+  const splitGroup = (): WorkbenchRelationGroup => ({
+    ...buildGroup('case-split', '2026-09-23'),
+    rows: {
+      oa: [buildOaRow('oa-1', '100.00'), buildOaRow('oa-2', '100.00')],
+      bank: ['1', '2'].map(id => ({ ...buildBankRow(`child-${id}`, '2026-09-23'), isSplit: true,
+        parentRowId: 'parent-1', parentAmount: '200.00', sourceOaId: `oa-${id}` })),
+      invoice: [buildAttachmentInvoiceRow('invoice-1', 'oa-1'), buildAttachmentInvoiceRow('invoice-2', 'oa-2')],
+    },
+  });
+  test('keeps OA and invoice alignment while one bank parent spans its child source segments', () => {
+    const group = splitGroup();
+    const layout = buildWorkbenchGroupDisplayLayout(group)!;
+    expect(layout.segmentedPaneIds).toEqual(['oa', 'invoice']);
+    expect(layout.segments.map(segment => segment.rows.oa.map(row => row.id))).toEqual([['oa-1'], ['oa-2']]);
+    expect(layout.segments.map(segment => segment.rows.invoice.map(row => row.id))).toEqual([['invoice-1'], ['invoice-2']]);
+    expect(group.rows.bank.map(row => row.id)).toEqual(['child-1', 'child-2']);
+  });
+  test('keeps one parent container across explicit display subgroups without merging formal identities', () => {
+    const group = splitGroup();
+    group.displaySubgroups = [
+      { oaRowIds: ['oa-1'], bankRowIds: ['child-1'] },
+      { oaRowIds: ['oa-2'], bankRowIds: ['child-2'] },
+    ];
+    const layout = buildWorkbenchGroupDisplayLayout(group)!;
+    expect(layout.segmentedPaneIds).toEqual(['oa']);
+    expect(layout.segments).toHaveLength(2);
+  });
+  test('preserves segmented banks for different parents', () => {
+    const group = splitGroup(); group.rows.bank[1].parentRowId = 'parent-2';
+    expect(buildWorkbenchGroupDisplayLayout(group)?.segmentedPaneIds).toContain('bank');
+  });
+});

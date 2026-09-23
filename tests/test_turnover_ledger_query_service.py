@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import unittest
 from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.services.bank_transaction_category_service import (
@@ -399,6 +399,18 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
 
         self.assertFalse(group["cash_pair_linked"])
         self.assertFalse(group["cash_closure_linked"])
+
+    def test_cash_closure_uses_turnover_children_and_keeps_full_case_members(self):
+        relation = self._active_case("principal-case", ["receipt", "principal", "interest"])
+        relation["turnover_bank_row_ids"] = ["receipt", "principal"]
+        [group] = apply_workbench_relation_context([
+            self._group([
+                self._flow("receipt", "income", "1000000.00", "1000000.00", "0.00"),
+                self._flow("principal", "expense", "1000000.00", "0.00", "1000000.00"),
+            ])
+        ], [relation])
+        self.assertTrue(group["cash_closure_linked"])
+        self.assertTrue(group["cash_pair_linked"])
 
     @staticmethod
     def _flow(

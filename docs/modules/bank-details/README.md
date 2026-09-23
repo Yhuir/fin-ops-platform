@@ -63,3 +63,7 @@
 - `tests.md`：七类测试、验证命令和剩余风险。
 - `e2e-spec.md` / `e2e-coverage.md`：Browser 业务合同与覆盖映射。
 - `implementation-notes.md`：提炼后的实施决策和验收记录。
+
+## 持久化流水拆分（2026-09-23）
+
+银行事实保留原身份、金额和余额；`bank_transaction_split_sets/items` 持久化人工子项，`bank_transaction_units` 是派生用途视图。各页面共用 `web/src/features/bankSplits/` 抽屉编辑器，银行 owner 编排关系/成本/往来/批次 owner 的原子变更。无新增 worker/read model。详见 [I/O 与测试矩阵](../../dev/bank-transaction-splits.md)。

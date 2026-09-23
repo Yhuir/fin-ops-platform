@@ -1,0 +1,12 @@
+.bank-split-editor { display:grid; gap:8px; min-width:0; }
+.bank-split-toolbar,.bank-split-actions { display:flex; justify-content:flex-end; gap:10px; }
+.bank-split-toolbar button { font-size:22px; line-height:24px; }
+.bank-split-editor button { color:#214cce; cursor:pointer; }
+.bank-split-editor button:disabled { opacity:.5; cursor:default; }
+.bank-split-line { display:grid; grid-template-columns:minmax(130px,1fr) minmax(100px,140px) 34px; align-items:center; gap:8px; }
+.bank-split-line input { width:100%; min-width:0; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; text-align:right; font-variant-numeric:tabular-nums; }
+.bank-split-total { display:flex; flex-wrap:wrap; gap:16px; font-variant-numeric:tabular-nums; }
+.bank-split-total span,.bank-split-editor [role="alert"] { color:#b42318; }
+.bank-split-chips { display:grid; gap:4px; }
+.bank-split-chips > span { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+@media(max-width:600px) { .bank-split-line { grid-template-columns:minmax(0,1fr) 34px; } .bank-split-line input { grid-row:2; } .bank-split-line > button { grid-column:2; grid-row:1 / span 2; } }

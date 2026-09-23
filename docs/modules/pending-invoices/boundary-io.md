@@ -115,3 +115,12 @@ OA detail SQL 读取原单据 canonical expense_items，服务使用共享公共
 - OA 待付款、进项使用及待找发票共用 `postgres_repositories/relation_invoice_members.py` 的只读成员展开：通过提交批次准确身份、active bridge 或既有 canonical `etc_invoice_id` 取得真实发票；同一 canonical 发票去重，软删除和撤回关系按当前事实处理。保留原关系 ETC summary，不另写一套关系，不把 ETC 原始票据伪造成正式发票。
 - 读取在页面既有只读 snapshot 内集合执行；没有新增缓存、read model、worker 或逐票查询。进项合并组搜索覆盖全部成员，+N 与详情抽屉使用同一成员集合，流水/OA 金额按实体去重；汇总付款不按每张发票复制累计。
 - 文件范围新增共享 repository SQL；各页面现有 query/assembler/API DTO 和权限保持各自 owner。旧的仅以显式 invoice row ID 读取 ETC 关系的路径已替换。回归入口：`tests/test_etc_relation_page_reads_postgres.py`，覆盖进行中 OA、47 张票、显式重复成员、成员搜索、删除、撤回与三页详情。
+
+
+## 2026-09-23 流水子项用途边界
+
+用途分类/配对使用 `app.bank_transaction_units`，配置为无需发票的本金不参与待票 paid_total。删除按整 case 的 `turnover_manual_closure` 排除条件，混合本金/费用组仍可进入待票。相同父流水子项按父身份合并展示，未筛选时优先显示需要发票的用途；详情查询子身份后解析真实父流水，关联详情按父去重。每个银行详情 section 明确返回 `bank_transaction_id`。
+
+验证：`tests/test_bank_split_consumers_postgres.py` 使用隔离 PostgreSQL 数据库覆盖原始金额不变、子项标签筛选、成本待分配、待票金额和详情父身份、往来补充信息迁移。往来手工成员重建和含利息 case 的本金闭环由对应 service/query 单元测试覆盖。
+
+列表主流水和 summaries 批量返回 `bank_transaction_id`（原流水公开身份）、`parent_bank_transaction_id`、`parent_amount`、`bank_split_parts`（含 `category_path`）、`bank_split_version`；从当前分页及其关联银行集合一次 SQL 取得，不逐行拉取。待票查询及写入服务必传 `bank_units_by_ids` 读取端口；生产由 canonical unit repository 提供，单笔补票、批量补票、收入状态操作均可接受子项身份，金额运算使用用途金额。原 import service 只保留发票等原有职责，不用父流水读取器处理 child UUID。

@@ -1,3 +1,4 @@
+import { mapBankSplitParts } from '../bankSplits/api';
 import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
 import type {
   CreateInputInvoiceUsageOaReverseDraftFromSelectionRequest,
@@ -198,6 +199,7 @@ function mapBank(rawValue: unknown): InputInvoiceUsageRowsResponse["rows"][numbe
   }
   return {
     id,
+    bankSplitParts: mapBankSplitParts(raw.bank_split_parts),
     counterpartyName,
     tradeTime,
     amount,
@@ -338,13 +340,13 @@ function detailSection(title: string, fields: InputInvoiceUsageDetailResponse["s
 function mapDetailSections(value: unknown): InputInvoiceUsageDetailResponse["sections"] {
   return arrayValue(value).map((sectionValue) => {
     const section = objectValue(sectionValue);
-    return detailSection(
+    return { bank_transaction_id: stringValue(section.bank_transaction_id) || undefined, ...detailSection(
       stringValue(section.title) || "详情",
       arrayValue(section.fields).map((fieldValue) => {
         const field = objectValue(fieldValue);
         return detailField(stringValue(field.label) || "字段", field.value);
       }),
-    );
+    ) };
   }).filter((section) => section.fields.length > 0);
 }
 
@@ -503,7 +505,7 @@ function mapRelationDetailResponse(payload: unknown): InputInvoiceUsageDetailRes
 function relationSummarySection(kind: string, item: unknown, index: number) {
   const raw = objectValue(item);
   if (kind === "bank") {
-    return detailSection(`银行流水 ${index + 1}`, [
+    return { bank_transaction_id: stringValue(raw.id), ...detailSection(`银行流水 ${index + 1}`, [
       detailField("对方户名", camelOrSnake(raw, "counterpartyName", "counterparty_name")),
       detailField("交易时间", camelOrSnake(raw, "tradeTime", "trade_time")),
       detailField("金额", raw.amount),
@@ -511,7 +513,7 @@ function relationSummarySection(kind: string, item: unknown, index: number) {
       detailField("银行账户", camelOrSnake(raw, "bankAccount", "bank_account")),
       detailField("摘要", raw.summary),
       detailField("备注", raw.remark),
-    ]);
+    ]) };
   }
   if (kind === "invoice") {
     return detailSection(`发票 ${index + 1}`, [

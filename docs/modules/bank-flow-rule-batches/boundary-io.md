@@ -186,3 +186,9 @@ Canonical facts：
 每次进入页面时，普通批次月份初始化为空（全部），列表 GET 省略 `month`；日历光标仍可定位当前月。当前访问选择年月后，刷新、查看详情及写后回读继续使用该范围；离开页面再进入回到全部。日期范围切换沿用既有页码/选择清理，具体 candidate 的 `scope_month` 和提交身份不变。
 
 通用进入边界见 [时间范围实施约定](../../dev/date-range-default-all-plan.md)。HTTP schema、权限、业务资格与事实写入边界不因此改变。
+
+## 银行拆分使提交依据失效（2026-09-23）
+
+银行拆分事务通过 `PostgresWorkbenchRepository.invalidate_bank_split_batches` 定位实际变化银行身份引用的 submitted 批次，标记 stale、推进版本并追加事件。冻结的成员、金额和 source proof 不改写；普通 relation/cost 变更与批次失效处于同一事务。金额与标签均未变化的显示重排不触发失效。真实 PostgreSQL 测试同时验证成功和失败回滚，保留原冻结 proof。
+
+- 曾提交（有 `submitted_at`）的 stale 批次仍展示并允许撤销，即使原 case 已合并到另一 active case；未提交 stale 不因此获得撤销入口。冻结父身份通过 relation owner 映射当前 children，再追溯历史还原，OA/发票关系保留；不存在的历史子项不得复活。

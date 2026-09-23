@@ -381,7 +381,7 @@ export default function OutputInvoiceCollectionsPage() {
           </div>
         </PageScaffold>
       </div>
-      <OutputInvoiceCollectionDetailDrawer
+      <OutputInvoiceCollectionDetailDrawer onBankSplitSaved={() => loadRows("refresh")}
         loadDetail={loadDetail}
         onClose={() => setQuery((current) => ({ ...current, detailTarget: null }))}
         open={Boolean(query.detailTarget)}

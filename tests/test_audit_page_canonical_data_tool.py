@@ -10,6 +10,7 @@ from fin_ops_platform.services.postgres_connection import PostgresConnection, Po
 from fin_ops_platform.services.postgres_repositories import page_business_audit
 from fin_ops_platform.services.postgres_repositories.cost_statistics_page_audit import audit_cost_statistics_page
 from fin_ops_platform.tools import audit_page_canonical_data
+
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,
@@ -553,7 +554,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("relation.relation_mode = 'batch_accounting'", batch_accounting_sql)
         self.assertIn("cardinality(relation.row_ids) <> cardinality(relation.row_types)", batch_accounting_sql)
         self.assertIn("count(distinct member.row_id)", batch_accounting_sql)
-        self.assertIn("app.bank_transactions", batch_accounting_sql)
+        self.assertIn("app.bank_transaction_units", batch_accounting_sql)
         self.assertNotIn("read_model.", batch_accounting_sql)
 
         rule_batch_connection = FakeConnection()
@@ -580,7 +581,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
             if "/* check: key_display_fields */" in sql
         )
         self.assertIn("relation.relation_mode = 'batch_accounting'", audit_sql)
-        self.assertIn("app.bank_transactions", audit_sql)
+        self.assertIn("app.bank_transaction_units", audit_sql)
         self.assertIn("app.oa_applications", audit_sql)
         self.assertIn("app.invoices", audit_sql)
         self.assertIn("app.etc_business_batches", audit_sql)
@@ -678,7 +679,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
 
         queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
         self.assertIn("app.workbench_pair_relations", queried_sql)
-        self.assertIn("app.bank_transactions", queried_sql)
+        self.assertIn("app.bank_transaction_units", queried_sql)
         self.assertIn("app.oa_applications", queried_sql)
         self.assertNotIn("read_model.", queried_sql)
         self.assertEqual(

@@ -387,6 +387,14 @@ _WORKBENCH_ACTIONS = {
 
 _DYNAMIC_RULES = (
     _RouteRule(
+        "PUT",
+        "/api/bank-transactions/",
+        _semantic(
+            "bank.transactions.save_splits", "保存流水拆分", "bank_transaction", "银行流水", "保存银行流水子项的标签和金额。",
+        ),
+        "/splits",
+    ),
+    _RouteRule(
         "POST",
         "/api/bank-details/transactions/",
         _semantic(

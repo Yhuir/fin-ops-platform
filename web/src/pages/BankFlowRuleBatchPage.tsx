@@ -1,6 +1,7 @@
+import BankTransactionDrawer from "../features/bankSplits/BankTransactionDrawer";
 import { Button, Checkbox, ToggleButton, ToggleButtonGroup } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { Eye, RefreshCw } from "lucide-react";
 
 import AppDialog from "../components/common/AppDialog";
 import AppDrawer from "../components/common/AppDrawer";
@@ -147,6 +148,7 @@ function mutationErrorMessage(caught: unknown, fallback: string) {
 }
 
 export default function BankFlowRuleBatchPage() {
+  const [bankDetailRow, setBankDetailRow] = useState<BankFlowRuleBatchDetailRow | null>(null);
   const { runOperation } = useGlobalOperationOverlay();
   const { active, activationGeneration } = useOptionalPageActivation("bank-flow-rule-batches");
   const { canOperateData } = useSessionPermissions();
@@ -1028,7 +1030,7 @@ export default function BankFlowRuleBatchPage() {
                                       </Checkbox>
                                     </FinanceTableCell>
                                   ) : null}
-                                  <FinanceTableCell className="bank-flow-rule-batches-table__counterparty" columnRole="identity">{row.counterpartyName || "—"}</FinanceTableCell>
+                                  <FinanceTableCell className="bank-flow-rule-batches-table__counterparty" columnRole="identity">{row.counterpartyName || "—"}<button type="button" aria-label={`查看银行流水 ${row.counterpartyName} 详情`} onClick={() => setBankDetailRow(row)}><Eye size={16} /></button></FinanceTableCell>
                                   <FinanceTableCell className="bank-flow-rule-batches-table__time" columnRole="date">{formatDateTimeText(row.tradeTime)}</FinanceTableCell>
                                   <FinanceTableCell className="bank-flow-rule-batches-table__amount" columnRole="amount">
                                     <div className="bank-flow-rule-batches-amount-cell">
@@ -1207,6 +1209,12 @@ export default function BankFlowRuleBatchPage() {
           <button aria-label="关闭提示" onClick={() => setFeedback(null)} type="button">×</button>
         </div>
       ) : null}
+      <BankTransactionDrawer transactionId={bankDetailRow?.transactionId ?? null} onClose={() => setBankDetailRow(null)}
+        onSaved={async () => { await reloadBatchesAfterMutation(); }}
+        sections={bankDetailRow ? [{ title: "交易信息", fields: [
+          { label: "金额", value: bankDetailRow.amount }, { label: "对方户名", value: bankDetailRow.counterpartyName },
+          { label: "交易时间", value: bankDetailRow.tradeTime }, { label: "摘要", value: bankDetailRow.summary }, { label: "备注", value: bankDetailRow.remark },
+        ] }] : []} />
     </PageScaffold>
   );
 }

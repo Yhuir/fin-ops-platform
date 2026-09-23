@@ -128,6 +128,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
         *,
         settings: dict[str, Any],
         category_codes: list[str],
+        transaction_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         normalized_codes = list(dict.fromkeys(text_list(category_codes)))
         if not normalized_codes:
@@ -146,9 +147,11 @@ class PostgresBankDetailsCanonicalQueryRepository:
         )
         cte_sql, cte_params = bank_category_classification_cte(
             definitions=definitions,
+            use_units=True,
             date_from=None,
             date_to=None,
             candidate_category_codes=candidate_category_codes,
+            candidate_transaction_ids=transaction_ids,
         )
         return list(
             transaction.fetch_all(
@@ -184,6 +187,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
         ]
         cte_sql, cte_params = bank_category_classification_cte(
             definitions=definitions,
+            use_units=True,
             date_from=None,
             date_to=None,
             candidate_transaction_ids=normalized_ids,
@@ -257,6 +261,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
         ]
         cte_sql, cte_params = bank_category_classification_cte(
             definitions=definitions,
+            use_units=True,
             date_from=None,
             date_to=None,
             candidate_transaction_ids=normalized_ids,
@@ -328,6 +333,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
         ]
         cte_sql, cte_params = bank_category_classification_cte(
             definitions=definitions,
+            use_units=True,
             date_from=None,
             date_to=None,
             candidate_transaction_ids=normalized_ids,
@@ -533,7 +539,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
             date_from=date_from,
             date_to=date_to,
             account_key=account_key,
-            keyword=keyword,
+            keyword=None,
             defer_full_payload=True,
         )
         where_sql, where_params = _transaction_filter_sql(
@@ -549,16 +555,39 @@ class PostgresBankDetailsCanonicalQueryRepository:
         rows = transaction.fetch_all(
             f"""
             with recursive {cte_sql},
+            purpose_filters as materialized (
+              select parent.row_id, parent.trade_time_sort, parent.direction, parent.account_key, parent.txn_date, parent.counterparty_name_raw, parent.trade_time, parent.amount, parent.balance, parent.summary_text, parent.purpose_text, parent.note_text, parent.bank_name, parent.account_last4,
+                parent.effective_category_code, parent.effective_category_primary_label,
+                parent.effective_category_sub_label, parent.effective_category_third_label,
+                parent.effective_category_label
+              from classified_filter_rows parent
+              where not exists (select 1 from app.bank_transaction_split_items item
+                join app.bank_transactions original on original.id = item.bank_transaction_id
+                where coalesce(original.legacy_mongo_id, original.id::text) = parent.row_id)
+              union all
+              select parent.row_id, parent.trade_time_sort, parent.direction, parent.account_key, parent.txn_date, parent.counterparty_name_raw, parent.trade_time, item.amount as amount, parent.balance, parent.summary_text, parent.purpose_text, parent.note_text, parent.bank_name, parent.account_last4, item.category_code,
+                definition.definition->>'output_primary_label',
+                definition.definition->>'output_sub_label',
+                definition.definition->>'output_third_label',
+                definition.definition->>'label'
+              from classified_filter_rows parent
+              join app.bank_transactions original on coalesce(original.legacy_mongo_id, original.id::text) = parent.row_id
+              join app.bank_transaction_split_items item on item.bank_transaction_id = original.id
+              join tag_definitions definition on definition.definition->>'code' = item.category_code
+            ),
             filtered as materialized (
               select
                 row_id,
                 trade_time_sort,
                 direction,
-                effective_category_code,
+                case when exists (select 1 from purpose_filters purpose
+                  where purpose.row_id = parent.row_id and purpose.effective_category_code is not null)
+                  then coalesce(effective_category_code, 'split') else null end as effective_category_code,
                 account_key,
                 txn_date
-              from classified_filter_rows
-              where {where_sql}
+              from classified_filter_rows parent
+              where exists (select 1 from purpose_filters purpose
+                where purpose.row_id = parent.row_id and {where_sql})
             ),
             {BANK_ACCOUNT_CANONICAL_SOURCE_CTES},
             ordering_candidates as materialized (
@@ -589,10 +618,10 @@ class PostgresBankDetailsCanonicalQueryRepository:
               ) as counts
               from (
                 select
-                  coalesce(effective_category_code, 'uncategorized') as category_code,
-                  count(*)::bigint as category_count
-                from filtered
-                group by coalesce(effective_category_code, 'uncategorized')
+                  coalesce(purpose.effective_category_code, 'uncategorized') as category_code,
+                  count(distinct filtered.row_id)::bigint as category_count
+                from filtered join purpose_filters purpose on purpose.row_id = filtered.row_id
+                group by coalesce(purpose.effective_category_code, 'uncategorized')
               ) grouped
             ),
             summary as (
@@ -617,6 +646,8 @@ class PostgresBankDetailsCanonicalQueryRepository:
             select
               page_rows.*,
               page_keys.same_time_order_status,
+              coalesce(split.version, 0) as bank_split_version,
+              coalesce(parts.parts, '[]'::jsonb) as bank_split_parts,
               coalesce(
                 nullif(
                   case
@@ -668,6 +699,22 @@ class PostgresBankDetailsCanonicalQueryRepository:
               on page_rows.row_id = page_keys.row_id
             left join app.bank_transactions page_bank
               on page_bank.id::text = page_rows.canonical_transaction_id
+            left join app.bank_transaction_split_sets split on split.bank_transaction_id = page_bank.id
+            left join lateral (
+              select jsonb_agg(jsonb_build_object(
+                'id', item.id::text, 'category_code', item.category_code,
+                'amount', to_char(item.amount, 'FM999999999999999990.00'),
+                'category_label', definition.definition->>'label',
+                'category_path', case when nullif(definition.definition->>'output_primary_label', '') is not null
+                  then to_jsonb(array_remove(array[definition.definition->>'output_primary_label',
+                    nullif(definition.definition->>'output_sub_label', ''),
+                    nullif(definition.definition->>'output_third_label', '')], null))
+                  else coalesce(definition.definition->'path', '[]'::jsonb) end
+              ) order by item.position) as parts
+              from app.bank_transaction_split_items item
+              join tag_definitions definition on definition.definition->>'code' = item.category_code
+              where item.bank_transaction_id = page_bank.id
+            ) parts on true
             order by page_keys.trade_time_sort desc nulls last,
               page_keys.account_identity, page_keys.normalized_currency,
               page_keys.order_in_group desc nulls last, page_keys.row_id desc
@@ -1006,6 +1053,12 @@ class BankDetailsCanonicalQueryService:
                     )
                 )
             )
+        source_rows = {str(row.get("row_id") or ""): row for row in snapshot.get("rows", [])}
+        for row in rows:
+            source = source_rows.get(str(row.get("id") or ""), {})
+            row["bank_split_version"] = int(source.get("bank_split_version") or 0)
+            row["bank_split_parts"] = list(source.get("bank_split_parts") or [])
+            row["bank_transaction_id"] = str(source.get("parent_row_id") or row.get("id") or "")
         category_counts = {
             str(code): int_value(count, 0)
             for code, count in dict(snapshot.get("category_counts") or {}).items()
@@ -1134,7 +1187,17 @@ def bank_category_classification_cte(
     keyword: str | None = None,
     defer_full_payload: bool = False,
     tenant_id: str = "default",
+    use_units: bool = False,
 ) -> tuple[str, list[Any]]:
+    bank_relation = "app.bank_transaction_units" if use_units else "app.bank_transactions"
+    split_fields = (
+        "bank.parent_bank_transaction_id, bank.parent_row_id, bank.parent_amount, "
+        "bank.split_version, bank.split_category_code, bank.is_split,"
+        if use_units else
+        "bank.id as parent_bank_transaction_id, coalesce(bank.legacy_mongo_id, bank.id::text) as parent_row_id, "
+        "bank.amount as parent_amount, 0::bigint as split_version, null::text as split_category_code, false as is_split,"
+    )
+    split_category = "bank.split_category_code" if use_units else "null::text"
     tag_definitions_json = json.dumps(
         definitions,
         ensure_ascii=False,
@@ -1168,7 +1231,7 @@ def bank_category_classification_cte(
         peer_cte_sql = f"""
         classification_peer_bank_ids as materialized (
           select distinct bank.id
-          from app.bank_transactions bank
+          from {bank_relation} bank
           join target_bank_rows target on {peer_match_sql}
         ),
         """
@@ -1272,7 +1335,7 @@ def bank_category_classification_cte(
           select
             bank.amount,
             coalesce(bank.trade_time, bank.txn_date::timestamptz) as trade_time_sort
-          from app.bank_transactions bank
+          from {bank_relation} bank
           where {target_filter_sql}
         ),
         {peer_cte_sql}
@@ -1280,6 +1343,7 @@ def bank_category_classification_cte(
           select
             coalesce(bank.legacy_mongo_id, bank.id::text) as row_id,
             bank.id::text as canonical_transaction_id,
+            {split_fields}
             bank.source_batch_id::text as source_batch_id,
             bank.legacy_source_batch_id,
             bank.updated_at::text as bank_transaction_updated_at,
@@ -1323,17 +1387,19 @@ def bank_category_classification_cte(
               nullif(bank.raw_payload->>'account_last4', '')
             ) as imported_bank_last4,
             {normalized_payload_sql} as normalized_payload,
-            manual.category as manual_category_code,
-            manual.source as manual_category_source,
+            coalesce({split_category}, manual.category) as manual_category_code,
+            case when {split_category} is not null then 'manual' else manual.source end as manual_category_source,
             manual.version as manual_category_version,
-            manual.raw_payload as manual_category_raw_payload,
+            case when {split_category} is not null then
+              '{{"normalized_payload":{{"manual_assignment":true}}}}'::jsonb
+              else manual.raw_payload end as manual_category_raw_payload,
             confirmation.id as confirmation_id,
             confirmation.category_code as confirmed_category_code,
             confirmation.candidate_category_codes as confirmed_candidate_category_codes,
             confirmation.rule_version as confirmation_rule_version,
             confirmation.version as confirmation_version,
             confirmation.raw_payload as confirmation_raw_payload
-          from app.bank_transactions bank
+          from {bank_relation} bank
           left join lateral (
             select category, source, version, raw_payload
             from app.bank_transaction_categories category
@@ -1376,7 +1442,7 @@ def bank_category_classification_cte(
             and (
               %s::text[] is null
               or confirmation.category_code = any(%s::text[])
-              or manual.category = any(%s::text[])
+              or coalesce({split_category}, manual.category) = any(%s::text[])
             )
             and (
               {source_target_filter_sql}
@@ -2303,6 +2369,7 @@ def _transaction_relation_lookup_ids(rows: list[dict[str, Any]]) -> list[str]:
             for identity in (
                 row.get("row_id"),
                 row.get("canonical_transaction_id"),
+                *(part.get("id") for part in row.get("bank_split_parts", [])),
             )
         ]
     )
@@ -2319,7 +2386,8 @@ def _relation_payloads_by_row_id(
         target = text(row.get("row_id"))
         if not target:
             continue
-        for identity in (target, text(row.get("canonical_transaction_id"))):
+        for identity in (target, text(row.get("canonical_transaction_id")),
+                         *(text(part.get("id")) for part in row.get("bank_split_parts", []))):
             if identity:
                 alias_to_row_id[identity] = target
     result: dict[str, dict[str, Any]] = {}

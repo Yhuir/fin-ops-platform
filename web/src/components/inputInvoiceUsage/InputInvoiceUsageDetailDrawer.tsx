@@ -1,8 +1,9 @@
+import { useBankSplitClose } from "../../features/bankSplits/useBankSplitClose";
+import BankTransactionDetailContent from "../../features/bankSplits/BankTransactionDetailContent";
 import { useEffect, useState } from "react";
 
 import AppDrawer from "../common/AppDrawer";
 import {
-  default as EntityDetailContent,
   preparePublicDetailSections,
   type EntityDetailField,
   type EntityDetailSection,
@@ -31,6 +32,7 @@ type InputInvoiceUsageDetailDrawerProps<TTarget extends InputInvoiceUsageDetailT
   target: TTarget | null;
   loadDetail: (target: TTarget) => Promise<InputInvoiceUsageDetailPayload>;
   onClose: () => void;
+  onBankSplitSaved?: () => void | Promise<void>;
 };
 
 const fallbackTitles: Record<InputInvoiceUsageDetailTarget["kind"], string> = {
@@ -45,7 +47,9 @@ export default function InputInvoiceUsageDetailDrawer<TTarget extends InputInvoi
   target,
   loadDetail,
   onClose,
+  onBankSplitSaved,
 }: InputInvoiceUsageDetailDrawerProps<TTarget>) {
+  const { close, setDirty } = useBankSplitClose(onClose);
   const [detail, setDetail] = useState<InputInvoiceUsageDetailPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,10 +98,10 @@ export default function InputInvoiceUsageDetailDrawer<TTarget extends InputInvoi
       open={open}
       title={title}
       width="min(800px, 100vw)"
-      onClose={onClose}
+      onClose={close}
     >
       <div className="input-invoice-usage-drawer-body">
-        <EntityDetailContent
+        <BankTransactionDetailContent onSplitDirtyChange={setDirty} onBankSplitSaved={onBankSplitSaved} bankTransactionId={target?.kind === "bank" ? target.id : undefined}
           detailAvailable={detail?.detailAvailable}
           error={error}
           loading={loading}

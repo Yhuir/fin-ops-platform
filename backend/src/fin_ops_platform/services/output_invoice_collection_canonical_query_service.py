@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from fin_ops_platform.services.bank_transaction_unit import original_bank_transaction
+from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_canonical_query_service import (
     _dedupe_objects,
     _filter_options,
@@ -10,7 +12,6 @@ from fin_ops_platform.services.input_invoice_usage_canonical_query_service impor
     _replace_filter_option_field,
     _validate_temporal_query,
 )
-from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.invoice_relation_query_context import (
     DistributedInvoiceRelationContext,
 )
@@ -279,6 +280,7 @@ class OutputInvoiceCollectionCanonicalQueryService:
                 f"Bank transaction detail not found: {bank_transaction_id}",
                 status_code=404,
             )
+        transaction = original_bank_transaction(transaction)
         return {
             "id": transaction.id,
             "counterpartyName": transaction.counterparty_name_raw,

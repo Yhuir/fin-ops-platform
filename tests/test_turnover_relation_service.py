@@ -27,6 +27,25 @@ def bank_row(
 
 
 class TurnoverRelationServiceTests(unittest.TestCase):
+    def test_split_rebuilds_manual_principal_amount_and_retires_old_identity(self):
+        receipt = bank_row("receipt", category_code="borrow_in_personal_pending_repayment", credit_amount="1000000.00")
+        parent = bank_row("parent", category_code="borrow_in_personal_repaid", debit_amount="1001497.22")
+        service = TurnoverRelationService(bank_rows=[receipt, parent])
+        relation = service.confirm_relation(["receipt", "parent"], actor="tester")
+        principal = bank_row("principal", category_code="borrow_in_personal_repaid", debit_amount="1000000.00")
+        service.refresh_bank_rows([receipt, principal])
+        [change] = service.replace_bank_split_members(old_ids={"parent"}, new_ids={"principal"}, actor_id="tester", whole_replacement=True)
+        self.assertEqual(change["before"]["status"], "withdrawn")
+        self.assertNotEqual(change["after"]["relation_id"], relation["relation_id"])
+        self.assertEqual(change["after"]["settled_amount"], "1000000.00")
+        self.assertEqual(change["after"]["balance_amount"], "0.00")
+        self.assertEqual(set(change["after"]["bank_row_ids"]), {"receipt", "principal"})
+
+    def test_split_edit_preserves_separately_owned_child_members(self):
+        self.assertEqual(TurnoverRelationService.split_replacement_members(
+            {"receipt", "principal"}, {"principal", "other"}, {"principal", "other", "new"}, whole_replacement=False),
+            {"receipt", "principal"})
+
     def test_borrow_in_unique_exact_closed_generates_deterministic_relation(self) -> None:
         service = TurnoverRelationService.from_snapshot(None)
 

@@ -203,7 +203,7 @@ class _Connection:
             ]
         if "with categorized_scopes as" in normalized:
             return [{"scope_key": "2026-05"}, {"scope_key": "2026-07"}]
-        if "from app.bank_transactions bank" in normalized:
+        if "from app.bank_transaction_units bank" in normalized:
             return [
                 {
                     "transaction_id": "bank-1",
@@ -436,7 +436,7 @@ def test_page_query_returns_live_candidate_inputs_in_the_same_snapshot() -> None
     assert connection.transaction_enters == connection.transaction_exits == 1
     assert len(connection.fetched_one) == 2
     combined_sql = connection.fetched_one[1][0]
-    assert "from app.bank_transactions" in combined_sql
+    assert "from app.bank_transaction_units" in combined_sql
     assert "from app.workbench_pair_relations" in combined_sql
     assert "from app.bank_flow_rule_batches" in combined_sql
     assert "manual_category.category, '' ) = any" not in combined_sql
@@ -498,3 +498,16 @@ def test_submit_guard_reads_the_same_formal_history_and_scope_as_list() -> None:
     assert guard == page
     assert guard_connection.fetched_one == page_connection.fetched_one
     assert len(guard_connection.fetched_one) == 2
+
+
+def test_stale_split_submitted_batch_remains_visible_and_withdrawable_without_original_owner() -> None:
+    payload = BankFlowRuleBatchCanonicalQueryRepository._batch_payload({
+        "batch_id": "split-batch", "status": "stale", "version": 2, "scope_month": "2026-09",
+        "submitted_at": "2026-09-23T00:00:00Z", "has_active_relation": False,
+    })
+    assert payload["status"] == "submitted"
+    assert payload["relation_backed_status"] == "stale"
+    assert payload["can_withdraw"] is True
+    assert payload["can_submit"] is False
+    never_submitted = BankFlowRuleBatchCanonicalQueryRepository._batch_payload({"status": "stale", "scope_month": "2026-09", "has_active_relation": False})
+    assert never_submitted["can_withdraw"] is False

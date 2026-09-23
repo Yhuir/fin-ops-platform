@@ -133,3 +133,7 @@ Workbench matcher 只复用同一号码 key 尝试正式化，不是页面展示
 页面每次挂载在现有 query session 的 `restoreQuery` 清除 `month`、`invoiceDateFrom/To`、`invoice_date` 与 `bank_trade_time` 日期列条件，首次 rows 和后续导出使用同一实际范围。保留 keyword、非日期 filters、sort 和 pageSize。旧范围含日期时同时重置 page=1 并关闭旧 activeWorkflow/detailTarget；原为全部时保留合法非日期状态。本次主动选月在刷新、分页、排序与抽屉关闭后保留，离开重进或真正整页刷新再恢复全部。
 
 通用进入边界见 [时间范围实施约定](../../dev/date-range-default-all-plan.md)。HTTP schema、权限、业务资格与事实写入边界不因此改变。
+
+## 2026-09 流水拆分合同
+
+银行原金融事实与导入身份不变；银行拆分 owner 的持久化子项通过用途视图进入业务关联。详情使用父交易，列表标签显示当前子项；金额统计不得父子重复相加。 具体输入/输出、跨模块消费、旧链路清理及测试见 [流水拆分 I/O](../../dev/bank-transaction-splits.md)。

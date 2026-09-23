@@ -1,3 +1,4 @@
+import BankSplitChips from "../../features/bankSplits/BankSplitChips";
 import {
   Checkbox,
   ListBox,
@@ -342,6 +343,7 @@ export default function OaPendingPaymentsTable({
                             </FinanceDirectionTag>
                           </span>
                         </div>
+                        {row.bankTransaction.bank_split_parts?.length ? <BankSplitChips parts={row.bankTransaction.bank_split_parts} /> : null}
                         <div className="oa-pending-payments-bank-grid__summary">
                           <MultiLineValue value={combinedBankSummaryRemark(row)} />
                         </div>

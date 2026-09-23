@@ -1298,6 +1298,7 @@ export default function TurnoverLedgerPage() {
       </AppDrawer>
 
       <TurnoverLedgerExtraDrawer
+        onBankSplitSaved={async () => { await reloadLedgerAfterMutation(); }}
         open={selectedRow !== null}
         row={selectedRow}
         detail={detail}

@@ -794,7 +794,7 @@ export default function PendingInvoicesPage() {
         onSaved={() => undefined}
         onClose={closeDrawer}
       />
-      <PendingInvoiceRelationDrawer
+      <PendingInvoiceRelationDrawer onBankSplitSaved={() => setRefreshToken(value => value + 1)}
         open={activeDrawer === "relation"}
         transactionId={relationTarget?.transactionId ?? null}
         detailKind={relationTarget?.kind ?? "all"}
@@ -810,7 +810,7 @@ export default function PendingInvoicesPage() {
         onConfirmed={handleAttachConfirmed}
         onClose={closeDrawer}
       />
-      <PendingInvoiceDetailDrawer
+      <PendingInvoiceDetailDrawer onBankSplitSaved={() => setRefreshToken(value => value + 1)}
         open={activeDrawer === "detail"}
         target={detailTarget}
         loadDetail={loadObjectDetail}

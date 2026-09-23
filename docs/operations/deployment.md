@@ -27,3 +27,5 @@ forward-only；执行后禁止自动回滚到仍读取旧矩阵列的 release，
 
 Migration 0165 将账户权限从旧访问层级一次性迁移为逐页面授权，并删除旧 JSON 字段与 OA 角色。旧 release
 无法读取新合同，因此也属于 forward-only；失败时保持 maintenance，由当前代码向前修复，禁止启动旧权限链路。
+
+Migration 0178/0179 增加持久化流水拆分及用途投影，属于 forward-only：保存拆分后旧 reader/writer 无法解释子项身份和关联，禁止回切旧链路。父流水金融事实不改写；失败保持 maintenance 并向前修复。历史外部往来成本撤销使用受控迁移命令，保留审计，不删除主数据库。

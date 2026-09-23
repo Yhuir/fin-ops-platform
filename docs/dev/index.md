@@ -51,3 +51,5 @@
 - [管理员导入任务处理闭环](import-task-disposition-plan.md)
 
 - [关联台异常 icon 恢复记录](workbench-anomaly-icon-restoration.md)
+
+- [流水拆分 I/O 与验证](bank-transaction-splits.md)：API、事务边界、迁移、七类测试与发布要求。

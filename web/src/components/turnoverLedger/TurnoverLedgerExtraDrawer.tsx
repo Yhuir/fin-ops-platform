@@ -1,3 +1,5 @@
+import BankTransactionDetailContent from "../../features/bankSplits/BankTransactionDetailContent";
+import { useBankSplitClose } from "../../features/bankSplits/useBankSplitClose";
 import { Button, Input, ListBox, Select, TextArea } from "@heroui/react";
 import type { ChangeEvent, Key, ReactNode } from "react";
 
@@ -80,6 +82,7 @@ export default function TurnoverLedgerExtraDrawer({
   onSave,
   onConfirm,
   onWithdraw,
+  onBankSplitSaved,
 }: {
   open: boolean;
   row: TurnoverLedgerGroupedRow | null;
@@ -96,7 +99,9 @@ export default function TurnoverLedgerExtraDrawer({
   onSave: () => void;
   onConfirm: () => void;
   onWithdraw: () => void;
+  onBankSplitSaved?: () => void | Promise<void>;
 }) {
+  const { close, setDirty } = useBankSplitClose(onClose);
   const relation = detail?.relation ?? null;
   const canConfirm = canOperateData && relation?.status === "suggested";
   const canWithdraw = canOperateData && relation?.status === "confirmed";
@@ -127,7 +132,7 @@ export default function TurnoverLedgerExtraDrawer({
       open={open}
       title="编辑流水补充信息"
       width={640}
-      onClose={onClose}
+      onClose={close}
       footer={(
         <div className="turnover-ledger-extra-footer">
           <div className="turnover-ledger-extra-footer__group">
@@ -175,16 +180,12 @@ export default function TurnoverLedgerExtraDrawer({
                 </div>
                 {(detail?.bankRows ?? []).length > 0 ? (
                   <div className="turnover-ledger-extra-bank-list">
-                    {detail?.bankRows.map((bankRow) => (
-                      <article className="turnover-ledger-extra-bank-card" key={bankRow.id}>
-                        <div className="turnover-ledger-extra-bank-card__chips">
-                          <span className="turnover-ledger-chip turnover-ledger-chip--filled">{bankRow.directionLabel || "-"}</span>
-                          <span className="turnover-ledger-chip turnover-ledger-chip--outline turnover-ledger-chip--amount">{formatMoney(bankRow.amount)}</span>
-                          <span className="turnover-ledger-chip turnover-ledger-chip--outline">{bankRow.bankAccountLabel || "-"}</span>
-                        </div>
-                        <p>{bankRow.summary || "-"}</p>
-                      </article>
-                    ))}
+                    <BankTransactionDetailContent onBankSplitSaved={onBankSplitSaved} onSplitDirtyChange={setDirty}
+                      sections={(detail?.bankRows ?? []).map((bankRow, index) => ({
+                        title: `银行流水 ${index + 1}`, bank_transaction_id: bankRow.id,
+                        fields: [{ label: "金额", value: bankRow.amount }, { label: "收支方向", value: bankRow.directionLabel },
+                          { label: "银行账户", value: bankRow.bankAccountLabel }, { label: "摘要", value: bankRow.summary }],
+                      }))} />
                   </div>
                 ) : null}
               </section>

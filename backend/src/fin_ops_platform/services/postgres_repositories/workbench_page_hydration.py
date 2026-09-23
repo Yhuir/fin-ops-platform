@@ -611,6 +611,12 @@ class PostgresWorkbenchPageHydrationRepository:
                         'id', coalesce(bank.legacy_mongo_id, bank.id::text),
                         'type', 'bank',
                         'source_kind', 'bank_transaction',
+                        'parent_row_id', bank.parent_row_id,
+                        'parent_bank_transaction_id', bank.parent_bank_transaction_id::text,
+                        'parent_amount', bank.parent_amount::text,
+                        'is_split', bank.is_split,
+                        'split_version', bank.split_version,
+                        'split_category_code', bank.split_category_code,
                         'status', 'unpaired',
                         'trade_time', coalesce(bank.trade_time, bank.txn_date::timestamptz)::text,
                         'detail_fields', jsonb_strip_nulls(jsonb_build_object(
@@ -685,7 +691,7 @@ class PostgresWorkbenchPageHydrationRepository:
                             'detail', 'view_relation', 'cancel_link'
                         )
                     )) as payload
-                from app.bank_transactions bank
+                from app.bank_transaction_units bank
                 join requested_members requested
                   on requested.row_type = 'bank'
                  and requested.row_id = coalesce(bank.legacy_mongo_id, bank.id::text)

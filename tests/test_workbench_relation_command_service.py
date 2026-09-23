@@ -27,6 +27,95 @@ def command_service() -> WorkbenchRelationCommandService:
 
 
 class WorkbenchRelationCommandServiceTests(unittest.TestCase):
+    def test_split_batch_withdraw_uses_stable_owner_current_children(self):
+        service = command_service()
+        service.confirm_relation(case_id="batch", row_ids=["principal", "interest"], row_types=["bank", "bank"],
+            relation_mode="bank_flow_rule_batch", actor_id="tester",
+            special_metadata={"bank_split_versions": {"parent": 1}})
+        result = service.withdraw_bank_flow_batch(case_id="batch", row_ids=["parent"], actor_id="tester")
+        self.assertEqual(result["changed_case_ids"], ["batch"])
+        with self.assertRaises(WorkbenchRelationCommandError):
+            service.get_active_relation_by_case_id("batch")
+        self.assertEqual(service.active_relations_for_row_ids(["principal", "interest"]), [])
+        self.assertEqual(service.withdraw_bank_flow_batch(case_id="batch", row_ids=["parent"], actor_id="tester")["changed_case_ids"], [])
+
+    def test_split_batch_withdraw_resolves_parent_before_unwinding_merge(self):
+        service = command_service()
+        service.confirm_relation(case_id="batch", row_ids=["principal", "interest"], row_types=["bank", "bank"],
+            relation_mode="bank_flow_rule_batch", actor_id="tester")
+        service.confirm_relation(case_id="oa-invoice", row_ids=["oa", "invoice"], row_types=["oa", "invoice"],
+            relation_mode="manual_confirmed", actor_id="tester")
+        service.confirm_relation(case_id="merged", row_ids=["principal", "interest", "oa", "invoice"],
+            row_types=["bank", "bank", "oa", "invoice"], relation_mode="manual_confirmed", actor_id="tester",
+            replace_existing=True, history_operation_type="confirm_link")
+        service._relation_repository.resolve_current_bank_unit_ids = lambda ids: ["principal", "interest"]
+        result = service.withdraw_bank_flow_batch(case_id="batch", row_ids=["parent"], actor_id="tester")
+        self.assertIn("batch", result["changed_case_ids"])
+        self.assertEqual(service.active_relations_for_row_ids(["principal", "interest"]), [])
+        self.assertEqual(service.get_active_relation_by_case_id("oa-invoice")["row_ids"], ["oa", "invoice"])
+
+    def test_batch_merge_then_split_withdraw_projects_history_without_rewriting_it(self):
+        service = command_service()
+        service.confirm_relation(case_id="batch", row_ids=["parent", "bank-other"], row_types=["bank", "bank"],
+            relation_mode="bank_flow_rule_batch", actor_id="tester")
+        service.confirm_relation(case_id="oa-invoice", row_ids=["oa", "invoice"], row_types=["oa", "invoice"],
+            relation_mode="manual_confirmed", actor_id="tester")
+        service.confirm_relation(case_id="merged", row_ids=["parent", "bank-other", "oa", "invoice"],
+            row_types=["bank", "bank", "oa", "invoice"], relation_mode="manual_confirmed", actor_id="tester",
+            replace_existing=True, history_operation_type="confirm_link")
+        domain = service._relation_repository._pair_relation_service
+        domain.replace_bank_split_members(case_id="merged", row_ids=["principal", "interest", "bank-other", "oa", "invoice"],
+            row_types=["bank", "bank", "bank", "oa", "invoice"], special_metadata={"bank_split_versions": {"parent": 1}},
+            actor_id="tester", parent_id="parent", source_bank_ids=["parent"], target_bank_ids=["principal", "interest"])
+        original_history = domain.list_history()
+        from unittest.mock import Mock
+        requirements = Mock(return_value={"batch": {"requires_oa": True, "requires_invoice": True,
+            "paired_requirement_tag_codes": ["loan", "interest"], "paired_requirement_version": 9}})
+        service._bank_requirements_resolver = requirements
+        service._relation_repository.resolve_current_bank_unit_ids = lambda ids: ["principal", "interest", "bank-other"]
+        result = service.withdraw_bank_flow_batch(case_id="batch", row_ids=["parent", "bank-other"], actor_id="tester")
+        self.assertIn("batch", result["changed_case_ids"])
+        self.assertEqual(service.active_relations_for_row_ids(["principal", "interest", "bank-other"]), [])
+        self.assertEqual(service.get_active_relation_by_case_id("oa-invoice")["row_ids"], ["oa", "invoice"])
+        self.assertEqual(service.list_history()[:len(original_history)], original_history)
+        requirements.assert_called_once_with({"batch": ["principal", "interest", "bank-other"]})
+        restored_batch = next(item for event in service.list_history()[len(original_history):] for item in event["after_relations"] if item["case_id"] == "batch")
+        self.assertTrue(restored_batch["special_metadata"]["requires_invoice"])
+        self.assertEqual(restored_batch["special_metadata"]["paired_requirement_version"], 9)
+
+    def test_withdraw_cannot_restore_deleted_split_child(self):
+        service = command_service()
+        service.confirm_relation(case_id="before-split", row_ids=["oa", "deleted-child"],
+            row_types=["oa", "bank"], relation_mode="manual_confirmed", actor_id="tester",
+            history_operation_type="confirm_link")
+        service.confirm_relation(case_id="current", row_ids=["oa", "current-child"],
+            row_types=["oa", "bank"], relation_mode="manual_confirmed", actor_id="tester",
+            replace_existing=True, history_operation_type="confirm_link")
+        preview = service.preview_withdraw_relation(row_ids=["oa", "current-child"], row_types=["oa", "bank"])
+        service._relation_repository.lock_canonical_relation_members = lambda ids, **kwargs: ["bank:deleted-child"] if "deleted-child" in ids else []
+        before = service.get_active_relation_by_case_id("current")
+        history = service.list_history()
+        with self.assertRaises(WorkbenchRelationCommandError) as error:
+            service.withdraw_relation(case_id="current", actor_id="tester", row_ids=["oa", "current-child"],
+                row_types=["oa", "bank"], preview_id=preview["preview_id"], expected_versions=preview["submit_expected_versions"])
+        self.assertEqual(error.exception.error_code, "workbench_relation_canonical_member_missing")
+        self.assertEqual(service.get_active_relation_by_case_id("current"), before)
+        self.assertEqual(service.list_history(), history)
+
+    def test_batch_withdraw_cannot_restore_deleted_split_child(self):
+        service = command_service()
+        service.confirm_relation(case_id="batch", row_ids=["bank", "deleted-child"],
+            row_types=["bank", "bank"], relation_mode="bank_flow_rule_batch", actor_id="tester")
+        service.confirm_relation(case_id="merged", row_ids=["bank", "deleted-child", "oa"],
+            row_types=["bank", "bank", "oa"], relation_mode="manual_confirmed", actor_id="tester",
+            replace_existing=True, history_operation_type="confirm_link")
+        service._relation_repository.lock_canonical_relation_members = lambda ids, **kwargs: ["bank:deleted-child"] if "deleted-child" in ids else []
+        before = service.get_active_relation_by_case_id("merged")
+        with self.assertRaises(WorkbenchRelationCommandError) as error:
+            service.withdraw_bank_flow_batch(case_id="batch", row_ids=["bank", "deleted-child"], actor_id="tester")
+        self.assertEqual(error.exception.error_code, "workbench_relation_canonical_member_missing")
+        self.assertEqual(service.get_active_relation_by_case_id("merged"), before)
+
     def test_withdraw_loads_missing_predecessor_months_once(self):
         from unittest.mock import Mock
         service = command_service()

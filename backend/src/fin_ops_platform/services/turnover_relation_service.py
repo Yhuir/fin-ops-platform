@@ -12,7 +12,6 @@ from fin_ops_platform.services.bank_turnover_tag_semantics import (
     turnover_relation_rule_from_bank_category,
 )
 
-
 TURNOVER_RELATION_SCHEMA_VERSION = "2026-05-turnover-relation-v1"
 TURNOVER_RELATION_STATUSES = {
     "suggested",
@@ -259,6 +258,47 @@ class TurnoverRelationService:
                 ]
             self._relations = [*relations, *manual_relations]
             return deepcopy(self._relations)
+
+    @staticmethod
+    def split_replacement_members(
+        members: set[str], old_ids: set[str], new_ids: set[str], *, whole_replacement: bool,
+    ) -> set[str]:
+        if whole_replacement:
+            return (members - old_ids) | new_ids
+        retained = (members - old_ids) | (members & new_ids)
+        return retained | (new_ids - old_ids) if old_ids <= members else retained
+
+    def replace_bank_split_members(
+        self, *, old_ids: set[str], new_ids: set[str], actor_id: str, whole_replacement: bool,
+    ) -> list[dict[str, Any]]:
+        """Rebuild affected manual turnover facts; never retain an obsolete parent amount."""
+        changes = []
+        for relation in list(self._relations):
+            members = set(relation.get("bank_row_ids") or [])
+            if not members.intersection(old_ids) or relation.get("status") == "withdrawn":
+                continue
+            if relation.get("source") != "manual" and relation.get("status") != "confirmed":
+                continue
+            next_ids = sorted(self.split_replacement_members(members, old_ids, new_ids, whole_replacement=whole_replacement))
+            if not next_ids:
+                raise TurnoverRelationValidationError("turnover_split_manual_empty", "请先撤回该往来的人工关联再移除全部往来子项。")
+            rows = [self._require_prepared_row(row_id) for row_id in next_ids]
+            rebuilt = self._build_relation_from_rows(rows, status=str(relation["status"]),
+                source=str(relation["source"]), created_by=str(relation["created_by"]),
+                evidence={**deepcopy(relation.get("evidence") or {}), "bank_split_reassigned": True})
+            rebuilt.update(version=int(relation.get("version") or 0) + 1,
+                created_at=relation.get("created_at"), updated_by=actor_id)
+            retired = {**deepcopy(relation), "status": "withdrawn", "sync_to_workbench": False,
+                "updated_by": actor_id, "updated_at": self._now(), "version": rebuilt["version"]}
+            event = {"relation_id": relation["relation_id"], "action": "bank_split_reassigned",
+                "old_status": relation["status"], "new_status": "withdrawn", "affected_row_ids": sorted(members),
+                "actor": actor_id, "created_at": self._now(), "version": rebuilt["version"]}
+            next_event = {**event, "relation_id": rebuilt["relation_id"], "action": "bank_split_rebuilt",
+                "old_status": None, "new_status": rebuilt["status"], "affected_row_ids": next_ids}
+            self._relations.remove(relation)
+            self._relations.append(rebuilt)
+            changes.append({"before": retired, "after": rebuilt, "event": event, "next_event": next_event})
+        return changes
 
     def confirm_relation(
         self,

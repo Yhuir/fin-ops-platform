@@ -1,3 +1,4 @@
+import BankSplitChips from "../../features/bankSplits/BankSplitChips";
 import { Button, Checkbox, ListBox, Select } from "@heroui/react";
 import { Filter, Info } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
@@ -641,9 +642,9 @@ function PendingInvoiceTableRow({
                     <Info aria-hidden="true" size={14} strokeWidth={2.3} />
                   </button>
                 </span>
-                <span className="pending-invoices-tag pending-invoices-tag--neutral" title={tagPathLabel(row.bankTransaction)}>
+                {row.bankTransaction.bankSplitParts?.length ? <BankSplitChips parts={row.bankTransaction.bankSplitParts} /> : <span className="pending-invoices-tag pending-invoices-tag--neutral" title={tagPathLabel(row.bankTransaction)}>
                   {tagPathLabel(row.bankTransaction)}
-                </span>
+                </span>}
               </>
             )}
           </span>

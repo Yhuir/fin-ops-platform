@@ -66,7 +66,7 @@ def workbench_relation_edge_equality_issues(
                or (
                     member.row_type = 'bank'
                     and not exists (
-                        select 1 from app.bank_transactions source
+                        select 1 from app.bank_transaction_units source
                         where coalesce(source.legacy_mongo_id, source.id::text) = member.row_id
                           and source.status <> 'deleted'
                     )

@@ -632,7 +632,7 @@ scoped_source_keys as materialized (
     union
     select 'bank'::text, coalesce(bank.legacy_mongo_id, bank.id::text)
     from requested_scope scope
-    join app.bank_transactions bank
+    join app.bank_transaction_units bank
       on scope.scope_key = 'all' or bank.txn_month = scope.scope_month
     where bank.status <> 'deleted'
     union
@@ -1181,7 +1181,7 @@ bank_candidates as materialized (
         null::numeric as invoice_total_with_tax,
         null::text as invoice_direction,
         '[]'::jsonb as invoice_source_links
-    from app.bank_transactions bank
+    from app.bank_transaction_units bank
     join needed_keys needed
       on needed.row_type = 'bank'
      and needed.row_id = coalesce(bank.legacy_mongo_id, bank.id::text)
@@ -2719,16 +2719,18 @@ class PostgresWorkbenchPageQueryRepository:
             ),
             bank_inventory as materialized (
                 select
-                    count(*) filter (
+                    count(distinct coalesce(split_item.bank_transaction_id::text, bank.row_id)) filter (
                         where bank.bank_direction = 'payment'
                     )::bigint as inventory_expense_transaction_total,
-                    count(*) filter (
+                    count(distinct coalesce(split_item.bank_transaction_id::text, bank.row_id)) filter (
                         where bank.bank_direction = 'receipt'
                     )::bigint as inventory_income_transaction_total
                 from canonical_rows bank
                 join scoped_source_keys source
                   on source.row_type = 'bank'
                  and source.row_id = bank.row_id
+                left join app.bank_transaction_split_items split_item
+                  on split_item.id::text = bank.row_id
                 where bank.pane = 'bank'
             ),
             overall_zone_member_summary as materialized (
@@ -2737,7 +2739,7 @@ class PostgresWorkbenchPageQueryRepository:
                     count(distinct member.row_id) filter (
                         where member.row_type = 'oa'
                     )::bigint as oa_count,
-                    count(distinct member.row_id) filter (
+                    count(distinct coalesce(split_item.bank_transaction_id::text, member.row_id)) filter (
                         where member.row_type = 'bank'
                     )::bigint as bank_count,
                     count(distinct member.row_id) filter (
@@ -2746,6 +2748,7 @@ class PostgresWorkbenchPageQueryRepository:
                 from effective_groups groups
                 cross join lateral unnest(groups.member_ids, groups.member_types)
                     as member(row_id, row_type)
+                left join app.bank_transaction_split_items split_item on member.row_type='bank' and split_item.id::text=member.row_id
                 group by groups.zone
             ),
             overall_canonical_invoice_zone_summary as materialized (
@@ -3076,6 +3079,7 @@ class PostgresWorkbenchPageQueryRepository:
             from effective_groups groups
             left join canonical_group_members member
               on member.internal_key = groups.internal_key
+                left join app.bank_transaction_split_items split_item on member.row_type='bank' and split_item.id::text=member.row_id
             where {where_sql}
             group by
                 groups.internal_key, groups.detail_key, groups.group_kind,
@@ -3113,7 +3117,7 @@ class PostgresWorkbenchPageQueryRepository:
                 select
                     count(distinct (member.row_type, member.row_id))
                         filter (where member.row_type = 'oa')::bigint as oa_count,
-                    count(distinct (member.row_type, member.row_id))
+                    count(distinct coalesce(split_item.bank_transaction_id::text, member.row_id))
                         filter (where member.row_type = 'bank')::bigint as bank_count,
                     count(distinct (member.row_type, member.row_id))
                         filter (where member.row_type = 'invoice')::bigint as invoice_count,
@@ -3121,6 +3125,7 @@ class PostgresWorkbenchPageQueryRepository:
                 from {prefix}_keyed_groups groups
                 left join canonical_group_members member
                   on member.internal_key = groups.internal_key
+                left join app.bank_transaction_split_items split_item on member.row_type='bank' and split_item.id::text=member.row_id
             """
         filtered_groups_select_sql = (
             PostgresWorkbenchPageQueryRepository._filtered_groups_select_sql(
@@ -3504,7 +3509,7 @@ class PostgresWorkbenchPageQueryRepository:
                 select
                     count(distinct (member.row_type, member.row_id))
                         filter (where member.row_type = 'oa')::bigint as oa_count,
-                    count(distinct (member.row_type, member.row_id))
+                    count(distinct coalesce(split_item.bank_transaction_id::text, member.row_id))
                         filter (where member.row_type = 'bank')::bigint as bank_count,
                     count(distinct (member.row_type, member.row_id))
                         filter (where member.row_type = 'invoice')::bigint as invoice_count,
@@ -3512,6 +3517,7 @@ class PostgresWorkbenchPageQueryRepository:
                 from keyed_groups groups
                 left join canonical_group_members member
                   on member.internal_key = groups.internal_key
+                left join app.bank_transaction_split_items split_item on member.row_type='bank' and split_item.id::text=member.row_id
             )
             select page_groups.*,
                    exact_totals.total_count,
@@ -3737,6 +3743,12 @@ class PostgresWorkbenchPageQueryRepository:
                     continue
                 if normalized_row_type and str(row.get("type") or "") != normalized_row_type:
                     continue
+                if normalized_row_type == "bank" and row.get("is_split"):
+                    amount = str(row["parent_amount"])
+                    row = {**row, "amount": amount,
+                           "debit_amount": amount if row.get("debit_amount") else None,
+                           "credit_amount": amount if row.get("credit_amount") else None,
+                           "detail_fields": {**row.get("detail_fields", {}), "amount": amount}}
                 return {
                     "month": normalized_scope,
                     "scope_key": normalized_scope,
@@ -3844,7 +3856,7 @@ class PostgresWorkbenchPageQueryRepository:
                     bank.updated_at,
                     null::text
                 from requested_target target
-                join app.bank_transactions bank
+                join app.bank_transaction_units bank
                   on target.row_type = 'bank'
                  and coalesce(bank.legacy_mongo_id, bank.id::text) = target.row_id
                 where bank.status <> 'deleted'
@@ -5324,7 +5336,7 @@ class PostgresWorkbenchPageQueryRepository:
                     {member_type} = 'bank'
                     and exists (
                         select 1
-                        from app.bank_transactions scoped_bank
+                        from app.bank_transaction_units scoped_bank
                         where coalesce(scoped_bank.legacy_mongo_id, scoped_bank.id::text)
                             = member.member_id
                           and scoped_bank.status <> 'deleted'
@@ -5563,7 +5575,7 @@ class PostgresWorkbenchPageQueryRepository:
                 from app.workbench_pair_relations relation
                 cross join requested_scope scope
                 cross join lateral unnest(relation.row_ids, relation.row_types) member(row_id, row_type)
-                join app.bank_transactions bank
+                join app.bank_transaction_units bank
                   on member.row_type = 'bank'
                  and member.row_id = coalesce(bank.legacy_mongo_id, bank.id::text)
                  and bank.status <> 'deleted'
@@ -5937,7 +5949,7 @@ class PostgresWorkbenchPageQueryRepository:
                 union
                 select 'bank'::text,
                        coalesce(bank.legacy_mongo_id, bank.id::text)
-                from app.bank_transactions bank
+                from app.bank_transaction_units bank
                 join needed_keys needed
                   on needed.row_type = 'bank'
                  and needed.row_id = coalesce(bank.legacy_mongo_id, bank.id::text)

@@ -1,3 +1,4 @@
+import type { BankSplitPart } from '../bankSplits/api';
 import type {
   BankTransactionTagDictionary,
   PendingInvoiceTagGroups,
@@ -167,6 +168,11 @@ export type WorkbenchBankCategoryResolutionStatus =
   | (string & {});
 
 export type WorkbenchRecord = {
+  parentRowId?: string;
+  parentAmount?: string;
+  isSplit?: boolean;
+  bankSplitParts?: BankSplitPart[];
+  bankSplitVersion?: number;
   supportingDocuments?: WorkbenchExpenseItem["supportingDocuments"];
   supportingDocumentAmount?: string | null;
   supportingDocumentOaAmount?: string;

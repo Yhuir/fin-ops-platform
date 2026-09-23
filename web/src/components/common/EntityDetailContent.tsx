@@ -20,6 +20,7 @@ export type EntityDetailField = {
 export type EntityDetailSection = {
   title: string;
   fields: EntityDetailField[];
+  bank_transaction_id?: string;
 };
 
 type EntityDetailContentProps = {
@@ -30,6 +31,7 @@ type EntityDetailContentProps = {
   loadingLabel?: string;
   sections: EntityDetailSection[];
   unavailableReason?: string;
+  extraFields?: (section: EntityDetailSection, index: number) => Array<{ label: string; content: ReactNode }>;
 };
 
 const publicLabelAliases: Record<string, string> = {
@@ -274,6 +276,7 @@ export default function EntityDetailContent({
   loadingLabel = "正在加载完整详情",
   sections,
   unavailableReason,
+  extraFields,
 }: EntityDetailContentProps) {
   if (loading) {
     return (
@@ -321,6 +324,12 @@ export default function EntityDetailContent({
                   </FinanceTableCell>
                 </FinanceTableRow>
               ))}
+              {(extraFields?.(section, sectionIndex) ?? []).map(field => (
+                <FinanceTableRow id={`extra-${sectionIndex}-${field.label}`} key={`extra-${field.label}`}>
+                  <FinanceTableCell columnRole="identity">{field.label}</FinanceTableCell>
+                  <FinanceTableCell columnRole="description">{field.content}</FinanceTableCell>
+                </FinanceTableRow>
+              ))}
             </FinanceTableBody>
           </FinanceTable>
         </section>
@@ -343,10 +352,10 @@ export function preparePublicDetailSections(sections: EntityDetailSection[]): En
       continue;
     }
     const previous = prepared[prepared.length - 1];
-    if (previous?.title === title) {
+    if (previous?.title === title && previous.bank_transaction_id === section.bank_transaction_id) {
       previous.fields.push(...fields);
     } else {
-      prepared.push({ title, fields });
+      prepared.push({ title, fields, ...(section.bank_transaction_id ? { bank_transaction_id: section.bank_transaction_id } : {}) });
     }
   }
   return prepared;

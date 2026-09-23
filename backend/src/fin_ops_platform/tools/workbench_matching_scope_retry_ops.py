@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
-from hashlib import sha256
 import json
 import re
 import sys
+from collections.abc import Sequence
+from hashlib import sha256
 from typing import Any, TextIO
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.workbench_matching_queue import (
     PostgresWorkbenchMatchingQueueRepository,
 )
-
 
 FAILED_STATUS = "failed"
 RETRY_REASON = "operator_retry_failed_scope"
@@ -103,10 +102,17 @@ def main(
 
 
 def preview_scope(connection: Any, scope_month: str) -> dict[str, Any]:
-    from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import PostgresWorkbenchFormalRelationFactRepository
+    from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import (
+        PostgresWorkbenchFormalRelationFactRepository,
+    )
     from fin_ops_platform.services.runtime_worker_handlers import WorkbenchMatchingWorkerFactory
-    from fin_ops_platform.services.workbench_free_matching_engine import WorkbenchFreeMatchingEngine, FormalRelationSearchLimits
-    from fin_ops_platform.services.workbench_invoice_expense_item_assignment_service import WorkbenchInvoiceExpenseItemAssignmentService
+    from fin_ops_platform.services.workbench_free_matching_engine import (
+        FormalRelationSearchLimits,
+        WorkbenchFreeMatchingEngine,
+    )
+    from fin_ops_platform.services.workbench_invoice_expense_item_assignment_service import (
+        WorkbenchInvoiceExpenseItemAssignmentService,
+    )
 
     with connection.transaction() as transaction:
         repository = PostgresWorkbenchFormalRelationFactRepository(transaction)

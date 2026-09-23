@@ -544,6 +544,7 @@ class WorkbenchPairRelationService:
         note: str | None = None,
         updated_at: str | None = None,
         operation_type: str = "update_pair_relation_metadata",
+        advance_version: bool = False,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         active_relation = self.get_active_relation_by_case_id(case_id)
         if not isinstance(active_relation, dict):
@@ -582,6 +583,7 @@ class WorkbenchPairRelationService:
                 "special_metadata": merged_metadata,
                 "display_tags": merged_display_tags,
                 "updated_at": timestamp,
+                "version": int(active_relation["version"]) + int(advance_version),
             },
             fallback_case_id=str(active_relation.get("case_id") or ""),
         )
@@ -713,7 +715,9 @@ class WorkbenchPairRelationService:
         self._assert_restored_relation_ownership_available(
             active_relation=active_relation,
             restored_relations=after_relations,
-            historical_relations=historical_relations,
+            historical_relations=(confirm_history["bank_split_original_relations"]
+                                  if isinstance(confirm_history, dict) and "bank_split_original_relations" in confirm_history
+                                  else historical_relations),
             row_id_aliases=row_id_aliases,
         )
         return {
@@ -945,6 +949,39 @@ class WorkbenchPairRelationService:
                             created_by=actor_id, note=reason)
         return deepcopy(after)
 
+    def replace_bank_split_members(
+        self, *, case_id: str, row_ids: list[str], row_types: list[str],
+        special_metadata: dict[str, Any], actor_id: str, parent_id: str,
+        source_bank_ids: list[str], target_bank_ids: list[str],
+    ) -> dict[str, Any]:
+        """Preserve case intent while replacing its bank-purpose identities."""
+        before = self.get_active_relation_by_case_id(case_id)
+        if before is None:
+            raise ValueError("The bank split relation is no longer active.")
+        entries = list(zip(row_ids, row_types, strict=True))
+        if len(set(entries)) != len(entries):
+            raise ValueError("Bank split relation members must be unique.")
+        old_other = {(row_id, row_type) for row_id, row_type in zip(before["row_ids"], before["row_types"], strict=True) if row_type != "bank"}
+        if old_other != {(row_id, row_type) for row_id, row_type in entries if row_type != "bank"}:
+            raise ValueError("A bank split cannot change OA or invoice ownership.")
+        after = deepcopy(before)
+        after.update(row_ids=list(row_ids), row_types=list(row_types),
+                     version=int(before["version"]) + 1, updated_at=self._timestamp(),
+                     special_metadata=deepcopy(special_metadata))
+        if len(entries) < 2:
+            after["status"] = CANCELLED_PAIR_RELATION_STATUS
+        self._pair_relations[case_id] = after
+        self.record_history(
+            operation_type="bank_transaction_split_changed", before_relations=[before],
+            after_relations=[after], affected_row_ids=sorted(set(before["row_ids"]) | set(row_ids)),
+            created_by=actor_id, note=f"流水子项已更新：{parent_id}",
+            bank_split_members={
+                "before": [value for value, kind in zip(before["row_ids"], before["row_types"], strict=True) if kind == "bank" and value in source_bank_ids],
+                "after": [value for value, kind in entries if kind == "bank" and value in target_bank_ids],
+            },
+        )
+        return deepcopy(after)
+
     def record_history(
         self,
         *,
@@ -956,6 +993,7 @@ class WorkbenchPairRelationService:
         note: str | None = None,
         amount_check: dict[str, Any] | None = None,
         created_at: str | None = None,
+        bank_split_members: dict[str, list[str]] | None = None,
     ) -> dict[str, Any]:
         history = self._normalize_history_entry(
             {
@@ -970,6 +1008,8 @@ class WorkbenchPairRelationService:
                 "created_at": created_at or self._timestamp(),
             }
         )
+        if bank_split_members is not None:
+            history["bank_split_members"] = deepcopy(bank_split_members)
         self._pair_relation_history.append(history)
         return deepcopy(history)
 
@@ -1539,22 +1579,57 @@ class WorkbenchPairRelationService:
 
     def _latest_confirm_history_for_relation(self, relation: dict[str, Any]) -> dict[str, Any] | None:
         case_id = str(relation.get("case_id", "")).strip()
-        row_ids = {str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()}
+        row_ids = set(relation.get("row_ids") or [])
+        split_changes: list[dict[str, list[str]]] = []
         for history in reversed(self._pair_relation_history):
-            if str(history.get("operation_type")) not in WITHDRAW_RESTORABLE_CONFIRM_OPERATION_TYPES:
+            operation = str(history.get("operation_type"))
+            if operation not in WITHDRAW_RESTORABLE_CONFIRM_OPERATION_TYPES and operation != "bank_transaction_split_changed":
                 continue
-            for after_relation in list(history.get("after_relations") or []):
-                if not isinstance(after_relation, dict):
-                    continue
-                after_case_id = str(after_relation.get("case_id", "")).strip()
-                after_row_ids = {
-                    str(row_id).strip()
-                    for row_id in list(after_relation.get("row_ids") or [])
-                    if str(row_id).strip()
-                }
-                if after_case_id == case_id and row_ids == after_row_ids:
-                    return deepcopy(history)
+            matched = any(
+                item.get("case_id") == case_id and set(item.get("row_ids") or []) == row_ids
+                for item in history.get("after_relations") or []
+            )
+            if not matched:
+                continue
+            if operation == "bank_transaction_split_changed":
+                previous = next(item for item in history["before_relations"] if item["case_id"] == case_id)
+                row_ids = set(previous["row_ids"])
+                split_changes.append(history["bank_split_members"])
+                continue
+            result = deepcopy(history)
+            if split_changes:
+                result["bank_split_original_relations"] = deepcopy(history.get("before_relations") or [])
+            for change in reversed(split_changes):
+                for collection in ("before_relations", "after_relations"):
+                    for snapshot in result.get(collection) or []:
+                        if self._project_bank_split_history_members(snapshot, change):
+                            metadata = deepcopy(snapshot.get("special_metadata") or {})
+                            metadata["bank_split_requires_cost_confirmation"] = True
+                            metadata["bank_split_versions"] = deepcopy(relation.get("special_metadata", {}).get("bank_split_versions") or {})
+                            snapshot["special_metadata"] = metadata
+            return result
         return None
+
+    @staticmethod
+    def _project_bank_split_history_members(snapshot: dict[str, Any], change: dict[str, list[str]]) -> bool:
+        """Project a complete historical source group; never guess partial child ownership."""
+        entries = list(zip(snapshot["row_ids"], snapshot["row_types"], strict=True))
+        old_ids = set(change["before"])
+        owned = {row_id for row_id, kind in entries if kind == "bank"}
+        if not old_ids or not old_ids <= owned:
+            return False
+        projected: list[tuple[str, str]] = []
+        inserted = False
+        for row_id, kind in entries:
+            if kind != "bank" or row_id not in old_ids:
+                projected.append((row_id, kind))
+            elif not inserted:
+                projected.extend((value, "bank") for value in change["after"])
+                inserted = True
+        projected = list(dict.fromkeys(projected))
+        snapshot["row_ids"] = [value for value, _ in projected]
+        snapshot["row_types"] = [kind for _, kind in projected]
+        return True
 
     @staticmethod
     def _history_touches_cases(history: dict[str, Any], case_ids: set[str]) -> bool:

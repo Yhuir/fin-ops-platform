@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from fin_ops_platform.services.bank_transaction_unit import original_bank_transaction
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     PaymentStatusEvaluationContext,
@@ -627,6 +628,8 @@ def _input_invoice_detail(group: dict[str, Any]) -> dict[str, Any]:
 
 
 def _bank_detail(transaction: Any, *, context: DistributedInvoiceRelationContext) -> dict[str, Any]:
+    relation_row_id = transaction.id
+    transaction = original_bank_transaction(transaction)
     direction = str(getattr(transaction.txn_direction, "value", transaction.txn_direction))
     return {
         "id": transaction.id,
@@ -645,7 +648,7 @@ def _bank_detail(transaction: Any, *, context: DistributedInvoiceRelationContext
         "remark": transaction.remark or "",
         "currency": transaction.currency or "CNY",
         "bankTextFields": list(transaction.bank_text_fields),
-        "relations": context.relation_summaries_for_row(transaction.id),
+        "relations": context.relation_summaries_for_row(relation_row_id),
     }
 
 

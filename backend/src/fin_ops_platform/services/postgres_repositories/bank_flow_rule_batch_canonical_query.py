@@ -118,6 +118,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
             else None
         )
         classification_sql, classification_params = bank_category_classification_cte(
+            use_units=True,
             definitions=definitions,
             date_from=None,
             date_to=None,
@@ -212,7 +213,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                     batch.status in ('submitted', 'withdrawn')
                     or (
                         batch.status = 'stale'
-                        and exists (
+                        and (batch.submitted_at is not null or exists (
                             select 1
                             from app.workbench_pair_relations relation
                             where relation.status = 'active'
@@ -224,7 +225,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                                   ),
                                   batch.batch_id
                               )
-                        )
+                        ))
                     )
                 )
                 {formal_scope_sql}
@@ -305,7 +306,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                        coalesce(bank.txn_month, date_trunc('month', bank.txn_date)::date),
                        'YYYY-MM'
                    ) as scope_month
-            from app.bank_transactions bank
+            from app.bank_transaction_units bank
             where bank.status <> 'deleted'
             group by coalesce(bank.txn_month, date_trunc('month', bank.txn_date)::date)
             order by coalesce(bank.txn_month, date_trunc('month', bank.txn_date)::date)
@@ -364,12 +365,14 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                     bank.*,
                     coalesce(bank.legacy_mongo_id, bank.id::text) as transaction_id,
                     coalesce(bank.raw_payload->'normalized_payload', '{}'::jsonb) as payload,
-                    coalesce(confirmed_category.category_code, manual_category.category, '') as category_code,
+                    coalesce(bank.split_category_code, confirmed_category.category_code, manual_category.category, '') as category_code,
                     case
+                        when bank.is_split then 'bank_split'
                         when confirmed_category.category_code is not null then 'auto_confirmation'
                         else coalesce(manual_category.source, '')
                     end as category_source,
                     coalesce(
+                        case when bank.is_split then bank.split_version end,
                         confirmed_category.version,
                         manual_category.version,
                         0
@@ -377,7 +380,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                     coalesce(active_relations.case_ids, array[]::text[]) as relation_case_ids,
                     coalesce(active_relations.linked_oa_count, 0)::integer as linked_oa_count,
                     coalesce(active_relations.linked_invoice_count, 0)::integer as linked_invoice_count
-                from app.bank_transactions bank
+                from app.bank_transaction_units bank
                 left join lateral (
                     select confirmation.category_code, confirmation.version
                     from app.bank_transaction_category_confirmations confirmation
@@ -432,13 +435,14 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                   and (
                       bank.id::text = any(%s::text[])
                       or bank.legacy_mongo_id = any(%s::text[])
+                      or bank.parent_row_id = any(%s::text[])
                   )
                 order by array_position(
                     %s::text[],
                     coalesce(bank.legacy_mongo_id, bank.id::text)
                 )
                 """,
-                (row_ids, row_ids, row_ids),
+                (row_ids, row_ids, row_ids, row_ids),
             )
             events = transaction.fetch_all(
                 """
@@ -581,9 +585,11 @@ class BankFlowRuleBatchCanonicalQueryRepository:
         result = dict(payload) if isinstance(payload, dict) else {}
         raw_status = text(row.get("status") or result.get("status")) or "draft"
         has_active_relation = bool(row.get("has_active_relation"))
+        was_submitted = bool(row.get("submitted_at") or result.get("submitted_at"))
+        can_recover = has_active_relation or was_submitted
         presented_status = text(row.get("presented_status"))
         if not presented_status:
-            presented_status = "submitted" if raw_status == "stale" and has_active_relation else raw_status
+            presented_status = "submitted" if raw_status == "stale" and can_recover else raw_status
             if raw_status == "unsubmitted" and text(row.get("status_bucket")) == "unsubmitted":
                 presented_status = "draft"
         status_bucket = text(row.get("presented_status_bucket"))
@@ -616,10 +622,10 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                     row.get("withdrawn_at") or result.get("withdrawn_at")
                 ),
                 "can_submit": presented_status == "draft",
-                "can_withdraw": presented_status == "submitted" and has_active_relation,
+                "can_withdraw": presented_status == "submitted" and can_recover,
             }
         )
-        if raw_status == "stale" and has_active_relation:
+        if raw_status == "stale" and can_recover:
             result["relation_backed_status"] = "stale"
         return result
 

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from hashlib import sha1
 from http import HTTPStatus
 from io import BytesIO
-import json
 from typing import Any
 from urllib.parse import unquote
 
@@ -14,6 +14,7 @@ from openpyxl import Workbook
 
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import BankTransaction, Invoice
+from fin_ops_platform.services.bank_transaction_unit import bank_unit_display, bank_unit_matches_invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.invoice_relation_query_context import (
     DistributedInvoiceRelationContext,
@@ -28,7 +29,6 @@ from fin_ops_platform.services.output_invoice_reversal import (
 from fin_ops_platform.services.workbench_relation_modes import (
     OUTPUT_INVOICE_REVERSAL_RELATION_MODE,
 )
-
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
@@ -799,7 +799,7 @@ class OutputInvoiceCollectionQueryService:
                     if row_type in {"bank", "bank_transaction"}
                     else None
                 )
-                if bank is None or bank.id in seen:
+                if bank is None or bank.id in seen or not bank_unit_matches_invoice(bank):
                     continue
                 seen.add(bank.id)
                 summaries.append(
@@ -816,6 +816,7 @@ class OutputInvoiceCollectionQueryService:
         primary = summaries[0] if summaries else {}
         return {
             "primaryBankTransactionId": primary.get("bankTransactionId"),
+            "bank_split_parts": primary.get("bank_split_parts", []),
             "counterpartyName": primary.get("counterpartyName", ""),
             "tradeTime": primary.get("tradeTime", ""),
             "amount": primary.get("amount", ""),
@@ -858,6 +859,7 @@ class OutputInvoiceCollectionQueryService:
         )
         return {
             "bankTransactionId": bank.id,
+            **bank_unit_display(bank),
             "counterpartyName": bank.counterparty_name_raw,
             "tradeTime": bank.trade_time or bank.txn_date or "",
             "amount": _money(bank.amount),

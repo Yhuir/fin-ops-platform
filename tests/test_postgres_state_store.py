@@ -1,22 +1,27 @@
 from __future__ import annotations
 
+import unittest
 from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 from unittest.mock import patch
 
-from fin_ops_platform.services.postgres_connection import PostgresConfigurationError, PostgresSettings, redact_database_url
-from fin_ops_platform.services.postgres_repositories.common import serialize_value
-from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
-    BankFlowRuleBatchCanonicalQueryRepository,
-)
 from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
     bank_flow_rule_batch_candidate_guard,
     bank_flow_rule_batch_rule_proof,
     bank_flow_rule_batch_selected_row_proofs,
     build_live_bank_flow_rule_batch_service,
 )
+from fin_ops_platform.services.etc_service import EtcBatch
+from fin_ops_platform.services.postgres_connection import (
+    PostgresConfigurationError,
+    PostgresSettings,
+    redact_database_url,
+)
+from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
+    BankFlowRuleBatchCanonicalQueryRepository,
+)
+from fin_ops_platform.services.postgres_repositories.common import serialize_value
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.settings_data_reset import (
     PostgresSettingsDataResetRepository,
@@ -24,7 +29,6 @@ from fin_ops_platform.services.postgres_repositories.settings_data_reset import 
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.state_store_diff import diff_state_snapshots
 from fin_ops_platform.services.state_store_factory import build_state_store
-from fin_ops_platform.services.etc_service import EtcBatch
 
 
 def unwrap_jsonb(value):
@@ -264,6 +268,15 @@ class MatchingFormalAndFallbackConnection(FakePostgresConnection):
 
 
 class PostgresStateStoreTests(unittest.TestCase):
+    def test_bank_unit_resolution_delegates_to_relation_owner(self) -> None:
+        from unittest.mock import Mock
+        with TemporaryDirectory() as temp_dir:
+            store = PostgresStateStore(data_dir=Path(temp_dir), connection=FakePostgresConnection())
+            owner = Mock(return_value=["principal", "interest"])
+            store._workbench_relation_repository.resolve_current_bank_unit_ids = owner
+            self.assertEqual(store.resolve_current_bank_unit_ids(["parent"]), ["principal", "interest"])
+            owner.assert_called_once_with(["parent"])
+
     def test_import_delta_port_rejects_cross_domain_payload(self) -> None:
         with TemporaryDirectory() as temp_dir:
             store = PostgresStateStore(

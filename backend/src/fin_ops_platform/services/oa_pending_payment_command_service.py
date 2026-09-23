@@ -7,11 +7,11 @@ from typing import Any, Callable
 
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction
-from fin_ops_platform.services.imports import ImportNormalizationService, clean_string
+from fin_ops_platform.services.imports import clean_string
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_pending_payment_query_contract import (
-    OaPendingPaymentError,
     VIEW_MODE_IN_PROGRESS,
+    OaPendingPaymentError,
 )
 from fin_ops_platform.services.workbench_relation_command_service import (
     WorkbenchRelationCommandError,
@@ -25,13 +25,13 @@ class OaPendingPaymentCommandService:
     def __init__(
         self,
         *,
-        import_service: ImportNormalizationService,
+        bank_transaction_reader: Callable[[list[str]], list[BankTransaction]],
         oa_projection: Any,
         relation_command_service: Any | None,
         bank_transaction_category_codes_for_row_ids: Callable[[list[str]], dict[str, str]] | None = None,
         bank_flow_rule_tag_rules_payload: Callable[[], dict[str, object]] | None = None,
     ) -> None:
-        self._import_service = import_service
+        self._bank_transaction_reader = bank_transaction_reader
         self._oa_projection = oa_projection
         self._relation_command_service = relation_command_service
         self._bank_transaction_category_codes_for_row_ids = bank_transaction_category_codes_for_row_ids
@@ -56,7 +56,15 @@ class OaPendingPaymentCommandService:
             )
         for record in records:
             self._assert_in_progress(record)
-        bank_transactions = [self._bank_transaction(bank_transaction_id) for bank_transaction_id in bank_transaction_ids]
+        bank_rows = self._bank_transaction_reader(bank_transaction_ids)
+        banks_by_id = {transaction.id: transaction for transaction in bank_rows}
+        missing = [row_id for row_id in bank_transaction_ids if row_id not in banks_by_id]
+        if missing:
+            raise OaPendingPaymentError(
+                "bank_transaction_not_found", "银行流水子项已变化，请刷新后重新选择。",
+                status_code=HTTPStatus.NOT_FOUND, details={"bank_transaction_ids": missing},
+            )
+        bank_transactions = [banks_by_id[row_id] for row_id in bank_transaction_ids]
         non_outflow = [
             transaction.id
             for transaction in bank_transactions
@@ -160,16 +168,6 @@ class OaPendingPaymentCommandService:
                 status_code=HTTPStatus.CONFLICT,
                 details={"oa_row_id": record.id, "workflow_status": workflow_status},
             )
-
-    def _bank_transaction(self, bank_transaction_id: str) -> BankTransaction:
-        try:
-            return self._import_service.get_transaction(bank_transaction_id)
-        except KeyError as exc:
-            raise OaPendingPaymentError(
-                "bank_transaction_not_found",
-                f"Bank transaction detail not found: {bank_transaction_id}",
-                status_code=HTTPStatus.NOT_FOUND,
-            ) from exc
 
     def _active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
         active_relations_for_row_ids = getattr(

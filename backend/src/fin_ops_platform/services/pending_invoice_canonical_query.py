@@ -137,6 +137,7 @@ request_config as materialized (
 bank_source as materialized (
     select
         b.id as canonical_id,
+        b.parent_row_id, b.parent_bank_transaction_id, b.split_category_code, b.split_version,
         coalesce(b.legacy_mongo_id, b.id::text) as row_id,
         case when b.txn_direction = 'outflow' then 'expense' else 'income' end as direction,
         b.account_no,
@@ -162,7 +163,7 @@ bank_source as materialized (
         coalesce(b.bank_serial_no, '') as bank_serial_no,
         b.bank_text_fields,
         b.raw_payload
-    from app.bank_transactions b
+    from app.bank_transaction_units b
     where b.status <> 'deleted'
       and b.txn_direction in ('outflow', 'inflow')
 ),
@@ -268,7 +269,7 @@ active_relations as materialized (
     select r.case_id, r.relation_mode, r.row_ids, r.row_types
     from {RELATION_INVOICE_READ_SQL} r
     where r.status = 'active'
-      and r.relation_mode <> 'turnover_manual_closure'
+
 ),
 relation_members as materialized (
     select
@@ -323,7 +324,11 @@ relation_case_bank_facts as materialized (
             order by bank.trade_time desc nulls last, bank.row_id
         ) as bank_summaries
     from case_bank_members member
-    join banks bank on bank.row_id = member.member_bank_id
+    join effective_categories bank on bank.row_id = member.member_bank_id
+    cross join request_config config
+    where not coalesce(bank.category_code, '') = any(array(
+        select jsonb_array_elements_text(config.payload->'groups'->bank.direction->'no_invoice_required')
+    ))
     group by member.case_id
 ),
 relation_bank_facts as materialized (
@@ -658,6 +663,7 @@ effective_categories as (
     select
         b.*,
         case
+            when b.split_category_code is not null then b.split_category_code
             when b.confirmed_category_code is not null then b.confirmed_category_code
             when b.manual_category_code is not null
                  and b.manual_category_source = 'manual'
@@ -674,6 +680,7 @@ effective_categories as (
             else auto.definition->>'code'
         end as category_code,
         case
+            when b.split_category_code is not null then 'manual'
             when b.confirmed_category_code is not null then 'manual_confirmation'
             when b.manual_category_code is not null
                  and b.manual_category_source = 'manual'
@@ -773,6 +780,7 @@ classified_source as (
 classified as materialized (
     select
         source.row_id,
+        source.parent_row_id,
         source.direction,
         source.account_no,
         source.account_name,
@@ -869,7 +877,7 @@ classified as materialized (
         case
             when jsonb_array_length(source.bank_summaries) > 1 and cardinality(source.relation_case_ids) > 0
             then source.relation_case_ids[1]
-            else source.row_id
+            else source.parent_row_id
         end as visible_group_key
     from classified_source source
     left join lateral (
@@ -924,7 +932,7 @@ scope_ranked as materialized (
         candidate.*,
         row_number() over (
             partition by candidate.visible_group_key
-            order by candidate.trade_time desc nulls last, candidate.row_id
+            order by (candidate.filter_group = 'no_invoice_required') asc, candidate.trade_time desc nulls last, candidate.row_id
         ) as visible_group_rank
     from scope_candidates candidate
 ),
@@ -967,11 +975,49 @@ page_rows as materialized (
     from page_keys page
     join classified row on row.row_id = page.row_id
 ),
+page_bank_ids as materialized (
+    select row_id from page_rows
+    union
+    select bank_summary.value->>'id' from page_rows
+    cross join lateral jsonb_array_elements(bank_summaries) bank_summary(value)
+),
+page_bank_metadata as materialized (
+    select coalesce(unit.legacy_mongo_id,unit.id::text) as row_id,
+        jsonb_build_object(
+            'bank_transaction_id', unit.parent_row_id,
+            'parent_bank_transaction_id', unit.parent_bank_transaction_id::text,
+            'parent_amount', unit.parent_amount::text,
+            'bank_split_version', unit.split_version,
+            'is_split', unit.is_split,
+            'bank_split_parts', coalesce(parts.items, '[]'::jsonb)
+        ) as metadata
+    from page_bank_ids requested
+    join app.bank_transaction_units unit on coalesce(unit.legacy_mongo_id,unit.id::text)=requested.row_id
+    left join lateral (
+        select jsonb_agg(jsonb_build_object(
+            'id', item.id::text, 'category_code', item.category_code, 'amount', item.amount::text,
+            'category_label', definition.payload->>'label',
+            'category_path', case when nullif(definition.payload->>'output_primary_label','') is not null
+                then to_jsonb(array_remove(array[
+                    nullif(definition.payload->>'output_primary_label',''),
+                    nullif(definition.payload->>'output_sub_label',''),
+                    nullif(definition.payload->>'output_third_label','')],null))
+                else definition.payload->'path' end
+        ) order by item.position) as items
+        from app.bank_transaction_split_items item
+        cross join request_config config
+        left join lateral (
+            select value as payload from jsonb_array_elements(config.payload#>'{{settings,bank_transaction_tags,definitions}}')
+            where value->>'code'=item.category_code limit 1
+        ) definition on true
+        where item.bank_transaction_id=unit.parent_bank_transaction_id
+    ) parts on true
+),
 statistics as (
     select
-        count(*)::integer as bank_transaction_count,
-        count(*) filter (where direction = 'expense')::integer as expense_transaction_count,
-        count(*) filter (where direction = 'income')::integer as income_transaction_count,
+        count(distinct parent_row_id)::integer as bank_transaction_count,
+        count(distinct parent_row_id) filter (where direction = 'expense')::integer as expense_transaction_count,
+        count(distinct parent_row_id) filter (where direction = 'income')::integer as income_transaction_count,
         (
             select count(*)::integer
             from app.oa_applications oa
@@ -1023,9 +1069,9 @@ statistics as (
 ),
 source_summary as (
     select
-        count(*)::integer as bank_transaction_rows,
-        count(*) filter (where direction = 'expense')::integer as expense_rows,
-        count(*) filter (where direction = 'income')::integer as income_rows
+        count(distinct parent_row_id)::integer as bank_transaction_rows,
+        count(distinct parent_row_id) filter (where direction = 'expense')::integer as expense_rows,
+        count(distinct parent_row_id) filter (where direction = 'income')::integer as income_rows
     from bank_source
     where __SOURCE_WHERE_SQL__
 ),
@@ -1072,6 +1118,7 @@ select
         ),
         '[]'::jsonb
     ) as rows,
+    coalesce((select jsonb_object_agg(row_id,metadata) from page_bank_metadata), '{{}}'::jsonb) as bank_metadata,
     (select total from scope_summary) as total,
     (select missing_invoice_rows from scope_summary) as missing_invoice_rows,
     (select create_invoice_available_rows from scope_summary) as create_invoice_available_rows,
@@ -1126,7 +1173,7 @@ active_relations as materialized (
     select case_id, row_ids, row_types
     from {RELATION_INVOICE_READ_SQL}
     where status = 'active'
-      and relation_mode <> 'turnover_manual_closure'
+
 ),
 relation_members as materialized (
     select
@@ -1175,7 +1222,7 @@ invoice_bank_facts as materialized (
         ) as linked_bank_ids,
         coalesce(sum(abs(bank.amount)), 0) as paid_total
     from invoice_bank_members bank_member
-    left join app.bank_transactions bank
+    left join app.bank_transaction_units bank
       on coalesce(bank.legacy_mongo_id, bank.id::text) = bank_member.bank_id
      and bank.status <> 'deleted'
     group by bank_member.invoice_id
@@ -1284,12 +1331,13 @@ select
     count(*)::integer as found_count,
     count(*) filter (where txn_direction = 'outflow')::integer as expense_count,
     coalesce(sum(abs(amount)), 0) as selected_total
-from app.bank_transactions
+from app.bank_transaction_units
 where status <> 'deleted'
   and coalesce(legacy_mongo_id, id::text) = any(%s::text[])
 """
 
 BANK_DETAIL_SQL = """
+with requested as (select %s::text as row_id)
 select
     coalesce(legacy_mongo_id, id::text) as id,
     account_no,
@@ -1336,7 +1384,8 @@ select
     ) as voucher_no
 from app.bank_transactions
 where status <> 'deleted'
-  and coalesce(legacy_mongo_id, id::text) = %s
+  and id = (select parent_bank_transaction_id from app.bank_transaction_units where coalesce(legacy_mongo_id, id::text) = (select row_id from requested)
+ union select id from app.bank_transactions where coalesce(legacy_mongo_id, id::text) = (select row_id from requested))
 limit 1
 """
 
@@ -1433,7 +1482,7 @@ with active_relations as materialized (
     select relation.case_id, relation.row_ids, relation.row_types
     from {RELATION_INVOICE_READ_SQL} relation
     where relation.status = 'active'
-      and relation.relation_mode <> 'turnover_manual_closure'
+
       and %s = any(relation.row_ids)
 ),
 relation_members as materialized (
@@ -1453,7 +1502,7 @@ bank_member_ids as materialized (
     select %s
 ),
 bank_rows as materialized (
-    select
+    select distinct
         coalesce(bank.legacy_mongo_id, bank.id::text) as id,
         bank.account_no,
         coalesce(bank.account_name, '') as account_name,
@@ -1473,8 +1522,8 @@ bank_rows as materialized (
         coalesce(bank.raw_payload->'normalized_payload'->>'voucher_type', bank.raw_payload->>'voucher_type', '') as voucher_type,
         coalesce(bank.raw_payload->'normalized_payload'->>'voucher_no', bank.raw_payload->>'voucher_no', '') as voucher_no
     from bank_member_ids member
-    join app.bank_transactions bank
-      on coalesce(bank.legacy_mongo_id, bank.id::text) = member.row_id
+    join app.bank_transaction_units unit on coalesce(unit.legacy_mongo_id, unit.id::text) = member.row_id
+    join app.bank_transactions bank on bank.id = unit.parent_bank_transaction_id
      and bank.status <> 'deleted'
 ),
 invoice_rows as materialized (
@@ -1666,6 +1715,11 @@ class PostgresPendingInvoiceCanonicalRepository:
                 ),
             )
         payload = dict(row) if isinstance(row, dict) else {}
+        metadata = payload.pop("bank_metadata", {})
+        for page_row in payload.get("rows", []):
+            page_row.update(metadata.get(page_row["row_id"], {}))
+            for summary in page_row.get("bank_summaries", []):
+                summary.update(metadata.get(summary["id"], {}))
         payload["settings"] = settings
         return payload
 
@@ -2123,7 +2177,7 @@ class PendingInvoiceCanonicalQueryService:
             "title": detail["counterparty_name"] or detail["id"],
             "subtitle": detail["trade_time"] or detail["booked_date"],
             "detail_available": True,
-            "sections": [{"title": _bank_section_title(detail), "fields": _bank_detail_fields(detail)}],
+            "sections": [{"title": _bank_section_title(detail), "fields": _bank_detail_fields(detail), "bank_transaction_id": detail["id"]}],
         }
 
     def invoice_detail(self, invoice_id: str) -> dict[str, Any]:
@@ -2384,6 +2438,7 @@ def _detail_sections(
             sections.append({
                 "title": f"{title} {index}" if multiple else title,
                 "fields": fields,
+                **({"bank_transaction_id": str(row["id"])} if title == "银行流水" else {}),
             })
     return sections
 
@@ -2849,6 +2904,12 @@ def _row_payload(row: dict[str, Any]) -> dict[str, Any]:
         "effective_tag_primary_label": category.get("category_primary_label"),
         "effective_tag_sub_label": category.get("category_sub_label"),
         "effective_tag_label_path": list(category.get("category_label_path") or []),
+        "bank_transaction_id": str(row.get("bank_transaction_id") or row.get("row_id") or ""),
+        "parent_bank_transaction_id": str(row.get("parent_bank_transaction_id") or ""),
+        "parent_amount": _money(row.get("parent_amount", row.get("amount"))),
+        "is_split": bool(row.get("is_split")),
+        "bank_split_version": int(row.get("bank_split_version") or 0),
+        "bank_split_parts": list(row.get("bank_split_parts") or []),
     }
     if not bank_summaries:
         bank_summaries = [

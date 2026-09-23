@@ -547,11 +547,12 @@ describe("BankFlowRuleBatchPage", () => {
     });
     const forbiddenLegacySurfaces = bankFlowRuleBatchSourceFiles.flatMap((path) => {
       const source = sourceByPath[path];
-      return /RefreshOutlinedIcon|CloseIcon|TextField|(?<!Finance)TableCell|(?<!Finance)TableRow|(?<!Finance)TableHead|(?<!Finance)TableBody|(?<!App)Drawer\b|DialogTitle|DialogContent|DialogActions|Snackbar|Chip|IconButton/.test(source)
+      return /RefreshOutlinedIcon|CloseIcon|TextField|(?<!Finance)TableCell|(?<!Finance)TableRow|(?<!Finance)TableHead|(?<!Finance)TableBody|(?<!App)(?<!BankTransaction)Drawer\b|DialogTitle|DialogContent|DialogActions|Snackbar|Chip|IconButton/.test(source)
         ? [path]
         : [];
     });
     const pageSource = sourceByPath["src/pages/BankFlowRuleBatchPage.tsx"];
+    expect(readWebSource("src/features/bankSplits/BankTransactionDrawer.tsx")).toContain("<AppDrawer");
     const primitiveSource = `${pageSource}\n${sourceByPath["src/features/bankFlowRuleBatches/components.tsx"]}`;
     const missingPrimitiveTargets = [
       pageSource.includes("PageScaffold") ? null : "BankFlowRuleBatchPage.tsx should keep PageScaffold",

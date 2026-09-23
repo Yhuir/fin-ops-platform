@@ -542,7 +542,7 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     assert canonical_invoice_facts_sql.count("jsonb_array_elements(") == 1
     assert "source_flags.has_manual_import" in canonical_invoice_facts_sql
     assert "source_flags.has_direct_oa_attachment" in canonical_invoice_facts_sql
-    assert sql.count("from app.invoices invoice") == 1
+    assert canonical_invoice_facts_sql.count("from app.invoices invoice") == 1
     assert "from canonical_invoice_facts invoice" in invoice_statistics_sql
     assert "jsonb_array_elements(" not in invoice_statistics_sql
     assert "invoice.has_manual_import" in invoice_statistics_sql
@@ -745,7 +745,7 @@ def test_etc_batch_accounting_summary_is_excluded_from_document_evidence() -> No
         "unassigned_relation_invoices as materialized (", 1
     )[1].split("unassigned_invoice_anomaly_items as materialized (", 1)[0]
     unlinked_expense_sql = sql.split(
-        "unlinked_expense_items as materialized (", 1
+        "evidence_expense_items as materialized (", 1
     )[1].split("unlinked_expense_anomaly_items as materialized (", 1)[0]
 
     assert "canonical_row.source_kind" in relation_members_sql

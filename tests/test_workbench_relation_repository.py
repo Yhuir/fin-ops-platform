@@ -188,8 +188,10 @@ def test_relation_save_persists_only_canonical_facts_and_history() -> None:
     assert any("insert into app.workbench_pair_relation_history" in sql for sql in execute_sql)
     assert any("on conflict (id) do nothing" in sql for sql in execute_sql)
     assert not connection.fetch_one_calls
-    assert len(connection.fetch_all_calls) == 1
+    assert len(connection.fetch_all_calls) == 2
     assert connection.fetch_all_calls[0][1] == (["CASE-1"],)
+    assert connection.fetch_all_calls[1][1] == (["CASE-1"], [])
+    assert "fact_date" in connection.fetch_all_calls[1][0]
     assert not any("job.read_model_dirty_scopes" in sql or "job.outbox_events" in sql for sql in execute_sql)
 
 
@@ -210,8 +212,9 @@ def test_relation_save_filters_to_changed_case_ids_without_page_fan_out() -> Non
     assert len(relation_params) == 1
     assert relation_params[0][0] == "CASE-2"
     assert not connection.fetch_one_calls
-    assert len(connection.fetch_all_calls) == 1
+    assert len(connection.fetch_all_calls) == 2
     assert connection.fetch_all_calls[0][1] == (["CASE-2"],)
+    assert connection.fetch_all_calls[1][1] == (["CASE-2"], [])
 
 
 def test_relation_delta_save_has_the_same_canonical_only_io_boundary() -> None:
@@ -396,6 +399,10 @@ def test_canonical_relation_member_lock_reports_deleted_member_and_locks_existin
         def fetch_all(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, object]]:
             self.fetch_all_calls.append((sql, params))
             normalized_sql = " ".join(sql.lower().split())
+            if "from app.bank_transaction_units" in normalized_sql:
+                assert "join app.bank_transactions parent" in normalized_sql
+                assert "for share of parent" in normalized_sql
+                return [{"row_id": "bank-present"}]
             assert "for key share" in normalized_sql
             if "from app.oa_applications" in normalized_sql:
                 assert "from app.oa_pending_payment_admissions" in normalized_sql
@@ -405,8 +412,6 @@ def test_canonical_relation_member_lock_reports_deleted_member_and_locks_existin
                     ["oa-deleted", "oa-present"],
                 )
                 return [{"row_id": "oa-present", "source_count": 1}]
-            if "from app.bank_transactions" in normalized_sql:
-                return [{"row_id": "bank-present"}]
             if "from app.invoices" in normalized_sql:
                 return [{"row_id": "invoice-present"}]
             return []
@@ -474,3 +479,26 @@ def test_relation_member_lock_includes_case_identity_and_persisted_members_in_st
 
     assert locked == ["bank:bank-1", "case:CASE-1", "invoice:invoice-1"]
     assert len(connection.fetch_all_calls) == 2
+
+
+def test_restored_bank_requirements_are_read_once_and_aggregated_per_current_group() -> None:
+    from unittest.mock import patch
+
+    from fin_ops_platform.services.bank_details_canonical_query import PostgresBankDetailsCanonicalQueryRepository
+
+    connection = RecordingConnection()
+    repository = PostgresWorkbenchRelationRepository(connection)
+    settings = {"paired_policy": {"version": 9, "requirements_by_tag_code": {
+        "principal": {"requires_oa": False, "requires_invoice": False},
+        "interest": {"requires_oa": True, "requires_invoice": True},
+    }}}
+    with patch.object(PostgresBankDetailsCanonicalQueryRepository, "settings_payload", return_value=settings) as read_settings:
+        with patch.object(PostgresBankDetailsCanonicalQueryRepository, "effective_category_projection_rows", return_value={
+            "bank-a": {"effective_category_code": "principal"}, "bank-b": {"effective_category_code": "interest"},
+        }) as read_categories:
+            result = repository.current_bank_relation_requirements({"loan-only": ["bank-a"], "mixed": ["bank-a", "bank-b"]})
+    read_settings.assert_called_once_with(connection)
+    read_categories.assert_called_once_with(connection, settings=settings, transaction_ids=["bank-a", "bank-b"])
+    assert result["loan-only"]["requires_invoice"] is False
+    assert result["mixed"]["requires_invoice"] is True
+    assert result["mixed"]["paired_requirement_version"] == 9

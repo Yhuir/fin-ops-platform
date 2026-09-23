@@ -27,7 +27,7 @@ class PostgresWorkbenchRelationReceiptRepository:
                    counterparty_name_raw, normalized_counterparty_name,
                    amount, txn_date, trade_time, pay_receive_time,
                    currency, summary, remark, updated_at
-            from app.bank_transactions
+            from app.bank_transaction_units
             where coalesce(legacy_mongo_id, id::text) = any(%s::text[])
             order by coalesce(pay_receive_time, trade_time, txn_date::timestamptz), id
             """,

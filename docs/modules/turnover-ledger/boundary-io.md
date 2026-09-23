@@ -133,3 +133,14 @@
 ## 右侧抽屉交互（2026-09-15）
 
 本模块复用的右侧抽屉遵循[统一关闭行为](../../dev/right-drawer-dismissal.md)：外部点击/Esc 不关闭，X 继续执行已有关闭保护。业务 owner 持有保存/确认完成状态，公共 AppDrawer 仅展示 `completion`；不改变本模块后端 API、权限、事实写入及查询 I/O。旧的重复退出按钮和成功自动关闭路径已移除，内部编辑取消仍按局部职责处理。
+
+
+## 2026-09-23 流水子项用途边界
+
+往来金额消费 `app.bank_transaction_units` 及统一分类 owner，子项用途由标签配置语义确定。正式 case 保留全部银行成员，但闭环核对只使用 `turnover_bank_row_ids`（配置语义为外部往来的成员）；费用子项不会制造本金差额。详情 bank_rows 按真实父流水去重，并显示原始金额及父身份。
+
+拆分写事务通过 `PostgresTurnoverBankSplitRepository.apply` 调用往来 owner：按受影响往来方批量读取用途；仅锁目标 extras 和该方已有往来关系，不锁全量补充信息。已有手工往来 relation 重建成员和金额，旧身份保留撤回审计；extras 仅在新旧成员存在明确一对一映射时移动并审计。存在多义或目标已有 extras 时显式拒绝该次保存，事务整体回滚；不得复制利率/备注到多个新往来，也不得查询时隐藏回退旧父身份。
+
+验证：`tests/test_bank_split_consumers_postgres.py` 使用隔离 PostgreSQL 数据库覆盖原始金额不变、子项标签筛选、成本待分配、待票金额和详情父身份、往来补充信息迁移。往来手工成员重建和含利息 case 的本金闭环由对应 service/query 单元测试覆盖。
+
+旧补充标签 API 保留给未拆分流水，其 writer 只接收当前配置中 active 且具有外部往来 action 语义的标签 code，并作为显式人工选择持久化；禁止使用固定 builtin leaf 白名单或读取时回退旧 category。生产页面当前无该 API 的直接调用，标签设置菜单继续读取动态 `active_tags`。已拆分父项/子项由统一拆分 owner 编辑。

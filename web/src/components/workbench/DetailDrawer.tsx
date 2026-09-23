@@ -1,5 +1,7 @@
+import { useBankSplitClose } from "../../features/bankSplits/useBankSplitClose";
+import BankTransactionDetailContent from "../../features/bankSplits/BankTransactionDetailContent";
 import AppDrawer from "../common/AppDrawer";
-import EntityDetailContent, {
+import {
   preparePublicDetailSections,
   type EntityDetailField,
 } from "../common/EntityDetailContent";
@@ -10,6 +12,7 @@ type DetailDrawerProps = {
   loading: boolean;
   error: string | null;
   onClose: () => void;
+  onBankSplitSaved?: () => void | Promise<void>;
 };
 
 const drawerTitles: Record<WorkbenchRecord["recordType"], string> = {
@@ -24,7 +27,8 @@ const sectionTitles: Record<WorkbenchRecord["recordType"], string> = {
   invoice: "基本信息",
 };
 
-export default function DetailDrawer({ row, loading, error, onClose }: DetailDrawerProps) {
+export default function DetailDrawer({ row, loading, error, onClose, onBankSplitSaved }: DetailDrawerProps) {
+  const { close, setDirty } = useBankSplitClose(onClose);
   const open = Boolean(row);
   const title = row ? drawerTitles[row.recordType] : "详情";
   const sections = row
@@ -58,10 +62,10 @@ export default function DetailDrawer({ row, loading, error, onClose }: DetailDra
       open={open}
       title={title}
       width="min(800px, 100vw)"
-      onClose={onClose}
+      onClose={close}
     >
       <div className="workbench-detail-drawer__body">
-        <EntityDetailContent error={error} loading={loading} sections={sections} />
+        <BankTransactionDetailContent onSplitDirtyChange={setDirty} onBankSplitSaved={onBankSplitSaved} bankTransactionId={row?.recordType === "bank" ? row.id : undefined} error={error} loading={loading} sections={sections} />
       </div>
     </AppDrawer>
   );

@@ -1,7 +1,9 @@
+import { useBankSplitClose } from "../../features/bankSplits/useBankSplitClose";
+import BankTransactionDetailContent from "../../features/bankSplits/BankTransactionDetailContent";
 import { useEffect, useMemo, useState } from "react";
 
 import type { PendingInvoiceRelationDetail, PendingInvoiceRelationDetailKind } from "../../features/pendingInvoices/types";
-import EntityDetailContent, { preparePublicDetailSections } from "../common/EntityDetailContent";
+import { preparePublicDetailSections } from "../common/EntityDetailContent";
 import PendingInvoiceDrawerFrame from "./PendingInvoiceDrawerFrame";
 
 type PendingInvoiceRelationDrawerProps = {
@@ -10,6 +12,7 @@ type PendingInvoiceRelationDrawerProps = {
   detailKind?: PendingInvoiceRelationDetailKind;
   loadDetail: (transactionId: string) => Promise<PendingInvoiceRelationDetail>;
   onClose: () => void;
+  onBankSplitSaved?: () => void | Promise<void>;
 };
 
 const drawerTitles: Record<PendingInvoiceRelationDetailKind, string> = {
@@ -25,7 +28,9 @@ export default function PendingInvoiceRelationDrawer({
   detailKind = "all",
   loadDetail,
   onClose,
+  onBankSplitSaved,
 }: PendingInvoiceRelationDrawerProps) {
+  const { close, setDirty } = useBankSplitClose(onClose);
   const [detail, setDetail] = useState<PendingInvoiceRelationDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,12 +72,12 @@ export default function PendingInvoiceRelationDrawer({
   return (
     <PendingInvoiceDrawerFrame
       closeLabel="关闭详情抽屉"
-      onClose={onClose}
+      onClose={close}
       open={open}
       title={drawerTitles[detailKind]}
       width="min(800px, 100vw)"
     >
-      <EntityDetailContent
+      <BankTransactionDetailContent onSplitDirtyChange={setDirty} onBankSplitSaved={onBankSplitSaved}
         emptyMessage="暂无可展示的详情。"
         error={error}
         loading={loading}

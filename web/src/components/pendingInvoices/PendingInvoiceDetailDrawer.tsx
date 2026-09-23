@@ -1,10 +1,12 @@
+import { useBankSplitClose } from "../../features/bankSplits/useBankSplitClose";
+import BankTransactionDetailContent from "../../features/bankSplits/BankTransactionDetailContent";
 import { useEffect, useState } from "react";
 
 import type {
   PendingInvoiceObjectDetail,
   PendingInvoiceObjectDetailTarget,
 } from "../../features/pendingInvoices/types";
-import EntityDetailContent, { preparePublicDetailSections } from "../common/EntityDetailContent";
+import { preparePublicDetailSections } from "../common/EntityDetailContent";
 import PendingInvoiceDrawerFrame from "./PendingInvoiceDrawerFrame";
 
 type PendingInvoiceDetailDrawerProps = {
@@ -12,6 +14,7 @@ type PendingInvoiceDetailDrawerProps = {
   target: PendingInvoiceObjectDetailTarget | null;
   loadDetail: (target: PendingInvoiceObjectDetailTarget) => Promise<PendingInvoiceObjectDetail>;
   onClose: () => void;
+  onBankSplitSaved?: () => void | Promise<void>;
 };
 
 const fallbackTitles: Record<PendingInvoiceObjectDetailTarget["kind"], string> = {
@@ -25,7 +28,9 @@ export default function PendingInvoiceDetailDrawer({
   target,
   loadDetail,
   onClose,
+  onBankSplitSaved,
 }: PendingInvoiceDetailDrawerProps) {
+  const { close, setDirty } = useBankSplitClose(onClose);
   const [detail, setDetail] = useState<PendingInvoiceObjectDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +71,7 @@ export default function PendingInvoiceDetailDrawer({
   const sections = detail ? preparePublicDetailSections(detail.sections) : [];
   const body = (
     <div className="pending-invoice-detail-body">
-      <EntityDetailContent
+      <BankTransactionDetailContent onSplitDirtyChange={setDirty} onBankSplitSaved={onBankSplitSaved} bankTransactionId={target?.kind === "bankTransaction" ? target.id : undefined}
         detailAvailable={detail?.detailAvailable}
         error={error}
         loading={loading}
@@ -79,7 +84,7 @@ export default function PendingInvoiceDetailDrawer({
   return (
     <PendingInvoiceDrawerFrame
       closeLabel="关闭详情抽屉"
-      onClose={onClose}
+      onClose={close}
       open={open}
       title={title}
       width="min(800px, 100vw)"

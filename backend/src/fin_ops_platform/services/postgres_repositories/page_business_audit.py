@@ -16,22 +16,22 @@ from fin_ops_platform.services.postgres_repositories.audit_report import (
     evaluate_audit_issues,
     use_audit_snapshot,
 )
+from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
+    BankFlowRuleBatchCanonicalQueryRepository,
+)
 from fin_ops_platform.services.postgres_repositories.canonical_etc_summary_sql import (
     CANONICAL_ETC_BATCH_CANDIDATES_SQL,
     WORKBENCH_RELATION_EXTERNAL_ETC_BATCH_ID_SQL,
-)
-from fin_ops_platform.services.postgres_repositories.page_consumer_relation_audit import (
-    BANK_FLOW_RULE_BATCH_CONSUMER,
-    page_consumer_relation_edge_equality_issues,
-)
-from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
-    BankFlowRuleBatchCanonicalQueryRepository,
 )
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_query import (
     list_oa_pending_payment_relation_visibility_gaps,
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     COMPLETED_WORKFLOW_STATUS_SQL,
+)
+from fin_ops_platform.services.postgres_repositories.page_consumer_relation_audit import (
+    BANK_FLOW_RULE_BATCH_CONSUMER,
+    page_consumer_relation_edge_equality_issues,
 )
 
 
@@ -130,7 +130,7 @@ PAGE_AUDIT_CONTRACTS: dict[str, PageAuditContract] = {
         domain_key="batch_accounting",
         label="批量账务",
         source_tables=(
-            "app.bank_transactions",
+            "app.bank_transaction_units",
             "app.oa_applications",
             "app.invoices",
             "app.etc_business_batches",
@@ -152,7 +152,7 @@ PAGE_AUDIT_CONTRACTS: dict[str, PageAuditContract] = {
         domain_key="bank_flow_rule_batches",
         label="流水规则批量处理",
         source_tables=(
-            "app.bank_transactions",
+            "app.bank_transaction_units",
             "app.bank_transaction_category_confirmations",
             "app.bank_transaction_categories",
             "app.app_settings",
@@ -486,7 +486,7 @@ def _turnover_ledger_direct_canonical_issues(
             select member.case_id as subject_id, to_char(member.month_scope, 'YYYY-MM') as scope_key,
                    member.row_id, member.row_type
             from members member
-            left join app.bank_transactions source
+            left join app.bank_transaction_units source
               on (
                     source.id::text = member.row_id
                  or source.legacy_mongo_id = member.row_id
@@ -541,7 +541,7 @@ def _turnover_ledger_direct_canonical_issues(
             select member.relation_id as subject_id, to_char(member.scope_month, 'YYYY-MM') as scope_key,
                    member.row_id
             from relation_members member
-            left join app.bank_transactions source
+            left join app.bank_transaction_units source
               on source.id::text = member.row_id
               or source.legacy_mongo_id = member.row_id
             where source.id is null
@@ -601,7 +601,7 @@ def _bank_details_direct_canonical_issues(
             select member.case_id as subject_id, to_char(member.month_scope, 'YYYY-MM') as scope_key,
                    member.row_id, member.row_type
             from members member
-            left join app.bank_transactions source
+            left join app.bank_transaction_units source
               on (
                     source.id::text = member.row_id
                  or source.legacy_mongo_id = member.row_id
@@ -1022,7 +1022,7 @@ def _key_display_field_issues(
                     from batch_relations relation
                     join lateral unnest(relation.row_ids) with ordinality
                       as member(row_id, ordinality) on true
-                    left join app.bank_transactions bank
+                    left join app.bank_transaction_units bank
                       on coalesce(bank.legacy_mongo_id, bank.id::text) = member.row_id
                      and bank.status <> 'deleted'
                     left join app.oa_applications oa
@@ -1099,7 +1099,7 @@ def _key_display_field_issues(
                            end as recalculated_total_amount
                     from source_batches batch
                     left join lateral unnest(batch.bank_transaction_ids) member(row_id) on true
-                    left join app.bank_transactions bank
+                    left join app.bank_transaction_units bank
                       on coalesce(bank.legacy_mongo_id, bank.id::text) = member.row_id
                      and bank.status <> 'deleted'
                     group by batch.batch_id, batch.scope_month, batch.canonical_batch_type, batch.total_amount,

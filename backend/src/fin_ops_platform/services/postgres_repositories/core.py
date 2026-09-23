@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import is_dataclass
+from dataclasses import fields, is_dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from enum import Enum
@@ -743,6 +743,49 @@ class PostgresCoreRepository:
             (normalized_ids, normalized_ids),
         )
         return [self._transaction_from_row(row) for row in rows if isinstance(row, dict)]
+
+    def list_bank_transaction_units_by_ids(self, transaction_ids: list[str]) -> list[BankTransaction]:
+        normalized_ids = self._unique_texts(transaction_ids)
+        if not normalized_ids:
+            return []
+        rows = self._connection.fetch_all(
+            """
+            select id::text as postgres_id, coalesce(legacy_mongo_id, id::text) as legacy_id,
+                   account_no, account_name, txn_direction, counterparty_name_raw,
+                   normalized_counterparty_name, amount, signed_amount, written_off_amount,
+                   txn_date, trade_time, pay_receive_time, bank_serial_no, source_unique_key,
+                   data_fingerprint, legacy_source_batch_id, counterparty_id, project_id, balance,
+                   currency, summary, remark, bank_text_fields, status, raw_payload, is_split, parent_row_id
+            from app.bank_transaction_units
+            where legacy_mongo_id = any(%s::text[]) or id::text = any(%s::text[])
+            order by created_at, id
+            """,
+            (normalized_ids, normalized_ids),
+        )
+        from fin_ops_platform.services.bank_transaction_unit import BankTransactionUnit
+        from fin_ops_platform.services.postgres_repositories.bank_transaction_splits import (
+            PostgresBankTransactionSplitRepository,
+        )
+
+        parent_ids = list(dict.fromkeys(row["parent_row_id"] for row in rows if row["is_split"]))
+        parents = {bank.id: bank for bank in self.list_bank_transactions_by_ids(parent_ids)}
+        split_details = PostgresBankTransactionSplitRepository(self._connection).load_many(self._connection, parent_ids) if parent_ids else []
+        details = {item["transaction_id"]: item for item in split_details}
+        roles = {item["code"]: item.get("turnover_role") for detail in split_details for item in detail["tag_definitions"]}
+        unit_codes = {part["id"]: part["category_code"] for detail in split_details for part in detail["parts"]}
+        result = []
+        for row in rows:
+            bank = self._transaction_from_row(row)
+            if row["is_split"]:
+                detail = details[row["parent_row_id"]]
+                bank = BankTransactionUnit(
+                    **{item.name: getattr(bank, item.name) for item in fields(BankTransaction)},
+                    parent_transaction=parents[row["parent_row_id"]],
+                    bank_split_parts=detail["parts"], bank_split_version=detail["version"],
+                    turnover_role=roles[unit_codes[bank.id]], split_category_code=unit_codes[bank.id],
+                )
+            result.append(bank)
+        return result
 
     def load_imports(self) -> dict[str, Any]:
         batches = self._connection.fetch_all(

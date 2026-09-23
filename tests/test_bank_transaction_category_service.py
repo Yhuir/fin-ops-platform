@@ -1,17 +1,17 @@
-import unittest
 import json
-from pathlib import Path
 import tempfile
+import unittest
+from pathlib import Path
 
+from fin_ops_platform.services.bank_batch_application_service import canonical_snapshot_version
 from fin_ops_platform.services.bank_transaction_category_service import (
-    BankAutoTagRulesValidationError,
     BANK_TRANSACTION_CATEGORY_LABELS,
+    BankAutoTagRulesValidationError,
     BankTransactionCategoryConflictError,
     BankTransactionCategoryService,
     BankTransactionCategoryValidationError,
     bank_transaction_tag_dictionary_display_payload,
 )
-from fin_ops_platform.services.bank_batch_application_service import canonical_snapshot_version
 
 
 class BankTransactionCategoryServiceTests(unittest.TestCase):
@@ -1086,10 +1086,14 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
             transaction_exists=lambda transaction_id: transaction_id in {"txn-1", "txn-2"},
         )
 
+        service.configure_tag_dictionary({"definitions":[{"code":"configured-turnover", "label":"借入款",
+            "path":["外部往来款收款","借入款","个人往来"], "source":"custom", "status":"active",
+            "output_primary_label":"外部往来款收款", "output_sub_label":"借入款",
+            "turnover_role":"external_turnover", "turnover_action_type":"pending_repayment", "rules":{}}]})
         with self.assertRaises(BankTransactionCategoryValidationError) as context:
             service.apply_turnover_updates(
                 [
-                    {"transaction_id": "txn-1", "category_code": "borrow_in_personal_pending_repayment", "expected_version": 0},
+                    {"transaction_id": "txn-1", "category_code": "configured-turnover", "expected_version": 0},
                     {"transaction_id": "txn-2", "category_code": "fee", "expected_version": 0},
                 ],
                 actor="YNSYLP005",
@@ -1103,15 +1107,24 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
             [
                 {
                     "transaction_id": "txn-1",
-                    "category_code": "borrow_in_personal_pending_repayment",
+                    "category_code": "configured-turnover",
                     "expected_version": 0,
                 }
             ],
             actor="YNSYLP005",
         )
 
-        self.assertEqual(result["updated_categories"][0]["category_code"], "borrow_in_personal_pending_repayment")
+        self.assertEqual(result["updated_categories"][0]["category_code"], "configured-turnover")
         self.assertEqual(service.get("txn-1")["source"], "turnover_ledger")
+
+        self.assertTrue(service.get("txn-1")["manual_assignment"])
+        dictionary = service.tag_dictionary_payload()
+        for definition in dictionary["definitions"]:
+            if definition["code"] == "configured-turnover":
+                definition["status"] = "archived"
+        service.configure_tag_dictionary(dictionary)
+        with self.assertRaises(BankTransactionCategoryValidationError):
+            service.apply_turnover_updates([{"transaction_id":"txn-2","category_code":"configured-turnover","expected_version":0}],actor="test")
 
 
 if __name__ == "__main__":

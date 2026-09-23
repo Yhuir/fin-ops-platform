@@ -231,3 +231,5 @@ p50/p95/p99、canonical audit、health、worker、PostgreSQL outbox/dead-letter 
 Migration 0176 为成本分配增加必填的 OA 单元金额锁定元数据；旧 writer 不能跨版本继续写入，加入现有 forward-only migration 清单。迁移不修改 OA、流水或既有成本金额。
 
 Migration 0177 增加成本自有 OA 来源行标签覆盖，不修改金额、来源或旧版本。旧 reader 会忽略覆盖、旧 writer 不具备完整合同，故纳入既有 forward-only 清单；不得回切忽略该字段的版本。任务无需新建生产数据库备份，不删除主数据库。
+
+Migration 0178/0179 增加持久化流水拆分及用途投影，属于 forward-only：保存拆分后旧 reader/writer 无法解释子项身份和关联，禁止回切旧链路。父流水金融事实不改写；失败保持 maintenance 并向前修复。历史外部往来成本撤销使用受控迁移命令，保留审计，不删除主数据库。

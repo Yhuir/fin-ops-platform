@@ -40,7 +40,7 @@
 | payment status | OA integration/oa-sync worker | `app.oa_pending_payment_status_snapshots`，按 tenant + flow ids 批量读取 |
 | completed relation | Workbench relation owner | 只读 `app.workbench_pair_relations` 中全部 `status='active'`；混合收支关系只把可解析 outflow 作为支付证据，不读 Workbench page payload 或 `workbench_relation` projection |
 | in-progress relation | Workbench relation owner | 与 completed OA 共用 `app.workbench_pair_relations.status='active'`；workflow status 只决定关联台 zone，不产生第二套 relation owner |
-| bank facts | core/bank owner | `app.bank_transactions`，只批量读取当前页 relation members |
+| bank facts | core/bank owner | `app.bank_transaction_units`，只批量读取当前页 relation members；拆分子项以自己的 ID/金额参与支付关联 |
 | input invoice facts | invoice owner | `app.invoices`，只批量读取当前页 relation members |
 | relation write command | frontend | 只创建/扩展 active relation；保留 outflow、幂等、CAS/冲突和 audit 校验，不直接写 OA 支付状态 |
 
@@ -170,3 +170,14 @@ OA 详情复用同次 canonical 批量 hydration，按请求 OA ID 选择原单�
 - OA 待付款、进项使用及待找发票共用 `postgres_repositories/relation_invoice_members.py` 的只读成员展开：通过提交批次准确身份、active bridge 或既有 canonical `etc_invoice_id` 取得真实发票；同一 canonical 发票去重，软删除和撤回关系按当前事实处理。保留原关系 ETC summary，不另写一套关系，不把 ETC 原始票据伪造成正式发票。
 - 读取在页面既有只读 snapshot 内集合执行；没有新增缓存、read model、worker 或逐票查询。进项合并组搜索覆盖全部成员，+N 与详情抽屉使用同一成员集合，流水/OA 金额按实体去重；汇总付款不按每张发票复制累计。
 - 文件范围新增共享 repository SQL；各页面现有 query/assembler/API DTO 和权限保持各自 owner。旧的仅以显式 invoice row ID 读取 ETC 关系的路径已替换。回归入口：`tests/test_etc_relation_page_reads_postgres.py`，覆盖进行中 OA、47 张票、显式重复成员、成员搜索、删除、撤回与三页详情。
+
+## 2026-09 流水拆分合同
+
+银行原金融事实与导入身份不变；银行拆分 owner 的持久化子项通过用途视图进入业务关联。详情使用父交易，列表标签显示当前子项；金额统计不得父子重复相加。 具体输入/输出、跨模块消费、旧链路清理及测试见 [流水拆分 I/O](../../dev/bank-transaction-splits.md)。
+
+### 流水拆分写入边界（2026-09-23）
+
+- `OaPendingPaymentCommandService` 接收显式 `bank_transaction_reader(row_ids)`，一次批量读取选中用途单元；PostgreSQL 由 `bank_transactions_for_command` 从 units 读取，禁止通过 import service 原流水 get 方法解析子项。
+- missing child 在关系写入前返回 `bank_transaction_not_found`；原 parent 已拆分后不再作为付款用途单元。分类读取使用 canonical category projection 的 units 口径。
+- 本地 JSON backend 明确只提供未拆分银行身份；其 relation repository adapter 的 current-unit resolver 为恒等映射，不猜测拆分。
+- 测试：`test_oa_pending_payment_command_service.py` 批量读取、子项金额、缺失身份；`test_bank_split_relations_postgres.py` 真实子项读取及原 parent 排除。

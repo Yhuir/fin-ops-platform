@@ -37,6 +37,7 @@ _ROUTE_PAGE_PREFIXES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("/reconciliation", ("reconciliation-workbench",)),
     ("/api/cost-statistics", ("cost-statistics",)),
     ("/api/bank-details", ("bank-details",)),
+    ("/api/bank-transactions", ("bank-details", "reconciliation-workbench", "cost-statistics", "turnover-ledger", "pending-invoices", "input-invoice-usage", "output-invoice-collections", "oa-pending-payments", "batch-accounting", "bank-flow-rule-batches")),
     ("/api/cash", ("cash",)),
     ("/api/no-oa-bank-batches", ("bank-details",)),
     ("/api/oa-pending-payments", ("oa-pending-payments",)),

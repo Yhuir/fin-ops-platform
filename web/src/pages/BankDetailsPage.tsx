@@ -1,3 +1,5 @@
+import BankSplitChips from "../features/bankSplits/BankSplitChips";
+import BankTransactionDrawer from "../features/bankSplits/BankTransactionDrawer";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -12,7 +14,7 @@ import {
   PopoverTrigger,
   Tooltip,
 } from "@heroui/react";
-import { Filter, RefreshCw, Tags } from "lucide-react";
+import { Eye, Filter, RefreshCw, Tags } from "lucide-react";
 
 import {
   FinanceTable,
@@ -1430,6 +1432,7 @@ function BankTextCell({ value }: { value: string }) {
 }
 
 export default function BankDetailsPage() {
+  const [detailTransaction, setDetailTransaction] = useState<BankDetailTransaction | null>(null);
   const { active, activationGeneration } = useOptionalPageActivation("bank-details");
   const { runOperation } = useGlobalOperationOverlay();
   const { canOperateData } = useSessionPermissions();
@@ -2384,6 +2387,7 @@ export default function BankDetailsPage() {
                             <span className={`bank-counterparty-name ${counterpartyNameDensity(row.counterpartyName)}`}>
                               {row.counterpartyName}
                             </span>
+                            <button type="button" aria-label={`查看银行流水 ${row.counterpartyName} 详情`} onClick={() => setDetailTransaction(row)}><Eye size={16} /></button>
                             <div className="bank-counterparty-meta-row">
                               <span className="bank-trade-time-text">{formatDateTimeText(row.tradeTime)}</span>
                               {row.sameTimeOrderStatus === "unresolved" ? <BankSameTimeOrderHint /> : null}
@@ -2404,7 +2408,7 @@ export default function BankDetailsPage() {
                           </div>
                         </FinanceTableCell>
                         <FinanceTableCell className="bank-col-type" columnRole="status" textValue={row.effectiveCategoryLabel || row.autoCategoryLabel || row.categoryResolutionStatus}>
-                          <TypeCell
+                          {row.bankSplitParts?.length ? <BankSplitChips parts={row.bankSplitParts} /> : <TypeCell
                             row={row}
                             autoTagRules={activeAutoTagRules}
                             confirming={categoryMutationId === row.id}
@@ -2413,7 +2417,7 @@ export default function BankDetailsPage() {
                             onAssign={handleAssignCategory}
                             onRevoke={handleRevokeCategoryConfirmation}
                             onClearAssignment={handleClearCategoryAssignment}
-                          />
+                          />}
                         </FinanceTableCell>
                         <FinanceTableCell className="bank-col-amount" columnRole="amount" textValue={formatMoney(row.amount)}>
                           <div className="bank-amount-cell">
@@ -2462,6 +2466,19 @@ export default function BankDetailsPage() {
           </section>
         </div>
       </div>
+      <BankTransactionDrawer transactionId={detailTransaction?.id ?? null} onClose={() => setDetailTransaction(null)}
+        onSaved={async () => { await reloadTransactionsAfterRulesMutation(); }}
+        sections={detailTransaction ? [{ title: "交易信息", fields: [
+          { label: "金额", value: detailTransaction.amount },
+          { label: "收支方向", value: detailTransaction.directionLabel },
+          { label: "对方户名", value: detailTransaction.counterpartyName },
+          { label: "交易时间", value: detailTransaction.tradeTime },
+          { label: "银行", value: detailTransaction.bankName },
+          { label: "账号后四位", value: detailTransaction.accountLast4 },
+          { label: "余额", value: detailTransaction.balance },
+          { label: "摘要", value: detailTransaction.summary },
+          { label: "备注", value: detailTransaction.noteText },
+        ] }] : []} />
       <AutoTagRulesDrawer
         open={rulesDrawerOpen}
         onClose={() => setRulesDrawerOpen(false)}

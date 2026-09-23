@@ -315,7 +315,7 @@ class PostgresOaPendingPaymentQueryRepositoryTests(unittest.TestCase):
 
         self.assertEqual(len(connection.fetch_one_calls), 1)
         sql, params = connection.fetch_one_calls[0]
-        self.assertIn("from app.bank_transactions", sql)
+        self.assertIn("from app.bank_transaction_units", sql)
         self.assertIn("from app.workbench_pair_relations", sql)
         self.assertNotIn("from app.oa_pending_payment_bank_relations", sql)
         self.assertIn("relation.status = 'active'", sql)

@@ -96,9 +96,12 @@ def test_manual_unlink_survives_refresh_restart_and_duplicate_source_removal(tmp
 
 def test_reparse_preserves_manual_decisions_and_rejects_stale_version(tmp_path):
     import pytest
-    from fin_ops_platform.services.etc_reconciliation_models import SourceFileKind, FileParseResult
+    from fin_ops_platform.services.etc_reconciliation_models import FileParseResult, SourceFileKind
     from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
-    from fin_ops_platform.services.etc_reconciliation_source_upload_service import EtcReconciliationSourceUploadService, EtcReconciliationSourceUpload
+    from fin_ops_platform.services.etc_reconciliation_source_upload_service import (
+        EtcReconciliationSourceUpload,
+        EtcReconciliationSourceUploadService,
+    )
 
     service = EtcReconciliationTaskService(data_dir=tmp_path)
     task = service.create_task(title='test', created_by='test')

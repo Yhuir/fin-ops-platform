@@ -9,6 +9,38 @@ class PostgresCostStatisticsManualAllocationRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
+    def revoke_for_bank_split(self, case_ids: list[str], *, actor_id: str, parent_id: str) -> list[str]:
+        """Revoke obsolete decisions, preserving the full decision in audit."""
+        from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
+
+        if not case_ids:
+            return []
+        rows = self._connection.fetch_all(
+            "delete from app.cost_statistics_manual_allocations where relation_case_id = any(%s::text[]) returning *",
+            (sorted(set(case_ids)),),
+        )
+        audit = PostgresOperationsAuditRepository(self._connection)
+        for row in rows:
+            audit.append_operation_event({
+                "event_type": "operation.completed", "object_type": "cost_statistics_manual_allocation",
+                "object_id": row["relation_case_id"], "actor_id": actor_id, "scope": "all",
+                "action": "cost_statistics.manual_allocation.revoke_bank_split",
+                "page_key": "cost-statistics", "operation_location": "流水拆分/成本分配撤销",
+                "payload": {"parent_transaction_id": parent_id, "before": {**serialize_value(row), "id": str(row["id"])}},
+            })
+        return sorted(row["relation_case_id"] for row in rows)
+
+    def list_bank_split_migration_candidates(self) -> list[dict[str, Any]]:
+        """Read historical and active decisions, without limiting to a UI page."""
+        return self._connection.fetch_all("""
+            select allocation.relation_case_id, allocation.version,
+                   allocation.source_allocations, relation.row_ids, relation.row_types
+            from app.cost_statistics_manual_allocations allocation
+            left join app.workbench_pair_relations relation
+              on relation.case_id = allocation.relation_case_id
+            order by allocation.relation_case_id
+        """)
+
     def list_by_case_ids(self, case_ids: list[str]) -> dict[str, dict[str, Any]]:
         normalized = list(dict.fromkeys(str(case_id).strip() for case_id in case_ids if str(case_id).strip()))
         if not normalized:

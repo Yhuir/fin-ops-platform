@@ -46,6 +46,7 @@ from fin_ops_platform.app.route_access_policy import (
 )
 from fin_ops_platform.app.routes_bank_details import BankDetailsApiRoutes
 from fin_ops_platform.app.routes_bank_flow_rule_batches import BankFlowRuleBatchApiRoutes
+from fin_ops_platform.app.routes_bank_transaction_splits import BankTransactionSplitApiRoutes
 from fin_ops_platform.app.routes_batch_accounting import BatchAccountingApiRoutes
 from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
 from fin_ops_platform.app.routes_etc import EtcBusinessBatchApiRoutes
@@ -130,6 +131,8 @@ from fin_ops_platform.services.bank_transaction_category_service import (
 from fin_ops_platform.services.bank_transaction_effective_category_provider import (
     BankTransactionEffectiveCategoryProvider,
 )
+from fin_ops_platform.services.bank_transaction_split_relation_service import BankTransactionSplitRelationService
+from fin_ops_platform.services.bank_transaction_split_service import BankTransactionSplitService
 from fin_ops_platform.services.batch_accounting_service import BatchAccountingService
 from fin_ops_platform.services.cost_statistics_canonical_repository import (
     LocalCostStatisticsCanonicalRepository,
@@ -310,6 +313,9 @@ from fin_ops_platform.services.postgres_repositories.bank_import_withdrawal impo
 from fin_ops_platform.services.postgres_repositories.bank_relation_requirement_recalculation import (
     PostgresBankRelationRequirementRecalculationRequestRepository,
 )
+from fin_ops_platform.services.postgres_repositories.bank_transaction_splits import (
+    PostgresBankTransactionSplitRepository,
+)
 from fin_ops_platform.services.postgres_repositories.batch_accounting import (
     PostgresBatchAccountingQueryRepository,
 )
@@ -360,6 +366,7 @@ from fin_ops_platform.services.postgres_repositories.tax_offset import (
     LocalTaxOffsetCanonicalRepository,
     PostgresTaxOffsetCanonicalRepository,
 )
+from fin_ops_platform.services.postgres_repositories.turnover_bank_split import PostgresTurnoverBankSplitRepository
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_repositories.workbench_idempotency import PostgresWorkbenchIdempotencyRepository
 from fin_ops_platform.services.postgres_repositories.workbench_oa_supporting_document import (
@@ -424,7 +431,6 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
 )
 from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
 from fin_ops_platform.services.turnover_relation_service import (
-    TURNOVER_CATEGORY_RULES,
     TurnoverRelationService,
 )
 from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
@@ -1007,6 +1013,11 @@ class Application:
         self._pending_invoice_command_repository = InMemoryPendingInvoiceCommandRepository(self._pending_invoice_commands)
         self._pending_invoice_query_service = PendingInvoiceQueryService(
             import_service=self._import_service,
+            bank_units_by_ids=(
+                import_fact_repository.list_bank_transaction_units_by_ids
+                if postgres_connection is not None
+                else self._import_service.list_transactions_by_ids
+            ),
             category_service=self._bank_transaction_category_service,
             app_settings_provider=self._app_settings_service.get_pending_invoice_settings_payload,
             effective_category_provider=self._bank_transaction_tag_reader(),
@@ -1028,6 +1039,11 @@ class Application:
         )
         self._pending_invoice_application_service = PendingInvoiceApplicationService(
             import_service=self._import_service,
+            bank_units_by_ids=(
+                import_fact_repository.list_bank_transaction_units_by_ids
+                if postgres_connection is not None
+                else self._import_service.list_transactions_by_ids
+            ),
             command_repository=self._pending_invoice_command_repository,
             audit_recorder=lambda event: record_pending_invoice_audit(self._audit_service, event),
             row_provider=lambda transaction_id, direction: self._pending_invoice_query_service.row_for_transaction(
@@ -1389,6 +1405,10 @@ class Application:
         return True
 
     def _turnover_bank_transaction_rows(self) -> list[dict[str, object]]:
+        state_store = self._state_store
+        if str(getattr(state_store, "storage_backend", "")) == "postgres":
+            connection = getattr(state_store, "_sql_read_connection", None) or state_store._connection
+            return TurnoverLedgerQueryService(connection=connection).selected_bank_rows()
         rows: list[dict[str, object]] = []
         transaction_payloads: list[dict[str, object]] = []
         for transaction in list(self._import_service.list_transactions(month="all")):
@@ -1406,16 +1426,10 @@ class Application:
             transaction_id = str(payload.get("id") or "").strip()
             category = categories_by_transaction_id.get(transaction_id, {})
             category_code = str(category.get("category_code") or "").strip()
-            if category_code not in TURNOVER_CATEGORY_RULES:
-                manual_category = self._bank_transaction_category_service.get(transaction_id)
-                manual_category_code = str(manual_category.get("category_code") or "").strip()
-                manual_category_source = str(manual_category.get("source") or "").strip()
-                if manual_category_code in TURNOVER_CATEGORY_RULES and manual_category_source == "turnover_ledger":
-                    category = manual_category
-                    category_code = manual_category_code
-            if category_code not in TURNOVER_CATEGORY_RULES:
+            if category.get("turnover_role") != "external_turnover":
                 continue
             row = dict(payload)
+            row.update(category)
             row["category_code"] = category_code
             row["category_label"] = category.get("category_label")
             row["category_path"] = list(category.get("category_path") or [])
@@ -1779,6 +1793,10 @@ class Application:
                 duration_ms=self._duration_ms(request_started_at),
             )
             return response
+        if route_path.startswith("/api/bank-transactions/"):
+            split_response = self._bank_transaction_split_routes().route(method, route_path, body, headers)
+            if split_response is not None:
+                return split_response
         if route_path.startswith("/api/bank-details/"):
             bank_detail_response = self._bank_details_routes().route(method, route_path, query, body, headers)
             if bank_detail_response is not None:
@@ -2583,6 +2601,15 @@ class Application:
         return allocator.next_case_id()
 
     def _bank_transaction_category_codes_for_workbench_row_ids(self, row_ids: list[str]) -> dict[str, str]:
+        if self._requires_postgres_runtime():
+            connection = self._state_store._connection
+            with connection.transaction() as transaction:
+                transaction.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+                categories = PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
+                    transaction, settings=PostgresBankDetailsCanonicalQueryRepository.settings_payload(transaction),
+                    transaction_ids=row_ids,
+                )
+            return {row_id: row["effective_category_code"] for row_id, row in categories.items()}
         no_oa_service = self._no_oa_bank_batch_application_service()
         rows = no_oa_service.no_oa_bank_transaction_rows_by_ids(row_ids)
         categories_by_transaction_id = no_oa_service.effective_categories_for_rows(rows)
@@ -2628,11 +2655,12 @@ class Application:
         repository: object | None = None,
         save_repository: bool = True,
     ) -> WorkbenchRelationCommandService:
+        relation_repository = self._workbench_relation_command_repository(
+            repository=repository, save_repository=save_repository,
+        )
         return WorkbenchRelationCommandService(
-            relation_repository=self._workbench_relation_command_repository(
-                repository=repository,
-                save_repository=save_repository,
-            ),
+            relation_repository=relation_repository,
+            bank_requirements_resolver=relation_repository.current_bank_relation_requirements,
             tenant_id=self._workbench_reconciliation_tenant_id(),
         )
 
@@ -5608,7 +5636,10 @@ class Application:
         if isinstance(service, OaPendingPaymentCommandService):
             return service
         service = OaPendingPaymentCommandService(
-            import_service=self._import_service,
+            bank_transaction_reader=(
+                PostgresOaPendingPaymentQueryRepository(self._state_store._connection).bank_transactions_for_command
+                if self._requires_postgres_runtime() else self._import_service.list_transactions_by_ids
+            ),
             oa_projection=self._oa_pending_payment_command_oa_projection(),
             relation_command_service=self._workbench_relation_command_service(repository=getattr(self, "_state_store", None)),
             bank_transaction_category_codes_for_row_ids=self._bank_transaction_category_codes_for_workbench_row_ids,
@@ -6903,6 +6934,26 @@ class Application:
             repository=category_repository,
         )
 
+    def _bank_transaction_split_routes(self) -> BankTransactionSplitApiRoutes:
+        connection = self._state_store._connection
+        relation_service = BankTransactionSplitRelationService(
+            relation_repository_factory=PostgresWorkbenchRelationRepository,
+            settings_snapshot_provider=lambda transaction: AppSettingsService.bank_category_relation_policy_snapshot(
+                PostgresOpsTaxEtcRepository(transaction).load_settings(APP_SETTINGS_KEY)
+            ),
+            effective_category_rows=PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows,
+            relation_delta_publisher=self._workbench_pair_relation_service.apply_snapshot_delta,
+            allocation_repository_factory=PostgresCostStatisticsManualAllocationRepository,
+            batch_repository_factory=PostgresWorkbenchRepository,
+            turnover_split_migrator=lambda tx, **kwargs: PostgresTurnoverBankSplitRepository(tx).apply(**kwargs),
+        )
+        return BankTransactionSplitApiRoutes(
+            service=BankTransactionSplitService(repository=PostgresBankTransactionSplitRepository(connection), relation_service=relation_service),
+            resolve_session=self._resolve_bank_details_read_session,
+            load_json_body=self._load_json_body,
+            json_response=self._json_response,
+        )
+
     def _bank_details_routes(self) -> BankDetailsApiRoutes:
         return BankDetailsApiRoutes(
             self._bank_details_application_service(),
@@ -7105,30 +7156,29 @@ class Application:
                 "invalid_turnover_bank_row_tag_update",
                 "duplicate transaction_id in updates.",
             )
-        rows: list[dict[str, object]] = []
-        for transaction_id in transaction_ids:
-            try:
-                transaction = self._import_service.get_transaction(transaction_id)
-            except KeyError as exc:
-                raise BankTransactionCategoryValidationError(
-                    "unknown_transaction_id",
-                    f"Unknown bank transaction id: {transaction_id}",
-                    transaction_id=transaction_id,
-                ) from exc
-            payload = self._serialize_value(transaction)
-            if not isinstance(payload, dict):
-                payload = {}
-            rows.append(dict(payload, id=transaction_id))
-        categories = self._bank_transaction_tag_reader().bulk_get_for_rows(rows)
+        state_store = self._state_store
+        if str(getattr(state_store, "storage_backend", "")) == "postgres":
+            connection = getattr(state_store, "_sql_read_connection", None) or state_store._connection
+            with connection.transaction() as transaction:
+                settings = PostgresBankDetailsCanonicalQueryRepository.settings_payload(transaction)
+                categories = PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
+                    transaction, settings=settings, transaction_ids=transaction_ids,
+                )
+        else:
+            rows = []
+            for transaction_id in transaction_ids:
+                try:
+                    row = self._import_service.get_transaction(transaction_id)
+                except KeyError as exc:
+                    raise BankTransactionCategoryValidationError(
+                        "unknown_transaction_id", f"Unknown bank transaction id: {transaction_id}",
+                        transaction_id=transaction_id,
+                    ) from exc
+                rows.append(dict(self._serialize_value(row), id=transaction_id))
+            categories = self._bank_transaction_tag_reader().bulk_get_for_rows(rows)
         for transaction_id in transaction_ids:
             category = categories.get(transaction_id) or {}
-            code = str(category.get("category_code") or "").strip()
-            manual = self._bank_transaction_category_service.get(transaction_id)
-            manual_code = str(manual.get("category_code") or "").strip()
-            manual_source = str(manual.get("source") or "").strip()
-            if code == "external_turnover" or code in TURNOVER_CATEGORY_RULES:
-                continue
-            if manual_code in TURNOVER_CATEGORY_RULES and manual_source == "turnover_ledger":
+            if category.get("turnover_role") == "external_turnover":
                 continue
             raise BankTransactionCategoryValidationError(
                 "not_turnover_bank_row",

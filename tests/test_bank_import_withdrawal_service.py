@@ -115,6 +115,21 @@ class BankImportWithdrawalServiceTests(unittest.TestCase):
         self.assertEqual(call_names[-1], "transaction")
         self.assertEqual(repository.calls[-1][1], "commit")
 
+    def test_concurrent_split_change_rolls_back_before_any_business_deletion(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.bank_import_withdrawal import (
+            BankImportWithdrawalStateChanged,
+        )
+        class ChangedRepository(FakeWithdrawalRepository):
+            def created_transactions(self, batch_uuid, batch_id):
+                raise BankImportWithdrawalStateChanged("流水拆分已变化")
+        repository = ChangedRepository()
+        service, relation = self.build_service(repository)
+        with self.assertRaises(BankImportWithdrawalConflict):
+            service.withdraw(batch_id="batch-1", actor_id="005")
+        self.assertEqual(relation.calls, [])
+        self.assertEqual(repository.calls[-1], ("transaction", "rollback"))
+        self.assertNotIn("delete", [name for name, _ in repository.calls])
+
     def test_blocks_external_business_references_without_mutation(self) -> None:
         repository = FakeWithdrawalRepository()
         repository.blockers = {"oa_pending_relations": 1}
