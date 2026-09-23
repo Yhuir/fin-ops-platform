@@ -133,3 +133,7 @@ Blocking issue 包含：
 恢复工件记录旧/新身份和 payload，恢复必须比较当前身份及相关事实，不能覆盖后续业务写入。成功后重跑精确 ID dry-run 应为 `planned_count=0`；重跑对象身份、银行导入和关系审计，对比金额、余额、核销、分类及关系，并在隔离库保护重复导入链路。最后通过既有 `import-audit-repair-artifact-delete` 精确删除任务恢复工件；不得删除主数据库、正式历史或原始文件。
 
 `BankTransactionIdentityService` 对带时区时间按 Asia/Shanghai 归一；对象审计不再截断时区，v4 使用现有 position policy。历史导入行仍保存当时来源，不因迁移批量改写。此工具不删除流水、不重放文件、不改关系、不创建页面重建任务。
+
+### 依据税务原件修正既有发票名称与税号
+
+复用 `import-audit-repair <release> --repair-invoice-financial-source <file-id> --invoice-id <id>`，只有明确需要主体纠正时增加 `--repair-invoice-party-fields`。先 dry-run 核对精确集合、原件与前后值；execute 使用同一 fingerprint、operator-id、reason。工具保留原 ID/OA 关系/来源，不改变总额，金额与主体原子更新，审计保留旧值以便精确反向纠正。执行后 dry-run 必须零更新，再重新预览原任务并只读核对下游 canonical 页面。该入口不进行全库清理、不自动提交其它发票，也不自动创建数据库备份。

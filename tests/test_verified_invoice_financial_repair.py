@@ -70,6 +70,37 @@ class VerifiedFinancialRepairTests(unittest.TestCase):
         self.assertEqual(again['invalidate_cache_keys'],[])
         self.assertNotEqual(first['source_fingerprint'],again['source_fingerprint'])
 
+    def test_party_repair_is_opt_in_complete_and_preserves_provenance(self):
+        invoice, source, cache = sample()
+        fields = dict(seller_name="正确销方", seller_tax_no="915300002165678829",
+                      buyer_name="正确购方", buyer_tax_no="915300007194052520")
+        invoice.update({key: "旧值" for key in fields}, counterparty_name="旧值")
+        source["rows"][0].update(fields)
+        self.assertEqual(self.build(invoice, source)["updates"][0]["party_fields"], {})
+        plan = build_verified_financial_repair_plan([invoice], invoice_ids=["repair-1"],
+            sources=[source], cache_rows=[cache], repair_party_fields=True)
+        update = plan["updates"][0]
+        self.assertEqual(update["party_fields"]["seller_tax_no"], fields["seller_tax_no"])
+        normalized = update["raw_payload"]["normalized_payload"]
+        self.assertEqual(normalized["counterparty"]["name"], fields["seller_name"])
+        self.assertEqual(normalized["source_links"], [{"source_id": "preserved"}])
+        invoice.update({key: update[key] for key in ("amount", "signed_amount", "tax_amount", "total_with_tax")})
+        # Party-only discrepancies still need correction after an earlier amount-only repair.
+        self.assertEqual(build_verified_financial_repair_plan([invoice], invoice_ids=["repair-1"],
+            sources=[source], cache_rows=[], repair_party_fields=True)["update_count"], 1)
+        invoice.update(update["party_fields"], raw_payload=update["raw_payload"])
+        self.assertEqual(build_verified_financial_repair_plan([invoice], invoice_ids=["repair-1"],
+            sources=[source], cache_rows=[], repair_party_fields=True)["update_count"], 0)
+        other = deepcopy(source)
+        other["rows"][0]["seller_tax_no"] = "91530000X22600103R"
+        with self.assertRaisesRegex(ValueError, "disagree on party"):
+            build_verified_financial_repair_plan([invoice], invoice_ids=["repair-1"],
+                sources=[source, other], cache_rows=[], repair_party_fields=True)
+        source["rows"][0]["buyer_tax_no"] = ""
+        with self.assertRaisesRegex(ValueError, "explicit party"):
+            build_verified_financial_repair_plan([invoice], invoice_ids=["repair-1"],
+                sources=[source], cache_rows=[], repair_party_fields=True)
+
 
 class VerifiedFinancialRepairPostgresTests(unittest.TestCase):
     @classmethod
@@ -122,8 +153,8 @@ class VerifiedFinancialRepairPostgresTests(unittest.TestCase):
 
         workbook=Workbook()
         workbook.active.title='发票基础信息'
-        workbook.active.append(['发票代码','发票号码','开票日期','金额','税额','价税合计','销方识别号','购买方名称'])
-        workbook.active.append(['053002400111','23195398','2026-01-13','3.67','0.33','4.00','seller','buyer'])
+        workbook.active.append(['发票代码','发票号码','开票日期','金额','税额','价税合计','销方识别号','购买方名称','销方名称','购方识别号'])
+        workbook.active.append(['053002400111','23195398','2026-01-13','3.67','0.33','4.00','915300002165678829','正确购方','正确销方','915300007194052520'])
         stream=io.BytesIO()
         workbook.save(stream)
         content=stream.getvalue()
@@ -145,6 +176,45 @@ class VerifiedFinancialRepairPostgresTests(unittest.TestCase):
         self.assertEqual(result['completion']['written_invoice_count'],1)
         self.assertEqual(run(['--dry-run'])['update_count'],0)
         self.assertEqual(self.connection.fetch_one("select count(*) n from audit.events where action='invoice_financial_source_repair'")['n'],1)
+        base.append('--repair-invoice-party-fields')
+        party_plan = run(['--dry-run'])
+        self.assertEqual(party_plan['update_count'], 1)
+        self.assertEqual(party_plan['updates'][0]['party_after']['seller_name'], '正确销方')
+        run(['--execute', '--expected-fingerprint', party_plan['source_fingerprint'],
+             '--operator-id', 'tester', '--reason', 'verified names and tax IDs'])
+        self.assertEqual(run(['--dry-run'])['update_count'], 0)
+        event = self.connection.fetch_one("select payload->'metadata' as metadata from audit.events where action='invoice_financial_source_repair' order by occurred_at desc limit 1")
+        self.assertEqual(event['metadata']['corrections'][0]['party_after']['seller_tax_no'], '915300002165678829')
         source['sha256']='wrong'
         with self.assertRaisesRegex(ValueError,'checksum differs'):
             run(['--dry-run'])
+
+    def test_party_writer_cas_atomicity_and_canonical_payload(self):
+        source = sample()[1]
+        source["rows"][0].update(seller_name="正确销方", seller_tax_no="915300002165678829",
+            buyer_name="正确购方", buyer_tax_no="915300007194052520")
+        def plan(tx):
+            return build_verified_financial_repair_plan(**load_verified_financial_repair_snapshot(tx, ["repair-1"]),
+                invoice_ids=["repair-1"], sources=[source], repair_party_fields=True)
+        stale = plan(self.connection)
+        self.connection.execute("update app.invoices set seller_name='concurrent' where legacy_mongo_id='repair-1'")
+        with self.assertRaisesRegex(RuntimeError, "target changed"):
+            with self.connection.transaction() as tx:
+                apply_verified_financial_repair(tx, stale, operator_id="tester", reason="verified original")
+        with self.assertRaisesRegex(RuntimeError, "injected"):
+            with self.connection.transaction() as tx:
+                apply_verified_financial_repair(tx, plan(tx), operator_id="tester", reason="verified original")
+                raise RuntimeError("injected")
+        before = load_verified_financial_repair_snapshot(self.connection, ["repair-1"])
+        self.assertEqual(before["snapshot"][0]["seller_name"], "concurrent")
+        self.assertEqual(before["snapshot"][0]["amount"], Decimal("0.33"))
+        self.assertEqual(len(before["cache_rows"]), 1)
+        with self.connection.transaction() as tx:
+            apply_verified_financial_repair(tx, plan(tx), operator_id="tester", reason="verified original")
+        row = load_verified_financial_repair_snapshot(self.connection, ["repair-1"])["snapshot"][0]
+        for field in ("seller_name", "seller_tax_no", "buyer_name", "buyer_tax_no"):
+            self.assertEqual(row[field], source["rows"][0][field])
+            self.assertEqual(row["raw_payload"]["normalized_payload"][field], row[field])
+        self.assertEqual(row["source_links"], [{"source_id": "preserved"}])
+        self.assertEqual(row["counterparty_name"], "正确销方")
+        self.assertEqual(plan(self.connection)["update_count"], 0)

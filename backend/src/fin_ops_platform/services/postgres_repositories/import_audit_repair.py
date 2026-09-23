@@ -53,7 +53,8 @@ def load_verified_financial_repair_snapshot(connection: Any, invoice_ids: list[s
     invoices = connection.fetch_all("""
         select coalesce(legacy_mongo_id,id::text) as invoice_id, invoice_type,
             invoice_no, invoice_code, digital_invoice_no, invoice_date::text,
-            amount, signed_amount, tax_amount, total_with_tax, tax_rate, raw_payload
+            amount, signed_amount, tax_amount, total_with_tax, tax_rate, raw_payload,
+            seller_name, seller_tax_no, buyer_name, buyer_tax_no, counterparty_name, source_links
         from app.invoices where coalesce(legacy_mongo_id,id::text)=any(%s::text[])
         order by id
     """, (invoice_ids,))

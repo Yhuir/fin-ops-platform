@@ -394,6 +394,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repair-invoice-header-source-sha256")
     parser.add_argument("--repair-invoice-financial-source", action="append", default=[],
                         help="Stored tax header import file ID; use --invoice-id for exact existing targets.")
+    parser.add_argument("--repair-invoice-party-fields", action="store_true",
+                        help="Also correct explicit seller/buyer names and tax IDs from verified tax headers.")
     parser.add_argument("--expected-invoice-header-repair-count", type=int)
     parser.add_argument("--repair-invoice-expense-link-id", action="append", default=[])
     parser.add_argument("--repair-invoice-expense-link-case-id")
@@ -545,7 +547,7 @@ def _run_verified_financial_repair(args: Any, *, stdout: TextIO) -> int:
         load_verified_financial_repair_snapshot,
     )
 
-    allowed = {"repair_invoice_financial_source", "invoice_id", "dry_run", "execute",
+    allowed = {"repair_invoice_financial_source", "repair_invoice_party_fields", "invoice_id", "dry_run", "execute",
                "expected_fingerprint", "operator_id", "reason"}
     if not args.invoice_id or any(_argument_is_set(value) for name, value in vars(args).items() if name not in allowed):
         raise SystemExit("Financial repair requires exact invoice IDs and cannot combine repair modes.")
@@ -571,7 +573,7 @@ def _run_verified_financial_repair(args: Any, *, stdout: TextIO) -> int:
         def load_plan(tx: Any) -> dict[str, Any]:
             return build_verified_financial_repair_plan(
                 **load_verified_financial_repair_snapshot(tx, args.invoice_id),
-                invoice_ids=args.invoice_id, sources=sources)
+                invoice_ids=args.invoice_id, sources=sources, repair_party_fields=args.repair_invoice_party_fields)
 
         with connection.transaction() as tx:
             tx.execute("set transaction isolation level repeatable read read only")
@@ -597,13 +599,17 @@ def _run_verified_financial_repair(args: Any, *, stdout: TextIO) -> int:
                                   "invalidated_cache_keys": current["invalidate_cache_keys"],
                                   "corrections": [{"invoice_id": item["invoice_id"],
                                       "before": {field: str(item["before"][field]) for field in ("amount", "tax_amount", "total_with_tax")},
-                                      "after": {field: item[field] for field in ("amount", "tax_amount", "total_with_tax")}}
+                                      "after": {field: item[field] for field in ("amount", "tax_amount", "total_with_tax")},
+                                      "party_before": {field: item["before"][field] for field in item["party_fields"]},
+                                      "party_after": item["party_fields"]}
                                       for item in current["updates"]]},
                     )
         report = {key: value for key, value in plan.items() if key != "updates"}
         report.update(mode="execute" if args.execute else "dry_run", completion=completion,
                       updates=[{**{key: value for key, value in item.items() if key not in ("before", "raw_payload")},
-                                "before": {field: str(item["before"][field]) for field in ("amount", "tax_amount", "total_with_tax")}}
+                                "before": {field: str(item["before"][field]) for field in ("amount", "tax_amount", "total_with_tax")},
+                                      "party_before": {field: item["before"][field] for field in item["party_fields"]},
+                                      "party_after": item["party_fields"]}
                                for item in plan["updates"]])
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, default=str), file=stdout)
         return 0
@@ -741,6 +747,8 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         return _run_oa_bank_account_invoice_repair(args, stdout=stdout)
     if args.export_source_file_id:
         return _export_source_file(args, stdout=stdout)
+    if args.repair_invoice_party_fields and not args.repair_invoice_financial_source:
+        raise SystemExit("Party repair requires a verified financial source and exact invoice IDs.")
     if args.repair_invoice_financial_source:
         return _run_verified_financial_repair(args, stdout=stdout)
     if args.inspect_invoice_source:

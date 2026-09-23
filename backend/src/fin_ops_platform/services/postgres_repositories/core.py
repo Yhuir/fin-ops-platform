@@ -1392,18 +1392,29 @@ class PostgresCoreRepository:
         connection.execute("select set_config('fin_ops.actor_id',%s,true)", (operator_id,))
         for update in updates:
             before = update["before"]
-            affected = connection.execute("""
+            party = update["party_fields"]
+            party_set = ""
+            party_where = ""
+            party_values: list[Any] = []
+            party_before: list[Any] = []
+            if party:
+                fields = ("seller_name", "seller_tax_no", "buyer_name", "buyer_tax_no", "counterparty_name")
+                party_set = ", " + ", ".join(f"{field}=%s" for field in fields)
+                party_where = " and " + " and ".join(f"{field} is not distinct from %s" for field in fields)
+                party_values = [party[field] for field in fields]
+                party_before = [before[field] for field in fields]
+            affected = connection.execute(f"""
                 update app.invoices set amount=%s, signed_amount=%s, tax_amount=%s,
-                    total_with_tax=%s, raw_payload=%s::jsonb, updated_at=now()
+                    total_with_tax=%s, raw_payload=%s::jsonb, updated_at=now(){party_set}
                 where coalesce(legacy_mongo_id,id::text)=%s and amount=%s::numeric
                     and signed_amount=%s::numeric and tax_amount is not distinct from %s::numeric
                     and total_with_tax is not distinct from %s::numeric
-                    and raw_payload=%s::jsonb
+                    and raw_payload=%s::jsonb{party_where}
             """, (update["amount"], update["signed_amount"], update["tax_amount"],
-                  update["total_with_tax"], _jsonb(update["raw_payload"]),
+                  update["total_with_tax"], _jsonb(update["raw_payload"]), *party_values,
                   update["invoice_id"], before["amount"], before["signed_amount"],
                   before["tax_amount"], before["total_with_tax"],
-                  _jsonb(before["raw_payload"])))
+                  _jsonb(before["raw_payload"]), *party_before))
             if affected != 1:
                 raise RuntimeError("Financial repair target changed; rerun dry-run.")
 

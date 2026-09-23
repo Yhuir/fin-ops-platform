@@ -240,3 +240,9 @@ ConfirmedInvoiceImportUnitOfWork 在导入事务内继续提交 promotion 与同
 - 前端 prepare 等待允许 `needs_review` 返回可查看预览；commit 不将其视为成功。当前真实记录仍需以原始凭证确定纠正方向，程序不自动覆盖财务冲突。
 - 删除旧明细 tabs、未处理差额公式、混入已存在的过滤、重复文件名列、固定 1520/1240px 表宽及旧测试假设。详情分页读写权限继续复用共享导入任务边界。
 - 七类测试、性能与发布证据见 [实施记录](../../dev/import-review-details-repair.md)。
+
+## 2026-09-23 精确历史发票主体纠正
+
+既有 `import_audit_repair_ops --repair-invoice-financial-source` 增加显式 `--repair-invoice-party-fields`。仅接受精确现有 invoice IDs 和归档原件 `发票基础信息` 的完整销购方名称/税号；校验原件摘要、同票日期和总额，多个原件的字段冲突直接拒绝。默认金额修复合同不变；不改变普通导入覆盖或 OA promotion 行为。
+
+修复计划 service 负责证据比对，repository 在同一 serializable 事务内 CAS 写入四个主体字段、counterparty_name 与 normalized payload/内嵌 counterparty 的一致值，保留 invoice ID、关系、source_links 和 counterparty ID。现有金额纠正审计及 operation audit 保存前后值/原件依据；旧附件解析 cache 仅按命中身份精确失效。不新增 schema/API/worker，页面直接读 canonical facts；原导入任务必须重新预览，不自动确认其它新增票。

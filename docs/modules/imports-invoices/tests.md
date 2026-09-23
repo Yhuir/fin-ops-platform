@@ -243,3 +243,5 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 ## 2026-09-23 复核闭环回归
 
 `tests/test_import_review_closure.py` 覆盖 33/19/10/4、单票字段比较、文件隔离、分页边界、确认前零入队、零部分写入、修正后幂等提交与 PostgreSQL 原子状态。前端 `ImportReviewTable.test.tsx`、`ImportPreparation.test.ts`、`ImportsApi.test.ts`、`ImportCenterPage.test.tsx` 与 `web/e2e/import-review-details.spec.ts` 覆盖颜色/文字、完整金额、比较展开、文件参数、needs_review、只读按需加载。既有银行/发票/ETC/共享任务浏览器链路继续回归。
+
+- 2026-09-23：`test_verified_invoice_financial_repair.py` 覆盖主体纠正显式开关、完整原始字段、多原件冲突、仅主体差异、默认金额模式不扩写、CLI 原件摘要、审计前后值、canonical/normalized 同步、来源保留、CAS 冲突、事务回滚和第二次零更新。生产限定四张铁路电子客票，修正后重新预览应为 19 新增/14 已存在/0 需检查，未授权的新增票不提交。

@@ -56,7 +56,8 @@ class ImportReviewClosureTests(unittest.TestCase):
             self.assertEqual(row["category"], "review")
             self.assertEqual({conflict["field"] for conflict in row["conflicts"]}, {"amount", "tax_amount", "seller_tax_no"})
             self.assertEqual(next(c for c in row["conflicts"] if c["field"] == "amount")["current_value"], "145.00")
-            self.assertNotIn("580", json.dumps(row))
+            self.assertEqual((row["amount"], row["tax_amount"], row["total_with_tax"]),
+                             ("133.03", "11.97", "145.00"))
             self.assertNotIn("file_name", row)
         self.assertTrue(all(row["category"] != "review" for row in result["rows"][4:]))
         page = self.files.review_rows(session_id=self.session.id, file_id=item.id, offset=4, limit=10)

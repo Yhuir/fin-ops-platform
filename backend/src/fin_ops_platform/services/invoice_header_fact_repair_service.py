@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Any
 
 from fin_ops_platform.domain.enums import InvoiceType
+from fin_ops_platform.services.imports import normalize_name
 from fin_ops_platform.services.invoice_identity_service import InvoiceIdentityService
 
 INVOICE_HEADER_REPAIR_SOURCE_SHA256 = (
@@ -241,9 +242,13 @@ def _fingerprint(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+VERIFIED_PARTY_FIELDS = ("seller_name", "seller_tax_no", "buyer_name", "buyer_tax_no")
+
+
 def build_verified_financial_repair_plan(
     snapshot: list[dict[str, Any]], *, invoice_ids: list[str],
     sources: list[dict[str, Any]], cache_rows: list[dict[str, Any]],
+    repair_party_fields: bool = False,
 ) -> dict[str, Any]:
     """Correct only explicit existing facts using verified tax header originals."""
     if not invoice_ids or len(invoice_ids) != len(set(invoice_ids)):
@@ -260,16 +265,20 @@ def build_verified_financial_repair_plan(
                 continue
             if any(row.get(field) in (None, "") for field in ("amount", "tax_amount", "total_with_tax", "invoice_date")):
                 raise ValueError(f"Tax header {key} lacks explicit financial fields.")
+            if repair_party_fields and any(not _text(row.get(field)) for field in VERIFIED_PARTY_FIELDS):
+                raise ValueError(f"Tax header {key} lacks explicit party fields.")
             values = tuple(_money(row[field]) for field in ("amount", "tax_amount", "total_with_tax"))
             if Decimal(values[0]) + Decimal(values[1]) != Decimal(values[2]):
                 raise ValueError(f"Tax header {key} has inconsistent amounts.")
             if key in facts:
                 old = facts[key][0]
+                if repair_party_fields and any(_text(old.get(field)) != _text(row.get(field)) for field in VERIFIED_PARTY_FIELDS):
+                    raise ValueError(f"Tax originals disagree on party fields for {key}.")
                 if values != tuple(_money(old[field]) for field in ("amount", "tax_amount", "total_with_tax")) or str(old["invoice_date"]) != str(row["invoice_date"]):
                     raise ValueError(f"Tax originals disagree for {key}.")
             else:
                 facts[key] = row, source
-    fingerprint = _fingerprint({"snapshot": snapshot, "sources": sources, "caches": cache_rows})
+    fingerprint = _fingerprint({"snapshot": snapshot, "sources": sources, "caches": cache_rows, "repair_party_fields": repair_party_fields})
     updates = []
     target_keys = set()
     for current in snapshot:
@@ -284,18 +293,29 @@ def build_verified_financial_repair_plan(
             raise ValueError(f"Repair may not change the invoice total: {key}.")
         amounts = {field: _money(fact[field]) for field in ("amount", "tax_amount", "total_with_tax")}
         amounts["signed_amount"] = amounts["amount"]
-        if all(_money(current[field]) == value for field, value in amounts.items()):
+        party = {field: _text(fact[field]) for field in VERIFIED_PARTY_FIELDS} if repair_party_fields else {}
+        if party:
+            party["counterparty_name"] = party["seller_name"]
+        if all(_money(current[field]) == value for field, value in amounts.items()) and all(
+            _text(current[field]) == value for field, value in party.items()
+        ):
             continue
         raw = dict(current["raw_payload"] or {})
         normalized = dict(raw.get("normalized_payload") or raw)
         normalized.update(amounts)
+        normalized.update(party)
+        if party:
+            counterparty = dict(normalized.get("counterparty") or {})
+            counterparty.update(name=party["seller_name"], normalized_name=normalize_name(party["seller_name"]),
+                                tax_no=party["seller_tax_no"])
+            normalized["counterparty"] = counterparty
         normalized.update(source_sheet_name="发票基础信息", source_sheet_role="invoice_header",
                           source_workbook_sha256=source["sha256"],
                           financial_repair_source_file_id=source["file_id"],
                           financial_repair_fingerprint=fingerprint)
         raw["normalized_payload"] = normalized
         updates.append({"invoice_id": current["invoice_id"], "identity_key": key,
-                        "before": current, "raw_payload": raw, **amounts})
+                        "before": current, "raw_payload": raw, **amounts, "party_fields": party})
     invalidate_keys = sorted({row["source_attachment_key"] for row in cache_rows
         if any(identities.canonical_key_for_mapping(item) in target_keys
                for item in row["invoices"] if isinstance(item, dict))})
