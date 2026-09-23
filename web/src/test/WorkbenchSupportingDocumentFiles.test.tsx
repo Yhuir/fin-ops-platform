@@ -38,10 +38,10 @@ test("read-only rendering keeps previews and hides management", () => {
 
 
 test.each([
-  [null, "凭证金额 待填写", "差额（OA − 凭证）待核对"],
-  ["0.00", "凭证金额 0.00", "差额（OA − 凭证）100.00"],
-  ["80.00", "凭证金额 80.00", "差额（OA − 凭证）20.00"],
-  ["120.00", "凭证金额 120.00", "差额（OA − 凭证）-20.00"],
+  [null, "凭证金额 待填写", "本项差额（OA − 凭证）待核对"],
+  ["0.00", "凭证金额 0.00", "本项差额（OA − 凭证）100.00"],
+  ["80.00", "凭证金额 80.00", "本项差额（OA − 凭证）20.00"],
+  ["120.00", "凭证金额 120.00", "本项差额（OA − 凭证）-20.00"],
 ])("shows voucher amount %s and a distinct delta", (amount, amountText, deltaText) => {
   render(<WorkbenchRecordCard row={{ ...row, supportingDocumentAmount: amount, supportingDocumentOaAmount: "100.00" }} paneId="invoice" zoneId="unpaired" rowState="idle"
     canOperateData showWorkflowActions onRowAction={vi.fn()} onSelectRow={vi.fn()} onOpenDetail={vi.fn()} />);
@@ -62,5 +62,5 @@ test("mixed invoice evidence keeps voucher management and explains combined comp
 test("keeps cent precision for the largest permitted voucher total", () => {
   render(<WorkbenchRecordCard row={{ ...row, supportingDocumentAmount: "999999999999999999.98", supportingDocumentOaAmount: "999999999999999999.99" }} paneId="invoice" zoneId="unpaired" rowState="idle"
     canOperateData showWorkflowActions onRowAction={vi.fn()} onSelectRow={vi.fn()} onOpenDetail={vi.fn()} />);
-  expect(screen.getByText("差额（OA − 凭证）0.01")).toBeInTheDocument();
+  expect(screen.getByText("本项差额（OA − 凭证）0.01")).toBeInTheDocument();
 });

@@ -803,7 +803,7 @@ describe("Workbench candidate grouping layout", () => {
   }
 
   function getZoneGroupOrder(zone: HTMLElement) {
-    return Array.from(zone.querySelectorAll<HTMLElement>(".candidate-grid-body > [data-testid^='candidate-group-']")).map(
+    return Array.from(zone.querySelectorAll<HTMLElement>(".candidate-grid-body [data-testid^='candidate-group-']")).map(
       (element) => element.getAttribute("data-testid") ?? "",
     );
   }

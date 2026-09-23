@@ -32,7 +32,7 @@ export default function WorkbenchSupportingDocumentFiles({
       <div className="workbench-supporting-files__amount">
         <strong>凭证金额 {knownAmount ? formatMoney(totalAmount) : "待填写"}</strong>
         {hasInvoice ? <span>与同项发票合并核对</span>
-          : <span>差额（OA − 凭证）{delta ?? "待核对"}</span>}
+          : <span>本项差额（OA − 凭证）{delta ?? "待核对"}</span>}
       </div>
       {canManage ? <Button size="sm" variant="ghost" onPress={onManage}>管理凭证</Button> : null}
     </div>

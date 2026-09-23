@@ -801,3 +801,12 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - API/worker/source：执行补录 API、附件 promotion、来源优先与现有 matching scope 测试；不引入新的 API 或 worker。
 
 - 升级重跑：真实 PostgreSQL 中先缓存旧整项规则的成功 no-op，确认旧版本重复调用命中幂等，再切换余额规则；同一事实必须补齐两张票，审计失败回滚，成功后重复执行无重复归属。
+
+
+## 2026-09-23 组级原因及局部凭证解释
+
+- Business：`test_workbench_amount_check_service` 增加五张 OA、140 元有效凭证、另一子项超额6.57及消除超额后全部一致的对照；原 grouping/review 套件保护审批、金额、审阅和状态边界。
+- Frontend：`WorkbenchAnomalyIndicator` 覆盖精确/共享/缺失子项定位、多异常、正式发票与凭证独立金额、零与未知、已接受状态；`WorkbenchExceptionDrawer`、`RelationGroupGrid`、`WorkbenchSupportingDocumentFiles` 更新原布局/文案回归，保护排序和原管理入口。
+- Browser：`workbench-supporting-documents-flow.spec.ts` 增加五张 OA/14 张发票长组、五份零差额凭证、桌面/390px窄屏 sticky 可见及零新增请求断言；原异常审阅、保存/删除回读、stale/error、权限测试继续保护。
+- API、service 与 PostgreSQL：合同不变，执行现有 mapper/review/query integration 回归。无 read model、cache、worker 改动，该实现测试不适用。
+- 生产按 [执行计划](../../dev/workbench-group-blocker-explanation-plan.md) 只读复核；真实差额 pending 保持，接受/撤回在隔离环境验证。

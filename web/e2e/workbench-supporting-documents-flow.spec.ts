@@ -60,7 +60,7 @@ test("supporting documents refresh the exact item, preview, and restore missing 
   const files = zone.locator(".workbench-supporting-files");
   await expect(files).toBeVisible();
   await expect(files.getByText("凭证金额 40.00")).toBeVisible();
-  await expect(files.getByText("差额（OA − 凭证）15.00")).toBeVisible();
+  await expect(files.getByText("本项差额（OA − 凭证）15.00")).toBeVisible();
   await expect(zone.getByRole("button", { name: "录入发票", exact: true })).toHaveCount(0);
   const supplement = zone.getByRole("button", { name: "录入发票 55 元付款项" });
   await expect(supplement).toHaveText("+");
@@ -132,7 +132,7 @@ test("exception details keep voucher files and amount management for the exact O
   const grid = exceptions.getByRole("grid", { name: "未配对三栏关联表" });
   await expect(grid.getByRole("link", { name: "历史凭证.pdf" })).toBeVisible();
   await expect(grid.getByText("凭证金额 待填写")).toBeVisible();
-  await expect(grid.getByText("差额（OA − 凭证）待核对")).toBeVisible();
+  await expect(grid.getByText("本项差额（OA − 凭证）待核对")).toBeVisible();
   await expect(grid.locator('[role="columnheader"]')).not.toHaveCount(0);
   await grid.getByRole("button", { name: "管理凭证" }).click();
   await expect(exceptions).toHaveCount(0);
@@ -141,4 +141,80 @@ test("exception details keep voucher files and amount management for the exact O
   await expect(editor.getByRole("textbox", { name: "凭证总金额（元）" })).toHaveValue("");
   await expect(editor.getByRole("button", { name: "保存凭证" })).toBeDisabled();
   await expect(page.getByRole("dialog")).toHaveCount(1);
+});
+
+test("a long multi-OA group explains the other item's excess while vouchers remain balanced", async ({ page }) => {
+  await installDeterministicApiMocks(page, { sessionMode: "user", workbenchAmountMismatchScenario: true, workbenchInitialRelationConfirmed: true });
+  const firstResponse = page.waitForResponse(r => new URL(r.url()).pathname === "/api/workbench");
+  await page.goto("/");
+  const payload = await (await firstResponse).json();
+  const group = payload.unpaired.groups[0];
+  const oaTemplate = group.oa_rows[0];
+  const invoiceTemplate = group.invoice_rows[0];
+  group.group_id = "case:CASE-EXPLANATION";
+  group.relation_mode = "batch_accounting";
+  group.oa_rows = [];
+  group.invoice_rows = [];
+  const layouts = [["320", "150.40"], ["150", "182.44"], ["50.22"], ["54", "8", "25", "23", "30"], ["280"]];
+  const amounts = ["470.40", "332.44", "50.22", "140", "280"];
+  layouts.forEach((values, i) => {
+    const id = `oa-explanation-${i}`;
+    const items = values.map((amount, j) => ({ id: `${id}:item:${j}`, row_index: String(j), amount,
+      project_name: "测试项目", expense_type: "交通费", expense_content: i === 1 && j === 1 ? "顺风车费用" : "高速通行费",
+      ...(i === 3 ? { supporting_document_amount: amount, supporting_document_version: 1,
+        supporting_documents: [{ id: `document-${j}`, file_name: `${amount}.png`, content_type: "image/png", size_bytes: 1,
+          content_url: `/test-document-${j}`, created_at: "2026-09-01T00:00:00+08:00" }] } : {}),
+    }));
+    group.oa_rows.push({ ...oaTemplate, id, case_id: "CASE-EXPLANATION", amount: amounts[i], applicant: `测试申请人${i}`, expense_items: items });
+    items.forEach((item, j) => {
+      if (i === 3) return;
+      const invoiceAmounts = i === 1 && j === 1 ? ["28.25", "126.16", "14.02", "20.58"]
+        : i === 0 && j === 1 ? ["25", "25", "25", "25", "25", "25.40"] : [item.amount];
+      invoiceAmounts.forEach((amount, k) => group.invoice_rows.push({ ...invoiceTemplate, id: `invoice-${i}-${j}-${k}`,
+        case_id: "CASE-EXPLANATION", amount, total_with_tax: amount, source_oa_id: id, source_expense_item_ids: [item.id],
+        workbench_anomalies: [] }));
+    });
+  });
+  group.bank_rows[0].amount = "1273.06";
+  group.amount_check = { status: "mismatch", direction: "expense", bank_amount: "1273.06", oa_amount: "1273.06",
+    oa_total: "1273.06", bank_total: "1273.06", invoice_total: "1139.63", supporting_document_total: "140.00",
+    evidence_total: "1279.63", evidence_complete: true, amount_delta: "6.57", requires_note: true };
+  group.workbench_anomaly.items = [{ ...group.workbench_anomaly.items[0], code: "oa_bank_equal_invoice_more",
+    display_label: "OA 流水一致，票多", label: "OA 流水一致，票多", display_scope: "group", display_pane: "group",
+    amount_delta: "6.57", oa_total: "1273.06", bank_total: "1273.06", invoice_total: "1139.63", evidence_total: "1279.63",
+    source_oa_ids: group.oa_rows.map((row: { id: string }) => row.id), source_expense_item_ids: [],
+    expense_item_differences: [{ expense_item_ids: ["oa-explanation-1:item:1"], oa_total: "182.44", evidence_total: "189.01", amount_delta: "6.57" }] }];
+  group.row_counts = { oa: 5, bank: 1, invoice: 14 };
+  group.completion = { is_complete: false, missing_row_types: [], blocking_reasons: ["anomaly_review_required"] };
+  payload.unpaired.groups = [group];
+  await page.route("**/api/workbench?*", route => route.fulfill({ json: payload }));
+  await page.reload();
+  const zone = page.getByTestId("zone-unpaired");
+  const indicator = zone.getByRole("button", { name: "该关联组有 1 项异常，查看详情" });
+  await expect(indicator).toHaveText("本组待处理 · OA 流水一致，票多 · 差额 6.57 元");
+  let requests = 0;
+  page.on("request", request => { if (new URL(request.url()).pathname.startsWith("/api/workbench")) requests++; });
+  const files = zone.locator(".workbench-supporting-files");
+  await expect(files).toHaveCount(5);
+  await expect(files.getByText("本项差额（OA − 凭证）0.00")).toHaveCount(5);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await files.last().scrollIntoViewIfNeeded();
+    await expect(indicator).toBeInViewport();
+    const headingBox = await indicator.boundingBox();
+    const fileBox = await files.last().boundingBox();
+    expect(headingBox!.y + headingBox!.height).toBeLessThanOrEqual(fileBox!.y);
+    expect(headingBox!.x + headingBox!.width).toBeLessThanOrEqual(width);
+  }
+  await page.mouse.move(0, 0);
+  await indicator.focus();
+  const explanation = page.getByRole("dialog", { name: "该关联组异常详情" });
+  await expect(explanation.getByText("正式发票 1139.63 · 补充凭证 140.00")).toBeVisible();
+  await expect(explanation.getByText("票据凭证合计 1279.63")).toBeVisible();
+  await expect(explanation.getByText("测试申请人1 · 交通费 · 顺风车费用 · 测试项目")).toBeVisible();
+  await expect(explanation.getByText("OA 182.44 · 票据凭证 189.01 · 差额 6.57")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(explanation).toHaveCount(0);
+  expect(requests).toBe(0);
+  await expectNoUnexpectedSuccessUiErrors(page);
 });

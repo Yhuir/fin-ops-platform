@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import WorkbenchAnomalyIndicator from "../components/workbench/WorkbenchAnomalyIndicator";
-import type { WorkbenchAnomalyItem } from "../features/workbench/types";
+import type { WorkbenchAnomalyItem, WorkbenchRelationGroup, WorkbenchRecord } from "../features/workbench/types";
 
 const anomaly: WorkbenchAnomalyItem = {
   code: "oa_bank_equal_invoice_less",
@@ -81,6 +81,9 @@ describe("WorkbenchAnomalyIndicator", () => {
 
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByText("OA 流水一致，票少")).not.toBeInTheDocument());
+    await user.tab();
+    await user.tab({ shift: true });
+    expect(await screen.findByText("OA 流水一致，票少")).toBeVisible();
   });
 
   it("runs a row-level resolution action once and closes the popover", async () => {
@@ -138,6 +141,60 @@ it("shows opposing item differences even when the group total cancels out", asyn
     { expenseItemIds: ["item-2"], oaTotal: "60.00", evidenceTotal: "100.00", amountDelta: "-40.00" },
   ] }]} />);
   await userEvent.setup({ skipHover: true }).click(screen.getByRole("button", { name: "该关联组有 1 项异常，查看详情" }));
-  expect(screen.getByText("明细 1：OA 40.00 · 票据凭证 0.00 · 差额 40.00")).toBeVisible();
-  expect(screen.getByText("明细 2：OA 60.00 · 票据凭证 100.00 · 差额 -40.00")).toBeVisible();
+  expect(screen.getByText("OA 40.00 · 票据凭证 0.00 · 差额 40.00")).toBeVisible();
+  expect(screen.getByText("OA 60.00 · 票据凭证 100.00 · 差额 -40.00")).toBeVisible();
+});
+
+function explanationGroup(): WorkbenchRelationGroup {
+  return {
+    id: "case:explanation", groupType: "unpaired", matchConfidence: "high", reason: "",
+    amountCheck: { status: "mismatch", direction: "expense", bankAmount: "1273.06", oaAmount: "1273.06",
+      oaTotal: "1273.06", bankTotal: "1273.06", invoiceTotal: "1139.63", supportingDocumentTotal: "140.00",
+      evidenceTotal: "1279.63", amountDelta: "6.57", requiresNote: true },
+    workbenchAnomaly: { code: "workbench_anomaly", fingerprint: "group", reviewDecision: "pending", reviewNote: "", reviewedByAccount: "", reviewedByName: "", items: [] },
+    rows: { bank: [], invoice: [], oa: [{ id: "oa-test", tableValues: { applicant: "测试申请人" }, expenseItems: [
+      { id: "item-car", rowIndex: "1", amount: "182.44", projectName: "测试项目", expenseType: "交通费", expenseContent: "顺风车费用" },
+      { id: "item-shared", rowIndex: "2", amount: "50.00", projectName: "另一个项目", expenseType: "住宿费" },
+    ] } as WorkbenchRecord] },
+  };
+}
+
+it("explains valid vouchers and the exact different item without changing group state", async () => {
+  const group = explanationGroup();
+  render(<WorkbenchAnomalyIndicator group={group} levelLabel="该关联组" anomalies={[{
+    ...anomaly, code: "oa_bank_equal_invoice_more", displayLabel: "OA 流水一致，票多", amountDelta: "6.57",
+    expenseItemDifferences: [{ expenseItemIds: ["item-car"], oaTotal: "182.44", evidenceTotal: "189.01", amountDelta: "6.57" }],
+  }]} />);
+  expect(screen.getByText("本组待处理 · OA 流水一致，票多 · 差额 6.57 元")).toBeVisible();
+  await userEvent.setup({ skipHover: true }).click(screen.getByRole("button"));
+  expect(screen.getByText("正式发票 1139.63 · 补充凭证 140.00")).toBeVisible();
+  expect(screen.getByText("票据凭证合计 1279.63")).toBeVisible();
+  expect(screen.getByText("测试申请人 · 交通费 · 顺风车费用 · 测试项目")).toBeVisible();
+  expect(screen.getByText("OA 182.44 · 票据凭证 189.01 · 差额 6.57")).toBeVisible();
+  expect(group.groupType).toBe("unpaired");
+});
+
+it("keeps shared item scope, all anomalies, zero totals and missing details explicit", async () => {
+  const group = explanationGroup();
+  group.amountCheck!.supportingDocumentTotal = "0.00";
+  delete group.amountCheck!.evidenceTotal;
+  render(<WorkbenchAnomalyIndicator group={group} levelLabel="该关联组" anomalies={[
+    { ...anomaly, expenseItemDifferences: [{ expenseItemIds: ["item-car", "item-shared", "not-loaded"], oaTotal: "232.44", evidenceTotal: "250.00", amountDelta: "17.56" }] },
+    { ...anomaly, fingerprint: "second", displayLabel: "另一项异常" },
+  ]} />);
+  expect(screen.getByText("本组待处理 · 2 项异常")).toBeVisible();
+  await userEvent.setup({ skipHover: true }).click(screen.getByRole("button"));
+  expect(screen.getByText("正式发票 1139.63 · 补充凭证 0.00")).toBeVisible();
+  expect(screen.getByText("票据凭证合计 待核对")).toBeVisible();
+  expect(screen.getByText(/测试申请人 · 交通费.*测试申请人 · 住宿费.*子项 not-loaded（明细未加载或无法定位）/)).toBeVisible();
+  expect(screen.getByText("另一项异常")).toBeVisible();
+});
+
+it("labels accepted group anomalies without claiming they still block pairing", () => {
+  const group = explanationGroup();
+  group.groupType = "paired";
+  group.workbenchAnomaly!.reviewDecision = "accept_paired";
+  render(<WorkbenchAnomalyIndicator group={group} levelLabel="该关联组" anomalies={[anomaly]} />);
+  expect(screen.getByText(/本组异常已接受/)).toBeVisible();
+  expect(screen.queryByText(/本组待处理/)).not.toBeInTheDocument();
 });

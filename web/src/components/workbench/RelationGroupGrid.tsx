@@ -626,10 +626,26 @@ function RelationGroupGrid({
           item.displayScope === "group" || !visibleAnomalyFingerprints.has(item.fingerprint)
         ));
 
+        const renderGroup = (content: ReactNode) => (
+          <div key={group.id} className="candidate-group-frame">
+            {groupLevelAnomalies.length > 0 ? (
+              <div className="workbench-group-anomaly-heading">
+                <WorkbenchAnomalyIndicator
+                  anomalies={groupLevelAnomalies}
+                  className="workbench-anomaly-indicator--group"
+                  confirmation={group.workbenchAnomaly?.confirmation}
+                  group={group}
+                  levelLabel="该关联组"
+                />
+              </div>
+            ) : null}
+            {content}
+          </div>
+        );
+
         if (displaySegments) {
-          return (
+          return renderGroup(
             <div
-              key={group.id}
               className={`candidate-group-row candidate-group-row-sheet candidate-group-row-segmented candidate-group-row-tone-${index % 4}`}
               data-testid={`candidate-group-${zoneId}-${group.id}`}
               style={{ gridTemplateColumns: rowTemplateColumns }}
@@ -771,21 +787,12 @@ function RelationGroupGrid({
                   {column.renderGroup(group)}
                 </div>
               ))}
-              {groupLevelAnomalies.length > 0 ? (
-                <WorkbenchAnomalyIndicator
-                  anomalies={groupLevelAnomalies}
-                  className="workbench-anomaly-indicator--group"
-                  confirmation={group.workbenchAnomaly?.confirmation}
-                  levelLabel="该关联组"
-                />
-              ) : null}
             </div>
           );
         }
 
-        return (
+        return renderGroup(
           <div
-            key={group.id}
             className={`candidate-group-row candidate-group-row-sheet candidate-group-row-tone-${index % 4}`}
             data-testid={`candidate-group-${zoneId}-${group.id}`}
             style={{ gridTemplateColumns: rowTemplateColumns }}
@@ -843,14 +850,6 @@ function RelationGroupGrid({
                 {column.renderGroup(group)}
               </div>
             ))}
-            {groupLevelAnomalies.length > 0 ? (
-              <WorkbenchAnomalyIndicator
-                anomalies={groupLevelAnomalies}
-                className="workbench-anomaly-indicator--group"
-                confirmation={group.workbenchAnomaly?.confirmation}
-                levelLabel="该关联组"
-              />
-            ) : null}
           </div>
         );
       })}

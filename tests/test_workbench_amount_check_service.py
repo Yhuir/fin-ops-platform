@@ -825,6 +825,36 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         anomaly = self.service.workbench_anomaly(rows, relation_id="CASE-DOC")
         self.assertEqual(anomaly["items"][0]["code"], "oa_invoice_equal_bank_more")
 
+    def test_multi_oa_valid_vouchers_preserve_other_items_excess_and_balanced_control(self) -> None:
+        amounts = ["470.40", "332.44", "50.22", "140.00", "280.00"]
+        rows = {"oa": [], "bank": [self._bank_row("1273.06")], "invoice": []}
+        item_amounts = [["320", "150.40"], ["150", "182.44"], ["50.22"], ["54", "8", "25", "23", "30"], ["280"]]
+        for index, amount in enumerate(amounts):
+            items = [{"id": f"oa-{index}:item:{number}", "amount": value}
+                     for number, value in enumerate(item_amounts[index])]
+            rows["oa"].append({**self._oa_row(amount), "id": f"oa-{index}", "expense_items": items})
+            for item in items:
+                if index == 3:
+                    item.update(supporting_document_amount=item["amount"], supporting_document_version=1,
+                                supporting_documents=[{"id": f"doc-{item['id']}"}])
+                else:
+                    values = ["28.25", "126.16", "14.02", "20.58"] if item["id"] == "oa-1:item:1" else [item["amount"]]
+                    for number, value in enumerate(values):
+                        rows["invoice"].append({**self._invoice_row(value), "id": f"inv-{item['id']}-{number}",
+                                                "source_oa_id": f"oa-{index}", "source_expense_item_ids": [item["id"]]})
+        result = self.service.check(rows)
+        self.assertEqual((result["oa_total"], result["bank_total"], result["invoice_total"],
+                          result["supporting_document_total"], result["evidence_total"]),
+                         ("1273.06", "1273.06", "1139.63", "140.00", "1279.63"))
+        anomaly = self.service.workbench_anomaly(rows, relation_id="CASE-VOUCHER-EXPLANATION")
+        self.assertEqual([item["code"] for item in anomaly["items"]], ["oa_bank_equal_invoice_more"])
+        self.assertEqual(anomaly["items"][0]["expense_item_differences"], [{
+            "expense_item_ids": ["oa-1:item:1"], "oa_total": "182.44", "evidence_total": "189.01", "amount_delta": "6.57",
+        }])
+        next(invoice for invoice in rows["invoice"] if invoice["id"] == "inv-oa-1:item:1-3")["total_with_tax"] = "14.01"
+        self.assertEqual(self.service.check(rows)["status"], "matched")
+        self.assertIsNone(self.service.workbench_anomaly(rows, relation_id="CASE-VOUCHER-EXPLANATION"))
+
     def test_supporting_documents_add_once_to_shared_invoice_component(self) -> None:
         rows = {
             "oa": [{**self._oa_row("300"), "id": "oa-1", "expense_items": [

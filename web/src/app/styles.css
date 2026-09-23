@@ -15049,18 +15049,58 @@ body.column-layout-dragging {
   outline-offset: 2px;
 }
 
-.workbench-anomaly-indicator--group {
-  position: absolute;
-  z-index: 4;
-  top: 6px;
-  right: 6px;
+.candidate-group-frame {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
-.candidate-group-row:has(.workbench-anomaly-indicator--group:hover),
-.candidate-group-row:has(.workbench-anomaly-indicator--group[data-open="true"]),
-.candidate-group-row:has(.workbench-anomaly-indicator--group:focus-visible) {
+.workbench-group-anomaly-heading {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  padding: 4px 6px;
+  background: #fff8eb;
+  border: 1px solid #e4b266;
+  border-radius: 8px;
+}
+
+.workbench-anomaly-indicator--group,
+.workbench-anomaly-indicator--drawer-summary {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  min-height: 28px;
+  flex-basis: auto;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  white-space: normal;
+  text-align: left;
+}
+
+.workbench-anomaly-indicator--group svg,
+.workbench-anomaly-indicator--drawer-summary svg {
+  flex-shrink: 0;
+}
+
+.candidate-group-frame:has(.workbench-anomaly-indicator--group:hover) > .candidate-group-row,
+.candidate-group-frame:has(.workbench-anomaly-indicator--group[data-open="true"]) > .candidate-group-row,
+.candidate-group-frame:has(.workbench-anomaly-indicator--group:focus-visible) > .candidate-group-row {
   outline: 2px solid rgba(201, 130, 18, 0.45);
   outline-offset: -2px;
+}
+
+.workbench-anomaly-popover__totals {
+  display: grid;
+  gap: 4px;
+  font-size: var(--fp-text-caption);
+  color: #43556a;
+}
+
+.workbench-anomaly-popover__list li > span > strong,
+.workbench-anomaly-popover__list li > span > span {
+  display: block;
 }
 
 .workbench-anomaly-popover {
@@ -15356,7 +15396,9 @@ body.column-layout-dragging {
 }
 
 .workbench-anomaly-drawer__heading {
-  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
 }
 
 .workbench-anomaly-drawer__trigger {
@@ -15407,11 +15449,8 @@ body.column-layout-dragging {
 }
 
 .workbench-anomaly-indicator--drawer-summary {
-  position: absolute;
-  z-index: 3;
-  top: 50%;
-  right: 34px;
-  transform: translateY(-50%);
+  align-self: flex-start;
+  margin: 0 6px 6px;
 }
 
 .workbench-anomaly-drawer__details {

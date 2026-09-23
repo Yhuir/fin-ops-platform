@@ -225,7 +225,7 @@ test.describe("workbench exception browser flow", () => {
     });
     await expect(collapsedIndicator).toBeVisible();
     const collapsedHeading = drawer.locator(".workbench-anomaly-drawer__heading").first();
-    await expect(collapsedHeading.getByText("OA 流水一致，票少")).toHaveCount(0);
+    await expect(collapsedHeading.getByText(/本组待处理 · OA 流水一致，票少/)).toBeVisible();
     await collapsedIndicator.hover();
     const collapsedPopover = page.getByRole("dialog", { name: "该关联组异常详情" });
     await expect(collapsedPopover.getByText("OA 流水一致，票少")).toBeVisible();
@@ -391,7 +391,7 @@ test.describe("workbench exception browser flow", () => {
     expect(collapsedBox).not.toBeNull();
     expect(collapsedBox!.x).toBeGreaterThanOrEqual(0);
     expect(collapsedBox!.x + collapsedBox!.width).toBeLessThanOrEqual(1440);
-    await expect(drawer.locator(".workbench-anomaly-drawer__heading").getByText("OA 流水一致，票少")).toHaveCount(0);
+    await expect(drawer.locator(".workbench-anomaly-drawer__heading").getByText(/本组待处理 · OA 流水一致，票少/)).toBeVisible();
 
     await drawer.getByRole("button", { name: "展开异常明细" }).first().click();
     const review = drawer.getByRole("region", { name: "异常审阅" });

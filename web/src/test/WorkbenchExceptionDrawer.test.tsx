@@ -185,9 +185,10 @@ describe("WorkbenchExceptionDrawer", () => {
     expect(onExceptionCodeChange).toHaveBeenCalledWith("oa_bank_equal_invoice_more");
   });
 
-  it("keeps the collapsed row to the three pane summary and reveals chips only in the popover", async () => {
+  it("shows the group reason alongside collapsed totals and opens the shared explanation", async () => {
     const user = userEvent.setup();
     const anomalyGroup = group("unpaired");
+    anomalyGroup.amountCheck = { status: "mismatch", direction: "expense", bankAmount: "90.00", oaAmount: "100.00", oaTotal: "100.00", bankTotal: "90.00", invoiceTotal: "80.00", amountDelta: "20.00", requiresNote: true };
     anomalyGroup.workbenchAnomaly!.confirmation = {
       note: "流水金额与 OA 金额存在差额，经确认保留关联",
     };
@@ -198,14 +199,15 @@ describe("WorkbenchExceptionDrawer", () => {
     expect(screen.getByText("发票 · 0项")).toBeInTheDocument();
     const heading = screen.getByRole("button", { name: "展开异常明细" }).closest(".workbench-anomaly-drawer__heading");
     expect(heading).not.toBeNull();
-    expect(heading).not.toHaveTextContent("三项不一致");
+    expect(heading).toHaveTextContent("本组待处理 · 三项不一致");
     expect(screen.queryByRole("button", { name: /人工金额判断/ })).not.toBeInTheDocument();
 
     const indicator = screen.getByRole("button", { name: "该关联组有 1 项异常，查看详情" });
     await user.hover(indicator);
     const popover = await screen.findByRole("dialog", { name: "该关联组异常详情" });
     expect(within(popover).getByText("三项不一致")).toBeVisible();
-    expect(within(popover).getByText("OA 100.00 · 流水 90.00 · 发票 80.00")).toBeVisible();
+    expect(within(popover).getByText("OA 100.00 · 流水 90.00")).toBeVisible();
+    expect(within(popover).getByText("正式发票 80.00 · 补充凭证 未提供")).toBeVisible();
     expect(within(popover).getByText("确认关联备注")).toBeVisible();
     expect(within(popover).getByText("流水金额与 OA 金额存在差额，经确认保留关联")).toBeVisible();
     await user.click(indicator);
@@ -323,7 +325,7 @@ it("loads full details and shares custom columns, item alignment and voucher man
   expect(within(grid).queryByRole("button", { name: /筛选|拖动|排序/ })).not.toBeInTheDocument();
   expect(within(grid).getByText("完整明细项目")).toBeInTheDocument();
   expect(within(grid).getByText("凭证金额 80.00")).toBeInTheDocument();
-  expect(within(grid).getByText("差额（OA − 凭证）20.00")).toBeInTheDocument();
+  expect(within(grid).getByText("本项差额（OA − 凭证）20.00")).toBeInTheDocument();
   await user.click(within(grid).getByRole("button", { name: "管理凭证" }));
   expect(onManage).toHaveBeenCalledWith(expect.objectContaining({ sourceOaId: "oa-voucher", sourceExpenseItemIds: ["voucher-item"] }), full);
   expect(onEnsure).toHaveBeenCalledOnce();

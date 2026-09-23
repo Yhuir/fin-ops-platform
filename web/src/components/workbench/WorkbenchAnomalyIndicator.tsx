@@ -6,18 +6,20 @@ import {
   PopoverDialog,
 } from "@heroui/react";
 import { CircleAlert, ExternalLink } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import {
   isWorkbenchAmountAnomalyCode,
   type WorkbenchAnomaly,
   type WorkbenchAnomalyItem,
+  type WorkbenchRelationGroup,
 } from "../../features/workbench/types";
 import { formatDateTimeText } from "../../features/dateTime";
 
 type WorkbenchAnomalyIndicatorProps = {
   anomalies: WorkbenchAnomalyItem[];
   confirmation?: WorkbenchAnomaly["confirmation"];
+  group?: WorkbenchRelationGroup;
   levelLabel: string;
   externalUrl?: string;
   className?: string;
@@ -36,6 +38,7 @@ type InteractionMode = "idle" | "hover-open" | "hover-dismissed" | "click-open";
 export default function WorkbenchAnomalyIndicator({
   anomalies,
   confirmation,
+  group,
   levelLabel,
   externalUrl,
   className = "",
@@ -47,6 +50,13 @@ export default function WorkbenchAnomalyIndicator({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverId = useId();
   const open = interactionMode === "hover-open" || interactionMode === "click-open";
+
+  const itemLabels = useMemo(() => new Map(open && group ? [
+    ...group.rows.oa, ...(group.collapsedRows?.oa ?? []),
+  ].flatMap((row) => (row.expenseItems ?? []).map((item) => [
+    item.id,
+    [row.tableValues.applicant, item.expenseType, item.expenseContent, item.projectName].filter(Boolean).join(" · "),
+  ])) : []), [open, group]);
 
   const cancelClose = () => {
     if (closeTimerRef.current !== null) {
@@ -64,7 +74,7 @@ export default function WorkbenchAnomalyIndicator({
 
   const handleOpenChange = (nextOpen: boolean) => {
     cancelClose();
-    setInteractionMode(nextOpen ? "click-open" : "idle");
+    setInteractionMode(nextOpen ? "click-open" : "hover-dismissed");
   };
 
   const toggleFromTrigger = () => {
@@ -91,6 +101,9 @@ export default function WorkbenchAnomalyIndicator({
   const reviewerLabel = review
     ? `${review.reviewedByAccount}${review.reviewedByName ? `（${review.reviewedByName}）` : ""}`
     : "";
+  const groupSummary = group ? `${group.workbenchAnomaly?.reviewDecision === "accept_paired" ? "本组异常已接受" : "本组待处理"} · ${anomalies.length === 1
+    ? `${anomalies[0].displayLabel}${anomalies[0].amountDelta !== undefined ? ` · 差额 ${anomalies[0].amountDelta} 元` : ""}`
+    : `${anomalies.length} 项异常`}` : undefined;
   const ariaLabel = `${levelLabel}有 ${anomalies.length} 项异常，查看详情`;
 
   return (
@@ -103,9 +116,12 @@ export default function WorkbenchAnomalyIndicator({
         aria-haspopup="dialog"
         className={`workbench-anomaly-indicator__trigger${className ? ` ${className}` : ""}`}
         data-open={open ? "true" : "false"}
-        isIconOnly
+        isIconOnly={!group}
         size="sm"
         variant="ghost"
+        onBlur={() => {
+          setInteractionMode((current) => current === "hover-dismissed" ? "idle" : current);
+        }}
         onFocus={() => {
           if (pointerActivationRef.current) {
             return;
@@ -136,6 +152,7 @@ export default function WorkbenchAnomalyIndicator({
         }}
       >
         <CircleAlert aria-hidden="true" size={16} strokeWidth={2.1} />
+        {groupSummary ? <span>{groupSummary}</span> : null}
       </Button>
       {open ? (
         <PopoverContent
@@ -161,9 +178,17 @@ export default function WorkbenchAnomalyIndicator({
               <span>{levelLabel}异常</span>
               <span>{anomalies.length} 项</span>
             </div>
+            {group ? (
+              <div className="workbench-anomaly-popover__totals">
+                <span>OA {group.amountCheck?.oaTotal ?? "未提供"} · 流水 {group.amountCheck?.bankTotal ?? "未提供"}</span>
+                <span>正式发票 {group.amountCheck?.invoiceTotal ?? "未提供"} · 补充凭证 {group.amountCheck?.supportingDocumentTotal ?? "未提供"}</span>
+                <strong>票据凭证合计 {group.amountCheck?.evidenceTotal ?? "待核对"}</strong>
+                <span>本项差额为零只说明该付款项一致；配对状态按整组判断。</span>
+              </div>
+            ) : null}
             <ul className="workbench-anomaly-popover__list">
               {anomalies.map((anomaly) => {
-                const detail = anomalyDetail(anomaly);
+                const detail = group && isWorkbenchAmountAnomalyCode(anomaly.code) ? "" : anomalyDetail(anomaly);
                 return (
                   <li key={anomaly.fingerprint}>
                     <Chip
@@ -174,9 +199,10 @@ export default function WorkbenchAnomalyIndicator({
                       <Chip.Label>{anomaly.displayLabel}</Chip.Label>
                     </Chip>
                     {detail ? <span>{detail}</span> : null}
-                    {anomaly.expenseItemDifferences?.map((difference, index) => (
+                    {anomaly.expenseItemDifferences?.map((difference) => (
                       <span key={difference.expenseItemIds.join(":")}>
-                        明细 {index + 1}：OA {difference.oaTotal} · 票据凭证 {difference.evidenceTotal} · 差额 {difference.amountDelta}
+                        <strong>{difference.expenseItemIds.length === 0 ? "未提供子项归属" : difference.expenseItemIds.map((id) => itemLabels.get(id) || `子项 ${id}（明细未加载或无法定位）`).join("；")}</strong>
+                        <span>OA {difference.oaTotal} · 票据凭证 {difference.evidenceTotal} · 差额 {difference.amountDelta}</span>
                       </span>
                     ))}
                   </li>
