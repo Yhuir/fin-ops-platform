@@ -1604,7 +1604,7 @@ class WorkbenchPairRelationService:
                     for snapshot in result.get(collection) or []:
                         if self._project_bank_split_history_members(snapshot, change):
                             metadata = deepcopy(snapshot.get("special_metadata") or {})
-                            metadata["bank_split_requires_cost_confirmation"] = True
+                            metadata.pop("bank_split_requires_cost_confirmation", None)
                             metadata["bank_split_versions"] = deepcopy(relation.get("special_metadata", {}).get("bank_split_versions") or {})
                             snapshot["special_metadata"] = metadata
             return result

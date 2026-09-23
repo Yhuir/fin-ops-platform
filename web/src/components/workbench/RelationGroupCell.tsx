@@ -1,4 +1,5 @@
-import BankCategoryTag from "../../features/bankDetails/BankCategoryTag";
+import { BankSplitPartContent } from "../../features/bankSplits/BankSplitChips";
+import { formatMoney } from "../../features/money";
 import { memo, type ReactNode } from "react";
 
 import type { WorkbenchRecord, WorkbenchRecordType } from "../../features/workbench/types";
@@ -90,12 +91,14 @@ function RelationGroupCell({
         {displayRecords.map((row, index) => (
           <WorkbenchRecordCard
             bankPartsContent={row.isSplit && row.parentRowId ? <span className="bank-split-chips">
-              {splitGroups.get(row.parentRowId)?.map(part => <label key={part.id} onClick={event => event.stopPropagation()}>
-                <input type="checkbox" aria-label={`选择流水子项 ${part.categoryLabel ?? part.id} ${part.amount}`} checked={getRowState(part, zoneId) === "selected"}
-                  disabled={readOnly || !canOperateData || part.displayOnly} onChange={() => onSelectRow(part, zoneId)} />
-                <BankCategoryTag compact categoryCode={part.categoryCode ?? null} label={part.categoryLabel ?? ""} />
-                <span>{part.amount}</span>
-              </label>)}
+              {splitGroups.get(row.parentRowId)?.map(part => <button type="button" className="bank-split-part bank-split-part-select" key={part.id}
+                aria-label={`选择流水子项 ${part.categoryLabel ?? part.id} ${formatMoney(part.amount)}`}
+                aria-pressed={getRowState(part, zoneId) === "selected"}
+                disabled={readOnly || !canOperateData || part.displayOnly}
+                onClick={event => { event.stopPropagation(); onSelectRow(part, zoneId); }}>
+                <BankSplitPartContent part={{ category_code: part.categoryCode ?? '', category_label: part.categoryLabel ?? '',
+                  category_path: part.categoryLabelPath ?? part.categoryPath ?? [], amount: part.amount }} />
+              </button>)}
             </span> : undefined}
             columnGridStyle={columnGridStyle}
             columns={columns}

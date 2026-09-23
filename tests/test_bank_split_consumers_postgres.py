@@ -72,7 +72,10 @@ class BankSplitConsumersPostgresTests(unittest.TestCase):
         self.connection.execute("insert into app.turnover_ledger_extras(ledger_key,extra_payload) values (%s,%s::jsonb)",
             (old_relation, json.dumps({"relation_id": old_relation, "note":"保留备注", "interest_rate_type":"annual", "interest_rate_value":"0.05"})))
         before = {"transaction_id":"bank-parent", "canonical_transaction_id":self.parent,
-            "amount":"1001497.22", "category_code":"principal-custom", "direction":"outflow", "parts":[]}
+            "amount":"1001497.22", "category_code":"principal-custom", "direction":"outflow", "parts":[],
+            "category_label":"本金", "category_primary_label":"外部往来款付款", "category_sub_label":"归还借款",
+            "category_third_label":"银行往来", "category_label_path":["外部往来款付款","归还借款","银行往来"],
+            "turnover_role":"external_turnover", "turnover_action_type":"repaid", "turnover_family":"bank"}
         after = {**before,"parts":[{"id":self.principal,"category_code":"principal-custom","amount":"1000000.00"},
             {"id":self.interest,"category_code":"interest-custom","amount":"1497.22"}]}
         with self.connection.transaction() as tx:
@@ -101,7 +104,10 @@ class BankSplitConsumersPostgresTests(unittest.TestCase):
             self.connection.execute("insert into app.turnover_ledger_extras(ledger_key,extra_payload) values (%s,%s::jsonb)",
                 (ledger_key,json.dumps({"relation_id":ledger_key,"note":ledger_key})))
         before = {"transaction_id":"bank-parent", "canonical_transaction_id":self.parent,
-            "amount":"1001497.22", "category_code":"principal-custom", "direction":"outflow", "parts":[]}
+            "amount":"1001497.22", "category_code":"principal-custom", "direction":"outflow", "parts":[],
+            "category_label":"本金", "category_primary_label":"外部往来款付款", "category_sub_label":"归还借款",
+            "category_third_label":"银行往来", "category_label_path":["外部往来款付款","归还借款","银行往来"],
+            "turnover_role":"external_turnover", "turnover_action_type":"repaid", "turnover_family":"bank"}
         after = {**before,"parts":[{"id":self.principal,"category_code":"principal-custom","amount":"1000000.00"},
             {"id":self.interest,"category_code":"interest-custom","amount":"1497.22"}]}
         with self.assertRaises(BankTransactionSplitError) as error, self.connection.transaction() as tx:
@@ -140,14 +146,15 @@ class BankSplitConsumersPostgresTests(unittest.TestCase):
         self.assertEqual(len(payload['rows'][0]['bank_split_parts']),2)
         self.assertEqual(payload['rows'][0]['id'],'bank-parent')
 
-    def test_cost_only_receives_interest_and_requires_manual_confirmation(self):
+    def test_cost_only_receives_interest_and_automatically_allocates_unique_source(self):
         policy = CostStatisticsPolicy(PostgresCostStatisticsCanonicalRepository(self.connection).load_snapshot())
-        self.assertEqual(policy.serialized_cost_rows,[])
-        self.assertEqual(len(policy.manual_allocation_tasks),1)
-        task = policy.manual_allocation_tasks[0]
+        self.assertEqual([row['amount'] for row in policy.serialized_cost_rows], ['1497.22'])
+        self.assertEqual(policy.manual_allocation_tasks, [])
+        task = policy.allocation_tasks[0]
         self.assertEqual(task['net_outflow_total'],'1497.22')
         self.assertEqual([row['transaction_id'] for row in task['bank_events']],[self.interest])
-        self.assertIsNone(task['source_allocations'])
+        self.assertEqual(task['source_allocations']['cost_lines'][0]['amount'], '1497.22')
+        self.assertEqual(self.connection.fetch_one('select count(*) as count from app.cost_statistics_manual_allocations')['count'],0)
 
     def test_pending_invoice_query_and_detail_accept_child_identity(self):
         query = PendingInvoiceCanonicalQueryService(repository=PostgresPendingInvoiceCanonicalRepository(self.connection))

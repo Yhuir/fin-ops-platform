@@ -14,6 +14,7 @@ export type BankSplitTag = {
   primary_label: string;
   sub_label: string;
   status: string;
+  turnover_role: string;
 };
 export type BankSplitDetail = {
   transaction_id: string;
@@ -22,14 +23,17 @@ export type BankSplitDetail = {
   direction: string;
   version: number;
   category_code: string | null;
+  category_label_path: string[];
+  turnover_third_label_options: Array<{ value: string; label: string }>;
   parts: BankSplitPart[];
   tag_definitions: BankSplitTag[];
   can_edit: boolean;
 };
 export type SaveBankSplits = {
   version: number;
-  parts: Array<{ id?: string; category_code: string; amount: string }>;
+  parts: Array<{ id?: string; category_code: string; amount: string; category_label_path: string[] }>;
   category_code?: string;
+  category_label_path?: string[];
 };
 export async function fetchBankSplits(id: string, signal?: AbortSignal) {
   const detail = await apiRequestJson<BankSplitDetail>(`/api/bank-transactions/${encodeURIComponent(id)}/splits`, { signal }, { allowHtmlFallback: false });

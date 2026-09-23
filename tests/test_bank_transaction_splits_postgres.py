@@ -39,7 +39,7 @@ class BankTransactionSplitPostgresTests(unittest.TestCase):
         self.connection = PostgresConnection(PostgresSettings(database_url=self.database_url, pool_enabled=False))
         self.parent = str(uuid4())
         self.settings = {"access_control_version": 1, "page_access_accounts": [], "bank_transaction_tags": {"version": 1, "definitions": [*default_bank_transaction_tag_dictionary_payload()["definitions"],
-            {"code": "test_principal", "label": "本金", "path": ["往来", "本金"], "status": "active", "source": "custom", "rules": {}, "output_primary_label": "往来", "output_sub_label": "本金", "turnover_role": "external_turnover"},
+            {"code": "test_principal", "label": "本金", "path": ["外部往来款付款", "归还借款"], "status": "active", "source": "custom", "rules": {}, "output_primary_label": "外部往来款付款", "output_sub_label": "归还借款", "turnover_role": "external_turnover", "turnover_action_type": "repaid"},
             {"code": "test_interest", "label": "利息", "path": ["费用", "利息"], "status": "active", "source": "custom", "rules": {}, "output_primary_label": "费用", "output_sub_label": "利息"},
         ]}}
         self.connection.execute("INSERT INTO app.app_settings(settings_key,settings_payload) VALUES ('app_settings',%s) ON CONFLICT(settings_key) DO UPDATE SET settings_payload=excluded.settings_payload", (jsonb(self.settings),))
@@ -61,7 +61,7 @@ class BankTransactionSplitPostgresTests(unittest.TestCase):
     @staticmethod
     def payload(version=0):
         return {"version": version, "parts": [
-            {"category_code": "test_principal", "amount": "1000000.00"},
+            {"category_code": "test_principal", "category_label_path": ["外部往来款付款", "归还借款", "银行往来"], "amount": "1000000.00"},
             {"category_code": "test_interest", "amount": "1497.22"},
         ]}
 
@@ -85,6 +85,64 @@ class BankTransactionSplitPostgresTests(unittest.TestCase):
         with self.connection.transaction() as tx:
             tags = PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(tx, settings=self.settings, transaction_ids=[part["id"] for part in saved["parts"]])
         self.assertEqual({row["effective_category_code"] for row in tags.values()}, {"test_principal", "test_interest"})
+        principal = tags[saved["parts"][0]["id"]]
+        self.assertEqual(principal["effective_category_label_path"], ["外部往来款付款", "归还借款", "银行往来"])
+        self.assertEqual(principal["turnover_family"], "bank")
+        self.assertEqual(principal["turnover_action_type"], "repaid")
+        from fin_ops_platform.services.turnover_ledger_query_service import TurnoverLedgerQueryService
+        selected = TurnoverLedgerQueryService(connection=self.connection).selected_bank_rows()
+        self.assertEqual([row["id"] for row in selected], [saved["parts"][0]["id"]])
+        self.assertEqual(Decimal(str(selected[0]["debit_amount"])), Decimal("1000000.00"))
+
+    def test_manual_confirmation_instance_survives_without_definition_family(self):
+        record = {"category_code": "test_principal", "category_label": "归还借款",
+                  "category_primary_label": "外部往来款付款", "category_sub_label": "归还借款",
+                  "category_third_label": "银行往来", "category_label_path": ["外部往来款付款", "归还借款", "银行往来"],
+                  "turnover_role": "external_turnover", "turnover_action_type": "repaid", "turnover_family": "bank"}
+        self.connection.execute("""INSERT INTO app.bank_transaction_category_confirmations
+            (bank_transaction_id, legacy_transaction_id, category_code, raw_payload)
+            VALUES (%s::uuid,'txn-split-test','test_principal',%s)""", (self.parent, jsonb({"normalized_payload": record})))
+        original = self.service.read(self.parent)
+        self.assertEqual(original["category_label_path"], record["category_label_path"])
+        self.assertEqual(original["turnover_family"], "bank")
+        saved = self.service.save(self.parent, self.payload(), actor_id="tester")
+        self.assertEqual(saved["parts"][0]["turnover_family"], "bank")
+        self.assertEqual(self.connection.fetch_one("SELECT raw_payload FROM app.bank_transaction_category_confirmations")["raw_payload"],
+                         {"normalized_payload": record})
+        # Choosing another family is authoritative and must never inherit the parent confirmation.
+        parts = [{"id": part["id"], "category_code": part["category_code"], "amount": part["amount"],
+                  "category_label_path": list(part["category_label_path"])} for part in saved["parts"]]
+        parts[0]["category_label_path"][2] = "个人往来"
+        edited = self.service.save(self.parent, {"version": 1, "parts": parts}, actor_id="tester")
+        with self.connection.transaction() as tx:
+            projected = PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
+                tx, settings=self.settings, transaction_ids=[edited["parts"][0]["id"]])
+        self.assertEqual(projected[edited["parts"][0]["id"]]["turnover_family"], "personal")
+
+    def test_instance_only_edit_versions_and_parent_or_child_amount_search(self):
+        saved = self.service.save(self.parent, self.payload(), actor_id="tester")
+        parts = [{"id": part["id"], "category_code": part["category_code"], "amount": part["amount"],
+                  "category_label_path": list(part["category_label_path"])} for part in saved["parts"]]
+        parts[0]["category_label_path"][2] = "公司往来"
+        edited = self.service.save(self.parent, {"version": 1, "parts": parts}, actor_id="tester")
+        self.assertEqual(edited["version"], 2)
+        self.assertEqual([part["id"] for part in edited["parts"]], [part["id"] for part in saved["parts"]])
+        self.assertEqual(edited["parts"][0]["turnover_family"], "company")
+        repo = PostgresBankDetailsCanonicalQueryRepository(self.connection)
+        for keyword, code, third in [("1001497.22", None, None), ("1497.22", "test_interest", None),
+                                     ("1001497.22", "test_principal", "公司往来")]:
+            with self.subTest(keyword=keyword, code=code):
+                snapshot = repo.transactions_snapshot(account_key=None, date_from=None, date_to=None, keyword=keyword,
+                    category_code=code, category_primary_label=None, category_sub_label=None, category_third_label=third,
+                    page=1, page_size=50)
+                self.assertEqual(len(snapshot["rows"]), 1)
+                self.assertEqual(snapshot["rows"][0]["amount"], Decimal("1001497.22"))
+                self.assertEqual(snapshot["rows"][0]["bank_split_parts"][0]["category_path"][-1], "公司往来")
+        cleared = self.service.save(self.parent, {"version": 2, "parts": [], "category_code": "test_principal",
+            "category_label_path": ["外部往来款付款", "归还借款", "银行往来"]}, actor_id="tester")
+        self.assertEqual(cleared["turnover_family"], "bank")
+        self.assertEqual(self.service.read(self.parent)["category_label_path"], ["外部往来款付款", "归还借款", "银行往来"])
+        self.assertEqual(self.service.read_many({"transaction_ids": [self.parent]})["rows"][0]["turnover_family"], "bank")
 
     def test_noop_conflict_and_explicit_clear(self):
         saved = self.service.save(self.parent, self.payload(), actor_id="tester")
@@ -123,8 +181,8 @@ class BankTransactionSplitPostgresTests(unittest.TestCase):
 
     def test_batch_read_preserves_alias_order_and_unit_detail_preserves_parent(self):
         from fin_ops_platform.services.bank_transaction_unit import (
+            bank_unit_comparison_rows,
             bank_unit_display,
-            bank_unit_matches_invoice,
             original_bank_transaction,
         )
         from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
@@ -136,7 +194,7 @@ class BankTransactionSplitPostgresTests(unittest.TestCase):
         self.assertTrue(all(row["transaction_id"] == "txn-split-test" and row["parts"] == saved["parts"] for row in rows))
         units = PostgresCoreRepository(self.connection).list_bank_transaction_units_by_ids(child_ids)
         self.assertEqual(sum(unit.amount for unit in units), Decimal("1001497.22"))
-        self.assertEqual(sum(unit.amount for unit in units if bank_unit_matches_invoice(unit)), Decimal("1497.22"))
+        self.assertEqual(sum(unit.amount for unit in bank_unit_comparison_rows(units,target=Decimal("1497.22"))), Decimal("1497.22"))
         for unit in units:
             self.assertEqual(original_bank_transaction(unit).amount, Decimal("1001497.22"))
             self.assertEqual(len(bank_unit_display(unit)["bank_split_parts"]), 2)

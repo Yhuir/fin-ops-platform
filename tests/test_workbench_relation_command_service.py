@@ -80,6 +80,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(service.list_history()[:len(original_history)], original_history)
         requirements.assert_called_once_with({"batch": ["principal", "interest", "bank-other"]})
         restored_batch = next(item for event in service.list_history()[len(original_history):] for item in event["after_relations"] if item["case_id"] == "batch")
+        self.assertNotIn("bank_split_requires_cost_confirmation", restored_batch["special_metadata"])
         self.assertTrue(restored_batch["special_metadata"]["requires_invoice"])
         self.assertEqual(restored_batch["special_metadata"]["paired_requirement_version"], 9)
 

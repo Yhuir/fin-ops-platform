@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 from fin_ops_platform.domain.models import BankTransaction
+from fin_ops_platform.services.bank_split_relation_scope import bank_split_comparison_rows
 
 
 @dataclass(slots=True)
@@ -16,10 +18,6 @@ class BankTransactionUnit(BankTransaction):
     turnover_role: str | None = None
     split_category_code: str | None = None
     is_split: bool = True
-
-
-def bank_unit_matches_invoice(bank: BankTransaction) -> bool:
-    return not isinstance(bank, BankTransactionUnit) or bank.turnover_role != "external_turnover"
 
 
 def original_bank_transaction(bank: BankTransaction) -> BankTransaction:
@@ -51,3 +49,13 @@ def original_bank_summaries(summaries: list[dict[str, Any]]) -> list[dict[str, A
         parent = original_bank_summary(summary)
         unique.setdefault(parent["bankTransactionId"], parent)
     return list(unique.values())
+
+
+def bank_unit_comparison_rows(banks: list[BankTransaction], *, target: Decimal) -> list[BankTransaction]:
+    """Adapt bank read projections to the shared document comparison rule."""
+    by_id = {bank.id: bank for bank in banks}
+    rows = [{"id": bank.id, "amount": bank.amount, "txn_direction": bank.txn_direction.value,
+             "is_split": isinstance(bank, BankTransactionUnit),
+             "turnover_role": bank.turnover_role if isinstance(bank, BankTransactionUnit) else None}
+            for bank in banks]
+    return [by_id[row["id"]] for row in bank_split_comparison_rows(rows, target=target)]

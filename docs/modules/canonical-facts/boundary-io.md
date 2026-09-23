@@ -108,3 +108,5 @@
 ## 持久化流水拆分（2026-09-23）
 
 银行事实保留原身份、金额和余额；`bank_transaction_split_sets/items` 持久化人工子项，`bank_transaction_units` 是派生用途视图。各页面共用 `web/src/features/bankSplits/` 抽屉编辑器，银行 owner 编排关系/成本/往来/批次 owner 的原子变更。无新增 worker/read model。详见 [I/O 与测试矩阵](../../dev/bank-transaction-splits.md)。
+
+0180 增加子项 `category_payload`，保存完整人工分类实例及 action/family；主流水金融事实与身份不变。统一用途核对仅生成只读子集，保留全部正式关系成员，不新增另一份成本或往来事实。

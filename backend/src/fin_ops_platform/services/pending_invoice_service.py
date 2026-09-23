@@ -10,10 +10,11 @@ from typing import Any, Callable
 
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Invoice
+from fin_ops_platform.services.bank_split_relation_scope import bank_split_comparison_rows
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
 from fin_ops_platform.services.bank_transaction_unit import (
+    bank_unit_comparison_rows,
     bank_unit_display,
-    bank_unit_matches_invoice,
     original_bank_transaction,
 )
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -482,7 +483,7 @@ class PendingInvoiceQueryService:
                 transaction_id = str(item.get("id") or item.get("transaction_id") or "").strip()
                 if transaction_id:
                     paid_transaction_ids.add(transaction_id)
-        paid_units = [row for row in self._bank_units_by_ids(sorted(paid_transaction_ids)) if bank_unit_matches_invoice(row)]
+        paid_units = bank_unit_comparison_rows(self._bank_units_by_ids(sorted(paid_transaction_ids)), target=invoice_total)
         paid_total = sum((row.amount for row in paid_units), Decimal("0.00"))
         remaining = invoice_total - paid_total
         if remaining < Decimal("0.00"):
@@ -580,7 +581,9 @@ class PendingInvoiceQueryService:
                         {
                             **common,
                             "transaction_id": member_id,
-                            "invoice_payment_eligible": transaction is None or bank_unit_matches_invoice(transaction),
+                            "is_split": bool(transaction is not None and getattr(transaction, "is_split", False)),
+                            "turnover_role": getattr(transaction, "turnover_role", None),
+                            "txn_direction": transaction.txn_direction.value if transaction is not None else "",
                             "amount": _decimal_to_str(transaction.amount) if transaction is not None else "0.00",
                             "trade_time": (transaction.trade_time or transaction.txn_date) if transaction is not None else "",
                             "counterparty_name": transaction.counterparty_name_raw if transaction is not None else "",
@@ -755,6 +758,10 @@ class PendingInvoiceQueryService:
         rows: list[dict[str, Any]] = []
         seen: set[str] = set()
         bank_units = self._relation_bank_units(row)
+        invoice_total = sum((_decimal_from_text(item.get("total_with_tax"))
+                             for key in ("linked_input_invoices", "linked_output_invoices")
+                             for item in row.get(key, []) if _distribution_item_is_linked(item)), Decimal("0.00"))
+        comparison_ids = {bank.id for bank in bank_unit_comparison_rows(list(bank_units.values()), target=invoice_total)}
         for item in list(row.get("linked_bank_transactions") or []):
             if not isinstance(item, dict):
                 continue
@@ -765,7 +772,7 @@ class PendingInvoiceQueryService:
                 continue
             seen.add(transaction_id)
             transaction = bank_units.get(transaction_id)
-            if transaction is not None and not bank_unit_matches_invoice(transaction):
+            if transaction is not None and transaction.id not in comparison_ids:
                 continue
             rows.append(
                 {
@@ -844,21 +851,12 @@ class PendingInvoiceQueryService:
     @staticmethod
     def _payment_summary_from_relation_context(row: dict[str, Any], invoices: list[dict[str, Any]]) -> dict[str, Any]:
         invoice_total = sum((_decimal_from_text(invoice.get("total_with_tax")) for invoice in invoices), start=Decimal("0.00"))
-        paid_transaction_ids: set[str] = set()
-        paid_total = Decimal("0.00")
-        for item in list(row.get("linked_bank_transactions") or []):
-            if not isinstance(item, dict):
-                continue
-            if not _distribution_item_is_linked(item):
-                continue
-            if item.get("invoice_payment_eligible") is False:
-                continue
-            transaction_id = str(item.get("id") or item.get("transaction_id") or "").strip()
-            if transaction_id and transaction_id in paid_transaction_ids:
-                continue
-            if transaction_id:
-                paid_transaction_ids.add(transaction_id)
-            paid_total += _decimal_from_text(item.get("amount"))
+        linked_banks = {str(item.get("id") or item.get("transaction_id") or ""): item
+                        for item in row.get("linked_bank_transactions", [])
+                        if isinstance(item, dict) and _distribution_item_is_linked(item)}
+        comparison = bank_split_comparison_rows(list(linked_banks.values()), target=invoice_total)
+        paid_transaction_ids = {str(item.get("id") or item.get("transaction_id") or "") for item in comparison}
+        paid_total = sum((_decimal_from_text(item.get("amount")) for item in comparison), Decimal("0.00"))
         remaining = invoice_total - paid_total
         if remaining < Decimal("0.00"):
             remaining = Decimal("0.00")
@@ -2561,8 +2559,9 @@ class PendingInvoiceApplicationService:
                 if row_type != "bank" or not row_id or row_id in seen_transaction_ids:
                     continue
                 seen_transaction_ids.add(row_id)
-        paid_total = sum((unit.amount for unit in self._bank_units_by_ids(sorted(seen_transaction_ids))
-                          if bank_unit_matches_invoice(unit)), Decimal("0.00"))
+        paid_units = bank_unit_comparison_rows(self._bank_units_by_ids(sorted(seen_transaction_ids)),
+                                               target=_invoice_total(self._get_invoice(invoice_id)))
+        paid_total = sum((unit.amount for unit in paid_units), Decimal("0.00"))
         return paid_total.quantize(Decimal("0.01"))
 
     def _record_attach_existing_audit(

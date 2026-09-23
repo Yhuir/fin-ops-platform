@@ -7,12 +7,12 @@ from uuid import uuid4
 
 from fin_ops_platform.app.routes_bank_transaction_splits import BankTransactionSplitApiRoutes
 from fin_ops_platform.services.bank_transaction_category_service import default_bank_transaction_tag_dictionary_payload
-from fin_ops_platform.services.bank_transaction_split_service import BankTransactionSplitError, validate_split_parts
+from fin_ops_platform.services.bank_transaction_split_service import BankTransactionSplitError, normalize_split_category, validate_split_parts
 from fin_ops_platform.services.postgres_repositories.bank_transaction_splits import (
     PostgresBankTransactionSplitRepository,
 )
 
-DEFINITIONS = [{"code": "principal", "status": "active"}, {"code": "interest", "status": "active"}]
+DEFINITIONS = [{"code": "principal", "label": "本金", "path": ["本金"], "status": "active"}, {"code": "interest", "label": "利息", "path": ["费用", "利息"], "status": "active"}]
 
 
 class SplitTagDisplayTests(unittest.TestCase):
@@ -72,6 +72,32 @@ class SplitValidationTests(unittest.TestCase):
         for value in (None, {}, [{"category_code": "principal", "amount": "1001497.22"}]):
             with self.subTest(value=value), self.assertRaises(BankTransactionSplitError):
                 self.validate(value)
+
+
+class SplitClassificationTests(unittest.TestCase):
+    definition = {"code": "custom", "status": "active", "label": "归还借款", "path": ["外部往来款付款", "归还借款"],
+                  "output_primary_label": "外部往来款付款", "output_sub_label": "归还借款",
+                  "turnover_role": "external_turnover", "turnover_action_type": "repaid"}
+
+    def test_complete_instance_derives_family_without_definition_third(self):
+        selection = {"category_label_path": ["外部往来款付款", "归还借款", "银行往来"]}
+        result = normalize_split_category(selection, self.definition)
+        self.assertEqual(result["turnover_family"], "bank")
+        self.assertEqual(result["category_third_label"], "银行往来")
+        self.assertEqual(result["turnover_action_type"], "repaid")
+        self.assertNotIn("output_third_label", self.definition)
+
+    def test_invalid_or_contradictory_instance_never_guesses(self):
+        for selection in ({}, {"category_label_path": ["外部往来款付款", "归还借款", "陌生往来"]},
+                          {"category_label_path": ["费用", "利息", "银行往来"]},
+                          {"category_label_path": ["外部往来款付款", "归还借款", "银行往来"], "turnover_family": "company"},
+                          {"category_label_path": ["外部往来款付款", "归还借款", "银行往来"], "turnover_action_type": "collected"}):
+            with self.subTest(selection=selection), self.assertRaises(BankTransactionSplitError):
+                normalize_split_category(selection, self.definition)
+        with self.assertRaises(BankTransactionSplitError):
+            normalize_split_category({"category_label_path": ["费用", "利息", "银行往来"]}, DEFINITIONS[1])
+        with self.assertRaises(BankTransactionSplitError):
+            normalize_split_category({"turnover_family": "bank"}, DEFINITIONS[1])
 
 
 class SplitRouteTests(unittest.TestCase):

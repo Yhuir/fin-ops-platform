@@ -35,6 +35,7 @@ from fin_ops_platform.services.pending_invoice_status import (
     pending_invoice_filter_status_codes,
     pending_invoice_status_payload,
 )
+from fin_ops_platform.services.postgres_repositories.bank_split_relation_scope import bank_split_scope_ctes
 from fin_ops_platform.services.postgres_repositories.relation_invoice_members import RELATION_INVOICE_READ_SQL
 from fin_ops_platform.services.search_query import normalize_money_search_query
 
@@ -1167,6 +1168,21 @@ CANDIDATE_SORT_EXPRESSIONS = {
     "amount_difference_abs": "amount_difference_abs",
 }
 
+_CANDIDATE_BANK_SCOPE_SQL = bank_split_scope_ctes(
+    bank_rows_sql="""select member.invoice_id as group_key, member.bank_id, bank.amount,
+        bank.txn_direction as direction, bank.is_split, definition.value->>'turnover_role' as turnover_role
+        from invoice_bank_members member
+        join app.bank_transaction_units bank
+          on coalesce(bank.legacy_mongo_id,bank.id::text)=member.bank_id and bank.status<>'deleted'
+        left join app.app_settings settings on settings.settings_key='app_settings'
+        left join lateral jsonb_array_elements(settings.settings_payload#>'{bank_transaction_tags,definitions}') definition(value)
+          on definition.value->>'code'=bank.split_category_code""",
+    targets_sql="""select coalesce(invoice.legacy_mongo_id,invoice.id::text) as group_key,
+        abs(invoice.total_with_tax) as target_amount from app.invoices invoice
+        where exists(select 1 from invoice_bank_members member
+          where member.invoice_id=coalesce(invoice.legacy_mongo_id,invoice.id::text))""",
+)
+
 CANDIDATE_QUERY_SQL = f"""
 with
 active_relations as materialized (
@@ -1204,6 +1220,7 @@ invoice_bank_members as materialized (
       on bank_member.case_id = invoice_case.case_id
      and bank_member.row_type = 'bank'
 ),
+{_CANDIDATE_BANK_SCOPE_SQL},
 invoice_case_facts as materialized (
     select
         invoice_case.invoice_id,
@@ -1220,11 +1237,12 @@ invoice_bank_facts as materialized (
                 filter (where bank_member.bank_id is not null),
             array[]::text[]
         ) as linked_bank_ids,
-        coalesce(sum(abs(bank.amount)), 0) as paid_total
+        coalesce(sum(abs(bank.amount)) filter(where scope.bank_id is not null), 0) as paid_total
     from invoice_bank_members bank_member
     left join app.bank_transaction_units bank
       on coalesce(bank.legacy_mongo_id, bank.id::text) = bank_member.bank_id
      and bank.status <> 'deleted'
+    left join scope_bank_members scope on scope.group_key=bank_member.invoice_id and scope.bank_id=bank_member.bank_id
     group by bank_member.invoice_id
 ),
 candidate_source as materialized (

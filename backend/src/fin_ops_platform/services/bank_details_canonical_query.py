@@ -286,7 +286,23 @@ class PostgresBankDetailsCanonicalQueryRepository:
                             then manual_category_raw_payload->'normalized_payload'->>'turnover_role'
                     end, ''),
                     effective_definition->>'turnover_role', ''
-                ) as turnover_role
+                ) as turnover_role,
+                coalesce(
+                    nullif(case
+                        when effective_category_source = 'manual_confirmation'
+                            then confirmation_raw_payload->'normalized_payload'->>'turnover_action_type'
+                        when effective_category_source in ('manual', 'turnover_ledger')
+                            then manual_category_raw_payload->'normalized_payload'->>'turnover_action_type'
+                    end, ''), effective_definition->>'turnover_action_type'
+                ) as turnover_action_type,
+                coalesce(
+                    nullif(case
+                        when effective_category_source = 'manual_confirmation'
+                            then confirmation_raw_payload->'normalized_payload'->>'turnover_family'
+                        when effective_category_source in ('manual', 'turnover_ledger')
+                            then manual_category_raw_payload->'normalized_payload'->>'turnover_family'
+                    end, ''), effective_definition->>'turnover_family'
+                ) as turnover_family
             from classified_with_semantics
             where row_id = any(%s::text[])
             """,
@@ -551,12 +567,13 @@ class PostgresBankDetailsCanonicalQueryRepository:
             category_primary_label=category_primary_label,
             category_sub_label=category_sub_label,
             category_third_label=category_third_label,
+            include_original_amount=True,
         )
         rows = transaction.fetch_all(
             f"""
             with recursive {cte_sql},
             purpose_filters as materialized (
-              select parent.row_id, parent.trade_time_sort, parent.direction, parent.account_key, parent.txn_date, parent.counterparty_name_raw, parent.trade_time, parent.amount, parent.balance, parent.summary_text, parent.purpose_text, parent.note_text, parent.bank_name, parent.account_last4,
+              select parent.row_id, parent.trade_time_sort, parent.direction, parent.account_key, parent.txn_date, parent.counterparty_name_raw, parent.trade_time, parent.amount, parent.balance, parent.summary_text, parent.purpose_text, parent.note_text, parent.bank_name, parent.account_last4, parent.amount as original_amount,
                 parent.effective_category_code, parent.effective_category_primary_label,
                 parent.effective_category_sub_label, parent.effective_category_third_label,
                 parent.effective_category_label
@@ -565,11 +582,11 @@ class PostgresBankDetailsCanonicalQueryRepository:
                 join app.bank_transactions original on original.id = item.bank_transaction_id
                 where coalesce(original.legacy_mongo_id, original.id::text) = parent.row_id)
               union all
-              select parent.row_id, parent.trade_time_sort, parent.direction, parent.account_key, parent.txn_date, parent.counterparty_name_raw, parent.trade_time, item.amount as amount, parent.balance, parent.summary_text, parent.purpose_text, parent.note_text, parent.bank_name, parent.account_last4, item.category_code,
-                definition.definition->>'output_primary_label',
-                definition.definition->>'output_sub_label',
-                definition.definition->>'output_third_label',
-                definition.definition->>'label'
+              select parent.row_id, parent.trade_time_sort, parent.direction, parent.account_key, parent.txn_date, parent.counterparty_name_raw, parent.trade_time, item.amount as amount, parent.balance, parent.summary_text, parent.purpose_text, parent.note_text, parent.bank_name, parent.account_last4, parent.amount as original_amount, item.category_code,
+                coalesce(item.category_payload->>'category_primary_label', definition.definition->>'output_primary_label'),
+                coalesce(item.category_payload->>'category_sub_label', definition.definition->>'output_sub_label'),
+                coalesce(item.category_payload->>'category_third_label', definition.definition->>'output_third_label'),
+                coalesce(item.category_payload->>'category_label', definition.definition->>'label')
               from classified_filter_rows parent
               join app.bank_transactions original on coalesce(original.legacy_mongo_id, original.id::text) = parent.row_id
               join app.bank_transaction_split_items item on item.bank_transaction_id = original.id
@@ -704,13 +721,13 @@ class PostgresBankDetailsCanonicalQueryRepository:
               select jsonb_agg(jsonb_build_object(
                 'id', item.id::text, 'category_code', item.category_code,
                 'amount', to_char(item.amount, 'FM999999999999999990.00'),
-                'category_label', definition.definition->>'label',
-                'category_path', case when nullif(definition.definition->>'output_primary_label', '') is not null
+                'category_label', coalesce(item.category_payload->>'category_label', definition.definition->>'label'),
+                'category_path', coalesce(item.category_payload->'category_label_path', case when nullif(definition.definition->>'output_primary_label', '') is not null
                   then to_jsonb(array_remove(array[definition.definition->>'output_primary_label',
                     nullif(definition.definition->>'output_sub_label', ''),
                     nullif(definition.definition->>'output_third_label', '')], null))
-                  else coalesce(definition.definition->'path', '[]'::jsonb) end
-              ) order by item.position) as parts
+                  else coalesce(definition.definition->'path', '[]'::jsonb) end)
+              ) || item.category_payload order by item.position) as parts
               from app.bank_transaction_split_items item
               join tag_definitions definition on definition.definition->>'code' = item.category_code
               where item.bank_transaction_id = page_bank.id
@@ -1198,6 +1215,7 @@ def bank_category_classification_cte(
         "bank.amount as parent_amount, 0::bigint as split_version, null::text as split_category_code, false as is_split,"
     )
     split_category = "bank.split_category_code" if use_units else "null::text"
+    split_payload = "bank.split_category_payload" if use_units else "null::jsonb"
     tag_definitions_json = json.dumps(
         definitions,
         ensure_ascii=False,
@@ -1389,9 +1407,9 @@ def bank_category_classification_cte(
             {normalized_payload_sql} as normalized_payload,
             coalesce({split_category}, manual.category) as manual_category_code,
             case when {split_category} is not null then 'manual' else manual.source end as manual_category_source,
-            manual.version as manual_category_version,
+            {"case when bank.is_split then bank.split_version else manual.version end" if use_units else "manual.version"} as manual_category_version,
             case when {split_category} is not null then
-              '{{"normalized_payload":{{"manual_assignment":true}}}}'::jsonb
+              jsonb_build_object('normalized_payload', coalesce({split_payload}, '{{}}'::jsonb) || '{{"manual_assignment":true}}'::jsonb)
               else manual.raw_payload end as manual_category_raw_payload,
             confirmation.id as confirmation_id,
             confirmation.category_code as confirmed_category_code,
@@ -2296,6 +2314,7 @@ def _transaction_filter_sql(
     category_primary_label: str | None,
     category_sub_label: str | None,
     category_third_label: str | None,
+    include_original_amount: bool = False,
 ) -> tuple[str, list[Any]]:
     clauses = [
         "(%s::text is null or account_key = %s)",
@@ -2313,13 +2332,14 @@ def _transaction_filter_sql(
     normalized_keyword = str(keyword or "").strip().lower()
     if normalized_keyword:
         clauses.append(
-            """
+            f"""
             lower(concat_ws(
               ' ',
               counterparty_name_raw,
               trade_time::text,
               case when direction = 'income' then '收' else '支' end,
               amount::text,
+              {"original_amount::text," if include_original_amount else ""}
               balance::text,
               summary_text,
               purpose_text,

@@ -6,7 +6,11 @@ from typing import Any, Iterator
 from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.bank_details_canonical_query import PostgresBankDetailsCanonicalQueryRepository
 from fin_ops_platform.services.bank_transaction_category_service import bank_transaction_tag_dictionary_display_payload
-from fin_ops_platform.services.bank_transaction_split_service import BankTransactionSplitError
+from fin_ops_platform.services.bank_transaction_split_service import SPLIT_CATEGORY_FIELDS, BankTransactionSplitError
+from fin_ops_platform.services.bank_turnover_tag_semantics import (
+    EXTERNAL_TURNOVER_THIRD_LABEL_OPTIONS,
+    is_external_turnover_definition,
+)
 from fin_ops_platform.services.postgres_repositories.bank_transaction_category import (
     PostgresBankTransactionCategoryRepository,
 )
@@ -86,7 +90,7 @@ class PostgresBankTransactionSplitRepository:
             (bank["canonical_transaction_id"],),
         )
         items = transaction.fetch_all(
-            "SELECT id::text AS id, category_code, amount FROM app.bank_transaction_split_items WHERE bank_transaction_id = %s::uuid ORDER BY position",
+            "SELECT id::text AS id, category_code, amount, category_payload FROM app.bank_transaction_split_items WHERE bank_transaction_id = %s::uuid ORDER BY position",
             (bank["canonical_transaction_id"],),
         )
         parts = self.decorate_parts(items, definitions)
@@ -101,6 +105,8 @@ class PostgresBankTransactionSplitRepository:
             "direction": bank["direction"],
             "version": int(version_row["version"]) if version_row else 0,
             "category_code": category.get("effective_category_code"),
+            **self.category_instance(category),
+            "turnover_third_label_options": list(EXTERNAL_TURNOVER_THIRD_LABEL_OPTIONS),
             "parts": parts,
             "tag_definitions": definitions,
             "affected_months": [bank["month"]] if bank["month"] else [],
@@ -115,9 +121,15 @@ class PostgresBankTransactionSplitRepository:
             # A flat system tag has an empty taxonomy path and its own label.
             if not path:
                 path = [definition["label"]]
-            result.append({**definition, "path": path, "label": " / ".join(path),
+            result.append({**definition, "turnover_role": "external_turnover" if is_external_turnover_definition(definition) else "", "path": path, "label": " / ".join(path),
                            "primary_label": path[0], "sub_label": " / ".join(path[1:])})
         return result
+
+    @staticmethod
+    def category_instance(category: dict[str, Any]) -> dict[str, Any]:
+        return {key: (category.get("effective_" + key) or []) if key == "category_label_path" else
+                category.get("effective_" + key) if key.startswith("category_") else category.get(key)
+                for key in SPLIT_CATEGORY_FIELDS}
 
     @staticmethod
     def decorate_parts(parts: list[dict[str, Any]], definitions: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -127,13 +139,16 @@ class PostgresBankTransactionSplitRepository:
             definition = by_code.get(part["category_code"])
             if definition is None:
                 raise BankTransactionSplitError("split_category_missing", "流水子项引用的标签不存在，请恢复标签配置。", status=409)
-            primary = definition.get("output_primary_label")
-            path = [value for value in (primary, definition.get("output_sub_label"), definition.get("output_third_label")) if value] if primary else list(definition["path"])
-            result.append({
-                "id": part["id"], "category_code": part["category_code"],
-                "category_label": definition["label"], "category_path": path,
-                "amount": format(part["amount"], ".2f") if not isinstance(part["amount"], str) else part["amount"],
-            })
+            path = list(definition["path"])
+            instance = {"category_label": definition["label"], "category_primary_label": path[0],
+                        "category_sub_label": path[1] if len(path) > 1 else None,
+                        "category_third_label": path[2] if len(path) > 2 else None, "category_label_path": path,
+                        "turnover_role": definition.get("turnover_role", ""),
+                        "turnover_action_type": definition.get("turnover_action_type"), "turnover_family": definition.get("turnover_family")}
+            instance.update(part.get("category_payload") or {})
+            result.append({"id": part["id"], "category_code": part["category_code"], **instance,
+                           "category_path": instance["category_label_path"],
+                           "amount": format(part["amount"], ".2f") if not isinstance(part["amount"], str) else part["amount"]})
         return result
 
     def load_many(self, transaction: Any, transaction_ids: list[str]) -> list[dict[str, Any]]:
@@ -156,7 +171,7 @@ class PostgresBankTransactionSplitRepository:
         settings = PostgresBankDetailsCanonicalQueryRepository.settings_payload(transaction)
         definitions = self.tag_definitions(AppSettingsService.bank_category_relation_policy_snapshot(settings)["bank_transaction_tags"])
         items = transaction.fetch_all(
-            """SELECT bank_transaction_id::text AS parent_id,id::text AS id,category_code,amount
+            """SELECT bank_transaction_id::text AS parent_id,id::text AS id,category_code,amount,category_payload
                FROM app.bank_transaction_split_items WHERE bank_transaction_id=ANY(%s::uuid[]) ORDER BY position""",
             (list({bank["canonical_transaction_id"] for bank in banks}),),
         )
@@ -171,11 +186,13 @@ class PostgresBankTransactionSplitRepository:
             "transaction_id": bank["transaction_id"], "canonical_transaction_id": bank["canonical_transaction_id"],
             "amount": format(bank["amount"], ".2f"), "written_off_amount": format(bank["written_off_amount"], ".2f"), "direction": bank["direction"], "version": int(bank["version"]),
             "category_code": categories.get(bank["transaction_id"], {}).get("effective_category_code"),
+            **self.category_instance(categories.get(bank["transaction_id"], {})),
+            "turnover_third_label_options": list(EXTERNAL_TURNOVER_THIRD_LABEL_OPTIONS),
             "parts": self.decorate_parts(by_parent.get(bank["canonical_transaction_id"], []), definitions),
             "tag_definitions": definitions, "affected_months": [bank["month"]] if bank["month"] else [],
         } for bank in banks]
 
-    def persist(self, transaction: Any, *, before: dict[str, Any], parts: list[dict[str, Any]], category_code: str | None, actor_id: str) -> dict[str, Any]:
+    def persist(self, transaction: Any, *, before: dict[str, Any], parts: list[dict[str, Any]], category_code: str | None, actor_id: str, category_payload: dict[str, Any] | None = None) -> dict[str, Any]:
         parent_id = before["canonical_transaction_id"]
         version = before["version"] + 1
         transaction.execute(
@@ -190,30 +207,26 @@ class PostgresBankTransactionSplitRepository:
         )
         if parts:
             transaction.execute_many_values(
-                """INSERT INTO app.bank_transaction_split_items(id,bank_transaction_id,category_code,amount,position)
-                   VALUES (%s::uuid,%s::uuid,%s,%s,%s) ON CONFLICT(id) DO UPDATE SET
-                   category_code=excluded.category_code,amount=excluded.amount,position=excluded.position""",
-                [(part["id"], parent_id, part["category_code"], part["amount"], part["position"]) for part in parts],
+                """INSERT INTO app.bank_transaction_split_items(id,bank_transaction_id,category_code,amount,position,category_payload)
+                   VALUES (%s::uuid,%s::uuid,%s,%s,%s,%s) ON CONFLICT(id) DO UPDATE SET
+                   category_code=excluded.category_code,amount=excluded.amount,position=excluded.position,category_payload=excluded.category_payload""",
+                [(part["id"], parent_id, part["category_code"], part["amount"], part["position"], jsonb(part["category_payload"])) for part in parts],
             )
         else:
-            definition = next(item for item in before["tag_definitions"] if item["code"] == category_code)
-            path = [value for value in (definition.get("output_primary_label"), definition.get("output_sub_label"), definition.get("output_third_label")) if value] or definition["path"]
+            if category_payload is None:
+                raise ValueError("Unsplit requires an explicit category instance.")
             PostgresBankTransactionCategoryRepository(transaction).apply_mutation(
                 transaction=transaction, transaction_id=before["transaction_id"],
                 mutation_type="manual_assign", actor_id=actor_id,
                 action="bank_transaction_split_removed", metadata={},
-                record={"category_code": category_code, "category_label_path": path,
-                        "category_primary_label": path[0] if path else None,
-                        "category_sub_label": path[1] if len(path) > 1 else None,
-                        "category_third_label": path[2] if len(path) > 2 else None,
-                        "turnover_action_type": definition.get("turnover_action_type"),
-                        "turnover_family": definition.get("turnover_family")},
+                record={"category_code": category_code, **category_payload},
             )
-        return {**before, "version": version, "parts": self.decorate_parts(parts, before["tag_definitions"]), "category_code": category_code if not parts else None}
+        return {**before, "version": version, "parts": self.decorate_parts(parts, before["tag_definitions"]), "category_code": category_code if not parts else None,
+                **(category_payload or {key: [] if key == "category_label_path" else None for key in SPLIT_CATEGORY_FIELDS})}
 
     @staticmethod
     def audit(transaction: Any, *, before: dict[str, Any], after: dict[str, Any], actor_id: str) -> None:
-        payload = {"before": {key: before[key] for key in ("version", "parts", "category_code")}, "after": {key: after[key] for key in ("version", "parts", "category_code")}}
+        payload = {"before": {key: before[key] for key in ("version", "parts", "category_code", *SPLIT_CATEGORY_FIELDS)}, "after": {key: after[key] for key in ("version", "parts", "category_code", *SPLIT_CATEGORY_FIELDS)}}
         transaction.execute(
             """INSERT INTO audit.events(event_type,object_type,object_id,actor_id,payload,raw_payload)
                VALUES ('bank_transaction_splits_saved','bank_transaction',%s,%s,%s,%s)""",

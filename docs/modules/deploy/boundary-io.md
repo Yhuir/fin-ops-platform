@@ -49,4 +49,8 @@ Nginx示例采用归一化`$uri`条件access_log，精确排除三种cash API前
 
 ## 流水拆分发布（2026-09-23）
 
-0178/0179 纳入既有 forward-only 清单。新增固定运维入口 `external-turnover-cost-revoke <release> [--apply --operator <actor>]`，默认只读预览，经领域 owner 同事务标记/撤销历史外部分配；执行后重启刷新进程镜像。`bank-transaction-split-smoke <release>` 仅创建事务内测试自有数据，100 次检查后强制回滚并校验无残留。两者不接受任意 SQL/shell；不创建或删除主数据库。输入/输出与性能范围见 [拆分验证](../../dev/bank-transaction-splits.md)。
+0178/0179 纳入既有 forward-only 清单。新增固定运维入口 `external-turnover-cost-revoke <release> [--apply --operator <actor>]`，默认只读预览，经领域 owner 同事务撤销历史外部分配；执行后重启刷新进程镜像。`bank-transaction-split-smoke <release>` 仅创建事务内测试自有数据，100 次检查后强制回滚并校验无残留。两者不接受任意 SQL/shell；不创建或删除主数据库。输入/输出与性能范围见 [拆分验证](../../dev/bank-transaction-splits.md)。
+
+0180 增量保存拆分分类实例，已退役的统一成本确认标记通过 `retire_bank_split_confirmation_flags` owner 工具预览/事务清理，不更改关系版本或成员，不创建数据库备份。既有子项缺失的第三层按已核实原确认事实经正式 PUT 修复；不在迁移 SQL 推断。
+
+0180 的完整拆分分类实例也纳入既有 forward-only 发布清单：旧 writer 只修改 code/金额，不能同步更新完整实例，回切后可能留下错配归属。验证失败保留 maintenance 向前修复；不新增审核门禁或数据库备份。

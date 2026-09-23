@@ -8,14 +8,14 @@ import { amountCents, centsText } from '../features/bankSplits/amount';
 vi.mock('../features/bankSplits/api', () => ({ fetchBankSplits: vi.fn(), getBankTransactionSplitsBatch: vi.fn(), saveBankSplits: vi.fn() }));
 const detail: BankSplitDetail = {
   transaction_id: 'bank-1', canonical_transaction_id: 'canonical-1', amount: '1001497.22', direction: 'expense', version: 2,
-  category_code: 'principal', can_edit: true,
+  category_code: 'principal', category_label_path: ['外部往来款', '归还借款', '银行往来'], turnover_third_label_options: [{ value: '银行往来', label: '银行往来' }, { value: '公司往来', label: '公司往来' }], can_edit: true,
   parts: [
-    { id: 'part-1', category_code: 'principal', category_label: '外部往来款 / 归还借款', category_path: ['外部往来款', '归还借款'], amount: '1000000.00' },
+    { id: 'part-1', category_code: 'principal', category_label: '外部往来款 / 归还借款', category_path: ['外部往来款', '归还借款', '银行往来'], amount: '1000000.00' },
     { id: 'part-2', category_code: 'interest', category_label: '费用 / 利息', category_path: ['费用', '利息'], amount: '1497.22' },
   ],
   tag_definitions: [
-    { code: 'principal', label: '外部往来款 / 归还借款', path: ['外部往来款', '归还借款'], primary_label: '外部往来款', sub_label: '归还借款', status: 'active' },
-    { code: 'interest', label: '费用 / 利息', path: ['费用', '利息'], primary_label: '费用', sub_label: '利息', status: 'active' },
+    { code: 'principal', label: '外部往来款 / 归还借款', path: ['外部往来款', '归还借款'], primary_label: '外部往来款', sub_label: '归还借款', status: 'active', turnover_role: 'external_turnover' },
+    { code: 'interest', label: '费用 / 利息', path: ['费用', '利息'], primary_label: '费用', sub_label: '利息', status: 'active', turnover_role: '' },
   ],
 };
 beforeEach(() => { vi.clearAllMocks(); vi.mocked(fetchBankSplits).mockResolvedValue(detail); });
@@ -36,8 +36,8 @@ test('loads complete saved parts and saves stable identities, then uses returned
   fireEvent.change(screen.getByLabelText('子项 1 金额'), { target: { value: '1000000.02' } });
   fireEvent.click(screen.getByRole('button', { name: '保存', exact: true }));
   await waitFor(() => expect(saveBankSplits).toHaveBeenCalledWith('part-2', { version: 2, parts: [
-    { id: 'part-1', category_code: 'principal', amount: '1000000.02' },
-    { id: 'part-2', category_code: 'interest', amount: '1497.20' },
+    { id: 'part-1', category_code: 'principal', category_label_path: ['外部往来款', '归还借款', '银行往来'], amount: '1000000.02' },
+    { id: 'part-2', category_code: 'interest', category_label_path: ['费用', '利息'], amount: '1497.20' },
   ] }));
   await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
   expect(await screen.findByText('已保存')).toBeInTheDocument();
@@ -109,7 +109,7 @@ test('removing every part restores an explicitly selected whole-transaction cate
   fireEvent.click(screen.getByRole('button', { name: '删除子项 1' }));
   expect(screen.getByRole('combobox', { name: '整笔流水标签' })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '保存', exact: true }));
-  await waitFor(() => expect(saveBankSplits).toHaveBeenCalledWith('bank-1', { version: 2, parts: [], category_code: 'principal' }));
+  await waitFor(() => expect(saveBankSplits).toHaveBeenCalledWith('bank-1', { version: 2, parts: [], category_code: 'principal', category_label_path: ['外部往来款', '归还借款', '银行往来'] }));
 });
 
 test('bank detail sections batch-read distinct bank identities instead of merging sections or requesting each bank', async () => {
@@ -159,4 +159,29 @@ test('saving one bank and refreshing its page retains the other bank draft witho
   expect(screen.getByRole('button', { name: '保存', exact: true })).toBeEnabled();
   expect(getBankTransactionSplitsBatch).toHaveBeenCalledOnce();
   expect(saveBankSplits).toHaveBeenCalledOnce();
+});
+
+
+test('external instance family is human-selected and remains in the complete save path', async () => {
+  vi.mocked(saveBankSplits).mockResolvedValue({ ...detail, version: 3, changed: true, affected_months: [] });
+  render(<BankSplitEditor transactionId="bank-1" />);
+  expect(await screen.findByLabelText('子项 1 往来归属')).toHaveValue('银行往来');
+  fireEvent.change(screen.getByLabelText('子项 1 往来归属'), { target: { value: '公司往来' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存', exact: true }));
+  await waitFor(() => expect(saveBankSplits).toHaveBeenCalledWith('bank-1', expect.objectContaining({ parts: [
+    { id: 'part-1', category_code: 'principal', amount: '1000000.00', category_label_path: ['外部往来款', '归还借款', '公司往来'] },
+    { id: 'part-2', category_code: 'interest', amount: '1497.22', category_label_path: ['费用', '利息'] },
+  ] })));
+});
+
+test('selecting a new external code requires a fresh instance family and does not inherit another item family', async () => {
+  render(<BankSplitEditor transactionId="bank-1" />);
+  fireEvent.click(await screen.findByRole('combobox', { name: '子项 2 标签' }));
+  fireEvent.click(within(await screen.findByRole('listbox', { name: '主标签' })).getByRole('option', { name: '外部往来款' }));
+  fireEvent.click(within(await screen.findByRole('listbox', { name: '子标签' })).getByRole('option', { name: '归还借款' }));
+  expect(screen.getByLabelText('子项 2 往来归属')).toHaveValue('');
+  fireEvent.click(screen.getByRole('button', { name: '保存', exact: true }));
+  expect(screen.getByRole('alert')).toHaveTextContent('请选择外部往来子项的往来归属');
+  expect(saveBankSplits).not.toHaveBeenCalled();
+  expect(screen.getByLabelText('子项 1 往来归属')).toHaveValue('银行往来');
 });

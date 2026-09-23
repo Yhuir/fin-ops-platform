@@ -34,6 +34,7 @@ class BankTransactionSplitRelationService:
         new_values = {part["id"]: (part["category_code"], part["amount"]) for part in after["parts"]}
         if old_values == new_values:
             return {"changed_case_ids": [], "invalidated_allocation_case_ids": [], "stale_batch_ids": [],
+                    "turnover_migration": self._turnover(transaction, before=before, after=after, actor_id=actor_id),
                     "_relation_snapshot_delta": {"pair_relations": {}, "pair_relation_history": []}}
         changed_ids = {key for key in old_values if old_values[key] != new_values.get(key)}
         old_ids = {part["id"] for part in before["parts"]} or {parent_id, before["canonical_transaction_id"]}
@@ -87,7 +88,7 @@ class BankTransactionSplitRelationService:
             for key in ("paired_requirement_tag_code", "paired_requires_oa", "paired_requires_invoice"):
                 metadata.pop(key, None)
             metadata.update(build_bank_relation_requirement_metadata(tag_codes=tags, rules_payload=settings["paired_policy"]))
-            metadata["bank_split_requires_cost_confirmation"] = True
+            metadata.pop("bank_split_requires_cost_confirmation", None)
             versions = deepcopy(metadata.get("bank_split_versions") or {})
             versions[parent_id] = after["version"]
             metadata["bank_split_versions"] = versions

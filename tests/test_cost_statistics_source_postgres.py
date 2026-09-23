@@ -93,6 +93,50 @@ class CostSourcePostgresTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.service.get_task('cost-source-case',can_save=True)
 
+    def test_case_0248_unique_interest_automatically_enters_cost_without_manual_record(self):
+        self.loan_fixture('1497.22', split=True)
+        self.connection.execute("""update app.oa_applications set project_name='云南溯源科技',
+            normalized_payload=jsonb_set(normalized_payload,'{project_name}','"云南溯源科技"'::jsonb) where row_id='oa-a'""")
+        task = self.service.get_task('cost-source-case', can_save=True)
+        self.assertEqual(task['status'], 'allocated')
+        self.assertEqual(task['difference'], '0.00')
+        self.assertEqual(task['units'][0]['project_name'], '云南溯源科技')
+        self.assertEqual(task['source_allocations']['cost_lines'], [
+            {'unit_id':'oa:oa-a','bank_transaction_id':self.interest_child,'amount':'1497.22'}])
+        for view in ('project','cost_tag','bank_account'):
+            self.assertEqual(self.query.get_explorer_page(scope='all',view=view,filters={},cursor=None,page_size=20)['summary']['total_amount'],'1497.22')
+        self.assertEqual(self.connection.fetch_one('select count(*) as count from app.cost_statistics_manual_allocations')['count'],0)
+        original = self.connection.fetch_one("select amount,signed_amount,balance from app.bank_transactions where legacy_mongo_id='bank-1'")
+        with self.connection.transaction() as tx:
+            tx.execute("update app.bank_transaction_split_items set amount=1497.00 where id=%s::uuid", (self.interest_child,))
+            tx.execute("update app.bank_transaction_split_items set amount=1000000.22 where id=%s::uuid", (self.principal_child,))
+        self.assertEqual(self.service.get_task('cost-source-case',can_save=True)['status'],'pending')
+        self.assertEqual(self.query.get_explorer_page(scope='all',view='project',filters={},cursor=None,page_size=20)['summary']['total_amount'],'0.00')
+        with self.connection.transaction() as tx:
+            tx.execute("update app.bank_transaction_split_items set amount=1497.22 where id=%s::uuid", (self.interest_child,))
+            tx.execute("update app.bank_transaction_split_items set amount=1000000.00 where id=%s::uuid", (self.principal_child,))
+        self.assertEqual(self.service.get_task('cost-source-case',can_save=True)['status'],'allocated')
+        with self.connection.transaction() as tx:
+            tx.execute("update app.workbench_pair_relations set row_ids=array['oa-a','bank-1'],row_types=array['oa','bank'] where case_id='cost-source-case'")
+            tx.execute("delete from app.bank_transaction_split_sets where bank_transaction_id=(select id from app.bank_transactions where legacy_mongo_id='bank-1')")
+        with self.assertRaises(KeyError):
+            self.service.get_task('cost-source-case',can_save=True)
+        self.assertEqual(self.query.get_explorer_page(scope='all',view='project',filters={},cursor=None,page_size=20)['summary']['total_amount'],'0.00')
+        self.assertEqual(self.connection.fetch_one("select amount,signed_amount,balance from app.bank_transactions where legacy_mongo_id='bank-1'"),original)
+
+    def test_valid_manual_interest_decision_is_not_replaced_by_automatic_amount(self):
+        self.loan_fixture('1497.22', split=True)
+        payload = self.current_payload()
+        payload.update(allocations=[{'unit_id':'oa:oa-a','amount':'1000.00'}],
+            oa_amount_locks=[{'unit_id':'oa:oa-a','locked':False}],
+            non_cost_amount='497.22',non_cost_reason='已确认非成本',
+            source_allocations={'cost_lines':[{'unit_id':'oa:oa-a','bank_transaction_id':self.interest_child,'amount':'1000.00'}],
+                'refund_links':[],'non_cost_lines':[{'bank_transaction_id':self.interest_child,'amount':'497.22'}]})
+        saved = self.save(payload)
+        self.assertEqual(saved['version'],1)
+        self.assertEqual(self.service.get_task('cost-source-case',can_save=True)['allocations'],saved['allocations'])
+        self.assertEqual(self.query.get_explorer_page(scope='all',view='project',filters={},cursor=None,page_size=20)['summary']['total_amount'],'1000.00')
+
     def test_interest_only_oa_keeps_original_lock(self):
         self.loan_fixture('1497.22', split=True)
         payload = self.current_payload()

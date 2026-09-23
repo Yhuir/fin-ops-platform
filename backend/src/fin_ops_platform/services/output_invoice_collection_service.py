@@ -14,7 +14,7 @@ from openpyxl import Workbook
 
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import BankTransaction, Invoice
-from fin_ops_platform.services.bank_transaction_unit import bank_unit_display, bank_unit_matches_invoice
+from fin_ops_platform.services.bank_transaction_unit import bank_unit_comparison_rows, bank_unit_display
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.invoice_relation_query_context import (
     DistributedInvoiceRelationContext,
@@ -790,6 +790,11 @@ class OutputInvoiceCollectionQueryService:
         ):
             relations = []
         bank_map = context.bank_transactions_by_id()
+        candidates = {row_id: bank_map[row_id] for relation in relations
+                      for row_id, row_type in context.typed_relation_rows(relation)
+                      if row_type in {"bank", "bank_transaction"} and row_id in bank_map}
+        comparison_ids = {bank.id for bank in bank_unit_comparison_rows(list(candidates.values()),
+            target=abs(sum((_invoice_total(line) for line in line_items), ZERO)))}
         summaries: list[dict[str, Any]] = []
         seen: set[str] = set()
         for relation in relations:
@@ -799,7 +804,7 @@ class OutputInvoiceCollectionQueryService:
                     if row_type in {"bank", "bank_transaction"}
                     else None
                 )
-                if bank is None or bank.id in seen or not bank_unit_matches_invoice(bank):
+                if bank is None or bank.id in seen or bank.id not in comparison_ids:
                     continue
                 seen.add(bank.id)
                 summaries.append(

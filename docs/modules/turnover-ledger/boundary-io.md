@@ -144,3 +144,8 @@
 验证：`tests/test_bank_split_consumers_postgres.py` 使用隔离 PostgreSQL 数据库覆盖原始金额不变、子项标签筛选、成本待分配、待票金额和详情父身份、往来补充信息迁移。往来手工成员重建和含利息 case 的本金闭环由对应 service/query 单元测试覆盖。
 
 旧补充标签 API 保留给未拆分流水，其 writer 只接收当前配置中 active 且具有外部往来 action 语义的标签 code，并作为显式人工选择持久化；禁止使用固定 builtin leaf 白名单或读取时回退旧 category。生产页面当前无该 API 的直接调用，标签设置菜单继续读取动态 `active_tags`。已拆分父项/子项由统一拆分 owner 编辑。
+
+## 2026-09-24 拆分分类实例修正
+
+拆分 owner 在 `app.bank_transaction_split_items.category_payload` 持久化完整人工分类实例，通过 `app.bank_transaction_units.split_category_payload` 与公共 effective classifier 提供当前标签、第三层、action/family。标签 definition 只定义选项，不能代替每笔用途的往来归属；禁止用父流水或对方银行名称在查询时补猜。输入完整 `category_label_path`，服务按现有分类规范校验与派生；同 code 同金额修改第三层也版本化并保留子身份。GET/PUT、迁移限制及测试见 [流水拆分 I/O](../../dev/bank-transaction-splits.md#分类实例合同0180)。
+往来准入读取持久化实例的 family/action；拆分前后 extras/手工关系迁移读取完整 before 分类实例，不再从 definition 重建缺失归属。

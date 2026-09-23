@@ -39,13 +39,12 @@ class BankSplitRelationsPostgresTests(unittest.TestCase):
     def test_failed_transaction_preserves_relation_cost_and_has_no_split(self):
         self._run(True)
 
-    def test_cost_migration_marks_active_case_atomically_and_is_idempotent(self):
+    def test_cost_migration_revokes_decision_without_changing_relation_and_is_idempotent(self):
         case = "test-cost-migration-" + str(uuid4())
         relation = {"case_id": case, "status": "active", "relation_mode": "manual_confirmed", "version": 4,
                     "month_scope": "2026-09", "row_ids": ["principal", "fee"], "row_types": ["bank", "bank"], "special_metadata": {"keep": True}}
         service = BankSplitCostMigrationService(
             allocation_repository_factory=PostgresCostStatisticsManualAllocationRepository,
-            relation_repository_factory=PostgresWorkbenchRelationRepository,
             settings_snapshot_provider=lambda tx: {},
             effective_category_rows=lambda tx, **kwargs: {"principal": {"turnover_role": "external_turnover"}, "fee": {"turnover_role": ""}},
         )
@@ -56,7 +55,7 @@ class BankSplitRelationsPostgresTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "rollback migration"):
                 with self.connection.transaction() as tx:
                     report = service.run(tx, actor_id="tester", apply=True)
-                    self.assertEqual(report["marked_case_ids"], [case])
+                    self.assertEqual(report["revoked_case_ids"], [case])
                     raise RuntimeError("rollback migration")
             with self.connection.transaction() as tx:
                 self.assertIn(case, PostgresCostStatisticsManualAllocationRepository(tx).list_by_case_ids([case]))
@@ -64,9 +63,9 @@ class BankSplitRelationsPostgresTests(unittest.TestCase):
                 report = service.run(tx, actor_id="tester", apply=True)
                 self.assertEqual(report["mixed_case_ids"], [case])
                 current = PostgresWorkbenchRelationRepository(tx).load_active_workbench_pair_relation_by_case_id(case)
-                self.assertEqual(current["version"], 5)
+                self.assertEqual(current["version"], 4)
                 self.assertEqual(current["special_metadata"]["keep"], True)
-                self.assertTrue(current["special_metadata"]["bank_split_requires_cost_confirmation"])
+                self.assertNotIn("bank_split_requires_cost_confirmation", current["special_metadata"])
                 self.assertNotIn(case, PostgresCostStatisticsManualAllocationRepository(tx).list_by_case_ids([case]))
                 self.assertEqual(service.run(tx, actor_id="tester", apply=True)["affected_count"], 0)
         finally:

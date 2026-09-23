@@ -1,3 +1,4 @@
+import userEvent from '@testing-library/user-event';
 import { fireEvent, render, screen } from '@testing-library/react';
 import RelationGroupGrid from '../components/workbench/RelationGroupGrid';
 import RelationGroupCell from '../components/workbench/RelationGroupCell';
@@ -21,7 +22,7 @@ test('same-parent children occupy one bank row while selection preserves child i
     onSelectRow={select} onOpenDetail={vi.fn()} onRowAction={vi.fn()} showWorkflowActions={false} canOperateData />);
   expect(container.querySelectorAll('.record-card')).toHaveLength(1);
   expect(screen.getByText('1001497.22')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('checkbox', { name: '选择流水子项 费用 / 利息 1497.22' }));
+  fireEvent.click(screen.getByRole('button', { name: '选择流水子项 费用 / 利息 1497.22' }));
   expect(select).toHaveBeenCalledOnce();
   expect(select).toHaveBeenCalledWith(interest, 'unpaired');
   expect(select.mock.calls[0][0].amount).toBe('1497.22');
@@ -43,10 +44,38 @@ test('different OA segments show one physical bank parent per case and keep chil
     rowTemplateColumns="1fr 8px 1fr 8px 1fr" getRowState={() => 'idle'} onSelectRow={select} onOpenDetail={vi.fn()} onRowAction={vi.fn()} canOperateData />);
   expect(container.querySelectorAll('.record-card-bank')).toHaveLength(2);
   expect(container.querySelectorAll('.record-card-oa')).toHaveLength(2);
-  const interest = screen.getAllByRole('checkbox', { name: '选择流水子项 费用 / 利息 1497.22' });
+  const interest = screen.getAllByRole('button', { name: '选择流水子项 费用 / 利息 1497.22' });
   expect(interest).toHaveLength(2);
   fireEvent.click(interest[0]);
   expect(select).toHaveBeenCalledWith(children[1], 'unpaired');
   fireEvent.click(interest[1]);
   expect(select.mock.calls[1][0].caseId).toBe('case-2');
+});
+
+
+test('split selection uses pressed buttons, keyboard and full label path without visible checkboxes', async () => {
+  const user = userEvent.setup();
+  const interest = { ...record('interest', '1497.2', '利息'), categoryPath: ['费用', '利息'] };
+  const select = vi.fn();
+  const props = { zoneId: 'unpaired' as const, paneId: 'bank' as const, columns: getWorkbenchColumns('bank'),
+    records: [interest], scrollPaneId: 'bank' as const, scrollTestId: 'bank-cell', onSelectRow: select,
+    onOpenDetail: vi.fn(), onRowAction: vi.fn(), showWorkflowActions: false, canOperateData: true };
+  const { container, rerender } = render(<RelationGroupCell {...props} getRowState={() => 'idle'} />);
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  const button = screen.getByRole('button', { name: '选择流水子项 利息 1497.20' });
+  expect(button).toHaveTextContent('费用 / 利息');
+  expect(button).toHaveAttribute('aria-pressed', 'false');
+  button.focus(); await user.keyboard('{Enter}');
+  expect(select).toHaveBeenCalledWith(interest, 'unpaired');
+  rerender(<RelationGroupCell {...props} getRowState={() => 'selected'} />);
+  expect(button).toHaveAttribute('aria-pressed', 'true');
+  await user.keyboard(' ');
+  expect(select).toHaveBeenCalledTimes(2);
+  expect(container.querySelectorAll('.record-card-bank')).toHaveLength(1);
+  expect(container.querySelector('.bank-split-parent-amount')).toHaveTextContent('1001497.22');
+  expect(container.querySelector('.bank-split-part-amount')).toHaveTextContent('1497.20');
+  rerender(<RelationGroupCell {...props} readOnly getRowState={() => 'idle'} />);
+  expect(button).toBeDisabled();
+  await user.click(button);
+  expect(select).toHaveBeenCalledTimes(2);
 });

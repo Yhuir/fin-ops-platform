@@ -153,3 +153,8 @@
 ## 2026-09 流水拆分合同
 
 银行原金融事实与导入身份不变；银行拆分 owner 的持久化子项通过用途视图进入业务关联。详情使用父交易，列表标签显示当前子项；金额统计不得父子重复相加。 具体输入/输出、跨模块消费、旧链路清理及测试见 [流水拆分 I/O](../../dev/bank-transaction-splits.md)。
+
+## 2026-09-24 拆分分类实例修正
+
+拆分 owner 在 `app.bank_transaction_split_items.category_payload` 持久化完整人工分类实例，通过 `app.bank_transaction_units.split_category_payload` 与公共 effective classifier 提供当前标签、第三层、action/family。标签 definition 只定义选项，不能代替每笔用途的往来归属；禁止用父流水或对方银行名称在查询时补猜。输入完整 `category_label_path`，服务按现有分类规范校验与派生；同 code 同金额修改第三层也版本化并保留子身份。GET/PUT、迁移限制及测试见 [流水拆分 I/O](../../dev/bank-transaction-splits.md#分类实例合同0180)。
+银行明细搜索同时包含父原金额和子项金额，子标签筛选仅作用匹配用途，父行数/分页/原金额保持不变。

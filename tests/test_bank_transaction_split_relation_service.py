@@ -74,7 +74,7 @@ class SplitRelationTests(unittest.TestCase):
         self.assertEqual(updated['row_ids'], ['oa-one', 'principal', 'interest'])
         self.assertEqual(updated['version'], 4)
         self.assertTrue(updated['special_metadata']['requires_invoice'])
-        self.assertTrue(updated['special_metadata']['bank_split_requires_cost_confirmation'])
+        self.assertNotIn('bank_split_requires_cost_confirmation', updated['special_metadata'])
         self.assertEqual(owners.revoked, ['one'])
         self.assertFalse(owners.published)
         service.after_commit(result)

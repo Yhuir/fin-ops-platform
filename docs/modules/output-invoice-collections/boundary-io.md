@@ -36,7 +36,7 @@
 | rows 查询 | `OutputInvoiceCollectionsPage.tsx` | `page`、`page_size`、keyword、月份、filters、sort；非法值返回 400。纯金额 keyword 使用无千分位文本并查询价税合计、税额、待收和关联收款金额。 |
 | canonical invoices | `app.invoices` | 只取非删除 output invoices；正票和负票分别保留；原始 `remark` 仅按精确“被红冲蓝字数电发票号码”标记提取结构化号码 |
 | formal relations | `app.workbench_pair_relations` | 只取 `status='active'` 的普通 relation 计算收款流水归属；不得用 relation 折叠发票行 |
-| bank facts | `app.bank_transactions` | 只统计 active relation 中唯一可归属到某一正票的收入流水；支出不计入已收金额，红票和其精确目标蓝票不重复占用同组收款 |
+| bank facts | `app.bank_transaction_units` | 只统计 active relation 中唯一可归属到某一正票的收入流水；支出不计入已收金额，红票和其精确目标蓝票不重复占用同组收款 |
 | exact reversal evidence | `app.invoices.raw_payload.normalized_payload.remark` | 只接受 `被红冲蓝字数电发票号码：<20 位数字>`；目标必须唯一命中一张正数销项发票，无金额兜底 |
 
 ## 输出 I/O
@@ -137,3 +137,9 @@ Workbench matcher 只复用同一号码 key 尝试正式化，不是页面展示
 ## 2026-09 流水拆分合同
 
 银行原金融事实与导入身份不变；银行拆分 owner 的持久化子项通过用途视图进入业务关联。详情使用父交易，列表标签显示当前子项；金额统计不得父子重复相加。 具体输入/输出、跨模块消费、旧链路清理及测试见 [流水拆分 I/O](../../dev/bank-transaction-splits.md)。
+
+## 2026-09-24 拆分流水的单据核对范围
+
+同一现有 active 关联的用途比较复用 `bank_split_relation_scope` 的 SQL/Python 规则；银行金融事实、子项事实与关联成员不改写。只有全为拆分子项、同一收支方向，且单据目标金额恰好唯一等于完整本金用途组或完整其他用途组时，取该组核对。本金单据可以匹配本金，不再一律删除外部往来子项；金额相同的两组、金额不匹配、混合收支或包含未拆分流水时保留完整证据。
+
+SQL 分页/筛选/汇总和 Python 行数据/详情组装使用相同范围，按集合执行，无逐行查询。OA 已付金额使用 OA 合计目标；发票页面使用当前发票组目标。进项含拆分的当前金额闭合不再依赖旧 relation.amount_check 的历史失败值，仍保留 OA 金额一致、正式关联与原支付规则约束；未拆分、无 OA 抵扣及销项超额收款/红蓝票规则不变。验证入口：`tests/test_bank_split_document_scope_postgres.py`，覆盖利息/本金单据、旧核对失败、金额歧义、未匹配、混合方向、未拆分兄弟流水，检查 SQL 汇总与行数据一致。

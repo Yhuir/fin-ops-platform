@@ -618,7 +618,7 @@ function renderBankMoneyValue(
 
   return (
     <span className="money-cell-stack">
-      <span className="money-cell-value">
+      <span className={`money-cell-value${bankPartsContent || row.bankSplitParts?.length ? " bank-split-parent-amount" : ""}`}>
         <span>{highlightSearchText(displayedValue, searchQuery)}</span>
       </span>
       {shouldShowDirectionTag || shouldShowAccount ? (

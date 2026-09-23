@@ -4,6 +4,7 @@ from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from typing import Any
 
+from fin_ops_platform.services.bank_split_relation_scope import bank_split_comparison_rows
 from fin_ops_platform.services.workbench_anomaly_contract import AMOUNT_EXCEPTION_CODES
 from fin_ops_platform.services.workbench_invoice_direction import invoice_flow_direction_from_row
 
@@ -795,6 +796,10 @@ class WorkbenchAmountCheckService:
             "bank": list(rows_by_type.get("bank") or []),
             "invoice": list(rows_by_type.get("invoice") or []),
         }
+        target_rows = normalized_rows["oa"] or normalized_rows["invoice"]
+        normalized_rows["bank"] = bank_split_comparison_rows(
+            normalized_rows["bank"], target=self._strict_sum_amounts(target_rows),
+        )
         direction, has_direction_conflict = self._check_direction(normalized_rows)
         bank_totals = self._bank_totals_for_direction(
             normalized_rows["bank"],

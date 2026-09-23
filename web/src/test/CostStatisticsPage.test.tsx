@@ -468,8 +468,8 @@ test('saving a split refreshes cost lists without closing or remounting the acti
   const fetchMock = installMockApiFetch();
   const split = {
     transaction_id: 'bank-test', canonical_transaction_id: 'bank-canonical', amount: '100.00', direction: 'expense', version: 0,
-    category_code: 'fee', can_edit: true,
-    tag_definitions: [{ code: 'fee', label: '费用 / 利息', path: ['费用', '利息'], primary_label: '费用', sub_label: '利息', status: 'active' }],
+    category_code: 'fee', category_label_path: ['费用', '利息'], turnover_third_label_options: [], can_edit: true,
+    tag_definitions: [{ code: 'fee', label: '费用 / 利息', path: ['费用', '利息'], primary_label: '费用', sub_label: '利息', status: 'active', turnover_role: '' }],
     parts: [{ id: 'one', category_code: 'fee', category_label: '费用 / 利息', category_path: ['费用', '利息'], amount: '50.00' },
       { id: 'two', category_code: 'fee', category_label: '费用 / 利息', category_path: ['费用', '利息'], amount: '50.00' }],
   };

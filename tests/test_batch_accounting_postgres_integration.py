@@ -391,7 +391,19 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
                         then confirmation_raw_payload->'normalized_payload'->>'turnover_role'
                     when effective_category_source in ('manual','turnover_ledger')
                         then manual_category_raw_payload->'normalized_payload'->>'turnover_role'
-                end,''),effective_definition->>'turnover_role','') as turnover_role
+                end,''),effective_definition->>'turnover_role','') as turnover_role,
+                coalesce(nullif(case
+                    when effective_category_source='manual_confirmation'
+                        then confirmation_raw_payload->'normalized_payload'->>'turnover_action_type'
+                    when effective_category_source in ('manual','turnover_ledger')
+                        then manual_category_raw_payload->'normalized_payload'->>'turnover_action_type'
+                end,''),effective_definition->>'turnover_action_type') as turnover_action_type,
+                coalesce(nullif(case
+                    when effective_category_source='manual_confirmation'
+                        then confirmation_raw_payload->'normalized_payload'->>'turnover_family'
+                    when effective_category_source in ('manual','turnover_ledger')
+                        then manual_category_raw_payload->'normalized_payload'->>'turnover_family'
+                end,''),effective_definition->>'turnover_family') as turnover_family
                 from classified_with_semantics c
                 join comparison_candidates b on b.row_id=c.row_id""",
                 (*params, *sql_params),

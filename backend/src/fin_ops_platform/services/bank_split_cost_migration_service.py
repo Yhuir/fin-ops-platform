@@ -8,9 +8,7 @@ class BankSplitCostMigrationService:
 
     def __init__(self, *, allocation_repository_factory: Callable[[Any], Any],
                  settings_snapshot_provider: Callable[[Any], dict[str, Any]],
-                 relation_repository_factory: Callable[[Any], Any],
                  effective_category_rows: Callable[..., dict[str, dict[str, Any]]]) -> None:
-        self._relations = relation_repository_factory
         self._allocations = allocation_repository_factory
         self._settings = settings_snapshot_provider
         self._categories = effective_category_rows
@@ -35,7 +33,6 @@ class BankSplitCostMigrationService:
         external_ids = {row_id for row_id, category in categories.items() if category.get("turnover_role") == "external_turnover"}
         affected = sorted(case_id for case_id, ids in bank_ids_by_case.items() if ids & external_ids)
         mixed = sorted(case_id for case_id in affected if bank_ids_by_case[case_id] - external_ids)
-        marked = self._relations(transaction).require_cost_reconfirmation(affected, actor_id=actor_id) if apply else []
         revoked = repository.revoke_for_bank_split(affected, actor_id=actor_id, parent_id="migration:external-turnover") if apply else []
         return {"affected_case_ids": affected, "mixed_case_ids": mixed, "revoked_case_ids": revoked,
-                "affected_count": len(affected), "marked_case_ids": marked, "applied": apply}
+                "affected_count": len(affected), "applied": apply}

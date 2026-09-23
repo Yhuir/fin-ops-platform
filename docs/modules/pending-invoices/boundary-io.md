@@ -124,3 +124,9 @@ OA detail SQL 读取原单据 canonical expense_items，服务使用共享公共
 验证：`tests/test_bank_split_consumers_postgres.py` 使用隔离 PostgreSQL 数据库覆盖原始金额不变、子项标签筛选、成本待分配、待票金额和详情父身份、往来补充信息迁移。往来手工成员重建和含利息 case 的本金闭环由对应 service/query 单元测试覆盖。
 
 列表主流水和 summaries 批量返回 `bank_transaction_id`（原流水公开身份）、`parent_bank_transaction_id`、`parent_amount`、`bank_split_parts`（含 `category_path`）、`bank_split_version`；从当前分页及其关联银行集合一次 SQL 取得，不逐行拉取。待票查询及写入服务必传 `bank_units_by_ids` 读取端口；生产由 canonical unit repository 提供，单笔补票、批量补票、收入状态操作均可接受子项身份，金额运算使用用途金额。原 import service 只保留发票等原有职责，不用父流水读取器处理 child UUID。
+
+## 2026-09-24 拆分用途核对
+
+- 主列表是否需要发票继续由标签分组配置决定；候选发票已付金额、现有关联付款摘要和关联写入 preview 的已付基数，统一使用共享 `bank_split_relation_scope` 按目标发票金额选择唯一完整用途范围。
+- 明确匹配本金的单据可以核对本金；金额不唯一、不匹配、混合未拆分流水或混合方向保留完整金额证据，不静默忽略本金。不能使用旧的整类本金排除函数计算单据已付金额。
+- 候选 SQL 按集合计算，无逐行读取；占用校验仍保留所有真实关联银行成员，金额核对范围不改变占用事实。

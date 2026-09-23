@@ -13,7 +13,7 @@ from fin_ops_platform.services.cost_statistics_policy import (
 
 
 class CostStatisticsPolicyTests(unittest.TestCase):
-    def test_split_principal_is_excluded_but_interest_stays_pending(self) -> None:
+    def test_split_principal_is_excluded_and_unique_interest_is_automatic_despite_legacy_flag(self) -> None:
         principal = {**self._bank("principal-unit", "1000000.00", tag_code="custom-principal"),
                      "turnover_role": "external_turnover", "parent_row_id": "bank-parent", "is_split": True}
         interest = {**self._bank("interest-unit", "1497.22", tag_code="custom-interest"),
@@ -21,12 +21,30 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         group = self._group(oa_rows=[self._oa("oa-interest", amount="1497.22")], bank_rows=[principal, interest])
         group["special_metadata"] = {"bank_split_requires_cost_confirmation": True}
         policy = self._policy([group])
-        self.assertEqual(policy.serialized_cost_rows, [])
-        self.assertEqual(len(policy.manual_allocation_tasks), 1)
-        task = policy.manual_allocation_tasks[0]
+        self.assertEqual([row['amount'] for row in policy.serialized_cost_rows], ['1497.22'])
+        self.assertEqual(policy.manual_allocation_tasks, [])
+        task = policy.allocation_tasks[0]
         self.assertEqual(task["net_outflow_total"], "1497.22")
         self.assertEqual([event["transaction_id"] for event in task["bank_events"]], ["interest-unit"])
-        self.assertIsNone(task["source_allocations"])
+        self.assertEqual(task["source_allocations"]["cost_lines"], [
+            {"unit_id": "oa:oa-interest", "bank_transaction_id": "interest-unit", "amount": "1497.22"}])
+        self.assertEqual(task["version"], 0)
+
+    def test_split_multiple_equal_sources_remain_ambiguous_without_manual_decision(self):
+        group = self._group(oa_rows=[self._oa('oa-a', amount='50.00'), self._oa('oa-b', amount='50.00')],
+            bank_rows=[{**self._bank('child-a', '50.00'), 'parent_row_id':'parent', 'is_split':True},
+                       {**self._bank('child-b', '50.00'), 'parent_row_id':'parent', 'is_split':True}])
+        group['special_metadata'] = {'bank_split_requires_cost_confirmation': True}
+        policy = self._policy([group])
+        self.assertEqual(policy.serialized_cost_rows, [])
+        self.assertIsNone(policy.manual_allocation_tasks[0]['source_allocations'])
+
+    def test_split_one_source_for_multiple_oa_uses_existing_unique_solution(self):
+        group = self._group(oa_rows=[self._oa('oa-a', amount='30.00'), self._oa('oa-b', amount='70.00')],
+            bank_rows=[{**self._bank('child-interest', '100.00'), 'parent_row_id':'parent', 'is_split':True}])
+        policy = self._policy([group])
+        self.assertEqual(sorted(row['amount'] for row in policy.serialized_cost_rows), ['30.00','70.00'])
+        self.assertEqual(policy.manual_allocation_tasks, [])
 
     def test_unsplit_external_principal_does_not_create_cost_task(self) -> None:
         principal = {**self._bank("principal", "260000.00"), "turnover_role": "external_turnover"}

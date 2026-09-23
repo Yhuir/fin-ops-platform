@@ -12,6 +12,7 @@ from fin_ops_platform.services.input_invoice_usage_payment_rules import (
 from fin_ops_platform.services.output_invoice_reversal import (
     REVERSED_BLUE_INVOICE_NO_SQL_PATTERN,
 )
+from fin_ops_platform.services.postgres_repositories.bank_split_relation_scope import bank_split_scope_ctes
 from fin_ops_platform.services.postgres_repositories.common import row_payload
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
@@ -802,6 +803,10 @@ def _fact_cte(
     month: str | None,
     status_case: str | None,
 ) -> str:
+    purpose_scope_sql = bank_split_scope_ctes(
+        bank_rows_sql="select group_key,bank_id,amount,txn_direction as direction,is_split,turnover_role from raw_group_bank_rows",
+        targets_sql="select group_key,abs(total_with_tax) as target_amount from grouped_invoices",
+    )
     if invoice_type not in {"input", "output"}:
         raise ValueError("Unsupported invoice type.")
     scope_sql = (
@@ -1106,6 +1111,7 @@ def _fact_cte(
                         false
                     )
                     or member.relation_mode = 'oa_invoice_offset_auto_match'
+                    or exists (select 1 from group_scope_balance balance where balance.group_key=relation.group_key and balance.current_split_matched)
                 ) as amount_matched
             from group_relation_ids relation
             join relation_members member on member.relation_id = relation.relation_id
@@ -1416,11 +1422,13 @@ def _fact_cte(
             join relation_component_ids component
               on component.component_id = grouped.component_id
         ),
-        group_bank_rows as (
+        raw_group_bank_rows as (
             select
                 relation.group_key,
                 coalesce(bank.legacy_mongo_id, bank.id::text) as bank_id,
                 bank.txn_direction,
+                bank.is_split,
+                definition.value->>'turnover_role' as turnover_role,
                 bank.amount,
                 bank.counterparty_name_raw,
                 bank.trade_time,
@@ -1443,19 +1451,17 @@ def _fact_cte(
             join relation_members member on member.relation_id = relation.relation_id
             join app.bank_transaction_units bank
               on member.row_id in (coalesce(bank.legacy_mongo_id, ''), bank.id::text)
+            left join app.app_settings settings on settings.settings_key='app_settings'
+            left join lateral jsonb_array_elements(settings.settings_payload#>'{{bank_transaction_tags,definitions}}') definition(value)
+              on definition.value->>'code'=bank.split_category_code
             where member.row_type in ('bank', 'bank_transaction')
               and bank.status <> 'deleted'
-              and (not bank.is_split or not exists (
-                  select 1 from app.app_settings settings,
-                  lateral jsonb_array_elements(settings.settings_payload#>'{{bank_transaction_tags,definitions}}') definition
-                  where settings.settings_key='app_settings'
-                    and definition->>'code'=bank.split_category_code
-                    and definition->>'turnover_role'='external_turnover'
-              ))
             group by
                 relation.group_key,
                 coalesce(bank.legacy_mongo_id, bank.id::text),
                 bank.txn_direction,
+                bank.is_split,
+                definition.value->>'turnover_role',
                 bank.amount,
                 bank.counterparty_name_raw,
                 bank.trade_time,
@@ -1468,6 +1474,25 @@ def _fact_cte(
                     ''
                 )
         ),
+        {purpose_scope_sql},
+        group_scope_balance as (
+            select bank.group_key,
+                   bool_or(bank.is_split) as has_split,
+                   bool_or(bank.is_split) and count(distinct bank.txn_direction)=1
+                   and bool_and(bank.txn_direction in ('inflow','outflow'))
+                   and sum(bank.amount)=max(abs(invoice.total_with_tax)) as current_split_matched
+            from raw_group_bank_rows bank
+            join scope_bank_members scope on scope.group_key=bank.group_key and scope.bank_id=bank.bank_id
+            join grouped_invoices invoice on invoice.group_key=bank.group_key
+            group by bank.group_key
+        ),
+        group_bank_rows as (
+            select bank.*, case when balance.has_split then balance.current_split_matched
+                                else bank.amount_matched end as current_amount_matched
+            from raw_group_bank_rows bank
+            join scope_bank_members scope on scope.group_key=bank.group_key and scope.bank_id=bank.bank_id
+            join group_scope_balance balance on balance.group_key=bank.group_key
+        ),
         group_banks as (
             select
                 grouped.group_key,
@@ -1478,7 +1503,7 @@ def _fact_cte(
                 coalesce(sum(bank.amount) filter (
                     where bank.txn_direction = 'outflow'
                 ), 0)::numeric as bank_outflow_total,
-                coalesce(sum(bank.amount) filter (where bank.amount_matched), 0)::numeric
+                coalesce(sum(bank.amount) filter (where bank.current_amount_matched), 0)::numeric
                     as matched_bank_total,
                 (array_agg(bank.counterparty_name_raw order by
                     coalesce(bank.trade_time, bank.txn_date::timestamptz) desc,

@@ -693,7 +693,7 @@ def test_page_members_are_narrow_and_anomalies_rehydrate_by_typed_identity() -> 
     member_sql = spine_sql.split("canonical_group_members as materialized (", 1)[1]
     anomaly_sql = " ".join(_ANOMALY_STATE_CTES.lower().split())
     anomaly_members = anomaly_sql.split(
-        "relation_anomaly_members as materialized (", 1
+        "relation_anomaly_raw_members as materialized (", 1
     )[1].split("oa_exact_identity_aliases as materialized (", 1)[0]
 
     assert "row.oa_source_aliases" not in member_sql
@@ -736,7 +736,7 @@ def test_anomaly_query_group_source_is_explicit_and_fail_closed() -> None:
 def test_etc_batch_accounting_summary_is_excluded_from_document_evidence() -> None:
     sql = " ".join(_ANOMALY_STATE_CTES.split()).lower()
     relation_members_sql = sql.split(
-        "relation_anomaly_members as materialized (", 1
+        "relation_anomaly_raw_members as materialized (", 1
     )[1].split("oa_exact_identity_aliases as materialized (", 1)[0]
     invoice_facts_sql = sql.split(
         "invoice_anomaly_facts as materialized (", 1
@@ -979,7 +979,7 @@ def test_source_owner_resolution_precedes_group_filters_counts_and_cursor_limit(
 def test_relation_anomaly_members_use_only_formal_relation_members() -> None:
     sql = " ".join(_ANOMALY_STATE_CTES.split()).lower()
     relation_members_sql = sql.split(
-        "relation_anomaly_members as materialized (", 1
+        "relation_anomaly_raw_members as materialized (", 1
     )[1].split("oa_exact_identity_aliases as materialized (", 1)[0]
 
     assert "join all_active_relation_members member" in relation_members_sql

@@ -971,9 +971,6 @@ def _manual_allocation_task(
         unit["lock_oa_amount"] = default_lock
         unit["outside_cost_amount"] = "0.00"
     if manual_record is None:
-        if (group.get("special_metadata") or {}).get("bank_split_requires_cost_confirmation"):
-            task["requires_manual_confirmation"] = True
-            return project_source_task(task, None)
         decision = automatic_relation_sources(task, [*outflows, *refunds], group.get("source_relation_groups", []))
         return project_source_task(task, decision, automatic=True)
     task.update(

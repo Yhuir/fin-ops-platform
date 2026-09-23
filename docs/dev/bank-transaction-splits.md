@@ -5,10 +5,20 @@
 ## API
 
 - GET /api/bank-transactions/{parent-or-child-id}/splits：解析原流水，返回 transaction_id、canonical_transaction_id、amount、written_off_amount、direction、version、category_code、parts、tag_definitions、can_edit。
-- PUT 同一路径：输入 version、parts[{id?,category_code,amount}]；金额为十进制字符串；空 parts 撤销时提供 category_code。actor 来自登录身份。成功返回持久化完整对象、changed、affected_months；旧版本 409、不合法合计/金额/标签 400、流水不存在 404、无认证 401、无页面授权 403。
+- PUT 同一路径：输入 version、parts[{id?,category_code,category_label_path,amount}]；金额为十进制字符串；空 parts 撤销时提供 category_code 与 category_label_path。actor 来自登录身份。成功返回持久化完整对象、changed、affected_months；旧版本 409、不合法合计/金额/标签 400、流水不存在 404、无认证 401、无页面授权 403。
 - POST /api/bank-transactions/splits/query：输入 transaction_ids[]，输出 rows[] 与输入顺序一一对应。两个子项属于同一父项时仍按请求数返回，避免位置错绑。固定次数 SQL，无逐行 load。
 - tag_definitions 是显示合同，含 code、label、path、primary_label、sub_label、status 与配置语义，不暴露自动分类规则全文。子项与配置分开持久化，标签更新不复制成银行原始事实。
 - 平级系统标签在字典中允许 `path=[]`，拆分显示投影使用该标签自身的 `label` 作为唯一层级；有输出层级的标签使用配置层级。两种现有标签形态均纳入单元与真实 PostgreSQL 测试，不修改分类语义。
+
+## 分类实例合同（0180）
+
+`category_payload` 保存每个子项人工选择的完整分类实例：category_label、category_primary_label、category_sub_label、category_third_label、category_label_path、turnover_role、turnover_action_type、turnover_family。GET 的 parts 以及未拆分根对象均返回这些字段，category_path 为完整 category_label_path 的展示别名；根对象始终返回 turnover_third_label_options，未分类 path 为 []。外部往来使用现有往来类型选项，客户端只提交完整路径，family/action 由分类 owner 从配置与第三层规范派生，禁止按银行名称或父流水猜测。
+
+外部往来前两层必须与所选 definition 相同，第三层必须在现有选项内；普通标签路径必须与 definition 相同。矛盾的 family/action/层级信息显式返回 400。仅修改第三层也增加拆分版本并审计，保留子 UUID；业务关联与成本是否变化由其 owner 根据有效金额/成员决定。
+
+0180 将快照投影为 units.split_category_payload，公共 effective category query 和各抽屉读取同一事实。旧 code-only 子项缺失的实例归属不能自动推断；只能以已核实原始分类证据执行一次显式保存，审计保留前后值。新增或编辑子项必须完整保存实例，不能读取时回退父分类。往来 extras 迁移以完整 before 实例重建旧状态。
+
+银行明细关键词可匹配父流水原金额以及子项金额；分类筛选匹配子项，分页和汇总仍按原流水计一次。实例第三层参与筛选和标签展示，余额与原金融事实不变。
 
 ## 模块与事务
 
@@ -16,7 +26,7 @@ route 仅 HTTP/session 映射；BankTransactionSplitService 校验金额及版�
 
 锁先取关联成员有序 advisory locks，再锁银行父行并重读金额，防 split 与 relation 写互锁；版本 CAS 防覆盖。子项属于多个关系时撤销拆分需先撤回相关关系，不合并不同业务意图。历史记录保留原证据；恢复时只允许明确完整身份组投影到当前子项，禁止恢复已删除成员。
 
-BankTransactionUnit 是服务层只读用途 DTO，继承银行字段用于现有行组装，但不送入导入写口。原始银行详情独立使用 parent_transaction，金额统计使用 unit.amount。标签由配置 role/code 决定；外部往来子项不增加发票实付款。
+BankTransactionUnit 是服务层只读用途 DTO，继承银行字段用于现有行组装，但不送入导入写口。原始银行详情独立使用 parent_transaction，金额统计使用 unit.amount。标签由配置 role/code 决定；凭证核对通过 `bank_unit_comparison_rows` 适配共享用途选择规则，允许本金专属 OA 正确核对，也防止利息 OA 累加本金。
 
 ## 旧链路清理
 
@@ -60,3 +70,19 @@ BankTransactionUnit 是服务层只读用途 DTO，继承银行字段用于现�
 - 前端 113 文件 / 1,509 测试通过，拆分浏览器流程 1 passed；生产构建、Ruff、docs、diff check 均通过。
 - 本地完整事务提交并回读 100 次：p50 18.97 ms、p95 22.32 ms、p99 26.83 ms；批量读 100 次 p99 17.07 ms。该数据不含网络，也不代表已有复杂关联的生产 HTTP 写入分位数。
 - 原银行表的余额、身份与金融金额不变，子项保存、并发冲突、失败回滚、往来/成本/待票/OA、批次及导入撤销均有针对性验证。生产发布记录由既有 release gate 持久化，发布后另跑统一抽屉、拆分读 API、金额错误拒绝与事务回滚性能探针。
+
+## 2026-09-24 闭环修复发布合同
+
+0180 持久化完整分类实例。成本删除拆分后一律人工确认的旧门禁；明确唯一等额关系自动入账，有效人工决策不覆盖。核对范围合同见产品说明；纯函数和 SQL CTE 共享测试保证关联台分区、OA、进项与销项一致，禁止页面分别减本金或忽略全部外部往来。
+
+发布后运行 `python3 -m fin_ops_platform.tools.retire_bank_split_confirmation_flags` 只读预览，再带 `--apply --operator <actor>` 原子移除已退役标记。工具不改变关系版本/成员，不清空有效成本决定，重复运行返回零。既有 code-only 本金按已核实的原三层分类，经正式拆分 PUT 保留子项 ID 修正，不进行 SQL 人工猜测回填。0180 为新增字段与用途视图投影，无需全库备份，不删除主数据库。
+
+验证覆盖七类：纯用途核对与金额规则、真实 PostgreSQL 分类/成本/往来及回滚、API及权限合同、canonical 查询/分页/summary/full一致、按钮/抽屉与错误交互、跨模块及浏览器流程、未拆分和旧人工决策回归。没有新增缓存或后台任务，验证现有事件的事务边界即可。
+
+### 本次闭环修复验证（2026-09-24）
+
+- 后端全量 `FIN_OPS_TEST_DATABASE_URL=<isolated-test-db> PYTHONPATH=backend/src python3 -m pytest tests -q`：4960 passed、7 failed、55 skipped。7项为分类测试 SQL 漏新增 action/family 字段、migration 计数与现金专用数据库命名要求；更新测试合同并使用专库后，失败所在文件 21 passed。未放宽断言或隐藏失败。
+- 最终合并链路复验（拆分、成本、待票、进项、OA、销项、关联台查询及撤回）：552 passed。新增真实 PostgreSQL 同一数电发票不同明细各属独立关系的合法场景；SQL、页面组装及候选/写入 preview 一致。主列表是否需票仍由标签配置决定。
+- 现金专用库另验 103 passed；发布脚本、运行配置与核心规则 68 passed。未修改现金业务实现。
+- `bash scripts/verify.sh frontend`：114 文件、1513 tests passed；TypeScript 与 Vite 构建通过。浏览器拆分新增/保存/重开/保存失败恢复流程 1 passed。`lint`、`docs` 和 `git diff --check` 通过。
+- 55个全量跳过包含需要独立现金 DSN 的测试（已专库补测）及已有显式可选环境测试；未为此次修复新增 skip。生产性能与业务验证在发布后进行，不能以本地单元测试或 no-op 保存替代生产结论。

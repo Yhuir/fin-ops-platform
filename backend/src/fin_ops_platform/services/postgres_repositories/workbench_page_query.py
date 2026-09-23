@@ -13,6 +13,7 @@ from fin_ops_platform.services.bank_details_canonical_query import (
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     OA_EXTERNAL_SOURCE_ID_FIELD_NAMES,
 )
+from fin_ops_platform.services.postgres_repositories.bank_split_relation_scope import bank_split_scope_ctes
 from fin_ops_platform.services.postgres_repositories.common import (
     int_value,
     month_start,
@@ -1695,6 +1696,29 @@ def _anomaly_state_ctes(*, group_source: str) -> str:
         "group_page_anomaly_groups",
     }:
         raise ValueError(f"unsupported anomaly group source: {group_source}")
+    purpose_scope_sql = bank_split_scope_ctes(
+        bank_rows_sql="""
+            select member.internal_key as group_key, member.row_id as bank_id,
+                   member.bank_amount as amount,
+                   case member.bank_direction when 'payment' then 'outflow' when 'receipt' then 'inflow' end as direction,
+                   item.id is not null as is_split, definition.value->>'turnover_role' as turnover_role
+            from relation_anomaly_raw_members member
+            left join app.bank_transaction_split_items item on item.id::text=member.row_id
+            left join app.app_settings settings on settings.settings_key='app_settings'
+            left join lateral jsonb_array_elements(settings.settings_payload#>'{bank_transaction_tags,definitions}') definition(value)
+                on definition.value->>'code'=item.category_code
+            where member.row_type='bank'
+        """,
+        targets_sql="""
+            select internal_key as group_key,
+                   case when count(*) filter (where row_type='oa') > 0 then
+                       case when count(oa_amount) filter (where row_type='oa') = count(*) filter (where row_type='oa')
+                            then sum(oa_amount) filter (where row_type='oa') end
+                   else case when count(invoice_total_with_tax) filter (where row_type='invoice') = count(*) filter (where row_type='invoice')
+                             then sum(invoice_total_with_tax) filter (where row_type='invoice') end end as target_amount
+            from relation_anomaly_raw_members group by internal_key
+        """,
+    )
     return f"""
 latest_anomaly_decisions as materialized (
     select group_id, fingerprint, resolution as decision, updated_at
@@ -1763,7 +1787,7 @@ relation_anomaly_etc_totals as materialized (
       and preferred.identity_rank = 1
     group by preferred.external_batch_id
 ),
-relation_anomaly_members as materialized (
+relation_anomaly_raw_members as materialized (
     select
         groups.internal_key,
         groups.detail_key as case_id,
@@ -1803,6 +1827,14 @@ relation_anomaly_members as materialized (
       on etc_total.external_batch_id = etc_key.external_batch_id
     where groups.group_kind = 'relation'
       and member.row_type in ('oa', 'bank', 'invoice')
+),
+{purpose_scope_sql},
+relation_anomaly_members as materialized (
+    select member.* from relation_anomaly_raw_members member
+    where member.row_type <> 'bank' or exists (
+        select 1 from scope_bank_members scoped
+        where scoped.group_key=member.internal_key and scoped.bank_id=member.row_id
+    )
 ),
 oa_exact_identity_aliases as materialized (
     select distinct

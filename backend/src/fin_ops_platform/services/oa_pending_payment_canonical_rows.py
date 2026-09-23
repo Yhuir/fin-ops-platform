@@ -7,7 +7,7 @@ from hashlib import sha1
 from typing import Any, Callable
 
 from fin_ops_platform.domain.models import BankTransaction, Invoice
-from fin_ops_platform.services.bank_transaction_unit import bank_unit_display
+from fin_ops_platform.services.bank_transaction_unit import bank_unit_comparison_rows, bank_unit_display
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.invoice_relation_query_context import relation_status, summary_is_linked
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
@@ -268,6 +268,10 @@ def _bank_relation_payload(
     seen_non_outflow_edges: set[tuple[str, str]] = set()
     missing_bank_relation_count = 0
     oa_amount = _parse_decimal(oa_amount_value) or ZERO
+    linked_banks = {row_id: banks_by_id[row_id] for relation in relations if relation_status(relation) == "linked"
+                    for row_id, row_type in _typed_relation_rows(relation)
+                    if row_type in {"bank", "bank_transaction"} and row_id in banks_by_id}
+    comparison_ids = {bank.id for bank in bank_unit_comparison_rows(list(linked_banks.values()), target=oa_amount)}
     for relation in relations:
         linked = relation_status(relation) == "linked"
         for row_id, row_type in _typed_relation_rows(relation):
@@ -277,6 +281,8 @@ def _bank_relation_payload(
             if bank is None:
                 if linked:
                     missing_bank_relation_count += 1
+                continue
+            if linked and bank.id not in comparison_ids:
                 continue
             if _bank_direction(bank) != "outflow":
                 edge_key = (str(relation.get("case_id") or ""), bank.id)

@@ -181,3 +181,9 @@ OA 详情复用同次 canonical 批量 hydration，按请求 OA ID 选择原单�
 - missing child 在关系写入前返回 `bank_transaction_not_found`；原 parent 已拆分后不再作为付款用途单元。分类读取使用 canonical category projection 的 units 口径。
 - 本地 JSON backend 明确只提供未拆分银行身份；其 relation repository adapter 的 current-unit resolver 为恒等映射，不猜测拆分。
 - 测试：`test_oa_pending_payment_command_service.py` 批量读取、子项金额、缺失身份；`test_bank_split_relations_postgres.py` 真实子项读取及原 parent 排除。
+
+## 2026-09-24 拆分流水的单据核对范围
+
+同一现有 active 关联的用途比较复用 `bank_split_relation_scope` 的 SQL/Python 规则；银行金融事实、子项事实与关联成员不改写。只有全为拆分子项、同一收支方向，且单据目标金额恰好唯一等于完整本金用途组或完整其他用途组时，取该组核对。本金单据可以匹配本金，不再一律删除外部往来子项；金额相同的两组、金额不匹配、混合收支或包含未拆分流水时保留完整证据。
+
+SQL 分页/筛选/汇总和 Python 行数据/详情组装使用相同范围，按集合执行，无逐行查询。OA 已付金额使用 OA 合计目标；发票页面使用当前发票组目标。进项含拆分的当前金额闭合不再依赖旧 relation.amount_check 的历史失败值，仍保留 OA 金额一致、正式关联与原支付规则约束；未拆分、无 OA 抵扣及销项超额收款/红蓝票规则不变。验证入口：`tests/test_bank_split_document_scope_postgres.py`，覆盖利息/本金单据、旧核对失败、金额歧义、未匹配、混合方向、未拆分兄弟流水，检查 SQL 汇总与行数据一致。

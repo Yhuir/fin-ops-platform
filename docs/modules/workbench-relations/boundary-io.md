@@ -203,12 +203,12 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - `BankTransactionSplitRelationService.apply(transaction, before, after, actor_id)` 只编排事务绑定的 relation、cost allocation 和 bank-flow batch owner；不接收 Application、不直接写 SQL。
 - 初次拆分将原银行成员替换为完整子项，保持 case 身份和 OA/发票成员。之后仅改变实际受影响 case；新增子项只有在同 case 原本拥有全部旧子项时继承组意图，部分占用时保持未关联。撤销拆分若涉及多个 active case 明确冲突，禁止把同一父身份放入多个 owner。
 - Relation owner 的 `replace_bank_split_members` 加锁核对版本，再由 domain service 变更成员/版本、记录 before/after history，复用 delta writer 产生 matching dirty 与 OA payment durable event。取消后少于两个成员的 case；不删除 OA/发票事实。
-- 每次业务变化重新冻结标签 requirement，标记 `bank_split_requires_cost_confirmation`，并记录 `bank_split_versions`。进程镜像仅在最外层事务提交后发布 changed-case delta；失败不发布。
+- 每次业务变化重新冻结标签 requirement，移除已退役的 `bank_split_requires_cost_confirmation`，并记录 `bank_split_versions`。进程镜像仅在最外层事务提交后发布 changed-case delta；失败不发布。
 - canonical bank member lock 从 `app.bank_transaction_units` 解析真实 parent，在父银行行取得共享锁，和拆分写事务互斥。页面不得把历史成员快照恢复成已删除的子项。
 - 回归：`tests/test_bank_transaction_split_relation_service.py`、`tests/test_bank_split_relations_postgres.py`，含真实事务提交/回滚、成本审计、OA outbox 与银行金额不变。
 
 保存拆分时先读取完整相关 case，一次排序取得其全部成员 advisory lock，核对锁等待期间关系未变化，再取得父流水写锁并重读金额/方向/月份；关系漂移返回明确冲突。普通撤回及 bank-flow 批次撤回在恢复历史前都验证 canonical 成员，已删除的拆分子项不得从历史复活。锁序和恢复保护分别由 `tests/test_bank_transaction_split_locking.py` 与 `tests/test_workbench_relation_command_service.py` 覆盖。
 
-- split history 增加 `bank_split_members.before/after`：只在撤销预览的副本中按完整已知身份组投影 parent→children。历史原始记录保持不变；历史仅占用部分已删子项时不得推测归属，canonical member 校验拒绝悬空恢复。投影后的银行关联继续标记成本待确认。
-- 历史外部往来成本迁移调用 `require_cost_reconfirmation(case_ids, actor_id)` owner 端口：批量锁 active case，复用 metadata domain writer，增加版本并记录 `external_turnover_cost_allocation_revoked` 历史；与旧分配撤销同一事务。
+- split history 增加 `bank_split_members.before/after`：只在撤销预览的副本中按完整已知身份组投影 parent→children。历史原始记录保持不变；历史仅占用部分已删子项时不得推测归属，canonical member 校验拒绝悬空恢复。投影恢复移除旧成本待确认标记；由成本 owner 按当前有效来源决定自动入账或待分配。
+- 已删除 `require_cost_reconfirmation` 旧写口。一次性 `retire_bank_split_confirmation_flags(actor_id, apply)` 批量锁定 active case，通过 metadata domain writer 移除旧标记并记录审计，保留成员和关系版本，避免使有效人工成本指纹失效；不发送不必要的 OA payment 事件。预览只读、应用事务原子且幂等。
 - 撤销恢复涉及拆分用途时，command 通过显式 `bank_requirements_resolver(bank_ids_by_case)` 一次批量读取当前分类与 paired policy，按每个恢复 case 的真实银行子集重算 OA/发票要求；不以审计中的旧标签要求替代当前事实。PostgreSQL relation repository 的 `current_bank_relation_requirements` 复用 canonical category query，server factory 将端口注入 command。缺少此依赖显式失败，未拆分撤销不增加查询。

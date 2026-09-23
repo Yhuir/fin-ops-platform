@@ -678,32 +678,35 @@ class PostgresWorkbenchRelationRepository:
             rules_payload=settings["paired_policy"],
         ) for case_id, members in bank_ids_by_case.items()}
 
-    def require_cost_reconfirmation(self, case_ids: list[str], *, actor_id: str) -> list[str]:
-        """Mark active migrated decisions through the relation metadata owner."""
+    def retire_bank_split_confirmation_flags(self, *, actor_id: str, apply: bool) -> list[str]:
+        """Explicit maintenance only: retire obsolete metadata without invalidating valid costs."""
         from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
-        if not case_ids:
-            return []
-        self.acquire_relation_member_locks([], case_ids=sorted(case_ids))
-        rows = self._connection.fetch_all(
-            "select raw_payload from app.workbench_pair_relations where case_id = any(%s::text[]) and status = 'active' order by case_id for update",
-            (sorted(case_ids),),
-        )
-        relations = {payload["case_id"]: payload for row in rows if isinstance((payload := row_payload(row, "raw_payload")), dict)}
-        service = WorkbenchPairRelationService(pair_relations=relations)
+        rows = self._connection.fetch_all("""select case_id from app.workbench_pair_relations
+            where status='active' and special_metadata ? 'bank_split_requires_cost_confirmation'
+            order by case_id""")
+        case_ids = [row["case_id"] for row in rows]
+        if not apply or not case_ids:
+            return case_ids
+        if not actor_id.strip():
+            raise ValueError("An operator is required to retire bank split confirmation flags.")
+        self.acquire_relation_member_locks([], case_ids=case_ids)
         changed = []
-        for case_id, relation in relations.items():
-            if relation.get("special_metadata", {}).get("bank_split_requires_cost_confirmation") is True:
+        for case_id in case_ids:
+            current = self.load_active_workbench_pair_relation_by_case_id_for_update(case_id)
+            if current is None or "bank_split_requires_cost_confirmation" not in current["special_metadata"]:
                 continue
+            metadata = dict(current["special_metadata"])
+            del metadata["bank_split_requires_cost_confirmation"]
+            service = WorkbenchPairRelationService(pair_relations={case_id: current})
             service.update_relation_metadata_for_case_id(
-                case_id, special_metadata={"bank_split_requires_cost_confirmation": True},
-                updated_by=actor_id, note="撤销旧外部往来成本分配，等待重新确认。",
-                operation_type="external_turnover_cost_allocation_revoked", advance_version=True,
+                case_id, special_metadata=metadata, replace_special_metadata=True,
+                updated_by=actor_id, operation_type="obsolete_bank_split_confirmation_retired",
+                note="移除已退役的拆分强制成本确认标记；保留关系成员及有效人工成本。",
             )
+            self.save_workbench_pair_relation_delta(service.snapshot(), changed_case_ids=[case_id], emit_payment_status_reconcile=False)
             changed.append(case_id)
-        if changed:
-            self.save_workbench_pair_relation_delta(service.snapshot(), changed_case_ids=changed)
-        return sorted(changed)
+        return changed
 
     def replace_bank_split_members(
         self, *, before: dict[str, Any], row_ids: list[str], row_types: list[str],

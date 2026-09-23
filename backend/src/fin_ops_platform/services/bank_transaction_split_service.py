@@ -4,6 +4,18 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID, uuid4
 
+from fin_ops_platform.services.bank_turnover_tag_semantics import (
+    is_external_turnover_definition,
+    normalize_external_third_label,
+    normalize_external_turnover_metadata,
+    selected_external_turnover_payload,
+)
+
+SPLIT_CATEGORY_FIELDS = (
+    "category_label", "category_primary_label", "category_sub_label", "category_third_label",
+    "category_label_path", "turnover_role", "turnover_action_type", "turnover_family",
+)
+
 
 class BankTransactionSplitError(ValueError):
     def __init__(self, code: str, message: str, *, status: int = 400) -> None:
@@ -12,13 +24,46 @@ class BankTransactionSplitError(ValueError):
         self.status = status
 
 
+def normalize_split_category(selection: dict[str, Any], definition: dict[str, Any]) -> dict[str, Any]:
+    """Persist the chosen classification instance, including turnover ownership."""
+    base_path = list(definition.get("path") or [definition["label"]])
+    expected = [value for value in (definition.get("output_primary_label"), definition.get("output_sub_label")) if value] or base_path[:2]
+    path = selection.get("category_label_path", base_path)
+    if not isinstance(path, list) or not path or any(not isinstance(value, str) or not value.strip() for value in path):
+        raise BankTransactionSplitError("invalid_split_category_path", "请选择完整的银行标签。")
+    path = [value.strip() for value in path]
+    if is_external_turnover_definition(definition):
+        if len(path) != 3 or path[:2] != expected or not normalize_external_third_label(path[2]):
+            raise BankTransactionSplitError("invalid_split_turnover_category", "请选择外部往来款的往来类型。")
+        semantics = normalize_external_turnover_metadata(
+            primary_label=path[0], sub_label=path[1], third_label=path[2],
+            action_type=definition.get("turnover_action_type"), direction=definition.get("direction"),
+        )
+        if not semantics["turnover_action_type"]:
+            raise BankTransactionSplitError("invalid_split_turnover_category", "所选标签未配置往来用途，请先完善标签配置。")
+        result = selected_external_turnover_payload(category_code=definition["code"], category_label=definition["label"],
+            category_primary_label=path[0], category_sub_label=path[1], category_third_label=path[2],
+            turnover_action_type=semantics["turnover_action_type"])
+    else:
+        if path != base_path:
+            raise BankTransactionSplitError("invalid_split_category_path", "标签路径与所选标签不一致。")
+        result = {"category_label": definition["label"], "category_primary_label": path[0],
+                  "category_sub_label": path[1] if len(path) > 1 else None,
+                  "category_third_label": path[2] if len(path) > 2 else None, "category_label_path": path,
+                  "turnover_role": "", "turnover_action_type": None, "turnover_family": None}
+    for key in ("turnover_role", "turnover_action_type", "turnover_family", "category_primary_label", "category_sub_label", "category_third_label"):
+        if key in selection and selection[key] != result[key]:
+            raise BankTransactionSplitError("invalid_split_category_semantics", "分类信息与所选标签不一致。")
+    return {key: result[key] for key in SPLIT_CATEGORY_FIELDS}
+
+
 def validate_split_parts(
     payload: dict[str, Any],
     *,
     amount: Decimal,
     current_parts: list[dict[str, Any]],
     definitions: list[dict[str, Any]],
-) -> list[dict[str, str | int]]:
+) -> list[dict[str, Any]]:
     """Validate the explicit full replacement; never infer a remainder or a tag."""
     parts = payload.get("parts")
     if not isinstance(parts, list) or len(parts) == 1:
@@ -26,7 +71,7 @@ def validate_split_parts(
     current_ids = {part["id"] for part in current_parts}
     active_codes = {item["code"] for item in definitions if item.get("status") == "active"}
     seen: set[str] = set()
-    result: list[dict[str, str | int]] = []
+    result: list[dict[str, Any]] = []
     total = Decimal("0.00")
     for position, part in enumerate(parts):
         if not isinstance(part, dict):
@@ -53,7 +98,9 @@ def validate_split_parts(
             item_id = str(uuid4())
         seen.add(item_id)
         total += value
-        result.append({"id": item_id, "category_code": category_code, "amount": format(value, ".2f"), "position": position})
+        classification = normalize_split_category(part, next(item for item in definitions if item["code"] == category_code))
+        result.append({"id": item_id, "category_code": category_code, "amount": format(value, ".2f"), "position": position,
+                       "category_payload": classification})
     if parts and total != amount:
         raise BankTransactionSplitError("split_amount_mismatch", f"子项合计须等于流水金额 {amount:.2f}。")
     if not parts and current_parts and payload.get("category_code") not in active_codes:
@@ -95,13 +142,14 @@ class BankTransactionSplitService:
                 current_parts=before["parts"],
                 definitions=before["tag_definitions"],
             )
-            old_values = [(part["id"], part["category_code"], part["amount"]) for part in before["parts"]]
-            new_values = [(part["id"], part["category_code"], part["amount"]) for part in parts]
+            old_values = [(part["id"], part["category_code"], part["amount"], {key: part[key] for key in SPLIT_CATEGORY_FIELDS}) for part in before["parts"]]
+            new_values = [(part["id"], part["category_code"], part["amount"], part["category_payload"]) for part in parts]
             if old_values == new_values:
                 return {**before, "changed": False, "affected_months": []}
             after = self._repository.persist(
                 transaction, before=before, parts=parts,
                 category_code=payload.get("category_code"), actor_id=actor_id,
+                category_payload=(normalize_split_category(payload, next(item for item in before["tag_definitions"] if item["code"] == payload["category_code"])) if not parts else None),
             )
             effects = self._relation_service.apply(transaction, before=before, after=after, actor_id=actor_id)
             self._repository.audit(transaction, before=before, after=after, actor_id=actor_id)

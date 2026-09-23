@@ -11,8 +11,8 @@ from typing import Any
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.bank_transaction_unit import (
+    bank_unit_comparison_rows,
     bank_unit_display,
-    bank_unit_matches_invoice,
     original_bank_summaries,
 )
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -645,12 +645,16 @@ class InputInvoiceUsageQueryService:
         context: DistributedInvoiceRelationContext,
     ) -> dict[str, Any]:
         bank_map = context.bank_transactions_by_id()
+        candidates = {str(row_id): bank_map[str(row_id)] for relation in relations
+                      for row_id in relation.get("row_ids", []) if str(row_id) in bank_map}
+        comparison_ids = {bank.id for bank in bank_unit_comparison_rows(list(candidates.values()),
+            target=sum((_invoice_total(line) for line in line_items), ZERO))}
         summaries = []
         seen: set[str] = set()
         for relation in relations:
             for row_id in list(relation.get("row_ids") or []):
                 bank = bank_map.get(str(row_id))
-                if bank is not None and bank.id not in seen and bank_unit_matches_invoice(bank):
+                if bank is not None and bank.id not in seen and bank.id in comparison_ids:
                     seen.add(bank.id)
                     summaries.append(self._bank_summary(bank, primary_invoice, line_items, relation))
         summaries.sort(key=lambda item: item["_sort"])
@@ -915,7 +919,12 @@ class InputInvoiceUsageQueryService:
     ) -> bool:
         invoice_total = sum((_invoice_total(line) for line in line_items), start=ZERO)
         bank_map = context.bank_transactions_by_id()
+        has_split = any(getattr(bank_map[row_id], "is_split", False)
+                        for relation in relations for row_id, kind in self._typed_relation_rows(relation)
+                        if kind in {"bank", "bank_transaction"} and row_id in bank_map)
         for relation in relations:
+            if has_split:
+                break
             if not self._relation_is_confirmed(relation):
                 continue
             if not self._relation_has_invoice_oa_bank(relation):
@@ -968,13 +977,28 @@ class InputInvoiceUsageQueryService:
         *,
         context: DistributedInvoiceRelationContext,
     ) -> dict[str, Decimal]:
-        del line_items
+        invoice_total = sum((_invoice_total(line) for line in line_items), ZERO)
+        bank_map = context.bank_transactions_by_id()
+        confirmed = [relation for relation in relations if self._relation_is_confirmed(relation)]
+        group_bank_ids = {row_id for relation in confirmed
+                          for row_id, kind in self._typed_relation_rows(relation)
+                          if kind in {"bank", "bank_transaction"} and row_id in bank_map}
+        group_banks = [bank_map[row_id] for row_id in group_bank_ids]
+        comparison = bank_unit_comparison_rows(group_banks, target=invoice_total)
+        has_split = any(getattr(bank, "is_split", False) for bank in group_banks)
+        current_split_match = (
+            has_split and len({bank.txn_direction for bank in comparison}) == 1
+            and sum((bank.amount for bank in comparison), ZERO) == invoice_total
+        )
         oa_ids: list[str] = []
         bank_ids: list[str] = []
         seen_oa: set[str] = set()
         seen_bank: set[str] = set()
-        for relation in relations:
-            if not self._relation_is_confirmed(relation) or not self._relation_amount_check_is_matched(relation):
+        for relation in confirmed:
+            if has_split:
+                if not current_split_match:
+                    continue
+            elif not self._relation_amount_check_is_matched(relation):
                 continue
             typed_rows = [
                 (row_id, self._canonical_relation_row_type(row_type, row_id))
@@ -991,7 +1015,8 @@ class InputInvoiceUsageQueryService:
         bank_map = context.bank_transactions_by_id()
         return {
             "oa": sum((_decimal(oa_records[oa_id].amount) for oa_id in oa_ids if oa_id in oa_records), start=ZERO),
-            "bank": sum((_decimal(bank_map[bank_id].amount) for bank_id in bank_ids if bank_id in bank_map), start=ZERO),
+            "bank": sum((bank.amount for bank in bank_unit_comparison_rows(
+                [bank_map[bank_id] for bank_id in bank_ids if bank_id in bank_map], target=invoice_total)), ZERO),
         }
 
     def _parse_filters(self, filters: str | list[dict[str, Any]] | None) -> list[dict[str, Any]]:

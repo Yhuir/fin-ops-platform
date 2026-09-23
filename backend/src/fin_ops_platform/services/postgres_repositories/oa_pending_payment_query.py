@@ -7,6 +7,7 @@ from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord, oa_flow_id_candidates
 from fin_ops_platform.services.oa_pending_payment_canonical_rows import relation_member_ids
+from fin_ops_platform.services.postgres_repositories.bank_split_relation_scope import bank_split_scope_ctes
 from fin_ops_platform.services.postgres_repositories.common import decimal_text, int_value, text
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_admission import (
@@ -789,6 +790,12 @@ def _descriptor_oa_ids(
     )
 
 
+_OA_BANK_SCOPE_CTES = bank_split_scope_ctes(
+    bank_rows_sql="select row_id as group_key, member_id as bank_id, bank_amount as amount, txn_direction as direction, is_split, turnover_role from raw_bank_edges",
+    targets_sql="select row_id as group_key, oa_amount as target_amount from group_oa",
+)
+
+
 _CANONICAL_ROWS_CTE = f"""
 with requested as (
     select %s::text as tenant_id
@@ -929,12 +936,14 @@ group_members as materialized (
     left join lateral unnest(group_oa.row_types) with ordinality as member_type(row_type, ordinality)
       on member_type.ordinality = member.ordinality
 ),
-bank_edges as materialized (
+raw_bank_edges as materialized (
     select
         members.row_id,
         members.member_id,
         members.ordinality,
         bank.txn_direction,
+        bank.is_split,
+        definition.value->>'turnover_role' as turnover_role,
         abs(bank.amount) as bank_amount,
         coalesce(bank.trade_time, bank.txn_date::timestamptz) as bank_trade_time,
         coalesce(
@@ -957,23 +966,29 @@ bank_edges as materialized (
         )) as bank_account,
         bank.counterparty_name_raw as bank_counterparty_name,
         bank.summary as bank_summary,
-        coalesce(bank.raw_payload->'normalized_payload', bank.raw_payload) as searchable_payload,
-        row_number() over (
-            partition by members.row_id
-            order by
-                abs(abs(bank.amount) - coalesce(group_oa.oa_amount, 0)),
-                coalesce(bank.trade_time, bank.txn_date::timestamptz) desc nulls last,
-                coalesce(bank.legacy_mongo_id, bank.id::text)
-        ) as primary_rank
+        coalesce(bank.raw_payload->'normalized_payload', bank.raw_payload) as searchable_payload
     from group_members members
     join group_oa on group_oa.row_id = members.row_id
     join app.bank_transaction_units bank
       on coalesce(bank.legacy_mongo_id, bank.id::text) = members.member_id
+    left join app.app_settings settings on settings.settings_key='app_settings'
+    left join lateral jsonb_array_elements(settings.settings_payload#>'{{bank_transaction_tags,definitions}}') definition(value)
+      on definition.value->>'code'=bank.split_category_code
     where (
         members.member_type in ('bank', 'bank_transaction')
         or (members.member_type = '' and (members.member_id like 'bank%%' or members.member_id like 'txn_%%'))
     )
-      and bank.txn_direction = 'outflow'
+),
+{_OA_BANK_SCOPE_CTES},
+bank_edges as materialized (
+    select bank.*, row_number() over (
+        partition by bank.row_id
+        order by abs(bank.bank_amount-coalesce(oa.oa_amount,0)), bank.bank_trade_time desc nulls last, bank.member_id
+    ) as primary_rank
+    from raw_bank_edges bank
+    join scope_bank_members scope on scope.group_key=bank.row_id and scope.bank_id=bank.member_id
+    join group_oa oa on oa.row_id=bank.row_id
+    where bank.txn_direction='outflow'
 ),
 bank_aggregates as materialized (
     select

@@ -47,12 +47,12 @@ def run(connection):
                 VALUES (%s::uuid,'SPLIT-SMOKE','outflow','SPLIT-SMOKE',1001497.22,-1001497.22,current_date,date_trunc('month',current_date),'CNY','pending')""", (parent,))
             before = repository.load(tx, parent, for_update=True)
             definitions = [d for d in before['tag_definitions'] if d['status']=='active']
-            principal = next(d['code'] for d in definitions if d.get('turnover_role')=='external_turnover')
+            principal = next(d for d in definitions if d.get('turnover_role')=='external_turnover' and len(d['path']) >= 2 and d.get('turnover_action_type'))
             expense = next(d['code'] for d in definitions if not d.get('turnover_role'))
             for index in range(100):
                 start = perf_counter()
                 before = repository.load(tx, parent, for_update=True)
-                parts = [{'category_code':principal,'amount':'1000000.00' if index%2==0 else '999999.99'},
+                parts = [{'category_code':principal['code'],'category_label_path':[*principal['path'][:2],before['turnover_third_label_options'][0]['value']],'amount':'1000000.00' if index%2==0 else '999999.99'},
                          {'category_code':expense,'amount':'1497.22' if index%2==0 else '1497.23'}]
                 if before['parts']:
                     for part, prior in zip(parts,before['parts'],strict=True):

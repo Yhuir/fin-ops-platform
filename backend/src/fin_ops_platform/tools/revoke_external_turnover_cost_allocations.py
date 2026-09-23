@@ -9,7 +9,6 @@ from fin_ops_platform.services.postgres_connection import PostgresConnection, Po
 from fin_ops_platform.services.postgres_repositories.cost_statistics_manual_allocation import (
     PostgresCostStatisticsManualAllocationRepository,
 )
-from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 
 
 def main() -> int:
@@ -25,7 +24,6 @@ def main() -> int:
             transaction.execute('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE' if args.apply else 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
             service = BankSplitCostMigrationService(
                 allocation_repository_factory=PostgresCostStatisticsManualAllocationRepository,
-                relation_repository_factory=PostgresWorkbenchRelationRepository,
                 settings_snapshot_provider=PostgresBankDetailsCanonicalQueryRepository.settings_payload,
                 effective_category_rows=PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows,
             )

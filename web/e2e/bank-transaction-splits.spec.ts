@@ -5,11 +5,11 @@ import { installDeterministicApiMocks } from './fixtures/apiMocks';
 test('bank detail adds labeled children, persists exact amounts and reloads complete saved children', async ({ page }) => {
   await installDeterministicApiMocks(page, { sessionMode: 'user' });
   const tagDefinitions = [
-    { code: 'principal', label: '外部往来款 / 归还借款', path: ['外部往来款', '归还借款'], primary_label: '外部往来款', sub_label: '归还借款', status: 'active' },
-    { code: 'interest', label: '费用 / 利息', path: ['费用', '利息'], primary_label: '费用', sub_label: '利息', status: 'active' },
+    { code: 'principal', label: '外部往来款 / 归还借款', path: ['外部往来款', '归还借款'], primary_label: '外部往来款', sub_label: '归还借款', status: 'active', turnover_role: 'external_turnover' },
+    { code: 'interest', label: '费用 / 利息', path: ['费用', '利息'], primary_label: '费用', sub_label: '利息', status: 'active', turnover_role: '' },
   ];
   let state = { transaction_id: 'bk-o-202603-001', canonical_transaction_id: 'canonical-bank-1', amount: '58000.00', direction: 'expense', version: 0,
-    category_code: 'principal', parts: [] as Array<{ id: string; category_code: string; category_label: string; category_path: string[]; amount: string }>, tag_definitions: tagDefinitions, can_edit: true };
+    category_code: 'principal', category_label_path: ['外部往来款', '归还借款', '银行往来'], turnover_third_label_options: [{ value: '银行往来', label: '银行往来' }], parts: [] as Array<{ id: string; category_code: string; category_label: string; category_path: string[]; amount: string }>, tag_definitions: tagDefinitions, can_edit: true };
   let writes = 0;
   let rejectSave = false;
   await page.route('**/api/bank-transactions/*/splits', async route => {
@@ -20,10 +20,10 @@ test('bank detail adds labeled children, persists exact amounts and reloads comp
       }
       const body = route.request().postDataJSON();
       expect(body.version).toBe(state.version);
-      expect(body.parts).toEqual([{ category_code: 'principal', amount: '56502.78' }, { category_code: 'interest', amount: '1497.22' }]);
-      state = { ...state, version: state.version + 1, parts: body.parts.map((part: { category_code: string; amount: string }, index: number) => {
+      expect(body.parts).toEqual([{ category_code: 'principal', category_label_path: ['外部往来款', '归还借款', '银行往来'], amount: '56502.78' }, { category_code: 'interest', category_label_path: ['费用', '利息'], amount: '1497.22' }]);
+      state = { ...state, version: state.version + 1, parts: body.parts.map((part: { category_code: string; category_label_path: string[]; amount: string }, index: number) => {
         const tag = tagDefinitions.find(item => item.code === part.category_code)!;
-        return { ...part, id: `part-${index + 1}`, category_label: tag.label, category_path: tag.path };
+        return { ...part, id: `part-${index + 1}`, category_label: tag.label, category_path: part.category_label_path };
       }) };
       writes += 1;
     }
@@ -38,6 +38,7 @@ test('bank detail adds labeled children, persists exact amounts and reloads comp
     await drawer.getByRole('combobox', { name: `子项 ${index} 标签` }).click();
     await page.getByRole('listbox', { name: '主标签' }).getByRole('option', { name: primary, exact: true }).click();
     await page.getByRole('listbox', { name: '子标签' }).getByRole('option', { name: child, exact: true }).click();
+    if (index === 1) await drawer.getByLabel('子项 1 往来归属').selectOption('银行往来');
     await drawer.getByLabel(`子项 ${index} 金额`).fill(amount);
   }
   expect(writes).toBe(0);

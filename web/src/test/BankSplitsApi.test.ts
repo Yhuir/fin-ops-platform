@@ -1,7 +1,7 @@
 import { fetchBankSplits, getBankTransactionSplitsBatch, saveBankSplits } from '../features/bankSplits/api';
 import { ApiClientError } from '../features/apiClient';
 
-const payload = { transaction_id: 'bank/1', canonical_transaction_id: 'canonical-1', amount: '100.00', direction: 'expense', version: 0, category_code: 'fee', parts: [], tag_definitions: [], can_edit: true };
+const payload = { transaction_id: 'bank/1', canonical_transaction_id: 'canonical-1', amount: '100.00', direction: 'expense', version: 0, category_code: 'fee', category_label_path: ['费用'], turnover_third_label_options: [], parts: [], tag_definitions: [], can_edit: true };
 
 test('reads full split fact using encoded bank identity and request abort signal', async () => {
   const fetch = vi.fn().mockResolvedValue(Response.json(payload)); vi.stubGlobal('fetch', fetch);
@@ -13,7 +13,7 @@ test('reads full split fact using encoded bank identity and request abort signal
 
 test('submits decimal strings, stable IDs, and version without introducing parent category', async () => {
   const fetch = vi.fn().mockResolvedValue(Response.json({ ...payload, version: 1, changed: true, affected_months: ['2026-09'] })); vi.stubGlobal('fetch', fetch);
-  const request = { version: 0, parts: [{ id: 'existing', category_code: 'fee', amount: '0.10' }, { category_code: 'fee', amount: '99.90' }] };
+  const request = { version: 0, parts: [{ id: 'existing', category_code: 'fee', category_label_path: ['费用'], amount: '0.10' }, { category_code: 'fee', category_label_path: ['费用'], amount: '99.90' }] };
   const response = await saveBankSplits('bank/1', request);
   expect(fetch.mock.calls[0][1].method).toBe('PUT');
   expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual(request);

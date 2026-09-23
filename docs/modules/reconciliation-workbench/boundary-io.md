@@ -375,3 +375,7 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - 原审阅账户、时间、备注和确认关联备注移到已有异常抽屉审阅区。只读用户保留记录查看能力；接受/撤回仅由原权限允许，原接口、CAS、审计及成功后回读不变。
 - 删除整组文本摘要、明细描述索引及相关 props/import/CSS；不新增 HTTP、SQL、缓存、worker 或金额计算。凭证文件区既有本项差额和管理入口保持。
 - 保留 hover/focus/click/Escape 与焦点恢复修复，不增加全局事件。实施及生产验证见 [修复记录](../../dev/workbench-anomaly-icon-restoration.md)。
+
+## 2026-09-24 拆分用途核对
+
+`services/bank_split_relation_scope.py` 只输入当前关系银行用途行与已知凭证总额，输出同一列表的核对子集，不做 I/O 或建立关联。repository 的同名 SQL helper 用集合 CTE 保持相同合同，关联台 paired/unpaired、异常统计、summary/full 与 domain hydration 一致。只有全部成员已拆分、同方向且唯一完整用途组等额才缩小核对范围；未知金额、混合原始流水、混合方向及双组同额均保留全部成员核对。页面展示、分页、原金融事实与正式关联成员不变。测试入口 `test_bank_split_relation_scope.py`、`test_bank_split_scope_postgres.py`。不新增 read model、缓存或 worker。

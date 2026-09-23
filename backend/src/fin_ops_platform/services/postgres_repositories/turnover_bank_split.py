@@ -8,7 +8,7 @@ from typing import Any
 from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.bank_details_canonical_query import PostgresBankDetailsCanonicalQueryRepository
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
-from fin_ops_platform.services.bank_transaction_split_service import BankTransactionSplitError
+from fin_ops_platform.services.bank_transaction_split_service import SPLIT_CATEGORY_FIELDS, BankTransactionSplitError
 from fin_ops_platform.services.postgres_repositories.common import jsonb, row_payload
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.turnover_ledger_query_service import _canonical_turnover_rows
@@ -52,19 +52,14 @@ class PostgresTurnoverBankSplitRepository:
             selected_tag_codes_provider=lambda: selected,
         )
         current = ledger.selected_bank_rows()
-        definitions = {item["code"]: item for item in settings["bank_transaction_tags"]["definitions"]}
         previous = []
-        before_parts = before["parts"] or [{"id": before["transaction_id"], "category_code": before["category_code"], "amount": before["amount"]}]
+        before_parts = before["parts"] or [{**before, "id": before["transaction_id"]}]
         for part in before_parts:
             code = part["category_code"]
             if code not in selected:
                 continue
-            definition = definitions[code]
-            semantics = category_service.category_semantics_for_code(code)
+            semantics = {key: part[key] for key in SPLIT_CATEGORY_FIELDS}
             previous.append({**parent, **semantics, "id": part["id"], "category_code": code,
-                "category_primary_label": definition.get("output_primary_label", ""),
-                "category_sub_label": definition.get("output_sub_label", ""),
-                "category_third_label": definition.get("output_third_label", ""),
                 "counterparty_name": parent["counterparty_name_raw"],
                 "debit_amount": part["amount"] if before["direction"] == "outflow" else "0.00",
                 "credit_amount": part["amount"] if before["direction"] == "inflow" else "0.00"})
