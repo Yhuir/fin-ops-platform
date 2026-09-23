@@ -62,7 +62,7 @@ class OAAttachmentOCRRuntimeError(RuntimeError):
 
 
 class OAAttachmentInvoiceService:
-    PARSER_VERSION = "2026-09-23-labelled-invoice-parties-v6"
+    PARSER_VERSION = "2026-09-23-partial-financial-evidence-v7"
 
     def __init__(
         self,
@@ -99,13 +99,21 @@ class OAAttachmentInvoiceService:
             limits=OA_ATTACHMENT_LIMITS,
         )
         if document.kind == "pdf":
+            first_evidence: dict[str, str] | None = None
             for segment in self._extract_pdf_evidence_text_segments(
                 document,
                 stop_after_first_invoice=True,
             ):
                 if evidence := self._first_invoice_evidence(segment.text):
-                    return evidence
-            return {}
+                    if first_evidence is None:
+                        first_evidence = evidence
+                    elif (
+                        first_evidence.get("financial_review_reason")
+                        and not evidence.get("financial_review_reason")
+                        and self._invoice_evidence_dedupe_key(first_evidence) == self._invoice_evidence_dedupe_key(evidence)
+                    ):
+                        first_evidence = evidence
+            return first_evidence or {}
         extracted_text = self._extract_image_text(document)
         return self._first_invoice_evidence(extracted_text) or {}
 
@@ -178,7 +186,7 @@ class OAAttachmentInvoiceService:
             return base_result
 
         parsed_evidences: list[dict[str, str]] = []
-        seen_keys: set[str] = set()
+        evidence_indexes: dict[str, int] = {}
         attachment_name = clean_string(base_result.get("attachment_name") or "")
         for segment in extracted_segments:
             extracted_text = segment.text
@@ -195,10 +203,13 @@ class OAAttachmentInvoiceService:
                 evidence["attachment_name"] = attachment_name
                 evidence["source_region_key"] = f"{segment.region}/{evidence['source_region_key']}"
                 dedupe_key = self._evidence_dedupe_key(evidence)
-                if dedupe_key and dedupe_key in seen_keys:
+                if dedupe_key and dedupe_key in evidence_indexes:
+                    index = evidence_indexes[dedupe_key]
+                    if parsed_evidences[index].get("financial_review_reason") and not evidence.get("financial_review_reason"):
+                        parsed_evidences[index] = evidence
                     continue
                 if dedupe_key:
-                    seen_keys.add(dedupe_key)
+                    evidence_indexes[dedupe_key] = len(parsed_evidences)
                 parsed_evidences.append(evidence)
 
         base_result["evidences"] = parsed_evidences
@@ -325,10 +336,15 @@ class OAAttachmentInvoiceService:
             for page_index in range(document.pdf_page_count):
                 page = pdf[page_index]
                 extracted_text = self._extract_pdf_page_text(page)
+                text_invoice = self._first_invoice_evidence(extracted_text) if clean_string(extracted_text) else None
 
                 if clean_string(extracted_text):
                     segments.append(AttachmentTextSegment(extracted_text, f"page:{page_index + 1}"))
-                    if self._first_invoice_evidence(extracted_text) is not None:
+                    if text_invoice is not None and (
+                        not text_invoice.get("financial_review_reason")
+                        or text_invoice.get("document_kind") == "railway_e_ticket_invoice"
+                    ):
+                        # Railway tickets legitimately provide only the fare.
                         if stop_after_first_invoice:
                             return segments
                         continue
@@ -339,10 +355,9 @@ class OAAttachmentInvoiceService:
                     limits=OA_ATTACHMENT_LIMITS,
                 )
                 ocr_text = "\n".join(self._run_image_ocr(normalized_image)).strip()
-                if not clean_string(ocr_text):
-                    continue
-                segments.append(AttachmentTextSegment(ocr_text, f"page:{page_index + 1}"))
-                if stop_after_first_invoice and self._first_invoice_evidence(ocr_text) is not None:
+                if clean_string(ocr_text):
+                    segments.append(AttachmentTextSegment(ocr_text, f"page:{page_index + 1}"))
+                if stop_after_first_invoice and (text_invoice is not None or self._first_invoice_evidence(ocr_text) is not None):
                     return segments
         finally:
             pdf.close()
@@ -612,7 +627,7 @@ class OAAttachmentInvoiceService:
             "invoice_kind": self._extract_invoice_kind(extracted_text),
         }
         if not net_amount or not tax_amount:
-            parsed["financial_review_reason"] = "票面只提供价税合计，未税金额和税额须以税务数据核对。"
+            parsed["financial_review_reason"] = "已识别价税合计，未税金额和税额尚未确认，须以正式发票数据核对。"
         return parsed
 
     def _parse_machine_printed_invoice_texts(
@@ -890,7 +905,13 @@ class OAAttachmentInvoiceService:
 
     def _extract_amount_summary(self, compact_text: str, *, tax_rates: set[str] | None = None) -> tuple[str, str, str] | None:
         totals_match = TOTALS_RE.search(compact_text)
-        total_with_tax = self._normalize_amount_text(self._match_text(TOTAL_WITH_TAX_RE, compact_text))
+        labelled_totals = {self._normalize_amount_text(value) for value in TOTAL_WITH_TAX_RE.findall(compact_text)}
+        if len(labelled_totals) > 1:
+            return None
+        total_with_tax = next(iter(labelled_totals), "")
+        small_total = self._normalize_amount_text(self._match_text(SMALL_TOTAL_RE, compact_text))
+        if total_with_tax and small_total and Decimal(total_with_tax) != Decimal(small_total):
+            return None
         if totals_match is not None and total_with_tax:
             return self._validated_amount_summary(
                 self._normalize_amount_text(totals_match.group(1)),
@@ -900,7 +921,6 @@ class OAAttachmentInvoiceService:
 
         net_match = re.search(r"(?<![税总])金额[:：]?[¥Y]?([0-9]+\.[0-9]{2}|[0-9]+(?![0-9.]))", compact_text)
         tax_match = re.search(r"税额[:：]?[¥Y]?([0-9]+\.[0-9]{2}|[0-9]+(?![0-9.]))", compact_text)
-        small_total = self._normalize_amount_text(self._match_text(SMALL_TOTAL_RE, compact_text))
         if net_match is not None and tax_match is not None and (total_with_tax or small_total):
             return self._validated_amount_summary(
                 self._normalize_amount_text(net_match.group(1)),
@@ -926,6 +946,10 @@ class OAAttachmentInvoiceService:
         if railway_ticket_amount:
             # A ticket price proves the total only, never a zero tax amount.
             return ("", "", railway_ticket_amount)
+        if total_with_tax:
+            # Preserve explicit evidence; unknown financial roles stay unknown.
+            # The recognition service can link a proven identity, never create it.
+            return ("", "", total_with_tax)
         return None
 
     @staticmethod

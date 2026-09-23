@@ -2756,7 +2756,7 @@ function importReviewRowsPayload(
     invoice_no: scenario === "invoice" ? "26990000000000000001" : null,
     invoice_date: "2026-05-20", seller_name: "浏览器销项客户", buyer_name: "云南溯源科技有限公司",
     tax_amount: "0.00", total_with_tax: row.amount,
-    category: row.decision === "error" ? "review" : row.decision === "duplicate_skipped" ? "existing" : "new", current_source: null, conflicts: [] }));
+    category: row.decision === "error" ? "review" : row.decision === "duplicate_skipped" ? "existing" : "new", current_source: null, conflicts: [], name_differences: [] }));
   const summary = { new: 0, existing: 0, review: 0, batch_duplicate: 0 };
   for (const row of rows) summary[row.category as keyof typeof summary]++;
   return { rows: rows.slice(offset, offset + limit), summary, total: rows.length, offset, limit, has_more: offset + limit < rows.length };

@@ -254,3 +254,7 @@ ConfirmedInvoiceImportUnitOfWork 在导入事务内继续提交 promotion 与同
 历史主体修复继续复用显式税务原件修复工具，不修改普通导入覆盖权、不确认其他新增发票。核对范围、证据缺口与验证记录见 [主体修复记录](implementation-notes.md#2026-09-23-主体识别与历史核对)。
 
 预览引用与正式来源审计边界：`pending/failed/reverted` batch 的查重引用不将已有 OA 发票纳入“本批已写入”的集合。只有 completed/completed_with_errors 的 terminal row 引用参与该集合；正式 source batch/manual source link 的独立约束仍然保留。修复未确认预览误报 canonical invoice orphan，不忽略真实孤立或缺失来源。
+
+## 2026-09-23 部分识别预填隔离
+
+人工识别继续消费共享 parser 和既有 DTO。票号/日期/总额明确但未税、税额未知时，空字段原样输出，不以总额充当未税或补零。前端成功识别新文件时覆盖原识别字段（含空值），保留方向/红蓝字等非识别选项；识别失败保留草稿，保存仍经既有必填/金额校验。删除仅非空覆盖造成的跨文件串值路径，无新增状态、接口、权限或页面。见[实施记录](../../dev/oa-attachment-partial-financial-evidence-plan.md)。

@@ -364,6 +364,28 @@ class ImportFileApiTests(unittest.TestCase):
             self.assertNotIn("source_region_key", values)
             self.assertEqual(len(app._import_service.list_invoices()), before)
 
+    def test_manual_recognition_preserves_unknown_financial_fields_without_writing_invoice(self):
+        from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
+
+        from tests.test_oa_attachment_invoice_service import PARTIAL_HOTEL_TEXT, VALID_PNG
+        app = build_application()
+        fixture = getattr(app, "_test_import_storage_tmp", None)
+        if fixture is not None:
+            self.addCleanup(fixture.cleanup)
+        parser = OAAttachmentInvoiceService()
+        app._manual_invoice_entry_service._document_recognizer = parser
+        before = len(app._import_service.list_invoices())
+        body, headers = build_multipart_payload(imported_by="finance-user", files=[MockImportFile("hotel.png", VALID_PNG)])
+        with patch.object(parser, "_run_image_ocr", return_value=PARTIAL_HOTEL_TEXT.splitlines()):
+            response = app.handle_request("POST", "/imports/invoices/manual/recognize", body=body, headers=headers)
+        self.assertEqual(response.status_code, 200)
+        values = json.loads(response.body)["values"]
+        self.assertEqual(values["invoice_number"], "26532000000000000300")
+        self.assertEqual(values["total_with_tax"], "300.00")
+        self.assertEqual((values["net_amount"], values["tax_amount"], values["tax_rate"]), ("", "", ""))
+        self.assertNotIn("financial_review_reason", values)
+        self.assertEqual(len(app._import_service.list_invoices()), before)
+
     def test_import_batch_error_csv_contains_review_rows_without_internal_ids(self) -> None:
         app = build_application()
         fixture = getattr(app, "_test_import_storage_tmp", None)

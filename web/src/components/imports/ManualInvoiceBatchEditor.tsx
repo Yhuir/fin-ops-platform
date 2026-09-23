@@ -109,7 +109,7 @@ export default function ManualInvoiceBatchEditor({
       updateCurrent({
         fileName: file.name, saved: false,
         values: Object.entries(recognized).reduce(
-          (next, [key, value]) => value && String(value).trim() ? { ...next, [key]: String(value) } : next,
+          (next, [key, value]) => ({ ...next, [key]: String(value ?? "") }),
           values,
         ),
       });

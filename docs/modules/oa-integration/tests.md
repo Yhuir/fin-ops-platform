@@ -196,3 +196,7 @@ Nightly CI 应至少覆盖：
 ## 2026-09-23 主体识别回归
 
 `test_oa_attachment_invoice_service` 覆盖车站干扰、只有购方、销方先出现、显式税号角色反序、无标签不猜测、完整分公司/个体工商户名称，以及解析后重复关联不覆盖已验证正式票。现有 `test_mongo_oa_adapter` 和 `test_oa_attachment_invoice_promotion_service` 保护缓存版本与来源/关系合同。名称缺失不替代财务准入条件。生产定向附件刷新验证按现有 durable worker 执行，不以本地模拟替代。
+
+## 2026-09-23 部分财务证据回归
+
+七类均适用：parser边界与去重、promotion财务保护/幂等、人工识别API空值、缓存/worker既有合同、人工预填串值/失败草稿、DOCX到PostgreSQL来源与matching入队、PDF/铁路/下游页面回归。新增用例位于 `test_oa_attachment_invoice_service.py`、`test_oa_attachment_invoice_promotion_service.py`、`test_import_file_api.py`、`ManualInvoiceEntryDrawer.test.tsx`。真实生产刷新和最终页面不由mock替代，测试与生产结果见[闭环记录](../../dev/oa-attachment-partial-financial-evidence-plan.md)。无已退役read model测试。

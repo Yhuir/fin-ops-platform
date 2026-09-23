@@ -156,4 +156,41 @@ describe("ManualInvoiceEntryDrawer", () => {
     await user.type(seller, "人工修正销方");
     expect(seller.value).toBe("人工修正销方");
   });
+
+  test("partial recognition clears the previous invoice amounts and cannot be saved as complete", async () => {
+    const user = userEvent.setup();
+    vi.mocked(recognizeManualInvoice).mockResolvedValue({
+      ...previewPayload.values[0],
+      invoiceNumber: "26532000000000000300", netAmount: "", taxAmount: "", taxRate: "", totalWithTax: "300.00",
+    });
+    render(<ManualInvoiceEntryDrawer onClose={vi.fn()} onImportAccepted={vi.fn()} open />);
+    fillRequiredFields();
+    await user.click(screen.getByText("上传识别"));
+    fireEvent.drop(screen.getByText("拖入或选择 JPG / PNG / PDF").closest("label")!, {
+      dataTransfer: { files: [new File(["png"], "new.png", { type: "image/png" })] },
+    });
+    await waitFor(() => expect(screen.getByLabelText("发票号码")).toHaveValue("26532000000000000300"));
+    expect(screen.getByLabelText("不含税价格")).toHaveValue("");
+    expect(screen.getByLabelText("税额")).toHaveValue("");
+    expect(screen.getByLabelText("税率")).toHaveValue("");
+    expect(screen.getByLabelText("价税合计")).toHaveValue("300.00");
+    await user.click(screen.getByRole("button", { name: "预览" }));
+    expect(previewManualInvoices).not.toHaveBeenCalled();
+    expect(confirmImportFiles).not.toHaveBeenCalled();
+  });
+
+  test("failed recognition preserves the current manual draft", async () => {
+    const user = userEvent.setup();
+    vi.mocked(recognizeManualInvoice).mockRejectedValue(new Error("识别服务不可用"));
+    render(<ManualInvoiceEntryDrawer onClose={vi.fn()} onImportAccepted={vi.fn()} open />);
+    fillRequiredFields();
+    await user.click(screen.getByText("上传识别"));
+    fireEvent.drop(screen.getByText("拖入或选择 JPG / PNG / PDF").closest("label")!, {
+      dataTransfer: { files: [new File(["png"], "new.png", { type: "image/png" })] },
+    });
+    await screen.findByText("识别服务不可用");
+    expect(screen.getByLabelText("发票号码")).toHaveValue("12345678901234567890");
+    expect(screen.getByLabelText("不含税价格")).toHaveValue("100");
+    expect(screen.getByLabelText("税额")).toHaveValue("13");
+  });
 });

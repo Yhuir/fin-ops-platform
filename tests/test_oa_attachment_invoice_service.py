@@ -313,13 +313,94 @@ def _build_docx_with_media(*media_contents: bytes) -> bytes:
     output = BytesIO()
     with ZipFile(output, "w") as document:
         document.writestr("[Content_Types].xml", "<Types xmlns=\"urn:test\"></Types>")
-        document.writestr("word/document.xml", "<w:document xmlns:w=\"urn:test\"><w:t></w:t></w:document>")
+        document.writestr("word/document.xml", "<w:document xmlns:w=\"urn:test\"></w:document>")
         for index, content in enumerate(media_contents, start=1):
             document.writestr(f"word/media/image{index}.png", content)
     return output.getvalue()
 
 
+PARTIAL_HOTEL_TEXT = """
+电子发票（普通发票） 发票号码：26532000000000000300
+开票日期：2026年08月31日
+购买方名称：测试采购有限公司
+销售方名称：测试住宿宾馆
+项目名称 规格型号 单位 数量 单价 金额 税率/征收率 税额
+*生产生活服务*住宿 间次 649.5049504950495 297. 03 2. 97
+¥297.03 ¥2.97
+价税合计（大写）叁佰圆整（小写）¥300.00
+"""
+
+
 class OAAttachmentInvoiceServiceTests(unittest.TestCase):
+    def test_docx_keeps_partial_financial_invoice_without_promoting_chat(self):
+        service = OAAttachmentInvoiceService()
+        content = _build_docx_with_media(VALID_PNG, VALID_PNG)
+        with (
+            patch.object(service, "_download_content", return_value=content),
+            patch.object(service, "_run_image_ocr", side_effect=[
+                PARTIAL_HOTEL_TEXT.splitlines(),
+                ["聊天记录", "dzfp 26532000000000000300.pdf", "微信转账 ￥300.00"],
+            ]) as ocr,
+        ):
+            result = service.parse_file_result({"fileName": "hotel.docx", "filePath": "/hotel.docx"})
+        self.assertEqual(result["parse_status"], "parsed")
+        self.assertEqual(ocr.call_count, 2)
+        self.assertEqual(len(result["evidences"]), 1)
+        invoice = result["evidences"][0]
+        self.assertEqual(invoice["invoice_no"], "26532000000000000300")
+        self.assertEqual(invoice["total_with_tax"], "300.00")
+        self.assertEqual((invoice["net_amount"], invoice["tax_amount"], invoice["tax_rate"]), ("", "", ""))
+        self.assertTrue(invoice["financial_review_reason"])
+        self.assertEqual(invoice["source_region_key"], "docx:1/document:1")
+
+    def test_partial_financial_evidence_does_not_accept_conflicts_or_invalid_identity(self):
+        service = OAAttachmentInvoiceService()
+        for text in (
+            PARTIAL_HOTEL_TEXT + "\n合计¥297.03¥3.97",
+            PARTIAL_HOTEL_TEXT + "\n金额:297.03\n税额:3.97",
+            PARTIAL_HOTEL_TEXT.replace("26532000000000000300", "265320000000000003001"),
+            PARTIAL_HOTEL_TEXT.replace("发票号码", "银行账号"),
+            PARTIAL_HOTEL_TEXT.replace("价税合计", "转账金额").replace("（小写）", ""),
+            PARTIAL_HOTEL_TEXT + "\n价税合计（小写）¥400.00",
+        ):
+            with self.subTest(text=text):
+                self.assertIsNone(service._parse_invoice_text(text))
+
+    def test_pdf_partial_text_is_enriched_by_same_page_ocr_for_both_entrypoints(self):
+        complete = PARTIAL_HOTEL_TEXT.replace("¥297.03 ¥2.97", "合计 ¥297.03 ¥2.97")
+        for manual in (False, True):
+            with self.subTest(manual=manual):
+                service = OAAttachmentInvoiceService()
+                content = _build_pdf_with_blank_pages(2)
+                with (
+                    patch.object(service, "_download_content", return_value=content),
+                    patch.object(service, "_extract_pdf_page_text", return_value=PARTIAL_HOTEL_TEXT),
+                    patch.object(service, "_run_image_ocr", return_value=complete.splitlines()) as ocr,
+                ):
+                    if manual:
+                        invoices = [service.recognize_uploaded_invoice(file_name="hotel.pdf", content=content)]
+                    else:
+                        invoices = service.parse_file_result({"fileName": "hotel.pdf", "filePath": "/hotel.pdf"})["evidences"]
+                self.assertEqual(ocr.call_count, 1 if manual else 2)
+                self.assertEqual(len(invoices), 1)
+                self.assertEqual((invoices[0]["net_amount"], invoices[0]["tax_amount"]), ("297.03", "2.97"))
+                self.assertNotIn("financial_review_reason", invoices[0])
+
+    def test_docx_later_complete_identity_replaces_partial_without_merging_other_invoice(self):
+        service = OAAttachmentInvoiceService()
+        complete = PARTIAL_HOTEL_TEXT.replace("¥297.03 ¥2.97", "合计 ¥297.03 ¥2.97")
+        other = complete.replace("26532000000000000300", "26532000000000000301")
+        with (
+            patch.object(service, "_download_content", return_value=_build_docx_with_media(VALID_PNG, VALID_PNG, VALID_PNG)),
+            patch.object(service, "_run_image_ocr", side_effect=[PARTIAL_HOTEL_TEXT.splitlines(), other.splitlines(), complete.splitlines()]),
+        ):
+            invoices = service.parse_file_result({"fileName": "hotel.docx", "filePath": "/hotel.docx"})["evidences"]
+        self.assertEqual(len(invoices), 2)
+        self.assertEqual(invoices[0]["invoice_no"], "26532000000000000300")
+        self.assertEqual(invoices[0]["source_region_key"], "docx:3/document:1")
+        self.assertEqual(invoices[0]["tax_amount"], "2.97")
+        self.assertEqual(invoices[1]["invoice_no"], "26532000000000000301")
+
     def test_build_download_url_percent_encodes_absolute_unicode_url(self) -> None:
         service = OAAttachmentInvoiceService()
 

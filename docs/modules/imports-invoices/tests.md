@@ -255,3 +255,9 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 - 回归：普通导入、分页/统计、未确认业务事实、OA 来源关联保持。七类测试均适用其受影响部分。
 
 `test_audit_invoice_import_page` 覆盖 pending/failed/reverted 预览引用已有 OA 票不冒充正式写入，并证明真正没有行证据的正式票仍报告 orphan。生产发布发现该误报，修复范围限定为审计集合口径，不改变发票或导入状态。
+
+## 2026-09-23 部分财务证据回归
+
+七类均适用：parser边界与去重、promotion财务保护/幂等、人工识别API空值、缓存/worker既有合同、人工预填串值/失败草稿、DOCX到PostgreSQL来源与matching入队、PDF/铁路/下游页面回归。新增用例位于 `test_oa_attachment_invoice_service.py`、`test_oa_attachment_invoice_promotion_service.py`、`test_import_file_api.py`、`ManualInvoiceEntryDrawer.test.tsx`。真实生产刷新和最终页面不由mock替代，测试与生产结果见[闭环记录](../../dev/oa-attachment-partial-financial-evidence-plan.md)。无已退役read model测试。
+
+- 2026-09-23 浏览器回归：`apiMocks.ts` 的 review-rows fixture 补齐既有必需 `name_differences: []`；不修改前端响应校验，相关导入/凭证/关系下游12项通过。

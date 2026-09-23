@@ -18,6 +18,7 @@ from fin_ops_platform.services.oa_attachment_invoice_promotion_service import (
     OAAttachmentInvoiceCandidate,
     OAAttachmentInvoicePromotionService,
 )
+from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 from fin_ops_platform.services.postgres_repositories.oa_attachment_identity_bridge import (
@@ -32,9 +33,34 @@ from tests.postgres_test_utils import (
     require_postgres_test_database_url,
     truncate_test_database,
 )
+from tests.test_oa_attachment_invoice_service import PARTIAL_HOTEL_TEXT, VALID_PNG, _build_docx_with_media
 
 
 class OAAttachmentInvoicePromotionServiceTests(unittest.TestCase):
+    def test_real_partial_parser_output_links_existing_only_without_financial_overwrite(self):
+        evidence = OAAttachmentInvoiceService()._parse_evidences_from_text(PARTIAL_HOTEL_TEXT)[0]
+        evidence.update(source_attachment_key="hotel", source_expense_item_id="oa-hotel:item:2")
+        record = SimpleNamespace(id="oa-hotel", month="2026-09", attachment_invoices=[evidence])
+        for mode in (OA_ATTACHMENT_INVOICE_PROMOTION_LINK_EXISTING_ONLY, OA_ATTACHMENT_INVOICE_PROMOTION_CREATE_MISSING):
+            with self.subTest(mode=mode):
+                repository = FakeAtomicInvoiceRepository([])
+                service = OAAttachmentInvoicePromotionService(invoice_repository=repository, promotion_mode_provider=lambda: mode)
+                report = service.promote_records([record])
+                self.assertEqual(report["reason_counts"], {"financial_requires_review": 1})
+                self.assertEqual(repository.save_calls, [])
+                invoice = _invoice({**evidence, "digital_invoice_no": evidence["invoice_no"], "amount": "297.03"})
+                invoice.tax_amount, invoice.total_with_tax = Decimal("2.97"), Decimal("300")
+                repository.invoices = [invoice]
+                report = service.promote_records([record])
+                self.assertEqual(report["summary"]["affected_invoice_count"], 1)
+                persisted = repository.invoices[0]
+                self.assertEqual((persisted.amount, persisted.tax_amount, persisted.total_with_tax),
+                                 (Decimal("297.03"), Decimal("2.97"), Decimal("300")))
+                self.assertEqual(persisted.source_links[0]["source_expense_item_id"], "oa-hotel:item:2")
+                repeat = service.promote_records([record])
+                self.assertEqual(repeat["summary"]["affected_invoice_count"], 0)
+                self.assertEqual(len(repository.invoices), 1)
+
     def test_reverse_promotion_fails_closed_for_numberless_tax_composite_identity(self) -> None:
         self.assertIsNone(OAAttachmentInvoicePromotionService.strong_identity_key({
             "seller_tax_no": "SELLER",
@@ -728,6 +754,34 @@ class PostgresOAAttachmentInvoiceRepositoryIntegrationTests(unittest.TestCase):
         connection = getattr(self, "connection", None)
         if connection is not None:
             connection.close()
+
+    def test_docx_partial_evidence_persists_existing_invoice_source_and_matching_idempotently(self):
+        parser = OAAttachmentInvoiceService()
+        with (
+            patch.object(parser, "_download_content", return_value=_build_docx_with_media(VALID_PNG)),
+            patch.object(parser, "_run_image_ocr", return_value=PARTIAL_HOTEL_TEXT.splitlines()),
+        ):
+            evidence = parser.parse_file_result({"fileName": "hotel.docx", "filePath": "/hotel.docx"})["evidences"][0]
+        evidence.update(source_attachment_key="hotel", source_expense_item_id="oa-hotel:item:2", source_expense_row_index="2")
+        invoice = _invoice({**evidence, "digital_invoice_no": evidence["invoice_no"], "amount": "297.03"})
+        invoice.tax_amount, invoice.total_with_tax = Decimal("2.97"), Decimal("300")
+        repository = PostgresOAAttachmentInvoiceRepository(self.connection)
+        repository.save_invoices([invoice])
+        service = OAAttachmentInvoicePromotionService(invoice_repository=repository)
+        record = SimpleNamespace(id="oa-hotel", month="2026-09", attachment_invoices=[evidence])
+        first = service.promote_records([record], ensure_matching=True)
+        second = service.promote_records([record], ensure_matching=True)
+        self.assertEqual(first["summary"]["affected_invoice_count"], 1)
+        self.assertEqual(second["summary"]["affected_invoice_count"], 0)
+        rows = self.connection.fetch_all("select invoice_no, amount, tax_amount, total_with_tax, source_links from app.invoices")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["amount"], rows[0]["tax_amount"], rows[0]["total_with_tax"]),
+                         (Decimal("297.03"), Decimal("2.97"), Decimal("300")))
+        links = rows[0]["source_links"]
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0]["derived_from_oa_id"], "oa-hotel")
+        self.assertEqual(links[0]["source_expense_item_id"], "oa-hotel:item:2")
+        self.assertEqual(self.connection.fetch_one("select count(*) n from job.workbench_matching_dirty_scopes")["n"], 5)
 
     def test_region_identity_conflict_is_atomic_and_other_pages_remain_valid(self) -> None:
         def row(invoice_id, number, region):
