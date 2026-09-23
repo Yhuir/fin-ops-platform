@@ -23,6 +23,7 @@ import {
   type WorkbenchRelationGroup,
 } from "../../features/workbench/types";
 import RelationGroupGrid from "./RelationGroupGrid";
+import { formatDateTimeText } from "../../features/dateTime";
 import WorkbenchAnomalyIndicator from "./WorkbenchAnomalyIndicator";
 
 type WorkbenchExceptionDrawerProps = {
@@ -367,8 +368,7 @@ export default function WorkbenchExceptionDrawer({
                       <WorkbenchAnomalyIndicator
                         anomalies={group.workbenchAnomaly.items}
                         className="workbench-anomaly-indicator--drawer-summary"
-                        confirmation={group.workbenchAnomaly.confirmation}
-                        group={group}
+                        amountScope="group"
                         levelLabel="该关联组"
                       />
                     ) : null}
@@ -467,13 +467,34 @@ function ExceptionReviewPanel({
     onReviewAnomaly(group, decision)
   );
 
-  if (!canOperateData || !group.workbenchAnomaly) {
+  if (!group.workbenchAnomaly) {
+    return null;
+  }
+
+  const review = group.workbenchAnomaly;
+  if (!canOperateData && !review.confirmation && review.reviewDecision === "pending") {
     return null;
   }
 
   return (
     <section aria-label="异常审阅" className="workbench-anomaly-drawer__review">
-      <div className="workbench-anomaly-drawer__decision-buttons">
+      {review.confirmation ? (
+        <div className="workbench-anomaly-drawer__confirmation">
+          <strong>确认关联备注</strong>
+          <p>{review.confirmation.note}</p>
+        </div>
+      ) : null}
+      {review.reviewDecision !== "pending" ? (
+        <div className="workbench-anomaly-drawer__review-record">
+          <strong>{review.reviewDecision === "accept_paired" ? "已接受该异常风险" : "留在未配对"}</strong>
+          <dl>
+            <div><dt>操作账户</dt><dd>{review.reviewedByAccount}{review.reviewedByName ? `（${review.reviewedByName}）` : ""}</dd></div>
+            <div><dt>操作时间</dt><dd>{formatDateTimeText(review.reviewedAt)}</dd></div>
+            {review.reviewNote ? <div><dt>备注</dt><dd>{review.reviewNote}</dd></div> : null}
+          </dl>
+        </div>
+      ) : null}
+      {canOperateData ? <div className="workbench-anomaly-drawer__decision-buttons">
         {bucket === "paired" ? (
           <Button isDisabled={pending} isPending={pending} size="sm" variant="secondary"
             onPress={() => onAction(submit("keep_unpaired"))}>
@@ -491,7 +512,7 @@ function ExceptionReviewPanel({
             </Button>
           </>
         )}
-      </div>
+      </div> : null}
     </section>
   );
 }

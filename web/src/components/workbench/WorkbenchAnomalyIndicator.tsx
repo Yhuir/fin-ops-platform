@@ -6,20 +6,16 @@ import {
   PopoverDialog,
 } from "@heroui/react";
 import { CircleAlert, ExternalLink } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import {
   isWorkbenchAmountAnomalyCode,
-  type WorkbenchAnomaly,
   type WorkbenchAnomalyItem,
-  type WorkbenchRelationGroup,
 } from "../../features/workbench/types";
-import { formatDateTimeText } from "../../features/dateTime";
 
 type WorkbenchAnomalyIndicatorProps = {
   anomalies: WorkbenchAnomalyItem[];
-  confirmation?: WorkbenchAnomaly["confirmation"];
-  group?: WorkbenchRelationGroup;
+  amountScope?: "group" | "placement";
   levelLabel: string;
   externalUrl?: string;
   className?: string;
@@ -37,8 +33,7 @@ type InteractionMode = "idle" | "hover-open" | "hover-dismissed" | "click-open";
 
 export default function WorkbenchAnomalyIndicator({
   anomalies,
-  confirmation,
-  group,
+  amountScope = "placement",
   levelLabel,
   externalUrl,
   className = "",
@@ -50,13 +45,6 @@ export default function WorkbenchAnomalyIndicator({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverId = useId();
   const open = interactionMode === "hover-open" || interactionMode === "click-open";
-
-  const itemLabels = useMemo(() => new Map(open && group ? [
-    ...group.rows.oa, ...(group.collapsedRows?.oa ?? []),
-  ].flatMap((row) => (row.expenseItems ?? []).map((item) => [
-    item.id,
-    [row.tableValues.applicant, item.expenseType, item.expenseContent, item.projectName].filter(Boolean).join(" · "),
-  ])) : []), [open, group]);
 
   const cancelClose = () => {
     if (closeTimerRef.current !== null) {
@@ -97,13 +85,6 @@ export default function WorkbenchAnomalyIndicator({
     return null;
   }
 
-  const review = anomalies.find((anomaly) => anomaly.reviewDecision === "accept_paired");
-  const reviewerLabel = review
-    ? `${review.reviewedByAccount}${review.reviewedByName ? `（${review.reviewedByName}）` : ""}`
-    : "";
-  const groupSummary = group ? `${group.workbenchAnomaly?.reviewDecision === "accept_paired" ? "本组异常已接受" : "本组待处理"} · ${anomalies.length === 1
-    ? `${anomalies[0].displayLabel}${anomalies[0].amountDelta !== undefined ? ` · 差额 ${anomalies[0].amountDelta} 元` : ""}`
-    : `${anomalies.length} 项异常`}` : undefined;
   const ariaLabel = `${levelLabel}有 ${anomalies.length} 项异常，查看详情`;
 
   return (
@@ -116,7 +97,7 @@ export default function WorkbenchAnomalyIndicator({
         aria-haspopup="dialog"
         className={`workbench-anomaly-indicator__trigger${className ? ` ${className}` : ""}`}
         data-open={open ? "true" : "false"}
-        isIconOnly={!group}
+        isIconOnly
         size="sm"
         variant="ghost"
         onBlur={() => {
@@ -152,7 +133,6 @@ export default function WorkbenchAnomalyIndicator({
         }}
       >
         <CircleAlert aria-hidden="true" size={16} strokeWidth={2.1} />
-        {groupSummary ? <span>{groupSummary}</span> : null}
       </Button>
       {open ? (
         <PopoverContent
@@ -174,68 +154,39 @@ export default function WorkbenchAnomalyIndicator({
             aria-label={`${levelLabel}异常详情`}
             className="workbench-anomaly-popover__dialog"
           >
-            <div className="workbench-anomaly-popover__heading">
-              <span>{levelLabel}异常</span>
-              <span>{anomalies.length} 项</span>
-            </div>
-            {group ? (
-              <div className="workbench-anomaly-popover__totals">
-                <span>OA {group.amountCheck?.oaTotal ?? "未提供"} · 流水 {group.amountCheck?.bankTotal ?? "未提供"}</span>
-                <span>正式发票 {group.amountCheck?.invoiceTotal ?? "未提供"} · 补充凭证 {group.amountCheck?.supportingDocumentTotal ?? "未提供"}</span>
-                <strong>票据凭证合计 {group.amountCheck?.evidenceTotal ?? "待核对"}</strong>
-                <span>本项差额为零只说明该付款项一致；配对状态按整组判断。</span>
-              </div>
-            ) : null}
             <ul className="workbench-anomaly-popover__list">
               {anomalies.map((anomaly) => {
-                const detail = group && isWorkbenchAmountAnomalyCode(anomaly.code) ? "" : anomalyDetail(anomaly);
+                if (isWorkbenchAmountAnomalyCode(anomaly.code)) {
+                  const differences = anomaly.code === "expense_item_amount_mismatch"
+                    || (amountScope === "placement" && anomaly.displayScope !== "group")
+                    ? anomaly.expenseItemDifferences : undefined;
+                  const comparisons = differences?.length
+                    ? differences.map((difference) => [
+                      ["OA", difference.oaTotal], ["票据凭证", difference.evidenceTotal],
+                    ])
+                    : [[["OA", anomaly.oaTotal], ["银行流水", anomaly.bankTotal], ["票据凭证", anomaly.evidenceTotal]]];
+                  return (
+                    <li key={anomaly.fingerprint}>
+                      {comparisons.map((amounts, index) => (
+                        <dl className="workbench-anomaly-popover__amounts" key={index}>
+                          {amounts.map(([label, amount]) => (
+                            <div key={label}><dt>{label}</dt><dd>{amount ?? "—"}</dd></div>
+                          ))}
+                        </dl>
+                      ))}
+                    </li>
+                  );
+                }
                 return (
                   <li key={anomaly.fingerprint}>
-                    <Chip
-                      color={isWorkbenchAmountAnomalyCode(anomaly.code) ? "danger" : "warning"}
-                      size="sm"
-                      variant="soft"
-                    >
+                    <Chip color="warning" size="sm" variant="soft">
                       <Chip.Label>{anomaly.displayLabel}</Chip.Label>
                     </Chip>
-                    {detail ? <span>{detail}</span> : null}
-                    {anomaly.expenseItemDifferences?.map((difference) => (
-                      <span key={difference.expenseItemIds.join(":")}>
-                        <strong>{difference.expenseItemIds.length === 0 ? "未提供子项归属" : difference.expenseItemIds.map((id) => itemLabels.get(id) || `子项 ${id}（明细未加载或无法定位）`).join("；")}</strong>
-                        <span>OA {difference.oaTotal} · 票据凭证 {difference.evidenceTotal} · 差额 {difference.amountDelta}</span>
-                      </span>
-                    ))}
+                    <span>{anomalyDetail(anomaly)}</span>
                   </li>
                 );
               })}
             </ul>
-            {confirmation ? (
-              <div className="workbench-anomaly-popover__confirmation">
-                <strong>确认关联备注</strong>
-                <p>{confirmation.note}</p>
-              </div>
-            ) : null}
-            {review ? (
-              <div className="workbench-anomaly-popover__review">
-                <strong>已接受该异常风险</strong>
-                <dl>
-                  <div>
-                    <dt>操作账户</dt>
-                    <dd>{reviewerLabel}</dd>
-                  </div>
-                  <div>
-                    <dt>操作时间</dt>
-                    <dd>{formatDateTimeText(review.reviewedAt)}</dd>
-                  </div>
-                  {review.reviewNote ? (
-                    <div>
-                      <dt>备注</dt>
-                      <dd>{review.reviewNote}</dd>
-                    </div>
-                  ) : null}
-                </dl>
-              </div>
-            ) : null}
             {action ? (
               <div className="workbench-anomaly-popover__action">
                 <Button
@@ -284,11 +235,5 @@ function anomalyDetail(anomaly: WorkbenchAnomalyItem) {
   if (anomaly.code === "oa_invoice_attachment_unassigned") {
     return "已解析发票尚未明确归属到付款项";
   }
-  const totals = [
-    anomaly.oaTotal ? `OA ${anomaly.oaTotal}` : "",
-    anomaly.bankTotal ? `流水 ${anomaly.bankTotal}` : "",
-    anomaly.invoiceTotal ? `发票 ${anomaly.invoiceTotal}` : "",
-    anomaly.evidenceTotal !== undefined ? `票据凭证 ${anomaly.evidenceTotal}` : "",
-  ].filter(Boolean);
-  return totals.join(" · ");
+  return "";
 }

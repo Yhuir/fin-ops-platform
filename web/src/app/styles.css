@@ -15049,58 +15049,18 @@ body.column-layout-dragging {
   outline-offset: 2px;
 }
 
-.candidate-group-frame {
-  position: relative;
-  flex: 0 0 auto;
-  min-width: 0;
-}
-
-.workbench-group-anomaly-heading {
-  position: sticky;
-  top: 0;
+.workbench-anomaly-indicator--group {
+  position: absolute;
   z-index: 4;
-  padding: 4px 6px;
-  background: #fff8eb;
-  border: 1px solid #e4b266;
-  border-radius: 8px;
+  top: 6px;
+  right: 6px;
 }
 
-.workbench-anomaly-indicator--group,
-.workbench-anomaly-indicator--drawer-summary {
-  width: auto;
-  max-width: 100%;
-  height: auto;
-  min-height: 28px;
-  flex-basis: auto;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: 6px;
-  white-space: normal;
-  text-align: left;
-}
-
-.workbench-anomaly-indicator--group svg,
-.workbench-anomaly-indicator--drawer-summary svg {
-  flex-shrink: 0;
-}
-
-.candidate-group-frame:has(.workbench-anomaly-indicator--group:hover) > .candidate-group-row,
-.candidate-group-frame:has(.workbench-anomaly-indicator--group[data-open="true"]) > .candidate-group-row,
-.candidate-group-frame:has(.workbench-anomaly-indicator--group:focus-visible) > .candidate-group-row {
+.candidate-group-row:has(.workbench-anomaly-indicator--group:hover),
+.candidate-group-row:has(.workbench-anomaly-indicator--group[data-open="true"]),
+.candidate-group-row:has(.workbench-anomaly-indicator--group:focus-visible) {
   outline: 2px solid rgba(201, 130, 18, 0.45);
   outline-offset: -2px;
-}
-
-.workbench-anomaly-popover__totals {
-  display: grid;
-  gap: 4px;
-  font-size: var(--fp-text-caption);
-  color: #43556a;
-}
-
-.workbench-anomaly-popover__list li > span > strong,
-.workbench-anomaly-popover__list li > span > span {
-  display: block;
 }
 
 .workbench-anomaly-popover {
@@ -15118,18 +15078,31 @@ body.column-layout-dragging {
   padding: 10px;
 }
 
-.workbench-anomaly-popover__heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: #253548;
-  font-size: 12px;
-  font-weight: var(--fp-weight-bold);
+.workbench-anomaly-popover__amounts {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  margin: 0;
+  color: #43556a;
+  font-size: var(--fp-text-caption);
+  font-variant-numeric: tabular-nums;
 }
 
-.workbench-anomaly-popover__heading span:last-child {
-  color: #748295;
-  font-weight: var(--fp-weight-semibold);
+.workbench-anomaly-popover__amounts + .workbench-anomaly-popover__amounts {
+  border-top: 1px solid #e5eaf0;
+  padding-top: 8px;
+  margin-top: 4px;
+}
+
+.workbench-anomaly-popover__amounts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workbench-anomaly-popover__amounts dt,
+.workbench-anomaly-popover__amounts dd {
+  margin: 0;
 }
 
 .workbench-anomaly-popover__list {
@@ -15158,8 +15131,8 @@ body.column-layout-dragging {
   overflow-wrap: anywhere;
 }
 
-.workbench-anomaly-popover__confirmation,
-.workbench-anomaly-popover__review {
+.workbench-anomaly-drawer__confirmation,
+.workbench-anomaly-drawer__review-record {
   display: grid;
   gap: 5px;
   padding-top: 7px;
@@ -15170,35 +15143,35 @@ body.column-layout-dragging {
   overflow-wrap: anywhere;
 }
 
-.workbench-anomaly-popover__confirmation strong,
-.workbench-anomaly-popover__review strong {
+.workbench-anomaly-drawer__confirmation strong,
+.workbench-anomaly-drawer__review-record strong {
   color: #526277;
 }
 
-.workbench-anomaly-popover__confirmation p {
+.workbench-anomaly-drawer__confirmation p {
   margin: 0;
   color: #43556a;
   white-space: pre-wrap;
 }
 
-.workbench-anomaly-popover__review dl {
+.workbench-anomaly-drawer__review-record dl {
   display: grid;
   gap: 3px;
   margin: 0;
 }
 
-.workbench-anomaly-popover__review dl > div {
+.workbench-anomaly-drawer__review-record dl > div {
   display: grid;
   grid-template-columns: 58px minmax(0, 1fr);
   gap: 6px;
 }
 
-.workbench-anomaly-popover__review dt,
-.workbench-anomaly-popover__review dd {
+.workbench-anomaly-drawer__review-record dt,
+.workbench-anomaly-drawer__review-record dd {
   margin: 0;
 }
 
-.workbench-anomaly-popover__review dt {
+.workbench-anomaly-drawer__review-record dt {
   color: #7a8899;
 }
 
@@ -15396,9 +15369,7 @@ body.column-layout-dragging {
 }
 
 .workbench-anomaly-drawer__heading {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  position: relative;
 }
 
 .workbench-anomaly-drawer__trigger {
@@ -15449,8 +15420,11 @@ body.column-layout-dragging {
 }
 
 .workbench-anomaly-indicator--drawer-summary {
-  align-self: flex-start;
-  margin: 0 6px 6px;
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  right: 34px;
+  transform: translateY(-50%);
 }
 
 .workbench-anomaly-drawer__details {

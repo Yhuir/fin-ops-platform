@@ -143,7 +143,7 @@ test("exception details keep voucher files and amount management for the exact O
   await expect(page.getByRole("dialog")).toHaveCount(1);
 });
 
-test("a long multi-OA group explains the other item's excess while vouchers remain balanced", async ({ page }) => {
+test("a long multi-OA group uses a compact icon and amount-only popover without additional I/O", async ({ page }) => {
   await installDeterministicApiMocks(page, { sessionMode: "user", workbenchAmountMismatchScenario: true, workbenchInitialRelationConfirmed: true });
   const firstResponse = page.waitForResponse(r => new URL(r.url()).pathname === "/api/workbench");
   await page.goto("/");
@@ -191,7 +191,8 @@ test("a long multi-OA group explains the other item's excess while vouchers rema
   await page.reload();
   const zone = page.getByTestId("zone-unpaired");
   const indicator = zone.getByRole("button", { name: "该关联组有 1 项异常，查看详情" });
-  await expect(indicator).toHaveText("本组待处理 · OA 流水一致，票多 · 差额 6.57 元");
+  await expect(indicator).toHaveText("");
+  await expect(zone.locator(".workbench-group-anomaly-heading, .candidate-group-frame")).toHaveCount(0);
   let requests = 0;
   page.on("request", request => { if (new URL(request.url()).pathname.startsWith("/api/workbench")) requests++; });
   const files = zone.locator(".workbench-supporting-files");
@@ -199,20 +200,30 @@ test("a long multi-OA group explains the other item's excess while vouchers rema
   await expect(files.getByText("本项差额（OA − 凭证）0.00")).toHaveCount(5);
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
-    await files.last().scrollIntoViewIfNeeded();
+    await indicator.scrollIntoViewIfNeeded();
     await expect(indicator).toBeInViewport();
-    const headingBox = await indicator.boundingBox();
-    const fileBox = await files.last().boundingBox();
-    expect(headingBox!.y + headingBox!.height).toBeLessThanOrEqual(fileBox!.y);
-    expect(headingBox!.x + headingBox!.width).toBeLessThanOrEqual(width);
+    const iconBox = await indicator.boundingBox();
+    expect(iconBox!.height).toBe(28);
+    expect(iconBox!.width).toBe(28);
+    const grid = indicator.locator("..");
+    expect(await grid.evaluate(element => getComputedStyle(element).position)).toBe("relative");
+    expect(await indicator.evaluate(element => getComputedStyle(element).position)).toBe("absolute");
+    await page.mouse.move(0, 0);
+    await indicator.blur();
+    await indicator.focus();
+    const popover = page.getByRole("dialog", { name: "该关联组异常详情" });
+    await expect(popover).toHaveText("OA1273.06银行流水1273.06票据凭证1279.63");
+    const box = await popover.boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+    await page.keyboard.press("Escape");
+    await expect(popover).toHaveCount(0);
   }
   await page.mouse.move(0, 0);
+  await indicator.blur();
   await indicator.focus();
   const explanation = page.getByRole("dialog", { name: "该关联组异常详情" });
-  await expect(explanation.getByText("正式发票 1139.63 · 补充凭证 140.00")).toBeVisible();
-  await expect(explanation.getByText("票据凭证合计 1279.63")).toBeVisible();
-  await expect(explanation.getByText("测试申请人1 · 交通费 · 顺风车费用 · 测试项目")).toBeVisible();
-  await expect(explanation.getByText("OA 182.44 · 票据凭证 189.01 · 差额 6.57")).toBeVisible();
+  await expect(explanation).toHaveText("OA1273.06银行流水1273.06票据凭证1279.63");
   await page.keyboard.press("Escape");
   await expect(explanation).toHaveCount(0);
   expect(requests).toBe(0);

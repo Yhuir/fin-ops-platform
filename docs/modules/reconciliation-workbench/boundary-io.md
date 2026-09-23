@@ -145,7 +145,7 @@ requested tenant/scope
 | zone page | 前端 | `groups,total,row_counts,page_size,has_more,next_cursor`；`row_counts.invoice` 是展示对象数，`row_counts.canonical_invoice` 是按 canonical ID 去重的业务统计数，`row_counts.rows` 继续只服务展示分页。列表只含 compact summary DTO。异常 bucket 请求 additive 返回服务端选中 code 和按唯一关系计算的双视图/金额分类 counts。 |
 | selection summary | 前端工具栏 | 数量按去重后的 canonical typed members；先由 OA/发票确定付款或收款主方向，银行金额按同向金额减反向金额计算。正式关系通常读取组级 `amount_check.oa_total/bank_total/invoice_total`，包括 `turnover_manual_closure` 的本金侧口径；`amount_check.direction=unknown` 的纯银行正式关系只有在组合主方向明确且全部正式银行成员已加载时按该方向计算净额，否则显示 `--`。禁止退回绝对值合计。 |
 | filter options | 表头菜单 | `options[{value,label,missing,group?}],page_size,has_more,next_cursor`；菜单惰性读取并支持 abort/latest-wins，`group` 只控制分组标题。 |
-| paired groups | 前端 | 冻结要求满足、OA workflow 已完成且无异常，或当前服务端异常 bundle 已明确 `accept_paired` 的 active formal relation；行级异常保留圆形感叹号；组级异常使用组内 sticky 标题行显示待处理/已接受、分类及差额，详情仍复用原 Popover。原始系统分类 Chip、审阅审计及 `manual_confirmed` 的非空确认备注都只在该 Popover 展示。审阅人格式为 `操作账户（姓名）`，时间格式为 Asia/Shanghai `YYYY-MM-DD HH:mm:ss`，不得显示内部 actor id 或原始 ISO offset。精确归属于组内 OA、但不是正式 relation member 的发票可作为 `source_owned_display` 展示；它不改变正式成员、状态或动作。 |
+| paired groups | 前端 | 冻结要求满足、OA workflow 已完成且无异常，或当前服务端异常 bundle 已明确 `accept_paired` 的 active formal relation；行级、组级异常均保留原圆形感叹号，不增加提示行；金额 Popover 仅展示两方或三方金额，资料异常保留原状态与处理入口。审阅审计及 `manual_confirmed` 的非空确认备注在已有异常抽屉审阅区展示，记录可见性不依赖写权限。审阅人格式为 `操作账户（姓名）`，时间格式为 Asia/Shanghai `YYYY-MM-DD HH:mm:ss`，不得显示内部 actor id 或原始 ISO offset。精确归属于组内 OA、但不是正式 relation member 的发票可作为 `source_owned_display` 展示；它不改变正式成员、状态或动作。 |
 | unpaired groups | 前端 | 无 active owner 的 singleton、由精确当前 item owner 证明的 OA+发票 source-owned 展示组，以及要求未满足、含 in-progress OA、存在 pending/`keep_unpaired` 异常的完整 active relation；正式关系本身不被删除或拆散，展示组也不伪装为正式配对。 |
 | OA expense/invoice display | 前端 | OA direct page DTO 输出 `expense_items[]` 及每项 `supporting_documents[]`；summary/detail/selection 通过一次有界批量查询附加 active 且文件未 tombstone 的凭证元数据；录入抽屉仍通过专用列表 API 管理凭证。OA attachment/manual supplement invoice 输出复数 canonical `source_expense_item_ids[]`；一张发票只出现一次。附件数为零且无精确正式发票来源时为“发票附件缺失”；附件存在但未产生正式发票为“发票附件未解析”并保留“录入发票”；同 relation 存在 OA expense items、但发票没有有效 item edge 时为 row-scoped“发票待归属”并只保留“选择 OA 明细”。唯一例外是 `batch_accounting + canonical etc_invoice_summary`：其发票归属事实源是 ETC 批次，不进入 OA 附件资料异常规则，金额仍按三栏 canonical totals 校验。这些分类不直接平铺，只通过对应明细的感叹号 Popover 展示。APP 内正式发票来源边只补足归属证明，不改写 OA 原始附件数。显式归属后的同行由下一次 canonical DTO 的 `source_expense_item_ids[]` 决定，前端不得本地挪行。 |
 | relation receipt action / draft / PDF | 前端、浏览器打印 | paired/unpaired 的合格 active relation 都在 OA 栏显示唯一“编辑并打印收据”，singleton 不显示；动作遵循 Workbench 写权限。点击先读取 draft 并打开单一右侧抽屉，按 `银行收据!A1:J12` 一联版式编辑付款单位、日期、摘要、金额、备注、主管和经手人，实时显示与收入固定金额的差额；不平衡、字段无效或冲销异常未确认时禁止打印。最终点击必须同步打开打印窗口，再提交编辑内容；成功后加载 A5 横向 PDF blob 并触发浏览器原生打印，失败关闭空窗口并显示明确错误。动作不改变 relation、canonical invoice、统计或分区。 |
@@ -367,9 +367,11 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 仅允许修复同时包含错误票与正确替代票的 active system_deterministic 关系。保留 case ID、OA、银行、正确发票、模式和其余业务元数据；移除错误 invoice 成员和附件绑定中的同一 ID，递增版本并追加 `repair_false_invoice_member` 历史。普通人工撤销及 OA 附件不可变规则不变，不给页面增加绕过入口。关联修复、错误发票删除、旧附件缓存失效和审计在同一数据库事务内完成，任一步失败整体回滚。
 
 
-## 2026-09-23 组级异常解释
+## 2026-09-23 异常 icon 与金额展示收口
 
-- `RelationGroupGrid` 在分段/普通布局共用同一组级提示；CSS sticky 受当前组边界限制，单独占一行，不在凭证文件/金额单元格中叠加绝对定位图标。异常抽屉折叠摘要共用同一提示及详情组件。
-- `WorkbenchAnomalyIndicator` 额外接收当前组展示 DTO：只读 `amountCheck` 的 OA、流水、正式发票、补充凭证和票据凭证合计，按 `expenseItemDifferences.expenseItemIds` 在本组 OA 中定位申请人/费用内容/项目。打开详情才建立本组索引；不新增 HTTP、SQL、缓存或后台任务，不从显示行重算金额/分区。缺字段显示未提供/待核对，缺精确归属显示未加载或无法定位；不按金额猜测。
-- 凭证零差额文案明确为“本项差额（OA − 凭证）”，混合发票+凭证继续显示“与同项发票合并核对”。凭证参与证据合计，不能自动创建正式发票或豁免其他子项差额。
-- 原统一异常审阅写接口、权限、CAS、审计和成功后回读保持；主表不新增接受异常入口。Escape 关闭抑制本次焦点恢复引发的自动重开，离开 trigger 后恢复后续正常交互。
+- 主表分段/普通布局及异常抽屉折叠摘要恢复原 28px 圆形异常 icon 和定位；删除独立 sticky 提示行、专用包裹层和文字触发器。
+- `WorkbenchAnomalyIndicator` 只接收既有异常项及展示范围 `amountScope`，不再接收整组 DTO。整组金额读取 anomaly 的 `oaTotal / bankTotal / evidenceTotal`；精确定位到行/付款项的明细及 `expense_item_amount_mismatch` 读取每个 `expenseItemDifferences` 的 OA/票据凭证金额。多个独立核对单元分别展示，不能合并抵消、截断或按金额猜归属。
+- 金额 Popover 只有金额标签和值，无标题/分类 Chip、差额、拆分合计、项目/人员描述或解释句。`evidenceTotal` 包括正式发票和已确认补充凭证；缺失金额显示 `—`，不能补零或使用正式发票金额替代。资料异常继续使用原状态、处理按钮与权限。
+- 原审阅账户、时间、备注和确认关联备注移到已有异常抽屉审阅区。只读用户保留记录查看能力；接受/撤回仅由原权限允许，原接口、CAS、审计及成功后回读不变。
+- 删除整组文本摘要、明细描述索引及相关 props/import/CSS；不新增 HTTP、SQL、缓存、worker 或金额计算。凭证文件区既有本项差额和管理入口保持。
+- 保留 hover/focus/click/Escape 与焦点恢复修复，不增加全局事件。实施及生产验证见 [修复记录](../../dev/workbench-anomaly-icon-restoration.md)。

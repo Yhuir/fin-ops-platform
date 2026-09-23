@@ -27,6 +27,7 @@ const anomalyItems: WorkbenchAnomalyItem[] = [
     oaTotal: "100.00",
     bankTotal: "90.00",
     invoiceTotal: "80.00",
+    evidenceTotal: "80.00",
     amountDelta: "20.00",
     invoiceRowIds: ["invoice-1"],
     attachmentFileCount: 0,
@@ -185,7 +186,7 @@ describe("WorkbenchExceptionDrawer", () => {
     expect(onExceptionCodeChange).toHaveBeenCalledWith("oa_bank_equal_invoice_more");
   });
 
-  it("shows the group reason alongside collapsed totals and opens the shared explanation", async () => {
+  it("keeps the collapsed icon compact and moves confirmation into the existing review panel", async () => {
     const user = userEvent.setup();
     const anomalyGroup = group("unpaired");
     anomalyGroup.amountCheck = { status: "mismatch", direction: "expense", bankAmount: "90.00", oaAmount: "100.00", oaTotal: "100.00", bankTotal: "90.00", invoiceTotal: "80.00", amountDelta: "20.00", requiresNote: true };
@@ -199,21 +200,22 @@ describe("WorkbenchExceptionDrawer", () => {
     expect(screen.getByText("发票 · 0项")).toBeInTheDocument();
     const heading = screen.getByRole("button", { name: "展开异常明细" }).closest(".workbench-anomaly-drawer__heading");
     expect(heading).not.toBeNull();
-    expect(heading).toHaveTextContent("本组待处理 · 三项不一致");
+    expect(heading).not.toHaveTextContent("本组待处理");
     expect(screen.queryByRole("button", { name: /人工金额判断/ })).not.toBeInTheDocument();
 
     const indicator = screen.getByRole("button", { name: "该关联组有 1 项异常，查看详情" });
     await user.hover(indicator);
     const popover = await screen.findByRole("dialog", { name: "该关联组异常详情" });
-    expect(within(popover).getByText("三项不一致")).toBeVisible();
-    expect(within(popover).getByText("OA 100.00 · 流水 90.00")).toBeVisible();
-    expect(within(popover).getByText("正式发票 80.00 · 补充凭证 未提供")).toBeVisible();
-    expect(within(popover).getByText("确认关联备注")).toBeVisible();
-    expect(within(popover).getByText("流水金额与 OA 金额存在差额，经确认保留关联")).toBeVisible();
+    expect(popover.textContent).toBe("OA100.00银行流水90.00票据凭证80.00");
     await user.click(indicator);
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "该关联组异常详情" })).not.toBeInTheDocument());
     await user.click(indicator);
     expect(await screen.findByRole("dialog", { name: "该关联组异常详情" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    await expandFirstGroup(user);
+    const review = screen.getByRole("region", { name: "异常审阅" });
+    expect(within(review).getByText("确认关联备注")).toBeVisible();
+    expect(within(review).getByText("流水金额与 OA 金额存在差额，经确认保留关联")).toBeVisible();
   });
 
   it("uses the shared three-pane grid and accepts the server classification without a manual gate", async () => {
@@ -241,7 +243,7 @@ describe("WorkbenchExceptionDrawer", () => {
 
     await user.hover(screen.getByRole("button", { name: "该关联组有 1 项异常，查看详情" }));
     const popover = await screen.findByRole("dialog", { name: "该关联组异常详情" });
-    expect(within(popover).getByText("三项不一致")).toBeVisible();
+    expect(popover.textContent).toBe("OA100.00银行流水90.00票据凭证80.00");
     await user.keyboard("{Escape}");
     await expandFirstGroup(user);
     expect(screen.queryByRole("region", { name: "异常审阅" })).not.toBeInTheDocument();
@@ -329,4 +331,21 @@ it("loads full details and shares custom columns, item alignment and voucher man
   await user.click(within(grid).getByRole("button", { name: "管理凭证" }));
   expect(onManage).toHaveBeenCalledWith(expect.objectContaining({ sourceOaId: "oa-voucher", sourceExpenseItemIds: ["voucher-item"] }), full);
   expect(onEnsure).toHaveBeenCalledOnce();
+});
+
+it.each([true, false])("preserves audit records in the drawer with operation permission %s", async (canOperate) => {
+  const user = userEvent.setup();
+  const reviewed = group("paired");
+  Object.assign(reviewed.workbenchAnomaly!, {
+    reviewedAt: "2026-08-25T17:03:47.404624+08:00", reviewNote: "金额差异已核对",
+    confirmation: { note: "票面金额少 1.00 元，经确认保留关联" },
+  });
+  renderDrawer("paired", vi.fn(), canOperate, reviewed);
+  await expandFirstGroup(user);
+  const review = screen.getByRole("region", { name: "异常审阅" });
+  expect(within(review).getByText("YNSYLP007（杨丽萍）")).toBeVisible();
+  expect(within(review).getByText("2026-08-25 17:03:47")).toBeVisible();
+  expect(within(review).getByText("金额差异已核对")).toBeVisible();
+  expect(within(review).getByText("票面金额少 1.00 元，经确认保留关联")).toBeVisible();
+  expect(within(review).queryByRole("button", { name: "撤回到未配对" }) !== null).toBe(canOperate);
 });

@@ -186,7 +186,7 @@ test.describe("workbench exception browser flow", () => {
     await expect(unpairedZone.getByText("OA 流水一致，票少")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "查看金额不一致差额说明" })).toHaveCount(0);
     await unpairedIndicator.hover();
-    await expect(page.getByText("OA 流水一致，票少")).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "该发票异常详情" })).toBeVisible();
     const indicatorStyle = await unpairedIndicator.evaluate((element) => {
       const style = getComputedStyle(element);
       return {
@@ -205,11 +205,11 @@ test.describe("workbench exception browser flow", () => {
       width: 28,
     });
     await unpairedIndicator.click();
-    await expect(page.getByText("OA 流水一致，票少")).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "该发票异常详情" })).toHaveCount(0);
     await page.waitForTimeout(180);
-    await expect(page.getByText("OA 流水一致，票少")).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "该发票异常详情" })).toHaveCount(0);
     await unpairedIndicator.click();
-    await expect(page.getByText("OA 流水一致，票少")).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "该发票异常详情" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(pairedZone.getByRole("button", {
       name: "该发票有 1 项异常，查看详情",
@@ -225,12 +225,11 @@ test.describe("workbench exception browser flow", () => {
     });
     await expect(collapsedIndicator).toBeVisible();
     const collapsedHeading = drawer.locator(".workbench-anomaly-drawer__heading").first();
-    await expect(collapsedHeading.getByText(/本组待处理 · OA 流水一致，票少/)).toBeVisible();
+    await expect(collapsedHeading.locator(".workbench-anomaly-indicator__trigger")).toHaveText("");
     await collapsedIndicator.hover();
     const collapsedPopover = page.getByRole("dialog", { name: "该关联组异常详情" });
-    await expect(collapsedPopover.getByText("OA 流水一致，票少")).toBeVisible();
-    await expect(collapsedPopover.getByText("确认关联备注")).toBeVisible();
-    await expect(collapsedPopover.getByText("票面金额少 0.01 元，经确认保留关联")).toBeVisible();
+    await expect(collapsedPopover.getByText("票据凭证", { exact: true })).toBeVisible();
+    await expect(collapsedPopover).not.toContainText("确认关联备注");
     await collapsedIndicator.click();
     await expect(collapsedPopover).toHaveCount(0);
     await collapsedIndicator.click();
@@ -270,22 +269,20 @@ test.describe("workbench exception browser flow", () => {
     })).toBeVisible();
 
     await drawer.getByRole("radio", { name: "已配对异常 1" }).click();
-    await collapsedIndicator.hover();
-    const reviewedPopover = page.getByRole("dialog", { name: "该关联组异常详情" });
-    await expect(reviewedPopover.getByText("已接受该异常风险")).toBeVisible();
-    await expect(reviewedPopover.getByText("操作账户")).toBeVisible();
-    await expect(reviewedPopover.getByText("E2E-REVIEWER（浏览器测试员）")).toBeVisible();
-    await expect(reviewedPopover.getByText("操作时间")).toBeVisible();
-    await expect(reviewedPopover.getByText("2026-08-25 17:03:47")).toBeVisible();
-    await expect(reviewedPopover).not.toContainText("+08:00");
-    await page.keyboard.press("Escape");
+    await drawer.getByRole("button", { name: "展开异常明细" }).first().click();
+    const reviewedPanel = drawer.getByRole("region", { name: "异常审阅" });
+    await expect(reviewedPanel.getByText("已接受该异常风险")).toBeVisible();
+    await expect(reviewedPanel.getByText("操作账户")).toBeVisible();
+    await expect(reviewedPanel.getByText("E2E-REVIEWER（浏览器测试员）")).toBeVisible();
+    await expect(reviewedPanel.getByText("2026-08-25 17:03:47")).toBeVisible();
+    await expect(reviewedPanel.getByText("票面金额少 0.01 元，经确认保留关联")).toBeVisible();
+    await expect(reviewedPanel).not.toContainText("+08:00");
     await expect(unpairedZone.getByRole("button", {
       name: "该发票有 1 项异常，查看详情",
     })).toHaveCount(0);
 
     const workbenchLoadsBeforeWithdraw = api.count("GET /api/workbench");
     const bucketLoadsBeforeWithdraw = api.count("GET /api/workbench/groups");
-    await drawer.getByRole("button", { name: "展开异常明细" }).first().click();
     await drawer.getByRole("button", { name: "撤回到未配对" }).click();
 
     await expect(drawer.getByRole("radio", { name: "已配对异常 0" })).toHaveAttribute("aria-checked", "true");
@@ -391,7 +388,7 @@ test.describe("workbench exception browser flow", () => {
     expect(collapsedBox).not.toBeNull();
     expect(collapsedBox!.x).toBeGreaterThanOrEqual(0);
     expect(collapsedBox!.x + collapsedBox!.width).toBeLessThanOrEqual(1440);
-    await expect(drawer.locator(".workbench-anomaly-drawer__heading").getByText(/本组待处理 · OA 流水一致，票少/)).toBeVisible();
+    await expect(drawer.locator(".workbench-anomaly-drawer__heading .workbench-anomaly-indicator__trigger")).toHaveText("");
 
     await drawer.getByRole("button", { name: "展开异常明细" }).first().click();
     const review = drawer.getByRole("region", { name: "异常审阅" });

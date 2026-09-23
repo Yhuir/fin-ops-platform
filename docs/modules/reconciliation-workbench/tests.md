@@ -31,7 +31,7 @@
 
 - Business/service：`tests/test_workbench_relation_grouping.py` 保护组级 `amount_check` 保留、三类 row 不再复制 `relation_amount_check`，并把 `manual_confirmed` 的非空确认备注投影到同一 `workbench_anomaly.confirmation`；异常审阅前后该确认事实不丢失。
 - API/read：`tests/test_workbench_v2_api.py`、`tests/test_workbench_page_query_repository.py` 保护 direct page 的组级合同与精简 row payload；`web/src/test/WorkbenchApi.test.ts` 保护确认备注映射且客户端 row 不再拥有旧金额判断字段。
-- Frontend/regression：`WorkbenchColumns.test.tsx`、`WorkbenchZone.test.tsx` 不再保留流水三角形/tooltip 行为；`RelationGroupGrid.test.tsx`、`WorkbenchExceptionDrawer.test.tsx` 保护主表、展开抽屉与折叠摘要复用圆形异常入口，并在 Popover 展示确认关联备注。批量账务页面自身的提交金额差异提示由 `BatchAccountingPage.test.tsx` 继续独立保护。
+- Frontend/regression：`WorkbenchColumns.test.tsx`、`WorkbenchZone.test.tsx` 不再保留流水三角形/tooltip 行为；`RelationGroupGrid.test.tsx`、`WorkbenchExceptionDrawer.test.tsx` 保护主表、展开抽屉与折叠摘要复用圆形异常入口，并在异常抽屉审阅区展示确认关联备注。批量账务页面自身的提交金额差异提示由 `BatchAccountingPage.test.tsx` 继续独立保护。
 
 ## 2026-08-27 paired / unpaired canonical 发票守恒统计
 
@@ -44,7 +44,7 @@
 
 - Service/repository/API：`tests/test_workbench_anomaly_review_service.py` 保护异常审阅只接收后端认证的 actor id/account/name，账户缺失 fail closed；持久化同时保留内部 actor id 与用户可见账户/姓名快照，幂等重复请求返回原审核人的快照和原审阅时间，不被后来点击者覆盖。compact/full 两条 direct hydration 都只发布 `reviewed_by_account/reviewed_by_name/reviewed_at`，旧 `reviewed_by` 用户可见字段已删除。
 - PostgreSQL migration：`0156_backfill_workbench_anomaly_reviewer_identity.sql` 仅为缺少账户快照的历史异常审阅记录补齐唯一 `audit.events` 账户和最新非空姓名；映射缺失或同一内部 actor 出现多个账户时整笔迁移失败，既有 decision/version/updated_by/updated_at 与历史 audit 不重写，并追加一次可审计的 migration event。集成测试保护成功、幂等和歧义零部分写入。
-- Frontend interaction：`WorkbenchAnomalyIndicator.test.tsx` 保护 Popover 显示 `YNSYLP007（杨丽萍）`、正常业务时区时间 `2026-08-25 17:03:47` 和可选备注，不再显示内部 `8` 或原始 `+08:00`。
+- Frontend interaction：`WorkbenchExceptionDrawer.test.tsx` 保护异常抽屉审阅区显示 `YNSYLP007（杨丽萍）`、正常业务时区时间 `2026-08-25 17:03:47` 和可选备注，不再显示内部 `8` 或原始 `+08:00`。
 - 性能与回归：写入只增加固定大小 JSON 快照；两条既有页面 SQL 在原 projection 内读取 JSON 字段，不增加 SQL、HTTP、read model、worker、cache、依赖或 N+1。七类金额异常、三类资料异常、分区、筛选、分页、确认/撤回与其它页面合同保持不变。
 
 ## 2026-08-26 ETC 折叠汇总、选择去重与误异常迁移
@@ -114,7 +114,7 @@
 
 - Business core：`test_workbench_amount_check_service.py` 覆盖七种互斥三栏分类、分精度、净额/外部往来本金、方向未知/冲突不猜测、局部差异不生成第八类，以及附件缺失/未解析/待归属；精确单行与歧义 group scope 均有断言。
 - Service/repository/API：`test_workbench_anomaly_review_service.py` 保护服务端重取 canonical bundle 并自行持久化 evidence fingerprints/detected codes，忽略客户端旧人工字段；fingerprint、其他 blocker、跨月 scope、幂等和审计不变。`WorkbenchApi.test.ts` 保护 review request 不再发送人工分类或逐项 fingerprints。
-- Frontend interaction：`WorkbenchAnomalyIndicator.test.tsx`、`WorkbenchExceptionDrawer.test.tsx`、`RelationGroupGrid.test.tsx` 保护主表/抽屉复用同一三栏定位，默认只显示感叹号；hover/键盘 focus 临时打开，显示时首次点击关闭且当前停留期间不自动重开，再次点击持续打开，离开后恢复下一次 hover；无先行 hover 的鼠标/触屏式点击也能独立开关。Popover 只展示 HeroUI Chip；折叠态不新增栏，展开态无重复 Chip、复选框或人工下拉，只读权限无 mutation。
+- Frontend interaction：`WorkbenchAnomalyIndicator.test.tsx`、`WorkbenchExceptionDrawer.test.tsx`、`RelationGroupGrid.test.tsx` 保护主表/抽屉复用同一三栏定位，默认只显示感叹号；hover/键盘 focus 临时打开，显示时首次点击关闭且当前停留期间不自动重开，再次点击持续打开，离开后恢复下一次 hover；无先行 hover 的鼠标/触屏式点击也能独立开关。金额 Popover 仅显示金额，资料状态保留 HeroUI Chip；折叠态不新增栏，展开态无重复 Chip、复选框或人工下拉，只读权限无 mutation。
 - E2E/regression：`workbench-exception-flow.spec.ts` 保护自动分类的接受、当前可见 bucket 单次重读且不自动跳转、撤回及 1440/1024px 边界；权限套件保护 read-export/App Health blocked 下证据可见且零写入。`WorkbenchSelection.test.tsx` 保护写成功但重读失败不重复提交。
 - 性能与边界：分类为现有 group 内固定规模纯计算，前端定位为单次 Map/Set 遍历；未新增 API round-trip、逐行 I/O、表、migration、read model、worker、cache 或依赖。PostgreSQL candidate 仍在分页前用三栏总额、成员和附件状态计算 review fingerprint，但不再为全量关系递归构建费用项—发票连通分量；该图只在已分页的当前组内存中用于感叹号定位。PostgreSQL integration 同时保护 SQL/Python fingerprint 一致、旧递归 CTE 缺席和 summary/detail 分区一致。
 - 旧链删除：删除 `workbench_exception_classifier.py` 及其测试、客户端人工分类/逐项审阅状态、请求字段和旧 CSS；dead-code guard 将旧 classifier 列为禁止恢复模块。
@@ -803,10 +803,9 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - 升级重跑：真实 PostgreSQL 中先缓存旧整项规则的成功 no-op，确认旧版本重复调用命中幂等，再切换余额规则；同一事实必须补齐两张票，审计失败回滚，成功后重复执行无重复归属。
 
 
-## 2026-09-23 组级原因及局部凭证解释
+## 2026-09-23 异常 icon 与金额展示收口
 
-- Business：`test_workbench_amount_check_service` 增加五张 OA、140 元有效凭证、另一子项超额6.57及消除超额后全部一致的对照；原 grouping/review 套件保护审批、金额、审阅和状态边界。
-- Frontend：`WorkbenchAnomalyIndicator` 覆盖精确/共享/缺失子项定位、多异常、正式发票与凭证独立金额、零与未知、已接受状态；`WorkbenchExceptionDrawer`、`RelationGroupGrid`、`WorkbenchSupportingDocumentFiles` 更新原布局/文案回归，保护排序和原管理入口。
-- Browser：`workbench-supporting-documents-flow.spec.ts` 增加五张 OA/14 张发票长组、五份零差额凭证、桌面/390px窄屏 sticky 可见及零新增请求断言；原异常审阅、保存/删除回读、stale/error、权限测试继续保护。
-- API、service 与 PostgreSQL：合同不变，执行现有 mapper/review/query integration 回归。无 read model、cache、worker 改动，该实现测试不适用。
-- 生产按 [执行计划](../../dev/workbench-group-blocker-explanation-plan.md) 只读复核；真实差额 pending 保持，接受/撤回在隔离环境验证。
+- 类别 5/7：`WorkbenchAnomalyIndicator.test.tsx` 保护纯 icon、整组三方与子项两方、独立明细差额不抵消、零/未知金额、资料异常动作与键盘关闭；`WorkbenchExceptionDrawer.test.tsx` 保护审阅记录迁移、正常业务时间、只读可见与操作权限。
+- 类别 5/6/7：`RelationGroupGrid.test.tsx`、`workbench-supporting-documents-flow.spec.ts`、`workbench-exception-flow.spec.ts` 保护主表/抽屉原布局、28px icon、无额外提示行、桌面/390px Popover 边界与零新增请求；五份凭证零差额与组级6.57异常并存，接受/撤回、保存/删除和回读使用原链路。
+- 回归：权限、申请人布局、长表滚动、筛选排序、凭证和发票处理入口。前端全套测试及生产构建保护共享组件；没有新增后端业务/API/缓存或任务实现，类别 1/2/3/4 不新增测试。
+- 生产验证读取同一真实关系，比较金额、成员、异常指纹及 completion；不提交真实异常接受/撤回，不以 mock 数据替代生产展示与性能证据。
