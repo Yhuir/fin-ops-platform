@@ -74,6 +74,7 @@ row 顶层只包含：
 - repository set-based 完成筛选、排序、分页和聚合；service 只组装当前页有界 DTO。
 - 收款状态的 self-excluding facet 与当前页 rows 共用一个 SQL statement 和同一 canonical CTE snapshot，不增加 API 或数据库往返。
 - SQL 数量不得随当前页行数、关系数量或红蓝票数量线性增长。
+- 共用发票查询 repository 将每条银行用途的 canonical ID 与 legacy ID 展开为去重别名，再与关联成员等值匹配；相同用途别名去重，跨用途同名别名保留原多匹配语义。旧双身份 `OR/IN` 全组合比较已替换，不改变收款归属、金额或 API 输出。
 - keyword 在同一 grouped invoice SQL 中搜索发票备注，不增加逐行查询、缓存、worker 或 read model。
 - 红蓝票关系必须由备注精确号码确定性派生；歧义时不建立关系，不按金额、税额、购销方或日期猜测。
 - 普通 relation 只提供收款流水归属，不拥有页面 row identity；同一 relation 内多张销项发票仍逐张输出。

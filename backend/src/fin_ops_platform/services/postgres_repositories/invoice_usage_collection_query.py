@@ -1449,8 +1449,11 @@ def _fact_cte(
                 ) as amount_matched
             from group_relation_ids relation
             join relation_members member on member.relation_id = relation.relation_id
-            join app.bank_transaction_units bank
-              on member.row_id in (coalesce(bank.legacy_mongo_id, ''), bank.id::text)
+            join app.bank_transaction_units bank on true
+            join lateral (
+                select distinct alias
+                from (values (coalesce(bank.legacy_mongo_id, '')), (bank.id::text)) names(alias)
+            ) bank_alias on bank_alias.alias = member.row_id
             left join app.app_settings settings on settings.settings_key='app_settings'
             left join lateral jsonb_array_elements(settings.settings_payload#>'{{bank_transaction_tags,definitions}}') definition(value)
               on definition.value->>'code'=bank.split_category_code

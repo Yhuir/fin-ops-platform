@@ -64,6 +64,7 @@
 - 服务端完成筛选、排序、分页；Python 只组装当前页有界 facts。
 - OA 详情使用一个独立只读 repeatable-read transaction 和一次有界 OA identity 查询；禁止加载页面 row group、发票或流水作为间接查找。
 - 只有 EXPLAIN 或真实慢查询证据支持时才增加索引；本模块不自行创建 migration。
+- 关联成员读取银行用途时，将每条用途的 canonical ID 与 legacy ID 展开为去重别名，再做等值关联；同一用途的相同别名只展开一次，不跨用途吞掉同名别名。替代旧双身份 `OR/IN` 全组合比较，保留原匹配、金额和分页语义，不增加 SQL 往返或持久化状态。
 
 ## 搜索控件展示边界
 
