@@ -13,12 +13,11 @@ from fin_ops_platform.domain.models import (
     ExceptionHandlingRecord,
     FollowUpLedger,
     Invoice,
-    Reminder,
     ReconciliationCase,
+    Reminder,
 )
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.imports import ImportNormalizationService
-
 
 ZERO = Decimal("0.00")
 

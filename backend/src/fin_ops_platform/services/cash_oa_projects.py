@@ -17,7 +17,6 @@ from fin_ops_platform.services.cash_domain import CashError, invalid
 from fin_ops_platform.services.cash_queries import query_sets
 from fin_ops_platform.services.mongo_oa_adapter import MongoOASettings
 
-
 # Verified in OA dictionary XMJD (type ID 24), not inferred from a label.
 ENDED_STAGE_CODE = "end"
 PROJECT_PROJECTION = {"_id": 1, "data.name": 1, "data.code": 1, "data.projectPhase": 1}

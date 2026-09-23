@@ -12,7 +12,6 @@ from typing import Any, Sequence, TextIO
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.common import jsonb, row_payload
 
-
 _SUBMITTED_STATUSES = {"submitted", "manually_marked_submitted"}
 
 

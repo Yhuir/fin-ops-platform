@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 import unittest
+from types import SimpleNamespace
 
 from fin_ops_platform.services.etc_batch_invoice_link_service import EtcBatchInvoiceLinkService
 

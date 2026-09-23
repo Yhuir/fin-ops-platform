@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import unittest
-
+from pathlib import Path
 
 NGINX_CONFIG_PATH = Path(__file__).resolve().parents[1] / "deploy" / "oa" / "nginx.fin-ops.conf.example"
 

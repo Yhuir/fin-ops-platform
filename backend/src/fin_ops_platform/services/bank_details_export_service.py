@@ -1,16 +1,15 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
-import re
 from typing import Any, Callable
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
-
 
 BANK_DETAIL_EXPORT_ROW_LIMIT = 20000
 BANK_DETAIL_EXPORT_PAGE_SIZE = 500

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from io import StringIO
 import json
 import os
+import unittest
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.tools import write_operation_scenario_discovery as discovery

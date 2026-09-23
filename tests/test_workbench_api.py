@@ -5,6 +5,7 @@ from copy import deepcopy
 from fin_ops_platform.services.workbench_relation_grouping import (
     WorkbenchRelationPreviewGroupingService,
 )
+
 from tests.app_test_support import build_local_state_application as build_application
 
 

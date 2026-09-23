@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 from fin_ops_platform.services.runtime_worker_registry import (
     RUNTIME_WORKER_REGISTRY,
 )
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND = REPO_ROOT / "backend/src/fin_ops_platform"

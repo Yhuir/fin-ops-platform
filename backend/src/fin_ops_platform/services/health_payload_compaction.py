@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-
 DEFAULT_READY_SAMPLE_LIMIT = 5
 MAX_READY_SAMPLE_STRING_LENGTH = 500
 

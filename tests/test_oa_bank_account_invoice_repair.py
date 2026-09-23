@@ -76,7 +76,9 @@ class OABankAccountInvoiceRepairPostgresTests(unittest.TestCase):
                 values (%s::uuid,%s,'input',%s,%s,'2026-08-10','2026-08-01',175.47,175.47,10.53,186,'pending',%s::jsonb)
             """, (row["id"], row["invoice_id"], row["invoice_no"], row["invoice_no"], json.dumps(row["source_links"])))
 
-        from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
+        from fin_ops_platform.services.postgres_repositories.workbench_relation import (
+            PostgresWorkbenchRelationRepository,
+        )
         relation = {"case_id": "CASE-REPAIR", "relation_mode": "manual_confirmed", "status": "active", "version": 1,
                     "month_scope": "2026-08", "row_ids": ["oa-1", "good", "bad"], "row_types": ["oa", "invoice", "invoice"],
                     "special_metadata": {"formal_relation": {"origin": "system_deterministic"},

@@ -1,34 +1,32 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import unittest
 from datetime import UTC, datetime
 from decimal import Decimal
-import hashlib
 from io import BytesIO
-import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-import unittest
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import fitz
-
-from tests.app_test_support import build_local_state_application, configure_access_control
-from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.etc_invoice_pdf_bundle_service import (
     EtcInvoicePdfBundleError,
     EtcInvoicePdfBundleService,
 )
 from fin_ops_platform.services.etc_service import (
     EtcBatchStatus,
+    EtcBusinessBatchInvalidTransitionError,
     EtcBusinessBatchStatus,
     EtcInvoice,
     EtcInvoiceStatus,
-)
-from fin_ops_platform.services.etc_service import (
-    EtcBusinessBatchInvalidTransitionError,
     UploadedEtcZipFile,
 )
+from fin_ops_platform.services.oa_identity_service import OAUserIdentity
+
+from tests.app_test_support import build_local_state_application, configure_access_control
 
 
 def _pdf_bytes(label: str, *, pages: int = 1) -> bytes:

@@ -8,7 +8,6 @@ from fin_ops_platform.services.workbench_free_matching_engine import (
     FormalRelationFactBatch,
 )
 
-
 YUNNAN_LIFU_CASE_ID = (
     "case:decision:2026-05:oa_invoice_exact_amount:"
     "oa-pay-2169:inv_imported_0369"

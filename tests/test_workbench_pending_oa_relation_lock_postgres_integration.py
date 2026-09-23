@@ -7,11 +7,11 @@ from fin_ops_platform.services.postgres_connection import (
     PostgresConnection,
     PostgresSettings,
 )
-from fin_ops_platform.services.postgres_repositories.workbench_relation import (
-    PostgresWorkbenchRelationRepository,
-)
 from fin_ops_platform.services.postgres_repositories.workbench_page_audit import (
     audit_workbench_relation_display,
+)
+from fin_ops_platform.services.postgres_repositories.workbench_relation import (
+    PostgresWorkbenchRelationRepository,
 )
 from fin_ops_platform.services.workbench_pair_relation_service import (
     WorkbenchPairRelationService,
@@ -23,6 +23,7 @@ from fin_ops_platform.services.workbench_relation_command_service import (
     WorkbenchRelationCommandError,
     WorkbenchRelationCommandService,
 )
+
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,

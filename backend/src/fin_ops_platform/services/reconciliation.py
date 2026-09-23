@@ -29,7 +29,6 @@ from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.matching import MatchingEngineService
 
-
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
 COMPANY_NAME = "杭州溯源科技有限公司"

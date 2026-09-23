@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from decimal import Decimal
 import unittest
+from decimal import Decimal
 
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
-from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord, PAY_STATUS_PAID
+from fin_ops_platform.services.oa_payment_status_service import PAY_STATUS_PAID, OAPaymentStatusRecord
 from fin_ops_platform.services.oa_pending_payment_canonical_rows import build_oa_pending_payment_rows
 
 

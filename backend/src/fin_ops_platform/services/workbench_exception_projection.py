@@ -3,7 +3,6 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-
 EXCEPTION_PROJECTION_VERSION = "exception_projection_v1"
 
 OPEN_CASE_STATUSES = {"open", "confirmed", "reopened", "legacy_confirmed"}

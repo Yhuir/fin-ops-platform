@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from dataclasses import asdict, is_dataclass
 from decimal import Decimal
 from enum import Enum
-import re
 from typing import Any, Callable
 
 from fin_ops_platform.services.app_settings_service import AppSettingsService
@@ -24,7 +24,6 @@ from fin_ops_platform.services.no_oa_bank_batch_service import (
 from fin_ops_platform.services.no_oa_managed_rule_policy import NO_OA_MANAGED_LABELS
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
-
 
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 

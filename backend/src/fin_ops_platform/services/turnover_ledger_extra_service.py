@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from threading import RLock
 from typing import Any
-
 
 TURNOVER_LEDGER_EXTRA_SNAPSHOT_VERSION = 1
 TURNOVER_LEDGER_INTEREST_RATE_TYPES = {"annual", "monthly", "none"}

@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import gzip
-from io import BytesIO
 import json
 import unittest
-
-from psycopg_pool import PoolTimeout
+from io import BytesIO
 
 from fin_ops_platform.app.http_adapter import HttpRequestLimits, WsgiHttpAdapter
 from fin_ops_platform.app.server import Response
+from psycopg_pool import PoolTimeout
 
 
 class FakeApplication:

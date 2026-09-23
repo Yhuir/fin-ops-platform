@@ -16,7 +16,6 @@ from fin_ops_platform.services.postgres_repositories.oa_attachment_invoice impor
     PostgresOAAttachmentInvoiceRepository,
 )
 
-
 APPLY_CONFIRMATION_FLAG = "--confirm-apply-oa-attachment-invoices"
 
 

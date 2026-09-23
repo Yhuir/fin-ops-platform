@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from io import BytesIO
 import unittest
-
-from openpyxl import load_workbook
+from io import BytesIO
 
 from fin_ops_platform.services.bank_details_export_service import (
     BANK_DETAIL_EXPORT_COLUMNS,
@@ -11,6 +9,7 @@ from fin_ops_platform.services.bank_details_export_service import (
     BankDetailsExportError,
     BankDetailsExportService,
 )
+from openpyxl import load_workbook
 
 
 class _PagedRowsLoader:

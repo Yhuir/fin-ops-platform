@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
 import json
 import os
 import sys
+from collections.abc import Callable, Sequence
 from typing import Any, TextIO
-
 
 TOOL_NAME = "workbench_direct_application_bootstrap_probe"
 

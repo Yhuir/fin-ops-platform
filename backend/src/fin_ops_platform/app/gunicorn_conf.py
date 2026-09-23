@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 
-
 bind = os.environ.get("FIN_OPS_HTTP_BIND", "127.0.0.1:18001")
 pidfile = os.environ.get("FIN_OPS_HTTP_PIDFILE", "/run/fin-ops/gunicorn.pid")
 worker_class = "gthread"

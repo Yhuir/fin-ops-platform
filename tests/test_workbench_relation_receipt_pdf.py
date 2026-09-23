@@ -3,7 +3,6 @@ from __future__ import annotations
 import unittest
 
 import fitz
-
 from fin_ops_platform.services.workbench_relation_receipt_pdf import (
     WorkbenchReceiptPdfRenderer,
     _uppercase_rmb,

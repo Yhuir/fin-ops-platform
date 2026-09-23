@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
-import hashlib
 from threading import Lock
 from typing import Any, Callable, Iterable
 
@@ -14,7 +14,6 @@ from fin_ops_platform.services.etc_service import (
     parse_etc_xml,
 )
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
-
 
 HISTORICAL_ETC_REPAIR_RELATION_MODE = "etc_batch_invoice_link"
 HISTORICAL_ETC_PARSED_SEED_SCHEMA_VERSION = 1

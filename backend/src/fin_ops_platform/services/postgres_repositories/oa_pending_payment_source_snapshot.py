@@ -1,23 +1,23 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from fin_ops_platform.services.oa_adapter import (
     OAApplicationRecord,
     is_in_progress_expense_claim,
 )
-from fin_ops_platform.services.oa_payment_status_service import (
-    OAPaymentStatusRecord,
-    PAY_STATUS_PAID,
-    PAY_STATUS_PENDING,
-    oa_flow_id_candidates,
-)
 from fin_ops_platform.services.oa_payment_status_reconcile_contract import (
     OA_PAYMENT_STATUS_RECONCILE_EVENT,
     OA_PAYMENT_STATUS_REMOVE_MISSING_OPERATION,
+)
+from fin_ops_platform.services.oa_payment_status_service import (
+    PAY_STATUS_PAID,
+    PAY_STATUS_PENDING,
+    OAPaymentStatusRecord,
+    oa_flow_id_candidates,
 )
 from fin_ops_platform.services.postgres_repositories.common import jsonb, run_in_transaction, serialize_value, text
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
@@ -29,7 +29,6 @@ from fin_ops_platform.services.postgres_repositories.workbench_matching_queue im
 )
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import expand_scope_month_window
-
 
 OA_PENDING_PAYMENT_COVERAGE_ONLY_SCHEMA_VERSION = 1
 

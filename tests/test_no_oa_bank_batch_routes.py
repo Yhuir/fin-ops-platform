@@ -7,8 +7,8 @@ from types import SimpleNamespace
 from fin_ops_platform.app.auth import OARequestSession
 from fin_ops_platform.app.routes_no_oa_bank_batches import NoOaBankBatchApiRoutes
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
-from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.no_oa_bank_batch_application_service import NoOaBankBatchRelationMutationError
+from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 
 
 class FakeNoOaApplicationService:

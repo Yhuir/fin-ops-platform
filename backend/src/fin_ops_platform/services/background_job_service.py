@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from datetime import UTC, datetime, timedelta
 import hashlib
 import json
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime, timedelta
 from threading import Lock
 from typing import Any, Callable
 from uuid import uuid4
@@ -11,7 +11,6 @@ from uuid import uuid4
 from fin_ops_platform.services.app_status_job_registry import APP_STATUS_BACKGROUND_JOB_REGISTRY
 from fin_ops_platform.services.runtime_state_policy import RETIRED_BACKGROUND_JOB_TYPES
 from fin_ops_platform.services.state_store_protocol import ApplicationStateStoreProtocol
-
 
 BACKGROUND_JOB_STATUSES = {
     "queued",

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import unittest
 from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from fin_ops_platform.services.etc_import_session_store import (
     InMemoryEtcImportSessionStore,

@@ -1,16 +1,15 @@
 from __future__ import annotations
 
+import json
+import re
 from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
-import json
-import re
 from typing import Any, Iterator
 
 from fin_ops_platform.services.live_workbench_service import format_decimal
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
-
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 ZERO = Decimal("0.00")

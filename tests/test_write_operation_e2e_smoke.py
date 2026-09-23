@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import gzip
-from io import StringIO
 import json
 import os
+import unittest
+from datetime import datetime, timedelta, timezone
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Barrier
-import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.tools import http_slo_probe, write_operation_e2e_smoke

@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
 import json
 import os
 import sys
+from collections.abc import Sequence
 from typing import Any, TextIO
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.workbench import (
     PostgresWorkbenchRepository,
 )
-
 
 TOOL_NAME = "repair_workbench_legacy_typed_identities"
 

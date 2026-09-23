@@ -3,7 +3,6 @@ from __future__ import annotations
 from copy import deepcopy
 
 import pytest
-
 from fin_ops_platform.services.invoice_header_fact_repair_service import (
     INVOICE_HEADER_REPAIR_FACTS,
     INVOICE_HEADER_REPAIR_SOURCE_SHA256,

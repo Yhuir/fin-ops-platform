@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 from collections.abc import Sequence
 from copy import deepcopy
 from datetime import UTC, datetime
-import hashlib
-import json
 from pathlib import Path
 from typing import Any
 
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
 from fin_ops_platform.tools.runtime_application import bank_auto_tag_rules_runtime
-
 
 DEFAULT_ACTOR_ID = "system:bank-auto-tag-rule-restore"
 DEFAULT_BACKUP_DIR = Path(".runtime/bank-auto-tag-rule-restore-backups")

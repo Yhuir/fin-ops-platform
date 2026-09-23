@@ -7,7 +7,6 @@ from typing import Any, Callable
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 
-
 INPUT_INVOICE_USAGE_EXPORT_ROW_LIMIT = 20000
 INPUT_INVOICE_USAGE_EXPORT_PAGE_SIZE = 200
 INPUT_INVOICE_USAGE_EXPORT_COLUMNS = [

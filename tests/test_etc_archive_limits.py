@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from io import BytesIO
-from pathlib import Path
 import tempfile
 import unittest
+from io import BytesIO
+from pathlib import Path
 from unittest.mock import patch
-from zipfile import BadZipFile, ZIP_DEFLATED, ZipFile
+from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
 from fin_ops_platform.services.etc_service import EtcService
 

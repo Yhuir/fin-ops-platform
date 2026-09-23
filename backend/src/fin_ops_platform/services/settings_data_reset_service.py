@@ -5,7 +5,6 @@ from typing import Any, Callable
 
 from fin_ops_platform.services.state_store_protocol import ApplicationStateStoreProtocol
 
-
 RESET_BANK_TRANSACTIONS_ACTION = "reset_bank_transactions"
 RESET_INVOICES_ACTION = "reset_invoices"
 RESET_OA_AND_REBUILD_ACTION = "reset_oa_and_rebuild"

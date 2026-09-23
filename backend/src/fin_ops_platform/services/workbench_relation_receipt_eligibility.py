@@ -6,7 +6,6 @@ from typing import Any
 
 from fin_ops_platform.services.workbench_invoice_direction import normalize_invoice_kind_from_row
 
-
 _CNY_ALIASES = frozenset({"CNY", "RMB", "人民币", "人民币元", "元"})
 
 

@@ -12,7 +12,6 @@ from openpyxl.utils import get_column_letter
 
 from fin_ops_platform.services.oa_pending_payment_query_contract import OaPendingPaymentError
 
-
 OA_PENDING_PAYMENT_EXPORT_ROW_LIMIT = 20_000
 OA_PENDING_PAYMENT_EXPORT_SOURCES = ("completed", "in_progress")
 OA_PENDING_PAYMENT_EXPORT_COLUMNS = (

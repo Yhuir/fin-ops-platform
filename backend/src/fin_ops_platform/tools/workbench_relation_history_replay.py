@@ -18,7 +18,6 @@ from fin_ops_platform.services.workbench_relation_modes import (
     relation_has_withdraw_restore_marker,
 )
 
-
 KNOWN_RELATION_STATUSES = {"active", "cancelled", "withdrawn", "superseded", "repair_attention"}
 
 

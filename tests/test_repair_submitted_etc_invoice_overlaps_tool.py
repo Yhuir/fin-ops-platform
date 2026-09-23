@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import unittest
 from contextlib import contextmanager
 from decimal import Decimal
-import unittest
 
 from fin_ops_platform.tools.repair_submitted_etc_invoice_overlaps import (
     _ensure_apply_candidate_examples_complete,
-    audit_submitted_etc_invoice_overlaps,
     apply_submitted_etc_invoice_overlap_repair,
+    audit_submitted_etc_invoice_overlaps,
 )
 
 

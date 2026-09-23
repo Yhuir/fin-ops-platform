@@ -1,10 +1,11 @@
 import json
 import unittest
 
-from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.import_file_service import parse_bank_statement_rows
 from fin_ops_platform.services.imports import ImportNormalizationService
+
+from tests.app_test_support import build_local_state_application as build_application
 
 
 class ImportApiTests(unittest.TestCase):

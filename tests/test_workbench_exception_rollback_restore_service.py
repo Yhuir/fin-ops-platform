@@ -4,7 +4,9 @@ import unittest
 from typing import Any
 
 from fin_ops_platform.services.workbench_exception_case_service import WorkbenchExceptionCaseService
-from fin_ops_platform.services.workbench_exception_rollback_restore_service import WorkbenchExceptionRollbackRestoreService
+from fin_ops_platform.services.workbench_exception_rollback_restore_service import (
+    WorkbenchExceptionRollbackRestoreService,
+)
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import gzip
 import json
-from time import sleep
 import unittest
+from time import sleep
 
 from fin_ops_platform.tools.health_ready_payload_probe import (
     collect_health_ready_payload,

@@ -7,8 +7,6 @@ from unittest.mock import Mock, patch
 from urllib.error import URLError
 
 from bson import ObjectId
-from pymongo.errors import ServerSelectionTimeoutError
-
 from fin_ops_platform.services.cash_domain import CashError
 from fin_ops_platform.services.cash_oa_projects import (
     PROJECT_PROJECTION,
@@ -16,7 +14,7 @@ from fin_ops_platform.services.cash_oa_projects import (
     load_project_stages,
 )
 from fin_ops_platform.services.mongo_oa_adapter import MongoOASettings
-
+from pymongo.errors import ServerSelectionTimeoutError
 
 STAGES = [{"code": "0", "name": "未中标"}, {"code": "5", "name": "实施阶段"},
           {"code": "4", "name": "采购阶段"}, {"code": "end", "name": "已结束"}]

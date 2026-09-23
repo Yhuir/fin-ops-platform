@@ -1,14 +1,14 @@
-from decimal import Decimal
 import unittest
+from decimal import Decimal
 
 from fin_ops_platform.domain.enums import (
     DifferenceReason,
+    ImportDecision,
     IntegrationObjectType,
     IntegrationSource,
     IntegrationSyncStatus,
     InvoiceStatus,
     InvoiceType,
-    ImportDecision,
     LedgerStatus,
     LedgerType,
     MatchingConfidence,
@@ -23,23 +23,23 @@ from fin_ops_platform.domain.models import (
     Counterparty,
     ExceptionHandlingRecord,
     FollowUpLedger,
+    ImportedBatch,
+    ImportedBatchRowResult,
     IntegrationMapping,
     IntegrationSyncIssue,
     IntegrationSyncRun,
-    ImportedBatch,
-    ImportedBatchRowResult,
     Invoice,
     MatchingResult,
     MatchingRun,
-    OfflineReconciliationRecord,
     OADocument,
+    OfflineReconciliationRecord,
     OffsetNote,
     ProjectAssignmentRecord,
     ProjectMaster,
     ProjectSummary,
-    Reminder,
     ReconciliationCase,
     ReconciliationLine,
+    Reminder,
 )
 
 

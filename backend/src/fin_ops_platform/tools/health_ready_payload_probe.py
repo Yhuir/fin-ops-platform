@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, datetime
 import json
 import os
+import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic
 from typing import Any, Callable, Mapping, Sequence, TextIO
-import sys
 from urllib.parse import urljoin
 
 from .cli_reports import write_json_report

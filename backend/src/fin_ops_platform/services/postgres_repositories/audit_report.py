@@ -6,7 +6,6 @@ from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from typing import Any
 
-
 FRESHNESS_ISSUE_CODES = frozenset(
     {
         "page_runtime_queue_not_drained",

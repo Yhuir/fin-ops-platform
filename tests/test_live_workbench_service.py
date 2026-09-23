@@ -1,5 +1,5 @@
-from decimal import Decimal
 import unittest
+from decimal import Decimal
 from unittest.mock import patch
 
 from fin_ops_platform.domain.enums import BatchType, InvoiceType, TransactionDirection

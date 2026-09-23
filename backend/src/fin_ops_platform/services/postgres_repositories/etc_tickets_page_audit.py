@@ -12,7 +12,6 @@ from fin_ops_platform.services.postgres_repositories.audit_report import (
     use_audit_snapshot,
 )
 
-
 ACTIVE_BATCH_STATUSES = frozenset(
     {
         "draft",

@@ -1,14 +1,12 @@
 from __future__ import annotations
 
+import unittest
 from io import BytesIO
 from types import SimpleNamespace
-import unittest
 from unittest.mock import Mock, patch
 from zipfile import ZipFile
 
 import fitz
-from PIL import Image
-
 from fin_ops_platform.services.etc_reconciliation_models import SourceFileKind
 from fin_ops_platform.services.etc_reconciliation_source_upload_service import (
     EtcReconciliationSourceUpload,
@@ -21,6 +19,7 @@ from fin_ops_platform.services.untrusted_document_policy import (
     inspect_untrusted_document,
     render_document_thumbnail,
 )
+from PIL import Image
 
 
 def _image_bytes(format_name: str = "PNG") -> bytes:

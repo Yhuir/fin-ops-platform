@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 import unittest
+from contextlib import contextmanager
 
 from fin_ops_platform.services.page_audit_registry import page_audit_registration
 from fin_ops_platform.services.postgres_repositories.audit_report import AuditSnapshot

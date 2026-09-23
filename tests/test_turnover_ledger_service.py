@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import json
+import unittest
 from datetime import date
 from decimal import Decimal
 from hashlib import sha1
-import json
-import unittest
 
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction

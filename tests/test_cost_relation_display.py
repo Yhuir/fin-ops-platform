@@ -124,6 +124,7 @@ def test_itemized_parent_does_not_imply_arbitrary_cost_split():
 
 def test_installment_display_does_not_change_cost_source_history_or_facts():
     from fin_ops_platform.services.cost_statistics_canonical_repository import _cost_oa_payload
+
     from tests.test_workbench_display_subgroups import installment_rows
     rows = installment_rows()
     # Exercise the Cost projection instead of giving display a Workbench DTO.

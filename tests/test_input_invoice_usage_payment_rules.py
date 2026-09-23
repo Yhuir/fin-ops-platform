@@ -19,7 +19,7 @@ from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 from tests.app_test_support import build_local_state_application as build_application
-from tests.test_pending_invoice_service import FakeOAProjection, FakeCanonicalRelationReader
+from tests.test_pending_invoice_service import FakeCanonicalRelationReader, FakeOAProjection
 
 
 class StaticOAProjection:

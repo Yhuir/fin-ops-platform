@@ -16,7 +16,6 @@ from fin_ops_platform.services.workbench_relation_requirements import (
     build_bank_relation_requirement_metadata,
 )
 
-
 _REQUIREMENT_KEYS = frozenset(
     {
         "paired_requirement_source",

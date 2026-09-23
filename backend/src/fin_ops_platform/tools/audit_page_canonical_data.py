@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
 import json
 import sys
+from collections.abc import Sequence
 from typing import Any, TextIO
 
 from fin_ops_platform.services.postgres_connection import (
@@ -11,13 +11,13 @@ from fin_ops_platform.services.postgres_connection import (
     PostgresConnection,
     PostgresSettings,
 )
-from fin_ops_platform.services.postgres_repositories.page_business_audit import (
-    PAGE_AUDIT_CONTRACTS,
-    audit_page_canonical_data,
-)
 from fin_ops_platform.services.postgres_repositories.cost_statistics_page_audit import (
     COST_STATISTICS_AUDIT_DOMAIN_KEY,
     audit_cost_statistics_page,
+)
+from fin_ops_platform.services.postgres_repositories.page_business_audit import (
+    PAGE_AUDIT_CONTRACTS,
+    audit_page_canonical_data,
 )
 from fin_ops_platform.tools.cli_reports import postgres_configuration_missing_report
 

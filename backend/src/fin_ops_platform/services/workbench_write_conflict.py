@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from http import HTTPStatus
 from typing import Any
 
-
 DEFAULT_WORKBENCH_WRITE_CONFLICT_MESSAGE = "工作台数据已变化，请刷新后重试。"
 
 

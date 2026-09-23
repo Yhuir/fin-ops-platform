@@ -15,19 +15,18 @@ from typing import Any, Callable, Mapping, Sequence, TextIO
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
+from fin_ops_platform.services.page_audit_registry import PAGE_AUDIT_REGISTRY
 from fin_ops_platform.services.postgres_connection import (
     PostgresConfigurationError,
     PostgresConnection,
     PostgresSettings,
 )
-from fin_ops_platform.services.page_audit_registry import PAGE_AUDIT_REGISTRY
 from fin_ops_platform.tools import http_slo_probe, retired_projection_event_audit
 from fin_ops_platform.tools.cli_reports import (
     input_file_error_report,
     postgres_configuration_missing_report,
     write_json_report,
 )
-
 
 DEFAULT_WRITE_TARGET_MS = 1_000.0
 DEFAULT_REFRESH_TARGET_MS = 30_000.0

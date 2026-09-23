@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+import json
+import os
+import unittest
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from io import StringIO
-import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import os
 from threading import Barrier
-import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import build_application
@@ -25,6 +25,7 @@ from fin_ops_platform.tools.repair_workbench_legacy_typed_identities import (
 from fin_ops_platform.tools.workbench_direct_application_bootstrap_probe import (
     main as workbench_direct_application_bootstrap_probe,
 )
+
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,

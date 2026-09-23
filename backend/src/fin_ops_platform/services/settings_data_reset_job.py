@@ -10,7 +10,6 @@ from fin_ops_platform.services.settings_data_reset_service import (
     RESET_OA_AND_REBUILD_ACTION,
 )
 
-
 SETTINGS_DATA_RESET_REQUESTED_EVENT = "settings.data_reset.requested"
 
 

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 import unittest
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
-from fin_ops_platform.services.postgres_repositories.workbench_matching_queue import PostgresWorkbenchMatchingQueueRepository
+from fin_ops_platform.services.postgres_repositories.workbench_matching_queue import (
+    PostgresWorkbenchMatchingQueueRepository,
+)
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import (
     WorkbenchReconciliationDirtyQueue,
     WorkbenchReconciliationDirtyQueueOptions,

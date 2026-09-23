@@ -4,7 +4,6 @@ from typing import Any
 
 from fin_ops_platform.services.postgres_repositories.audit_report import AuditIssue
 
-
 BANK_FLOW_RULE_BATCH_CONSUMER = "bank_flow_rule_batch_members"
 
 

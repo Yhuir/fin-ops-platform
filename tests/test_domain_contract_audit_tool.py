@@ -3,9 +3,9 @@ from __future__ import annotations
 import io
 import json
 import os
-from urllib.parse import parse_qs, urlsplit
-from unittest import mock
 import unittest
+from unittest import mock
+from urllib.parse import parse_qs, urlsplit
 
 from fin_ops_platform.tools import domain_contract_audit
 

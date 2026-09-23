@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 import unittest
+from types import SimpleNamespace
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_payment_status_reconcile import (
@@ -9,14 +9,14 @@ from fin_ops_platform.services.oa_payment_status_reconcile import (
     OAPaymentStatusReconcileService,
 )
 from fin_ops_platform.services.oa_payment_status_reconcile_contract import (
-    OA_PAYMENT_STATUS_REMOVE_MISSING_OPERATION,
     OA_PAYMENT_STATUS_RECONCILE_EVENT,
+    OA_PAYMENT_STATUS_REMOVE_MISSING_OPERATION,
 )
 from fin_ops_platform.services.oa_payment_status_service import (
-    OAPaymentStatusRecord,
     PAY_STATUS_FAILED,
     PAY_STATUS_PAID,
     PAY_STATUS_PENDING,
+    OAPaymentStatusRecord,
 )
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from io import StringIO
 import json
-from pathlib import Path
 import tempfile
 import unittest
+from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 from fin_ops_platform.tools import external_control_evidence as tool
+
 from tests.external_evidence_test_support import ARTIFACT_BYTES, bank_item, manifest_payload
 
 

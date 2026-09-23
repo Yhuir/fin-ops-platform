@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Sequence, TextIO
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
@@ -12,7 +12,6 @@ from fin_ops_platform.services.postgres_repositories.workbench_matching_queue im
     PostgresWorkbenchMatchingQueueRepository,
 )
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
-
 
 ETC_BATCH_INVOICE_LINK_BACKFILL_SQL = """
 select

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import unittest
 from contextlib import contextmanager
 from datetime import UTC, datetime
-import unittest
 
 from fin_ops_platform.services.external_control_evidence import ExternalControlEvidenceService
 from fin_ops_platform.services.postgres_repositories.external_control_evidence import (
     PostgresExternalControlEvidenceRepository,
 )
+
 from tests.external_evidence_test_support import bank_item, manifest_payload
 
 

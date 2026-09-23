@@ -7,7 +7,14 @@ from typing import Any, Callable
 from urllib.parse import urlencode
 
 from psycopg import OperationalError
-from psycopg.errors import InsufficientPrivilege, InvalidSchemaName, LockNotAvailable, QueryCanceled, UndefinedTable, UniqueViolation
+from psycopg.errors import (
+    InsufficientPrivilege,
+    InvalidSchemaName,
+    LockNotAvailable,
+    QueryCanceled,
+    UndefinedTable,
+    UniqueViolation,
+)
 from psycopg_pool import PoolTimeout, TooManyRequests
 
 from fin_ops_platform.services.cash_domain import CashError, serialize

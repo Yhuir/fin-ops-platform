@@ -2,19 +2,18 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 from collections import OrderedDict
 from dataclasses import dataclass
 from decimal import Decimal
-import json
-import os
 from pathlib import Path
 from time import monotonic
 from typing import Iterable
 
 from fin_ops_platform.app.server import build_application
-from fin_ops_platform.services.historical_etc_repair_service import DEFAULT_HISTORICAL_ETC_REPAIR_SPECS
 from fin_ops_platform.services.etc_service import UploadedEtcZipFile, parse_etc_xml
-
+from fin_ops_platform.services.historical_etc_repair_service import DEFAULT_HISTORICAL_ETC_REPAIR_SPECS
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / ".runtime" / "fin_ops_platform"

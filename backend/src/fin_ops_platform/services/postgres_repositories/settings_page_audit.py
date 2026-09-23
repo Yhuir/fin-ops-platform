@@ -11,7 +11,6 @@ from fin_ops_platform.services.postgres_repositories.audit_report import (
     use_audit_snapshot,
 )
 
-
 ACTIVE_JOB_STATUSES = frozenset({"queued", "running"})
 ATTENTION_JOB_STATUSES = frozenset({"failed", "partial_success"})
 SENSITIVE_KEY_PARTS = ("password", "token", "secret", "encrypted", "content", "raw_file")

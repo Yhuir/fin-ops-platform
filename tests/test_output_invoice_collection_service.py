@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from decimal import Decimal
 import unittest
+from decimal import Decimal
 from typing import Any
 
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 import unittest
+from types import SimpleNamespace
 
 from fin_ops_platform.services.etc_business_batch_delete_service import EtcBusinessBatchDeleteService
 from fin_ops_platform.services.etc_service import EtcBusinessBatchNotFoundError

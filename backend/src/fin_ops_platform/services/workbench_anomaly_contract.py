@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 AMOUNT_EXCEPTION_CODES = (
     "oa_bank_equal_invoice_more",
     "oa_bank_equal_invoice_less",

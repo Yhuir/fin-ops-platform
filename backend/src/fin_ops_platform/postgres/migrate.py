@@ -1,20 +1,19 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TextIO
 from urllib.parse import parse_qsl, quote, unquote, urlsplit, urlunsplit
-
 
 MIGRATION_FILENAME_RE = re.compile(r"^(?P<version>\d{4})_(?P<name>[a-z0-9_]+)\.sql$")
 MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"

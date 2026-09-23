@@ -1,14 +1,19 @@
 import json
-from types import SimpleNamespace
 import unittest
+from types import SimpleNamespace
+
+from fin_ops_platform.domain.enums import BatchType
+from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
 
 from tests.app_test_support import (
     build_grouped_workbench_projection as _build_grouped_workbench_projection,
+)
+from tests.app_test_support import (
     build_local_state_application as build_application,
+)
+from tests.app_test_support import (
     install_direct_workbench_selection_repository,
 )
-from fin_ops_platform.domain.enums import BatchType
-from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
 
 
 def flatten_groups(groups: list[dict[str, object]], row_type: str) -> list[dict[str, object]]:

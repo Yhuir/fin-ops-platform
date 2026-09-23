@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import io
 import json
 import unittest
+from copy import deepcopy
 from unittest.mock import patch
 
 from fin_ops_platform.tools import workbench_relation_requirement_repair_ops as repair_ops

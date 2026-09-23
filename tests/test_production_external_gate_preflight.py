@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from io import StringIO
 import json
 import unittest
+from io import StringIO
 
 from fin_ops_platform.tools import production_external_gate_preflight as preflight
 

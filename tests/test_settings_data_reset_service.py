@@ -2,13 +2,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.settings_data_reset_service import (
     RESET_BANK_TRANSACTIONS_ACTION,
     RESET_INVOICES_ACTION,
     RESET_OA_AND_REBUILD_ACTION,
 )
+
+from tests.app_test_support import build_local_state_application as build_application
 
 
 class SettingsDataResetServiceTests(unittest.TestCase):

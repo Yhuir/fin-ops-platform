@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 OA_ATTACHMENT_INVOICE_PREFIX = "oa-att-inv-"
 WORKBENCH_ROW_IDENTITY_SEPARATOR = "\x1f"
 

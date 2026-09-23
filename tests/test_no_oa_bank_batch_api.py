@@ -1,20 +1,20 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 import tempfile
 import time
 import unittest
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
-from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction
-from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.bank_batch_application_service import canonical_snapshot_version
+from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.no_oa_managed_rule_policy import NO_OA_MANAGED_BATCH_TYPE_ORDER
 
+from tests.app_test_support import build_local_state_application as build_application
 
 AUTO_CATEGORY_TEXT_BY_CODE = {
     "fee": "手续费",

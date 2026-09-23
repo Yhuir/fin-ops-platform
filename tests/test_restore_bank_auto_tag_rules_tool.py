@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from io import StringIO
 import json
+import unittest
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService

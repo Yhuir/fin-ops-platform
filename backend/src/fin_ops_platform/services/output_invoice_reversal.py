@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable
 
-
 REVERSED_BLUE_INVOICE_NO_SQL_PATTERN = (
     r"被红冲蓝字数电发票号码\s*[：:]\s*([0-9]{20})([^0-9]|$)"
 )

@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import UTC, datetime
-from pathlib import Path
 import argparse
 import hashlib
 import json
 import subprocess
 import tarfile
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Sequence
-
 
 MANIFEST_NAME = "production-browser-smoke-manifest.json"
 DEFAULT_BASE_URL = "https://www.yn-sourcing.com"

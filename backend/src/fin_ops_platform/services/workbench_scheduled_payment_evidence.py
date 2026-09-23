@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from datetime import date, datetime
 import re
+from datetime import date, datetime
 from typing import Any
-
 
 SCHEDULED_PAYMENT_DATE_RE = re.compile(
     r"预约[^，。；;、()（）]{0,20}"

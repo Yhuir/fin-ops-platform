@@ -47,7 +47,9 @@ def test_attachment_owner_wins_over_stored_wrong_manual_assignment():
 
 @pytest.mark.parametrize("correction", [False, True])
 def test_assignment_api_domain_rejects_both_initial_and_correction_for_oa_invoice(correction):
-    from tests.test_workbench_invoice_expense_item_assignment_service import WorkbenchInvoiceExpenseItemAssignmentServiceTests
+    from tests.test_workbench_invoice_expense_item_assignment_service import (
+        WorkbenchInvoiceExpenseItemAssignmentServiceTests,
+    )
     fixture = WorkbenchInvoiceExpenseItemAssignmentServiceTests()
     service, invoices, _, audit = fixture._fixture(source_links=[OA_LINK])
     request = fixture._payload()

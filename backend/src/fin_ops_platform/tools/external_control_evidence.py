@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
 import hashlib
 import json
-from pathlib import Path
 import sys
+from collections.abc import Sequence
+from pathlib import Path
 from typing import Any, TextIO
 
 from fin_ops_platform.services.external_control_evidence import ExternalControlEvidenceService
-from fin_ops_platform.services.postgres_connection import PostgresConfigurationError, PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_connection import (
+    PostgresConfigurationError,
+    PostgresConnection,
+    PostgresSettings,
+)
 from fin_ops_platform.services.postgres_repositories.external_control_evidence import (
     PostgresExternalControlEvidenceRepository,
 )

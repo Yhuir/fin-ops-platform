@@ -12,7 +12,6 @@ from fin_ops_platform.services.import_file_service import is_company_identity
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.matching import MatchingEngineService
 
-
 ZERO = Decimal("0.00")
 DEFAULT_COMPANY_NAME = "溯源科技有限公司"
 LEGACY_DEMO_TRANSACTION_SOURCES = {"bank_transaction.json"}

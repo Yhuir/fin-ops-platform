@@ -6,7 +6,9 @@ import json
 from pathlib import Path
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-from fin_ops_platform.services.postgres_repositories.workbench_scope_repair import PostgresWorkbenchScopeRepairRepository
+from fin_ops_platform.services.postgres_repositories.workbench_scope_repair import (
+    PostgresWorkbenchScopeRepairRepository,
+)
 
 
 def main():

@@ -9,18 +9,19 @@ from typing import Any, Callable
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
+
 from tests.app_test_support import (
     build_grouped_workbench_projection,
-    build_local_state_application as build_application,
     install_direct_workbench_selection_repository,
 )
-
+from tests.app_test_support import (
+    build_local_state_application as build_application,
+)
 from tests.test_workbench_uow_contract import (
     _Command,
     _RecordingConnection,
     _RecordingRepositoryFactory,
 )
-
 
 """
 PF-P024/PF-P025 durable idempotency contracts.

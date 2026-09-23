@@ -5,7 +5,6 @@ from http import HTTPStatus
 from typing import Any
 from urllib.parse import unquote
 
-
 VIEW_MODE_COMPLETED = "completed"
 VIEW_MODE_IN_PROGRESS = "in_progress"
 VIEW_MODES = {VIEW_MODE_COMPLETED, VIEW_MODE_IN_PROGRESS}

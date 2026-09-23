@@ -1,20 +1,15 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from copy import deepcopy
 from dataclasses import asdict, is_dataclass
 from decimal import Decimal
 from enum import Enum
-import hashlib
-import json
-import re
 from typing import Any, Callable
 
 from fin_ops_platform.services.app_settings_service import AppSettingsService
-from fin_ops_platform.services.bank_transaction_category_service import (
-    BANK_TRANSACTION_CATEGORY_LABELS,
-    BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION,
-    BankTransactionCategoryService,
-)
 from fin_ops_platform.services.bank_batch_service import (
     BANK_FLOW_RULE_BATCH_RELATION_MODE,
     BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
@@ -22,10 +17,14 @@ from fin_ops_platform.services.bank_batch_service import (
     NO_OA_BANK_BATCH_SCHEMA_VERSION,
     BankBatchService,
 )
+from fin_ops_platform.services.bank_transaction_category_service import (
+    BANK_TRANSACTION_CATEGORY_LABELS,
+    BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION,
+    BankTransactionCategoryService,
+)
 from fin_ops_platform.services.no_oa_managed_rule_policy import NO_OA_MANAGED_LABELS
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
-
 
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 

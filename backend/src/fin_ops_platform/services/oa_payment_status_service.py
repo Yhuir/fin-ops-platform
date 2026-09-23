@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
 from fin_ops_platform.services.imports import clean_string
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
-
 
 PAY_STATUS_PENDING = 0
 PAY_STATUS_PAID = 1

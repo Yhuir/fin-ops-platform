@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path, PurePosixPath
-import warnings
 from zipfile import BadZipFile, ZipFile, is_zipfile
 
 import fitz

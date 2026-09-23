@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from decimal import Decimal
 import unittest
+from decimal import Decimal
 
 from fin_ops_platform.tools.backfill_etc_batch_invoice_links import (
-    _etc_batch_invoice_links_table_exists,
     _ensure_apply_candidate_examples_complete,
+    _etc_batch_invoice_links_table_exists,
     apply_etc_batch_invoice_link_backfill,
     audit_etc_batch_invoice_link_backfill,
 )

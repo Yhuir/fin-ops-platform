@@ -1,5 +1,5 @@
-from io import StringIO
 import unittest
+from io import StringIO
 from unittest.mock import patch
 
 from fin_ops_platform.services.app_settings_service import OA_ATTACHMENT_INVOICE_PROMOTION_CREATE_MISSING

@@ -12,7 +12,6 @@ from fin_ops_platform.services.workbench_idempotency import (
     WorkbenchIdempotencyKeyConflict,
 )
 
-
 """
 PF-P053 target contract tests.
 

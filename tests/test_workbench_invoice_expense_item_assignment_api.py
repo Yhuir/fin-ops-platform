@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from http import HTTPStatus
 import json
 import unittest
+from http import HTTPStatus
 
 from fin_ops_platform.app.routes_workbench_actions import WorkbenchActionApiRoutes
 from fin_ops_platform.services.operation_history_semantics import operation_semantics
@@ -10,6 +10,7 @@ from fin_ops_platform.services.workbench_idempotency import WorkbenchIdempotency
 from fin_ops_platform.services.workbench_invoice_expense_item_assignment_service import (
     WorkbenchInvoiceExpenseItemAssignmentError,
 )
+
 from tests.app_test_support import build_local_state_application
 
 
@@ -105,7 +106,9 @@ class WorkbenchInvoiceExpenseItemAssignmentApiTests(unittest.TestCase):
                 self.assertEqual(result["error"], code)
 
     def test_actual_oa_source_rejection_is_structured_conflict(self) -> None:
-        from tests.test_workbench_invoice_expense_item_assignment_service import WorkbenchInvoiceExpenseItemAssignmentServiceTests
+        from tests.test_workbench_invoice_expense_item_assignment_service import (
+            WorkbenchInvoiceExpenseItemAssignmentServiceTests,
+        )
         fixture = WorkbenchInvoiceExpenseItemAssignmentServiceTests()
         service, invoices, _, audit = fixture._fixture(source_links=[{
             "source_type": "oa_attachment_invoice", "derived_from_oa_id": "oa-1", "source_expense_item_id": "oa-1:item:0",

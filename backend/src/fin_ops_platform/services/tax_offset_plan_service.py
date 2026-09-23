@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from datetime import UTC, datetime
-import re
 from typing import Any, Callable
 from uuid import uuid4
 

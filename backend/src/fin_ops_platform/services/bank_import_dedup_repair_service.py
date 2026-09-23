@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-from copy import deepcopy
-from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 import re
-from typing import Any
 import unicodedata
+from collections import Counter, defaultdict
+from copy import deepcopy
+from decimal import Decimal, InvalidOperation
+from typing import Any
 
 from fin_ops_platform.services.bank_transaction_identity_service import (
     BankTransactionIdentityService,

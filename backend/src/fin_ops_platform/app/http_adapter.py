@@ -16,7 +16,6 @@ from fin_ops_platform.app.route_access_policy import is_cash_request
 from fin_ops_platform.app.server import Application, Response
 from fin_ops_platform.services.http_runtime_metrics import HTTP_RUNTIME_METRICS
 
-
 LOGGER = logging.getLogger("fin_ops_platform.http")
 BODY_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 WORKBENCH_GZIP_MIN_BYTES = 1024

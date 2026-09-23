@@ -9,7 +9,6 @@ from typing import Any
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 
-
 XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 EXPORT_COLUMNS = [
     "序号",

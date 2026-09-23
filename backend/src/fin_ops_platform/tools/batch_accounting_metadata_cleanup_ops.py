@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import json
+import sys
 from collections.abc import Sequence
 from copy import deepcopy
 from hashlib import sha256
-import json
-import sys
 from typing import Any, TextIO
 
 from fin_ops_platform.tools.runtime_application import (
@@ -13,7 +13,6 @@ from fin_ops_platform.tools.runtime_application import (
     persist_workbench_pair_relations,
     workbench_relation_command_service,
 )
-
 
 RETIRED_KEYS = ("bank_row_id", "oa_row_ids", "invoice_row_ids", "year")
 REPAIR_ACTOR_ID = "system:batch_accounting_metadata_cleanup"

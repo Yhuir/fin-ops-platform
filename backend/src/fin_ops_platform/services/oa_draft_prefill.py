@@ -4,7 +4,6 @@ from copy import deepcopy
 from datetime import date
 from typing import Any
 
-
 ETC_OA_DRAFT_PREFILL_FAMILY = "etc"
 INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY = "input_invoice_usage"
 

@@ -8,7 +8,6 @@ from fin_ops_platform.domain.enums import MatchingConfidence, MatchingResultType
 from fin_ops_platform.domain.models import BankTransaction, Invoice, MatchingResult, MatchingRun
 from fin_ops_platform.services.imports import ImportNormalizationService, normalize_name
 
-
 ZERO = Decimal("0.00")
 MAX_EXACT_SUM_MATCH_SIZE = 3
 MAX_EXACT_SUM_MATCH_STATE_COUNT = 20000

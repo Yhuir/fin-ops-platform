@@ -3,7 +3,6 @@ from __future__ import annotations
 from math import isfinite
 from typing import Any, Mapping
 
-
 PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 
 

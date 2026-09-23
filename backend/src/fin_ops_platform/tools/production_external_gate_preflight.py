@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, datetime
 import json
 import os
 import sys
+from datetime import UTC, datetime
 from typing import Mapping, Sequence, TextIO
 
 

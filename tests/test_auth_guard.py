@@ -8,6 +8,7 @@ import fin_ops_platform.app.auth as auth_module
 from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.access_control_service import AccessControlService
 from fin_ops_platform.services.oa_identity_service import OASessionExpiredError, OAUserIdentity
+
 from tests.app_test_support import build_local_state_application as build_application
 from tests.app_test_support import configure_access_control
 

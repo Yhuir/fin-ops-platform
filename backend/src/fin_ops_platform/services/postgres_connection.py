@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import dataclass
 import os
 import re
+from contextlib import contextmanager
+from dataclasses import dataclass
 from threading import Lock
 from time import monotonic
 from typing import Any, Iterator

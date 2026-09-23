@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 import re
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping, Protocol
-
 
 EXTERNAL_CONTROL_EVIDENCE_CONTRACT_VERSION = "external-control-evidence.v1"
 EXTERNAL_CONTROL_EVIDENCE_DOMAINS = ("bank", "oa", "invoice", "etc")

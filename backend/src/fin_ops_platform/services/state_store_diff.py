@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields, is_dataclass
-from decimal import Decimal
-from datetime import date, datetime
-from enum import Enum
 import re
+from dataclasses import asdict, dataclass, fields, is_dataclass
+from datetime import date, datetime
+from decimal import Decimal
+from enum import Enum
 from typing import Any
-
 
 SECRET_KEY_MARKERS = (
     "password",

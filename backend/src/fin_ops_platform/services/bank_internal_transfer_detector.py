@@ -6,7 +6,6 @@ from typing import Any
 
 from fin_ops_platform.services.import_file_service import is_company_identity
 
-
 INTERNAL_TRANSFER_MATCH_WINDOW = timedelta(hours=48)
 INTERNAL_TRANSFER_RULE_CODE = "internal_transfer_pair"
 INTERNAL_TRANSFER_SELF_TEXT_MARKERS = ("本公司帐户", "本公司账户", "本公司税户")

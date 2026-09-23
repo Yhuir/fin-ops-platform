@@ -1,15 +1,15 @@
 from __future__ import annotations
 
+import unittest
 from copy import deepcopy
 from types import SimpleNamespace
-import unittest
 
+from fin_ops_platform.services.bank_batch_application_service import canonical_snapshot_version
 from fin_ops_platform.services.no_oa_bank_batch_application_service import (
     NoOaBankBatchApplicationService,
     NoOaBankBatchPersistenceError,
     NoOaPairRelationSnapshotPort,
 )
-from fin_ops_platform.services.bank_batch_application_service import canonical_snapshot_version
 from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 

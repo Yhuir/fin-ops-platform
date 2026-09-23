@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import unittest
 from dataclasses import dataclass
 from http import HTTPStatus
 from types import SimpleNamespace
-import unittest
 
 from fin_ops_platform.app.routes_bank_details import BankDetailsApiRoutes
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryValidationError

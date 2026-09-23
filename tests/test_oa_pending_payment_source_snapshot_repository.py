@@ -3,10 +3,10 @@ from __future__ import annotations
 import unittest
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
-from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord
 from fin_ops_platform.services.oa_payment_status_reconcile_contract import (
     OA_PAYMENT_STATUS_REMOVE_MISSING_OPERATION,
 )
+from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentSourceSnapshotRepository,
     _signature,

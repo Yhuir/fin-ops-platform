@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
 import hashlib
 import json
 import sys
+from collections.abc import Sequence
 from typing import Any, TextIO
 
 from fin_ops_platform.services.app_settings_service import AppSettingsService

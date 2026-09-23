@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-
 InvoiceKind = Literal["input", "output"]
 FlowDirection = Literal["inflow", "outflow"]
 WorkbenchDirection = Literal["income", "expenditure"]

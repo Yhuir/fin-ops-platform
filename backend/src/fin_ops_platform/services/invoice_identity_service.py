@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-
 CENT = Decimal("0.01")
 PLACEHOLDER_TEXTS = frozenset({"-", "--", "—", "无", "暂无", "null", "none", "n/a", "nan"})
 

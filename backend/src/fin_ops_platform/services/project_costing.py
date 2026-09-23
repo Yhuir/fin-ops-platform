@@ -21,7 +21,6 @@ from fin_ops_platform.services.integrations import IntegrationHubService
 from fin_ops_platform.services.ledgers import LedgerReminderService
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 
-
 ZERO = Decimal("0.00")
 ASSIGNABLE_TYPES = {"invoice", "bank_transaction", "reconciliation_case", "follow_up_ledger"}
 

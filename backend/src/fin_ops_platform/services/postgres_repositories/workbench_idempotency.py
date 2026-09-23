@@ -9,7 +9,6 @@ from fin_ops_platform.services.workbench_idempotency import (
     WorkbenchIdempotencyReservation,
 )
 
-
 _COLUMNS = """
     tenant_id,
     actor_id,

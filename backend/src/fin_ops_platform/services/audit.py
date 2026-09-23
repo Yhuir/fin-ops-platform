@@ -8,7 +8,6 @@ from uuid import uuid4
 from fin_ops_platform.domain.models import AuditLog
 from fin_ops_platform.services.postgres_repositories.common import serialize_value, without_keys
 
-
 _SENSITIVE_AUDIT_KEYS = {
     "authorization",
     "cookie",

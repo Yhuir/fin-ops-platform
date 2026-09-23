@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import json
-from pathlib import Path
-from types import SimpleNamespace
 import tempfile
-from time import perf_counter
 import unittest
+from copy import deepcopy
+from pathlib import Path
+from time import perf_counter
+from types import SimpleNamespace
 
 from fin_ops_platform.app.auth import OAUserIdentity
 from fin_ops_platform.app.routes_batch_accounting import BatchAccountingApiRoutes
@@ -15,11 +15,13 @@ from fin_ops_platform.services.batch_accounting_service import (
     BatchAccountingService,
 )
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
+
 from tests.app_test_support import (
     build_local_state_application as build_application,
+)
+from tests.app_test_support import (
     configure_access_control,
 )
-
 
 BANK_ROW_ID = "txn_imported_202601_batch_001"
 OA_ROW_ID = "oa-exp-ba-001"

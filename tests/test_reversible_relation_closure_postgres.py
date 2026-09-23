@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
+import unittest
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
-import unittest
 from uuid import uuid4
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-from fin_ops_platform.services.postgres_repositories.workbench_relation import (
-    PostgresWorkbenchRelationRepository,
-)
 from fin_ops_platform.services.postgres_repositories.workbench_idempotency import (
     PostgresWorkbenchIdempotencyRepository,
+)
+from fin_ops_platform.services.postgres_repositories.workbench_relation import (
+    PostgresWorkbenchRelationRepository,
 )
 from fin_ops_platform.services.turnover_ledger_write_uow import TurnoverLedgerWriteUnitOfWork
 from fin_ops_platform.services.workbench_pair_relation_service import (
@@ -25,13 +25,13 @@ from fin_ops_platform.services.workbench_relation_command_service import (
     WorkbenchRelationCommandService,
 )
 from fin_ops_platform.services.workbench_uow import WorkbenchWriteUnitOfWork
+
 from tests.postgres_test_utils import (
     apply_test_migrations,
     assert_safe_test_database_url,
     require_postgres_test_database_url,
     truncate_test_database,
 )
-
 
 IMPACT_MATRIX_PATH = Path("docs/dev/write-operation-impact-matrix.json")
 EXPECTED_PROFILE_PAIRS = {

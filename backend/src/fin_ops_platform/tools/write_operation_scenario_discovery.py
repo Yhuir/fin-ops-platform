@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, datetime
 import json
-from pathlib import Path
 import sys
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Sequence, TextIO
 from urllib.parse import quote
 
@@ -14,7 +14,6 @@ from fin_ops_platform.services.postgres_connection import (
     PostgresSettings,
 )
 from fin_ops_platform.tools.cli_reports import postgres_configuration_missing_report, write_json_report
-
 
 DEFAULT_LIMIT = 10
 STANDARD_SCENARIOS_PER_OPERATION = 1

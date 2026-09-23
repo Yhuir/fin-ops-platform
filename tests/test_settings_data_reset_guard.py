@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from fin_ops_platform.services.postgres_repositories.settings_data_reset import (
     PostgresSettingsDataResetRepository,

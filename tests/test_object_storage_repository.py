@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import os
 import sys
-from types import SimpleNamespace
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from fin_ops_platform.services.object_storage import ObjectStorageConfigurationError, ObjectStorageSettings, S3ObjectStorageRepository
+from fin_ops_platform.services.object_storage import (
+    ObjectStorageConfigurationError,
+    ObjectStorageSettings,
+    S3ObjectStorageRepository,
+)
 
 
 class ObjectStorageSettingsTests(unittest.TestCase):

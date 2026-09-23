@@ -9,7 +9,6 @@ from typing import Any, Callable
 
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 
-
 """
 PF-P019 target contract tests.
 

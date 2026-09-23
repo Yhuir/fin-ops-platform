@@ -4,15 +4,15 @@ from typing import Any
 
 from fin_ops_platform.services.imports import clean_string
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.oa_payment_status_reconcile_contract import (
+    OA_PAYMENT_STATUS_RECONCILE_EVENT,
+    OA_PAYMENT_STATUS_REMOVE_MISSING_OPERATION,
+)
 from fin_ops_platform.services.oa_payment_status_service import (
-    OAPaymentStatusRepository,
     PAY_STATUS_FAILED,
     PAY_STATUS_PAID,
     PAY_STATUS_PENDING,
-)
-from fin_ops_platform.services.oa_payment_status_reconcile_contract import (
-    OA_PAYMENT_STATUS_REMOVE_MISSING_OPERATION,
-    OA_PAYMENT_STATUS_RECONCILE_EVENT,
+    OAPaymentStatusRepository,
 )
 from fin_ops_platform.services.postgres_repositories.oa_payment_status_reconcile import (
     PostgresOAPaymentStatusReconcileRepository,

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 EXTERNAL_TURNOVER_CATEGORY_CODE = "external_turnover"
 EXTERNAL_TURNOVER_ROLE = "external_turnover"
 

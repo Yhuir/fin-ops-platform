@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from fin_ops_platform.services.runtime_redis import RuntimeRedisHelper, RuntimeRedisSettings
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 COMMON_ENV_EXAMPLE = REPO_ROOT / "deploy/oa/env/fin-ops.common.env.example"

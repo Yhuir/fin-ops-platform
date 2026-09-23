@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 import hashlib
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fin_ops_platform.services.external_control_evidence import (
@@ -9,7 +9,6 @@ from fin_ops_platform.services.external_control_evidence import (
     external_evidence_controls,
     normalize_external_evidence_item,
 )
-
 
 ARTIFACT_BYTES = b"independent external source artifact\n"
 

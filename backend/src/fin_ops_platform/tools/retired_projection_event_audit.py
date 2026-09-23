@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, datetime
 import json
-from pathlib import Path
 import sys
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Sequence, TextIO
 
 from fin_ops_platform.services.postgres_connection import (
@@ -16,7 +16,6 @@ from fin_ops_platform.tools.cli_reports import (
     postgres_configuration_missing_report,
     write_json_report,
 )
-
 
 DEFAULT_LOOKBACK_HOURS = 24.0
 DEFAULT_LIMIT = 2_000

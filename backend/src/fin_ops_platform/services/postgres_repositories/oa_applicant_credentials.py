@@ -10,7 +10,6 @@ from fin_ops_platform.services.oa_applicant_credentials import (
 )
 from fin_ops_platform.services.postgres_repositories.common import jsonb as _jsonb
 
-
 OA_APPLICANT_CREDENTIAL_KEY_ENV = "FIN_OPS_OA_APPLICANT_CREDENTIAL_KEY"
 
 

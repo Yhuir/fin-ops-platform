@@ -429,7 +429,9 @@ class ImportJobCompletion:
         actor = self.job.payload.get("command_actor")
         if actor:
             from fin_ops_platform.services.audit import AuditTrailService
-            from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
+            from fin_ops_platform.services.postgres_repositories.operations_audit import (
+                PostgresOperationsAuditRepository,
+            )
             AuditTrailService(PostgresOperationsAuditRepository(transaction)).record_action(
                 actor_id=actor["actor_id"], action="import_job.completed", entity_type="import_job",
                 entity_id=self.job.import_job_id, metadata={**actor, "creator": self.job.created_by,

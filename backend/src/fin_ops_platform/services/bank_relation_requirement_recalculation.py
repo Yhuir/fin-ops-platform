@@ -11,7 +11,6 @@ from fin_ops_platform.services.workbench_relation_requirements import (
     build_bank_relation_requirement_metadata,
 )
 
-
 BANK_RELATION_REQUIREMENT_RECALCULATION_EVENT = (
     "settings.bank_relation_requirements.recalculate.requested"
 )

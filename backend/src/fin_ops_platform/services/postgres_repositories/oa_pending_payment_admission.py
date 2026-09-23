@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import asdict, fields, is_dataclass
 import hashlib
 import json
+from dataclasses import asdict, fields, is_dataclass
 from typing import Any
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord, OAReadStatus

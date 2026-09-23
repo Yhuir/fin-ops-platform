@@ -9,7 +9,6 @@ from fin_ops_platform.services.workbench_row_identity import (
     workbench_row_identity_key,
 )
 
-
 EXCEPTION_CASE_DEFINITIONS: dict[str, dict[str, str]] = {
     "oa_missing_bank": {
         "label": "OA缺流水",

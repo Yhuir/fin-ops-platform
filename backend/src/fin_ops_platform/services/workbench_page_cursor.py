@@ -6,7 +6,6 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-
 WORKBENCH_PAGE_CURSOR_SCHEMA = "workbench-direct-v1"
 WORKBENCH_PAGE_CURSOR_MAX_LENGTH = 2048
 

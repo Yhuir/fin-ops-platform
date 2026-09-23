@@ -17,7 +17,6 @@ from fin_ops_platform.domain.models import (
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.imports import ImportNormalizationService, clean_string
 
-
 SUPPORTED_SCOPES = (
     "all",
     "counterparties",

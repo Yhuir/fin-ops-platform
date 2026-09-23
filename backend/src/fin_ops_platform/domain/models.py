@@ -9,10 +9,10 @@ from .enums import (
     BatchStatus,
     BatchType,
     DifferenceReason,
+    ImportDecision,
     IntegrationObjectType,
     IntegrationSource,
     IntegrationSyncStatus,
-    ImportDecision,
     InvoiceStatus,
     InvoiceType,
     LedgerStatus,
@@ -25,7 +25,6 @@ from .enums import (
     TransactionDirection,
     TransactionStatus,
 )
-
 
 ZERO = Decimal("0.00")
 

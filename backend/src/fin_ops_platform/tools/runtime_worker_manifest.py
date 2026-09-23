@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
 import json
 import sys
+from dataclasses import asdict
 from typing import Sequence, TextIO
 
 from fin_ops_platform.services.runtime_worker_registry import (

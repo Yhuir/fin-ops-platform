@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from fin_ops_platform.services.oa_identity_service import OASessionExpiredError, OAUserIdentity
+
 from tests.app_test_support import build_local_state_application as build_application
 from tests.app_test_support import configure_access_control
 

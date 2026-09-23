@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import unittest
 from contextlib import contextmanager
 from copy import deepcopy
-import unittest
 
 from fin_ops_platform.services.bank_category_relation_closure_service import (
     BankCategoryRelationClosureService,
@@ -10,7 +10,6 @@ from fin_ops_platform.services.bank_category_relation_closure_service import (
 from fin_ops_platform.services.workbench_pair_relation_service import (
     WorkbenchPairRelationService,
 )
-
 
 INTEREST_TAG = "custom_interest"
 

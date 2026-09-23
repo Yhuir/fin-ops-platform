@@ -1,20 +1,20 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 from hashlib import sha256
 from http import HTTPStatus
-import json
 from threading import RLock
 from typing import Any, Callable, Protocol
 from uuid import uuid4
 
 from fin_ops_platform.services.etc_service import EtcOAFormFieldMapping
 from fin_ops_platform.services.input_invoice_usage_service import (
-    InputInvoiceUsageError,
     TARGET_APPLICANTS,
+    InputInvoiceUsageError,
 )
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_draft_prefill import (
@@ -24,7 +24,6 @@ from fin_ops_platform.services.oa_draft_prefill import (
     render_oa_draft_reason,
 )
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
-
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")

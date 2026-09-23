@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import tempfile
-from types import SimpleNamespace
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.services.state_store import ApplicationStateStore
+
+from tests.app_test_support import build_local_state_application as build_application
 
 
 def _session() -> SimpleNamespace:

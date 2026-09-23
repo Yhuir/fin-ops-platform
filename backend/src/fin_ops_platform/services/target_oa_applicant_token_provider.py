@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
+from dataclasses import dataclass
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Callable, Protocol
 from urllib.error import HTTPError, URLError
@@ -14,7 +14,6 @@ from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
 from fin_ops_platform.services.etc_service import EtcOAHttpClientSettings, HttpEtcOAClient
-
 
 OA_LOGIN_RSA_PUBLIC_KEY_ENV = "FIN_OPS_OA_LOGIN_RSA_PUBLIC_KEY"
 

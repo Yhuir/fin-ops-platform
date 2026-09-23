@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
@@ -10,7 +10,6 @@ from fin_ops_platform.services.state_store_protocol import (
     settings_access_control_from_payload,
     settings_username_comparison_key,
 )
-
 
 DEFAULT_ADMIN_USERNAME = PROTECTED_ADMIN_USERNAME
 ASSIGNABLE_PAGE_KEYS = frozenset(

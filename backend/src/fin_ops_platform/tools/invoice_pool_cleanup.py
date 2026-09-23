@@ -1,20 +1,19 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
-from collections.abc import Sequence
 import csv
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
+from collections import Counter
+from collections.abc import Sequence
+from pathlib import Path
 from typing import Any, TextIO
 
 from fin_ops_platform.services.cutover_preflight import redact_secret_text
 from fin_ops_platform.services.import_file_service import parse_invoice_rows, read_xlsx_rows
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-
 
 DEFAULT_AUDIT_ROOT = Path(".runtime/backups/invoice-pool-audit")
 EXECUTE_GUARD_ENV = "FIN_OPS_INVOICE_POOL_CLEANUP_EXECUTE"

@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from hashlib import sha1
 from typing import Any
 
-
 DIRTY_SCOPE_WARNING_SECONDS = 300
 DIRTY_SCOPE_CRITICAL_SECONDS = 900
 WORKBENCH_REBUILD_WARNING_SECONDS = 300

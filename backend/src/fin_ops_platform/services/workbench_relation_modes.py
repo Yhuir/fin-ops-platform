@@ -3,7 +3,6 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-
 MANUAL_CONFIRMED_RELATION_MODE = "manual_confirmed"
 TURNOVER_MANUAL_CLOSURE_RELATION_MODE = "turnover_manual_closure"
 OUTPUT_INVOICE_REVERSAL_RELATION_MODE = "output_invoice_reversal"

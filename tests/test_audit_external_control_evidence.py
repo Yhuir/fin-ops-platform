@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 import unittest
+from datetime import UTC, datetime, timedelta
 
 from fin_ops_platform.services.external_control_evidence import ExternalControlEvidenceService
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
@@ -11,6 +11,7 @@ from fin_ops_platform.services.postgres_repositories.external_control_evidence i
 from fin_ops_platform.services.postgres_repositories.external_control_evidence_audit import (
     audit_external_control_evidence,
 )
+
 from tests.external_evidence_test_support import (
     bank_item,
     etc_invoice_item,

@@ -1,16 +1,15 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from http import HTTPStatus
-import re
 from typing import Any, Callable, Protocol
 
 from fin_ops_platform.domain.enums import ImportDecision
 from fin_ops_platform.services.bank_transaction_identity_service import BankTransactionIdentityService
 from fin_ops_platform.services.import_file_service import FileImportSession
-
 
 CENT = Decimal("0.01")
 MAX_MANUAL_BANK_TRANSACTIONS = 50

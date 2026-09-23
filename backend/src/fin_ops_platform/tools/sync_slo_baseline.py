@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, datetime
 import json
 import sys
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from typing import Any, TextIO
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
-
 
 DEFAULT_LIMIT = 20
 CURRENT_PRODUCTION_CRITICAL_SECTIONS = (

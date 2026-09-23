@@ -7,7 +7,6 @@ from typing import Mapping
 from fin_ops_platform.services.access_control_service import AccessControlService
 from fin_ops_platform.services.oa_identity_service import OAIdentityService, OAUserIdentity
 
-
 AUTHORIZATION_HEADER = "authorization"
 COOKIE_HEADER = "cookie"
 OA_TOKEN_COOKIE_NAME = "Admin-Token"

@@ -7,18 +7,21 @@ from http import HTTPStatus
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
-from fin_ops_platform.services.workbench_write_facade import WorkbenchWriteFacade
-from tests.app_test_support import build_local_state_application as build_application
+from fin_ops_platform.services.workbench_idempotency import (
+    InMemoryWorkbenchIdempotencyRepository,
+    workbench_request_fingerprint,
+)
 from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
     WorkbenchMatchingDirtyScopeWorker,
     WorkbenchMatchingDirtyScopeWorkerConfig,
 )
-from fin_ops_platform.services.workbench_idempotency import InMemoryWorkbenchIdempotencyRepository
-from fin_ops_platform.services.workbench_idempotency import workbench_request_fingerprint
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryResult
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_row_identity import workbench_row_identity_key
 from fin_ops_platform.services.workbench_uow import WorkbenchWriteUnitOfWork
+from fin_ops_platform.services.workbench_write_facade import WorkbenchWriteFacade
+
+from tests.app_test_support import build_local_state_application as build_application
 from tests.test_workbench_uow_contract import (
     _RecordingConnection,
     _RecordingDirtyOutboxWriter,

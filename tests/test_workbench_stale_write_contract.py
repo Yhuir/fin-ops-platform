@@ -9,10 +9,13 @@ from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
+
 from tests.app_test_support import (
     build_grouped_workbench_projection,
-    build_local_state_application as build_application,
     install_direct_workbench_selection_repository,
+)
+from tests.app_test_support import (
+    build_local_state_application as build_application,
 )
 
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-
 RULE_VERSION = "exception_rules_v1"
 
 ACTION_DEFINITIONS: dict[str, dict[str, Any]] = {

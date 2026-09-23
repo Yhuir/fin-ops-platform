@@ -1,16 +1,15 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-import re
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from time import perf_counter
 from typing import Any, Callable, Iterable
 
 from fin_ops_platform.services.search_query import normalize_money_search_query
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
-
 
 BATCH_ACCOUNTING_SOURCE = "batch_accounting"
 BATCH_ACCOUNTING_COUNTERPARTY_NAME = "批量账务集中处理"

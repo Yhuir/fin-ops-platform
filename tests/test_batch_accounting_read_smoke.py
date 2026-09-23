@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import date
 import unittest
+from datetime import date
 
 from fin_ops_platform.services.batch_accounting_service import BatchAccountingService
 from fin_ops_platform.tools.batch_accounting_read_smoke import run_smoke

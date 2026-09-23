@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import unittest
 from dataclasses import dataclass
 from types import SimpleNamespace
-import unittest
 
 from fin_ops_platform.services.etc_reconciliation_models import EtcReconciliationTaskStatus
 from fin_ops_platform.tools.cleanup_orphan_etc_reconciliation_tasks import _execute_task_cleanup, _plan_task_cleanup

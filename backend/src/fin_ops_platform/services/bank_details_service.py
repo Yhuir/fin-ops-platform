@@ -11,8 +11,8 @@ from fin_ops_platform.services.bank_transaction_auto_category_service import (
     resolve_effective_category,
 )
 from fin_ops_platform.services.bank_transaction_category_service import (
-    BANK_TRANSACTION_CATEGORY_LABELS,
     BANK_TRANSACTION_CATEGORY_COUNT_KEYS,
+    BANK_TRANSACTION_CATEGORY_LABELS,
     BankTransactionCategoryService,
 )
 

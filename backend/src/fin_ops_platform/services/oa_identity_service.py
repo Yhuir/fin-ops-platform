@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from copy import deepcopy
-from dataclasses import dataclass, field
 import json
 import os
+from copy import deepcopy
+from dataclasses import dataclass, field
 from time import monotonic
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError

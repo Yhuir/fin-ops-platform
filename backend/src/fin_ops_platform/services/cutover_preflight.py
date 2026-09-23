@@ -4,7 +4,6 @@ import re
 from typing import Any
 from urllib.parse import ParseResult, urlparse, urlunparse
 
-
 SECRET_KEY_PARTS = ("password", "passwd", "secret", "token", "credential", "database_url", "uri", "url")
 
 

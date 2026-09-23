@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import replace
 import json
 import sys
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from typing import Any, TextIO
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
@@ -13,7 +13,6 @@ from fin_ops_platform.services.postgres_connection import (
     PostgresSettings,
 )
 from fin_ops_platform.tools.cli_reports import postgres_configuration_missing_report
-
 
 _CONTRACT_COLUMNS = {
     "invoices.invoice_date_month": "invoice_date_month",

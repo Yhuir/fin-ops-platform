@@ -8,7 +8,6 @@ from fin_ops_platform.services.oa_pending_payment_command_service import OaPendi
 from fin_ops_platform.services.oa_pending_payment_query_contract import OaPendingPaymentError
 from fin_ops_platform.services.oa_pending_payment_query_service import OaPendingPaymentQueryService
 
-
 ReadSessionResolver = Callable[[dict[str, str] | None], tuple[Any | None, Any | None]]
 ReadTenantResolver = Callable[[Any], str]
 WriteAuthContext = Callable[[dict[str, str] | None], tuple[str, str] | Any]

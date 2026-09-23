@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 NO_OA_MANAGED_LABELS: dict[str, str] = {
     "fee": "手续费",
     "salary": "工资",

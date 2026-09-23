@@ -1,22 +1,21 @@
 from __future__ import annotations
 
 import argparse
+import gzip
+import json
+import os
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-import gzip
-import json
 from math import ceil
 from pathlib import Path
 from threading import Barrier, Lock
 from time import monotonic
 from typing import Any, Callable, Mapping, Sequence, TextIO
-import os
-import sys
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
-
 
 DEFAULT_TARGET_MS = 1_000.0
 DEFAULT_P99_TARGET_MS = 2_000.0

@@ -7,14 +7,14 @@ from unittest.mock import patch
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_payment_admitted_projection import PaymentAdmittedOAProjectionAdapter
 from fin_ops_platform.services.oa_payment_status_service import (
-    OAPaymentStatusConfigurationError,
-    OAPaymentStatusExecutionError,
-    MySQLOAPaymentStatusRepository,
-    OAPaymentStatusRecord,
-    OAPaymentStatusSettings,
     PAY_STATUS_FAILED,
     PAY_STATUS_PAID,
     PAY_STATUS_PENDING,
+    MySQLOAPaymentStatusRepository,
+    OAPaymentStatusConfigurationError,
+    OAPaymentStatusExecutionError,
+    OAPaymentStatusRecord,
+    OAPaymentStatusSettings,
     oa_flow_id_candidates,
 )
 

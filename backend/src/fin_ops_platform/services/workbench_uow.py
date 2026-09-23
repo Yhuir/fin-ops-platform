@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
 from time import monotonic
 from typing import Any, Callable
 
@@ -17,7 +17,6 @@ from fin_ops_platform.services.workbench_idempotency import (
 )
 from fin_ops_platform.services.workbench_stale_precondition import assert_workbench_stale_preconditions
 from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteConflict
-
 
 LOGGER = logging.getLogger(__name__)
 

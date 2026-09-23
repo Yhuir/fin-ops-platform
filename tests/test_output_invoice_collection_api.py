@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from http import HTTPStatus
 import unittest
+from http import HTTPStatus
 from typing import Any
 
 from fin_ops_platform.app.routes_output_invoice_collections import (

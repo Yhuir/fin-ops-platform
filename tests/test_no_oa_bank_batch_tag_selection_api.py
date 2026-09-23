@@ -1,13 +1,14 @@
 import json
-from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
-from tests.app_test_support import build_local_state_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+
+from tests.app_test_support import build_local_state_application
 
 
 def _json(response):

@@ -6,7 +6,6 @@ from time import sleep as default_sleep
 from typing import Any
 from uuid import uuid4
 
-
 MATCHING_SOURCE_VERSIONS_CHANGED_REASON = "matching_source_versions_changed"
 
 

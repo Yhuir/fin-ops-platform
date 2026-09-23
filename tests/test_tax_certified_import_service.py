@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from fin_ops_platform.services.state_store import ApplicationStateStore
 from fin_ops_platform.services.tax_certified_import_service import (
@@ -10,6 +10,7 @@ from fin_ops_platform.services.tax_certified_import_service import (
     UploadedCertifiedImportFile,
     _build_unique_key,
 )
+
 from tests.mock_import_files import CERTIFIED_FEB, CERTIFIED_JAN
 
 

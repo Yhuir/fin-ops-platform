@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from fin_ops_platform.services.workbench_filter_options import (
     WORKBENCH_FILTER_MISSING_VALUE,
     normalize_workbench_column_filters,

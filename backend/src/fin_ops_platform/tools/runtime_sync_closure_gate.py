@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
 import json
 import os
-from pathlib import Path
 import sys
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 from time import monotonic, sleep
 from typing import Any, Mapping, Sequence, TextIO
 from uuid import uuid4
 
 from fin_ops_platform.services.api_performance_metrics import ApiPerformanceRecorder
 from fin_ops_platform.services.operations_dashboard import OperationsDashboardService
-from fin_ops_platform.services.postgres_connection import PostgresConfigurationError, PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_connection import (
+    PostgresConfigurationError,
+    PostgresConnection,
+    PostgresSettings,
+)
 from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 from fin_ops_platform.tools import (
@@ -22,7 +26,6 @@ from fin_ops_platform.tools import (
     write_operation_e2e_smoke,
 )
 from fin_ops_platform.tools.cli_reports import postgres_configuration_missing_report, write_json_report
-
 
 PASS = "pass"
 FAIL = "fail"

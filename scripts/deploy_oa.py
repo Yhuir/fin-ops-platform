@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
-from pathlib import Path
 import argparse
 import hashlib
 import io
@@ -15,7 +12,9 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 
 RELEASE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 MIGRATION_FILENAME_PATTERN = re.compile(r"^(?P<version>\d{4})_[a-z0-9_]+\.sql$")

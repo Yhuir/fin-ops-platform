@@ -9,7 +9,6 @@ from fin_ops_platform.services.output_invoice_collection_service import (
     OutputInvoiceCollectionError,
 )
 
-
 ReadSessionResolver = Callable[
     [dict[str, str] | None], tuple[OARequestSession | None, Any | None]
 ]

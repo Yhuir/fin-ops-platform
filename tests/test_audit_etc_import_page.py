@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import unittest
 import json
+import unittest
 
-from fin_ops_platform.services.postgres_repositories import etc_import_page_audit
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_repositories import etc_import_page_audit
 from postgres_test_utils import apply_test_migrations, require_postgres_test_database_url, truncate_test_database
+
 from tests.test_audit_etc_tickets_read_model_tool import FakeConnection as EtcTicketsFakeConnection
 
 

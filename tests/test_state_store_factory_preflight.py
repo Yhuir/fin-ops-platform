@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.services import state_store_factory
+
+
 class FakePostgresStateStore:
     def __init__(self, *, data_dir: Path, connection: object, sql_read_connection: object | None = None, **_kwargs: object) -> None:
         self.data_dir = data_dir

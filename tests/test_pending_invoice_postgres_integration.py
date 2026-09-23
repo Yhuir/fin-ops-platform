@@ -12,6 +12,7 @@ from fin_ops_platform.services.postgres_connection import (
 )
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.runtime_paths import default_data_dir
+
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
 import json
 import sys
+from collections.abc import Sequence
 from typing import Any, TextIO
 
 from fin_ops_platform.services.app_settings_service import AppSettingsService
@@ -27,7 +27,6 @@ from fin_ops_platform.services.postgres_repositories.ops_tax_etc import (
 from fin_ops_platform.services.postgres_repositories.workbench_relation import (
     PostgresWorkbenchRelationRepository,
 )
-
 
 REPAIR_ACTION = "repair_unknown_manual_bank_transaction_category"
 

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-from datetime import UTC, datetime
 import hashlib
 import json
+from collections import Counter, defaultdict
+from datetime import UTC, datetime
 from typing import Any
 
 from fin_ops_platform.services.postgres_repositories.audit_report import (
@@ -16,7 +16,6 @@ from fin_ops_platform.services.postgres_repositories.etc_tickets_page_audit impo
     COVERED_IMPORT_TASK_STATUSES,
     collect_etc_tickets_integrity,
 )
-
 
 ACTIVE_JOB_STATUSES = frozenset({"pending", "processing"})
 TERMINAL_SESSION_STATUSES = frozenset({"succeeded", "partial_success"})

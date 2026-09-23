@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 WORKBENCH_RELATION_EXTERNAL_ETC_BATCH_ID_SQL = """
 coalesce(
     nullif(relation.amount_check->>'external_etc_batch_id', ''),

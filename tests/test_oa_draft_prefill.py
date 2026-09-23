@@ -1,6 +1,7 @@
 import unittest
 from datetime import date
 
+from fin_ops_platform.services.oa_adapter import detect_etc_batch_metadata
 from fin_ops_platform.services.oa_draft_prefill import (
     ETC_OA_DRAFT_PREFILL_FAMILY,
     INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY,
@@ -9,7 +10,6 @@ from fin_ops_platform.services.oa_draft_prefill import (
     normalize_oa_draft_prefill,
     render_oa_draft_reason,
 )
-from fin_ops_platform.services.oa_adapter import detect_etc_batch_metadata
 
 
 class OADraftPrefillTests(unittest.TestCase):

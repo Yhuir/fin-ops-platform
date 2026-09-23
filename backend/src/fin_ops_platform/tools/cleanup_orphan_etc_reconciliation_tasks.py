@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +12,6 @@ from fin_ops_platform.tools.runtime_application import (
     etc_reconciliation_task_service,
     etc_service,
 )
-
 
 ACTOR = "system_orphan_etc_task_cleanup"
 

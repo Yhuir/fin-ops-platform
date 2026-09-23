@@ -7,10 +7,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
-from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.oa_attachment_refresh_request_service import (
     OAAttachmentRefreshRowNotRefreshableError,
 )
+from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.oa_manual_import_service import OAManualImportService
 
 from tests.app_test_support import (

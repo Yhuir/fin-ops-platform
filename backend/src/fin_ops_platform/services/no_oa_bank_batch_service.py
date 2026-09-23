@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 from copy import deepcopy
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-import hashlib
 from typing import Any
 
 from fin_ops_platform.services.bank_internal_transfer_detector import INTERNAL_TRANSFER_MATCH_WINDOW
@@ -14,7 +14,6 @@ from fin_ops_platform.services.no_oa_managed_rule_policy import (
 )
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
-
 
 NO_OA_BANK_BATCH_SCHEMA_VERSION = "2026-05-no-oa-bank-batch-v1"
 NO_OA_BANK_BATCH_RELATION_MODE = "no_oa_bank_batch"

@@ -69,6 +69,7 @@ class ManualCostItemsTests(unittest.TestCase):
     def test_tag_route_respects_read_permission_and_only_returns_catalogue(self):
         from http import HTTPStatus
         from unittest.mock import Mock
+
         from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
         settings = Mock()
         settings.get_cost_manual_tags.side_effect = [{'tags': []}, {'tags': self.options['tags']}]

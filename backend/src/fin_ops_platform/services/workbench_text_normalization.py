@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
 import unicodedata
 from collections.abc import Mapping
-
+from dataclasses import dataclass
 
 LOW_INFORMATION_TOKENS = frozenset({"报销", "付款", "费用", "有限公司"})
 COMPANY_SUFFIXES = (

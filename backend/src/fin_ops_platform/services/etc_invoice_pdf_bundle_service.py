@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import dataclass
 import hashlib
 import re
+from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Callable, Iterable, Iterator
 
 import fitz

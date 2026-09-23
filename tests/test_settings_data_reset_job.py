@@ -1,16 +1,12 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from types import SimpleNamespace
 import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from tests.app_test_support import (
-    build_local_state_application,
-    configure_access_control,
-)
 from fin_ops_platform.services.background_job_service import BackgroundJobService
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.runtime_worker_handlers import SettingsDataResetRuntimeFactory
@@ -23,6 +19,11 @@ from fin_ops_platform.services.settings_data_reset_service import (
     SettingsDataResetResult,
 )
 from fin_ops_platform.services.state_store import ApplicationStateStore
+
+from tests.app_test_support import (
+    build_local_state_application,
+    configure_access_control,
+)
 
 
 class SettingsQueueFixture:

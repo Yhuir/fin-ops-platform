@@ -3,11 +3,10 @@ from __future__ import annotations
 from http import HTTPStatus
 
 import pytest
-
 from fin_ops_platform.services.workbench_direct_query_errors import (
     WorkbenchDirectQueryUnavailable,
-    is_workbench_data_integrity_query_error,
     is_transient_postgres_query_error,
+    is_workbench_data_integrity_query_error,
 )
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
 

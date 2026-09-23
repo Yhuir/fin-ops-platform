@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from io import BytesIO
 from typing import Any
 
 import fitz
-
 
 _PAGE = (595.28, 419.53)
 _FONT = "china-s"

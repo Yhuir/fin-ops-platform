@@ -23,6 +23,7 @@ from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_qu
     PostgresInputInvoiceUsageQueryRepository,
     PostgresOutputInvoiceCollectionQueryRepository,
 )
+
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,

@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from io import BytesIO
 import unittest
-
-from openpyxl import load_workbook
+from io import BytesIO
 
 from fin_ops_platform.services.input_invoice_usage_export_service import (
     INPUT_INVOICE_USAGE_EXPORT_ROW_LIMIT,
     InputInvoiceUsageExportError,
     InputInvoiceUsageExportService,
 )
+from openpyxl import load_workbook
 
 
 class InputInvoiceUsageExportServiceTests(unittest.TestCase):

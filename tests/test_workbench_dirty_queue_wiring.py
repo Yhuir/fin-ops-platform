@@ -8,7 +8,6 @@ from unittest.mock import patch
 
 import fin_ops_platform.app.server as server_module
 from fin_ops_platform.app import worker as worker_app
-from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.app.worker import build_parser
 from fin_ops_platform.services.runtime_worker_handlers import _workbench_matching_source_versions
 from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
@@ -16,6 +15,8 @@ from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
     WorkbenchMatchingDirtyScopeWorkerConfig,
 )
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import expand_scope_month_window
+
+from tests.app_test_support import build_local_state_application as build_application
 
 
 class RecordingDirtyQueue:

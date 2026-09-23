@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 from decimal import Decimal
-from typing import Callable
-from typing import Any
+from typing import Any, Callable
 
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
-
 
 ZERO = Decimal("0.00")
 

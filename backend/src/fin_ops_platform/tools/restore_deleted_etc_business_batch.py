@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import argparse
-from decimal import Decimal
 import hashlib
 import json
 import sys
+from decimal import Decimal
 from typing import Any, Sequence, TextIO
 
 from fin_ops_platform.services.etc_service import EtcBusinessBatchInvalidTransitionError

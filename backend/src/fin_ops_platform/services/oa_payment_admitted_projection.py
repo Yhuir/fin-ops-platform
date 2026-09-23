@@ -6,7 +6,6 @@ from typing import Any, Callable
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord, OAReadStatus
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRepository
 
-
 MONTH_FORMAT = "%Y-%m"
 
 

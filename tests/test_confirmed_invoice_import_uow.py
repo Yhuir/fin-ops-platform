@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 import unittest
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from fin_ops_platform.services.confirmed_invoice_import_uow import (
     ConfirmedInvoiceImportUnitOfWork,
 )

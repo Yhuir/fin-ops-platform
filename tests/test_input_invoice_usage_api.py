@@ -25,6 +25,8 @@ from openpyxl import load_workbook
 
 from tests.app_test_support import (
     build_local_state_application as build_application,
+)
+from tests.app_test_support import (
     configure_access_control,
 )
 from tests.test_pending_invoice_service import FakeCanonicalRelationReader

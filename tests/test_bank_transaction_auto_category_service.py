@@ -3,7 +3,10 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService, resolve_effective_category
+from fin_ops_platform.services.bank_transaction_auto_category_service import (
+    BankTransactionAutoCategoryService,
+    resolve_effective_category,
+)
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
 
 
