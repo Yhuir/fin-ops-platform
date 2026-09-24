@@ -31,7 +31,7 @@
 
 - Business/service：`tests/test_workbench_relation_grouping.py` 保护组级 `amount_check` 保留、三类 row 不再复制 `relation_amount_check`，并把 `manual_confirmed` 的非空确认备注投影到同一 `workbench_anomaly.confirmation`；异常审阅前后该确认事实不丢失。
 - API/read：`tests/test_workbench_v2_api.py`、`tests/test_workbench_page_query_repository.py` 保护 direct page 的组级合同与精简 row payload；`web/src/test/WorkbenchApi.test.ts` 保护确认备注映射且客户端 row 不再拥有旧金额判断字段。
-- Frontend/regression：`WorkbenchColumns.test.tsx`、`WorkbenchZone.test.tsx` 不再保留流水三角形/tooltip 行为；`RelationGroupGrid.test.tsx`、`WorkbenchExceptionDrawer.test.tsx` 保护主表、展开抽屉与折叠摘要复用圆形异常入口，并在异常抽屉审阅区展示确认关联备注。批量账务页面自身的提交金额差异提示由 `BatchAccountingPage.test.tsx` 继续独立保护。
+- Frontend/regression：`WorkbenchColumns.test.tsx`、`WorkbenchZone.test.tsx` 不再保留流水三角形/tooltip 行为；`RelationGroupGrid.test.tsx`、`WorkbenchExceptionDrawer.test.tsx` 保护主表、展开抽屉与折叠摘要复用圆形异常入口，并通过异常抽屉汇总行备注 icon 的 Popover 展示确认关联备注。批量账务页面自身的提交金额差异提示由 `BatchAccountingPage.test.tsx` 继续独立保护。
 
 ## 2026-08-27 paired / unpaired canonical 发票守恒统计
 
@@ -823,3 +823,10 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 
 WorkbenchSupportingDocumentFiles、groupDisplayModel、WorkbenchExceptionDrawer、WorkbenchInvoiceEntryDrawer 测试保护金额、未知/零元/大金额、精确子项管理及只读权限；workbench-supporting-documents-flow 覆盖保存回读、预览、删除恢复、异常抽屉、混合票据、五份凭证与窄屏。列表断言两种说明文字缺席，异常 Popover 仍显示权威核对金额。既有 test_workbench_amount_check_service 保护业务差额、混合计额及重复文件不重复计额。
 七类测试中业务核心回归、前端交互、E2E和旧功能回归适用；服务/持久化、HTTP合同、read model/cache/worker实现不变，不新增对应测试。
+
+
+## 2026-09-24 汇总行确认关联备注
+
+- Frontend / regression：`WorkbenchExceptionDrawer.test.tsx` 覆盖有/无确认备注、两分区、只读用户、展开/收起、正文不在汇总行直接显示、原审阅记录保留、无空审阅 footer、文本安全渲染、Escape 和零详情请求。
+- Browser / integration：`workbench-exception-flow.spec.ts` 验证 1600/1024/600px 图标在金额右侧且在异常 icon 左侧、hover/focus/click/Escape、移入浮层、长备注换行和内部滚动、切换分区和关闭抽屉清理浮层；沿用接受/撤回、分页、发票录入/归属和详情按需加载流程。
+- 业务 core、service、HTTP contract、cache/worker 无改动，不新增对应测试；请求边界在现有浏览器测试验证。生产仅只读检查已有备注、界面、请求次数及部署前后相同 API 的延迟，不修改真实异常决定。

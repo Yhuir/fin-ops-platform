@@ -188,7 +188,7 @@ describe("WorkbenchExceptionDrawer", () => {
     expect(onExceptionCodeChange).toHaveBeenCalledWith("oa_bank_equal_invoice_more");
   });
 
-  it("keeps the collapsed icon compact and moves confirmation into the existing review panel", async () => {
+  it("keeps anomaly amounts separate from the summary confirmation-note popover", async () => {
     const user = userEvent.setup();
     const anomalyGroup = group("unpaired");
     anomalyGroup.amountCheck = { status: "mismatch", direction: "expense", bankAmount: "90.00", oaAmount: "100.00", oaTotal: "100.00", bankTotal: "90.00", invoiceTotal: "80.00", amountDelta: "20.00", requiresNote: true };
@@ -216,8 +216,14 @@ describe("WorkbenchExceptionDrawer", () => {
     await user.keyboard("{Escape}");
     await expandFirstGroup(user);
     const review = screen.getByRole("region", { name: "异常审阅" });
-    expect(within(review).getByText("确认关联备注")).toBeVisible();
-    expect(within(review).getByText("流水金额与 OA 金额存在差额，经确认保留关联")).toBeVisible();
+    expect(within(review).queryByText("确认关联备注")).not.toBeInTheDocument();
+    expect(within(review).queryByText("流水金额与 OA 金额存在差额，经确认保留关联")).not.toBeInTheDocument();
+    const noteTrigger = screen.getByRole("button", { name: "查看确认关联备注" });
+    expect(heading).toContainElement(noteTrigger);
+    await user.hover(noteTrigger);
+    const notePopover = await screen.findByRole("dialog", { name: "确认关联备注" });
+    expect(notePopover).toHaveTextContent("流水金额与 OA 金额存在差额，经确认保留关联");
+    expect(notePopover).not.toHaveTextContent("银行流水90.00");
   });
 
   it("uses the shared three-pane grid and accepts the server classification without a manual gate", async () => {
@@ -348,6 +354,54 @@ it.each([true, false])("preserves audit records in the drawer with operation per
   expect(within(review).getByText("YNSYLP007（杨丽萍）")).toBeVisible();
   expect(within(review).getByText("2026-08-25 17:03:47")).toBeVisible();
   expect(within(review).getByText("金额差异已核对")).toBeVisible();
-  expect(within(review).getByText("票面金额少 1.00 元，经确认保留关联")).toBeVisible();
+  expect(within(review).queryByText("票面金额少 1.00 元，经确认保留关联")).not.toBeInTheDocument();
+  await user.hover(screen.getByRole("button", { name: "查看确认关联备注" }));
+  expect(await screen.findByRole("dialog", { name: "确认关联备注" })).toHaveTextContent("票面金额少 1.00 元，经确认保留关联");
   expect(within(review).queryByRole("button", { name: "撤回到未配对" }) !== null).toBe(canOperate);
+});
+
+
+it.each(["paired", "unpaired"] as const)("shows the confirmation note without fetching details in %s", async (bucket) => {
+  const user = userEvent.setup();
+  const value = group(bucket);
+  value.workbenchAnomaly!.confirmation = { note: "第一行备注\n第二行备注 <script>纯文本</script>" };
+  const ensureDetail = vi.fn(async (current: WorkbenchRelationGroup) => current);
+  const onReview = vi.fn();
+  renderDrawer(bucket, onReview, true, value, { onEnsureGroupDetail: ensureDetail });
+  const trigger = screen.getByRole("button", { name: "查看确认关联备注" });
+  const heading = trigger.closest(".workbench-anomaly-drawer__heading")!;
+  expect(heading).not.toHaveTextContent("第一行备注");
+  expect(heading.querySelector("button button")).toBeNull();
+  expect(screen.queryByRole("dialog", { name: "确认关联备注" })).not.toBeInTheDocument();
+  await user.hover(trigger);
+  const popover = await screen.findByRole("dialog", { name: "确认关联备注" });
+  expect(popover.querySelector("p")?.textContent).toBe(value.workbenchAnomaly!.confirmation.note);
+  expect(popover.querySelector("script")).toBeNull();
+  await user.hover(popover);
+  expect(popover).toBeVisible();
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "确认关联备注" })).not.toBeInTheDocument());
+  expect(screen.getByRole("button", { name: "展开异常明细" })).toBeInTheDocument();
+  expect(ensureDetail).not.toHaveBeenCalled();
+  expect(onReview).not.toHaveBeenCalled();
+});
+
+it("does not render a note entry without confirmation", () => {
+  renderDrawer("unpaired");
+  expect(screen.queryByRole("button", { name: "查看确认关联备注" })).not.toBeInTheDocument();
+});
+
+it("keeps read-only confirmation in the header without an empty review footer", async () => {
+  const user = userEvent.setup();
+  const value = group("unpaired");
+  value.workbenchAnomaly!.confirmation = { note: "1607.25为扣除的质保金" };
+  renderDrawer("unpaired", vi.fn(), false, value);
+  await expandFirstGroup(user);
+  expect(screen.queryByRole("region", { name: "异常审阅" })).not.toBeInTheDocument();
+  const trigger = screen.getByRole("button", { name: "查看确认关联备注" });
+  await user.hover(trigger);
+  expect(await screen.findByRole("dialog", { name: "确认关联备注" })).toHaveTextContent(value.workbenchAnomaly!.confirmation.note);
+  await user.keyboard("{Escape}");
+  await user.click(screen.getByRole("button", { name: "收起异常明细" }));
+  expect(trigger).toBeVisible();
 });

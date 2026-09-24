@@ -2,11 +2,14 @@ import {
   Button,
   Disclosure,
   DisclosureGroup,
+  PopoverContent,
+  PopoverDialog,
   ToggleButton,
   ToggleButtonGroup,
 } from "@heroui/react";
 import type { Key } from "@heroui/react";
-import { useEffect, useRef, useState } from "react";
+import { MessageSquareText } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import AppDrawer from "../common/AppDrawer";
 import { formatMoney } from "../../features/money";
@@ -335,13 +338,19 @@ export default function WorkbenchExceptionDrawer({
             {visibleGroups.map((group) => {
               const expanded = expandedKeys.has(group.id);
               const detailGroup = expanded ? detailGroups[group.id] : null;
+              const note = group.workbenchAnomaly?.confirmation?.note;
+              const showAnomaly = !expanded && Boolean(group.workbenchAnomaly?.items.length);
               return (
                 <Disclosure
                   className="workbench-anomaly-drawer__group"
                   id={group.id}
                   key={`${contentGeneration}:${group.id}`}
                 >
-                  <Disclosure.Heading className="workbench-anomaly-drawer__heading">
+                  <Disclosure.Heading
+                    className="workbench-anomaly-drawer__heading"
+                    data-has-note={Boolean(note)}
+                    data-has-anomaly={showAnomaly}
+                  >
                     <Button
                       aria-label={`${expanded ? "收起" : "展开"}异常明细`}
                       className="workbench-anomaly-drawer__trigger"
@@ -364,14 +373,16 @@ export default function WorkbenchExceptionDrawer({
                         <Disclosure.Indicator className="workbench-anomaly-drawer__indicator" />
                       </span>
                     </Button>
-                    {!expanded && group.workbenchAnomaly?.items.length ? (
-                      <WorkbenchAnomalyIndicator
-                        anomalies={group.workbenchAnomaly.items}
-                        className="workbench-anomaly-indicator--drawer-summary"
-                        amountScope="group"
-                        levelLabel="该关联组"
-                      />
-                    ) : null}
+                    <div className="workbench-anomaly-drawer__summary-actions">
+                      {note ? <ConfirmationNotePopover key={note} note={note} /> : null}
+                      {showAnomaly && group.workbenchAnomaly ? (
+                        <WorkbenchAnomalyIndicator
+                          anomalies={group.workbenchAnomaly.items}
+                          amountScope="group"
+                          levelLabel="该关联组"
+                        />
+                      ) : null}
+                    </div>
                   </Disclosure.Heading>
                   <Disclosure.Content>
                     <Disclosure.Body className="workbench-anomaly-drawer__details">
@@ -446,6 +457,95 @@ export default function WorkbenchExceptionDrawer({
   );
 }
 
+function ConfirmationNotePopover({ note }: { note: string }) {
+  const [mode, setMode] = useState<"idle" | "open" | "dismissed">("idle");
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const pointerRef = useRef(false);
+  const openedFromTriggerFocusRef = useRef(false);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const id = useId();
+  const open = mode === "open";
+  const cancelClose = () => {
+    if (closeTimerRef.current !== null) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimerRef.current = setTimeout(() => {
+      closeTimerRef.current = null;
+      setMode("idle");
+    }, 140);
+  };
+  useEffect(() => () => {
+    if (closeTimerRef.current !== null) clearTimeout(closeTimerRef.current);
+  }, []);
+
+  return (
+    <>
+      <Button
+        ref={triggerRef}
+        aria-label="查看确认关联备注"
+        aria-controls={open ? id : undefined}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        className="workbench-anomaly-drawer__note-trigger"
+        isIconOnly
+        size="sm"
+        variant="ghost"
+        onHoverStart={() => {
+          cancelClose();
+          openedFromTriggerFocusRef.current = document.activeElement === triggerRef.current;
+          setMode("open");
+        }}
+        onHoverEnd={() => { if (mode === "dismissed") setMode("idle"); else scheduleClose(); }}
+        onFocus={() => {
+          if (!pointerRef.current && mode === "idle") {
+            cancelClose();
+            openedFromTriggerFocusRef.current = true;
+            setMode("open");
+          }
+        }}
+        onBlur={() => setMode((current) => current === "dismissed" ? "idle" : current)}
+        onPointerDown={() => { pointerRef.current = true; }}
+        onPointerCancel={() => { pointerRef.current = false; }}
+        onPressEnd={() => { pointerRef.current = false; }}
+        onPress={() => {
+          cancelClose();
+          openedFromTriggerFocusRef.current = true;
+          setMode(open ? "dismissed" : "open");
+        }}
+      >
+        <MessageSquareText aria-hidden="true" size={16} />
+      </Button>
+      {open ? (
+        <PopoverContent
+          className="workbench-confirmation-note-popover"
+          containerPadding={12}
+          isOpen
+          isNonModal
+          offset={6}
+          placement="bottom end"
+          triggerRef={triggerRef}
+          shouldCloseOnInteractOutside={(element) => !triggerRef.current?.contains(element)}
+          onOpenChange={(nextOpen) => {
+            cancelClose();
+            setMode(nextOpen ? "open" : openedFromTriggerFocusRef.current ? "dismissed" : "idle");
+          }}
+          onMouseEnter={cancelClose}
+          onMouseLeave={scheduleClose}
+        >
+          <PopoverDialog id={id} aria-label="确认关联备注" className="workbench-confirmation-note-popover__dialog">
+            <strong>确认关联备注</strong>
+            <p>{note}</p>
+          </PopoverDialog>
+        </PopoverContent>
+      ) : null}
+    </>
+  );
+}
+
 function ExceptionReviewPanel({
   canOperateData,
   bucket,
@@ -472,18 +572,12 @@ function ExceptionReviewPanel({
   }
 
   const review = group.workbenchAnomaly;
-  if (!canOperateData && !review.confirmation && review.reviewDecision === "pending") {
+  if (!canOperateData && review.reviewDecision === "pending") {
     return null;
   }
 
   return (
     <section aria-label="异常审阅" className="workbench-anomaly-drawer__review">
-      {review.confirmation ? (
-        <div className="workbench-anomaly-drawer__confirmation">
-          <strong>确认关联备注</strong>
-          <p>{review.confirmation.note}</p>
-        </div>
-      ) : null}
       {review.reviewDecision !== "pending" ? (
         <div className="workbench-anomaly-drawer__review-record">
           <strong>{review.reviewDecision === "accept_paired" ? "已接受该异常风险" : "留在未配对"}</strong>

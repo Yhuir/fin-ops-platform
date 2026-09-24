@@ -83,6 +83,7 @@ describe("WorkbenchAnomalyIndicator", () => {
 
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button")).toHaveFocus());
     await user.tab();
     await user.tab({ shift: true });
     expect(await screen.findByRole("dialog")).toBeVisible();

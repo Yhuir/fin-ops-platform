@@ -14975,7 +14975,6 @@ body.column-layout-dragging {
   overflow-wrap: anywhere;
 }
 
-.workbench-anomaly-drawer__confirmation,
 .workbench-anomaly-drawer__review-record {
   display: grid;
   gap: 5px;
@@ -14987,15 +14986,8 @@ body.column-layout-dragging {
   overflow-wrap: anywhere;
 }
 
-.workbench-anomaly-drawer__confirmation strong,
 .workbench-anomaly-drawer__review-record strong {
   color: #526277;
-}
-
-.workbench-anomaly-drawer__confirmation p {
-  margin: 0;
-  color: #43556a;
-  white-space: pre-wrap;
 }
 
 .workbench-anomaly-drawer__review-record dl {
@@ -15213,7 +15205,17 @@ body.column-layout-dragging {
 }
 
 .workbench-anomaly-drawer__heading {
+  --summary-actions-width: 0px;
   position: relative;
+}
+
+.workbench-anomaly-drawer__heading[data-has-note="true"],
+.workbench-anomaly-drawer__heading[data-has-anomaly="true"] {
+  --summary-actions-width: 36px;
+}
+
+.workbench-anomaly-drawer__heading[data-has-note="true"][data-has-anomaly="true"] {
+  --summary-actions-width: 68px;
 }
 
 .workbench-anomaly-drawer__trigger {
@@ -15227,7 +15229,7 @@ body.column-layout-dragging {
 .workbench-anomaly-drawer__outline {
   display: grid;
   width: 100%;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) 32px;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) var(--summary-actions-width) 32px;
   align-items: stretch;
 }
 
@@ -15258,17 +15260,54 @@ body.column-layout-dragging {
 }
 
 .workbench-anomaly-drawer__indicator {
+  grid-column: 5;
   align-self: center;
   justify-self: center;
   color: #6d7a89;
 }
 
-.workbench-anomaly-indicator--drawer-summary {
+.workbench-anomaly-drawer__summary-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   position: absolute;
   z-index: 3;
   top: 50%;
   right: 34px;
   transform: translateY(-50%);
+}
+
+.workbench-anomaly-drawer__note-trigger {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  color: #475569;
+}
+
+.workbench-confirmation-note-popover {
+  max-width: min(360px, calc(100vw - 24px));
+}
+
+.workbench-confirmation-note-popover__dialog {
+  display: grid;
+  gap: 8px;
+  max-height: min(320px, 60vh);
+  overflow-y: auto;
+  padding: 12px;
+  color: #475569;
+  font-size: var(--fp-text-caption);
+  line-height: 1.5;
+}
+
+.workbench-confirmation-note-popover__dialog strong {
+  color: #334155;
+}
+
+.workbench-confirmation-note-popover__dialog p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .workbench-anomaly-drawer__details {
@@ -15345,11 +15384,15 @@ body.column-layout-dragging {
   }
 
   .workbench-anomaly-drawer__outline {
-    grid-template-columns: repeat(3, minmax(0, 1fr)) 28px;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) var(--summary-actions-width) 28px;
   }
 
   .workbench-anomaly-drawer__pane-summary {
     padding-inline: 8px;
+  }
+
+  .workbench-anomaly-drawer__summary-actions {
+    right: 30px;
   }
 
   .workbench-anomaly-drawer__review {

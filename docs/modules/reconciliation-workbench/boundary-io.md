@@ -372,7 +372,7 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - 主表分段/普通布局及异常抽屉折叠摘要恢复原 28px 圆形异常 icon 和定位；删除独立 sticky 提示行、专用包裹层和文字触发器。
 - `WorkbenchAnomalyIndicator` 只接收既有异常项及展示范围 `amountScope`，不再接收整组 DTO。整组金额读取 anomaly 的 `oaTotal / bankTotal / evidenceTotal`；精确定位到行/付款项的明细及 `expense_item_amount_mismatch` 读取每个 `expenseItemDifferences` 的 OA/票据凭证金额。多个独立核对单元分别展示，不能合并抵消、截断或按金额猜归属。
 - 金额 Popover 只有金额标签和值，无标题/分类 Chip、差额、拆分合计、项目/人员描述或解释句。`evidenceTotal` 包括正式发票和已确认补充凭证；缺失金额显示 `—`，不能补零或使用正式发票金额替代。资料异常继续使用原状态、处理按钮与权限。
-- 原审阅账户、时间、备注和确认关联备注移到已有异常抽屉审阅区。只读用户保留记录查看能力；接受/撤回仅由原权限允许，原接口、CAS、审计及成功后回读不变。
+- 审阅账户、时间和审阅备注保留在异常抽屉审阅区；确认关联备注通过汇总行中异常 icon 左侧的备注 icon 查看。只读用户保留记录查看能力；接受/撤回仅由原权限允许，原接口、CAS、审计及成功后回读不变。
 - 删除整组文本摘要、明细描述索引及相关 props/import/CSS；不新增 HTTP、SQL、缓存、worker 或金额计算。凭证文件区只显示实际凭证金额，保留文件预览和管理入口；本项差额及混合核对说明已移除。
 - 保留 hover/focus/click/Escape 与焦点恢复修复，不增加全局事件。实施及生产验证见 [修复记录](../../dev/workbench-anomaly-icon-restoration.md)。
 
@@ -410,3 +410,11 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 
 主关联台与异常抽屉共用 WorkbenchSupportingDocumentFiles，仅接收 documents、totalAmount、canManage、onManage，显示文件链接、凭证金额及有权限的管理动作。未知金额显示待填写，明确零元显示0.00；不显示本项差额或与同项发票合并核对说明。
 删除展示专用差额函数、oaAmount/hasInvoice参数、前端记录的supportingDocumentOaAmount/supportingDocumentHasInvoice字段与专属说明样式。原OA明细金额、正式发票展示、管理表单样式和后台计额/异常判断保留。无HTTP API、持久化、worker、缓存或数据库变更。
+
+
+## 2026-09-24 确认关联备注入口
+
+- `WorkbenchExceptionDrawer` 直接读取摘要组 `workbenchAnomaly.confirmation.note`；有备注时在汇总行异常 icon 左侧显示中性备注 icon，展开后仍保留入口。正文仅由既有 HeroUI Popover 展示，支持 hover、focus、click、Escape、移入阅读和长文本滚动，不新增详情请求。
+- 备注入口与展开按钮为独立节点；汇总 grid 为操作区预留宽度，局部样式不改变公共按钮/Popover或其它页面。切换类别、分区、关闭抽屉及备注更新时不能残留旧正文。
+- 删除底部确认备注 DOM、专属 CSS、旧绝对定位图标类和过期测试断言；只读且没有审阅记录时不渲染空审阅区域。审阅记录、金额异常 Popover、接受/撤回权限与原写入合同保持不变。
+- 无 HTTP API、SQL、持久化、worker、缓存、金额计算或数据库变更；只读验证不得操作真实生产关联关系。

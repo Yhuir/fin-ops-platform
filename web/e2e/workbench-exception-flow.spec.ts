@@ -275,7 +275,10 @@ test.describe("workbench exception browser flow", () => {
     await expect(reviewedPanel.getByText("操作账户")).toBeVisible();
     await expect(reviewedPanel.getByText("E2E-REVIEWER（浏览器测试员）")).toBeVisible();
     await expect(reviewedPanel.getByText("2026-08-25 17:03:47")).toBeVisible();
-    await expect(reviewedPanel.getByText("票面金额少 0.01 元，经确认保留关联")).toBeVisible();
+    await expect(reviewedPanel).not.toContainText("票面金额少 0.01 元，经确认保留关联");
+    await drawer.getByRole("button", { name: "查看确认关联备注" }).hover();
+    await expect(page.getByRole("dialog", { name: "确认关联备注" })).toContainText("票面金额少 0.01 元，经确认保留关联");
+    await page.keyboard.press("Escape");
     await expect(reviewedPanel).not.toContainText("+08:00");
     await expect(unpairedZone.getByRole("button", {
       name: "该发票有 1 项异常，查看详情",
@@ -418,5 +421,124 @@ test.describe("workbench exception browser flow", () => {
     expect(compactDrawerBox!.x + compactDrawerBox!.width).toBeLessThanOrEqual(1024);
     expect(compactReviewBox!.x + compactReviewBox!.width)
       .toBeLessThanOrEqual(compactDrawerBox!.x + compactDrawerBox!.width);
+  });
+});
+
+test("shows confirmation notes beside the anomaly icon without loading detail or toggling the group", async ({ page }, testInfo) => {
+  const api = await installDeterministicApiMocks(page, {
+    sessionMode: "user", workbenchAmountMismatchScenario: true, workbenchInitialRelationConfirmed: true,
+  });
+  await page.goto("/");
+  await page.getByTestId("zone-unpaired").getByRole("button", { name: "未配对异常 1 | 已配对异常 0" }).click();
+  const drawer = page.getByRole("dialog", { name: "异常处理" });
+  const group = drawer.locator(".workbench-anomaly-drawer__group").first();
+  const heading = group.locator(".workbench-anomaly-drawer__heading");
+  const note = heading.getByRole("button", { name: "查看确认关联备注" });
+  const anomaly = heading.getByRole("button", { name: "该关联组有 1 项异常，查看详情" });
+  const popover = page.getByRole("dialog", { name: "确认关联备注" });
+  await expect(note).toBeVisible();
+  await expect(heading).not.toContainText("票面金额少");
+  for (const width of [1600, 1024, 600]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const layout = await heading.evaluate((element) => {
+      const noteBox = element.querySelector(".workbench-anomaly-drawer__note-trigger")!.getBoundingClientRect();
+      const anomalyBox = element.querySelector(".workbench-anomaly-indicator__trigger")!.getBoundingClientRect();
+      const amountBox = [...element.querySelectorAll(".workbench-anomaly-drawer__pane-summary")].at(-1)!.getBoundingClientRect();
+      return { noteRight: noteBox.right, noteLeft: noteBox.left, anomalyLeft: anomalyBox.left,
+        amountRight: amountBox.right, verticalDifference: Math.abs(noteBox.y - anomalyBox.y) };
+    });
+    expect(layout.noteRight).toBeLessThanOrEqual(layout.anomalyLeft);
+    expect(layout.amountRight).toBeLessThanOrEqual(layout.noteLeft);
+    expect(layout.verticalDifference).toBeLessThan(1);
+    await note.hover();
+    await expect(popover).toContainText("票面金额少 0.01 元，经确认保留关联");
+    await popover.hover();
+    await expect(popover).toBeVisible();
+    const box = (await popover.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(width);
+    await drawer.screenshot({ path: testInfo.outputPath(`confirmation-note-${width}.png`) });
+    await page.keyboard.press("Escape");
+    await expect(popover).toHaveCount(0);
+  }
+  expect(api.count("GET /api/workbench/groups/detail")).toBe(0);
+  expect(api.count("POST /api/workbench/exceptions/review")).toBe(0);
+  await expect(group.getByRole("button", { name: "展开异常明细" })).toBeVisible();
+  await page.mouse.move(0, 0);
+  await group.getByRole("button", { name: "展开异常明细" }).focus();
+  await note.focus();
+  await expect(popover).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(popover).toHaveCount(0);
+  await note.hover();
+  await expect(popover).toBeVisible();
+  await note.click();
+  await expect(popover).toHaveCount(0);
+  await note.click();
+  await expect(popover).toBeVisible();
+  await page.keyboard.press("Escape");
+  await group.getByRole("button", { name: "展开异常明细" }).click();
+  await expect(group.getByRole("region", { name: "异常审阅" })).toBeVisible();
+  await expect(group.getByRole("region", { name: "异常审阅" })).not.toContainText("确认关联备注");
+  await expect(note).toBeVisible();
+  expect(api.count("GET /api/workbench/groups/detail")).toBe(1);
+  await note.hover();
+  await expect(popover).toBeVisible();
+  await drawer.getByRole("button", { name: "关闭抽屉" }).click();
+  await expect(popover).toHaveCount(0);
+});
+
+test("wraps long confirmation notes in a bounded popover and clears it when switching categories", async ({ page }) => {
+  await installDeterministicApiMocks(page, {
+    sessionMode: "user", workbenchAmountMismatchScenario: true, workbenchInitialRelationConfirmed: true,
+  });
+  await page.goto("/");
+  const summaryResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/workbench/groups");
+  await page.getByTestId("zone-unpaired").getByRole("button", { name: "未配对异常 1 | 已配对异常 0" }).click();
+  const summary = await (await summaryResponse).json();
+  const longNote = "第一段确认依据：" + "此处记录已核实的质保金说明。".repeat(60) + "\n第二段：" + "x".repeat(400);
+  summary.groups[0].workbench_anomaly.confirmation.note = longNote;
+  await page.route("**/api/workbench/groups?*", (route) => route.fulfill({ json: summary }));
+  await page.reload();
+  await page.setViewportSize({ width: 600, height: 800 });
+  await page.getByTestId("zone-unpaired").getByRole("button", { name: "未配对异常 1 | 已配对异常 0" }).click();
+  const drawer = page.getByRole("dialog", { name: "异常处理" });
+  await drawer.getByRole("button", { name: "查看确认关联备注" }).hover();
+  const popover = page.getByRole("dialog", { name: "确认关联备注" });
+  await expect(popover.locator("p")).toHaveText(longNote);
+  const geometry = await popover.evaluate((el) => ({
+    width: el.clientWidth, contentWidth: el.scrollWidth, height: el.clientHeight, contentHeight: el.scrollHeight,
+    left: el.getBoundingClientRect().left, right: el.getBoundingClientRect().right,
+  }));
+  expect(geometry.contentWidth).toBeLessThanOrEqual(geometry.width);
+  expect(geometry.contentHeight).toBeGreaterThan(geometry.height);
+  expect(geometry.height).toBeLessThanOrEqual(320);
+  expect(geometry.left).toBeGreaterThanOrEqual(0);
+  expect(geometry.right).toBeLessThanOrEqual(600);
+  await drawer.getByRole("radio", { name: "已配对异常 0" }).click();
+  await expect(popover).toHaveCount(0);
+});
+
+test.describe("confirmation note touch access", () => {
+  test.use({ hasTouch: true, viewport: { width: 600, height: 900 } });
+  test("opens and closes by tap without expanding or fetching details", async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, {
+      sessionMode: "user", workbenchAmountMismatchScenario: true, workbenchInitialRelationConfirmed: true,
+    });
+    await page.goto("/");
+    await page.getByTestId("zone-unpaired").getByRole("button", { name: "未配对异常 1 | 已配对异常 0" }).tap();
+    const drawer = page.getByRole("dialog", { name: "异常处理" });
+    const trigger = drawer.getByRole("button", { name: "查看确认关联备注" });
+    const popover = page.getByRole("dialog", { name: "确认关联备注" });
+    await trigger.tap();
+    await expect(popover).toContainText("票面金额少 0.01 元，经确认保留关联");
+    await trigger.tap();
+    await expect(popover).toHaveCount(0);
+    await trigger.tap();
+    await expect(popover).toBeVisible();
+    await drawer.getByRole("heading", { name: "异常处理" }).tap();
+    await expect(popover).toHaveCount(0);
+    await expect(drawer.getByRole("button", { name: "展开异常明细" })).toBeVisible();
+    expect(api.count("GET /api/workbench/groups/detail")).toBe(0);
   });
 });
