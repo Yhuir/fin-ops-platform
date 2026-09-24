@@ -151,11 +151,11 @@ PUT manual allocation
 
 - `GET /manual-allocations/{case_id}` 新增必有的 `suggested_source_allocations: null | {cost_lines,refund_links,non_cost_lines}`；`PUT` 响应该字段为 null，列表摘要不携带它。PUT 入参、存储、权限、审计及原有自动完成规则不变。
 - repository 在成本 snapshot（总表、任务及详情）投影银行 raw_payload 中现有的 `source_oa_row_id`、`oa_row_id`、`derived_from_oa_id`、`source_workbench_row_id` 四个标量引用为内部 `source_oa_ids`。仅投影这四个标量，普通 explorer 和任务列表不取完整原始 payload、不增加银行查询。只识别与当前 canonical OA ID 精确匹配的引用；别名或互相冲突的引用不猜测。
-- `suggest_source_allocations(task, bank_rows, relation_groups)` 是详情专用无 I/O 纯函数。只处理版本0、未保存、未过期、固定目标且无退款/非成本的 pending 任务；输入合计必须闭合。枚举一单元对应整笔来源子集、一来源对应固定单元子集，按候选重叠划分独立组件，逐组件搜索完整覆盖；只有唯一覆盖输出建议。搜索到两个解即判定该组件歧义，不能取局部贪心匹配或前两个解的公共行。没有候选的部分保持人工。
+- `suggest_source_allocations(task, bank_rows, relation_groups)` 是详情专用无 I/O 纯函数。只处理 automatic 模式、未过期、固定目标且无退款/非成本的 pending 任务；输入合计必须闭合。枚举一单元对应整笔来源子集、一来源对应固定单元子集，按候选重叠划分独立组件，逐组件搜索完整覆盖；只有唯一覆盖输出建议。搜索到两个解即判定该组件歧义，不能取局部贪心匹配或前两个解的公共行。没有候选的部分保持人工。
 - 固定上限为128个正成本单元与来源节点合计、50000步候选/覆盖工作；超限返回null，绝不把截断搜索当唯一解。只在展开详情计算，列表与explorer不计算、不增查询。没有通用求解器、依赖、新缓存/worker/表。
 - 当前有效历史子关系先约束来源允许归属的 OA，原始明确引用与其取交集；冲突或无法解析的引用不按金额绕过。当前精简OA投影不含足够的外部身份别名，继续只接受canonical引用，不伪造别名。退款缺少逐来源归属证据，非固定成本缺少确定目标，这两类不生成金额建议，保留完整人工编辑/保存链。
 - Workbench 的 `exact_amount` / `unique_bank_sum` 是展示对齐，不作为来源证据；不新增子集合搜索、比例算法、hash、表、cache、worker 或 fallback。截图 CASE-AUTO-0016 的金额组合可以作为人工判断线索，但没有原始明确引用时不会自动预填。
-- 服务只在 GET 详情计算建议，不把建议送入 policy、统计或持久化。前端草稿初始化保留确定来源，版本0时合并剩余建议；人工版本只使用已保存来源，stale 不复用。已有会话草稿（包括手动删空）不重新初始化。最终保存继续完整校验来源和金额并使用既有事务/版本约束。
+- 服务只在 GET 详情计算建议，不把建议送入 policy、统计或持久化。前端草稿初始化保留确定来源，automatic 模式时合并剩余建议；人工版本只使用已保存来源，stale 不复用。已有会话草稿（包括手动删空）不重新初始化。最终保存继续完整校验来源和金额并使用既有事务/版本约束。
 - 同一成本单元的项目格和 OA 格使用原生 rowSpan；新增、删除来源后同步更新跨度，删除最后一条仍保留身份与新增入口。不同 OA/成本单元不因项目同名而合并。
 - Block 使用四色循环 `#C5D4B8` / `#E8C5A5` / `#DDB9C3` / `#B9CCDF`；数据表格与输入保持白底，颜色不表示财务状态。已删除旧两色选择器、续行空身份格及依赖首个 td 的项目样式，不保留重复路径。
 - 上游 Workbench、银行分类与账户页面的写入、DTO 和职责不变；Cost 只消费既有原始引用。read model / worker 合同不变。本轮没有数据库迁移或备份。
@@ -329,3 +329,14 @@ Cost 的关系展示复用统一 OA—银行对应规则；canonical repository 
 ## 2026-09-24 拆分利息自动成本
 
 单笔本金 1,000,000.00 与利息 1,497.22 拆分、完成 OA 1,497.22、唯一利息来源且金额闭合时，成本三个视角直接读取自动分配结果，不要求再保存、不创建人工记录。拆分金额变化后重新按当前事实计算，金额不匹配回待分配；撤销拆分恢复外部本金用途后不再计利息成本。多个相同金额来源仍由既有歧义规则保留待分配，旧有效人工金额、来源和标签不被自动结果覆盖。删除两处基于统一确认标记的阻断路径，无新增表、API、缓存或后台任务。
+
+
+## 自动与人工决定模式（2026-09-24）
+
+0181 为原 allocation 表增加必有 decision_mode（automatic/manual），版本继续用于 CAS。无记录或 automatic 使用当前事实自动计算；保留的旧载荷不参与计算。manual + stale 保持待复核，禁止静默切自动。人工列表/计数只包含尚未解决任务及有效人工完成任务；自动完成直接计成本，不要求保存。
+
+等价保存不新增人工记录；已有 manual 恢复完整自动结果时更新为 automatic 并递增版本。范围内编辑保留范围外确定来源；标签覆盖、金额解锁、人工补充和非成本均属于人工语义。GET 不迁移、不写审计。自动判断复用当前关系及来源纯函数，不跨关系按金额建配对，不引入全局组合搜索。
+
+`cost_statistics_decision_equivalence.py` 只在写入/维护边界比较完整决定；列表不逐项双算。`CostStatisticsAutomaticMigrationService` 接收 canonical/allocation/audit repository，调用者拥有 SERIALIZABLE 事务。CLI `python3 -m fin_ops_platform.tools.migrate_automatic_cost_allocations` 默认只读预览，`--apply --operator <actor>` 对全量人工候选逐项重新核对，只有完整等价才退役，保存 before/after 审计。非 active、缺事实和非等价记录保留。失败整体回滚，重复执行零重复审计。
+
+恢复仅通过 `--restore-case <case> --expected-version <current-version> --apply --operator <actor>`；要求 automatic 模式、版本与事实仍一致，以递增版本恢复保留载荷并审计，不覆盖后续人工编辑。拆分 owner 撤销成本同样更新模式/版本，不删除记录造成 CAS 版本复用。没有新 read model、缓存或 worker，无数据库备份。

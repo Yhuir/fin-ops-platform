@@ -226,7 +226,7 @@ FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:5189 npx playw
 
 - `AutomaticFormalSourceTests`：145/204 正式对应、仅金额歧义、重复金额明确引用、冲突、部分来源与固定目标、父 OA 明细歧义、混合审批及输入不变。
 - 真实 PostgreSQL：明确引用/正式历史自动读取、GET 零分配与审计写入、三视图无需保存直接计入、首次人工保存/重读与撤回；现有保存/退款/并发/范围/审计回滚继续回归。
-- 前端来源草稿：自动行与剩余建议合并，已保存决定不混入建议；浏览器自动任务在已完成展示、打开零 PUT、显式人工保存和重开。
+- 前端来源草稿：自动行与剩余建议合并，已保存决定不混入建议；浏览器自动完成任务不进入人工两列表；打开零 PUT，等价保存不创建人工覆盖。
 - 七类：1/2/3/5/6/7适用；4中前端旧响应与详情失效沿用既有覆盖，服务端 read model/cache/job 不适用，维持 canonical 直接读取。性能与执行结果见 implementation-notes。
 
 
@@ -252,3 +252,12 @@ FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:5189 npx playw
 - 前端：`CostSourceAllocation.test.ts` 覆盖回填、仅改标签请求、超时结果比较与失效；`CostSourceAllocationForm.test.tsx` 覆盖双栏、恢复来源、证据和本金不变；`CostStatisticsApi.test.ts` 覆盖 DTO。
 - 浏览器：`cost-source-allocation.spec.ts` 覆盖人工选择→保存→重开→恢复来源，复用既有权限/错误/大表性能与范围、关系回归。
 - 七类适用：1业务、2服务、3API、5交互、6集成、7回归均适用；4只验证 canonical 写后读取/批量I/O，无缓存、read model 或 worker。
+
+
+## 自动模式与历史决定收敛（2026-09-24）
+
+- `test_cost_statistics_decision_storage.py`：真实 PostgreSQL/manual→automatic→manual 连续版本、旧版本拒绝、拆分撤销幂等、审计失败事务回滚、0181合同。
+- `test_cost_statistics_source_postgres.py`：等价保存不写、历史迁移只读预览/执行/重复执行、恢复版本保护、审计前后镜像、范围外自动来源保留和三成本视图不变。
+- Policy/source/API：自动已完成退出两人工列表；未知/人工/过期语义、唯一来源及歧义、权限和金额闭合沿用并更新现有测试。
+- UI：`CostAllocationStatus`、来源草稿、保存核实、待复核/待审批/待补资料短状态，自动模式不再用version=0推断。
+- 七类1/2/3/5/6/7适用；4服务端read model/cache/worker不适用，canonical写后读和客户端刷新通过已有及新增测试验证。

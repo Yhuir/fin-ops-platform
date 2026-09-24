@@ -66,7 +66,9 @@ class BankSplitRelationsPostgresTests(unittest.TestCase):
                 self.assertEqual(current["version"], 4)
                 self.assertEqual(current["special_metadata"]["keep"], True)
                 self.assertNotIn("bank_split_requires_cost_confirmation", current["special_metadata"])
-                self.assertNotIn(case, PostgresCostStatisticsManualAllocationRepository(tx).list_by_case_ids([case]))
+                retired = PostgresCostStatisticsManualAllocationRepository(tx).list_by_case_ids([case])[case]
+                self.assertEqual(retired["decision_mode"], "automatic")
+                self.assertEqual(retired["version"], 2)
                 self.assertEqual(service.run(tx, actor_id="tester", apply=True)["affected_count"], 0)
         finally:
             truncate_test_database(require_postgres_test_database_url())
@@ -113,11 +115,12 @@ class BankSplitRelationsPostgresTests(unittest.TestCase):
                 if not fail:
                     raise
             current = self.connection.fetch_one('select row_ids,version from app.workbench_pair_relations where case_id=%s', (case,))
-            count = self.connection.fetch_one('select count(*) as n from app.cost_statistics_manual_allocations where relation_case_id=%s', (case,))['n']
+            allocation = self.connection.fetch_one('select decision_mode, version from app.cost_statistics_manual_allocations where relation_case_id=%s', (case,))
             raw = self.connection.fetch_one('select amount from app.bank_transactions where id=%s::uuid', (parent,))
             self.assertEqual(raw['amount'], Decimal('1001497.22'))
             self.assertEqual(current['row_ids'], relation['row_ids'] if fail else ['oa-test', *[part['id'] for part in parts]])
-            self.assertEqual(count, 1 if fail else 0)
+            self.assertEqual(allocation['decision_mode'], 'manual' if fail else 'automatic')
+            self.assertEqual(allocation['version'], 1 if fail else 2)
             self.assertEqual(len(published), 0 if fail else 1)
             batch = self.connection.fetch_one('select status,bank_transaction_ids,raw_payload from app.bank_flow_rule_batches where batch_id=%s', (case,))
             self.assertEqual(batch['status'], 'submitted' if fail else 'stale')

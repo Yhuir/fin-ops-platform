@@ -1,5 +1,4 @@
 import { BankSplitPartContent } from "../../features/bankSplits/BankSplitChips";
-import { formatMoney } from "../../features/money";
 import { memo, type ReactNode } from "react";
 
 import type { WorkbenchRecord, WorkbenchRecordType } from "../../features/workbench/types";
@@ -57,6 +56,7 @@ function RelationGroupCell({
   entryControl,
 }: RelationGroupCellProps) {
   const splitGroups = new Map<string, WorkbenchRecord[]>();
+  const bankMembers = new Map(paneId === "bank" ? records.map(row => [row.id, row] as const) : []);
   const displayRecords = records.filter(row => {
     if (paneId !== "bank" || !row.isSplit || !row.parentRowId) return true;
     const members = splitGroups.get(row.parentRowId);
@@ -91,14 +91,15 @@ function RelationGroupCell({
         {displayRecords.map((row, index) => (
           <WorkbenchRecordCard
             bankPartsContent={row.isSplit && row.parentRowId ? <span className="bank-split-chips">
-              {splitGroups.get(row.parentRowId)?.map(part => <button type="button" className="bank-split-part bank-split-part-select" key={part.id}
-                aria-label={`选择流水子项 ${part.categoryLabel ?? part.id} ${formatMoney(part.amount)}`}
-                aria-pressed={getRowState(part, zoneId) === "selected"}
-                disabled={readOnly || !canOperateData || part.displayOnly}
-                onClick={event => { event.stopPropagation(); onSelectRow(part, zoneId); }}>
-                <BankSplitPartContent part={{ category_code: part.categoryCode ?? '', category_label: part.categoryLabel ?? '',
-                  category_path: part.categoryLabelPath ?? part.categoryPath ?? [], amount: part.amount }} />
-              </button>)}
+              {row.bankSplitParts?.map(part => {
+                const member = bankMembers.get(part.id);
+                return <span className="bank-split-part" key={part.id}>
+                  <BankSplitPartContent
+                    selected={member ? getRowState(member, zoneId) === "selected" : false}
+                    onSelect={member && !readOnly && canOperateData && !member.displayOnly ? () => onSelectRow(member, zoneId) : undefined}
+                    part={part} />
+                </span>;
+              })}
             </span> : undefined}
             columnGridStyle={columnGridStyle}
             columns={columns}

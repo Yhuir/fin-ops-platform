@@ -317,7 +317,7 @@ function DataRow({
               <FinanceTag>{dateOnly(bank.tradeTime)}</FinanceTag>
               {bankRelationTarget ? (
                 <RelationButton
-                  label={`收入流水 · ${row.bank.relationCount}`}
+                  label={`收入流水 · ${row.bank.originalTransactionCount}`}
                   onClick={() => onOpenDetail(bankRelationTarget)}
                 />
               ) : null}
@@ -325,15 +325,15 @@ function DataRow({
           </>
         ) : <EmptyValue />}
       </FinanceTableCell>
-      <FinanceTableCell className="output-invoice-collections-table-cell output-invoice-collections-table-cell--amount output-invoice-collections-table-cell--small-border" columnRole="amount" textValue={row.bank.receivedTotal || bank?.amount || "—"}>
+      <FinanceTableCell className="output-invoice-collections-table-cell output-invoice-collections-table-cell--amount output-invoice-collections-table-cell--small-border" columnRole="amount" textValue={row.bank.originalAmount || "—"}>
         {bank ? (
           <>
-            <TextLine numeric strong value={formatMoney(row.bank.receivedTotal || bank.amount)} />
-{bank.bankSplitParts?.length ? <BankSplitChips parts={bank.bankSplitParts} /> : null}
+            <TextLine numeric strong value={formatMoney(row.bank.originalAmount, "—")} />
             <span className="output-invoice-collections-tag-row output-invoice-collections-tag-row--right">
               <FinanceTag tone={bank.directionLabel === "收入" ? "success" : "neutral"}>{bank.directionLabel || "收入"}</FinanceTag>
               {accountLabel(bank.bankName, bank.accountLast4) ? <FinanceTag>{accountLabel(bank.bankName, bank.accountLast4)}</FinanceTag> : null}
             </span>
+            {row.bank.bankSplitParts?.length ? <BankSplitChips parts={row.bank.bankSplitParts} /> : null}
           </>
         ) : <EmptyValue />}
       </FinanceTableCell>

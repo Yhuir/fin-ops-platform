@@ -945,6 +945,7 @@ raw_bank_edges as materialized (
         bank.is_split,
         definition.value->>'turnover_role' as turnover_role,
         abs(bank.amount) as bank_amount,
+        bank.parent_amount as bank_original_amount,
         coalesce(bank.trade_time, bank.txn_date::timestamptz) as bank_trade_time,
         coalesce(
             nullif(bank.raw_payload->'normalized_payload'->>'imported_bank_name', ''),
@@ -1009,7 +1010,7 @@ bank_aggregates as materialized (
         coalesce(sum(bank_edges.bank_amount) filter (where bank_edges.txn_direction = 'outflow'), 0)
             as bank_paid_total,
         max(bank_edges.bank_trade_time) filter (where bank_edges.primary_rank = 1) as bank_trade_time,
-        max(bank_edges.bank_amount) filter (where bank_edges.primary_rank = 1) as bank_amount,
+        max(bank_edges.bank_original_amount) filter (where bank_edges.primary_rank = 1) as bank_amount,
         max(bank_edges.bank_name) filter (where bank_edges.primary_rank = 1) as bank_name,
         max(bank_edges.bank_account) filter (where bank_edges.primary_rank = 1) as bank_account,
         max(bank_edges.txn_direction) filter (where bank_edges.primary_rank = 1) as bank_direction,

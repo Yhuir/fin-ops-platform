@@ -86,3 +86,17 @@ BankTransactionUnit 是服务层只读用途 DTO，继承银行字段用于现�
 - 现金专用库另验 103 passed；发布脚本、运行配置与核心规则 68 passed。未修改现金业务实现。
 - `bash scripts/verify.sh frontend`：114 文件、1513 tests passed；TypeScript 与 Vite 构建通过。浏览器拆分新增/保存/重开/保存失败恢复流程 1 passed。`lint`、`docs` 和 `git diff --check` 通过。
 - 55个全量跳过包含需要独立现金 DSN 的测试（已专库补测）及已有显式可选环境测试；未为此次修复新增 skip。生产性能与业务验证在发布后进行，不能以本地单元测试或 no-op 保存替代生产结论。
+
+## 2026-09-24 银行原始金额与用途金额展示合同
+
+OA 待付款、进项发票使用、销项收款的银行聚合对象，以及待找发票的 `bank_transactions`，均输出 `original_amount`（按父流水身份去重的原始金额合计）、`original_transaction_count`（父流水数）、`bank_split_parts`（涉及父流水的完整拆分明细，按父去重）。单笔 summary 输出 `parent_row_id` 与 `original_amount`；待找发票 primary 也输出二者。没有流水时金额为空字符串、父流水数为 0。
+
+原 `amount`、`paidTotal`、`receivedTotal`、`payment_summary` 继续表达用途/单据核对金额，不用于银行总额展示。银行金额筛选、排序与原始总额一致，关键词同时可命中原始金额和用途金额；关联详情复用父流水去重。标签组件只做展示，不参与分类与金额计算。待找发票删除按 definition 自行拼拆分标签的 SQL，改用银行拆分 owner 的 `decorate_parts`，优先消费已持久化完整分类实例，包括第三层。
+
+查询仍为现有 canonical 只读快照、服务端分页和批量 hydrate。没有新增页面 read model、worker、数据库 migration、事实写入、缓存或逐行查询。列表悬浮不发请求；现有编辑命令成功后页面重新 GET。
+
+进项导出“流水金额”使用原始合计，增加“关联金额”和“流水拆分”；销项“收款金额”使用原始合计，增加“关联收款金额”和“流水拆分”。待找发票导出修正已退役 `bank_transaction` 单数入口，读取 canonical `bank_transactions.primary`，借贷列保留主原流水金额，并增加“流水金额合计”和“流水拆分”；已付合计仍为业务金额。OA 导出仅导出 OA 事实，保持不变。
+
+验证入口：`test_bank_split_document_scope_postgres.py`、`test_bank_split_consumers_postgres.py`，验证本息拆分的展示与业务金额隔离、同父去重、多父完整标签、金额筛选/子项搜索、持久化第三层和导出；并回归四个消费页面的 query/API/service/export 测试。
+
+关联台的完整父拆分信息由现有 `workbench_category_projection_rows` 一次 SQL 提供，原单行/full/summary hydration 均经过此边界。选中用途限定父集合后，集合聚合全部兄弟子项，再调用 owner 的装配方法；不额外查询、不复制关联成员，也不改变选择金额。真实 PostgreSQL 测试将父流水两个子项放入不同 case，验证展示完整但当前 case 仍只有自己的 child ID。

@@ -2408,7 +2408,7 @@ export default function BankDetailsPage() {
                           </div>
                         </FinanceTableCell>
                         <FinanceTableCell className="bank-col-type" columnRole="status" textValue={row.effectiveCategoryLabel || row.autoCategoryLabel || row.categoryResolutionStatus}>
-                          {row.bankSplitParts?.length ? <BankSplitChips parts={row.bankSplitParts} /> : <TypeCell
+                          {row.bankSplitParts?.length ? null : <TypeCell
                             row={row}
                             autoTagRules={activeAutoTagRules}
                             confirming={categoryMutationId === row.id}
@@ -2437,6 +2437,7 @@ export default function BankDetailsPage() {
                             <span className="bank-source-chip bank-chip-auto-size">
                               <span className="bank-chip-label">{`${row.bankName} ${row.accountLast4}`}</span>
                             </span>
+                            {row.bankSplitParts?.length ? <BankSplitChips parts={row.bankSplitParts} /> : null}
                           </div>
                         </FinanceTableCell>
                         <FinanceTableCell className="bank-col-balance" columnRole="amount" textValue={row.balance === null ? "—" : formatMoney(row.balance)}>

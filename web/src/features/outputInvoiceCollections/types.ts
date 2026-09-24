@@ -68,6 +68,7 @@ export type OutputInvoiceCollectionStatus = {
 };
 
 export type OutputInvoiceCollectionBankSummary = {
+  originalAmount: string;
   bankSplitParts?: BankSplitPart[];
   id: string;
   counterpartyName: string;
@@ -104,6 +105,9 @@ export type OutputInvoiceCollectionRelatedInvoiceSummary = {
 };
 
 export type OutputInvoiceCollectionRelationSummary<T> = {
+  originalTransactionCount?: number;
+  bankSplitParts?: BankSplitPart[];
+  originalAmount?: string;
   primary: T | null;
   relationCount: number;
   hasMultiple: boolean;

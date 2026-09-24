@@ -54,3 +54,6 @@ Nginx示例采用归一化`$uri`条件access_log，精确排除三种cash API前
 0180 增量保存拆分分类实例，已退役的统一成本确认标记通过 `retire_bank_split_confirmation_flags` owner 工具预览/事务清理，不更改关系版本或成员，不创建数据库备份。既有子项缺失的第三层按已核实原确认事实经正式 PUT 修复；不在迁移 SQL 推断。
 
 0180 的完整拆分分类实例也纳入既有 forward-only 发布清单：旧 writer 只修改 code/金额，不能同步更新完整实例，回切后可能留下错配归属。验证失败保留 maintenance 向前修复；不新增审核门禁或数据库备份。
+
+
+0181 cost decision_mode 为 forward-only：退役人工决定后旧 writer 忽略模式会重新启用旧载荷。先发布理解模式的版本，再运行成本 owner 的 automatic migration CLI。数据恢复要求模式/连续版本/当前事实校验；不能回切忽略模式的代码。生产不创建全库备份、不删除主数据库。

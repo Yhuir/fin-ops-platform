@@ -11,7 +11,7 @@ import CostManualTagPicker from './CostManualTagPicker';
 type Props = {
   tagLoading: boolean; tagError?: string; onLoadTags: () => void;
   task: CostStatisticsManualAllocationTask; draft: SourceDraft; disabled: boolean; saving: boolean;
-  error?: string; notice?: string; onChange: (draft: SourceDraft) => void; onSave: () => void;
+  saveDisabled?: boolean; error?: string; notice?: string; onChange: (draft: SourceDraft) => void; onSave: () => void;
 };
 type LineKind = 'costLines' | 'refundLinks' | 'nonCostLines';
 
@@ -22,7 +22,7 @@ function FieldIssue({ message, field, open, onOpenChange }: { message: string; f
   </Popover>;
 }
 
-export default function CostSourceAllocationForm({ tagLoading, tagError, onLoadTags, task, draft, disabled, saving, error, notice, onChange, onSave }: Props) {
+export default function CostSourceAllocationForm({ tagLoading, tagError, onLoadTags, task, draft, disabled, saving, saveDisabled = false, error, notice, onChange, onSave }: Props) {
   const [submitted, setSubmitted] = useState(0);
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const [openIssue, setOpenIssue] = useState<string | null>(null);
@@ -141,6 +141,8 @@ export default function CostSourceAllocationForm({ tagLoading, tagError, onLoadT
   return <div className="cost-source-form" ref={root}>
     {task.pendingReasons.includes('scope_refund_required') ? <p className="cost-source-notice">请先确认退款对应的原支出</p> : null}
     {task.pendingReasons.includes('oa_in_progress') ? <p className="cost-source-notice">部分 OA 待审批</p> : null}
+    {task.pendingReasons.includes('bank_account_missing') ? <p className="cost-source-notice">银行账户待完善</p> : null}
+    {task.pendingReasons.includes('source_date_missing') ? <p className="cost-source-notice">付款日期待完善</p> : null}
     {task.pendingReasons.includes('bank_tag_missing') ? <p className="cost-source-notice">银行标签待完善</p> : null}
     {task.pendingReasons.includes('allocation_stale') ? <p className="cost-source-notice">数据已变化，请重新核对</p> : null}
     <CostSourceEvidence task={task} sourceError={sourceError} />
@@ -165,7 +167,7 @@ export default function CostSourceAllocationForm({ tagLoading, tagError, onLoadT
       {refunds.length ? <details className="cost-source-extra" open><summary>退款归属</summary>{refunds.map(refund => <Fragment key={refund.transactionId}><div className="cost-source-extra-heading"><CostChips values={[shortBankAccount(refund.bankAccountLabel), refund.tradeTime ? formatDateTimeText(refund.tradeTime) : '日期待完善']} /><span className="cost-source-money">¥{refund.amount}</span>{showError(`refund.${refund.transactionId}`)}</div>{auxiliaryLines('refundLinks', refund.transactionId)}</Fragment>)}</details> : null}
       <details className="cost-source-extra" open={cents(draft.nonCostAmount) !== 0n || undefined}><summary>不计成本 {showError('nonCost')}</summary><div className="cost-source-non-cost"><input aria-label="不计入成本金额" inputMode="decimal" value={draft.nonCostAmount} disabled={disabled} onChange={event => onChange({ ...draft, nonCostAmount: event.target.value })} /><input aria-label="不计入成本原因" placeholder="原因" value={draft.nonCostReason} disabled={disabled} onChange={event => onChange({ ...draft, nonCostReason: event.target.value })} /></div>{auxiliaryLines('nonCostLines', '')}</details>
     </section>
-    <footer><div><span className="cost-source-muted">项目成本 {money(draft.costLines.reduce((total, line) => total + (cents(line.amount) ?? 0n), 0n))} · {(() => { const remaining = (cents(task.netOutflowTotal) ?? 0n) - draft.costLines.reduce((total, line) => total + (cents(line.amount) ?? 0n), 0n) - (cents(draft.nonCostAmount) ?? 0n); return `${remaining < 0n ? '超出' : '剩余'} ${money(remaining < 0n ? -remaining : remaining)}`; })()}</span>{submitted > 0 && errors.total ? <p className="cost-source-error" role="alert" tabIndex={-1}>{errors.total}</p> : null}{error ? <p className="cost-source-error" role="alert">{error}</p> : null}{notice ? <p className="cost-source-notice" role="status">{notice}</p> : null}</div><div className="cost-source-save-actions"><span className="cost-source-balanced" role="status">{(!task.allowsPartial || draft.costLines.reduce((sum, line) => sum + (cents(line.amount) ?? 0n), 0n) + (cents(draft.nonCostAmount) ?? 0n) === cents(task.netOutflowTotal)) && !task.waitingOaIds?.length && !Object.keys(errors).length && !saving && !error && (!notice || task.status === "allocated") ? '分配金额一致' : ''}</span><button type="button" className="cost-source-save" disabled={disabled} onClick={() => { focusErrors.current = !!Object.keys(errors).length; setSubmitted(value => value + 1); if (!Object.keys(errors).length) onSave(); }}>{saving ? '保存中…' : '保存'}</button></div></footer>
+    <footer><div><span className="cost-source-muted">项目成本 {money(draft.costLines.reduce((total, line) => total + (cents(line.amount) ?? 0n), 0n))} · {(() => { const remaining = (cents(task.netOutflowTotal) ?? 0n) - draft.costLines.reduce((total, line) => total + (cents(line.amount) ?? 0n), 0n) - (cents(draft.nonCostAmount) ?? 0n); return `${remaining < 0n ? '超出' : '剩余'} ${money(remaining < 0n ? -remaining : remaining)}`; })()}</span>{submitted > 0 && errors.total ? <p className="cost-source-error" role="alert" tabIndex={-1}>{errors.total}</p> : null}{error ? <p className="cost-source-error" role="alert">{error}</p> : null}{notice ? <p className="cost-source-notice" role="status">{notice}</p> : null}</div><div className="cost-source-save-actions"><span className="cost-source-balanced" role="status">{(!task.allowsPartial || draft.costLines.reduce((sum, line) => sum + (cents(line.amount) ?? 0n), 0n) + (cents(draft.nonCostAmount) ?? 0n) === cents(task.netOutflowTotal)) && !task.waitingOaIds?.length && !Object.keys(errors).length && !saving && !error && (!notice || task.status === "allocated") ? '分配金额一致' : ''}</span><button type="button" className="cost-source-save" disabled={disabled || saveDisabled} onClick={() => { focusErrors.current = !!Object.keys(errors).length; setSubmitted(value => value + 1); if (!Object.keys(errors).length) onSave(); }}>{saving ? '保存中…' : '保存'}</button></div></footer>
   </div>;
 }
 

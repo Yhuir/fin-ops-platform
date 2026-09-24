@@ -99,3 +99,7 @@ cd web && npm run build
 `InputInvoiceUsagePage.test.tsx` 分别注入旧年月/起止与仅日期列过滤缓存，检查所有首请求没有隐藏日期，page=1 且旧详情/导出关闭，非日期偏好保留；已有全部范围 session 保留第 3 页。支付规则、OA 反提、导出与空态回归继续执行。
 
 本次覆盖页面交互与既有功能回归；使用既有 API schema，不新增领域状态、写服务、read model 或 worker。导航、浏览器前后退与整页刷新由 App 进入规则浏览器验证补充。
+
+## 原始流水金额与拆分展示回归（2026-09-24）
+
+`tests/test_bank_split_document_scope_postgres.py` 与 `tests/test_bank_split_consumers_postgres.py` 验证原始金额 1001497.22 与利息业务金额 1497.22 同时成立、同父子项去重、多父金额/标签完整、原始金额筛选、子项金额搜索、持久化第三层及导出。适用业务核心、服务、API/查询合同、跨模块链路与旧功能回归；前端交互由各页面及 BankSplitChips 测试覆盖。本次无缓存/read-model/后台任务变更，验证 canonical 查询与现有写后 GET，无需新增后台测试。

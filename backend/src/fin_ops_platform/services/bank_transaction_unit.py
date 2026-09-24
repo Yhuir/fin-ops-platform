@@ -27,11 +27,12 @@ def original_bank_transaction(bank: BankTransaction) -> BankTransaction:
 
 
 def bank_unit_display(bank: BankTransaction) -> dict[str, Any]:
-    if not isinstance(bank, BankTransactionUnit):
-        return {}
     parent = original_bank_transaction(bank)
-    return {"parent_row_id": parent.id, "parent_amount": f"{parent.amount:.2f}",
-            "bank_split_parts": bank.bank_split_parts, "bank_split_version": bank.bank_split_version}
+    display = {"parent_row_id": parent.id, "original_amount": f"{parent.amount:.2f}"}
+    if isinstance(bank, BankTransactionUnit):
+        display.update(parent_amount=f"{parent.amount:.2f}",
+                       bank_split_parts=bank.bank_split_parts, bank_split_version=bank.bank_split_version)
+    return display
 
 
 def original_bank_summary(summary: dict[str, Any]) -> dict[str, Any]:
@@ -49,6 +50,17 @@ def original_bank_summaries(summaries: list[dict[str, Any]]) -> list[dict[str, A
         parent = original_bank_summary(summary)
         unique.setdefault(parent["bankTransactionId"], parent)
     return list(unique.values())
+
+
+def original_bank_display_totals(summaries: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate distinct financial facts for display, independently of business totals."""
+    parents = {summary["parent_row_id"]: summary for summary in summaries}
+    total = sum((Decimal(row["original_amount"]) for row in parents.values()), Decimal("0.00"))
+    return {
+        "original_amount": f"{total:.2f}" if parents else "",
+        "original_transaction_count": len(parents),
+        "bank_split_parts": [part for row in parents.values() for part in row.get("bank_split_parts", [])],
+    }
 
 
 def bank_unit_comparison_rows(banks: list[BankTransaction], *, target: Decimal) -> list[BankTransaction]:

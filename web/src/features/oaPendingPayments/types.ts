@@ -80,6 +80,8 @@ export type OaPendingPaymentWritebackStatus = {
 };
 
 export type OaPendingPaymentBankTransaction = {
+  original_transaction_count: number;
+  original_amount: string;
   bank_split_parts?: BankSplitPart[];
   primaryBankTransactionId?: string | null;
   accountDetailNo: string;
@@ -115,6 +117,7 @@ export type OaPendingPaymentBankTransaction = {
 };
 
 export type OaPendingPaymentBankTransactionSummary = {
+  original_amount: string;
   bankTransactionId?: string | null;
   bankName?: string;
   accountNo?: string;

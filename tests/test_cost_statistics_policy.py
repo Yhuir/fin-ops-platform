@@ -982,7 +982,8 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                 "oa_related_bank_ids": list(oa_related_bank_ids or []),
                 "active_relation_count": len(groups),
                 "available_years": ["2026"],
-                "manual_allocations": dict(manual_allocations or {}),
+                "manual_allocations": {key: {"decision_mode": "manual", "updated_by": "tester", "updated_at": "", **record}
+                                       for key, record in (manual_allocations or {}).items()},
             },
         )
 

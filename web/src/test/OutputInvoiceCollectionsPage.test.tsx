@@ -59,11 +59,14 @@ function collectionStatusRow({
       pending_amount: pendingAmount,
     },
     bank: {
+      original_amount: collectedAmount,
+      original_transaction_count: bankRelationCount,
       primary: hasBank ? {
         id: `bank-${id}`,
         counterparty_name: "云南驰林科技有限公司",
         trade_time: "2026-06-06 10:30:00",
         amount: collectedAmount,
+        original_amount: collectedAmount,
         direction: "inflow",
         direction_label: "收入",
         bank_name: "建设银行",
@@ -131,12 +134,16 @@ const rowsPayload = {
           account_last4: "8106",
           summary: "客户回款",
           relation_status: "linked",
+          original_amount: "182400.00",
+          original_transaction_count: 1,
         },
         relation_count: 1,
         has_multiple: false,
         received_total: "182400.00",
         detail_mode: "single",
         summaries: [],
+        original_amount: "182400.00",
+        original_transaction_count: 1,
       },
       invoice_relations: {
         primary: {

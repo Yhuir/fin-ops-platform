@@ -10,14 +10,26 @@ class PostgresCostStatisticsManualAllocationRepository:
         self._connection = connection
 
     def revoke_for_bank_split(self, case_ids: list[str], *, actor_id: str, parent_id: str) -> list[str]:
-        """Revoke obsolete decisions, preserving the full decision in audit."""
+        """Retire obsolete decisions without resetting their CAS version."""
         from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
 
         if not case_ids:
             return []
         rows = self._connection.fetch_all(
-            "delete from app.cost_statistics_manual_allocations where relation_case_id = any(%s::text[]) returning *",
-            (sorted(set(case_ids)),),
+            """
+            with before as materialized (
+                select * from app.cost_statistics_manual_allocations
+                where relation_case_id = any(%s::text[]) and decision_mode = 'manual'
+                order by relation_case_id for update
+            ), changed as (
+                update app.cost_statistics_manual_allocations allocation
+                set decision_mode = 'automatic', version = allocation.version + 1,
+                    updated_by = %s, updated_at = now()
+                from before where allocation.relation_case_id = before.relation_case_id
+                returning before.*
+            ) select * from changed
+            """,
+            (sorted(set(case_ids)), actor_id),
         )
         audit = PostgresOperationsAuditRepository(self._connection)
         for row in rows:
@@ -26,7 +38,11 @@ class PostgresCostStatisticsManualAllocationRepository:
                 "object_id": row["relation_case_id"], "actor_id": actor_id, "scope": "all",
                 "action": "cost_statistics.manual_allocation.revoke_bank_split",
                 "page_key": "cost-statistics", "operation_location": "流水拆分/成本分配撤销",
-                "payload": {"parent_transaction_id": parent_id, "before": {**serialize_value(row), "id": str(row["id"])}},
+                "payload": {
+                    "parent_transaction_id": parent_id,
+                    "before": {**serialize_value(row), "id": str(row["id"])},
+                    "after": {"decision_mode": "automatic", "version": int(row["version"]) + 1},
+                },
             })
         return sorted(row["relation_case_id"] for row in rows)
 
@@ -38,8 +54,34 @@ class PostgresCostStatisticsManualAllocationRepository:
             from app.cost_statistics_manual_allocations allocation
             left join app.workbench_pair_relations relation
               on relation.case_id = allocation.relation_case_id
+            where allocation.decision_mode = 'manual'
             order by allocation.relation_case_id
         """)
+
+    def list_decision_candidates(self) -> list[dict[str, Any]]:
+        """List every live manual decision, including inactive/missing relations."""
+        return self._connection.fetch_all("""
+            select allocation.relation_case_id, allocation.decision_mode,
+                   allocation.version, relation.status as relation_status
+            from app.cost_statistics_manual_allocations allocation
+            left join app.workbench_pair_relations relation
+              on relation.case_id = allocation.relation_case_id
+            where allocation.decision_mode = 'manual'
+            order by allocation.relation_case_id
+        """)
+
+    def retire_to_automatic(
+        self, *, relation_case_id: str, expected_version: int, actor_id: str,
+    ) -> dict[str, Any] | None:
+        """CAS transition; the caller writes the full audit in the same transaction."""
+        row = self._connection.fetch_one("""
+            update app.cost_statistics_manual_allocations
+            set decision_mode = 'automatic', version = version + 1,
+                updated_by = %s, updated_at = now()
+            where relation_case_id = %s and version = %s and decision_mode = 'manual'
+            returning *
+        """, (actor_id, relation_case_id, expected_version))
+        return _record(row) if isinstance(row, dict) else None
 
     def list_by_case_ids(self, case_ids: list[str]) -> dict[str, dict[str, Any]]:
         normalized = list(dict.fromkeys(str(case_id).strip() for case_id in case_ids if str(case_id).strip()))
@@ -49,6 +91,7 @@ class PostgresCostStatisticsManualAllocationRepository:
             """
             select
                 relation_case_id,
+                decision_mode,
                 relation_version,
                 source_fingerprint,
                 oa_total,
@@ -83,6 +126,7 @@ class PostgresCostStatisticsManualAllocationRepository:
         self,
         *,
         relation_case_id: str,
+        decision_mode: str,
         relation_version: int,
         source_fingerprint: str,
         oa_total: str,
@@ -99,11 +143,13 @@ class PostgresCostStatisticsManualAllocationRepository:
         expected_version: int,
         actor_id: str,
     ) -> dict[str, Any] | None:
+        _validate_decision_mode(decision_mode)
         if expected_version == 0:
             row = self._connection.fetch_one(
                 """
                 insert into app.cost_statistics_manual_allocations(
                     relation_case_id,
+                    decision_mode,
                     relation_version,
                     source_fingerprint,
                     oa_total,
@@ -121,7 +167,7 @@ class PostgresCostStatisticsManualAllocationRepository:
                     created_by,
                     updated_by
                 ) values (
-                    %s, %s, %s, %s::numeric, %s::numeric, %s::numeric, %s::numeric,
+                    %s, %s, %s, %s, %s::numeric, %s::numeric, %s::numeric, %s::numeric,
                     %s, %s, %s, %s, %s, %s::numeric, %s, 1, %s, %s
                 )
                 on conflict (relation_case_id) do nothing
@@ -129,6 +175,7 @@ class PostgresCostStatisticsManualAllocationRepository:
                 """,
                 (
                     relation_case_id,
+                    decision_mode,
                     relation_version,
                     source_fingerprint,
                     oa_total,
@@ -150,7 +197,8 @@ class PostgresCostStatisticsManualAllocationRepository:
             row = self._connection.fetch_one(
                 """
                 update app.cost_statistics_manual_allocations
-                set relation_version = %s,
+                set decision_mode = %s,
+                    relation_version = %s,
                     source_fingerprint = %s,
                     oa_total = %s::numeric,
                     gross_outflow_total = %s::numeric,
@@ -171,6 +219,7 @@ class PostgresCostStatisticsManualAllocationRepository:
                 returning *
                 """,
                 (
+                    decision_mode,
                     relation_version,
                     source_fingerprint,
                     oa_total,
@@ -203,7 +252,19 @@ class InMemoryCostStatisticsManualAllocationRepository:
             if case_id in self._records
         }
 
+    def retire_to_automatic(
+        self, *, relation_case_id: str, expected_version: int, actor_id: str,
+    ) -> dict[str, Any] | None:
+        current = self._records.get(relation_case_id)
+        if current is None or current["version"] != expected_version or current["decision_mode"] != "manual":
+            return None
+        record = {**current, "decision_mode": "automatic", "version": expected_version + 1,
+                  "updated_by": actor_id, "updated_at": ""}
+        self._records[relation_case_id] = record
+        return dict(record)
+
     def save(self, **values: Any) -> dict[str, Any] | None:
+        _validate_decision_mode(values["decision_mode"])
         case_id = str(values["relation_case_id"])
         expected_version = int(values["expected_version"])
         current = self._records.get(case_id)
@@ -220,9 +281,15 @@ class InMemoryCostStatisticsManualAllocationRepository:
         return dict(record)
 
 
+def _validate_decision_mode(mode: str) -> None:
+    if mode not in {"manual", "automatic"}:
+        raise ValueError("Invalid cost allocation decision mode.")
+
+
 def _record(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "relation_case_id": str(row.get("relation_case_id") or ""),
+        "decision_mode": row["decision_mode"],
         "relation_version": int(row.get("relation_version") or 1),
         "source_fingerprint": str(row.get("source_fingerprint") or ""),
         "oa_total": str(row.get("oa_total") or "0.00"),

@@ -510,7 +510,7 @@ export default function InputInvoiceUsageTable({
               const bankRelationTarget = relationListTarget(row, "bank");
               const invoiceRelationTarget = relationListTarget(row, "invoice");
               const oaExtraCount = extraRelationCount(row.oa.relationCount);
-              const bankExtraCount = extraRelationCount(row.bank.relationCount);
+              const bankExtraCount = extraRelationCount(row.bank.originalTransactionCount);
               const invoiceExtraCount = extraRelationCount(row.invoiceRelations.relationCount);
 
               return (
@@ -619,22 +619,22 @@ export default function InputInvoiceUsageTable({
                     {bank ? (
                       <>
                         <div className="input-invoice-usage-bank-amount-line">
-                          <span className="input-invoice-usage-money-primary">{formatMoney(bank.amount)}</span>
+                          <span className="input-invoice-usage-money-primary">{formatMoney(row.bank.originalAmount, "—")}</span>
                           {bankRelationTarget ? (
                             <RelationCountButton
                               extraCount={bankExtraCount}
-                              label={`查看${bank.counterpartyName || "该发票"}关联流水 ${row.bank.relationCount} 条`}
+                              label={`查看${bank.counterpartyName || "该发票"}关联流水 ${row.bank.originalTransactionCount} 条`}
                               onClick={() => onOpenDetail(bankRelationTarget)}
                             />
                           ) : null}
                         </div>
-{bank.bankSplitParts?.length ? <BankSplitChips parts={bank.bankSplitParts} /> : null}
                         <div className="input-invoice-usage-bank-tag-row">
                           <Tag tone="info">{directionLabel(bank.directionLabel || bank.direction)}</Tag>
                           <Tag className="input-invoice-usage-bank-tag">
                             {bankAccountLabel(bank) || "银行账户为空"}
                           </Tag>
                         </div>
+                        {row.bank.bankSplitParts?.length ? <BankSplitChips parts={row.bank.bankSplitParts} /> : null}
                       </>
                     ) : <EmptyCell />}
                   </FinanceTableCell>

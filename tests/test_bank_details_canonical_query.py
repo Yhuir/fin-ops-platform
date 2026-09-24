@@ -572,6 +572,7 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
                 return [
                     {
                         "row_id": "bank-legacy-1",
+                        "split_display_items": [],
                         "amount": Decimal("12.34"),
                         "direction": "expense",
                         "confirmation_id": "confirmation-1",
@@ -594,6 +595,7 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
         self.assertEqual(
             projections["bank-legacy-1"],
             {
+                "bank_split_parts": [],
                 "category_code": "fee",
                 "category_label": "手续费",
                 "category_path": ["自动识别", "手续费"],
@@ -638,6 +640,7 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
                 return [
                     {
                         "row_id": "bank-turnover-1",
+                        "split_display_items": [],
                         "amount": Decimal("100000.00"),
                         "direction": "expense",
                         "confirmation_id": "confirmation-turnover-1",

@@ -1428,6 +1428,8 @@ def _fact_cte(
                 coalesce(bank.legacy_mongo_id, bank.id::text) as bank_id,
                 bank.txn_direction,
                 bank.is_split,
+                bank.parent_row_id,
+                bank.parent_amount,
                 definition.value->>'turnover_role' as turnover_role,
                 bank.amount,
                 bank.counterparty_name_raw,
@@ -1464,6 +1466,8 @@ def _fact_cte(
                 coalesce(bank.legacy_mongo_id, bank.id::text),
                 bank.txn_direction,
                 bank.is_split,
+                bank.parent_row_id,
+                bank.parent_amount,
                 definition.value->>'turnover_role',
                 bank.amount,
                 bank.counterparty_name_raw,
@@ -1496,6 +1500,11 @@ def _fact_cte(
             join scope_bank_members scope on scope.group_key=bank.group_key and scope.bank_id=bank.bank_id
             join group_scope_balance balance on balance.group_key=bank.group_key
         ),
+        group_bank_original_totals as (
+            select group_key, sum(parent_amount) as original_amount
+            from (select distinct group_key, parent_row_id, parent_amount from group_bank_rows) parents
+            group by group_key
+        ),
         group_banks as (
             select
                 grouped.group_key,
@@ -1516,10 +1525,6 @@ def _fact_cte(
                     coalesce(bank.trade_time, bank.txn_date::timestamptz) desc,
                     bank.bank_id
                 ))[1] as bank_trade_time,
-                (array_agg(bank.amount order by
-                    coalesce(bank.trade_time, bank.txn_date::timestamptz) desc,
-                    bank.bank_id
-                ))[1] as bank_amount,
                 (array_agg(bank.bank_name order by
                     coalesce(bank.trade_time, bank.txn_date::timestamptz) desc,
                     bank.bank_id
@@ -1555,7 +1560,7 @@ def _fact_cte(
                 coalesce(banks.matched_bank_total, 0)::numeric as matched_bank_total,
                 coalesce(banks.bank_counterparty_name, '') as bank_counterparty_name,
                 banks.bank_trade_time,
-                coalesce(banks.bank_amount, 0)::numeric as bank_amount,
+                coalesce(originals.original_amount, 0)::numeric as bank_amount,
                 coalesce(banks.bank_name, '') as bank_name,
                 coalesce(banks.bank_account, '') as bank_account,
                 coalesce(banks.bank_direction, '') as bank_direction,
@@ -1566,6 +1571,7 @@ def _fact_cte(
               on reversal.group_key = grouped.group_key
             {oa_join_sql}
             left join group_banks banks on banks.group_key = grouped.group_key
+            left join group_bank_original_totals originals on originals.group_key = grouped.group_key
         )
         {final_status_sql}
     """
@@ -1649,6 +1655,8 @@ def _where_sql(
             "oa_project_name",
             "bank_counterparty_name",
             "bank_summary",
+            "bank_inflow_total::text",
+            "bank_outflow_total::text",
             *keyword_extra_columns,
             *amount_columns,
         ]

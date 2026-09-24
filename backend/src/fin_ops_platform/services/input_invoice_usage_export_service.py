@@ -31,6 +31,8 @@ INPUT_INVOICE_USAGE_EXPORT_COLUMNS = [
     "支付银行",
     "交易时间",
     "流水金额",
+    "关联金额",
+    "流水拆分",
     "收支方向",
     "对方户名",
     "摘要",
@@ -241,7 +243,12 @@ class InputInvoiceUsageExportService:
             "项目名称": cls._text(oa_primary.get("projectName") or oa_primary.get("project_name")),
             "支付银行": cls._text(bank_primary.get("bankName") or bank_primary.get("bank_name")),
             "交易时间": cls._text(bank_primary.get("tradeTime") or bank_primary.get("trade_time")),
-            "流水金额": cls._text(bank_primary.get("amount")),
+            "流水金额": cls._text(bank_relation.get("original_amount")),
+            "关联金额": cls._text(bank_primary.get("amount")),
+            "流水拆分": "；".join(
+                f"{' / '.join(part['category_path'])}：{part['amount']}"
+                for part in bank_relation.get("bank_split_parts", [])
+            ),
             "收支方向": cls._text(bank_primary.get("directionLabel") or bank_primary.get("direction_label") or bank_primary.get("direction")),
             "对方户名": cls._text(bank_primary.get("counterpartyName") or bank_primary.get("counterparty_name")),
             "摘要": cls._text(bank_primary.get("summary")),

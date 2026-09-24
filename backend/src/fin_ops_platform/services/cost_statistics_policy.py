@@ -115,7 +115,7 @@ class CostStatisticsPolicy:
     @cached_property
     def manual_allocation_tasks(self) -> list[dict[str, Any]]:
         return [task for task in self.allocation_tasks
-                if task["in_project_cost_scope"] and (task["status"] != "allocated" or task["relation_case_id"] in self._manual_allocations)]
+                if task["in_project_cost_scope"] and (task["status"] != "allocated" or task["decision_mode"] == "manual")]
 
     @cached_property
     def pending_manual_allocation_count(self) -> int:
@@ -915,6 +915,12 @@ def _manual_allocation_task(
             str(event["transaction_id"]),
         ),
     )
+    stored_record = manual_record
+    if stored_record is not None:
+        if stored_record["decision_mode"] not in {"automatic", "manual"}:
+            raise CostStatisticsAllocationConflictError("Invalid cost allocation decision mode.")
+        if stored_record["decision_mode"] == "automatic":
+            manual_record = None
     saved_usage: dict[str, Decimal] = {}
     if manual_record and manual_record.get("source_allocations") is not None:
         for lines in manual_record["source_allocations"].values():
@@ -946,9 +952,10 @@ def _manual_allocation_task(
         "allocations": [],
         "non_cost_amount": "0.00",
         "non_cost_reason": "",
-        "version": 0,
-        "updated_by": "",
-        "updated_at": "",
+        "decision_mode": "manual" if manual_record is not None else "automatic",
+        "version": int(stored_record["version"]) if stored_record is not None else 0,
+        "updated_by": _clean_text(stored_record["updated_by"]) if stored_record is not None else "",
+        "updated_at": _clean_text(stored_record["updated_at"]) if stored_record is not None else "",
     }
     if reconciliation["difference"] == "0.00" and not task["allows_partial"]:
         task["allocations"] = [

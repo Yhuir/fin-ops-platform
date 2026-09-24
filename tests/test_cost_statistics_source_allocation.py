@@ -193,6 +193,7 @@ class SourceSuggestionTests(unittest.TestCase):
     def fixture(self):
         task = complete_source_task(task_fixture())
         task['version'] = 0
+        task['decision_mode'] = 'automatic'
         for unit in task['units']:
             unit['oa_id'] = unit['unit_id']
         task['bank_events'][0]['amount'] = '600.00'
@@ -246,7 +247,7 @@ class SourceSuggestionTests(unittest.TestCase):
         self.assertIsNone(self.suggest(task, {'bank1': ['outside'], 'bank2': []}))
 
     def test_saved_stale_variable_targets_and_refunds_do_not_prefill(self):
-        for patch in ({'version': 1}, {'pending_reasons': ['allocation_stale']},
+        for patch in ({'decision_mode': 'manual'}, {'pending_reasons': ['allocation_stale']},
                       {'oa_total': '999.00'}, {'non_cost_amount': '1.00'}, {'status': 'allocated'}):
             with self.subTest(patch=patch):
                 task = self.fixture() | patch

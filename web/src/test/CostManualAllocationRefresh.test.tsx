@@ -10,7 +10,7 @@ beforeEach(()=>{
  vi.clearAllMocks();
  // jsdom has no layout; actual height transitions are verified in Playwright.
  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
- task={relationCaseId:'case',relationVersion:1,sourceFingerprint:'first',scopeVersion:1,status:'pending',pendingReasons:['source_required'],oaTotal:'100.00',grossOutflowTotal:'100.00',wrongPaymentRefundTotal:'0.00',netOutflowTotal:'100.00',nonCostAmount:'0.00',nonCostReason:'',version:0,updatedBy:'',updatedAt:'',canSave:true,
+ task={relationCaseId:'case',relationVersion:1,sourceFingerprint:'first',scopeVersion:1,decisionMode:'automatic',status:'pending',pendingReasons:['source_required'],oaTotal:'100.00',grossOutflowTotal:'100.00',wrongPaymentRefundTotal:'0.00',netOutflowTotal:'100.00',nonCostAmount:'0.00',nonCostReason:'',version:0,updatedBy:'',updatedAt:'',canSave:true,
  units:[{unitId:'u',oaId:'o',oaApplyType:'支付申请',expenseItemId:'',projectId:'p',projectName:'项目',expenseType:'材料',expenseContent:'原始费用',oaApplicant:'申请人',lockOaAmount: true, outsideCostAmount: "0.00", oaOriginalAmount:'100.00'}],
  bankEvents:[{transactionId:'b',eventKind:'outflow',inProjectCostScope:true,amount:'100.00',tradeTime:'2026-09-01',counterpartyName:'供应商',bankAccountLabel:'建行 8106',bankTagCode:'material',bankTagPrimaryLabel:'材料',bankTagSubLabel:'采购',tags:[]}],
  allocations:[{unitId:'u',amount:'100.00'}],sourceAllocations:null,oaCostTagOverrides: [], manualItems: [], manualOptions: {projects: [], tags: []}, suggestedSourceAllocations:{costLines:[{unitId:'u',bankTransactionId:'b',amount:'100.00'}],refundLinks:[],nonCostLines:[]},relationDisplayGroups:[{unitIds:['u'],bankTransactionIds:['b'],sourcesExcluded:false}]};
@@ -156,4 +156,40 @@ it('opens automatic cost directly without reading manual lists and retains its s
  await screen.findByText('已保存'); expect(lock).not.toBeChecked(); expect(onSaved).toHaveBeenCalledOnce();
  expect(vi.mocked(saveCostStatisticsManualAllocation).mock.calls[0][0].oaAmountLocks).toEqual([{unitId:'u',locked:false}]);
  await user.click(screen.getByRole('button',{name:/关闭/})); expect(onCloseCase).toHaveBeenCalledOnce();
+});
+
+it('shows stale manual decisions as pending review instead of completed', async () => {
+  task = {...task,decisionMode:'manual',version:3,status:'stale',pendingReasons:['allocation_stale']};
+  const user = userEvent.setup(); render(<Drawer canSave onSaved={vi.fn()}/>);
+  await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));
+  expect(await screen.findByRole('button',{name:/项目 待复核/})).toBeVisible();
+  expect(screen.queryByRole('button',{name:/项目 已完成/})).not.toBeInTheDocument();
+  expect(screen.queryByRole('textbox',{name:'分配金额 1'})).not.toBeInTheDocument();
+});
+
+it('disables unchanged metadata-waiting saves but permits actual edits', async () => {
+  task={...task,pendingReasons:['bank_account_missing','source_date_missing'],sourceAllocations:task.suggestedSourceAllocations,suggestedSourceAllocations:null};
+  const user=userEvent.setup();render(<Drawer canSave onSaved={vi.fn()}/>);
+  await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));
+  await screen.findByRole('textbox',{name:'分配金额 1'});
+  expect(screen.getByRole('button',{name:/项目 待补资料/})).toBeVisible();
+  expect(screen.getByRole('button',{name:'保存'})).toBeDisabled();
+  expect(screen.getByText('银行账户待完善')).toBeVisible();
+  expect(screen.getByText('付款日期待完善')).toBeVisible();
+  await user.click(screen.getByRole('checkbox',{name:'按 OA 原额'}));
+  expect(screen.getByRole('button',{name:'保存'})).toBeEnabled();
+});
+
+it('accepts an interrupted automatic no-op at the same version without creating a manual task', async () => {
+  task={...task,version:4,status:'allocated',pendingReasons:[],sourceAllocations:task.suggestedSourceAllocations,suggestedSourceAllocations:null};
+  vi.mocked(saveCostStatisticsManualAllocation).mockRejectedValue(new Error('response lost'));
+  const user=userEvent.setup(); const onSaved=vi.fn();
+  render(<Drawer canSave caseId="case" onSaved={onSaved}/>);
+  await screen.findByRole('textbox',{name:'分配金额 1'});
+  await user.click(screen.getByRole('button',{name:'保存'}));
+  await user.click(await screen.findByRole('button',{name:'核实保存结果'}));
+  expect(await screen.findByText('已保存')).toBeVisible();
+  expect(onSaved).toHaveBeenCalledOnce();
+  expect(saveCostStatisticsManualAllocation).toHaveBeenCalledOnce();
+  expect(fetchCostStatisticsManualAllocations).not.toHaveBeenCalled();
 });

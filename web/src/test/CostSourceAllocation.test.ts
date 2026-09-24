@@ -5,7 +5,7 @@ import type { CostStatisticsManualAllocationTask } from '../features/cost-statis
 export function sourceTask(): CostStatisticsManualAllocationTask {
   return {
     relationCaseId: 'case-1', relationVersion: 1, sourceFingerprint: 'existing-version-fingerprint', scopeVersion: 1,
-    status: 'pending', pendingReasons: ['source_required'], oaTotal: '600.00', grossOutflowTotal: '600.00', wrongPaymentRefundTotal: '0.00', netOutflowTotal: '600.00',
+    decisionMode: 'automatic', status: 'pending', pendingReasons: ['source_required'], oaTotal: '600.00', grossOutflowTotal: '600.00', wrongPaymentRefundTotal: '0.00', netOutflowTotal: '600.00',
     units: [{ unitId: 'oa-1:parent', oaId: 'oa-1', oaApplyType: '支付申请', expenseItemId: '', projectId: 'p-1', projectName: '项目 A', expenseType: '原 OA 分类', expenseContent: '材料采购', oaApplicant: '申请人', lockOaAmount: true, outsideCostAmount: "0.00", oaOriginalAmount: '600.00' }],
     bankEvents: [
       { transactionId: 'bank-a', eventKind: 'outflow', amount: '350.00', counterpartyName: '供应商', tradeTime: '2026-08-15', tags: ['采购', '材料款'], bankAccountLabel: '建行 8106', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款' },
@@ -27,7 +27,9 @@ describe('cost source amount closure', () => {
     expect(validateSourceDraft(task, draft)).toEqual({});
     expect(sourceSaveRequest(task, draft).expectedVersion).toBe(0);
     expect(JSON.stringify(task)).toBe(before);
-    task.version = 1;
+    task.version = 8;
+    expect(createSourceDraft(task).costLines).toHaveLength(2);
+    task.decisionMode = 'manual';
     expect(createSourceDraft(task).costLines).toHaveLength(1);
   });
   test('uses exact cents and distinguishes blank from explicit zero', () => {
@@ -180,4 +182,17 @@ test('persists explicit cost tags, verifies interrupted saves, restores inherita
   expect(sourceSaveRequest(task,restored).oaCostTagOverrides).toEqual([]);
   task.pendingReasons=['allocation_stale'];
   expect(createSourceDraft(task).costLines).toEqual([]);
+});
+
+test.each(['automatic', 'manual'] as const)('verifies identical %s no-op outcomes without requiring a new revision', decisionMode => {
+  const task = sourceTask(); task.decisionMode = decisionMode; task.version = 8;
+  task.sourceAllocations = {costLines:task.bankEvents.map(bank => ({unitId:task.units[0].unitId,bankTransactionId:bank.transactionId,amount:bank.amount})),refundLinks:[],nonCostLines:[]};
+  const request = sourceSaveRequest(task,createSourceDraft(task));
+  expect(sourceDecisionMatches(request,task)).toBe(true);
+  task.version = 7;
+  expect(sourceDecisionMatches(request,task)).toBe(false);
+  task.version = 9; task.decisionMode = 'automatic';
+  expect(sourceDecisionMatches(request,task)).toBe(true);
+  task.allocations = [{...task.allocations[0],amount:'599.00'}];
+  expect(sourceDecisionMatches(request,task)).toBe(false);
 });

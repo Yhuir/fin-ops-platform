@@ -379,3 +379,7 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 ## 2026-09-24 拆分用途核对
 
 `services/bank_split_relation_scope.py` 只输入当前关系银行用途行与已知凭证总额，输出同一列表的核对子集，不做 I/O 或建立关联。repository 的同名 SQL helper 用集合 CTE 保持相同合同，关联台 paired/unpaired、异常统计、summary/full 与 domain hydration 一致。只有全部成员已拆分、同方向且唯一完整用途组等额才缩小核对范围；未知金额、混合原始流水、混合方向及双组同额均保留全部成员核对。页面展示、分页、原金融事实与正式关联成员不变。测试入口 `test_bank_split_relation_scope.py`、`test_bank_split_scope_postgres.py`。不新增 read model、缓存或 worker。
+
+## 2026-09-24 拆分标签金额展示
+
+同父流水保持一张银行卡片和原金额。标签读取后端批量返回的完整父流水 `bank_split_parts`；未在当前关系中的兄弟子项仅可查看金额，不取得选择资格。前端以子项 ID 集合匹配现有关系成员，不按金额/标签推断成员。公共 `BankSplitPartContent` 完整显示每项标签路径，子项金额只在 portal 悬浮层显示，鼠标/聚焦/点击可查看。可操作的用途子项仍以原 child identity 和 child amount 参与选择；单一 trigger 保留 pressed 状态与键盘选择，不嵌套按钮、不增加 checkbox。只读场景不调用 selection，但仍可查看金额。组件不读写事实，不发请求，不改关系核对金额。

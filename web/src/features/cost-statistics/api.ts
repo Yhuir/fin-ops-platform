@@ -143,7 +143,8 @@ type ApiCostStatisticsManualAllocationTask = {
   relation_version: number;
   source_fingerprint: string;
   scope_version: number;
-  status: "pending" | "allocated";
+  decision_mode: "automatic" | "manual";
+  status: "pending" | "stale" | "allocated";
   pending_reasons: string[];
   allows_partial: boolean;
   waiting_oa_ids: string[];
@@ -431,6 +432,7 @@ function mapManualAllocationTask(
     relationCaseId: task.relation_case_id,
     relationVersion: task.relation_version,
     sourceFingerprint: task.source_fingerprint, scopeVersion: task.scope_version,
+    decisionMode: task.decision_mode,
     status: task.status,
     pendingReasons: task.pending_reasons,
     allowsPartial: task.allows_partial, waitingOaIds: task.waiting_oa_ids,
@@ -499,7 +501,7 @@ function mapSourceAllocations(value: ApiCostSourceAllocations): CostSourceAlloca
 function mapManualSummary(task: ApiCostManualAllocationSummary): CostStatisticsManualAllocationSummary {
   return {
     relationCaseId: task.relation_case_id, relationVersion: task.relation_version,
-    sourceFingerprint: task.source_fingerprint, scopeVersion: task.scope_version, status: task.status, pendingReasons: task.pending_reasons,
+    sourceFingerprint: task.source_fingerprint, scopeVersion: task.scope_version, decisionMode: task.decision_mode, status: task.status, pendingReasons: task.pending_reasons,
     oaTotal: task.oa_total, grossOutflowTotal: task.gross_outflow_total,
     wrongPaymentRefundTotal: task.wrong_payment_refund_total, netOutflowTotal: task.net_outflow_total,
     nonCostAmount: task.non_cost_amount, nonCostReason: task.non_cost_reason,

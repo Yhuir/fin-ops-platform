@@ -172,7 +172,8 @@ export type CostStatisticsManualAllocationTask = {
   relationVersion: number;
   sourceFingerprint: string;
   scopeVersion: number;
-  status: "pending" | "allocated";
+  decisionMode: "automatic" | "manual";
+  status: "pending" | "stale" | "allocated";
   pendingReasons: string[];
   allowsPartial?: boolean;
   waitingOaIds?: string[];

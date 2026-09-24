@@ -147,7 +147,8 @@ class PostgresCostStatisticsCanonicalRepository:
                 relations=relations,
                 manual_allocations=manual_allocations,
                 relation_history=_postgres_source_history(transaction, [r for r in relations
-                    if r['case_id'] not in manual_allocations and r['row_types'].count('bank') > 1]),
+                    if (r['case_id'] not in manual_allocations or manual_allocations[r['case_id']]['decision_mode'] == 'automatic')
+                    and r['row_types'].count('bank') > 1]),
                 available_years=available_years,
                 bank_statistics=(
                     dict(bank_overview["statistics"])
@@ -197,7 +198,8 @@ class PostgresCostStatisticsCanonicalRepository:
                 relations=relations,
                 manual_allocations=manual_allocations,
                 relation_history=_postgres_source_history(transaction, [r for r in relations
-                    if r['case_id'] not in manual_allocations and r['row_types'].count('bank') > 1]),
+                    if (r['case_id'] not in manual_allocations or manual_allocations[r['case_id']]['decision_mode'] == 'automatic')
+                    and r['row_types'].count('bank') > 1]),
                 available_years=[],
             )
 

@@ -234,3 +234,7 @@ cd web && npm run build
 ## 原有全部范围回归（2026-09-21）
 
 `OaPendingPaymentsPage.test.tsx` 新增首请求无 month、当前访问选月后显式刷新保留、卸载重进无 month 回归；既有切回全部和旧响应迟到用例继续执行。日期仍由页面本地 query 初始化，无需新增 session 或修改导出来源资格。
+
+## 原始流水金额与拆分展示回归（2026-09-24）
+
+`tests/test_bank_split_document_scope_postgres.py` 与 `tests/test_bank_split_consumers_postgres.py` 验证原始金额 1001497.22 与利息业务金额 1497.22 同时成立、同父子项去重、多父金额/标签完整、原始金额筛选、子项金额搜索、持久化第三层及导出。适用业务核心、服务、API/查询合同、跨模块链路与旧功能回归；前端交互由各页面及 BankSplitChips 测试覆盖。本次无缓存/read-model/后台任务变更，验证 canonical 查询与现有写后 GET，无需新增后台测试。

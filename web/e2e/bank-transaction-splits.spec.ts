@@ -65,3 +65,34 @@ test('bank detail adds labeled children, persists exact amounts and reloads comp
   await expect(drawer.getByLabel('子项 2 金额')).toHaveValue('1497.22');
   await expectNoUnexpectedSuccessUiErrors(page);
 });
+
+test('split labels stay in the bank amount column and hover reveals exact amounts without requests', async ({ page }) => {
+  await installDeterministicApiMocks(page, { sessionMode: 'user' });
+  const initial = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/api/bank-details/transactions'));
+  await page.goto('/bank-details');
+  const payload = await (await initial).json();
+  const parts = [
+    { id: 'principal', category_code: 'principal', category_label: '归还借款', category_path: ['外部往来款付款', '归还借款', '银行往来'], amount: '1000000.00' },
+    { id: 'interest', category_code: 'interest', category_label: '利息', category_path: ['费用', '利息'], amount: '1497.22' },
+  ];
+  await page.route('**/api/bank-details/transactions?*', route => route.fulfill({ json: {
+    ...payload, rows: [{ ...payload.rows[0], amount: '1001497.22', bank_split_parts: parts }],
+  } }));
+  await page.reload();
+  const amountCell = page.locator('.bank-col-amount').filter({ hasText: '1001497.22' });
+  await expect(amountCell).toBeVisible();
+  await expect(amountCell.getByText('外部往来款付款 / 归还借款 / 银行往来', { exact: true })).toBeVisible();
+  await expect(page.locator('.bank-col-type').getByText('费用 / 利息', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('¥1497.22', { exact: true })).toHaveCount(0);
+  const requests: string[] = [];
+  page.on('request', request => { if (request.url().includes('/api/')) requests.push(request.url()); });
+  const interest = amountCell.getByRole('button', { name: '费用 / 利息拆分金额' });
+  await interest.hover();
+  await expect(page.getByRole('tooltip')).toHaveText('¥1497.22');
+  expect(requests).toEqual([]);
+  await expect(amountCell.locator('.bank-split-part-amount')).toHaveCount(0);
+  await page.mouse.move(0, 0);
+  await interest.focus();
+  await expect(page.getByRole('tooltip')).toHaveText('¥1497.22');
+  await expectNoUnexpectedSuccessUiErrors(page);
+});

@@ -206,6 +206,7 @@ function mapBank(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"]
   return {
     id,
     bankSplitParts: mapBankSplitParts(raw.bank_split_parts),
+    originalAmount: stringValue(raw.original_amount),
     counterpartyName,
     tradeTime,
     amount,
@@ -250,6 +251,9 @@ function mapRelatedInvoice(rawValue: unknown): OutputInvoiceCollectionRowsRespon
 }
 
 function mapRelation<T>(rawValue: unknown, mapper: (value: unknown) => T | null): {
+  originalAmount: string;
+  originalTransactionCount: number;
+  bankSplitParts: ReturnType<typeof mapBankSplitParts>;
   primary: T | null;
   relationCount: number;
   hasMultiple: boolean;
@@ -264,6 +268,9 @@ function mapRelation<T>(rawValue: unknown, mapper: (value: unknown) => T | null)
   const detailMode = stringValue(camelOrSnake(raw, "detailMode", "detail_mode"));
   return {
     primary,
+    originalAmount: stringValue(raw.original_amount),
+    originalTransactionCount: numberValue(raw.original_transaction_count, 0),
+    bankSplitParts: mapBankSplitParts(raw.bank_split_parts),
     relationCount: numberValue(camelOrSnake(raw, "relationCount", "relation_count"), primary ? 1 : 0),
     hasMultiple: booleanValue(camelOrSnake(raw, "hasMultiple", "has_multiple")),
     receivedTotal: stringValue(camelOrSnake(raw, "receivedTotal", "received_total")),

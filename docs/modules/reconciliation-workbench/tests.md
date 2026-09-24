@@ -809,3 +809,5 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - 类别 5/6/7：`RelationGroupGrid.test.tsx`、`workbench-supporting-documents-flow.spec.ts`、`workbench-exception-flow.spec.ts` 保护主表/抽屉原布局、28px icon、无额外提示行、桌面/390px Popover 边界与零新增请求；五份凭证零差额与组级6.57异常并存，接受/撤回、保存/删除和回读使用原链路。
 - 回归：权限、申请人布局、长表滚动、筛选排序、凭证和发票处理入口。前端全套测试及生产构建保护共享组件；没有新增后端业务/API/缓存或任务实现，类别 1/2/3/4 不新增测试。
 - 生产验证读取同一真实关系，比较金额、成员、异常指纹及 completion；不提交真实异常接受/撤回，不以 mock 数据替代生产展示与性能证据。
+
+- 2026-09-24：`BankSplitRelationCell.test.tsx` 验证同父一行、子身份金额选择、pressed/键盘、只读不选择仍可看金额；`BankSplitChips.test.tsx` 验证新悬浮交互不引入嵌套按钮或 checkbox。

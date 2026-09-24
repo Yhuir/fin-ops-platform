@@ -578,7 +578,7 @@ function PendingInvoiceTableRow({
 }: Omit<PendingInvoicesTableProps, "rows" | "config" | "onSortChange" | "statusFilterControl" | "filterFields" | "columnFilters" | "onApplyColumnFilters" | "onClearColumnFilters" | "page" | "pageSize" | "total" | "onPageChange" | "onPageSizeChange"> & { row: PendingInvoiceRow }) {
   const primaryInvoice = row.inputInvoices.primary;
   const primaryOa = row.oa.primary;
-  const bankRelationCount = Math.max(0, row.bankTransactions.relationCount);
+  const bankRelationCount = Math.max(0, row.bankTransactions.originalTransactionCount ?? 0);
   const bankHasMultiple = row.bankTransactions.hasMultiple && bankRelationCount > 1;
   const invoiceRelationCount = Math.max(0, row.inputInvoices.relationCount);
   const invoiceHasMultiple = row.inputInvoices.hasMultiple && invoiceRelationCount > 1;
@@ -591,9 +591,7 @@ function PendingInvoiceTableRow({
   const transactionSelectable = isTransactionSelectable?.(row) === true;
   const transactionSelected = selectedTransactionIds?.has(transactionId) === true;
   const invoiceTotal = row.inputInvoices.paymentSummary?.invoiceTotal || primaryInvoice?.totalWithTax || "";
-  const bankTotal = bankHasMultiple
-    ? row.bankTransactions.paymentSummary?.paidTotal || row.bankTransaction.amount
-    : row.bankTransaction.amount;
+  const bankTotal = bankHasMultiple ? row.bankTransactions.originalAmount : row.bankTransaction.originalAmount;
   const counterpartyLabel = bankHasMultiple ? uniqueCounterpartyLabel(row) : row.bankTransaction.counterpartyName;
 
   return (
@@ -642,7 +640,7 @@ function PendingInvoiceTableRow({
                     <Info aria-hidden="true" size={14} strokeWidth={2.3} />
                   </button>
                 </span>
-                {row.bankTransaction.bankSplitParts?.length ? <BankSplitChips parts={row.bankTransaction.bankSplitParts} /> : <span className="pending-invoices-tag pending-invoices-tag--neutral" title={tagPathLabel(row.bankTransaction)}>
+                {row.bankTransaction.bankSplitParts?.length ? null : <span className="pending-invoices-tag pending-invoices-tag--neutral" title={tagPathLabel(row.bankTransaction)}>
                   {tagPathLabel(row.bankTransaction)}
                 </span>}
               </>
@@ -652,11 +650,12 @@ function PendingInvoiceTableRow({
       </FinanceTableCell>
       <FinanceTableCell className="pending-invoices-table-cell pending-invoices-table-cell--amount pending-invoices-col-amount" columnRole="amount">
         <AmountCell
-          account={bankHasMultiple ? `${bankRelationCount} 笔流水` : bankAccountLabel(row.bankTransaction)}
-          amount={formatMoney(bankTotal)}
+          account={bankHasMultiple ? `${row.bankTransactions.originalTransactionCount} 笔流水` : bankAccountLabel(row.bankTransaction)}
+          amount={formatMoney(bankTotal, "—")}
           className="pending-invoices-amount-cell"
           direction={<FinanceDirectionTag direction={moneyDirection}>{moneyDirection === "income" ? "收" : "支"}</FinanceDirectionTag>}
         />
+        {row.bankTransactions.bankSplitParts?.length ? <BankSplitChips parts={row.bankTransactions.bankSplitParts} /> : null}
       </FinanceTableCell>
       <FinanceTableCell className="pending-invoices-table-cell pending-invoices-table-cell--summary pending-invoices-col-summary" columnRole="description">
         {bankHasMultiple ? <EmptyValue /> : (

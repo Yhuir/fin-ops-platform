@@ -24,6 +24,7 @@ describe("Cost statistics export API", () => {
       relation_case_id: "relation-1",
       relation_version: 3,
       source_fingerprint: "b".repeat(64), scope_version: 1,
+      decision_mode: "automatic",
       status: "pending",
       pending_reasons: ["source_required"], oa_cost_tag_overrides: [], manual_items: [], manual_options: { projects: [], tags: [] }, suggested_source_allocations: null, relation_display_groups: [], source_allocations: null,
       project_names: ["云南溯源科技"], unit_count: 1, bank_event_count: 1,
@@ -62,6 +63,7 @@ describe("Cost statistics export API", () => {
     global.fetch = vi.fn(async (_input, init) => new Response(JSON.stringify({
       ...(init?.method === "PUT" ? {
         ...task,
+        decision_mode: "manual",
         status: "allocated",
         allocations: [{ unit_id: "oa-1:parent", amount: "120.00" }],
         version: 1, source_allocations: { cost_lines: [{unit_id: "oa-1:parent", bank_transaction_id: "bank-out", amount: "120.00"}], refund_links: [], non_cost_lines: [] },
@@ -75,8 +77,10 @@ describe("Cost statistics export API", () => {
 
     const page = await fetchCostStatisticsManualAllocations({ status: "pending", pageSize: 50 });
     expect(page.items[0]).not.toHaveProperty("bankEvents");
+    expect(page.items[0].decisionMode).toBe("automatic");
     const detail = await fetchCostStatisticsManualAllocation("relation-1");
     expect(detail).toMatchObject({
+      decisionMode: "automatic",
       oaTotal: "120.00",
       grossOutflowTotal: "125.00",
       wrongPaymentRefundTotal: "5.00",

@@ -1,12 +1,18 @@
 import userEvent from '@testing-library/user-event';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import RelationGroupGrid from '../components/workbench/RelationGroupGrid';
 import RelationGroupCell from '../components/workbench/RelationGroupCell';
 import { getWorkbenchColumns } from '../features/workbench/tableConfig';
 import type { WorkbenchRecord, WorkbenchRelationGroup } from '../features/workbench/types';
 
+const splitParts = [
+  { id: 'principal-1', amount: '1000000.00', category_code: 'principal-1', category_label: '外部往来款 / 归还借款', category_path: ['外部往来款', '归还借款'] },
+  { id: 'interest-1', amount: '1497.22', category_code: 'interest-1', category_label: '费用 / 利息', category_path: ['费用', '利息'] },
+];
+
 const record = (id: string, amount: string, category: string): WorkbenchRecord => ({
   id, caseId: 'case-1', recordType: 'bank', amount, parentAmount: '1001497.22', parentRowId: 'parent-1', isSplit: true,
+  bankSplitParts: splitParts,
   label: '银行流水', status: '待关联', statusCode: 'pending_match', statusTone: 'warn', exceptionHandled: false,
   counterparty: '测试银行', categoryCode: id, categoryLabel: category, detailFields: [],
   tableValues: { counterparty: '测试银行', amount, direction: '支出', paymentAccount: '银行 1234', note: '还款' },
@@ -55,17 +61,17 @@ test('different OA segments show one physical bank parent per case and keep chil
 
 test('split selection uses pressed buttons, keyboard and full label path without visible checkboxes', async () => {
   const user = userEvent.setup();
-  const interest = { ...record('interest', '1497.2', '利息'), categoryPath: ['费用', '利息'] };
+  const interest = { ...record('interest', '1497.2', '利息'), categoryPath: ['费用', '利息'], bankSplitParts: [{ ...splitParts[1], id: 'interest', amount: '1497.2' }] };
   const select = vi.fn();
   const props = { zoneId: 'unpaired' as const, paneId: 'bank' as const, columns: getWorkbenchColumns('bank'),
     records: [interest], scrollPaneId: 'bank' as const, scrollTestId: 'bank-cell', onSelectRow: select,
     onOpenDetail: vi.fn(), onRowAction: vi.fn(), showWorkflowActions: false, canOperateData: true };
   const { container, rerender } = render(<RelationGroupCell {...props} getRowState={() => 'idle'} />);
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
-  const button = screen.getByRole('button', { name: '选择流水子项 利息 1497.20' });
+  const button = screen.getByRole('button', { name: '选择流水子项 费用 / 利息 1497.20' });
   expect(button).toHaveTextContent('费用 / 利息');
   expect(button).toHaveAttribute('aria-pressed', 'false');
-  button.focus(); await user.keyboard('{Enter}');
+  act(() => button.focus()); await user.keyboard('{Enter}');
   expect(select).toHaveBeenCalledWith(interest, 'unpaired');
   rerender(<RelationGroupCell {...props} getRowState={() => 'selected'} />);
   expect(button).toHaveAttribute('aria-pressed', 'true');
@@ -73,9 +79,25 @@ test('split selection uses pressed buttons, keyboard and full label path without
   expect(select).toHaveBeenCalledTimes(2);
   expect(container.querySelectorAll('.record-card-bank')).toHaveLength(1);
   expect(container.querySelector('.bank-split-parent-amount')).toHaveTextContent('1001497.22');
-  expect(container.querySelector('.bank-split-part-amount')).toHaveTextContent('1497.20');
+  await user.hover(button);
+  expect(await screen.findByRole('tooltip')).toHaveTextContent('¥1497.20');
   rerender(<RelationGroupCell {...props} readOnly getRowState={() => 'idle'} />);
-  expect(button).toBeDisabled();
+  expect(button).not.toHaveAttribute('aria-pressed');
   await user.click(button);
   expect(select).toHaveBeenCalledTimes(2);
+});
+
+
+test('parent shows an unlinked sibling without granting its selection', async () => {
+  const user = userEvent.setup();
+  const interest = record('interest-1', '1497.22', '费用 / 利息');
+  const select = vi.fn();
+  render(<RelationGroupCell zoneId="unpaired" paneId="bank" columns={getWorkbenchColumns('bank')}
+    records={[interest]} scrollPaneId="bank" scrollTestId="bank-cell" getRowState={() => 'idle'}
+    onSelectRow={select} onOpenDetail={vi.fn()} onRowAction={vi.fn()} showWorkflowActions={false} canOperateData />);
+  await user.click(screen.getByRole('button', { name: '外部往来款 / 归还借款拆分金额' }));
+  expect(select).not.toHaveBeenCalled();
+  expect(await screen.findByRole('tooltip')).toHaveTextContent('¥1000000.00');
+  await user.click(screen.getByRole('button', { name: '选择流水子项 费用 / 利息 1497.22' }));
+  expect(select).toHaveBeenCalledWith(interest, 'unpaired');
 });

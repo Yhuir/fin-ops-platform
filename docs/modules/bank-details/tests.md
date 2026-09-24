@@ -72,3 +72,9 @@ git diff --check
 `BankDetailsPage.test.tsx` 覆盖全历史首请求、旧日期 session 清理、账户选择保留、选择月份后同页刷新保留及卸载重进恢复全部。原有取消/过期响应、分类、分页、导出与权限回归继续执行。银行 initial-state、export-download、filtered-export-permissions E2E 的默认无日期断言同步更新。
 
 本次覆盖页面交互与既有功能回归；使用既有 API schema，不新增领域状态、写服务、read model 或 worker。导航、浏览器前后退与整页刷新由 App 进入规则浏览器验证补充。
+
+- 2026-09-24：`BankSplitChips.test.tsx` 覆盖完整层级、独立子项、金额初始隐藏、portal 悬浮/键盘/点击及事件隔离；`bank-transaction-splits.spec.ts` 在 Chromium 验证标签位于金额列、原金额不变、hover 零 API 请求及拆分编辑持久化回读。
+
+## 2026-09-24 关联台父流水拆分显示
+
+`test_bank_split_consumers_postgres.py::BankSplitConsumersPostgresTests::test_workbench_hydration_shows_all_parent_parts_without_adding_other_case_members` 验证父流水两个子项在不同 case 时，单行/full/summary 均取得完整标签，当前成员与用途金额保持不变。`test_bank_details_canonical_query.py` 保留原分类语义与单次查询预算；`test_workbench_page_query_repository.py` 覆盖既有分页/摘要及分类调用合同。

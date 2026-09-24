@@ -117,6 +117,7 @@ export type PendingInvoiceRulesPayload = {
 };
 
 export type PendingInvoiceBankTransaction = {
+  originalAmount: string;
   bankSplitParts?: BankSplitPart[];
   id: string;
   accountNo: string;
@@ -158,6 +159,9 @@ export type PendingInvoiceBankTransactionPaymentSummary = {
 };
 
 export type PendingInvoiceBankTransactionZone = {
+  originalTransactionCount?: number;
+  bankSplitParts?: BankSplitPart[];
+  originalAmount?: string;
   primary: PendingInvoiceBankTransactionSummary | null;
   relationCount: number;
   linkedRelationCount: number;

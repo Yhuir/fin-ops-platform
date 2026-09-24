@@ -119,3 +119,8 @@ manual-allocation-loading / manual-allocation-ready / manual-allocation-error
 ## 人工成本标签
 
 来源继承 → 用户选择 → 人工覆盖 → 保存/重读保留；用户点击恢复来源标签 → 清除当前行覆盖。仅改标签同样进入 dirty、关闭保护和保存结果核对；保存失败保留草稿。失效分配不继承旧覆盖。删除行或零成本不保留覆盖，范围外有效决定由服务端保留。
+
+
+## 决定模式与任务状态
+
+模式与完成状态正交：automatic + allocated 不进入人工两列表；automatic + pending 保留真实待处理原因；manual + allocated 为人工已完成；manual + stale 为待复核。模式变化不重置版本，来源事实变化不复用失效人工载荷。纯等待审批/资料且草稿未改时不引导重复保存。

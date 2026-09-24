@@ -164,6 +164,15 @@ class BankSplitConsumersPostgresTests(unittest.TestCase):
         bank = payload['rows'][0]['bank_transactions']['primary']
         self.assertEqual(bank['bank_transaction_id'], 'bank-parent')
         self.assertEqual(bank['parent_amount'], '1001497.22')
+        self.assertEqual(bank['original_amount'], '1001497.22')
+        aggregate = payload['rows'][0]['bank_transactions']
+        self.assertEqual(aggregate['original_amount'], '1001497.22')
+        self.assertEqual(aggregate['original_transaction_count'], 1)
+        self.assertEqual(len(aggregate['bank_split_parts']), 2)
+        for keyword in ('1497.22', '1001497.22'):
+            self.assertEqual(query.rows({'keyword': [keyword]})['pagination']['total'], 1)
+        self.assertEqual(query.rows({'filters': [json.dumps([{'field': 'amount', 'operator': 'eq', 'value': '1001497.22'}])]})['pagination']['total'], 1)
+        self.assertEqual(query.rows({'filters': [json.dumps([{'field': 'amount', 'operator': 'eq', 'value': '1497.22'}])]})['pagination']['total'], 0)
         self.assertEqual(bank['bank_split_version'], 1)
         self.assertEqual({part['id'] for part in bank['bank_split_parts']}, {self.principal,self.interest})
         self.assertEqual(bank['bank_split_parts'][1]['category_path'], ['费用', '利息'])
@@ -171,11 +180,51 @@ class BankSplitConsumersPostgresTests(unittest.TestCase):
             self.assertEqual(bank_summary['bank_transaction_id'], 'bank-parent')
             self.assertEqual(bank_summary['bank_split_version'], 1)
 
+        from fin_ops_platform.services.pending_invoice_service import PendingInvoiceQueryService
+        exported = PendingInvoiceQueryService._export_row(1, payload['rows'][0])
+        self.assertEqual(exported['借方金额'], '1001497.22')
+        self.assertEqual(exported['流水金额合计'], '1001497.22')
+        self.assertEqual(exported['已付合计'], '1497.22')
+        self.assertIn('费用 / 利息：1497.22', exported['流水拆分'])
+
         detail = query.bank_transaction_detail(self.interest)
         self.assertEqual(detail['sections'][0]['bank_transaction_id'],'bank-parent')
         relation = query.relation_detail(self.interest,direction='expense',kind='bank')
         self.assertEqual(len(relation['sections']),1)
         self.assertEqual(relation['sections'][0]['bank_transaction_id'],'bank-parent')
+
+    def test_workbench_hydration_shows_all_parent_parts_without_adding_other_case_members(self):
+        from fin_ops_platform.services.postgres_repositories.workbench_page_hydration import (
+            PostgresWorkbenchPageHydrationRepository,
+        )
+        self.connection.execute("""update app.workbench_pair_relations set row_ids=%s::text[],row_types=array['bank']
+            where case_id='split-case'""", ([self.interest],))
+        self.connection.execute("""insert into app.workbench_pair_relations(case_id,relation_mode,status,row_ids,row_types,month_scope)
+            values ('principal-case','manual_confirmed','active',%s::text[],array['bank'],'2026-04-01')""", ([self.principal],))
+        repository = PostgresWorkbenchPageHydrationRepository(self.connection)
+        rows = repository.hydrate_rows({'bank': {self.interest}})
+        self.assertEqual(set(rows), {('bank', self.interest)})
+        self.assertEqual(rows[('bank', self.interest)]['amount'], '1497.22')
+        self.assertEqual({part['id'] for part in rows[('bank', self.interest)]['bank_split_parts']}, {self.principal, self.interest})
+        descriptor = {'internal_key': 'case:split-case', 'detail_key': 'split-case', 'group_kind': 'relation',
+                      'member_ids': [self.interest], 'member_types': ['bank']}
+        for detail_level in ('full', 'summary'):
+            groups = repository.hydrate_groups(scope_key='2026-04', descriptors=[descriptor], detail_level=detail_level)
+            self.assertEqual(len(groups), 1)
+            banks = groups[0]['bank_rows']
+            self.assertEqual([bank['id'] for bank in banks], [self.interest])
+            self.assertEqual({part['id'] for part in banks[0]['bank_split_parts']}, {self.principal, self.interest})
+        relation = self.connection.fetch_one("select row_ids from app.workbench_pair_relations where case_id='split-case'")
+        self.assertEqual(relation['row_ids'], [self.interest])
+
+    def test_pending_split_labels_use_persisted_category_instance(self):
+        self.connection.execute("""update app.bank_transaction_split_items set category_payload=%s::jsonb where id=%s::uuid""",
+            (json.dumps({"category_label_path": ["外部往来款付款", "归还借款", "银行往来"]}), self.principal))
+        self.settings['bank_transaction_tags']['definitions'][0].pop('output_third_label')
+        self.connection.execute("update app.app_settings set settings_payload=%s::jsonb", (json.dumps(self.settings),))
+        query = PendingInvoiceCanonicalQueryService(repository=PostgresPendingInvoiceCanonicalRepository(self.connection))
+        parts = query.rows({})['rows'][0]['bank_transactions']['bank_split_parts']
+        self.assertEqual(parts[0]['category_path'], ['外部往来款付款', '归还借款', '银行往来'])
 
     def test_pending_child_command_uses_canonical_units_and_replays_idempotently(self):
         from fin_ops_platform.services.imports import ImportNormalizationService

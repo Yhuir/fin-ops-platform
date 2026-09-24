@@ -36,6 +36,9 @@ from fin_ops_platform.services.pending_invoice_status import (
     pending_invoice_status_payload,
 )
 from fin_ops_platform.services.postgres_repositories.bank_split_relation_scope import bank_split_scope_ctes
+from fin_ops_platform.services.postgres_repositories.bank_transaction_splits import (
+    PostgresBankTransactionSplitRepository,
+)
 from fin_ops_platform.services.postgres_repositories.relation_invoice_members import RELATION_INVOICE_READ_SQL
 from fin_ops_platform.services.search_query import normalize_money_search_query
 
@@ -43,7 +46,7 @@ PAGE_SIZE_LIMIT = 200
 FILTER_OPTION_LIMIT = 50
 SORT_EXPRESSIONS = {
     "trade_date": "trade_date",
-    "amount": "amount",
+    "amount": "original_amount",
     "counterparty_name": "counterparty_name",
     "status_code": "status_code",
     "seller_name": "seller_name",
@@ -59,7 +62,7 @@ FILTER_EXPRESSIONS = {
     "counterparty_name": "counterparty_name",
     "transaction_tag": "transaction_tag",
     "direction": "direction",
-    "amount": "amount",
+    "amount": "original_amount",
     "summary_remark": "summary_remark",
     "status_code": "status_code",
     "rule_group": "filter_group",
@@ -138,7 +141,7 @@ request_config as materialized (
 bank_source as materialized (
     select
         b.id as canonical_id,
-        b.parent_row_id, b.parent_bank_transaction_id, b.split_category_code, b.split_version,
+        b.parent_row_id, b.parent_bank_transaction_id, b.parent_amount, b.split_category_code, b.split_version,
         coalesce(b.legacy_mongo_id, b.id::text) as row_id,
         case when b.txn_direction = 'outflow' then 'expense' else 'income' end as direction,
         b.account_no,
@@ -313,6 +316,8 @@ relation_case_bank_facts as materialized (
                 'trade_time', coalesce(bank.trade_time::text, ''),
                 'counterparty_name', bank.counterparty_name,
                 'amount', bank.amount::text,
+                'original_amount', bank.parent_amount::text,
+                'parent_row_id', bank.parent_row_id,
                 'debit_amount', case when bank.direction = 'expense' then bank.amount::text else '0.00' end,
                 'credit_amount', case when bank.direction = 'income' then bank.amount::text else '0.00' end,
                 'summary', bank.summary,
@@ -344,6 +349,16 @@ relation_bank_facts as materialized (
     from bank_cases owner
     join relation_case_bank_facts facts on facts.case_id = owner.case_id
     group by owner.bank_id
+),
+relation_bank_original_totals as materialized (
+    select bank_id, sum(parent_amount) as original_amount
+    from (
+        select distinct facts.bank_id, summary.value->>'parent_row_id' as parent_row_id,
+               (summary.value->>'original_amount')::numeric as parent_amount
+        from relation_bank_facts facts
+        cross join lateral jsonb_array_elements(facts.bank_summaries) summary(value)
+    ) parents
+    group by bank_id
 ),
 case_invoice_members as materialized (
     select distinct owner.bank_id, member.row_id as invoice_id
@@ -745,6 +760,7 @@ enriched as (
         coalesce(invoice.invoice_total, 0) as invoice_total,
         coalesce(invoice.invoice_summaries, '[]'::jsonb) as invoice_summaries,
         coalesce(bank.paid_total, category.amount) as paid_total,
+        coalesce(original.original_amount, category.parent_amount) as original_amount,
         coalesce(bank.payment_transaction_count, 1) as payment_transaction_count,
         coalesce(bank.bank_summaries, '[]'::jsonb) as bank_summaries,
         coalesce(oa.oa_count, 0) as oa_count,
@@ -753,6 +769,7 @@ enriched as (
     from effective_categories category
     left join relation_invoice_facts invoice on invoice.bank_id = category.row_id
     left join relation_bank_facts bank on bank.bank_id = category.row_id
+    left join relation_bank_original_totals original on original.bank_id = category.row_id
     left join relation_oa_facts oa on oa.bank_id = category.row_id
     left join relation_case_facts cases on cases.bank_id = category.row_id
 ),
@@ -789,6 +806,7 @@ classified as materialized (
         source.counterparty_account_no,
         source.counterparty_bank_name,
         source.amount,
+        source.original_amount,
         source.trade_date,
         source.trade_time,
         source.balance,
@@ -866,6 +884,7 @@ classified as materialized (
             source.row_id,
             source.counterparty_name,
             source.amount::text,
+            source.original_amount::text,
             source.balance::text,
             source.invoice_total::text,
             source.paid_total::text,
@@ -997,20 +1016,9 @@ page_bank_metadata as materialized (
     left join lateral (
         select jsonb_agg(jsonb_build_object(
             'id', item.id::text, 'category_code', item.category_code, 'amount', item.amount::text,
-            'category_label', definition.payload->>'label',
-            'category_path', case when nullif(definition.payload->>'output_primary_label','') is not null
-                then to_jsonb(array_remove(array[
-                    nullif(definition.payload->>'output_primary_label',''),
-                    nullif(definition.payload->>'output_sub_label',''),
-                    nullif(definition.payload->>'output_third_label','')],null))
-                else definition.payload->'path' end
+            'category_payload', item.category_payload
         ) order by item.position) as items
         from app.bank_transaction_split_items item
-        cross join request_config config
-        left join lateral (
-            select value as payload from jsonb_array_elements(config.payload#>'{{settings,bank_transaction_tags,definitions}}')
-            where value->>'code'=item.category_code limit 1
-        ) definition on true
         where item.bank_transaction_id=unit.parent_bank_transaction_id
     ) parts on true
 ),
@@ -1734,6 +1742,12 @@ class PostgresPendingInvoiceCanonicalRepository:
             )
         payload = dict(row) if isinstance(row, dict) else {}
         metadata = payload.pop("bank_metadata", {})
+        if metadata:
+            definitions = PostgresBankTransactionSplitRepository.tag_definitions(settings.get("bank_transaction_tags", {}))
+            for display in metadata.values():
+                display["bank_split_parts"] = PostgresBankTransactionSplitRepository.decorate_parts(
+                    display["bank_split_parts"], definitions,
+                )
         for page_row in payload.get("rows", []):
             page_row.update(metadata.get(page_row["row_id"], {}))
             for summary in page_row.get("bank_summaries", []):
@@ -2924,7 +2938,9 @@ def _row_payload(row: dict[str, Any]) -> dict[str, Any]:
         "effective_tag_label_path": list(category.get("category_label_path") or []),
         "bank_transaction_id": str(row.get("bank_transaction_id") or row.get("row_id") or ""),
         "parent_bank_transaction_id": str(row.get("parent_bank_transaction_id") or ""),
-        "parent_amount": _money(row.get("parent_amount", row.get("amount"))),
+        "parent_amount": _money(row["parent_amount"] if row.get("is_split") else row["amount"]),
+        "original_amount": _money(row["parent_amount"] if row.get("is_split") else row["amount"]),
+        "parent_row_id": str(row.get("bank_transaction_id") or row["row_id"]),
         "is_split": bool(row.get("is_split")),
         "bank_split_version": int(row.get("bank_split_version") or 0),
         "bank_split_parts": list(row.get("bank_split_parts") or []),
@@ -2933,6 +2949,9 @@ def _row_payload(row: dict[str, Any]) -> dict[str, Any]:
         bank_summaries = [
             {
                 "id": bank_transaction["id"],
+                "original_amount": bank_transaction["original_amount"],
+                "bank_split_parts": bank_transaction["bank_split_parts"],
+                "parent_row_id": bank_transaction["parent_row_id"],
                 "trade_time": bank_transaction["trade_time"],
                 "counterparty_name": bank_transaction["counterparty_name"],
                 "amount": amount,
@@ -2946,10 +2965,14 @@ def _row_payload(row: dict[str, Any]) -> dict[str, Any]:
                 "relation_status": "unlinked",
             }
         ]
+    parent_summaries = {summary["parent_row_id"]: summary for summary in bank_summaries}
     return {
         "id": bank_transaction["id"],
         "bank_transactions": {
             "primary": bank_transaction,
+            "original_amount": _money(row["original_amount"]),
+            "original_transaction_count": len(parent_summaries),
+            "bank_split_parts": [part for summary in parent_summaries.values() for part in summary.get("bank_split_parts", [])],
             "relation_count": len(bank_summaries),
             "has_multiple": len(bank_summaries) > 1,
             "summaries": bank_summaries if len(bank_summaries) > 1 else [],

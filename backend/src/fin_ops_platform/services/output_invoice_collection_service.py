@@ -14,7 +14,11 @@ from openpyxl import Workbook
 
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import BankTransaction, Invoice
-from fin_ops_platform.services.bank_transaction_unit import bank_unit_comparison_rows, bank_unit_display
+from fin_ops_platform.services.bank_transaction_unit import (
+    bank_unit_comparison_rows,
+    bank_unit_display,
+    original_bank_display_totals,
+)
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.invoice_relation_query_context import (
     DistributedInvoiceRelationContext,
@@ -47,6 +51,8 @@ OUTPUT_INVOICE_COLLECTION_EXPORT_COLUMNS = [
     "收款方",
     "收款日期",
     "收款金额",
+    "关联收款金额",
+    "流水拆分",
     "收款银行",
     "摘要",
     "冲红蓝字发票号码",
@@ -821,7 +827,7 @@ class OutputInvoiceCollectionQueryService:
         primary = summaries[0] if summaries else {}
         return {
             "primaryBankTransactionId": primary.get("bankTransactionId"),
-            "bank_split_parts": primary.get("bank_split_parts", []),
+            **original_bank_display_totals(summaries),
             "counterpartyName": primary.get("counterpartyName", ""),
             "tradeTime": primary.get("tradeTime", ""),
             "amount": primary.get("amount", ""),
@@ -1300,7 +1306,7 @@ class OutputInvoiceCollectionQueryService:
             "pending_amount": collection.get("pendingAmount"),
             "bank_counterparty_name": bank.get("counterpartyName"),
             "bank_trade_time": bank.get("tradeTime"),
-            "bank_amount": bank.get("amount"),
+            "bank_amount": bank.get("original_amount"),
             "bank_name": bank.get("bankName"),
             "bank_summary": bank.get("summary"),
         }.get(field)
@@ -1426,7 +1432,12 @@ class OutputInvoiceCollectionQueryService:
             "待收金额": collection.get("pendingAmount") or "",
             "收款方": bank.get("counterpartyName") or "",
             "收款日期": bank.get("tradeTime") or "",
-            "收款金额": bank.get("amount") or "",
+            "收款金额": bank.get("original_amount") or "",
+            "关联收款金额": bank.get("receivedTotal") or "",
+            "流水拆分": "；".join(
+                f"{' / '.join(part['category_path'])}：{part['amount']}"
+                for part in bank.get("bank_split_parts", [])
+            ),
             "收款银行": bank.get("bankName") or "",
             "摘要": bank.get("summary") or "",
             "冲红蓝字发票号码": _join_non_empty(

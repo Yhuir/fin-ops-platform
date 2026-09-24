@@ -81,3 +81,7 @@ PostgreSQL 集成测试必须覆盖 `load_page() -> row.id -> load_row() -> rela
 `OutputInvoiceCollectionsPage.test.tsx` 注入旧年月、起止与日期列缓存，断言首请求全部、无隐藏日期、page=1、非日期筛选/排序/pageSize 保留及旧详情关闭；选择月份后的刷新保留月份，卸载重进重新全部；切回全部后旧月份迟到响应不得覆盖当前结果。正式详情、收款状态和导出既有回归保留。
 
 本次覆盖页面交互与既有功能回归；使用既有 API schema，不新增领域状态、写服务、read model 或 worker。导航、浏览器前后退与整页刷新由 App 进入规则浏览器验证补充。
+
+## 原始流水金额与拆分展示回归（2026-09-24）
+
+`tests/test_bank_split_document_scope_postgres.py` 与 `tests/test_bank_split_consumers_postgres.py` 验证原始金额 1001497.22 与利息业务金额 1497.22 同时成立、同父子项去重、多父金额/标签完整、原始金额筛选、子项金额搜索、持久化第三层及导出。适用业务核心、服务、API/查询合同、跨模块链路与旧功能回归；前端交互由各页面及 BankSplitChips 测试覆盖。本次无缓存/read-model/后台任务变更，验证 canonical 查询与现有写后 GET，无需新增后台测试。

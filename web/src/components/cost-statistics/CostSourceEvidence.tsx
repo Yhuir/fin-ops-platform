@@ -50,7 +50,7 @@ export const CostSourceEvidence = memo(function CostSourceEvidence({ task, sourc
         const matched = unitIndexes.length > 0 && bankIndexes.length > 0;
         return <tbody key={unitIndexes.length ? `oa-${unitIndexes[0]}` : `bank-${bankIndexes[0]}`} data-evidence-kind={many ? 'many' : matched ? 'matched' : 'unassigned'}>
           {many ? <>
-            <tr><th colSpan={6} className="cost-evidence-group-label" scope="rowgroup">多对多 · {unitIndexes.length} 项 / {bankIndexes.length} 笔</th></tr>
+            <tr><th colSpan={6} className="cost-evidence-group-label" scope="rowgroup">关联明细 · {unitIndexes.length} 项 / {bankIndexes.length} 笔</th></tr>
             <tr><td colSpan={3} className="cost-evidence-group-cell">{unitIndexes.map(index => <div className="cost-evidence-group-item" key={index}>{unitContent(index).map((value, i) => <div key={i}>{value}</div>)}</div>)}</td>
               <td colSpan={3} className="cost-evidence-group-cell cost-evidence-bank">{bankIndexes.map(index => <div className="cost-evidence-group-item" key={index}>{bankContent(index).map((value, i) => <div key={i}>{value}</div>)}</div>)}</td></tr>
           </> : Array.from({ length: Math.max(unitIndexes.length, bankIndexes.length) }, (_, row) => {

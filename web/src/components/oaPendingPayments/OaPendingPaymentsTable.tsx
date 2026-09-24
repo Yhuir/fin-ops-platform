@@ -342,8 +342,8 @@ export default function OaPendingPaymentsTable({
                               {row.bankTransaction.directionLabel || "支出"}
                             </FinanceDirectionTag>
                           </span>
+                          {row.bankTransaction.bank_split_parts?.length ? <BankSplitChips parts={row.bankTransaction.bank_split_parts} /> : null}
                         </div>
-                        {row.bankTransaction.bank_split_parts?.length ? <BankSplitChips parts={row.bankTransaction.bank_split_parts} /> : null}
                         <div className="oa-pending-payments-bank-grid__summary">
                           <MultiLineValue value={combinedBankSummaryRemark(row)} />
                         </div>
@@ -931,10 +931,7 @@ function hasInvoice(row: OaPendingPaymentRow): boolean {
 }
 
 function bankAmount(row: OaPendingPaymentRow): string {
-  if (row.bankTransaction.detailMode === "list" && row.bankTransaction.paidTotal) {
-    return row.bankTransaction.paidTotal;
-  }
-  return row.bankTransaction.amount || row.bankTransaction.paidTotal || row.bankTransaction.debitAmount || row.bankTransaction.creditAmount || "";
+  return row.bankTransaction.original_amount;
 }
 
 function invoiceAmount(row: OaPendingPaymentRow): string {
@@ -1057,13 +1054,13 @@ function extraRelationCount(relationCount: number | undefined): number {
 function bankDetailLabel(row: OaPendingPaymentRow): string {
   const applicant = row.oa.applicantName || "该OA";
   if (row.bankTransaction.detailMode === "list") {
-    return `查看${applicant}关联流水 ${row.bankTransaction.relationCount} 条`;
+    return `查看${applicant}关联流水 ${row.bankTransaction.original_transaction_count} 条`;
   }
   return `查看流水 ${applicant} 详情`;
 }
 
 function bankRelationButtonText(row: OaPendingPaymentRow): string | undefined {
-  const extraCount = extraRelationCount(row.bankTransaction.relationCount);
+  const extraCount = extraRelationCount(row.bankTransaction.original_transaction_count);
   return row.bankTransaction.detailMode === "list" && extraCount > 0 ? `+${extraCount}` : undefined;
 }
 

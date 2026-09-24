@@ -60,6 +60,8 @@ const rowsPayload = {
         relationCount: 1,
         hasMultiple: false,
         detailMode: "single",
+        original_amount: "10000.00",
+        original_transaction_count: 1,
       },
       invoice: {
         primaryInvoiceId: "inv-001",
@@ -171,6 +173,8 @@ const rowsPayload = {
             summary: "住宿费",
             remark: "昭通市昭阳区豪然精品酒店",
             relationCaseId: "case-group-001",
+            original_amount: "3000.00",
+            original_transaction_count: 1,
           },
           {
             bankTransactionId: "bank-003",
@@ -185,8 +189,12 @@ const rowsPayload = {
             summary: "补充住宿费",
             remark: "补充流水备注",
             relationCaseId: "case-group-001",
+            original_amount: "1450.00",
+            original_transaction_count: 1,
           },
         ],
+        original_amount: "4450.00",
+        original_transaction_count: 2,
       },
       invoice: {
         primaryInvoiceId: "inv-002",
@@ -265,6 +273,8 @@ const rowsPayload = {
         relationCount: 1,
         hasMultiple: false,
         detailMode: "single",
+        original_amount: "18200.00",
+        original_transaction_count: 1,
       },
       invoice: {
         primaryInvoiceId: null,
@@ -322,6 +332,8 @@ const rowsPayload = {
         relationCount: 0,
         hasMultiple: false,
         detailMode: "none",
+        original_amount: "0.00",
+        original_transaction_count: 0,
       },
       invoice: {
         primaryInvoiceId: null,
@@ -381,6 +393,8 @@ const rowsPayload = {
         relationCount: 1,
         hasMultiple: false,
         detailMode: "single",
+        original_amount: "0.00",
+        original_transaction_count: 1,
       },
       invoice: {
         primaryInvoiceId: null,
@@ -1730,4 +1744,24 @@ describe("OA pending payments page", () => {
     expect(await screen.findByRole("heading", { name: "OA详情" })).toBeInTheDocument();
     expect(await screen.findByRole("alert")).toHaveTextContent("OA 详情暂不可用，请稍后重试。");
   });
+});
+
+test('split original bank total and full chips stay inside the bank amount cell while OA keeps its own amount', async () => {
+  const base = rowsPayload.rows[0];
+  const parts = [
+    { id: 'principal', category_code: 'repay', category_label: '归还借款', category_path: ['外部往来款付款', '归还借款', '银行往来'], amount: '1000000.00' },
+    { id: 'interest', category_code: 'interest', category_label: '利息', category_path: ['费用', '利息'], amount: '1497.22' },
+  ];
+  installOaPendingPaymentsFetch({ rowsPayload: { ...rowsPayload, rows: [{ ...base,
+    oa: { ...base.oa, amount: '1497.22' },
+    bankTransaction: { ...base.bankTransaction, amount: '1497.22', paidTotal: '1497.22', original_amount: '1001497.22', original_transaction_count: 1, bank_split_parts: parts },
+  }] } });
+  renderAuthenticatedAppAt('/oa-pending-payments');
+  const original = await screen.findByText('1001497.22');
+  const amountCell = original.closest('.oa-pending-payments-bank-grid__amount') as HTMLElement;
+  expect(within(amountCell).getByText('费用 / 利息')).toBeVisible();
+  expect(within(amountCell).getByText('外部往来款付款 / 归还借款 / 银行往来')).toBeVisible();
+  expect(within(amountCell).queryByText('1497.22')).toBeNull();
+  expect(screen.getAllByText('1497.22').length).toBeGreaterThan(0);
+  expect(screen.queryByText('¥1000000.00')).toBeNull();
 });

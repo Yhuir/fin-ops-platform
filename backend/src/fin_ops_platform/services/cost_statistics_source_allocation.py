@@ -280,7 +280,7 @@ def suggest_source_allocations(
     neither screen order nor a greedy exact-amount match proves uniqueness.
     """
     if task.get("source_allocations") is not None:
-        if task["version"] != 0 or task["status"] != "pending" or Decimal(task["oa_total"]) != Decimal(task["net_outflow_total"]):
+        if task["decision_mode"] != "automatic" or task["status"] != "pending" or Decimal(task["oa_total"]) != Decimal(task["net_outflow_total"]):
             return None
         known = task["source_allocations"]["cost_lines"]
         unit_ids = {line["unit_id"] for line in known}
@@ -290,7 +290,7 @@ def suggest_source_allocations(
         task = {**task, "units": units, "bank_events": events, "source_allocations": None,
                 "oa_total": f"{sum((Decimal(u['oa_original_amount']) for u in units), ZERO):.2f}",
                 "net_outflow_total": f"{sum((Decimal(e['amount']) for e in events), ZERO):.2f}"}
-    if (task["status"] != "pending" or task["version"] != 0
+    if (task["status"] != "pending" or task["decision_mode"] != "automatic"
             or task["source_allocations"] is not None
             or "allocation_stale" in task["pending_reasons"]
             or any(event["event_kind"] != "outflow" for event in task["bank_events"])):

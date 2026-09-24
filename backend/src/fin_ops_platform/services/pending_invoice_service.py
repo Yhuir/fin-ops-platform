@@ -15,6 +15,7 @@ from fin_ops_platform.services.bank_transaction_category_service import BankTran
 from fin_ops_platform.services.bank_transaction_unit import (
     bank_unit_comparison_rows,
     bank_unit_display,
+    original_bank_display_totals,
     original_bank_transaction,
 )
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -840,6 +841,7 @@ class PendingInvoiceQueryService:
             linked_count = 1
         return {
             "primary": summaries[0] if len(summaries) == 1 else None,
+            **original_bank_display_totals(summaries),
             "relation_count": len(summaries),
             "linked_relation_count": linked_count,
             "has_multiple": len(summaries) > 1,
@@ -1541,7 +1543,8 @@ class PendingInvoiceQueryService:
 
     @staticmethod
     def _export_row(index: int, row: dict[str, Any]) -> dict[str, Any]:
-        bank = row.get("bank_transaction") if isinstance(row.get("bank_transaction"), dict) else {}
+        bank_group = row["bank_transactions"]
+        bank = bank_group["primary"]
         status = row.get("invoice_acquisition_status") if isinstance(row.get("invoice_acquisition_status"), dict) else {}
         invoices = row.get("input_invoices") if isinstance(row.get("input_invoices"), dict) else {}
         primary_invoice = invoices.get("primary") if isinstance(invoices.get("primary"), dict) else {}
@@ -1553,8 +1556,13 @@ class PendingInvoiceQueryService:
             "流水ID": row.get("id"),
             "交易日期": bank.get("trade_date") or str(bank.get("trade_time") or "")[:10],
             "对方户名": bank.get("counterparty_name"),
-            "借方金额": bank.get("debit_amount"),
-            "贷方金额": bank.get("credit_amount"),
+            "借方金额": bank["original_amount"] if Decimal(bank["debit_amount"]) > 0 else "0.00",
+            "贷方金额": bank["original_amount"] if Decimal(bank["credit_amount"]) > 0 else "0.00",
+            "流水金额合计": bank_group["original_amount"],
+            "流水拆分": "；".join(
+                f"{' / '.join(part['category_path'])}：{part['amount']}"
+                for part in bank_group["bank_split_parts"]
+            ),
             "银行": bank.get("bank_name"),
             "账号尾号": bank.get("account_last4"),
             "摘要": bank.get("summary"),
@@ -2853,6 +2861,8 @@ def _pending_invoice_export_columns() -> list[str]:
         "对方户名",
         "借方金额",
         "贷方金额",
+        "流水金额合计",
+        "流水拆分",
         "银行",
         "账号尾号",
         "摘要",

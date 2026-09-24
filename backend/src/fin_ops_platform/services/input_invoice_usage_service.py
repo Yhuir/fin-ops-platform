@@ -13,6 +13,7 @@ from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.bank_transaction_unit import (
     bank_unit_comparison_rows,
     bank_unit_display,
+    original_bank_display_totals,
     original_bank_summaries,
 )
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -663,7 +664,7 @@ class InputInvoiceUsageQueryService:
         total_amount = sum((_decimal(summary.get("amount")) for summary in public_summaries), start=ZERO)
         return {
             "primaryBankTransactionId": primary.get("bankTransactionId"),
-            "bank_split_parts": primary.get("bank_split_parts", []),
+            **original_bank_display_totals(public_summaries),
             "counterpartyName": primary.get("counterpartyName", ""),
             "tradeTime": primary.get("tradeTime", ""),
             "amount": _money(total_amount) if public_summaries else "",
@@ -1135,7 +1136,7 @@ class InputInvoiceUsageQueryService:
             "oa_project_name": oa.get("projectName"),
             "bank_counterparty_name": bank.get("counterpartyName"),
             "bank_trade_time": bank.get("tradeTime"),
-            "bank_amount": bank.get("amount"),
+            "bank_amount": bank.get("original_amount"),
             "bank_name": bank.get("bankName"),
             "bank_account": bank.get("bankAccount"),
             "bank_direction": bank.get("direction"),

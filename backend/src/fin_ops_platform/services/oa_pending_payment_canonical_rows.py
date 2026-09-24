@@ -7,7 +7,11 @@ from hashlib import sha1
 from typing import Any, Callable
 
 from fin_ops_platform.domain.models import BankTransaction, Invoice
-from fin_ops_platform.services.bank_transaction_unit import bank_unit_comparison_rows, bank_unit_display
+from fin_ops_platform.services.bank_transaction_unit import (
+    bank_unit_comparison_rows,
+    bank_unit_display,
+    original_bank_display_totals,
+)
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.invoice_relation_query_context import relation_status, summary_is_linked
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
@@ -291,7 +295,7 @@ def _bank_relation_payload(
                     non_outflow_edges.append(
                         {
                             "bankTransactionId": bank.id,
-        **bank_unit_display(bank),
+                            **bank_unit_display(bank),
                             "relationCaseId": edge_key[0],
                             "relationStatus": relation_status(relation),
                             "relationSource": str(relation.get("relation_source") or ""),
@@ -308,7 +312,7 @@ def _bank_relation_payload(
     paid_total = sum((_decimal(summary.get("amount")) for summary in linked_summaries), start=ZERO)
     return {
         "primaryBankTransactionId": primary.get("bankTransactionId"),
-        "bank_split_parts": primary.get("bank_split_parts", []),
+        **original_bank_display_totals(public),
         "accountDetailNo": primary.get("accountDetailNo", ""),
         "enterpriseSerialNo": primary.get("enterpriseSerialNo", ""),
         "voucherKind": primary.get("voucherKind", ""),

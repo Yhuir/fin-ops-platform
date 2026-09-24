@@ -70,6 +70,7 @@ export type InputInvoiceUsageOaSummary = {
 };
 
 export type InputInvoiceUsageBankSummary = {
+  originalAmount: string;
   bankSplitParts?: BankSplitPart[];
   id: string;
   counterpartyName: string;
@@ -86,6 +87,9 @@ export type InputInvoiceUsageBankSummary = {
 };
 
 export type InputInvoiceUsageRelationSummary<T> = {
+  originalTransactionCount?: number;
+  bankSplitParts?: BankSplitPart[];
+  originalAmount?: string;
   primary: T | null;
   relationCount: number;
   hasMultiple: boolean;

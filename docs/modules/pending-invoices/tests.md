@@ -69,3 +69,7 @@ FIN_OPS_TEST_DATABASE_URL=postgresql://localhost/<disposable_db> \
 ## 原有全部范围回归（2026-09-21）
 
 `PendingInvoicesPage.test.tsx` 在选择已有进项发票→预览→确认→回读业务链路中验证候选日期初始为空、首个 candidate 请求无起止日期，并仍限定所选 transaction_ids 和既有分页/资格。主表不新增日期入口，候选日期仍由抽屉本地状态持有。
+
+## 原始流水金额与拆分展示回归（2026-09-24）
+
+`tests/test_bank_split_document_scope_postgres.py` 与 `tests/test_bank_split_consumers_postgres.py` 验证原始金额 1001497.22 与利息业务金额 1497.22 同时成立、同父子项去重、多父金额/标签完整、原始金额筛选、子项金额搜索、持久化第三层及导出。适用业务核心、服务、API/查询合同、跨模块链路与旧功能回归；前端交互由各页面及 BankSplitChips 测试覆盖。本次无缓存/read-model/后台任务变更，验证 canonical 查询与现有写后 GET，无需新增后台测试。

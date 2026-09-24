@@ -99,6 +99,7 @@ type ApiOaSummary = Partial<{
 
 type ApiBankTransactionPayload = Partial<{
   bank_split_parts: BankSplitPart[];
+  original_amount: string | null;
   id: string | null;
   account_no: string | null;
   counterparty_name: string | null;
@@ -138,6 +139,9 @@ type ApiPendingInvoiceRow = {
   id?: string | null;
   bank_transaction?: ApiBankTransactionPayload | null;
   bank_transactions?: Partial<{
+    original_transaction_count: number;
+    bank_split_parts: BankSplitPart[];
+    original_amount: string | null;
     primary: ApiBankTransactionPayload | null;
     relation_count: number | null;
     linked_relation_count: number | null;
@@ -474,6 +478,7 @@ function mapBankTransaction(value: ApiBankTransactionPayload | null | undefined,
     voucherType: stringValue(value?.voucher_type),
     voucherNo: stringValue(value?.voucher_no),
     bankSplitParts: value?.bank_split_parts,
+    originalAmount: stringValue(value?.original_amount),
     effectiveTagCode: value?.effective_tag_code ?? null,
     effectiveTagLabel: value?.effective_tag_label ?? null,
     effectiveTagPrimaryLabel: value?.effective_tag_primary_label ?? null,
@@ -590,6 +595,9 @@ export function mapPendingInvoiceRow(row: ApiPendingInvoiceRow): PendingInvoiceR
     id,
     bankTransaction,
     bankTransactions: {
+      originalTransactionCount: numberValue(row.bank_transactions?.original_transaction_count),
+      bankSplitParts: row.bank_transactions?.bank_split_parts,
+      originalAmount: stringValue(row.bank_transactions?.original_amount),
       primary: bankPrimary,
       relationCount: numberValue(row.bank_transactions?.relation_count, bankTransactionSummaries.length),
       linkedRelationCount: numberValue(row.bank_transactions?.linked_relation_count, bankTransactionSummaries.length),

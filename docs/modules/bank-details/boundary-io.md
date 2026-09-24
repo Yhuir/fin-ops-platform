@@ -158,3 +158,11 @@
 
 拆分 owner 在 `app.bank_transaction_split_items.category_payload` 持久化完整人工分类实例，通过 `app.bank_transaction_units.split_category_payload` 与公共 effective classifier 提供当前标签、第三层、action/family。标签 definition 只定义选项，不能代替每笔用途的往来归属；禁止用父流水或对方银行名称在查询时补猜。输入完整 `category_label_path`，服务按现有分类规范校验与派生；同 code 同金额修改第三层也版本化并保留子身份。GET/PUT、迁移限制及测试见 [流水拆分 I/O](../../dev/bank-transaction-splits.md#分类实例合同0180)。
 银行明细搜索同时包含父原金额和子项金额，子标签筛选仅作用匹配用途，父行数/分页/原金额保持不变。
+
+## 2026-09-24 拆分标签列表展示
+
+银行金额列保留原始金额、方向和账户；拆分时完整分类路径通过公共 `BankSplitChips` 一项一行展示，原类型列不重复显示拆分子项。金额悬浮层使用页面已返回的子项金额，不产生 API/SQL 请求；鼠标、键盘聚焦和点击均可查看。未拆分 TypeCell 的分类操作、父行分页/统计、余额及原金额合同不变。抽屉编辑仍直接显示各项金额。
+
+## 2026-09-24 关联台完整拆分展示投影
+
+`workbench_category_projection_rows` 在原有一次分类 SQL 中对当前选中用途的父身份去重、批量聚合全部持久化子项，再用银行拆分 owner 的分类实例装配方法输出 `bank_split_parts`。关联台 full/summary、单行及分类调用方共享该边界，不新增逐行查询或改变用途金额、成员身份、关联占用。未在当前 case 的兄弟子项仅作为展示事实返回，不成为当前关系成员。原 SQL 次数预算保持不变。

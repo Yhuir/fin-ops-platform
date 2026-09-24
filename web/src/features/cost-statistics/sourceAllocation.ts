@@ -25,7 +25,7 @@ export function createSourceDraft(task: CostStatisticsManualAllocationTask): Sou
   let id = 0;
   const stale = task.pendingReasons.includes('allocation_stale');
   const saved = stale ? null : task.sourceAllocations;
-  const suggested = stale || task.version !== 0 ? null : task.suggestedSourceAllocations;
+  const suggested = stale || task.decisionMode !== 'automatic' ? null : task.suggestedSourceAllocations;
   const tags = new Map(task.oaCostTagOverrides.map(row => [JSON.stringify([row.unitId, row.bankTransactionId]),
     { code: row.costTagCode, primary_label: row.costTagPrimaryLabel, sub_label: row.costTagSubLabel }]));
   return {
@@ -165,9 +165,9 @@ export function sourceSaveRequest(task: CostStatisticsManualAllocationTask, draf
   };
 }
 
-// Reconcile an interrupted response against the actual saved decision, not version alone.
+// Verify the requested outcome, including idempotent saves that keep their revision.
 export function sourceDecisionMatches(request: SaveCostStatisticsManualAllocationRequest, task: CostStatisticsManualAllocationTask): boolean {
-  if (task.scopeVersion !== request.scopeVersion || task.version <= request.expectedVersion || task.sourceFingerprint !== request.sourceFingerprint
+  if (!['automatic', 'manual'].includes(task.decisionMode) || task.scopeVersion !== request.scopeVersion || task.version < request.expectedVersion || task.sourceFingerprint !== request.sourceFingerprint
     || task.pendingReasons.includes('allocation_stale') || !task.sourceAllocations) return false;
   const ordered = (rows: string[][]) => JSON.stringify(rows.map(row => JSON.stringify(row)).sort());
   const matrix = (value: CostSourceAllocations) => [

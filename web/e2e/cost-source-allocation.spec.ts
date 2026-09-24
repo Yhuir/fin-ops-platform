@@ -2,11 +2,11 @@ import { expect, test, type Page } from "./fixtures/strictTest";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { installDeterministicApiMocks } from './fixtures/apiMocks';
 
-async function sourceScenario(page: Page, options: { detailDelayMs?: number; automatic?: boolean; partial?: boolean; manual?: boolean;  telecom?: boolean; scopedLoan?: boolean; alignmentCase?: boolean; many?: boolean; longMenu?: boolean; screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
+async function sourceScenario(page: Page, options: { restoreAutomatic?: boolean; detailDelayMs?: number; automatic?: boolean; partial?: boolean; manual?: boolean;  telecom?: boolean; scopedLoan?: boolean; alignmentCase?: boolean; many?: boolean; longMenu?: boolean; screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
   await installDeterministicApiMocks(page, { sessionMode: 'user' });
   const task = {
     relation_case_id: 'source-case', relation_version: 1, source_fingerprint: 'a'.repeat(64), scope_version: 7,
-    status: 'pending', pending_reasons: options.missingTag ? ['bank_tag_missing'] : ['source_required'], allows_partial: !!options.partial, waiting_oa_ids: [] as string[],
+    decision_mode: 'automatic', status: 'pending', pending_reasons: options.missingTag ? ['bank_tag_missing'] : ['source_required'], allows_partial: !!options.partial, waiting_oa_ids: [] as string[],
     oa_total: '600.00', gross_outflow_total: '600.00', wrong_payment_refund_total: '0.00', net_outflow_total: '600.00',
     units: [{ unit_id: 'oa-1', oa_id: 'OA-202608-001', cost_eligible: true, oa_apply_type: '支付申请', expense_item_id: '', project_id: 'p-1', project_name: '云南溯源科技', expense_type: '原 OA 材料费用', expense_content: '设备安装项目材料采购', oa_applicant: '测试申请人', lock_oa_amount: true, outside_cost_amount: "0.00", oa_original_amount: '600.00' }],
     bank_events: [
@@ -119,7 +119,7 @@ async function sourceScenario(page: Page, options: { detailDelayMs?: number; aut
       task.units.forEach(u => { u.lock_oa_amount = savedBody!.oa_amount_locks.find((r: any) => r.unit_id === u.unit_id).locked; });
       task.suggested_source_allocations = null;
       task.allocations = savedBody!.allocations;
-      task.version++; task.status = options.missingTag || options.partial ? 'pending' : 'allocated';
+      task.decision_mode = options.restoreAutomatic ? 'automatic' : 'manual'; task.version++; task.status = options.missingTag || options.partial ? 'pending' : 'allocated';
       task.pending_reasons = options.partial ? ['oa_in_progress', 'source_required'] : options.missingTag ? ['bank_tag_missing'] : [];
       if (options.interrupted) return route.fulfill({ status: 502, json: { message: 'upstream response lost after commit' } });
       return route.fulfill({ json: task });
@@ -127,8 +127,8 @@ async function sourceScenario(page: Page, options: { detailDelayMs?: number; aut
     if (url.pathname.endsWith('/source-case')) { details++; if (options.detailDelayMs) await new Promise(resolve=>setTimeout(resolve,options.detailDelayMs)); if (options.detailFailure && details === 1) return route.fulfill({ status: 503, json: { message: 'unavailable' } }); return route.fulfill({ json: task }); }
     const { units, bank_events, allocations, source_allocations, suggested_source_allocations, ...summary } = task;
     return route.fulfill({ json: {
-      items: (!options.automatic || writes > 0) && url.searchParams.get('status') === task.status ? [{ ...summary, project_names: [...new Set(task.units.map(unit => unit.project_name))], unit_count: task.units.length, bank_event_count: task.bank_events.length }, ...(options.prefill ? [2,3,4].map(i => ({...summary, relation_case_id: `color-block-${i}`, project_names: [`配色验证项目 ${i}`], unit_count: 1, bank_event_count: 2})) : [])] : [],
-      row_count: options.prefill ? 4 : 1, counts: { pending: task.status === 'pending' ? (options.prefill ? 4 : 1) : 0, allocated: task.status === 'allocated' && (!options.automatic || writes > 0) ? (options.prefill ? 4 : 1) : 0 }, next_cursor: null,
+      items: (task.decision_mode === 'manual' || task.status !== 'allocated') && url.searchParams.get('status') === task.status ? [{ ...summary, project_names: [...new Set(task.units.map(unit => unit.project_name))], unit_count: task.units.length, bank_event_count: task.bank_events.length }, ...(options.prefill ? [2,3,4].map(i => ({...summary, relation_case_id: `color-block-${i}`, project_names: [`配色验证项目 ${i}`], unit_count: 1, bank_event_count: 2})) : [])] : [],
+      row_count: options.prefill ? 4 : 1, counts: { pending: task.status === 'pending' ? (options.prefill ? 4 : 1) : 0, allocated: task.status === 'allocated' && (task.decision_mode === 'manual' || task.status !== 'allocated') ? (options.prefill ? 4 : 1) : 0 }, next_cursor: null,
     } });
   });
   if (options.refreshFailure) await page.route('**/api/cost-statistics/explorer**', route => writes > 0 ? route.fulfill({ status: 503, json: { error: 'temporarily_unavailable', message: '统计刷新暂不可用' } }) : route.fallback());
@@ -539,7 +539,7 @@ test('shows many-to-many evidence as one group without duplicating bank facts',a
   const scene=await sourceScenario(page,{many:true});
   const evidence=scene.drawer.getByRole('table',{name:'OA 与流水对照'});
   await expect(evidence.locator('tbody')).toHaveCount(1);
-  await expect(evidence.getByText('多对多 · 2 项 / 2 笔')).toBeVisible();
+  await expect(evidence.getByText('关联明细 · 2 项 / 2 笔')).toBeVisible();
   await expect(evidence.getByText('¥350.00',{exact:true})).toHaveCount(1);
   await expect(evidence.getByText('¥250.00',{exact:true})).toHaveCount(1);
   await expect(scene.drawer.getByText('分配金额一致',{exact:true})).toBeVisible();
@@ -646,7 +646,7 @@ test('manual tag catalogue refreshes on open, retries failure without losing dra
   await content.fill('保留草稿');
   const picker=scene.drawer.getByRole('combobox',{name:'人工成本标签',exact:true});
   await picker.click();
-  const menu=page.getByRole('dialog',{name:'选择成本标签',exact:true});
+  const menu=page.getByRole('dialog',{name:'人工成本标签',exact:true});
   await expect(menu.getByRole('alert')).toContainText('标签读取失败');
   await expect(menu.getByRole('option')).toHaveCount(0);
   fail=false;
@@ -781,5 +781,19 @@ test('OA cost tag edits survive save and reopen, then explicitly restore source 
   await expect.poll(()=>scene.writes()).toBe(2);
   expect(scene.body()!.oa_cost_tag_overrides).toEqual([]);
   await expect(picker).toContainText('采购 / 材料款');
+  await expectNoUnexpectedSuccessUiErrors(page);
+});
+
+test('restoring automatic allocation removes the task from both tabs and refreshes server counts', async ({page}) => {
+  const scene = await sourceScenario(page, {restoreAutomatic:true});
+  await fillSources(page,scene.unit);
+  await scene.drawer.getByRole('button',{name:'保存',exact:true}).click();
+  await expect(scene.drawer.getByText('暂无待分配任务')).toBeVisible();
+  await expect(scene.drawer.getByRole('radio',{name:'待分配 0'})).toBeVisible();
+  await scene.drawer.getByRole('radio',{name:'已完成 0'}).click();
+  await expect(scene.drawer.getByText('暂无已完成任务')).toBeVisible();
+  expect(scene.task.version).toBe(1);
+  expect(scene.task.decision_mode).toBe('automatic');
+  expect(scene.writes()).toBe(1);
   await expectNoUnexpectedSuccessUiErrors(page);
 });

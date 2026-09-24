@@ -53,6 +53,8 @@ function upgradedRows() {
         effective_tag_primary_label: "货款",
         effective_tag_sub_label: "设备采购",
         effective_tag_label_path: ["货款", "设备采购"],
+        original_amount: "1200.00",
+        original_transaction_count: 1,
       },
       bank_transactions: {
         primary: {
@@ -82,6 +84,8 @@ function upgradedRows() {
           effective_tag_primary_label: "货款",
           effective_tag_sub_label: "设备采购",
           effective_tag_label_path: ["货款", "设备采购"],
+          original_amount: "1200.00",
+          original_transaction_count: 1,
         },
         relation_count: 1,
         linked_relation_count: 1,
@@ -97,9 +101,13 @@ function upgradedRows() {
             bank_name: "建设银行",
             account_last4: "8106",
             summary: "电子转账",
+            original_amount: "1200.00",
+            original_transaction_count: 1,
           },
         ],
         payment_summary: { paid_total: "0.00" },
+        original_amount: "1200.00",
+        original_transaction_count: 1,
       },
       invoice_acquisition_status: {
         code: "paid_pending_invoice",
@@ -142,6 +150,8 @@ function upgradedRows() {
         enterprise_serial_no: "ent-not-paid",
         voucher_type: "电子凭证",
         voucher_no: "v-not-paid",
+        original_amount: "1200.00",
+        original_transaction_count: 1,
       },
       bank_transactions: {
         primary: null,
@@ -161,6 +171,8 @@ function upgradedRows() {
             summary: "合同付款",
             relation_case_id: "case-001",
             relation_status: "linked",
+            original_amount: "1200.00",
+            original_transaction_count: 1,
           },
           {
             id: "txn-old-payment",
@@ -173,9 +185,13 @@ function upgradedRows() {
             summary: "历史付款",
             relation_case_id: "case-old",
             relation_status: "linked",
+            original_amount: "300.00",
+            original_transaction_count: 1,
           },
         ],
         payment_summary: { paid_total: "1500.00" },
+        original_amount: "1500.00",
+        original_transaction_count: 2,
       },
       invoice_acquisition_status: {
         code: "invoice_not_fully_paid",
@@ -237,6 +253,8 @@ function upgradedRows() {
         enterprise_serial_no: "ent-no-required",
         voucher_type: "电子凭证",
         voucher_no: "v-no-required",
+        original_amount: "300.00",
+        original_transaction_count: 1,
       },
       invoice_acquisition_status: {
         code: "no_invoice_required",
@@ -264,6 +282,8 @@ function upgradedRows() {
         account_name: "云南溯源科技有限公司",
         account_last4: "8106",
         summary: "候选关系",
+        original_amount: "400.00",
+        original_transaction_count: 1,
       },
       invoice_acquisition_status: {
         code: "paid_invoiced",
@@ -385,6 +405,8 @@ function pendingRuleClosureRow(id: string, counterpartyName: string, statusLabel
       account_name: "云南溯源科技有限公司",
       account_last4: "8106",
       summary: "规则闭环验证",
+      original_amount: "118.00",
+      original_transaction_count: 1,
     },
     invoice_acquisition_status: {
       code: matchedGroup === "no_invoice_required" ? "no_invoice_required" : "paid_pending_invoice",
@@ -408,6 +430,7 @@ function batchAttachRow() {
     id: "txn-paid-pending-2",
     counterparty_name: "云南开票供应商二号",
     debit_amount: "36.00",
+    original_amount: "36.00",
     amount: "36.00",
     trade_time: "2026-04-20T10:52:02+08:00",
     booked_date: "2026-05-03",
@@ -1278,6 +1301,8 @@ describe("Pending invoices page", () => {
         effective_tag_primary_label: "收入",
         effective_tag_sub_label: "服务收入",
         effective_tag_label_path: ["收入", "服务收入"],
+        original_amount: "300.00",
+        original_transaction_count: 1,
       },
       invoice_acquisition_status: {
         code: "income_pending_invoice",
@@ -1763,6 +1788,8 @@ describe("Pending invoices page", () => {
         effective_tag_primary_label: "收入",
         effective_tag_sub_label: "服务收入",
         effective_tag_label_path: ["收入", "服务收入"],
+        original_amount: "300.00",
+        original_transaction_count: 1,
       },
       invoice_acquisition_status: {
         code: "income_pending_invoice",
@@ -1784,6 +1811,8 @@ describe("Pending invoices page", () => {
         counterparty_name: "收入批量客户B",
         credit_amount: "200.00",
         amount: "200.00",
+        original_amount: "200.00",
+        original_transaction_count: 1,
       },
     };
     const fetchMock = installPendingInvoiceFetch({

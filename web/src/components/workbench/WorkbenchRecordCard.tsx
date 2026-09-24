@@ -608,7 +608,7 @@ function renderBankMoneyValue(
   bankPartsContent?: ReactNode,
 ) {
   const hasValue = value !== "--" && value !== "—" && value !== "";
-  const displayedValue = hasValue ? formatMoney(bankPartsContent && row.parentAmount ? row.parentAmount : value) : "--";
+  const displayedValue = hasValue ? formatMoney(row.isSplit ? row.parentAmount : value, "—") : "--";
   const normalizedDirection = resolveDirectionForMoneyCell(columnKey, direction, hasValue);
   const shouldShowDirectionTag = hasValue && normalizedDirection !== null;
   const shouldShowAccount = hasValue && paymentAccount !== "--" && paymentAccount !== "—" && paymentAccount !== "";

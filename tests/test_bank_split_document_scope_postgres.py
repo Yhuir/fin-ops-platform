@@ -59,7 +59,7 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
         return OaPendingPaymentQueryService(repository=PostgresOaPendingPaymentQueryRepository(self.connection)).rows(
             {'month':['2026-04'],'page':['1'],'page_size':['20']}, tenant_id='default')
 
-    def invoice_page(self, invoice_type='input'):
+    def invoice_page(self, invoice_type='input', **query):
         self.sync_relation_fixture()
         if invoice_type == 'input':
             service = InputInvoiceUsageCanonicalQueryService(repository=PostgresInputInvoiceUsageQueryRepository(self.connection),
@@ -67,16 +67,41 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
         else:
             service = OutputInvoiceCollectionCanonicalQueryService(repository=PostgresOutputInvoiceCollectionQueryRepository(self.connection),
                 row_assembler=OutputInvoiceCollectionQueryService(import_service=ImportNormalizationService()))
-        return service.list_rows(page=1,page_size=20,month='2026-04',**({'include_statistics':False} if invoice_type == 'input' else {}))
+        return service.list_rows(page=1,page_size=20,month='2026-04',**query,**({'include_statistics':False} if invoice_type == 'input' else {}))
+
+    def assert_original_bank_display(self, bank):
+        self.assertEqual(bank['original_amount'], '1001497.22')
+        self.assertEqual(bank['original_transaction_count'], 1)
+        self.assertEqual(len(bank['bank_split_parts']), 2)
+        for summary in bank['summaries']:
+            self.assertEqual(summary['original_amount'], '1001497.22')
+            self.assertEqual(summary['parent_row_id'], 'bank-parent')
+
+    def test_bank_amount_filters_use_original_cash_but_keyword_still_finds_interest(self):
+        self.document()
+        visible = self.invoice_page(filters=[{'field': 'bank_amount', 'operator': 'equals', 'value': '1001497.22'}])
+        self.assertEqual(len(visible['rows']), 1)
+        self.assert_original_bank_display(visible['rows'][0]['bankTransactions'])
+        invisible = self.invoice_page(filters=[{'field': 'bank_amount', 'operator': 'equals', 'value': '1497.22'}])
+        self.assertEqual(invisible['rows'], [])
+        self.assertEqual(len(self.invoice_page(keyword='1497.22')['rows']), 1)
+        self.assertEqual(len(self.invoice_page(keyword='1001497.22')['rows']), 1)
 
     def test_interest_oa_and_input_invoice_use_current_unique_purpose_despite_old_mismatch(self):
         self.document()
         oa = self.oa_page()
         self.assertEqual(oa['summary']['bankPaidTotal'],'1497.22')
         self.assertEqual(oa['rows'][0]['bankTransaction']['paidTotal'],'1497.22')
+        self.assert_original_bank_display(oa['rows'][0]['bankTransaction'])
         invoice = self.invoice_page()
         self.assertEqual(invoice['rows'][0]['bankTransactions']['amount'],'1497.22')
+        self.assert_original_bank_display(invoice['rows'][0]['bankTransactions'])
         self.assertEqual(invoice['rows'][0]['paymentStatus']['code'],'paid')
+        from fin_ops_platform.services.input_invoice_usage_export_service import InputInvoiceUsageExportService
+        export = InputInvoiceUsageExportService._formal_row(1, invoice['rows'][0])
+        self.assertEqual(export['流水金额'], '1001497.22')
+        self.assertEqual(export['关联金额'], '1497.22')
+        self.assertIn('费用 / 利息：1497.22', export['流水拆分'])
         self.assertEqual(self.connection.fetch_one("select amount_check from app.workbench_pair_relations")['amount_check'],{'matched':False})
 
     def test_principal_document_uses_principal_bucket_instead_of_deleting_it(self):
@@ -92,6 +117,7 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
         self.document(invoice_type='output')
         invoice = self.invoice_page('output')
         self.assertEqual(invoice['rows'][0]['bankTransactions']['receivedTotal'],'1497.22')
+        self.assert_original_bank_display(invoice['rows'][0]['bankTransactions'])
         self.assertEqual(invoice['summary']['collectedAmount'],'1497.22')
 
     def test_unmatched_target_keeps_entire_evidence_and_pending_status(self):
@@ -101,6 +127,7 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
         self.assertEqual(oa['rows'][0]['bankTransaction']['paidTotal'],'1001497.22')
         invoice = self.invoice_page()
         self.assertEqual(invoice['rows'][0]['bankTransactions']['amount'],'1001497.22')
+        self.assert_original_bank_display(invoice['rows'][0]['bankTransactions'])
         self.assertEqual(invoice['rows'][0]['paymentStatus']['code'],'pending')
 
     def test_equal_buckets_do_not_choose_principal_or_interest(self):
@@ -179,6 +206,11 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
         self.assertEqual(invoice['pagination']['total'],1)
         self.assertEqual(invoice['rows'][0]['invoice']['lineItemCount'],2)
         self.assertEqual(invoice['rows'][0]['bankTransactions']['amount'],'1597.22')
+        bank = invoice['rows'][0]['bankTransactions']
+        self.assertEqual(bank['original_amount'], '1002597.22')
+        self.assertEqual(bank['original_transaction_count'], 2)
+        self.assertEqual(len(bank['bank_split_parts']), 4)
+        self.assertEqual(len({part['id'] for part in bank['bank_split_parts']}), 4)
         self.assertEqual(invoice['rows'][0]['paymentStatus']['code'],'paid')
         # A separate unsplit case matching the group total must not conceal the split case's evidence.
         with self.connection.transaction() as tx:

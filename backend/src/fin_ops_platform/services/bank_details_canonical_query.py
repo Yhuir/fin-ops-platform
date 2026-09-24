@@ -197,15 +197,39 @@ class PostgresBankDetailsCanonicalQueryRepository:
         rows = list(
             transaction.fetch_all(
                 f"""
-                with {cte_sql}
-                select *
-                from classified_with_semantics
-                where row_id = any(%s::text[])
+                with {cte_sql},
+                display_units as materialized (
+                    select * from classified_with_semantics where row_id = any(%s::text[])
+                ),
+                display_parent_parts as (
+                    select item.bank_transaction_id,
+                        jsonb_agg(jsonb_build_object(
+                            'id', item.id::text, 'category_code', item.category_code,
+                            'amount', item.amount::text, 'category_payload', item.category_payload
+                        ) order by item.position) as items
+                    from app.bank_transaction_split_items item
+                    join (select distinct parent_bank_transaction_id from display_units) parents
+                      on parents.parent_bank_transaction_id = item.bank_transaction_id
+                    group by item.bank_transaction_id
+                )
+                select display_units.*, coalesce(parts.items, '[]'::jsonb) as split_display_items
+                from display_units
+                left join display_parent_parts parts on parts.bank_transaction_id = display_units.parent_bank_transaction_id
                 order by row_id
                 """,
                 (*cte_params, normalized_ids),
             )
         )
+        # Import at the owner method boundary: the split repository uses this classifier.
+        from fin_ops_platform.services.postgres_repositories.bank_transaction_splits import (
+            PostgresBankTransactionSplitRepository,
+        )
+
+        display_definitions = PostgresBankTransactionSplitRepository.tag_definitions(tags)
+        for row in rows:
+            row["bank_split_parts"] = PostgresBankTransactionSplitRepository.decorate_parts(
+                row["split_display_items"], display_definitions,
+            )
         payload = BankDetailsCanonicalQueryService._transactions_payload(
             {
                 "settings": settings,
@@ -218,6 +242,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
         )
         return {
             str(row.get("id") or ""): {
+                "bank_split_parts": row["bank_split_parts"],
                 "category_code": row.get("effective_category_code"),
                 "category_label": row.get("effective_category_label"),
                 "category_path": list(row.get("effective_category_path") or []),

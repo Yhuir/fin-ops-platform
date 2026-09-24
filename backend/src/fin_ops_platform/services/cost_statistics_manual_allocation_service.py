@@ -6,6 +6,7 @@ from typing import Any
 
 from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.cost_statistics_allocation_scope import merge_source_decision
+from fin_ops_platform.services.cost_statistics_decision_equivalence import automatic_equivalence_reason, automatic_task
 from fin_ops_platform.services.cost_statistics_canonical_repository import (
     PostgresCostStatisticsCanonicalRepository,
 )
@@ -268,7 +269,8 @@ class CostStatisticsManualAllocationService:
             raise CostStatisticsManualAllocationConflictError(
                 "人工分配版本已变化，请刷新后重试。"
             )
-        previous = snapshot["manual_allocations"].get(relation_case_id)
+        stored_previous = snapshot["manual_allocations"].get(relation_case_id)
+        previous = stored_previous if stored_previous is not None and stored_previous["decision_mode"] == "manual" else None
         if "manual_items" not in payload and previous and previous.get("manual_items"):
             raise CostStatisticsManualAllocationConflictError("分配包含人工成本，请刷新页面后再保存。")
         options = AppSettingsService.cost_manual_options_from_settings(snapshot["settings"], snapshot["manual_projects"])
@@ -331,13 +333,21 @@ class CostStatisticsManualAllocationService:
             raise CostStatisticsManualAllocationValidationError(
                 "operator identity is required"
             )
-        previous = snapshot["manual_allocations"].get(relation_case_id)
+        stored_previous = snapshot["manual_allocations"].get(relation_case_id)
+        previous = stored_previous if stored_previous is not None and stored_previous["decision_mode"] == "manual" else None
         if (previous and previous["source_fingerprint"] == source_fingerprint
                 and previous["source_allocations"] is None
                 and Decimal(previous["gross_outflow_total"]) != Decimal(task["gross_outflow_total"])):
             raise CostStatisticsManualAllocationValidationError("历史分配缺少逐笔来源，请先在完整范围确认来源。")
+        automatic = automatic_task(snapshot, relation_case_id)
+        # Automatic sources outside the edited scope remain part of the full decision.
+        # A stale manual record is never replaced with an inferred baseline.
+        baseline = previous
+        if previous is None and automatic is not None and automatic["status"] == "allocated":
+            baseline = {**automatic, "oa_amount_locks": {
+                unit["unit_id"]: unit["lock_oa_amount"] for unit in automatic["units"]}}
         # Preserve all canonical unit identities, including units hidden by current scope.
-        valid_previous = previous if previous and previous["source_fingerprint"] == source_fingerprint else None
+        valid_previous = baseline if baseline and baseline["source_fingerprint"] == source_fingerprint else None
         selected = {e["transaction_id"] for e in task["bank_events"] if e["event_kind"] == "outflow"}
         outside_ids = {line["unit_id"] for line in valid_previous["source_allocations"]["cost_lines"] if line["bank_transaction_id"] not in selected} if valid_previous and valid_previous["source_allocations"] else set()
         retained_manual = [item for item in valid_previous.get("manual_items", []) if item["unit_id"] in outside_ids] if valid_previous else []
@@ -346,15 +356,15 @@ class CostStatisticsManualAllocationService:
         stored_manual = retained_manual + manual_items
         oa_ids = [line["unit_id"] for line in valid_previous["allocations"] if not line["unit_id"].startswith("manual:")] if valid_previous else [u["unit_id"] for u in task["units"]]
         all_units = [{"unit_id": id} for id in oa_ids] + stored_manual
-        merged = merge_source_decision({**task, "non_cost_reason": non_cost_reason}, previous, source_allocations, all_units)
+        merged = merge_source_decision({**task, "non_cost_reason": non_cost_reason}, baseline, source_allocations, all_units)
         merged["non_cost_reason"] = _non_cost_reason(merged["non_cost_reason"])
         stored_refund = sum((Decimal(line["amount"]) for line in merged["source_allocations"]["refund_links"]), Decimal("0.00"))
         stored_net = sum((Decimal(line["amount"]) for line in merged["allocations"]), Decimal(merged["non_cost_amount"]))
-        saved = allocation_repository.save(
+        stored_fields = dict(
             relation_case_id=relation_case_id,
             relation_version=int(task["relation_version"]),
             source_fingerprint=source_fingerprint,
-            oa_total=str(previous["oa_total"] if previous and previous["source_fingerprint"] == source_fingerprint else task["oa_total"]),
+            oa_total=str(valid_previous["oa_total"] if valid_previous else task["oa_total"]),
             gross_outflow_total=f"{stored_net + stored_refund:.2f}",
             wrong_payment_refund_total=f"{stored_refund:.2f}",
             net_outflow_total=f"{stored_net:.2f}",
@@ -366,14 +376,20 @@ class CostStatisticsManualAllocationService:
                                     if row["bank_transaction_id"] not in selected] if valid_previous else []) + oa_cost_tags,
             non_cost_amount=merged["non_cost_amount"],
             non_cost_reason=merged["non_cost_reason"],
-            expected_version=expected_version,
-            actor_id=actor_id,
         )
+        decision_mode = "automatic" if not automatic_equivalence_reason(stored_fields, automatic) else "manual"
+        if decision_mode == "automatic" and previous is None:
+            unchanged = next(t for t in CostStatisticsPolicy(snapshot).allocation_tasks if t["relation_case_id"] == relation_case_id)
+            group = next(g for g in snapshot["cost_groups"] if g["group_id"] == relation_case_id)
+            return {**unchanged, "manual_options": options, "can_save": True,
+                    "relation_display_groups": _relation_display_groups(unchanged, group)}
+        saved = allocation_repository.save(**stored_fields, decision_mode=decision_mode,
+                                           expected_version=expected_version, actor_id=actor_id)
         if saved is None:
             raise CostStatisticsManualAllocationConflictError(
                 "人工分配版本已变化，请刷新后重试。"
             )
-        if audit_repository is not None:
+        if audit_repository is not None and saved["version"] != expected_version:
             audit_repository.append_operation_event(
                 {
                     "event_type": "operation.completed",
@@ -389,6 +405,8 @@ class CostStatisticsManualAllocationService:
                     "outcome": "success",
                     "request_id": request_id or None,
                     "payload": {
+                        "decision_mode": decision_mode,
+                        "before": stored_previous,
                         "relation_case_id": relation_case_id,
                         "source_fingerprint": source_fingerprint,
                         "version": int(saved["version"]),
