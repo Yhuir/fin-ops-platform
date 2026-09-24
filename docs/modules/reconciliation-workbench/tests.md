@@ -817,3 +817,9 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 `BankSplitRelationCell.test.tsx` 保护列表无子项选择入口且金额/浮层不变；`BankSplitEditor.test.tsx` 保护可选操作与编辑权限独立、dirty/saving/conflict 不可关联草稿；`WorkbenchBankSelectionCleanup.test.ts` 保护清理当前父流水两区旧选择、保留其它流水和 OA。`workbench-split-selection.spec.ts` 对应 RECON-WB-E2E-017，覆盖整笔 confirm、详情选择/跨关系占用/withdraw、保存后清除旧选择与新版本回读。业务选择规则、前端状态、交互、E2E与既有回归适用；后端契约、worker、read model未改变。
 
 生产真实详情发现列表/详情版本字段不同，新增 `WorkbenchApi.test.ts` 断言详情 `split_version` 明确映射；浏览器子项场景的详情 fixture 使用真实字段，避免拿列表 DTO 冒充详情 DTO。未修改 HTTP API shape、后端事务或身份键。
+
+
+## 2026-09-24 凭证金额展示精简
+
+WorkbenchSupportingDocumentFiles、groupDisplayModel、WorkbenchExceptionDrawer、WorkbenchInvoiceEntryDrawer 测试保护金额、未知/零元/大金额、精确子项管理及只读权限；workbench-supporting-documents-flow 覆盖保存回读、预览、删除恢复、异常抽屉、混合票据、五份凭证与窄屏。列表断言两种说明文字缺席，异常 Popover 仍显示权威核对金额。既有 test_workbench_amount_check_service 保护业务差额、混合计额及重复文件不重复计额。
+七类测试中业务核心回归、前端交互、E2E和旧功能回归适用；服务/持久化、HTTP合同、read model/cache/worker实现不变，不新增对应测试。

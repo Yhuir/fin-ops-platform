@@ -179,8 +179,6 @@ export type WorkbenchRecord = {
   bankSplitVersion?: number;
   supportingDocuments?: WorkbenchExpenseItem["supportingDocuments"];
   supportingDocumentAmount?: string | null;
-  supportingDocumentOaAmount?: string;
-  supportingDocumentHasInvoice?: boolean;
   id: string;
   caseId?: string;
   exceptionCaseId?: string;

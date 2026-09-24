@@ -38,29 +38,17 @@ test("read-only rendering keeps previews and hides management", () => {
 
 
 test.each([
-  [null, "凭证金额 待填写", "本项差额（OA − 凭证）待核对"],
-  ["0.00", "凭证金额 0.00", "本项差额（OA − 凭证）100.00"],
-  ["80.00", "凭证金额 80.00", "本项差额（OA − 凭证）20.00"],
-  ["120.00", "凭证金额 120.00", "本项差额（OA − 凭证）-20.00"],
-])("shows voucher amount %s and a distinct delta", (amount, amountText, deltaText) => {
-  render(<WorkbenchRecordCard row={{ ...row, supportingDocumentAmount: amount, supportingDocumentOaAmount: "100.00" }} paneId="invoice" zoneId="unpaired" rowState="idle"
+  [undefined, "凭证金额 待填写"],
+  [null, "凭证金额 待填写"],
+  ["0.00", "凭证金额 0.00"],
+  ["80.00", "凭证金额 80.00"],
+  ["120.00", "凭证金额 120.00"],
+  ["999999999999999999.98", "凭证金额 999999999999999999.98"],
+])("shows only the persisted voucher amount %s", (amount, amountText) => {
+  render(<WorkbenchRecordCard row={{ ...row, supportingDocumentAmount: amount }} paneId="invoice" zoneId="unpaired" rowState="idle"
     canOperateData showWorkflowActions onRowAction={vi.fn()} onSelectRow={vi.fn()} onOpenDetail={vi.fn()} />);
   expect(screen.getByText(amountText)).toBeInTheDocument();
-  expect(screen.getByText(deltaText)).toBeInTheDocument();
-});
-
-test("mixed invoice evidence keeps voucher management and explains combined comparison", () => {
-  render(<WorkbenchRecordCard row={{ ...row, supportingDocumentAmount: "80.00", supportingDocumentOaAmount: "100.00", supportingDocumentHasInvoice: true }} paneId="invoice" zoneId="unpaired" rowState="idle"
-    canOperateData showWorkflowActions onRowAction={vi.fn()} onSelectRow={vi.fn()} onOpenDetail={vi.fn()} />);
-  expect(screen.getByText("凭证金额 80.00")).toBeInTheDocument();
-  expect(screen.getByText("与同项发票合并核对")).toBeInTheDocument();
-  expect(screen.queryByText(/差额（OA/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/本项差额|与同项发票合并核对/)).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "管理凭证" })).toBeInTheDocument();
-});
-
-
-test("keeps cent precision for the largest permitted voucher total", () => {
-  render(<WorkbenchRecordCard row={{ ...row, supportingDocumentAmount: "999999999999999999.98", supportingDocumentOaAmount: "999999999999999999.99" }} paneId="invoice" zoneId="unpaired" rowState="idle"
-    canOperateData showWorkflowActions onRowAction={vi.fn()} onSelectRow={vi.fn()} onOpenDetail={vi.fn()} />);
-  expect(screen.getByText("本项差额（OA − 凭证）0.01")).toBeInTheDocument();
+  expect(screen.getAllByRole("link")).toHaveLength(2);
 });

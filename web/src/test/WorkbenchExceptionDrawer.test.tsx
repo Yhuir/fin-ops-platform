@@ -329,7 +329,7 @@ it("loads full details and shares custom columns, item alignment and voucher man
   expect(within(grid).queryByRole("button", { name: /筛选|拖动|排序/ })).not.toBeInTheDocument();
   expect(within(grid).getByText("完整明细项目")).toBeInTheDocument();
   expect(within(grid).getByText("凭证金额 80.00")).toBeInTheDocument();
-  expect(within(grid).getByText("本项差额（OA − 凭证）20.00")).toBeInTheDocument();
+  expect(within(grid).queryByText(/本项差额|与同项发票合并核对/)).not.toBeInTheDocument();
   await user.click(within(grid).getByRole("button", { name: "管理凭证" }));
   expect(onManage).toHaveBeenCalledWith(expect.objectContaining({ sourceOaId: "oa-voucher", sourceExpenseItemIds: ["voucher-item"] }), full);
   expect(onEnsure).toHaveBeenCalledOnce();

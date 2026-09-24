@@ -373,7 +373,7 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - `WorkbenchAnomalyIndicator` 只接收既有异常项及展示范围 `amountScope`，不再接收整组 DTO。整组金额读取 anomaly 的 `oaTotal / bankTotal / evidenceTotal`；精确定位到行/付款项的明细及 `expense_item_amount_mismatch` 读取每个 `expenseItemDifferences` 的 OA/票据凭证金额。多个独立核对单元分别展示，不能合并抵消、截断或按金额猜归属。
 - 金额 Popover 只有金额标签和值，无标题/分类 Chip、差额、拆分合计、项目/人员描述或解释句。`evidenceTotal` 包括正式发票和已确认补充凭证；缺失金额显示 `—`，不能补零或使用正式发票金额替代。资料异常继续使用原状态、处理按钮与权限。
 - 原审阅账户、时间、备注和确认关联备注移到已有异常抽屉审阅区。只读用户保留记录查看能力；接受/撤回仅由原权限允许，原接口、CAS、审计及成功后回读不变。
-- 删除整组文本摘要、明细描述索引及相关 props/import/CSS；不新增 HTTP、SQL、缓存、worker 或金额计算。凭证文件区既有本项差额和管理入口保持。
+- 删除整组文本摘要、明细描述索引及相关 props/import/CSS；不新增 HTTP、SQL、缓存、worker 或金额计算。凭证文件区只显示实际凭证金额，保留文件预览和管理入口；本项差额及混合核对说明已移除。
 - 保留 hover/focus/click/Escape 与焦点恢复修复，不增加全局事件。实施及生产验证见 [修复记录](../../dev/workbench-anomaly-icon-restoration.md)。
 
 ## 2026-09-24 拆分用途核对
@@ -404,3 +404,9 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 保存回调携带已持久化 BankSplitDetail；清理该父流水在两区的旧选择与受影响来源组，显式读取新详情及列表，不被“抽屉打开时暂缓后台刷新”机制阻挡。不使用旧版本选择；写后回读失败明确显示已保存及读取错误。保持抽屉打开，关闭后关联选择保留。其它页面不注入此操作。业务 API、金额、成本、往来和正式关系写合同不变。
 
 详情 GET 的版本字段为 `split_version`，列表 GET 为 `bank_split_version`；前端 API adapter 在详情入口明确映射到 `bankSplitVersion`，不猜测或回退到列表字段。拆分编辑器返回的 version 必须与该字段一致才允许选择。
+
+
+## 2026-09-24 凭证列表仅显示金额
+
+主关联台与异常抽屉共用 WorkbenchSupportingDocumentFiles，仅接收 documents、totalAmount、canManage、onManage，显示文件链接、凭证金额及有权限的管理动作。未知金额显示待填写，明确零元显示0.00；不显示本项差额或与同项发票合并核对说明。
+删除展示专用差额函数、oaAmount/hasInvoice参数、前端记录的supportingDocumentOaAmount/supportingDocumentHasInvoice字段与专属说明样式。原OA明细金额、正式发票展示、管理表单样式和后台计额/异常判断保留。无HTTP API、持久化、worker、缓存或数据库变更。

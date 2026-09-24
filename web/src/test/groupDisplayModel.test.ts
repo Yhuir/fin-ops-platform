@@ -826,8 +826,6 @@ describe("groupDisplayModel time filter", () => {
         sourceKind: "oa_supporting_document",
         supportingDocuments: documents,
         supportingDocumentAmount: "30.00",
-        supportingDocumentOaAmount: "38.00",
-        supportingDocumentHasInvoice: false,
         amount: "",
         displayOnly: true,
         tableValues: {},

@@ -60,7 +60,7 @@ test("supporting documents refresh the exact item, preview, and restore missing 
   const files = zone.locator(".workbench-supporting-files");
   await expect(files).toBeVisible();
   await expect(files.getByText("凭证金额 40.00")).toBeVisible();
-  await expect(files.getByText("本项差额（OA − 凭证）15.00")).toBeVisible();
+  await expect(files.getByText(/本项差额|与同项发票合并核对/)).toHaveCount(0);
   await expect(zone.getByRole("button", { name: "录入发票", exact: true })).toHaveCount(0);
   const supplement = zone.getByRole("button", { name: "录入发票 55 元付款项" });
   await expect(supplement).toHaveText("+");
@@ -132,7 +132,7 @@ test("exception details keep voucher files and amount management for the exact O
   const grid = exceptions.getByRole("grid", { name: "未配对三栏关联表" });
   await expect(grid.getByRole("link", { name: "历史凭证.pdf" })).toBeVisible();
   await expect(grid.getByText("凭证金额 待填写")).toBeVisible();
-  await expect(grid.getByText("本项差额（OA − 凭证）待核对")).toBeVisible();
+  await expect(grid.getByText(/本项差额|与同项发票合并核对/)).toHaveCount(0);
   await expect(grid.locator('[role="columnheader"]')).not.toHaveCount(0);
   await grid.getByRole("button", { name: "管理凭证" }).click();
   await expect(exceptions).toHaveCount(0);
@@ -176,12 +176,15 @@ test("a long multi-OA group uses a compact icon and amount-only popover without 
     });
   });
   group.bank_rows[0].amount = "1273.06";
+  group.bank_rows[0].debit_amount = "1273.06";
   group.amount_check = { status: "mismatch", direction: "expense", bank_amount: "1273.06", oa_amount: "1273.06",
     oa_total: "1273.06", bank_total: "1273.06", invoice_total: "1139.63", supporting_document_total: "140.00",
+    bank_original_total: "1273.06", bank_related_total: "1273.06",
     evidence_total: "1279.63", evidence_complete: true, amount_delta: "6.57", requires_note: true };
   group.workbench_anomaly.items = [{ ...group.workbench_anomaly.items[0], code: "oa_bank_equal_invoice_more",
     display_label: "OA 流水一致，票多", label: "OA 流水一致，票多", display_scope: "group", display_pane: "group",
     amount_delta: "6.57", oa_total: "1273.06", bank_total: "1273.06", invoice_total: "1139.63", evidence_total: "1279.63",
+    bank_original_total: "1273.06", bank_related_total: "1273.06",
     source_oa_ids: group.oa_rows.map((row: { id: string }) => row.id), source_expense_item_ids: [],
     expense_item_differences: [{ expense_item_ids: ["oa-explanation-1:item:1"], oa_total: "182.44", evidence_total: "189.01", amount_delta: "6.57" }] }];
   group.row_counts = { oa: 5, bank: 1, invoice: 14 };
@@ -197,7 +200,8 @@ test("a long multi-OA group uses a compact icon and amount-only popover without 
   page.on("request", request => { if (new URL(request.url()).pathname.startsWith("/api/workbench")) requests++; });
   const files = zone.locator(".workbench-supporting-files");
   await expect(files).toHaveCount(5);
-  await expect(files.getByText("本项差额（OA − 凭证）0.00")).toHaveCount(5);
+  await expect(files.getByText(/^凭证金额 /)).toHaveCount(5);
+  await expect(files.getByText(/本项差额|与同项发票合并核对/)).toHaveCount(0);
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await indicator.scrollIntoViewIfNeeded();

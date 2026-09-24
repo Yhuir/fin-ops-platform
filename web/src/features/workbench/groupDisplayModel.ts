@@ -531,7 +531,7 @@ function expandExpenseClaimSegment(segment: WorkbenchGroupDisplaySegment): Workb
         bank: [],
         invoice: [
           ...Array.from(componentInvoiceRows.values()),
-          ...componentItems.flatMap((item) => supportingDocumentRows(parent, item, componentInvoiceRows.size > 0)),
+          ...componentItems.flatMap((item) => supportingDocumentRows(parent, item)),
           ...(componentInvoiceRows.size > 0 ? [] : missingInvoicePlaceholder(parent, componentItems[0])),
         ],
       },
@@ -603,7 +603,6 @@ function missingInvoicePlaceholder(
 function supportingDocumentRows(
   parent: WorkbenchRecord,
   item: NonNullable<WorkbenchRecord["expenseItems"]>[number],
-  hasInvoice: boolean,
 ): WorkbenchRecord[] {
   if (!item.supportingDocuments?.length) return [];
   return [{
@@ -615,8 +614,6 @@ function supportingDocumentRows(
     sourceExpenseItemIds: [item.id],
     supportingDocuments: item.supportingDocuments,
     supportingDocumentAmount: item.supportingDocumentAmount ?? null,
-    supportingDocumentOaAmount: item.amount,
-    supportingDocumentHasInvoice: hasInvoice,
     label: "补充凭证",
     status: item.supportingDocumentAmount == null ? "待填写凭证金额" : "凭证已保存",
     statusCode: "supporting_document",

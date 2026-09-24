@@ -114,8 +114,6 @@ function WorkbenchRecordCard({
         <WorkbenchSupportingDocumentFiles
           documents={row.supportingDocuments}
           totalAmount={row.supportingDocumentAmount}
-          oaAmount={row.supportingDocumentOaAmount}
-          hasInvoice={row.supportingDocumentHasInvoice}
           canManage={!invoiceResolutionDisabled}
           onManage={() => onRowAction(row, "manage-supporting-documents")}
         />
