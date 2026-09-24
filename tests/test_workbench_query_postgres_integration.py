@@ -1937,6 +1937,53 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             )
         )
 
+    def test_search_keeps_complete_anomaly_evidence_and_reviewed_zone(self) -> None:
+        # Only the ETC invoice matches 44; OA and bank are both 100. Search
+        # must restrict whole groups without dropping nonmatching evidence.
+        def search_group(zone: str) -> dict[str, Any]:
+            for scope in ("all", "2026-07"):
+                for detail in ("summary", "full"):
+                    page = self.repository.get_workbench_groups_page(
+                        scope_key=scope, zone=zone, search="44",
+                        detail_level=detail, page_size=1,
+                    )
+                    self.assertEqual(page["total"], 1)
+                    self.assertFalse(page["has_more"])
+                    self.assertEqual(page["row_counts"]["bank"], 1)
+                    group = page["groups"][0]
+                    self.assertEqual(group["detail_key"], "CASE-DIRECT-1")
+                    self.assertEqual(group["bank_rows"][0]["id"], "bank-direct-1")
+                    self.assertEqual(group["oa_rows"][0]["id"], "oa-direct-1")
+                    self.assertEqual(
+                        {item["code"] for item in group["workbench_anomaly"]["items"]},
+                        {"oa_invoice_attachment_absent", "oa_bank_equal_invoice_less"},
+                    )
+            return group
+
+        group = search_group("unpaired")
+        self.assertEqual(self.repository.get_workbench_groups_page(
+            scope_key="all", zone="paired", search="44",
+        )["total"], 0)
+        anomaly = group["workbench_anomaly"]
+        PostgresWorkbenchRepository(self.raw_connection).set_workbench_anomaly_review_decision(
+            fingerprint=anomaly["fingerprint"], group_id=group["group_id"],
+            scope_key="2026-07", actor_id="test-suite", actor_account="test-suite",
+            actor_name="测试账户", decision="accept_paired", note="核对完整关系",
+            detected_classification_codes=[item["code"] for item in anomaly["items"]],
+            evidence_item_fingerprints=anomaly["evidence_item_fingerprints"],
+        )
+        reviewed = search_group("paired")
+        self.assertEqual(reviewed["workbench_anomaly"]["fingerprint"], anomaly["fingerprint"])
+        self.assertEqual(self.repository.get_workbench_groups_page(
+            scope_key="all", zone="unpaired", search="44",
+        )["total"], 0)
+        for zone in ("paired", "unpaired"):
+            empty = self.repository.get_workbench_groups_page(
+                scope_key="all", zone=zone, search="no-matching-evidence",
+            )
+            self.assertEqual(empty["total"], 0)
+            self.assertEqual(empty["groups"], [])
+
     def test_narrow_anomaly_rehydration_keeps_document_owner_semantics(self) -> None:
         self.raw_connection.execute(
             """

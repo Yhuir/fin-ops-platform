@@ -972,8 +972,7 @@ def _manual_allocation_task(
         reconciliation=reconciliation,
     )
     task["source_fingerprint"] = source_fingerprint
-    default_lock = (reconciliation["difference"] == "0.00" and not task["allows_partial"]) or any(
-        e.get("turnover_role") == "external_turnover" for e in bank_events if e["event_kind"] == "outflow")
+    default_lock = reconciliation["difference"] == "0.00" and not task["allows_partial"]
     for unit in units:
         unit["lock_oa_amount"] = default_lock
         unit["outside_cost_amount"] = "0.00"

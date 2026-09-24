@@ -19,6 +19,7 @@ from fin_ops_platform.services.postgres_repositories.workbench_page_query import
     PostgresWorkbenchPageQueryRepository,
     _anomaly_state_ctes,
     _canonical_invoice_count_for_keyed_groups_sql,
+    _group_page_anomaly_state_ctes,
     _scoped_canonical_groups_cte,
 )
 from fin_ops_platform.services.workbench_anomaly_contract import AMOUNT_EXCEPTION_CODES
@@ -2199,3 +2200,28 @@ def test_bank_tag_filter_resolves_only_canonical_matching_rows(
     assert "bankTag:" not in str(connection.params)
     assert "from filter_option_anomaly_groups groups" in connection.sql
     assert connection.params[5] == "bank"
+
+
+def test_search_anomaly_scope_keeps_groups_whole_and_exception_universe_complete() -> None:
+    searched = _group_page_anomaly_state_ctes(exception_bucket=None, has_search=True)
+    candidates = searched.split("latest_anomaly_decisions", 1)[0]
+    assert "select groups.*" in candidates
+    assert "join groups_source_search_hits hit" in candidates
+    assert "member.internal_key = groups.internal_key" in candidates
+    assert "limit" not in candidates.lower()
+    assert _group_page_anomaly_state_ctes(
+        exception_bucket="unpaired", has_search=True,
+    ) == _ANOMALY_STATE_CTES
+    assert "groups_source_search_hits" not in _group_page_anomaly_state_ctes(
+        exception_bucket=None,
+    )
+
+
+def test_split_tag_definitions_are_expanded_once_before_member_join() -> None:
+    sql = _anomaly_state_ctes(group_source="canonical_groups")
+    assert "split_tag_definitions as materialized" in sql
+    scope_input = sql.split("scope_bank_input as materialized", 1)[1].split(
+        "scope_bank_targets as materialized", 1,
+    )[0]
+    assert "left join split_tag_definitions definition" in scope_input
+    assert "jsonb_array_elements" not in scope_input

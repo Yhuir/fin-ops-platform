@@ -547,7 +547,7 @@ class CostSourcePostgresTests(unittest.TestCase):
         self.assertEqual(self.connection.fetch_one('select count(*) as n from app.cost_statistics_manual_allocations')['n'], 0)
         self.assertEqual(self.connection.fetch_one("select count(*) as n from audit.events where action='cost_statistics.manual_allocation.save'")['n'], 0)
 
-    def test_partial_automatic_cost_preserves_targets_then_manual_save_closes_remainder(self):
+    def partial_automatic_fixture(self, *, with_history=True):
         from tests.test_bank_same_time_ordering_postgres import BankSameTimeOrderingPostgresTests
         BankSameTimeOrderingPostgresTests.add_transaction(self, 'bank-3', signed_amount='-145.00', balance='1000.00', trade_time='2026-09-01 12:00:00+08', txn_date='2026-09-01', account_no='622200009486')
         self.connection.execute("""insert into app.oa_applications
@@ -561,7 +561,10 @@ class CostSourcePostgresTests(unittest.TestCase):
         history = {'operation_type': 'confirm_link',
                    'after_relations': [{'case_id': 'cost-source-case', 'row_ids': ids, 'row_types': kinds}],
                    'before_relations': [{'case_id': 'old-c', 'row_ids': ['oa-c', 'bank-3'], 'row_types': ['oa', 'bank']}]}
-        self.connection.execute("insert into app.workbench_pair_relation_history(case_id,event_type,raw_payload) values ('cost-source-case','confirm_link',%s::jsonb)", (json.dumps(history),))
+        if with_history:
+            self.connection.execute("insert into app.workbench_pair_relation_history(case_id,event_type,raw_payload) values ('cost-source-case','confirm_link',%s::jsonb)", (json.dumps(history),))
+    def test_partial_automatic_cost_preserves_targets_then_manual_save_closes_remainder(self):
+        self.partial_automatic_fixture()
         task = self.service.get_task('cost-source-case', can_save=True)
         self.assertTrue(all(u['lock_oa_amount'] for u in task['units']))
         self.assertEqual(task['unallocated_amount'], '1000.00')
@@ -576,6 +579,119 @@ class CostSourcePostgresTests(unittest.TestCase):
         self.assertEqual(saved['unallocated_amount'], '0.00')
         self.assertEqual(len(saved['source_allocations']['cost_lines']), 4)
         self.assertEqual(self.query.get_explorer_page(scope='all',view='project',filters={},cursor=None,page_size=20)['summary']['total_amount'], '1145.00')
+
+    def test_scoped_manual_save_preserves_formally_proven_partial_automatic_source(self):
+        self.partial_automatic_fixture()
+        self.connection.execute("""insert into app.bank_transaction_categories
+            (bank_transaction_id,legacy_transaction_id,category,source,status,raw_payload)
+            select id,legacy_mongo_id,'internal_transfer','manual','active','{"manual_assignment":true}'::jsonb
+            from app.bank_transactions where legacy_mongo_id='bank-3'""")
+        task = self.service.get_task('cost-source-case', can_save=True)
+        self.assertEqual(task['status'], 'pending')
+        self.assertEqual(task['unallocated_amount'], '1000.00')
+        self.assertEqual(next(u for u in task['units'] if u['unit_id'] == 'oa:oa-c')['outside_cost_amount'], '145.00')
+        payload = self.payload()
+        payload['allocations'] = [{'unit_id': 'oa:oa-a', 'amount': '600.00'},
+                                  {'unit_id': 'oa:oa-b', 'amount': '400.00'},
+                                  {'unit_id': 'oa:oa-c', 'amount': '0.00'}]
+        with patch.object(PostgresOperationsAuditRepository, 'append_operation_event', side_effect=RuntimeError('audit unavailable')):
+            with self.assertRaisesRegex(RuntimeError, 'audit unavailable'):
+                self.save(payload)
+        self.assertEqual(self.connection.fetch_one('select count(*) as n from app.cost_statistics_manual_allocations')['n'], 0)
+        saved = self.save(payload)
+        self.assertEqual(saved['version'], 1)
+        with self.assertRaises(CostStatisticsManualAllocationConflictError):
+            self.save(payload)
+        stored = PostgresCostStatisticsManualAllocationRepository(self.connection).list_by_case_ids(['cost-source-case'])['cost-source-case']
+        self.assertIn({'unit_id': 'oa:oa-c', 'bank_transaction_id': 'bank-3', 'amount': '145.00'}, stored['source_allocations']['cost_lines'])
+        self.scope_service().update_project_cost_scope({'expected_version': 1, 'selected_tag_codes': ['uncategorized', 'internal_transfer']}, actor_id='test')
+        restored = self.service.get_task('cost-source-case', can_save=True)
+        self.assertEqual(restored['unallocated_amount'], '0.00')
+        self.assertEqual(len(restored['source_allocations']['cost_lines']), 4)
+        for view in ('project', 'cost_tag', 'bank_account'):
+            self.assertEqual(self.query.get_explorer_page(scope='all', view=view, filters={}, cursor=None, page_size=20)['summary']['total_amount'], '1145.00')
+
+    def test_scoped_save_does_not_invent_partial_source_without_formal_evidence(self):
+        self.partial_automatic_fixture(with_history=False)
+        self.connection.execute("""insert into app.bank_transaction_categories
+            (bank_transaction_id,legacy_transaction_id,category,source,status,raw_payload)
+            select id,legacy_mongo_id,'internal_transfer','manual','active','{"manual_assignment":true}'::jsonb
+            from app.bank_transactions where legacy_mongo_id='bank-3'""")
+        task = self.service.get_task('cost-source-case', can_save=True)
+        self.assertIsNone(task['source_allocations'])
+        payload = self.payload()
+        payload['oa_amount_locks'] = [{**row, 'locked': False} for row in payload['oa_amount_locks']]
+        payload['allocations'] = [{'unit_id': 'oa:oa-a', 'amount': '600.00'},
+                                  {'unit_id': 'oa:oa-b', 'amount': '400.00'},
+                                  {'unit_id': 'oa:oa-c', 'amount': '0.00'}]
+        self.save(payload)
+        stored = PostgresCostStatisticsManualAllocationRepository(self.connection).list_by_case_ids(['cost-source-case'])['cost-source-case']
+        self.assertEqual(stored['source_allocations'], payload['source_allocations'])
+        self.scope_service().update_project_cost_scope({'expected_version': 1, 'selected_tag_codes': ['uncategorized', 'internal_transfer']}, actor_id='test')
+        restored = self.service.get_task('cost-source-case', can_save=True)
+        self.assertEqual(restored['status'], 'pending')
+        self.assertEqual(restored['pending_reasons'], ['source_required'])
+        self.assertEqual(self.query.get_explorer_page(scope='all', view='project', filters={}, cursor=None, page_size=20)['summary']['total_amount'], '1000.00')
+
+    def test_partial_automatic_shared_oa_keeps_inside_and_outside_sources(self):
+        from tests.test_bank_same_time_ordering_postgres import BankSameTimeOrderingPostgresTests
+        self.partial_automatic_fixture(with_history=False)
+        BankSameTimeOrderingPostgresTests.add_transaction(self, 'bank-4', signed_amount='-55.00', balance='1000.00', trade_time='2026-09-01 12:00:00+08', txn_date='2026-09-01', account_no='622200009486')
+        self.connection.execute("""update app.oa_applications set amount=200,
+            normalized_payload=jsonb_set(normalized_payload,'{amount}','"200.00"'::jsonb) where row_id='oa-c'""")
+        ids = ['oa-a', 'oa-b', 'oa-c', 'bank-1', 'bank-2', 'bank-3', 'bank-4']
+        kinds = ['oa', 'oa', 'oa', 'bank', 'bank', 'bank', 'bank']
+        self.connection.execute('update app.workbench_pair_relations set row_ids=%s,row_types=%s', (ids, kinds))
+        history = {'operation_type': 'confirm_link',
+                   'after_relations': [{'case_id': 'cost-source-case', 'row_ids': ids, 'row_types': kinds}],
+                   'before_relations': [{'case_id': 'old-c', 'row_ids': ['oa-c', 'bank-3', 'bank-4'], 'row_types': ['oa', 'bank', 'bank']}]}
+        self.connection.execute("insert into app.workbench_pair_relation_history(case_id,event_type,raw_payload) values ('cost-source-case','confirm_link',%s::jsonb)", (json.dumps(history),))
+        self.connection.execute("""insert into app.bank_transaction_categories
+            (bank_transaction_id,legacy_transaction_id,category,source,status,raw_payload)
+            select id,legacy_mongo_id,'internal_transfer','manual','active','{"manual_assignment":true}'::jsonb
+            from app.bank_transactions where legacy_mongo_id='bank-3'""")
+        task = self.service.get_task('cost-source-case', can_save=True)
+        self.assertEqual(task['source_allocations']['cost_lines'], [{'unit_id': 'oa:oa-c', 'bank_transaction_id': 'bank-4', 'amount': '55.00'}])
+        payload = self.payload()
+        payload['allocations'] = [{'unit_id': 'oa:oa-a', 'amount': '600.00'},
+                                  {'unit_id': 'oa:oa-b', 'amount': '400.00'},
+                                  {'unit_id': 'oa:oa-c', 'amount': '55.00'}]
+        payload['source_allocations']['cost_lines'].extend(task['source_allocations']['cost_lines'])
+        self.save(payload)
+        self.scope_service().update_project_cost_scope({'expected_version': 1, 'selected_tag_codes': ['uncategorized', 'internal_transfer']}, actor_id='test')
+        restored = self.service.get_task('cost-source-case', can_save=True)
+        self.assertEqual(len(restored['source_allocations']['cost_lines']), 5)
+        self.assertIn({'unit_id': 'oa:oa-c', 'amount': '200.00'}, restored['allocations'])
+        self.assertEqual(self.query.get_explorer_page(scope='all', view='project', filters={}, cursor=None, page_size=20)['summary']['total_amount'], '1200.00')
+
+    def test_stale_manual_decision_is_not_replaced_by_partial_automatic_baseline(self):
+        self.partial_automatic_fixture()
+        task = self.service.get_task('cost-source-case', can_save=True)
+        payload = self.payload()
+        payload['allocations'] = [{'unit_id': u['unit_id'], 'amount': u['oa_original_amount']} for u in task['units']]
+        payload['source_allocations']['cost_lines'].extend(task['source_allocations']['cost_lines'])
+        self.save(payload)
+        with self.connection.transaction() as tx:
+            tx.execute("select set_config('fin_ops.correction_reason', 'isolated stale source fixture', true)")
+            tx.execute("update app.bank_transactions set txn_date='2026-09-02',trade_time='2026-09-02 12:00:00+08' where legacy_mongo_id='bank-3'")
+        self.connection.execute("""insert into app.bank_transaction_categories
+            (bank_transaction_id,legacy_transaction_id,category,source,status,raw_payload)
+            select id,legacy_mongo_id,'internal_transfer','manual','active','{"manual_assignment":true}'::jsonb
+            from app.bank_transactions where legacy_mongo_id='bank-3'""")
+        self.assertIn('allocation_stale', self.service.get_task('cost-source-case', can_save=True)['pending_reasons'])
+        payload = self.payload()
+        payload['oa_amount_locks'] = [{**row, 'locked': False} for row in payload['oa_amount_locks']]
+        payload['allocations'] = [{'unit_id': 'oa:oa-a', 'amount': '600.00'},
+                                  {'unit_id': 'oa:oa-b', 'amount': '400.00'},
+                                  {'unit_id': 'oa:oa-c', 'amount': '0.00'}]
+        self.save(payload)
+        stored = PostgresCostStatisticsManualAllocationRepository(self.connection).list_by_case_ids(['cost-source-case'])['cost-source-case']
+        self.assertEqual(stored['version'], 2)
+        self.assertEqual(stored['source_allocations'], payload['source_allocations'])
+        self.scope_service().update_project_cost_scope({'expected_version': 1, 'selected_tag_codes': ['uncategorized', 'internal_transfer']}, actor_id='test')
+        restored = self.service.get_task('cost-source-case', can_save=True)
+        self.assertEqual(restored['status'], 'pending')
+        self.assertEqual(restored['pending_reasons'], ['source_required'])
 
     def scope_service(self):
         from pathlib import Path
@@ -744,7 +860,9 @@ class CostSourcePostgresTests(unittest.TestCase):
             **fields, decision_mode='manual', expected_version=0, actor_id='historical')
 
     def migrate_automatic(self, apply=False):
-        from fin_ops_platform.services.cost_statistics_automatic_migration_service import CostStatisticsAutomaticMigrationService
+        from fin_ops_platform.services.cost_statistics_automatic_migration_service import (
+            CostStatisticsAutomaticMigrationService,
+        )
         with self.connection.transaction() as tx:
             tx.execute('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE' if apply
                        else 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
@@ -772,7 +890,9 @@ class CostSourcePostgresTests(unittest.TestCase):
         self.assertEqual(events[0]['payload']['after']['version'], 2)
         for view in ('project', 'cost_tag', 'bank_account'):
             self.assertEqual(self.query.get_explorer_page(scope='all',view=view,filters={},cursor=None,page_size=20)['summary']['total_amount'], '1497.22')
-        from fin_ops_platform.services.cost_statistics_automatic_migration_service import CostStatisticsAutomaticMigrationService
+        from fin_ops_platform.services.cost_statistics_automatic_migration_service import (
+            CostStatisticsAutomaticMigrationService,
+        )
         with self.connection.transaction() as tx:
             service = CostStatisticsAutomaticMigrationService(
                 canonical_repository=PostgresCostStatisticsCanonicalRepository(tx, transaction_bound=True),

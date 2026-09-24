@@ -340,3 +340,10 @@ Cost 的关系展示复用统一 OA—银行对应规则；canonical repository 
 `cost_statistics_decision_equivalence.py` 只在写入/维护边界比较完整决定；列表不逐项双算。`CostStatisticsAutomaticMigrationService` 接收 canonical/allocation/audit repository，调用者拥有 SERIALIZABLE 事务。CLI `python3 -m fin_ops_platform.tools.migrate_automatic_cost_allocations` 默认只读预览，`--apply --operator <actor>` 对全量人工候选逐项重新核对，只有完整等价才退役，保存 before/after 审计。非 active、缺事实和非等价记录保留。失败整体回滚，重复执行零重复审计。
 
 恢复仅通过 `--restore-case <case> --expected-version <current-version> --apply --operator <actor>`；要求 automatic 模式、版本与事实仍一致，以递增版本恢复保留载荷并审计，不覆盖后续人工编辑。拆分 owner 撤销成本同样更新模式/版本，不删除记录造成 CAS 版本复用。没有新 read model、缓存或 worker，无数据库备份。
+
+
+## 2026-09-24 部分来源保存与读取性能闭环
+
+- 保存合并基线不再要求整组自动任务为 allocated。无人工决定时，仅保留当前 Policy 已验证的非空正式成本来源；未确定目标不得补造。编辑范围外的已确定来源与范围内提交在既有事务、连续版本及审计边界内合并；stale manual 不自动替换。
+- 成本准入已经排除外部往来本金；删除下游来源自动判断、范围状态及默认锁定中的旧外部往来确认分支。2026-09-21 的本金“不计成本”说明属于已被拆分用途合同替代的历史行为。
+- OA repository 在同一读取 SQL 内裁剪到 `_cost_oa_payload` 使用的字段及费用子项；附件等非成本内容不传到 Python。既有空明细、字段优先级、来源身份和已支持的 payload 包装结构保持不变。没有新增查询、表、跨请求缓存或后台任务，外部 API DTO 不变。

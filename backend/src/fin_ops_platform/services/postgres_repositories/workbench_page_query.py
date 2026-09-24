@@ -1704,8 +1704,7 @@ def _anomaly_state_ctes(*, group_source: str) -> str:
                    item.id is not null as is_split, definition.value->>'turnover_role' as turnover_role
             from relation_anomaly_raw_members member
             left join app.bank_transaction_split_items item on item.id::text=member.row_id
-            left join app.app_settings settings on settings.settings_key='app_settings'
-            left join lateral jsonb_array_elements(settings.settings_payload#>'{bank_transaction_tags,definitions}') definition(value)
+            left join split_tag_definitions definition
                 on definition.value->>'code'=item.category_code
             where member.row_type='bank'
         """,
@@ -1720,6 +1719,14 @@ def _anomaly_state_ctes(*, group_source: str) -> str:
         """,
     )
     return f"""
+split_tag_definitions as materialized (
+    select definition.value
+    from app.app_settings settings
+    cross join lateral jsonb_array_elements(
+        settings.settings_payload#>'{{bank_transaction_tags,definitions}}'
+    ) definition(value)
+    where settings.settings_key = 'app_settings'
+),
 latest_anomaly_decisions as materialized (
     select group_id, fingerprint, resolution as decision, updated_at
     from (
@@ -2474,19 +2481,32 @@ anomaly_states as materialized (
 _ANOMALY_STATE_CTES = _anomaly_state_ctes(group_source="canonical_groups")
 
 
-def _group_page_anomaly_state_ctes(*, exception_bucket: str | None) -> str:
+def _group_page_anomaly_state_ctes(
+    *, exception_bucket: str | None, has_search: bool = False,
+) -> str:
     if exception_bucket is not None:
         return _ANOMALY_STATE_CTES
     # An anomaly can only move a base-paired relation into the unpaired zone.
     # Base-unpaired groups remain unpaired for every anomaly decision, so
     # ordinary page reads do not need to fingerprint them. Exception pages
     # retain the complete two-zone anomaly universe above.
+    # Search identifies whole groups before anomaly evaluation. Preserve every
+    # member of each hit; nonmatching groups cannot affect filtered totals/zone.
+    search_filter = """
+      and exists (
+          select 1 from canonical_group_members member
+          join groups_source_search_hits hit
+            on hit.row_type = member.row_type and hit.row_id = member.row_id
+          where member.internal_key = groups.internal_key
+      )
+    """ if has_search else ""
     return f"""
 group_page_anomaly_groups as materialized (
     select groups.*
     from canonical_groups groups
     where groups.group_kind = 'relation'
       and groups.zone = 'paired'
+      {search_filter}
 ),
 {_anomaly_state_ctes(group_source="group_page_anomaly_groups")}
 """
@@ -3511,7 +3531,7 @@ class PostgresWorkbenchPageQueryRepository:
             f"""
             with recursive {_scoped_canonical_groups_cte(normalized_scope)},
             {search_ctes}
-            {_group_page_anomaly_state_ctes(exception_bucket=normalized_exception_bucket)},
+            {_group_page_anomaly_state_ctes(exception_bucket=normalized_exception_bucket, has_search=bool(normalized_search))},
             {_EFFECTIVE_GROUPS_CTES},
             {_CANONICAL_INVOICE_GROUP_MEMBER_CTES},
             {exception_query_cte_sql}

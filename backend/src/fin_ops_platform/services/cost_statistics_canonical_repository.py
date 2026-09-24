@@ -806,9 +806,53 @@ def _postgres_oa_rows(
         return []
     filter_sql = "and row_id = any(%s::text[])" if oa_ids is not None else ""
     filter_params: tuple[Any, ...] = (oa_ids,) if oa_ids is not None else ()
+    # Transfer only the fields consumed by _cost_oa_payload; attachment bodies stay in PostgreSQL.
     rows = connection.fetch_all(
         f"""
-        select row_id, form_type, workflow_status, approved_at, normalized_payload
+        select row_id, form_type, workflow_status, approved_at,
+            case when jsonb_typeof(normalized_payload) is distinct from 'object'
+                or (normalized_payload ? 'normalized_payload'
+                    and jsonb_typeof(normalized_payload->'normalized_payload') is distinct from 'object')
+            then normalized_payload
+            else (
+                select coalesce(jsonb_object_agg(field.key, case
+                    when field.key = 'detail_fields' and jsonb_typeof(field.value) = 'object'
+                    then (
+                        select jsonb_object_agg(detail.key, detail.value)
+                        from jsonb_each(field.value) detail
+                        where detail.key = any(array[
+                            '申请时间', '申请日期', '项目名称', '项目编号',
+                            '费用类型', '费用内容', '申请人', '收款账号'
+                        ])
+                    )
+                    when field.key = 'expense_items' and jsonb_typeof(field.value) = 'array'
+                    then (
+                        select jsonb_agg((
+                            select coalesce(jsonb_object_agg(item_field.key, item_field.value), '{{}}'::jsonb)
+                            from jsonb_each(item) item_field
+                            where item_field.key = any(array[
+                                'expense_item_id', 'row_id', 'item_id', 'project_id',
+                                'project_name', 'expense_type', 'expense_content', 'reason',
+                                'settlement_amount', 'amount', 'total_with_tax'
+                            ])
+                        ))
+                        from jsonb_array_elements(field.value) item
+                        where jsonb_typeof(item) = 'object'
+                    )
+                    else field.value
+                end), '{{}}'::jsonb)
+                from jsonb_each(case
+                    when normalized_payload ? 'normalized_payload'
+                    then normalized_payload->'normalized_payload'
+                    else normalized_payload
+                end) field
+                where field.key = any(array[
+                    'apply_type', 'workflow_status', 'completed_at', 'application_date',
+                    'project_id', 'project_name', 'expense_type', 'expense_content',
+                    'applicant', 'counterparty_name', 'amount', 'reconciliation_amount',
+                    'reason', 'currency', 'detail_fields', 'expense_items'
+                ])
+            ) end as normalized_payload
         from app.oa_applications
         where form_type = any(%s::text[])
           {filter_sql}

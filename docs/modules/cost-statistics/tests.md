@@ -261,3 +261,10 @@ FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:5189 npx playw
 - Policy/source/API：自动已完成退出两人工列表；未知/人工/过期语义、唯一来源及歧义、权限和金额闭合沿用并更新现有测试。
 - UI：`CostAllocationStatus`、来源草稿、保存核实、待复核/待审批/待补资料短状态，自动模式不再用version=0推断。
 - 七类1/2/3/5/6/7适用；4服务端read model/cache/worker不适用，canonical写后读和客户端刷新通过已有及新增测试验证。
+
+
+## 2026-09-24 部分已确定来源与读取投影
+
+- `test_cost_statistics_source_postgres.py` 新增隐藏正式145来源后保存剩余1000、恢复范围三视角1145；同OA范围内55/外145；缺正式证据不能猜配；stale manual不得用自动基线替代。覆盖旧版本、审计失败事务回滚及原始银行/OA/关系不变。
+- `test_cost_statistics_oa_projection_postgres.py` 对比窄SQL投影与原成本转换结果，覆盖主字段、费用子项、空对象/数组、无效明细、已支持的包装结构和大附件移除；隔离PG验证选择身份及空选择。
+- 本轮无前端契约或交互修改，复用现有成本/拆分组件与浏览器回归；无read model/cache/worker，验证canonical读取和保存后重读。部署与实测结果记录到剩余闭环计划。

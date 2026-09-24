@@ -124,8 +124,6 @@ def validate_source_allocations(
 
 def automatic_source_allocations(task: dict[str, Any]) -> dict[str, Any] | None:
     """Only unique solutions: one outflow, or one positive unit without deductions."""
-    if any(e.get("turnover_role") == "external_turnover" for e in task["bank_events"] if e["event_kind"] == "outflow"):
-        return None
     allocations = task["allocations"]
     if task.get("allows_partial"):
         if any(e["event_kind"] != "outflow" for e in task["bank_events"]):

@@ -119,8 +119,6 @@ def project_source_task(task: dict[str, Any], decision: dict[str, Any] | None, *
         remaining = gross - refund_total - allocated - non_cost
         if remaining > ZERO:
             reasons.append('source_required' if task['allocations'] or scoped else 'amount_required')
-        if any(e.get('turnover_role') == 'external_turnover' for e in events if e['event_kind'] == 'outflow'):
-            reasons.append('external_turnover_requires_confirmation')
         if task.get('waiting_oa_ids'):
             reasons.append('oa_in_progress')
         result.update(status='pending' if reasons else 'allocated', pending_reasons=list(dict.fromkeys(reasons)),

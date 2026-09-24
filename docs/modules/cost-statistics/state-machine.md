@@ -64,7 +64,7 @@ manual-allocation-loading / manual-allocation-ready / manual-allocation-error
 - `no-oa-drawer-ready`：只显示当前实际无 active OA 关系的支出标签；名称和标签默认都为空。选择标签后必须填写虚拟项目名，未选择标签时名称可为空。
 - `saving / save-error`：使用 settings version CAS；冲突或失败不得伪报成功，也不得清空用户输入。保存成功后下一次 canonical GET 对全部历史期间逐笔应用规则。
 - `manual-allocation-loading`：只有用户在三个项目成本 view 中打开“待分配” Drawer 后才读取全局关系任务的有界摘要页，展开后定向读取详情；两个流水 view 不显示该入口，也不读取人工分配。
-- `pending / allocated`：pending 视图包含 pending 与 stale，allocated 包含当前已解决的来源分配；两者都使用服务端 search 和稳定 cursor，计数来自同一次全局任务快照，不由浏览过的成本项累积。
+- `pending / allocated`：pending 视图包含 pending 与 stale，allocated 只包含当前已解决的人工决定；自动已完成不进入这两个列表；两者都使用服务端 search 和稳定 cursor，计数来自同一次全局任务快照，不由浏览过的成本项累积。
 - `editing`：OA 单元下可以新增/删除来源行。选支出后展示只读账户、主/子标签和付款日期。固定目标不可改，人工目标按来源行精确汇总，零行默认未分配；允许时显式设零，新增取消零标记。当前有效 source_allocations 即使仍 pending 也回填；stale 决定不回填。
 - `saving`：一次事务复核版本、事实、OA 目标、逐银行/退款/单元闭合及完整/部分金额规则；只写分配与审计。按钮只在当前任务真正保存时禁用，错误保留输入。
 - `allocated`：已确定来源且所需银行信息完整；`pending` 原因为 amount_required/source_required/allocation_stale/bank_tag_missing/bank_account_missing/source_date_missing，可同时存在。保存 200 不等于 allocated，只有状态改变才移动任务和调整计数。

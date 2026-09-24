@@ -6,10 +6,10 @@ from typing import Any
 
 from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.cost_statistics_allocation_scope import merge_source_decision
-from fin_ops_platform.services.cost_statistics_decision_equivalence import automatic_equivalence_reason, automatic_task
 from fin_ops_platform.services.cost_statistics_canonical_repository import (
     PostgresCostStatisticsCanonicalRepository,
 )
+from fin_ops_platform.services.cost_statistics_decision_equivalence import automatic_equivalence_reason, automatic_task
 from fin_ops_platform.services.cost_statistics_manual_items import allocation_targets, validate_manual_items
 from fin_ops_platform.services.cost_statistics_oa_cost_tags import validate_oa_cost_tags
 from fin_ops_platform.services.cost_statistics_policy import CostStatisticsPolicy
@@ -340,10 +340,13 @@ class CostStatisticsManualAllocationService:
                 and Decimal(previous["gross_outflow_total"]) != Decimal(task["gross_outflow_total"])):
             raise CostStatisticsManualAllocationValidationError("历史分配缺少逐笔来源，请先在完整范围确认来源。")
         automatic = automatic_task(snapshot, relation_case_id)
-        # Automatic sources outside the edited scope remain part of the full decision.
-        # A stale manual record is never replaced with an inferred baseline.
+        # Policy validates each resolved source independently of unresolved siblings.
+        # Retain those explicit sources outside the edit scope, not unproven targets.
+        # A stale manual record is never replaced with an automatic baseline.
         baseline = previous
-        if previous is None and automatic is not None and automatic["status"] == "allocated":
+        if (previous is None and automatic is not None
+                and automatic["source_allocations"] is not None
+                and automatic["source_allocations"]["cost_lines"]):
             baseline = {**automatic, "oa_amount_locks": {
                 unit["unit_id"]: unit["lock_oa_amount"] for unit in automatic["units"]}}
         # Preserve all canonical unit identities, including units hidden by current scope.
