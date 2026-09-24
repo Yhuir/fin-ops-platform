@@ -2684,7 +2684,6 @@ export default function ReconciliationWorkbenchPage() {
       {relationPreviewDialog ? (
         <RelationPreviewDialog
           preview={relationPreviewDialog.preview}
-          columnLayouts={workbenchSettings?.workbenchColumnLayouts}
           onClose={() => setRelationPreviewDialog(null)}
           onSubmit={handleSubmitRelationPreview}
         />
@@ -2867,17 +2866,6 @@ type RelationPreviewSubmitState =
   | { phase: WorkbenchActionProgressPhase; message: string; committed: boolean }
   | { phase: "error"; message: string; committed: boolean; retryable: boolean };
 
-function countRelationPreviewRows(groups: WorkbenchRelationGroup[]) {
-  return groups.reduce(
-    (counts, group) => ({
-      oa: counts.oa + group.rows.oa.length,
-      bank: counts.bank + group.rows.bank.length,
-      invoice: counts.invoice + group.rows.invoice.length,
-    }),
-    { oa: 0, bank: 0, invoice: 0 },
-  );
-}
-
 function relationPreviewOperationCopy(preview: WorkbenchRelationPreview) {
   if (preview.operation === "withdraw_link") {
     return {
@@ -2885,7 +2873,6 @@ function relationPreviewOperationCopy(preview: WorkbenchRelationPreview) {
       submitLabel: "确认撤回",
       retryLabel: "重试撤回",
       submittingMessage: "正在撤回关联...",
-      statusLabel: "待撤回",
     };
   }
   return {
@@ -2893,7 +2880,6 @@ function relationPreviewOperationCopy(preview: WorkbenchRelationPreview) {
     submitLabel: "确认关联",
     retryLabel: "重试确认",
     submittingMessage: "正在确认关联...",
-    statusLabel: "待确认",
   };
 }
 
@@ -2915,12 +2901,10 @@ function relationPreviewPhaseLabel(phase: RelationPreviewSubmitState["phase"]) {
 
 function RelationPreviewDialog({
   preview,
-  columnLayouts,
   onClose,
   onSubmit,
 }: {
   preview: WorkbenchRelationPreview;
-  columnLayouts?: WorkbenchSettings["workbenchColumnLayouts"];
   onClose: () => void;
   onSubmit: (note: string, onProgress: WorkbenchActionProgressHandler) => Promise<void>;
 }) {
@@ -2937,7 +2921,7 @@ function RelationPreviewDialog({
   const isNonRetryableError = submitState.phase === "error" && !submitState.retryable;
   const canSubmit = preview.canSubmit && (!noteRequired || note.trim().length > 0);
   const primaryDisabled = !canSubmit || isBusy || submitState.committed || isNonRetryableError;
-  const rowCounts = countRelationPreviewRows(preview.after.groups);
+  const [activeSide, setActiveSide] = useState<"before" | "after">("before");
   const closePreview = () => {
     if (!isBusy) {
       onClose();
@@ -2974,36 +2958,38 @@ function RelationPreviewDialog({
 
   useEffect(() => {
     setNote("");
+    setActiveSide("before");
     setSubmitState({ phase: "idle", message: "", committed: false });
   }, [preview.previewId]);
 
-  const headerAside = (
-    <span className={`relation-preview-phase-pill relation-preview-phase-${submitState.phase}`}>
-      {isBusy || submitState.phase === "error" ? relationPreviewPhaseLabel(submitState.phase) : operationCopy.statusLabel}
-    </span>
-  );
-  const subtitle = (
-    <div className="relation-preview-subtitle">
-      <span>OA {rowCounts.oa}</span>
-      <span>流水 {rowCounts.bank}</span>
-      <span>发票 {rowCounts.invoice}</span>
-    </div>
-  );
   const footer = (
     <div className="relation-preview-actions">
+      <label className="relation-preview-footer-note">
+        <span>
+          {preview.operation === "withdraw_link"
+            ? `撤回说明（${noteRequired ? "必填" : "可选"}）`
+            : noteRequired
+              ? "差额说明（必填）"
+              : "备注（可选）"}
+        </span>
+        <TextArea
+          rows={1}
+          aria-label={preview.operation === "withdraw_link" ? "撤回说明" : noteRequired ? "差额说明" : "备注"}
+          disabled={isBusy || isCommittedError || isNonRetryableError}
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+        />
+      </label>
       {isCommittedError || isNonRetryableError ? null : (
-        <>
-
-          <Button
-            isDisabled={primaryDisabled}
-            isPending={isBusy}
-            onPress={handleSubmitClick}
-            size="sm"
-            variant={preview.operation === "withdraw_link" ? "danger" : "primary"}
-          >
-            {submitState.phase === "error" ? operationCopy.retryLabel : operationCopy.submitLabel}
-          </Button>
-        </>
+        <Button
+          isDisabled={primaryDisabled}
+          isPending={isBusy}
+          onPress={handleSubmitClick}
+          size="sm"
+          variant={preview.operation === "withdraw_link" ? "danger" : "primary"}
+        >
+          {submitState.phase === "error" ? operationCopy.retryLabel : operationCopy.submitLabel}
+        </Button>
       )}
     </div>
   );
@@ -3022,26 +3008,7 @@ function RelationPreviewDialog({
       onClose={closePreview}
     >
       <div className="relation-preview-body">
-        <div className="relation-preview-toolbar">
-          {subtitle}
-          {headerAside}
-        </div>
-        {preview.message ? <div className={`relation-preview-message ${preview.requiresNote ? "warning" : ""}`}>{preview.message}</div> : null}
-        <label className="relation-preview-note">
-          <span>
-            {preview.operation === "withdraw_link"
-              ? `撤回说明（${noteRequired ? "必填" : "可选"}）`
-              : noteRequired
-                ? "差额说明（必填）"
-                : "备注（可选）"}
-          </span>
-          <TextArea
-            aria-label={preview.operation === "withdraw_link" ? "撤回说明" : noteRequired ? "差额说明" : "备注"}
-            disabled={isBusy || isCommittedError || isNonRetryableError}
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-          />
-        </label>
+        {!preview.canSubmit && preview.message ? <div className="relation-preview-message warning" role="alert">{preview.message}</div> : null}
         {submitState.phase !== "idle" ? (
           <div
             className={`relation-preview-progress-panel relation-preview-progress-${submitState.phase}`}
@@ -3054,25 +3021,30 @@ function RelationPreviewDialog({
             </div>
           </div>
         ) : null}
-        <div className="relation-preview-stack">
-          <RelationPreviewTriPane
-            title="操作前"
-            testId="relation-preview-before"
-            groups={preview.before.groups}
-            totals={preview.amountSummary.before}
-            status={preview.amountSummary.status}
-            mismatchFields={preview.amountSummary.mismatchFields}
-            columnLayouts={columnLayouts}
-          />
-          <RelationPreviewTriPane
-            title="操作后"
-            testId="relation-preview-after"
-            groups={preview.after.groups}
-            totals={preview.amountSummary.after}
-            status={preview.amountSummary.status}
-            mismatchFields={preview.amountSummary.mismatchFields}
-            columnLayouts={columnLayouts}
-          />
+        <div className="relation-preview-side-tabs" role="group" aria-label="前后对比">
+          {(["before", "after"] as const).map(side => <button key={side} type="button" aria-pressed={activeSide === side} aria-controls={`relation-preview-${side}`} onClick={() => setActiveSide(side)}>{side === "before" ? "操作前" : "操作后"}</button>)}
+        </div>
+        <div className="relation-preview-compare-scroll">
+          <div className="relation-preview-stack" data-active-side={activeSide}>
+            <RelationPreviewTriPane
+              title="操作前"
+              side="before"
+              testId="relation-preview-before"
+              groups={preview.before.groups}
+              totals={preview.amountSummary.before}
+              status={preview.amountSummary.status}
+              mismatchFields={preview.amountSummary.mismatchFields}
+            />
+            <RelationPreviewTriPane
+              title="操作后"
+              side="after"
+              testId="relation-preview-after"
+              groups={preview.after.groups}
+              totals={preview.amountSummary.after}
+              status={preview.amountSummary.status}
+              mismatchFields={preview.amountSummary.mismatchFields}
+            />
+          </div>
         </div>
       </div>
     </AppDrawer>

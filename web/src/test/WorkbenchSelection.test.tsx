@@ -32,11 +32,10 @@ async function openWorkbenchSettingsPage(user: ReturnType<typeof userEvent.setup
 
 function expectRelationPreviewSummary(section: HTMLElement) {
   const summary = within(section).getByTestId("relation-preview-summary");
-  expect(within(summary).getByText("金额核对")).toBeInTheDocument();
+  expect(within(summary).queryByText("金额核对")).not.toBeInTheDocument();
   expect(within(summary).getByTestId("relation-preview-summary-metric-oa")).toBeInTheDocument();
   expect(within(summary).getByTestId("relation-preview-summary-metric-bank")).toBeInTheDocument();
   expect(within(summary).getByTestId("relation-preview-summary-metric-invoice")).toBeInTheDocument();
-  expect(within(summary).queryByText(/\d+\s*[项条]/)).not.toBeInTheDocument();
   return summary;
 }
 
@@ -46,11 +45,11 @@ function expectRelationPreviewTriPane(section: HTMLElement) {
   const bankPane = within(section).getByTestId("pane-bank");
   const invoicePane = within(section).getByTestId("pane-invoice");
   expect(within(oaPane).getByText("OA")).toBeInTheDocument();
-  expect(within(oaPane).getByText(/\d+ [项条]/)).toBeInTheDocument();
+  expect(within(oaPane).getByText(/\d+ [项条笔]/)).toBeInTheDocument();
   expect(within(bankPane).getByText("流水")).toBeInTheDocument();
-  expect(within(bankPane).getByText(/\d+ [项条]/)).toBeInTheDocument();
+  expect(within(bankPane).getByText(/\d+ [项条笔]/)).toBeInTheDocument();
   expect(within(invoicePane).getByText("发票")).toBeInTheDocument();
-  expect(within(invoicePane).getByText(/\d+ [项条]/)).toBeInTheDocument();
+  expect(within(invoicePane).getByText(/\d+ [项条笔]/)).toBeInTheDocument();
 }
 
 function expectRelationPreviewBlocking(_preview: HTMLElement, submitLabel: string) {
@@ -947,20 +946,20 @@ describe("Workbench row selection and detail drawer", () => {
     const beforeGroups = within(before).getAllByTestId(/^candidate-group-/);
     expect(beforeGroups).toHaveLength(3);
     expect(within(before).getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toHaveClass(
-      "record-card-sheet-row",
+      "relation-preview-record",
     );
     expect(within(before).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toHaveClass(
-      "record-card-sheet-row",
+      "relation-preview-record",
     );
     expect(within(before).getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toHaveClass(
-      "record-card-sheet-row",
+      "relation-preview-record",
     );
     const afterGroups = within(after).getAllByTestId(/^candidate-group-/);
     expect(afterGroups).toHaveLength(1);
-    expect(afterGroups[0]).toHaveClass("candidate-group-row-sheet");
-    expect(within(afterGroups[0]).getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toHaveClass("record-card-sheet-row");
-    expect(within(afterGroups[0]).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toHaveClass("record-card-sheet-row");
-    expect(within(afterGroups[0]).getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toHaveClass("record-card-sheet-row");
+    expect(afterGroups[0]).toHaveClass("relation-preview-group");
+    expect(within(afterGroups[0]).getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toHaveClass("relation-preview-record");
+    expect(within(afterGroups[0]).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toHaveClass("relation-preview-record");
+    expect(within(afterGroups[0]).getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toHaveClass("relation-preview-record");
     expect(within(dialog).queryByText("杭州张三广告有限公司")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("ETC过路费")).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
@@ -1165,14 +1164,12 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(screen.getByRole("button", { name: "确认关联" }));
 
     const dialog = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
-    expect(within(dialog).getByText("金额不一致，请填写备注。")).toBeInTheDocument();
+    expect(within(dialog).queryByText("金额不一致，请填写备注。")).not.toBeInTheDocument();
+    expect(within(dialog).getByText("差额说明（必填）")).toBeInTheDocument();
     const after = within(dialog).getByTestId("relation-preview-after");
     const summary = expectRelationPreviewSummary(after);
     const invoiceMetric = within(summary).getByTestId("relation-preview-summary-metric-invoice");
-    expect(
-      invoiceMetric.classList.contains("mismatch")
-        || invoiceMetric.classList.contains("relation-preview-summary-metric-mismatch"),
-    ).toBe(true);
+    expect(invoiceMetric.closest(".relation-preview-column")).toHaveClass("mismatch");
     const deltaBlocks = within(dialog).getAllByTestId("relation-preview-delta");
     expect(deltaBlocks.length).toBeGreaterThan(0);
     deltaBlocks.forEach((deltaBlock) => {

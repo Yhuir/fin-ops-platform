@@ -418,3 +418,12 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - 备注入口与展开按钮为独立节点；汇总 grid 为操作区预留宽度，局部样式不改变公共按钮/Popover或其它页面。切换类别、分区、关闭抽屉及备注更新时不能残留旧正文。
 - 删除底部确认备注 DOM、专属 CSS、旧绝对定位图标类和过期测试断言；只读且没有审阅记录时不渲染空审阅区域。审阅记录、金额异常 Popover、接受/撤回权限与原写入合同保持不变。
 - 无 HTTP API、SQL、持久化、worker、缓存、金额计算或数据库变更；只读验证不得操作真实生产关联关系。
+
+## 2026-09-24 确认与撤回预览左右对照
+
+- 预览展示由 `RelationPreviewTriPane` 接收只读的 `groups`、`totals`、`status`、`mismatchFields` 与 `side`。不再接收主表 `columnLayouts`，不借用主表完整列宽与横向滚动。`RelationPreviewDialog` 继续负责备注、提交状态和既有 action I/O。
+- 左右分别展示服务端 `before.groups` / `after.groups`，完整保留 group/member identity。组内复用 `buildWorkbenchGroupDisplayLayout` 的明确子组与共享列布局；多对多没有明确子组时独立堆叠各列，不按数组下标推断关系。不从金额相同或同名去重。
+- 银行展示按当前组/单元格的父流水身份合并可见子项，主金额读取 `parentAmount`；只展示该单元格实际成员标签，部分关联另显示本次关联金额。该视图不改变提交的 canonical 子项集合或银行拆分版本。银行数量按父流水身份计笔。
+- 两侧均采用白底、浅灰表头和细分隔线；每侧仅 OA / 流水 / 发票三列。单一中部纵向滚动，固定标题和 footer，备注位于确认按钮左侧。1100px 以下切换操作前/后，不并列挤压六列；切换不发请求、不丢备注。
+- 删除旧顶部大备注区、待确认/待撤回重复状态、完整主表列复制、560px 最小列宽、横向滚动同步及无调用的预览样式。保留实际阻断与提交错误反馈，原业务按钮权限、幂等、版本、金额核对、submit 后回读合同不变。
+- 未修改 API、service、repository、数据表、read model、worker 或其他页面；无需数据迁移/备份。

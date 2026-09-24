@@ -2075,3 +2075,14 @@
 - 复核命令：`npm --prefix web run test -- --run src/test/WorkbenchExceptionDrawer.test.tsx src/test/WorkbenchAnomalyIndicator.test.tsx src/test/RelationGroupGrid.test.tsx`；`npm --prefix web run e2e -- e2e/workbench-exception-flow.spec.ts --project=chromium`；`npm --prefix web run build`；`bash scripts/verify.sh docs`；`git diff --check`。生产通过token包装器执行正式部署、只读浏览器事实/交互/计时验证与`npm --prefix web run e2e:production-shell`。生产财务写流程未试写，接受/撤回等写链路由本地确定性E2E保护。
 - 最终发布检查证据保留在生产 `/opt/fin-ops/runtime-smoke/release-gates/main-b1863e0a0-20260924-confirmation-note/`；最终验证记录提交只更新文档，不改变上述部署运行时代码。
 - 最终版本16个生产路由只读巡检通过（单个测试遍历16页，27.7秒），无会话阻断、浏览器异常或写请求；在单独性能采样结束后运行，避免互相干扰。
+
+## 2026-09-24 确认/撤回预览关系对照重设计
+
+- 按 Impeccable 的既有 Ledger Calm 风格简化为左右对照，每侧保留真实关系组及 OA / 流水 / 发票三列。不是把成员平铺成两份清单；明确子组按行对齐，共享成员跨行，歧义多对多保留整组关系。
+- OA保留项目、申请人和金额，银行保留对方户名、原流水金额、方向/账户/标签，发票保留销购双方与识别号、价税合计、未税金额和税额。长文本换行，不截断必要身份。辅助时间/原因沿用原数据作为title，不新增加载。
+- 备注与确认按钮同处底部，正文一个滚动区，少量记录可完整查看；大量记录不能承诺无需滚动，以保留全部记录和可读字号为优先。窄屏用前后切换代替六列强行挤压，不新增请求。
+- 展示组件只读，不改变预览/提交金额与关系事实、权限、版本、幂等和失败处理。移除原全列预览与横向滚动同步、过期样式和旧断言；不加依赖、数据库迁移、备份或新运行时分支。
+- 生产验证计划：正式部署后打开真实撤回预览检查左右/备注布局，比较同一关系发布前后成员与金额，再执行16个页面只读巡检。生产不确认/撤回真实关系；写链路由确定性E2E覆盖。验证结果补记如下。
+
+- 本地验证：6个Vitest文件共293项通过；两轮确定性浏览器测试20项和13项全部通过（其中2项布局测试重复验证，合计31个不同用例）。覆盖确认/撤回、部分拆分、异常与权限、重复提交、版本冲突、写失败重试、写成功回读失败不重试、现金处理、银行/OA待付款刷新及税额抵扣隔离。新增6项组件测试和2项浏览器布局测试。
+- 验证命令：`npm --prefix web run test -- --run src/test/RelationPreviewTriPane.test.tsx src/test/WorkbenchSelection.test.tsx src/test/WorkbenchApi.test.ts src/test/RelationGroupGrid.test.tsx src/test/groupDisplayModel.test.ts src/test/WorkbenchExceptionDrawer.test.tsx`；`npm --prefix web run e2e -- e2e/workbench-preview-layout.spec.ts e2e/workbench-withdraw-flow.spec.ts e2e/workbench-split-selection.spec.ts e2e/workbench-network-recovery-flow.spec.ts e2e/workbench-stale-error-flow.spec.ts --project=chromium`；另运行cash-special-flow、relation-fanout、relations-oa-pending-fanout、relations-tax-offset-isolation四个文件。`npm --prefix web run build`、`bash scripts/verify.sh docs`、`git diff --check`通过。构建保留依赖既有CSS/大chunk提示。

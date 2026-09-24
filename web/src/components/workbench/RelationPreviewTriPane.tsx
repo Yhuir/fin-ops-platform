@@ -1,29 +1,29 @@
-import { memo, useMemo, useRef } from "react";
+import { memo, useMemo } from "react";
 
-import { getWorkbenchColumns, getWorkbenchPaneGridStyle } from "../../features/workbench/tableConfig";
 import { formatMoney } from "../../features/money";
+import {
+  buildWorkbenchGroupDisplayLayout,
+  compactWorkbenchBankAccountLabel,
+} from "../../features/workbench/groupDisplayModel";
+import {
+  formatWorkbenchAmountCents,
+  parseWorkbenchAmountCents,
+} from "../../features/workbench/selectionModel";
 import type {
   WorkbenchRelationGroup,
-  WorkbenchColumnLayouts,
   WorkbenchRecord,
   WorkbenchRecordType,
 } from "../../features/workbench/types";
-import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
-import RelationGroupCell from "./RelationGroupCell";
-import type { WorkbenchInlineAction } from "./RowActions";
+import BankSplitChips from "../../features/bankSplits/BankSplitChips";
 
 export type RelationPreviewTriPaneProps = {
   title: string;
+  side: "before" | "after";
   testId?: string;
   groups: WorkbenchRelationGroup[];
-  totals: {
-    oaTotal: string;
-    bankTotal: string;
-    invoiceTotal: string;
-  };
+  totals: { oaTotal: string; bankTotal: string; invoiceTotal: string };
   status?: "matched" | "mismatch" | "unknown" | (string & {});
   mismatchFields: string[];
-  columnLayouts?: WorkbenchColumnLayouts;
 };
 
 type PreviewPaneConfig = {
@@ -31,266 +31,348 @@ type PreviewPaneConfig = {
   title: string;
   mismatchField: string;
 };
-
 const PREVIEW_PANES: PreviewPaneConfig[] = [
   { id: "oa", title: "OA", mismatchField: "oa_total" },
   { id: "bank", title: "流水", mismatchField: "bank_total" },
   { id: "invoice", title: "发票", mismatchField: "invoice_total" },
 ];
-
-const ROW_TEMPLATE_COLUMNS = "repeat(3, minmax(0, 1fr))";
 const PREVIEW_STATUS_LABELS = {
   matched: "金额一致",
   mismatch: "金额不一致",
   pending: "金额待核对",
 } as const;
 
-const noopSelectRow = (_row: WorkbenchRecord, _zoneId: "paired" | "unpaired") => undefined;
-const noopOpenDetail = (_row: WorkbenchRecord) => undefined;
-const noopRowAction = (_row: WorkbenchRecord, _action: WorkbenchInlineAction) => undefined;
-const getReadOnlyRowState = (): WorkbenchRowState => "idle";
-
 function RelationPreviewTriPane({
   title,
+  side,
   testId,
   groups,
   totals,
   status,
   mismatchFields,
-  columnLayouts,
 }: RelationPreviewTriPaneProps) {
-  const gridRef = useRef<HTMLDivElement | null>(null);
-  const syncInFlightRef = useRef<Record<WorkbenchRecordType, boolean>>({
-    oa: false,
-    bank: false,
-    invoice: false,
-  });
-
-  const previewGroups = useMemo(() => normalizePreviewGroups(groups, title), [groups, title]);
-  const columnsByPane = useMemo(
-    () => ({
-      oa: getWorkbenchColumns("oa", columnLayouts),
-      bank: getWorkbenchColumns("bank", columnLayouts),
-      invoice: getWorkbenchColumns("invoice", columnLayouts),
-    }),
-    [columnLayouts],
-  );
-  const paneGridStyleByPane = useMemo(
-    () => ({
-      oa: { ...getWorkbenchPaneGridStyle("oa", columnLayouts), minWidth: "560px" },
-      bank: { ...getWorkbenchPaneGridStyle("bank", columnLayouts), minWidth: "560px" },
-      invoice: { ...getWorkbenchPaneGridStyle("invoice", columnLayouts), minWidth: "560px" },
-    }),
-    [columnLayouts],
-  );
   const rowCountByPane = useMemo(
     () => ({
       oa: groups.reduce((sum, group) => sum + group.rows.oa.length, 0),
-      bank: groups.reduce((sum, group) => sum + group.rows.bank.length, 0),
-      invoice: groups.reduce((sum, group) => sum + group.rows.invoice.length, 0),
+      bank: new Set(
+        groups.flatMap((group) =>
+          group.rows.bank.map((row) =>
+            row.isSplit ? row.parentRowId : row.id,
+          ),
+        ),
+      ).size,
+      invoice: groups.reduce(
+        (sum, group) => sum + group.rows.invoice.length,
+        0,
+      ),
     }),
     [groups],
   );
-  const previewStatus = resolvePreviewStatus(status, mismatchFields, totals, rowCountByPane);
-  const visualMismatchFields = useMemo(
-    () => resolveVisualMismatchFields(status, totals, mismatchFields, rowCountByPane),
-    [status, totals, mismatchFields, rowCountByPane],
+  const previewStatus = resolvePreviewStatus(
+    status,
+    mismatchFields,
+    totals,
+    rowCountByPane,
   );
-  const deltaAmount = useMemo(() => buildDeltaAmount(status, totals, rowCountByPane), [status, totals, rowCountByPane]);
-  const sectionToneClass = resolvePreviewSectionToneClass(testId, title);
-
-  const handleSyncScroll = (paneId: WorkbenchRecordType, element: HTMLDivElement) => {
-    if (syncInFlightRef.current[paneId]) {
-      return;
-    }
-
-    const root = gridRef.current;
-    if (!root) {
-      return;
-    }
-
-    syncInFlightRef.current[paneId] = true;
-    root.querySelectorAll<HTMLElement>(`[data-scroll-pane="${paneId}"]`).forEach((candidate) => {
-      if (candidate !== element) {
-        candidate.scrollLeft = element.scrollLeft;
-      }
-    });
-    queueMicrotask(() => {
-      syncInFlightRef.current[paneId] = false;
-    });
-  };
-
+  const mismatch = resolveVisualMismatchFields(
+    status,
+    totals,
+    mismatchFields,
+    rowCountByPane,
+  );
+  const delta = buildDeltaAmount(status, totals, rowCountByPane);
   return (
     <section
-      className={`relation-preview-section relation-preview-tri-pane-section${sectionToneClass ? ` ${sectionToneClass}` : ""}`}
+      className={`relation-preview-section relation-preview-section-${side}`}
       data-testid={testId}
+      id={testId}
     >
-      <div className="relation-preview-section-heading">
-        <div className="relation-preview-section-title">
+      <div className="relation-preview-sticky-head">
+        <div className="relation-preview-section-heading">
           <h3>{title}</h3>
-          <span className={`relation-preview-status relation-preview-status-${previewStatus}`}>
+          <span
+            className={`relation-preview-status relation-preview-status-${previewStatus}`}
+          >
             {PREVIEW_STATUS_LABELS[previewStatus]}
           </span>
-        </div>
-        <div className="relation-preview-summary relation-preview-summary-inline" data-testid="relation-preview-summary">
-          <span className="relation-preview-summary-title">金额核对</span>
-          <div className="relation-preview-summary-value-list">
-            {PREVIEW_PANES.map((pane) => {
-              const mismatch = visualMismatchFields.includes(pane.mismatchField);
-              const paneTotal = resolvePaneTotal(totals, pane.id);
-              return (
-                <div
-                  key={`summary-${pane.id}`}
-                  className={`relation-preview-summary-metric relation-preview-summary-metric-${pane.id}${mismatch ? " mismatch relation-preview-summary-metric-mismatch" : ""}`}
-                  data-testid={`relation-preview-summary-metric-${pane.id}`}
-                >
-                  <span className="relation-preview-summary-label">{pane.title}</span>
-                  <strong>{formatDisplayAmount(paneTotal, rowCountByPane[pane.id] > 0)}</strong>
-                </div>
-              );
-            })}
-          </div>
-          {deltaAmount ? (
-            <span className="relation-preview-delta relation-preview-delta-pill" data-testid="relation-preview-delta">
-              差额 {deltaAmount}
+          {delta ? (
+            <span
+              className="relation-preview-delta"
+              data-testid="relation-preview-delta"
+            >
+              差额 {delta}
             </span>
           ) : null}
         </div>
-      </div>
-      <div ref={gridRef} className="candidate-grid relation-preview-tri-pane" data-testid="tri-pane">
-        <div className="candidate-grid-head relation-preview-tri-pane-head" style={{ gridTemplateColumns: ROW_TEMPLATE_COLUMNS }}>
-          {PREVIEW_PANES.map((pane) => {
-            const mismatch = visualMismatchFields.includes(pane.mismatchField);
-            return (
-              <section
-                key={pane.id}
-                className={`candidate-pane-head pane-card relation-preview-pane relation-preview-tri-pane-pane relation-preview-pane-${pane.id}${mismatch ? " mismatch relation-preview-pane-mismatch" : ""}`}
-                data-testid={`pane-${pane.id}`}
-              >
-                <div className="pane-header relation-preview-pane-header">
-                  <div className="pane-header-main">
-                    <span>{pane.title}</span>
-                    <span>{rowCountByPane[pane.id]} 项</span>
-                  </div>
-                </div>
-                <div
-                  className="candidate-pane-scroll"
-                  data-scroll-pane={pane.id}
-                  data-testid={`relation-preview-pane-scroll-head-${title}-${pane.id}`}
-                >
-                  <div
-                    className={`candidate-pane-columnheaders candidate-pane-columnheaders-${pane.id}`}
-                    role="row"
-                    style={paneGridStyleByPane[pane.id]}
-                  >
-                    {columnsByPane[pane.id].map((column) => (
-                      <div
-                        aria-label={column.label}
-                        key={column.key}
-                        className={`candidate-columnheader cell-${column.kind ?? "text"}${column.className ? ` ${column.className}` : ""}`}
-                        role="columnheader"
-                      >
-                        <span className={`candidate-columnheader-label${column.headerLines ? " candidate-columnheader-label-lines" : ""}`}>
-                          {column.headerLines
-                            ? column.headerLines.map((line) => (
-                              <span key={line} className="candidate-columnheader-label-line">
-                                {line}
-                              </span>
-                            ))
-                            : column.label}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </section>
-            );
-          })}
-        </div>
-
-        <div className="candidate-grid-body relation-preview-tri-pane-body">
-          {previewGroups.map((group, index) => (
-            <div
-              key={group.id}
-              className={`candidate-group-row candidate-group-row-sheet candidate-group-row-tone-${index % 4}`}
-              data-testid={`candidate-group-${group.id}`}
-              style={{ gridTemplateColumns: ROW_TEMPLATE_COLUMNS }}
-            >
-              {PREVIEW_PANES.map((pane) => (
-                <div key={`${group.id}-${pane.id}`} className="candidate-group-pane-slot candidate-group-pane-slot-sheet">
-                  <RelationGroupCell
-                    columnGridStyle={paneGridStyleByPane[pane.id]}
-                    columns={columnsByPane[pane.id]}
-                    getRowState={getReadOnlyRowState}
-                    onOpenDetail={noopOpenDetail}
-                    onRowAction={noopRowAction}
-                    onSelectRow={noopSelectRow}
-                    paneId={pane.id}
-                    readOnly
-                    records={group.rows[pane.id]}
-                    scrollPaneId={pane.id}
-                    scrollTestId={`relation-preview-candidate-scroll-${title}-${group.id}-${pane.id}`}
-                    showWorkflowActions={false}
-                    canOperateData={false}
-                    zoneId="paired"
-                  />
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-
-        <div className="candidate-grid-footer relation-preview-tri-pane-footer" style={{ gridTemplateColumns: ROW_TEMPLATE_COLUMNS }}>
+        <div
+          className="relation-preview-columns"
+          data-testid="relation-preview-summary"
+        >
           {PREVIEW_PANES.map((pane) => (
-            <div key={`footer-${pane.id}`} className="candidate-pane-footer-slot">
-              <div
-                className="candidate-pane-footer-scroll"
-                data-scroll-pane={pane.id}
-                data-testid={`relation-preview-pane-scrollbar-${title}-${pane.id}`}
-                onScroll={(event) => handleSyncScroll(pane.id, event.currentTarget)}
+            <div
+              key={pane.id}
+              className={
+                mismatch.includes(pane.mismatchField)
+                  ? "relation-preview-column mismatch"
+                  : "relation-preview-column"
+              }
+              data-testid={`pane-${pane.id}`}
+            >
+              <span>
+                {pane.title}{" "}
+                <small>
+                  {rowCountByPane[pane.id]}
+                  {pane.id === "bank" ? " 笔" : " 项"}
+                </small>
+              </span>
+              <strong
+                data-testid={`relation-preview-summary-metric-${pane.id}`}
               >
-                <div
-                  className={`candidate-pane-scrollbar-track candidate-pane-columnheaders-${pane.id}`}
-                  aria-hidden="true"
-                  style={paneGridStyleByPane[pane.id]}
-                >
-                  {columnsByPane[pane.id].map((column) => (
-                    <div key={column.key} className="candidate-scrollbar-track-cell" />
-                  ))}
-                </div>
-              </div>
+                {formatDisplayAmount(
+                  resolvePaneTotal(totals, pane.id),
+                  rowCountByPane[pane.id] > 0,
+                )}
+              </strong>
             </div>
           ))}
         </div>
+      </div>
+      <div className="relation-preview-groups" data-testid="tri-pane">
+        {groups.length ? (
+          groups.map((group) => <PreviewGroup key={group.id} group={group} />)
+        ) : (
+          <div className="relation-preview-empty">暂无记录</div>
+        )}
       </div>
     </section>
   );
 }
 
-export default memo(RelationPreviewTriPane);
+const PreviewGroup = memo(function PreviewGroup({
+  group,
+}: {
+  group: WorkbenchRelationGroup;
+}) {
+  const layout = useMemo(
+    () => buildWorkbenchGroupDisplayLayout(group),
+    [group],
+  );
+  const segmentCount = layout?.segments.length || 1;
+  return (
+    <div
+      className="relation-preview-group"
+      data-testid={`candidate-group-${group.id}`}
+      role="rowgroup"
+      aria-label="关联组"
+    >
+      {PREVIEW_PANES.map((pane, column) => {
+        if (
+          layout &&
+          layout.segments.length &&
+          layout.segmentedPaneIds.includes(pane.id)
+        ) {
+          return layout.segments.map((segment, index) => (
+            <div
+              key={`${pane.id}-${segment.id}`}
+              className="relation-preview-group-cell"
+              data-pane={pane.id}
+              data-segment={segment.id}
+              style={{ gridColumn: column + 1, gridRow: index + 1 }}
+            >
+              <PreviewRecords records={segment.rows[pane.id]} />
+            </div>
+          ));
+        }
+        return (
+          <div
+            key={pane.id}
+            className="relation-preview-group-cell"
+            data-pane={pane.id}
+            style={{
+              gridColumn: column + 1,
+              gridRow: `1 / span ${segmentCount}`,
+            }}
+          >
+            <PreviewRecords records={group.rows[pane.id]} />
+          </div>
+        );
+      })}
+    </div>
+  );
+});
 
-function normalizePreviewGroups(groups: WorkbenchRelationGroup[], title: string): WorkbenchRelationGroup[] {
-  if (groups.length > 0) {
-    return groups;
+function PreviewRecords({ records }: { records: WorkbenchRecord[] }) {
+  const byIdentity = new Map<string, WorkbenchRecord[]>();
+  for (const row of records) {
+    const key =
+      row.recordType === "bank" && row.isSplit ? row.parentRowId! : row.id;
+    const members = byIdentity.get(key);
+    if (members) members.push(row);
+    else byIdentity.set(key, [row]);
   }
-
-  return [
-    {
-      id: `empty-${title}`,
-      groupType: "unpaired",
-      rawGroupType: "relation_preview_empty",
-      matchConfidence: "medium",
-      reason: "relation_preview_empty",
-      rows: {
-        oa: [],
-        bank: [],
-        invoice: [],
-      },
-    },
-  ];
+  if (!records.length)
+    return <span className="relation-preview-empty-cell">—</span>;
+  return (
+    <>
+      {Array.from(byIdentity, ([identity, members]) => (
+        <PreviewRecord key={identity} row={members[0]} members={members} />
+      ))}
+    </>
+  );
 }
 
-function resolvePaneTotal(totals: RelationPreviewTriPaneProps["totals"], paneId: WorkbenchRecordType) {
+function PreviewRecord({
+  row,
+  members,
+}: {
+  row: WorkbenchRecord;
+  members: WorkbenchRecord[];
+}) {
+  const v = row.tableValues;
+  const identity =
+    row.recordType === "oa"
+      ? [
+          v.applicant,
+          v.projectName,
+          v.counterparty,
+          row.amount,
+          v.applicationTime,
+        ]
+      : row.recordType === "bank"
+        ? [
+            v.transactionTime,
+            row.counterparty,
+            row.isSplit ? row.parentAmount : row.amount,
+          ]
+        : [
+            v.sellerTaxId,
+            v.sellerName,
+            v.buyerTaxId,
+            v.buyerName,
+            v.invoiceNo,
+            v.grossAmount,
+          ];
+  const title =
+    row.recordType === "oa"
+      ? [v.applicationTime, v.reason].filter(Boolean).join(" · ")
+      : row.recordType === "bank"
+        ? v.transactionTime
+        : [v.invoiceNo, v.issueDate].filter(Boolean).join(" · ");
+  const memberIds = new Set(members.map((member) => member.id));
+  const parts = row.bankSplitParts?.filter((part) => memberIds.has(part.id));
+  const partial =
+    row.isSplit && parts && parts.length < (row.bankSplitParts?.length ?? 0);
+  const cents = members.map((member) =>
+    parseWorkbenchAmountCents(member.amount),
+  );
+  const relatedAmount = cents.every((value) => value !== null)
+    ? formatWorkbenchAmountCents(
+        cents.reduce<number>((sum, value) => sum + value!, 0),
+      )
+    : "—";
+  return (
+    <div
+      className="relation-preview-record"
+      role="row"
+      aria-label={identity.filter(Boolean).join(" ")}
+      data-member-ids={members.map((member) => member.id).join(" ")}
+    >
+      <div
+        role="cell"
+        className="relation-preview-record-content"
+        title={title}
+      >
+        {row.recordType === "oa" ? (
+          <>
+            <strong className="relation-preview-name">{v.projectName}</strong>
+            <div className="relation-preview-record-line">
+              <span>{v.applicant}</span>
+              <strong className="relation-preview-money">
+                {formatMoney(row.amount, "—")}
+              </strong>
+            </div>
+          </>
+        ) : row.recordType === "bank" ? (
+          <>
+            <strong className="relation-preview-name">
+              {row.counterparty}
+            </strong>
+            <div className="relation-preview-record-line">
+              <span className="relation-preview-direction">{v.direction}</span>
+              <strong className="relation-preview-money">
+                {formatMoney(row.isSplit ? row.parentAmount : row.amount, "—")}
+              </strong>
+            </div>
+            <span className="relation-preview-secondary">
+              {compactWorkbenchBankAccountLabel(v.paymentAccount)}
+            </span>
+            {row.isSplit ? (
+              <BankSplitChips parts={parts ?? []} />
+            ) : row.categoryLabelPath?.length ? (
+              <span className="relation-preview-tag">
+                {row.categoryLabelPath.join(" / ")}
+              </span>
+            ) : null}
+            {partial ? (
+              <span className="relation-preview-secondary">
+                本次关联 {relatedAmount}
+              </span>
+            ) : null}
+          </>
+        ) : row.supportingDocuments ? (
+          <>
+            {row.supportingDocuments.map((document) => (
+              <a
+                key={document.id}
+                href={document.contentUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {document.fileName}
+              </a>
+            ))}
+            <strong className="relation-preview-money">
+              凭证金额 {formatMoney(row.supportingDocumentAmount, "—")}
+            </strong>
+          </>
+        ) : (
+          <>
+            <div className="relation-preview-party">
+              <span className="relation-preview-secondary">销</span>
+              <span>
+                <strong>{v.sellerName}</strong>
+                <span className="relation-preview-tax-id">{v.sellerTaxId}</span>
+              </span>
+            </div>
+            <div className="relation-preview-party">
+              <span className="relation-preview-secondary">购</span>
+              <span>
+                <strong>{v.buyerName}</strong>
+                <span className="relation-preview-tax-id">{v.buyerTaxId}</span>
+              </span>
+            </div>
+            <div className="relation-preview-invoice-amount">
+              <strong className="relation-preview-money">
+                {formatMoney(v.grossAmount, "—")}
+              </strong>
+              <span className="relation-preview-secondary">
+                不含税 {formatMoney(v.amount, "—")} · {v.taxRate}（
+                {formatMoney(v.taxAmount, "—")}）
+              </span>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default memo(RelationPreviewTriPane);
+
+function resolvePaneTotal(
+  totals: RelationPreviewTriPaneProps["totals"],
+  paneId: WorkbenchRecordType,
+) {
   if (paneId === "oa") {
     return totals.oaTotal;
   }
@@ -316,15 +398,23 @@ function resolvePreviewStatus(
     return "mismatch";
   }
 
-  const visualMismatchFields = resolveVisualMismatchFields(amountStatus, totals, mismatchFields, rowCountByPane);
+  const visualMismatchFields = resolveVisualMismatchFields(
+    amountStatus,
+    totals,
+    mismatchFields,
+    rowCountByPane,
+  );
   if (visualMismatchFields.length > 0) {
     return "mismatch";
   }
 
-  const totalValues = PREVIEW_PANES
-    .filter((pane) => rowCountByPane[pane.id] > 0)
-    .map((pane) => resolvePaneTotal(totals, pane.id));
-  if (totalValues.length > 0 && totalValues.some((value) => parseMoneyAmount(value) === null)) {
+  const totalValues = PREVIEW_PANES.filter(
+    (pane) => rowCountByPane[pane.id] > 0,
+  ).map((pane) => resolvePaneTotal(totals, pane.id));
+  if (
+    totalValues.length > 0 &&
+    totalValues.some((value) => parseMoneyAmount(value) === null)
+  ) {
     return "pending";
   }
 
@@ -345,17 +435,6 @@ function formatMoneyDelta(value: number) {
   return formatMoney(value);
 }
 
-function resolvePreviewSectionToneClass(testId: string | undefined, title: string) {
-  const marker = `${testId ?? ""} ${title}`.toLowerCase();
-  if (marker.includes("before") || marker.includes("操作前")) {
-    return "relation-preview-section-before";
-  }
-  if (marker.includes("after") || marker.includes("操作后")) {
-    return "relation-preview-section-after";
-  }
-  return "";
-}
-
 function formatDisplayAmount(value: string, hasRows: boolean) {
   if (!hasRows) {
     return "-";
@@ -367,13 +446,15 @@ function resolveComparableAmounts(
   totals: RelationPreviewTriPaneProps["totals"],
   rowCountByPane: Record<WorkbenchRecordType, number>,
 ) {
-  return PREVIEW_PANES.filter((pane) => rowCountByPane[pane.id] > 0).map((pane) => {
-    const displayValue = resolvePaneTotal(totals, pane.id);
-    return {
-      pane,
-      amount: parseMoneyAmount(displayValue),
-    };
-  }).filter((total) => total.amount !== null) as Array<{
+  return PREVIEW_PANES.filter((pane) => rowCountByPane[pane.id] > 0)
+    .map((pane) => {
+      const displayValue = resolvePaneTotal(totals, pane.id);
+      return {
+        pane,
+        amount: parseMoneyAmount(displayValue),
+      };
+    })
+    .filter((total) => total.amount !== null) as Array<{
     pane: PreviewPaneConfig;
     amount: number;
   }>;
@@ -387,7 +468,9 @@ function resolveVisualMismatchFields(
 ) {
   const comparableAmounts = resolveComparableAmounts(totals, rowCountByPane);
   const nonEmptyMismatchFields = mismatchFields.filter((field) =>
-    PREVIEW_PANES.some((pane) => pane.mismatchField === field && rowCountByPane[pane.id] > 0),
+    PREVIEW_PANES.some(
+      (pane) => pane.mismatchField === field && rowCountByPane[pane.id] > 0,
+    ),
   );
 
   if (amountStatus === "matched" || amountStatus === "unknown") {
@@ -408,8 +491,12 @@ function resolveVisualMismatchFields(
       : [left.pane.mismatchField, right.pane.mismatchField];
   }
 
-  const amountGroups = comparableAmounts.reduce<Array<typeof comparableAmounts>>((groups, total) => {
-    const existingGroup = groups.find((group) => areMoneyAmountsEqual(group[0].amount, total.amount));
+  const amountGroups = comparableAmounts.reduce<
+    Array<typeof comparableAmounts>
+  >((groups, total) => {
+    const existingGroup = groups.find((group) =>
+      areMoneyAmountsEqual(group[0].amount, total.amount),
+    );
     if (existingGroup) {
       existingGroup.push(total);
     } else {
@@ -424,7 +511,9 @@ function resolveVisualMismatchFields(
 
   if (amountGroups.length === 2) {
     const isolatedGroup = amountGroups.find((group) => group.length === 1);
-    return isolatedGroup ? [isolatedGroup[0].pane.mismatchField] : comparableAmounts.map((total) => total.pane.mismatchField);
+    return isolatedGroup
+      ? [isolatedGroup[0].pane.mismatchField]
+      : comparableAmounts.map((total) => total.pane.mismatchField);
   }
 
   return comparableAmounts.map((total) => total.pane.mismatchField);

@@ -830,3 +830,11 @@ WorkbenchSupportingDocumentFiles、groupDisplayModel、WorkbenchExceptionDrawer�
 - Frontend / regression：`WorkbenchExceptionDrawer.test.tsx` 覆盖有/无确认备注、两分区、只读用户、展开/收起、正文不在汇总行直接显示、原审阅记录保留、无空审阅 footer、文本安全渲染、Escape 和零详情请求。
 - Browser / integration：`workbench-exception-flow.spec.ts` 验证 1600/1024/600px 图标在金额右侧且在异常 icon 左侧、hover/focus/click/Escape、移入浮层、长备注换行和内部滚动、切换分区和关闭抽屉清理浮层；沿用接受/撤回、分页、发票录入/归属和详情按需加载流程。
 - 业务 core、service、HTTP contract、cache/worker 无改动，不新增对应测试；请求边界在现有浏览器测试验证。生产仅只读检查已有备注、界面、请求次数及部署前后相同 API 的延迟，不修改真实异常决定。
+
+## 2026-09-24 紧凑前后关系预览
+
+- `RelationPreviewTriPane.test.tsx`：精确 before/after 组、明确子组同行、共享发票跨行、歧义多对多不伪配对、同名同金额500个成员不截断、拆分父金额与部分成员标签、空组/未知税额。
+- `WorkbenchSelection.test.tsx`：沿用原确认/撤回请求、金额状态、版本/幂等、权限、提交错误与回读失败用例；更新紧凑表格定位及备注必填断言。
+- `workbench-preview-layout.spec.ts`：真实浏览器验证桌面左右关系边界、footer 备注位置、700px 切换及备注保留、2 OA +15 流水大组、长公司名/税号/税额完整、单一滚动区、无额外 preview/submit 请求。截图关闭动画，以稳定布局验收。
+- 回归运行撤回、拆分选择、网络恢复、stale/error、现金特殊处理、关系 fanout、OA待付款 fanout 和税额抵扣隔离。实际财务写入只在确定性浏览器环境验证，生产只读预览并关闭。
+- 七类测试：1业务核心复用组布局/金额与身份断言；3接口合同复用 WorkbenchApi 和请求版本回归；5前端交互、6端到端、7旧功能回归适用。2服务/持久化、4read model/cache/worker未改变，不新增对应测试。
