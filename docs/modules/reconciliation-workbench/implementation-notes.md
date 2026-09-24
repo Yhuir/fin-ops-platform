@@ -2031,3 +2031,28 @@
 关联台 p95 仍略超1秒，与发布前约1017ms接近；中间发布采样曾达到1201ms，因此不能声称所有接口稳定达标。本次不扩大为后端关联台性能重构；未新增周期轮询、列表逐行请求或数据库查询。发布证据位于生产 `/opt/fin-ops/runtime-smoke/release-gates/main-224264a6b-20260924-ui-cleanup/`。
 
 最终版本 `production-route-shell.spec.ts` 的16个生产路由巡检通过（27.5秒）：无顶部任务条/旧子项入口、无登录阻断、无浏览器异常、无写请求。验证记录提交仅更新文档，部署的运行时代码保持 `224264a6b`。
+
+
+## 2026-09-24 凭证金额单行展示发布
+
+- 代码提交 `bc0abfae1`，release `main-bc0abfae1-20260924-voucher-amount`；remote main 已推送，正式 `deploy-oa.sh` 的 frontend pre/T0检查 PASS，API及四个登记worker正常。无后端逻辑、HTTP合同、数据库迁移、备份或生产财务写入。
+- 共用凭证列表仅保留实际凭证金额、文件预览和管理入口；删除两种说明分支、专用差额函数、两项前端展示字段和列表专属说明样式。未知/零元、混合票据计额和原异常判断保持。
+- 测试：72项前端组件/展示模型/异常抽屉/凭证编辑测试、51项后台金额核对回归、3项凭证E2E全部通过。长组浏览器fixture原先继承模板58000元的原流水字段，本次补齐与案例1273.06一致的debit/original/related字段，未修改产品金额逻辑。
+- 执行命令：
+  - `npm --prefix web run test -- --run src/test/WorkbenchSupportingDocumentFiles.test.tsx src/test/groupDisplayModel.test.ts src/test/WorkbenchExceptionDrawer.test.tsx src/test/WorkbenchInvoiceEntryDrawer.test.tsx`
+  - `PYTHONPATH=backend/src python3 -m unittest discover -s tests -p test_workbench_amount_check_service.py`
+  - `npm --prefix web run e2e -- e2e/workbench-supporting-documents-flow.spec.ts --project=chromium`
+  - `npm --prefix web run build`、`bash scripts/verify.sh docs`、`git diff --check`通过；构建保留原有CSS及chunk体积警告。
+- 七类测试：业务核心使用原金额核对回归；前端交互、E2E和旧功能回归已更新并通过；服务/持久化、HTTP合同、read model/cache/worker未改，不新增这三类测试。生产保存/删除不做真实账务试验，写链路由确定性浏览器测试覆盖。
+- 生产真实组 `CASE-BATCH-txn_imported_1393`：主表和异常抽屉均显示54、8、25、23、30元五份凭证，两个旧说明均不出现；管理54元凭证显示正确金额及原文件。展开异常详情一次实测365ms，此小样本不代表容量SLO。浏览器异常为零，业务写请求为零。
+- 发布前后只读事实逐项完全一致：OA/银行/发票成员、五份凭证金额、amount_check、completion、workbench_anomaly。OA/银行1273.06元、综合凭证1279.63元，6.57元差额及anomaly_review_required继续保留。
+- 公网性能使用同一客户端、每接口20次、并发2、各预热1次，发布前后各40个计时请求全部成功。以下为毫秒；目标p95≤1000、p99≤2000。
+
+| 查询 | 发布前p95 | 发布后p50 | 发布后p95 | 发布后p99 |
+| --- | ---: | ---: | ---: | ---: |
+| 关联台初始查询 | 1741.5 | 1179.1 | 1359.5 | 1422.9 |
+| 未配对完整组查询 | 1164.0 | 1100.3 | 1199.5 | 1248.0 |
+
+两个查询发布前后p95均未达到1秒，p99均低于2秒，不能宣称全量性能达标。当前改动删除前端计算且无新增网络I/O，不扩大为后端查询优化；网络/运行时波动下的小样本差异不证明性能提升。正式发布证据保留在生产 `/opt/fin-ops/runtime-smoke/release-gates/main-bc0abfae1-20260924-voucher-amount/`。
+
+生产 `e2e:production-shell` 的16个路由只读巡检通过（27.2秒），无会话阻断、浏览器异常或写请求。最终验证记录仅更新文档，部署代码仍为 `bc0abfae1`。
