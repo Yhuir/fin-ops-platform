@@ -452,6 +452,9 @@ test("shows confirmation notes beside the anomaly icon without loading detail or
     expect(layout.verticalDifference).toBeLessThan(1);
     await note.hover();
     await expect(popover).toContainText("票面金额少 0.01 元，经确认保留关联");
+    const surface = page.locator(".workbench-confirmation-note-popover");
+    await expect(surface).toHaveCSS("background-color", "rgb(255, 255, 255)");
+    await expect(surface).toHaveCSS("border-top-width", "1px");
     await popover.hover();
     await expect(popover).toBeVisible();
     const box = (await popover.boundingBox())!;

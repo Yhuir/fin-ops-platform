@@ -15286,7 +15286,12 @@ body.column-layout-dragging {
 }
 
 .workbench-confirmation-note-popover {
+  z-index: 1200;
   max-width: min(360px, calc(100vw - 24px));
+  border: 1px solid #d8e0e9;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(30, 43, 57, 0.1);
 }
 
 .workbench-confirmation-note-popover__dialog {
