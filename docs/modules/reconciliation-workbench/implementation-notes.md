@@ -2064,6 +2064,14 @@
 - 删除底部旧备注 DOM、专属 CSS、旧 summary icon 定位类和过期断言；保留审阅记录和原操作权限，只读且无审阅记录时不渲染空 footer。业务 API、金额、正式关系、持久化和 worker 均不变，无数据库备份或迁移。
 - 本地验证：异常抽屉15项、异常图标12项、三栏关系网格60项，共87项组件/回归测试通过；异常浏览器全流程9项通过（包含接受/撤回、发票录入/归属、按需加载，以及1600/1024/600px备注入口、长文本、键盘与触屏）。原图标键盘测试补充等待焦点实际恢复后再Tab，不放松行为断言。生产构建、`bash scripts/verify.sh docs`、`git diff --check`通过；保留依赖原有CSS与chunk体积警告。
 - 七类测试适用性：前端、E2E、旧功能回归已覆盖；API只读请求次数由浏览器验证；无业务规则、service、HTTP契约、read model/cache/worker变更，不新增对应测试。
-- 发布前公网只读采样各接口10次：关联台初始查询p50 671.4ms、p95 813.1ms；异常摘要查询p50 572.9ms、p95 685.0ms，20次均200。此为小样本，不能据此推断全App容量表现。发布后复核将在本节追加。
+- 发布前公网只读采样各接口10次：关联台初始查询p50 671.4ms、p95 813.1ms；异常摘要查询p50 572.9ms、p95 685.0ms，20次均200。此为小样本，不能据此推断全App容量表现。发布后复核结果见下方记录。
 
 - 第一轮生产浏览器检查发现浮层基础组件没有提供实底，已补齐本模块专属白底、浅边框、8px圆角和轻阴影，并增加浏览器computed style断言；不改公共Popover样式。最终版本按下方发布记录验收。
+
+- 最终运行时代码 `b1863e0a0`（包含 `0be9b8ba9`），已推送 remote main 并部署至 release `main-b1863e0a0-20260924-confirmation-note`。正式发布入口 frontend profile 的 pre/T0 均 PASS，API 与四个登记 worker 正常；未执行全量后端容量审计，也未改数据库或创建数据库备份。
+- 补齐实底后的三个备注浏览器用例再次通过；生产实测1600/1024/600px汇总行入口始终位于异常图标左侧，展开后入口保留。悬浮显示原备注、可移入阅读、Escape关闭，旧底部正文不再展示。实测悬浮到可见约113ms，无额外API请求；生产样例关联成员、金额核对及异常事实与发布前逐项一致，业务写请求0、浏览器异常0。
+- 最终公网性能单独测量，每接口10次顺序请求，20次均200；关联台初始查询p50 695.9ms、p95 1173.5ms，异常摘要p50 573.4ms、p95 635.3ms。发布前同法分别为671.4/813.1ms与572.9/685.0ms。初始查询本轮p95超过1秒，不能宣称全量性能达标，也不能将小样本差异直接归因于本次展示修改。
+- 第一轮发布与16页巡检并行时，初始查询p95曾为1755.0ms、摘要1699.3ms；记录该波动，不以最终单独采样掩盖并行请求时的慢响应。本次前端交互没有新增网络I/O，后端查询优化不扩入这次备注展示修复。
+- 复核命令：`npm --prefix web run test -- --run src/test/WorkbenchExceptionDrawer.test.tsx src/test/WorkbenchAnomalyIndicator.test.tsx src/test/RelationGroupGrid.test.tsx`；`npm --prefix web run e2e -- e2e/workbench-exception-flow.spec.ts --project=chromium`；`npm --prefix web run build`；`bash scripts/verify.sh docs`；`git diff --check`。生产通过token包装器执行正式部署、只读浏览器事实/交互/计时验证与`npm --prefix web run e2e:production-shell`。生产财务写流程未试写，接受/撤回等写链路由本地确定性E2E保护。
+- 最终发布检查证据保留在生产 `/opt/fin-ops/runtime-smoke/release-gates/main-b1863e0a0-20260924-confirmation-note/`；最终验证记录提交只更新文档，不改变上述部署运行时代码。
+- 最终版本16个生产路由只读巡检通过（单个测试遍历16页，27.7秒），无会话阻断、浏览器异常或写请求；在单独性能采样结束后运行，避免互相干扰。
