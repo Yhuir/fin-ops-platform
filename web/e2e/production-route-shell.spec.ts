@@ -63,7 +63,7 @@ test.describe("production route shell smoke", () => {
       await expect(page.locator('.app-shell-progress-stack, .background-progress-block')).toHaveCount(0);
       await expect(page.getByRole('button', { name: '选择流水子项', exact: true })).toHaveCount(0);
       const bodyText = (await page.locator("body").innerText()).replace(/\s+/g, " ").trim();
-      const blockedSession = /缺少 OA 登录态|请返回 OA 系统重新登录|会话校验失败|没有权限访问/.test(bodyText);
+      const blockedSession = /缺少 OA 登录态|请返回 OA 系统重新登录|会话校验失败|没有权限访问|OA 会话已失效|登录状态已过期/.test(bodyText);
       const stillLoading = bodyText.includes("正在加载页面") && bodyText.length < 80;
       routeResults.push({ path, blockedSession, stillLoading });
     }

@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, test } from "vitest";
 import RelationPreviewTriPane from "../components/workbench/RelationPreviewTriPane";
 import type {
@@ -190,7 +190,7 @@ describe("compact relation preview", () => {
     );
     const interest = screen.getByTestId("candidate-group-interest-case");
     expect(within(interest).getByText("1001497.22")).toBeInTheDocument();
-    expect(within(interest).getByText("本次关联 1497.22")).toBeInTheDocument();
+    expect(within(interest).queryByText(/本次关联/)).not.toBeInTheDocument();
     expect(
       within(interest).queryByRole("button", { name: /归还借款拆分金额/ }),
     ).not.toBeInTheDocument();
@@ -201,7 +201,7 @@ describe("compact relation preview", () => {
       within(screen.getByTestId("pane-bank")).getByText("1 笔"),
     ).toBeInTheDocument();
   });
-  test("does not manufacture an empty group or zero tax values", () => {
+  test("keeps secondary invoice fields in details without manufacturing tax values", async () => {
     const view = render(preview([]));
     expect(screen.queryByRole("rowgroup")).not.toBeInTheDocument();
     expect(screen.getByText("暂无记录")).toBeInTheDocument();
@@ -223,8 +223,15 @@ describe("compact relation preview", () => {
         ]),
       ]),
     );
-    expect(screen.getByText("不含税 — · 免税（—）")).toBeInTheDocument();
-    expect(screen.getByText("913000000000000002")).toBeInTheDocument();
+    expect(screen.queryByText(/不含税/)).not.toBeInTheDocument();
+    expect(screen.queryByText("913000000000000002")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "查看发票详情" }));
+    const details = await screen.findByRole("dialog", { name: "发票详情" });
+    expect(within(details).getByText("913000000000000002")).toBeInTheDocument();
+    expect(within(details).queryByText(/税额|不含税/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("candidate-group-tax").querySelector("[title]")).toBeNull();
+    view.rerender(preview([]));
+    expect(screen.queryByRole("dialog", { name: "发票详情" })).not.toBeInTheDocument();
   });
   test("keeps all 500 distinct members even when their names and amounts match", () => {
     render(

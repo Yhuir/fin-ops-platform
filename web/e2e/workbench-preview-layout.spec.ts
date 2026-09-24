@@ -187,10 +187,26 @@ test("shows every member in a 2 OA and 15 bank preview with one scroll area and 
   const after = dialog.getByTestId("relation-preview-after");
   await expect(after.getByRole("rowgroup")).toHaveCount(1);
   await expect(after.locator("[data-member-ids]")).toHaveCount(18);
-  await expect(
-    after.getByText("915300007194052520", { exact: true }),
-  ).toBeVisible();
-  await expect(after.getByText("不含税 14150.94 · 6%（849.06）")).toBeVisible();
+  await expect(after.getByText("915300007194052520", { exact: true })).toHaveCount(0);
+  await expect(after.getByText(/不含税/)).toHaveCount(0);
+  const detailsButton = after.getByRole("button", { name: "查看发票详情" });
+  await detailsButton.hover();
+  const details = page.getByRole("dialog", { name: "发票详情", exact: true });
+  await expect(details.getByText("915300007194052520", { exact: true })).toBeVisible();
+  await details.hover();
+  await expect(details.getByText("云南溯源科技有限公司", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(details).toHaveCount(0);
+  await detailsButton.click();
+  await expect(details).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(details).toHaveCount(0);
+  await dialog.getByRole("textbox").focus();
+  await expect(dialog.getByRole("textbox")).toBeFocused();
+  await detailsButton.focus();
+  await expect(details).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(details).toHaveCount(0);
   const scroller = dialog.locator(".relation-preview-compare-scroll");
   expect(
     await scroller.evaluate((el) => el.scrollWidth - el.clientWidth),
@@ -210,4 +226,63 @@ test("shows every member in a 2 OA and 15 bank preview with one scroll area and 
     dialog.getByRole("button", { name: "确认关联", exact: true }),
   ).toBeInViewport();
   expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(0);
+});
+
+test("withdraw preview preserves five independent rows and split parent money", async ({ page }, info) => {
+  const api = await installDeterministicApiMocks(page, { sessionMode: "user", workbenchInitialIncompleteRelation: true });
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.goto("/");
+  const zone = page.getByTestId("zone-unpaired");
+  await zone.getByTestId("candidate-group-unpaired-case:CASE-202603-101")
+    .getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
+  const response = page.waitForResponse(r => r.url().endsWith("/withdraw-link/preview"));
+  await zone.getByRole("button", { name: "撤回关联", exact: true }).click();
+  const data = await (await response).json();
+  await page.getByRole("button", { name: "关闭关联预览" }).click();
+  const template = data.before.groups[0];
+  const oa = ["1000000.00", "1497.22"].map((amount, i) => ({
+    ...template.oa_rows[0], id: `oa-${i}`, amount, expense_items: [],
+    applicant: "刘际涛", project_name: "云南溯源科技", project_name_display: "云南溯源科技",
+  }));
+  const parts = [
+    { id: "principal", amount: "1000000.00", category_code: "principal", category_label: "归还借款", category_path: ["外部往来款付款", "归还借款", "银行往来"] },
+    { id: "interest", amount: "1497.22", category_code: "interest", category_label: "利息", category_path: ["费用", "利息"] },
+  ];
+  const bank = parts.map(part => ({ ...template.bank_rows[0], id: part.id, amount: part.amount,
+    parent_row_id: "bank-parent", parent_amount: "1001497.22", is_split: true, bank_split_parts: parts,
+    counterparty_name: "中国民生银行贷款户", payment_account_label: "民生银行 账户 9486",
+  }));
+  const invoice = { ...template.invoice_rows[0], id: "invoice", total_with_tax: "1497.22",
+    seller_name: "中国民生银行股份有限公司昆明分行", buyer_name: "云南溯源科技有限公司",
+    amount: "1412.47", tax_amount: "84.75", tax_rate: "6%" };
+  const g = { ...template, group_id: "combined", oa_rows: oa, bank_rows: bank, invoice_rows: [invoice], display_subgroups: [] };
+  data.before.groups = [g];
+  data.after.groups = [
+    { ...g, group_id: "interest-only", oa_rows: [], bank_rows: [bank[1]], invoice_rows: [] },
+    ...oa.map(r => ({ ...g, group_id: r.id, oa_rows: [r], bank_rows: [], invoice_rows: [] })),
+    { ...g, group_id: "invoice-only", oa_rows: [], bank_rows: [], invoice_rows: [invoice] },
+    { ...g, group_id: "principal-only", oa_rows: [], bank_rows: [bank[0]], invoice_rows: [] },
+  ];
+  for (const side of ["before", "after"]) data.amount_summary[side] = {
+    oa_total: "1001497.22", bank_total: "1001497.22", invoice_total: "1497.22",
+  };
+  await page.route("**/api/workbench/actions/withdraw-link/preview", route => route.fulfill({ json: data }));
+  await zone.getByRole("button", { name: "撤回关联", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "撤回关联", exact: true });
+  const before = dialog.getByTestId("relation-preview-before"), after = dialog.getByTestId("relation-preview-after");
+  await expect(before.getByRole("rowgroup")).toHaveCount(1);
+  await expect(after.getByRole("rowgroup")).toHaveCount(5);
+  await expect(after.getByTestId("pane-bank")).toContainText("1 笔");
+  const interest = after.getByTestId("candidate-group-interest-only");
+  await expect(interest.getByText("1001497.22", { exact: true })).toBeVisible();
+  await expect(interest.locator(".bank-account-tag")).toHaveText("民生9486");
+  await expect(interest.getByRole("button", { name: /归还借款拆分金额/ })).toHaveCount(0);
+  await expect(dialog.getByText(/本次关联|不含税/)).toHaveCount(0);
+  await interest.getByRole("button", { name: "费用 / 利息拆分金额" }).hover();
+  await expect(page.getByRole("tooltip")).toHaveText("¥1497.22");
+  await dialog.getByRole("heading", { name: "撤回关联", exact: true }).hover();
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+  await expect(after.getByTestId("candidate-group-principal-only")).toBeInViewport();
+  await dialog.screenshot({ path: info.outputPath("preview-withdraw-splits.png"), animations: "disabled" });
+  expect(api.count("POST /api/workbench/actions/withdraw-link")).toBe(0);
 });

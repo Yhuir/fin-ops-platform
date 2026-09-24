@@ -1,14 +1,13 @@
 import { memo, useMemo } from "react";
+import { Chip } from "@heroui/react";
+import BankAccountValue from "../BankAccountValue";
+import PreviewRecordDetails from "./PreviewRecordDetails";
 
 import { formatMoney } from "../../features/money";
 import {
   buildWorkbenchGroupDisplayLayout,
   compactWorkbenchBankAccountLabel,
 } from "../../features/workbench/groupDisplayModel";
-import {
-  formatWorkbenchAmountCents,
-  parseWorkbenchAmountCents,
-} from "../../features/workbench/selectionModel";
 import type {
   WorkbenchRelationGroup,
   WorkbenchRecord,
@@ -252,24 +251,14 @@ function PreviewRecord({
             v.invoiceNo,
             v.grossAmount,
           ];
-  const title =
-    row.recordType === "oa"
-      ? [v.applicationTime, v.reason].filter(Boolean).join(" · ")
-      : row.recordType === "bank"
-        ? v.transactionTime
-        : [v.invoiceNo, v.issueDate].filter(Boolean).join(" · ");
   const memberIds = new Set(members.map((member) => member.id));
   const parts = row.bankSplitParts?.filter((part) => memberIds.has(part.id));
-  const partial =
-    row.isSplit && parts && parts.length < (row.bankSplitParts?.length ?? 0);
-  const cents = members.map((member) =>
-    parseWorkbenchAmountCents(member.amount),
-  );
-  const relatedAmount = cents.every((value) => value !== null)
-    ? formatWorkbenchAmountCents(
-        cents.reduce<number>((sum, value) => sum + value!, 0),
-      )
-    : "—";
+  const details: [string, string][] = row.recordType === "oa"
+    ? [["项目", v.projectName], ["申请人", v.applicant], ["申请时间", v.applicationTime], ["申请事由", v.reason]]
+    : row.recordType === "bank"
+      ? [["对方户名", row.counterparty], ["银行账户", v.paymentAccount], ["交易时间", v.transactionTime]]
+      : [["销方", v.sellerName], ["销方识别号", v.sellerTaxId], ["购方", v.buyerName], ["购方识别号", v.buyerTaxId], ["发票号码", v.invoiceNo], ["开票日期", v.issueDate]];
+  const name = row.recordType === "oa" ? v.projectName : row.recordType === "bank" ? row.counterparty : v.sellerName;
   return (
     <div
       className="relation-preview-record"
@@ -280,11 +269,15 @@ function PreviewRecord({
       <div
         role="cell"
         className="relation-preview-record-content"
-        title={title}
       >
+        {!row.supportingDocuments ? (
+          <div className="relation-preview-record-heading">
+            <strong className="relation-preview-name">{name}</strong>
+            <PreviewRecordDetails key={JSON.stringify(details)} label={`${row.recordType === "oa" ? "OA" : row.recordType === "bank" ? "流水" : "发票"}详情`} fields={details} />
+          </div>
+        ) : null}
         {row.recordType === "oa" ? (
           <>
-            <strong className="relation-preview-name">{v.projectName}</strong>
             <div className="relation-preview-record-line">
               <span>{v.applicant}</span>
               <strong className="relation-preview-money">
@@ -294,28 +287,18 @@ function PreviewRecord({
           </>
         ) : row.recordType === "bank" ? (
           <>
-            <strong className="relation-preview-name">
-              {row.counterparty}
-            </strong>
             <div className="relation-preview-record-line">
-              <span className="relation-preview-direction">{v.direction}</span>
+              <Chip size="sm" variant="soft" color={v.direction === "支出" ? "danger" : v.direction === "收入" ? "success" : "default"} className="relation-preview-direction">{v.direction}</Chip>
               <strong className="relation-preview-money">
                 {formatMoney(row.isSplit ? row.parentAmount : row.amount, "—")}
               </strong>
             </div>
-            <span className="relation-preview-secondary">
-              {compactWorkbenchBankAccountLabel(v.paymentAccount)}
-            </span>
+            <BankAccountValue value={compactWorkbenchBankAccountLabel(v.paymentAccount)} variant="tag" />
             {row.isSplit ? (
               <BankSplitChips parts={parts ?? []} />
             ) : row.categoryLabelPath?.length ? (
               <span className="relation-preview-tag">
                 {row.categoryLabelPath.join(" / ")}
-              </span>
-            ) : null}
-            {partial ? (
-              <span className="relation-preview-secondary">
-                本次关联 {relatedAmount}
               </span>
             ) : null}
           </>
@@ -337,29 +320,9 @@ function PreviewRecord({
           </>
         ) : (
           <>
-            <div className="relation-preview-party">
-              <span className="relation-preview-secondary">销</span>
-              <span>
-                <strong>{v.sellerName}</strong>
-                <span className="relation-preview-tax-id">{v.sellerTaxId}</span>
-              </span>
-            </div>
-            <div className="relation-preview-party">
-              <span className="relation-preview-secondary">购</span>
-              <span>
-                <strong>{v.buyerName}</strong>
-                <span className="relation-preview-tax-id">{v.buyerTaxId}</span>
-              </span>
-            </div>
-            <div className="relation-preview-invoice-amount">
-              <strong className="relation-preview-money">
-                {formatMoney(v.grossAmount, "—")}
-              </strong>
-              <span className="relation-preview-secondary">
-                不含税 {formatMoney(v.amount, "—")} · {v.taxRate}（
-                {formatMoney(v.taxAmount, "—")}）
-              </span>
-            </div>
+            <strong className="relation-preview-money relation-preview-invoice-amount">
+              {formatMoney(v.grossAmount, "—")}
+            </strong>
           </>
         )}
       </div>
