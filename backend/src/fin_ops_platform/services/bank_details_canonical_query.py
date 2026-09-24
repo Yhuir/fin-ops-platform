@@ -7,6 +7,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any, Iterator
 
+from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.bank_account_balance_canonical_rows import (
     BANK_ACCOUNT_BALANCE_CANONICAL_ROWS_SQL,
     BANK_ACCOUNT_CANONICAL_SOURCE_CTES,
@@ -205,11 +206,16 @@ class PostgresBankDetailsCanonicalQueryRepository:
                     select item.bank_transaction_id,
                         jsonb_agg(jsonb_build_object(
                             'id', item.id::text, 'category_code', item.category_code,
-                            'amount', item.amount::text, 'category_payload', item.category_payload
+                            'amount', item.amount::text, 'category_payload', item.category_payload,
+                            'relation_case_id', owner.case_id
                         ) order by item.position) as items
                     from app.bank_transaction_split_items item
                     join (select distinct parent_bank_transaction_id from display_units) parents
                       on parents.parent_bank_transaction_id = item.bank_transaction_id
+                    left join app.workbench_pair_relations owner
+                      on owner.status = 'active' and owner.row_ids @> array[item.id::text]
+                     and exists (select 1 from unnest(owner.row_ids,owner.row_types) member(row_id,row_type)
+                                 where member.row_id=item.id::text and member.row_type='bank')
                     group by item.bank_transaction_id
                 )
                 select display_units.*, coalesce(parts.items, '[]'::jsonb) as split_display_items
@@ -227,9 +233,9 @@ class PostgresBankDetailsCanonicalQueryRepository:
 
         display_definitions = PostgresBankTransactionSplitRepository.tag_definitions(tags)
         for row in rows:
-            row["bank_split_parts"] = PostgresBankTransactionSplitRepository.decorate_parts(
-                row["split_display_items"], display_definitions,
-            )
+            parts = PostgresBankTransactionSplitRepository.decorate_parts(row["split_display_items"], display_definitions)
+            owners = {part["id"]: part["relation_case_id"] for part in row["split_display_items"]}
+            row["bank_split_parts"] = [{**part, "relation_case_id": owners[part["id"]]} for part in parts]
         payload = BankDetailsCanonicalQueryService._transactions_payload(
             {
                 "settings": settings,
@@ -240,10 +246,12 @@ class PostgresBankDetailsCanonicalQueryRepository:
             date_from=None,
             date_to=None,
         )
+        requirements = AppSettingsService.bank_category_relation_policy_snapshot(settings)["paired_policy"]["requirements_by_tag_code"]
         return {
             str(row.get("id") or ""): {
                 "bank_split_parts": row["bank_split_parts"],
                 "category_code": row.get("effective_category_code"),
+                "paired_requires_invoice": requirements.get(row.get("effective_category_code"), {}).get("requires_invoice"),
                 "category_label": row.get("effective_category_label"),
                 "category_path": list(row.get("effective_category_path") or []),
                 "category_primary_label": row.get("effective_category_primary_label"),

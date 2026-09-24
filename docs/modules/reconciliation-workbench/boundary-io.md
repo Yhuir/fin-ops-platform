@@ -390,3 +390,9 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - 无搜索、initial、filter options 和异常抽屉保留各自已有候选范围。异常页不因普通搜索优化缩小分类计数宇宙；原查询参数、DTO、权限及纯读事务不变。
 - 拆分用途的标签定义在本次 SQL 内只展开一次，再按 category code 集合连接关系成员。删除原逐成员 lateral JSON 展开，不引入持久缓存、后台任务或新事实源。
 - 隔离 PostgreSQL 回归验证仅发票金额命中搜索时，非命中的 OA/银行仍参与异常，审阅前后分区、金额指纹、全量/月范围、full/summary 与空结果一致。生产只读新旧查询对照覆盖两区金额/文本/空命中/无搜索、月范围及异常查询，完整 DTO 相等。端到端性能阈值由发布统一压测验收，局部 SQL 收益不替代该验收。
+
+## 2026-09-24 整笔选择与核对金额分层
+
+拆分卡片整行选择使用完整 bank_split_parts 的 canonical 子项及 active relation_case_id，不能只选择当前筛选可见子项；其他 owner 明确拒绝整选。标签只展示，单项选择经显式菜单。金额核对新增 bank_original_total、bank_related_total、evidence_required_total；Popover 显示原银行金额，真实部分关联另显示本次关联金额。标签配对规则决定需票金额，SQL 分区与领域异常一致；不改变真实票据金额或正式成员。preview/confirm 携带 bank_split_versions，事务锁后验证。详见 [闭环实施记录](split-payment-closure.md)。
+
+有效拆分标签资格必须与银行分类 owner 的规则标准化一致：缺省状态为 active、内置系统规则与自定义规则分别按既有合同处理。缺失或归档用途规则不伪装成金额差额；SQL 分区和领域 completion 均保留 unpaired，blocking_reasons 为 bank_split_rule_unknown。该状态不阻止既有人工关联命令，但不能自动宣称已闭环。

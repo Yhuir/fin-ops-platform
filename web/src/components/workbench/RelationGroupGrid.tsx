@@ -59,7 +59,7 @@ type RelationGroupGridProps = {
   }>;
   highlightedRowId?: string | null;
   getRowState: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => WorkbenchRowState;
-  onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => void;
+  onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "unpaired", scope?: "unit") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (
     row: WorkbenchRecord,

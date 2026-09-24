@@ -224,6 +224,11 @@ class WorkbenchRelationCommandRepositoryAdapter:
             return list(row_ids)
         return self._repository.resolve_current_bank_unit_ids(row_ids)
 
+    def bank_split_versions_for_members(self, bank_row_ids: list[str]) -> dict[str, int]:
+        if self._repository is None:
+            raise RuntimeError("Split version validation requires a canonical bank reader.")
+        return self._repository.bank_split_versions_for_members(bank_row_ids)
+
     def lock_canonical_relation_members(
         self,
         row_ids: list[str],

@@ -948,6 +948,138 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         third = self.service.workbench_anomaly(rows, relation_id="voucher")
         self.assertEqual(third["items"][0]["code"], "expense_item_amount_mismatch")
 
+    def _split_payment(self):
+        return {
+            "oa": [dict(self._oa_row("1000000"), id="principal-oa"),
+                   dict(self._oa_row("1497.22"), id="interest-oa")],
+            "bank": [
+                {"id": "principal", "type": "bank", "amount": "1000000",
+                 "txn_direction": "outflow", "is_split": True,
+                 "parent_row_id": "payment", "parent_amount": "1001497.22",
+                 "turnover_role": "external_turnover", "paired_requires_invoice": False},
+                {"id": "interest", "type": "bank", "amount": "1497.22",
+                 "txn_direction": "outflow", "is_split": True,
+                 "parent_row_id": "payment", "parent_amount": "1001497.22",
+                 "paired_requires_invoice": True},
+            ],
+            "invoice": [dict(self._invoice_row("1497.22"), id="interest-invoice")],
+        }
+
+    def test_split_payment_uses_tag_policy_for_evidence_without_changing_bank_total(self):
+        from copy import deepcopy
+        rows = self._split_payment()
+        before = deepcopy(rows)
+        result = self.service.check(rows)
+        self.assertEqual(result["status"], "matched")
+        self.assertEqual(result["bank_total"], "1001497.22")
+        self.assertEqual(result["bank_original_total"], "1001497.22")
+        self.assertEqual(result["evidence_required_total"], "1497.22")
+        self.assertEqual(result["evidence_total"], "1497.22")
+        self.assertEqual(result["amount_delta"], "0.00")
+        self.assertIsNone(self.service.workbench_anomaly(rows, relation_id="split"))
+        self.assertEqual(rows, before)
+
+    def test_split_evidence_shortage_and_excess_keep_actual_display_amounts(self):
+        for amount, code in (("1490", "oa_bank_equal_invoice_less"),
+                             ("1500", "oa_bank_equal_invoice_more")):
+            with self.subTest(amount=amount):
+                rows = self._split_payment()
+                rows["invoice"][0]["total_with_tax"] = amount
+                check = self.service.check(rows)
+                self.assertEqual(check["status"], "mismatch")
+                self.assertEqual(check["mismatch_fields"], ["invoice_total"])
+                item = self.service.workbench_anomaly(rows, relation_id="split")["items"][0]
+                self.assertEqual(item["code"], code)
+                self.assertEqual(item["bank_total"], "1001497.22")
+                self.assertEqual(item["bank_original_total"], "1001497.22")
+                self.assertEqual(item["evidence_required_total"], "1497.22")
+                self.assertEqual(item["evidence_total"], f"{float(amount):.2f}")
+
+    def test_split_missing_invoice_is_not_fabricated_as_zero_or_paid_principal(self):
+        rows = self._split_payment()
+        rows["invoice"] = []
+        result = self.service.check(rows)
+        self.assertEqual(result["bank_total"], "1001497.22")
+        self.assertEqual(result["evidence_required_total"], "1497.22")
+        self.assertIsNone(result["evidence_total"])
+        self.assertFalse(result["evidence_complete"])
+
+    def test_partial_association_keeps_parent_display_and_real_payment_gap(self):
+        rows = self._split_payment()
+        rows["bank"] = [rows["bank"][1]]
+        result = self.service.check(rows)
+        self.assertEqual(result["status"], "mismatch")
+        self.assertEqual(result["bank_total"], "1497.22")
+        self.assertEqual(result["bank_original_total"], "1001497.22")
+        self.assertEqual(result["bank_related_total"], "1497.22")
+        self.assertEqual(result["mismatch_fields"], ["oa_total"])
+        item = self.service.workbench_anomaly(rows, relation_id="partial")["items"][0]
+        self.assertEqual(item["bank_original_total"], "1001497.22")
+        self.assertEqual(item["bank_total"], "1497.22")
+
+    def test_interest_only_oa_retains_unique_purpose_comparison(self):
+        rows = self._split_payment()
+        rows["oa"] = [rows["oa"][1]]
+        result = self.service.check(rows)
+        self.assertEqual(result["status"], "matched")
+        self.assertEqual(result["bank_total"], "1497.22")
+        self.assertEqual(result["bank_original_total"], "1001497.22")
+        self.assertEqual(result["bank_related_total"], "1001497.22")
+        self.assertEqual(result["evidence_required_total"], "1497.22")
+
+    def test_split_requirement_changes_are_not_hardcoded_to_turnover_role(self):
+        rows = self._split_payment()
+        rows["bank"][0]["paired_requires_invoice"] = True
+        result = self.service.check(rows)
+        self.assertEqual(result["status"], "mismatch")
+        self.assertEqual(result["evidence_required_total"], "1001497.22")
+        rows["bank"][0].pop("turnover_role")
+        rows["bank"][0]["paired_requires_invoice"] = False
+        self.assertEqual(self.service.check(rows)["status"], "matched")
+
+    def test_turnover_closure_keeps_existing_amount_contract(self):
+        rows = self._split_payment()
+        result = self.service.check(rows, relation_mode="turnover_manual_closure")
+        self.assertEqual(result["evidence_required_total"], "1001497.22")
+        self.assertEqual(result["status"], "mismatch")
+
+    def test_split_contra_adjusts_evidence_by_directed_requirement(self):
+        rows = self._split_payment()
+        rows["bank"].append({
+            "id": "refund", "type": "bank", "amount": "100",
+            "txn_direction": "inflow", "is_split": True,
+            "parent_row_id": "refund-parent", "parent_amount": "100",
+            "paired_requires_invoice": True,
+        })
+        rows["oa"][1]["amount"] = "1397.22"
+        rows["invoice"][0]["total_with_tax"] = "1397.22"
+        result = self.service.check(rows)
+        self.assertEqual(result["status"], "matched")
+        self.assertEqual(result["bank_total"], "1001397.22")
+        self.assertEqual(result["bank_related_total"], "1001397.22")
+        self.assertEqual(result["evidence_required_total"], "1397.22")
+        self.assertEqual(result["bank_original_total"], "1001597.22")
+
+    def test_mixed_split_and_unsplit_payment_preserves_each_evidence_scope(self):
+        rows = self._split_payment()
+        rows["bank"].append({"id": "ordinary", "type": "bank", "amount": "100", "txn_direction": "outflow"})
+        rows["oa"][1]["amount"] = "1597.22"
+        rows["invoice"][0]["total_with_tax"] = "1597.22"
+        result = self.service.check(rows)
+        self.assertEqual(result["status"], "matched")
+        self.assertEqual(result["bank_original_total"], "1001597.22")
+        self.assertEqual(result["evidence_required_total"], "1597.22")
+        self.assertIsNone(self.service.workbench_anomaly(rows, relation_id="mixed"))
+
+    def test_unknown_split_requirement_is_explicit_unknown(self):
+        rows = self._split_payment()
+        rows["bank"][0].pop("paired_requires_invoice")
+        result = self.service.check(rows)
+        self.assertEqual(result["status"], "unknown")
+        self.assertTrue(result["requires_note"])
+        self.assertIsNone(result["evidence_required_total"])
+        self.assertEqual(result["bank_total"], "1001497.22")
+
     @staticmethod
     def _oa_row(amount: str, *, reconciliation_amount: str | None = None) -> dict[str, str]:
         row = {

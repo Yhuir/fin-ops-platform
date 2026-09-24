@@ -579,6 +579,9 @@ def _cost_entries(
             target = external_oa_ids if bank_ids and bank_ids <= external_ids else other_oa_ids
             target.update(source_group["oa_row_ids"])
         principal_only_oa_ids = external_oa_ids - other_oa_ids
+        principal_only_oa_ids.update(_split_principal_only_oa_ids(
+            oa_rows, group_bank_rows, external_ids, group.get("source_relation_groups", []),
+        ))
         oa_rows = [row for row in oa_rows
                    if _clean_text(row.get("id") or row.get("row_id")) not in principal_only_oa_ids]
         if not oa_rows:
@@ -860,6 +863,54 @@ def _append_source_allocation_entries(
             bank_account_label=_clean_text(bank_row.get("payment_account_label")) or UNRESOLVED_BANK_ACCOUNT_LABEL,
             payment_evidence=payment_evidence, reconciliation=reconciliation,
         ))
+
+
+def _split_principal_only_oa_ids(
+    oa_rows: list[dict[str, Any]], bank_rows: list[dict[str, Any]],
+    external_ids: set[str], relation_groups: list[dict[str, Any]],
+) -> set[str]:
+    """Prove whole OA principal ownership before removing principal cost sources."""
+    if (len(oa_rows) < 2 or not external_ids or len(external_ids) == len(bank_rows)
+            or not all(row.get("is_split") and _outflow_amount(row) is not None for row in bank_rows)):
+        return set()
+    contexts: list[dict[str, Any]] = []
+    for row in oa_rows:
+        row_contexts, reasons = _oa_allocation_contexts(row)
+        if reasons:
+            return set()
+        contexts.extend(row_contexts)
+    units = [{"unit_id": _allocation_id(context), "oa_id": context["oa_id"],
+              "oa_original_amount": _money(context["allocation_amount"]),
+              "lock_oa_amount": True, "outside_cost_amount": "0.00"}
+             for context in contexts]
+    events = [{"transaction_id": _bank_transaction_id(row), "event_kind": "outflow",
+               "amount": _money(_outflow_amount(row))} for row in bank_rows]
+    original = sum((Decimal(unit["oa_original_amount"]) for unit in units), ZERO)
+    if not units or original != sum((Decimal(event["amount"]) for event in events), ZERO):
+        return set()
+    task = {"units": units, "bank_events": events, "non_cost_amount": "0.00",
+            "oa_total": _money(original), "net_outflow_total": _money(original),
+            "allocations": [{"unit_id": unit["unit_id"], "amount": unit["oa_original_amount"]} for unit in units]}
+    decision = automatic_relation_sources(task, bank_rows, relation_groups)
+    if decision is None:
+        return set()
+    by_unit: dict[str, list[dict[str, str]]] = {}
+    source_usage: dict[str, Decimal] = {}
+    for line in decision["cost_lines"]:
+        by_unit.setdefault(line["unit_id"], []).append(line)
+        source = line["bank_transaction_id"]
+        source_usage[source] = source_usage.get(source, ZERO) + Decimal(line["amount"])
+    # A partial independent solution cannot prove the remaining OA is principal.
+    if any(sum((Decimal(line["amount"]) for line in by_unit.get(unit["unit_id"], [])), ZERO)
+           != Decimal(unit["oa_original_amount"]) for unit in units):
+        return set()
+    if any(source_usage.get(event["transaction_id"], ZERO) != Decimal(event["amount"]) for event in events):
+        return set()
+    principal_oa = {unit["oa_id"] for unit in units}
+    for unit in units:
+        if any(line["bank_transaction_id"] not in external_ids for line in by_unit[unit["unit_id"]]):
+            principal_oa.discard(unit["oa_id"])
+    return principal_oa
 
 
 def _manual_allocation_task(

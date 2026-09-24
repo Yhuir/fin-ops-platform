@@ -164,7 +164,13 @@ export default function WorkbenchAnomalyIndicator({
                     ? differences.map((difference) => [
                       ["OA", difference.oaTotal], ["票据凭证", difference.evidenceTotal],
                     ])
-                    : [[["OA", anomaly.oaTotal], ["银行流水", anomaly.bankTotal], ["票据凭证", anomaly.evidenceTotal]]];
+                    : [[
+                      ["OA", anomaly.oaTotal], ["银行流水", anomaly.bankOriginalTotal],
+                      ...(anomaly.bankOriginalTotal !== undefined && anomaly.bankRelatedTotal !== undefined
+                        && Number(anomaly.bankOriginalTotal) !== Number(anomaly.bankRelatedTotal)
+                        ? [["本次关联", anomaly.bankRelatedTotal]] : []),
+                      ["票据凭证", anomaly.evidenceTotal],
+                    ]];
                   return (
                     <li key={anomaly.fingerprint}>
                       {comparisons.map((amounts, index) => (

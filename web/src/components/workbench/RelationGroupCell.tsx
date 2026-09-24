@@ -1,4 +1,7 @@
-import { BankSplitPartContent } from "../../features/bankSplits/BankSplitChips";
+import BankSplitChips from "../../features/bankSplits/BankSplitChips";
+import { Dropdown } from "@heroui/react";
+import { resolveWorkbenchBankSelection } from "../../features/workbench/selectionModel";
+import { formatMoney } from "../../features/money";
 import { memo, type ReactNode } from "react";
 
 import type { WorkbenchRecord, WorkbenchRecordType } from "../../features/workbench/types";
@@ -21,7 +24,7 @@ type RelationGroupCellProps = {
   highlightedRowId?: string | null;
   searchQuery?: string;
   getRowState: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => WorkbenchRowState;
-  onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => void;
+  onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "unpaired", scope?: "unit") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
   showWorkflowActions: boolean;
@@ -56,7 +59,6 @@ function RelationGroupCell({
   entryControl,
 }: RelationGroupCellProps) {
   const splitGroups = new Map<string, WorkbenchRecord[]>();
-  const bankMembers = new Map(paneId === "bank" ? records.map(row => [row.id, row] as const) : []);
   const displayRecords = records.filter(row => {
     if (paneId !== "bank" || !row.isSplit || !row.parentRowId) return true;
     const members = splitGroups.get(row.parentRowId);
@@ -90,17 +92,27 @@ function RelationGroupCell({
       >
         {displayRecords.map((row, index) => (
           <WorkbenchRecordCard
-            bankPartsContent={row.isSplit && row.parentRowId ? <span className="bank-split-chips">
-              {row.bankSplitParts?.map(part => {
-                const member = bankMembers.get(part.id);
-                return <span className="bank-split-part" key={part.id}>
-                  <BankSplitPartContent
-                    selected={member ? getRowState(member, zoneId) === "selected" : false}
-                    onSelect={member && !readOnly && canOperateData && !member.displayOnly ? () => onSelectRow(member, zoneId) : undefined}
-                    part={part} />
-                </span>;
-              })}
-            </span> : undefined}
+            bankPartsContent={row.isSplit && row.parentRowId ? <>
+              <BankSplitChips parts={row.bankSplitParts ?? []} />
+              {!readOnly && canOperateData && !row.displayOnly ? <span onClick={event => event.stopPropagation()}>
+                <Dropdown>
+                  <Dropdown.Trigger aria-label="选择流水子项" className="row-actions-compact-trigger">选择子项</Dropdown.Trigger>
+                  <Dropdown.Popover placement="bottom end">
+                    <Dropdown.Menu aria-label="流水子项" onAction={key => {
+                      const [member] = resolveWorkbenchBankSelection(row, String(key));
+                      onSelectRow(member, zoneId, "unit");
+                    }}>
+                      {(row.bankSplitParts ?? []).map(part => <Dropdown.Item key={part.id} id={part.id}
+                        isDisabled={part.relation_case_id === undefined || (part.relation_case_id !== null && part.relation_case_id !== row.caseId)}
+                        textValue={`${part.category_label} ${formatMoney(part.amount)}`}>
+                        {part.category_path.join(" / ")} · {formatMoney(part.amount)}
+                        {part.relation_case_id !== undefined && part.relation_case_id !== null && part.relation_case_id !== row.caseId ? " · 已关联" : ""}
+                      </Dropdown.Item>)}
+                    </Dropdown.Menu>
+                  </Dropdown.Popover>
+                </Dropdown>
+              </span> : null}
+            </> : undefined}
             columnGridStyle={columnGridStyle}
             columns={columns}
             highlighted={highlightedRowId === row.id || Boolean(row.parentRowId && splitGroups.get(row.parentRowId)?.some(part => part.id === highlightedRowId))}
@@ -111,7 +123,11 @@ function RelationGroupCell({
             onSelectRow={onSelectRow}
             paneId={paneId}
             row={row}
-            rowState={getRowState(row, zoneId)}
+            rowState={row.isSplit && row.bankSplitParts?.length
+              ? row.bankSplitParts.every(part => getRowState({ ...row, id: part.id }, zoneId) === "selected")
+                ? "selected"
+                : row.bankSplitParts.some(part => getRowState({ ...row, id: part.id }, zoneId) !== "idle") ? "related" : "idle"
+              : getRowState(row, zoneId)}
             sheetRowMode={isSingleRecord ? "stretched" : "split"}
             leadingControl={rowControls?.get(row.id) ?? (index === 0 ? leadingControl : undefined)}
             showWorkflowActions={showWorkflowActions}

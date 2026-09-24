@@ -9,18 +9,15 @@ type PartContent = Pick<BankSplitPart, 'category_code' | 'category_label' | 'cat
 
 type PartProps = {
   part: PartContent;
-  onSelect?: () => void;
-  selected?: boolean;
 };
 
-export function BankSplitPartContent({ part, onSelect, selected }: PartProps) {
+export function BankSplitPartContent({ part }: PartProps) {
   const [open, setOpen] = useState(false);
   const label = part.category_path.length ? part.category_path.join(' / ') : part.category_label;
   return <Tooltip delay={150} isOpen={open} onOpenChange={setOpen}>
     <Tooltip.Trigger<"button">
       className="bank-split-part-trigger"
-      aria-label={onSelect ? `选择流水子项 ${label} ${formatMoney(part.amount)}` : `${label}拆分金额`}
-      aria-pressed={onSelect ? selected : undefined}
+      aria-label={`${label}拆分金额`}
       render={(props) => <button {...props} type="button" />}
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
@@ -28,8 +25,7 @@ export function BankSplitPartContent({ part, onSelect, selected }: PartProps) {
       onBlur={() => setOpen(false)}
       onClick={(event) => {
         event.stopPropagation();
-        if (onSelect) onSelect();
-        else setOpen(true);
+        setOpen(true);
       }}
     >
       <BankCategoryTag compact categoryCode={part.category_code} label={label} hierarchyTooltip={false} />

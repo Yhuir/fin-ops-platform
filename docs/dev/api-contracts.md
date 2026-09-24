@@ -1570,3 +1570,7 @@ OA 成本标签覆盖：`oa_cost_tag_overrides` 为必填数组，每项 `{unit_
 - `POST /api/imports/jobs/{uuid}/dispose`：admin-only mutation；body `{version,action,reason,note?}`，version 正整数，action=close|discard，reason=completed_elsewhere|not_needed，note最多500字。close只处理failed，discard只处理文件/ETC的needs_review并事务终结预览。返回 `{job_id,status,version,disposition,idempotent_replay}`；保留失败原文，不写正式财务事实。
 - 同一版本、动作、原因、说明重复提交返回已处理结果；不同请求争用或版本/状态变化返回409。非法输入400、目标不存在404、非管理员403。操作者来自认证session，不能由body冒充。
 - 个人确认已知仅隐藏提醒；管理员 disposition 明确结束原任务，原 confirm/retry/reprepare/cancel 不得重新激活。后续需要导入时创建新导入。审计与状态同事务，HTTP completion 保存业务可读处理证据。
+
+### 拆分流水确认与金额核对（2026-09-24）
+
+Workbench 银行用途 DTO 的 bank_split_parts 新增 relation_case_id（null 表示无 active owner），paired_requires_invoice 来自当前标签配对规则。confirm-link/preview 返回 bank_split_versions；confirm-link 接受同一 map 并在持久化锁内复核，非法 map 400、版本冲突409。amount_check 与组级金额异常输出 bank_original_total、bank_related_total、evidence_required_total，分别表示父流水原额、正式成员方向净额、用途规则要求的票据额；invoice_total/evidence_total 保留真实凭证值。原 bank_total 继续承担既有用途核对，不可拿它替代原流水显示金额。

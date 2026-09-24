@@ -251,10 +251,9 @@ class WorkbenchRelationGroupingService:
             if isinstance(relation.get("amount_check"), dict)
             else None
         )
+        current_amount_check = amount_check_service.check(rows_by_type, relation_mode=relation_mode)
         if relation_amount_check is not None:
-            relation_amount_check.update(
-                amount_check_service.check(rows_by_type, relation_mode=relation_mode)
-            )
+            relation_amount_check.update(current_amount_check)
         anomaly = amount_check_service.workbench_anomaly(
             rows_by_type,
             relation_id=case_id,
@@ -280,6 +279,15 @@ class WorkbenchRelationGroupingService:
                     [*list(completion.get("blocking_reasons") or []), "anomaly_review_required"]
                 )
             )
+        if (relation_mode != "turnover_manual_closure"
+                and any(row.get("is_split") for row in rows_by_type["bank"])
+                and current_amount_check["evidence_required_total"] is None):
+            zone = "unpaired"
+            completion = deepcopy(completion)
+            completion["is_complete"] = False
+            completion["blocking_reasons"] = list(dict.fromkeys([
+                *completion.get("blocking_reasons", []), "bank_split_rule_unknown",
+            ]))
         if zone != base_zone:
             for row in rows:
                 row["status"] = zone

@@ -1,6 +1,7 @@
 import { apiRequestJson } from '../apiClient';
 
 export type BankSplitPart = {
+  relation_case_id?: string | null;
   id: string;
   category_code: string;
   category_label: string;

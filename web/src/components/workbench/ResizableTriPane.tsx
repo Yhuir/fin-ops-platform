@@ -36,7 +36,7 @@ type ResizableTriPaneProps = {
   onStartDrag: (leftIndex: number, rightIndex: number, clientX: number, containerWidth: number) => void;
   getRowState: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => WorkbenchRowState;
   highlightedRowId?: string | null;
-  onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => void;
+  onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "unpaired", scope?: "unit") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (
     row: WorkbenchRecord,

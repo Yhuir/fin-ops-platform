@@ -499,6 +499,19 @@ class PostgresWorkbenchRelationRepository:
         )
         return {(row["pane"], row["row_id"]): row["scope_month"] for row in rows}
 
+    def bank_split_versions_for_members(self, bank_row_ids: list[str]) -> dict[str, int]:
+        """Read split versions after the caller holds canonical parent share locks."""
+        if not bank_row_ids:
+            return {}
+        rows = self._connection.fetch_all(
+            """select distinct parent_row_id, split_version
+               from app.bank_transaction_units
+               where coalesce(legacy_mongo_id, id::text) = any(%s::text[])
+                 and status <> 'deleted' and is_split""",
+            (bank_row_ids,),
+        )
+        return {row["parent_row_id"]: int(row["split_version"]) for row in rows}
+
     def lock_canonical_relation_members(
         self,
         row_ids: list[str],

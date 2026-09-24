@@ -404,6 +404,7 @@ class WorkbenchRelationCommandService:
         preparation: WorkbenchRelationConfirmPreparation | None = None,
         request_id: str | None = None,
         tenant_id: str | None = None,
+        bank_split_versions: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         mode = self._validated_relation_mode(relation_mode)
         fingerprint = self._request_fingerprint(
@@ -417,6 +418,7 @@ class WorkbenchRelationCommandService:
                 "month_scope": month_scope,
                 "note": note,
                 "amount_check": amount_check,
+                "bank_split_versions": bank_split_versions,
                 "special_metadata": special_metadata,
                 "evidence": evidence,
                 "oa_exemption": oa_exemption,
@@ -482,6 +484,20 @@ class WorkbenchRelationCommandService:
                 row_types=additional_row_types,
                 case_ids=[case_id],
             )
+        if bank_split_versions is not None:
+            if (not isinstance(bank_split_versions, dict)
+                    or any(not isinstance(key, str) or not key or type(value) is not int or value < 1
+                           for key, value in bank_split_versions.items())):
+                raise WorkbenchRelationCommandError("invalid_bank_split_versions", "Invalid bank split versions.")
+            current_versions = self._relation_repository.bank_split_versions_for_members(
+                [row_id for row_id, row_type in zip(row_ids, row_types, strict=True) if row_type == "bank"],
+            )
+            if current_versions != bank_split_versions:
+                raise WorkbenchRelationCommandError(
+                    "bank_split_version_conflict", "流水拆分已变化，请重新预览后确认。",
+                    payload={"expected_bank_split_versions": bank_split_versions,
+                             "current_bank_split_versions": current_versions},
+                )
         active_relations = pair_service.active_relations_for_typed_rows(
             list(row_ids or []),
             list(row_types or []),

@@ -26,6 +26,8 @@ const anomalyItems: WorkbenchAnomalyItem[] = [
     sourceExpenseItemIds: [],
     oaTotal: "100.00",
     bankTotal: "90.00",
+    bankOriginalTotal: "90.00",
+    bankRelatedTotal: "90.00",
     invoiceTotal: "80.00",
     evidenceTotal: "80.00",
     amountDelta: "20.00",

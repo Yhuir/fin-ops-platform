@@ -423,6 +423,7 @@ class WorkbenchWriteFacade:
             {
                 "operation": "confirm_link",
                 "operation_type": "confirm_link",
+                "bank_split_versions": self._bank_split_versions(rows),
                 "can_submit": True,
                 "requires_note": requires_note,
                 "message": "金额不一致，请填写备注。" if requires_note else "",
@@ -498,6 +499,7 @@ class WorkbenchWriteFacade:
                 selected_rows,
                 minimum_rows=2,
             )
+            self._validate_bank_split_versions_payload(payload, selected_rows)
             rows_by_type = self._rows_by_type(selected_rows)
             confirm_plan = self._confirm_plan_for_rows(
                 rows_by_type,
@@ -505,6 +507,8 @@ class WorkbenchWriteFacade:
                 note=note,
             )
             amount_check = confirm_plan.amount_check
+        except WorkbenchRelationCommandError as exc:
+            return self._relation_command_error_result(exc)
         except KeyError as exc:
             row_id = str(exc.args[0] if exc.args else "").strip()
             return WorkbenchWriteResult(
@@ -597,6 +601,7 @@ class WorkbenchWriteFacade:
                     case_id=resolved_case_id,
                     row_ids=row_ids,
                     row_types=row_types,
+                    bank_split_versions=self._bank_split_versions(selected_rows),
                     actor_id=actor_id,
                     month=relation_scope(selected_rows),
                     note=note,
@@ -778,6 +783,7 @@ class WorkbenchWriteFacade:
                 case_id=resolved_case_id,
                 row_ids=row_ids,
                 row_types=row_types,
+                bank_split_versions=self._bank_split_versions(selected_rows),
                 actor_id=actor_id,
                 month=relation_scope(canonical_selection),
                 note=note,
@@ -853,6 +859,7 @@ class WorkbenchWriteFacade:
         case_id: str,
         row_ids: list[str],
         row_types: list[str],
+        bank_split_versions: dict[str, int],
         actor_id: str | None,
         month: str,
         note: str,
@@ -887,6 +894,8 @@ class WorkbenchWriteFacade:
             "request_id": request_id,
             "tenant_id": tenant_id,
         }
+        if bank_split_versions:
+            command_payload["bank_split_versions"] = bank_split_versions
         if confirm_plan.turnover_closure is not None:
             command_payload.update(
                 {
@@ -895,6 +904,40 @@ class WorkbenchWriteFacade:
                 }
             )
         return confirm_relation(**command_payload)
+
+    @staticmethod
+    def _bank_split_versions(rows: list[dict[str, object]]) -> dict[str, int]:
+        versions: dict[str, int] = {}
+        for row in rows:
+            if row.get("type") != "bank" or not row.get("is_split"):
+                continue
+            parent = row.get("parent_row_id")
+            version = row.get("split_version")
+            if not isinstance(parent, str) or not parent or type(version) is not int or version < 1:
+                raise ValueError("拆分流水缺少有效父流水身份或版本。")
+            if parent in versions and versions[parent] != version:
+                raise ValueError("同一流水的拆分版本不一致，请重新预览。")
+            versions[parent] = version
+        return versions
+
+    @classmethod
+    def _validate_bank_split_versions_payload(
+        cls, payload: dict[str, object], rows: list[dict[str, object]],
+    ) -> None:
+        current = cls._bank_split_versions(rows)
+        if "bank_split_versions" not in payload:
+            return
+        expected = payload["bank_split_versions"]
+        if (not isinstance(expected, dict)
+                or any(not isinstance(key, str) or not key or type(value) is not int or value < 1
+                       for key, value in expected.items())
+                or set(expected) != set(current)):
+            raise ValueError("bank_split_versions 必须完整包含所选拆分流水及有效版本。")
+        if expected != current:
+            raise WorkbenchRelationCommandError(
+                "bank_split_version_conflict", "流水拆分已变化，请重新预览后确认。",
+                payload={"expected_bank_split_versions": expected, "current_bank_split_versions": current},
+            )
 
     def _confirm_plan_for_rows(
         self,
@@ -1157,6 +1200,7 @@ class WorkbenchWriteFacade:
         conflict_errors = {
             "workbench_relation_active_row_conflict",
             "workbench_relation_canonical_member_missing",
+            "bank_split_version_conflict",
             "workbench_relation_idempotency_conflict",
             "workbench_relation_immutable_oa_attachment_binding",
             "workbench_relation_multiple_groups_selected",

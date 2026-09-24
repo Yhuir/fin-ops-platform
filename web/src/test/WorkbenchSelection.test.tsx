@@ -101,6 +101,7 @@ function selectionAmountCheck(oaTotal: string, bankTotal: string, invoiceTotal: 
     bank_amount: bankTotal,
     oa_total: oaTotal,
     bank_total: bankTotal,
+    bank_related_total: bankTotal,
     invoice_total: invoiceTotal,
     amount_delta: "0.00",
     requires_note: false,
@@ -637,7 +638,7 @@ function withCompactBankFlowRelation(payload: Record<string, unknown>) {
       groups: [{
         ...sourceGroup,
         group_id: "bank-flow-rule-batch:COMPACT-202603",
-        amount_check: { status: "matched", direction: "payment", oa_total: "0.00", bank_total: "128000.00", invoice_total: "0.00", requires_note: false },
+        amount_check: { status: "matched", direction: "payment", oa_total: "0.00", bank_total: "128000.00", bank_related_total: "128000.00", invoice_total: "0.00", requires_note: false },
         relation_mode: "bank_flow_rule_batch",
         bank_folds: [{ fold_id: "COMPACT-202603", member_ids: ["compact-bank-1", "compact-bank-2", "compact-bank-3"], summary_row: summaryRow }],
         formal_member_ids: ["compact-bank-1", "compact-bank-2", "compact-bank-3"],

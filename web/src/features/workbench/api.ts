@@ -229,6 +229,8 @@ type ApiWorkbenchAnomalyItem = {
   source_expense_item_ids?: unknown[] | null;
   oa_total?: string | number | null;
   bank_total?: string | number | null;
+  bank_original_total?: string | number | null;
+  bank_related_total?: string | number | null;
   invoice_total?: string | number | null;
   amount_delta?: string | number | null;
   mismatch_pair?: unknown[] | null;
@@ -524,6 +526,8 @@ type ApiWorkbenchRelationAmountCheck = {
   bank_amount?: string | number | null;
   bankAmount?: string | number | null;
   bank_total?: string | number | null;
+  bank_original_total?: string | number | null;
+  bank_related_total?: string | number | null;
   bankTotal?: string | number | null;
   oa_amount?: string | number | null;
   oaAmount?: string | number | null;
@@ -558,6 +562,7 @@ type ApiWorkbenchAmountSummary = {
 };
 
 type ApiWorkbenchRelationPreview = {
+  bank_split_versions?: Record<string, number>;
   operation?: "confirm_link" | "withdraw_link";
   operation_type?: "confirm_link" | "withdraw_relation";
   operationType?: "confirm_link" | "withdraw_relation";
@@ -599,6 +604,7 @@ export type WorkbenchActionResult = Omit<ApiWorkbenchActionResult, "affectedScop
 };
 
 type ConfirmLinkPayload = {
+  bankSplitVersions?: Record<string, number>;
   month: string;
   rowIds: string[];
   rowTypes: WorkbenchRecordType[];
@@ -1034,6 +1040,8 @@ function mapRelationAmountCheck(value: ApiWorkbenchRelationAmountCheck | null | 
     oaAmount: toDisplayValue(value.oa_amount ?? value.oaAmount),
     oaTotal: firstNonPlaceholderDisplayValue(value.oa_total, value.oaTotal, value.oa_amount, value.oaAmount),
     bankTotal: firstNonPlaceholderDisplayValue(value.bank_total, value.bankTotal, value.bank_amount, value.bankAmount),
+    bankOriginalTotal: firstNonPlaceholderDisplayValue(value.bank_original_total),
+    bankRelatedTotal: firstNonPlaceholderDisplayValue(value.bank_related_total),
     invoiceTotal: firstNonPlaceholderDisplayValue(value.invoice_total, value.invoiceTotal),
     supportingDocumentTotal: firstNonPlaceholderDisplayValue(value.supporting_document_total),
     evidenceTotal: firstNonPlaceholderDisplayValue(value.evidence_total),
@@ -1089,6 +1097,8 @@ function mapWorkbenchAnomaly(
       sourceExpenseItemIds: toStringList(item.source_expense_item_ids),
       oaTotal: toDisplayValue(item.oa_total, "") || undefined,
       bankTotal: toDisplayValue(item.bank_total, "") || undefined,
+      bankOriginalTotal: toDisplayValue(item.bank_original_total, "") || undefined,
+      bankRelatedTotal: toDisplayValue(item.bank_related_total, "") || undefined,
       invoiceTotal: toDisplayValue(item.invoice_total, "") || undefined,
       amountDelta: toDisplayValue(item.amount_delta, "") || undefined,
       mismatchPair: Array.isArray(item.mismatch_pair) && item.mismatch_pair.length === 2
@@ -1992,6 +2002,7 @@ function mapRelationPreview(payload: ApiWorkbenchRelationPreview): WorkbenchRela
     operation,
     operationType,
     previewId: String(payload.preview_id ?? payload.previewId ?? "").trim(),
+    bankSplitVersions: payload.bank_split_versions,
     submitExpectedVersions: {
       ...(payload.submit_expected_versions ?? payload.submitExpectedVersions ?? {}),
     },
@@ -3722,6 +3733,7 @@ export async function fetchWorkbenchRowDetail(
 
 export async function confirmWorkbenchLink(payload: ConfirmLinkPayload): Promise<WorkbenchActionResult> {
   const requestBody: {
+    bank_split_versions?: Record<string, number>;
     month: string;
     row_ids: string[];
     row_types: WorkbenchRecordType[];
@@ -3729,6 +3741,7 @@ export async function confirmWorkbenchLink(payload: ConfirmLinkPayload): Promise
     note?: string;
     idempotency_key: string;
   } = {
+    bank_split_versions: payload.bankSplitVersions,
     month: payload.month,
     row_ids: payload.rowIds,
     row_types: payload.rowTypes,

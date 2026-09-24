@@ -35,12 +35,10 @@ test('keyboard focus and touch click reveal amounts without selecting a surround
   expect(select).not.toHaveBeenCalled();
 });
 
-test('workbench retains explicit part selection on a single control with no nested button', async () => {
-  const select = vi.fn();
+test('split chips never act as hidden selection controls', async () => {
   const user = userEvent.setup();
-  const { container } = render(<BankSplitPartContent part={parts[1]} onSelect={select} selected />);
-  await user.click(screen.getByRole('button', { name: /选择流水子项/ }));
-  expect(select).toHaveBeenCalledOnce();
-  expect(screen.getByRole('button')).toHaveAttribute('aria-pressed', 'true');
+  const { container } = render(<BankSplitPartContent part={parts[1]} />);
+  await user.click(screen.getByRole('button', { name: '费用 / 利息拆分金额' }));
+  expect(screen.getByRole('button')).not.toHaveAttribute('aria-pressed');
   expect(container.querySelector('button button')).toBeNull();
 });

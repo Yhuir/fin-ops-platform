@@ -602,6 +602,7 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
             {
                 "bank_split_parts": [],
                 "category_code": "fee",
+                "paired_requires_invoice": True,
                 "category_label": "手续费",
                 "category_path": ["自动识别", "手续费"],
                 "category_primary_label": "费用",

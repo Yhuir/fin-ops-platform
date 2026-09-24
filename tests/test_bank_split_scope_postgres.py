@@ -76,3 +76,100 @@ def test_retire_flag_preserves_relation_version_members_and_rolls_back(split_cas
         assert current['row_ids'] == original['row_ids']
         assert current['special_metadata'] == {"keep": "value"}
         assert owner.retire_bank_split_confirmation_flags(actor_id="test", apply=True) == []
+
+
+@pytest.mark.parametrize("ordinary_amount", [0, 100])
+@pytest.mark.parametrize("explicit_status", [False, True])
+def test_full_principal_interest_payment_has_separate_invoice_requirement(split_case, ordinary_amount, explicit_status):
+    c = split_case.connection
+    settings = split_case.settings
+    if not explicit_status:
+        for definition in settings['bank_transaction_tags']['definitions']:
+            definition.pop('status')
+    settings['bank_flow_rule_batch_tag_rules'] = {'version': 1, 'requirements_by_tag_code': {
+        'principal-custom': {'requires_oa': True, 'requires_invoice': False},
+        'interest-custom': {'requires_oa': True, 'requires_invoice': True},
+    }}
+    c.execute("update app.app_settings set settings_payload=%s::jsonb where settings_key='app_settings'", (json.dumps(settings),))
+    c.execute("""insert into app.oa_applications
+        (oa_source_id,form_id,form_type,row_id,status,workflow_status,applicant,application_date,scope_month,
+         project_name,amount,currency,normalized_payload,raw_payload)
+        values ('oa-principal','oa-principal','支付申请','oa-principal','active','completed','测试申请人',
+                '2026-04-29','2026-04-01','测试项目',1000000,'CNY',
+                '{"id":"oa-principal","project_name":"测试项目","amount":"1000000.00","expense_type":"还款"}', '{}')""")
+    c.execute("""insert into app.invoices
+        (legacy_mongo_id,invoice_type,invoice_no,amount,signed_amount,total_with_tax,status,workbench_visibility,invoice_date,invoice_month)
+        values ('invoice-interest','input','test-interest-1497',%s,%s,%s,'active','visible','2026-04-29','2026-04-01')""", (Decimal('1497.22') + ordinary_amount,) * 3)
+    c.execute("""update app.workbench_pair_relations set row_ids=row_ids||array['oa-principal','invoice-interest'],
+        row_types=row_types||array['oa','invoice'],special_metadata='{"requires_oa":true,"requires_invoice":true}'
+        where case_id='split-case'""")
+    if ordinary_amount:
+        c.execute("""insert into app.bank_transactions(legacy_mongo_id,account_no,counterparty_name_raw,txn_direction,amount,signed_amount,
+            txn_date,txn_month,trade_time,status,currency,raw_payload)
+            values ('ordinary','111','测试对方','outflow',100,-100,'2026-04-29','2026-04-01','2026-04-29 12:00:00+08','active','CNY','{}')""")
+        c.execute("update app.workbench_pair_relations set row_ids=row_ids||array['ordinary'],row_types=row_types||array['bank'] where case_id='split-case'")
+        c.execute("update app.oa_applications set amount=1597.22,normalized_payload=jsonb_set(normalized_payload,'{amount}','\"1597.22\"') where row_id='oa-interest'")
+    query = PostgresWorkbenchPageQueryRepository(c, tenant_id='default')
+    for level in ('summary', 'full'):
+        page = query.get_workbench_groups_page(scope_key='all', zone='paired', page_size=10, detail_level=level)
+        group = next(g for g in page['groups'] if g.get('case_id') == 'split-case')
+        assert group['amount_check']['status'] == 'matched'
+        assert group['amount_check']['bank_total'] == f'{Decimal("1001497.22") + ordinary_amount:.2f}'
+        assert group['amount_check']['bank_original_total'] == f'{Decimal("1001497.22") + ordinary_amount:.2f}'
+        assert group['amount_check']['evidence_required_total'] == f'{Decimal("1497.22") + ordinary_amount:.2f}'
+        assert group['amount_check']['invoice_total'] == f'{Decimal("1497.22") + ordinary_amount:.2f}'
+        assert group['completion']['is_complete'] is True
+    from fin_ops_platform.services.cost_statistics_canonical_repository import PostgresCostStatisticsCanonicalRepository
+    from fin_ops_platform.services.cost_statistics_policy import CostStatisticsPolicy
+    policy = CostStatisticsPolicy(PostgresCostStatisticsCanonicalRepository(c).load_snapshot())
+    if not ordinary_amount:
+        assert [row['amount'] for row in policy.serialized_cost_rows] == ['1497.22']
+        assert policy.manual_allocation_tasks == []
+    assert c.fetch_one('select count(*) as count from app.cost_statistics_manual_allocations')['count'] == 0
+    # Same facts and changed policy must immediately change both SQL partition and detail.
+    settings['bank_flow_rule_batch_tag_rules']['requirements_by_tag_code']['principal-custom']['requires_invoice'] = True
+    c.execute("update app.app_settings set settings_payload=%s::jsonb where settings_key='app_settings'", (json.dumps(settings),))
+    page = query.get_workbench_groups_page(scope_key='all', zone='unpaired', page_size=10, detail_level='full')
+    group = next(g for g in page['groups'] if g.get('case_id') == 'split-case')
+    assert group['amount_check']['status'] == 'mismatch'
+    assert group['workbench_anomaly']['items'][0]['code'] == 'oa_bank_equal_invoice_less'
+
+
+def test_workbench_sibling_ownership_is_complete_for_partial_selection(split_case):
+    from fin_ops_platform.services.bank_details_canonical_query import PostgresBankDetailsCanonicalQueryRepository
+    c = split_case.connection
+    c.execute("update app.workbench_pair_relations set row_ids=array['oa-interest',%s],row_types=array['oa','bank'] where case_id='split-case'", (split_case.interest,))
+    def parts():
+        projection = PostgresBankDetailsCanonicalQueryRepository.workbench_category_projection_rows(
+            c, settings=split_case.settings, transaction_ids=[split_case.interest])
+        return {part['id']: part['relation_case_id'] for part in projection[split_case.interest]['bank_split_parts']}
+    assert parts() == {split_case.principal: None, split_case.interest: 'split-case'}
+    c.execute("""insert into app.workbench_pair_relations(case_id,relation_mode,status,row_ids,row_types,month_scope)
+        values ('principal-owner','manual_confirmed','active',array[%s],array['bank'],'2026-04-01')""", (split_case.principal,))
+    assert parts() == {split_case.principal: 'principal-owner', split_case.interest: 'split-case'}
+    c.execute("update app.workbench_pair_relations set status='cancelled' where case_id='principal-owner'")
+    assert parts()[split_case.principal] is None
+
+
+@pytest.mark.parametrize("invalid_rule", ["archived", "missing_rules"])
+def test_unknown_split_rule_is_unpaired_without_fabricated_amount_anomaly(split_case, invalid_rule):
+    c = split_case.connection
+    settings = split_case.settings
+    if invalid_rule == 'archived':
+        settings['bank_transaction_tags']['definitions'][1]['status'] = 'archived'
+    else:
+        settings['bank_transaction_tags']['definitions'][1].pop('rules')
+    c.execute("update app.app_settings set settings_payload=%s::jsonb", (json.dumps(settings),))
+    c.execute("""insert into app.invoices
+        (legacy_mongo_id,invoice_type,invoice_no,amount,signed_amount,total_with_tax,status,workbench_visibility,invoice_date,invoice_month)
+        values ('invoice-interest','input','test-interest-1497',1497.22,1497.22,1497.22,'active','visible','2026-04-29','2026-04-01')""")
+    c.execute("update app.workbench_pair_relations set row_ids=row_ids||array['invoice-interest'],row_types=row_types||array['invoice'] where case_id='split-case'")
+    query = PostgresWorkbenchPageQueryRepository(c, tenant_id='default')
+    for level in ('summary', 'full'):
+        page = query.get_workbench_groups_page(scope_key='all', zone='unpaired', page_size=10, detail_level=level)
+        group = next(g for g in page['groups'] if g.get('case_id') == 'split-case')
+        assert group['amount_check']['status'] == 'unknown'
+        assert group['completion']['is_complete'] is False
+        assert not group.get('workbench_anomaly')
+    page = query.get_workbench_groups_page(scope_key='all', zone='paired', page_size=10)
+    assert not any(g.get('case_id') == 'split-case' for g in page['groups'])

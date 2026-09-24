@@ -2,6 +2,8 @@ import { describe, expect, test } from "vitest";
 
 import {
   buildWorkbenchSelectionContext,
+  resolveWorkbenchBankSelection,
+  toggleWorkbenchSelectionRows,
   workbenchComparableAmountCents,
   workbenchRowIdentityKey,
 } from "../features/workbench/selectionModel";
@@ -47,6 +49,7 @@ function authoritativeAmountCheck(
     oaAmount: oaTotal,
     oaTotal,
     bankTotal,
+    bankRelatedTotal: bankTotal,
     invoiceTotal,
     amountDelta: "0.00",
     requiresNote: false,
@@ -294,6 +297,7 @@ describe("buildWorkbenchSelectionContext", () => {
         oaAmount: "2100.00",
         oaTotal: "2100.00",
         bankTotal: "2100.00",
+        bankRelatedTotal: "2100.00",
         invoiceTotal: "0.00",
         amountDelta: "0.00",
         requiresNote: false,
@@ -818,4 +822,68 @@ describe("buildWorkbenchSelectionContext", () => {
     ]);
     expect(context.summary).toMatchObject({ explicitTotal: 1, total: 2, oa: 1, bank: 1 });
   });
+});
+
+
+describe("whole split bank selection", () => {
+  const bank: WorkbenchRecord = { ...row("interest", "bank", "1497.22"), caseId: "case-1", isSplit: true,
+    parentRowId: "parent", parentAmount: "1001497.22", amountDirection: "payment",
+    bankSplitParts: [
+      { id: "principal", amount: "1000000.00", category_code: "principal", category_label: "归还借款", category_path: ["外部往来款", "归还借款"], relation_case_id: null },
+      { id: "interest", amount: "1497.22", category_code: "interest", category_label: "利息", category_path: ["费用", "利息"], relation_case_id: "case-1" },
+    ],
+  };
+  test("search displaying only interest still resolves the full canonical sibling set", () => {
+    const selected = resolveWorkbenchBankSelection(bank);
+    expect(selected.map(item => [item.id, item.amount, item.caseId])).toEqual([
+      ["principal", "1000000.00", undefined], ["interest", "1497.22", "case-1"],
+    ]);
+    expect(selected.every(item => item.parentAmount === "1001497.22")).toBe(true);
+    expect(resolveWorkbenchBankSelection(bank, "interest")).toHaveLength(1);
+  });
+  test("rejects partial occupation and unknown ownership without silently dropping siblings", () => {
+    const parts = bank.bankSplitParts!;
+    expect(() => resolveWorkbenchBankSelection({ ...bank, bankSplitParts: [{ ...parts[0], relation_case_id: "other" }, parts[1]] })).toThrow("部分子项已属于其他关联");
+    expect(() => resolveWorkbenchBankSelection({ ...bank, bankSplitParts: [{ ...parts[0], relation_case_id: undefined }, parts[1]] })).toThrow("关联状态不完整");
+  });
+  test("batch select completes partial selection, deduplicates and toggles the complete set", () => {
+    const all = resolveWorkbenchBankSelection(bank);
+    const completed = toggleWorkbenchSelectionRows([all[1]], [...all, all[0]]);
+    expect(completed).toHaveLength(2);
+    expect(toggleWorkbenchSelectionRows(completed, all)).toEqual([]);
+  });
+  test("unsplit transactions retain their identity and amount", () => {
+    const unsplit = row("bank", "bank", "100.00");
+    expect(resolveWorkbenchBankSelection(unsplit)).toEqual([unsplit]);
+  });
+});
+
+
+test("a selected formal split relation totals actual members, not purpose comparison", () => {
+  const parts = [
+    { id: "principal", amount: "1000000.00", category_code: "principal", category_label: "本金", category_path: ["外部往来款", "归还借款"], relation_case_id: "split-case" },
+    { id: "interest", amount: "1497.22", category_code: "interest", category_label: "利息", category_path: ["费用", "利息"], relation_case_id: "split-case" },
+  ];
+  const bankRows = parts.map(part => ({ ...directionalRow(part.id, "bank", part.amount, "payment"),
+    caseId: "split-case", isSplit: true, parentRowId: "parent", parentAmount: "1001497.22", bankSplitParts: parts }));
+  const oa = directionalRow("interest-oa", "oa", "1497.22", "payment");
+  const relation: WorkbenchRelationGroup = { ...group("split-case"), rawGroupType: "relation", groupType: "paired",
+    rows: { oa: [oa], bank: bankRows, invoice: [] },
+    formalMemberIdentities: [oa, ...bankRows].map(item => ({ id: item.id, recordType: item.recordType })),
+    amountCheck: { ...authoritativeAmountCheck("1497.22", "1497.22", "0.00"), bankRelatedTotal: "1001497.22" },
+  };
+  const context = buildWorkbenchSelectionContext({ explicitRows: resolveWorkbenchBankSelection(bankRows[1]), sourceGroups: [relation], zoneId: "paired" });
+  expect(context.summary.amounts.bank).toBe("1001497.22");
+  expect(context.includedRowIdentities).toEqual(relation.formalMemberIdentities);
+
+  const interestOnly = { ...relation, rows: { oa: [oa], bank: [bankRows[1]], invoice: [] },
+    formalMemberIdentities: [oa, bankRows[1]].map(item => ({ id: item.id, recordType: item.recordType })),
+    amountCheck: authoritativeAmountCheck("1497.22", "1497.22", "0.00"),
+  };
+  bankRows[1].bankSplitParts = [{ ...parts[0], relation_case_id: "another-case" }, parts[1]];
+  expect(() => resolveWorkbenchBankSelection(bankRows[1])).toThrow("部分子项已属于其他关联");
+  const withdrawal = buildWorkbenchSelectionContext({ explicitRows: resolveWorkbenchBankSelection(bankRows[1], "interest"), sourceGroups: [interestOnly], zoneId: "paired" });
+  expect(withdrawal.summary.amounts.bank).toBe("1497.22");
+  expect(withdrawal.includedRowIdentities).toEqual(interestOnly.formalMemberIdentities);
+  expect(withdrawal.includedRowIdentities.some(item => item.id === "principal")).toBe(false);
 });

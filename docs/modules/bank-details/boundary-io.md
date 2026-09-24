@@ -170,3 +170,7 @@
 ## 2026-09-24 有界分类查询性能
 
 指定candidate_transaction_ids与内部candidate_transaction_relation复用同一classification_peer_bank_ids集合CTE，完整保留按金额和时间窗口补齐的内部转账候选；移除指定ID路径逐行重复扫描target_bank_rows。无目标范围的查询保持原语义，参数/DTO/查询次数/事务与标签优先级不变，无新增cache/index/worker。真实PG验证legacy/canonical ID、重复ID、缺失ID、拆分用途以及范围外对手流水；生产508条分类新旧全等，局部查询约162–188ms降为92–102ms。关联台、成本、批量账务与往来仍只消费既有分类边界。
+
+## 2026-09-24 子项选择所需的归属事实
+
+workbench_category_projection_rows 在既有一次有界批量查询中返回每个 bank_split_parts 子项的 relation_case_id（未占用为 null），并按当前有效标签配对规则返回用途行 paired_requires_invoice。查询不改正式关系，兄弟子项不因展示而成为当前成员；分类、原金额、持久化与其它页面 DTO 不变。关联台使用该事实进行完整选择，不能从当前页缺席推断子项未占用。

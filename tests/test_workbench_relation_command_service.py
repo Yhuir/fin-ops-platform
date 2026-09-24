@@ -27,6 +27,39 @@ def command_service() -> WorkbenchRelationCommandService:
 
 
 class WorkbenchRelationCommandServiceTests(unittest.TestCase):
+    def test_confirm_checks_split_versions_after_member_locks_before_writing(self):
+        service = command_service()
+        repository = service._relation_repository
+        events = []
+        repository.lock_canonical_relation_members = lambda *args, **kwargs: events.append("canonical_lock") or []
+        repository.acquire_relation_member_locks = lambda *args, **kwargs: events.append("member_lock") or []
+        repository.bank_split_versions_for_members = lambda ids: events.append(("read_versions", ids)) or {"parent": 3}
+        before = service.runtime_snapshot()
+        with self.assertRaises(WorkbenchRelationCommandError) as error:
+            service.confirm_relation(case_id="split-case", row_ids=["oa", "child"], row_types=["oa", "bank"],
+                relation_mode="manual_confirmed", actor_id="tester", bank_split_versions={"parent": 2})
+        self.assertEqual(error.exception.error_code, "bank_split_version_conflict")
+        self.assertEqual(events[-1], ("read_versions", ["child"]))
+        self.assertIn("canonical_lock", events[:-1])
+        self.assertIn("member_lock", events[:-1])
+        self.assertEqual(service.runtime_snapshot(), before)
+
+    def test_confirm_current_split_versions_is_idempotent_and_replay_has_no_new_reads(self):
+        service = command_service()
+        from unittest.mock import Mock
+        reader = Mock(return_value={"parent": 2})
+        service._relation_repository.bank_split_versions_for_members = reader
+        arguments = dict(case_id="split-case", row_ids=["oa", "child"], row_types=["oa", "bank"],
+            relation_mode="manual_confirmed", actor_id="tester", bank_split_versions={"parent": 2},
+            idempotency_key="split-confirm")
+        first = service.confirm_relation(**arguments)
+        second = service.confirm_relation(**arguments)
+        self.assertFalse(first["idempotent_replay"])
+        self.assertTrue(second["idempotent_replay"])
+        self.assertEqual({**first, "idempotent_replay": True}, second)
+        reader.assert_called_once_with(["child"])
+        self.assertEqual(service.get_active_relation_by_case_id("split-case")["row_ids"], ["oa", "child"])
+
     def test_split_batch_withdraw_uses_stable_owner_current_children(self):
         service = command_service()
         service.confirm_relation(case_id="batch", row_ids=["principal", "interest"], row_types=["bank", "bank"],

@@ -63,6 +63,8 @@ export type WorkbenchAmountCheck = {
   oaAmount: string;
   oaTotal?: string;
   bankTotal?: string;
+  bankOriginalTotal?: string;
+  bankRelatedTotal?: string;
   invoiceTotal?: string;
   supportingDocumentTotal?: string;
   evidenceTotal?: string;
@@ -128,6 +130,8 @@ export type WorkbenchAnomalyItem = {
   sourceExpenseItemIds: string[];
   oaTotal?: string;
   bankTotal?: string;
+  bankOriginalTotal?: string;
+  bankRelatedTotal?: string;
   invoiceTotal?: string;
   amountDelta?: string;
   mismatchPair?: ["oa" | "bank" | "invoice", "oa" | "bank" | "invoice"];
@@ -500,6 +504,7 @@ export type WorkbenchAmountSummary = {
 export type WorkbenchRelationPreviewOperation = "confirm_link" | "withdraw_link";
 
 export type WorkbenchRelationPreview = {
+  bankSplitVersions?: Record<string, number>;
   operation: WorkbenchRelationPreviewOperation;
   operationType: "confirm_link" | "withdraw_relation";
   previewId: string;

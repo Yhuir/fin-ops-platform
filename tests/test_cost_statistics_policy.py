@@ -30,6 +30,54 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             {"unit_id": "oa:oa-interest", "bank_transaction_id": "interest-unit", "amount": "1497.22"}])
         self.assertEqual(task["version"], 0)
 
+    def test_split_principal_oa_is_removed_only_after_full_unique_source_proof(self):
+        from copy import deepcopy
+        principal = {**self._bank("principal-unit", "1000000.00"),
+                     "turnover_role": "external_turnover", "parent_row_id": "parent", "is_split": True}
+        interest = {**self._bank("interest-unit", "1497.22"),
+                    "parent_row_id": "parent", "is_split": True}
+        group = self._group(oa_rows=[self._oa("oa-principal", amount="1000000.00"),
+                                    self._oa("oa-interest", amount="1497.22")], bank_rows=[principal, interest])
+        original = deepcopy(group)
+        policy = self._policy([group])
+        self.assertEqual([row["amount"] for row in policy.serialized_cost_rows], ["1497.22"])
+        self.assertEqual(policy.manual_allocation_tasks, [])
+        task = policy.allocation_tasks[0]
+        self.assertEqual([unit["oa_id"] for unit in task["units"]], ["oa-interest"])
+        self.assertEqual(task["source_allocations"]["cost_lines"], [
+            {"unit_id": "oa:oa-interest", "bank_transaction_id": "interest-unit", "amount": "1497.22"}])
+        self.assertEqual(group, original)
+
+    def test_split_principal_oa_proof_keeps_amount_ambiguity_pending(self):
+        group = self._group(oa_rows=[self._oa("oa-a", amount="100.00"), self._oa("oa-b", amount="100.00")],
+            bank_rows=[{**self._bank("principal", "100.00"), "is_split": True, "turnover_role": "external_turnover"},
+                       {**self._bank("interest", "100.00"), "is_split": True}])
+        policy = self._policy([group])
+        self.assertEqual(policy.serialized_cost_rows, [])
+        task = policy.manual_allocation_tasks[0]
+        self.assertEqual({unit["oa_id"] for unit in task["units"]}, {"oa-a", "oa-b"})
+        self.assertEqual(task["status"], "pending")
+
+    def test_split_principal_oa_proof_respects_conflicting_source_references(self):
+        group = self._group(oa_rows=[self._oa("oa-a", amount="200.00"), self._oa("oa-b", amount="100.00")],
+            bank_rows=[{**self._bank("principal", "200.00"), "is_split": True,
+                        "turnover_role": "external_turnover", "source_oa_ids": ["oa-b"]},
+                       {**self._bank("interest", "100.00"), "is_split": True, "source_oa_ids": ["oa-a"]}])
+        policy = self._policy([group])
+        self.assertEqual(policy.serialized_cost_rows, [])
+        self.assertEqual({unit["oa_id"] for unit in policy.manual_allocation_tasks[0]["units"]}, {"oa-a", "oa-b"})
+
+    def test_split_principal_oa_proof_respects_conflicting_formal_ownership(self):
+        group = self._group(oa_rows=[self._oa("oa-a", amount="200.00"), self._oa("oa-b", amount="100.00")],
+            bank_rows=[{**self._bank("principal", "200.00"), "is_split": True, "turnover_role": "external_turnover"},
+                       {**self._bank("interest", "100.00"), "is_split": True}])
+        # Both sources are formally limited to oa-b; equal amounts must not
+        # invent an ownership edge to oa-a to remove it from the cost targets.
+        group["source_relation_groups"] = [{"oa_row_ids": ["oa-b"], "bank_row_ids": ["principal", "interest"]}]
+        policy = self._policy([group])
+        self.assertEqual(policy.serialized_cost_rows, [])
+        self.assertEqual({unit["oa_id"] for unit in policy.manual_allocation_tasks[0]["units"]}, {"oa-a", "oa-b"})
+
     def test_split_multiple_equal_sources_remain_ambiguous_without_manual_decision(self):
         group = self._group(oa_rows=[self._oa('oa-a', amount='50.00'), self._oa('oa-b', amount='50.00')],
             bank_rows=[{**self._bank('child-a', '50.00'), 'parent_row_id':'parent', 'is_split':True},

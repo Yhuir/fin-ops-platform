@@ -15,6 +15,7 @@ const anomaly: WorkbenchAnomalyItem = {
   sourceExpenseItemIds: [],
   oaTotal: "100.00",
   bankTotal: "100.00",
+  bankOriginalTotal: "100.00",
   invoiceTotal: "99.00",
   evidenceTotal: "99.00",
   amountDelta: "1.00",
@@ -107,7 +108,7 @@ describe("WorkbenchAnomalyIndicator", () => {
 
   it("renders only authoritative group amounts with an icon-only trigger", async () => {
     render(<WorkbenchAnomalyIndicator amountScope="group" levelLabel="该关联组" anomalies={[{
-      ...anomaly, oaTotal: "1273.06", bankTotal: "1273.06", invoiceTotal: "1139.63", evidenceTotal: "1279.63",
+      ...anomaly, oaTotal: "1273.06", bankTotal: "1273.06", bankOriginalTotal: "1273.06", invoiceTotal: "1139.63", evidenceTotal: "1279.63",
       reviewDecision: "accept_paired", reviewedByAccount: "ACCOUNT", reviewNote: "说明",
       expenseItemDifferences: [{ expenseItemIds: ["item"], oaTotal: "182.44", evidenceTotal: "189.01", amountDelta: "6.57" }],
     }]} />);
@@ -141,7 +142,7 @@ describe("WorkbenchAnomalyIndicator", () => {
 
   it("does not replace unknown evidence with formal invoices or zero, or remove a party", async () => {
     render(<WorkbenchAnomalyIndicator levelLabel="该关联组" anomalies={[
-      { ...anomaly, fingerprint: "unknown", evidenceTotal: undefined, bankTotal: undefined },
+      { ...anomaly, fingerprint: "unknown", evidenceTotal: undefined, bankTotal: undefined, bankOriginalTotal: undefined },
       { ...anomaly, fingerprint: "zero", evidenceTotal: "0.00" },
     ]} />);
     await userEvent.setup({ skipHover: true }).click(screen.getByRole("button"));
@@ -160,4 +161,28 @@ describe("WorkbenchAnomalyIndicator", () => {
     expect(screen.getByRole("button", { name: "选择 OA 明细" })).toBeDisabled();
     expect(onPress).not.toHaveBeenCalled();
   });
+});
+
+
+it("distinguishes original bank total from the actual related child amount", async () => {
+  const user = userEvent.setup({ skipHover: true });
+  render(<WorkbenchAnomalyIndicator anomalies={[{
+    ...anomaly, oaTotal: "1001497.22", bankOriginalTotal: "1001497.22",
+    bankTotal: "1497.22", bankRelatedTotal: "1497.22", evidenceTotal: "1497.22",
+  }]} levelLabel="该关系" />);
+  await user.click(screen.getByRole("button", { name: "该关系有 1 项异常，查看详情" }));
+  const dialog = await screen.findByRole("dialog");
+  expect(dialog.querySelector("dl")).toHaveTextContent("银行流水1001497.22本次关联1497.22");
+});
+
+it("does not call a purpose-only comparison a partial bank association", async () => {
+  const user = userEvent.setup({ skipHover: true });
+  render(<WorkbenchAnomalyIndicator anomalies={[{
+    ...anomaly, bankOriginalTotal: "1001497.22", bankRelatedTotal: "1001497.22",
+    bankTotal: "1497.22", evidenceTotal: "1400.00",
+  }]} levelLabel="该关系" />);
+  await user.click(screen.getByRole("button", { name: "该关系有 1 项异常，查看详情" }));
+  const dialog = await screen.findByRole("dialog");
+  expect(dialog).toHaveTextContent("银行流水1001497.22");
+  expect(dialog).not.toHaveTextContent("本次关联");
 });

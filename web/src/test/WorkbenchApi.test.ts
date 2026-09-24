@@ -1485,6 +1485,9 @@ describe("workbench api bank amount mapping", () => {
                   source_oa_ids: ["oa-paired"],
                   source_expense_item_ids: ["oa-paired:item:1"],
                   oa_total: "60.00",
+                  bank_total: "60.00",
+                  bank_original_total: "100.00",
+                  bank_related_total: "60.00",
                   invoice_total: "59.00",
                   amount_delta: "1.00",
                   invoice_row_ids: ["invoice-paired"],
@@ -1655,6 +1658,9 @@ describe("workbench api bank amount mapping", () => {
     expect(group.rows.invoice[0]).not.toHaveProperty("relationNote");
     expect(group.rows.invoice[0].workbenchAnomalies?.[0]).toMatchObject({
       displayLabel: "OA 流水一致，票少",
+      bankOriginalTotal: "100.00",
+      bankRelatedTotal: "60.00",
+      bankTotal: "60.00",
       amountDelta: "1.00",
       reviewDecision: "accept_paired",
       reviewNote: "财务已核对",

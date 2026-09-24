@@ -10,6 +10,7 @@ from typing import Any, TypeVar
 from fin_ops_platform.services.bank_details_canonical_query import (
     PostgresBankDetailsCanonicalQueryRepository,
 )
+from fin_ops_platform.services.bank_transaction_category_service import BANK_AUTO_TAG_EDITABLE_CODES
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     OA_EXTERNAL_SOURCE_ID_FIELD_NAMES,
 )
@@ -1696,6 +1697,7 @@ def _anomaly_state_ctes(*, group_source: str) -> str:
         "group_page_anomaly_groups",
     }:
         raise ValueError(f"unsupported anomaly group source: {group_source}")
+    editable_codes_sql = ", ".join(f"'{code}'" for code in BANK_AUTO_TAG_EDITABLE_CODES)
     purpose_scope_sql = bank_split_scope_ctes(
         bank_rows_sql="""
             select member.internal_key as group_key, member.row_id as bank_id,
@@ -1719,6 +1721,10 @@ def _anomaly_state_ctes(*, group_source: str) -> str:
         """,
     )
     return f"""
+split_tag_policy_settings as materialized (
+    select settings_payload->'bank_flow_rule_batch_tag_rules'->'requirements_by_tag_code' as requirements
+    from app.app_settings where settings_key='app_settings'
+),
 split_tag_definitions as materialized (
     select definition.value
     from app.app_settings settings
@@ -1837,7 +1843,21 @@ relation_anomaly_raw_members as materialized (
 ),
 {purpose_scope_sql},
 relation_anomaly_members as materialized (
-    select member.* from relation_anomaly_raw_members member
+    select member.*, item.id is not null as bank_is_split,
+           case when item.id is null then true
+                when item.category_code='internal_transfer'
+                  or (item.category_code in ({editable_codes_sql})
+                      and (coalesce(definition.value->>'source','custom') <> 'system'
+                           or btrim(coalesce(definition.value->>'status','active')) <> 'archived'))
+                  or (jsonb_typeof(definition.value->'rules')='object'
+                      and btrim(coalesce(definition.value->>'status','active')) <> 'archived')
+                then case when policy.requirements ? item.category_code
+                          then coalesce((policy.requirements->item.category_code->>'requires_invoice')::boolean, false)
+                          else true end end as bank_requires_invoice
+    from relation_anomaly_raw_members member
+    left join app.bank_transaction_split_items item on member.row_type='bank' and item.id::text=member.row_id
+    left join split_tag_definitions definition on definition.value->>'code'=item.category_code
+    left join split_tag_policy_settings policy on true
     where member.row_type <> 'bank' or exists (
         select 1 from scope_bank_members scoped
         where scoped.group_key=member.internal_key and scoped.bank_id=member.row_id
@@ -2287,6 +2307,11 @@ relation_pane_totals as materialized (
                   and member.bank_direction <> direction.direction
             ), 0)
         end, 2) as bank_contra_total,
+        bool_or(member.bank_is_split) filter (where member.row_type='bank') as has_bank_split,
+        count(*) filter (where member.row_type='bank' and member.bank_requires_invoice is null) as unknown_bank_policy_count,
+        coalesce(sum(case when member.bank_direction=direction.direction then member.bank_amount
+                          when member.bank_direction<>direction.direction then -member.bank_amount end)
+                 filter (where member.row_type='bank' and member.bank_requires_invoice=false),0) as invoice_exempt_total,
         count(*) filter (where member.row_type = 'invoice')::bigint as invoice_count,
         count(*) filter (
             where member.row_type = 'invoice'
@@ -2344,7 +2369,10 @@ relation_document_comparison_totals as materialized (
                 when document.internal_key is not null then
                     coalesce(totals.invoice_total, 0) + document.supporting_amount
                 when totals.invoice_count > 0 then totals.invoice_total
-                else null end as comparison_invoice_total
+                else null end
+           + case when totals.has_bank_split and totals.unknown_bank_policy_count=0
+                       and totals.relation_mode <> 'turnover_manual_closure'
+                  then totals.invoice_exempt_total else 0 end as comparison_invoice_total
     from relation_comparison_totals totals
     left join supporting_document_totals document using (internal_key)
 ),
@@ -2369,6 +2397,7 @@ relation_group_amount_classifications as materialized (
     from relation_document_comparison_totals totals
     where totals.direction is not null
       and totals.oa_count > 0 and totals.bank_count > 0
+      and (totals.unknown_bank_policy_count = 0 or totals.relation_mode = 'turnover_manual_closure')
       and totals.invalid_oa_amount_count = 0
       and totals.invalid_bank_amount_count = 0
       and totals.invalid_bank_direction_count = 0
@@ -2539,6 +2568,8 @@ effective_groups as materialized (
         groups.detail_key,
         groups.group_kind,
         case
+            when totals.unknown_bank_policy_count > 0
+             and totals.relation_mode <> 'turnover_manual_closure' then 'unpaired'
             when anomaly.internal_key is not null
              and anomaly.decision <> 'accept_paired'
                 then 'unpaired'
@@ -2551,6 +2582,7 @@ effective_groups as materialized (
         groups.external_etc_batch_id,
         groups.missing_row_types
     from canonical_groups groups
+    left join relation_pane_totals totals on totals.internal_key = groups.internal_key
     left join anomaly_states anomaly
       on anomaly.internal_key = groups.internal_key
 )

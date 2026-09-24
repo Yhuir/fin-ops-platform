@@ -338,7 +338,9 @@ function resolveFormalRelationAmountCents(
   const counts = countWorkbenchIdentitiesByType(identities);
   const amountValues: Partial<Record<WorkbenchRecordType, string>> = {
     oa: group.amountCheck?.oaTotal,
-    bank: group.amountCheck?.bankTotal,
+    bank: group.relationMode === "turnover_manual_closure"
+      ? group.amountCheck?.bankTotal
+      : group.amountCheck?.bankRelatedTotal,
     invoice: group.amountCheck?.invoiceTotal,
   };
   const resolved: WorkbenchSelectionAmountCents = { oa: 0, bank: 0, invoice: 0 };
@@ -411,4 +413,49 @@ function flattenWorkbenchGroupSelectionRows(group: WorkbenchRelationGroup) {
     ...(group.bankFolds ?? []).map((batch) => batch.summaryRow),
     ...paneIds.flatMap((paneId) => group.collapsedRows?.[paneId] ?? []),
   ];
+}
+
+
+/** Select the full requested set atomically; a partial selection is completed, never inverted. */
+export function toggleWorkbenchSelectionRows(current: WorkbenchRecord[], requested: WorkbenchRecord[]) {
+  const next = new Map(current.map(row => [workbenchRowIdentityKey(row), row]));
+  const allSelected = requested.every(row => next.has(workbenchRowIdentityKey(row)));
+  for (const row of requested) {
+    const key = workbenchRowIdentityKey(row);
+    if (allSelected) next.delete(key);
+    else next.set(key, row);
+  }
+  return [...next.values()];
+}
+
+/** Split amounts and ownership come from canonical sibling DTOs, never from visible/filter rows. */
+export function resolveWorkbenchBankSelection(row: WorkbenchRecord, unitId?: string): WorkbenchRecord[] {
+  if (row.recordType !== "bank" || !row.isSplit) return [row];
+  const parts = row.bankSplitParts;
+  if (!parts?.length || !row.parentRowId || !parts.some(part => part.id === row.id)) {
+    throw new Error("流水拆分信息不完整，请刷新后重试。");
+  }
+  const selected = unitId === undefined ? parts : parts.filter(part => part.id === unitId);
+  if (!selected.length || selected.some(part => part.relation_case_id === undefined)) {
+    throw new Error("流水子项关联状态不完整，请刷新后重试。");
+  }
+  if (selected.some(part => part.relation_case_id !== null && part.relation_case_id !== row.caseId)) {
+    throw new Error("部分子项已属于其他关联，请使用“选择子项”或先处理已有关系。");
+  }
+  return selected.map(part => ({
+    ...row,
+    id: part.id,
+    caseId: part.relation_case_id ?? undefined,
+    amount: part.amount,
+    categoryCode: part.category_code,
+    categoryLabel: part.category_label,
+    categoryPath: part.category_path,
+    categoryPrimaryLabel: part.category_path[0],
+    categorySubLabel: part.category_path[1],
+    categoryLabelPath: part.category_path,
+    sourceOaId: undefined,
+    sourceExpenseItemIds: undefined,
+    workbenchAnomalies: undefined,
+    tableValues: { ...row.tableValues, amount: part.amount },
+  }));
 }

@@ -876,6 +876,8 @@ function buildAmountMismatchWorkbenchGroup(decision: WorkbenchAnomalyReviewDecis
     comparison_unit_id: "case:CASE-202603-101",
     oa_total: "58000.00",
     bank_total: "58000.00",
+    bank_original_total: "58000.00",
+    bank_related_total: "58000.00",
     invoice_total: "57999.99",
     amount_delta: "0.01",
     invoice_row_ids: [group.invoice_rows[0].id],

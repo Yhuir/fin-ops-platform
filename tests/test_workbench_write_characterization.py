@@ -1301,6 +1301,44 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertTrue(selection_calls)
         self.assertTrue(all(set(call).issuperset(row_ids) for call in selection_calls))
 
+    def test_confirm_preview_exposes_split_versions_and_rejects_changed_preview(self):
+        app = self._build_app()
+        rows_by_type = self._default_open_rows(app)
+        rows = [dict(rows_by_type[kind]) for kind in ("oa", "bank", "invoice")]
+        rows[1].update(is_split=True, parent_row_id="parent-bank", split_version=2)
+        row_ids = [str(row["id"]) for row in rows]
+        app._workbench_query_facade().relation_preview_selection = lambda *_args, **_kwargs: WorkbenchQueryResult(
+            HTTPStatus.OK, {"selected_rows": rows, "selected_row_ids": row_ids, "context_rows": [], "rows": rows},
+        )
+        preview = self._post(app, "/api/workbench/actions/confirm-link/preview", {"month": "2026-03", "row_ids": row_ids})
+        self.assertEqual(preview.status_code, 200, preview.body)
+        self.assertEqual(_json_response(preview)["bank_split_versions"], {"parent-bank": 2})
+        rows[1]["split_version"] = 3
+        with patch.object(app, "_resolve_rows_for_amount_check", return_value=rows):
+            response = self._post(app, "/api/workbench/actions/confirm-link", {
+                "month": "2026-03", "row_ids": row_ids, "bank_split_versions": {"parent-bank": 2},
+                "idempotency_key": "changed-split-preview",
+            })
+        self.assertEqual(response.status_code, 409, response.body)
+        self.assertEqual(_json_response(response)["error"], "bank_split_version_conflict")
+        self.assertEqual(_json_response(response)["current_bank_split_versions"], {"parent-bank": 3})
+
+    def test_confirm_split_version_map_must_cover_exact_selected_parents(self):
+        app = self._build_app()
+        rows_by_type = self._default_open_rows(app)
+        rows = [dict(rows_by_type[kind]) for kind in ("oa", "bank", "invoice")]
+        rows[1].update(is_split=True, parent_row_id="parent-bank", split_version=2)
+        row_ids = [str(row["id"]) for row in rows]
+        for versions in ({}, {"parent-bank": True}, {"parent-bank": "2"}, {"parent-bank": 0},
+                         {"parent-bank": 2, "unselected": 1}, []):
+            with self.subTest(versions=versions), patch.object(app, "_resolve_rows_for_amount_check", return_value=rows):
+                response = self._post(app, "/api/workbench/actions/confirm-link", {
+                    "month": "2026-03", "row_ids": row_ids, "bank_split_versions": versions,
+                    "idempotency_key": "invalid-split-preview",
+                })
+            self.assertEqual(response.status_code, 400, response.body)
+            self.assertEqual(_json_response(response)["error"], "invalid_confirm_link_request")
+
     def test_confirm_preview_reads_one_bounded_selection_and_skips_legacy_row_scans(self) -> None:
         app = self._build_app()
         rows_by_type = self._default_open_rows(app)

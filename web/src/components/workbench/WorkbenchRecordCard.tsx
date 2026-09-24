@@ -41,7 +41,7 @@ type WorkbenchRecordCardProps = {
   highlighted?: boolean;
   searchQuery?: string;
   sheetRowMode?: "stretched" | "split";
-  onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => void;
+  onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "unpaired", scope?: "unit") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
   showWorkflowActions: boolean;
@@ -99,8 +99,16 @@ function WorkbenchRecordCard({
       data-row-state={rowState}
       data-search-highlighted={highlighted ? "true" : "false"}
       role="row"
+      tabIndex={row.isSplit && !readOnly && !row.displayOnly ? 0 : undefined}
+      onKeyDown={event => {
+        if (event.target === event.currentTarget && row.isSplit && !readOnly && !row.displayOnly
+          && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          onSelectRow(row, zoneId);
+        }
+      }}
       style={columnGridStyle}
-      onClick={readOnly || row.displayOnly || bankPartsContent ? undefined : () => onSelectRow(row, zoneId)}
+      onClick={readOnly || row.displayOnly ? undefined : () => onSelectRow(row, zoneId)}
     >
       {paneId === "invoice" && row.supportingDocuments ? (
         <WorkbenchSupportingDocumentFiles
@@ -350,7 +358,7 @@ function buildRowAriaLabel(row: WorkbenchRecord, paneId: WorkbenchRecordType, co
   }
 
   for (const column of columns) {
-    pushValue(row.tableValues[column.key]);
+    pushValue(paneId === "bank" && column.key === "amount" && row.isSplit ? row.parentAmount : row.tableValues[column.key]);
   }
 
   if (paneId === "oa") {

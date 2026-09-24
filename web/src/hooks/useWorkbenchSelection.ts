@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 
-import { workbenchRowIdentityKey } from "../features/workbench/selectionModel";
+import { toggleWorkbenchSelectionRows, workbenchRowIdentityKey } from "../features/workbench/selectionModel";
 import type { WorkbenchRecord } from "../features/workbench/types";
 
 export type WorkbenchRowState = "idle" | "selected" | "related";
@@ -29,24 +29,12 @@ export default function useWorkbenchSelection() {
     [selectedOpenRowIdentityKeys],
   );
 
-  const togglePairedRowSelection = useCallback((row: WorkbenchRecord) => {
-    const identityKey = workbenchRowIdentityKey(row);
-    setSelectedPairedRows((current) => {
-      const isSelected = current.some((item) => workbenchRowIdentityKey(item) === identityKey);
-      return isSelected
-        ? current.filter((item) => workbenchRowIdentityKey(item) !== identityKey)
-        : [...current, row];
-    });
+  const togglePairedRowSelection = useCallback((rows: WorkbenchRecord | WorkbenchRecord[]) => {
+    setSelectedPairedRows((current) => toggleWorkbenchSelectionRows(current, Array.isArray(rows) ? rows : [rows]));
   }, []);
 
-  const toggleOpenRowSelection = useCallback((row: WorkbenchRecord) => {
-    const identityKey = workbenchRowIdentityKey(row);
-    setSelectedOpenRows((current) => {
-      const isSelected = current.some((item) => workbenchRowIdentityKey(item) === identityKey);
-      return isSelected
-        ? current.filter((item) => workbenchRowIdentityKey(item) !== identityKey)
-        : [...current, row];
-    });
+  const toggleOpenRowSelection = useCallback((rows: WorkbenchRecord | WorkbenchRecord[]) => {
+    setSelectedOpenRows((current) => toggleWorkbenchSelectionRows(current, Array.isArray(rows) ? rows : [rows]));
   }, []);
 
   const openDetail = useCallback((row: WorkbenchRecord) => {

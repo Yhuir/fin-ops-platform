@@ -130,8 +130,21 @@ class WorkbenchAmountCheckService:
         ):
             if any(self._amount(row) is None for row in pane_rows):
                 totals[pane] = None
-        actual_totals = totals
-        totals = {**totals, "invoice": self._decimal(amount_check.get("evidence_total"))}
+        evidence_total = self._decimal(amount_check.get("evidence_total"))
+        evidence_required = self._decimal(amount_check.get("evidence_required_total"))
+        actual_totals = {
+            **totals,
+            "bank_original": self._decimal(amount_check.get("bank_original_total")),
+            "bank_related": self._decimal(amount_check.get("bank_related_total")),
+            "evidence": evidence_total,
+            "evidence_required": evidence_required,
+        }
+        totals = {
+            **totals,
+            "invoice": self._evidence_comparison_total(
+                evidence_total, totals["bank"], evidence_required,
+            ),
+        }
         supporting_items = self._supporting_items(rows_by_type, relation_mode=relation_mode)
         has_three_way_comparison = (
             amount_check.get("status") != "unknown"
@@ -313,7 +326,10 @@ class WorkbenchAmountCheckService:
                 "oa_total": self._format_amount(totals["oa"]),
                 "bank_total": self._format_amount(totals["bank"]),
                 "invoice_total": self._format_amount(totals["invoice"]),
-                "evidence_total": self._format_amount(comparison_totals["invoice"]),
+                "evidence_total": self._format_amount(totals["evidence"]),
+                "bank_original_total": self._format_amount(totals["bank_original"]),
+                "bank_related_total": self._format_amount(totals["bank_related"]),
+                "evidence_required_total": self._format_amount(totals["evidence_required"]),
                 "amount_delta": self._format_amount(max([
                     self._amount_delta({pane: amount for pane, amount in comparison_totals.items() if amount is not None}) or ZERO,
                     *(self._decimal(item.get("amount_delta")) or ZERO for item in component_amount_items),
@@ -796,9 +812,10 @@ class WorkbenchAmountCheckService:
             "bank": list(rows_by_type.get("bank") or []),
             "invoice": list(rows_by_type.get("invoice") or []),
         }
+        original_bank_rows = normalized_rows["bank"]
         target_rows = normalized_rows["oa"] or normalized_rows["invoice"]
         normalized_rows["bank"] = bank_split_comparison_rows(
-            normalized_rows["bank"], target=self._strict_sum_amounts(target_rows),
+            original_bank_rows, target=self._strict_sum_amounts(target_rows),
         )
         direction, has_direction_conflict = self._check_direction(normalized_rows)
         bank_totals = self._bank_totals_for_direction(
@@ -834,8 +851,15 @@ class WorkbenchAmountCheckService:
                 formal_total + supporting_total
                 if formal_total is not None and supporting_total is not None else None
             )
+        evidence_required, policy_unknown = self._evidence_required_total(
+            normalized_rows["bank"], direction=direction,
+            bank_total=totals["bank_total"], relation_mode=relation_mode,
+        )
         comparison = {
-            "oa": totals["oa_total"], "bank": totals["bank_total"], "invoice": evidence_total,
+            "oa": totals["oa_total"], "bank": totals["bank_total"],
+            "invoice": self._evidence_comparison_total(
+                evidence_total, totals["bank_total"], evidence_required,
+            ),
         }
         supporting_deltas = [
             Decimal(item["amount_delta"])
@@ -847,7 +871,7 @@ class WorkbenchAmountCheckService:
         status = "matched"
         requires_note = False
 
-        if has_direction_gap or has_direction_conflict or (direction == "unknown" and not directions):
+        if policy_unknown or has_direction_gap or has_direction_conflict or (direction == "unknown" and not directions):
             status = "unknown"
             requires_note = True
         elif direction != "unknown" and len(comparable) >= 2:
@@ -870,6 +894,11 @@ class WorkbenchAmountCheckService:
             "direction": direction,
             "oa_total": self._format_amount(totals["oa_total"]),
             "bank_total": self._format_amount(totals["bank_total"]),
+            "bank_original_total": self._format_amount(self._bank_original_total(original_bank_rows)),
+            "bank_related_total": self._format_amount(self._bank_comparison_total(
+                self._bank_totals_for_direction(original_bank_rows, direction), relation_mode=relation_mode,
+            )),
+            "evidence_required_total": self._format_amount(evidence_required),
             "bank_gross_total": self._format_amount(bank_totals["gross"]),
             "bank_contra_total": self._format_amount(bank_totals["contra"]),
             "bank_net_total": self._format_amount(bank_totals["net"]),
@@ -885,6 +914,51 @@ class WorkbenchAmountCheckService:
             "mismatch_fields": mismatch_fields,
             "requires_note": requires_note,
         }
+
+    @staticmethod
+    def _evidence_comparison_total(
+        evidence_total: Decimal | None,
+        bank_total: Decimal | None,
+        evidence_required: Decimal | None,
+    ) -> Decimal | None:
+        # This translated amount is only for the existing classification algebra.
+        # Public invoice/evidence totals always retain their actual amounts.
+        if evidence_total is None or bank_total is None or evidence_required is None:
+            return evidence_total
+        return evidence_total + bank_total - evidence_required
+
+    def _evidence_required_total(
+        self, rows: list[dict[str, Any]], *, direction: str,
+        bank_total: Decimal | None, relation_mode: str,
+    ) -> tuple[Decimal | None, bool]:
+        if relation_mode == "turnover_manual_closure" or not rows or not any(row.get("is_split") for row in rows):
+            return bank_total, False
+        if any(row.get("is_split") and not isinstance(row.get("paired_requires_invoice"), bool) for row in rows):
+            return None, True
+        required = [row for row in rows if not row.get("is_split") or row["paired_requires_invoice"]]
+        if not required:
+            return ZERO, False
+        return self._bank_comparison_total(
+            self._bank_totals_for_direction(required, direction), relation_mode=relation_mode,
+        ), False
+
+    def _bank_original_total(self, rows: list[dict[str, Any]]) -> Decimal | None:
+        parents: dict[str, Decimal] = {}
+        for row in rows:
+            if row.get("is_split"):
+                parent_id = str(row.get("parent_row_id") or row.get("parent_bank_transaction_id") or "")
+                amount = self._decimal(row.get("parent_amount"))
+                if not parent_id or amount is None:
+                    return None
+            else:
+                parent_id = self._row_id(row)
+                amount = self._amount(row)
+                if not parent_id or amount is None:
+                    return None
+            if parent_id in parents and parents[parent_id] != amount:
+                return None
+            parents[parent_id] = amount
+        return sum(parents.values(), ZERO) if parents else None
 
     @staticmethod
     def _bank_comparison_total(

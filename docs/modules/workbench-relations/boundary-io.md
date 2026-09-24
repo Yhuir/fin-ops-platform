@@ -212,3 +212,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - split history 增加 `bank_split_members.before/after`：只在撤销预览的副本中按完整已知身份组投影 parent→children。历史原始记录保持不变；历史仅占用部分已删子项时不得推测归属，canonical member 校验拒绝悬空恢复。投影恢复移除旧成本待确认标记；由成本 owner 按当前有效来源决定自动入账或待分配。
 - 已删除 `require_cost_reconfirmation` 旧写口。一次性 `retire_bank_split_confirmation_flags(actor_id, apply)` 批量锁定 active case，通过 metadata domain writer 移除旧标记并记录审计，保留成员和关系版本，避免使有效人工成本指纹失效；不发送不必要的 OA payment 事件。预览只读、应用事务原子且幂等。
 - 撤销恢复涉及拆分用途时，command 通过显式 `bank_requirements_resolver(bank_ids_by_case)` 一次批量读取当前分类与 paired policy，按每个恢复 case 的真实银行子集重算 OA/发票要求；不以审计中的旧标签要求替代当前事实。PostgreSQL relation repository 的 `current_bank_relation_requirements` 复用 canonical category query，server factory 将端口注入 command。缺少此依赖显式失败，未拆分撤销不增加查询。
+
+## 2026-09-24 拆分选择版本
+
+confirm preview 返回 bank_split_versions（父流水公开身份 → 拆分版本）。前端确认原样回传；显式 map 必须完整覆盖所选拆分父身份且版本合法。旧调用未携带 map 时仍以确认前读取事实版本进行事务内复核，不跳过并发保护。command 在既有成员锁和父流水锁完成后由 repository 批量读取版本；变化明确冲突且零写入，复用原幂等、审计和事务。原关系精确撤销与其他 owner 占用规则不变。

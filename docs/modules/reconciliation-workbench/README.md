@@ -109,3 +109,5 @@ ETC 批次在折叠态只显示 canonical `summaryRow`，不显示任何真实�
 - `state-machine.md`：页面 direct query 与正式关系状态。
 - `tests.md`：七类测试、命令和生产核验。
 - `implementation-notes.md`：历史实施记录，不是当前业务事实源。
+
+- [拆分流水选择与本息闭环](split-payment-closure.md)：整笔/子项选择、金额口径、版本保护、成本来源证明及生产验收。

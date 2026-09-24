@@ -56,6 +56,7 @@ import {
 } from "../features/workbench/groupDisplayModel";
 import { reorderWorkbenchColumnLayout, type WorkbenchColumnDropPosition } from "../features/workbench/columnLayout";
 import {
+  resolveWorkbenchBankSelection,
   buildWorkbenchSelectionContext,
   workbenchRowIdentityKey,
 } from "../features/workbench/selectionModel";
@@ -2099,13 +2100,15 @@ export default function ReconciliationWorkbenchPage() {
     });
   }, [cashTicketPurchaseDialog, ensureCanWriteWorkbench, runBlockingAction]);
 
-  const handleSelectRow = useCallback((row: WorkbenchRecord, zoneId: "paired" | "unpaired") => {
-    if (zoneId === "unpaired") {
-      toggleOpenRowSelection(row);
-      return;
+  const handleSelectRow = useCallback((row: WorkbenchRecord, zoneId: "paired" | "unpaired", scope?: "unit") => {
+    try {
+      const rows = resolveWorkbenchBankSelection(row, scope === "unit" ? row.id : undefined);
+      if (zoneId === "unpaired") toggleOpenRowSelection(rows);
+      else togglePairedRowSelection(rows);
+    } catch (error) {
+      openActionResultDialog(error instanceof Error ? error.message : "流水选择失败。", "无法选择整笔流水");
     }
-    togglePairedRowSelection(row);
-  }, [toggleOpenRowSelection, togglePairedRowSelection]);
+  }, [openActionResultDialog, toggleOpenRowSelection, togglePairedRowSelection]);
 
   const openRelationPreview = async (
     kind: RelationPreviewRequestKind,
@@ -2201,6 +2204,7 @@ export default function ReconciliationWorkbenchPage() {
         onProgress,
         action: async () => {
           const result = await confirmWorkbenchLink({
+            bankSplitVersions: preview.bankSplitVersions,
             month: WORKBENCH_VIEW_MONTH,
             rowIds,
             rowTypes,
