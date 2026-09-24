@@ -2086,3 +2086,9 @@
 
 - 本地验证：6个Vitest文件共293项通过；两轮确定性浏览器测试20项和13项全部通过（其中2项布局测试重复验证，合计31个不同用例）。覆盖确认/撤回、部分拆分、异常与权限、重复提交、版本冲突、写失败重试、写成功回读失败不重试、现金处理、银行/OA待付款刷新及税额抵扣隔离。新增6项组件测试和2项浏览器布局测试。
 - 验证命令：`npm --prefix web run test -- --run src/test/RelationPreviewTriPane.test.tsx src/test/WorkbenchSelection.test.tsx src/test/WorkbenchApi.test.ts src/test/RelationGroupGrid.test.tsx src/test/groupDisplayModel.test.ts src/test/WorkbenchExceptionDrawer.test.tsx`；`npm --prefix web run e2e -- e2e/workbench-preview-layout.spec.ts e2e/workbench-withdraw-flow.spec.ts e2e/workbench-split-selection.spec.ts e2e/workbench-network-recovery-flow.spec.ts e2e/workbench-stale-error-flow.spec.ts --project=chromium`；另运行cash-special-flow、relation-fanout、relations-oa-pending-fanout、relations-tax-offset-isolation四个文件。`npm --prefix web run build`、`bash scripts/verify.sh docs`、`git diff --check`通过。构建保留依赖既有CSS/大chunk提示。
+
+- 运行时代码 `1582565a7` 已推送 remote main，并通过标准 `scripts/with-production-admin-token.sh ./scripts/deploy-oa.sh --release-name main-1582565a7-20260924-relation-preview` 发布。frontend profile 的 pre/T0 均 PASS，四个登记 worker 就绪，无回滚；不涉及数据库备份、迁移或主数据库操作。正式证据保留在生产 `/opt/fin-ops/runtime-smoke/release-gates/main-1582565a7-20260924-relation-preview/`。
+- 生产浏览器使用同一真实关系打开撤回预览：操作前1组、操作后恢复为2组，左右位置与底部备注按钮布局正确。发布前后 `before`、`after` 与 `amount_summary` 全量深比较一致，浏览器异常0，财务写请求0。只调用preview并关闭，不执行真实确认/撤回。
+- 公网性能单独运行，发布前后同一关系各10次顺序preview请求，全部200。发布前p50/p95为86.3/176.0ms，发布后106.4/224.3ms；点击到预览可见分别237.3/285.2ms，响应后可见分别88.5/101.6ms。当前样本预览p95低于1秒，没有新增交互网络请求；数据不支持声称性能提升或整个App容量达标。没有并行巡检干扰此采样。
+- 性能测量结束后，通过token包装器运行 `npm --prefix web run e2e:production-shell`，16个生产页面只读巡检通过（1个测试遍历16页，27.6秒），无会话阻断、浏览器异常或写请求。生产真实财务写流程未试写，其确认/撤回及跨页更新由确定性E2E验证。
+- 最终验证记录仅修改文档，部署运行时代码仍为上述 `1582565a7`。
