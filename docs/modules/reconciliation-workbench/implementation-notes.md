@@ -2102,3 +2102,9 @@
 - 本地验证：原278项单元／组件测试通过；最终详情组件与异常抽屉21项通过（含重复的6项预览，共293项不同测试）。构建、文档检查与diff检查通过。最终31项浏览器回归全部通过（1.5分钟），覆盖桌面/窄屏、15笔流水、拆分撤回前1组后5组、详情hover/click/focus/Escape、确认/撤回、权限、网络恢复、stale/error及跨页面fanout。
 - 生产验证发现本机管理员token已过期，接口返回401 invalid_oa_session。旧route-shell smoke未识别“OA 会话已失效／登录状态已过期”，本次补齐检测，之前该过期会话下的通过不计为业务验收。发布与生产业务/性能验证需有效管理员登录态；不得绕过认证。
 - 七类测试：1、3以现有业务布局/金额和API回归保护；5前端、6端到端、7旧功能回归适用；2服务层和4read model/cache/worker未改，不新增。无数据库操作或备份。
+
+### 发布结果
+
+- 修复提交 `e1a986459` 已推送 origin/main；候选版本 `main-e1a986459-20260925-compact-preview` 已构建、上传并通过候选安全检查。
+- 正式部署在 frontend pre-activation 检查失败，唯一失败项 `admin_session=false`。生产仍运行 `main-1582565a7-20260924-relation-preview`；API与import、oa-sync、settings-maintenance、workbench-matching四个worker均active。未激活候选，不把旧版本健康或公共资源响应耗时记为新版本验收。
+- 服务器证据：`/opt/fin-ops/runtime-smoke/release-gates/main-e1a986459-20260925-compact-preview/pre/`。更新本机管理员token后通过正式发布入口继续激活及业务预览、性能验证；当前生产业务/性能验收未完成。
