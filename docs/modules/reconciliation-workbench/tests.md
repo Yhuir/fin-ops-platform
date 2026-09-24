@@ -815,3 +815,5 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 ## 2026-09-24 详情内子项选择
 
 `BankSplitRelationCell.test.tsx` 保护列表无子项选择入口且金额/浮层不变；`BankSplitEditor.test.tsx` 保护可选操作与编辑权限独立、dirty/saving/conflict 不可关联草稿；`WorkbenchBankSelectionCleanup.test.ts` 保护清理当前父流水两区旧选择、保留其它流水和 OA。`workbench-split-selection.spec.ts` 对应 RECON-WB-E2E-017，覆盖整笔 confirm、详情选择/跨关系占用/withdraw、保存后清除旧选择与新版本回读。业务选择规则、前端状态、交互、E2E与既有回归适用；后端契约、worker、read model未改变。
+
+生产真实详情发现列表/详情版本字段不同，新增 `WorkbenchApi.test.ts` 断言详情 `split_version` 明确映射；浏览器子项场景的详情 fixture 使用真实字段，避免拿列表 DTO 冒充详情 DTO。未修改 HTTP API shape、后端事务或身份键。
