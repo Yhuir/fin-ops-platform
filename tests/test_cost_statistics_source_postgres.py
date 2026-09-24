@@ -124,6 +124,49 @@ class CostSourcePostgresTests(unittest.TestCase):
         self.assertEqual(self.query.get_explorer_page(scope='all',view='project',filters={},cursor=None,page_size=20)['summary']['total_amount'],'0.00')
         self.assertEqual(self.connection.fetch_one("select amount,signed_amount,balance from app.bank_transactions where legacy_mongo_id='bank-1'"),original)
 
+    def test_principal_history_repair_reconfirms_without_inheriting_crossed_sources(self):
+        from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
+        from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
+
+        self.loan_fixture('1000000.00', split=True)
+        self.connection.execute("""update app.oa_applications set amount=1497.22,
+            normalized_payload=jsonb_set(normalized_payload,'{amount}','"1497.22"'::jsonb) where row_id='oa-b'""")
+        ids = ['oa-a', 'oa-b', self.principal_child, self.interest_child]
+        kinds = ['oa', 'oa', 'bank', 'bank']
+        current = {'case_id': 'cost-source-case', 'row_ids': ids, 'row_types': kinds}
+        prior = [{'case_id': 'old-principal', 'row_ids': ['oa-a', self.interest_child], 'row_types': ['oa', 'bank']},
+                 {'case_id': 'old-interest', 'row_ids': ['oa-b', self.principal_child], 'row_types': ['oa', 'bank']}]
+        self.connection.execute("""update app.workbench_pair_relations set row_ids=%s::text[],row_types=%s::text[],raw_payload=%s::jsonb""",
+            (ids, kinds, json.dumps({'normalized_payload': {**current, 'status': 'active', 'version': 1,
+                'relation_mode': 'manual_confirmed', 'month_scope': 'all'}})))
+        self.connection.execute("""insert into app.workbench_pair_relation_history(case_id,event_type,raw_payload)
+            values ('cost-source-case','confirm_link',%s::jsonb)""", (json.dumps({
+                'operation_type': 'confirm_link', 'after_relations': [current], 'before_relations': prior}),))
+        before = self.service.get_task('cost-source-case', can_save=True)
+        self.assertEqual(before['status'], 'pending')
+        self.assertEqual({unit['oa_id'] for unit in before['units']}, {'oa-a', 'oa-b'})
+        original = self.connection.fetch_one("select amount,signed_amount,balance from app.bank_transactions where legacy_mongo_id='bank-1'")
+        with self.connection.transaction() as tx:
+            command = WorkbenchRelationCommandService(relation_repository=PostgresWorkbenchRelationRepository(tx))
+            cancelled = command.cancel_relation(case_id='cost-source-case', actor_id='test', reason='Correct crossed historical ownership')
+            self.assertEqual(cancelled['history']['after_relations'], [])
+            confirmed = command.confirm_relation(case_id='cost-source-case', row_ids=ids, row_types=kinds,
+                relation_mode='manual_confirmed', actor_id='test', replace_existing=True,
+                history_operation_type='confirm_link', bank_split_versions={'bank-1': 1})
+            self.assertEqual(confirmed['history']['before_relations'], [])
+        task = self.service.get_task('cost-source-case', can_save=True)
+        self.assertEqual(task['status'], 'allocated')
+        self.assertEqual(task['decision_mode'], 'automatic')
+        self.assertEqual(task['source_allocations']['cost_lines'], [
+            {'unit_id': 'oa:oa-b', 'bank_transaction_id': self.interest_child, 'amount': '1497.22'}])
+        for view in ('project', 'cost_tag', 'bank_account'):
+            self.assertEqual(self.query.get_explorer_page(scope='all', view=view, filters={}, cursor=None, page_size=20)['summary']['total_amount'], '1497.22')
+        self.assertEqual(self.service.list_tasks(cursor=None, page_size=20, status='pending', query=None, can_save=True)['items'], [])
+        self.assertEqual(self.service.list_tasks(cursor=None, page_size=20, status='allocated', query=None, can_save=True)['items'], [])
+        self.assertEqual(self.connection.fetch_one('select count(*) as n from app.cost_statistics_manual_allocations')['n'], 0)
+        self.assertEqual(self.connection.fetch_one('select count(*) as n from app.workbench_pair_relation_history')['n'], 3)
+        self.assertEqual(self.connection.fetch_one("select amount,signed_amount,balance from app.bank_transactions where legacy_mongo_id='bank-1'"), original)
+
     def test_valid_manual_interest_decision_is_not_replaced_by_automatic_amount(self):
         self.loan_fixture('1497.22', split=True)
         payload = self.current_payload()

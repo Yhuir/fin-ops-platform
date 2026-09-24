@@ -574,9 +574,16 @@ def _cost_entries(
                         if _outflow_amount(row) is not None and row.get("turnover_role") == "external_turnover"}
         external_oa_ids: set[str] = set()
         other_oa_ids: set[str] = set()
+        oa_by_id = {_clean_text(row.get("id") or row.get("row_id")): row for row in oa_rows}
+        banks_by_id = {_bank_transaction_id(row): row for row in group_bank_rows}
         for source_group in group.get("source_relation_groups", []):
             bank_ids = set(source_group["bank_row_ids"])
-            target = external_oa_ids if bank_ids and bank_ids <= external_ids else other_oa_ids
+            # A merge-history partition is not a cost decision. An unbalanced
+            # principal block cannot remove its OA targets from consideration.
+            principal_closed = bank_ids and bank_ids <= external_ids and _principal_source_group_is_closed(
+                source_group, oa_by_id, banks_by_id,
+            )
+            target = external_oa_ids if principal_closed else other_oa_ids
             target.update(source_group["oa_row_ids"])
         principal_only_oa_ids = external_oa_ids - other_oa_ids
         principal_only_oa_ids.update(_split_principal_only_oa_ids(
@@ -865,6 +872,19 @@ def _append_source_allocation_entries(
         ))
 
 
+def _principal_source_group_is_closed(
+    group: dict[str, Any], oa_by_id: dict[str, dict[str, Any]], banks_by_id: dict[str, dict[str, Any]],
+) -> bool:
+    oa_ids = set(group["oa_row_ids"])
+    if not oa_ids or not oa_ids <= oa_by_id.keys():
+        return False
+    bank_ids = set(group["bank_row_ids"])
+    banks = [banks_by_id[bank_id] for bank_id in bank_ids]
+    return _fully_principal_oa_ids(
+        [oa_by_id[oa_id] for oa_id in oa_ids], banks, bank_ids, [group],
+    ) == oa_ids
+
+
 def _split_principal_only_oa_ids(
     oa_rows: list[dict[str, Any]], bank_rows: list[dict[str, Any]],
     external_ids: set[str], relation_groups: list[dict[str, Any]],
@@ -873,6 +893,14 @@ def _split_principal_only_oa_ids(
     if (len(oa_rows) < 2 or not external_ids or len(external_ids) == len(bank_rows)
             or not all(row.get("is_split") and _outflow_amount(row) is not None for row in bank_rows)):
         return set()
+    return _fully_principal_oa_ids(oa_rows, bank_rows, external_ids, relation_groups)
+
+
+def _fully_principal_oa_ids(
+    oa_rows: list[dict[str, Any]], bank_rows: list[dict[str, Any]],
+    external_ids: set[str], relation_groups: list[dict[str, Any]],
+) -> set[str]:
+    """Use the existing source allocator to prove complete principal coverage."""
     contexts: list[dict[str, Any]] = []
     for row in oa_rows:
         row_contexts, reasons = _oa_allocation_contexts(row)

@@ -78,6 +78,19 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         self.assertEqual(policy.serialized_cost_rows, [])
         self.assertEqual({unit["oa_id"] for unit in policy.manual_allocation_tasks[0]["units"]}, {"oa-a", "oa-b"})
 
+    def test_unbalanced_principal_history_cannot_remove_interest_oa(self):
+        group = self._group(oa_rows=[self._oa("oa-principal", amount="1000000.00"),
+                                    self._oa("oa-interest", amount="1497.22")], bank_rows=[
+            {**self._bank("principal", "1000000.00"), "is_split": True, "turnover_role": "external_turnover"},
+            {**self._bank("interest", "1497.22"), "is_split": True}])
+        group["source_relation_groups"] = [
+            {"oa_row_ids": ["oa-principal"], "bank_row_ids": ["interest"]},
+            {"oa_row_ids": ["oa-interest"], "bank_row_ids": ["principal"]}]
+        policy = self._policy([group])
+        self.assertEqual(policy.serialized_cost_rows, [])
+        self.assertEqual({unit["oa_id"] for unit in policy.manual_allocation_tasks[0]["units"]},
+                         {"oa-principal", "oa-interest"})
+
     def test_split_multiple_equal_sources_remain_ambiguous_without_manual_decision(self):
         group = self._group(oa_rows=[self._oa('oa-a', amount='50.00'), self._oa('oa-b', amount='50.00')],
             bank_rows=[{**self._bank('child-a', '50.00'), 'parent_row_id':'parent', 'is_split':True},
