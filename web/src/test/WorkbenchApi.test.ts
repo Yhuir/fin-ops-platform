@@ -1930,6 +1930,20 @@ describe("workbench api bank amount mapping", () => {
     expect(row.id).toBe("bank-1");
   });
 
+  test("maps the detail endpoint split_version without substituting the list endpoint field", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ row: {
+      id: "interest-child", type: "bank", amount: "1497.22", debit_amount: "1497.22", parent_row_id: "bank-parent",
+      parent_amount: "1001497.22", is_split: true, split_version: 2,
+      bank_split_parts: [{ id: "interest-child", amount: "1497.22", category_code: "interest",
+        category_label: "利息", category_path: ["费用", "利息"], relation_case_id: null }],
+    } }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    const row = await fetchWorkbenchRowDetail("interest-child", { month: "all", rowType: "bank" });
+    expect(row.bankSplitVersion).toBe(2);
+    expect(row.parentAmount).toBe("1001497.22");
+    expect(row.amount).toBe("1497.22");
+    expect(row.bankSplitParts?.[0].relation_case_id).toBeNull();
+  });
+
   test("builds server page query from column and time filters", () => {
     const state = createEmptyWorkbenchZoneDisplayState();
     state.activePaneId = "bank";

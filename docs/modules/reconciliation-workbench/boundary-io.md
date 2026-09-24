@@ -402,3 +402,5 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 金额列移除子项选择菜单，仅展示原流水金额及金额浮层标签。单子项选择通过既有详情图标进入 DetailDrawer：关联台以 `renderPartAction(partId, version, disabled)` 向公共拆分编辑器注入操作；公共组件不 import 关联业务。权限、当前区域、ownership、版本与选择状态仍由关联台拥有，整笔及单项共用 resolveWorkbenchBankSelection。编辑中/冲突中/占用子项不可选择；编辑权限与关联权限独立。
 
 保存回调携带已持久化 BankSplitDetail；清理该父流水在两区的旧选择与受影响来源组，显式读取新详情及列表，不被“抽屉打开时暂缓后台刷新”机制阻挡。不使用旧版本选择；写后回读失败明确显示已保存及读取错误。保持抽屉打开，关闭后关联选择保留。其它页面不注入此操作。业务 API、金额、成本、往来和正式关系写合同不变。
+
+详情 GET 的版本字段为 `split_version`，列表 GET 为 `bank_split_version`；前端 API adapter 在详情入口明确映射到 `bankSplitVersion`，不猜测或回退到列表字段。拆分编辑器返回的 version 必须与该字段一致才允许选择。

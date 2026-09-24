@@ -67,7 +67,10 @@ test('a split sibling owned elsewhere cannot be selected wholesale but the curre
   });
   group.amount_check = { status: 'matched', direction: 'payment', oa_total: '1497.22', bank_total: '1497.22', bank_related_total: '1497.22', bank_original_total: '1001497.22', invoice_total: '1497.22', requires_note: false };
   await page.route('**/api/workbench?*', route => route.fulfill({ json: payload }));
-  await page.route('**/api/workbench/rows/*?*', route => route.fulfill({ json: { row: bank } }));
+  await page.route('**/api/workbench/rows/*?*', route => {
+    const { bank_split_version, ...detailRow } = bank;
+    return route.fulfill({ json: { row: { ...detailRow, split_version: bank_split_version } } });
+  });
   await page.route('**/api/bank-transactions/*/splits', route => route.fulfill({ json: {
     transaction_id: 'shared-parent', canonical_transaction_id: 'canonical-parent', amount: '1001497.22', direction: 'expense', version: 7,
     category_code: 'principal', category_label_path: [], turnover_third_label_options: [],
@@ -118,7 +121,10 @@ test('saving splits clears only that bank selection and reloads the saved versio
   Object.assign(bank, { detail_fields: { '金额': '58000.00' }, amount: '57000.00', parent_row_id: 'parent-bank', parent_amount: '58000.00', is_split: true, bank_split_version: 7, bank_split_parts: parts });
   const tags = parts.map(part => ({ code: part.category_code, label: part.category_label, path: part.category_path, primary_label: part.category_path[0], sub_label: part.category_path[1], status: 'active', turnover_role: '' }));
   await page.route('**/api/workbench?*', route => route.fulfill({ json: payload }));
-  await page.route('**/api/workbench/rows/*?*', route => route.fulfill({ json: { row: bank } }));
+  await page.route('**/api/workbench/rows/*?*', route => {
+    const { bank_split_version, ...detailRow } = bank;
+    return route.fulfill({ json: { row: { ...detailRow, split_version: bank_split_version } } });
+  });
   let writes = 0;
   await page.route('**/api/bank-transactions/*/splits', async route => {
     if (route.request().method() === 'PUT') {

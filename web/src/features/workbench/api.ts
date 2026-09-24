@@ -3721,14 +3721,14 @@ export async function fetchWorkbenchRowDetail(
     params.set("row_type", options.rowType);
   }
   const query = params.toString();
-  const payload = await requestJson<{ row: ApiWorkbenchRow }>(
+  const payload = await requestJson<{ row: Omit<ApiWorkbenchRow, "bank_split_version"> & { split_version?: number } }>(
     `/api/workbench/rows/${encodeURIComponent(rowId)}${query ? `?${query}` : ""}`,
     {
     method: "GET",
     signal,
     },
   );
-  return mapRow(payload.row);
+  return mapRow({ ...payload.row, bank_split_version: payload.row.split_version });
 }
 
 export async function confirmWorkbenchLink(payload: ConfirmLinkPayload): Promise<WorkbenchActionResult> {
