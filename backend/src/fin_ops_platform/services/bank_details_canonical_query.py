@@ -1271,14 +1271,6 @@ def bank_category_classification_cte(
             f"bank.id::text in (select row_id from {candidate_transaction_relation}) "
             f"or bank.legacy_mongo_id in (select row_id from {candidate_transaction_relation})"
         )
-        peer_cte_sql = f"""
-        classification_peer_bank_ids as materialized (
-          select distinct bank.id
-          from {bank_relation} bank
-          join target_bank_rows target on {peer_match_sql}
-        ),
-        """
-        peer_filter_sql = "bank.id in (select id from classification_peer_bank_ids)"
         source_target_filter_sql = target_filter_sql
         target_params: list[Any] = []
         source_target_params: list[Any] = []
@@ -1287,6 +1279,15 @@ def bank_category_classification_cte(
         source_target_filter_sql = "%s::text[] is null or bank.id::text = any(%s::text[]) or bank.legacy_mongo_id = any(%s::text[])"
         target_params = [target_ids, target_ids, target_ids]
         source_target_params = [target_ids, target_ids, target_ids]
+    if candidate_transaction_relation is not None or target_ids is not None:
+        peer_cte_sql = f"""
+        classification_peer_bank_ids as materialized (
+          select distinct bank.id
+          from {bank_relation} bank
+          join target_bank_rows target on {peer_match_sql}
+        ),
+        """
+        peer_filter_sql = "bank.id in (select id from classification_peer_bank_ids)"
     prefilter_sql, prefilter_params = _transaction_prefilter_sql(
         definitions=definitions,
         account_key=account_key,

@@ -7,6 +7,7 @@ from uuid import uuid4
 from fin_ops_platform.services.bank_details_canonical_query import (
     BankDetailsCanonicalQueryService,
     PostgresBankDetailsCanonicalQueryRepository,
+    bank_category_classification_cte,
 )
 from fin_ops_platform.services.cost_statistics_canonical_repository import PostgresCostStatisticsCanonicalRepository
 from fin_ops_platform.services.cost_statistics_policy import CostStatisticsPolicy
@@ -61,6 +62,44 @@ class BankSplitConsumersPostgresTests(unittest.TestCase):
           (case_id,relation_mode,status,row_ids,row_types,month_scope,special_metadata)
           values ('split-case','manual_confirmed','active',%s::text[],array['oa','bank','bank'],'2026-04-01',
                   '{"bank_split_requires_cost_confirmation":true}'::jsonb)""", (["oa-interest",self.principal,self.interest],))
+
+    def test_bounded_classification_keeps_peer_context_and_split_identity(self):
+        outgoing, incoming = str(uuid4()), str(uuid4())
+        for identity, legacy, direction, account, signed, trade_date in (
+            (outgoing, "peer-out", "outflow", "1111", -600, "2026-04-29"),
+            (incoming, "peer-in", "inflow", "2222", 600, "2026-04-30"),
+        ):
+            self.connection.execute("""insert into app.bank_transactions
+                (id, legacy_mongo_id, account_no, txn_direction, counterparty_name_raw,
+                 amount, signed_amount, txn_date, txn_month, trade_time, status, currency, raw_payload)
+                values (%s::uuid,%s,%s,%s,'云南溯源科技有限公司',600,%s,%s::date,
+                        '2026-04-01',%s::timestamptz,'active','CNY','{}'::jsonb)""",
+                (identity, legacy, account, direction, signed, trade_date, trade_date+" 12:00:00+08"))
+        definitions = self.settings["bank_transaction_tags"]["definitions"]
+        with self.connection.transaction() as tx:
+            tx.execute("set transaction read only")
+            tx.execute("set local jit=off")
+            full_sql, full_params = bank_category_classification_cte(
+                definitions=definitions, date_from=None, date_to=None, use_units=True)
+            fields = "row_id, effective_category_code, effective_category_source"
+            full = tx.fetch_all(f"with {full_sql} select {fields} from classified_with_semantics", full_params)
+            by_id = {row["row_id"]: row for row in full}
+            self.assertEqual(by_id["peer-out"]["effective_category_code"], "internal_transfer")
+            for ids, expected in (
+                ([outgoing], {"peer-out"}),
+                (["peer-out"], {"peer-out"}),
+                ([outgoing, outgoing, incoming], {"peer-out", "peer-in"}),
+                (["peer-in", self.principal, self.interest], {"peer-in", self.principal, self.interest}),
+                (["missing-id"], set()),
+            ):
+                sql, params = bank_category_classification_cte(
+                    definitions=definitions, date_from=None, date_to=None, use_units=True,
+                    candidate_transaction_ids=ids)
+                rows = tx.fetch_all(f"with {sql} select {fields} from classified_with_semantics "
+                    "where row_id=any(%s::text[]) or canonical_transaction_id=any(%s::text[])",
+                    (*params, ids, ids))
+                self.assertEqual({row["row_id"] for row in rows}, expected)
+                self.assertEqual({row["row_id"]:row for row in rows}, {key:by_id[key] for key in expected})
 
     def test_turnover_extra_identity_migrates_with_principal_child(self):
         from fin_ops_platform.services.postgres_repositories.turnover_bank_split import (

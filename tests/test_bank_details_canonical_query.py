@@ -157,6 +157,11 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
         for kwargs in ({"candidate_transaction_ids":["bank-1"]},{"candidate_transaction_relation":"batch_candidates"},{}):
             sql,params = bank_category_classification_cte(definitions=[],date_from=None,date_to=None,**kwargs)
             self.assertEqual(sql.count("%s"),len(params))
+            if kwargs:
+                self.assertIn("classification_peer_bank_ids as materialized", sql)
+                self.assertNotIn("exists (select 1 from target_bank_rows", sql)
+            else:
+                self.assertNotIn("classification_peer_bank_ids as materialized", sql)
 
     def test_transaction_snapshot_uses_one_fixed_repeatable_read_query_set(self) -> None:
         connection = _Connection()

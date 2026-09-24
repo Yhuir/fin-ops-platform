@@ -166,3 +166,7 @@
 ## 2026-09-24 关联台完整拆分展示投影
 
 `workbench_category_projection_rows` 在原有一次分类 SQL 中对当前选中用途的父身份去重、批量聚合全部持久化子项，再用银行拆分 owner 的分类实例装配方法输出 `bank_split_parts`。关联台 full/summary、单行及分类调用方共享该边界，不新增逐行查询或改变用途金额、成员身份、关联占用。未在当前 case 的兄弟子项仅作为展示事实返回，不成为当前关系成员。原 SQL 次数预算保持不变。
+
+## 2026-09-24 有界分类查询性能
+
+指定candidate_transaction_ids与内部candidate_transaction_relation复用同一classification_peer_bank_ids集合CTE，完整保留按金额和时间窗口补齐的内部转账候选；移除指定ID路径逐行重复扫描target_bank_rows。无目标范围的查询保持原语义，参数/DTO/查询次数/事务与标签优先级不变，无新增cache/index/worker。真实PG验证legacy/canonical ID、重复ID、缺失ID、拆分用途以及范围外对手流水；生产508条分类新旧全等，局部查询约162–188ms降为92–102ms。关联台、成本、批量账务与往来仍只消费既有分类边界。
