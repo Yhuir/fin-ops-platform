@@ -4437,6 +4437,8 @@ function oaPendingPaymentRowsPayload(includeInvoiceImportEvidence = false) {
           summary: "浏览器待付款",
           remark: "部分支付",
           amount: "8000.00",
+          original_amount: "8000.00",
+          original_transaction_count: 1,
           paidTotal: "8000.00",
           relationCount: 1,
           relationStatus: "linked",

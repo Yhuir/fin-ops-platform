@@ -1,4 +1,5 @@
 import {
+  Button,
   Chip,
   PopoverContent,
   PopoverDialog,
@@ -12,6 +13,8 @@ import { Link as RouterLink } from "react-router-dom";
 import { useAppHealthStatus, useAppStatusOverview } from "../../contexts/AppHealthStatusContext";
 import { useOptionalSessionPermissions } from "../../contexts/SessionContext";
 import type { AppStatusDomain, AppStatusQueueSummary, AppStatusRuntimeSummaryGroup, AppStatusTask } from "../../features/appStatus/types";
+import { useBackgroundJobProgress } from "../../features/backgroundJobs/BackgroundJobProgressProvider";
+import type { BackgroundJob } from "../../features/backgroundJobs/types";
 import { SharedImportTasksButton } from "../imports/ImportJobDiagnostics";
 import financePlatformMark from "./finance-platform-mark.svg";
 
@@ -175,11 +178,26 @@ type AppStatusIndicatorProps = {
 export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIndicatorProps) {
   const healthStatus = useAppHealthStatus();
   const appStatus = useAppStatusOverview();
-  const { canAdminAccess } = useOptionalSessionPermissions();
+  const { canAdminAccess, canOperateData } = useOptionalSessionPermissions();
+  const { jobs, operatingJobId, operationError, connectionFailed, retryJob, acknowledgeJob, clearOperationError } = useBackgroundJobProgress();
   const reason = appStatus?.overall.reason ?? healthStatus.reason;
   const level = appStatus?.overall.level ?? healthStatus.level;
   const tone = toneFromLevel(level);
   const tasks = appStatus?.backgroundTasks ?? [];
+  const jobsById = new Map(jobs.map(job => [job.jobId, job]));
+  const taskIds = new Set(tasks.map(task => task.jobId));
+  const additionalJobs = jobs.filter(job => !taskIds.has(job.jobId));
+  const jobActions = (job: BackgroundJob | undefined) => {
+    if (!job || !canOperateData || job.jobId.startsWith("import:")) return null;
+    return <div className="app-status-task-actions">
+      {job.retryable && (["failed", "partial_success"].includes(job.status) || job.retryMode === "reprepare") ?
+        <Button size="sm" variant="secondary" isDisabled={operatingJobId !== null}
+          onPress={() => { void retryJob(job.jobId).catch(() => { /* Provider displays the operation error below. */ }); }}>重新执行</Button> : null}
+      {job.acknowledgeable && ["failed", "partial_success", "succeeded"].includes(job.status) ?
+        <Button size="sm" variant="secondary" isDisabled={operatingJobId !== null}
+          onPress={() => { void acknowledgeJob(job.jobId).catch(() => { /* Provider displays the operation error below. */ }); }}>确认已知</Button> : null}
+    </div>;
+  };
   const domains = appStatus?.domains ?? [];
   const runtimeSummary = appStatus?.runtimeSummary;
   const busyDomainCount = domains.filter((domain) => domain.level === "busy").length;
@@ -211,7 +229,7 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
               </Chip>
             </div>
 
-              {tasks.length > 0 ? (
+              {tasks.length > 0 || additionalJobs.length > 0 ? (
                 <>
                   <Separator />
                   <section className="app-status-section">
@@ -228,11 +246,22 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
                       </>;
                       return task.jobId.startsWith("import:") && task.route.startsWith("/imports/")
                         ? <SharedImportTasksButton key={task.jobId} jobId={task.jobId} label={content} />
-                        : <RouterLink key={task.jobId} to={task.route} className="app-status-task-link">{content}</RouterLink>;
+                        : <div key={task.jobId}><RouterLink to={task.route} className="app-status-task-link">{content}</RouterLink>{jobActions(jobsById.get(task.jobId))}</div>;
                     })}
+                    {additionalJobs.map(job => job.jobId.startsWith("import:")
+                      ? <SharedImportTasksButton key={job.jobId} jobId={job.jobId} label={job.shortLabel} />
+                      : <div key={job.jobId} className="app-status-task-link">
+                          <span className="app-status-task-label">{job.shortLabel}</span>
+                          {jobActions(job)}
+                        </div>)}
                   </section>
                 </>
               ) : null}
+
+              {connectionFailed ? <p role="alert">后台任务状态读取失败</p> : null}
+              {operationError ? <div role="alert">{operationError}
+                <Button size="sm" variant="secondary" onPress={clearOperationError}>关闭错误</Button>
+              </div> : null}
 
               <Separator />
 

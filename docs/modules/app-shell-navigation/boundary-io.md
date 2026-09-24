@@ -123,3 +123,7 @@ Shell 精确展示导入 pending/processing/awaiting_confirmation/needs_review/f
 - 刷新：沿用现有全局轮询，写后回读当前任务/列表；共享任务跨状态保持可见。不新增定时器、缓存、read model、队列、依赖、迁移或备份。
 - 旧链清理：删除导入任务 admin-only、共享任务 creator-only、跨用户无法继续预览文案与对应旧测试假设；非共享任务的 owner 校验保留。失败不能用普通已读绕过明确结束处理；原错误历史保留。
 - 验证：共享权限、私人草稿隔离、跨用户确认/异步审计、分页筛选、并发与回滚、丢失响应核实、旧页面导入回归；见[共享实施与验收](../../dev/import-task-disposition-plan.md#共享处理修订2026-09-23)。
+
+## 2026-09-24 后台任务展示收敛
+
+App Shell 不再挂载任何页面顶部后台任务进度/完成条。删除 `BackgroundProgressBlock`、专属 CSS 和 Provider 的 primaryJob/extraCount 排序派生；任务查询、轮询和其它消费者保留。既有 AppStatusIndicator 弹层按 job ID 去重组合摘要与 active jobs；非导入任务按原能力字段和操作权限提供重试/确认，错误在弹层反馈，导入任务继续进入 SharedImportTasksButton，不重复实现导入生命周期。零新增 API、轮询、持久化或数据库迁移。

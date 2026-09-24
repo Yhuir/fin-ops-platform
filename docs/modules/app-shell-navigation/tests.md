@@ -128,3 +128,7 @@ PYTHONPATH=backend/src python3 -m unittest \
 - `web/src/test/PageRouteHost.test.tsx` 锁定全部 18 个 route owner、route mount 单次加载，以及 focus、hidden→visible 与 BFCache 恢复零业务 reload。
 - 静态 source guard 禁止受影响业务页恢复 `domainEvents`、`useActiveFinanceDomainEvent`、银行标签 window event 或业务 `BroadcastChannel`。
 - 排序、分页、筛选只属于当前页面查询状态；它们可以重跑当前页查询，但不能触发跨页面 rebuild。
+
+## 2026-09-24 顶部提示移除回归
+
+`BackgroundJobProgress.test.tsx` 覆盖跨路由无顶部提示、既有状态弹层任务读取、重试、重试失败反馈、确认已知及共享导入入口隔离；`AppStatusIndicator.test.tsx` 保持管理员与非管理员入口测试。生产只读 `production-route-shell.spec.ts` 增加所有路由无顶部提示和旧子项入口断言。七类测试中主要适用前端状态/交互、E2E及旧功能回归；API shape、后台 worker/read model、后端业务规则无改动，不新增对应实现测试。

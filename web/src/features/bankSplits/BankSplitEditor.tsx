@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import TwoColumnTagPicker from '../../components/common/TwoColumnTagPicker';
 import { ApiClientError } from '../apiClient';
 import { amountCents, centsText } from './amount';
@@ -6,8 +6,9 @@ import { fetchBankSplits, saveBankSplits, type BankSplitDetail } from './api';
 import './bankSplits.css';
 
 type DraftPart = { key: string; id?: string; category_code: string; category_path: string[]; amount: string };
-type Props = { transactionId: string; initialDetail?: BankSplitDetail; onSaved?: () => void | Promise<void>; onDirtyChange?: (dirty: boolean) => void };
-export default function BankSplitEditor({ transactionId, initialDetail, onSaved, onDirtyChange }: Props) {
+export type BankSplitPartAction = (partId: string, version: number, disabled: boolean) => ReactNode;
+type Props = { transactionId: string; initialDetail?: BankSplitDetail; onSaved?: (detail: BankSplitDetail) => void | Promise<void>; renderPartAction?: BankSplitPartAction; onDirtyChange?: (dirty: boolean) => void };
+export default function BankSplitEditor({ transactionId, initialDetail, onSaved, onDirtyChange, renderPartAction }: Props) {
   const [detail, setDetail] = useState<BankSplitDetail | null>(null);
   const [parts, setParts] = useState<DraftPart[]>([]);
   const [category, setCategory] = useState('');
@@ -72,7 +73,7 @@ export default function BankSplitEditor({ transactionId, initialDetail, onSaved,
         ...(!parts.length ? { category_code: category, category_label_path: categoryPath } : {}),
       });
       apply(response); setNotice('已保存');
-      await onSaved?.();
+      await onSaved?.(response);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '保存拆分失败');
       if (reason instanceof ApiClientError && reason.status === 409) setConflict(true);
@@ -92,7 +93,10 @@ export default function BankSplitEditor({ transactionId, initialDetail, onSaved,
       </div>
       <input aria-label={`子项 ${index + 1} 金额`} inputMode="decimal" value={part.amount} disabled={disabled}
         onChange={event => changed(parts.map(item => item.key === part.key ? { ...item, amount: event.target.value } : item))} />
-      <button type="button" aria-label={`删除子项 ${index + 1}`} disabled={disabled} onClick={() => changed(parts.filter(item => item.key !== part.key))}>删除</button>
+      <div className="bank-split-line-actions">
+        {part.id ? renderPartAction?.(part.id, detail.version, dirty || saving || conflict) : null}
+        <button type="button" aria-label={`删除子项 ${index + 1}`} disabled={disabled} onClick={() => changed(parts.filter(item => item.key !== part.key))}>删除</button>
+      </div>
     </div>)}
     {!parts.length && dirty ? <div className="bank-split-label-fields">
       <TwoColumnTagPicker value={category} savedLabel={categoryPath.join(' / ')} tags={tags} loading={false} disabled={disabled} onLoad={() => undefined}

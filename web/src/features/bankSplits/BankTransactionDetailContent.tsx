@@ -1,14 +1,15 @@
 import { useEffect, useState, type ComponentProps } from 'react';
 import EntityDetailContent from '../../components/common/EntityDetailContent';
-import BankSplitEditor from './BankSplitEditor';
+import BankSplitEditor, { type BankSplitPartAction } from './BankSplitEditor';
 import { getBankTransactionSplitsBatch, type BankSplitDetail } from './api';
 
 type Props = ComponentProps<typeof EntityDetailContent> & {
   bankTransactionId?: string;
-  onBankSplitSaved?: () => void | Promise<void>;
+  onBankSplitSaved?: (detail: BankSplitDetail) => void | Promise<void>;
+  renderPartAction?: BankSplitPartAction;
   onSplitDirtyChange?: (dirty: boolean, source?: string) => void;
 };
-export default function BankTransactionDetailContent({ bankTransactionId, onBankSplitSaved, onSplitDirtyChange, ...props }: Props) {
+export default function BankTransactionDetailContent({ bankTransactionId, onBankSplitSaved, onSplitDirtyChange, renderPartAction, ...props }: Props) {
   const ids = [...new Set(props.sections.flatMap((section, index) => {
     const id = section.bank_transaction_id ?? (index === 0 ? bankTransactionId : undefined);
     return id ? [id] : [];
@@ -34,6 +35,6 @@ export default function BankTransactionDetailContent({ bankTransactionId, onBank
     const initialDetail = batchKey && batch?.key === batchKey ? batch.rows[ids.indexOf(id)] : undefined;
     return [{ label: '流水子项拆分', content: batchKey && !initialDetail
       ? batchError ? <div role="alert">{batchError}<button type="button" onClick={() => setReload(value => value + 1)}>重试</button></div> : <span role="status">正在读取拆分…</span>
-      : <BankSplitEditor key={id} transactionId={id} initialDetail={initialDetail} onSaved={onBankSplitSaved} onDirtyChange={dirty => onSplitDirtyChange?.(dirty, id)} /> }];
+      : <BankSplitEditor key={id} transactionId={id} initialDetail={initialDetail} onSaved={onBankSplitSaved} renderPartAction={renderPartAction} onDirtyChange={dirty => onSplitDirtyChange?.(dirty, id)} /> }];
   }} />;
 }

@@ -307,6 +307,7 @@ export default function ReconciliationWorkbenchPage() {
     replaceDetailRow,
     closeDetail,
     clearSelection,
+    clearBankSelection,
     clearPairedSelection,
     clearOpenSelection,
     selectedPairedRows: explicitSelectedPairedRows,
@@ -368,6 +369,7 @@ export default function ReconciliationWorkbenchPage() {
   });
   const canWriteWorkbench = workbenchWriteGate.allowed;
   const [isDetailLoading, setIsDetailLoading] = useState(false);
+  const [detailZone, setDetailZone] = useState<"paired" | "unpaired" | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const detailRequestSeqRef = useRef(0);
   const detailRequestAbortControllerRef = useRef<AbortController | null>(null);
@@ -1510,6 +1512,10 @@ export default function ReconciliationWorkbenchPage() {
     detailRequestSeqRef.current = requestSeq;
     setDetailError(null);
     setIsDetailLoading(true);
+    const identity = workbenchRowIdentityKey(row);
+    const containsRow = (groups: WorkbenchRelationGroup[]) => flattenGroups(groups).some(item => workbenchRowIdentityKey(item) === identity);
+    setDetailZone(containsRow(workbenchData?.paired.groups ?? []) ? "paired"
+      : containsRow(workbenchData?.unpaired.groups ?? []) ? "unpaired" : null);
     openDetail(row);
     const controller = new AbortController();
     detailRequestAbortControllerRef.current = controller;
@@ -1536,7 +1542,7 @@ export default function ReconciliationWorkbenchPage() {
           setIsDetailLoading(false);
         }
       });
-  }, [openDetail, replaceDetailRow]);
+  }, [openDetail, replaceDetailRow, workbenchData]);
 
   const handleCloseDetail = useCallback(() => {
     detailRequestAbortControllerRef.current?.abort();
@@ -2632,7 +2638,49 @@ export default function ReconciliationWorkbenchPage() {
         ) : null}
       </div>
 
-      <DetailDrawer onBankSplitSaved={() => refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH)} error={detailError} loading={isDetailLoading} row={detailRow} onClose={handleCloseDetail} />
+      <DetailDrawer
+        onBankSplitSaved={async saved => {
+          clearBankSelection(saved.transaction_id);
+          setSelectionSourceGroups(current => {
+            const keep = (group: WorkbenchRelationGroup) => !group.rows.bank.some(row => row.parentRowId === saved.transaction_id || row.id === saved.transaction_id);
+            return { paired: current.paired.filter(keep), unpaired: current.unpaired.filter(keep) };
+          });
+          setDetailZone(null);
+          // The open drawer must not defer this explicit post-save read.
+          setIsDetailLoading(true);
+          setDetailError(null);
+          const requestSeq = ++detailRequestSeqRef.current;
+          try {
+            const [freshRow, freshPage] = await Promise.all([
+              fetchWorkbenchRowDetail(saved.parts.length ? (saved.parts.find(part => part.id === detailRow?.id) ?? saved.parts[0]).id : saved.transaction_id, { month: WORKBENCH_VIEW_MONTH, rowType: "bank" }),
+              loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, { background: true, forceFresh: true, propagateError: true }),
+            ]);
+            if (detailRequestSeqRef.current === requestSeq) {
+              replaceDetailRow(freshRow);
+              const containsRow = (groups: WorkbenchRelationGroup[]) => flattenGroups(groups).some(row => workbenchRowIdentityKey(row) === workbenchRowIdentityKey(freshRow));
+              setDetailZone(freshPage && containsRow(freshPage.data.paired.groups) ? "paired"
+                : freshPage && containsRow(freshPage.data.unpaired.groups) ? "unpaired" : null);
+            }
+          } catch (error) {
+            if (detailRequestSeqRef.current === requestSeq) setDetailError(error instanceof Error ? `拆分已保存，重新读取失败：${error.message}` : "拆分已保存，重新读取失败。");
+          } finally {
+            if (detailRequestSeqRef.current === requestSeq) setIsDetailLoading(false);
+          }
+        }}
+        renderPartAction={canWriteWorkbench && detailZone && detailRow?.recordType === "bank" && !detailRow.displayOnly ? (partId, version, editing) => {
+          const part = detailRow.bankSplitParts?.find(item => item.id === partId);
+          const occupied = part?.relation_case_id !== undefined && part.relation_case_id !== null && part.relation_case_id !== detailRow.caseId;
+          const unavailable = editing || isDetailLoading || version !== detailRow.bankSplitVersion || !part || part.relation_case_id === undefined || occupied;
+          const selected = (detailZone === "paired" ? explicitSelectedPairedRows : explicitSelectedOpenRows).some(item => item.recordType === "bank" && item.id === partId);
+          return <button type="button" disabled={unavailable} aria-pressed={selected}
+            aria-label={`${selected ? "取消选中" : "选中"}子项 ${part?.category_path.join(" / ") ?? partId}`}
+            title={occupied ? "已属于其他关联" : version !== detailRow.bankSplitVersion ? "请重新打开详情读取最新拆分" : undefined}
+            onClick={() => {
+              const [member] = resolveWorkbenchBankSelection(detailRow, partId);
+              handleSelectRow(member, detailZone, "unit");
+            }}>{selected ? "取消选中" : "选中"}</button>;
+        } : undefined}
+        error={detailError} loading={isDetailLoading} row={detailRow} onClose={handleCloseDetail} />
       {relationPreviewDialog ? (
         <RelationPreviewDialog
           preview={relationPreviewDialog.preview}

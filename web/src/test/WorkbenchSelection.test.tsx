@@ -3794,7 +3794,7 @@ describe("Workbench row selection and detail drawer", () => {
 
     expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "ETC发票导入" })).not.toBeInTheDocument();
-    expect(screen.getByTestId("background-progress-block")).toBeInTheDocument();
+    expect(screen.queryByTestId("background-progress-block")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "正在执行后台任务：正在导入 ETC发票 3/31" })).toBeInTheDocument();
     await user.selectOptions(await screen.findByLabelText("ETC对账任务"), "etc_task_ready_001");
     const input =
@@ -3813,7 +3813,7 @@ describe("Workbench row selection and detail drawer", () => {
     await waitFor(() => {
       expect(screen.getAllByText("已开始后台导入").length).toBeGreaterThan(0);
     });
-    expect(screen.getByTestId("background-progress-block")).toBeInTheDocument();
+    expect(screen.queryByTestId("background-progress-block")).not.toBeInTheDocument();
     const previewCall = fetchMock.mock.calls.find(([url]) => String(url) === "/api/etc/import/preview");
     expect(previewCall).toBeTruthy();
     const formData = (previewCall?.[1] as RequestInit).body as FormData;

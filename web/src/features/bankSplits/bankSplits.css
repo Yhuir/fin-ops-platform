@@ -3,7 +3,7 @@
 .bank-split-toolbar button { font-size:22px; line-height:24px; }
 .bank-split-editor button { color:#214cce; cursor:pointer; }
 .bank-split-editor button:disabled { opacity:.5; cursor:default; }
-.bank-split-line { display:grid; grid-template-columns:minmax(130px,1fr) minmax(100px,140px) 34px; align-items:center; gap:8px; }
+.bank-split-line { display:grid; grid-template-columns:minmax(130px,1fr) minmax(100px,140px) auto; align-items:center; gap:8px; }
 .bank-split-label-fields { display:grid; gap:6px; min-width:0; }
 .bank-split-label-fields select { width:100%; min-width:0; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:var(--fp-surface); }
 .bank-split-line input { width:100%; min-width:0; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; text-align:right; font-variant-numeric:tabular-nums; }
@@ -18,4 +18,6 @@
 .bank-split-part-trigger:focus-visible { outline:2px solid var(--fp-primary); outline-offset:2px; }
 .bank-split-part-trigger .bank-category-tag { max-width:100%; }
 .bank-split-amount-popover { font-variant-numeric:tabular-nums; }
-@media(max-width:600px) { .bank-split-line { grid-template-columns:minmax(0,1fr) 34px; } .bank-split-line input { grid-row:2; } .bank-split-line > button { grid-column:2; grid-row:1 / span 2; } }
+@media(max-width:600px) { .bank-split-line { grid-template-columns:minmax(0,1fr) 34px; } .bank-split-line input { grid-row:2; } .bank-split-line-actions { grid-column:2; grid-row:1 / span 2; } }
+
+.bank-split-line-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }

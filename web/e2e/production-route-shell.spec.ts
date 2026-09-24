@@ -60,6 +60,8 @@ test.describe("production route shell smoke", () => {
       await page.goto(path, { waitUntil: "domcontentloaded" });
       await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
       await page.waitForTimeout(1_500);
+      await expect(page.locator('.app-shell-progress-stack, .background-progress-block')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: '选择流水子项', exact: true })).toHaveCount(0);
       const bodyText = (await page.locator("body").innerText()).replace(/\s+/g, " ").trim();
       const blockedSession = /缺少 OA 登录态|请返回 OA 系统重新登录|会话校验失败|没有权限访问/.test(bodyText);
       const stillLoading = bodyText.includes("正在加载页面") && bodyText.length < 80;

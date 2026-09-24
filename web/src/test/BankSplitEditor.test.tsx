@@ -185,3 +185,24 @@ test('selecting a new external code requires a fresh instance family and does no
   expect(saveBankSplits).not.toHaveBeenCalled();
   expect(screen.getByLabelText('子项 1 往来归属')).toHaveValue('银行往来');
 });
+
+
+test('optional saved-part actions receive the version and block dirty drafts without requiring edit permission', async () => {
+  const select = vi.fn();
+  vi.mocked(fetchBankSplits).mockResolvedValue({ ...detail, can_edit: false });
+  const view = render(<BankTransactionDetailContent bankTransactionId="bank-1" sections={[{ title: '交易信息', fields: [] }]}
+    renderPartAction={(id, version, disabled) => <button disabled={disabled} onClick={() => select(id, version)}>选中 {id}</button>} />);
+  fireEvent.click(await screen.findByRole('button', { name: '选中 part-2' }));
+  expect(select).toHaveBeenCalledWith('part-2', 2);
+  expect(saveBankSplits).not.toHaveBeenCalled();
+  view.unmount();
+  vi.mocked(fetchBankSplits).mockResolvedValue(detail);
+  render(<BankSplitEditor transactionId="bank-1" renderPartAction={(id, version, disabled) => <button disabled={disabled} onClick={() => select(id, version)}>选中 {id}</button>} />);
+  await screen.findByLabelText('子项 2 金额');
+  fireEvent.change(screen.getByLabelText('子项 2 金额'), { target: { value: '1497.20' } });
+  expect(screen.getByRole('button', { name: '选中 part-2' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '新增流水子项' }));
+  expect(screen.getAllByRole('button', { name: /^选中 / })).toHaveLength(2);
+  fireEvent.click(screen.getByRole('button', { name: '取消', exact: true }));
+  expect(screen.getByRole('button', { name: '选中 part-2' })).toBeEnabled();
+});

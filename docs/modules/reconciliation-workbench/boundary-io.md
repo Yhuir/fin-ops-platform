@@ -393,6 +393,12 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 
 ## 2026-09-24 整笔选择与核对金额分层
 
-拆分卡片整行选择使用完整 bank_split_parts 的 canonical 子项及 active relation_case_id，不能只选择当前筛选可见子项；其他 owner 明确拒绝整选。标签只展示，单项选择经显式菜单。金额核对新增 bank_original_total、bank_related_total、evidence_required_total；Popover 显示原银行金额，真实部分关联另显示本次关联金额。标签配对规则决定需票金额，SQL 分区与领域异常一致；不改变真实票据金额或正式成员。preview/confirm 携带 bank_split_versions，事务锁后验证。详见 [闭环实施记录](split-payment-closure.md)。
+拆分卡片整行选择使用完整 bank_split_parts 的 canonical 子项及 active relation_case_id，不能只选择当前筛选可见子项；其他 owner 明确拒绝整选。标签只展示，单项选择经流水详情抽屉。金额核对新增 bank_original_total、bank_related_total、evidence_required_total；Popover 显示原银行金额，真实部分关联另显示本次关联金额。标签配对规则决定需票金额，SQL 分区与领域异常一致；不改变真实票据金额或正式成员。preview/confirm 携带 bank_split_versions，事务锁后验证。详见 [闭环实施记录](split-payment-closure.md)。
 
 有效拆分标签资格必须与银行分类 owner 的规则标准化一致：缺省状态为 active、内置系统规则与自定义规则分别按既有合同处理。缺失或归档用途规则不伪装成金额差额；SQL 分区和领域 completion 均保留 unpaired，blocking_reasons 为 bank_split_rule_unknown。该状态不阻止既有人工关联命令，但不能自动宣称已闭环。
+
+## 2026-09-24 子项选择入口收敛
+
+金额列移除子项选择菜单，仅展示原流水金额及金额浮层标签。单子项选择通过既有详情图标进入 DetailDrawer：关联台以 `renderPartAction(partId, version, disabled)` 向公共拆分编辑器注入操作；公共组件不 import 关联业务。权限、当前区域、ownership、版本与选择状态仍由关联台拥有，整笔及单项共用 resolveWorkbenchBankSelection。编辑中/冲突中/占用子项不可选择；编辑权限与关联权限独立。
+
+保存回调携带已持久化 BankSplitDetail；清理该父流水在两区的旧选择与受影响来源组，显式读取新详情及列表，不被“抽屉打开时暂缓后台刷新”机制阻挡。不使用旧版本选择；写后回读失败明确显示已保存及读取错误。保持抽屉打开，关闭后关联选择保留。其它页面不注入此操作。业务 API、金额、成本、往来和正式关系写合同不变。

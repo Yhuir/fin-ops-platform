@@ -56,116 +56,72 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("global background job page header", () => {
-  test("maps completed job affected scopes from result summary", () => {
-    const job = mapBackgroundJob({
-      job_id: "job_file_import_001",
-      type: "file_import",
-      status: "succeeded",
-      result_summary: {
-        affected_months: ["2026-04"],
-        affected_scope_keys: ["all", "2026-04", "active:2026-04"],
-      },
-    });
+async function openStatus() {
+  const button = await waitFor(() => {
+    const trigger = document.querySelector<HTMLElement>('.app-sidebar-brand-mark[role="button"]');
+    expect(trigger).toBeVisible();
+    return trigger!;
+  });
+  await userEvent.click(button);
+  return screen.findByRole("dialog", { name: "全局运行状态" });
+}
 
-    expect(job.affectedMonths).toEqual(["2026-04"]);
-    expect(job.affectedScopeKeys).toEqual(["2026-04", "active:2026-04"]);
+describe("background tasks are handled only in the runtime status popover", () => {
+  test("maps completed job affected scopes", () => {
+    expect(mapBackgroundJob({ job_id: "one", status: "succeeded", result_summary: {
+      affected_months: ["2026-04"], affected_scope_keys: ["all", "2026-04"],
+    } }).affectedScopeKeys).toEqual(["2026-04"]);
   });
 
-  test("does not render a page header when there are no active jobs", async () => {
-    installMockApiFetch({ backgroundJobs: [] });
-    renderAppAt("/");
-
-    await waitFor(() => {
-      expect(screen.queryByTestId("background-progress-block")).not.toBeInTheDocument();
-    });
-  });
-
-  test("renders a running job page header on the current page", async () => {
-    installMockApiFetch({ backgroundJobs: [runningEtcJob] });
-    renderAppAt("/");
-
-    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("正在导入 ETC发票 3/31");
-  });
-
-  test("renders a retry action for retryable attention jobs", async () => {
-    const fetchMock = installMockApiFetch({
-      backgroundJobs: [
-        failedImportJob,
-      ],
-    });
-    renderAppAt("/");
-
-    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("导入银行流水失败");
-
-    await userEvent.click(screen.getByRole("button", { name: "重新执行" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/background-jobs/job_file_import_failed/retry"),
-        expect.objectContaining({ method: "POST" }),
-      );
-    });
-  });
-
-  test("shows operation feedback when retry fails instead of appearing unresponsive", async () => {
-    installMockApiFetch({
-      backgroundJobs: [failedImportJob],
-      backgroundJobRetryStatus: 409,
-      backgroundJobRetryBody: { message: "关联台匹配任务缺少重新执行所需的范围。" },
-    });
-    renderAppAt("/");
-
-    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("导入银行流水失败");
-
-    await userEvent.click(screen.getByRole("button", { name: "重新执行" }));
-
-    expect(await screen.findByText("关联台匹配任务缺少重新执行所需的范围。")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "重新执行" })).toBeEnabled();
-  });
-
-  test("acknowledges known attention jobs from the global progress header", async () => {
-    const fetchMock = installMockApiFetch({
-      backgroundJobs: [failedImportJob],
-    });
-    renderAppAt("/");
-
-    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("导入银行流水失败");
-
-    await userEvent.click(screen.getByRole("button", { name: "确认已知" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/background-jobs/job_file_import_failed/acknowledge"),
-        expect.objectContaining({ method: "POST" }),
-      );
-    });
-    await waitFor(() => {
-      expect(screen.queryByTestId("background-progress-block")).not.toBeInTheDocument();
-    });
-  });
-
-  test("keeps the global background job status visible after route changes", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch({ backgroundJobs: [runningEtcJob] });
-    renderAppAt("/");
-
-    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("正在导入 ETC发票 3/31");
-
-    await user.click(await screen.findByRole("link", { name: "银行明细" }));
-
-    expect(await screen.findByRole("button", { name: "正在执行后台任务：正在导入 ETC发票 3/31" })).toBeInTheDocument();
+  test.each(["/", "/bank-details", "/cost-statistics", "/imports/invoices"])("never mounts a global progress banner on %s", async path => {
+    const fetchMock = installMockApiFetch({ backgroundJobs: [runningEtcJob] });
+    renderAppAt(path);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/background-jobs/active"))).toBe(true));
     expect(screen.queryByTestId("background-progress-block")).not.toBeInTheDocument();
+    expect(document.querySelector(".app-shell-progress-stack")).toBeNull();
+    expect(screen.queryByText(runningEtcJob.short_label)).not.toBeInTheDocument();
+    await openStatus();
+    expect(await screen.findByText(runningEtcJob.short_label)).toBeInTheDocument();
   });
-});
 
-test("review-required import offers preview and reprepare, not blind commit retry", async () => {
-  installMockApiFetch({ backgroundJobs: [{ ...failedImportJob, job_id: "import:review", status: "needs_review",
-    short_label: "预览需要复核", retry_mode: "reprepare", acknowledgeable: false,
-    source: { session_id: "session-1", route: "/imports/invoices" } }] });
-  renderAppAt("/");
-  expect(await screen.findByRole("button", { name: "重新预览" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "查看预览" })).toHaveAttribute("href", expect.stringContaining("import_job=import%3Areview"));
-  expect(screen.queryByRole("button", { name: "重新执行" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "确认已知" })).not.toBeInTheDocument();
+  test("retries a task from the existing status popover", async () => {
+    const fetchMock = installMockApiFetch({ backgroundJobs: [failedImportJob] });
+    renderAppAt("/");
+    await openStatus();
+    await userEvent.click(await screen.findByRole("button", { name: "重新执行" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/job_file_import_failed/retry"), expect.objectContaining({ method: "POST" })));
+  });
+
+  test("failed retry stays visible in the popover without a global banner", async () => {
+    installMockApiFetch({ backgroundJobs: [failedImportJob], backgroundJobRetryStatus: 409,
+      backgroundJobRetryBody: { message: "任务范围已变化" } });
+    renderAppAt("/");
+    await openStatus();
+    await userEvent.click(await screen.findByRole("button", { name: "重新执行" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("任务范围已变化");
+    expect(screen.getByRole("button", { name: "重新执行" })).toBeEnabled();
+    expect(screen.queryByTestId("background-progress-block")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "关闭错误" }));
+    expect(screen.queryByText("任务范围已变化")).not.toBeInTheDocument();
+  });
+
+  test("acknowledges a task through the existing API", async () => {
+    const fetchMock = installMockApiFetch({ backgroundJobs: [failedImportJob] });
+    renderAppAt("/");
+    await openStatus();
+    await userEvent.click(await screen.findByRole("button", { name: "确认已知" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/job_file_import_failed/acknowledge"), expect.objectContaining({ method: "POST" })));
+    await waitFor(() => expect(screen.queryByText(failedImportJob.short_label)).not.toBeInTheDocument());
+  });
+
+  test("shared import tasks keep their dedicated entry and cannot be blindly acknowledged", async () => {
+    installMockApiFetch({ backgroundJobs: [{ ...failedImportJob, job_id: "import:review", status: "needs_review",
+      short_label: "预览需要复核", retry_mode: "reprepare", acknowledgeable: false,
+      source: { route: "/imports/invoices" } }] });
+    renderAppAt("/");
+    await openStatus();
+    expect(await screen.findByRole("button", { name: "预览需要复核" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重新执行" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "确认已知" })).not.toBeInTheDocument();
+  });
 });

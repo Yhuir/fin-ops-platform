@@ -142,7 +142,7 @@ test.describe("app shell browser smoke", () => {
     await expect(page.getByRole("grid", { name: "OA 状态" })).not.toContainText("单据");
     await expect(page.getByRole("grid", { name: "OA 状态" })).not.toContainText("明细");
     await expect(page.getByTestId("app-health-requests")).toBeVisible();
-    await expect(page.getByRole("button", { name: "刷新" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "刷新", exact: true })).toBeVisible();
     expect(api.count("GET /api/session/me")).toBeGreaterThan(0);
     expect(api.count("GET /api/operations/app-health-dashboard")).toBeGreaterThan(0);
 
@@ -153,7 +153,7 @@ test.describe("app shell browser smoke", () => {
       actionType: "click",
     }, async (mark) => {
       const dashboardResponse = waitForAppHealthDashboard(page);
-      await page.getByRole("button", { name: "刷新" }).click();
+      await page.getByRole("button", { name: "刷新", exact: true }).click();
       await mark("apiLatencyMs", dashboardResponse);
       await mark("finalSettledLatencyMs", expect(page.getByTestId("app-health-runtime")).toBeVisible());
     });

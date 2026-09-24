@@ -1,7 +1,4 @@
 import BankSplitChips from "../../features/bankSplits/BankSplitChips";
-import { Dropdown } from "@heroui/react";
-import { resolveWorkbenchBankSelection } from "../../features/workbench/selectionModel";
-import { formatMoney } from "../../features/money";
 import { memo, type ReactNode } from "react";
 
 import type { WorkbenchRecord, WorkbenchRecordType } from "../../features/workbench/types";
@@ -92,27 +89,7 @@ function RelationGroupCell({
       >
         {displayRecords.map((row, index) => (
           <WorkbenchRecordCard
-            bankPartsContent={row.isSplit && row.parentRowId ? <>
-              <BankSplitChips parts={row.bankSplitParts ?? []} />
-              {!readOnly && canOperateData && !row.displayOnly ? <span onClick={event => event.stopPropagation()}>
-                <Dropdown>
-                  <Dropdown.Trigger aria-label="选择流水子项" className="row-actions-compact-trigger">选择子项</Dropdown.Trigger>
-                  <Dropdown.Popover placement="bottom end">
-                    <Dropdown.Menu aria-label="流水子项" onAction={key => {
-                      const [member] = resolveWorkbenchBankSelection(row, String(key));
-                      onSelectRow(member, zoneId, "unit");
-                    }}>
-                      {(row.bankSplitParts ?? []).map(part => <Dropdown.Item key={part.id} id={part.id}
-                        isDisabled={part.relation_case_id === undefined || (part.relation_case_id !== null && part.relation_case_id !== row.caseId)}
-                        textValue={`${part.category_label} ${formatMoney(part.amount)}`}>
-                        {part.category_path.join(" / ")} · {formatMoney(part.amount)}
-                        {part.relation_case_id !== undefined && part.relation_case_id !== null && part.relation_case_id !== row.caseId ? " · 已关联" : ""}
-                      </Dropdown.Item>)}
-                    </Dropdown.Menu>
-                  </Dropdown.Popover>
-                </Dropdown>
-              </span> : null}
-            </> : undefined}
+            bankPartsContent={row.isSplit ? <BankSplitChips parts={row.bankSplitParts ?? []} /> : undefined}
             columnGridStyle={columnGridStyle}
             columns={columns}
             highlighted={highlightedRowId === row.id || Boolean(row.parentRowId && splitGroups.get(row.parentRowId)?.some(part => part.id === highlightedRowId))}

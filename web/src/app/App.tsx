@@ -1,11 +1,9 @@
 import { useEffect, useState } from "react";
-import { Alert } from "@heroui/react";
 import { BrowserRouter, useLocation } from "react-router-dom";
 
 import SessionGate from "../components/auth/SessionGate";
 import AppSidebar from "../components/shell/AppSidebar";
 import AppTopBar from "../components/shell/AppTopBar";
-import BackgroundProgressBlock from "../components/common/BackgroundProgressBlock";
 import { AppChromeProvider } from "../contexts/AppChromeContext";
 import { AppHealthStatusProvider } from "../contexts/AppHealthStatusContext";
 import { GlobalOperationOverlayProvider } from "../contexts/GlobalOperationOverlayContext";
@@ -13,7 +11,7 @@ import { ImportProgressProvider } from "../contexts/ImportProgressContext";
 import { MonthProvider } from "../contexts/MonthContext";
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionProvider } from "../contexts/SessionContext";
-import { BackgroundJobProgressProvider, useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
+import { BackgroundJobProgressProvider } from "../features/backgroundJobs/BackgroundJobProgressProvider";
 import AppRouter from "./router";
 import { APP_BASE_PATH, isOaEmbeddedMode } from "./runtime";
 import "./styles.css";
@@ -109,21 +107,10 @@ function StatefulAppSidebar({
 
 function AppShell() {
   const location = useLocation();
-  const {
-    primaryJob,
-    extraCount,
-    connectionFailed,
-    operatingJobId,
-    operationError,
-    acknowledgeJob,
-    retryJob,
-    clearOperationError,
-  } = useBackgroundJobProgress();
   const embedded = isOaEmbeddedMode();
   const isCompact = useShellMediaQuery("(max-width: 899.95px)");
   const [mobileOpen, setMobileOpen] = useState(false);
   const isBankDetailsRoute = location.pathname === "/bank-details";
-  const showProgressStack = !isBankDetailsRoute && (connectionFailed || primaryJob || operationError);
 
   useEffect(() => {
     if (!isCompact) {
@@ -148,42 +135,6 @@ function AppShell() {
           isCompact={isCompact}
           onOpenMobileSidebar={() => setMobileOpen(true)}
         />
-        {showProgressStack ? (
-          <div className="app-shell-progress-stack">
-            {connectionFailed ? (
-              <BackgroundProgressBlock kind="connection_error" />
-            ) : primaryJob ? (
-              <BackgroundProgressBlock
-                kind="job"
-                job={primaryJob}
-                extraCount={extraCount}
-                operating={operatingJobId === primaryJob.jobId}
-                onAcknowledge={(jobId) => {
-                  acknowledgeJob(jobId).catch(() => undefined);
-                }}
-                onRetry={(jobId) => {
-                  retryJob(jobId).catch(() => undefined);
-                }}
-              />
-            ) : null}
-            {operationError ? (
-              <Alert className="app-shell-operation-error" role="alert" status="danger">
-                <Alert.Indicator />
-                <Alert.Content>
-                  <Alert.Description>{operationError}</Alert.Description>
-                </Alert.Content>
-                <button
-                  aria-label="关闭后台操作错误"
-                  className="app-shell-operation-error__close"
-                  type="button"
-                  onClick={clearOperationError}
-                >
-                  ×
-                </button>
-              </Alert>
-            ) : null}
-          </div>
-        ) : null}
         <main className={`page-body${embedded ? " embedded" : ""}`} id="main-content" tabIndex={-1}>
           <SessionGate>
             <AppRouter />

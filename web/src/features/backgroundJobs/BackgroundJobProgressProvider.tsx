@@ -20,8 +20,6 @@ const MAX_FAILURES_BEFORE_WARNING = 3;
 
 type BackgroundJobProgressContextValue = {
   jobs: BackgroundJob[];
-  primaryJob: BackgroundJob | null;
-  extraCount: number;
   connectionFailed: boolean;
   operatingJobId: string | null;
   operationError: string | null;
@@ -32,41 +30,6 @@ type BackgroundJobProgressContextValue = {
 };
 
 const BackgroundJobProgressContext = createContext<BackgroundJobProgressContextValue | null>(null);
-
-function jobPriority(job: BackgroundJob) {
-  if ((job.status === "awaiting_confirmation" || job.status === "needs_review")) return 1;
-  if (job.status === "failed") {
-    return 0;
-  }
-  if (job.status === "partial_success") {
-    return 1;
-  }
-  if (job.status === "running") {
-    return 2;
-  }
-  if (job.status === "queued") {
-    return 3;
-  }
-  if (job.status === "succeeded") {
-    return 4;
-  }
-  return 5;
-}
-
-function jobTime(job: BackgroundJob) {
-  const value = Date.parse(job.updatedAt || job.createdAt || "");
-  return Number.isFinite(value) ? value : 0;
-}
-
-function choosePrimaryJob(jobs: BackgroundJob[]) {
-  return [...jobs].sort((left, right) => {
-    const priorityDelta = jobPriority(left) - jobPriority(right);
-    if (priorityDelta !== 0) {
-      return priorityDelta;
-    }
-    return jobTime(right) - jobTime(left);
-  })[0] ?? null;
-}
 
 function hasQueuedOrRunningJob(jobs: BackgroundJob[]) {
   return jobs.some((job) => job.status === "queued" || job.status === "running");
@@ -221,13 +184,10 @@ export function BackgroundJobProgressProvider({ children }: { children: ReactNod
     };
   }, [refresh]);
 
-  const primaryJob = useMemo(() => choosePrimaryJob(jobs), [jobs]);
   const value = useMemo(
     () => ({
       jobs,
-      primaryJob,
-      extraCount: Math.max(0, jobs.length - 1),
-      connectionFailed: !primaryJob && failureCount >= MAX_FAILURES_BEFORE_WARNING,
+      connectionFailed: jobs.length === 0 && failureCount >= MAX_FAILURES_BEFORE_WARNING,
       operatingJobId,
       operationError,
       acknowledgeJob,
@@ -235,7 +195,7 @@ export function BackgroundJobProgressProvider({ children }: { children: ReactNod
       clearOperationError,
       refresh,
     }),
-    [acknowledgeJob, clearOperationError, failureCount, jobs, operatingJobId, operationError, primaryJob, refresh, retryJob],
+    [acknowledgeJob, clearOperationError, failureCount, jobs, operatingJobId, operationError, refresh, retryJob],
   );
 
   return (

@@ -28,6 +28,7 @@ test('same-parent children show once, chips only reveal amounts and row click se
     records={[principal, interest]} scrollPaneId="bank" scrollTestId="bank-cell" getRowState={() => 'idle'}
     onSelectRow={select} onOpenDetail={vi.fn()} onRowAction={vi.fn()} showWorkflowActions={false} canOperateData />);
   expect(container.querySelectorAll('.record-card')).toHaveLength(1);
+  expect(screen.queryByRole('button', { name: '选择流水子项' })).not.toBeInTheDocument();
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: '费用 / 利息拆分金额' }));
   expect(select).not.toHaveBeenCalled();
@@ -35,21 +36,6 @@ test('same-parent children show once, chips only reveal amounts and row click se
   fireEvent.click(screen.getByText('1001497.22'));
   expect(select).toHaveBeenCalledOnce();
   expect(select).toHaveBeenCalledWith(principal, 'unpaired');
-});
-
-test('explicit child menu selects a precise unit and disables siblings owned by other relations', async () => {
-  const user = userEvent.setup();
-  const interest = { ...record('interest-1', '1497.22', '费用 / 利息'), bankSplitParts: [
-    { ...splitParts[0], relation_case_id: 'other-case' }, { ...splitParts[1], relation_case_id: 'case-1' },
-  ] };
-  const select = vi.fn();
-  render(<RelationGroupCell zoneId="unpaired" paneId="bank" columns={getWorkbenchColumns('bank')}
-    records={[interest]} scrollPaneId="bank" scrollTestId="bank-cell" getRowState={() => 'idle'}
-    onSelectRow={select} onOpenDetail={vi.fn()} onRowAction={vi.fn()} showWorkflowActions={false} canOperateData />);
-  await user.click(screen.getByRole('button', { name: '选择流水子项' }));
-  expect(await screen.findByRole('menuitem', { name: /外部往来款/ })).toHaveAttribute('aria-disabled', 'true');
-  await user.click(screen.getByRole('menuitem', { name: /费用.*利息/ }));
-  expect(select).toHaveBeenCalledWith(expect.objectContaining({ id: 'interest-1', amount: '1497.22' }), 'unpaired', 'unit');
 });
 
 test('read-only split rows permit hover but neither whole nor child selection', async () => {

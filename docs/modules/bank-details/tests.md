@@ -78,3 +78,7 @@ git diff --check
 ## 2026-09-24 关联台父流水拆分显示
 
 `test_bank_split_consumers_postgres.py::BankSplitConsumersPostgresTests::test_workbench_hydration_shows_all_parent_parts_without_adding_other_case_members` 验证父流水两个子项在不同 case 时，单行/full/summary 均取得完整标签，当前成员与用途金额保持不变。`test_bank_details_canonical_query.py` 保留原分类语义与单次查询预算；`test_workbench_page_query_repository.py` 覆盖既有分页/摘要及分类调用合同。
+
+## 2026-09-24 公共编辑器扩展回归
+
+BankSplitEditor 的可选子项操作只接受持久化 ID/版本/编辑禁用状态；无回调消费者不增加操作。BankSplitEditor、BankSplitsApi、BankSplitChips、DetailDrawer 单测及 bank-transaction-splits 浏览器用例覆盖旧查看/编辑/保存/失败/金额浮层。无 API/数据库/worker 变更，不新增后端测试。

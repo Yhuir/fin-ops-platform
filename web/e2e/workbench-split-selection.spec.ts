@@ -59,7 +59,7 @@ test('a split sibling owned elsewhere cannot be selected wholesale but the curre
   const payload = await (await initial).json();
   const group = payload.unpaired.groups.find((item: { group_id: string }) => item.group_id === 'case:CASE-202603-101');
   const bank = group.bank_rows[0];
-  Object.assign(bank, { amount: '1497.22', is_split: true, parent_row_id: 'shared-parent', parent_amount: '1001497.22', bank_split_version: 7,
+  Object.assign(bank, { detail_fields: { '金额': '1001497.22' }, amount: '1497.22', is_split: true, parent_row_id: 'shared-parent', parent_amount: '1001497.22', bank_split_version: 7,
     bank_split_parts: [
       { id: 'principal-other-case', amount: '1000000.00', category_code: 'principal', category_label: '归还借款', category_path: ['外部往来款', '归还借款'], relation_case_id: 'CASE-OTHER' },
       { id: bank.id, amount: '1497.22', category_code: 'interest', category_label: '利息', category_path: ['费用', '利息'], relation_case_id: 'CASE-202603-101' },
@@ -67,6 +67,12 @@ test('a split sibling owned elsewhere cannot be selected wholesale but the curre
   });
   group.amount_check = { status: 'matched', direction: 'payment', oa_total: '1497.22', bank_total: '1497.22', bank_related_total: '1497.22', bank_original_total: '1001497.22', invoice_total: '1497.22', requires_note: false };
   await page.route('**/api/workbench?*', route => route.fulfill({ json: payload }));
+  await page.route('**/api/workbench/rows/*?*', route => route.fulfill({ json: { row: bank } }));
+  await page.route('**/api/bank-transactions/*/splits', route => route.fulfill({ json: {
+    transaction_id: 'shared-parent', canonical_transaction_id: 'canonical-parent', amount: '1001497.22', direction: 'expense', version: 7,
+    category_code: 'principal', category_label_path: [], turnover_third_label_options: [],
+    parts: bank.bank_split_parts, tag_definitions: [], can_edit: false,
+  } }));
   await page.reload();
   const relation = page.getByTestId('candidate-group-unpaired-case:CASE-202603-101');
   const bankRow = relation.locator('.record-card-bank');
@@ -74,9 +80,13 @@ test('a split sibling owned elsewhere cannot be selected wholesale but the curre
   const error = page.getByRole('dialog', { name: '操作状态弹窗' });
   await expect(error).toContainText('部分子项已属于其他关联');
   await error.getByRole('button', { name: '确定' }).click();
-  await bankRow.getByRole('button', { name: '选择流水子项' }).click();
-  await expect(page.getByRole('menuitem', { name: /外部往来款/ })).toBeDisabled();
-  await page.getByRole('menuitem', { name: /费用.*利息/ }).click();
+  await expect(bankRow.getByRole('button', { name: '选择流水子项' })).toHaveCount(0);
+  await bankRow.getByRole('button', { name: /查看银行流水.*详情/ }).click();
+  const drawer = page.getByRole('dialog', { name: '银行流水详情' });
+  await expect(drawer.getByRole('button', { name: '选中子项 外部往来款 / 归还借款', exact: true })).toBeDisabled();
+  await drawer.getByRole('button', { name: '选中子项 费用 / 利息', exact: true }).click();
+  await expect(drawer.getByRole('button', { name: '取消选中子项 费用 / 利息' })).toHaveAttribute('aria-pressed', 'true');
+  await drawer.getByRole('button', { name: '关闭详情抽屉' }).click();
   const zone = page.getByTestId('zone-unpaired');
   await expect(zone.getByText('带入 2', { exact: true })).toBeVisible();
   await expect(zone.getByRole('button', { name: '撤回关联' })).toBeEnabled();
@@ -92,4 +102,54 @@ test('a split sibling owned elsewhere cannot be selected wholesale but the curre
   const confirmed = api.lastBody('POST /api/workbench/actions/withdraw-link');
   expect(confirmed.row_ids).toEqual(request.row_ids);
   expect(confirmed.row_ids).not.toContain('principal-other-case');
+});
+
+test('saving splits clears only that bank selection and reloads the saved version before selecting again', async ({ page }) => {
+  await installDeterministicApiMocks(page, { sessionMode: 'user' });
+  const initial = page.waitForResponse(response => new URL(response.url()).pathname === '/api/workbench');
+  await page.goto('/');
+  const payload = await (await initial).json();
+  const group = payload.unpaired.groups.find((item: { bank_rows: Array<{ id: string }> }) => item.bank_rows.some(bank => bank.id === 'bk-o-202603-001'));
+  const bank = group.bank_rows[0];
+  const parts = [
+    { id: bank.id, amount: '57000.00', category_code: 'goods', category_label: '设备', category_path: ['货款', '设备'], relation_case_id: null },
+    { id: 'second-part', amount: '1000.00', category_code: 'fee', category_label: '利息', category_path: ['费用', '利息'], relation_case_id: null },
+  ];
+  Object.assign(bank, { detail_fields: { '金额': '58000.00' }, amount: '57000.00', parent_row_id: 'parent-bank', parent_amount: '58000.00', is_split: true, bank_split_version: 7, bank_split_parts: parts });
+  const tags = parts.map(part => ({ code: part.category_code, label: part.category_label, path: part.category_path, primary_label: part.category_path[0], sub_label: part.category_path[1], status: 'active', turnover_role: '' }));
+  await page.route('**/api/workbench?*', route => route.fulfill({ json: payload }));
+  await page.route('**/api/workbench/rows/*?*', route => route.fulfill({ json: { row: bank } }));
+  let writes = 0;
+  await page.route('**/api/bank-transactions/*/splits', async route => {
+    if (route.request().method() === 'PUT') {
+      const body = route.request().postDataJSON();
+      expect(body.version).toBe(7);
+      parts[0].amount = body.parts[0].amount;
+      parts[1].amount = body.parts[1].amount;
+      bank.amount = parts[0].amount;
+      bank.bank_split_version = 8;
+      writes++;
+    }
+    await route.fulfill({ json: { transaction_id: 'parent-bank', canonical_transaction_id: 'canonical-parent', amount: '58000.00', direction: 'expense', version: bank.bank_split_version,
+      category_code: 'goods', category_label_path: ['货款', '设备'], turnover_third_label_options: [], parts, tag_definitions: tags, can_edit: true, changed: true, affected_months: [] } });
+  });
+  await page.reload();
+  const zone = page.getByTestId('zone-unpaired');
+  const bankRow = zone.locator('.record-card-bank').filter({ hasText: '智能工厂设备商' });
+  await bankRow.getByText('58000.00', { exact: true }).click();
+  await expect(zone.getByText('已选 2', { exact: true })).toBeVisible();
+  await bankRow.getByRole('button', { name: /查看银行流水.*详情/ }).click();
+  const drawer = page.getByRole('dialog', { name: '银行流水详情' });
+  await drawer.getByLabel('子项 1 金额').fill('56999.00');
+  await drawer.getByLabel('子项 2 金额').fill('1001.00');
+  await expect(drawer.getByRole('button', { name: '取消选中子项 费用 / 利息' })).toBeDisabled();
+  await drawer.getByRole('button', { name: '保存', exact: true }).click();
+  await expect(drawer.getByLabel('子项 2 金额')).toHaveValue('1001.00');
+  await expect(drawer.getByRole('button', { name: '选中子项 费用 / 利息', exact: true })).toBeEnabled();
+  expect(writes).toBe(1);
+  await drawer.getByRole('button', { name: '选中子项 费用 / 利息', exact: true }).click();
+  await drawer.getByRole('button', { name: '关闭详情抽屉' }).click();
+  await expect(zone.getByText('已选 1', { exact: true })).toBeVisible();
+  await expect(zone.getByText('流水 1 / 1001.00', { exact: true })).toBeVisible();
+  await expectNoUnexpectedSuccessUiErrors(page);
 });

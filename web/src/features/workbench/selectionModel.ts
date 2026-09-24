@@ -440,7 +440,7 @@ export function resolveWorkbenchBankSelection(row: WorkbenchRecord, unitId?: str
     throw new Error("流水子项关联状态不完整，请刷新后重试。");
   }
   if (selected.some(part => part.relation_case_id !== null && part.relation_case_id !== row.caseId)) {
-    throw new Error("部分子项已属于其他关联，请使用“选择子项”或先处理已有关系。");
+    throw new Error("部分子项已属于其他关联，请打开流水详情选择可用子项，或先处理已有关系。");
   }
   return selected.map(part => ({
     ...row,

@@ -58,6 +58,13 @@ export default function useWorkbenchSelection() {
     setSelectedOpenRows([]);
   }, []);
 
+  const clearBankSelection = useCallback((transactionId: string) => {
+    const keep = (row: WorkbenchRecord) => row.recordType !== "bank"
+      || (row.id !== transactionId && row.parentRowId !== transactionId);
+    setSelectedPairedRows(current => current.filter(keep));
+    setSelectedOpenRows(current => current.filter(keep));
+  }, []);
+
   const clearPairedSelection = useCallback(() => {
     setSelectedPairedRows([]);
   }, []);
@@ -95,6 +102,7 @@ export default function useWorkbenchSelection() {
     replaceDetailRow,
     closeDetail,
     clearSelection,
+    clearBankSelection,
     clearPairedSelection,
     clearOpenSelection,
     selectedPairedRows,
