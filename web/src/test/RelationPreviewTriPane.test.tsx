@@ -71,6 +71,28 @@ function preview(groups: WorkbenchRelationGroup[]) {
 }
 
 describe("compact relation preview", () => {
+  test("uses one payment chip for direction and original money, and chips for unsplit categories", () => {
+    render(preview([group("payment", [row("bank", "bank", {
+      amount: "8000.00", categoryLabelPath: ["货款", "设备采购"],
+    })])]));
+    const payment = screen.getByText("8000.00").closest(".chip");
+    expect(payment).toHaveTextContent("支8000.00");
+    expect(screen.getByText("货款 / 设备采购").closest(".chip")).not.toBeNull();
+    expect(screen.getByText("民生", { exact: true }).closest(".bank-account-tag")).not.toBeNull();
+  });
+  test("keeps reordered unchanged groups in their bands while separating adjacent groups", () => {
+    const a = group("a", [row("oa-a", "oa")]), b = group("b", [row("oa-b", "oa")]);
+    const renderAfter = (groups: WorkbenchRelationGroup[]) => <RelationPreviewTriPane
+      title="操作后" side="after" groups={groups} referenceGroups={[a,b]}
+      totals={{oaTotal:"200",bankTotal:"0",invoiceTotal:"0"}} mismatchFields={[]} />;
+    const view = render(renderAfter([b,a]));
+    expect(screen.getByTestId("candidate-group-b")).toHaveAttribute("data-band", "1");
+    expect(screen.getByTestId("candidate-group-a")).toHaveAttribute("data-band", "0");
+    view.rerender(renderAfter([group("new", []),a,b]));
+    expect(screen.getByTestId("candidate-group-new")).toHaveAttribute("data-band", "1");
+    expect(screen.getByTestId("candidate-group-a")).toHaveAttribute("data-band", "0");
+    expect(screen.getByTestId("candidate-group-b")).toHaveAttribute("data-band", "1");
+  });
   test("renders exact before and after groups without altering members", () => {
     const a = row("oa", "oa"),
       b = row("bank", "bank"),

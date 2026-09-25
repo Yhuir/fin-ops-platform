@@ -421,10 +421,10 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 
 ## 2026-09-24 确认与撤回预览左右对照
 
-- 预览展示由 `RelationPreviewTriPane` 接收只读的 `groups`、`totals`、`status`、`mismatchFields` 与 `side`。不再接收主表 `columnLayouts`，不借用主表完整列宽与横向滚动。`RelationPreviewDialog` 继续负责备注、提交状态和既有 action I/O。
+- 预览展示由 `RelationPreviewTriPane` 接收只读的 `groups`、`totals`、`status`、`mismatchFields`、`side` 及仅用于着色的 `referenceGroups`。不再接收主表 `columnLayouts`，不借用主表完整列宽与横向滚动。`RelationPreviewDialog` 继续负责备注、提交状态和既有 action I/O。
 - 左右分别展示服务端 `before.groups` / `after.groups`，完整保留 group/member identity。组内复用 `buildWorkbenchGroupDisplayLayout` 的明确子组与共享列布局；多对多没有明确子组时独立堆叠各列，不按数组下标推断关系。不从金额相同或同名去重。
 - 银行展示按当前组/单元格的父流水身份合并可见子项，主金额读取 `parentAmount`；只展示该单元格实际成员标签，子项金额仅由标签浮层展示，不再内联显示本次关联金额。该视图不改变提交的 canonical 子项集合或银行拆分版本。银行数量按父流水身份计笔。
-- 两侧采用白底、轻微不同的浅色表头和细分隔线；每侧仅 OA / 流水 / 发票三列。关系组使用连续表格边界与交替浅底，不使用卡片间距和圆角。单一中部纵向滚动，固定标题和 footer，备注位于确认按钮左侧。1100px 以下切换操作前/后，不并列挤压六列；切换不发请求、不丢备注。
+- 两侧标题条使用中性灰／浅蓝区分，操作后增加细蓝顶线，中间保留24px留白及竖线；每侧仅 OA / 流水 / 发票三列。真实关系组使用关联台浅黄／浅蓝连续表格背景，不使用卡片间距和圆角。单一中部纵向滚动，固定标题和 footer，备注位于确认按钮左侧。1100px 以下切换操作前/后，不并列挤压六列；切换不发请求、不丢备注。
 - 删除旧顶部大备注区、待确认/待撤回重复状态、完整主表列复制、560px 最小列宽、横向滚动同步及无调用的预览样式。保留实际阻断与提交错误反馈，原业务按钮权限、幂等、版本、金额核对、submit 后回读合同不变。
 - 未修改 API、service、repository、数据表、read model、worker 或其他页面；无需数据迁移/备份。
 
@@ -433,3 +433,9 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - OA 常驻项目、申请人和金额；流水常驻户名、原父流水金额、收支 chip、银行后四位 chip 和成员标签；发票常驻销方与价税合计。PreviewRecordDetails 只接收字段标签/字符串值，按需以既有 HeroUI Portal 展示完整项目、申请事由、日期、发票双方名称/税号及票号；无新增网络 I/O。hover/focus/click、Escape、复制和组件卸载清理沿用既有交互模式。
 - 不显示预览税额说明、内联本次关联金额和整单元格原生 title。移除对应金额求和、导入及旧样式；其他页面银行账户、标签和金额核对合同不变。预览排序和布局不得改变提交成员，也不得按同额推断归属。
 - 仅更新本模块预览组件及局部样式，不修改 FinanceTable、公共 Popover 默认值、后端 API、持久化、read model 或 worker；无需数据库备份。
+
+## 2026-09-25 预览关系底色与居中
+
+- 预览专属收支金额chip组合方向和原父流水金额；银行后四位继续使用BankAccountValue，未拆分类路径使用Chip，拆分成员继续复用BankSplitChips。每条记录内容在所属区域居中，共享列跨行、组内多条记录分别居中；详情正文仍左对齐。
+- 配色为当前快照的纯展示计算：以操作前组ID及次序记录黄蓝位置，操作后第一个仍存在的组作为着色锚点，再交替相邻组；无共同组从浅黄开始。两色无法同时满足任意重排的永久同色与相邻异色，优先相邻区分，不改变排序、成员、分组或提交。复杂度O(组数)，无持久化、哈希、新请求或金额推断。
+- 背景作用于整组，包含空白和跨行区域；标题条负责前后区分。删除白灰交替、两端分散金额、普通分类文字及预览专属旧对齐规则；公共组件、其他页面、API和数据库不变。

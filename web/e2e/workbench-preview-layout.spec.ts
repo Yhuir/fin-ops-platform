@@ -3,6 +3,37 @@ import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
 test.use({ reducedMotion: "reduce" });
 
+async function expectPreviewPresentation(page: Page) {
+  const dialog = page.locator('.relation-preview-drawer');
+  const visuals = await dialog.evaluate(el => {
+    const before = el.querySelector('.relation-preview-section-before .relation-preview-section-heading')!;
+    const after = el.querySelector('.relation-preview-section-after .relation-preview-section-heading')!;
+    return {
+      headings: [getComputedStyle(before).backgroundColor, getComputedStyle(after).backgroundColor],
+      groups: Array.from(el.querySelectorAll('.relation-preview-group')).map(group => ({
+        band: group.getAttribute('data-band'), color: getComputedStyle(group).backgroundColor,
+      })),
+      records: Array.from(el.querySelectorAll('.relation-preview-record')).map(record => {
+        const r = record.getBoundingClientRect();
+        const content = record.querySelector('.relation-preview-record-content')!;
+        const c = content.getBoundingClientRect();
+        const money = record.querySelector('.relation-preview-payment')?.getBoundingClientRect();
+        return { visible: r.width > 0, textAlign: getComputedStyle(content).textAlign,
+          verticalOffset: Math.abs((r.top+r.bottom-c.top-c.bottom)/2),
+          moneyOffset: money ? Math.abs((r.left+r.right-money.left-money.right)/2) : 0 };
+      }),
+    };
+  });
+  expect(visuals.headings[0]).not.toBe(visuals.headings[1]);
+  for (const group of visuals.groups) expect(group.color).toBe(group.band === '0' ? 'rgb(255, 248, 230)' : 'rgb(231, 243, 255)');
+  for (const record of visuals.records.filter(r => r.visible)) {
+    expect(record.textAlign).toBe('center');
+    expect(record.verticalOffset).toBeLessThanOrEqual(1);
+    expect(record.moneyOffset).toBeLessThanOrEqual(1);
+  }
+  await expect(dialog.getByText(/不含税|本次关联/)).toHaveCount(0);
+}
+
 async function openConfirm(page: Page) {
   const zone = page.getByTestId("zone-unpaired");
   await zone
@@ -38,6 +69,11 @@ test("compares exact groups side by side and keeps notes next to submit without 
     after = dialog.getByTestId("relation-preview-after");
   await expect(before.getByRole("rowgroup")).toHaveCount(3);
   await expect(after.getByRole("rowgroup")).toHaveCount(1);
+  await expectPreviewPresentation(page);
+  const bankRecord = after.locator('[data-pane="bank"] .relation-preview-record');
+  await expect(bankRecord.locator('.relation-preview-payment')).toContainText('支');
+  await expect(bankRecord.locator('.relation-preview-payment .relation-preview-money')).toHaveText('58000.00');
+  await expect(bankRecord.locator('.relation-preview-tag.chip')).toHaveCount(1);
   const geometry = await dialog.evaluate((el) => {
     const a = el
         .querySelector("#relation-preview-before")!
@@ -187,6 +223,7 @@ test("shows every member in a 2 OA and 15 bank preview with one scroll area and 
   const after = dialog.getByTestId("relation-preview-after");
   await expect(after.getByRole("rowgroup")).toHaveCount(1);
   await expect(after.locator("[data-member-ids]")).toHaveCount(18);
+  await expectPreviewPresentation(page);
   await expect(after.getByText("915300007194052520", { exact: true })).toHaveCount(0);
   await expect(after.getByText(/不含税/)).toHaveCount(0);
   const detailsButton = after.getByRole("button", { name: "查看发票详情" });
@@ -199,14 +236,25 @@ test("shows every member in a 2 OA and 15 bank preview with one scroll area and 
   await expect(details).toHaveCount(0);
   await detailsButton.click();
   await expect(details).toBeVisible();
+  await expect(details).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(details).toHaveCount(0);
+  await dialog.getByRole("heading", { name: "确认关联", exact: true }).hover();
   await dialog.getByRole("textbox").focus();
   await expect(dialog.getByRole("textbox")).toBeFocused();
   await detailsButton.focus();
   await expect(details).toBeVisible();
+  await expect(details).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(details).toHaveCount(0);
+  await expect(detailsButton).toBeFocused();
+  await dialog.getByRole("textbox").focus();
+  await detailsButton.focus();
+  await expect(details).toBeVisible();
+  await expect(details).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(details).toHaveCount(0);
+  await expect(detailsButton).toBeFocused();
   const scroller = dialog.locator(".relation-preview-compare-scroll");
   expect(
     await scroller.evaluate((el) => el.scrollWidth - el.clientWidth),
@@ -272,6 +320,7 @@ test("withdraw preview preserves five independent rows and split parent money", 
   const before = dialog.getByTestId("relation-preview-before"), after = dialog.getByTestId("relation-preview-after");
   await expect(before.getByRole("rowgroup")).toHaveCount(1);
   await expect(after.getByRole("rowgroup")).toHaveCount(5);
+  await expectPreviewPresentation(page);
   await expect(after.getByTestId("pane-bank")).toContainText("1 笔");
   const interest = after.getByTestId("candidate-group-interest-only");
   await expect(interest.getByText("1001497.22", { exact: true })).toBeVisible();
@@ -285,4 +334,43 @@ test("withdraw preview preserves five independent rows and split parent money", 
   await expect(after.getByTestId("candidate-group-principal-only")).toBeInViewport();
   await dialog.screenshot({ path: info.outputPath("preview-withdraw-splits.png"), animations: "disabled" });
   expect(api.count("POST /api/workbench/actions/withdraw-link")).toBe(0);
+});
+
+test("centers two 8000 payments and one shared invoice within a single yellow relation", async ({ page }, info) => {
+  await installDeterministicApiMocks(page, { sessionMode: "user" });
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.goto("/");
+  const data = await openConfirm(page);
+  await page.getByRole("button", { name: "关闭关联预览" }).click();
+  const template = data.after.groups[0];
+  const oa = ["杨丽萍", "樊祖芳"].map((applicant, i) => ({ ...template.oa_rows[0],
+    id: `oa-${i}`, applicant, amount: "8000.00", expense_items: [],
+    project_name: "大理卷烟厂动力车间中水处理系统升级改造项目",
+    project_name_display: "大理卷烟厂动力车间中水处理系统升级改造项目" }));
+  const bank = oa.map((_, i) => ({ ...template.bank_rows[0], id: `bank-${i}`,
+    amount: "8000.00", debit_amount: "8000.00", bank_original_amount: "8000.00", bank_related_amount: "8000.00",
+    payment_account_label: "平安银行 账户 0093", counterparty_name: "定州六联环保科技有限公司" }));
+  const invoice = { ...template.invoice_rows[0], id: "shared-invoice", total_with_tax: "16000.00",
+    seller_name: "定州六联环保科技有限公司", amount: "14159.29", tax_amount: "1840.71" };
+  const g = { ...template, group_id: "shared", oa_rows: oa, bank_rows: bank, invoice_rows: [invoice],
+    display_subgroups: oa.map((o, i) => ({ oa_row_ids: [o.id], bank_row_ids: [bank[i].id] })) };
+  data.before.groups = [g];
+  data.after.groups = [{ ...g, group_id: "remaining", oa_rows: [oa[1]], display_subgroups: [] },
+    { ...g, group_id: "separate", oa_rows: [oa[0]], bank_rows: [], invoice_rows: [], display_subgroups: [] }];
+  for (const side of ["before", "after"]) data.amount_summary[side] = { oa_total: "16000.00", bank_total: "16000.00", invoice_total: "16000.00" };
+  await page.route("**/api/workbench/actions/confirm-link/preview", route => route.fulfill({ json: data }));
+  await page.getByTestId("zone-unpaired").getByRole("button", { name: "确认关联", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "确认关联", exact: true });
+  const before = dialog.getByTestId("relation-preview-before");
+  await expectPreviewPresentation(page);
+  await expect(before.locator('.relation-preview-payment')).toHaveText(['支8000.00', '支8000.00']);
+  await expect(before.locator('.bank-account-tag')).toHaveText(['平安0093', '平安0093']);
+  const shared = before.locator('[data-pane="invoice"]');
+  const first = before.locator('[data-member-ids="oa-0"]');
+  const last = before.locator('[data-member-ids="oa-1"]');
+  const [i, a, b] = await Promise.all([shared.boundingBox(), first.boundingBox(), last.boundingBox()]);
+  expect(Math.abs(i!.y - a!.y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(i!.y+i!.height-b!.y-b!.height)).toBeLessThanOrEqual(1);
+  await expect(shared.locator('[data-member-ids]')).toHaveCount(1);
+  await dialog.screenshot({ path: info.outputPath('preview-shared-8000.png'), animations:'disabled' });
 });

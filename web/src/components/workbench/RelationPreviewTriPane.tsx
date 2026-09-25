@@ -20,6 +20,7 @@ export type RelationPreviewTriPaneProps = {
   side: "before" | "after";
   testId?: string;
   groups: WorkbenchRelationGroup[];
+  referenceGroups?: WorkbenchRelationGroup[];
   totals: { oaTotal: string; bankTotal: string; invoiceTotal: string };
   status?: "matched" | "mismatch" | "unknown" | (string & {});
   mismatchFields: string[];
@@ -46,10 +47,17 @@ function RelationPreviewTriPane({
   side,
   testId,
   groups,
+  referenceGroups = groups,
   totals,
   status,
   mismatchFields,
 }: RelationPreviewTriPaneProps) {
+  // Keep the first unchanged group in the same band while alternating adjacent groups.
+  const bandOffset = useMemo(() => {
+    const referenceBands = new Map(referenceGroups.map((group, index) => [group.id, index % 2]));
+    const anchor = groups.findIndex((group) => referenceBands.has(group.id));
+    return anchor < 0 ? 0 : (referenceBands.get(groups[anchor].id)! + anchor) % 2;
+  }, [groups, referenceGroups]);
   const rowCountByPane = useMemo(
     () => ({
       oa: groups.reduce((sum, group) => sum + group.rows.oa.length, 0),
@@ -138,7 +146,7 @@ function RelationPreviewTriPane({
       </div>
       <div className="relation-preview-groups" data-testid="tri-pane">
         {groups.length ? (
-          groups.map((group) => <PreviewGroup key={group.id} group={group} />)
+          groups.map((group, index) => <PreviewGroup key={group.id} group={group} band={(index + bandOffset) % 2} />)
         ) : (
           <div className="relation-preview-empty">暂无记录</div>
         )}
@@ -149,8 +157,10 @@ function RelationPreviewTriPane({
 
 const PreviewGroup = memo(function PreviewGroup({
   group,
+  band,
 }: {
   group: WorkbenchRelationGroup;
+  band: number;
 }) {
   const layout = useMemo(
     () => buildWorkbenchGroupDisplayLayout(group),
@@ -160,6 +170,7 @@ const PreviewGroup = memo(function PreviewGroup({
   return (
     <div
       className="relation-preview-group"
+      data-band={band}
       data-testid={`candidate-group-${group.id}`}
       role="rowgroup"
       aria-label="关联组"
@@ -287,19 +298,19 @@ function PreviewRecord({
           </>
         ) : row.recordType === "bank" ? (
           <>
-            <div className="relation-preview-record-line">
-              <Chip size="sm" variant="soft" color={v.direction === "支出" ? "danger" : v.direction === "收入" ? "success" : "default"} className="relation-preview-direction">{v.direction}</Chip>
+            <Chip size="sm" variant="soft" color={v.direction === "支出" ? "danger" : v.direction === "收入" ? "success" : "default"} className="relation-preview-payment">
+              <span>{v.direction === "支出" ? "支" : v.direction === "收入" ? "收" : v.direction}</span>
               <strong className="relation-preview-money">
                 {formatMoney(row.isSplit ? row.parentAmount : row.amount, "—")}
               </strong>
-            </div>
+            </Chip>
             <BankAccountValue value={compactWorkbenchBankAccountLabel(v.paymentAccount)} variant="tag" />
             {row.isSplit ? (
               <BankSplitChips parts={parts ?? []} />
             ) : row.categoryLabelPath?.length ? (
-              <span className="relation-preview-tag">
+              <Chip size="sm" variant="soft" className="relation-preview-tag">
                 {row.categoryLabelPath.join(" / ")}
-              </span>
+              </Chip>
             ) : null}
           </>
         ) : row.supportingDocuments ? (
@@ -320,7 +331,7 @@ function PreviewRecord({
           </>
         ) : (
           <>
-            <strong className="relation-preview-money relation-preview-invoice-amount">
+            <strong className="relation-preview-money">
               {formatMoney(v.grossAmount, "—")}
             </strong>
           </>

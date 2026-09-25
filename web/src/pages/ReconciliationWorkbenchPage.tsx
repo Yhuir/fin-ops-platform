@@ -3040,6 +3040,7 @@ function RelationPreviewDialog({
               side="after"
               testId="relation-preview-after"
               groups={preview.after.groups}
+              referenceGroups={preview.before.groups}
               totals={preview.amountSummary.after}
               status={preview.amountSummary.status}
               mismatchFields={preview.amountSummary.mismatchFields}

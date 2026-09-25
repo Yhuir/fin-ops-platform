@@ -11,6 +11,8 @@ export default function PreviewRecordDetails({
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const openedFromTriggerFocusRef = useRef(false);
+  const dismissedFocusRef = useRef(false);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const id = useId();
   const cancelClose = () => {
@@ -19,11 +21,15 @@ export default function PreviewRecordDetails({
       closeTimerRef.current = null;
     }
   };
+  const close = () => {
+    dismissedFocusRef.current = openedFromTriggerFocusRef.current;
+    setOpen(false);
+  };
   const scheduleClose = () => {
     cancelClose();
     closeTimerRef.current = setTimeout(() => {
       closeTimerRef.current = null;
-      setOpen(false);
+      close();
     }, 140);
   };
   useEffect(() => () => {
@@ -47,10 +53,30 @@ export default function PreviewRecordDetails({
         isIconOnly
         size="sm"
         variant="ghost"
-        onHoverStart={() => { cancelClose(); setOpen(true); }}
-        onHoverEnd={scheduleClose}
-        onFocus={() => { cancelClose(); setOpen(true); }}
-        onPress={() => { cancelClose(); setOpen(true); }}
+        onHoverStart={() => {
+          cancelClose();
+          dismissedFocusRef.current = false;
+          openedFromTriggerFocusRef.current = document.activeElement === triggerRef.current;
+          setOpen(true);
+        }}
+        onHoverEnd={() => {
+          if (dismissedFocusRef.current) dismissedFocusRef.current = false;
+          else scheduleClose();
+        }}
+        onFocus={() => {
+          // Escape restores focus to the trigger; only a new focus visit reopens it.
+          if (dismissedFocusRef.current) return;
+          cancelClose();
+          openedFromTriggerFocusRef.current = true;
+          setOpen(true);
+        }}
+        onBlur={() => { dismissedFocusRef.current = false; }}
+        onPress={() => {
+          cancelClose();
+          dismissedFocusRef.current = false;
+          openedFromTriggerFocusRef.current = true;
+          setOpen(true);
+        }}
       >
         <Info aria-hidden="true" size={16} />
       </Button>
@@ -64,7 +90,11 @@ export default function PreviewRecordDetails({
           placement="bottom end"
           triggerRef={triggerRef}
           shouldCloseOnInteractOutside={(element) => !triggerRef.current?.contains(element)}
-          onOpenChange={(nextOpen) => { cancelClose(); setOpen(nextOpen); }}
+          onOpenChange={(nextOpen) => {
+            cancelClose();
+            if (nextOpen) setOpen(true);
+            else close();
+          }}
           onMouseEnter={cancelClose}
           onMouseLeave={scheduleClose}
         >
