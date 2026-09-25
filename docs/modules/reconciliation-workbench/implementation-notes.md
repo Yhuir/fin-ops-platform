@@ -2108,3 +2108,12 @@
 - 修复提交 `e1a986459` 已推送 origin/main；候选版本 `main-e1a986459-20260925-compact-preview` 已构建、上传并通过候选安全检查。
 - 正式部署在 frontend pre-activation 检查失败，唯一失败项 `admin_session=false`。生产仍运行 `main-1582565a7-20260924-relation-preview`；API与import、oa-sync、settings-maintenance、workbench-matching四个worker均active。未激活候选，不把旧版本健康或公共资源响应耗时记为新版本验收。
 - 服务器证据：`/opt/fin-ops/runtime-smoke/release-gates/main-e1a986459-20260925-compact-preview/pre/`。更新本机管理员token后通过正式发布入口继续激活及业务预览、性能验证；当前生产业务/性能验收未完成。
+
+### 登录态更新后的正式发布与生产验收
+
+- 管理员登录态更新后，正式入口发布 `main-7200bd71c-20260925-compact-preview`，部署命令退出0，frontend profile 的 pre/T0 检查均 PASS。运行目录和公开资源均指向该版本，API及四个登记worker全部active，无回滚。上述首次发布阻断已解除；证据保留在生产 `/opt/fin-ops/runtime-smoke/release-gates/main-7200bd71c-20260925-compact-preview/`。
+- 同一真实关系 `case:CASE-AUTO-0257` 发布前后完整比较 `before`、`after`、`amount_summary`，全部一致：操作前1组、操作后5组；OA和原流水1001497.22元、发票1497.22元。拆分流水按物理流水汇总为1笔，各子项所在关系只展示对应标签，主金额始终为原流水金额。
+- 真实生产浏览器在1600×1000验证全部5个操作后关系可见、横向溢出0px、收支和账户chip、发票按需详情、hover移入阅读、Escape关闭及点击重开；700×900验证前后切换和底部确认入口。旧原生title、税额行和“本次关联”文字均不再展示。浏览器异常0，财务提交/撤回写请求0；仅打开preview后关闭。
+- 同一客户端同一预览各10次请求，全部200。发布前p50/p95为146.2/183.5ms，发布后126.1/205.5ms（10个样本的P95使用nearest-rank）。发布后API采样与单次浏览器验证并行，不能据此推断性能提升或全App容量达标；本次样例P95低于1秒。浏览器单次点击至响应303ms、至预览就绪593ms、响应后就绪290ms，详情hover至可见79ms。
+- 验证通过本机token包装器运行正式部署、真实preview事实比对和Playwright浏览器检查；未修改服务端业务、HTTP合同、read model、worker或数据库，也未创建数据库备份。生产实际财务写流程不试写，其确认/撤回及错误路径由前述31项确定性E2E保护。
+- `npm --prefix web run e2e:production-shell` 最终通过：1个测试遍历16个生产页面，用例28.2秒；无登录阻断、浏览器异常或写请求。巡检在性能采样和预览视觉验证完成后运行。最终验证记录提交只更新文档，部署运行时代码保持 `7200bd71c`。
