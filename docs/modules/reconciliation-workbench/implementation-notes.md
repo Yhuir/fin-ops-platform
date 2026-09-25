@@ -2146,3 +2146,27 @@
 发布前验证：后端165项通过（含44项真实PostgreSQL direct query/ETC/history读取回归），前端6文件297项通过，33项浏览器回归通过，构建、lint、docs与diff检查通过。浏览器像素测量确认1711.33三栏同一上下边界、16000精确跨对应两行8000且不重复；新版表头与黄蓝底色区分明确。临时测试数据库为本任务独立创建，测试结束后移除，不触碰主数据库。七类测试中业务、服务、API、前端、集成及既有回归适用并覆盖；缓存/后台任务实现未改动，直接读取合同由真实PostgreSQL测试验证。
 
 首次生产视觉验证补出了历史嵌套场景：设备组先前仅一个OA占用两笔付款，后来补入第二个OA；再合并ETC时，最早的无效子分区不能取代完整设备组。发票投影现在逐层验证细分，保留最近有效完整范围，并拒绝与当前银行/发票明确来源冲突的旧分区。新增对应 preview/正式历史一致性回归，按正式入口再次发布，不修改生产财务关系。
+
+### 最终发布与生产验收
+
+- 两次修复提交 `716537ab9`、`35165db20` 均已推送 origin/main；最终正式部署 `main-35165db20-20260925-invoice-scope-history`，runtime profile pre/T0/T30 检查全部 PASS，队列稳定、pending outbox 为0，未回滚。发布证据保留于生产 `/opt/fin-ops/runtime-smoke/release-gates/main-35165db20-20260925-invoice-scope-history/`。验证记录随后独立提交，生产运行时代码保持 `35165db20`。
+- 补充修正后167项后端测试全部通过，包含真实PostgreSQL direct query/ETC/history、嵌套历史、来源冲突、预览/正式读取一致性和成本分组回归；此前297项前端及33项确定性浏览器回归继续适用，补充修正未改变前端。构建、lint、docs和diff检查通过。仅本任务创建的临时测试数据库已移除，无生产数据库迁移或备份操作。
+- 真实生产浏览器1600×1000验证合并预览：1711.33 的 OA、流水、ETC发票上下边界完全一致；16000 发票精确跨对应两行8000，不重复；表头为深蓝灰 `#0f2742`，金额/账户/标签chip及居中保持。700×900验证前后切换与固定确认入口，横向溢出0px。浏览器异常0、财务写请求0，关闭预览并刷新后正常。截图保留在本地Codex交付目录 `invoice-alignment/production-merged.png` 和 `production-mobile.png`。
+- 同一真实合并样例发布前后各10次顺序请求，全部200；p50从411.4ms到409.2ms，P95从600.9ms到490.9ms（nearest-rank）。发布后接口采样单独运行，不与浏览器巡检并行；小样本仅说明此样例未观察到变慢，不作为全App容量或普遍加速结论。生产浏览器单次响应706ms、预览就绪859ms、响应后渲染153ms；该浏览器测量与发布健康检查时间有重叠，不作为独立接口基准。
+- 对比发布前后 typed成员、每项金额及完整 `amount_summary`，全部一致；拆分样例撤回preview仍为操作前1组、操作后5组，银行主金额1001497.22元。生产仅查询和preview，实际财务确认/撤回不试写，由确定性E2E验证提交、恢复、权限、版本冲突、失败反馈及跨页面刷新。
+
+验证入口：
+
+```sh
+PYTHONPATH=backend/src:. python3 -m pytest tests/test_workbench_query_postgres_integration.py tests/test_workbench_display_subgroups.py tests/test_workbench_relation_grouping.py tests/test_workbench_auth_context_idempotency.py tests/test_cost_relation_display.py -q --disable-warnings
+npm --prefix web test -- --run src/test/groupDisplayModel.test.ts src/test/RelationPreviewTriPane.test.tsx src/test/RelationGroupGrid.test.tsx src/test/WorkbenchApi.test.ts src/test/WorkbenchSelection.test.tsx src/test/WorkbenchExceptionDrawer.test.tsx
+npm --prefix web run e2e -- e2e/workbench-preview-layout.spec.ts e2e/workbench-withdraw-flow.spec.ts e2e/workbench-split-selection.spec.ts e2e/workbench-network-recovery-flow.spec.ts e2e/workbench-stale-error-flow.spec.ts e2e/workbench-permissions-flow.spec.ts e2e/workbench-relation-fanout.spec.ts --project=chromium
+npm --prefix web run build
+bash scripts/verify.sh lint
+bash scripts/verify.sh docs
+git diff --check
+```
+
+PostgreSQL测试运行时指定了指向本任务独立测试库的 `FIN_OPS_TEST_DATABASE_URL`。七类测试覆盖：①业务核心（范围完整性、历史细分及来源冲突）；②服务（历史读取和预览投影）；③API（可选范围字段及原金额/成员合同）；④读取链路（真实PostgreSQL发布组读取），缓存失效与worker实现未变，不新增后台任务测试；⑤前端（共享布局、跨行、交互和窄屏）；⑥端到端（确认/撤回及跨页刷新）；⑦既有回归（拆分、成本、权限、网络及stale/error）。
+
+最终在性能采样结束后经本机token包装器执行 `npm --prefix web run e2e:production-shell`：1个测试遍历16个生产页面，用例28.0秒，全部通过，无会话阻断、浏览器异常或财务写请求。未验证生产财务实际提交和大规模并发容量，前者由确定性业务E2E覆盖，后者不从本次小样本推断。
