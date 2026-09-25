@@ -439,3 +439,12 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - 预览专属收支金额chip组合方向和原父流水金额；银行后四位继续使用BankAccountValue，未拆分类路径使用Chip，拆分成员继续复用BankSplitChips。每条记录内容在所属区域居中，共享列跨行、组内多条记录分别居中；详情正文仍左对齐。
 - 配色为当前快照的纯展示计算：以操作前组ID及次序记录黄蓝位置，操作后第一个仍存在的组作为着色锚点，再交替相邻组；无共同组从浅黄开始。两色无法同时满足任意重排的永久同色与相邻异色，优先相邻区分，不改变排序、成员、分组或提交。复杂度O(组数)，无持久化、哈希、新请求或金额推断。
 - 背景作用于整组，包含空白和跨行区域；标题条负责前后区分。删除白灰交替、两端分散金额、普通分类文字及预览专属旧对齐规则；公共组件、其他页面、API和数据库不变。
+
+## 2026-09-25 合并关系中的发票跨行范围
+
+- group DTO 增加可选 `invoice_display_scopes[]`，每项只有 `oa_row_ids/bank_row_ids/invoice_row_ids`。它描述已有成员的展示覆盖范围，不新增关系、费用归属、金额或表格行号。
+- `workbench_display_subgroups.apply_invoice_display_scopes` 根据精确 typed members 的关系历史划分范围；确认预览使用当前关系与原有 synthetic-existing-case 快照，正式读取使用同一确认事件的 before/after。无证据、历史成员不一致、范围重叠、银行金额过度占用或与当前明确来源冲突时保持共享展示，不按同额或排序发明归属。
+- 页面 hydration 复用原批量 history 查询；预览通过既有 relation snapshot port 读取有界成员历史。GET/preview 不写历史、关系、数据库或队列，不增加 read model、worker 或逐行请求。
+- 前端统一 `buildWorkbenchGroupDisplayLayout` 把成员范围转换为单元格跨行：确认/撤回预览与关联台 `RelationGroupGrid` 共用。1,711.33 发票对齐其 OA/流水，16,000 发票只跨对应的两行 8,000；共享发票保持一项，原流水仍按物理身份去重。搜索隐藏成员不改变归属。
+- 成本统计继续只消费既有 OA/银行 `display_subgroups`；新发票展示字段不进入成本判定或持久化。ETC summary 身份、展开入口、真实票数及金额合同不变。
+- 预览汇总表头使用既有深蓝灰 `#0f2742` 与浅色文字，错误金额使用可读的浅黄；黄蓝关系底色和前后标题区分保留。颜色仅表示展示层级。

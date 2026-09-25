@@ -14,6 +14,7 @@ from fin_ops_platform.services.turnover_relation_service import (
     TurnoverRelationService,
     TurnoverRelationValidationError,
 )
+from fin_ops_platform.services.workbench_display_subgroups import apply_invoice_display_scopes
 from fin_ops_platform.services.workbench_idempotency import (
     WorkbenchIdempotencyFailed,
     WorkbenchIdempotencyInProgress,
@@ -163,6 +164,9 @@ class WorkbenchWriteRelationReadSnapshotPort:
 
     def preview_withdraw_for_row_ids(self, row_ids: list[str]) -> dict[str, object]:
         return self._pair_relation_service.preview_withdraw_for_row_ids(row_ids)
+
+    def display_history(self, row_ids: list[str]) -> list[dict[str, object]]:
+        return self._pair_relation_service.snapshot_for_row_ids(row_ids).get("pair_relation_history", [])
 
     def snapshot(self) -> dict[str, object]:
         snapshot = self._pair_relation_service.snapshot()
@@ -417,6 +421,15 @@ class WorkbenchWriteFacade:
             },
         }
         after_groups = self._relation_groups([after_relation], selected_rows=rows)
+        history = self._relation_read_snapshot_port.display_history(row_ids)
+        apply_invoice_display_scopes(before_groups, history)
+        display_before_relations = self._merge_relation_snapshots(
+            before_relations,
+            self._synthetic_existing_case_relations(
+                selected_rows, existing_relations=before_relations, month_scope=relation_scope(selected_rows),
+            ),
+        )
+        apply_invoice_display_scopes(after_groups, history, before_relations=display_before_relations)
         requires_note = bool(amount_check.get("requires_note"))
         return WorkbenchWriteResult(
             HTTPStatus.OK,
@@ -2054,6 +2067,9 @@ class WorkbenchWriteFacade:
             selected_rows=rows,
             ungrouped_selected_rows="individual",
         )
+        history = self._relation_read_snapshot_port.display_history([str(row["id"]) for row in rows])
+        apply_invoice_display_scopes(before_groups, history)
+        apply_invoice_display_scopes(after_groups, history)
         amount_check = self._amount_check_for_withdraw_preview(
             active_relation=active_relation,
             rows=rows,

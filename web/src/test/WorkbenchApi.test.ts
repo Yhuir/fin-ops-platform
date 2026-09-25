@@ -2556,11 +2556,13 @@ test("maps display subgroups without replacing formal selection identities", asy
     group: { group_id: "case:aligned", group_type: "relation", match_confidence: "high", reason: "active_formal_relation",
       formal_member_ids: ["oa-a", "oa-b", "bank-a"], formal_member_types: ["oa", "oa", "bank"],
       oa_rows: [{ id: "oa-a", type: "oa" }, { id: "oa-b", type: "oa" }], bank_rows: [{ id: "bank-a", type: "bank" }], invoice_rows: [],
-      display_subgroups: [{ oa_row_ids: ["oa-a", "oa-b"], bank_row_ids: ["bank-a"] }] },
+      display_subgroups: [{ oa_row_ids: ["oa-a", "oa-b"], bank_row_ids: ["bank-a"] }],
+      invoice_display_scopes: [{ oa_row_ids: ["oa-a", "oa-b"], bank_row_ids: ["bank-a"], invoice_row_ids: [] }] },
   }), { status: 200, headers: { "Content-Type": "application/json" } }));
   try {
     const group = await fetchWorkbenchGroupDetail("all", "paired", "case:aligned", "aligned");
     expect(group.displaySubgroups).toEqual([{ oaRowIds: ["oa-a", "oa-b"], bankRowIds: ["bank-a"] }]);
+    expect(group.invoiceDisplayScopes).toEqual([{ oaRowIds: ["oa-a", "oa-b"], bankRowIds: ["bank-a"], invoiceRowIds: [] }]);
     expect(group.formalMemberIdentities).toHaveLength(3);
     expect(group.rows.oa).toHaveLength(2);
     expect(group.rows.bank).toHaveLength(1);

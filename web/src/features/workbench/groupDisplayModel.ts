@@ -31,6 +31,7 @@ const compactBankNameByPrefix: Record<string, string> = {
 export type WorkbenchGroupDisplaySegment = {
   id: string;
   rows: WorkbenchPaneRows;
+  rowSpans?: Partial<Record<WorkbenchRecordType, number>>;
 };
 
 export type WorkbenchGroupDisplayLayout = {
@@ -124,6 +125,9 @@ export function buildWorkbenchGroupDisplayLayout(
   group: WorkbenchRelationGroup,
   sourceGroup: WorkbenchRelationGroup = group,
 ): WorkbenchGroupDisplayLayout | null {
+  if (sourceGroup.invoiceDisplayScopes?.length) {
+    return buildInvoiceScopedLayout(group, sourceGroup);
+  }
   if (sourceGroup.displaySubgroups?.length) {
     // These are display partitions, not new formal relations. Invoices retain
     // their shared group pane unless they have explicit expense-item ownership.
@@ -252,6 +256,49 @@ export function buildWorkbenchGroupDisplayLayout(
     segments: displaySegments,
     segmentedPaneIds: ["oa", ...segmentedPaneIds],
   });
+}
+
+/** Invoice coverage comes from typed relation evidence, never amount-only matching. */
+function buildInvoiceScopedLayout(
+  group: WorkbenchRelationGroup, sourceGroup: WorkbenchRelationGroup,
+): WorkbenchGroupDisplayLayout {
+  const segments: WorkbenchGroupDisplaySegment[] = [];
+  const scopeKeys = { oa: "oaRowIds", bank: "bankRowIds", invoice: "invoiceRowIds" } as const;
+  for (const [index, scope] of sourceGroup.invoiceDisplayScopes!.entries()) {
+    const pick = (input: WorkbenchRelationGroup): WorkbenchRelationGroup => ({
+      ...input, id: `${group.id}:invoice-scope:${index}`, invoiceDisplayScopes: undefined,
+      rows: Object.fromEntries(workbenchPaneIds.map(pane => {
+        const ids = new Set(scope[scopeKeys[pane]]);
+        return [pane, input.rows[pane].filter(row => ids.has(row.id))];
+      })) as WorkbenchPaneRows,
+      displaySubgroups: input.displaySubgroups?.filter(part => (
+        part.oaRowIds.some(id => scope.oaRowIds.includes(id)) || part.bankRowIds.some(id => scope.bankRowIds.includes(id))
+      )),
+    });
+    const scoped = pick(group), source = pick(sourceGroup);
+    if (workbenchPaneIds.every(pane => scoped.rows[pane].length === 0)) continue;
+    const layout = buildWorkbenchGroupDisplayLayout(scoped, source);
+    const local = layout?.segments ?? [{ id: scoped.id, rows: scoped.rows }];
+    local.forEach((segment, i) => {
+      const rows = { oa: [], bank: [], invoice: [] } as WorkbenchPaneRows;
+      const rowSpans: Partial<Record<WorkbenchRecordType, number>> = {};
+      for (const pane of workbenchPaneIds) {
+        const segmented = layout?.segmentedPaneIds.includes(pane);
+        rows[pane] = segmented ? segment.rows[pane] : i === 0 ? scoped.rows[pane] : [];
+        rowSpans[pane] = segmented ? 1 : i === 0 ? local.length : 0;
+      }
+      segments.push({ id: `${scoped.id}:${segment.id}`, rows, rowSpans });
+    });
+  }
+  // A split transaction remains one physical bank record even across invoice scopes.
+  const parents = new Map<string, string>();
+  const sharedBank = segments.some(segment => segment.rows.bank.some(row => {
+    if (!row.isSplit || !row.parentRowId) return false;
+    const previous = parents.get(row.parentRowId);
+    parents.set(row.parentRowId, segment.id);
+    return previous !== undefined && previous !== segment.id;
+  }));
+  return { segments, segmentedPaneIds: sharedBank ? ["oa", "invoice"] : ["oa", "bank", "invoice"] };
 }
 
 function keepSplitBankParentsTogether(layout: WorkbenchGroupDisplayLayout): WorkbenchGroupDisplayLayout {

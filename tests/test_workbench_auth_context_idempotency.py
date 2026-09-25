@@ -302,6 +302,9 @@ class _CanonicalConfirmRepositoryFactory:
 
 
 class _PairRelationService:
+    def snapshot_for_row_ids(self, row_ids, *, case_ids=None):
+        return WorkbenchPairRelationService.from_snapshot(self.snapshot()).snapshot_for_row_ids(row_ids, case_ids=case_ids)
+
     def __init__(self) -> None:
         self.replace_calls: list[object] = []
         self.cancel_calls: list[object] = []
@@ -2295,3 +2298,36 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_confirm_preview_and_persisted_merge_share_invoice_coverage_without_writing_preview():
+    from fin_ops_platform.services.workbench_display_subgroups import apply_invoice_display_scopes
+
+    from tests.test_workbench_display_subgroups import event, group, installment_rows, relation, row
+
+    equipment = installment_rows()
+    etc = [row("oa", "oa-etc", "1711.33"), row("bank", "bank-etc", "1711.33"), row("invoice", "invoice-etc", "1711.33")]
+    rows = [{**r, "scope_month": "2026-08", "workflow_status": "completed"} for r in [*equipment, *etc]]
+    pairs = WorkbenchPairRelationService()
+    for case, rs in [("equipment", equipment), ("etc", etc)]:
+        r = relation(case, rs)
+        pairs.create_active_relation(**r, relation_mode="manual_confirmed", created_by="test", month_scope="2026-08")
+    before = pairs.snapshot()
+    facade = _new_facade(pair_relation_service=pairs, live_rows=rows, relation_groups=_preview_relation_groups())
+    payload = {"month": "2026-08", "row_ids": [r["id"] for r in rows], "row_types": [r["type"] for r in rows]}
+    preview = facade.preview_confirm_link(payload)
+    assert preview.status_code == HTTPStatus.OK
+    scopes = preview.payload["after"]["groups"][0]["invoice_display_scopes"]
+    assert len(scopes) == 2
+    assert scopes[0]["invoice_row_ids"] == ["shared-invoice"]
+    assert scopes[0]["oa_row_ids"] == ["prepay", "final"]
+    assert scopes[1]["invoice_row_ids"] == ["invoice-etc"]
+    assert pairs.snapshot() == before
+    # Reading the persisted confirm event must produce precisely the preview contract.
+    g = group(rows)
+    history = [event(relation("merged", rows), list(before["pair_relations"].values()))]
+    apply_invoice_display_scopes([g], history)
+    assert g["invoice_display_scopes"] == scopes
+    restored = [group(equipment, "equipment"), group(etc, "etc")]
+    apply_invoice_display_scopes(restored, history)
+    assert all("invoice_display_scopes" not in g for g in restored)

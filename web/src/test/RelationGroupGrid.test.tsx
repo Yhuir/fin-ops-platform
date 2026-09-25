@@ -1732,6 +1732,24 @@ describe("Workbench candidate grouping layout", () => {
   });
 
 
+  test("invoice scopes span their own installment rows in the main workbench", () => {
+    const group: WorkbenchRelationGroup = {
+      id: "scoped", groupType: "paired", matchConfidence: "high", reason: "active",
+      rows: { oa: [createOaRecord("etc", "申请人", "1711.33"), createOaRecord("a", "甲", "8000"), createOaRecord("b", "乙", "8000")],
+        bank: [createSourceBankRecord("x", "1711.33", "etc"), createSourceBankRecord("y", "8000", "a"), createSourceBankRecord("z", "8000", "b")],
+        invoice: [createInvoiceRecord("i", "ETC-SCOPE"), createInvoiceRecord("j", "EQUIPMENT-SCOPE")] },
+      displaySubgroups: [{ oaRowIds: ["etc"], bankRowIds: ["x"] }, { oaRowIds: ["a"], bankRowIds: ["y"] }, { oaRowIds: ["b"], bankRowIds: ["z"] }],
+      invoiceDisplayScopes: [{ oaRowIds: ["etc"], bankRowIds: ["x"], invoiceRowIds: ["i"] }, { oaRowIds: ["a", "b"], bankRowIds: ["y", "z"], invoiceRowIds: ["j"] }],
+    };
+    render(<RelationGroupGrid canOperateData displayState={createEmptyWorkbenchZoneDisplayState()}
+      getRowState={() => "idle"} groups={[group]} onOpenDetail={vi.fn()} onRowAction={vi.fn()} onSelectRow={vi.fn()}
+      panes={[{ id: "oa", title: "OA", rows: group.rows.oa }, { id: "bank", title: "流水", rows: group.rows.bank }, { id: "invoice", title: "发票", rows: group.rows.invoice }]}
+      rowTemplateColumns="1fr 8px 1fr 8px 1fr" zoneId="paired" />);
+    expect(screen.getByText("ETC-SCOPE").closest('[data-pane-id="invoice"]')).toHaveStyle({ gridRow: "1 / span 1" });
+    expect(screen.getByText("EQUIPMENT-SCOPE").closest('[data-pane-id="invoice"]')).toHaveStyle({ gridRow: "2 / span 2" });
+    expect(screen.getAllByText("EQUIPMENT-SCOPE")).toHaveLength(1);
+  });
+
   test.each(["paired", "unpaired"] as const)("keeps correspondence folds independently collapsible in %s mixed relations", (zoneId) => {
     const group = createBankFlowCollapsedGroup();
     const first = group.rows.bank.slice(0, 4);

@@ -181,17 +181,17 @@ const PreviewGroup = memo(function PreviewGroup({
           layout.segments.length &&
           layout.segmentedPaneIds.includes(pane.id)
         ) {
-          return layout.segments.map((segment, index) => (
+          return layout.segments.flatMap((segment, index) => (segment.rowSpans?.[pane.id] === 0 ? [] : [
             <div
               key={`${pane.id}-${segment.id}`}
               className="relation-preview-group-cell"
               data-pane={pane.id}
               data-segment={segment.id}
-              style={{ gridColumn: column + 1, gridRow: index + 1 }}
+              style={{ gridColumn: column + 1, gridRow: segment.rowSpans?.[pane.id] ? `${index + 1} / span ${segment.rowSpans[pane.id]}` : index + 1 }}
             >
               <PreviewRecords records={segment.rows[pane.id]} />
             </div>
-          ));
+          ]));
         }
         return (
           <div

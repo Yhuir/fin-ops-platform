@@ -642,7 +642,7 @@ function RelationGroupGrid({
                 >
                   {panes.flatMap((pane, paneIndex) => {
                     const paneId = pane.id as WorkbenchRecordType;
-                    if (!segmentedPaneIds.has(paneId)) {
+                    if (!segmentedPaneIds.has(paneId) || segment.rowSpans?.[paneId] === 0) {
                       return [];
                     }
                     return [
@@ -652,7 +652,7 @@ function RelationGroupGrid({
                         data-pane-id={paneId}
                         style={{
                           gridColumn: paneIndex * 2 + 1,
-                          gridRow: segmentIndex + 1,
+                          gridRow: segment.rowSpans?.[paneId] ? `${segmentIndex + 1} / span ${segment.rowSpans[paneId]}` : segmentIndex + 1,
                         }}
                       >
                         {segmentIndex === 0 ? renderReceiptAction(group, paneId) : null}

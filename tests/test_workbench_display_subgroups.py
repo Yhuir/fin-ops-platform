@@ -203,3 +203,58 @@ def test_payment_evidence_search_is_bounded_and_never_returns_partial_choices():
     banks = [PaymentEvidence(str(i), Decimal(1), payee="相同收款方", day=date(2026, 8, 1)) for i in range(150)]
     result = evidenced_payment_pairs(oa, banks)
     assert result.resource_limited and result.pairs == {}
+
+
+def test_invoice_scopes_preserve_merged_relations_without_inventing_equal_amount_owners():
+    from fin_ops_platform.services.workbench_display_subgroups import apply_invoice_display_scopes
+
+    equipment = installment_rows()
+    etc = [row("oa", "etc-oa", "1711.33"), row("bank", "etc-bank", "1711.33"), row("invoice", "etc-invoice", "1711.33")]
+    rows = [*etc, *equipment]
+    g = group(rows)
+    original = deepcopy(g)
+    previous = [relation("equipment", equipment), relation("etc", etc)]
+    history = [event(relation("merged", rows), previous)]
+    apply_display_subgroups([g], history)
+    apply_invoice_display_scopes([g], history)
+    assert g["invoice_display_scopes"] == [
+        {"oa_row_ids": ["etc-oa"], "bank_row_ids": ["etc-bank"], "invoice_row_ids": ["etc-invoice"]},
+        {"oa_row_ids": ["prepay", "final"], "bank_row_ids": ["bank-prepay", "bank-final"], "invoice_row_ids": ["shared-invoice"]},
+    ]
+    g.pop("invoice_display_scopes")
+    g.pop("display_subgroups")
+    assert g == original
+    unproven = group(rows)
+    apply_invoice_display_scopes([unproven], [])
+    assert "invoice_display_scopes" not in unproven
+
+
+def test_invoice_scopes_reject_overallocated_history_and_stale_members():
+    from fin_ops_platform.services.workbench_display_subgroups import apply_invoice_display_scopes
+
+    rows = installment_rows()
+    invalid = relation("old", [rows[0], *rows[2:]])
+    g = group(rows)
+    apply_invoice_display_scopes([g], [event(relation("merged", rows), [invalid])])
+    assert "invoice_display_scopes" not in g
+    stale = relation("merged", rows[:-1])
+    apply_invoice_display_scopes([g], [event(stale, [invalid])])
+    assert "invoice_display_scopes" not in g
+
+
+@pytest.mark.parametrize("conflict", ["invoice_source", "overlap", "unknown_amount"])
+def test_invoice_scopes_do_not_publish_conflicting_coverage(conflict):
+    from fin_ops_platform.services.workbench_display_subgroups import apply_invoice_display_scopes
+
+    a = [row("oa", "oa-a", 100), row("bank", "bank-a", 100), row("invoice", "invoice-a", 100)]
+    b = [row("oa", "oa-b", 100), row("bank", "bank-b", 100), row("invoice", "invoice-b", 100)]
+    if conflict == "invoice_source":
+        a[2]["source_oa_id"] = "oa-b"
+    elif conflict == "unknown_amount":
+        a[0]["amount"] = None
+    before = [relation("a", a), relation("b", b)]
+    if conflict == "overlap":
+        before.append(relation("duplicate", a))
+    g = group(a + b)
+    apply_invoice_display_scopes([g], [], before_relations=before)
+    assert "invoice_display_scopes" not in g

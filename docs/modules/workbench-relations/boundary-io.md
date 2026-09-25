@@ -216,3 +216,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 ## 2026-09-24 拆分选择版本
 
 confirm preview 返回 bank_split_versions（父流水公开身份 → 拆分版本）。前端确认原样回传；显式 map 必须完整覆盖所选拆分父身份且版本合法。旧调用未携带 map 时仍以确认前读取事实版本进行事务内复核，不跳过并发保护。command 在既有成员锁和父流水锁完成后由 repository 批量读取版本；变化明确冲突且零写入，复用原幂等、审计和事务。原关系精确撤销与其他 owner 占用规则不变。
+
+## 2026-09-25 预览展示范围与正式关系隔离
+
+确认预览的 `invoice_display_scopes` 使用与提交一致的 before-relations（包含原 synthetic-existing-case 快照）及精确成员历史；撤回预览只使用当前/恢复关系的有效历史。该字段由纯展示投影生成，不写历史、不改变 confirm/withdraw 命令、版本、锁、幂等、审计或金额校验。成本分配不消费它。成员字段及前端跨行合同见 [关联台边界](../reconciliation-workbench/boundary-io.md#2026-09-25-合并关系中的发票跨行范围)。

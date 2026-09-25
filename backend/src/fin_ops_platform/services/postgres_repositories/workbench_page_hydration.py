@@ -35,7 +35,7 @@ from fin_ops_platform.services.workbench_canonical_rows import (
     WorkbenchCanonicalRowsBuilder,
     invoice_source_kinds,
 )
-from fin_ops_platform.services.workbench_display_subgroups import apply_display_subgroups
+from fin_ops_platform.services.workbench_display_subgroups import apply_display_subgroups, apply_invoice_display_scopes
 from fin_ops_platform.services.workbench_etc_batch_link import etc_source_links, workbench_etc_summary_row_id
 
 # One relation lookup, one batch read per present canonical pane, one settings
@@ -1346,15 +1346,16 @@ class PostgresWorkbenchPageHydrationRepository:
     @staticmethod
     def _attach_display_subgroups(groups: list[dict[str, Any]], connection: Any) -> None:
         targets = [g for g in groups if g.get("formal_member_ids")
-                   and len(g.get("oa_rows", [])) > 1 and g.get("bank_rows")
-                   and not any(r.get("expense_items") for r in g["oa_rows"])]
+                   and len(g.get("oa_rows", [])) > 1 and g.get("bank_rows")]
         if not targets:
             return
         row_ids = sorted({r["id"] for g in targets for r in g["oa_rows"]})
         from fin_ops_platform.services.postgres_repositories.workbench_relation import (
             PostgresWorkbenchRelationRepository,
         )
-        apply_display_subgroups(targets, PostgresWorkbenchRelationRepository(connection).load_display_history(row_ids))
+        history = PostgresWorkbenchRelationRepository(connection).load_display_history(row_ids)
+        apply_display_subgroups(targets, history)
+        apply_invoice_display_scopes(targets, history)
 
     @staticmethod
     def _settings_payload(connection: Any) -> dict[str, Any]:

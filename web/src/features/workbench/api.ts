@@ -481,6 +481,7 @@ type ApiWorkbenchGroup = {
   display_mode?: string | null;
   default_collapsed?: boolean | null;
   summary_row?: ApiWorkbenchRow | null;
+  invoice_display_scopes?: { oa_row_ids: string[]; bank_row_ids: string[]; invoice_row_ids: string[] }[];
   display_subgroups?: { oa_row_ids: string[]; bank_row_ids: string[] }[];
   bank_folds?: { fold_id: string; member_ids: string[]; summary_row: ApiWorkbenchRow }[];
   formal_member_ids?: unknown[] | null;
@@ -1709,6 +1710,9 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
       : undefined,
     defaultCollapsed: group.default_collapsed === true ? true : undefined,
     summaryRow,
+    invoiceDisplayScopes: group.invoice_display_scopes?.map(scope => ({
+      oaRowIds: scope.oa_row_ids, bankRowIds: scope.bank_row_ids, invoiceRowIds: scope.invoice_row_ids,
+    })),
     displaySubgroups: group.display_subgroups?.map((part) => ({
       oaRowIds: part.oa_row_ids, bankRowIds: part.bank_row_ids,
     })),

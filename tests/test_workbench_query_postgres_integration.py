@@ -949,14 +949,19 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         """)
         self.raw_connection.execute("""
             update app.workbench_pair_relations set
-                row_ids=array['oa-direct-1','oa-direct-2','bank-direct-1','bank-direct-2'],
-                row_types=array['oa','oa','bank','bank'] where case_id='CASE-DIRECT-1'
+                row_ids=array['oa-direct-1','oa-direct-2','bank-direct-1','bank-direct-2','same-text-id','etc-summary-etc_202607_linked'],
+                row_types=array['oa','oa','bank','bank','invoice','invoice'] where case_id='CASE-DIRECT-1'
         """)
-        after = {"case_id": "CASE-DIRECT-1", "row_ids": ["oa-direct-1", "oa-direct-2", "bank-direct-1", "bank-direct-2"],
-                 "row_types": ["oa", "oa", "bank", "bank"]}
+        with self.raw_connection.transaction() as transaction:
+            transaction.execute("select set_config('fin_ops.correction_reason', '发票展示范围测试', true)")
+            transaction.execute("update app.invoices set amount=100,signed_amount=100,total_with_tax=100 where legacy_mongo_id in ('same-text-id','canonical-etc-direct-2')")
+            transaction.execute("update app.etc_business_batches set total_amount=100 where business_batch_id='etc_202607_linked'")
+            transaction.execute("update app.etc_invoices set amount=100,tax_amount=0,total_with_tax=100 where etc_invoice_id='etc-invoice-direct-2'")
+        after = {"case_id": "CASE-DIRECT-1", "row_ids": ["oa-direct-1", "oa-direct-2", "bank-direct-1", "bank-direct-2", "same-text-id", "etc-summary-etc_202607_linked"],
+                 "row_types": ["oa", "oa", "bank", "bank", "invoice", "invoice"]}
         history = {"operation_type": "confirm_link", "after_relations": [after], "before_relations": [
-            {"case_id": "old1", "row_ids": ["oa-direct-1", "bank-direct-2"], "row_types": ["oa", "bank"]},
-            {"case_id": "old2", "row_ids": ["oa-direct-2", "bank-direct-1"], "row_types": ["oa", "bank"]}]}
+            {"case_id": "old1", "row_ids": ["oa-direct-1", "bank-direct-2", "same-text-id"], "row_types": ["oa", "bank", "invoice"]},
+            {"case_id": "old2", "row_ids": ["oa-direct-2", "bank-direct-1", "etc-summary-etc_202607_linked"], "row_types": ["oa", "bank", "invoice"]}]}
         PostgresWorkbenchRelationRepository(self.raw_connection)._append_workbench_pair_relation_history(
             self.raw_connection, [history], changed_case_ids=None)
         expected = [{"resolved": True, "oa_row_ids": ["oa-direct-1"], "bank_row_ids": ["bank-direct-2"]},
@@ -967,6 +972,10 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 scope_key="2026-07", zone="paired", page_size=100, detail_level=detail_level)
             target = next(g for g in page["groups"] if g["case_id"] == "CASE-DIRECT-1")
             self.assertEqual(sorted(target["display_subgroups"], key=lambda p: p["oa_row_ids"]), expected)
+            self.assertEqual(sorted(target["invoice_display_scopes"], key=lambda p: p["oa_row_ids"]), [
+                {"oa_row_ids": ["oa-direct-1"], "bank_row_ids": ["bank-direct-2"], "invoice_row_ids": ["same-text-id"]},
+                {"oa_row_ids": ["oa-direct-2"], "bank_row_ids": ["bank-direct-1"], "invoice_row_ids": ["etc-summary-etc_202607_linked"]},
+            ])
             self.assertEqual(set(zip(target["formal_member_types"], target["formal_member_ids"])),
                              set(zip(after["row_types"], after["row_ids"])))
             history_reads = [q for q in self.connection.statements if "select h.raw_payload" in q.get("raw_sql", "")]

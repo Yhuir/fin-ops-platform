@@ -753,6 +753,9 @@ class WorkbenchRelationPreviewGroupingService:
             group: dict[str, object] = {
                 "group_id": f"case:{case_id}",
                 "group_type": "relation",
+                "case_id": case_id,
+                "formal_member_ids": row_ids,
+                "formal_member_types": row_types,
                 "match_confidence": "high",
                 "reason": "active_formal_relation" if zone == "paired" else "active_relation_incomplete",
                 "zone": zone,

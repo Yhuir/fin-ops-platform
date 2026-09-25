@@ -852,3 +852,11 @@ WorkbenchSupportingDocumentFiles、groupDisplayModel、WorkbenchExceptionDrawer�
 - 七类测试：1业务布局/金额、3API请求沿用现有回归；5前端、6端到端和7既有功能回归适用并更新。2服务层、4read model/cache/worker未修改，不新增。生产只读打开预览，比对发布前后业务事实，不提交真实财务操作。
 
 - 详情浮层键盘回归：等待浮层获得焦点后 Esc 关闭、恢复触发器焦点、离开后再次进入能打开，连续两次访问；悬浮、移入阅读、点击重开保持可用。
+
+## 合并发票范围回归（2026-09-25）
+
+- `test_workbench_display_subgroups.py`：1711.33 与 8000+8000 的发票覆盖、无证据不按同额推断、过度占用与旧成员历史不生效；不改原金额/成员。
+- `test_workbench_auth_context_idempotency.py`：确认 preview 无写入、正式历史重读与 preview 范围一致、撤回恢复原组；保留鉴权、版本、错误和幂等回归。
+- `test_workbench_query_postgres_integration.py`：真实 PostgreSQL summary/full 读取同一展示范围，ETC summary 与普通发票身份不丢失，原一次批量 history 查询和正式版本/成员保持不变。
+- `groupDisplayModel.test.ts`、`WorkbenchApi.test.ts`、`RelationGroupGrid.test.tsx`：DTO 映射、共享发票精确跨行、主关联台相同布局、过滤不重复成员。
+- `workbench-preview-layout.spec.ts`：浏览器测量 1711.33 三栏上下边界、16000 只跨两行8000、单张只显示一次、深色表头、居中/无横向溢出；保留拆分撤回、窄屏、权限、stale、网络恢复及 fanout 回归。

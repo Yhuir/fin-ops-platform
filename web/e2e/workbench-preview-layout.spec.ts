@@ -374,3 +374,56 @@ test("centers two 8000 payments and one shared invoice within a single yellow re
   await expect(shared.locator('[data-member-ids]')).toHaveCount(1);
   await dialog.screenshot({ path: info.outputPath('preview-shared-8000.png'), animations:'disabled' });
 });
+
+test("merged invoice scopes keep 1711 on one row and 16000 across only two installments", async ({ page }, info) => {
+  const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.goto("/");
+  const data = await openConfirm(page);
+  await page.getByRole("button", { name: "关闭关联预览" }).click();
+  const template = data.after.groups[0];
+  const oa = ["1711.33", "8000.00", "8000.00"].map((amount, i) => ({ ...template.oa_rows[0],
+    id: `oa-${i}`, applicant: `申请人${i}`, amount, expense_items: [], project_name: i ? "设备项目" : "ETC项目" }));
+  const bank = oa.map((o, i) => ({ ...template.bank_rows[0], id: `bank-${i}`, source_oa_id: o.id,
+    amount: o.amount, debit_amount: o.amount, bank_original_amount: o.amount, bank_related_amount: o.amount,
+    payment_account_label: "平安银行 0093" }));
+  const invoice = ["1711.33", "16000.00"].map((amount, i) => ({ ...template.invoice_rows[0],
+    id: `invoice-${i}`, amount, total_with_tax: amount, source_oa_id: "", seller_name: i ? "设备供应商" : "ETC发票47张" }));
+  const g = { ...template, group_id: "merged-invoices", oa_rows: oa, bank_rows: bank, invoice_rows: invoice,
+    display_subgroups: oa.map((o, i) => ({ oa_row_ids: [o.id], bank_row_ids: [bank[i].id] })),
+    invoice_display_scopes: [
+      { oa_row_ids: [oa[0].id], bank_row_ids: [bank[0].id], invoice_row_ids: [invoice[0].id] },
+      { oa_row_ids: [oa[1].id, oa[2].id], bank_row_ids: [bank[1].id, bank[2].id], invoice_row_ids: [invoice[1].id] },
+    ],
+  };
+  data.after.groups = [g];
+  data.before.groups = [
+    { ...g, group_id: "etc-before", oa_rows: [oa[0]], bank_rows: [bank[0]], invoice_rows: [invoice[0]], display_subgroups: [], invoice_display_scopes: [] },
+    { ...g, group_id: "equipment-before", oa_rows: oa.slice(1), bank_rows: bank.slice(1), invoice_rows: [invoice[1]], display_subgroups: g.display_subgroups.slice(1), invoice_display_scopes: [] },
+  ];
+  for (const side of ["before", "after"]) data.amount_summary[side] = { oa_total: "17711.33", bank_total: "17711.33", invoice_total: "17711.33" };
+  await page.route("**/api/workbench/actions/confirm-link/preview", route => route.fulfill({ json: data }));
+  await page.getByTestId("zone-unpaired").getByRole("button", { name: "确认关联", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "确认关联", exact: true });
+  await expectPreviewPresentation(page);
+  const after = dialog.getByTestId("relation-preview-after");
+  const geometry = await after.evaluate(el => {
+    const box = (id: string) => {
+      const r = el.querySelector(`[data-member-ids="${id}"]`)!.parentElement!.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom };
+    };
+    return { first: box("oa-0"), bank: box("bank-0"), etc: box("invoice-0"),
+      second: box("oa-1"), third: box("oa-2"), equipment: box("invoice-1"),
+      header: getComputedStyle(el.querySelector('.relation-preview-columns')!).backgroundColor };
+  });
+  expect(geometry.etc).toEqual(geometry.first);
+  expect(geometry.bank).toEqual(geometry.first);
+  expect(geometry.equipment.top).toBe(geometry.second.top);
+  expect(geometry.equipment.bottom).toBe(geometry.third.bottom);
+  expect(geometry.etc.bottom).toBeLessThanOrEqual(geometry.equipment.top + 1);
+  expect(geometry.header).toBe('rgb(15, 39, 66)');
+  await expect(after.locator('[data-member-ids="invoice-1"]')).toHaveCount(1);
+  await dialog.screenshot({ path: info.outputPath('preview-merged-invoice-scopes.png'), animations: 'disabled' });
+  await page.getByRole("button", { name: "关闭关联预览" }).click();
+  expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(0);
+});

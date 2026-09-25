@@ -1206,3 +1206,34 @@ describe('split bank parent presentation', () => {
     expect(buildWorkbenchGroupDisplayLayout(group)?.segmentedPaneIds).toContain('bank');
   });
 });
+
+
+describe("invoice coverage across merged relations", () => {
+  test("1711 stays on its row and 16000 spans exactly its two 8000 rows", () => {
+    const g = buildGroup("merge-invoices", "2026-09-01");
+    g.rows = {
+      oa: [buildOaRow("etc", "1711.33"), buildOaRow("pre", "8000"), buildOaRow("final", "8000")],
+      bank: [buildBankRow("pre-bank", ""), buildBankRow("etc-bank", ""), buildBankRow("final-bank", "")],
+      invoice: [buildInvoiceRow("equipment", "16000"), buildInvoiceRow("etc-invoice", "1711.33")],
+    };
+    g.displaySubgroups = [
+      { oaRowIds: ["etc"], bankRowIds: ["etc-bank"] },
+      { oaRowIds: ["pre"], bankRowIds: ["pre-bank"] },
+      { oaRowIds: ["final"], bankRowIds: ["final-bank"] },
+    ];
+    g.invoiceDisplayScopes = [
+      { oaRowIds: ["etc"], bankRowIds: ["etc-bank"], invoiceRowIds: ["etc-invoice"] },
+      { oaRowIds: ["pre", "final"], bankRowIds: ["pre-bank", "final-bank"], invoiceRowIds: ["equipment"] },
+    ];
+    const original = structuredClone(g);
+    const layout = buildWorkbenchGroupDisplayLayout(g)!;
+    expect(layout.segments.map(s => [s.rows.oa.map(r => r.id), s.rows.invoice.map(r => r.id), s.rowSpans?.invoice])).toEqual([
+      [["etc"], ["etc-invoice"], 1], [["pre"], ["equipment"], 2], [["final"], [], 0],
+    ]);
+    expect(g).toEqual(original);
+    const split = { ...g, rows: { ...g.rows, bank: g.rows.bank.map(row => ({ ...row, isSplit: true, parentRowId: "physical-bank", parentAmount: "17711.33" })) } };
+    expect(buildWorkbenchGroupDisplayLayout(split)!.segmentedPaneIds).toEqual(["oa", "invoice"]);
+    const filtered = { ...g, rows: { ...g.rows, invoice: [g.rows.invoice[1]] } };
+    expect(buildWorkbenchGroupDisplayLayout(filtered, g)!.segments.flatMap(s => s.rows.invoice.map(r => r.id))).toEqual(["etc-invoice"]);
+  });
+});

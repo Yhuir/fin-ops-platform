@@ -140,3 +140,67 @@ def apply_display_subgroups(groups: list[dict[str, Any]], history: list[dict[str
             for part in resolved
             if part
         ]
+
+
+def apply_invoice_display_scopes(
+    groups: list[dict[str, Any]], history: list[dict[str, Any]],
+    *, before_relations: list[dict[str, Any]] | None = None,
+) -> None:
+    """Retain proven invoice coverage across a merge, independently of cost allocation.
+
+    A scope is typed membership, never a row number or a new formal relation.
+    Pending previews supply current relations; published groups use exact history.
+    Unproven/overlapping coverage remains shared, without inventing an owner.
+    """
+    for group in groups:
+        group.pop("invoice_display_scopes", None)
+        if not group.get("invoice_rows") or not group.get("formal_member_ids"):
+            continue
+        current = {"case_id": group.get("case_id"), "row_ids": group["formal_member_ids"],
+                   "row_types": group["formal_member_types"]}
+        available = members(current)
+        if before_relations is None:
+            parts = relation_history_partitions([current], history)[0]
+        else:
+            previous = [r for r in before_relations if members(r) and members(r) <= available]
+            parts = [part for partitions in relation_history_partitions(previous, history) for part in partitions]
+            remainder = available - set().union(*parts) if parts else available
+            if remainder:
+                parts.append(frozenset(remainder))
+        usage = Counter(member for part in parts for member in part)
+        if len(parts) < 2 or any(count != 1 for count in usage.values()) or set(usage) != available:
+            continue
+        rows = {(kind, r["id"]): r for kind in ("oa", "bank", "invoice") for r in group[f"{kind}_rows"]}
+        if not available <= rows.keys():
+            continue
+        scopes = []
+        aliases = oa_row_source_alias_map(group["oa_rows"])
+        aligned = [
+            {*(('oa', k) for k in p["oa_row_ids"]), *(('bank', k) for k in p["bank_row_ids"])}
+            for p in group.get("display_subgroups", []) if p.get("resolved")
+        ]
+        for part in parts:
+            oa = [rows[key] for key in part if key[0] == "oa"]
+            bank = [rows[key] for key in part if key[0] == "bank"]
+            invoices = [rows[key] for key in part if key[0] == "invoice"]
+            # History with an overallocated bank side cannot establish invoice coverage.
+            amounts = [WorkbenchRelationAlignmentService._money(r.get("amount")) for r in oa]
+            bank_amounts = [WorkbenchRelationAlignmentService._bank_amount(r) for r in bank]
+            if (invoices and not (oa or bank)) or any(a is None for a in [*amounts, *bank_amounts]):
+                break
+            if oa and bank and sum(amounts) != sum(bank_amounts):
+                break
+            # Never contradict the current OA/bank alignment when history is obsolete.
+            if any(p & part and not p <= part for p in aligned):
+                break
+            if any(
+                owner and ("oa", owner) not in part
+                for owner in (WorkbenchRelationAlignmentService._source_oa_id(r, aliases) for r in invoices)
+            ):
+                break
+            scopes.append({f"{kind}_row_ids": [r["id"] for r in group[f"{kind}_rows"] if (kind, r["id"]) in part]
+                           for kind in ("oa", "bank", "invoice")})
+        else:
+            order = {key: i for i, key in enumerate(rows)}
+            scopes.sort(key=lambda scope: min(order[(kind, k)] for kind in ("oa", "bank", "invoice") for k in scope[f"{kind}_row_ids"]))
+            group["invoice_display_scopes"] = scopes
