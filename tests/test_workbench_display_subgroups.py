@@ -242,7 +242,7 @@ def test_invoice_scopes_reject_overallocated_history_and_stale_members():
     assert "invoice_display_scopes" not in g
 
 
-@pytest.mark.parametrize("conflict", ["invoice_source", "overlap", "unknown_amount"])
+@pytest.mark.parametrize("conflict", ["invoice_source", "bank_source", "overlap", "unknown_amount"])
 def test_invoice_scopes_do_not_publish_conflicting_coverage(conflict):
     from fin_ops_platform.services.workbench_display_subgroups import apply_invoice_display_scopes
 
@@ -250,6 +250,8 @@ def test_invoice_scopes_do_not_publish_conflicting_coverage(conflict):
     b = [row("oa", "oa-b", 100), row("bank", "bank-b", 100), row("invoice", "invoice-b", 100)]
     if conflict == "invoice_source":
         a[2]["source_oa_id"] = "oa-b"
+    elif conflict == "bank_source":
+        a[1]["detail_fields"] = {"source_oa_row_id": "oa-b"}
     elif conflict == "unknown_amount":
         a[0]["amount"] = None
     before = [relation("a", a), relation("b", b)]
@@ -258,3 +260,21 @@ def test_invoice_scopes_do_not_publish_conflicting_coverage(conflict):
     g = group(a + b)
     apply_invoice_display_scopes([g], [], before_relations=before)
     assert "invoice_display_scopes" not in g
+
+
+def test_invoice_scope_keeps_complete_parent_when_older_history_overallocated_one_oa():
+    from fin_ops_platform.services.workbench_display_subgroups import apply_invoice_display_scopes
+
+    equipment = installment_rows()
+    etc = [row("oa", "etc-oa", "1711.33"), row("bank", "etc-bank", "1711.33"), row("invoice", "etc-invoice", "1711.33")]
+    old = relation("equipment", [equipment[0], *equipment[2:]])
+    complete = relation("equipment", equipment)
+    history = [event(complete, [old])]
+    previous = [complete, relation("etc", etc)]
+    preview = group(equipment + etc)
+    apply_invoice_display_scopes([preview], history, before_relations=previous)
+    assert preview["invoice_display_scopes"][0]["oa_row_ids"] == ["prepay", "final"]
+    assert preview["invoice_display_scopes"][0]["invoice_row_ids"] == ["shared-invoice"]
+    published = group(equipment + etc)
+    apply_invoice_display_scopes([published], history + [event(relation("merged", equipment + etc), previous)])
+    assert published["invoice_display_scopes"] == preview["invoice_display_scopes"]

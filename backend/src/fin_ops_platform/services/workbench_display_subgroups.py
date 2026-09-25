@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Callable
 from typing import Any
 
 from fin_ops_platform.services.oa_attachment_invoice_linking import oa_row_source_alias_map
@@ -24,6 +25,7 @@ def members(relation: dict[str, Any]) -> frozenset[tuple[str, str]]:
 
 def relation_history_partitions(
     relations: list[dict[str, Any]], history: list[dict[str, Any]],
+    *, accept_partition: Callable[[list[frozenset[tuple[str, str]]]], bool] | None = None,
 ) -> list[list[frozenset[tuple[str, str]]]]:
     """Partition exact active snapshots by their merge history, without amount inference."""
     # Histories are ordered oldest to newest by the repository. Index exact
@@ -50,6 +52,8 @@ def relation_history_partitions(
         remainder = current - set(usage)
         if remainder:
             result.append(frozenset(remainder))
+        if accept_partition is not None and not accept_partition(result):
+            return [current]
         return result or [current]
 
     return [partition(relation, len(history)) for relation in relations]
@@ -159,48 +163,58 @@ def apply_invoice_display_scopes(
         current = {"case_id": group.get("case_id"), "row_ids": group["formal_member_ids"],
                    "row_types": group["formal_member_types"]}
         available = members(current)
+        rows = {(kind, r["id"]): r for kind in ("oa", "bank", "invoice") for r in group[f"{kind}_rows"]}
+        if not available <= rows.keys():
+            continue
+        aliases = oa_row_source_alias_map(group["oa_rows"])
+        aligned = [
+            {*(('oa', k) for k in p["oa_row_ids"]), *(('bank', k) for k in p["bank_row_ids"])}
+            for p in group.get("display_subgroups", []) if p.get("resolved")
+        ]
+
+        def valid_partition(parts: list[frozenset[tuple[str, str]]]) -> bool:
+            for part in parts:
+                if not part <= rows.keys():
+                    return False
+                oa = [rows[key] for key in part if key[0] == "oa"]
+                bank = [rows[key] for key in part if key[0] == "bank"]
+                invoices = [rows[key] for key in part if key[0] == "invoice"]
+                amounts = [WorkbenchRelationAlignmentService._money(r.get("amount")) for r in oa]
+                bank_amounts = [WorkbenchRelationAlignmentService._bank_amount(r) for r in bank]
+                if (invoices and not (oa or bank)) or any(a is None for a in [*amounts, *bank_amounts]):
+                    return False
+                if oa and bank and sum(amounts) != sum(bank_amounts):
+                    return False
+                if any(p & part and not p <= part for p in aligned):
+                    return False
+                if any(
+                    owner and ("oa", owner) not in part
+                    for owner in [
+                        *(WorkbenchRelationAlignmentService._source_oa_id(r, aliases) for r in invoices),
+                        *(WorkbenchRelationAlignmentService.bank_source_oa_id(r, aliases) for r in bank),
+                    ]
+                ):
+                    return False
+            return True
+
         if before_relations is None:
-            parts = relation_history_partitions([current], history)[0]
+            parts = relation_history_partitions([current], history, accept_partition=valid_partition)[0]
         else:
             previous = [r for r in before_relations if members(r) and members(r) <= available]
-            parts = [part for partitions in relation_history_partitions(previous, history) for part in partitions]
+            parts = [part for partitions in relation_history_partitions(previous, history, accept_partition=valid_partition) for part in partitions]
             remainder = available - set().union(*parts) if parts else available
             if remainder:
                 parts.append(frozenset(remainder))
         usage = Counter(member for part in parts for member in part)
         if len(parts) < 2 or any(count != 1 for count in usage.values()) or set(usage) != available:
             continue
-        rows = {(kind, r["id"]): r for kind in ("oa", "bank", "invoice") for r in group[f"{kind}_rows"]}
-        if not available <= rows.keys():
+        if not valid_partition(parts):
             continue
-        scopes = []
-        aliases = oa_row_source_alias_map(group["oa_rows"])
-        aligned = [
-            {*(('oa', k) for k in p["oa_row_ids"]), *(('bank', k) for k in p["bank_row_ids"])}
-            for p in group.get("display_subgroups", []) if p.get("resolved")
+        scopes = [
+            {f"{kind}_row_ids": [r["id"] for r in group[f"{kind}_rows"] if (kind, r["id"]) in part]
+             for kind in ("oa", "bank", "invoice")}
+            for part in parts
         ]
-        for part in parts:
-            oa = [rows[key] for key in part if key[0] == "oa"]
-            bank = [rows[key] for key in part if key[0] == "bank"]
-            invoices = [rows[key] for key in part if key[0] == "invoice"]
-            # History with an overallocated bank side cannot establish invoice coverage.
-            amounts = [WorkbenchRelationAlignmentService._money(r.get("amount")) for r in oa]
-            bank_amounts = [WorkbenchRelationAlignmentService._bank_amount(r) for r in bank]
-            if (invoices and not (oa or bank)) or any(a is None for a in [*amounts, *bank_amounts]):
-                break
-            if oa and bank and sum(amounts) != sum(bank_amounts):
-                break
-            # Never contradict the current OA/bank alignment when history is obsolete.
-            if any(p & part and not p <= part for p in aligned):
-                break
-            if any(
-                owner and ("oa", owner) not in part
-                for owner in (WorkbenchRelationAlignmentService._source_oa_id(r, aliases) for r in invoices)
-            ):
-                break
-            scopes.append({f"{kind}_row_ids": [r["id"] for r in group[f"{kind}_rows"] if (kind, r["id"]) in part]
-                           for kind in ("oa", "bank", "invoice")})
-        else:
-            order = {key: i for i, key in enumerate(rows)}
-            scopes.sort(key=lambda scope: min(order[(kind, k)] for kind in ("oa", "bank", "invoice") for k in scope[f"{kind}_row_ids"]))
-            group["invoice_display_scopes"] = scopes
+        order = {key: i for i, key in enumerate(rows)}
+        scopes.sort(key=lambda scope: min(order[(kind, k)] for kind in ("oa", "bank", "invoice") for k in scope[f"{kind}_row_ids"]))
+        group["invoice_display_scopes"] = scopes
