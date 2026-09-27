@@ -816,7 +816,7 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 
 类别 1／5／7：`WorkbenchSelectionModel.test.ts`、`WorkbenchSplitSelection.test.tsx` 和 `BankSplitRelationCell.test.tsx` 保护整笔选择完整子项、搜索部分命中、跨关系占用拒绝、金额浮层不改变选择及旧单项按钮缺席。`BankSplitEditor.test.tsx` 保护动态层级菜单、草稿／保存与权限；`WorkbenchBankSelectionCleanup.test.ts` 保护清理当前父流水两区旧选择、保留其它流水和 OA。
 
-类别 5／6／7：`workbench-split-selection.spec.ts` 对应 RECON-WB-E2E-017，覆盖整笔 confirm、占用错误、从 OA／发票选择既有完整关系后 withdraw、纯银行未配对正式关系“撤回当前关联”沿用 unlink 精确成员、保存后清除旧选择与新版本回读。`RelationGroupGrid.test.tsx` 同时保护撤回入口只在未配对 bank 正式关系且可操作非只读时出现，并传递原关系及银行成员；兄弟子项属于其他关系不扩张撤回集合。旧详情单项选择断言由该合同替代，不能丢弃其中占用、版本及权限保护。
+类别 1／5／6／7：`WorkbenchSelectionModel.test.ts`、`BankSplitRelationCell.test.tsx`、`workbench-split-selection.spec.ts` 保护整笔未关联流水选择与正式关系精确选择、无行内撤回入口、表头预览及提交、占用/版本/权限保护和保存后的清理重读。
 
 类别 3 沿用既有 API adapter／请求形状回归，无新 HTTP 合同；类别 2 沿用既有拆分及关联事务服务回归，无 service/repository 实现变化；类别 4 不适用，无 read model/cache/worker 变化。本节记录覆盖责任，测试和生产验证结果需另行记录，不预先宣称通过。
 
@@ -869,3 +869,11 @@ WorkbenchSupportingDocumentFiles、groupDisplayModel、WorkbenchExceptionDrawer�
 ## 2026-09-27 来源详情回归
 
 按[来源详情验证责任](../../dev/source-record-details.md#验证责任)覆盖真实来源保留、内部状态/推断/替代值移除、缺失与零值、权限及读取失败；保留本模块列表、计算、导出和关系回归。公共前端入口包括 `EntityDetailContent.test.tsx`、`DetailDrawer.test.tsx` 与 `BankTransactionDrawer.test.tsx`，后者保护按 ID 读取、切换取消及禁止列表摘要回退。具体后端/浏览器执行及性能结果据实际报告，不以本节表示已通过。
+
+## 2026-09-28 唯一表头撤回入口
+
+- `BankSplitRelationCell.test.tsx`：不同权限下均无行内撤回入口。
+- `WorkbenchSelectionModel.test.ts`、`WorkbenchSelection.test.tsx`：正式关系精确成员、未关联整笔占用校验，以及 paired/unpaired 批次先预览后提交。
+- `BankFlowBatchWithdrawPreview.test.tsx`：取消零写、预览版本、重复点击、读取/权限失败、提交冲突、已提交但重读失败、关闭取消读取。
+- `workbench-split-selection.spec.ts`、`workbench-withdraw-flow.spec.ts`：普通、纯银行、跨关系拆分从表头预览提交。
+- `workbench-batch-withdraw-preview.spec.ts`：两分区取消零写、确认后唯一请求与写后刷新；`bank-flow-rule-batches-flow.spec.ts` 保留业务 owner 页和补齐发票关系回归。

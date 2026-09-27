@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   buildWorkbenchSelectionContext,
   resolveWorkbenchBankSelection,
+  resolveWorkbenchRowSelection,
   toggleWorkbenchSelectionRows,
   workbenchComparableAmountCents,
   workbenchRowIdentityKey,
@@ -885,4 +886,22 @@ test("a selected formal split relation totals actual members, not purpose compar
   expect(withdrawal.summary.amounts.bank).toBe("1497.22");
   expect(withdrawal.includedRowIdentities).toEqual(interestOnly.formalMemberIdentities);
   expect(withdrawal.includedRowIdentities.some(item => item.id === "principal")).toBe(false);
+});
+
+
+test("formal split selection keeps exact relation members even when siblings belong to another relation", () => {
+  const bank = { ...row("interest", "bank"), isSplit: true, parentRowId: "parent", caseId: "case-interest",
+    bankSplitParts: [
+      { id: "principal", amount: "1000.00", category_code: "principal", category_label: "本金", category_path: ["本金"], relation_case_id: "other-case" },
+      { id: "interest", amount: "100.00", category_code: "interest", category_label: "利息", category_path: ["费用", "利息"], relation_case_id: "case-interest" },
+    ] };
+  const second = row("second", "bank");
+  const relation: WorkbenchRelationGroup = { ...group("case-interest"), rawGroupType: "relation",
+    rows: { oa: [], bank: [bank, second], invoice: [] },
+    formalMemberIdentities: [{ id: bank.id, recordType: "bank" }, { id: second.id, recordType: "bank" }] };
+  const selected = resolveWorkbenchRowSelection(bank, [relation]);
+  const context = buildWorkbenchSelectionContext({ explicitRows: selected, sourceGroups: [relation], zoneId: "unpaired" });
+  expect(context.includedRowIdentities).toEqual(relation.formalMemberIdentities);
+  expect(() => resolveWorkbenchRowSelection(bank, [])).toThrow("部分子项已属于其他关联");
+  expect(() => resolveWorkbenchRowSelection(bank, [{ ...relation, formalMemberIdentities: [] }])).toThrow("正式成员合同无效");
 });

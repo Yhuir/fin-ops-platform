@@ -71,15 +71,14 @@ test('OA display segments still show each physical bank parent only once per rel
 });
 
 
-test('formal unpaired bank relation exposes only relation withdrawal and hides it without write permission', async () => {
-  const user = userEvent.setup();
+test('formal unpaired bank relation has no inline withdrawal entry regardless of permission', async () => {
   const bank = record('interest-1', '1497.22', '费用 / 利息');
   const group: WorkbenchRelationGroup = { id: 'case-1', groupType: 'unpaired', rawGroupType: 'relation', matchConfidence: 'high', reason: 'test', rows: { oa: [], bank: [bank], invoice: [] } };
   const onRowAction = vi.fn();
   const props = { zoneId: 'unpaired' as const, groups: [group], panes: [{ id: 'bank' as const, title: '银行', rows: [bank] }], rowTemplateColumns: '1fr', getRowState: () => 'idle' as const, onSelectRow: vi.fn(), onOpenDetail: vi.fn(), onRowAction };
   const { rerender } = render(<RelationGroupGrid {...props} canOperateData />);
-  await user.click(screen.getByRole('button', { name: '撤回当前关联' }));
-  expect(onRowAction).toHaveBeenCalledWith(bank, 'unlink', group);
+  expect(screen.queryByRole('button', { name: '撤回当前关联' })).not.toBeInTheDocument();
+  expect(onRowAction).not.toHaveBeenCalled();
   expect(props.onSelectRow).not.toHaveBeenCalled();
   rerender(<RelationGroupGrid {...props} canOperateData={false} />);
   expect(screen.queryByRole('button', { name: '撤回当前关联' })).not.toBeInTheDocument();

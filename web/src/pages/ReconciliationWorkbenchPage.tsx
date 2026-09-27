@@ -5,6 +5,7 @@ import AppDrawer from "../components/common/AppDrawer";
 import AppDialog from "../components/common/AppDialog";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import ActionStatusModal from "../components/workbench/ActionStatusModal";
+import BankFlowBatchWithdrawPreview from "../components/workbench/BankFlowBatchWithdrawPreview";
 import DetailDrawer from "../components/workbench/DetailDrawer";
 import RelationPreviewTriPane from "../components/workbench/RelationPreviewTriPane";
 import WorkbenchExceptionDrawer from "../components/workbench/WorkbenchExceptionDrawer";
@@ -41,7 +42,7 @@ import {
   WORKBENCH_GROUP_PAGE_SIZE,
   type WorkbenchActionResult,
 } from "../features/workbench/api";
-import { fetchBankFlowRuleBatchDetail, withdrawBankFlowRuleBatch } from "../features/bankFlowRuleBatches/api";
+import { withdrawBankFlowRuleBatch } from "../features/bankFlowRuleBatches/api";
 import {
   buildWorkbenchServerPageQuery,
   buildWorkbenchDisplayGroups,
@@ -56,7 +57,7 @@ import {
 } from "../features/workbench/groupDisplayModel";
 import { reorderWorkbenchColumnLayout, type WorkbenchColumnDropPosition } from "../features/workbench/columnLayout";
 import {
-  resolveWorkbenchBankSelection,
+  resolveWorkbenchRowSelection,
   buildWorkbenchSelectionContext,
   workbenchRowIdentityKey,
 } from "../features/workbench/selectionModel";
@@ -269,25 +270,9 @@ function bankFlowRuleBatchSourceBatchId(row: WorkbenchRecord) {
   return readStringMetadata(row.specialMetadata, "source_batch_id");
 }
 
-function uniqueBankFlowRuleBatchRows(rows: WorkbenchRecord[]) {
-  const byBatchId = new Map<string, WorkbenchRecord>();
-  rows.forEach((row) => {
-    const sourceBatchId = bankFlowRuleBatchSourceBatchId(row);
-    if (sourceBatchId && !byBatchId.has(sourceBatchId)) {
-      byBatchId.set(sourceBatchId, row);
-    }
-  });
-  return Array.from(byBatchId.values());
-}
-
 function readStringMetadata(metadata: Record<string, unknown> | undefined, key: string) {
   const value = metadata?.[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function readNumberMetadata(metadata: Record<string, unknown> | undefined, key: string) {
-  const value = metadata?.[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function actionResultMessage(result: string | WorkbenchActionResult) {
@@ -392,6 +377,7 @@ export default function ReconciliationWorkbenchPage() {
   const [lastActionMessage, setLastActionMessage] = useState<string | null>(null);
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(null);
   const [receiptEditorCaseId, setReceiptEditorCaseId] = useState<string | null>(null);
+  const [batchWithdrawTarget, setBatchWithdrawTarget] = useState<{ batchId: string; canonicalEpoch: number } | null>(null);
   const [relationPreviewDialog, setRelationPreviewDialog] = useState<RelationPreviewDialogState | null>(null);
   const [relationPreviewRequestKind, setRelationPreviewRequestKind] = useState<RelationPreviewRequestKind | null>(null);
   const relationPreviewRequestKindRef = useRef<RelationPreviewRequestKind | null>(null);
@@ -788,30 +774,6 @@ export default function ReconciliationWorkbenchPage() {
       }
     }
   }, [applyOaSyncStatus]);
-
-  const withdrawBankFlowRuleBatchSummaryRow = useCallback(async (row: WorkbenchRecord) => {
-    const sourceBatchId = readStringMetadata(row.specialMetadata, "source_batch_id");
-    if (!sourceBatchId) {
-      throw new Error("流水规则批次来源缺失，无法撤回。");
-    }
-
-    let expectedVersion = readNumberMetadata(row.specialMetadata, "batch_version");
-    if (expectedVersion === null) {
-      const detail = await fetchBankFlowRuleBatchDetail(sourceBatchId, undefined, "formal");
-      expectedVersion = typeof detail.batch.version === "number" ? detail.batch.version : null;
-    }
-    if (expectedVersion === null) {
-      throw new Error("流水规则批次状态已变化，请刷新后重试。");
-    }
-
-    await withdrawBankFlowRuleBatch({
-      batchId: sourceBatchId,
-      expectedVersion,
-      reason: "由关联台撤回流水规则批次",
-    });
-    clearPairedSelection();
-    return "已撤回流水规则批次。";
-  }, [clearPairedSelection]);
 
   async function loadWorkbenchAuxiliaryData(month: string, signal?: AbortSignal) {
     try {
@@ -2016,30 +1978,6 @@ export default function ReconciliationWorkbenchPage() {
       return;
     }
 
-    if (action === "unlink") {
-      if (isBankFlowRuleBatchMember(row)) {
-        await runBlockingAction({
-          loadingMessage: "正在撤回流水规则批次...",
-          action: () => withdrawBankFlowRuleBatchSummaryRow(row),
-        });
-        return;
-      }
-      try {
-        const relationSelection = buildWorkbenchSelectionContext({
-          explicitRows: [row],
-          sourceGroups: sourceAllGroups,
-          zoneId: "paired",
-        });
-        if (relationSelection.includedRowIdentities.length === 0) {
-          openActionResultDialog("当前关联组的正式成员合同无效，请刷新后重试。");
-          return;
-        }
-        await openWithdrawPreviewIdentities(relationSelection.includedRowIdentities);
-      } catch (error) {
-        openRelationPreviewErrorDialog(error);
-      }
-      return;
-    }
 
   }, [
     collectCaseRows,
@@ -2048,7 +1986,6 @@ export default function ReconciliationWorkbenchPage() {
     openActionResultDialog,
     runBlockingAction,
     sourceAllGroups,
-    withdrawBankFlowRuleBatchSummaryRow,
     openRelationPreviewErrorDialog,
   ]);
 
@@ -2103,13 +2040,13 @@ export default function ReconciliationWorkbenchPage() {
 
   const handleSelectRow = useCallback((row: WorkbenchRecord, zoneId: "paired" | "unpaired") => {
     try {
-      const rows = resolveWorkbenchBankSelection(row);
+      const rows = resolveWorkbenchRowSelection(row, sourceAllGroups);
       if (zoneId === "unpaired") toggleOpenRowSelection(rows);
       else togglePairedRowSelection(rows);
     } catch (error) {
       openActionResultDialog(error instanceof Error ? error.message : "流水选择失败。", "无法选择整笔流水");
     }
-  }, [openActionResultDialog, toggleOpenRowSelection, togglePairedRowSelection]);
+  }, [openActionResultDialog, sourceAllGroups, toggleOpenRowSelection, togglePairedRowSelection]);
 
   const openRelationPreview = async (
     kind: RelationPreviewRequestKind,
@@ -2269,6 +2206,15 @@ export default function ReconciliationWorkbenchPage() {
     setLastActionMessage("已清空当前选择。");
   };
 
+  const openBatchWithdrawPreview = (row: WorkbenchRecord) => {
+    const batchId = bankFlowRuleBatchSourceBatchId(row);
+    if (!batchId) {
+      openActionResultDialog("流水规则批次来源缺失，无法撤回。");
+      return;
+    }
+    setBatchWithdrawTarget({ batchId, canonicalEpoch: canonicalEpochRef.current });
+  };
+
   const handleWithdrawOpenSelection = async () => {
     if (!ensureCanWriteWorkbench()) {
       return;
@@ -2280,15 +2226,8 @@ export default function ReconciliationWorkbenchPage() {
     const selectedGroup = selectedOpenWithdrawableRelationGroups[0];
     const batchSummary = selectedGroup?.relationMode === "bank_flow_rule_batch"
       ? selectedGroup.rows.bank.find(isBankFlowRuleBatchMember) : undefined;
-    if (batchSummary && isBankFlowRuleBatchMember(batchSummary)) {
-      await runBlockingAction({
-        loadingMessage: "正在撤回流水规则批次...",
-        action: async () => {
-          await withdrawBankFlowRuleBatchSummaryRow(batchSummary);
-          clearOpenSelection();
-          return "已撤回流水规则批次。";
-        },
-      });
+    if (batchSummary) {
+      openBatchWithdrawPreview(batchSummary);
       return;
     }
     try {
@@ -2320,24 +2259,11 @@ export default function ReconciliationWorkbenchPage() {
       openActionResultDialog("一次只能处理一个关联组。");
       return;
     }
-    const selectedBankFlowRuleBatchRows = uniqueBankFlowRuleBatchRows(
-      selectedPairedGroupsForUnifiedAction
-        .flatMap((group) => group.relationMode === "bank_flow_rule_batch"
-          ? group.rows.bank : [])
-        .filter(isBankFlowRuleBatchMember),
-    );
-    if (selectedBankFlowRuleBatchRows.length > 0) {
-      await runBlockingAction({
-        loadingMessage: "正在撤回流水规则批次...",
-        action: async () => {
-          for (const row of selectedBankFlowRuleBatchRows) {
-            await withdrawBankFlowRuleBatchSummaryRow(row);
-          }
-          return selectedBankFlowRuleBatchRows.length === 1
-            ? "已撤回流水规则批次。"
-            : `已撤回 ${selectedBankFlowRuleBatchRows.length} 个流水规则批次。`;
-        },
-      });
+    const batchGroup = selectedPairedGroupsForUnifiedAction[0];
+    const batchRow = batchGroup?.relationMode === "bank_flow_rule_batch"
+      ? batchGroup.rows.bank.find(isBankFlowRuleBatchMember) : undefined;
+    if (batchRow) {
+      openBatchWithdrawPreview(batchRow);
       return;
     }
     if (pairedSelectionContext.includedRowIdentities.length === 0) {
@@ -2659,6 +2585,27 @@ export default function ReconciliationWorkbenchPage() {
           }
         }}
         error={detailError} loading={isDetailLoading} row={detailRow} onClose={handleCloseDetail} />
+      {batchWithdrawTarget ? (
+        <BankFlowBatchWithdrawPreview
+          batchId={batchWithdrawTarget.batchId}
+          onClose={() => setBatchWithdrawTarget(null)}
+          onSubmit={async (expectedVersion, onCommitted) => {
+            if (!ensureCanWriteWorkbench()) throw new Error("当前状态不允许执行写操作。");
+            if (batchWithdrawTarget.canonicalEpoch !== canonicalEpochRef.current) {
+              throw new Error("关联台数据已更新，请关闭后重新选择并预览。");
+            }
+            await executeWorkbenchActionAndReread({
+              loadingMessage: "正在撤回流水规则批次...",
+              onProgress: progress => { if (progress.committed) onCommitted(); },
+              action: async () => {
+                await withdrawBankFlowRuleBatch({ batchId: batchWithdrawTarget.batchId, expectedVersion,
+                  reason: "由关联台撤回流水规则批次" });
+                return "已撤回流水规则批次。";
+              },
+            });
+          }}
+        />
+      ) : null}
       {relationPreviewDialog ? (
         <RelationPreviewDialog
           preview={relationPreviewDialog.preview}

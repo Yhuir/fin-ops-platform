@@ -401,7 +401,7 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 
 金额列标签仅查看金额，流水详情只负责编辑标签／金额／删除。删除 `BankSplitPartAction/renderPartAction` 回调链、单项按钮、专用 `detailZone`、`scope: unit` 透传及 `resolveWorkbenchBankSelection` 的 `unitId` 分支。整笔选择使用完整 `bank_split_parts`，缺少身份或存在其他 owner 时明确拒绝，不能静默缩减为可见／未占用子项。
 
-历史关系可通过其 OA／发票成员选择完整关系并使用既有撤回。纯银行历史关系的恢复入口由 `RelationGroupGrid` 提供：仅未配对区、bank pane、`rawGroupType=relation`、可操作且非只读时显示“撤回当前关联”，调用已有 `onRowAction(bank member, "unlink", group)`。撤回以该关系精确完整正式成员为范围，不按父流水补入其他 owner 的兄弟子项；已配对关系继续使用既有“更多操作 → 取消关联”。不新增后端 I/O、不修改版本锁或恢复单项选择。标签组件只输出分类 code 与完整路径，不接收关联回调。编辑与关联权限继续独立。
+关联台撤回统一使用表头入口：选择一个正式关系 → 撤回关联 → 预览 → 确认撤回。既有关系按完整正式成员选择，纯银行关系及跨关系拆分均不扩展到其它关系的兄弟子项；未关联流水继续整笔选择并校验占用。删除行内撤回按钮、菜单取消关联和专用 unlink 分支，不恢复子项选择。普通关系沿用原预览／提交、版本、幂等和历史恢复合同。
 
 保存回调携带已持久化 BankSplitDetail；清理该父流水在两区的旧选择与受影响来源组，显式读取新详情及列表，不被“抽屉打开时暂缓后台刷新”机制阻挡。不使用旧版本选择；写后回读失败明确显示已保存及读取错误。保持抽屉打开，关闭后关联选择保留。其它页面不注入此操作。业务 API、金额、成本、往来和正式关系写合同不变。
 
@@ -459,3 +459,11 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../../dev/source-record-details.md)。详情投影只消费明确来源值，移除内部状态、推断费用类型、默认币种、日期替代及无来源的聚合信息；不从列表摘要或旧详情回退。银行使用父交易身份和真实交易日期，拆分操作仍由银行 owner 管理。模块列表、业务计算、导出、关系写入与原权限不变；公共成本核对信息不按原始字段规则全局删除。
 
 文件范围包含共享 `services/source_record_details.py`、所属详情 query/assembler 与前端 API 映射；银行通用抽屉按 ID 读取 `/api/bank-transactions/{id}/source-detail`，复用既有有界银行读取。没有新增 read model、cache、worker、迁移或数据库备份。旧取值删除条件、测试矩阵及性能验证见集中合同；实际执行结果另记，不以本节表示验证通过。
+
+## 2026-09-28 表头唯一撤回入口
+
+- `RelationGroupGrid` 与 `RowActions` 不再产生行内 `unlink`。详情、凭证、现金等其它动作继续走现有回调，不整体删除 `onRowAction`。
+- `resolveWorkbenchRowSelection(row, sourceGroups)` 先识别正式关系并验证成员合同；返回选择锚点，由既有 selection context 展开完整 typed 成员。无正式关系时才调用 `resolveWorkbenchBankSelection` 整笔解析。展示/过滤/折叠不决定撤回范围。
+- `BankFlowBatchWithdrawPreview` 只通过已有 `GET /api/bank-flow-rule-batches/{id}?view=formal` 读取完整批次成员与版本，HeroUI Drawer/Button/Table 展示批次范围与撤回语义，不伪造 before/after topology。只有显式确认才将该版本交给页面编排；页面调用原批次 withdraw API 并执行一次共享写后重读。取消/读取失败零写，提交后重读失败不得重复提交，canonical epoch 变化要求重开预览。
+- 普通关系继续使用原服务端 before/after 预览及版本/幂等提交；批次维持原 owner API。无后端接口、持久化、SQL、worker、缓存、迁移或备份变更。
+- 文件新增 `web/src/components/workbench/BankFlowBatchWithdrawPreview.tsx`；测试新增同名组件测试，更新关系选择、拆分单元格及浏览器测试。

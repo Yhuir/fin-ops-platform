@@ -626,11 +626,6 @@ function RelationGroupGrid({
           item.displayScope === "group" || !visibleAnomalyFingerprints.has(item.fingerprint)
         ));
 
-        const renderWithdrawAction = (paneId: WorkbenchRecordType) => paneId === "bank" && zoneId === "unpaired"
-          && group.rawGroupType === "relation" && group.rows.bank.length > 0 && canOperateData && !readOnly
-          ? <Button size="sm" variant="tertiary" onPress={() => onRowAction(group.rows.bank[0], "unlink", group)}>撤回当前关联</Button>
-          : null;
-
         if (displaySegments) {
           return (
             <div
@@ -660,7 +655,6 @@ function RelationGroupGrid({
                           gridRow: segment.rowSpans?.[paneId] ? `${segmentIndex + 1} / span ${segment.rowSpans[paneId]}` : segmentIndex + 1,
                         }}
                       >
-                        {segmentIndex === 0 ? renderWithdrawAction(paneId) : null}
                         {segmentIndex === 0 ? renderReceiptAction(group, paneId) : null}
                         <RelationGroupCell
                           columnGridStyle={paneGridStyleByPane[paneId]}
@@ -719,7 +713,6 @@ function RelationGroupGrid({
                       gridRow: `1 / span ${segmentCount}`,
                     }}
                   >
-                    {renderWithdrawAction(paneId)}
                     {renderReceiptAction(group, paneId)}
                     <RelationGroupCell
                       columnGridStyle={paneGridStyleByPane[paneId]}
@@ -805,7 +798,6 @@ function RelationGroupGrid({
               return (
                 <Fragment key={`${group.id}-${pane.id}`}>
                   <div className="candidate-group-pane-slot candidate-group-pane-slot-sheet" data-pane-id={paneId}>
-                    {renderWithdrawAction(paneId)}
                     {renderReceiptAction(group, paneId)}
                     {requirementLabel ? (
                       <span

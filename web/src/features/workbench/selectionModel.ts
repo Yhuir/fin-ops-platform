@@ -428,6 +428,20 @@ export function toggleWorkbenchSelectionRows(current: WorkbenchRecord[], request
   return [...next.values()];
 }
 
+/** Existing formal relations are selected by their exact member contract, not parent-bank siblings. */
+export function resolveWorkbenchRowSelection(row: WorkbenchRecord, sourceGroups: WorkbenchRelationGroup[]): WorkbenchRecord[] {
+  const identity = workbenchRowIdentityKey(row);
+  const group = sourceGroups.find(candidate => candidate.rawGroupType === "relation"
+    && flattenWorkbenchGroupSelectionRows(candidate).some(member => workbenchRowIdentityKey(member) === identity));
+  if (group) {
+    if (!resolveFormalRelationSelection(group)) {
+      throw new Error("当前关联组的正式成员合同无效，请刷新后重试。");
+    }
+    return [row];
+  }
+  return resolveWorkbenchBankSelection(row);
+}
+
 /** Split amounts and ownership come from canonical sibling DTOs, never from visible/filter rows. */
 export function resolveWorkbenchBankSelection(row: WorkbenchRecord): WorkbenchRecord[] {
   if (row.recordType !== "bank" || !row.isSplit) return [row];

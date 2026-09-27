@@ -105,7 +105,7 @@ OA 待付款、进项发票使用、销项收款的银行聚合对象，以及�
 
 `features/bankSplits/BankSplitTagPicker.tsx` 输入当前 code／完整路径、有效标签定义、往来归属选项及禁用状态，只在末级选定时输出 `{category_code, category_label_path}`。分类层级来自结构化配置；外部往来第三层使用接口已有选项，不按名称或父流水推断。组件只管理菜单暂选，不请求 API、不持久化、不拥有关联能力。拆分编辑器继续负责草稿、金额、版本和现有 PUT；仅改变第三层也必须保留子项 ID 并提交完整路径。
 
-移除 `BankSplitPartAction`、`renderPartAction`、关联台专用 `detailZone`、`scope: unit` 透传及选择模型 `unitId` 分支。整笔选择仍解析完整 canonical 子项、校验占用；保存响应、父流水旧选择清理和详情／列表重读保留。历史关系可从 OA／发票入口选择完整关系后撤回；无 OA／发票的未配对正式银行关系由 `RelationGroupGrid` 显示“撤回当前关联”，仅可操作且非只读时提供，调用既有 `onRowAction(bank member, "unlink", group)` 对精确完整正式成员执行既有预览／撤回。已配对关系沿用“更多操作 → 取消关联”。这些都是关系级操作，不恢复单项选择，也不受其他关系占用兄弟子项阻断。
+移除 `BankSplitPartAction`、`renderPartAction`、专用 `detailZone`、`scope: unit` 透传与 `unitId` 分支；拆分保存响应及重读保留。关联台撤回统一使用表头入口：选择一个正式关系 → 撤回关联 → 预览 → 确认撤回。既有关系按完整正式成员选择，纯银行关系及跨关系拆分均不扩展到其它关系的兄弟子项；未关联流水继续整笔选择并校验占用。删除行内撤回按钮、菜单取消关联和专用 unlink 分支，不恢复子项选择。普通关系沿用原预览／提交、版本、幂等和历史恢复合同。
 
 本次无 API shape、数据库、service/repository、read model、worker、缓存或依赖变更，不创建数据库备份。菜单分组复用配置，打开与切换不新增网络请求；性能结论以实际样本为准。测试责任与执行结果分别见银行明细和关联台模块的 tests 文档；生产结果不能由模拟 API 浏览器测试代替。
 

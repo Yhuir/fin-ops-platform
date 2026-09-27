@@ -4217,6 +4217,10 @@ describe("Workbench row selection and detail drawer", () => {
       throw new Error("Missing Workbench fetch mock implementation.");
     }
     fetchMock.mockImplementation(async (input, init) => {
+      if (fetchPath(input) === "/api/bank-flow-rule-batches/COMPACT-202603?view=formal") {
+        return jsonResponse({ batch: { batch_id: "COMPACT-202603", batch_label: "流水规则专用批次", status: "submitted", can_withdraw: true, version: 7, total_amount: "128000.00" },
+          rows: [1, 2, 3].map(i => ({ transaction_id: `compact-bank-${i}`, amount: i === 3 ? "28000.00" : "50000.00" })) });
+      }
       if (fetchPath(input) === "/api/bank-flow-rule-batches/COMPACT-202603/withdraw") {
         return jsonResponse({ affected_months: ["2026-03"], results: [] });
       }
@@ -4234,6 +4238,11 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(pairedZone).getByRole("button", { name: "撤回关联" })).toBeEnabled();
 
     await user.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
+    const preview = await screen.findByRole("dialog", { name: "撤回关联" });
+    const confirm = await within(preview).findByRole("button", { name: "确认撤回" });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    expect(fetchMock.mock.calls.some(([input]) => fetchPath(input).endsWith("COMPACT-202603/withdraw"))).toBe(false);
+    await user.click(confirm);
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(

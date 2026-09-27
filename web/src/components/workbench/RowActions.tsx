@@ -7,7 +7,6 @@ import type { WorkbenchRecordType } from "../../features/workbench/types";
 
 export type WorkbenchInlineAction =
   | "relation-status"
-  | "unlink"
   | "confirm-cash-pass-through"
   | "confirm-cash-ticket-purchase"
   | "cancel-cash-special"
@@ -98,7 +97,6 @@ export default function RowActions({
     if (recordType === "bank" && showDetailAction) actions.push({ id: "detail", label: "详情" });
     if (recordType === "bank" && canOperateData && showWorkflowActions) {
       actions.push({ id: "relation-status", label: "关联情况" });
-      actions.push({ id: "unlink", label: "取消关联" });
       if (canConfirmCashPassThrough) actions.push({ id: "confirm-cash-pass-through", label: "确认为过账" });
       if (canConfirmCashTicketPurchase) actions.push({ id: "confirm-cash-ticket-purchase", label: "确认为买票" });
       if (canCancelCashSpecial) actions.push({ id: "cancel-cash-special", label: "取消现金处理", warning: true });
@@ -173,9 +171,6 @@ export default function RowActions({
                 >
                   <button className="row-menu-item" role="menuitem" type="button" onClick={handleAction("relation-status")}>
                     关联情况
-                  </button>
-                  <button className="row-menu-item" role="menuitem" type="button" onClick={handleAction("unlink")}>
-                    取消关联
                   </button>
                   {canConfirmCashPassThrough ? (
                     <button className="row-menu-item" role="menuitem" type="button" onClick={handleAction("confirm-cash-pass-through")}>

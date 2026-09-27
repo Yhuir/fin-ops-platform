@@ -771,7 +771,11 @@ test.describe("bank flow rule batches browser flow", () => {
     await openZone.getByRole("button", { name: "确认关联" }).click();
     expect((await previewResponse).status()).toBe(200);
     const previewDialog = page.getByRole("dialog", { name: "确认关联" });
-    await expect(previewDialog.getByText("确认后将把 1 条流水和 1 条发票按流水规则闭环。")).toBeVisible();
+    await expect(previewDialog.getByRole("heading", { name: "操作前" })).toBeVisible();
+    await expect(previewDialog.getByRole("heading", { name: "操作后" })).toBeVisible();
+    await expect(previewDialog.getByRole("row", { name: /BFR-INV-E2E-001/ })).toHaveCount(2);
+    await expect(previewDialog.getByRole("row", { name: "2026-05-09 10:20:00 建设银行 19.9", exact: true })).toHaveCount(2);
+    expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(0);
 
     const confirmResponse = page.waitForResponse((response) =>
       response.url().endsWith("/api/workbench/actions/confirm-link")

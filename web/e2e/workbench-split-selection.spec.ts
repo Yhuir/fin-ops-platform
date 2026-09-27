@@ -52,7 +52,7 @@ test('search-visible split child selects canonical siblings and preserves previe
   await expectNoUnexpectedSuccessUiErrors(page);
 });
 
-test('a split sibling owned elsewhere cannot be selected wholesale but the current relation remains withdrawable', async ({ page }) => {
+test('an existing split relation selects exact members without including occupied siblings', async ({ page }) => {
   const api = await installDeterministicApiMocks(page, { sessionMode: 'user', workbenchInitialIncompleteRelation: true });
   const initial = page.waitForResponse(response => new URL(response.url()).pathname === '/api/workbench');
   await page.goto('/');
@@ -80,15 +80,12 @@ test('a split sibling owned elsewhere cannot be selected wholesale but the curre
   const relation = page.getByTestId('candidate-group-unpaired-case:CASE-202603-101');
   const bankRow = relation.locator('.record-card-bank');
   await bankRow.getByText('1001497.22', { exact: true }).click();
-  const error = page.getByRole('dialog', { name: '操作状态弹窗' });
-  await expect(error).toContainText('部分子项已属于其他关联');
-  await error.getByRole('button', { name: '确定' }).click();
+  await expect(page.getByRole('dialog', { name: '操作状态弹窗' })).toHaveCount(0);
   await expect(bankRow.getByRole('button', { name: '选择流水子项' })).toHaveCount(0);
   await bankRow.getByRole('button', { name: /查看银行流水.*详情/ }).click();
   const drawer = page.getByRole('dialog', { name: '银行流水详情' });
   await expect(drawer.getByRole('button', { name: /选中子项/ })).toHaveCount(0);
   await drawer.getByRole('button', { name: '关闭详情抽屉' }).click();
-  await relation.locator('.record-card-oa').click();
   const zone = page.getByTestId('zone-unpaired');
   await expect(zone.getByText('带入 2', { exact: true })).toBeVisible();
   await expect(zone.getByRole('button', { name: '撤回关联' })).toBeEnabled();
@@ -182,7 +179,9 @@ test('a pure-bank historical relation remains withdrawable without selecting an 
   const relation = page.getByTestId('candidate-group-unpaired-case:CASE-202603-101');
   await expect(relation.locator('.record-card-oa')).toHaveCount(0);
   await expect(relation.locator('.record-card-invoice')).toHaveCount(0);
-  await relation.getByRole('button', { name: '撤回当前关联', exact: true }).click();
+  await expect(relation.getByRole('button', { name: '撤回当前关联', exact: true })).toHaveCount(0);
+  await relation.locator('.record-card-bank').first().getByText('1001497.22', { exact: true }).click();
+  await page.getByTestId('zone-unpaired').getByRole('button', { name: '撤回关联', exact: true }).click();
   const preview = page.getByRole('dialog', { name: '撤回关联' });
   await expect(preview).toBeVisible();
   const request = api.lastBody('POST /api/workbench/actions/withdraw-link/preview');
