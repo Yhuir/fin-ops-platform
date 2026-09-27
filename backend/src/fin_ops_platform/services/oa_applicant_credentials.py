@@ -68,6 +68,14 @@ class OaApplicantCredentialService:
         self._require_admin(can_admin_access)
         return {"credentials": [self._summary_payload(item) for item in self._repository.list_credentials()]}
 
+    def applicant_options(self) -> list[dict[str, str]]:
+        """Non-secret choices for authorized draft workflows; never decrypt credentials."""
+        return [
+            {"code": item.target_applicant_code, "name": item.target_applicant_name}
+            for item in self._repository.list_credentials()
+            if item.enabled and item.has_credential and item.credential_status == "configured"
+        ]
+
     def save_credential(
         self,
         *,

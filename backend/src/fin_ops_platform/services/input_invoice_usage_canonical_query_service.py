@@ -130,6 +130,35 @@ class InputInvoiceUsageCanonicalQueryService:
             include_statistics=include_statistics,
         )
 
+    def candidate_rows(self, query: dict[str, list[str]], *, tenant_id: str = "default") -> dict[str, Any]:
+        """Invoice-level unlinked-OA pool, filtered before bounded pagination."""
+        page = _positive_int(_first(query, "page") or 1, "page")
+        page_size = _positive_int(_first(query, "page_size") or 50, "page_size", maximum=200)
+        bank_relation = _first(query, "bank_relation") or "all"
+        if bank_relation not in {"all", "linked", "unlinked"}:
+            raise InputInvoiceUsageError("invalid_bank_relation", "流水关联筛选无效。")
+        filters = [{"field": "relation_status", "operator": "in", "values": ["no_oa"]}]
+        if bank_relation != "all":
+            filters.append({"field": "bank_relation", "operator": "in", "values": [bank_relation]})
+        if self._repository is None:
+            raise InputInvoiceUsageError("input_invoice_usage_query_unavailable", "反提候选查询未配置。", status_code=503)
+        snapshot = self._repository.load_page(
+            page=page, page_size=page_size, keyword=_first(query, "keyword") or None,
+            invoice_date_from=None, invoice_date_to=None, month=None,
+            filters=filters, sort_field="invoice_date", sort_direction="desc",
+            tenant_id=tenant_id, invoice_level=True,
+        )
+        result = self._payload(snapshot, filters=filters, sort_field="invoice_date", sort_direction="desc", include_statistics=False)
+        counts = {item["value"]: item["count"] for item in snapshot.facet_counts.get("bank_relation", [])}
+        result["relationCounts"] = {"all": sum(counts.values()), "linked": counts.get("linked", 0), "unlinked": counts.get("unlinked", 0)}
+        return result
+
+    def candidate_rows_by_invoice_ids(self, invoice_ids: list[str], *, tenant_id: str = "default") -> dict[str, Any]:
+        if self._repository is None:
+            raise InputInvoiceUsageError("input_invoice_usage_query_unavailable", "反提候选查询未配置。", status_code=503)
+        snapshot = self._repository.load_rows_by_invoice_ids(invoice_ids, tenant_id=tenant_id, invoice_level=True)
+        return self._payload(snapshot, filters=[], sort_field="invoice_date", sort_direction="desc", include_statistics=False)
+
     def filter_options(
         self,
         query: dict[str, list[str]],
@@ -345,7 +374,10 @@ class InputInvoiceUsageCanonicalQueryService:
         )
 
     def payment_status_rules(self) -> dict[str, Any]:
-        return self._row_assembler.payment_status_rules()
+        payload = self._row_assembler.payment_status_rules()
+        if self._repository is not None:
+            payload["applicantOptions"] = self._repository.load_applicant_names()
+        return payload
 
     def _payload(
         self,

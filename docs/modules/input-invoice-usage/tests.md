@@ -23,9 +23,9 @@
 - relation details、export 和 OA reverse preview 不回退旧 page repository。
 - OA 详情按 rows DTO 的 canonical `oa.id` 直接读取 completed/in-progress OA projection；测试必须禁止把该 id 送入发票使用行 hash 查询。
 - OA summary 从 completed/in-progress canonical source 输出 `workflowStatus`；OA 申请人总览列不显示流程状态，单条和多条 OA 详情只读取 `workflowStatus`，不得回退 relation `status/section`。
-- 支付状态 chip 按 canonical `paymentStatus.code` 映射颜色：`paid` 为成功色、`waiting_payment` 为警示色、`pending` 为中性色；现金往来和三种冲销状态使用信息色，未知 code 保守显示中性色，不按中文 label 推断。
+- 支付状态 chip 按 canonical `paymentStatus.code` 映射颜色：`paid` 为成功色、`waiting_payment` 为警示色、`pending` 为中性色；现金往来和统一 offset 分类使用信息色，未知 code 保守显示中性色，不按中文 label 推断。
 - OA reverse preview 必须区分 `permissions.canCreateDraft` 写能力与顶层 `canCreateDraft` 当前集合业务状态；多销方整组不可创建时，选择同一销方子集仍可触发精确 re-preview 并创建。
-- OA reverse 候选表只保留选择、发票号码、销方、价税合计和 OA 关联列；开票日期在发票号码单元格内以 chip 展示，禁用通用说明不占据抽屉头部。
+- OA reverse 候选表保留选择、发票号码、销方、价税合计和流水关联列；开票日期在发票号码单元格内以 chip 展示，禁用通用说明不占据抽屉头部。
 - 写成功响应不含 operation barrier；当前页面随后执行 GET。
 - API/frontend 响应不含页面 `read_model_status`、source version、refresh enqueue 或 polling 语义。
 
@@ -39,7 +39,7 @@
 - `tests/test_input_invoice_usage_payment_rules.py`
 - `tests/test_postgres_input_invoice_usage_oa_reverse_repository.py`
 - `tests/test_platform_runtime_boundary_guards.py`
-- `tests/test_read_model_architecture_guards.py`
+- `tests/test_read_model_runtime_removal.py`
 - `web/src/test/InputInvoiceUsagePage.test.tsx`
 - `web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`
 - `web/e2e/input-invoice-usage-flow.spec.ts`
@@ -108,3 +108,11 @@ cd web && npm run build
 ## 2026-09-27 来源详情回归
 
 按[来源详情验证责任](../../dev/source-record-details.md#验证责任)覆盖真实来源保留、内部状态/推断/替代值移除、缺失与零值、权限及读取失败；保留本模块列表、计算、导出和关系回归。公共前端入口包括 `EntityDetailContent.test.tsx`、`DetailDrawer.test.tsx` 与 `BankTransactionDrawer.test.tsx`，后者保护按 ID 读取、切换取消及禁止列表摘要回退。具体后端/浏览器执行及性能结果据实际报告，不以本节表示已通过。
+
+## 2026-09-28 统计与反提闭环验证
+
+新增 `tests/test_input_invoice_usage_candidates_postgres.py`：超过 200 张分页、同组三票、银行关联候选、OA 详情缺失、精确选票、空页总数、错误筛选及行/筛选金额状态一致。新增 `test_input_invoice_usage_payment_rules_postgres.py`：版本并发、幂等、审计回滚和真实配置迁移。新增 `test_oa_reverse_occupancy_postgres.py`：占用并发、释放、事务回滚及已有 OA 的锁后复核。
+
+前端 `InputInvoiceUsagePage`、`InputInvoiceUsageFiltersAndDrawers` 及 `input-invoice-usage-flow.spec.ts` 更新为 HeroUI 分类 Tabs、真实发票张数、服务端候选分页/流水筛选、原生搜索、分页选择、规则增删改和写后回读。
+
+七类中 1/2/3/5/6/7 均适用；第 4 类没有新缓存/read model/worker 行为，继续运行既有架构回归，禁止引回已退休链路。性能在同一生产环境记录列表和 preview 首次/p50/p95/max，张数交叉验证比较 canonical 发票身份集合，不写死历史 385。

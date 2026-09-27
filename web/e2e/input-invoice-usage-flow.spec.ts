@@ -278,7 +278,7 @@ test.describe("input invoice usage browser flow", () => {
     const recoveredRow = page.getByRole("row", { name: /SD-INV-E2E-0001/ });
     await expect(recoveredRow).toBeVisible();
     await expect(recoveredRow.getByText("待处理")).toBeVisible();
-    await expect(page.getByText("1-1 / 1")).toBeVisible();
+    await expect(page.getByText("第 1 / 1 页")).toBeVisible();
     await expect(page.getByRole("button", { name: "筛选内容导出" })).toBeEnabled();
     expect(api.count("GET /api/input-invoice-usage/rows")).toBeGreaterThanOrEqual(3);
     expect(browserErrors).toEqual([]);
@@ -309,7 +309,7 @@ test.describe("input invoice usage browser flow", () => {
     const initialRowsUrl = new URL(initialRowsResponse.url());
     await expect(page.getByTestId("input-invoice-usage-page")).toBeVisible();
     await expect(page.getByRole("grid", { name: "进项发票使用情况表" })).toBeVisible();
-    await expect(page.getByText("1-20 / 23")).toBeVisible();
+    await expect(page.getByText("第 1 / 2 页")).toBeVisible();
     await expect(page.getByText("SD-INV-E2E-0001")).toBeVisible();
     await expect(page.getByText("SD-INV-E2E-0099")).toHaveCount(0);
     expect(initialRowsUrl.searchParams.get("page")).toBe("1");
@@ -356,14 +356,14 @@ test.describe("input invoice usage browser flow", () => {
       const filteredRowsPromise = waitForInputInvoiceUsageRows(page);
       await sellerMenu.locator("label.input-invoice-usage-filter-menu__item").filter({ hasText: /页外供应商 1/ }).click();
       filteredRowsResponse = await mark("apiLatencyMs", filteredRowsPromise);
-      await mark("finalSettledLatencyMs", expect(page.getByText("1-1 / 1")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByText("第 1 / 1 页")).toBeVisible());
     });
     if (!filteredRowsResponse) {
       throw new Error("missing filtered input invoice rows response");
     }
     const filteredRowsUrl = new URL(filteredRowsResponse.url());
     const filters = decodedFilters(filteredRowsUrl);
-    await expect(page.getByText("1-1 / 1")).toBeVisible();
+    await expect(page.getByText("第 1 / 1 页")).toBeVisible();
     await expect(page.getByText("SD-INV-E2E-0099")).toBeVisible();
     await expect(page.getByText("页外供应商").first()).toBeVisible();
     await expect(page.getByText("SD-INV-E2E-0001")).toHaveCount(0);
@@ -383,13 +383,13 @@ test.describe("input invoice usage browser flow", () => {
       const clearSellerFilter = sellerMenu.getByRole("menuitem", { name: "清空" });
       await clearSellerFilter.click();
       clearedRowsResponse = await mark("apiLatencyMs", clearedRowsPromise);
-      await mark("finalSettledLatencyMs", expect(page.getByText("1-20 / 23")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByText("第 1 / 2 页")).toBeVisible());
     });
     if (!clearedRowsResponse) {
       throw new Error("missing cleared input invoice rows response");
     }
     const clearedRowsUrl = new URL(clearedRowsResponse.url());
-    await expect(page.getByText("1-20 / 23")).toBeVisible();
+    await expect(page.getByText("第 1 / 2 页")).toBeVisible();
     expect(clearedRowsUrl.searchParams.has("filters")).toBe(false);
     await page.keyboard.press("Escape");
 
@@ -422,13 +422,13 @@ test.describe("input invoice usage browser flow", () => {
       await page.getByRole("button", { name: /每页行数/ }).click();
       await page.getByRole("option", { name: "50", exact: true }).click();
       pageSizeRowsResponse = await mark("apiLatencyMs", pageSizeRowsPromise);
-      await mark("finalSettledLatencyMs", expect(page.getByText("1-23 / 23")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByText("第 1 / 1 页")).toBeVisible());
     });
     if (!pageSizeRowsResponse) {
       throw new Error("missing page-size input invoice rows response");
     }
     const pageSizeRowsUrl = new URL(pageSizeRowsResponse.url());
-    await expect(page.getByText("1-23 / 23")).toBeVisible();
+    await expect(page.getByText("第 1 / 1 页")).toBeVisible();
     await expect(page.locator("tbody tr")).toHaveCount(23);
     expect(pageSizeRowsUrl.searchParams.get("page")).toBe("1");
     expect(pageSizeRowsUrl.searchParams.get("page_size")).toBe("50");
@@ -757,6 +757,8 @@ test.describe("input invoice usage browser flow", () => {
     await expect(workflow).toBeVisible();
     await expect(page.getByRole("tab", { name: "待处理" })).toHaveAttribute("aria-selected", "true");
     await expect(workflow.getByRole("grid", { name: "反提 OA 候选发票清单" })).toBeVisible();
+    await expect(workflow.getByLabel("选择候选发票 SD-INV-E2E-001")).not.toBeChecked();
+    await workflow.getByRole("button", { name: "选择本页" }).click();
     await expect(workflow.getByLabel("选择候选发票 SD-INV-E2E-001")).toBeChecked();
     await expect(workflow.getByLabel("选择候选发票 SD-INV-E2E-002")).toBeChecked();
 
@@ -826,7 +828,7 @@ test.describe("input invoice usage browser flow", () => {
       await mark("finalSettledLatencyMs", expect(page.getByRole("tab", { name: "已提交" })).toHaveAttribute("aria-selected", "true"));
     });
     expect(manualStatusResponseStatus).toBe(200);
-    expect(api.count("GET /api/input-invoice-usage/rows")).toBe(rowsCountBeforeManualStatus);
+    expect(api.count("GET /api/input-invoice-usage/rows")).toBe(rowsCountBeforeManualStatus + 1);
 
     await expect(page.getByLabel("以发票反提 OA 提示").getByText("已进入已提交历史。")).toBeVisible();
     await expect(page.getByRole("tab", { name: "已提交" })).toHaveAttribute("aria-selected", "true");
@@ -835,8 +837,41 @@ test.describe("input invoice usage browser flow", () => {
     await expect(workflow.getByText("浏览器进项供应商一")).toBeVisible();
     await expect(workflow.getByText("input-oa-reverse-batch-e2e-001")).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
-    expect(api.count("GET /api/input-invoice-usage/rows")).toBe(rowsCountBeforeDraft);
+    expect(api.count("GET /api/input-invoice-usage/rows")).toBe(rowsCountBeforeDraft + 1);
     expect(api.count("GET /api/input-invoice-usage/oa-reverse/submitted-history")).toBeGreaterThanOrEqual(1);
     expect(browserErrors).toEqual([]);
   });
+});
+
+test("unknown OA creation requires verified local release and requesting batches cannot be retried", async ({ page }) => {
+  const api = await installDeterministicApiMocks(page, { sessionMode: "admin" });
+  const batch = {
+    batchId: "failed-oa-batch", version: 4, status: "oa_draft_failed",
+    invoiceIds: ["failed-invoice"], totalWithTax: "49.86", targetApplicantName: "陈秀云",
+    invoiceRows: [{ invoiceId: "failed-invoice", invoiceNo: "FAILED-INV-1", invoiceDate: "2026-09-01", sellerName: "测试销方", totalWithTax: "49.86" }],
+    draftRequestState: "unknown", canRelease: true, canConfirmSubmission: false,
+    oaDetectionError: "OA 响应超时",
+  };
+  await page.route("**/api/input-invoice-usage/oa-reverse/staged-drafts*", (route) => route.fulfill({ json: { items: [batch, { ...batch, batchId: "requesting-oa-batch", draftRequestState: "requesting", canRelease: false }] } }));
+  let releaseBody: Record<string, unknown> | undefined;
+  await page.route("**/api/input-invoice-usage/oa-reverse/batches/failed-oa-batch/manual-oa-status", async (route) => {
+    releaseBody = route.request().postDataJSON();
+    await route.fulfill({ json: { ...batch, version: 5, status: "not_submitted", canRelease: false } });
+  });
+  await page.goto("/input-invoice-usage");
+  await page.getByRole("button", { name: "以发票反提 OA" }).click();
+  await expect(page.getByRole("grid", { name: "反提 OA 候选发票清单" })).toBeVisible();
+  await page.getByRole("tab", { name: "暂存" }).click();
+  await expect(page.getByText(/创建结果不明/)).toBeVisible();
+  await expect(page.getByText(/不会删除 OA 中的草稿/)).toBeVisible();
+  await expect(page.getByText(/OA 创建请求正在处理/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "创建 OA 草稿" })).toHaveCount(0);
+  const release = page.getByRole("button", { name: "已核实并清理 OA 草稿，解除本地占用" });
+  await expect(release).toHaveCount(1);
+  expect(releaseBody).toBeUndefined();
+  await release.click();
+  await expect(page.getByText("已解除本地暂存占用，返回候选后可重新选择发票。")).toBeVisible();
+  expect(releaseBody).toMatchObject({ decision: "not_submitted", expectedVersion: 4 });
+  expect(String(releaseBody?.reason)).toContain("已到 OA 核实并删除可能存在的草稿");
+  expect(api.count("POST /api/input-invoice-usage/oa-reverse/oa-draft")).toBe(0);
 });

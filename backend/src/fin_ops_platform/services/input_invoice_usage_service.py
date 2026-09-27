@@ -39,16 +39,6 @@ CENT = Decimal("0.01")
 SOURCE_VERSION = "input-invoice-usage:v5-canonical-invoice-inventory"
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 
-TARGET_APPLICANTS = {
-    "chen_xiuyun": "陈秀云",
-    "zhou_jieying": "周洁莹",
-    "liu_shugang_pay": "刘树刚付",
-    "liu_shugang_no_pay": "刘树刚不付",
-    "wei_dailian": "韦代连",
-    "liu_hanjing": "刘涵静",
-}
-
-
 class InputInvoiceUsageError(ValueError):
     def __init__(
         self,
@@ -528,15 +518,15 @@ class InputInvoiceUsageQueryService:
         bank_payload = self._bank_relation_payload(primary, line_items, relations, context=context)
         oa_payload = self._oa_relation_payload(primary, line_items, relations, context=context)
         invoice_relation_payload = self._invoice_relation_payload(primary, line_items, relations, context=context)
-        payment_status = self._payment_status(
-            primary,
-            line_items,
-            relations,
-            oa_payload,
-            bank_payload,
-            context=context,
-            lifecycle_policy=lifecycle_policy,
-        )
+        if "payment_facts" in group:
+            if lifecycle_policy is None:
+                raise ValueError("Canonical payment facts require the snapshot payment policy.")
+            payment_status = lifecycle_policy.evaluate_input_invoice_payment(**group["payment_facts"])
+        else:
+            payment_status = self._payment_status(
+                primary, line_items, relations, oa_payload, bank_payload,
+                context=context, lifecycle_policy=lifecycle_policy,
+            )
         row_id = "invoice_usage_row_" + sha1(str(group.get("row_key") or group["identity_key"]).encode("utf-8")).hexdigest()[:16]
         payload = {
             "id": row_id,
@@ -546,6 +536,11 @@ class InputInvoiceUsageQueryService:
             "paymentStatus": payment_status,
             "oa": oa_payload,
             "bankTransactions": bank_payload,
+            "bankRelationStatus": "linked" if any(
+                row_type in {"bank", "bank_transaction"}
+                for relation in relations
+                for _, row_type in self._typed_relation_rows(relation)
+            ) else "unlinked",
             "invoiceRelations": invoice_relation_payload,
         }
         if group.get("relation_group_id"):
@@ -855,28 +850,6 @@ class InputInvoiceUsageQueryService:
         context: DistributedInvoiceRelationContext,
     ) -> bool:
         invoice_total = sum((_invoice_total(line) for line in line_items), start=ZERO)
-        bank_map = context.bank_transactions_by_id()
-        has_split = any(getattr(bank_map[row_id], "is_split", False)
-                        for relation in relations for row_id, kind in self._typed_relation_rows(relation)
-                        if kind in {"bank", "bank_transaction"} and row_id in bank_map)
-        for relation in relations:
-            if has_split:
-                break
-            if not self._relation_is_confirmed(relation):
-                continue
-            if not self._relation_has_invoice_oa_bank(relation):
-                continue
-            if not self._relation_amount_check_is_matched(relation):
-                continue
-            oa_ids = [row_id for row_id, row_type in self._typed_relation_rows(relation) if row_type == "oa"]
-            bank_ids = [row_id for row_id, row_type in self._typed_relation_rows(relation) if row_type == "bank"]
-            oa_records = context.oa_records_by_id(oa_ids)
-            if any(_within_cent(_decimal(record.amount), invoice_total) for record in oa_records.values()) and any(
-                _within_cent(_decimal(bank_map[bank_id].amount), invoice_total)
-                for bank_id in bank_ids
-                if bank_id in bank_map
-            ):
-                return True
         totals = self._matched_linked_relation_amount_totals(line_items, relations, context=context)
         if _within_cent(totals["oa"], invoice_total) and _within_cent(totals["bank"], invoice_total):
             return True
@@ -890,18 +863,6 @@ class InputInvoiceUsageQueryService:
         context: DistributedInvoiceRelationContext,
     ) -> bool:
         invoice_total = sum((_invoice_total(line) for line in line_items), start=ZERO)
-        for relation in relations:
-            if not self._relation_is_confirmed(relation):
-                continue
-            if (
-                not self._relation_amount_check_is_matched(relation)
-                and not self._relation_is_oa_invoice_offset_auto_match(relation)
-            ):
-                continue
-            oa_ids = [row_id for row_id, row_type in self._typed_relation_rows(relation) if row_type == "oa"]
-            oa_records = context.oa_records_by_id(oa_ids)
-            if any(_within_cent(_decimal(record.amount), invoice_total) for record in oa_records.values()):
-                return True
         totals = self._matched_linked_relation_amount_totals(line_items, relations, context=context)
         if _within_cent(totals["oa"], invoice_total):
             return True
@@ -935,7 +896,7 @@ class InputInvoiceUsageQueryService:
             if has_split:
                 if not current_split_match:
                     continue
-            elif not self._relation_amount_check_is_matched(relation):
+            elif not self._relation_amount_check_is_matched(relation) and not self._relation_is_oa_invoice_offset_auto_match(relation):
                 continue
             typed_rows = [
                 (row_id, self._canonical_relation_row_type(row_type, row_id))
@@ -1067,6 +1028,8 @@ class InputInvoiceUsageQueryService:
             "specific_business_type": invoice.get("specificBusinessType"),
             "taxable_item_name": invoice.get("taxableItemName"),
             "payment_status": payment.get("code"),
+            "relation_status": "no_oa" if not oa.get("relationCount") else "oa_no_bank" if not bank.get("relationCount") else "oa_bank",
+            "bank_relation": "linked" if bank.get("relationCount") else "unlinked",
             "oa_applicant": oa.get("applicantName"),
             "oa_application_type": oa.get("applicationType"),
             "oa_project_name": oa.get("projectName"),

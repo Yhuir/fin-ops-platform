@@ -253,8 +253,8 @@ describe("InputInvoiceUsageDetailDrawer", () => {
     );
     expect(await screen.findByRole("heading", { name: "OA 1" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "OA 2" })).toBeInTheDocument();
-    expect(screen.getByText("张三")).toBeInTheDocument();
-    expect(screen.getByText("李四")).toBeInTheDocument();
+    expect(await screen.findByText("张三")).toBeInTheDocument();
+    expect(await screen.findByText("李四")).toBeInTheDocument();
     expect(screen.queryByText("关系数量")).not.toBeInTheDocument();
   });
 
@@ -372,6 +372,30 @@ describe("Input invoice usage workflow drawers", () => {
       expect.objectContaining({ label: "金额", value: "100.00" }),
       expect.objectContaining({ label: "流程状态", value: "completed" }),
     ]));
+  });
+
+  test("OA preview browsing omits explicit IDs and main-table filters, while selection sends precise IDs", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      const count = Object.hasOwn(body, "invoiceIds") ? body.invoiceIds.length : 385;
+      return new Response(JSON.stringify({ invoiceCount: count, totalWithTax: "0", groups: [], pagination: { page: 1, pageSize: 50, total: count }, relationCounts: { all: 385, linked: 1, unlinked: 384 } }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const all = await previewInputInvoiceUsageOaReverse({ selectedInvoiceIds: [], page: 1, pageSize: 50, bankRelation: "all" });
+    expect(all.invoiceCount).toBe(385);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).not.toHaveProperty("invoiceIds");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).not.toHaveProperty("filters");
+    const selected = await previewInputInvoiceUsageOaReverse({ selectedInvoiceIds: ["inv-1", "inv-2"] });
+    expect(selected.invoiceCount).toBe(2);
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toMatchObject({ invoiceIds: ["inv-1", "inv-2"] });
+  });
+
+  test("staged API preserves recovery capabilities and sends the requested batch limit", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ items: [{ batchId: "failed-1", version: 3, status: "oa_draft_failed", invoiceIds: ["inv-1"], invoiceRows: [], draftRequestState: "unknown", canRelease: true, canConfirmSubmission: false, oaDetectionError: "OA 超时" }] }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const payload = await fetchInputInvoiceUsageOaReverseStagedDrafts(100);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("staged-drafts?limit=100");
+    expect(payload.items[0]).toMatchObject({ draftRequestState: "unknown", canRelease: true, canConfirmSubmission: false, oaDetectionError: "OA 超时" });
   });
 
   test("OA reverse API mapper uses one-step draft and submitted history contracts", async () => {
@@ -507,7 +531,6 @@ describe("Input invoice usage workflow drawers", () => {
 
     const preview = await previewInputInvoiceUsageOaReverse({
       source: "explicitSelection",
-      filters: [],
       selectedInvoiceIds: ["inv-backend-1"],
     });
     const batch = await createInputInvoiceUsageOaReverseDraftFromSelection({
@@ -612,8 +635,8 @@ describe("Input invoice usage workflow drawers", () => {
     render(
       <OaReverseWorkspaceDrawer
         open
-        sourceFilters={[{ field: "payment_status", operator: "in", values: ["pending"] }]}
-        selectedInvoiceIds={["inv-001", "inv-002"]}
+
+
         loadPreview={loadPreview}
         createDraftFromSelection={createDraftFromSelection}
         onClose={() => undefined}
@@ -626,12 +649,11 @@ describe("Input invoice usage workflow drawers", () => {
 
     await waitFor(() => {
       expect(loadPreview).toHaveBeenCalledWith(expect.objectContaining({
-        sourceFilters: [{ field: "payment_status", operator: "in", values: ["pending"] }],
-        selectedInvoiceIds: ["inv-001", "inv-002"],
+        selectedInvoiceIds: [],
         targetApplicantCode: null,
       }));
     });
-    expect(await screen.findByText("2")).toBeInTheDocument();
+    expect(await screen.findByText("2 张")).toBeInTheDocument();
     expect(screen.getAllByText("99.72").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("陈秀云").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("chen_xiuyun")).not.toBeInTheDocument();
@@ -657,33 +679,13 @@ describe("Input invoice usage workflow drawers", () => {
     expect(createDraftButton).toBeDisabled();
   });
 
-  test("OA reverse candidate search matches an ungrouped amount", async () => {
+  test("OA reverse candidate search submits server query and resets the page", async () => {
     const user = userEvent.setup();
-    const amountPreview: OaReversePreviewPayload = {
-      ...previewPayload,
-      groups: [{
-        ...previewPayload.groups[0],
-        invoiceRows: previewPayload.groups[0].invoiceRows?.map((invoice, index) => (
-          index === 0 ? { ...invoice, totalWithTax: "4,311.00" } : invoice
-        )),
-      }],
-    };
-
-    render(
-      <OaReverseWorkspaceDrawer
-        open
-        sourceFilters={[]}
-        selectedInvoiceIds={["inv-001", "inv-002"]}
-        loadPreview={() => Promise.resolve(amountPreview)}
-        createDraftFromSelection={vi.fn()}
-        onClose={() => undefined}
-      />,
-    );
-
-    await user.type(await screen.findByLabelText("搜索候选发票"), "4311.00");
-    expect(screen.getByText("SD-INV-001")).toBeInTheDocument();
-    expect(screen.getByText("4311.00")).toBeInTheDocument();
-    expect(screen.queryByText("SD-INV-002")).not.toBeInTheDocument();
+    const loadPreview = vi.fn(() => Promise.resolve(previewPayload));
+    render(<OaReverseWorkspaceDrawer open loadPreview={loadPreview} onClose={() => undefined} />);
+    await user.type(await screen.findByRole("searchbox", { name: "搜索候选发票" }), "4311.00");
+    await user.click(screen.getByRole("button", { name: "查询" }));
+    await waitFor(() => expect(loadPreview).toHaveBeenLastCalledWith(expect.objectContaining({ keyword: "4311.00", page: 1, pageSize: 50 })));
   });
 
   test("OA reverse drawer creates OA draft directly and records submitted confirmation", async () => {
@@ -757,8 +759,8 @@ describe("Input invoice usage workflow drawers", () => {
     render(
       <OaReverseWorkspaceDrawer
         open
-        sourceFilters={[]}
-        selectedInvoiceIds={["inv-001", "inv-002"]}
+
+
         loadPreview={loadPreview}
         createDraftFromSelection={createDraftFromSelection}
         manualStatus={manualStatus}
@@ -767,11 +769,10 @@ describe("Input invoice usage workflow drawers", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("checkbox", { name: "选择候选发票 SD-INV-002" }));
+    await user.click(await screen.findByRole("checkbox", { name: "选择候选发票 SD-INV-001" }));
     expect(screen.queryByRole("button", { name: "创建本地批次" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "创建 OA 草稿" }));
-    await waitFor(() => expect(loadPreview).toHaveBeenLastCalledWith(expect.objectContaining({
-      sourceFilters: [],
+    await waitFor(() => expect(loadPreview).toHaveBeenCalledWith(expect.objectContaining({
       selectedInvoiceIds: ["inv-001"],
       targetApplicantCode: "chen_xiuyun",
     })));
@@ -794,7 +795,7 @@ describe("Input invoice usage workflow drawers", () => {
     expect(await screen.findByText("SD-INV-001")).toBeInTheDocument();
   });
 
-  test("OA reverse drawer creates draft from current preview when the candidate set is unchanged", async () => {
+  test("OA reverse drawer revalidates exact selection even when the candidate set is unchanged", async () => {
     const user = userEvent.setup();
     const loadPreview = vi.fn(() => Promise.resolve(createReadyPreviewPayload));
     const createDraftFromSelection = vi.fn(() => Promise.resolve({
@@ -816,22 +817,23 @@ describe("Input invoice usage workflow drawers", () => {
     render(
       <OaReverseWorkspaceDrawer
         open
-        sourceFilters={[]}
-        selectedInvoiceIds={["inv-001", "inv-002"]}
+
+
         loadPreview={loadPreview}
         createDraftFromSelection={createDraftFromSelection}
         onClose={() => undefined}
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "创建 OA 草稿" }));
+    await user.click(await screen.findByRole("button", { name: "选择本页" }));
+    await user.click(screen.getByRole("button", { name: "创建 OA 草稿" }));
 
     await waitFor(() => expect(createDraftFromSelection).toHaveBeenCalledWith(expect.objectContaining({
       previewId: createReadyPreviewPayload.previewId,
       expectedPreviewHash: createReadyPreviewPayload.previewHash,
       selectedInvoiceIds: ["inv-001", "inv-002"],
     })));
-    expect(loadPreview).toHaveBeenCalledTimes(1);
+    expect(loadPreview).toHaveBeenCalledTimes(3);
   });
 
   test("OA reverse draft confirmation stays open across parent rerenders until the user decides", async () => {
@@ -855,7 +857,6 @@ describe("Input invoice usage workflow drawers", () => {
     }));
     const props = {
       open: true,
-      sourceFilters: [] as unknown[],
       loadPreview,
       createDraftFromSelection,
       manualStatus: vi.fn(),
@@ -864,21 +865,22 @@ describe("Input invoice usage workflow drawers", () => {
     const { rerender } = render(
       <OaReverseWorkspaceDrawer
         {...props}
-        selectedInvoiceIds={[]}
+
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "创建 OA 草稿" }));
+    await user.click(await screen.findByRole("button", { name: "选择本页" }));
+    await user.click(screen.getByRole("button", { name: "创建 OA 草稿" }));
     expect(await screen.findByRole("dialog", { name: "OA 草稿提交确认" })).toBeInTheDocument();
 
     rerender(
       <OaReverseWorkspaceDrawer
         {...props}
-        selectedInvoiceIds={[]}
+
       />,
     );
 
-    await waitFor(() => expect(loadPreview).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(loadPreview).toHaveBeenCalledTimes(3));
     const confirmDialog = screen.getByRole("dialog", { name: "OA 草稿提交确认" });
     expect(within(confirmDialog).getByRole("button", { name: /我已在OA系统提交该草稿\s+OA正在进行中/ })).toBeInTheDocument();
     expect(within(confirmDialog).getByRole("button", { name: /OA提交内容需修改\s+删除本次提交内容/ })).toBeInTheDocument();
@@ -886,13 +888,26 @@ describe("Input invoice usage workflow drawers", () => {
     rerender(
       <OaReverseWorkspaceDrawer
         {...props}
-        sourceFilters={[{ field: "payment_status", operator: "equals", value: "pending" }]}
-        selectedInvoiceIds={[]}
+
+
       />,
     );
 
-    await waitFor(() => expect(loadPreview).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(loadPreview).toHaveBeenCalledTimes(3));
     expect(screen.getByRole("dialog", { name: "OA 草稿提交确认" })).toBeInTheDocument();
+  });
+
+  test("OA reverse rejects a changed selection instead of silently submitting the remaining invoices", async () => {
+    const user = userEvent.setup();
+    const loadPreview = vi.fn((request) => Promise.resolve(request.selectedInvoiceIds.length ? {
+      ...createReadyPreviewPayload, groups: [{ ...createReadyPreviewPayload.groups[0], invoiceRows: [createReadyPreviewPayload.groups[0].invoiceRows![0]] }],
+    } : createReadyPreviewPayload));
+    const createDraftFromSelection = vi.fn();
+    render(<OaReverseWorkspaceDrawer open loadPreview={loadPreview} createDraftFromSelection={createDraftFromSelection} onClose={() => undefined} />);
+    await user.click(await screen.findByRole("button", { name: "选择本页" }));
+    await user.click(screen.getByRole("button", { name: "创建 OA 草稿" }));
+    expect(await screen.findByText("所选发票的关联或占用状态已变化，请刷新并重新选择。")).toBeInTheDocument();
+    expect(createDraftFromSelection).not.toHaveBeenCalled();
   });
 
   test("OA reverse staged tab recovers a draft after closing confirmation without exposing draft link", async () => {
@@ -934,8 +949,8 @@ describe("Input invoice usage workflow drawers", () => {
     render(
       <OaReverseWorkspaceDrawer
         open
-        sourceFilters={[]}
-        selectedInvoiceIds={["inv-001"]}
+
+
         loadPreview={loadPreview}
         createDraftFromSelection={createDraftFromSelection}
         loadStagedDrafts={loadStagedDrafts}
@@ -944,7 +959,8 @@ describe("Input invoice usage workflow drawers", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "创建 OA 草稿" }));
+    await user.click(await screen.findByRole("button", { name: "选择本页" }));
+    await user.click(screen.getByRole("button", { name: "创建 OA 草稿" }));
     const confirmDialog = await screen.findByRole("dialog", { name: "OA 草稿提交确认" });
     expect(within(confirmDialog).getByRole("button", { name: /我已在OA系统提交该草稿\s+OA正在进行中/ })).toBeInTheDocument();
     expect(within(confirmDialog).getByRole("button", { name: /OA提交内容需修改\s+删除本次提交内容/ })).toBeInTheDocument();
@@ -964,77 +980,74 @@ describe("Input invoice usage workflow drawers", () => {
     })));
   });
 
-  test("OA reverse drawer marks linked OA invoices as disabled and filters by OA relation status", async () => {
+  test("OA reverse keeps cross-page selection and disables occupied invoices without reducing totals", async () => {
     const user = userEvent.setup();
-    const loadPreview = vi.fn(() => Promise.resolve({
-      ...createReadyPreviewPayload,
-      canCreateDraft: true,
-      nextAction: "create_oa_draft",
-      permissions: { canCreateDraft: true },
-      groups: [{
-        ...createReadyPreviewPayload.groups[0],
-        invoiceCount: 1,
-        totalWithTax: "49.86",
-        invoiceRows: createReadyPreviewPayload.groups[0].invoiceRows?.filter((invoice) => invoice.invoiceId === "inv-001"),
-        candidateInvoiceIds: ["inv-001"],
-        rejectedInvoices: [{
-          invoiceId: "inv-linked-oa",
-          invoiceNumber: "SD-INV-LINKED",
-          sellerName: "已关联供应商",
-          issueDate: "2026-05-03",
-          totalWithTax: "68.00",
-          paymentStatusLabel: "待处理",
-          reasonCode: "already_has_active_oa",
-          reason: "发票已有 active OA 关系",
-          oaRelationStatus: "linked",
-        }],
-      }],
+    const first = createReadyPreviewPayload.groups[0].invoiceRows![0];
+    const second = { ...first, invoiceId: "inv-002", displayNo: "SD-INV-002", occupiedBatchId: "batch-existing", bankRelationStatus: "linked" as const };
+    const loadPreview = vi.fn((request) => Promise.resolve({ ...createReadyPreviewPayload, invoiceCount: 51,
+      pagination: { page: request.page || 1, pageSize: 50, total: 51 }, relationCounts: { all: 51, linked: 1, unlinked: 50 },
+      groups: [], invoiceRows: request.page === 2 ? [second] : [first],
     }));
+    render(<OaReverseWorkspaceDrawer open loadPreview={loadPreview} onClose={() => undefined} />);
+    expect(await screen.findByRole("checkbox", { name: "选择候选发票 SD-INV-001" })).not.toBeChecked();
+    await user.click(screen.getByRole("button", { name: "选择本页" }));
+    await user.click(screen.getByRole("button", { name: "下一页" }));
+    expect(await screen.findByRole("checkbox", { name: /暂存或提交中的发票 SD-INV-002/ })).toBeDisabled();
+    expect(screen.getByText(/已选 1 张（其中 1 张不在本页）/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "上一页" }));
+    expect(await screen.findByRole("checkbox", { name: "选择候选发票 SD-INV-001" })).toBeChecked();
+    await user.click(screen.getByLabelText("筛选流水关联状态"));
+    await user.click(await screen.findByRole("option", { name: /已关联流水/ }));
+    await waitFor(() => expect(loadPreview).toHaveBeenLastCalledWith(expect.objectContaining({ bankRelation: "linked", page: 1 })));
+  });
 
-    render(
-      <OaReverseWorkspaceDrawer
-        open
-        sourceFilters={[]}
-        selectedInvoiceIds={["inv-001", "inv-linked-oa"]}
-        loadPreview={loadPreview}
-        createDraftFromSelection={vi.fn()}
-        onClose={() => undefined}
-      />,
-    );
+  test("unknown draft results remain visible and require explicit verified release without retrying creation", async () => {
+    const user = userEvent.setup();
+    const failed = { batchId: "failed-batch", version: 7, status: "oa_draft_failed", invoiceIds: ["inv-001"], selectedInvoiceIds: ["inv-001"], totalWithTax: "49.86", targetApplicantName: "陈秀云", invoiceRows: createReadyPreviewPayload.groups[0].invoiceRows!, invoices: [], rejectedInvoices: [], draftRequestState: "unknown" as const, canRelease: true, canConfirmSubmission: false, oaDetectionError: "OA 响应超时" };
+    const manualStatus = vi.fn(() => Promise.resolve({ ...failed, status: "not_submitted", canRelease: false }));
+    const createDraftFromSelection = vi.fn();
+    const loadStagedDrafts = vi.fn(() => Promise.resolve({ items: [failed] }));
+    const onChanged = vi.fn();
+    render(<OaReverseWorkspaceDrawer open loadPreview={() => Promise.resolve(createReadyPreviewPayload)} loadStagedDrafts={loadStagedDrafts} manualStatus={manualStatus} createDraftFromSelection={createDraftFromSelection} onChanged={onChanged} onClose={() => undefined} />);
+    await user.click(await screen.findByRole("tab", { name: "暂存" }));
+    expect(await screen.findByText(/创建结果不明/)).toBeInTheDocument();
+    expect(screen.getByText(/不会删除 OA 中的草稿/)).toBeInTheDocument();
+    expect(screen.getByText("OA 响应超时")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /我已在OA系统提交/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "已核实并清理 OA 草稿，解除本地占用" }));
+    await waitFor(() => expect(manualStatus).toHaveBeenCalledWith("failed-batch", expect.objectContaining({ decision: "not_submitted", expectedVersion: 7, reason: "用户已到 OA 核实并删除可能存在的草稿，确认无有效 OA 单据，解除本地发票占用" })));
+    expect(await screen.findByText("已解除本地暂存占用，返回候选后可重新选择发票。")).toBeInTheDocument();
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(createDraftFromSelection).not.toHaveBeenCalled();
+  });
 
-    expect(await screen.findByText("SD-INV-001")).toBeInTheDocument();
-    expect(screen.getByText("SD-INV-LINKED")).toBeInTheDocument();
-    expect(screen.getAllByText("未关联oa").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("已关联oa")).toBeInTheDocument();
-    expect(screen.queryByText("候选oa")).not.toBeInTheDocument();
-    expect(screen.queryByText("目标 OA 分组")).not.toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: "已关联 OA 发票 SD-INV-LINKED 不可选择" })).toBeDisabled();
-    await waitFor(() => {
-      expect(screen.getByRole("checkbox", { name: "选择候选发票 SD-INV-001" })).toBeChecked();
-      expect(screen.getAllByText((_content, node) => node?.textContent === "已选 1 张").length).toBeGreaterThan(0);
-    });
+  test("requesting batches cannot be released or recreated and can be refreshed manually", async () => {
+    const user = userEvent.setup();
+    const requesting = { batchId: "request-batch", version: 3, status: "draft", invoiceIds: ["inv-001"], selectedInvoiceIds: ["inv-001"], totalWithTax: "49.86", targetApplicantName: "陈秀云", invoiceRows: [], invoices: [], rejectedInvoices: [], draftRequestState: "requesting" as const, canRelease: false, canConfirmSubmission: false };
+    const loadStagedDrafts = vi.fn(() => Promise.resolve({ items: [requesting] }));
+    const createDraftFromSelection = vi.fn();
+    const manualStatus = vi.fn();
+    render(<OaReverseWorkspaceDrawer open loadPreview={() => Promise.resolve(createReadyPreviewPayload)} loadStagedDrafts={loadStagedDrafts} manualStatus={manualStatus} createDraftFromSelection={createDraftFromSelection} onClose={() => undefined} />);
+    await user.click(await screen.findByRole("tab", { name: "暂存" }));
+    expect(await screen.findByText(/OA 创建请求正在处理/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /解除.*占用|创建 OA 草稿|我已在OA系统提交/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "刷新暂存状态" }));
+    await waitFor(() => expect(loadStagedDrafts).toHaveBeenCalledTimes(2));
+    expect(createDraftFromSelection).not.toHaveBeenCalled();
+    expect(manualStatus).not.toHaveBeenCalled();
+  });
 
-    await user.click(screen.getByRole("button", { name: /筛选 OA 关联状态/ }));
-    await user.click(screen.getByRole("option", { name: "已经关联oa" }));
-    expect(screen.queryByText("SD-INV-001")).not.toBeInTheDocument();
-    expect(screen.getByText("SD-INV-LINKED")).toBeInTheDocument();
-    expect(screen.queryByText("SD-INV-CANDIDATE")).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: /筛选 OA 关联状态/ }));
-    await user.click(screen.getByRole("option", { name: "未关联oa" }));
-    expect(screen.getByText("SD-INV-001")).toBeInTheDocument();
-    expect(screen.queryByText("SD-INV-LINKED")).not.toBeInTheDocument();
-    expect(screen.queryByText("SD-INV-CANDIDATE")).not.toBeInTheDocument();
-
-    // Wait for the Select overlay to finish restoring focus before typing elsewhere.
-    await waitFor(() => expect(screen.getByRole("button", { name: /筛选 OA 关联状态/ })).toHaveFocus());
-    const search = screen.getByRole("searchbox", { name: "搜索候选发票" });
-    await user.type(search, "候选供应商");
-    expect(search).toHaveValue("候选供应商");
-    await waitFor(() => {
-      expect(screen.queryByText("SD-INV-001")).not.toBeInTheDocument();
-      expect(screen.queryByText("SD-INV-CANDIDATE")).not.toBeInTheDocument();
-    });
+  test("staged batches beyond the first fifty remain reachable with load more", async () => {
+    const user = userEvent.setup();
+    const base = { version: 1, status: "draft", invoiceIds: ["inv-1"], selectedInvoiceIds: ["inv-1"], totalWithTax: "1", invoiceRows: [], invoices: [], rejectedInvoices: [], draftRequestState: "not_started" as const, canRelease: true };
+    const batches = Array.from({ length: 51 }, (_, index) => ({ ...base, batchId: `batch-${index}`, targetApplicantName: `申请人 ${index}` }));
+    const loadStagedDrafts = vi.fn((limit = 50) => Promise.resolve({ items: batches.slice(0, limit) }));
+    render(<OaReverseWorkspaceDrawer open loadPreview={() => Promise.resolve(createReadyPreviewPayload)} loadStagedDrafts={loadStagedDrafts} manualStatus={vi.fn()} onClose={() => undefined} />);
+    await user.click(await screen.findByRole("tab", { name: "暂存" }));
+    await user.click(await screen.findByRole("button", { name: "加载更多暂存批次" }));
+    await waitFor(() => expect(loadStagedDrafts).toHaveBeenLastCalledWith(100));
+    expect(await screen.findByText("申请人 50")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "加载更多暂存批次" })).not.toBeInTheDocument();
   });
 
   test("OA reverse drawer lets the backend target applicant list drive preview and batch target", async () => {
@@ -1068,8 +1081,8 @@ describe("Input invoice usage workflow drawers", () => {
     render(
       <OaReverseWorkspaceDrawer
         open
-        sourceFilters={[]}
-        selectedInvoiceIds={["inv-001", "inv-002"]}
+
+
         loadPreview={loadPreview}
         createDraftFromSelection={createDraftFromSelection}
         onClose={() => undefined}
@@ -1083,6 +1096,7 @@ describe("Input invoice usage workflow drawers", () => {
     await waitFor(() => expect(loadPreview).toHaveBeenLastCalledWith(expect.objectContaining({
       targetApplicantCode: "zhou_jieying",
     })));
+    await user.click(screen.getByRole("button", { name: "选择本页" }));
     await user.click(screen.getByRole("button", { name: "创建 OA 草稿" }));
     await waitFor(() => expect(createDraftFromSelection).toHaveBeenCalledWith(expect.objectContaining({
       targetApplicantCode: "zhou_jieying",
@@ -1118,8 +1132,8 @@ describe("Input invoice usage workflow drawers", () => {
     render(
       <OaReverseWorkspaceDrawer
         open
-        sourceFilters={[]}
-        selectedInvoiceIds={["inv-001", "inv-002"]}
+
+
         loadPreview={loadPreview}
         createDraftFromSelection={vi.fn()}
         onClose={() => undefined}
@@ -1184,8 +1198,8 @@ describe("Input invoice usage workflow drawers", () => {
     render(
       <OaReverseWorkspaceDrawer
         open
-        sourceFilters={[]}
-        selectedInvoiceIds={["inv-001"]}
+
+
         loadPreview={loadPreview}
         createDraftFromSelection={createDraftFromSelection}
         manualStatus={manualStatus}
@@ -1193,7 +1207,8 @@ describe("Input invoice usage workflow drawers", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "创建 OA 草稿" }));
+    await user.click(await screen.findByRole("button", { name: "选择本页" }));
+    await user.click(screen.getByRole("button", { name: "创建 OA 草稿" }));
     const confirmDialog = await screen.findByRole("dialog", { name: "OA 草稿提交确认" });
     await user.click(within(confirmDialog).getByRole("button", { name: /OA提交内容需修改\s+删除本次提交内容/ }));
 
@@ -1228,8 +1243,8 @@ describe("Input invoice usage workflow drawers", () => {
     render(
       <OaReverseWorkspaceDrawer
         open
-        sourceFilters={[]}
-        selectedInvoiceIds={["inv-001", "inv-002"]}
+
+
         loadPreview={loadPreview}
         loadSubmittedHistory={loadSubmittedHistory}
         onClose={() => undefined}
@@ -1276,24 +1291,20 @@ describe("Input invoice usage workflow drawers", () => {
           conditions: { hasOa: true, hasBank: true, fullyMatched: true },
         },
       ],
-      pendingDirections: [
-        { code: "pending", label: "待处理" },
-        { code: "wei_dailian_batch_reverse", label: "韦代连批量反提oa" },
-        { code: "chen_xiuyun_batch_reverse", label: "陈秀云批量反提oa" },
-      ],
+      applicantOptions: ["陈秀云", "周洁莹"],
     }));
 
     render(<PaymentStatusRulesDrawer open loadRules={loadRules} onClose={() => undefined} />);
 
     await waitFor(() => expect(loadRules).toHaveBeenCalledTimes(1));
-    expect(await screen.findByRole("list", { name: "Sheet4 支付状态规则" })).toBeInTheDocument();
-    expect(screen.getByText("2 条规则 · 3 个待处理方向")).toBeInTheDocument();
-    expect(screen.queryByRole("table", { name: "Sheet4 支付状态规则" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("list", { name: "支付状态规则" })).toBeInTheDocument();
+    expect(screen.getByText("2 条规则")).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "支付状态规则" })).not.toBeInTheDocument();
     expect(await screen.findByText("待付款（自动识别有oa无流水）")).toBeInTheDocument();
-    expect(screen.getByText("有发票、有 OA、无流水")).toBeInTheDocument();
+    expect(screen.queryByText("原因文案")).not.toBeInTheDocument();
     expect(screen.getAllByText("有 OA").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("无流水")).toBeInTheDocument();
-    expect(screen.getByText("陈秀云批量反提oa")).toBeInTheDocument();
+    expect(screen.queryByText("待处理发票处理方向")).not.toBeInTheDocument();
     expect(screen.queryByText("当前仅作为待处理方向标签，不影响自动分流。")).not.toBeInTheDocument();
     expect(screen.queryByText(/版本\s*\d|sheet4-v1/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /保存|确认保存/ })).not.toBeInTheDocument();
@@ -1318,7 +1329,7 @@ describe("Input invoice usage workflow drawers", () => {
           conditions: { hasOa: true, hasBank: false },
         },
       ],
-      pendingDirections: [{ code: "pending", label: "待处理" }],
+      applicantOptions: ["陈秀云", "周洁莹"],
     }));
     const saveRules = vi.fn(() => Promise.resolve({
       version: 8,
@@ -1335,27 +1346,27 @@ describe("Input invoice usage workflow drawers", () => {
           conditions: { hasOa: true, hasBank: false },
         },
       ],
-      pendingDirections: [{ code: "pending", label: "待处理" }],
+      applicantOptions: ["陈秀云", "周洁莹"],
     }));
 
     render(<PaymentStatusRulesDrawer open loadRules={loadRules} saveRules={saveRules} onClose={() => undefined} />);
 
     expect(screen.queryByText(/版本\s*7/)).not.toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "保存" })).toBeDisabled();
-    expect(screen.getByText("1 条规则 · 1 个待处理方向")).toBeInTheDocument();
+    expect(screen.getByText("1 条规则")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "还原" })).toBeDisabled();
-    const ruleEditor = await screen.findByLabelText("原因文案");
+    const ruleEditor = await screen.findByLabelText("支付状态");
     await user.clear(ruleEditor);
-    await user.type(ruleEditor, "已更新规则");
-    await user.click(screen.getByLabelText("待付款 流水条件"));
+    await user.type(ruleEditor, "已更新状态");
+    await user.click(screen.getByLabelText("已更新状态 流水条件"));
     await user.click(await screen.findByRole("option", { name: "不限制" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "还原" })).toBeEnabled());
-    expect(screen.getByText("1 条规则 · 1 个待处理方向 · 未保存")).toBeInTheDocument();
+    expect(screen.getByText("1 条规则 · 未保存")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() => expect(saveRules).toHaveBeenCalledWith(expect.objectContaining({
       expectedVersion: 7,
-      rules: [expect.objectContaining({ description: "已更新规则", reason: "已更新规则", enabled: true })],
+      rules: [expect.objectContaining({ label: "已更新状态", enabled: true })],
     })));
     expect(saveRules.mock.calls[0][0].rules[0].conditions).toEqual({ hasOa: true });
     expect(saveRules.mock.calls[0][0].idempotencyKey).toMatch(/^input-invoice-usage-payment-rules-save:/);
@@ -1369,13 +1380,13 @@ describe("Input invoice usage workflow drawers", () => {
       readOnly: false,
       permissions: { canSave: true },
       rules: [{ id: "paid_full_match", label: "已付款", description: "旧规则", priority: 2 }],
-      pendingDirections: [],
+      applicantOptions: [],
     }));
     const saveRules = vi.fn(() => Promise.reject({ status: 409, code: "payment_status_rules_version_conflict" }));
 
     render(<PaymentStatusRulesDrawer open loadRules={loadRules} saveRules={saveRules} onClose={() => undefined} />);
 
-    const ruleEditor = await screen.findByLabelText("原因文案");
+    const ruleEditor = await screen.findByLabelText("支付状态");
     await user.clear(ruleEditor);
     await user.type(ruleEditor, "新规则");
     await user.click(screen.getByRole("button", { name: "保存" }));
@@ -1383,12 +1394,68 @@ describe("Input invoice usage workflow drawers", () => {
     expect(await screen.findByText("规则已被其他人更新，请重新加载后再编辑。")).toBeInTheDocument();
   });
 
+  test("rules support applicant editing, adding and deleting without obsolete settings", async () => {
+    const user = userEvent.setup();
+    const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: ["陈秀云", "周洁莹"], rules: [{ id: "r1", statusCode: "paid", label: "已付款", description: "", priority: 1, enabled: true, conditions: { applicantName: "陈秀云", hasOa: true } }] };
+    const saveRules = vi.fn((request) => Promise.resolve({ ...payload, version: 2, rules: request.rules }));
+    render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} saveRules={saveRules} onClose={() => undefined} />);
+    await user.click(await screen.findByLabelText("已付款 OA 申请人条件"));
+    await user.click(await screen.findByRole("option", { name: "周洁莹" }));
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(saveRules).toHaveBeenCalledWith(expect.objectContaining({ rules: [expect.objectContaining({ conditions: { applicantName: "周洁莹", hasOa: true } })] })));
+    expect(saveRules.mock.calls[0][0]).not.toHaveProperty("pendingDirections");
+    expect(screen.queryByLabelText("原因文案")).not.toBeInTheDocument();
+    await user.click(screen.getByLabelText("已付款 OA 申请人条件"));
+    expect(await screen.findByRole("option", { name: "陈秀云" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "新增规则" }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    await user.click(screen.getAllByRole("button", { name: "删除规则 已付款" })[0]);
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(saveRules).toHaveBeenCalledTimes(2));
+    expect(saveRules.mock.calls[1][0].rules).toHaveLength(1);
+    expect(saveRules.mock.calls[1][0].rules[0].id).not.toBe("r1");
+  });
+
+  test("category label edits update every matching rule and new rules reuse the shared label", async () => {
+    const user = userEvent.setup();
+    const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: [], rules: [
+      { id: "offset1", statusCode: "offset", label: "冲", description: "", priority: 1, conditions: { hasBank: false } },
+      { id: "offset2", statusCode: "offset", label: "冲", description: "", priority: 2, conditions: { hasBank: false } },
+      { id: "paid1", statusCode: "paid", label: "已核付", description: "", priority: 3, conditions: { fullyMatched: true } },
+    ] };
+    const saveRules = vi.fn((request) => Promise.resolve({ ...payload, version: 2, rules: request.rules, applicantOptions: [] }));
+    render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} saveRules={saveRules} onClose={() => undefined} />);
+    const label = (await screen.findAllByLabelText("支付状态"))[0];
+    await user.clear(label);
+    await user.type(label, "抵账");
+    expect(screen.getAllByDisplayValue("抵账")).toHaveLength(2);
+    await user.click(screen.getByRole("button", { name: "新增规则" }));
+    expect(screen.getAllByDisplayValue("已核付")).toHaveLength(2);
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(saveRules).toHaveBeenCalled());
+    expect(saveRules.mock.calls[0][0].rules.filter((rule) => rule.statusCode === "offset").map((rule) => rule.label)).toEqual(["抵账", "抵账"]);
+  });
+
+  test("rules retain edits after close is cancelled and display save failures", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve({ version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: [], rules: [] })} saveRules={() => Promise.reject(new Error("保存失败"))} onClose={onClose} />);
+    await user.click(await screen.findByRole("button", { name: "新增规则" }));
+    await user.click(screen.getByRole("button", { name: "关闭支付状态规则抽屉" }));
+    expect(await screen.findByRole("dialog", { name: "放弃未保存的规则？" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "继续编辑" }));
+    expect(onClose).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("保存失败");
+  });
+
   test("parent state can keep the two workflow drawers mutually exclusive", async () => {
     const user = userEvent.setup();
     const loadPreview = vi.fn(() => Promise.resolve(previewPayload));
     const loadRules = vi.fn<[], Promise<PaymentStatusRulesPayload>>(() => Promise.resolve({
       rules: [],
-      pendingDirections: [{ code: "pending", label: "待处理" }],
+      applicantOptions: ["陈秀云", "周洁莹"],
     }));
 
     function Harness() {
@@ -1399,8 +1466,8 @@ describe("Input invoice usage workflow drawers", () => {
           <button type="button" onClick={() => setActiveWorkflow("paymentRules")}>发票与支付状态规则设置</button>
           <OaReverseWorkspaceDrawer
             open={activeWorkflow === "oaReverse"}
-            sourceFilters={[]}
-            selectedInvoiceIds={[]}
+
+
             loadPreview={loadPreview}
             onClose={() => setActiveWorkflow(null)}
           />
@@ -1431,7 +1498,7 @@ describe("Input invoice usage workflow drawers", () => {
     const loadPreview = vi.fn(() => Promise.resolve(previewPayload));
     const loadRules = vi.fn<[], Promise<PaymentStatusRulesPayload>>(() => Promise.resolve({
       rules: [],
-      pendingDirections: [],
+      applicantOptions: [],
     }));
 
     function Harness() {
@@ -1443,8 +1510,8 @@ describe("Input invoice usage workflow drawers", () => {
           <button type="button" onClick={() => setActiveWorkflow("paymentRules")}>发票与支付状态规则设置</button>
           <OaReverseWorkspaceDrawer
             open={activeWorkflow === "oaReverse"}
-            sourceFilters={[]}
-            selectedInvoiceIds={[]}
+
+
             loadPreview={loadPreview}
             onClose={() => setActiveWorkflow(null)}
           />

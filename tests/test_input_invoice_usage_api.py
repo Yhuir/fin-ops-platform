@@ -1062,6 +1062,26 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
             if hasattr(app, attr):
                 delattr(app, attr)
 
+        credential_service = app._oa_applicant_credential_service()
+        for code, name in (("chen_xiuyun", "陈秀云"), ("zhou_jieying", "周洁莹")):
+            credential_service.save_credential(
+                target_applicant_code=code, target_applicant_name=name,
+                oa_username=code, password="test-only-credential", actor_id="test",
+                can_admin_access=True,
+            )
+        reverse = app._input_invoice_usage_oa_reverse_service()
+        def candidate_rows(query):
+            result = query_service.list_rows(page=int(query["page"][0]), page_size=int(query["page_size"][0]))
+            rows = [row for row in result["rows"] if not row["oa"]["relationCount"]]
+            return {"rows": rows, "pagination": {"page": 1, "pageSize": 50, "total": len(rows)},
+                    "summary": {"invoiceCount": len(rows), "totalWithTax": str(sum(Decimal(row["invoice"]["totalWithTax"]) for row in rows))},
+                    "relationCounts": {"all": len(rows), "linked": 0, "unlinked": len(rows)}}
+        reverse._rows_loader = candidate_rows
+        reverse._rows_by_invoice_ids_loader = lambda invoice_ids: {
+            "rows": [row for row in query_service.list_rows(page=1, page_size=200)["rows"]
+                     if row["invoiceId"] in invoice_ids],
+        }
+
     @staticmethod
     def _invoice(
         invoice_id: str,

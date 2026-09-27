@@ -48,6 +48,15 @@ class PostgresInputInvoiceUsageQueryRepository:
             raise ValueError("Input invoice usage query repository requires PostgreSQL.")
         self._connection = connection
 
+    def load_applicant_names(self) -> list[str]:
+        rows = self._connection.fetch_all(
+            "select applicant from app.oa_applications where nullif(trim(applicant), '') is not null "
+            "union select applicant from app.oa_pending_payment_admissions "
+            "where tenant_id = 'default' and workflow_status = 'in_progress' "
+            "and nullif(trim(applicant), '') is not null order by applicant"
+        )
+        return [str(row["applicant"]) for row in rows]
+
     def load_page(
         self,
         *,
@@ -61,6 +70,7 @@ class PostgresInputInvoiceUsageQueryRepository:
         sort_field: str,
         sort_direction: str,
         tenant_id: str = "default",
+        invoice_level: bool = False,
     ) -> InvoiceUsageCollectionCanonicalSnapshot:
         return self._load(
             page=page,
@@ -73,6 +83,7 @@ class PostgresInputInvoiceUsageQueryRepository:
             sort_field=sort_field,
             sort_direction=sort_direction,
             tenant_id=tenant_id,
+            invoice_level=invoice_level,
         )
 
     def load_rows_by_invoice_ids(
@@ -80,13 +91,14 @@ class PostgresInputInvoiceUsageQueryRepository:
         invoice_ids: list[str],
         *,
         tenant_id: str = "default",
+        invoice_level: bool = False,
     ) -> InvoiceUsageCollectionCanonicalSnapshot:
         normalized = _texts(invoice_ids)
         if not normalized:
             return _empty_snapshot(page=1, page_size=200)
         return self._load(
             page=1,
-            page_size=min(200, max(1, len(normalized))),
+            page_size=max(1, len(normalized)),
             keyword=None,
             invoice_date_from=None,
             invoice_date_to=None,
@@ -96,6 +108,7 @@ class PostgresInputInvoiceUsageQueryRepository:
             sort_direction="desc",
             tenant_id=tenant_id,
             invoice_ids=normalized,
+            invoice_level=invoice_level,
         )
 
     def load_row(
@@ -150,6 +163,7 @@ class PostgresInputInvoiceUsageQueryRepository:
         tenant_id: str,
         invoice_ids: list[str] | None = None,
         row_id: str | None = None,
+        invoice_level: bool = False,
     ) -> InvoiceUsageCollectionCanonicalSnapshot:
         normalized_month = _month(month)
         with self._connection.transaction() as transaction:
@@ -176,6 +190,7 @@ class PostgresInputInvoiceUsageQueryRepository:
                 invoice_type="input",
                 month=normalized_month,
                 status_case=status_case,
+                invoice_level=invoice_level,
             )
             base_params: list[Any] = [tenant_id, *status_params]
             where_sql, where_params = _where_sql(
@@ -196,11 +211,19 @@ class PostgresInputInvoiceUsageQueryRepository:
                 invoice_ids=invoice_ids,
                 row_id=row_id,
             )
+            relation_where_sql, relation_where_params = _where_sql(
+                keyword=keyword, invoice_date_from=invoice_date_from,
+                invoice_date_to=invoice_date_to,
+                filters=[item for item in filters if item["field"] not in {"relation_status", "bank_relation"}],
+                field_sql=_INPUT_FIELDS, invoice_ids=invoice_ids, row_id=row_id,
+            )
             filtered_sql = (
                 f"{cte}, filtered_rows as materialized "
                 f"(select * from final_rows {where_sql}), "
                 f"status_option_rows as materialized "
-                f"(select * from final_rows {status_where_sql})"
+                f"(select * from final_rows {status_where_sql}), "
+                f"relation_option_rows as materialized "
+                f"(select * from final_rows {relation_where_sql})"
             )
             order_sql = _order_sql(
                 sort_field=sort_field,
@@ -218,6 +241,8 @@ class PostgresInputInvoiceUsageQueryRepository:
                         identity_key,
                         primary_invoice_id,
                         invoice_ids,
+                        status_code, fully_matched, invoice_oa_amount_matched,
+                        oa_count, bank_count, oa_applicant,
                         array[]::text[] as supporting_group_keys,
                         count(*) over()::bigint as filtered_total,
                         row_number() over ({order_sql}) as page_order
@@ -236,13 +261,14 @@ class PostgresInputInvoiceUsageQueryRepository:
                         coalesce(sum(total_with_tax), 0)::numeric as total_with_tax,
                         count(*) filter (where oa_count > 0)::bigint as matched_oa_count,
                         count(*) filter (where bank_count > 0)::bigint as matched_bank_count,
-                        count(*) filter (where status_code = 'pending')::bigint as pending_count,
+                        coalesce(sum(cardinality(invoice_ids)) filter (where status_code = 'pending'), 0)::bigint as pending_count,
                         (select count(*) from selected_members)::bigint as invoice_count
                     from filtered_rows
                 ),
                 facet_rows as (
-                    select facet.field, facet.value, count(*)::bigint as option_count
+                    select facet.field, facet.value, count(distinct member.invoice_id)::bigint as option_count
                     from filtered_rows
+                    cross join lateral unnest(invoice_ids) member(invoice_id)
                     cross join lateral (
                         values
                             ('seller_name', seller_name),
@@ -263,10 +289,22 @@ class PostgresInputInvoiceUsageQueryRepository:
                     select
                         'payment_status'::text,
                         status_code,
-                        count(*)::bigint
+                        count(distinct member.invoice_id)::bigint
                     from status_option_rows
+                    cross join lateral unnest(invoice_ids) member(invoice_id)
                     where nullif(status_code, '') is not null
                     group by status_code
+                    union all
+                    select 'relation_status', relation_status, count(distinct member.invoice_id)::bigint
+                    from relation_option_rows
+                    cross join lateral unnest(invoice_ids) member(invoice_id)
+                    group by relation_status
+                    union all
+                    select 'bank_relation', bank_relation, count(distinct member.invoice_id)::bigint
+                    from relation_option_rows
+                    cross join lateral unnest(invoice_ids) member(invoice_id)
+                    where relation_status = 'no_oa'
+                    group by bank_relation
                 )
                 select
                     coalesce(
@@ -298,6 +336,7 @@ class PostgresInputInvoiceUsageQueryRepository:
                     *base_params,
                     *where_params,
                     *status_where_params,
+                    *relation_where_params,
                     page_size,
                     offset,
                 ),
@@ -316,13 +355,14 @@ class PostgresInputInvoiceUsageQueryRepository:
                 transaction,
                 tenant_id=tenant_id,
             )
-        filtered_total = int((group_rows[0] if group_rows else {}).get("filtered_total") or 0)
+        filtered_total = int(summary_row.get("row_count") or 0)
         invoice_count = int(summary_row.get("invoice_count") or 0)
         labels = {
             str(rule.get("statusCode") or ""): str(rule.get("label") or "")
             for rule in list(payment_settings.get("rules") or [])
             if str(rule.get("statusCode") or "").strip()
         }
+        labels["pending"] = "未命中规则"
         return InvoiceUsageCollectionCanonicalSnapshot(
             groups=facts["groups"],
             supporting_groups=[],
@@ -739,6 +779,8 @@ _INPUT_FIELDS = {
     "specific_business_type": "specific_business_type",
     "taxable_item_name": "taxable_item_name",
     "payment_status": "status_code",
+    "relation_status": "relation_status",
+    "bank_relation": "bank_relation",
     "oa_applicant": "oa_applicant",
     "oa_application_type": "oa_application_type",
     "oa_project_name": "oa_project_name",
@@ -802,6 +844,7 @@ def _fact_cte(
     invoice_type: str,
     month: str | None,
     status_case: str | None,
+    invoice_level: bool = False,
 ) -> str:
     purpose_scope_sql = bank_split_scope_ctes(
         bank_rows_sql="select group_key,bank_id,amount,txn_direction as direction,is_split,turnover_role from raw_group_bank_rows",
@@ -910,7 +953,7 @@ def _fact_cte(
               )
         )
         """
-        if invoice_type == "input"
+        if invoice_type == "input" and not invoice_level
         else """
         group_members as (
             select
@@ -1010,6 +1053,10 @@ def _fact_cte(
             select
                 facts.*,
                 {status_case} as status_code,
+                case when not facts.has_oa_relation then 'no_oa'
+                     when not facts.has_bank_relation then 'oa_no_bank'
+                     else 'oa_bank' end as relation_status,
+                case when facts.has_bank_relation then 'linked' else 'unlinked' end as bank_relation,
                 0::numeric as collected_amount,
                 abs(facts.total_with_tax)::numeric as pending_amount
             from group_facts facts
@@ -1059,6 +1106,14 @@ def _fact_cte(
     oa_ctes_sql = (
         """
         ,
+        group_relation_presence as (
+            select relation.group_key,
+                   bool_or(member.row_type = 'oa') as has_oa_relation,
+                   bool_or(member.row_type in ('bank', 'bank_transaction')) as has_bank_relation
+            from group_relation_ids relation
+            join relation_members member using (relation_id)
+            group by relation.group_key
+        ),
         workflow_oa as materialized (
             select
                 row_id,
@@ -1138,6 +1193,7 @@ def _fact_cte(
             select
                 grouped.group_key,
                 count(distinct oa.oa_id)::bigint as oa_count,
+                count(distinct oa.oa_id) filter (where oa.amount_matched)::bigint as matched_oa_count,
                 coalesce(sum(oa.amount) filter (where oa.amount_matched), 0)::numeric
                     as matched_oa_total,
                 (array_agg(oa.applicant order by oa.oa_id))[1]
@@ -1156,6 +1212,8 @@ def _fact_cte(
     )
     oa_facts_sql = (
         """
+                coalesce(presence.has_oa_relation, false) as has_oa_relation,
+                coalesce(presence.has_bank_relation, false) as has_bank_relation,
                 coalesce(oa.oa_count, 0)::bigint as oa_count,
                 coalesce(oa.matched_oa_total, 0)::numeric as matched_oa_total,
                 coalesce(oa.oa_applicant, '') as oa_applicant,
@@ -1174,10 +1232,13 @@ def _fact_cte(
     match_facts_sql = (
         """
                 (
-                    abs(coalesce(oa.matched_oa_total, 0) - grouped.total_with_tax) <= 0.01
+                    coalesce(oa.matched_oa_count, 0) > 0
+                    and abs(coalesce(oa.matched_oa_total, 0) - grouped.total_with_tax) <= 0.01
                 ) as invoice_oa_amount_matched,
                 (
-                    abs(coalesce(oa.matched_oa_total, 0) - grouped.total_with_tax) <= 0.01
+                    coalesce(oa.matched_oa_count, 0) > 0
+                    and coalesce(banks.matched_bank_count, 0) > 0
+                    and abs(coalesce(oa.matched_oa_total, 0) - grouped.total_with_tax) <= 0.01
                     and abs(coalesce(banks.matched_bank_total, 0) - abs(grouped.total_with_tax)) <= 0.01
                 ) as fully_matched
         """
@@ -1190,7 +1251,8 @@ def _fact_cte(
         """
     )
     oa_join_sql = (
-        "left join group_oa oa on oa.group_key = grouped.group_key"
+        "left join group_oa oa on oa.group_key = grouped.group_key "
+        "left join group_relation_presence presence on presence.group_key = grouped.group_key"
         if invoice_type == "input"
         else ""
     )
@@ -1509,6 +1571,7 @@ def _fact_cte(
             select
                 grouped.group_key,
                 count(distinct bank.bank_id)::bigint as bank_count,
+                count(distinct bank.bank_id) filter (where bank.current_amount_matched)::bigint as matched_bank_count,
                 coalesce(sum(bank.amount) filter (
                     where bank.txn_direction = 'inflow'
                 ), 0)::numeric as bank_inflow_total,
@@ -1585,7 +1648,6 @@ def _input_payment_status_case(
         "then 'pending'"
     ]
     params: list[Any] = []
-    fallback = "pending"
     for rule in sorted(
         list(settings.get("rules") or []),
         key=lambda item: (int(item.get("priority") or 0), str(item.get("id") or "")),
@@ -1598,9 +1660,6 @@ def _input_payment_status_case(
             if isinstance(rule.get("conditions"), dict)
             else {}
         )
-        if conditions.get("fallback") is True:
-            fallback = code
-            continue
         predicates: list[str] = []
         for key, column in {
             "hasOa": "facts.oa_count > 0",
@@ -1619,7 +1678,7 @@ def _input_payment_status_case(
                 f"when {' and '.join(predicates)} then '{_safe_code(code)}'"
             )
     return (
-        "case " + " ".join(fragments) + f" else '{_safe_code(fallback)}' end",
+        "case " + " ".join(fragments) + " else 'pending' end",
         params,
     )
 
@@ -1881,6 +1940,13 @@ def _group_payload(
     }
     relation_case_id = str(row.get("relation_case_id") or "").strip()
     if invoice_type == "input":
+        payload["payment_facts"] = {
+            "has_oa": int(row.get("oa_count") or 0) > 0,
+            "has_bank": int(row.get("bank_count") or 0) > 0,
+            "applicant_name": str(row.get("oa_applicant") or ""),
+            "fully_matched": bool(row.get("fully_matched")),
+            "invoice_oa_amount_matched": bool(row.get("invoice_oa_amount_matched")),
+        }
         payload["row_key"] = (
             f"relation:{relation_case_id}"
             if relation_case_id

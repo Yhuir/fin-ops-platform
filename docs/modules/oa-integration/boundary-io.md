@@ -196,3 +196,7 @@ parser version 升为 `2026-09-23-labelled-invoice-parties-v6`，复用 adapter 
 ## 2026-09-27 OA 原始详情字段
 
 共享 `oa_expense_details.py` 只投影真实费用子项字段：内容取原 `fee_content`，不回退推断的 `expense_content`；移除费用类型和计算的附件文件数。主单源字段由纯 `source_record_details.py` 约束，流程状态只取显式来源，修改时间不冒充审批完成时间。OA 同步、内部分类、canonical workflow 状态与其它页面业务规则不因此修改；页面不访问外部 OA。完整 I/O、旧路径清理和测试责任见[来源详情合同](../../dev/source-record-details.md)。
+
+## 2026-09-28 反提申请人只读选项
+
+`OaApplicantCredentialService.applicant_options()` 向已授权反提业务返回 enabled 且 has_credential 的 code/name；不返回密码、登录用户名或 token，不放宽管理员凭据管理权限。反提调用方不再维护固定六人列表；历史批次保留当时的申请人。

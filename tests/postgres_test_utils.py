@@ -192,6 +192,7 @@ EXPECTED_MIGRATION_FILES = [
     "0179_bank_transaction_units.sql",
     "0180_bank_split_classification_instances.sql",
     "0181_cost_statistics_decision_mode.sql",
+    "0182_input_invoice_payment_rules_editable.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "app", "staging", "cash")
 TEST_TABLES = (

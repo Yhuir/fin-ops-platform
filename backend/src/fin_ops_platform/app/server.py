@@ -5435,13 +5435,14 @@ class Application:
             self._input_invoice_usage_oa_reverse_repository = repository
         service = InputInvoiceUsageOaReverseService(
             repository=repository,
+            applicant_options_provider=self._oa_applicant_credential_service().applicant_options,
             evidence_provider=OAProjectionInputInvoiceUsageOaEvidenceProvider(
                 getattr(self._input_invoice_usage_service(), "_oa_projection", None)
             ),
             relation_writer=WorkbenchInputInvoiceUsageOaReverseRelationWriter(self._workbench_relation_command_service()),
             audit_recorder=self._record_input_invoice_usage_oa_reverse_audit,
-            rows_loader=lambda query: self._input_invoice_usage_page_query_service().rows(query),
-            rows_by_invoice_ids_loader=lambda invoice_ids: self._input_invoice_usage_page_query_service().rows_by_invoice_ids(
+            rows_loader=lambda query: self._input_invoice_usage_page_query_service().candidate_rows(query),
+            rows_by_invoice_ids_loader=lambda invoice_ids: self._input_invoice_usage_page_query_service().candidate_rows_by_invoice_ids(
                 invoice_ids
             ),
             oa_prefill_provider=lambda: self._app_settings_service.get_oa_draft_prefill_configuration(

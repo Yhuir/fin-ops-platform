@@ -235,3 +235,6 @@ Migration 0177 增加成本自有 OA 来源行标签覆盖，不修改金额、�
 Migration 0178/0179 增加持久化流水拆分及用途投影，属于 forward-only：保存拆分后旧 reader/writer 无法解释子项身份和关联，禁止回切旧链路。父流水金融事实不改写；失败保持 maintenance 并向前修复。历史外部往来成本撤销使用受控迁移命令，保留审计，不删除主数据库。
 
 0180 的完整拆分分类实例也纳入既有 forward-only 发布清单：旧 writer 只修改 code/金额，不能同步更新完整实例，回切后可能留下错配归属。验证失败保留 maintenance 向前修复；不新增审核门禁或数据库备份。
+
+
+Migration `0182_input_invoice_payment_rules_editable.sql` 是支付规则配置的 forward-only 转换：合并旧的三个 offset 输出代码，移除固定兜底规则、处理方向和手写原因存储，并将旧默认“待付款”改为“未关联流水”（保留自定义名称）。旧 runtime 会补回已删除规则、拒绝新增规则身份，无法安全消费新配置，因此已加入现有 forward-only 版本集合。迁移后验证失败保持 maintenance 并向前修复，不能自动回切旧代码。配置和审计遵守既有事务，迁移同时维护 settings 与 normalized payload 一致性；本次不新建生产数据库备份，不删除主数据库。

@@ -88,6 +88,8 @@ class InputInvoiceUsageOaReverseApiRoutes:
             )
         except InputInvoiceUsageError as exc:
             return self._input_usage_error_response(exc)
+        except InputInvoiceUsageOaReverseServiceError as exc:
+            return self._oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
 
     def create_batch(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
@@ -105,6 +107,8 @@ class InputInvoiceUsageOaReverseApiRoutes:
                 payload if isinstance(payload, dict) else {},
                 actor_id=actor_id,
             )
+        except InputInvoiceUsageError as exc:
+            return self._input_usage_error_response(exc)
         except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
@@ -125,6 +129,8 @@ class InputInvoiceUsageOaReverseApiRoutes:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_oa_reverse_history_query", "message": "limit must be a positive integer."},
             )
+        except InputInvoiceUsageError as exc:
+            return self._input_usage_error_response(exc)
         except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
@@ -145,6 +151,8 @@ class InputInvoiceUsageOaReverseApiRoutes:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_oa_reverse_staged_query", "message": "limit must be a positive integer."},
             )
+        except InputInvoiceUsageError as exc:
+            return self._input_usage_error_response(exc)
         except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
@@ -158,6 +166,8 @@ class InputInvoiceUsageOaReverseApiRoutes:
             return auth_error
         try:
             result = self._service.get_batch(batch_id)
+        except InputInvoiceUsageError as exc:
+            return self._input_usage_error_response(exc)
         except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
@@ -178,6 +188,8 @@ class InputInvoiceUsageOaReverseApiRoutes:
                 actor_id=actor_id,
                 oa_client_provider=self._target_oa_applicant_token_provider(),
             )
+        except InputInvoiceUsageError as exc:
+            return self._input_usage_error_response(exc)
         except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
@@ -201,6 +213,8 @@ class InputInvoiceUsageOaReverseApiRoutes:
                 actor_id=actor_id,
                 oa_client=self._oa_draft_client_for_batch(batch_id),
             )
+        except InputInvoiceUsageError as exc:
+            return self._input_usage_error_response(exc)
         except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
@@ -224,6 +238,8 @@ class InputInvoiceUsageOaReverseApiRoutes:
                 idempotency_key=str(request.get("idempotencyKey", request.get("idempotency_key")) or ""),
                 actor_id=actor_id,
             )
+        except InputInvoiceUsageError as exc:
+            return self._input_usage_error_response(exc)
         except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
@@ -245,6 +261,8 @@ class InputInvoiceUsageOaReverseApiRoutes:
                 expected_version=self._int_or_none(request.get("expectedVersion", request.get("expected_version"))),
                 actor_id=actor_id,
             )
+        except InputInvoiceUsageError as exc:
+            return self._input_usage_error_response(exc)
         except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
@@ -270,6 +288,8 @@ class InputInvoiceUsageOaReverseApiRoutes:
                 actor_id=actor_id,
                 candidate_oa_row_id=str(request.get("candidateOaRowId", request.get("candidate_oa_row_id")) or "") or None,
             )
+        except InputInvoiceUsageError as exc:
+            return self._input_usage_error_response(exc)
         except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)

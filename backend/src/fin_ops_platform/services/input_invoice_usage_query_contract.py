@@ -29,6 +29,8 @@ FILTER_CONFIG: dict[str, dict[str, Any]] = {
     "tax_amount": {"label": "税额", "mode": "money", "operators": {"between", "equals"}, "sortable": True},
     "specific_business_type": {"label": "特定业务类型", "mode": "enum_multi", "operators": {"in"}, "sortable": False},
     "taxable_item_name": {"label": "货物或应税劳务名称", "mode": "enum_multi", "operators": {"in", "contains"}, "sortable": True},
+    "relation_status": {"label": "关联情况", "mode": "enum_multi", "operators": {"in"}, "sortable": False},
+    "bank_relation": {"label": "流水关联", "mode": "enum_multi", "operators": {"in"}, "sortable": False},
     "payment_status": {"label": "支付状态", "mode": "enum_multi", "operators": {"in"}, "sortable": True},
     "oa_applicant": {"label": "OA申请人", "mode": "enum_multi", "operators": {"in"}, "sortable": True},
     "oa_application_type": {"label": "报销/支付", "mode": "enum_multi", "operators": {"in", "equals"}, "sortable": True},

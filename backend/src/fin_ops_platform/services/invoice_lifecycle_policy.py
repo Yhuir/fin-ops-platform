@@ -65,14 +65,6 @@ class InvoiceLifecyclePolicy:
     ) -> dict[str, str]:
         if self._input_payment_rules_provider is None:
             raise ValueError("input_payment_rules_provider is required for input invoice usage payment evaluation.")
-        if has_oa and has_bank and not fully_matched:
-            return {
-                "code": "pending",
-                "label": "待处理",
-                "reason": "有 OA 和流水，但关联台不能证明发票、OA、流水完全匹配",
-                "matchedRuleId": "pending_default",
-                "severity": "warning",
-            }
         return self._input_payment_rules_provider.evaluate(
             PaymentStatusEvaluationContext(
                 has_oa=has_oa,

@@ -3,13 +3,18 @@ from __future__ import annotations
 from typing import Any
 
 from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import (
+    RELEASED_BATCH_STATUSES,
     InputInvoiceUsageOaReverseBatch,
+    InputInvoiceUsageOaReverseInvalidTransitionError,
+    _assert_draft_claim_available,
+    _assert_draft_claim_write,
     _batch_from_storage,
     _batch_to_storage,
     _decimal,
 )
 from fin_ops_platform.services.postgres_repositories.common import jsonb as _jsonb
 from fin_ops_platform.services.postgres_repositories.common import serialize_value as _serialize_jsonb_value
+from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 
 
 def input_invoice_usage_oa_reverse_statistics_snapshot(connection: Any) -> dict[str, object]:
@@ -81,9 +86,78 @@ class PostgresInputInvoiceUsageOaReverseBatchRepository:
                 batches.append(batch)
         return batches
 
-    def save_batch(self, batch: InputInvoiceUsageOaReverseBatch) -> None:
+    def invoice_occupancy(self, invoice_ids: list[str]) -> dict[str, dict[str, str]]:
+        return self._invoice_occupancy(self._connection, invoice_ids)
+
+    @staticmethod
+    def _invoice_occupancy(connection: Any, invoice_ids: list[str]) -> dict[str, dict[str, str]]:
+        if not invoice_ids:
+            return {}
+        rows = connection.fetch_all(
+            """select batch_id, status, invoice_ids
+               from app.input_invoice_usage_oa_reverse_batches
+               where invoice_ids && %s::text[] and status <> all(%s::text[])
+               order by created_at, batch_id""",
+            (invoice_ids, sorted(RELEASED_BATCH_STATUSES)),
+        )
+        requested = set(invoice_ids)
+        return {
+            invoice_id: {"occupiedBatchId": str(row["batch_id"]), "occupiedBatchStatus": str(row["status"])}
+            for row in rows for invoice_id in row["invoice_ids"] if invoice_id in requested
+        }
+
+    def claim_draft_creation(self, batch: InputInvoiceUsageOaReverseBatch, *, expected_version: int) -> None:
+        self.save_batch(batch, claim_expected_version=expected_version)
+
+    def save_batch(self, batch: InputInvoiceUsageOaReverseBatch, *, claim_expected_version: int | None = None) -> None:
+        with self._connection.transaction() as tx:
+            PostgresWorkbenchRelationRepository(tx).acquire_relation_member_locks(
+                batch.invoice_ids, row_types=["invoice"] * len(batch.invoice_ids))
+            # Relation commands use the same member locks and key-share these canonical rows.
+            tx.fetch_all(
+                """select id from app.invoices
+                   where id::text = any(%s::text[]) or legacy_mongo_id = any(%s::text[])
+                   order by id for update""",
+                (batch.invoice_ids, batch.invoice_ids),
+            )
+            current = tx.fetch_one(
+                "select status, raw_payload from app.input_invoice_usage_oa_reverse_batches where batch_id = %s for update",
+                (batch.batch_id,),
+            )
+            stored = _batch_from_storage(current["raw_payload"]) if current else None
+            if claim_expected_version is not None:
+                _assert_draft_claim_available(stored, claim_expected_version)
+            _assert_draft_claim_write(stored, batch)
+            if batch.status not in RELEASED_BATCH_STATUSES:
+                if claim_expected_version is not None or current is None or current["status"] in RELEASED_BATCH_STATUSES:
+                    linked = tx.fetch_one(
+                        """select case_id from app.workbench_pair_relations relation
+                           where relation.status = 'active' and relation.row_ids && %s::text[]
+                             and 'oa' = any(relation.row_types)
+                             and exists (
+                               select 1 from unnest(relation.row_ids, relation.row_types) member(row_id, row_type)
+                               where member.row_type = 'invoice' and member.row_id = any(%s::text[])
+                             ) limit 1""",
+                        (batch.invoice_ids, batch.invoice_ids),
+                    )
+                    if linked:
+                        raise InputInvoiceUsageOaReverseInvalidTransitionError(
+                            "所选发票已有 OA 关系，请重新选择。", code="invalid_oa_reverse_selection")
+                rows = tx.fetch_all(
+                    """select batch_id from app.input_invoice_usage_oa_reverse_batches
+                       where invoice_ids && %s::text[] and status <> all(%s::text[])
+                         and batch_id <> %s limit 1""",
+                    (batch.invoice_ids, sorted(RELEASED_BATCH_STATUSES), batch.batch_id),
+                )
+                if rows:
+                    raise InputInvoiceUsageOaReverseInvalidTransitionError(
+                        "发票已有反提 OA 批次，请处理现有批次。", code="invoice_oa_reverse_occupied")
+            self._save_batch(tx, batch)
+
+    @staticmethod
+    def _save_batch(connection: Any, batch: InputInvoiceUsageOaReverseBatch) -> None:
         payload = _batch_to_storage(batch)
-        self._connection.execute(
+        connection.execute(
             """
             insert into app.input_invoice_usage_oa_reverse_batches(
                 batch_id, status, version, target_applicant_code, target_applicant_name,

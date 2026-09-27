@@ -1,4 +1,4 @@
-import { Button } from "@heroui/react";
+import { Button, Tabs } from "@heroui/react";
 import { Download } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -353,9 +353,9 @@ export default function InputInvoiceUsagePage() {
   const loadOaReversePreview = useCallback((request: OaReversePreviewRequest) => (
     previewInputInvoiceUsageOaReverse({
       source: request.selectedInvoiceIds.length > 0 ? "explicitSelection" : "currentFilters",
-      filters: isFilterArray(request.sourceFilters) ? request.sourceFilters : [],
       selectedInvoiceIds: request.selectedInvoiceIds,
       targetApplicantCode: request.targetApplicantCode || undefined,
+      page: request.page, pageSize: request.pageSize, keyword: request.keyword, bankRelation: request.bankRelation,
     }, request.signal)
   ), []);
 
@@ -450,6 +450,17 @@ export default function InputInvoiceUsagePage() {
           <div className="input-invoice-usage-content">
             <PageToolbar
               className="input-invoice-usage-query-toolbar"
+              left={(
+                <Tabs selectedKey={query.filters.find((filter) => filter.field === "relation_status")?.values?.[0] ?? "all"} onSelectionChange={(key) => setQuery((current) => ({ ...current, page: 1, filters: [...current.filters.filter((filter) => filter.field !== "relation_status"), ...(key === "all" ? [] : [{ field: "relation_status", operator: "in" as const, values: [String(key)] }])] }))}>
+                  <Tabs.List aria-label="进项发票关联分类">
+                    {[{id:"all",label:"全部"},{id:"no_oa",label:"未关联 OA"},{id:"oa_no_bank",label:"有 OA／无流水"},{id:"oa_bank",label:"OA／流水均已关联"}].map((item) => {
+                      const options = filterOptions.relation_status ?? [];
+                      const count = item.id === "all" ? options.reduce((sum, option) => sum + (option.count ?? 0), 0) : (options.find((option) => option.value === item.id)?.count ?? 0);
+                      return <Tabs.Tab id={item.id} key={item.id}>{item.label} {loading || error ? "—" : count} 张</Tabs.Tab>;
+                    })}
+                  </Tabs.List>
+                </Tabs>
+              )}
               right={(
                 <div className="input-invoice-usage-query-actions">
                   <Button
@@ -518,10 +529,9 @@ export default function InputInvoiceUsagePage() {
       />
       <OaReverseWorkspaceDrawer
         open={query.activeWorkflow === "oaReverse"}
-        sourceFilters={query.filters}
-        selectedInvoiceIds={[]}
         loadPreview={loadOaReversePreview}
         createDraftFromSelection={createInputInvoiceUsageOaReverseDraftFromSelection}
+        onChanged={() => loadRows("refresh")}
         loadStagedDrafts={fetchInputInvoiceUsageOaReverseStagedDrafts}
         loadSubmittedHistory={fetchInputInvoiceUsageOaReverseSubmittedHistory}
         manualStatus={manualInputInvoiceUsageOaReverseStatus}

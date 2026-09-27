@@ -1399,9 +1399,14 @@ class AppSettingsService:
         *,
         actor_id: str,
     ) -> dict[str, Any]:
+        transaction_factory = None
+        if getattr(self._state_store, "storage_backend", "") == "postgres":
+            connection = self._state_store._connection
+            transaction_factory = connection.transaction
         provider = AppSettingsInputInvoiceUsagePaymentRulesProvider(
             state_store=self._state_store,
             audit_service=self._audit_service,
+            transaction_factory=transaction_factory,
         )
         try:
             updated = provider.update_payment_status_rules(

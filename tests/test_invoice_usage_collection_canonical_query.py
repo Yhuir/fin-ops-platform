@@ -293,8 +293,8 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         )
 
         sql = "\n".join(connection.transactions[0].statements)
-        self.assertEqual(sql.count("seller_name = any(%s::text[])"), 2)
-        self.assertEqual(sql.count("status_code = any(%s::text[])"), 1)
+        self.assertEqual(sql.count("seller_name = any(%s::text[])"), 3)
+        self.assertEqual(sql.count("status_code = any(%s::text[])"), 2)
 
     def test_output_collection_status_facets_exclude_only_their_own_filter(self) -> None:
         connection = RecordingConnection()
@@ -474,11 +474,12 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
                 "version": 2,
                 "rules": [
                     {
-                        "id": "pending_default",
+                        "id": "snapshot-no-oa",
+                        "statusCode": "waiting_payment",
                         "label": "快照待处理",
                         "priority": 7,
                         "enabled": True,
-                        "conditions": {"fallback": True},
+                        "conditions": {"hasOa": False},
                     }
                 ],
             },

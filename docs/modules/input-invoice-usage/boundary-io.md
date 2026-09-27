@@ -1,6 +1,6 @@
 # 进项发票使用情况模块边界与 I/O
 
-日期：2026-08-11
+日期：2026-09-28
 
 ## 模块化状态
 
@@ -44,14 +44,14 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| `/rows` | 页面 | 同一 snapshot 返回 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、`filterOptions`；`payment_status` 候选排除自身状态条件后聚合，并按规则字典补齐零数量状态，选择状态不得缩减候选词表 |
-
-`statistics` 只包含 canonical 进项发票总数、已完成/进行中 OA、支出/收入流水数量；同 ID OA 以已完成优先，旧付款、关系组和反提批次数量字段已删除。
+| `/rows` | 页面 | 同一 snapshot 返回 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、`filterOptions`；`payment_status` 候选排除自身状态条件后聚合，并按输出分类字典补齐零数量状态，选择状态不得缩减候选词表；所有 facet 数量按去重发票张数计算 |
 | relation/details | drawer | row/invoice/bank 按 canonical id 定向读取，不存在返回 404；OA 详情按 canonical OA id 返回 `detailAvailable=true|false`，不可用时保持 200 的既有 drawer 合同 |
 | OA 申请人列与详情 | frontend | 总览只显示申请人、申请类型、多 OA 数量和合计金额，不显示流程状态；原始 OA 详情只使用明确的来源 `detail_fields["流程状态"]`，不以内部 `workflowStatus` 或 linked/unlinked/unpaired 关系状态替代 |
 | export preview/download | export drawer | 复用 canonical filters/sort；20,000 行上限和原错误合同不变 |
-| OA reverse preview/command | OA reverse drawer | preview 只读 canonical snapshot，并分别返回 `permissions.canCreateDraft` 写能力与当前整组 `canCreateDraft` 业务可创建状态；前端对当前勾选集合只做同一非空销方的轻量可用性判断，提交前必须按精确发票集合重新 preview，并以新 preview 的权限、业务状态和 hash 为准。命令只写 canonical facts；候选金额展示与本地搜索都使用无千分位文本。OA payload 动态写目标申请人、当天日期、所选总额和唯一销方，申请事由只显示发票数/发票号码，内部 reverse batch ID 仅保留结构化字段。 |
+| OA reverse preview/command | OA reverse drawer | preview 只读 canonical snapshot，并分别返回 `permissions.canCreateDraft` 写能力与当前整组 `canCreateDraft` 业务可创建状态；前端对当前勾选集合只做同一非空销方的轻量可用性判断，提交前必须按精确发票集合重新 preview，并以新 preview 的权限、业务状态和 hash 为准。命令只写 canonical facts；候选金额展示与服务端搜索都使用无千分位文本。OA payload 动态写目标申请人、当天日期、所选总额和唯一销方，申请事由只显示发票数/发票号码，内部 reverse batch ID 仅保留结构化字段。 |
 | write result | 页面 | 不含 refresh target/barrier；页面成功后重跑当前 GET |
+
+`statistics` 只包含 canonical 进项发票总数、已完成/进行中 OA、支出/收入流水数量；同 ID OA 以已完成优先，旧付款、关系组和反提批次数量字段已删除。
 
 `/rows` 不输出 `read_model_status`、`source_versions`、`refresh_enqueued`、scope 或 polling 字段。
 
@@ -63,7 +63,7 @@
 - 支付状态的 self-excluding facet 在同一 SQL statement、同一 canonical CTE snapshot 内计算；禁止为保持完整候选额外请求 `/filter-options` 或增加数据库往返。
 - 服务端完成筛选、排序、分页；Python 只组装当前页有界 facts。
 - OA 详情使用一个独立只读 repeatable-read transaction 和一次有界 OA identity 查询；禁止加载页面 row group、发票或流水作为间接查找。
-- 只有 EXPLAIN 或真实慢查询证据支持时才增加索引；本模块不自行创建 migration。
+- 只有 EXPLAIN 或真实慢查询证据支持时才增加索引；查询优化不自行创建 migration；本次 0182 仅迁移现有规则配置，属于 settings 合同升级。
 - 关联成员读取银行用途时，将每条用途的 canonical ID 与 legacy ID 展开为去重别名，再做等值关联；同一用途的相同别名只展开一次，不跨用途吞掉同名别名。替代旧双身份 `OR/IN` 全组合比较，保留原匹配、金额和分页语义，不增加 SQL 往返或持久化状态。
 
 ## 搜索控件展示边界
@@ -152,3 +152,23 @@ SQL 分页/筛选/汇总和 Python 行数据/详情组装使用相同范围，�
 OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../../dev/source-record-details.md)。详情投影只消费明确来源值，移除内部状态、推断费用类型、默认币种、日期替代及无来源的聚合信息；不从列表摘要或旧详情回退。银行使用父交易身份和真实交易日期，拆分操作仍由银行 owner 管理。模块列表、业务计算、导出、关系写入与原权限不变；公共成本核对信息不按原始字段规则全局删除。
 
 文件范围包含共享 `services/source_record_details.py`、所属详情 query/assembler 与前端 API 映射；银行通用抽屉按 ID 读取 `/api/bank-transactions/{id}/source-detail`，复用既有有界银行读取。没有新增 read model、cache、worker、迁移或数据库备份。旧取值删除条件、测试矩阵及性能验证见集中合同；实际执行结果另记，不以本节表示验证通过。
+
+## 2026-09-28 发票张数、反提候选与可编辑规则
+
+- 主表增加 `relation_status` enum filter：`no_oa`、`oa_no_bank`、`oa_bank`，使用 active typed relation 成员判断关联是否存在；详情源记录暂不可用不能把已关联 OA 误判为反提候选。三个 facet 排除自身分类条件，同一只读快照统计 canonical invoice 身份，合计为当前其它条件下的“全部”。主表关系分组分页与发票张数分开表达。
+- 反提 `preview` 默认候选是全部未关联 OA 的单张进项发票，输入 `page/pageSize/keyword/bankRelation`，先筛选再分页；不隐式继承主表 filters/month。输出完整 `invoiceCount/totalWithTax`、`pagination`、`relationCounts(all/linked/unlinked)` 和当前页 `invoiceRows`。显式 `invoiceIds` 走完整精确身份读取，任一不存在、已关联或被占用均禁止部分提交。
+- canonical repository 通过同一 SQL builder 的 invoice-level 模式复用 active relations；无全量 Python 过滤、分页循环或逐票查询。金额比较事实随当前页 snapshot 进入 assembler，移除“任意单笔金额相等即可判整个组匹配”的旧路径。
+- 目标申请人经 OA credential owner 的 `applicant_options()` 只读端口提供 code/name，仅 enabled 且有凭据者可选；不暴露密码或用户名。不使用固定六人名单。规则申请人选项独立来自 canonical OA 的真实 applicant。
+- 未关联 OA 的已占用发票仍计入候选，行附带 `occupiedBatchId/occupiedBatchStatus` 并禁选。反提 repository 复用 relation owner 的成员锁及 invoice row lock，保存新 batch 前检查已有有效 OA 关系与其他未释放批次；复用现有状态和审计，不创建占用表或新状态。
+- 支付规则支持新增、删除、修改申请人/条件。输出 code 为 `paid/cash_turnover/offset/waiting_payment`；同类输出统一显示名，多个冲规则合并为一个筛选项。未命中为显式 `pending/未命中规则`，不是可编辑兜底规则。原因由命中条件生成，列表、预览与导出一致。
+- 规则 save 沿现有 app_settings family CAS，配置与审计同事务；读取不补回删除规则。Migration 0182 一次性转换旧配置（offset 合并、移除 pending_default/pendingDirections/手写原因），保留其它配置及 raw normalized 镜像。输出标签冲突则明确终止转换。旧程序不能消费新配置，发布失败应向前修复。
+- 前端使用 HeroUI 原生 Tabs/Select/ListBox/Checkbox/Input/Button/SearchField 和已有 AppDrawer；仅删除本页重复边框、阴影及过期样式，不改全局组件。
+- 文件范围增加 `0182_input_invoice_payment_rules_editable.sql`、OA credentials 的非敏感选项端口及 reverse repository 占用保护；无新 worker/read model/cache，无整库备份，不删除主数据库。
+
+## OA reverse 请求 claim 与恢复合同
+
+- 申请人选项由凭据 owner 返回启用且已配置的 `{code,name}`，不暴露账号密码或解密；无可用申请人可只读预览，禁止创建。候选服务端分页返回 `pagination`、`relationCounts` 和全量筛选摘要，精确选择必须全部有效。
+- 外部 OA 创建前，repository 在既有 batch 事务内持久化 `draft_request`、version 和审计。复用 formal relation 成员锁与发票行锁，提交时再查 active OA 和其他 batch 占用；仅银行关联不禁止反提。
+- `bankRelationStatus` 直接取 canonical typed relation 是否存在，禁止根据银行详情数组是否为空猜测关系状态。
+- staged-drafts 返回所有 draft/failed/created/检测占用，新增 `draftRequestState` 和 `canRelease`；业务能力与接口写权限共同控制动作。`requesting` 禁止释放，失败/超过 HTTP timeout 两倍后只显示 `unknown`，人工核实与 reason 后可释放；不自动重试、释放或删除远端 OA。版本校验阻止并发发送和迟到完成覆盖释放。
+- 真实 PostgreSQL 验证入口：`tests/test_oa_reverse_occupancy_postgres.py`，覆盖同票并发、同批外部调用一次、未知结果恢复、迟到结果拒绝、银行单独关联及事务回滚。状态只属于反提命令，不污染来源详情、普通列表或 read model/worker。

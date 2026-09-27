@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
@@ -40,8 +41,6 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "id": "cash_turnover_chen_xiuyun",
         "statusCode": "cash_turnover",
         "label": "现金往来",
-        "description": "陈秀云 OA + 流水 + 关联台完全匹配",
-        "reason": "自动识别陈秀云 OA，有流水且完全匹配",
         "priority": 1,
         "enabled": True,
         "conditions": {"hasOa": True, "hasBank": True, "fullyMatched": True, "applicantName": "陈秀云"},
@@ -50,38 +49,30 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "id": "paid_full_match",
         "statusCode": "paid",
         "label": "已付款",
-        "description": "有 OA、有流水，并且关联台完全匹配",
-        "reason": "自动识别有 OA 有流水且完全匹配",
         "priority": 2,
         "enabled": True,
         "conditions": {"hasOa": True, "hasBank": True, "fullyMatched": True},
     },
     {
         "id": "offset_zhou_jieying",
-        "statusCode": "offset_zhou_jieying",
+        "statusCode": "offset",
         "label": "冲",
-        "description": "周洁莹 OA、无流水，发票和 OA 金额匹配",
-        "reason": "自动识别周洁莹 OA，无流水且金额匹配",
         "priority": 3,
         "enabled": True,
         "conditions": {"hasOa": True, "hasBank": False, "applicantName": "周洁莹", "invoiceOaAmountMatched": True},
     },
     {
         "id": "offset_liu_shugang_no_pay",
-        "statusCode": "offset_liu_shugang_no_pay",
+        "statusCode": "offset",
         "label": "冲",
-        "description": "刘树刚不付 OA、无流水",
-        "reason": "自动识别刘树刚不付 OA，无流水",
         "priority": 4,
         "enabled": True,
         "conditions": {"hasOa": True, "hasBank": False, "applicantName": "刘树刚不付"},
     },
     {
         "id": "offset_wei_dailian",
-        "statusCode": "offset_wei_dailian",
+        "statusCode": "offset",
         "label": "冲",
-        "description": "韦代连 OA、无流水",
-        "reason": "自动识别韦代连 OA，无流水",
         "priority": 5,
         "enabled": True,
         "conditions": {"hasOa": True, "hasBank": False, "applicantName": "韦代连"},
@@ -89,48 +80,24 @@ DEFAULT_RULES: list[dict[str, Any]] = [
     {
         "id": "waiting_payment",
         "statusCode": "waiting_payment",
-        "label": "待付款",
-        "description": "有 OA、无流水",
-        "reason": "自动识别有 OA 无流水",
+        "label": "未关联流水",
         "priority": 6,
         "enabled": True,
         "conditions": {"hasOa": True, "hasBank": False},
     },
-    {
-        "id": "pending_default",
-        "statusCode": "pending",
-        "label": "待处理",
-        "description": "规则不能自动闭环",
-        "reason": "规则不能自动闭环",
-        "priority": 7,
-        "enabled": True,
-        "conditions": {"fallback": True},
-    },
 ]
 
-DEFAULT_PENDING_DIRECTIONS: list[dict[str, str]] = [
-    {"code": "pending", "label": "待处理"},
-    {"code": "wei_dailian_batch_reverse", "label": "韦代连批量反提oa"},
-    {"code": "chen_xiuyun_batch_reverse", "label": "陈秀云批量反提oa"},
-    {"code": "zhou_jieying_batch_reverse", "label": "周洁莹批量反提oa"},
-    {"code": "liu_shugang_pay_batch_reverse", "label": "刘树刚付批量反提oa"},
-    {"code": "liu_shugang_no_pay_batch_reverse", "label": "刘树刚不付批量反提oa"},
-    {"code": "liu_hanjing_batch_reverse", "label": "刘涵静批量反提oa"},
-]
-
-_DEFAULT_RULES_BY_ID = {str(rule["id"]): rule for rule in DEFAULT_RULES}
-_DEFAULT_PENDING_CODES = {str(item["code"]) for item in DEFAULT_PENDING_DIRECTIONS}
-_SUPPORTED_APPLICANTS = {
-    str(rule.get("conditions", {}).get("applicantName"))
-    for rule in DEFAULT_RULES
-    if str(rule.get("conditions", {}).get("applicantName") or "").strip()
-}
+OUTPUT_STATUS_CODES = frozenset({"cash_turnover", "paid", "offset", "waiting_payment"})
 
 
 class AppSettingsInputInvoiceUsagePaymentRulesProvider:
-    def __init__(self, *, state_store: Any | None, audit_service: Any | None = None) -> None:
+    def __init__(
+        self, *, state_store: Any | None, audit_service: Any | None = None,
+        transaction_factory: Callable[[], Any] | None = None,
+    ) -> None:
         self._state_store = state_store
         self._audit_service = audit_service
+        self._transaction_factory = transaction_factory
 
     def payment_status_rules_payload(self, *, can_save: bool = True) -> dict[str, Any]:
         return public_payment_status_rules_payload(
@@ -156,8 +123,20 @@ class AppSettingsInputInvoiceUsagePaymentRulesProvider:
                 "input_invoice_usage_payment_rules_read_only",
                 "Input invoice usage payment status rules are read-only in this runtime.",
             )
+        if self._transaction_factory is not None:
+            with self._transaction_factory() as transaction:
+                return self._update_payment_status_rules(payload, actor_id=actor_id, transaction=transaction)
+        return self._update_payment_status_rules(payload, actor_id=actor_id)
+
+    def _update_payment_status_rules(
+        self, payload: dict[str, Any] | None, *, actor_id: str, transaction: Any | None = None,
+    ) -> dict[str, Any]:
         request = payload if isinstance(payload, dict) else {}
-        persisted_payload = self._load_app_settings()
+        if transaction is not None:
+            from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
+            persisted_payload = PostgresOpsTaxEtcRepository(transaction).load_app_settings_for_update()
+        else:
+            persisted_payload = self._load_app_settings()
         current = normalize_payment_status_rules_settings(persisted_payload.get(SETTINGS_KEY))
         idempotency_key = _required_text(
             request.get("idempotencyKey", request.get("idempotency_key")),
@@ -193,7 +172,6 @@ class AppSettingsInputInvoiceUsagePaymentRulesProvider:
         next_settings = {
             "version": int(current["version"]) + 1,
             "rules": desired["rules"],
-            "pendingDirections": desired["pendingDirections"],
             "idempotencyRecords": idempotency_records,
         }
         response = public_payment_status_rules_payload(next_settings, read_only=False, can_save=True)
@@ -205,7 +183,25 @@ class AppSettingsInputInvoiceUsagePaymentRulesProvider:
         )
         next_payload = dict(persisted_payload)
         next_payload[SETTINGS_KEY] = next_settings
-        self._state_store.save_app_settings(next_payload)
+        if transaction is not None:
+            persisted = self._state_store.save_app_settings_for_versioned_family_in_transaction(
+                next_payload, family_key=SETTINGS_KEY, expected_version=current["version"], transaction=transaction,
+            )
+            if persisted is None:
+                raise InputInvoiceUsagePaymentRulesValidationError(
+                    "input_invoice_usage_payment_rules_version_conflict", "Payment rule version conflict.",
+                )
+            from fin_ops_platform.services.postgres_repositories.operations_audit import (
+                PostgresOperationsAuditRepository,
+            )
+            PostgresOperationsAuditRepository(transaction).append_operation_event({
+                "event_type": "operation.completed", "object_type": "app_settings", "object_id": SETTINGS_KEY,
+                "actor_id": actor_id, "action": "input_invoice_usage_payment_status_rules_updated",
+                "page_key": "input-invoice-usage", "operation_location": "进项发票使用情况/支付规则",
+                "scope": "all", "payload": {"before": current, "after": next_settings},
+            })
+        else:
+            self._state_store.save_app_settings(next_payload)
         event = {
             "scope_type": "input_invoice_usage",
             "scope_key": "all",
@@ -213,7 +209,8 @@ class AppSettingsInputInvoiceUsagePaymentRulesProvider:
             "old_version": int(current["version"]),
             "new_version": int(next_settings["version"]),
         }
-        self._record_audit(actor_id=actor_id, event=event, before=current, after=next_settings)
+        if transaction is None:
+            self._record_audit(actor_id=actor_id, event=event, before=current, after=next_settings)
         return response
 
     def _current_settings(self) -> dict[str, Any]:
@@ -222,11 +219,12 @@ class AppSettingsInputInvoiceUsagePaymentRulesProvider:
     def _load_app_settings(self) -> dict[str, Any]:
         if self._state_store is None:
             return {}
-        load = getattr(self._state_store, "load_app_settings", None)
-        if not callable(load):
-            return {}
-        payload = load()
-        return payload if isinstance(payload, dict) else {}
+        payload = self._state_store.load_app_settings()
+        if not isinstance(payload, dict):
+            raise InputInvoiceUsagePaymentRulesValidationError(
+                "invalid_input_invoice_usage_payment_rules_settings", "Application settings must be an object.",
+            )
+        return payload
 
     def _record_audit(
         self,
@@ -250,7 +248,6 @@ class AppSettingsInputInvoiceUsagePaymentRulesProvider:
                 "old_version": int(event["old_version"]),
                 "new_version": int(event["new_version"]),
                 "changed_rule_ids": _changed_rule_ids(before, after),
-                "pending_directions_changed": before.get("pendingDirections") != after.get("pendingDirections"),
             },
         )
 
@@ -274,59 +271,42 @@ class PostgresInputInvoiceUsagePaymentRulesStateStore:
 
 
 def normalize_payment_status_rules_settings(value: Any) -> dict[str, Any]:
-    raw = value if isinstance(value, dict) else {}
-    version = _optional_positive_int(raw.get("version"), DEFAULT_VERSION)
-    raw_rules = raw.get("rules") if isinstance(raw.get("rules"), list) else DEFAULT_RULES
-    raw_pending = raw.get("pendingDirections") if isinstance(raw.get("pendingDirections"), list) else raw.get("pending_directions")
-    if not isinstance(raw_pending, list):
-        raw_pending = DEFAULT_PENDING_DIRECTIONS
-    rules = _normalize_rules(
-        raw_rules,
-        require_complete=False,
-        exact_conditions=_has_complete_rule_set(raw_rules),
-    )
-    pending_directions = _normalize_pending_directions(raw_pending, require_complete=False)
+    # Absence is the initial configuration, not a recovery path for malformed settings.
+    if value is None or value == {}:
+        return {"version": DEFAULT_VERSION, "rules": _normalize_rules(DEFAULT_RULES), "idempotencyRecords": {}}
+    if not isinstance(value, dict):
+        raise InputInvoiceUsagePaymentRulesValidationError(
+            "invalid_input_invoice_usage_payment_rules_settings", "Payment rule settings must be an object.",
+        )
+    if "pendingDirections" in value or "pending_directions" in value:
+        raise InputInvoiceUsagePaymentRulesValidationError(
+            "input_invoice_usage_payment_rules_migration_required", "Payment rule configuration migration is required.",
+        )
     return {
-        "version": version,
-        "rules": rules,
-        "pendingDirections": pending_directions,
-        "idempotencyRecords": _normalize_idempotency_records(raw.get("idempotencyRecords")),
+        "version": _required_int(value.get("version"), "version", "invalid_input_invoice_usage_payment_rules_version"),
+        "rules": _normalize_rules(value.get("rules")),
+        "idempotencyRecords": _normalize_idempotency_records(value.get("idempotencyRecords")),
     }
 
 
 def normalize_payment_status_rules_update(
-    payload: dict[str, Any],
-    *,
-    current_settings: dict[str, Any],
+    payload: dict[str, Any], *, current_settings: dict[str, Any],
 ) -> dict[str, Any]:
-    current_rules_by_id = {
-        str(rule.get("id")): rule
-        for rule in current_settings.get("rules", [])
-        if isinstance(rule, dict) and str(rule.get("id") or "").strip()
-    }
-    return {
-        "rules": _normalize_rules(
-            payload.get("rules"),
-            require_complete=True,
-            current_rules_by_id=current_rules_by_id,
-            exact_conditions=True,
-        ),
-        "pendingDirections": _normalize_pending_directions(payload.get("pendingDirections"), require_complete=True),
-    }
+    return {"rules": _normalize_rules(payload.get("rules"))}
 
 
 def public_payment_status_rules_payload(
-    settings: dict[str, Any],
-    *,
-    read_only: bool,
-    can_save: bool,
+    settings: dict[str, Any], *, read_only: bool, can_save: bool,
 ) -> dict[str, Any]:
     normalized = normalize_payment_status_rules_settings(settings)
     return {
         "version": int(normalized["version"]),
         "readOnly": bool(read_only),
-        "rules": deepcopy(normalized["rules"]),
-        "pendingDirections": deepcopy(normalized["pendingDirections"]),
+        "rules": [
+            {**deepcopy(rule), "description": condition_description(rule["conditions"]),
+             "reason": condition_description(rule["conditions"])}
+            for rule in normalized["rules"]
+        ],
         "permissions": {"canSave": bool(can_save), "can_save": bool(can_save)},
         "sourceMetadata": {
             "settingsKey": SETTINGS_KEY,
@@ -338,211 +318,107 @@ def public_payment_status_rules_payload(
 
 def evaluate_payment_status(settings: dict[str, Any], context: PaymentStatusEvaluationContext) -> dict[str, str]:
     normalized = normalize_payment_status_rules_settings(settings)
-    fallback: dict[str, Any] | None = None
-    for rule in sorted(normalized["rules"], key=lambda item: (int(item["priority"]), str(item["id"]))):
-        if not bool(rule.get("enabled", True)):
-            continue
-        conditions = rule.get("conditions") if isinstance(rule.get("conditions"), dict) else {}
-        if conditions.get("fallback") is True:
-            fallback = rule
-            continue
-        if _conditions_match(conditions, context):
+    for rule in normalized["rules"]:
+        if context.has_oa and context.has_bank and not context.fully_matched:
+            break
+        if rule["enabled"] and _conditions_match(rule["conditions"], context):
             return _status_payload(rule)
-    return _status_payload(fallback or _DEFAULT_RULES_BY_ID["pending_default"])
+    return {"code": "pending", "label": "未命中规则", "reason": "未命中已启用的支付规则", "matchedRuleId": "", "severity": "warning"}
 
 
-def _normalize_rules(
-    value: Any,
-    *,
-    require_complete: bool,
-    current_rules_by_id: dict[str, dict[str, Any]] | None = None,
-    exact_conditions: bool = False,
-) -> list[dict[str, Any]]:
+def _normalize_rules(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
-        if require_complete:
-            raise InputInvoiceUsagePaymentRulesValidationError(
-                "input_invoice_usage_payment_rules_required",
-                "Payment status rules must be a complete rules array.",
-            )
-        value = DEFAULT_RULES
+        raise InputInvoiceUsagePaymentRulesValidationError(
+            "input_invoice_usage_payment_rules_required", "Payment status rules must be an array.",
+        )
     normalized: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     seen_priorities: set[int] = set()
+    labels_by_code: dict[str, str] = {}
     for item in value:
         if not isinstance(item, dict):
             raise InputInvoiceUsagePaymentRulesValidationError(
-                "invalid_input_invoice_usage_payment_rule",
-                "Each payment status rule must be an object.",
+                "invalid_input_invoice_usage_payment_rule", "Each payment status rule must be an object.",
             )
-        rule_id = str(item.get("id") or "").strip()
-        default = _DEFAULT_RULES_BY_ID.get(rule_id)
-        if default is None:
-            raise InputInvoiceUsagePaymentRulesValidationError(
-                "unknown_input_invoice_usage_payment_rule",
-                f"Unsupported payment status rule id: {rule_id}",
-                details={"ruleId": rule_id},
-            )
+        rule_id = _required_text(item.get("id"), "id", "invalid_input_invoice_usage_payment_rule_id")
         if rule_id in seen_ids:
             raise InputInvoiceUsagePaymentRulesValidationError(
-                "duplicate_input_invoice_usage_payment_rule",
-                f"Duplicate payment status rule id: {rule_id}",
-                details={"ruleId": rule_id},
+                "duplicate_input_invoice_usage_payment_rule", f"Duplicate payment status rule id: {rule_id}",
             )
         seen_ids.add(rule_id)
-        priority = _required_int(item.get("priority", default["priority"]), "priority", "invalid_input_invoice_usage_payment_rule_priority")
+        priority = _required_int(item.get("priority"), "priority", "invalid_input_invoice_usage_payment_rule_priority")
         if priority in seen_priorities:
             raise InputInvoiceUsagePaymentRulesValidationError(
-                "duplicate_input_invoice_usage_payment_rule_priority",
-                f"Duplicate payment status rule priority: {priority}",
-                details={"priority": priority},
+                "duplicate_input_invoice_usage_payment_rule_priority", f"Duplicate payment status rule priority: {priority}",
             )
         seen_priorities.add(priority)
-        current_rule = (current_rules_by_id or {}).get(rule_id) if exact_conditions else None
-        if exact_conditions and "conditions" not in item and isinstance(current_rule, dict):
-            conditions_value = current_rule.get("conditions", default.get("conditions"))
+        code = item.get("statusCode")
+        if not isinstance(code, str) or code not in OUTPUT_STATUS_CODES:
+            raise InputInvoiceUsagePaymentRulesValidationError(
+                "invalid_input_invoice_usage_payment_rule_status", "Unsupported payment status output.",
+            )
+        enabled = item.get("enabled")
+        if type(enabled) is not bool:
+            raise InputInvoiceUsagePaymentRulesValidationError(
+                "invalid_input_invoice_usage_payment_rule_enabled", "enabled must be a boolean.",
+            )
+        label = _required_text(item.get("label"), "label", "invalid_input_invoice_usage_payment_rule_label")
+        if code in labels_by_code and labels_by_code[code] != label:
+            raise InputInvoiceUsagePaymentRulesValidationError(
+                "conflicting_input_invoice_usage_payment_rule_labels", "Rules with the same output class must use the same display label.",
+            )
+        labels_by_code[code] = label
+        normalized.append({
+            "id": rule_id, "statusCode": code, "label": label, "priority": priority,
+            "enabled": enabled, "conditions": _normalize_conditions(rule_id, item.get("conditions")),
+        })
+    return sorted(normalized, key=lambda item: (item["priority"], item["id"]))
+
+
+def _normalize_conditions(rule_id: str, value: Any) -> dict[str, Any]:
+    bool_keys = ("hasOa", "hasBank", "fullyMatched", "invoiceOaAmountMatched")
+    if not isinstance(value, dict) or not value:
+        raise InputInvoiceUsagePaymentRulesValidationError(
+            "empty_input_invoice_usage_payment_rule_conditions", "Payment status rule conditions cannot be empty.",
+        )
+    if set(value) - {*bool_keys, "applicantName"}:
+        raise InputInvoiceUsagePaymentRulesValidationError(
+            "unsupported_input_invoice_usage_payment_rule_constraint", "Unsupported payment rule condition.",
+        )
+    normalized: dict[str, Any] = {}
+    for key, item in value.items():
+        if key in bool_keys:
+            if type(item) is not bool:
+                raise InputInvoiceUsagePaymentRulesValidationError(
+                    "invalid_input_invoice_usage_payment_rule_condition", f"{key} must be a boolean.",
+                )
+            normalized[key] = item
         else:
-            conditions_value = item.get("conditions", default.get("conditions"))
-        conditions = _normalize_conditions(rule_id, conditions_value, exact=exact_conditions)
-        normalized.append(
-            {
-                "id": rule_id,
-                "statusCode": str(default["statusCode"]),
-                "label": _required_text(item.get("label", default["label"]), "label", "invalid_input_invoice_usage_payment_rule_label"),
-                "description": _required_text(
-                    item.get("description", default["description"]),
-                    "description",
-                    "invalid_input_invoice_usage_payment_rule_description",
-                ),
-                "reason": str(item.get("reason") or default["reason"]).strip() or str(default["reason"]),
-                "priority": priority,
-                "enabled": bool(item.get("enabled", default.get("enabled", True))),
-                "conditions": conditions,
-            }
-        )
-    if require_complete and seen_ids != set(_DEFAULT_RULES_BY_ID):
-        missing = sorted(set(_DEFAULT_RULES_BY_ID).difference(seen_ids))
+            normalized[key] = _required_text(item, key, "invalid_input_invoice_usage_payment_rule_applicant")
+    impossible = (
+        (normalized.get("hasOa") is False and (normalized.get("applicantName") or normalized.get("invoiceOaAmountMatched") is True))
+        or (normalized.get("fullyMatched") is True and (
+            normalized.get("hasOa") is False or normalized.get("hasBank") is False
+            or normalized.get("invoiceOaAmountMatched") is False
+        ))
+    )
+    if impossible:
         raise InputInvoiceUsagePaymentRulesValidationError(
-            "incomplete_input_invoice_usage_payment_rules",
-            "Payment status rules update must include every supported rule.",
-            details={"missingRuleIds": missing},
-        )
-    if not require_complete:
-        existing = {str(rule["id"]) for rule in normalized}
-        for default in DEFAULT_RULES:
-            if str(default["id"]) not in existing:
-                normalized.append(deepcopy(default))
-    return sorted(normalized, key=lambda item: (int(item["priority"]), str(item["id"])))
-
-
-def _has_complete_rule_set(value: Any) -> bool:
-    if not isinstance(value, list):
-        return False
-    rule_ids = {
-        str(item.get("id") or "").strip()
-        for item in value
-        if isinstance(item, dict) and str(item.get("id") or "").strip()
-    }
-    return rule_ids == set(_DEFAULT_RULES_BY_ID)
-
-
-def _normalize_conditions(rule_id: str, value: Any, *, exact: bool = False) -> dict[str, Any]:
-    default_conditions = deepcopy(_DEFAULT_RULES_BY_ID[rule_id].get("conditions") or {})
-    conditions = value if isinstance(value, dict) else default_conditions
-    applicant = str(conditions.get("applicantName") or "").strip()
-    default_applicant = str(default_conditions.get("applicantName") or "").strip()
-    if default_applicant:
-        if applicant and applicant != default_applicant:
-            raise InputInvoiceUsagePaymentRulesValidationError(
-                "unsupported_input_invoice_usage_payment_rule_constraint",
-                "Unsupported applicant constraint for input invoice usage payment rule.",
-                details={"ruleId": rule_id, "applicantName": applicant},
-            )
-        if exact and not applicant:
-            raise InputInvoiceUsagePaymentRulesValidationError(
-                "unsupported_input_invoice_usage_payment_rule_constraint",
-                "Unsupported applicant constraint for input invoice usage payment rule.",
-                details={"ruleId": rule_id, "applicantName": applicant},
-            )
-    elif applicant:
-        raise InputInvoiceUsagePaymentRulesValidationError(
-            "unsupported_input_invoice_usage_payment_rule_constraint",
-            "Unsupported applicant constraint for input invoice usage payment rule.",
-            details={"ruleId": rule_id, "applicantName": applicant},
-        )
-    if conditions.get("fallback") is True and default_conditions.get("fallback") is not True:
-        raise InputInvoiceUsagePaymentRulesValidationError(
-            "unsupported_input_invoice_usage_payment_rule_constraint",
-            "Only the pending default rule can be configured as fallback.",
-            details={"ruleId": rule_id},
-        )
-    normalized = {} if exact else deepcopy(default_conditions)
-    for key in ("hasOa", "hasBank", "fullyMatched", "invoiceOaAmountMatched", "fallback"):
-        if key in conditions:
-            normalized[key] = bool(conditions[key])
-    if default_conditions.get("fallback") is True:
-        normalized["fallback"] = True
-    if default_applicant:
-        normalized["applicantName"] = default_applicant
-    if normalized.get("fallback") is not True and not any(
-        key in normalized
-        for key in ("hasOa", "hasBank", "fullyMatched", "invoiceOaAmountMatched", "applicantName")
-    ):
-        raise InputInvoiceUsagePaymentRulesValidationError(
-            "empty_input_invoice_usage_payment_rule_conditions",
-            "Payment status rule conditions cannot be empty.",
+            "contradictory_input_invoice_usage_payment_rule_conditions", "Payment rule conditions contradict each other.",
             details={"ruleId": rule_id},
         )
     return normalized
 
 
-def _normalize_pending_directions(value: Any, *, require_complete: bool) -> list[dict[str, str]]:
-    if not isinstance(value, list):
-        if require_complete:
-            raise InputInvoiceUsagePaymentRulesValidationError(
-                "input_invoice_usage_pending_directions_required",
-                "Pending directions must be a complete array.",
-            )
-        value = DEFAULT_PENDING_DIRECTIONS
-    normalized: list[dict[str, str]] = []
-    seen_codes: set[str] = set()
-    for item in value:
-        if not isinstance(item, dict):
-            raise InputInvoiceUsagePaymentRulesValidationError(
-                "invalid_input_invoice_usage_pending_direction",
-                "Each pending direction must be an object.",
-            )
-        code = str(item.get("code") or "").strip()
-        if code not in _DEFAULT_PENDING_CODES:
-            raise InputInvoiceUsagePaymentRulesValidationError(
-                "unknown_input_invoice_usage_pending_direction",
-                f"Unsupported pending direction code: {code}",
-                details={"code": code},
-            )
-        if code in seen_codes:
-            raise InputInvoiceUsagePaymentRulesValidationError(
-                "duplicate_input_invoice_usage_pending_direction",
-                f"Duplicate pending direction code: {code}",
-                details={"code": code},
-            )
-        seen_codes.add(code)
-        normalized.append(
-            {
-                "code": code,
-                "label": _required_text(item.get("label"), "label", "invalid_input_invoice_usage_pending_direction_label"),
-            }
-        )
-    if require_complete and seen_codes != _DEFAULT_PENDING_CODES:
-        raise InputInvoiceUsagePaymentRulesValidationError(
-            "incomplete_input_invoice_usage_pending_directions",
-            "Pending directions update must include every supported direction.",
-            details={"missingCodes": sorted(_DEFAULT_PENDING_CODES.difference(seen_codes))},
-        )
-    if not require_complete:
-        for default in DEFAULT_PENDING_DIRECTIONS:
-            if str(default["code"]) not in seen_codes:
-                normalized.append(dict(default))
-    order = {str(item["code"]): index for index, item in enumerate(DEFAULT_PENDING_DIRECTIONS)}
-    return sorted(normalized, key=lambda item: order.get(str(item["code"]), 999))
+def condition_description(conditions: dict[str, Any]) -> str:
+    labels = {
+        "hasOa": ("有 OA", "无 OA"), "hasBank": ("有流水", "无流水"),
+        "fullyMatched": ("完全匹配", "未完全匹配"),
+        "invoiceOaAmountMatched": ("发票与 OA 金额匹配", "发票与 OA 金额不匹配"),
+    }
+    parts = [f"申请人={conditions['applicantName']}"] if "applicantName" in conditions else []
+    parts.extend(pair[0] if conditions[key] else pair[1] for key, pair in labels.items() if key in conditions)
+    return "；".join(parts)
 
 
 def _conditions_match(conditions: dict[str, Any], context: PaymentStatusEvaluationContext) -> bool:
@@ -562,24 +438,25 @@ def _conditions_match(conditions: dict[str, Any], context: PaymentStatusEvaluati
 
 
 def _status_payload(rule: dict[str, Any]) -> dict[str, str]:
-    code = str(rule.get("statusCode") or "pending")
     return {
-        "code": code,
-        "label": str(rule.get("label") or "待处理"),
-        "reason": str(rule.get("reason") or rule.get("description") or "规则不能自动闭环"),
-        "matchedRuleId": str(rule.get("id") or "pending_default"),
-        "severity": "warning" if code == "pending" else "success",
+        "code": rule["statusCode"], "label": rule["label"],
+        "reason": condition_description(rule["conditions"]),
+        "matchedRuleId": rule["id"], "severity": "success",
     }
 
 
 def _required_text(value: Any, field: str, error_code: str) -> str:
-    normalized = str(value or "").strip()
+    if not isinstance(value, str):
+        raise InputInvoiceUsagePaymentRulesValidationError(error_code, f"{field} must be text.")
+    normalized = value.strip()
     if not normalized:
         raise InputInvoiceUsagePaymentRulesValidationError(error_code, f"{field} is required.")
     return normalized
 
 
 def _required_int(value: Any, field: str, error_code: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise InputInvoiceUsagePaymentRulesValidationError(error_code, f"{field} must be an integer.")
     try:
         number = int(value)
     except (TypeError, ValueError) as exc:
@@ -587,14 +464,6 @@ def _required_int(value: Any, field: str, error_code: str) -> int:
     if number < 1:
         raise InputInvoiceUsagePaymentRulesValidationError(error_code, f"{field} must be a positive integer.")
     return number
-
-
-def _optional_positive_int(value: Any, default: int) -> int:
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
-        return default
-    return number if number > 0 else default
 
 
 def _fingerprint(payload: dict[str, Any]) -> str:
@@ -632,12 +501,6 @@ def _append_idempotency_record(
 
 
 def _changed_rule_ids(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
-    before_rules = {str(rule.get("id")): rule for rule in list(before.get("rules") or []) if isinstance(rule, dict)}
-    changed: list[str] = []
-    for rule in list(after.get("rules") or []):
-        if not isinstance(rule, dict):
-            continue
-        rule_id = str(rule.get("id"))
-        if before_rules.get(rule_id) != rule:
-            changed.append(rule_id)
-    return changed
+    before_rules = {rule["id"]: rule for rule in before["rules"]}
+    after_rules = {rule["id"]: rule for rule in after["rules"]}
+    return sorted(rule_id for rule_id in before_rules.keys() | after_rules.keys() if before_rules.get(rule_id) != after_rules.get(rule_id))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from contextlib import contextmanager
 from datetime import UTC, datetime
 
 from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import (
@@ -20,6 +21,10 @@ class RecordingConnection:
         self.fetch_one_row: dict[str, object] | None = None
         self.fetch_all_rows: list[dict[str, object]] = []
         self.executions: list[tuple[str, tuple[object, ...]]] = []
+
+    @contextmanager
+    def transaction(self):
+        yield self
 
     def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
         self.fetches.append((" ".join(sql.split()), params))

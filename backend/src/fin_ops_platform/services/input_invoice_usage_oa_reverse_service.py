@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 from hashlib import sha256
@@ -11,9 +11,8 @@ from threading import RLock
 from typing import Any, Callable, Protocol
 from uuid import uuid4
 
-from fin_ops_platform.services.etc_service import EtcOAFormFieldMapping
+from fin_ops_platform.services.etc_service import EtcOAFormFieldMapping, EtcOAHttpClientSettings
 from fin_ops_platform.services.input_invoice_usage_service import (
-    TARGET_APPLICANTS,
     InputInvoiceUsageError,
 )
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
@@ -61,6 +60,12 @@ MANUAL_FALLBACK_STATUSES = {
     InputInvoiceUsageOaReverseStatus.OA_DETECTION_CONFLICT.value,
     InputInvoiceUsageOaReverseStatus.OA_DETECTION_UNAVAILABLE.value,
 }
+
+
+RELEASED_BATCH_STATUSES = frozenset({
+    InputInvoiceUsageOaReverseStatus.NOT_SUBMITTED.value,
+    InputInvoiceUsageOaReverseStatus.MANUALLY_MARKED_NOT_SUBMITTED.value,
+})
 
 
 class InputInvoiceUsageOaReverseServiceError(RuntimeError):
@@ -255,6 +260,12 @@ class InputInvoiceUsageOaReverseBatchRepository(Protocol):
     def list_batches_by_status(self, statuses: list[str], *, limit: int = 50) -> list[InputInvoiceUsageOaReverseBatch]:
         raise NotImplementedError
 
+    def invoice_occupancy(self, invoice_ids: list[str]) -> dict[str, dict[str, str]]:
+        raise NotImplementedError
+
+    def claim_draft_creation(self, batch: InputInvoiceUsageOaReverseBatch, *, expected_version: int) -> None:
+        raise NotImplementedError
+
     def save_batch(self, batch: InputInvoiceUsageOaReverseBatch) -> None:
         raise NotImplementedError
 
@@ -292,8 +303,29 @@ class InMemoryInputInvoiceUsageOaReverseBatchRepository:
         batches.sort(key=lambda batch: batch.updated_at, reverse=True)
         return batches[: max(int(limit or 50), 1)]
 
+    def invoice_occupancy(self, invoice_ids: list[str]) -> dict[str, dict[str, str]]:
+        requested = set(invoice_ids)
+        with self._lock:
+            return {
+                invoice_id: {"occupiedBatchId": batch.batch_id, "occupiedBatchStatus": batch.status}
+                for batch in self._batches.values() if batch.status not in RELEASED_BATCH_STATUSES
+                for invoice_id in batch.invoice_ids if invoice_id in requested
+            }
+
+    def claim_draft_creation(self, batch: InputInvoiceUsageOaReverseBatch, *, expected_version: int) -> None:
+        with self._lock:
+            current = self._batches.get(batch.batch_id)
+            _assert_draft_claim_available(current, expected_version)
+            self.save_batch(batch)
+
     def save_batch(self, batch: InputInvoiceUsageOaReverseBatch) -> None:
         with self._lock:
+            _assert_draft_claim_write(self._batches.get(batch.batch_id), batch)
+            if batch.status not in RELEASED_BATCH_STATUSES:
+                occupied = self.invoice_occupancy(batch.invoice_ids)
+                if any(item["occupiedBatchId"] != batch.batch_id for item in occupied.values()):
+                    raise InputInvoiceUsageOaReverseInvalidTransitionError(
+                        "发票已有反提 OA 批次，请处理现有批次。", code="invoice_oa_reverse_occupied")
             self._batches[batch.batch_id] = _copy_batch(batch)
 
 
@@ -302,6 +334,7 @@ class InputInvoiceUsageOaReverseService:
         self,
         *,
         repository: InputInvoiceUsageOaReverseBatchRepository,
+        applicant_options_provider: Callable[[], list[dict[str, str]]],
         oa_client: InputInvoiceUsageOaDraftClient | None = None,
         evidence_provider: InputInvoiceUsageOaEvidenceProvider | None = None,
         relation_writer: Callable[[InputInvoiceUsageOaReverseBatch, InputInvoiceUsageOaEvidence], None] | None = None,
@@ -311,6 +344,7 @@ class InputInvoiceUsageOaReverseService:
         oa_prefill_provider: Callable[[], dict[str, object]] | None = None,
     ) -> None:
         self._repository = repository
+        self._applicant_options_provider = applicant_options_provider
         self._oa_client = oa_client or NotConfiguredInputInvoiceUsageOaDraftClient()
         self._evidence_provider = evidence_provider
         self._relation_writer = relation_writer
@@ -323,8 +357,11 @@ class InputInvoiceUsageOaReverseService:
 
     def preview(self, request: dict[str, Any] | None, *, can_create_draft: bool = False) -> dict[str, object]:
         payload = dict(request or {})
-        target_code, target_name = self._resolve_target_applicant(payload.get("targetApplicantCode"))
-        rows, missing_ids = self._rows_for_preview_payload(payload)
+        applicants = self._applicant_options_provider()
+        target_code, target_name = self._resolve_target_applicant(payload.get("targetApplicantCode"), applicants)
+        rows, missing_ids, page_payload = self._rows_for_preview_payload(payload)
+        explicit = "invoiceIds" in payload
+        occupancy = self._repository.invoice_occupancy([str(row["invoiceId"]) for row in rows])
 
         candidate_rows: list[dict[str, object]] = []
         rejected: list[dict[str, object]] = []
@@ -332,20 +369,25 @@ class InputInvoiceUsageOaReverseService:
             rejected.append({"invoiceId": invoice_id, "reasonCode": "invoice_not_found", "reason": "发票不存在"})
         for row in rows:
             rejection = self._candidate_rejection(row)
+            occupied = occupancy.get(str(row["invoiceId"]))
+            if occupied and explicit:
+                rejection = {"reasonCode": "invoice_oa_reverse_occupied", "reason": "发票已有反提 OA 批次，请处理现有批次。", **occupied}
             if rejection is not None:
                 rejected.append({**self._invoice_display_row(row), **rejection})
                 continue
             candidate_rows.append(row)
 
-        display_rows = [self._invoice_display_row(row) for row in candidate_rows]
+        display_rows = [{**self._invoice_display_row(row), **occupancy.get(str(row["invoiceId"]), {})} for row in candidate_rows]
         total = sum((_decimal(row.get("totalWithTax")) for row in display_rows), start=ZERO)
         candidate_ids = [str(row["invoiceId"]) for row in display_rows]
-        source = str(payload.get("source") or ("explicitSelection" if payload.get("invoiceIds") else "currentFilters")).strip()
+        source = str(payload.get("source") or ("explicitSelection" if explicit else "candidates")).strip()
         fingerprint = {
             "candidateInvoiceIds": candidate_ids,
             "targetApplicantCode": target_code,
             "totalWithTax": _money(total),
             "invoiceRows": display_rows,
+            "requestedInvoiceIds": _text_list(payload.get("invoiceIds")),
+            "rejectedInvoices": rejected,
         }
         preview_hash = _stable_hash(fingerprint)
         preview_id = f"oa_reverse_preview_{preview_hash[:16]}"
@@ -363,16 +405,30 @@ class InputInvoiceUsageOaReverseService:
         warnings = [] if payee_resolvable or not candidate_ids else [
             "所选发票必须属于同一销方且销方名称不能为空，才能生成 OA 草稿。"
         ]
-        can_submit = bool(can_create_draft and candidate_ids and payee_resolvable)
+        if not applicants:
+            warnings.append("暂无已配置凭据的 OA 申请人，请先配置申请人凭据。")
+        if rejected:
+            warnings.append("所选发票包含不可创建项，请重新选择后预览。")
+        can_submit = bool(can_create_draft and explicit and target_code and candidate_ids and payee_resolvable and not rejected)
+        invoice_count = len(candidate_ids) if explicit else int(page_payload["summary"]["invoiceCount"])
+        display_total = _money(total) if explicit else str(page_payload["summary"]["totalWithTax"])
+        pagination = ({"page": 1, "pageSize": len(rows), "total": len(rows)} if explicit else page_payload["pagination"])
+        relation_counts = page_payload.get("relationCounts") if not explicit else {
+            "all": len(rows),
+            "linked": sum(row["bankRelationStatus"] == "linked" for row in rows),
+            "unlinked": sum(row["bankRelationStatus"] == "unlinked" for row in rows),
+        }
         return {
             "previewId": preview_id,
             "previewHash": preview_hash,
             "source": source,
             "targetApplicantCode": target_code,
             "targetApplicantName": target_name,
-            "targetApplicants": self._target_applicant_options(),
-            "invoiceCount": len(candidate_ids),
-            "totalWithTax": _money(total),
+            "targetApplicants": applicants,
+            "invoiceCount": invoice_count,
+            "totalWithTax": display_total,
+            "pagination": pagination,
+            "relationCounts": relation_counts,
             "invoiceRows": display_rows,
             "rejectedInvoices": rejected,
             "groups": [
@@ -413,6 +469,8 @@ class InputInvoiceUsageOaReverseService:
             preview_request["source"] = "explicitSelection"
         if request.get("targetApplicantCode") is not None:
             preview_request["targetApplicantCode"] = request.get("targetApplicantCode")
+        if not selected_ids:
+            raise InputInvoiceUsageOaReverseInvalidTransitionError("请明确选择发票后创建草稿。", code="empty_oa_reverse_batch")
         preview_payload = self.preview(preview_request, can_create_draft=True)
         if str(preview_payload["previewHash"]) != expected_hash:
             raise InputInvoiceUsageOaReverseStalePreviewError("OA reverse preview is stale. Refresh preview before creating a batch.")
@@ -420,6 +478,10 @@ class InputInvoiceUsageOaReverseService:
         invoice_ids = [str(row.get("invoiceId") or "") for row in invoice_rows if str(row.get("invoiceId") or "").strip()]
         if not invoice_ids:
             raise InputInvoiceUsageOaReverseInvalidTransitionError("OA reverse batch requires at least one candidate invoice.", code="empty_oa_reverse_batch")
+        if preview_payload["rejectedInvoices"]:
+            raise InputInvoiceUsageOaReverseInvalidTransitionError("所选发票已不可用，请重新选择。", code="invalid_oa_reverse_selection")
+        if not preview_payload["targetApplicantCode"]:
+            raise InputInvoiceUsageOaReverseInvalidTransitionError("暂无可用的 OA 申请人凭据。", code="oa_reverse_applicant_unavailable")
         if not bool(preview_payload.get("payeeResolvable")):
             raise InputInvoiceUsageOaReverseInvalidTransitionError(
                 "所选发票必须属于同一销方且销方名称不能为空。",
@@ -465,6 +527,13 @@ class InputInvoiceUsageOaReverseService:
         oa_client_provider: InputInvoiceUsageOaDraftClientProvider,
     ) -> dict[str, object]:
         idempotency_key = _required_text(request.get("idempotencyKey"), "idempotencyKey")
+        existing = self._repository.find_batch_by_create_idempotency_key(f"{idempotency_key}:batch")
+        if existing is not None:
+            return self.create_oa_draft(
+                existing.batch_id, expected_version=existing.version,
+                idempotency_key=f"{idempotency_key}:draft", actor_id=actor_id,
+                oa_client=oa_client_provider.draft_client_for(existing.target_applicant_code),
+            )
         expected_hash = _required_text(request.get("expectedPreviewHash"), "expectedPreviewHash")
         preview_request = dict(request.get("previewRequest") if isinstance(request.get("previewRequest"), dict) else {})
         selected_ids = _text_list(request.get("selectedInvoiceIds") or request.get("invoiceIds"))
@@ -473,11 +542,15 @@ class InputInvoiceUsageOaReverseService:
             preview_request["source"] = "explicitSelection"
         if request.get("targetApplicantCode") is not None:
             preview_request["targetApplicantCode"] = request.get("targetApplicantCode")
+        if not selected_ids:
+            raise InputInvoiceUsageOaReverseInvalidTransitionError("请明确选择发票后创建草稿。", code="empty_oa_reverse_batch")
         preview_payload = self.preview(preview_request, can_create_draft=True)
         if str(preview_payload.get("previewHash") or "") != expected_hash:
             raise InputInvoiceUsageOaReverseStalePreviewError("OA reverse preview is stale. Refresh preview before creating an OA draft.")
         if not list(preview_payload.get("invoiceRows") or []):
             raise InputInvoiceUsageOaReverseInvalidTransitionError("OA reverse draft requires at least one candidate invoice.", code="empty_oa_reverse_batch")
+        if not preview_payload["canCreateDraft"]:
+            raise InputInvoiceUsageOaReverseInvalidTransitionError("所选发票或申请人不可创建草稿，请重新预览。", code="invalid_oa_reverse_selection")
         target_applicant_code = str(preview_payload.get("targetApplicantCode") or "").strip()
         try:
             client = oa_client_provider.draft_client_for(target_applicant_code)
@@ -520,7 +593,8 @@ class InputInvoiceUsageOaReverseService:
 
     def staged_drafts(self, *, limit: int = 50) -> dict[str, object]:
         batches = self._repository.list_batches_by_status(
-            [InputInvoiceUsageOaReverseStatus.OA_DRAFT_CREATED.value],
+            [InputInvoiceUsageOaReverseStatus.DRAFT.value, InputInvoiceUsageOaReverseStatus.OA_DRAFT_FAILED.value,
+             InputInvoiceUsageOaReverseStatus.OA_DRAFT_CREATED.value, *sorted(DETECTION_STATUSES)],
             limit=limit,
         )
         return {"items": [self.batch_payload(batch) for batch in batches]}
@@ -539,6 +613,8 @@ class InputInvoiceUsageOaReverseService:
         if self._is_operation_replay(batch, "create_oa_draft", normalized_key):
             return self.batch_payload(batch)
         self._assert_version(batch, expected_version)
+        if batch.operation_idempotency.get("draft_request"):
+            raise InputInvoiceUsageOaReverseInvalidTransitionError("OA 草稿创建已发起或结果不明，请先核实现有请求。", code="oa_reverse_draft_outcome_unknown")
         if batch.status not in {
             InputInvoiceUsageOaReverseStatus.DRAFT.value,
             InputInvoiceUsageOaReverseStatus.OA_DRAFT_FAILED.value,
@@ -547,9 +623,36 @@ class InputInvoiceUsageOaReverseService:
         }:
             raise InputInvoiceUsageOaReverseInvalidTransitionError("current status does not allow creating an OA draft.")
 
+        self._resolve_target_applicant(batch.target_applicant_code, self._applicant_options_provider())
+        rows, missing, _ = self._rows_for_preview_payload({"invoiceIds": batch.invoice_ids})
+        if missing or any(self._candidate_rejection(row) is not None for row in rows):
+            raise InputInvoiceUsageOaReverseInvalidTransitionError("批次发票已不存在或已关联 OA，请重新核对。", code="invalid_oa_reverse_selection")
+        current_rows = [self._invoice_display_row(row) for row in rows]
+        source_keys = ("invoiceId", "invoiceIdentityKey", "invoiceNo", "invoiceDate", "sellerName", "sellerTaxNo", "totalWithTax")
+        current_facts = sorted(tuple(row.get(key) for key in source_keys) for row in current_rows)
+        saved_facts = sorted(tuple(row.get(key) for key in source_keys) for row in batch.invoice_display_rows)
+        if current_facts != saved_facts:
+            raise InputInvoiceUsageOaReverseStalePreviewError("批次发票已变化，请重新核对后创建 OA 草稿。")
         before_status = batch.status
+        occupied = self._repository.invoice_occupancy(batch.invoice_ids)
+        if any(item["occupiedBatchId"] != batch.batch_id for item in occupied.values()):
+            raise InputInvoiceUsageOaReverseInvalidTransitionError(
+                "发票已有反提 OA 批次，请处理现有批次。", code="invoice_oa_reverse_occupied")
+        if batch.status in RELEASED_BATCH_STATUSES:
+            batch.status = InputInvoiceUsageOaReverseStatus.DRAFT.value
+            self._repository.save_batch(batch)
         draft_payload = self._build_oa_draft_payload(batch)
         client = oa_client or self._oa_client
+        if isinstance(client, NotConfiguredInputInvoiceUsageOaDraftClient):
+            self._mark_draft_failed(batch, actor_id=actor_id, before_status=before_status, reason="OA client is not configured.")
+            raise InputInvoiceUsageOaReverseMissingClientError("Input invoice usage OA draft client is not configured.")
+        claim_version = batch.version
+        batch.operation_idempotency["draft_request"] = normalized_key
+        batch.oa_detection_status = "draft_requesting"
+        timeout = max(EtcOAHttpClientSettings.from_environment().request_timeout_ms / 1000, 1)
+        batch.oa_detection_payload["draftRequestReviewAfter"] = _datetime_to_iso(datetime.now(UTC) + timedelta(seconds=2 * timeout))
+        self._bump_version(batch, actor_id=actor_id, event_type="oa_reverse_draft_requested", before_status=before_status, after_status=batch.status)
+        self._repository.claim_draft_creation(batch, expected_version=claim_version)
         try:
             oa_draft_id, oa_draft_url = client.create_form_draft(form_id=batch.oa_form_id, payload=draft_payload)
         except InputInvoiceUsageOaReverseMissingClientError as exc:
@@ -609,6 +712,7 @@ class InputInvoiceUsageOaReverseService:
         batch.oa_detection_reason = "user_revoked"
         batch.oa_detection_payload = {**dict(batch.oa_detection_payload or {}), **revoked_payload}
         batch.status = InputInvoiceUsageOaReverseStatus.NOT_SUBMITTED.value
+        batch.operation_idempotency.pop("draft_request", None)
         batch.operation_idempotency["revoke_oa_draft"] = normalized_key
         self._bump_version(batch, actor_id=actor_id, event_type="oa_reverse_draft_revoked", before_status=before_status, after_status=batch.status, reason=normalized_reason)
         self._repository.save_batch(batch)
@@ -681,6 +785,21 @@ class InputInvoiceUsageOaReverseService:
         if self._is_operation_replay(batch, f"manual_oa_status:{normalized_decision}", normalized_key):
             return self.batch_payload(batch)
         self._assert_version(batch, expected_version)
+        if normalized_decision == "not_submitted" and batch.status in {
+            InputInvoiceUsageOaReverseStatus.DRAFT.value, InputInvoiceUsageOaReverseStatus.OA_DRAFT_FAILED.value,
+        }:
+            if not _can_release_draft(batch):
+                raise InputInvoiceUsageOaReverseInvalidTransitionError("OA 创建请求仍在处理中，请稍后刷新并核实。", code="oa_reverse_draft_request_in_progress")
+            before_status = batch.status
+            batch.oa_detection_payload["releasedDraftRequest"] = batch.operation_idempotency.pop("draft_request", None)
+            batch.status = InputInvoiceUsageOaReverseStatus.NOT_SUBMITTED.value
+            batch.oa_detection_status = "user_confirmed_not_submitted"
+            batch.oa_detection_reason = normalized_reason
+            batch.operation_idempotency["manual_oa_status:not_submitted"] = normalized_key
+            self._bump_version(batch, actor_id=actor_id, event_type="oa_reverse_user_confirmed_not_submitted", before_status=before_status, after_status=batch.status, reason=normalized_reason)
+            self._repository.save_batch(batch)
+            self._record_external_audit(batch, "oa_reverse_user_confirmed_not_submitted", actor_id=actor_id)
+            return self.batch_payload(batch)
         if batch.status not in MANUAL_FALLBACK_STATUSES | SUBMISSION_CONFIRMABLE_STATUSES:
             raise InputInvoiceUsageOaReverseInvalidTransitionError(
                 "manual OA status is allowed only after draft creation or for detection exception states.",
@@ -716,6 +835,8 @@ class InputInvoiceUsageOaReverseService:
             batch.oa_detection_status = "manual_not_submitted"
             event_type = "oa_reverse_manual_status_not_submitted"
         batch.oa_detection_reason = normalized_reason
+        if normalized_decision == "not_submitted":
+            batch.operation_idempotency.pop("draft_request", None)
         batch.operation_idempotency[f"manual_oa_status:{normalized_decision}"] = normalized_key
         self._bump_version(batch, actor_id=actor_id, event_type=event_type, before_status=before_status, after_status=batch.status, reason=normalized_reason)
         self._repository.save_batch(batch)
@@ -752,6 +873,8 @@ class InputInvoiceUsageOaReverseService:
             "updatedBy": batch.updated_by,
             "createdAt": _datetime_to_iso(batch.created_at),
             "updatedAt": _datetime_to_iso(batch.updated_at),
+            "draftRequestState": _draft_request_state(batch),
+            "canRelease": _can_release_draft(batch),
             "canCreateDraft": _can_create_oa_draft(batch),
             "canConfirmSubmission": _can_confirm_submission(batch),
             "canRevoke": _can_revoke_oa_draft(batch),
@@ -792,26 +915,20 @@ class InputInvoiceUsageOaReverseService:
             "invoices": invoices,
         }
 
-    def _rows_for_preview_payload(self, payload: dict[str, Any]) -> tuple[list[dict[str, object]], list[str]]:
-        invoice_ids = _text_list(payload.get("invoiceIds"))
-        if invoice_ids:
-            rows_payload = (
-                self._rows_by_invoice_ids_loader(invoice_ids)
-                if self._rows_by_invoice_ids_loader
-                else None
-            )
+    def _rows_for_preview_payload(self, payload: dict[str, Any]) -> tuple[list[dict[str, object]], list[str], dict[str, object]]:
+        if "invoiceIds" in payload:
+            if not isinstance(payload["invoiceIds"], list):
+                raise InputInvoiceUsageError("invalid_invoice_ids", "invoiceIds must be an array.")
+            invoice_ids = _text_list(payload["invoiceIds"])
+            if not invoice_ids:
+                return [], [], {}
+            rows_payload = self._rows_by_invoice_ids_loader(invoice_ids) if self._rows_by_invoice_ids_loader else None
             rows = self._required_rows_from_payload(rows_payload)
             known = {str(row.get("invoiceId") or "") for row in rows}
-            missing_ids = _text_list(rows_payload.get("missing_invoice_ids")) if isinstance(rows_payload, dict) else []
-            if not missing_ids:
-                missing_ids = [invoice_id for invoice_id in invoice_ids if invoice_id not in known]
-            return rows, missing_ids
-        rows_payload = (
-            self._rows_loader(_preview_query_from_payload(payload))
-            if self._rows_loader
-            else None
-        )
-        return self._required_rows_from_payload(rows_payload), []
+            missing_ids = [invoice_id for invoice_id in invoice_ids if invoice_id not in known]
+            return rows, missing_ids, rows_payload
+        rows_payload = self._rows_loader(_preview_query_from_payload(payload)) if self._rows_loader else None
+        return self._required_rows_from_payload(rows_payload), [], rows_payload
 
     @staticmethod
     def _required_rows_from_payload(payload: dict[str, object] | None) -> list[dict[str, object]]:
@@ -855,6 +972,7 @@ class InputInvoiceUsageOaReverseService:
                 "reason": str(payment_status.get("reason") or ""),
             },
             "oaRelationStatus": InputInvoiceUsageOaReverseService._oa_relation_status(row),
+            "bankRelationStatus": row["bankRelationStatus"],
         }
 
     @staticmethod
@@ -874,25 +992,17 @@ class InputInvoiceUsageOaReverseService:
         return "unlinked"
 
     @staticmethod
-    def _resolve_target_applicant(value: Any) -> tuple[str, str]:
-        code = str(value or "chen_xiuyun").strip() or "chen_xiuyun"
-        name = TARGET_APPLICANTS.get(code)
-        if name is None:
-            if code not in set(TARGET_APPLICANTS.values()):
-                raise InputInvoiceUsageError(
-                    "invalid_target_applicant",
-                    f"Unsupported target applicant: {code}",
-                    details={"targetApplicantCode": code},
-                )
-            name = code
-        return code, name
-
-    @staticmethod
-    def _target_applicant_options() -> list[dict[str, str]]:
-        return [
-            {"code": code, "name": name}
-            for code, name in TARGET_APPLICANTS.items()
-        ]
+    def _resolve_target_applicant(value: Any, applicants: list[dict[str, str]]) -> tuple[str, str]:
+        code = str(value or "").strip()
+        if not code:
+            return (applicants[0]["code"], applicants[0]["name"]) if applicants else ("", "")
+        for applicant in applicants:
+            if applicant["code"] == code:
+                return code, applicant["name"]
+        raise InputInvoiceUsageError(
+            "invalid_target_applicant", "目标 OA 申请人未配置有效凭据，请重新选择。",
+            details={"targetApplicantCode": code},
+        )
 
     def _build_oa_draft_payload(self, batch: InputInvoiceUsageOaReverseBatch) -> dict[str, object]:
         mapping = EtcOAFormFieldMapping.from_environment()
@@ -967,7 +1077,7 @@ class InputInvoiceUsageOaReverseService:
         reason: str,
     ) -> None:
         batch.status = InputInvoiceUsageOaReverseStatus.OA_DRAFT_FAILED.value
-        batch.oa_detection_status = "draft_failed"
+        batch.oa_detection_status = "draft_outcome_unknown" if batch.operation_idempotency.get("draft_request") else "draft_failed"
         batch.oa_detection_error = reason
         self._bump_version(batch, actor_id=actor_id, event_type="oa_reverse_draft_failed", before_status=before_status, after_status=batch.status, reason=reason)
         self._repository.save_batch(batch)
@@ -1065,8 +1175,48 @@ def _copy_batch(batch: InputInvoiceUsageOaReverseBatch | None) -> InputInvoiceUs
     )
 
 
-def _can_create_oa_draft(batch: InputInvoiceUsageOaReverseBatch) -> bool:
+def _draft_request_state(batch: InputInvoiceUsageOaReverseBatch) -> str:
     if batch.oa_draft_id:
+        return "succeeded"
+    if not batch.operation_idempotency.get("draft_request"):
+        return "not_started"
+    if batch.oa_detection_status != "draft_requesting":
+        return "unknown"
+    review_after = batch.oa_detection_payload.get("draftRequestReviewAfter")
+    if review_after and datetime.now(UTC) >= datetime.fromisoformat(str(review_after).replace("Z", "+00:00")):
+        return "unknown"
+    return "requesting"
+
+
+def _can_release_draft(batch: InputInvoiceUsageOaReverseBatch) -> bool:
+    return batch.status in {
+        InputInvoiceUsageOaReverseStatus.DRAFT.value,
+        InputInvoiceUsageOaReverseStatus.OA_DRAFT_FAILED.value,
+        InputInvoiceUsageOaReverseStatus.OA_DRAFT_CREATED.value,
+    } and _draft_request_state(batch) != "requesting"
+
+
+def _assert_draft_claim_available(current: InputInvoiceUsageOaReverseBatch | None, expected_version: int) -> None:
+    if current is None:
+        raise InputInvoiceUsageOaReverseNotFoundError("OA reverse batch not found.")
+    if current.version != expected_version:
+        raise InputInvoiceUsageOaReverseVersionConflictError(current.batch_id, expected_version, current.version)
+    if current.operation_idempotency.get("draft_request"):
+        raise InputInvoiceUsageOaReverseInvalidTransitionError("OA 草稿请求已发起，不能重复创建。", code="oa_reverse_draft_outcome_unknown")
+
+
+def _assert_draft_claim_write(current: InputInvoiceUsageOaReverseBatch | None, incoming: InputInvoiceUsageOaReverseBatch) -> None:
+    if current is None or not (current.operation_idempotency.get("draft_request") or incoming.operation_idempotency.get("draft_request")):
+        return
+    if incoming.version != current.version + 1:
+        raise InputInvoiceUsageOaReverseVersionConflictError(current.batch_id, incoming.version - 1, current.version)
+    if current.operation_idempotency.get("draft_request") and incoming.operation_idempotency.get("draft_request") != current.operation_idempotency["draft_request"]:
+        if incoming.status not in RELEASED_BATCH_STATUSES or _draft_request_state(current) == "requesting":
+            raise InputInvoiceUsageOaReverseInvalidTransitionError("OA 草稿创建正在处理中，不能覆盖请求状态。", code="oa_reverse_draft_request_in_progress")
+
+
+def _can_create_oa_draft(batch: InputInvoiceUsageOaReverseBatch) -> bool:
+    if batch.oa_draft_id or batch.operation_idempotency.get("draft_request"):
         return False
     return batch.status in {
         InputInvoiceUsageOaReverseStatus.DRAFT.value,
@@ -1234,24 +1384,23 @@ def _text_list(value: Any) -> list[str]:
 
 
 def _preview_query_from_payload(payload: dict[str, Any]) -> dict[str, list[Any]]:
-    query: dict[str, list[Any]] = {
-        "page": ["1"],
-        "page_size": ["200"],
-        "sort_field": ["invoice_date"],
-        "sort_direction": ["desc"],
+    numbers = {}
+    for key, default, maximum in (("page", 1, None), ("pageSize", 50, 200)):
+        value = payload.get(key, default)
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            number = 0
+        if isinstance(value, bool) or str(number) != str(value) or number < 1 or (maximum and number > maximum):
+            raise InputInvoiceUsageError("invalid_oa_reverse_query", f"{key} must be a positive integer" + (f" <= {maximum}." if maximum else "."))
+        numbers[key] = number
+    relation = payload.get("bankRelation", "all")
+    if relation not in {"all", "linked", "unlinked"}:
+        raise InputInvoiceUsageError("invalid_oa_reverse_query", "bankRelation must be all, linked or unlinked.")
+    return {
+        "page": [str(numbers["page"])], "page_size": [str(numbers["pageSize"])],
+        "keyword": [str(payload.get("keyword") or "").strip()], "bank_relation": [relation],
     }
-    for source_key, query_key in (
-        ("keyword", "keyword"),
-        ("invoiceDateFrom", "invoice_date_from"),
-        ("invoiceDateTo", "invoice_date_to"),
-        ("month", "month"),
-    ):
-        value = payload.get(source_key)
-        if value not in (None, ""):
-            query[query_key] = [value]
-    if payload.get("filters") not in (None, ""):
-        query["filters"] = [payload.get("filters")]
-    return query
 
 
 def _decimal(value: Any) -> Decimal:

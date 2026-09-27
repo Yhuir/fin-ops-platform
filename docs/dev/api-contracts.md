@@ -1574,3 +1574,13 @@ OA 成本标签覆盖：`oa_cost_tag_overrides` 为必填数组，每项 `{unit_
 ### 拆分流水确认与金额核对（2026-09-24）
 
 Workbench 银行用途 DTO 的 bank_split_parts 新增 relation_case_id（null 表示无 active owner），paired_requires_invoice 来自当前标签配对规则。confirm-link/preview 返回 bank_split_versions；confirm-link 接受同一 map 并在持久化锁内复核，非法 map 400、版本冲突409。amount_check 与组级金额异常输出 bank_original_total、bank_related_total、evidence_required_total，分别表示父流水原额、正式成员方向净额、用途规则要求的票据额；invoice_total/evidence_total 保留真实凭证值。原 bank_total 继续承担既有用途核对，不可拿它替代原流水显示金额。
+
+## 2026-09-28 进项关联分类、反提候选与规则更新
+
+`GET /api/input-invoice-usage/rows` 支持 `relation_status` (`no_oa/oa_no_bank/oa_bank`) 筛选；`filterOptions` 中同名 facet 按去重发票张数、排除自身条件统计。原关系组分页不等于张数。支付输出 `offset` 合并原三类冲；未命中为 `pending/未命中规则`。
+
+`POST /api/input-invoice-usage/oa-reverse/preview`：浏览候选不传 `invoiceIds`，输入 `page`、`pageSize`（1..200，默认50）、`keyword`、`bankRelation`（all/linked/unlinked）。返回全量 `invoiceCount`、`totalWithTax`、`pagination`、`relationCounts` 和当前页 `invoiceRows`。不沿用主表 filters/month。传 `invoiceIds` 表示精确提交预览，空数组是空选择；任何拒绝项使 `canCreateDraft=false`。行可含 `occupiedBatchId/occupiedBatchStatus`，占用不影响候选基数。无可用申请人时仍可浏览，创建被禁用。
+
+支付规则 GET 返回真实 `applicantOptions` 及派生条件解释；PUT 仍用 `expectedVersion/idempotencyKey/rules`，不再接收有效的 pendingDirections 配置。规则包含稳定 id、输出分类、显示名、优先级、enabled 和明确条件。可新增/删除/修改申请人，同类输出共享文案；规则为空不补回默认项。保存使用现有 family CAS，审计与设置原子提交。配置格式由 migration0182 一次性更新。
+
+进项发票 canonical row 的 `bankRelationStatus: linked | unlinked` 取自正式 typed 关联成员；不以流水详情是否能被加载判断关系。反提 `invoiceRows` 使用同一字段与流水筛选保持一致。

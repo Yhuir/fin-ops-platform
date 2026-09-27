@@ -1,6 +1,6 @@
 import BankSplitChips from "../../features/bankSplits/BankSplitChips";
 import { ArrowUpDown, Filter, Info } from "lucide-react";
-import { Checkbox, ListBox, PopoverContent, PopoverDialog, PopoverRoot, PopoverTrigger, Select } from "@heroui/react";
+import { Button, Checkbox, ListBox, PopoverContent, PopoverDialog, PopoverRoot, PopoverTrigger, Select } from "@heroui/react";
 import type { MutableRefObject, ReactNode } from "react";
 import { useId, useMemo, useState } from "react";
 
@@ -25,7 +25,6 @@ import {
   FinanceTableCell,
   FinanceTableColumn,
   FinanceTableHeader,
-  FinanceTablePagination,
   FinanceTableRow,
 } from "../common/FinanceTable";
 
@@ -60,9 +59,7 @@ const paymentStatusToneByCode: Record<string, TagTone> = {
   waiting_payment: "warning",
   pending: "neutral",
   cash_turnover: "info",
-  offset_zhou_jieying: "info",
-  offset_liu_shugang_no_pay: "info",
-  offset_wei_dailian: "info",
+  offset: "info",
 };
 
 function displayInvoiceNo(row: InputInvoiceUsageRow) {
@@ -429,7 +426,9 @@ export default function InputInvoiceUsageTable({
               <Select.Trigger><Select.Value /></Select.Trigger>
               <Select.Popover><ListBox>{PAGE_SIZE_OPTIONS.map((option) => <ListBox.Item id={String(option)} key={option} textValue={String(option)}>{option}</ListBox.Item>)}</ListBox></Select.Popover>
             </Select>
-            <FinanceTablePagination className="finance-table-pagination--fit" compact onPageChange={onPageChange} page={page} pageSize={pageSize} total={total} />
+            <Button size="sm" variant="secondary" isDisabled={page <= 1} onPress={() => onPageChange(page - 1)}>上一页</Button>
+            <span>第 {page} / {Math.max(1, Math.ceil(total / pageSize))} 页</span>
+            <Button size="sm" variant="secondary" isDisabled={page * pageSize >= total} onPress={() => onPageChange(page + 1)}>下一页</Button>
           </div>
         )}
         minWidth={1480}

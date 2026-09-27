@@ -102,3 +102,9 @@ OA 待付款核对页用于对齐 OA 单据、付款流水和进项发票，并�
 - API 契约：`../dev/api-contracts.md`
 - Runtime：`../app-architecture/runtime-and-ownership.md`
 - Worker：`../operations/runtime-worker-governance.md`
+
+## 进项发票关联统计与反提候选（2026-09-28）
+
+主表四项为“全部／未关联 OA／有 OA 无流水／OA 与流水均已关联”。后三项互斥，全部按真实发票张数统计；三张同组发票计三张。关联状态不等于现实付款结论，同时关联不承诺金额匹配。支付分类仍是独立可配置结果；“冲”不是来源发票红冲字段。
+
+反提 OA 基础范围为全部无有效 OA 关联的进项发票，不因已关联流水排除；流水关联在抽屉内筛选。占用和销方约束影响能否操作，不隐藏基础统计。规则、凭据、分页、状态一致性及迁移见[进项模块边界](../modules/input-invoice-usage/boundary-io.md)。

@@ -4274,30 +4274,26 @@ function inputInvoiceUsagePaymentStatusRulesPayload(
     rules: [
       {
         id: "waiting_payment",
-        code: "waiting_payment",
+        code: "waiting_payment", statusCode: "waiting_payment", conditions: { hasOa: true, hasBank: false },
         label: waitingPaymentLabel,
         description: "有发票、有 OA、无流水",
         priority: 6,
       },
       {
         id: "paid_full_match",
-        code: "paid_full_match",
+        code: "paid_full_match", statusCode: "paid", conditions: { hasOa: true, hasBank: true, fullyMatched: true },
         label: "已付款（自动识别有oa有流水）",
         description: "有发票、有 OA、有流水，并且关联台完全匹配",
         priority: 2,
       },
     ],
-    pending_directions: [
-      { code: "pending", label: "待处理" },
-      { code: "wei_dailian_batch_reverse", label: "韦代连批量反提oa" },
-      { code: "chen_xiuyun_batch_reverse", label: "陈秀云批量反提oa" },
-    ],
+    applicantOptions: ["陈秀云", "周洁莹"],
     permissions: { can_save: canSave },
   };
 }
 
 function inputInvoiceOaReversePreviewPayload(
-  selectedInvoiceIds: string[],
+  selectedInvoiceIds: string[] | undefined,
   relationConfirmed = false,
   includeWorkbenchRelationEvidence = false,
   canCreateDraft = true,
@@ -4307,9 +4303,9 @@ function inputInvoiceOaReversePreviewPayload(
     inputInvoiceOaReverseInvoice(2),
     ...includeWorkbenchRelationEvidence && !relationConfirmed ? [inputInvoiceOaReverseWorkbenchInvoice()] : [],
   ];
-  const selected = selectedInvoiceIds.length > 0
-    ? selectedInvoiceIds
-    : selectableInvoices.map((invoice) => invoice.invoice_id);
+  const selected = selectedInvoiceIds === undefined
+    ? selectableInvoices.map((invoice) => invoice.invoice_id)
+    : selectedInvoiceIds;
   const invoices = selectableInvoices
     .filter((invoice) => selected.includes(invoice.invoice_id));
   const isSubset = invoices.length === 1;
@@ -4322,7 +4318,7 @@ function inputInvoiceOaReversePreviewPayload(
   return {
     preview_id: isSubset ? "input-oa-reverse-preview-e2e-subset" : "input-oa-reverse-preview-e2e-all",
     preview_hash: isSubset ? "input-oa-reverse-hash-e2e-subset" : "input-oa-reverse-hash-e2e-all",
-    source: selectedInvoiceIds.length > 0 ? "explicitSelection" : "currentFilters",
+    source: selectedInvoiceIds !== undefined ? "explicitSelection" : "currentFilters",
     target_applicant_code: "chen_xiuyun",
     target_applicant_name: "陈秀云",
     target_applicants: [
@@ -9255,7 +9251,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         && options.sessionMode !== "expired"
         && options.sessionMode !== "error";
       return json(route, inputInvoiceOaReversePreviewPayload(
-        body.invoiceIds ?? body.invoice_ids ?? [],
+        body.invoiceIds ?? body.invoice_ids,
         relationConfirmed,
         Boolean(options.inputInvoiceUsageRelationFanout),
         canCreateDraft,

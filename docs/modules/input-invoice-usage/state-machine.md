@@ -14,7 +14,7 @@
 
 ## 以发票反提 OA 本地状态机
 
-`以发票反提 OA` 使用后端内部 batch 记录本地状态。batch 是内部状态对象，不作为前端用户概念暴露；前端只展示 `创建 OA 草稿`、确认弹窗和 `已提交` 历史。
+`以发票反提 OA` 使用后端内部 batch 记录本地状态。batch 是内部状态对象，不作为前端用户概念暴露；前端展示 `创建 OA 草稿`、可恢复的 `暂存`、确认弹窗和 `已提交` 历史。
 
 OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实源。检测到 OA evidence 后建立关系必须通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写 `input_invoice_oa_reverse`；command service 前置条件失败时，本地 batch 不得先推进到 detected。
 
@@ -41,7 +41,7 @@ OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实�
 | --- | --- | --- | --- |
 | `ready_to_create` | 点击 `创建 OA 草稿` | `creating_draft` | 必须有写权限、目标申请人凭据已配置、候选发票仍有效。 |
 | `creating_draft` | OA 暂存草稿创建成功 | `oa_draft_created` | 保存草稿 id/url 和内部 batch 状态；用户可在 `暂存` bucket 继续处理，但不展示 OA 草稿链接。 |
-| `creating_draft` | OA 登录、创建草稿、候选校验或权限失败 | `ready_to_create` | preview hash 校验失败、候选失效或凭据缺失时不创建内部 batch；已创建 batch 但 OA 失败时保留失败状态供诊断，前端仍返回明确错误。 |
+| `creating_draft` | OA 创建请求失败或结果不明 | `oa_draft_failed` / 保留 `draft` | 已发送请求保留 durable claim 与占用，进入暂存供人工核实；禁止自动重试。发送前校验失败不发外部请求。 |
 | `oa_draft_created` | 用户选择 `我已在OA系统提交该草稿 / OA正在进行中` | `submitted_confirmed` | 进入 `已提交` 历史。 |
 | `oa_draft_created` | 用户选择 `OA提交内容需修改 / 删除本次提交内容` | `ready_to_create` | 只回滚 FinOps 本地状态，不删除 OA 暂存草稿。 |
 | `oa_draft_created` | 用户关闭确认弹窗 | `oa_draft_created` | 只关闭 UI 弹窗；batch 保留在 `暂存`，用户可稍后继续二选一。 |
@@ -70,8 +70,8 @@ OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实�
 - refreshing/polling：不适用。页面 API 不返回 `read_model_status`、`source_versions` 或 `202 refreshing`，前端不自动轮询；用户刷新只发起一次正常 GET。
 - permission disabled/hidden：列表读取无独立权限状态；OA 反提、支付规则保存等 mutation 能力按对应接口权限和前端按钮状态控制。
 - oa reverse pending tab：`待处理` 页签展示目标 OA 申请人、候选发票和 `创建 OA 草稿` 主动作；不展示 `创建本地批次`。
-- oa reverse staged tab：`暂存` 页签展示状态为 `oa_draft_created` 的批次摘要和两项处理动作：`我已在OA系统提交该草稿 / OA正在进行中`、`OA提交内容需修改 / 删除本次提交内容`。暂存列表不展示 OA 草稿链接。
-- oa reverse relation display：候选发票清单只展示 OA 关联二态。可反提发票展示 `未关联oa` chip 并可勾选；已有 active/linked OA 关系的发票展示 `已关联oa` chip、禁用勾选；历史 `candidate` 兼容值归入 `未关联oa`，不再提供独立“候选 OA”筛选。表头提供 drawer 内局部筛选：`全部`、`已经关联oa`、`未关联oa`，并支持发票清单搜索。
+- oa reverse staged tab：`暂存` 展示 `draft`、`oa_draft_failed`、`oa_draft_created` 和检测中/检测异常批次。`draftRequestState=requesting` 禁止释放或重建；`unknown` 必须先核实并清理 OA 草稿，再通过带原因的人工未提交动作释放本地占用。成功草稿沿用提交/未提交确认。按钮同时受业务能力与页面写权限控制，列表支持主动刷新和加载更多，不展示 OA 草稿链接。
+- oa reverse relation display：候选仅取无 active OA 关系的发票，以真实 `bankRelationStatus` 展示流水关联；表头按全部/已关联流水/未关联流水服务端筛选。暂存占用不减少基础数量，但禁选；显式提交遇到已关联 OA、缺失或占用成员时整体拒绝。
 - oa reverse submitted tab：`已提交` 页签展示用户确认过的已提交历史，只显示申请人、时间、金额和发票摘要等业务字段。
 - oa reverse confirmation：OA 草稿创建成功后显示确认弹窗，用户可以选择 `我已在OA系统提交该草稿 / OA正在进行中`、`OA提交内容需修改 / 删除本次提交内容`，也可以点击右上角取消只关闭弹窗。取消、页面刷新、父组件重渲染或 preview reload 都不能清空当前草稿 batch；未决批次必须可在 `暂存` 页签恢复处理。
 - oa reverse local-state performance：创建草稿、确认 submitted、确认 not_submitted 都是本地 batch 状态动作，drawer 在 API 成功后立即释放按钮。evidence detected 后真正写入 relation 只提交 canonical relation/version/audit，当前页随后通过正常 GET 收敛。
@@ -111,3 +111,17 @@ OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实�
 ## 日期筛选生命周期（2026-09-21）
 
 页面每次挂载在现有 query session 的 `restoreQuery` 清除 `month`、`invoiceDateFrom/To`、`invoice_date` 与 `bank_trade_time` 日期列条件，首个 rows/导出请求使用清理后的范围；不新增日期控件。保留 keyword、非日期 filters、sort 和 pageSize。旧范围确实含日期时，page 重置为 1，activeWorkflow/detailTarget 清空；原为全部时不无条件重置合法页码与流程。普通刷新、排序、分页、保存回读及抽屉关闭不执行 restore。
+
+## 2026-09-28 状态与配置补充
+
+关联统计独立于支付分类：`no_oa` / `oa_no_bank` / `oa_bank` 互斥。支付规则按顺序首条命中，相同输出分类合并选项，未命中显式为 `pending/未命中规则`；删除规则不恢复默认项。条件和申请人均可编辑，版本冲突禁止覆盖其他操作人的更改。
+
+反提候选读取按单张发票分页，默认无 OA、不限制流水；草稿占用只影响选择资格，不改变基础数量。显式提交任何无效成员均拒绝整体提交。暂存与提交状态继续沿现有状态机，重新创建前先重新取得占用；成功回读、失败保留可诊断状态，不能静默重试外部 OA。
+
+零金额发票的金额相等不代表已经匹配。`fully_matched` 需要实际存在已确认金额匹配的 OA 和流水证据；`invoice_oa_amount_matched` 至少需要真实 OA 匹配证据。
+
+### OA 创建请求的持久化占用
+
+外部创建前在现有 batch 事务内保存 `operation_idempotency.draft_request`、递增 version 并记录审计；同批并发只有一个请求取得 claim。成功/失败完成和人工释放继续以 version 校验，旧请求迟到不能覆盖已释放状态。`draftRequestState` 为 `not_started/requesting/unknown/succeeded`，仅用于反提操作状态，不混入来源详情字段。
+
+现有 HTTP client 无自动重试；按配置的请求 timeout 两倍记录人工核实起点。到时仅将展示转为 `unknown`，并不证明 OA 未创建，也不自动重试或释放。人工释放要求原因，保留审计，且只清理 FinOps 占用，不删除 OA 单据。

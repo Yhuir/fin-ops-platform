@@ -6,6 +6,7 @@ from fin_ops_platform.services.oa_applicant_credentials import (
     InMemoryOaApplicantCredentialRepository,
     OaApplicantCredentialPermissionError,
     OaApplicantCredentialService,
+    OaApplicantCredentialSummary,
     OaApplicantCredentialValidationError,
 )
 
@@ -34,6 +35,21 @@ class OaApplicantCredentialServiceTests(unittest.TestCase):
         self.assertEqual(listed["credentials"], [saved])
         self.assertEqual(secret.oa_username, "chen_xiuyun")
         self.assertEqual(secret.password, "correct-password")
+
+    def test_applicant_options_include_only_enabled_credentials_and_no_login_details(self):
+        class Repository:
+            def list_credentials(self):
+                return [
+                    OaApplicantCredentialSummary("new", "真实申请人", "private-login", "configured", True),
+                    OaApplicantCredentialSummary("disabled", "停用", "private", "configured", True, False),
+                    OaApplicantCredentialSummary("missing", "无凭据", "private", "unconfigured", False),
+                ]
+
+            def resolve_login_credential(self, code):
+                raise AssertionError("Listing options must not decrypt credentials")
+
+        service = OaApplicantCredentialService(repository=Repository())
+        self.assertEqual(service.applicant_options(), [{"code": "new", "name": "真实申请人"}])
 
     def test_non_admin_cannot_save_or_list_credentials(self) -> None:
         service = OaApplicantCredentialService(repository=InMemoryOaApplicantCredentialRepository())

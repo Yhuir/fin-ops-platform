@@ -1,7 +1,8 @@
-import { Button, Checkbox, Input, ListBox, Select, TextArea } from "@heroui/react";
+import { Button, Checkbox, Input, ListBox, Select } from "@heroui/react";
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 
 import AppDrawer from "../common/AppDrawer";
+import AppDialog from "../common/AppDialog";
 import type {
   InputInvoiceUsagePaymentStatusRulesResponse,
   SaveInputInvoiceUsagePaymentStatusRulesRequest,
@@ -27,7 +28,7 @@ export type PaymentStatusRulesPayload = {
     can_save?: boolean;
   };
   rules: PaymentStatusRule[];
-  pendingDirections: Array<{ code?: string; label: string }>;
+  applicantOptions: string[];
 };
 
 type RuleConditionKey = "hasOa" | "hasBank" | "fullyMatched" | "invoiceOaAmountMatched";
@@ -42,6 +43,13 @@ const CONDITION_FIELDS: Array<{
   { key: "hasBank", label: "流水", trueLabel: "需要流水", falseLabel: "无流水" },
   { key: "fullyMatched", label: "完全匹配", trueLabel: "必须完全匹配", falseLabel: "不得完全匹配" },
   { key: "invoiceOaAmountMatched", label: "发票/OA 金额", trueLabel: "金额必须匹配", falseLabel: "金额不得匹配" },
+];
+
+const OUTPUT_CLASSES = [
+  { id: "paid", label: "已付款" },
+  { id: "cash_turnover", label: "现金往来" },
+  { id: "offset", label: "冲" },
+  { id: "waiting_payment", label: "未关联流水" },
 ];
 
 type PaymentStatusRulesDrawerProps = {
@@ -61,17 +69,17 @@ export default function PaymentStatusRulesDrawer({
 }: PaymentStatusRulesDrawerProps) {
   const [payload, setPayload] = useState<PaymentStatusRulesPayload | null>(null);
   const [draftRules, setDraftRules] = useState<PaymentStatusRule[]>([]);
-  const [draftPendingDirections, setDraftPendingDirections] = useState<Array<{ code?: string; label: string }>>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmClose, setConfirmClose] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
+      setConfirmClose(false);
       setPayload(null);
       setDraftRules([]);
-      setDraftPendingDirections([]);
       setLoading(false);
       setSaving(false);
       setError(null);
@@ -87,7 +95,6 @@ export default function PaymentStatusRulesDrawer({
         if (active) {
           setPayload(nextPayload);
           setDraftRules(cloneRules(nextPayload.rules));
-          setDraftPendingDirections(nextPayload.pendingDirections.map((item) => ({ ...item })));
         }
       })
       .catch((reason: unknown) => {
@@ -114,8 +121,8 @@ export default function PaymentStatusRulesDrawer({
   );
 
   const dirty = payload
-    ? JSON.stringify({ rules: draftRules, pendingDirections: draftPendingDirections })
-      !== JSON.stringify({ rules: payload.rules, pendingDirections: payload.pendingDirections })
+    ? JSON.stringify(draftRules)
+      !== JSON.stringify(payload.rules)
     : false;
 
   const handleSave = () => {
@@ -129,22 +136,17 @@ export default function PaymentStatusRulesDrawer({
       expectedVersion: payload.version ?? null,
       idempotencyKey: createIdempotencyKey("input-invoice-usage-payment-rules-save"),
       rules: draftRules.map((rule) => ({
-        ...rule,
+        id: rule.id,
+        statusCode: rule.statusCode,
+        conditions: rule.conditions,
         label: rule.label.trim(),
-        description: rule.description.trim(),
-        reason: String(rule.reason ?? "").trim() || undefined,
         priority: Number(rule.priority),
         enabled: rule.enabled !== false,
       })),
-      pendingDirections: draftPendingDirections.map((item) => ({
-        ...item,
-        label: item.label.trim(),
-      })),
     })
       .then(async (nextPayload) => {
-        setPayload(nextPayload);
+        setPayload({ ...nextPayload, applicantOptions: payload.applicantOptions });
         setDraftRules(cloneRules(nextPayload.rules));
-        setDraftPendingDirections(nextPayload.pendingDirections.map((item) => ({ ...item })));
         setFeedback("规则已保存。");
         await onSaved?.();
       })
@@ -165,7 +167,6 @@ export default function PaymentStatusRulesDrawer({
         isDisabled={saving || loading || !dirty}
         onPress={() => {
           setDraftRules(cloneRules(payload.rules));
-          setDraftPendingDirections(payload.pendingDirections.map((item) => ({ ...item })));
           setError(null);
           setFeedback(null);
         }}
@@ -188,11 +189,13 @@ export default function PaymentStatusRulesDrawer({
   ) : null;
 
   return (
+    <>
     <AppDrawer
       className="input-invoice-usage-rules-drawer"
       closeLabel="关闭支付状态规则抽屉"
       footer={footer}
-      onClose={onClose}
+      closeDisabled={saving}
+      onClose={() => dirty ? setConfirmClose(true) : onClose()}
       open={open}
       title="发票与支付状态规则设置"
       width="min(880px, 100vw)"
@@ -227,10 +230,16 @@ export default function PaymentStatusRulesDrawer({
               <div className="input-invoice-usage-payment-rules-panel__header">
                 <h3>支付状态规则</h3>
                 <span className="input-invoice-usage-payment-rules-panel__meta">
-                  {draftRules.length} 条规则 · {draftPendingDirections.length} 个待处理方向{dirty ? " · 未保存" : ""}
+                  {draftRules.length} 条规则{dirty ? " · 未保存" : ""}
                 </span>
               </div>
-              <div aria-label="Sheet4 支付状态规则" className="input-invoice-usage-payment-rules-list" role="list">
+              {canSave ? <Button size="sm" variant="secondary" onPress={() => setDraftRules((current) => [...current, {
+                id: `rule_${crypto.randomUUID()}`, statusCode: "paid", label: current.find((rule) => rule.statusCode === "paid")?.label ?? "已付款", description: "",
+                priority: Math.max(0, ...current.map((rule) => rule.priority)) + 1, enabled: true,
+                conditions: { hasOa: true, hasBank: true, fullyMatched: true },
+              }])}>新增规则</Button> : null}
+              <p>按优先级从小到大匹配，首条命中生效；未命中规则的发票保留未命中状态。同一输出分类共用显示名称，修改名称会同步更新该分类的全部规则。</p>
+              <div aria-label="支付状态规则" className="input-invoice-usage-payment-rules-list" role="list">
                 {draftRules.map((rule, index) => (
                   <article className="input-invoice-usage-payment-rule-row" key={rule.id || rule.code || rule.label} role="listitem">
                     <div className="input-invoice-usage-payment-rule-row__state">
@@ -269,7 +278,7 @@ export default function PaymentStatusRulesDrawer({
                         <label className="input-invoice-usage-rules-field">
                           <span>支付状态</span>
                           <Input
-                            onChange={(event) => updateRule(index, { label: event.target.value }, setDraftRules)}
+                            onChange={(event) => setDraftRules((current) => current.map((item, itemIndex) => (item.statusCode === rule.statusCode || itemIndex === index ? { ...item, label: event.target.value } : item)))}
                             value={rule.label}
                           />
                         </label>
@@ -279,6 +288,17 @@ export default function PaymentStatusRulesDrawer({
                           <strong>{rule.label}</strong>
                         </div>
                       )}
+                      {canSave ? <Select aria-label={`${rule.label || "规则"} 输出分类`} selectedKey={rule.statusCode} onSelectionChange={(key) => {
+                        const output = OUTPUT_CLASSES.find((item) => item.id === key);
+                        if (!output) return;
+                        const existing = draftRules.find((item) => item.statusCode === key);
+                        updateRule(index, { statusCode: output.id, label: existing ? existing.label : output.label }, setDraftRules);
+                      }}>
+                        <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                        <Select.Popover><ListBox>
+                          {OUTPUT_CLASSES.map((option) => <ListBox.Item id={option.id} key={option.id} textValue={option.label}>{option.label}</ListBox.Item>)}
+                        </ListBox></Select.Popover>
+                      </Select> : null}
                       <div className="input-invoice-usage-rules-chip-list input-invoice-usage-payment-rule-chips" aria-label={`${rule.label || "规则"}命中条件`}>
                         {conditionChips(rule).map((chip) => (
                           <span className="input-invoice-usage-rules-tag" key={`${rule.id || rule.label}:${chip}`}>
@@ -290,26 +310,17 @@ export default function PaymentStatusRulesDrawer({
                         <RuleConditionEditor
                           onChange={(key, value) => updateRuleCondition(index, key, value, setDraftRules)}
                           rule={rule}
+                          applicantOptions={payload.applicantOptions}
+                          onApplicantChange={(name) => {
+                            const conditions = { ...rule.conditions };
+                            if (name === "any") delete conditions.applicantName;
+                            else conditions.applicantName = name;
+                            updateRule(index, { conditions }, setDraftRules);
+                          }}
                         />
                       ) : null}
                     </div>
-                    <div className="input-invoice-usage-payment-rule-row__reason">
-                      {canSave ? (
-                        <label className="input-invoice-usage-rules-field">
-                          <span>原因文案</span>
-                          <TextArea
-                            onChange={(event) => updateRule(index, { reason: event.target.value, description: event.target.value }, setDraftRules)}
-                            rows={2}
-                            value={rule.reason ?? rule.description}
-                          />
-                        </label>
-                      ) : (
-                        <div className="input-invoice-usage-payment-rule-readonly-field">
-                          <span>原因文案</span>
-                          <strong>{rule.reason || rule.description}</strong>
-                        </div>
-                      )}
-                    </div>
+                    {canSave ? <Button aria-label={`删除规则 ${rule.label}`} size="sm" variant="danger-soft" onPress={() => setDraftRules((current) => current.filter((_, itemIndex) => itemIndex !== index))}>删除</Button> : null}
                   </article>
                 ))}
                 {draftRules.length === 0 ? (
@@ -317,33 +328,12 @@ export default function PaymentStatusRulesDrawer({
                 ) : null}
               </div>
             </section>
-            <section className="input-invoice-usage-rules-section">
-              <h3>待处理发票处理方向</h3>
-              <div className="input-invoice-usage-rules-directions">
-                {draftPendingDirections.length === 0 ? (
-                  <span className="input-invoice-usage-rules-empty">暂无待处理方向。</span>
-                ) : null}
-                {draftPendingDirections.map((option, index) => (
-                  canSave ? (
-                    <label className="input-invoice-usage-rules-field input-invoice-usage-rules-field--direction" key={option.code || index}>
-                      <span>{option.code || `方向 ${index + 1}`}</span>
-                      <Input
-                        onChange={(event) => updatePendingDirection(index, event.target.value, setDraftPendingDirections)}
-                        value={option.label}
-                      />
-                    </label>
-                  ) : (
-                    <span className="input-invoice-usage-rules-tag" key={option.code || option.label}>
-                      {option.label}
-                    </span>
-                  )
-                ))}
-              </div>
-            </section>
           </>
         ) : null}
       </div>
     </AppDrawer>
+    <AppDialog open={confirmClose} title="放弃未保存的规则？" onClose={() => setConfirmClose(false)} actions={<><Button variant="secondary" onPress={() => setConfirmClose(false)}>继续编辑</Button><Button variant="danger" onPress={() => { setConfirmClose(false); onClose(); }}>放弃修改</Button></>} />
+    </>
   );
 }
 
@@ -384,16 +374,6 @@ function updateRuleCondition(
   }));
 }
 
-function updatePendingDirection(
-  index: number,
-  label: string,
-  setDraftPendingDirections: Dispatch<SetStateAction<Array<{ code?: string; label: string }>>>,
-) {
-  setDraftPendingDirections((current) => current.map((item, itemIndex) => (
-    itemIndex === index ? { ...item, label } : item
-  )));
-}
-
 function createIdempotencyKey(prefix: string) {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return `${prefix}:${crypto.randomUUID()}`;
@@ -404,25 +384,28 @@ function createIdempotencyKey(prefix: string) {
 function RuleConditionEditor({
   rule,
   onChange,
+  applicantOptions,
+  onApplicantChange,
 }: {
+  applicantOptions: string[];
+  onApplicantChange: (name: string) => void;
   rule: PaymentStatusRule;
   onChange: (key: RuleConditionKey, value: "any" | "true" | "false") => void;
 }) {
   const conditions = rule.conditions ?? {};
   const applicantName = String(conditions.applicantName ?? "").trim();
-  const fallback = conditions.fallback === true;
-  if (fallback) {
-    return (
-      <div className="input-invoice-usage-payment-rule-condition-editor" aria-label={`${rule.label || "规则"}条件编辑`}>
-        <span className="input-invoice-usage-rules-tag">兜底规则</span>
-      </div>
-    );
-  }
   return (
     <div className="input-invoice-usage-payment-rule-condition-editor" aria-label={`${rule.label || "规则"}条件编辑`}>
-      {applicantName ? (
-        <span className="input-invoice-usage-rules-tag">申请人={applicantName}</span>
-      ) : null}
+      <div className="input-invoice-usage-payment-rule-condition">
+        <span>OA 申请人</span>
+        <Select aria-label={`${rule.label || "规则"} OA 申请人条件`} selectedKey={applicantName || "any"} onSelectionChange={(key) => onApplicantChange(String(key))}>
+          <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+          <Select.Popover><ListBox>
+            <ListBox.Item id="any" textValue="不限制">不限制</ListBox.Item>
+            {Array.from(new Set([...applicantOptions, ...(applicantName ? [applicantName] : [])])).map((name) => <ListBox.Item key={name} id={name} textValue={name}>{name}</ListBox.Item>)}
+          </ListBox></Select.Popover>
+        </Select>
+      </div>
       {CONDITION_FIELDS.map((field) => (
         <div className="input-invoice-usage-payment-rule-condition" key={field.key}>
           <span>{field.label}</span>
@@ -475,10 +458,7 @@ function conditionChips(rule: PaymentStatusRule) {
   if (conditions.invoiceOaAmountMatched === true) {
     chips.push("发票/OA 金额匹配");
   }
-  if (conditions.fallback === true) {
-    chips.push("兜底规则");
-  }
-  return chips.length > 0 ? chips : ["条件由后端规则定义"];
+  return chips.length > 0 ? chips : ["未设置条件"];
 }
 
 function isVersionConflict(reason: unknown) {

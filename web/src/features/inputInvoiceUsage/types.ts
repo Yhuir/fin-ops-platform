@@ -190,7 +190,7 @@ export type InputInvoiceUsagePaymentStatusRulesResponse = {
     canSave: boolean;
   };
   rules: InputInvoiceUsagePaymentStatusRule[];
-  pendingDirections: InputInvoiceUsagePendingDirection[];
+  applicantOptions: string[];
   source?: {
     version?: string;
     updatedAt?: string;
@@ -211,26 +211,25 @@ export type InputInvoiceUsagePaymentStatusRule = {
   applicantConstraints?: string[];
 };
 
-export type InputInvoiceUsagePendingDirection = {
-  code?: string;
-  label: string;
-};
-
 export type SaveInputInvoiceUsagePaymentStatusRulesRequest = {
   expectedVersion: number | string | null;
   idempotencyKey: string;
-  rules: InputInvoiceUsagePaymentStatusRule[];
-  pendingDirections: InputInvoiceUsagePendingDirection[];
+  rules: Array<Pick<InputInvoiceUsagePaymentStatusRule, "id" | "statusCode" | "label" | "priority" | "enabled" | "conditions">>;
 };
 
 export type InputInvoiceUsageOaReversePreviewRequest = {
+  page?: number;
+  pageSize?: number;
+  keyword?: string;
+  bankRelation?: "all" | "linked" | "unlinked";
   source?: "currentFilters" | "explicitSelection";
-  filters: InputInvoiceUsageFilter[];
   selectedInvoiceIds: string[];
   targetApplicantCode?: string;
 };
 
 export type InputInvoiceUsageOaReversePreviewResponse = {
+  pagination: { page: number; pageSize: number; total: number };
+  relationCounts: { all: number; linked: number; unlinked: number };
   previewId?: string;
   previewHash?: string;
   source?: string;
@@ -288,6 +287,9 @@ export type InputInvoiceUsageOaReverseInvoice = {
   totalWithTax: string;
   paymentStatusLabel: string;
   targetApplicantName?: string;
+  occupiedBatchId?: string;
+  occupiedBatchStatus?: string;
+  bankRelationStatus?: "linked" | "unlinked";
   oaRelationStatus?: "linked" | "unlinked" | string;
 };
 
@@ -299,6 +301,9 @@ export type InputInvoiceUsageOaReverseRejectedInvoice = {
   issueDate?: string | null;
   totalWithTax?: string | null;
   paymentStatusLabel?: string | null;
+  occupiedBatchId?: string;
+  occupiedBatchStatus?: string;
+  bankRelationStatus?: "linked" | "unlinked";
   oaRelationStatus?: "linked" | "unlinked" | string;
   reasonCode?: string | null;
   reason: string;
@@ -331,6 +336,9 @@ export type InputInvoiceUsageOaReverseBatch = {
   auditEventId?: string | null;
   canCreateDraft?: boolean;
   canConfirmSubmission?: boolean;
+  canRelease?: boolean;
+  draftRequestState?: "not_started" | "requesting" | "unknown" | "succeeded";
+  oaDetectionError?: string | null;
   canRevoke?: boolean;
   canManualStatus?: boolean;
 };

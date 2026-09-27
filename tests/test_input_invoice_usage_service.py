@@ -334,7 +334,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(rows["inv-chen"]["paymentStatus"]["code"], "cash_turnover")
         self.assertEqual(rows["inv-paid"]["paymentStatus"]["code"], "paid")
         self.assertEqual(rows["inv-fallback"]["paymentStatus"]["code"], "pending")
-        self.assertIn("不能证明", rows["inv-fallback"]["paymentStatus"]["reason"])
+        self.assertEqual("未命中规则", rows["inv-fallback"]["paymentStatus"]["label"])
 
     def test_payment_status_uses_linked_oa_and_bank_totals_for_multi_relation(self) -> None:
         vendor = self._counterparty("vendor", "昭通市昭阳区豪然精品酒店")
@@ -388,9 +388,9 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
 
         rows = {row["invoiceId"]: row for row in service.list_rows(page_size=20)["rows"]}
 
-        self.assertEqual(rows["inv-zhou"]["paymentStatus"]["code"], "offset_zhou_jieying")
-        self.assertEqual(rows["inv-liu"]["paymentStatus"]["code"], "offset_liu_shugang_no_pay")
-        self.assertEqual(rows["inv-wei"]["paymentStatus"]["code"], "offset_wei_dailian")
+        self.assertEqual(rows["inv-zhou"]["paymentStatus"]["code"], "offset")
+        self.assertEqual(rows["inv-liu"]["paymentStatus"]["code"], "offset")
+        self.assertEqual(rows["inv-wei"]["paymentStatus"]["code"], "offset")
         self.assertEqual(rows["inv-wait"]["paymentStatus"]["code"], "waiting_payment")
 
     def test_confirmed_multi_invoice_relation_collapses_to_one_payment_row(self) -> None:
@@ -414,7 +414,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["invoiceRelations"]["relationCount"], 2)
         self.assertEqual(row["oa"]["relationCount"], 1)
         self.assertEqual(row["oa"]["amount"], "800.00")
-        self.assertEqual(row["paymentStatus"]["code"], "offset_zhou_jieying")
+        self.assertEqual(row["paymentStatus"]["code"], "offset")
 
     def test_confirmed_relation_component_with_shared_oa_collapses_to_one_payment_row(self) -> None:
         vendor = self._counterparty("vendor", "云南城建物业运营集团")
@@ -479,7 +479,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["oa"]["relationCount"], 1)
         self.assertEqual(row["oa"]["amount"], "800.00")
         self.assertEqual(row["paymentStatus"]["label"], "冲")
-        self.assertEqual(row["paymentStatus"]["code"], "offset_zhou_jieying")
+        self.assertEqual(row["paymentStatus"]["code"], "offset")
 
     def test_payment_status_accepts_status_matched_amount_check_for_oa_invoice_offset(self) -> None:
         vendor = self._counterparty("vendor", "云南城建物业运营集团")
@@ -504,7 +504,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         row = service.list_rows(page_size=20)["rows"][0]
 
         self.assertEqual(row["invoice"]["totalWithTax"], "800.00")
-        self.assertEqual(row["paymentStatus"]["code"], "offset_zhou_jieying")
+        self.assertEqual(row["paymentStatus"]["code"], "offset")
         self.assertEqual(row["paymentStatus"]["label"], "冲")
 
     def test_payment_status_accepts_legacy_offset_relation_without_amount_check_when_totals_match(self) -> None:
@@ -530,7 +530,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         row = service.list_rows(page_size=20)["rows"][0]
 
         self.assertEqual(row["invoice"]["totalWithTax"], "800.00")
-        self.assertEqual(row["paymentStatus"]["code"], "offset_zhou_jieying")
+        self.assertEqual(row["paymentStatus"]["code"], "offset")
         self.assertEqual(row["paymentStatus"]["label"], "冲")
 
     def test_one_to_many_oa_and_bank_relations_include_deterministic_primary_and_all_summaries(self) -> None:

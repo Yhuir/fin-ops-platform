@@ -891,6 +891,21 @@ describe("Input invoice usage page", () => {
     expect(relationRequests.map((url) => url.searchParams.get("month"))).toEqual(["2026-05", "2026-05", "2026-05"]);
   });
 
+  test("relation tabs count invoices and send an exclusive server filter", async () => {
+    const user = userEvent.setup();
+    const payload = { ...rowsPayload, filterOptions: [...inputFilterOptions, { field: "relation_status", label: "关联情况", type: "enum", operators: ["in"], options: [{ value: "no_oa", label: "未关联 OA", count: 3 }, { value: "oa_bank", label: "均已关联", count: 2 }] }] };
+    const fetchMock = installInputInvoiceUsageFetch(payload);
+    renderAuthenticatedAppAt("/input-invoice-usage");
+    expect(await screen.findByRole("tab", { name: "全部 5 张" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "有 OA／无流水 0 张" })).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "未关联 OA 3 张" }));
+    await waitFor(() => {
+      const query = rowsRequests(fetchMock).at(-1)!;
+      expect(JSON.parse(decodeURIComponent(query.searchParams.get("filters")!))).toEqual(expect.arrayContaining([{ field: "relation_status", operator: "in", values: ["no_oa"] }]));
+      expect(query.searchParams.get("page")).toBe("1");
+    });
+  });
+
   test("opens OA reverse workspace with one-step draft creation and submitted history tabs", async () => {
     const user = userEvent.setup();
     const fetchMock = installInputInvoiceUsageFetch();
@@ -903,7 +918,8 @@ describe("Input invoice usage page", () => {
 
     expect(await screen.findByRole("tab", { name: "待处理" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "已提交" })).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "创建 OA 草稿" })).toBeEnabled();
+    await user.click(await screen.findByRole("button", { name: "选择本页" }));
+    expect(screen.getByRole("button", { name: "创建 OA 草稿" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "创建本地批次" })).not.toBeInTheDocument();
     expect(screen.queryByText("尚未创建本地批次。")).not.toBeInTheDocument();
 
@@ -933,7 +949,8 @@ describe("Input invoice usage page", () => {
     const initialRowsRequests = rowsRequests(fetchMock).length;
 
     await user.click(within(page).getByRole("button", { name: "以发票反提 OA" }));
-    expect(await screen.findByRole("button", { name: "创建 OA 草稿" })).toBeEnabled();
+    await user.click(await screen.findByRole("button", { name: "选择本页" }));
+    expect(screen.getByRole("button", { name: "创建 OA 草稿" })).toBeEnabled();
 
     await user.click(screen.getByRole("button", { name: "创建 OA 草稿" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => {

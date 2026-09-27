@@ -550,13 +550,7 @@ function mapPaymentStatusRulesResponse(payload: unknown): InputInvoiceUsagePayme
         applicantConstraints: arrayValue(camelOrSnake(rule, "applicantConstraints", "applicant_constraints")).map(stringValue),
       };
     }),
-    pendingDirections: arrayValue(camelOrSnake(raw, "pendingDirections", "pending_directions")).map((item) => {
-      const direction = objectValue(item);
-      return {
-        code: stringValue(direction.code),
-        label: stringValue(direction.label),
-      };
-    }),
+    applicantOptions: arrayValue(raw.applicantOptions).map(stringValue),
     source: Object.keys(source).length > 0 ? {
       version: stringValue(source.version),
       updatedAt: stringValue(camelOrSnake(source, "updatedAt", "updated_at")),
@@ -579,6 +573,9 @@ function mapOaReverseInvoice(rawValue: unknown) {
     totalWithTax: stringValue(camelOrSnake(raw, "totalWithTax", "total_with_tax")),
     paymentStatusLabel: stringValue(camelOrSnake(raw, "paymentStatusLabel", "payment_status_label") ?? camelOrSnake(raw, "statusLabel", "status_label") ?? paymentStatus.label ?? raw.status),
     targetApplicantName: stringValue(camelOrSnake(raw, "targetApplicantName", "target_applicant_name")),
+    occupiedBatchId: stringValue(raw.occupiedBatchId),
+    occupiedBatchStatus: stringValue(raw.occupiedBatchStatus),
+    bankRelationStatus: raw.bankRelationStatus as "linked" | "unlinked",
     oaRelationStatus: stringValue(camelOrSnake(raw, "oaRelationStatus", "oa_relation_status")),
   };
 }
@@ -605,6 +602,9 @@ function mapRejectedInvoice(rawValue: unknown) {
         ?? paymentStatus.label
         ?? raw.status,
     ),
+    occupiedBatchId: stringValue(raw.occupiedBatchId),
+    occupiedBatchStatus: stringValue(raw.occupiedBatchStatus),
+    bankRelationStatus: raw.bankRelationStatus as "linked" | "unlinked",
     oaRelationStatus: stringValue(camelOrSnake(raw, "oaRelationStatus", "oa_relation_status")),
     reasonCode: stringValue(camelOrSnake(raw, "reasonCode", "reason_code")),
     reason: stringValue(raw.reason),
@@ -637,6 +637,8 @@ function mapOaReversePreviewResponse(payload: unknown): InputInvoiceUsageOaRever
     };
   });
   return {
+    pagination: raw.pagination as InputInvoiceUsageOaReversePreviewResponse["pagination"],
+    relationCounts: raw.relationCounts as InputInvoiceUsageOaReversePreviewResponse["relationCounts"],
     previewId: stringValue(camelOrSnake(raw, "previewId", "preview_id")),
     previewHash: stringValue(camelOrSnake(raw, "previewHash", "preview_hash") ?? camelOrSnake(raw, "expectedPreviewHash", "expected_preview_hash")),
     source: stringValue(raw.source),
@@ -714,6 +716,9 @@ function mapOaReverseBatch(payload: unknown): InputInvoiceUsageOaReverseBatch {
     idempotentReplay: booleanValue(camelOrSnake(raw, "idempotentReplay", "idempotent_replay")),
     auditEventId: stringValue(camelOrSnake(raw, "auditEventId", "audit_event_id")) || null,
     canCreateDraft: camelOrSnake(raw, "canCreateDraft", "can_create_draft") === undefined ? undefined : booleanValue(camelOrSnake(raw, "canCreateDraft", "can_create_draft")),
+    canRelease: booleanValue(raw.canRelease),
+    draftRequestState: raw.draftRequestState as InputInvoiceUsageOaReverseBatch["draftRequestState"],
+    oaDetectionError: stringValue(camelOrSnake(raw, "oaDetectionError", "oa_detection_error")),
     canConfirmSubmission: camelOrSnake(raw, "canConfirmSubmission", "can_confirm_submission") === undefined ? undefined : booleanValue(camelOrSnake(raw, "canConfirmSubmission", "can_confirm_submission")),
     canRevoke: camelOrSnake(raw, "canRevoke", "can_revoke") === undefined ? undefined : booleanValue(camelOrSnake(raw, "canRevoke", "can_revoke")),
     canManualStatus: camelOrSnake(raw, "canManualStatus", "can_manual_status") === undefined ? undefined : booleanValue(camelOrSnake(raw, "canManualStatus", "can_manual_status")),
@@ -902,7 +907,6 @@ export async function saveInputInvoiceUsagePaymentStatusRules(
       expectedVersion: request.expectedVersion,
       idempotencyKey: request.idempotencyKey,
       rules: request.rules,
-      pendingDirections: request.pendingDirections,
     }),
   });
   return mapPaymentStatusRulesResponse(payload);
@@ -917,8 +921,11 @@ export async function previewInputInvoiceUsageOaReverse(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       source: request.source ?? (request.selectedInvoiceIds.length > 0 ? "explicitSelection" : "currentFilters"),
-      filters: request.filters,
-      invoiceIds: request.selectedInvoiceIds,
+      page: request.page,
+      pageSize: request.pageSize,
+      keyword: request.keyword,
+      bankRelation: request.bankRelation,
+      ...(request.selectedInvoiceIds.length > 0 ? { invoiceIds: request.selectedInvoiceIds } : {}),
       ...(request.targetApplicantCode ? { targetApplicantCode: request.targetApplicantCode } : {}),
     }),
     signal,
@@ -968,8 +975,8 @@ export async function fetchInputInvoiceUsageOaReverseSubmittedHistory(signal?: A
   return mapOaReverseSubmittedHistory(payload);
 }
 
-export async function fetchInputInvoiceUsageOaReverseStagedDrafts(signal?: AbortSignal) {
-  const payload = await apiRequestJson<unknown>("/api/input-invoice-usage/oa-reverse/staged-drafts", {
+export async function fetchInputInvoiceUsageOaReverseStagedDrafts(limit = 50, signal?: AbortSignal) {
+  const payload = await apiRequestJson<unknown>(`/api/input-invoice-usage/oa-reverse/staged-drafts?limit=${limit}`, {
     method: "GET",
     signal,
   });
