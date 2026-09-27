@@ -205,3 +205,10 @@ bash scripts/verify.sh docs
 - `tests/test_etc_formal_matching_postgres.py`：47 张 ETC、进行中 OA、后到银行同 case、幂等、事务回滚、旧事实拒绝、提交与 dirty scopes 原子性、多批来源不覆盖。
 - 既有 ETC API/删除、OA adapter、matching/UoW、Workbench query/grouping/command、成本和待付款回归；`WorkbenchColumns.test.tsx` 覆盖 paired/unpaired 两区真实进行中标签。
 - 不新增 read model/cache，freshness 专属测试不适用。部署和生产证据记录在 [实施计划](../../dev/etc-oa-invoice-bank-matching-plan.md)。
+
+## 2026-09-28 发票统计验证
+
+- `tests/test_etc_formal_matching_postgres.py::EtcFormalMatchingPostgresTests::test_business_bucket_counts_distinct_actual_invoices_before_pagination` 使用真实 PostgreSQL 覆盖跨批次重复成员、批内重复、缺失/删除成员、空批次、分页不影响统计和关键词/月筛选。
+- `tests/test_etc_backend.py` 保留 65 张发票固定 list=2/detail=3 查询预算，明确 invoice counts=65、pagination total=1；既有权限、提交/撤回、删除 API 回归继续适用。
+- `EtcApi.test.ts` 覆盖非法/缺失统计拒绝；`EtcTicketManagementPage.test.tsx` 和 ETC Playwright 场景更新张数文案、刷新、暂存/提交与分页合同。
+- 适用类别：业务计数、repository/service、API合同、组件交互、既有提交/撤回链路与回归。read model/cache/worker无合同改动，不新增其测试。

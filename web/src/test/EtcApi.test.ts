@@ -157,6 +157,16 @@ describe("etc api", () => {
     });
   });
 
+  test.each([undefined, {}, { unsubmitted: -1, staged: 0, submitted: 0 }, { unsubmitted: 1, staged: "2", submitted: 0 }])(
+    "rejects invalid invoice bucket counts instead of inventing zero: %j",
+    async (counts) => {
+      global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [], counts }), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      })) as typeof fetch;
+      await expect(fetchEtcBusinessBatches()).rejects.toThrow("ETC 发票统计响应无效");
+    },
+  );
+
   test("maps ETC business batches from envelope and legacy fields", async () => {
     const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;

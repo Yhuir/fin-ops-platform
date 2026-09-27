@@ -63,20 +63,13 @@ function finiteCount(value: unknown, fallback = 0) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-function normalizeSummary(summary: OaPendingPaymentSummary | undefined, fallbackRowCount: number): OaPendingPaymentSummary {
-  return {
-    ...(summary ?? {}),
-    rowCount: finiteCount(summary?.rowCount, fallbackRowCount),
-  };
-}
-
 export default function OaPendingPaymentsPage() {
   const { canOperateData } = useSessionPermissions();
   const { active, activationGeneration } = useOptionalPageActivation("oa-pending-payments");
   const [query, setQuery] = useState<OaPendingPaymentQuery>(initialQuery);
   const [rows, setRows] = useState<OaPendingPaymentRow[]>([]);
   const [total, setTotal] = useState(0);
-  const [summary, setSummary] = useState<OaPendingPaymentSummary>({ rowCount: 0 });
+  const [summary, setSummary] = useState<OaPendingPaymentSummary | null>(null);
   const [statistics, setStatistics] = useState<OaPendingPaymentStatistics | null>(null);
   const [filterConfigs, setFilterConfigs] = useState<OaPendingPaymentFieldConfig[]>([]);
   const [filterOptions, setFilterOptions] = useState<Record<string, OaPendingPaymentFilterOption[]>>({});
@@ -97,17 +90,17 @@ export default function OaPendingPaymentsPage() {
   const clearVisibleRows = useCallback(() => {
     setRows([]);
     setTotal(0);
-    setSummary({ rowCount: 0 });
+    setSummary(null);
     setStatistics(null);
     setFilterConfigs([]);
     setFilterOptions({});
   }, []);
 
   const applyRowsPayload = useCallback((payload: OaPendingPaymentRowsResponse) => {
-    const payloadTotal = finiteCount(payload.pagination?.total);
+    const payloadTotal = payload.pagination.total;
     setRows(payload.rows ?? []);
     setTotal(payloadTotal);
-    setSummary(normalizeSummary(payload.summary, payloadTotal));
+    setSummary(payload.summary);
     setStatistics(payload.statistics ?? null);
     setFilterConfigs(payload.filterConfig ?? []);
     setFilterOptions(payload.filterOptions ?? {});
@@ -128,6 +121,11 @@ export default function OaPendingPaymentsPage() {
     try {
       const payload = await fetchOaPendingPaymentRows({ ...query, signal });
       if (signal?.aborted || requestId !== requestIdRef.current) {
+        return;
+      }
+      const lastPage = Math.max(1, Math.ceil(payload.pagination.total / query.pageSize));
+      if (query.page > lastPage) {
+        setQuery(current => ({ ...current, page: lastPage }));
         return;
       }
       applyRowsPayload(payload);
@@ -279,8 +277,13 @@ export default function OaPendingPaymentsPage() {
   ), [canOperateData, loadRows, loading, query.viewMode, refreshing, selectedOaRowIds.size]);
   const visibleError = error ?? actionError;
   const isEmpty = !loading && !refreshing && !visibleError && rows.length === 0;
-  const completedCountLabel = formatViewCount(summary.viewCounts?.completed);
-  const inProgressCountLabel = formatViewCount(summary.viewCounts?.in_progress);
+  const completedCountLabel = loading ? "…" : formatViewCount(summary?.viewCounts?.completed);
+  const inProgressCountLabel = loading ? "…" : formatViewCount(summary?.viewCounts?.in_progress);
+  const paymentValues = query.filters.find(filter => filter.field === "payment_status")?.values ?? [];
+  const paymentSelection = paymentValues.length === 1 ? paymentValues[0] : "all";
+  const statusCount = (key: "all" | "paid" | "unpaid") => loading ? "…" : summary
+    ? `${key === "all" ? summary.statusCounts.paid + summary.statusCounts.unpaid : summary.statusCounts[key]}条`
+    : "—";
   const titleAccessory = (
     <div className="page-title-accessory-group">
       <PageStatisticsPopover
@@ -344,6 +347,24 @@ export default function OaPendingPaymentsPage() {
                 </div>
               )}
             />
+            <SegmentGroup
+              aria-label="支付流水"
+              disallowEmptySelection
+              selectedKeys={new Set([paymentSelection])}
+              selectionMode="single"
+              size="sm"
+              onSelectionChange={(keys) => {
+                const [key] = Array.from(keys);
+                if (key === "all") handleFilterClear("payment_status");
+                else if (key === "paid" || key === "unpaid") {
+                  handleFilterApply({ field: "payment_status", operator: "in", values: [key] });
+                }
+              }}
+            >
+              <Segment id="all">全部 {statusCount("all")}</Segment>
+              <Segment id="paid">已关联 {statusCount("paid")}</Segment>
+              <Segment id="unpaid">未关联 {statusCount("unpaid")}</Segment>
+            </SegmentGroup>
             {visibleError ? (
               <div className="oa-pending-payments-alert" role="alert">
                 {visibleError}
@@ -373,6 +394,7 @@ export default function OaPendingPaymentsPage() {
                   page={query.page}
                   pageSize={query.pageSize}
                   total={total}
+                  oaCount={summary?.oaCount}
                   keywordDraft={keywordDraft}
                   filterConfigs={filterConfigs}
                   filterOptions={filterOptions}

@@ -110,7 +110,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         )
         payload: dict[str, object] = {
             "summary": self._summary_from_aggregates(
-                self._aggregates_for_batches(batches_for_summary),
+                self._aggregates_for_batches(batches_for_summary, page_result["bank_parent_ids"]),
                 eligible_tag_codes=eligible_tag_codes,
                 definitions_by_code=definitions_by_code,
             ),
@@ -158,6 +158,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
     @staticmethod
     def _aggregates_for_batches(
         batches: list[dict[str, object]],
+        parent_ids: dict[str, str],
     ) -> list[dict[str, object]]:
         aggregates: dict[tuple[str, str], dict[str, object]] = {}
         for batch in batches:
@@ -172,7 +173,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                     "batch_type": batch_type,
                     "presented_status": status,
                     "batch_count": 0,
-                    "row_count": 0,
+                    "transaction_ids": set(),
                     "batch_label": str(batch.get("batch_label") or batch_type),
                     "category_primary_label": str(batch.get("category_primary_label") or ""),
                     "category_sub_label": str(batch.get("category_sub_label") or ""),
@@ -180,8 +181,10 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 },
             )
             aggregate["batch_count"] = int(aggregate["batch_count"]) + 1
-            aggregate["row_count"] = int(aggregate["row_count"]) + int(
-                batch.get("row_count") or len(list(batch.get("row_ids") or []))
+            # Business counts include existing canonical transactions only; retained history
+            # may refer to removed purpose units and must not invent their parent identity.
+            aggregate["transaction_ids"].update(
+                parent_ids[row_id] for row_id in set(batch["row_ids"]).intersection(parent_ids)
             )
             try:
                 amount = Decimal(str(batch.get("total_amount") or "0").replace(",", ""))
@@ -317,35 +320,43 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 "total_amount": Decimal("0.00"),
             }
         total_amount = Decimal("0.00")
-        row_counts = {"draft": 0, "submitted": 0, "withdrawn": 0}
+        row_ids = {"draft": set(), "submitted": set(), "withdrawn": set()}
+        category_ids = {code: {status: set() for status in row_ids} for code in categories}
+        label_ids = {
+            (category["primary_label"] or category["label"], sub): {status: set() for status in row_ids}
+            for category in categories.values()
+            for sub in (None, category["sub_label"])
+        }
         for row in rows:
             code = str(row.get("batch_type") or "").strip()
             status = str(row.get("presented_status") or "").strip()
             count = max(int(row.get("batch_count") or 0), 0)
-            row_count = max(int(row.get("row_count") or 0), 0)
+            transaction_ids = set(row["transaction_ids"])
             try:
                 amount = Decimal(str(row.get("total_amount") or "0").replace(",", ""))
             except (InvalidOperation, ValueError):
                 amount = Decimal("0.00")
             if status in counts:
                 counts[status] += count
-            if status in row_counts:
-                row_counts[status] += row_count
+            if status in row_ids:
+                row_ids[status].update(transaction_ids)
             total_amount += amount
             category = categories.get(code)
             if category is None:
                 continue
             category["total"] = int(category["total"]) + count
-            category["total_row_count"] = int(category["total_row_count"]) + row_count
             if status in counts:
                 category[status] = int(category[status]) + count
-            row_count_key = f"{status}_row_count"
-            if row_count_key in category:
-                category[row_count_key] = int(category[row_count_key]) + row_count
+            category_ids[code][status].update(transaction_ids)
+            for sub_label in (None, category["sub_label"]):
+                key = (category["primary_label"] or category["label"], sub_label)
+                label_ids.setdefault(key, {state: set() for state in row_ids})[status].update(transaction_ids)
             category["total_amount"] = Decimal(str(category["total_amount"])) + amount
         category_payloads: list[dict[str, object]] = []
         for category in categories.values():
             next_category = dict(category)
+            next_category.update({f"{status}_row_count": len(ids) for status, ids in category_ids[category["code"]].items()})
+            next_category["total_row_count"] = len(set().union(*category_ids[category["code"]].values()))
             next_category["total_amount"] = f"{Decimal(str(category['total_amount'])):.2f}"
             category_payloads.append(next_category)
         total = counts["draft"] + counts["submitted"] + counts["withdrawn"]
@@ -355,14 +366,20 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             "draft_count": counts["draft"],
             "submitted_count": counts["submitted"],
             "withdrawn_count": counts["withdrawn"],
-            "total_row_count": sum(row_counts.values()),
-            "draft_row_count": row_counts["draft"],
-            "submitted_row_count": row_counts["submitted"],
-            "withdrawn_row_count": row_counts["withdrawn"],
+            "total_row_count": len(set().union(*row_ids.values())),
+            "draft_row_count": len(row_ids["draft"]),
+            "submitted_row_count": len(row_ids["submitted"]),
+            "withdrawn_row_count": len(row_ids["withdrawn"]),
             "conflict_count": counts["conflict"],
             "stale_count": counts["stale"],
             "total_amount": f"{total_amount:.2f}",
             "categories": category_payloads,
+            "label_counts": [
+                {"primary_label": primary, "sub_label": sub,
+                 "total_row_count": len(set().union(*states.values())),
+                 **{f"{status}_row_count": len(ids) for status, ids in states.items()}}
+                for (primary, sub), states in label_ids.items()
+            ],
         }
 
     def _ensure_formal_bank_flow_rule_batch_runtime_item(

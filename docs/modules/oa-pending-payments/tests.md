@@ -243,3 +243,9 @@ cd web && npm run build
 ## 2026-09-27 来源详情回归
 
 按[来源详情验证责任](../../dev/source-record-details.md#验证责任)覆盖真实来源保留、内部状态/推断/替代值移除、缺失与零值、权限及读取失败；保留本模块列表、计算、导出和关系回归。公共前端入口包括 `EntityDetailContent.test.tsx`、`DetailDrawer.test.tsx` 与 `BankTransactionDrawer.test.tsx`，后者保护按 ID 读取、切换取消及禁止列表摘要回退。具体后端/浏览器执行及性能结果据实际报告，不以本节表示已通过。
+
+## 2026-09-28 实体统计回归
+
+真实 PostgreSQL `test_entity_counts_are_independent_of_group_paging_and_status_filter` 验证同组多 OA、当页一行与全量条数分离、支付状态自身排除、筛选候选条数、撤回后状态变化和空集合真实 0。前端用例验证分段统计、共享 filters、页码重置、统计合同错误不冒充行数及原有权限/抽屉/异步请求回归。覆盖业务核心、repository/service、API 合同、组件交互、关联撤回读链和旧功能；无新增 read model/cache/worker。
+
+额外覆盖范围切换期间不展示上一范围数字、刷新后总页数减少时重读最后有效页。浏览器几何断言以当前原生分段的实际 padding/gap 计算，保留像素误差限制。

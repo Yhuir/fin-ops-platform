@@ -26,9 +26,16 @@ describe("bank flow rule batch API", () => {
     expect(detail.batch.version).toBe(3);
   });
 
+  test("rejects missing business counts instead of substituting batch totals", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      summary: { label_counts: [], categories: [], draft_count: 12 }, batches: [],
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    await expect(fetchBankFlowRuleBatches({})).rejects.toThrow("原始流水统计数量缺失或无效");
+  });
+
   test("omits month and all filters when requesting the complete batch scope", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      summary: { categories: [] },
+      summary: { label_counts: [], categories: [], total_row_count: 0, draft_row_count: 0, submitted_row_count: 0, withdrawn_row_count: 0 },
       batches: [],
       pagination: { page: 1, page_size: 50, total: 0 },
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
@@ -130,16 +137,16 @@ describe("bank flow rule batch API", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({
-        summary: {
+        summary: { label_counts: [],
           draft_count: 1,
           submittedCount: 2,
           withdrawn_count: 3,
           conflictCount: 4,
           stale_count: 5,
           total_row_count: 12,
-          draftRowCount: 12,
+          draft_row_count: 12,
           submitted_row_count: 0,
-          withdrawnRowCount: 0,
+          withdrawn_row_count: 0,
           total_amount: "12345.67",
           categories: [
             { code: "fee", label: "手续费", total: 1, draft: 1, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_row_count: 12, draft_row_count: 12, submitted_row_count: 0, withdrawn_row_count: 0, total_amount: "88.00" },
@@ -211,7 +218,7 @@ describe("bank flow rule batch API", () => {
       "/api/bank-flow-rule-batches?month=2026-05&bucket=unsubmitted&account_key=ccb%3A8106&page=2&page_size=50",
       expect.objectContaining({ method: "GET" }),
     );
-    expect(payload.summary).toEqual({
+    expect(payload.summary).toEqual({ labelCounts: [],
       draftCount: 1,
       submittedCount: 2,
       withdrawnCount: 3,
@@ -265,13 +272,14 @@ describe("bank flow rule batch API", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({
-        summary: {
+        summary: { label_counts: [],
           draft_count: 1,
           submitted_count: 0,
           withdrawn_count: 0,
           conflict_count: 0,
           stale_count: 0,
           total_amount: "40.50",
+          total_row_count: 1, draft_row_count: 1, submitted_row_count: 0, withdrawn_row_count: 0,
           categories: [],
         },
         batches: [
@@ -313,13 +321,14 @@ describe("bank flow rule batch API", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({
-        summary: {
+        summary: { label_counts: [],
           draft_count: 0,
           submitted_count: 1,
           withdrawn_count: 0,
           conflict_count: 0,
           stale_count: 0,
           total_amount: "86.00",
+          total_row_count: 1, draft_row_count: 0, submitted_row_count: 1, withdrawn_row_count: 0,
           categories: [],
         },
         batches: [
@@ -355,13 +364,14 @@ describe("bank flow rule batch API", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({
-        summary: {
+        summary: { label_counts: [],
           draft_count: 1,
           submitted_count: 1,
           withdrawn_count: 0,
           conflict_count: 0,
           stale_count: 0,
           total_amount: "2.00",
+          total_row_count: 2, draft_row_count: 1, submitted_row_count: 1, withdrawn_row_count: 0,
           categories: [],
         },
         batches: [

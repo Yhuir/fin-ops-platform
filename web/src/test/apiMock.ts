@@ -549,9 +549,9 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
         ok: true,
         data: {
           counts: {
-            unsubmitted: filteredBatches.filter((batch) => businessBatchBucket(batch) === "unsubmitted").length,
-            staged: filteredBatches.filter((batch) => businessBatchBucket(batch) === "staged").length,
-            submitted: filteredBatches.filter((batch) => businessBatchBucket(batch) === "submitted").length,
+            unsubmitted: new Set(filteredBatches.filter((batch) => businessBatchBucket(batch) === "unsubmitted").flatMap((batch) => invoicesForBatch(batch).map((invoice) => invoice.id))).size,
+            staged: new Set(filteredBatches.filter((batch) => businessBatchBucket(batch) === "staged").flatMap((batch) => invoicesForBatch(batch).map((invoice) => invoice.id))).size,
+            submitted: new Set(filteredBatches.filter((batch) => businessBatchBucket(batch) === "submitted").flatMap((batch) => invoicesForBatch(batch).map((invoice) => invoice.id))).size,
           },
           items: cloneJson(rows.slice((page - 1) * pageSize, page * pageSize)),
           pagination: {
@@ -2106,12 +2106,12 @@ function toGroupedWorkbenchPayload(payload: {
       invoice_count: payload.summary.invoice_count,
       paired_count: pairedGroups.length,
       unpaired_count: unpairedGroups.length,
-      unpaired_exception_count: unpairedGroups.filter(
+      unpaired_exception_counts: countMockWorkbenchRows(unpairedGroups.filter(
         (group) => (group as { workbench_anomaly?: object }).workbench_anomaly != null,
-      ).length,
-      paired_exception_count: pairedGroups.filter(
+      )),
+      paired_exception_counts: countMockWorkbenchRows(pairedGroups.filter(
         (group) => (group as { workbench_anomaly?: object }).workbench_anomaly != null,
-      ).length,
+      )),
     },
     statistics: {
       oa_count: payload.summary.oa_count,
@@ -4988,6 +4988,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         "bank_invoice_equal_oa_less",
         "bank_invoice_equal_oa_more",
         "all_amounts_different",
+        "expense_item_amount_mismatch",
       ] as const;
       const baseGroups = sortMockWorkbenchGroups(
         payload[zone].groups.filter((group) => (
@@ -5051,10 +5052,10 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           ...(exceptionBucket ? {
             selected_exception_code: selectedExceptionCode,
             exception_counts: {
-              total: amountGroups.length + documentOnlyGroups.length,
-              amount_total: amountGroups.length,
-              document_only: documentOnlyGroups.length,
-              by_code: byCode,
+              total: countMockWorkbenchRows([...amountGroups, ...documentOnlyGroups]),
+              amount_total: countMockWorkbenchRows(amountGroups),
+              document_only: countMockWorkbenchRows(documentOnlyGroups),
+              by_code: Object.fromEntries(amountCodes.map((code) => [code, countMockWorkbenchRows(amountGroups.filter((group) => primaryAmountCode(group) === code))])),
             },
           } : {}),
         },

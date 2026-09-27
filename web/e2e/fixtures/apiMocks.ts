@@ -1819,8 +1819,8 @@ function workbenchSummary(
       invoice_count: 210,
       paired_count: 5,
       unpaired_count: 205,
-      unpaired_exception_count: 0,
-      paired_exception_count: 0,
+      unpaired_exception_counts: { oa: (0), bank: (0), invoice: (0) },
+      paired_exception_counts: { oa: (0), bank: (0), invoice: (0) },
       ignored_count: 0,
     };
   }
@@ -1830,8 +1830,8 @@ function workbenchSummary(
     invoice_count: 1,
     paired_count: relationConfirmed && (!amountMismatchScenario || amountMismatchDecision === "accept_paired") ? 1 : 0,
     unpaired_count: relationConfirmed && (!amountMismatchScenario || amountMismatchDecision === "accept_paired") ? 0 : 1,
-    unpaired_exception_count: amountMismatchScenario && amountMismatchDecision !== "accept_paired" ? 1 : 0,
-    paired_exception_count: amountMismatchScenario && amountMismatchDecision === "accept_paired" ? 1 : 0,
+    unpaired_exception_counts: { oa: (amountMismatchScenario && amountMismatchDecision !== "accept_paired" ? 1 : 0), bank: (amountMismatchScenario && amountMismatchDecision !== "accept_paired" ? 1 : 0), invoice: (amountMismatchScenario && amountMismatchDecision !== "accept_paired" ? 1 : 0) },
+    paired_exception_counts: { oa: (amountMismatchScenario && amountMismatchDecision === "accept_paired" ? 1 : 0), bank: (amountMismatchScenario && amountMismatchDecision === "accept_paired" ? 1 : 0), invoice: (amountMismatchScenario && amountMismatchDecision === "accept_paired" ? 1 : 0) },
     ignored_count: 0,
   };
 }
@@ -1885,10 +1885,10 @@ function workbenchExceptionProjection<T extends Record<string, unknown>>(
     groups: selectedGroups,
     selectedExceptionCode: selectedCode,
     counts: {
-      total: amountGroups.length + documentOnlyGroups.length,
-      amount_total: amountGroups.length,
-      document_only: documentOnlyGroups.length,
-      by_code: byCode,
+      total: countWorkbenchRows([...amountGroups, ...documentOnlyGroups] as never),
+      amount_total: countWorkbenchRows(amountGroups as never),
+      document_only: countWorkbenchRows(documentOnlyGroups as never),
+      by_code: Object.fromEntries(WORKBENCH_AMOUNT_EXCEPTION_CODES.map((code) => [code, countWorkbenchRows(amountGroups.filter((group) => primaryAmountCode(group) === code) as never)])),
     },
   };
 }
@@ -3139,9 +3139,9 @@ function etcBusinessBatchListPayload(
   return {
     items: batches.slice((page - 1) * pageSize, page * pageSize),
     counts: {
-      unsubmitted: batchBucket === "unsubmitted" ? total : 0,
-      staged: batchBucket === "staged" ? total : 0,
-      submitted: batchBucket === "submitted" ? total : 0,
+      unsubmitted: batchBucket === "unsubmitted" ? total * etcBusinessBatchInvoiceItems().length : 0,
+      staged: batchBucket === "staged" ? total * etcBusinessBatchInvoiceItems().length : 0,
+      submitted: batchBucket === "submitted" ? total * etcBusinessBatchInvoiceItems().length : 0,
     },
     pagination: {
       page,
@@ -4535,7 +4535,9 @@ function oaPendingPaymentRowsPayload(includeInvoiceImportEvidence = false) {
       rowCount: includeInvoiceImportEvidence ? 2 : 1,
       oaAmountTotal: includeInvoiceImportEvidence ? "30320.00" : "12000.00",
       bankPaidTotal: includeInvoiceImportEvidence ? "26320.00" : "8000.00",
-      statusCounts: { paid: includeInvoiceImportEvidence ? 2 : 1 },
+      oaCount: includeInvoiceImportEvidence ? 2 : 1,
+      viewCounts: { completed: includeInvoiceImportEvidence ? 2 : 1, in_progress: 1 },
+      statusCounts: { paid: includeInvoiceImportEvidence ? 2 : 1, unpaid: 0 },
     },
     filterOptions: oaPendingPaymentFilterOptions(),
     filterConfig: [
@@ -4667,7 +4669,8 @@ function oaPendingPaymentBankLinkRowsPayload(linked: boolean) {
       rowCount: 1,
       oaAmountTotal: "7600.00",
       bankPaidTotal: linked ? "7600.00" : "0.00",
-      statusCounts: linked ? { paid: 1 } : { unpaid: 1 },
+      oaCount: 1,
+      statusCounts: linked ? { paid: 1, unpaid: 0 } : { paid: 0, unpaid: 1 },
       viewCounts: { completed: 1, in_progress: 1 },
     },
     filterOptions: oaPendingPaymentFilterOptions(),
@@ -4829,7 +4832,9 @@ function oaPendingPaymentRelationFanoutRowsPayload(relationConfirmed: boolean) {
       rowCount: 1,
       oaAmountTotal: "58000.00",
       bankPaidTotal: relationConfirmed ? "58000.00" : "0.00",
-      statusCounts: relationConfirmed ? { paid: 1 } : { unpaid: 1 },
+      oaCount: 1,
+      viewCounts: { completed: 1, in_progress: 1 },
+      statusCounts: relationConfirmed ? { paid: 1, unpaid: 0 } : { paid: 0, unpaid: 1 },
     },
     filterOptions: oaPendingPaymentFilterOptions(),
     filterConfig: [
@@ -5903,7 +5908,22 @@ function bankFlowRuleBatchSummary(status: BankFlowRuleBrowserBatchStatus, batche
     }, batch]);
     categoriesByCode.set(code, current);
   }
+  // These browser fixtures use disjoint original transaction members.
+  const labelCounts = new Map<string, { primary_label: string; sub_label: string | null;
+    total_row_count: number; draft_row_count: number; submitted_row_count: number; withdrawn_row_count: number }>();
+  for (const category of categoriesByCode.values()) {
+    for (const sub of [null, category.sub_label]) {
+      const primary = category.primary_label || category.label;
+      const key = JSON.stringify([primary, sub]);
+      const counts = labelCounts.get(key) ?? { primary_label: primary, sub_label: sub,
+        total_row_count: 0, draft_row_count: 0, submitted_row_count: 0, withdrawn_row_count: 0 };
+      for (const field of ["total_row_count", "draft_row_count", "submitted_row_count", "withdrawn_row_count"] as const)
+        counts[field] += category[field];
+      labelCounts.set(key, counts);
+    }
+  }
   return {
+    label_counts: [...labelCounts.values()],
     draft_count: draft,
     submitted_count: submitted,
     withdrawn_count: withdrawn,
@@ -9716,8 +9736,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             invoice_count: 2,
             paired_count: pairedGroups.length,
             unpaired_count: unpairedGroups.length,
-            paired_exception_count: 0,
-            unpaired_exception_count: unpairedGroups.length,
+            paired_exception_counts: { oa: (0), bank: (0), invoice: (0) },
+            unpaired_exception_counts: countWorkbenchRows(unpairedGroups),
           },
           paired: {
             ...payload.paired,
@@ -9764,8 +9784,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             bank_count: 0,
             invoice_count: 0,
             unpaired_count: 1,
-            unpaired_exception_count: 1,
-            paired_exception_count: 0,
+            unpaired_exception_counts: countWorkbenchRows(groups),
+            paired_exception_counts: { oa: (0), bank: (0), invoice: (0) },
           },
           invoice_inventory: {
             ...payload.invoice_inventory,
@@ -9821,8 +9841,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             invoice_count: relationConfirmed ? 1 : 0,
             paired_count: relationConfirmed ? 2 : 1,
             unpaired_count: relationConfirmed ? 0 : 1,
-            unpaired_exception_count: 0,
-            paired_exception_count: 0,
+            unpaired_exception_counts: { oa: (0), bank: (0), invoice: (0) },
+            paired_exception_counts: { oa: (0), bank: (0), invoice: (0) },
             ignored_count: 0,
           },
           statistics: {

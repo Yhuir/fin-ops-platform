@@ -47,10 +47,17 @@ export function nextOaPendingPaymentSortDirection(
 export async function fetchOaPendingPaymentRows(request: FetchRowsRequest): Promise<OaPendingPaymentRowsResponse> {
   const params = new URLSearchParams();
   appendRowsQuery(params, request);
-  return apiRequestJson<OaPendingPaymentRowsResponse>(`/api/oa-pending-payments/rows?${params.toString()}`, {
+  const payload = await apiRequestJson<OaPendingPaymentRowsResponse>(`/api/oa-pending-payments/rows?${params.toString()}`, {
     method: "GET",
     signal: request.signal,
   });
+  const counts = [payload.pagination?.total, payload.summary?.rowCount, payload.summary?.oaCount,
+    payload.summary?.statusCounts?.paid, payload.summary?.statusCounts?.unpaid,
+    payload.summary?.viewCounts?.completed, payload.summary?.viewCounts?.in_progress];
+  if (counts.some(value => !Number.isSafeInteger(value) || (value as number) < 0)) {
+    throw new Error("OA 数量统计不完整，请刷新重试。");
+  }
+  return payload;
 }
 
 export async function downloadOaPendingPaymentSources(

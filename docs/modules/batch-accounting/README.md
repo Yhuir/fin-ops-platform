@@ -50,7 +50,7 @@
 - OA 已有发票关系或其它不含银行流水的关系时仍可成为候选；附件发票只按当前可见/选中的 OA IDs 查询。
 - `submitted` 直接分页查询带当前范围 canonical 银行成员的 active batch-accounting relations，再用一次批量成员查询补齐 OA/发票详情。
 - 已提交 bucket 不受标签规则过滤，但仍显示银行流水当前 effective tag；银行明细分类事实变化后，页面下一次 GET 即读取新标签。
-- `summary.submitted_count` 按 relation 中 canonical 银行成员的当前时间范围统计，支持跨月关系。
+- `summary.submitted_count` 按 relation 中 canonical 原始银行成员去重、限定当前时间范围统计，支持跨月关系。
 - `GET/PUT /api/batch-accounting/tag-rules` 提供当前业务流水实际出现的标签、stable code 选择、CAS version 和 `can_save`；full/admin 可保存，read-export 只读。
 
 ## 写合同
@@ -97,3 +97,10 @@
 ### 全部年份（2026-09-21）
 
 页面首次及重新进入默认 `bank_year=all`；GET all 的 summary 年份为 null。每行 bank_year 由 canonical 日期独立返回，提交使用该年份，不截取显示时间。缺日期行可见但不可提交，已提交缺日期关系仍可撤回。分类和 count/分页在 SQL 内完成；原全候选 JSON/ID 集合回传 Python 分页路径已移除。详细 I/O 见 [boundary](boundary-io.md)。
+
+## 2026-09-28 业务数量与分页分离
+
+- `summary.unsubmitted_count/submitted_count` 均按符合当前范围的 `bank_transaction_units.parent_bank_transaction_id` 去重，单位为原始流水“笔”。同一原始流水的多个用途子项只计一次；已提交关系包含多笔流水时计实际成员，不计关系组。
+- 原始流水若有部分用途项已提交、部分用途项仍符合未提交候选，可分别出现在两个集合的笔数中；本次不改变用途项提交状态或强行归类。
+- `pagination.bank_rows.total` 继续按可分页展示对象计算：未提交是用途行，已提交是关系行；不使用 summary 替代分页。页面切换显示笔数，底部分页只显示页码，不把展示行数量标成流水数量。
+- 聚合与分页在已有只读一致快照中完成，无新增数据库语句、缓存、worker 或写入。提交和撤回 owner、CAS、幂等、审计与权限保持不变。

@@ -298,6 +298,13 @@ function mapMutationResult(payload: ApiMutationResult): BatchAccountingMutationR
   };
 }
 
+function requiredTransactionCount(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error("原始流水统计数量缺失或无效。");
+  }
+  return value;
+}
+
 export async function fetchBatchAccounting({
   bankYear,
   bucket,
@@ -331,8 +338,8 @@ export async function fetchBatchAccounting({
   return {
     summary: {
       bankYear: payload.summary?.bank_year ?? null,
-      unsubmittedCount: numberValue(payload.summary?.unsubmitted_count ?? payload.summary?.unsubmittedCount),
-      submittedCount: numberValue(payload.summary?.submitted_count ?? payload.summary?.submittedCount),
+      unsubmittedCount: requiredTransactionCount(payload.summary?.unsubmitted_count),
+      submittedCount: requiredTransactionCount(payload.summary?.submitted_count),
     },
     bankRows: Array.isArray(payload.bank_rows ?? payload.bankRows) ? (payload.bank_rows ?? payload.bankRows ?? []).map(mapBankRow) : [],
     oaRows: Array.isArray(payload.oa_rows ?? payload.oaRows) ? (payload.oa_rows ?? payload.oaRows ?? []).map(mapOaRow) : [],

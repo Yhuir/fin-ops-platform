@@ -1,3 +1,5 @@
+import "./workbenchEntityCounts.css";
+import { formatWorkbenchEntityCounts } from "../../features/workbench/entityCounts";
 import { Segment, SegmentGroup } from "../common/SegmentedControl";
 import {
   Button,
@@ -19,6 +21,7 @@ import {
   type WorkbenchAmountAnomalyCode,
   type WorkbenchColumnLayouts,
   type WorkbenchExceptionCounts,
+  type WorkbenchEntityCounts,
   type WorkbenchExceptionView,
   type WorkbenchRecord,
   type WorkbenchRecordType,
@@ -31,7 +34,7 @@ import WorkbenchAnomalyIndicator from "./WorkbenchAnomalyIndicator";
 type WorkbenchExceptionDrawerProps = {
   open: boolean;
   bucket: "unpaired" | "paired";
-  bucketCounts: Record<"unpaired" | "paired", number>;
+  bucketCounts: Record<"unpaired" | "paired", WorkbenchEntityCounts | null>;
   view: WorkbenchExceptionView;
   selectedExceptionCode: WorkbenchAmountAnomalyCode | null;
   exceptionCounts: WorkbenchExceptionCounts | null;
@@ -40,7 +43,6 @@ type WorkbenchExceptionDrawerProps = {
   loading: boolean;
   loadingMore: boolean;
   error: string | null;
-  total: number;
   hasMore: boolean;
   canOperateData: boolean;
   columnLayouts?: WorkbenchColumnLayouts;
@@ -113,7 +115,6 @@ export default function WorkbenchExceptionDrawer({
   loading,
   loadingMore,
   error,
-  total,
   hasMore,
   canOperateData,
   columnLayouts,
@@ -225,9 +226,9 @@ export default function WorkbenchExceptionDrawer({
           }
         }}
       >
-        <Segment id="unpaired">未配对异常 {bucketCounts.unpaired}</Segment>
+        <Segment id="unpaired"><span>未配对异常</span>{" "}<small>{formatWorkbenchEntityCounts(bucketCounts.unpaired)}</small></Segment>
         <Segment id="paired">
-          已配对异常 {bucketCounts.paired}
+          <span>已配对异常</span>{" "}<small>{formatWorkbenchEntityCounts(bucketCounts.paired)}</small>
         </Segment>
       </SegmentGroup>
     </div>
@@ -259,13 +260,15 @@ export default function WorkbenchExceptionDrawer({
               }
             }}
           >
-            <Segment id="amount">金额异常 {exceptionCounts?.amountTotal ?? 0}</Segment>
+            <Segment id="amount"><span>金额异常</span>{" "}<small>{formatWorkbenchEntityCounts(exceptionCounts?.amountTotal)}</small></Segment>
             <Segment id="document_only">
-              仅资料异常 {exceptionCounts?.documentOnly ?? 0}
+              <span>仅资料异常</span>{" "}<small>{formatWorkbenchEntityCounts(exceptionCounts?.documentOnly)}</small>
             </Segment>
           </SegmentGroup>
           <span aria-live="polite" className="workbench-anomaly-drawer__count">
-            {visibleGroups.length < total ? `显示 ${visibleGroups.length} / ${total}` : `共 ${total} 项`}
+            {formatWorkbenchEntityCounts(view === "document_only"
+              ? exceptionCounts?.documentOnly
+              : selectedExceptionCode ? exceptionCounts?.byCode[selectedExceptionCode] : null)}
           </span>
         </div>
         {view === "amount" ? (
@@ -294,7 +297,7 @@ export default function WorkbenchExceptionDrawer({
                   </span>
                   <div className="workbench-anomaly-drawer__amount-family-options">
                     {family.codes.map((code) => {
-                      const count = exceptionCounts?.byCode[code] ?? 0;
+                      const count = formatWorkbenchEntityCounts(exceptionCounts?.byCode[code]);
                       return (
                         <Segment
                           aria-label={`${WORKBENCH_AMOUNT_ANOMALY_LABELS[code]} ${count}`}
@@ -361,7 +364,7 @@ export default function WorkbenchExceptionDrawer({
                           return (
                             <span className="workbench-anomaly-drawer__pane-summary" key={paneId}>
                               <span className="workbench-anomaly-drawer__pane-label">
-                                {PANE_LABELS[paneId]} · {summary.count}项
+                                {PANE_LABELS[paneId]}
                               </span>
                               <strong>{summary.total}</strong>
                             </span>

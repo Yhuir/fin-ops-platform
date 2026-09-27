@@ -877,3 +877,11 @@ WorkbenchSupportingDocumentFiles、groupDisplayModel、WorkbenchExceptionDrawer�
 - `BankFlowBatchWithdrawPreview.test.tsx`：取消零写、预览版本、重复点击、读取/权限失败、提交冲突、已提交但重读失败、关闭取消读取。
 - `workbench-split-selection.spec.ts`、`workbench-withdraw-flow.spec.ts`：普通、纯银行、跨关系拆分从表头预览提交。
 - `workbench-batch-withdraw-preview.spec.ts`：两分区取消零写、确认后唯一请求与写后刷新；`bank-flow-rule-batches-flow.spec.ts` 保留业务 owner 页和补齐发票关系回归。
+
+## 2026-09-28 异常实体计数验证
+
+- PostgreSQL integration新增 2 OA + 同父流水2拆分 + ETC汇总2发票的单关系样例，统计为2条/1笔/2张；空查询真实零值、分类全集不受分页影响、审阅移区计数继续验证。
+- `test_workbench_page_query_repository.py`验证实体DTO与有界单次集合查询；`test_workbench_relation_grouping.py`保护移除旧组数输出后分组、异常规则不变。
+- `WorkbenchApi.test.ts`映射实体数量；`WorkbenchExceptionDrawer.test.tsx`验证一条关系列表可以显示3 OA/2流水/5发票及切换；`WorkbenchSelection.test.tsx`继续保护审阅、详情和加载更多。
+- 浏览器 `workbench-exception-flow.spec.ts`保留两区、分类、详情按需读取、加载更多、审阅写后刷新、桌面及窄屏交互。统计文本改为实体单位，不使用已加载组数代替总数。
+- 七类责任：业务计数、repository、API合同、前端交互、跨模块读取及既有回归适用；本次没有read model/cache/worker变更，仅复用既有写后direct GET。生产验证只读。

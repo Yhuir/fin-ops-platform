@@ -46,6 +46,7 @@ type OaPendingPaymentsTableProps = {
   page: number;
   pageSize: number;
   total: number;
+  oaCount?: number;
   keywordDraft: string;
   filterConfigs: OaPendingPaymentFieldConfig[];
   filterOptions: Record<string, OaPendingPaymentFilterOption[]>;
@@ -141,6 +142,7 @@ export default function OaPendingPaymentsTable({
   page,
   pageSize,
   total,
+  oaCount,
   keywordDraft,
   filterConfigs,
   filterOptions,
@@ -187,6 +189,7 @@ export default function OaPendingPaymentsTable({
             page={page}
             pageSize={pageSize}
             total={total}
+            oaCount={oaCount}
           />
         )}
         minWidth={1320}
@@ -793,12 +796,14 @@ function PaginationControls({
   page,
   pageSize,
   total,
+  oaCount,
   onPageChange,
   onPageSizeChange,
 }: {
   page: number;
   pageSize: number;
   total: number;
+  oaCount?: number;
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
 }) {
@@ -815,9 +820,9 @@ function PaginationControls({
         value={String(pageSize)}
       >
         <Select.Trigger><Select.Value /></Select.Trigger>
-        <Select.Popover><ListBox>{[20, 50, 100].map((option) => <ListBox.Item id={String(option)} key={option} textValue={String(option)}>{option}</ListBox.Item>)}</ListBox></Select.Popover>
+        <Select.Popover><ListBox>{[20, 50, 100].map((option) => <ListBox.Item id={String(option)} key={option} textValue={`${option} 行/页`}>{option} 行/页</ListBox.Item>)}</ListBox></Select.Popover>
       </Select>
-      <FinanceTablePagination compact onPageChange={onPageChange} page={currentPage} pageSize={pageSize} total={safeTotal} />
+      <FinanceTablePagination summary={`符合条件 ${oaCount ?? "—"} 条 OA · 第 ${currentPage}/${totalPages} 页`} compact onPageChange={onPageChange} page={currentPage} pageSize={pageSize} total={safeTotal} />
     </div>
   );
 }

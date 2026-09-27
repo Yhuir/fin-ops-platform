@@ -208,3 +208,11 @@ OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../
 ## 2026-09-28 原生分段切换展示
 
 本模块的视图/状态切换采用[统一 HeroUI 分段展示合同](../../dev/segmented-controls.md)。页面继续拥有选中状态、计数、权限、草稿、查询与写入回调；公共组件只输入选项/选中值/禁用状态并输出选择事件，不产生网络或持久化 I/O。已替换的独立按钮与旧选中样式同步删除；既有业务、API、现金隔离及数据库边界不变。入口范围、例外和验证责任见上述合同。
+
+## 2026-09-28 原始流水去重统计
+
+- Summary 的 `*_row_count` 是当前有效 canonical 原始流水笔数，不再累加用途行或历史批次成员次数。repository 在现有 canonical 查询中提供单位到 `parent_row_id` 的身份映射；service 在状态、标签及主/子标签各自集合内去重。
+- `label_counts` 输出 `primary_label`、`sub_label`（null 表示主标签汇总）与 `total_row_count/draft_row_count/submitted_row_count/withdrawn_row_count`，供分类栏直接显示；前端不得累加子分类数替代主分类去重数。
+- `total_row_count` 按各状态集合并集去重；历史撤回与当前提交/候选可能包含相同流水，因此各状态数不保证可加。已删除 canonical 流水或已移除用途成员没有可证明 parent 身份时不计业务实体数，但历史批次仍保留、可查看及按原合同操作。
+- `draft_count/submitted_count/withdrawn_count` 仍是操作批次数，用于内部存在性及批次分页；页面状态按钮改用原始流水笔数。分类栏移除“批·条”混用，只显示去重笔数，分页只显示页码。
+- 查询数保持不变，不修改批次冻结成员、金额、提交/撤回、权限、read model 或 worker。旧的成员数累加和浏览器跨类别相加链路已移除。

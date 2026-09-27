@@ -298,9 +298,9 @@ describe("ETC ticket management page", () => {
     const page = await screen.findByTestId("etc-ticket-management-page");
     expect(within(page).getByRole("heading", { name: "ETC票据" })).toBeInTheDocument();
     expect(within(page).getByRole("radiogroup", { name: "ETC批次状态" })).toBeInTheDocument();
-    expect(await within(page).findByRole("radio", { name: "未提交 2" })).toBeInTheDocument();
-    expect(within(page).getByRole("radio", { name: "暂存 0" })).toBeInTheDocument();
-    expect(within(page).getByRole("radio", { name: "已提交 1" })).toBeInTheDocument();
+    expect(await within(page).findByRole("radio", { name: "未提交 3张" })).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: "暂存 0张" })).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: "已提交 1张" })).toBeInTheDocument();
     expect(within(page).getByRole("region", { name: "ETC批次列表区" })).toBeInTheDocument();
     expect(within(page).getByRole("list", { name: "ETC批次列表" })).toBeInTheDocument();
     expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent(invoiceRangeBatchName);
@@ -349,7 +349,7 @@ describe("ETC ticket management page", () => {
       const page = query.page ?? 1;
       const pageSize = query.pageSize ?? 50;
       return Promise.resolve({
-        counts: { unsubmitted: batches.length, staged: 0, submitted: 0 },
+        counts: { unsubmitted: 242, staged: 0, submitted: 0 },
         items: batches.slice((page - 1) * pageSize, page * pageSize),
         pagination: { page, pageSize, total: batches.length },
       } as never);
@@ -363,6 +363,7 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     expect(await within(page).findByTestId("etc-batch-row-etc-business-page-001")).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: "未提交 242张" })).toHaveAttribute("aria-checked", "true");
     expect(within(page).getByText("121 批")).toBeInTheDocument();
     expect(within(page).getByText("显示 1-50 / 121")).toBeInTheDocument();
     await user.click(within(page).getByRole("button", { name: "下一页" }));
@@ -373,6 +374,7 @@ describe("ETC ticket management page", () => {
     expect(await within(page).findByTestId("etc-batch-row-etc-business-page-101")).toBeInTheDocument();
     expect(within(page).getByTestId("etc-batch-row-etc-business-page-121")).toBeInTheDocument();
     expect(within(page).getByText("显示 101-121 / 121")).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: "未提交 242张" })).toHaveAttribute("aria-checked", "true");
 
     expect(fetchBatches.mock.calls.map(([query]) => [query?.page, query?.pageSize])).toEqual([
       [1, 50],
@@ -414,7 +416,7 @@ describe("ETC ticket management page", () => {
 
     await waitFor(() => {
       expect(within(page).queryByText("ETC业务批次加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
-      expect(within(page).getByRole("radio", { name: "未提交 2" })).toHaveAttribute("aria-checked", "true");
+      expect(within(page).getByRole("radio", { name: "未提交 3张" })).toHaveAttribute("aria-checked", "true");
       expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent(invoiceRangeBatchName);
     });
     expect((await within(page).findAllByText("ETC-2026-001")).length).toBeGreaterThanOrEqual(1);
@@ -432,7 +434,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByRole("radio", { name: "未提交 2" })).toHaveAttribute("aria-checked", "true");
+    expect(await within(page).findByRole("radio", { name: "未提交 3张" })).toHaveAttribute("aria-checked", "true");
     expect(within(page).getByRole("heading", { name: "批次列表" })).toBeInTheDocument();
     expect(within(page).getAllByRole("heading", { name: "批次列表" })).toHaveLength(1);
     expect(within(page).getByRole("link", { name: "导入发票" })).toHaveAttribute("href", "/imports/etc-invoices");
@@ -468,13 +470,13 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByRole("button", { name: "提交审批" })).not.toBeInTheDocument();
   });
 
-  test("business batch tab counts come from all batches without a month selector", async () => {
+  test("invoice tab counts cover all matching batches rather than current page or batch count", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByRole("radio", { name: "已提交 1" })).toBeInTheDocument();
+    expect(await within(page).findByRole("radio", { name: "已提交 1张" })).toBeInTheDocument();
     expect(within(page).queryByLabelText("月份")).not.toBeInTheDocument();
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -484,17 +486,17 @@ describe("ETC ticket management page", () => {
     });
 
     await waitFor(() => {
-      expect(within(page).getByRole("radio", { name: "已提交 1" })).toBeInTheDocument();
+      expect(within(page).getByRole("radio", { name: "已提交 1张" })).toBeInTheDocument();
     });
 
-    await user.click(within(page).getByRole("radio", { name: "已提交 1" }));
+    await user.click(within(page).getByRole("radio", { name: "已提交 1张" }));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/etc/business-batches?bucket=submitted&page=1&page_size=50",
         expect.objectContaining({ method: "GET" }),
       );
     });
-    expect(within(page).getByRole("radio", { name: "已提交 1" })).toHaveAttribute("aria-checked", "true");
+    expect(within(page).getByRole("radio", { name: "已提交 1张" })).toHaveAttribute("aria-checked", "true");
   });
 
   test("keeps submitted business batches visible when their workflow task shares the ETC batch id", async () => {
@@ -563,8 +565,8 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByRole("radio", { name: "已提交 1" })).toBeInTheDocument();
-    await user.click(within(page).getByRole("radio", { name: "已提交 1" }));
+    expect(await within(page).findByRole("radio", { name: "已提交 1张" })).toBeInTheDocument();
+    await user.click(within(page).getByRole("radio", { name: "已提交 1张" }));
 
     const submittedRow = await within(page).findByTestId("etc-batch-row-etc_business_batch_0004");
     expect(submittedRow).toHaveTextContent("人工确认已提交");
@@ -674,7 +676,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByRole("radio", { name: "未提交 0" })).toBeInTheDocument();
+    expect(await within(page).findByRole("radio", { name: "未提交 0张" })).toBeInTheDocument();
     expect(await within(page).findByText("无匹配批次。")).toBeInTheDocument();
     expect(within(page).queryByTestId("etc-batch-row-ETC-RECON-000011")).not.toBeInTheDocument();
     expect(within(page).queryByText("新建ETC批次")).not.toBeInTheDocument();
@@ -964,7 +966,7 @@ describe("ETC ticket management page", () => {
         expect.objectContaining({ method: "DELETE" }),
       );
     });
-    expect(await within(page).findByRole("radio", { name: "未提交 1" })).toBeInTheDocument();
+    expect(await within(page).findByRole("radio", { name: "未提交 1张" })).toBeInTheDocument();
     expect(within(page).queryByTestId("etc-batch-row-etc-batch-unsubmitted-01")).not.toBeInTheDocument();
   });
 
@@ -1314,7 +1316,11 @@ describe("ETC ticket management page", () => {
       createdAt: "2026-05-19T09:00:00+08:00",
       updatedAt: "2026-05-19T09:10:00+08:00",
     };
-    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
+    const fetchBatches = vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
+      counts: { unsubmitted: 0, staged: 0, submitted: 0 },
+      items: [],
+      pagination: { page: 1, pageSize: 100, total: 0 },
+    } as never).mockResolvedValueOnce({
       counts: { unsubmitted: 1, staged: 0, submitted: 0 },
       items: [staleListedBusinessBatch],
       pagination: { page: 1, pageSize: 100, total: 1 },
@@ -1328,6 +1334,7 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     await waitFor(() => {
+      expect(fetchBatches).toHaveBeenCalledTimes(2);
       expect(within(page).queryByTestId("etc-batch-row-etc_business_batch_0003")).not.toBeInTheDocument();
     });
     expect(within(page).queryByText("ETC业务批次不存在。")).not.toBeInTheDocument();
@@ -1425,7 +1432,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    await user.click(await within(page).findByRole("radio", { name: "暂存 1" }));
+    await user.click(await within(page).findByRole("radio", { name: "暂存 1张" }));
     const oaStatusPanel = await within(page).findByRole("region", { name: "审批提交确认" });
     const openDraftButton = within(oaStatusPanel).getByRole("button", { name: "打开草稿" });
     expect(openDraftButton).toBeEnabled();
@@ -1463,9 +1470,9 @@ describe("ETC ticket management page", () => {
     await waitFor(() => {
       expect(fetchBusinessBatches.mock.calls.filter(([query]) => query?.bucket === "submitted")).toHaveLength(1);
     });
-    await waitFor(() => expect(within(page).getByRole("radio", { name: "未提交 0" })).toBeInTheDocument());
-    expect(within(page).getByRole("radio", { name: "暂存 0" })).toBeInTheDocument();
-    expect(within(page).getByRole("radio", { name: "已提交 1" })).toHaveAttribute("aria-checked", "true");
+    await waitFor(() => expect(within(page).getByRole("radio", { name: "未提交 0张" })).toBeInTheDocument());
+    expect(within(page).getByRole("radio", { name: "暂存 0张" })).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: "已提交 1张" })).toHaveAttribute("aria-checked", "true");
     expect(within(page).getByTestId("etc-batch-row-etc-business-linked-001")).toHaveTextContent("人工确认已提交");
   });
 
@@ -1537,12 +1544,12 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    await user.click(await within(page).findByRole("radio", { name: "暂存 1" }));
+    await user.click(await within(page).findByRole("radio", { name: "暂存 1张" }));
     const oaStatusPanel = await within(page).findByRole("region", { name: "审批提交确认" });
     await user.click(within(oaStatusPanel).getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" }));
-    await waitFor(() => expect(within(page).getByRole("radio", { name: "已提交 1" })).toBeInTheDocument());
+    await waitFor(() => expect(within(page).getByRole("radio", { name: "已提交 1张" })).toBeInTheDocument());
 
-    await user.click(within(page).getByRole("radio", { name: "已提交 1" }));
+    await user.click(within(page).getByRole("radio", { name: "已提交 1张" }));
 
     expect(await within(page).findByTestId("etc-batch-row-etc-business-linked-001")).toBeInTheDocument();
     expect(within(page).getByTestId("etc-batch-row-etc-business-linked-001")).toHaveTextContent("人工确认已提交");
@@ -1588,7 +1595,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    await user.click(await within(page).findByRole("radio", { name: "暂存 1" }));
+    await user.click(await within(page).findByRole("radio", { name: "暂存 1张" }));
     const oaStatusPanel = await within(page).findByRole("region", { name: "审批提交确认" });
     expect(within(oaStatusPanel).queryByRole("button", { name: "刷新检测" })).not.toBeInTheDocument();
     await user.click(within(oaStatusPanel).getByRole("button", { name: "我已在 OA 系统上删除该 OA 草稿" }));
@@ -1600,9 +1607,9 @@ describe("ETC ticket management page", () => {
       });
     });
     expect(within(oaStatusPanel).queryByLabelText("人工处理原因")).not.toBeInTheDocument();
-    expect(within(page).getByRole("radio", { name: "未提交 1" })).toBeInTheDocument();
-    expect(within(page).getByRole("radio", { name: "暂存 0" })).toBeInTheDocument();
-    expect(within(page).getByRole("radio", { name: "已提交 0" })).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: "未提交 1张" })).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: "暂存 0张" })).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: "已提交 0张" })).toBeInTheDocument();
   });
 
   test("surfaces manual OA status errors and keeps the confirmation actions available", async () => {
@@ -1629,7 +1636,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    await user.click(await within(page).findByRole("radio", { name: "暂存 1" }));
+    await user.click(await within(page).findByRole("radio", { name: "暂存 1张" }));
     const oaStatusPanel = await within(page).findByRole("region", { name: "审批提交确认" });
     await user.click(within(oaStatusPanel).getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" }));
 
@@ -1644,7 +1651,7 @@ describe("ETC ticket management page", () => {
     expect(within(oaStatusPanel).getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" })).toBeEnabled();
     expect(within(oaStatusPanel).getByRole("button", { name: "我已在 OA 系统上删除该 OA 草稿" })).toBeEnabled();
     expect(within(page).getByTestId("etc-batch-row-etc-business-manual-fail-001")).toBeInTheDocument();
-    expect(within(page).getByRole("radio", { name: "暂存 1" })).toHaveAttribute("aria-checked", "true");
+    expect(within(page).getByRole("radio", { name: "暂存 1张" })).toHaveAttribute("aria-checked", "true");
   });
 
   test("can retry manual OA status confirmation after a transient failure", async () => {
@@ -1687,7 +1694,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    await user.click(await within(page).findByRole("radio", { name: "暂存 1" }));
+    await user.click(await within(page).findByRole("radio", { name: "暂存 1张" }));
     const oaStatusPanel = await within(page).findByRole("region", { name: "审批提交确认" });
     await user.click(within(oaStatusPanel).getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" }));
 
@@ -1698,9 +1705,9 @@ describe("ETC ticket management page", () => {
       expectedVersion: 8,
     });
     expect(await within(page).findByText("人工确认暂时失败，请重试。")).toBeInTheDocument();
-    expect(within(page).getByRole("radio", { name: "暂存 1" })).toHaveAttribute("aria-checked", "true");
-    expect(within(page).getByRole("radio", { name: "未提交 0" })).toBeInTheDocument();
-    expect(within(page).getByRole("radio", { name: "已提交 0" })).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: "暂存 1张" })).toHaveAttribute("aria-checked", "true");
+    expect(within(page).getByRole("radio", { name: "未提交 0张" })).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: "已提交 0张" })).toBeInTheDocument();
     expect(within(oaStatusPanel).getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" })).toBeEnabled();
 
     await user.click(within(oaStatusPanel).getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" }));
@@ -1712,7 +1719,7 @@ describe("ETC ticket management page", () => {
       expectedVersion: 8,
     });
     await waitFor(() => expect(within(page).queryByText("人工确认暂时失败，请重试。")).not.toBeInTheDocument());
-    await waitFor(() => expect(within(page).getByRole("radio", { name: "已提交 1" })).toHaveAttribute("aria-checked", "true"));
+    await waitFor(() => expect(within(page).getByRole("radio", { name: "已提交 1张" })).toHaveAttribute("aria-checked", "true"));
     expect(within(page).getByTestId("etc-batch-row-etc-business-manual-retry-001")).toHaveTextContent("人工确认已提交");
   });
 
@@ -3637,7 +3644,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    await user.click(await within(page).findByRole("radio", { name: "已提交 1" }));
+    await user.click(await within(page).findByRole("radio", { name: "已提交 1张" }));
 
     await waitFor(() => expect(within(page).getAllByText(invoiceRangeBatchName).length).toBeGreaterThanOrEqual(1));
     expect(within(page).queryByRole("button", { name: "提交审批" })).not.toBeInTheDocument();
@@ -3680,7 +3687,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    await user.click(await within(page).findByRole("radio", { name: "已提交 1" }));
+    await user.click(await within(page).findByRole("radio", { name: "已提交 1张" }));
     await within(page).findByTestId("etc-batch-row-etc-batch-submitted-01");
     const downloadButton = await within(page).findByRole("button", { name: "下载 PDF" });
     const disclosureTrigger = await within(page).findByRole("button", { name: /发票明细/ });
@@ -3854,7 +3861,7 @@ describe("ETC ticket management page", () => {
     }));
     const startingDialog = await screen.findByRole("dialog", { name: "确认 OA 草稿处理结果" });
     expect(startingDialog).toHaveTextContent("已发起 OA 草稿创建");
-    expect(screen.getByText("暂存 1")).toBeInTheDocument();
+    expect(screen.getByText("暂存 …")).toBeInTheDocument();
     expect(within(startingDialog).getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" })).toBeDisabled();
     expect(within(startingDialog).getByRole("button", { name: "我已在 OA 系统上删除该 OA 草稿" })).toBeDisabled();
     await act(async () => {
@@ -3897,7 +3904,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    await user.click(await within(page).findByRole("radio", { name: "暂存 1" }));
+    await user.click(await within(page).findByRole("radio", { name: "暂存 1张" }));
     expect(await within(page).findByText("已发起审批草稿创建，等待确认。")).toBeInTheDocument();
     expect(within(page).getByText("App 不检测 OA 草稿状态，请按你在 OA 系统中的实际操作选择。")).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" })).toBeEnabled();
@@ -3978,7 +3985,7 @@ describe("ETC ticket management page", () => {
     await waitFor(() => expect(resultDialog.contains(document.activeElement)).toBe(true));
     await user.keyboard("{Escape}");
     await waitFor(() => expect(resultDialog).not.toBeInTheDocument());
-    await user.click(within(page).getByRole("radio", { name: "暂存 2" }));
+    await user.click(within(page).getByRole("radio", { name: "暂存 2张" }));
     const stagedBRow = await within(page).findByTestId("etc-batch-row-etc-business-staged-b");
     await user.click(within(stagedBRow).getByRole("button", { name: /查看批次/ }));
     const panel = await within(page).findByRole("region", { name: "审批提交确认" });

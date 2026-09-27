@@ -601,8 +601,8 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         group = payload["unpaired"]["groups"][0]
         self.assertNotIn("exception_state", group)
         self.assertNotIn("processed_exception_summary", group)
-        self.assertEqual(payload["summary"]["unpaired_exception_count"], 0)
-        self.assertEqual(payload["summary"]["paired_exception_count"], 0)
+        self.assertNotIn("unpaired_exception_count", payload["summary"])
+        self.assertNotIn("paired_exception_count", payload["summary"])
 
     def test_unpaired_etc_summary_preserves_all_collapsed_invoice_details(self) -> None:
         payload = self.service.group_payload(
@@ -1333,8 +1333,8 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         )
         active_group = active_payload["unpaired"]["groups"][0]
         fingerprint = active_group["workbench_anomaly"]["fingerprint"]
-        self.assertEqual(active_payload["summary"]["unpaired_exception_count"], 1)
-        self.assertEqual(active_payload["summary"]["paired_exception_count"], 0)
+        self.assertNotIn("unpaired_exception_count", active_payload["summary"])
+        self.assertNotIn("paired_exception_count", active_payload["summary"])
         self.assertEqual(active_group["workbench_anomaly"]["review_decision"], "pending")
         self.assertEqual(
             active_group["workbench_anomaly"]["confirmation"],
@@ -1360,8 +1360,8 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
             },
         )
         accepted_group = accepted_payload["paired"]["groups"][0]
-        self.assertEqual(accepted_payload["summary"]["unpaired_exception_count"], 0)
-        self.assertEqual(accepted_payload["summary"]["paired_exception_count"], 1)
+        self.assertNotIn("unpaired_exception_count", accepted_payload["summary"])
+        self.assertNotIn("paired_exception_count", accepted_payload["summary"])
         self.assertEqual(
             accepted_group["workbench_anomaly"]["review_decision"],
             "accept_paired",
@@ -1424,7 +1424,7 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
 
         group = payload["unpaired"]["groups"][0]
         item = group["workbench_anomaly"]["items"][0]
-        self.assertEqual(payload["summary"]["unpaired_exception_count"], 1)
+        self.assertNotIn("unpaired_exception_count", payload["summary"])
         self.assertEqual(group["workbench_anomaly"]["review_decision"], "pending")
         self.assertEqual(item["code"], "oa_invoice_attachment_unparsed")
         self.assertEqual(item["display_label"], "发票附件未解析")

@@ -1410,11 +1410,17 @@ export async function fetchEtcBusinessBatches(query: EtcBusinessBatchQuery = {})
   );
   const payload = unwrapEnvelope<ApiEtcBusinessBatchPayload>(rawPayload);
   const items = (payload.items ?? payload.businessBatches ?? payload.business_batches ?? []).map(mapBusinessBatchSummary);
+  const counts = payload.counts;
+  if (!counts || ![counts.unsubmitted, counts.staged, counts.submitted].every(
+    (count) => typeof count === "number" && Number.isSafeInteger(count) && count >= 0,
+  )) {
+    throw new Error("ETC 发票统计响应无效，请刷新重试。");
+  }
   return {
     counts: {
-      unsubmitted: payload.counts?.unsubmitted ?? 0,
-      staged: payload.counts?.staged ?? 0,
-      submitted: payload.counts?.submitted ?? 0,
+      unsubmitted: counts.unsubmitted!,
+      staged: counts.staged!,
+      submitted: counts.submitted!,
     },
     items,
     statistics: payload.statistics ? {

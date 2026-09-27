@@ -89,3 +89,10 @@
 - `e2e-spec.md`：维护 ETC 票据管理 Spec-first Browser 业务验收合同。
 - `e2e-coverage.md`：维护 ETC 票据管理 Spec-first 合同到自动化覆盖的映射。
 - `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。
+
+## 2026-09-28 业务统计按发票张数
+
+- `GET /api/etc/business-batches` 的 `counts.unsubmitted/staged/submitted` 统一为当前权限和查询范围内，按正式 `app.etc_invoices.etc_invoice_id` 去重的真实成员发票张数；取业务批次明确 `invoice_ids` 成员并排除不存在/已删除票，不使用批次 `invoice_count` 标量相加。ETC 成员并非全部已桥接统一 `app.invoices`，不得强制 canonical pool 连接导致漏票。
+- 三状态切换显示“张”；新建但尚未导入发票的批次贡献 0 张且仍可选、可操作。历史批次保留成员，跨状态存在同票时分别表达各状态成员事实，不擅自删除历史或假定合计互斥。
+- `pagination.total`/`total` 继续为所选状态的批次数，仅服务批次 rail 分页。统计在分页前计算，与当前页 `items.length` 无关。PostgreSQL 继续同一 repeatable-read read-only snapshot 的两次集合查询；不新增请求、缓存、worker 或写入。
+- 删除前端 OA 草稿创建/失败时 `counts ± 1` 的批次数乐观计算；请求中显示加载状态，成功后消费现有重读结果。缺失/非法统计响应报错，初始或失败不显示伪造的 0。

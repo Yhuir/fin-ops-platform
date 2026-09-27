@@ -1195,9 +1195,17 @@ class PostgresOpsTaxEtcRepository:
                 common_sql
                 + """
                 , bucket_counts as (
-                    select bucket, count(*)::integer as count
+                    select bucket, count(*)::integer as batch_count
                     from scoped
                     group by bucket
+                ), bucket_invoice_counts as (
+                    select scoped.bucket, count(distinct invoice.etc_invoice_id)::integer as invoice_count
+                    from scoped
+                    cross join lateral jsonb_array_elements_text(scoped.batch_payload->'invoice_ids') member(invoice_id)
+                    join app.etc_invoices invoice on invoice.etc_invoice_id = member.invoice_id
+                    where invoice.status <> 'deleted'
+                      and coalesce(invoice.legacy_mongo_id, '') !~ '^current_state:'
+                    group by scoped.bucket
                 ), canonical_invoice_stats as (
                     select
                         count(*)::integer as input_invoice_count,
@@ -1217,9 +1225,11 @@ class PostgresOpsTaxEtcRepository:
                         canonical_invoice_stats.etc_invoice_count
                     from canonical_invoice_stats
                 )
-                select bucket.bucket, coalesce(bucket_counts.count, 0)::integer as count, statistics.*
+                select bucket.bucket, coalesce(bucket_counts.batch_count, 0)::integer as batch_count,
+                       coalesce(bucket_invoice_counts.invoice_count, 0)::integer as invoice_count, statistics.*
                 from (values ('unsubmitted'), ('staged'), ('submitted')) as bucket(bucket)
                 left join bucket_counts using (bucket)
+                left join bucket_invoice_counts using (bucket)
                 cross join statistics
                 order by bucket.bucket
                 """,
@@ -1257,11 +1267,14 @@ class PostgresOpsTaxEtcRepository:
                 repeated_params + (bucket, page_size, (page - 1) * page_size),
             )
         counts = {"unsubmitted": 0, "staged": 0, "submitted": 0}
+        total = 0
         statistics: dict[str, int] | None = None
         for row in count_rows:
             row_bucket = str(row.get("bucket") or "")
             if row_bucket in counts:
-                counts[row_bucket] = int(row.get("count") or 0)
+                counts[row_bucket] = int(row["invoice_count"])
+            if row_bucket == bucket:
+                total = int(row["batch_count"])
             if statistics is None:
                 statistics = {
                     "input_invoice_count": int(row.get("input_invoice_count") or 0),
@@ -1282,7 +1295,7 @@ class PostgresOpsTaxEtcRepository:
             ],
             "counts": counts,
             "statistics": statistics,
-            "total": counts[bucket],
+            "total": total,
         }
 
     def get_etc_business_batch_record(self, business_batch_id: str) -> dict[str, Any] | None:

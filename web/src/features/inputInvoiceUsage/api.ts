@@ -297,8 +297,6 @@ function mapRowsResponse(payload: unknown): InputInvoiceUsageRowsResponse {
       return {
         invoiceCount: numberValue(camelOrSnake(summary, "invoiceCount", "invoice_count"), 0),
         totalWithTax: stringValue(camelOrSnake(summary, "totalWithTax", "total_with_tax")),
-        matchedOaCount: numberValue(camelOrSnake(summary, "matchedOaCount", "matched_oa_count"), 0),
-        matchedBankTransactionCount: numberValue(camelOrSnake(summary, "matchedBankTransactionCount", "matched_bank_transaction_count"), 0),
         pendingCount: numberValue(camelOrSnake(summary, "pendingCount", "pending_count"), 0),
       };
     })() : undefined,

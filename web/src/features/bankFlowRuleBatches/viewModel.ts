@@ -51,17 +51,7 @@ export function accountLabel(batch: BankFlowRuleBatch) {
   return account || "多账户";
 }
 
-export function pageRange(page: number, pageSize: number, total: number) {
-  if (total <= 0) {
-    return "0-0 / 0";
-  }
-  const start = (page - 1) * pageSize + 1;
-  if (start > total) {
-    return `0-0 / ${total}`;
-  }
-  const end = Math.min(total, page * pageSize);
-  return `${start}-${end} / ${total}`;
-}
+
 
 export function directionTagLabel(row: { direction?: string; directionLabel?: string }) {
   return row.directionLabel || (row.direction === "income" ? "收" : row.direction === "expense" ? "支" : "-");
@@ -193,11 +183,8 @@ export function requirementFor(requirements: BankFlowRuleDraftRequirements, tagC
   return requirements[tagCode] ?? { requiresOa: true, requiresInvoice: true };
 }
 
-export function formatCountMeta(batchCount: number, rowCount: number) {
-  if (batchCount === 0 && rowCount === 0) {
-    return "暂无";
-  }
-  return `${batchCount}批 · ${rowCount}条`;
+export function formatCountMeta(rowCount: number) {
+  return `${rowCount}笔`;
 }
 
 export function isUnsubmittedEligible(
@@ -218,15 +205,7 @@ export function categoryCountForBucket(
   return category.total;
 }
 
-export function categoryRowCountForBucket(
-  category: BankFlowRuleBatchSummaryCategory,
-  bucket: BankFlowRuleBatchStatusBucket,
-) {
-  if (bucket === "unsubmitted") return category.draftRowCount;
-  if (bucket === "submitted") return category.submittedRowCount;
-  if (bucket === "withdrawn") return category.withdrawnRowCount;
-  return category.totalRowCount;
-}
+
 
 export function relationContextLabels(row: BankFlowRuleBatchDetailRow) {
   if (row.relationStatus !== "linked" && row.relationCaseIds.length === 0) {

@@ -107,42 +107,26 @@ class PostgresBatchAccountingQueryRepository:
             source = (
                 transaction.fetch_one(
                     f"""
+                with submitted_members as materialized (
+                    select relation.case_id, bank.parent_bank_transaction_id
+                    from app.workbench_pair_relations relation
+                    join app.bank_transaction_units bank on relation.row_ids @> array[
+                        coalesce(bank.legacy_mongo_id, bank.id::text)]::text[]
+                    where relation.status = 'active'
+                      and relation.relation_mode = 'batch_accounting'
+                      and bank.status <> 'deleted'
+                      and (%s::date is null or (coalesce(bank.txn_date, bank.trade_time::date,
+                            bank.pay_receive_time::date) >= %s::date
+                          and coalesce(bank.txn_date, bank.trade_time::date,
+                            bank.pay_receive_time::date) < %s::date + interval '1 year'))
+                )
                 select
-                    coalesce(
-                        (
-                            select settings_payload
-                            from app.app_settings
-                            where settings_key = 'app_settings'
-                        ),
-                        '{{}}'::jsonb
-                    ) as settings_payload,
-                    (
-                        select count(*)::integer
-                        from app.workbench_pair_relations relation
-                        where relation.status = 'active'
-                          and relation.relation_mode = 'batch_accounting'
-                          and exists (
-                              select 1
-                              from app.bank_transaction_units submitted_bank
-                              where relation.row_ids @> array[
-                                        coalesce(
-                                            submitted_bank.legacy_mongo_id,
-                                            submitted_bank.id::text
-                                        )
-                                    ]::text[]
-                                and submitted_bank.status <> 'deleted'
-                                and (%s::date is null or (coalesce(
-                                      submitted_bank.txn_date,
-                                      submitted_bank.trade_time::date,
-                                      submitted_bank.pay_receive_time::date
-                                    ) >= %s::date
-                                and coalesce(
-                                      submitted_bank.txn_date,
-                                      submitted_bank.trade_time::date,
-                                      submitted_bank.pay_receive_time::date
-                                    ) < (%s::date + interval '1 year')))
-                          )
-                    ) as submitted_count,
+                    coalesce((select settings_payload from app.app_settings
+                        where settings_key = 'app_settings'), '{{}}'::jsonb) as settings_payload,
+                    (select count(distinct parent_bank_transaction_id)::integer
+                        from submitted_members) as submitted_count,
+                    (select count(distinct case_id)::integer
+                        from submitted_members) as submitted_row_count,
                     (
                         select count(*)::integer
                         from app.oa_applications oa
@@ -242,12 +226,13 @@ class PostgresBatchAccountingQueryRepository:
             page = (
                 transaction.fetch_one(
                     f"""with {candidates}, {classifier},
-                eligible as materialized (select c.row_id from classified_with_semantics c
+                eligible as materialized (select c.row_id, bank.parent_bank_transaction_id from classified_with_semantics c
                     join batch_bank_candidates candidate on candidate.row_id=c.row_id
                     join app.bank_transaction_units bank on {_BANK_ID_SQL}=c.row_id
                     where c.effective_category_code=any(%s::text[]) and {_BANK_NOT_LINKED_SQL}),
                 {page_cte}
-                select (select count(*) from eligible) as unsubmitted_count, {page_output}
+                select (select count(distinct parent_bank_transaction_id) from eligible) as unsubmitted_count,
+                    (select count(*) from eligible) as unsubmitted_row_count, {page_output}
                 """,
                     (*candidate_params, *classifier_params, selected["selected_tag_codes"], *page_params),
                 )
@@ -274,7 +259,8 @@ class PostgresBatchAccountingQueryRepository:
                     "bank_rows": self._page_payload(
                         page=bank_page,
                         page_size=bank_page_size,
-                        total=summary["submitted_count" if bucket == "submitted" else "unsubmitted_count"],
+                        total=self._int(source.get("submitted_row_count") if bucket == "submitted"
+                                        else page.get("unsubmitted_row_count")),
                     )
                 },
             }

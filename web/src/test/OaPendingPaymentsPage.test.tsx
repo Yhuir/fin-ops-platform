@@ -409,7 +409,7 @@ const rowsPayload = {
     },
   ],
   pagination: { page: 1, pageSize: 20, total: 51 },
-  summary: { rowCount: 51, viewCounts: { completed: 51, in_progress: 23 } },
+  summary: { oaCount: 60, statusCounts: { paid: 50, unpaid: 10 }, rowCount: 51, viewCounts: { completed: 60, in_progress: 23 } },
   filterConfig: [
     {
       field: "oa_applicant",
@@ -1207,7 +1207,7 @@ describe("OA pending payments page", () => {
     const page = await screen.findByTestId("oa-pending-payments-page");
     await within(page).findByText("候选付款人");
 
-    expect(within(page).getByRole("radio", { name: /已完成 OA 51条/ })).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: /已完成 OA 60条/ })).toBeInTheDocument();
     expect(within(page).getByRole("radio", { name: /进行中 OA 23条/ })).toBeInTheDocument();
 
     await user.click(within(page).getByRole("radio", { name: /进行中 OA/ }));
@@ -1458,7 +1458,7 @@ describe("OA pending payments page", () => {
       rowsPayload: {
         rows: [],
         pagination: { page: 1, pageSize: 20, total: 0 },
-        summary: { rowCount: 0, viewCounts: { completed: 0, in_progress: 0 } },
+        summary: { oaCount: 0, statusCounts: { paid: 0, unpaid: 0 }, rowCount: 0, viewCounts: { completed: 0, in_progress: 0 } },
         filterConfig: [],
       },
     });
@@ -1664,7 +1664,7 @@ describe("OA pending payments page", () => {
         oa: { ...rowsPayload.rows[0].oa, applicantName },
       }],
       pagination: { page: 1, pageSize: 20, total: 1 },
-      summary: { rowCount: 1, viewCounts: { completed: 1, in_progress: 0 } },
+      summary: { oaCount: 1, statusCounts: { paid: 1, unpaid: 0 }, rowCount: 1, viewCounts: { completed: 1, in_progress: 0 } },
     });
     const fetchMock = installOaPendingPaymentsFetch({
       rowsResponses: [
@@ -1689,13 +1689,70 @@ describe("OA pending payments page", () => {
     expect(within(page).getByText("最新查询")).toBeInTheDocument();
   });
 
+  test("uses OA counts for the payment segments and shares the column filter state", async () => {
+    const fetchMock = installOaPendingPaymentsFetch();
+    renderAuthenticatedAppAt("/oa-pending-payments");
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    const segment = await within(page).findByRole("radio", { name: "已关联 50条" });
+    expect(within(page).getByRole("radio", { name: "全部 60条" })).toBeInTheDocument();
+    expect(within(page).getByText("符合条件 60 条 OA · 第 1/3 页")).toBeInTheDocument();
+    await userEvent.click(segment);
+    await waitFor(() => {
+      const query = rowsRequests(fetchMock).at(-1)!;
+      expect(query.searchParams.get("page")).toBe("1");
+      expect(JSON.parse(decodeURIComponent(query.searchParams.get("filters")!))).toContainEqual({ field: "payment_status", operator: "in", values: ["paid"] });
+    });
+    await userEvent.click(within(page).getByRole("radio", { name: "全部 60条" }));
+    await waitFor(() => expect(rowsRequests(fetchMock).at(-1)!.searchParams.get("filters")).toBeNull());
+  });
+
+  test("does not show the previous scope's counts while a new scope is loading", async () => {
+    const pending = deferred();
+    installOaPendingPaymentsFetch({ rowsResponses: [
+      { status: 200, payload: rowsPayload },
+      { status: 200, payload: { ...rowsPayload, summary: { ...rowsPayload.summary, oaCount: 23, statusCounts: { paid: 20, unpaid: 3 } } }, delay: pending.promise },
+    ] });
+    renderAuthenticatedAppAt("/oa-pending-payments");
+    await screen.findByRole("radio", { name: "已关联 50条" });
+    await userEvent.click(screen.getByRole("radio", { name: /进行中 OA/ }));
+    expect(await screen.findByRole("radio", { name: "已关联 …" })).toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: "已关联 50条" })).not.toBeInTheDocument();
+    pending.resolve();
+    expect(await screen.findByRole("radio", { name: "已关联 20条" })).toBeInTheDocument();
+  });
+
+  test("rereads the last valid page when a refresh removes the current page", async () => {
+    const smaller = { ...rowsPayload, pagination: { page: 2, pageSize: 20, total: 1 },
+      summary: { rowCount: 1, oaCount: 1, statusCounts: { paid: 1, unpaid: 0 }, viewCounts: { completed: 1, in_progress: 0 } } };
+    const fetchMock = installOaPendingPaymentsFetch({ rowsResponses: [
+      { status: 200, payload: rowsPayload }, { status: 200, payload: rowsPayload },
+      { status: 200, payload: { ...smaller, rows: [] } }, { status: 200, payload: smaller },
+    ] });
+    renderAuthenticatedAppAt("/oa-pending-payments");
+    await screen.findByRole("radio", { name: "全部 60条" });
+    await userEvent.click(screen.getByRole("button", { name: "下一页" }));
+    await waitFor(() => expect(rowsRequests(fetchMock).at(-1)!.searchParams.get("page")).toBe("2"));
+    await screen.findByRole("radio", { name: "全部 60条" });
+    await userEvent.click(screen.getByRole("button", { name: "刷新 OA 待付款核对" }));
+    await waitFor(() => expect(rowsRequests(fetchMock)).toHaveLength(4));
+    expect(rowsRequests(fetchMock).at(-1)!.searchParams.get("page")).toBe("1");
+    expect(await screen.findByText("符合条件 1 条 OA · 第 1/1 页")).toBeInTheDocument();
+  });
+
+  test("shows a contract error instead of substituting grouped rows for missing OA counts", async () => {
+    installOaPendingPaymentsFetch({ rowsPayload: { ...rowsPayload, summary: { rowCount: 51 } } });
+    renderAuthenticatedAppAt("/oa-pending-payments");
+    expect(await screen.findByText("OA 数量统计不完整，请刷新重试。")).toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: "全部 51条" })).not.toBeInTheDocument();
+  });
+
   test("does not expose removed read-model runtime states in the empty UI", async () => {
     installOaPendingPaymentsFetch({
       rowsPayload: {
         ...rowsPayload,
         rows: [],
         pagination: { page: 1, pageSize: 20, total: 0 },
-        summary: {},
+        summary: { rowCount: 0, oaCount: 0, statusCounts: { paid: 0, unpaid: 0 }, viewCounts: { completed: 0, in_progress: 0 } },
       },
     });
 
@@ -1703,7 +1760,7 @@ describe("OA pending payments page", () => {
 
     const page = await screen.findByTestId("oa-pending-payments-page");
     expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
-    expect(within(page).getByText("显示 0-0 / 0")).toBeInTheDocument();
+    expect(within(page).getByText("符合条件 0 条 OA · 第 1/1 页")).toBeInTheDocument();
     expect(within(page).queryByText(/NaN|undefined/)).not.toBeInTheDocument();
     expect(within(page).queryByText(/刷新或等待后台任务/)).not.toBeInTheDocument();
   });

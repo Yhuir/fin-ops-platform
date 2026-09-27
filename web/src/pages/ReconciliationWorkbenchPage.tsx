@@ -1,3 +1,4 @@
+import { formatWorkbenchEntityCounts } from "../features/workbench/entityCounts";
 import SegmentedControl from "../components/common/SegmentedControl";
 import { Button, Input, TextArea } from "@heroui/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -68,6 +69,7 @@ import type {
   WorkbenchRelationGroup,
   WorkbenchData,
   WorkbenchExceptionCounts,
+  WorkbenchEntityCounts,
   WorkbenchExceptionView,
   WorkbenchGroupsPageQuery,
   WorkbenchInitialPageResult,
@@ -405,7 +407,7 @@ export default function ReconciliationWorkbenchPage() {
   const [exceptionDrawerPage, setExceptionDrawerPage] = useState<WorkbenchZonePageInfo>(
     () => createInitialZonePageInfo("unpaired"),
   );
-  const [pairedExceptionCount, setPairedExceptionCount] = useState(0);
+  const [pairedExceptionCounts, setPairedExceptionCounts] = useState<WorkbenchEntityCounts | null>(null);
   const [exceptionDrawerLoading, setExceptionDrawerLoading] = useState(false);
   const [exceptionDrawerLoadingMore, setExceptionDrawerLoadingMore] = useState(false);
   const [exceptionDrawerError, setExceptionDrawerError] = useState<string | null>(null);
@@ -818,7 +820,7 @@ export default function ReconciliationWorkbenchPage() {
     relationPreviewContextKeyRef.current = `canonical:${nextCanonicalEpoch}`;
 
     setWorkbenchData(workbenchPayload.data);
-    setPairedExceptionCount(workbenchPayload.data.summary.pairedExceptionCount);
+    setPairedExceptionCounts(workbenchPayload.data.summary.pairedExceptionCounts);
     setStatistics(workbenchPayload.statistics ?? null);
     setLoadedZoneServerPageQueryKeys(createWorkbenchZoneServerPageQueryKeys(resolvedZoneQueries));
     setZonePages(workbenchPayload.pages);
@@ -905,7 +907,7 @@ export default function ReconciliationWorkbenchPage() {
         setExceptionDrawerGroups([]);
         setExceptionDrawerPage(createInitialZonePageInfo(exceptionDrawerBucketRef.current));
         setExceptionDrawerCounts(null);
-        setPairedExceptionCount(0);
+        setPairedExceptionCounts(null);
         setLoadError(normalizedError.message);
         setIsLoading(false);
       } else {
@@ -1550,11 +1552,11 @@ export default function ReconciliationWorkbenchPage() {
       if (result.exceptionCounts) {
         const bucketTotal = result.exceptionCounts.total;
         if (bucket === "paired") {
-          setPairedExceptionCount(bucketTotal);
+          setPairedExceptionCounts(bucketTotal);
         } else {
           setWorkbenchData((current) => current ? {
             ...current,
-            summary: { ...current.summary, unpairedExceptionCount: bucketTotal },
+            summary: { ...current.summary, unpairedExceptionCounts: bucketTotal },
           } : current);
         }
       }
@@ -2357,12 +2359,12 @@ export default function ReconciliationWorkbenchPage() {
   const openAuxiliaryHeaderActions = useMemo(
     () => [
       {
-        label: `未配对异常 ${workbenchData?.summary.unpairedExceptionCount ?? 0} | 已配对异常 ${pairedExceptionCount}`,
+        label: `未配对异常 ${formatWorkbenchEntityCounts(workbenchData?.summary.unpairedExceptionCounts)} | 已配对异常 ${formatWorkbenchEntityCounts(pairedExceptionCounts)}`,
         onClick: handleOpenExceptionDrawer,
         tone: "danger" as const,
       },
     ],
-    [handleOpenExceptionDrawer, pairedExceptionCount, workbenchData?.summary.unpairedExceptionCount],
+    [handleOpenExceptionDrawer, pairedExceptionCounts, workbenchData?.summary.unpairedExceptionCounts],
   );
 
   const isEmpty = (workbenchData?.summary.totalCount ?? 0) === 0;
@@ -2627,8 +2629,8 @@ export default function ReconciliationWorkbenchPage() {
         onManageSupportingDocuments={(row, group) => { void handleRowAction(row, "manage-supporting-documents", group); }}
         bucket={exceptionDrawerBucket}
         bucketCounts={{
-          unpaired: workbenchData?.summary.unpairedExceptionCount ?? 0,
-          paired: pairedExceptionCount,
+          unpaired: workbenchData?.summary.unpairedExceptionCounts ?? null,
+          paired: pairedExceptionCounts,
         }}
         canOperateData={canWriteWorkbench}
         contentGeneration={exceptionDrawerContentGeneration}
@@ -2653,7 +2655,6 @@ export default function ReconciliationWorkbenchPage() {
         onLoadMore={loadMoreExceptionDrawer}
         onViewChange={handleExceptionDrawerViewChange}
         selectedExceptionCode={exceptionDrawerSelectedCode}
-        total={exceptionDrawerPage.total}
         view={exceptionDrawerView}
       />
       {cashTicketPurchaseDialog ? (

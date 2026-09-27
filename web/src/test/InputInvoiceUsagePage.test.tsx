@@ -178,8 +178,6 @@ const rowsPayload = {
   summary: {
     invoiceCount: 787,
     totalWithTax: "12345.67",
-    matchedOaCount: 1,
-    matchedBankTransactionCount: 1,
     pendingCount: 1,
   },
   statistics: {

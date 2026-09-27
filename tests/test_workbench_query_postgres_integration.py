@@ -8,6 +8,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
+from uuid import uuid4
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
@@ -1323,7 +1324,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         """)
         page = self.repository.get_workbench_groups_page(scope_key="2026-07", zone="unpaired",
             exception_bucket="unpaired", exception_view="amount", exception_code="expense_item_amount_mismatch")
-        self.assertEqual(page["exception_counts"]["by_code"]["expense_item_amount_mismatch"], 1)
+        self.assertEqual(page["exception_counts"]["by_code"]["expense_item_amount_mismatch"], {"oa": 1, "bank": 1, "invoice": 0})
         group = next(g for g in page["groups"] if g.get("detail_key") == "CASE-DIRECT-1")
         anomaly = group["workbench_anomaly"]
         self.assertEqual(group["amount_check"]["evidence_total"], "100.00")
@@ -1846,8 +1847,8 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         )
         anomaly = dict(group.get("workbench_anomaly") or {})
 
-        self.assertEqual(initial["summary"]["unpaired_exception_count"], 1)
-        self.assertEqual(initial["summary"]["paired_exception_count"], 0)
+        self.assertEqual(initial["summary"]["unpaired_exception_counts"], {"oa": 1, "bank": 1, "invoice": 1})
+        self.assertEqual(initial["summary"]["paired_exception_counts"], {"oa": 0, "bank": 0, "invoice": 0})
         self.assertEqual(anomaly.get("review_decision"), "pending")
         self.assertTrue(str(anomaly.get("fingerprint") or ""))
         self.assertEqual(
@@ -1923,8 +1924,8 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             evidence_item_fingerprints=list(anomaly["evidence_item_fingerprints"]),
         )
         accepted = self.repository.get_workbench_initial_page(scope_key="2026-07")
-        self.assertEqual(accepted["summary"]["unpaired_exception_count"], 0)
-        self.assertEqual(accepted["summary"]["paired_exception_count"], 1)
+        self.assertEqual(accepted["summary"]["unpaired_exception_counts"], {"oa": 0, "bank": 0, "invoice": 0})
+        self.assertEqual(accepted["summary"]["paired_exception_counts"], {"oa": 1, "bank": 1, "invoice": 1})
         self.assertEqual(
             accepted["paired"]["groups"][0]["workbench_anomaly"]["review_decision"],
             "accept_paired",
@@ -2352,6 +2353,53 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             [canonical_expense_item_id],
         )
 
+    def test_exception_entity_counts_expand_etc_and_deduplicate_split_parent(self) -> None:
+        parent = self.raw_connection.fetch_one(
+            "select id::text as id from app.bank_transactions where legacy_mongo_id='bank-direct-1'"
+        )["id"]
+        parts = [str(uuid4()), str(uuid4())]
+        self.raw_connection.execute(
+            "insert into app.bank_transaction_split_sets(bank_transaction_id,version,updated_by) values (%s::uuid,1,'test')",
+            (parent,),
+        )
+        for position, amount in enumerate((40, 60)):
+            self.raw_connection.execute(
+                """insert into app.bank_transaction_split_items
+                    (id,bank_transaction_id,category_code,amount,position)
+                    values (%s::uuid,%s::uuid,'materials',%s,%s)""",
+                (parts[position], parent, amount, position),
+            )
+        self.raw_connection.execute("""
+            insert into app.oa_applications(oa_source_id,form_id,form_type,row_id,status,
+                workflow_status,application_date,scope_month,amount,normalized_payload,raw_payload)
+            values ('entity-oa-source','payment_request','付款申请','entity-oa','active',
+                'completed','2026-07-21','2026-07-01',50,
+                '{"id":"entity-oa","amount":"50","workflow_status":"completed"}'::jsonb,'{}'::jsonb)
+        """)
+        self.raw_connection.execute("""
+            update app.etc_invoices set business_batch_id='etc_202607_linked'
+            where etc_invoice_id='etc-invoice-direct-4'
+        """)
+        self.raw_connection.execute("""
+            update app.workbench_pair_relations
+            set row_ids=%s::text[], row_types=array['oa','oa','bank','bank','invoice']
+            where case_id='CASE-DIRECT-1'
+        """, (["oa-direct-1", "entity-oa", *parts, "etc-summary-etc_202607_linked"],))
+        expected = {"oa": 2, "bank": 1, "invoice": 2}
+        initial = self.repository.get_workbench_initial_page(scope_key="2026-07")
+        self.assertEqual(initial["summary"]["unpaired_exception_counts"], expected)
+        page = self.repository.get_workbench_groups_page(
+            scope_key="2026-07", zone="unpaired", exception_bucket="unpaired", page_size=1,
+        )
+        self.assertEqual(page["total"], 1)
+        self.assertEqual(page["exception_counts"]["total"], expected)
+        self.assertEqual(page["exception_counts"]["amount_total"], expected)
+        empty = self.repository.get_workbench_groups_page(
+            scope_key="2026-07", zone="unpaired", exception_bucket="unpaired", search="no-entity-matches",
+        )
+        self.assertEqual(empty["total"], 0)
+        self.assertEqual(empty["exception_counts"]["total"], {"oa": 0, "bank": 0, "invoice": 0})
+
     def test_exception_views_count_unique_relations_and_auto_select_first_amount_code(self) -> None:
         fixtures = [
             {
@@ -2586,18 +2634,18 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(amount_page["selected_exception_code"], "oa_bank_equal_invoice_more")
         self.assertEqual(amount_page["total"], 2)
         self.assertEqual(amount_page["exception_counts"], {
-            "total": 9,
-            "amount_total": 8,
-            "document_only": 1,
+            "total": {"oa": 9, "bank": 9, "invoice": 9},
+            "amount_total": {"oa": 8, "bank": 8, "invoice": 8},
+            "document_only": {"oa": 1, "bank": 1, "invoice": 1},
             "by_code": {
-                "oa_bank_equal_invoice_more": 2,
-                "oa_bank_equal_invoice_less": 1,
-                "oa_invoice_equal_bank_more": 1,
-                "oa_invoice_equal_bank_less": 1,
-                "bank_invoice_equal_oa_less": 1,
-                "bank_invoice_equal_oa_more": 1,
-                "all_amounts_different": 1,
-                "expense_item_amount_mismatch": 0,
+                "oa_bank_equal_invoice_more": {"oa": 2, "bank": 2, "invoice": 2},
+                "oa_bank_equal_invoice_less": {"oa": 1, "bank": 1, "invoice": 1},
+                "oa_invoice_equal_bank_more": {"oa": 1, "bank": 1, "invoice": 1},
+                "oa_invoice_equal_bank_less": {"oa": 1, "bank": 1, "invoice": 1},
+                "bank_invoice_equal_oa_less": {"oa": 1, "bank": 1, "invoice": 1},
+                "bank_invoice_equal_oa_more": {"oa": 1, "bank": 1, "invoice": 1},
+                "all_amounts_different": {"oa": 1, "bank": 1, "invoice": 1},
+                "expense_item_amount_mismatch": {"oa": 0, "bank": 0, "invoice": 0},
             },
         })
         self.assertEqual(
@@ -2699,7 +2747,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(continued_page["groups"], [])
         self.assertEqual(
             continued_page["exception_counts"]["by_code"]["oa_bank_equal_invoice_less"],
-            1,
+            {"oa": 1, "bank": 1, "invoice": 1},
         )
 
     def test_shared_invoice_sources_are_counted_once_with_sql_fingerprint_parity(self) -> None:

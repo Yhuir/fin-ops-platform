@@ -58,7 +58,7 @@ import {
 } from "../features/etc/api";
 import { buildEtcOaDraftReviewUrl } from "../features/etc/oaNavigation";
 import type {
-  EtcBusinessBatchCounts,
+  EtcBusinessBatchInvoiceCounts,
   EtcBusinessBatchDetail,
   EtcBusinessBatchBucket,
   EtcBusinessBatchStatus,
@@ -71,12 +71,6 @@ import type {
   EtcSupplementEvidence,
   EtcTicketRootItem,
 } from "../features/etc/types";
-
-const initialCounts: EtcBusinessBatchCounts = {
-  unsubmitted: 0,
-  staged: 0,
-  submitted: 0,
-};
 
 const BUSINESS_BATCH_PAGE_SIZE = 50;
 const POST_MUTATION_RELOAD_WARNING = "操作已成功，但 ETC 批次列表重新加载失败，请刷新页面重试。";
@@ -684,7 +678,7 @@ export default function EtcTicketManagementPage() {
     pageSize: BUSINESS_BATCH_PAGE_SIZE,
     total: 0,
   });
-  const [counts, setCounts] = useState(initialCounts);
+  const [counts, setCounts] = useState<EtcBusinessBatchInvoiceCounts | null>(null);
   const [statistics, setStatistics] = useState<EtcPageStatistics | null>(null);
   const [businessBatches, setBusinessBatches] = useState<EtcBusinessBatchSummary[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState("");
@@ -1615,11 +1609,6 @@ export default function EtcTicketManagementPage() {
     setBatchPage(1);
     setBusinessBatches([pendingDraft]);
     setBatchPagination({ page: 1, pageSize: BUSINESS_BATCH_PAGE_SIZE, total: 1 });
-    setCounts((current) => ({
-      ...current,
-      unsubmitted: Math.max(0, current.unsubmitted - 1),
-      staged: current.staged + 1,
-    }));
     const intent = oaDraftIntentRef.current?.businessBatchId === currentOaDraftBatchId
       ? oaDraftIntentRef.current
       : { businessBatchId: currentOaDraftBatchId, idempotencyKey: crypto.randomUUID() };
@@ -1652,11 +1641,6 @@ export default function EtcTicketManagementPage() {
         setBatchPage(1);
         setBusinessBatches([currentBusinessBatch]);
         setBatchPagination({ page: 1, pageSize: BUSINESS_BATCH_PAGE_SIZE, total: 1 });
-        setCounts((current) => ({
-          ...current,
-          unsubmitted: current.unsubmitted + 1,
-          staged: Math.max(0, current.staged - 1),
-        }));
       } else {
         await changeBatchQuery("staged", 1, currentOaDraftBatchId);
         setDraftResult(null);
@@ -2035,13 +2019,13 @@ export default function EtcTicketManagementPage() {
                 }}
               >
                 <Segment id="unsubmitted">
-                  未提交 {counts.unsubmitted}
+                  未提交 {loading || draftCreating ? "…" : counts === null || batchListError ? "—" : `${counts.unsubmitted}张`}
                 </Segment>
                 <Segment id="staged">
-                  暂存 {counts.staged}
+                  暂存 {loading || draftCreating ? "…" : counts === null || batchListError ? "—" : `${counts.staged}张`}
                 </Segment>
                 <Segment id="submitted">
-                  已提交 {counts.submitted}
+                  已提交 {loading || draftCreating ? "…" : counts === null || batchListError ? "—" : `${counts.submitted}张`}
                 </Segment>
               </SegmentGroup>
               {loading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}

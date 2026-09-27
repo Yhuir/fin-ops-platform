@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from dataclasses import replace
 from io import BytesIO
@@ -638,6 +639,49 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(withdrawn["rows"][0]["bankTransaction"]["relationCount"], 0)
         self.assertEqual(withdrawn["rows"][0]["invoice"]["relationCount"], 0)
         self.assertEqual([row["id"] for row in withdrawn_candidates["rows"]], ["bank-direct-query"])
+
+    def test_entity_counts_are_independent_of_group_paging_and_status_filter(self) -> None:
+        self.test_canonical_page_query_observes_active_relation_changes_without_read_model_refresh()
+        records = [replace(_record(), id=f"oa-integration-{index}", detail_fields={}) for index in (1, 2, 3)]
+        self._source_snapshot().commit_authoritative_snapshot(
+            scope_key="2026-05", tenant_id="default", projection_records=records,
+            admission_records=[], payment_statuses={},
+        )
+        self.connection.execute("""
+            update app.workbench_pair_relations
+            set status='active', row_ids=array['oa-integration-1','oa-integration-2','bank-direct-query'],
+                row_types=array['oa','oa','bank'], raw_payload='{}'::jsonb
+            where case_id='oa-direct-query'
+        """)
+        self.connection.execute("""
+            update app.workbench_pair_relations set raw_payload=jsonb_build_object('normalized_payload',
+                jsonb_build_object('case_id',case_id,'status',status,'relation_mode',relation_mode,
+                    'row_ids',row_ids,'row_types',row_types,'version',version))
+            where case_id='oa-direct-query'
+        """)
+        service = OaPendingPaymentQueryService(repository=PostgresOaPendingPaymentQueryRepository(self.connection))
+        query = {"page": ["1"], "page_size": ["1"]}
+        all_rows = service.rows(query, tenant_id="default")
+        self.assertEqual(all_rows["summary"]["oaCount"], 3)
+        self.assertEqual(all_rows["pagination"]["total"], 2)
+        self.assertEqual(len(all_rows["rows"]), 1)
+        self.assertEqual(all_rows["summary"]["statusCounts"], {"paid": 2, "unpaid": 1})
+        for status, count in (("paid", 2), ("unpaid", 1)):
+            filtered = service.rows({**query, "filters": [json.dumps([
+                {"field": "payment_status", "operator": "in", "values": [status]}
+            ])]}, tenant_id="default")
+            self.assertEqual(filtered["summary"]["oaCount"], count)
+            self.assertEqual(filtered["summary"]["viewCounts"]["completed"], 3)
+            self.assertEqual(filtered["summary"]["statusCounts"], {"paid": 2, "unpaid": 1})
+            self.assertEqual({item["value"]: item["count"] for item in filtered["filterOptions"]["payment_status"]},
+                             {"paid": 2, "unpaid": 1})
+        self.connection.execute("update app.workbench_pair_relations set status='withdrawn' where case_id='oa-direct-query'")
+        withdrawn = service.rows(query, tenant_id="default")
+        self.assertEqual(withdrawn["summary"]["statusCounts"], {"paid": 0, "unpaid": 3})
+        self.assertEqual(withdrawn["summary"]["oaCount"], 3)
+        empty = service.rows({**query, "keyword": ["never-match-entity-count"]}, tenant_id="default")
+        self.assertEqual(empty["summary"]["oaCount"], 0)
+        self.assertEqual(empty["summary"]["statusCounts"], {"paid": 0, "unpaid": 0})
 
     def test_export_reads_both_oa_fact_sources_without_queue_or_non_oa_fields(self) -> None:
         completed = _record()

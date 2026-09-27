@@ -1,0 +1,36 @@
+/* Only exception controls have a second line of business entity counts. */
+.workbench-anomaly-drawer .app-segments .toggle-button {
+  height: auto;
+  min-height: 48px;
+  padding-block: 6px;
+}
+.workbench-anomaly-drawer .app-segments__label {
+  flex-direction: column;
+  gap: 3px;
+}
+.workbench-anomaly-drawer .app-segments__label small,
+.workbench-anomaly-drawer .app-segments__label strong {
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.workbench-anomaly-drawer .workbench-anomaly-drawer__view-row {
+  flex-wrap: wrap;
+}
+.workbench-anomaly-drawer .workbench-anomaly-drawer__count {
+  white-space: normal;
+}
+.workbench-shell .zone .zone-aux-action {
+  max-width: 440px;
+  height: auto;
+  min-height: 32px;
+  padding-block: 5px;
+  white-space: normal;
+  line-height: 1.4;
+}
+@media (max-width: 820px) {
+  .workbench-anomaly-drawer .workbench-anomaly-drawer__view-segmented {
+    max-width: 100%;
+    flex-shrink: 1;
+  }
+}

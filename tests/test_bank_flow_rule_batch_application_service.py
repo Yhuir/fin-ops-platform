@@ -27,6 +27,16 @@ from fin_ops_platform.services.workbench_pair_relation_service import (
 )
 
 
+def _canonical_source(source):
+    """Fixture rows are unsplit unless an explicit parent identity is supplied."""
+    parent_ids = {row.get("transaction_id", row.get("id")): row.get("parent_row_id", row.get("transaction_id", row.get("id")))
+                  for row in source["candidate_rows"]}
+    for item in source.get("formal_items", []):
+        for row_id in item.get("row_ids", item.get("bank_transaction_ids", [])):
+            parent_ids.setdefault(row_id, row_id)
+    return {**source, "bank_parent_ids": parent_ids}
+
+
 class RecordingStateStore:
     def __init__(self, *, bank_flow_batch_snapshot: dict[str, object] | None = None) -> None:
         self.bank_flow_mutations: list[dict[str, object]] = []
@@ -215,6 +225,31 @@ class RecordingTransactionConnection:
 
 
 class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
+    def test_counts_deduplicate_original_transactions_across_splits_tags_and_history(self):
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        batches = [
+            {"batch_type": "fee", "status": "draft", "row_ids": ["part-1", "part-2"], "total_amount": "3"},
+            {"batch_type": "interest", "status": "draft", "row_ids": ["part-3"], "total_amount": "4"},
+            {"batch_type": "fee", "status": "withdrawn", "row_ids": ["part-1"], "total_amount": "1"},
+            {"batch_type": "fee", "status": "withdrawn", "row_ids": ["part-1", "removed"], "total_amount": "1"},
+        ]
+        parent_ids = {"part-1": "bank-1", "part-2": "bank-1", "part-3": "bank-1"}
+        summary = service._summary_from_aggregates(
+            service._aggregates_for_batches(batches, parent_ids),
+            eligible_tag_codes={"fee", "interest"},
+            definitions_by_code={code: {"code": code, "label": code,
+                "output_primary_label": "费用", "output_sub_label": code} for code in ("fee", "interest")},
+        )
+        self.assertEqual(summary["draft_count"], 2)  # operational batch count remains separate
+        self.assertEqual(summary["withdrawn_count"], 2)
+        self.assertEqual(summary["total_row_count"], 1)
+        self.assertEqual(summary["draft_row_count"], 1)
+        self.assertEqual(summary["withdrawn_row_count"], 1)
+        primary = next(item for item in summary["label_counts"] if item["sub_label"] is None)
+        self.assertEqual(primary["draft_row_count"], 1)
+        self.assertEqual(primary["total_row_count"], 1)
+        self.assertEqual(len(summary["categories"]), 2)
+
     def test_list_filters_one_normalized_batch_snapshot_for_rows_and_summary(self) -> None:
         list_batches = Mock(
             return_value=[
@@ -225,6 +260,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                         "status": "draft",
                         "status_bucket": "unsubmitted",
                         "row_count": 2,
+                        "row_ids": ["a", "b"],
                         "total_amount": "2.00",
                     },
                     {
@@ -234,6 +270,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                         "status": "submitted",
                         "status_bucket": "submitted",
                         "row_count": 3,
+                        "row_ids": ["c", "d", "e"],
                         "total_amount": "3.00",
                     },
                     {
@@ -243,6 +280,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                         "status": "draft",
                         "status_bucket": "unsubmitted",
                         "row_count": 4,
+                        "row_ids": ["f", "g", "h", "i"],
                         "total_amount": "4.00",
                     },
             ]
@@ -251,6 +289,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         service = object.__new__(BankFlowRuleBatchApplicationService)
         service._query_repository = SimpleNamespace(
             read_page=lambda *_args, **_kwargs: {
+                "bank_parent_ids": {key: key for key in "abcdefghi"},
                 "tag_policy": {"active_tags": [{"code": "fee", "label": "手续费"}]}
             }
         )
@@ -324,7 +363,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             side_effect=AssertionError("canonical SQL categories must not be classified twice"),
         ):
             categories = bank_flow_rule_batch_effective_categories(
-                {
+                _canonical_source({
                     "candidate_rows": [
                         {
                             "id": "bank-1",
@@ -340,7 +379,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                             "category_resolution_authority": "canonical_sql",
                         },
                     ]
-                }
+                })
             )
 
         self.assertEqual(categories["bank-1"]["effective_category_code"], "fee")
@@ -740,7 +779,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                         "page_size": page_size,
                     }
                 )
-                return {
+                return _canonical_source({
                     "candidate_rows": [
                         {
                             "id": "bank-row-current",
@@ -762,7 +801,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                             "fee": {"requires_oa": False, "requires_invoice": False},
                         },
                     },
-                }
+                })
 
         class ImportSnapshot:
             def list_transactions_by_ids(self, _row_ids):  # type: ignore[no-untyped-def]
@@ -1437,7 +1476,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                     "batch_type": "archived_fee",
                     "presented_status": "submitted",
                     "batch_count": 2,
-                    "row_count": 7,
+                    "transaction_ids": set("abcdefg"),
                     "total_amount": "88.00",
                     "batch_label": "历史手续费",
                     "category_primary_label": "历史费用",
@@ -1672,7 +1711,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                         "page_size": page_size,
                     }
                 )
-                return {
+                return _canonical_source({
                     "candidate_rows": [
                         {
                             "id": "bank-1",
@@ -1704,7 +1743,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                             }
                         },
                     },
-                }
+                })
 
         repository = Repository()
         service._query_repository = repository
@@ -1748,7 +1787,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                 return None
 
             def read_page(self, *_args: object, **_kwargs: object) -> dict[str, object]:
-                return {
+                return _canonical_source({
                     "candidate_rows": [
                         {
                             "id": "bank-out-188500",
@@ -1782,7 +1821,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                             }
                         },
                     },
-                }
+                })
 
         service = object.__new__(BankFlowRuleBatchApplicationService)
         service._query_repository = Repository()
@@ -1861,7 +1900,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
 
         class Repository:
             def read_page(self, *_args: object, **_kwargs: object) -> dict[str, object]:
-                return {
+                return _canonical_source({
                     "candidate_rows": rows,
                     "active_relations": [
                         {
@@ -1882,7 +1921,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                             }
                         },
                     },
-                }
+                })
 
         service = object.__new__(BankFlowRuleBatchApplicationService)
         service._query_repository = Repository()
@@ -1980,7 +2019,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                         "page_size": page_size,
                     }
                 )
-                return {
+                return _canonical_source({
                     "candidate_rows": rows,
                     "active_relations": [
                         {
@@ -2001,7 +2040,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                             }
                         },
                     },
-                }
+                })
 
         repository = Repository()
         service = object.__new__(BankFlowRuleBatchApplicationService)
@@ -2073,7 +2112,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                         "page_size": page_size,
                     }
                 )
-                return {
+                return _canonical_source({
                     "candidate_rows": [
                         {
                             "id": "bank-out-188500",
@@ -2105,7 +2144,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                             }
                         },
                     },
-                }
+                })
 
         repository = Repository()
         service = object.__new__(BankFlowRuleBatchApplicationService)
@@ -2193,7 +2232,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
     def test_candidate_guard_conflict_restores_relation_and_writes_no_formal_batch(self) -> None:
         class Repository:
             def read_page(self, *_args: object, **_kwargs: object) -> dict[str, object]:
-                return {
+                return _canonical_source({
                     "candidate_rows": [
                         {
                             "id": "bank-out-188500",
@@ -2225,7 +2264,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                             }
                         },
                     },
-                }
+                })
 
         class GuardRejectingStateStore:
             def __init__(self) -> None:
@@ -2338,7 +2377,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                         "version": 3,
                     }
                 )
-                return {
+                return _canonical_source({
                     "candidate_rows": rows,
                     "active_relations": [],
                     "formal_items": [withdrawn],
@@ -2351,7 +2390,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                             }
                         },
                     },
-                }
+                })
 
         service = object.__new__(BankFlowRuleBatchApplicationService)
         service._query_repository = Repository()
@@ -2392,7 +2431,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                         "category_source": "auto_confirmation",
                     }
 
-                return {
+                return _canonical_source({
                     "candidate_rows": [
                         row(
                             "unique-out",
@@ -2436,7 +2475,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                             }
                         },
                     },
-                }
+                })
 
         service = object.__new__(BankFlowRuleBatchApplicationService)
         service._query_repository = Repository()
@@ -2485,7 +2524,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                 self.active_relations: list[dict[str, object]] = []
 
             def read_page(self, *_args: object, **_kwargs: object) -> dict[str, object]:
-                return {
+                return _canonical_source({
                     "candidate_rows": rows,
                     "active_relations": list(self.active_relations),
                     "formal_items": [],
@@ -2498,7 +2537,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                             }
                         },
                     },
-                }
+                })
 
         repository = Repository()
         service = object.__new__(BankFlowRuleBatchApplicationService)

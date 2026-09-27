@@ -67,7 +67,17 @@ export type BankFlowRuleBatch = {
   categoryLabelPath?: string[];
 };
 
+export type BankFlowRuleLabelCount = {
+  primaryLabel: string;
+  subLabel: string | null;
+  totalRowCount: number;
+  draftRowCount: number;
+  submittedRowCount: number;
+  withdrawnRowCount: number;
+};
+
 export type BankFlowRuleBatchSummary = {
+  labelCounts: BankFlowRuleLabelCount[];
   draftCount: number;
   submittedCount: number;
   withdrawnCount: number;

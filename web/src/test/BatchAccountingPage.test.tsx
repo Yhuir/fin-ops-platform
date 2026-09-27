@@ -549,8 +549,8 @@ describe("BatchAccountingPage", () => {
       expect(url.searchParams.get("oa_page_size")).toBe("200");
       expect(url.searchParams.has("oa_year")).toBe(false);
     });
-    expect(screen.getByRole("radio", { name: "未提交 2" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("radio", { name: "已提交 1" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "未提交 2 笔" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "已提交 1 笔" })).toBeInTheDocument();
     expect(screen.queryByLabelText("年份")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "流水年份：年月" })).toBeInTheDocument();
     expect(screen.queryByLabelText("OA年份")).not.toBeInTheDocument();
@@ -563,8 +563,8 @@ describe("BatchAccountingPage", () => {
     expect(within(bankList).getAllByRole("button", { name: /批量账务集中处理/ })).toHaveLength(2);
     expect(within(bankList).getByText("手续费")).toBeInTheDocument();
     expect(within(bankList).getByText("差旅费")).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "批量账务流水分页" })).toHaveTextContent("1-2 / 2");
-    expect(screen.getByRole("group", { name: "可关联OA项分页" })).toHaveTextContent("1-3 / 3");
+    expect(screen.getByRole("group", { name: "批量账务流水分页" })).toHaveTextContent("第 1 / 1 页");
+    expect(screen.getByRole("group", { name: "可关联OA项分页" })).toHaveTextContent("第 1 / 1 页");
     expect(within(bankList).queryByRole("table")).not.toBeInTheDocument();
     expect(within(bankList).getByText("2026-01-07 15:54:00")).toBeInTheDocument();
     expect(within(bankList).queryByText("2026-01-07T15:54:00+08")).not.toBeInTheDocument();
@@ -624,8 +624,8 @@ describe("BatchAccountingPage", () => {
     renderPage();
 
     await waitFor(() => {
-      expect(within(screen.getByRole("group", { name: "批量账务流水分页" })).getByText("1-200 / 205")).toBeInTheDocument();
-      expect(within(screen.getByRole("group", { name: "可关联OA项分页" })).getByText("1-200 / 205")).toBeInTheDocument();
+      expect(within(screen.getByRole("group", { name: "批量账务流水分页" })).getByText("第 1 / 2 页")).toBeInTheDocument();
+      expect(within(screen.getByRole("group", { name: "可关联OA项分页" })).getByText("第 1 / 2 页")).toBeInTheDocument();
     });
     expect(screen.getByRole("button", { name: /批量账务集中处理.*建行 0000/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /批量账务集中处理.*建行 0204/ })).not.toBeInTheDocument();
@@ -633,7 +633,7 @@ describe("BatchAccountingPage", () => {
     expect(screen.queryByText("申请人204")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "批量账务流水分页下一页" }));
-    expect(await screen.findByText("201-205 / 205")).toBeInTheDocument();
+    expect(await screen.findByText("第 2 / 2 页")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /批量账务集中处理.*建行 0200/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /批量账务集中处理.*建行 0000/ })).not.toBeInTheDocument();
 
@@ -861,7 +861,7 @@ describe("BatchAccountingPage", () => {
     await user.type(screen.getByLabelText("差额说明"), "财务确认差额闭环");
     expect(screen.getByLabelText("差额说明")).toHaveValue("财务确认差额闭环");
 
-    await user.click(screen.getByRole("radio", { name: "已提交 1" }));
+    await user.click(screen.getByRole("radio", { name: "已提交 1 笔" }));
     await screen.findByRole("grid", { name: "已关联OA项" });
     await user.click(screen.getByRole("radio", { name: /^未提交/ }));
     await screen.findByRole("grid", { name: "可关联OA项" });
@@ -1042,7 +1042,7 @@ describe("BatchAccountingPage", () => {
     const fetchMock = installFetchMock();
 
     renderPage();
-      await user.click(await screen.findByRole("radio", { name: "已提交 1" }));
+      await user.click(await screen.findByRole("radio", { name: "已提交 1 笔" }));
 
       expect(await screen.findByRole("button", { name: /批量账务集中处理.*900.00.*2026-02-10 12:30:00.*支出.*建行 8106/ })).toBeInTheDocument();
       const associatedTable = screen.getByRole("grid", { name: "已关联OA项" });

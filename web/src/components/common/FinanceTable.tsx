@@ -225,6 +225,7 @@ type FinanceTablePaginationProps = {
   className?: string;
   compact?: boolean;
   isDisabled?: boolean;
+  summary?: ReactNode;
 };
 
 type FinanceTablePageToken = number | `ellipsis-${number}`;
@@ -249,6 +250,7 @@ function financeTablePageTokens(currentPage: number, totalPages: number): Financ
 }
 
 export function FinanceTablePagination({
+  summary,
   page,
   pageSize,
   total,
@@ -266,7 +268,7 @@ export function FinanceTablePagination({
   return (
     <Pagination className={cx("finance-table-pagination", className)} size="sm">
       <Pagination.Summary className="finance-table-pagination__summary">
-        显示 {start}-{end} / {total}
+        {summary ?? <>显示 {start}-{end} / {total}</>}
       </Pagination.Summary>
       <Pagination.Content>
         <Pagination.Item>

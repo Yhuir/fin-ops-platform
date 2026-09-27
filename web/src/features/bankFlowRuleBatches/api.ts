@@ -70,6 +70,8 @@ type ApiBankFlowRuleBatch = {
 };
 
 type ApiBankFlowRuleBatchSummary = {
+  label_counts?: Array<{primary_label: string; sub_label: string | null; total_row_count: number;
+    draft_row_count: number; submitted_row_count: number; withdrawn_row_count: number}>;
   draft_count?: number | null;
   draftCount?: number | null;
   submitted_count?: number | null;
@@ -347,17 +349,36 @@ function isPublicBatch(batch: BankFlowRuleBatch) {
   return batch.status === "draft" || batch.status === "submitted" || batch.status === "withdrawn";
 }
 
+function requiredTransactionCount(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error("原始流水统计数量缺失或无效。");
+  }
+  return value;
+}
+
 function mapSummary(summary: ApiBankFlowRuleBatchSummary = {}): BankFlowRuleBatchSummary {
+  if (!Array.isArray(summary.label_counts)) throw new Error("流水分类统计缺失，请刷新后重试。");
+  for (const item of summary.label_counts) {
+    if (![item.total_row_count, item.draft_row_count, item.submitted_row_count, item.withdrawn_row_count]
+      .every((value) => Number.isSafeInteger(value) && value >= 0)) {
+      throw new Error("流水分类统计数量无效。");
+    }
+  }
   return {
+    labelCounts: summary.label_counts.map((item) => ({
+      primaryLabel: item.primary_label, subLabel: item.sub_label,
+      totalRowCount: item.total_row_count, draftRowCount: item.draft_row_count,
+      submittedRowCount: item.submitted_row_count, withdrawnRowCount: item.withdrawn_row_count,
+    })),
     draftCount: numberValue(summary.draft_count ?? summary.draftCount),
     submittedCount: numberValue(summary.submitted_count ?? summary.submittedCount),
     withdrawnCount: numberValue(summary.withdrawn_count ?? summary.withdrawnCount),
     conflictCount: numberValue(summary.conflict_count ?? summary.conflictCount),
     staleCount: numberValue(summary.stale_count ?? summary.staleCount),
-    totalRowCount: numberValue(summary.total_row_count ?? summary.totalRowCount),
-    draftRowCount: numberValue(summary.draft_row_count ?? summary.draftRowCount),
-    submittedRowCount: numberValue(summary.submitted_row_count ?? summary.submittedRowCount),
-    withdrawnRowCount: numberValue(summary.withdrawn_row_count ?? summary.withdrawnRowCount),
+    totalRowCount: requiredTransactionCount(summary.total_row_count),
+    draftRowCount: requiredTransactionCount(summary.draft_row_count),
+    submittedRowCount: requiredTransactionCount(summary.submitted_row_count),
+    withdrawnRowCount: requiredTransactionCount(summary.withdrawn_row_count),
     totalAmount: text(summary.total_amount ?? summary.totalAmount, "0.00"),
     categories: Array.isArray(summary.categories) ? summary.categories.map(mapSummaryCategory) : [],
   };

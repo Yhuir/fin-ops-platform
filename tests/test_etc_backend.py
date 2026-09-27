@@ -3986,6 +3986,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertLessEqual(len(list_response.body.encode("utf-8")), 250 * 1024)
         list_payload = json.loads(list_response.body)["data"]
         self.assertEqual(list_payload["total"], 1)
+        self.assertEqual(list_payload["counts"]["unsubmitted"], 65)
         self.assertEqual(list_payload["items"][0]["invoiceSummary"]["count"], 65)
         self.assertNotIn("invoiceIds", list_payload["items"][0])
         self.assertEqual(detail_response.status_code, 200)
@@ -4013,7 +4014,8 @@ class EtcApiTests(unittest.TestCase):
             if "group by bucket" in normalized_sql:
                 return [{
                     "bucket": "unsubmitted",
-                    "count": 1,
+                    "batch_count": 1,
+                    "invoice_count": 65,
                     "etc_invoice_count": 65,
                     "input_invoice_count": 1158,
                 }]
@@ -4077,9 +4079,9 @@ class EtcApiTests(unittest.TestCase):
         self.assertIn("left join lateral", list_page_sql)
         self.assertIn("min(invoice.invoice_date) as invoice_date_start", list_page_sql)
         self.assertEqual(list_count_sql.count("from app.etc_business_batches"), 1)
-        self.assertNotIn("jsonb_array_elements_text", list_count_sql)
+        self.assertIn("count(distinct invoice.etc_invoice_id)", list_count_sql)
         self.assertNotIn("cross join lateral unnest", list_count_sql)
-        self.assertEqual(list_payload["counts"]["unsubmitted"], 1)
+        self.assertEqual(list_payload["counts"]["unsubmitted"], 65)
         self.assertEqual(list_payload["statistics"]["input_invoice_count"], 1158)
         self.assertEqual(list_payload["statistics"]["invoice_count"], 65)
         self.assertEqual(list_payload["items"][0]["invoice_date_start"], "2026-03-28")
@@ -4106,7 +4108,8 @@ class EtcApiTests(unittest.TestCase):
                 if "group by bucket" in normalized_sql:
                     return [{
                         "bucket": "unsubmitted",
-                        "count": 1,
+                        "batch_count": 1,
+                        "invoice_count": 2,
                         "etc_invoice_count": 2,
                         "input_invoice_count": 2,
                     }]
@@ -5527,7 +5530,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(business_batch["status"], "imported")
         self.assertEqual(business_batch["invoiceSummary"]["count"], 2)
         self.assertEqual(business_batch["importBatchIds"], ["etc_import_batch_0001"])
-        self.assertEqual(active_business_batches["data"]["counts"]["unsubmitted"], 1)
+        self.assertEqual(active_business_batches["data"]["counts"]["unsubmitted"], 2)
         self.assertEqual(active_business_batches["data"]["total"], 1)
         self.assertEqual(active_business_batches["data"]["items"][0]["businessBatchId"], business_batch["businessBatchId"])
 

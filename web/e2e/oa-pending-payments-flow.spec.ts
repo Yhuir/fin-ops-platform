@@ -63,6 +63,11 @@ async function expectSegmentedPeriodPickerGeometry(page: Page, name: string) {
       root: rootRect.toJSON(),
       all: allRect.toJSON(),
       trigger: triggerRect.toJSON(),
+      paddingTop: Number.parseFloat(rootStyle.paddingTop),
+      paddingRight: Number.parseFloat(rootStyle.paddingRight),
+      paddingBottom: Number.parseFloat(rootStyle.paddingBottom),
+      paddingLeft: Number.parseFloat(rootStyle.paddingLeft),
+      gap: Number.parseFloat(rootStyle.columnGap),
       borderTop: Number.parseFloat(rootStyle.borderTopWidth),
       borderRight: Number.parseFloat(rootStyle.borderRightWidth),
       borderBottom: Number.parseFloat(rootStyle.borderBottomWidth),
@@ -72,13 +77,13 @@ async function expectSegmentedPeriodPickerGeometry(page: Page, name: string) {
   const tolerance = 1;
 
   expect(Math.abs(metrics.all.height - metrics.trigger.height)).toBeLessThanOrEqual(tolerance);
-  expect(Math.abs(metrics.all.y - (metrics.root.y + metrics.borderTop))).toBeLessThanOrEqual(tolerance);
-  expect(Math.abs(metrics.trigger.y - (metrics.root.y + metrics.borderTop))).toBeLessThanOrEqual(tolerance);
-  expect(Math.abs((metrics.all.y + metrics.all.height) - (metrics.root.y + metrics.root.height - metrics.borderBottom))).toBeLessThanOrEqual(tolerance);
-  expect(Math.abs((metrics.trigger.y + metrics.trigger.height) - (metrics.root.y + metrics.root.height - metrics.borderBottom))).toBeLessThanOrEqual(tolerance);
-  expect(Math.abs(metrics.all.x - (metrics.root.x + metrics.borderLeft))).toBeLessThanOrEqual(tolerance);
-  expect(Math.abs(metrics.trigger.x - (metrics.all.x + metrics.all.width))).toBeLessThanOrEqual(tolerance);
-  expect(Math.abs((metrics.trigger.x + metrics.trigger.width) - (metrics.root.x + metrics.root.width - metrics.borderRight))).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs(metrics.all.y - (metrics.root.y + metrics.borderTop + metrics.paddingTop))).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs(metrics.trigger.y - (metrics.root.y + metrics.borderTop + metrics.paddingTop))).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs((metrics.all.y + metrics.all.height) - (metrics.root.y + metrics.root.height - metrics.borderBottom - metrics.paddingBottom))).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs((metrics.trigger.y + metrics.trigger.height) - (metrics.root.y + metrics.root.height - metrics.borderBottom - metrics.paddingBottom))).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs(metrics.all.x - (metrics.root.x + metrics.borderLeft + metrics.paddingLeft))).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs(metrics.trigger.x - (metrics.all.x + metrics.all.width + metrics.gap))).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs((metrics.trigger.x + metrics.trigger.width) - (metrics.root.x + metrics.root.width - metrics.borderRight - metrics.paddingRight))).toBeLessThanOrEqual(tolerance);
 }
 
 test.describe("OA pending payments browser flow", () => {
@@ -129,7 +134,7 @@ test.describe("OA pending payments browser flow", () => {
     await expect(recoveredRow).toBeVisible();
     await expect(recoveredRow).toContainText("浏览器待付款项目");
     await expect(recoveredRow).toContainText("已支付");
-    await expect(page.getByText("1-1 / 1")).toBeVisible();
+    await expect(page.getByText("符合条件 1 条 OA · 第 1/1 页")).toBeVisible();
     expect(api.count("GET /api/oa-pending-payments/rows")).toBeGreaterThanOrEqual(3);
   });
 

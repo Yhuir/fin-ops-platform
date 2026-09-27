@@ -43,7 +43,6 @@ import {
   batchBlockingReason,
   buildTagDrawerRows,
   categoryCountForBucket,
-  categoryRowCountForBucket,
   currentMonth,
   cx,
   directionTagLabel,
@@ -74,6 +73,7 @@ import { formatDateTimeText } from "../features/dateTime";
 
 const EMPTY_BATCHES: BankFlowRuleBatchesResponse = {
   summary: {
+    labelCounts: [],
     draftCount: 0,
     submittedCount: 0,
     withdrawnCount: 0,
@@ -330,11 +330,13 @@ export default function BankFlowRuleBatchPage() {
         const category = categoriesByCode.get(node.code);
         group.codes.push(node.code);
         group.batchCount += category ? categoryCountForBucket(category, bucket) : 0;
-        group.rowCount += category ? categoryRowCountForBucket(category, bucket) : 0;
+        const counts = payload.summary.labelCounts.find((item) => item.primaryLabel === node.primaryLabel && item.subLabel === null);
+        if (!counts) throw new Error("流水分类统计缺失。");
+        group.rowCount = (bucket === "unsubmitted" ? counts.draftRowCount : bucket === "submitted" ? counts.submittedRowCount : bucket === "withdrawn" ? counts.withdrawnRowCount : counts.totalRowCount);
       }
     });
     return Array.from(groups.values());
-  }, [bucket, payload.summary.categories, tagNodesByCode]);
+  }, [bucket, payload.summary.categories, payload.summary.labelCounts, tagNodesByCode]);
 
   useEffect(() => {
     if (primaryGroups.length === 0) {
@@ -372,11 +374,13 @@ export default function BankFlowRuleBatchPage() {
         const category = categoriesByCode.get(node.code);
         group.codes.push(node.code);
         group.batchCount += category ? categoryCountForBucket(category, bucket) : 0;
-        group.rowCount += category ? categoryRowCountForBucket(category, bucket) : 0;
+        const counts = payload.summary.labelCounts.find((item) => item.primaryLabel === node.primaryLabel && item.subLabel === node.subLabel);
+        if (!counts) throw new Error("流水分类统计缺失。");
+        group.rowCount = (bucket === "unsubmitted" ? counts.draftRowCount : bucket === "submitted" ? counts.submittedRowCount : bucket === "withdrawn" ? counts.withdrawnRowCount : counts.totalRowCount);
       }
     });
     return Array.from(groups.values());
-  }, [bucket, payload.summary.categories, selectedPrimaryLabel, tagNodesByCode]);
+  }, [bucket, payload.summary.categories, payload.summary.labelCounts, selectedPrimaryLabel, tagNodesByCode]);
 
   useEffect(() => {
     if (subGroups.length === 0) {
@@ -700,7 +704,7 @@ export default function BankFlowRuleBatchPage() {
     });
   };
 
-  const unsubmittedCount = payload.summary.draftCount;
+  const unsubmittedCount = payload.summary.draftRowCount;
   const resetListScope = useCallback(() => {
     clearSelection();
     suppressNextAutoSelectRef.current = false;
@@ -781,9 +785,9 @@ export default function BankFlowRuleBatchPage() {
           selectionMode="single"
           size="sm"
         >
-          <Segment id="unsubmitted">未提交 {unsubmittedCount}</Segment>
-          <Segment id="submitted">已提交 {payload.summary.submittedCount}</Segment>
-          <Segment id="withdrawn">历史 {payload.summary.withdrawnCount}</Segment>
+          <Segment id="unsubmitted">未提交 {unsubmittedCount} 笔</Segment>
+          <Segment id="submitted">已提交 {payload.summary.submittedRowCount} 笔</Segment>
+          <Segment id="withdrawn">历史 {payload.summary.withdrawnRowCount} 笔</Segment>
         </SegmentGroup>
         <BusinessPeriodPicker
           allowedModes={["month"]}
@@ -810,7 +814,7 @@ export default function BankFlowRuleBatchPage() {
             {selectedTransactionIds.size > 0 ? (
               <>
                 <span className="bank-flow-rule-batches-selected-count">
-                  已选 {selectedTransactionIds.size} 条
+                  已选 {selectedTransactionIds.size} 项明细
                 </span>
                 <Button
                   className="bank-flow-rule-batches-button bank-flow-rule-batches-button--compact"
@@ -915,7 +919,7 @@ export default function BankFlowRuleBatchPage() {
                           <BatchStatusTag status={batch.status} />
                         </div>
                         <p className="bank-flow-rule-batches-batch__meta">
-                          {batch.rowCount} 条 · 合计 {formatMoney(batch.totalAmount)}
+                          {batch.rowCount} 项明细 · 合计 {formatMoney(batch.totalAmount)}
                         </p>
                       </div>
                       <div className="bank-flow-rule-batches-batch__actions">

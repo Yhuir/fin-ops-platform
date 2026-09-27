@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import StatePanel from "../../components/common/StatePanel";
 import type { BankFlowRuleBatchStatus } from "./types";
-import { cx, formatCountMeta, pageRange } from "./viewModel";
+import { cx, formatCountMeta } from "./viewModel";
 
 type BatchStatusMeta = { label: string; color: "default" | "primary" | "success" | "warning" | "error" };
 
@@ -42,7 +42,7 @@ export function PageControls({
   const pageCount = Math.max(1, Math.ceil(total / Math.max(1, pageSize)));
   return (
     <div aria-label={label} className="bank-flow-rule-batches-pagination" role="group">
-      <span className="bank-flow-rule-batches-pagination__summary">{pageRange(page, pageSize, total)}</span>
+      <span className="bank-flow-rule-batches-pagination__summary">第 {page} / {pageCount} 页</span>
       <button
         aria-label={`${label}上一页`}
         className="bank-flow-rule-batches-pagination__button"
@@ -114,7 +114,7 @@ export function LabelRail({
         <div className="bank-flow-rule-batches-rail__list">
           {groups.map((group) => {
             const selected = selectedKey === group.key;
-            const countMeta = formatCountMeta(group.batchCount, group.rowCount);
+            const countMeta = formatCountMeta(group.rowCount);
             const isEmpty = group.batchCount === 0 && group.rowCount === 0;
             return (
               <button

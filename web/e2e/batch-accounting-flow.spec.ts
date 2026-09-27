@@ -235,10 +235,10 @@ test.describe("batch accounting browser flow", () => {
     }, async (mark) => {
       await page.goto("/batch-accounting");
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "日常报销批量账务管理" })).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByRole("radio", { name: "未提交 1" })).toBeChecked());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("radio", { name: "未提交 1 笔" })).toBeChecked());
     });
-    await expect(page.getByRole("radio", { name: "未提交 1" })).toBeChecked();
-    await expect(page.getByRole("radio", { name: "已提交 0" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "未提交 1 笔" })).toBeChecked();
+    await expect(page.getByRole("radio", { name: "已提交 0 笔" })).toBeVisible();
 
     const bankPanel = page.getByRole("region", { name: "批量账务流水" });
     await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
@@ -283,19 +283,19 @@ test.describe("batch accounting browser flow", () => {
     expect(api.lastBody("POST /api/batch-accounting/submit")).toMatchObject({ bank_year: "2025" });
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(api.count("GET /api/batch-accounting")).toBe(batchAccountingGetsBeforeSubmit + 1);
-    await expect(page.getByRole("radio", { name: "已提交 1" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "已提交 1 笔" })).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
 
     await recordLatency({
       operationId: "batch-accounting.open-submitted-bucket",
-      visibleLabel: "已提交 1",
+      visibleLabel: "已提交 1 笔",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("radio", { name: "已提交 1" }).click();
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("radio", { name: "已提交 1" })).toBeChecked());
+      await page.getByRole("radio", { name: "已提交 1 笔" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("radio", { name: "已提交 1 笔" })).toBeChecked());
       await mark("finalSettledLatencyMs", expect(page.getByRole("grid", { name: "已关联OA项" })).toBeVisible());
     });
-    await expect(page.getByRole("radio", { name: "已提交 1" })).toBeChecked();
+    await expect(page.getByRole("radio", { name: "已提交 1 笔" })).toBeChecked();
     await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
 
     const submittedTable = page.getByRole("grid", { name: "已关联OA项" });
@@ -345,16 +345,16 @@ test.describe("batch accounting browser flow", () => {
     expect(api.count("POST /api/batch-accounting/BA-REL-202604-001/withdraw")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(api.count("GET /api/batch-accounting")).toBe(batchAccountingGetsBeforeWithdraw + 1);
-    await expect(page.getByRole("radio", { name: "已提交 0" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "已提交 0 笔" })).toBeVisible();
     await expect(page.getByText("当前范围暂无批量账务流水")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
 
     await recordLatency({
       operationId: "batch-accounting.open-unsubmitted-bucket-after-withdraw",
-      visibleLabel: "未提交 1",
+      visibleLabel: "未提交 1 笔",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("radio", { name: "未提交 1" }).click();
+      await page.getByRole("radio", { name: "未提交 1 笔" }).click();
       await mark("finalSettledLatencyMs", expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true"));
     });
     await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");

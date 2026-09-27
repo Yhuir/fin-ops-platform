@@ -259,8 +259,6 @@ class PostgresInputInvoiceUsageQueryRepository:
                     select
                         count(*)::bigint as row_count,
                         coalesce(sum(total_with_tax), 0)::numeric as total_with_tax,
-                        count(*) filter (where oa_count > 0)::bigint as matched_oa_count,
-                        count(*) filter (where bank_count > 0)::bigint as matched_bank_count,
                         coalesce(sum(cardinality(invoice_ids)) filter (where status_code = 'pending'), 0)::bigint as pending_count,
                         (select count(*) from selected_members)::bigint as invoice_count
                     from filtered_rows
@@ -374,8 +372,6 @@ class PostgresInputInvoiceUsageQueryRepository:
             summary={
                 "invoiceCount": invoice_count,
                 "totalWithTax": _money(summary_row.get("total_with_tax")),
-                "matchedOaCount": int(summary_row.get("matched_oa_count") or 0),
-                "matchedBankTransactionCount": int(summary_row.get("matched_bank_count") or 0),
                 "pendingCount": int(summary_row.get("pending_count") or 0),
             },
             statistics={

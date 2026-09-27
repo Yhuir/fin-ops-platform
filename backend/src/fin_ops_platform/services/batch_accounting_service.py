@@ -114,12 +114,12 @@ class BatchAccountingService:
                 if isinstance(row, dict)
             ]
             relations_by_bank_row_id = {}
-        summary = snapshot.get("summary") if isinstance(snapshot.get("summary"), dict) else {}
+        summary = snapshot["summary"]
         pagination = snapshot.get("pagination") if isinstance(snapshot.get("pagination"), dict) else {}
         payload = {
             "summary": {
-                "unsubmitted_count": self._optional_int(summary.get("unsubmitted_count")) or 0,
-                "submitted_count": self._optional_int(summary.get("submitted_count")) or 0,
+                "unsubmitted_count": int(summary["unsubmitted_count"]),
+                "submitted_count": int(summary["submitted_count"]),
                 "bank_year": resolved_bank_year,
             },
             "bank_rows": bank_rows,

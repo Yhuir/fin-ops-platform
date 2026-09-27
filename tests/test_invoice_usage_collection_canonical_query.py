@@ -441,6 +441,8 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
 
         self.assertEqual(payload.summary["invoiceCount"], 2)
         self.assertEqual(payload.summary["totalWithTax"], "800.00")
+        self.assertNotIn("matchedOaCount", payload.summary)
+        self.assertNotIn("matchedBankTransactionCount", payload.summary)
 
     def test_invoice_lookup_map_is_reused_across_export_rows(self) -> None:
         import_service = CountingImportService()

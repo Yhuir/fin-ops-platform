@@ -231,10 +231,13 @@ class PostgresOaPendingPaymentQueryRepository:
         if keyword:
             base_where.append("searchable_text ilike %s")
             base_params.append(f"%{keyword}%")
-        for clause, params in _filter_clauses(filters):
+        for clause, params in _filter_clauses([item for item in filters if item["field"] != "payment_status"]):
             base_where.append(clause)
             base_params.extend(params)
 
+        status_clauses = _filter_clauses([item for item in filters if item["field"] == "payment_status"])
+        status_where_sql = " and ".join(clause for clause, _ in status_clauses) or "true"
+        status_params = [param for _, params in status_clauses for param in params]
         view_clause = (
             "oa_workflow_status = 'in_progress'"
             if view_mode == "in_progress"
@@ -257,14 +260,17 @@ class PostgresOaPendingPaymentQueryRepository:
                 from canonical_rows
                 where {base_where_sql}
             ),
+            status_rows as materialized (
+                select * from base_rows where {view_clause}
+            ),
             filtered_rows as materialized (
-                select *
-                from base_rows
-                where {view_clause}
+                select * from status_rows where {status_where_sql}
             ),
             summary as (
                 select
                     count(*)::integer as row_count,
+                    (select count(distinct oa_id) from filtered_rows
+                     cross join lateral unnest(oa_ids) as member(oa_id))::integer as oa_count,
                     coalesce(sum(oa_amount), 0) as oa_amount_total,
                     coalesce(sum(bank_paid_total), 0) as bank_paid_total
                 from filtered_rows
@@ -279,20 +285,26 @@ class PostgresOaPendingPaymentQueryRepository:
                 cross join lateral unnest(oa_ids) as expanded(oa_id)
             ),
             status_counts as (
-                select coalesce(jsonb_object_agg(payment_status, status_count), '{{}}'::jsonb) as payload
-                from (
-                    select payment_status, count(*)::integer as status_count
-                    from filtered_rows
-                    group by payment_status
-                ) grouped
+                select jsonb_build_object(
+                    'paid', count(distinct oa_id) filter (where payment_status = 'paid'),
+                    'unpaid', count(distinct oa_id) filter (where payment_status = 'unpaid')
+                ) as payload
+                from status_rows
+                cross join lateral unnest(oa_ids) as member(oa_id)
             ),
-            option_values(field, value, label) as (
-                select options.field, options.value, options.label
+            option_values(field, value, label, oa_id) as (
+                select options.field, options.value, options.label, member.oa_id
                 from filtered_rows
+                cross join lateral unnest(oa_ids) as member(oa_id)
                 cross join lateral (
                     values
                         {option_values_sql}
                 ) as options(field, value, label)
+                where options.field <> 'payment_status'
+                union all
+                select 'payment_status', payment_status, payment_status_label, member.oa_id
+                from status_rows
+                cross join lateral unnest(oa_ids) as member(oa_id)
             ),
             options_by_field as (
                 select
@@ -310,7 +322,7 @@ class PostgresOaPendingPaymentQueryRepository:
                         field,
                         value,
                         max(label) as max_label,
-                        count(*)::integer as option_count
+                        count(distinct oa_id)::integer as option_count
                     from option_values
                     where value is not null
                     group by field, value
@@ -369,6 +381,7 @@ class PostgresOaPendingPaymentQueryRepository:
             )
             select
                 summary.row_count,
+                summary.oa_count,
                 summary.oa_amount_total,
                 summary.bank_paid_total,
                 view_counts.completed_count,
@@ -387,6 +400,7 @@ class PostgresOaPendingPaymentQueryRepository:
             (
                 text(tenant_id) or "default",
                 *base_params,
+                *status_params,
                 page_size,
                 (page - 1) * page_size,
                 InvoiceType.INPUT.value,
@@ -412,6 +426,7 @@ class PostgresOaPendingPaymentQueryRepository:
             "pagination": {"page": page, "pageSize": page_size, "total": total},
             "summary": {
                 "rowCount": total,
+                "oaCount": int(result["oa_count"]),
                 "oaAmountTotal": decimal_text(result.get("oa_amount_total")) or "0.00",
                 "bankPaidTotal": decimal_text(result.get("bank_paid_total")) or "0.00",
                 "statusCounts": dict(result.get("status_counts") or {}),

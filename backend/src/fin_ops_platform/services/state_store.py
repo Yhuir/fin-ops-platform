@@ -517,7 +517,17 @@ class ApplicationStateStore:
             visible.append(raw_batch)
         visible.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
         bucket = str(query.get("bucket") or "unsubmitted").strip()
-        counts = {name: sum(1 for item in visible if _etc_business_batch_bucket(str(item.get("status") or "")) == name) for name in ("unsubmitted", "staged", "submitted")}
+        counts = {
+            name: len({
+                str(invoice_id)
+                for item in visible
+                if _etc_business_batch_bucket(str(item.get("status") or "")) == name
+                for invoice_id in item.get("invoice_ids") or []
+                if str(invoice_id) in invoices_by_id
+                and str(invoices_by_id[str(invoice_id)].get("status")) != "deleted"
+            })
+            for name in ("unsubmitted", "staged", "submitted")
+        }
         bucket_items = [item for item in visible if _etc_business_batch_bucket(str(item.get("status") or "")) == bucket]
         page = max(1, int(query.get("page") or 1))
         page_size = max(1, min(500, int(query.get("page_size") or 100)))

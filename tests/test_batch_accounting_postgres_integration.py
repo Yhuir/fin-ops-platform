@@ -321,6 +321,32 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
             bank_year=year, bucket=bucket, bank_page=page, bank_page_size=size, oa_page=1, oa_page_size=20
         )
 
+    def test_original_bank_counts_are_separate_from_split_units_and_relation_pagination(self):
+        from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
+            BankFlowRuleBatchCanonicalQueryRepository,
+        )
+        self.connection.execute("""insert into app.bank_transaction_split_sets(bank_transaction_id, version, updated_by)
+            select id, 1, 'test' from app.bank_transactions where legacy_mongo_id='txn-batch-unsubmitted'""")
+        self.connection.execute("""insert into app.bank_transaction_split_items(id, bank_transaction_id, category_code, amount, position)
+            select gen_random_uuid(), id, 'fee', amount / 2, position
+            from app.bank_transactions cross join generate_series(0,1) position
+            where legacy_mongo_id='txn-batch-unsubmitted'""")
+        page = self._page(size=1)
+        self.assertEqual(page["summary"]["unsubmitted_count"], 1)
+        self.assertEqual(page["pagination"]["bank_rows"]["total"], 2)
+        next_page = self._page(page=2, size=1)
+        self.assertNotEqual(page["bank_rows"][0]["id"], next_page["bank_rows"][0]["id"])
+        source = BankFlowRuleBatchCanonicalQueryRepository(self.connection).read_page({})
+        for unit in page["bank_rows"] + next_page["bank_rows"]:
+            self.assertEqual(source["bank_parent_ids"][unit["id"]], "txn-batch-unsubmitted")
+        # One relation can contain more than one original transaction.
+        self.connection.execute("""update app.workbench_pair_relations set
+            row_ids = row_ids || array['txn-other-counterparty'], row_types = row_types || array['bank']
+            where case_id='CASE-BATCH-SUBMITTED'""")
+        submitted = self._page(bucket="submitted")
+        self.assertEqual(submitted["summary"]["submitted_count"], 2)
+        self.assertEqual(submitted["pagination"]["bank_rows"]["total"], 1)
+
     def test_all_years_sql_pages_unknown_dates_and_canonical_year(self):
         self._bank_with_date("old", "2024-01-01", "2024-01-01T00:00:00+08")
         self._bank_with_date("date-conflict", "2025-12-31", "2026-01-01T00:00:00+08")

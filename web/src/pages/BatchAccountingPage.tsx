@@ -87,18 +87,6 @@ function accountLabel(row: BatchAccountingBankRow) {
   return row.accountLast4 ? `${bankName} ${row.accountLast4}` : bankName;
 }
 
-function pageRange(page: number, pageSize: number, total: number) {
-  if (total <= 0) {
-    return "0-0 / 0";
-  }
-  const start = (page - 1) * pageSize + 1;
-  if (start > total) {
-    return `0-0 / ${total}`;
-  }
-  const end = Math.min(total, page * pageSize);
-  return `${start}-${end} / ${total}`;
-}
-
 function PageControls({
   disabled,
   label,
@@ -119,7 +107,7 @@ function PageControls({
   const pageCount = Math.max(1, Math.ceil(total / Math.max(1, pageSize)));
   return (
     <div aria-label={label} className="batch-accounting-pagination" role="group">
-      <span className="batch-accounting-pagination__summary">{pageRange(page, pageSize, total)}</span>
+      <span className="batch-accounting-pagination__summary">第 {page} / {pageCount} 页</span>
       <button
         aria-label={`${label}上一页`}
         className="batch-accounting-pagination__button"
@@ -682,8 +670,8 @@ export default function BatchAccountingPage() {
           selectionMode="single"
           size="sm"
         >
-          <Segment id="unsubmitted">未提交 {payload.summary.unsubmittedCount}</Segment>
-          <Segment id="submitted">已提交 {payload.summary.submittedCount}</Segment>
+          <Segment id="unsubmitted">未提交 {payload.summary.unsubmittedCount} 笔</Segment>
+          <Segment id="submitted">已提交 {payload.summary.submittedCount} 笔</Segment>
         </SegmentGroup>
       </div>
 

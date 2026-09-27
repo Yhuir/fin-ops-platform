@@ -176,3 +176,7 @@ OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../
 ## 分段控件一致性（2026-09-28）
 
 统计切换使用 `components/common/InvoiceCountSegments.tsx`（HeroUI 原生 Tabs/Indicator）。输入是页面提供的 key/label/count/selectedKey/pending，输出仅选择事件；共享组件不持有请求、缓存或业务状态。仍按发票张数，保留页面现有分类、筛选、导出与权限合同。删除页面旧的 tabs 私有 CSS；影响范围限三个显式使用此组件的发票页面。
+
+## 2026-09-28 删除无消费的组数摘要
+
+删除 `summary.matchedOaCount/matchedBankTransactionCount` 及 SQL、纯组装、前端类型/API 映射中的旧计算：它们原本统计有关联的展示组而非对象数量，且没有业务 UI 消费者。内部金额匹配使用的 matched_oa_count/matched_bank_count 属于支付判定，不受此次删除影响。发票张数、筛选、导出、分页和关系命令保持原合同。

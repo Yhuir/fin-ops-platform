@@ -97,3 +97,5 @@ browser
 - `performance-integrity-design.md`：查询次数、快照和生产性能门槛。
 - `e2e-spec.md` / `e2e-coverage.md`：浏览器合同与覆盖映射。
 - `implementation-notes.md`：历史实施记录；历史 read-model 设计不覆盖本页当前合同。
+
+两层流程/支付流水切换与分页计数的区别见 [实体计数合同](boundary-io.md#2026-09-28-oa-实体计数与支付流水切换)。

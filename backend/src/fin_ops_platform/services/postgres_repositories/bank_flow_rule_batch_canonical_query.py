@@ -16,6 +16,7 @@ _CLASSIFIED_CANDIDATE_ROWS_SQL = """
     select
         candidate.canonical_transaction_id as id,
         candidate.row_id as transaction_id,
+        candidate.parent_row_id,
         candidate.account_no,
         candidate.direction as txn_direction,
         candidate.normalized_counterparty_name,
@@ -257,7 +258,22 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                         from formal_items batch
                     ),
                     '[]'::jsonb
-                ) as formal_items
+                ) as formal_items,
+                coalesce((select jsonb_object_agg(identity, parent_id) from (
+                    select candidate.transaction_id as identity, candidate.parent_row_id as parent_id
+                    from candidate_rows candidate
+                    union
+                    select coalesce(bank.legacy_mongo_id, bank.id::text), bank.parent_row_id
+                    from app.bank_transaction_units bank
+                    where bank.status <> 'deleted' and coalesce(bank.legacy_mongo_id, bank.id::text) = any(
+                        select unnest(batch.bank_transaction_ids) from formal_items batch)
+                    union
+                    select coalesce(bank.legacy_mongo_id, bank.id::text),
+                        coalesce(bank.legacy_mongo_id, bank.id::text)
+                    from app.bank_transactions bank
+                    where bank.status <> 'deleted' and coalesce(bank.legacy_mongo_id, bank.id::text) = any(
+                        select unnest(batch.bank_transaction_ids) from formal_items batch)
+                ) identities), '{{}}'::jsonb) as bank_parent_ids
             """,
             tuple(
                 [
@@ -278,6 +294,7 @@ class BankFlowRuleBatchCanonicalQueryRepository:
         )
         return {
             "candidate_rows": resolved_candidate_rows,
+            "bank_parent_ids": source_result["bank_parent_ids"],
             "active_relations": [
                 dict(row) for row in active_relations if isinstance(row, dict)
             ],

@@ -136,8 +136,6 @@ export type InputInvoiceUsageRowsResponse = {
   summary?: {
     invoiceCount: number;
     totalWithTax: string;
-    matchedOaCount: number;
-    matchedBankTransactionCount: number;
     pendingCount: number;
   };
   statistics?: InputInvoiceUsageStatistics;

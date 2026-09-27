@@ -132,3 +132,7 @@ git diff --check
 `BankFlowRuleBatchPage.test.tsx` 覆盖首请求省略 month、具体月与全部切换、同页刷新保留月份、卸载重进恢复全部；既有 candidate scope_month、选择清理、权限/CAS/冲突与写后回读继续回归。
 
 本次覆盖页面交互与既有功能回归；使用既有 API schema，不新增领域状态、写服务、read model 或 worker。导航、浏览器前后退与整页刷新由 App 进入规则浏览器验证补充。
+
+## 2026-09-28 实体计数回归
+
+新增/更新业务核心、service/repository、API合同、前端交互及既有功能回归，覆盖多个用途成员同一parent、跨标签主分类去重、重复撤回历史、未知历史成员不猜身份、分页total与实体count分离。真实PostgreSQL测试验证拆分视图、分类SQL及规则批次parent映射；浏览器原提交/撤回链路保持回归。第4类不新增read model/cache/worker，验证固定查询数与canonical-only边界；跨模块写链沿用既有E2E。

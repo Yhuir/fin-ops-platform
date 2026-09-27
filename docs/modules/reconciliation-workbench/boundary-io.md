@@ -106,7 +106,7 @@ requested tenant/scope
 - `statistics` 只返回 canonical OA/流水/进项/销项总数，以及已完成/进行中 OA、支出/收入流水、手工导入发票和 OA 解析新增发票数量；顶部进项/销项不得使用 ETC 折叠后的可见对象数。旧配对组、缺关系组和未配对对象统计字段已删除。
 - 两区 `row_counts` 同时返回 `invoice` 与 `canonical_invoice`：`invoice` 只表示分页和布局使用的展示对象数，`canonical_invoice` 表示该区去重后的统一发票池 canonical ID 数。无区域筛选时，若同一 canonical 发票存在 paired owner 则只计入 paired，否则只计入 unpaired；两区 `canonical_invoice` 必须互斥且合计等于 `statistics.invoice_total_count`。ETC 折叠、展开或重复勾选真实成员不得改变该统计。
 - 首屏 candidate spine 只构建一次；禁止依次执行 summary、paired count/page、unpaired count/page 六套重复 canonical CTE。
-- `GET /api/workbench/groups` 返回 `groups,total,row_counts,page_size,has_more,next_cursor`；异常 bucket 请求 additive 返回 `selected_exception_code` 与 `exception_counts={total,amount_total,document_only,by_code}`，`by_code` 固定包含八个 code（包括零值）。
+- `GET /api/workbench/groups` 返回 `groups,total,row_counts,page_size,has_more,next_cursor`；异常 bucket 请求 additive 返回 `selected_exception_code` 与 `exception_counts={total,amount_total,document_only,by_code}`；每个值及 `by_code` 的八个 code 都返回 `{oa,bank,invoice}` 实体数量（包括真实零值），不再返回关系组数。
 - compact summary group 只在组级保留 `amount_check`；row DTO 不再输出 `relation_amount_check` 或 `relation_note`，前端也不得把组级金额判断复制成流水行三角形、行级 tooltip 或其它第二异常入口。折叠栏以现有 `summary_row` 作为唯一闭合态展示 I/O；ETC 发票栏首屏只返回 canonical `source_kind=etc_invoice_summary` 汇总行和真实成员总数，不返回第一张真实发票。用户展开时复用既有 group detail 一次加载全部 `source_kind=etc_invoice` 成员，展开态不混入汇总行，收起恢复同一汇总行；汇总行缺失时前端显示明确空态，禁止从 `rows` 或详情成员推断兜底。完整金额诊断和确认备注只通过组级统一异常 I/O 提供。
 - `total` 和 row counts 是当前 query 的精确值；统计发生在 cursor 条件前。cursor 只减少深页排序/hydration，不能把 exact count 伪装成常数复杂度。
 - cursor 绑定 scope、zone、sort、search、filters、exception bucket/view 和调用方显式请求的 exception code 的规范化 query hash，并保存完整稳定排序 tuple 与 `group_key` tie-breaker。首屏未传 code、由服务端自动选中首个非零分类时，opaque cursor 内部同时封存该 resolved code；后续 cursor 请求继续省略 code，服务端强制复用 cursor 分类，即使期间 counts 变化也不得切换分类。客户端不得把响应中的自动选中 code 回填为新的 query 条件。
@@ -472,3 +472,13 @@ OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../
 ## 2026-09-28 原生分段切换展示
 
 本模块的视图/状态切换采用[统一 HeroUI 分段展示合同](../../dev/segmented-controls.md)。页面继续拥有选中状态、计数、权限、草稿、查询与写入回调；公共组件只输入选项/选中值/禁用状态并输出选择事件，不产生网络或持久化 I/O。已替换的独立按钮与旧选中样式同步删除；既有业务、API、现金隔离及数据库边界不变。入口范围、例外和验证责任见上述合同。
+
+## 2026-09-28 异常实体计数
+
+- 初始 summary 使用 `unpaired_exception_counts` / `paired_exception_counts`，值为 `{oa,bank,invoice}`；删除旧单数标量字段。纯内存关系 assembler 的无消费者异常组数输出同时删除。
+- OA 按 canonical row identity 去重，流水按 split item 的原始 `bank_transaction_id` 去重，ETC summary 先展开明确 canonical invoice identity 再与普通发票去重。每个 bucket/view/code 内独立计数；同一成员跨分类出现时不可把分类数相加当总数。
+- 在既有 PostgreSQL 只读快照、scope-first canonical spine 上集合聚合，无新增 endpoint、缓存、worker、逐关系 SQL 或全量 hydrate。全部筛选结果计数不受 cursor/page_size 影响。
+- `total`、cursor、has_more 继续表示内部关系列表分页；异常入口、类型、分类和结果摘要只显示 OA条/流水笔/发票张，前端不将三类相加。缺失/非法实体计数合同报错，不回退旧字段、页面长度或零值。
+- HeroUI native segmented controls 复用现有公共组件，实体数作为第二行；仅本抽屉局部样式，不改变其它页面。
+
+- 异常单关系汇总行保留三栏标题与金额，删除把display row counts当业务数量的冗余“项”数；ETC汇总与拆分成员不再在此冒充实体数。完整成员仍通过原详情展开读取。

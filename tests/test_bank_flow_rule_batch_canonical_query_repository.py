@@ -41,6 +41,16 @@ def _settings_payload() -> dict[str, object]:
     }
 
 
+def _canonical_source(source):
+    """Fixture rows are unsplit unless an explicit parent identity is supplied."""
+    parent_ids = {row.get("transaction_id", row.get("id")): row.get("parent_row_id", row.get("transaction_id", row.get("id")))
+                  for row in source["candidate_rows"]}
+    for item in source.get("formal_items", []):
+        for row_id in item.get("row_ids", item.get("bank_transaction_ids", [])):
+            parent_ids.setdefault(row_id, row_id)
+    return {**source, "bank_parent_ids": parent_ids}
+
+
 class _Transaction:
     def __init__(self, connection: "_Connection") -> None:
         self._connection = connection
@@ -91,12 +101,12 @@ class _Connection:
             return {"settings_payload": _settings_payload()}
         if "candidate_rows" in normalized and "formal_items" in normalized:
             if self.empty_page:
-                return {
+                return _canonical_source({
                     "candidate_rows": [],
                     "active_relations": [],
                     "formal_items": [],
-                }
-            return {
+                })
+            return _canonical_source({
                 "candidate_rows": [
                     {
                         "transaction_id": "bank-1",
@@ -138,7 +148,7 @@ class _Connection:
                     if self.include_formal_item
                     else []
                 ),
-            }
+            })
         if "from app.bank_flow_rule_batches batch" in normalized and "where batch.batch_id = %s" in normalized:
             return {
                 "batch_id": "batch-fee",
@@ -399,7 +409,7 @@ def test_page_query_returns_live_candidate_inputs_in_the_same_snapshot() -> None
             if "from app.app_settings" in normalized:
                 return {"settings_payload": _settings_payload()}
             if "candidate_rows" in normalized and "formal_items" in normalized:
-                return {
+                return _canonical_source({
                     "candidate_rows": [
                         {
                             "transaction_id": "bank-out-188500",
@@ -416,7 +426,7 @@ def test_page_query_returns_live_candidate_inputs_in_the_same_snapshot() -> None
                     ],
                     "active_relations": [],
                     "formal_items": [],
-                }
+                })
             return None
 
     connection = LiveSourceConnection()

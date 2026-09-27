@@ -507,7 +507,7 @@ class RecordingConnection:
     def fetch_one(self, sql: str, params: object = None) -> dict[str, object] | None:
         normalized_params = tuple(params or ())
         self.fetch_one_calls.append((sql, normalized_params))
-        return {}
+        return {"oa_count": 0}
 
     def fetch_all(self, sql: str, params: object = None) -> list[dict[str, object]]:
         self.fetch_all_calls.append((sql, params))

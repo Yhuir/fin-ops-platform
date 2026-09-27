@@ -1068,8 +1068,6 @@ class InputInvoiceUsageQueryService:
         return {
             "invoiceCount": len(rows),
             "totalWithTax": _money(sum((_decimal(row["invoice"]["totalWithTax"]) for row in rows), start=ZERO)),
-            "matchedOaCount": sum(1 for row in rows if row["oa"]["relationCount"]),
-            "matchedBankTransactionCount": sum(1 for row in rows if row["bankTransactions"]["relationCount"]),
             "pendingCount": sum(1 for row in rows if row["paymentStatus"]["code"] == "pending"),
         }
 

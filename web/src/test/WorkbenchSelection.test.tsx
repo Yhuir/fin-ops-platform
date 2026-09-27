@@ -263,8 +263,8 @@ function withAmountMismatchGroups(
     ...payload,
     summary: {
       ...summary,
-      unpaired_exception_count: state === "unpaired" ? count : 0,
-      paired_exception_count: state === "paired" ? count : 0,
+      unpaired_exception_counts: { oa: (state === "unpaired" ? count : 0), bank: (state === "unpaired" ? count : 0), invoice: (state === "unpaired" ? count : 0) },
+      paired_exception_counts: { oa: (state === "paired" ? count : 0), bank: (state === "paired" ? count : 0), invoice: (state === "paired" ? count : 0) },
     },
     paired: {
       ...paired,
@@ -314,7 +314,7 @@ function withUnparsedAttachmentGroup(payload: Record<string, unknown>) {
     summary: {
       ...summary,
       unpaired_count: 1,
-      unpaired_exception_count: 1,
+      unpaired_exception_counts: { oa: (1), bank: (1), invoice: (1) },
     },
     unpaired: {
       ...unpaired,
@@ -694,7 +694,7 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(within(unpairedZone).getByRole("button", { name: "银行流水时间筛选：年月" }));
     const dialog = await screen.findByRole("dialog", { name: "银行流水时间筛选选择器" });
 
-    await user.click(within(dialog).getByRole("button", { name: "按月" }));
+    await user.click(within(dialog).getByRole("radio", { name: "按月" }));
     await user.click(within(dialog).getByRole("button", { name: "四月" }));
 
     expect(within(unpairedZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
@@ -1518,7 +1518,7 @@ describe("Workbench row selection and detail drawer", () => {
 
     await user.click(within(unpairedZone).getByRole("button", { name: "银行流水时间筛选：年月" }));
     const dialog = await screen.findByRole("dialog", { name: "银行流水时间筛选选择器" });
-    await user.click(within(dialog).getByRole("button", { name: "按月" }));
+    await user.click(within(dialog).getByRole("radio", { name: "按月" }));
     await user.click(within(dialog).getByRole("button", { name: "三月" }));
 
     expect(within(unpairedZone).queryByRole("row", { name: /王青.*维保续费项目/ })).not.toBeInTheDocument();
@@ -1599,7 +1599,7 @@ describe("Workbench row selection and detail drawer", () => {
 
     await user.click(within(pairedZone).getByRole("button", { name: "银行流水时间筛选：年月" }));
     const dialog = await screen.findByRole("dialog", { name: "银行流水时间筛选选择器" });
-    await user.click(within(dialog).getByRole("button", { name: "按月" }));
+    await user.click(within(dialog).getByRole("radio", { name: "按月" }));
     await user.click(within(dialog).getByRole("button", { name: "四月" }));
 
     expect(within(pairedZone).queryByRole("row", { name: /2026-03-25 14:22.*华东设备供应商/ })).not.toBeInTheDocument();
@@ -1958,9 +1958,9 @@ describe("Workbench row selection and detail drawer", () => {
     });
     renderWorkbenchPage();
 
-    await user.click(await screen.findByRole("button", { name: /未配对异常 1 \| 已配对异常 0/ }));
+    await user.click(await screen.findByRole("button", { name: /未配对异常 OA 1条 · 流水 1笔 · 发票 1张 \| 已配对异常 OA 0条 · 流水 0笔 · 发票 0张/ }));
     const drawer = await screen.findByRole("dialog", { name: "异常处理" });
-    await user.click(within(drawer).getByRole("button", { name: "展开异常明细" }));
+    await user.click(await within(drawer).findByRole("button", { name: "展开异常明细" }));
     await user.click(within(drawer).getByRole("button", { name: "留在未配对" }));
 
     const errorDialog = await screen.findByRole("dialog", { name: "全局操作进度" });
@@ -1997,7 +1997,7 @@ describe("Workbench row selection and detail drawer", () => {
     });
     renderWorkbenchPage();
 
-    await user.click(await screen.findByRole("button", { name: /未配对异常 1 \| 已配对异常 0/ }));
+    await user.click(await screen.findByRole("button", { name: /未配对异常 OA 1条 · 流水 1笔 · 发票 1张 \| 已配对异常 OA 0条 · 流水 0笔 · 发票 0张/ }));
     const drawer = await screen.findByRole("dialog", { name: "异常处理" });
     const initialCombinedReads = fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input)).length;
     const initialBucketReads = fetchMock.mock.calls.filter(([input]) => {
@@ -2005,7 +2005,7 @@ describe("Workbench row selection and detail drawer", () => {
       return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "unpaired";
     }).length;
 
-    await user.click(within(drawer).getByRole("button", { name: "展开异常明细" }));
+    await user.click(await within(drawer).findByRole("button", { name: "展开异常明细" }));
     await user.click(within(drawer).getByRole("button", { name: "留在未配对" }));
 
     await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => (
@@ -2024,8 +2024,8 @@ describe("Workbench row selection and detail drawer", () => {
       const url = new URL(fetchPath(input), "http://localhost");
       return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "unpaired";
     })).toHaveLength(initialBucketReads + 1));
-    expect(within(drawer).getByRole("radio", { name: /^未配对异常 \d+$/ })).toHaveAttribute("aria-checked", "true");
-    await user.click(within(drawer).getByRole("button", { name: "展开异常明细" }));
+    expect(within(drawer).getByRole("radio", { name: /^未配对异常 OA \d+条/ })).toHaveAttribute("aria-checked", "true");
+    await user.click(await within(drawer).findByRole("button", { name: "展开异常明细" }));
     expect(within(drawer).getByRole("button", { name: "接受异常并进入已配对" })).toBeEnabled();
   });
 
@@ -2056,7 +2056,7 @@ describe("Workbench row selection and detail drawer", () => {
     });
     renderWorkbenchPage();
 
-    await user.click(await screen.findByRole("button", { name: /未配对异常 1 \| 已配对异常 0/ }));
+    await user.click(await screen.findByRole("button", { name: /未配对异常 OA 1条 · 流水 1笔 · 发票 1张 \| 已配对异常 OA 0条 · 流水 0笔 · 发票 0张/ }));
     const drawer = await screen.findByRole("dialog", { name: "异常处理" });
     const initialCombinedReads = fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input)).length;
     const initialBucketReads = fetchMock.mock.calls.filter(([input]) => {
@@ -2065,10 +2065,10 @@ describe("Workbench row selection and detail drawer", () => {
     });
     expect(initialBucketReads).toHaveLength(1);
 
-    await user.click(within(drawer).getByRole("button", { name: "展开异常明细" }));
+    await user.click(await within(drawer).findByRole("button", { name: "展开异常明细" }));
     await user.click(within(drawer).getByRole("button", { name: "接受异常并进入已配对" }));
     expect(await within(drawer).findByText("当前分类没有金额异常。")).toBeInTheDocument();
-    expect(within(drawer).getByRole("radio", { name: "未配对异常 0" })).toHaveAttribute(
+    expect(within(drawer).getByRole("radio", { name: "未配对异常 OA 0条 · 流水 0笔 · 发票 0张" })).toHaveAttribute(
       "aria-checked",
       "true",
     );
@@ -2091,7 +2091,7 @@ describe("Workbench row selection and detail drawer", () => {
       fetchPath(input) === "/api/workbench/exceptions/review"
     ))).toHaveLength(1);
 
-    await user.click(within(drawer).getByRole("radio", { name: "已配对异常 1" }));
+    await user.click(within(drawer).getByRole("radio", { name: "已配对异常 OA 1条 · 流水 1笔 · 发票 1张" }));
     await user.click(await within(drawer).findByRole("button", { name: "展开异常明细" }));
     expect(await within(drawer).findByRole("button", { name: "撤回到未配对" })).toBeInTheDocument();
     const pairedReadsBeforeWithdraw = fetchMock.mock.calls.filter(([input]) => {
@@ -2102,7 +2102,7 @@ describe("Workbench row selection and detail drawer", () => {
 
     await user.click(within(drawer).getByRole("button", { name: "撤回到未配对" }));
     expect(await within(drawer).findByText("当前分类没有金额异常。")).toBeInTheDocument();
-    expect(within(drawer).getByRole("radio", { name: "已配对异常 0" })).toHaveAttribute(
+    expect(within(drawer).getByRole("radio", { name: "已配对异常 OA 0条 · 流水 0笔 · 发票 0张" })).toHaveAttribute(
       "aria-checked",
       "true",
     );
@@ -2162,19 +2162,19 @@ describe("Workbench row selection and detail drawer", () => {
     });
     renderWorkbenchPage();
 
-    await user.click(await screen.findByRole("button", { name: /未配对异常 51 \| 已配对异常 0/ }));
+    await user.click(await screen.findByRole("button", { name: /未配对异常 OA 51条 · 流水 51笔 · 发票 51张 \| 已配对异常 OA 0条 · 流水 0笔 · 发票 0张/ }));
     const drawer = await screen.findByRole("dialog", { name: "异常处理" });
-    expect(drawer.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent(
-      "显示 10 / 51",
-    );
+    await waitFor(() => expect(drawer.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent(
+      "OA 51条 · 流水 51笔 · 发票 51张",
+    ));
     await user.click(within(drawer).getByRole("button", { name: "加载更多异常" }));
     await waitFor(() => expect(loadMoreStarted).toBe(true));
 
-    await user.click(within(drawer).getByRole("radio", { name: /^已配对异常 \d+$/ }));
+    await user.click(within(drawer).getByRole("radio", { name: /^已配对异常 OA \d+条/ }));
     await waitFor(() => expect(loadMoreAborted).toBe(true));
     expect(await within(drawer).findByText("当前没有金额异常。")).toBeInTheDocument();
 
-    await user.click(within(drawer).getByRole("radio", { name: /^未配对异常 \d+$/ }));
+    await user.click(within(drawer).getByRole("radio", { name: /^未配对异常 OA \d+条/ }));
     const loadMoreButton = await within(drawer).findByRole("button", { name: "加载更多异常" });
     expect(loadMoreButton).toBeEnabled();
     expect(loadMoreButton).not.toHaveAttribute("aria-busy", "true");
@@ -2190,20 +2190,20 @@ describe("Workbench row selection and detail drawer", () => {
     });
     renderWorkbenchPage();
 
-    await user.click(await screen.findByRole("button", { name: /未配对异常 1 \| 已配对异常 0/ }));
+    await user.click(await screen.findByRole("button", { name: /未配对异常 OA 1条 · 流水 1笔 · 发票 1张 \| 已配对异常 OA 0条 · 流水 0笔 · 发票 0张/ }));
     const drawer = await screen.findByRole("dialog", { name: "异常处理" });
-    expect(within(drawer).getByRole("radio", { name: "OA 流水一致，票少 1" })).toHaveAttribute(
+    expect(await within(drawer).findByRole("radio", { name: "OA 流水一致，票少 OA 1条 · 流水 1笔 · 发票 1张" })).toHaveAttribute(
       "aria-checked",
       "true",
     );
     expect(drawer.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent(
-      "共 1 项",
+      "OA 1条 · 流水 1笔 · 发票 1张",
     );
 
-    await user.click(within(drawer).getByRole("radio", { name: "三项不一致 0" }));
+    await user.click(await within(drawer).findByRole("radio", { name: "三项不一致 OA 0条 · 流水 0笔 · 发票 0张" }));
     expect(await within(drawer).findByText("当前分类没有金额异常。")).toBeInTheDocument();
     expect(drawer.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent(
-      "共 0 项",
+      "OA 0条 · 流水 0笔 · 发票 0张",
     );
     const categoryRead = [...fetchMock.mock.calls].reverse().find(([input]) => {
       const url = new URL(fetchPath(input), "http://localhost");
@@ -2213,7 +2213,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(categoryRead).toBeDefined();
     expect(new URL(fetchPath(categoryRead![0]), "http://localhost").searchParams.get("exception_view")).toBe("amount");
 
-    await user.click(within(drawer).getByRole("radio", { name: "仅资料异常 0" }));
+    await user.click(within(drawer).getByRole("radio", { name: "仅资料异常 OA 0条 · 流水 0笔 · 发票 0张" }));
     expect(await within(drawer).findByText("当前没有仅资料异常。")).toBeInTheDocument();
     const documentRead = [...fetchMock.mock.calls].reverse().find(([input]) => {
       const url = new URL(fetchPath(input), "http://localhost");
@@ -2258,15 +2258,15 @@ describe("Workbench row selection and detail drawer", () => {
     });
     renderWorkbenchPage();
 
-    await user.click(await screen.findByRole("button", { name: /未配对异常 1 \| 已配对异常 0/ }));
+    await user.click(await screen.findByRole("button", { name: /未配对异常 OA 1条 · 流水 1笔 · 发票 1张 \| 已配对异常 OA 0条 · 流水 0笔 · 发票 0张/ }));
     const drawer = await screen.findByRole("dialog", { name: "异常处理" });
-    await user.click(within(drawer).getByRole("radio", { name: "三项不一致 0" }));
+    await user.click(await within(drawer).findByRole("radio", { name: "三项不一致 OA 0条 · 流水 0笔 · 发票 0张" }));
     await waitFor(() => expect(categoryRequestStarted).toBe(true));
-    await user.click(within(drawer).getByRole("radio", { name: "仅资料异常 0" }));
+    await user.click(within(drawer).getByRole("radio", { name: "仅资料异常 OA 0条 · 流水 0笔 · 发票 0张" }));
 
     await waitFor(() => expect(categoryRequestAborted).toBe(true));
     expect(await within(drawer).findByText("当前没有仅资料异常。")).toBeInTheDocument();
-    expect(within(drawer).getByRole("radio", { name: "仅资料异常 0" })).toHaveAttribute(
+    expect(within(drawer).getByRole("radio", { name: "仅资料异常 OA 0条 · 流水 0笔 · 发票 0张" })).toHaveAttribute(
       "aria-checked",
       "true",
     );
@@ -2298,11 +2298,11 @@ describe("Workbench row selection and detail drawer", () => {
     });
     renderWorkbenchPage();
 
-    await user.click(await screen.findByRole("button", { name: /未配对异常 1 \| 已配对异常 0/ }));
+    await user.click(await screen.findByRole("button", { name: /未配对异常 OA 1条 · 流水 1笔 · 发票 1张 \| 已配对异常 OA 0条 · 流水 0笔 · 发票 0张/ }));
     const drawer = await screen.findByRole("dialog", { name: "异常处理" });
-    await user.click(within(drawer).getByRole("button", { name: "展开异常明细" }));
+    await user.click(await within(drawer).findByRole("button", { name: "展开异常明细" }));
     await waitFor(() => expect(staleDetailSignal).not.toBeNull());
-    await user.click(within(drawer).getByRole("radio", { name: /^已配对异常 \d+$/ }));
+    await user.click(within(drawer).getByRole("radio", { name: /^已配对异常 OA \d+条/ }));
     await waitFor(() => expect(staleDetailSignal?.aborted).toBe(true));
     expect(await within(drawer).findByText("当前没有金额异常。")).toBeInTheDocument();
 

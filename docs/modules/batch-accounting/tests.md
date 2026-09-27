@@ -92,3 +92,7 @@ bash scripts/verify.sh lint
 - 缺日期行不可选，页面在 all 中提交行的真实年份；缺日期 active relation 可读/可撤回。
 - 公共分类候选 CTE 与 ID 输入实库等价，包含候选集合外内部转账对手；原银行明细、关联台分类投影、往来与规则批次查询回归。
 - 规则目录按全历史 distinct 标签读取，保持固定 query count，禁止把全部候选 ID 拉回应用。
+
+## 2026-09-28 实体计数回归
+
+新增/更新业务核心、service/repository、API合同、前端交互及既有功能回归，覆盖多个用途成员同一parent、跨标签主分类去重、重复撤回历史、未知历史成员不猜身份、分页total与实体count分离。真实PostgreSQL测试验证拆分视图、分类SQL及规则批次parent映射；浏览器原提交/撤回链路保持回归。第4类不新增read model/cache/worker，验证固定查询数与canonical-only边界；跨模块写链沿用既有E2E。

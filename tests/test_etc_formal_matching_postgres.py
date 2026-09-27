@@ -60,6 +60,45 @@ class EtcFormalMatchingPostgresTests(unittest.TestCase):
                 values (%s,'batch-source','submitted',%s,'2026-07-31','公路公司',%s,0,%s,'{}')''',
                 (f'etc-invoice-{i}', f'ETC-NO-{i}', amount, amount))
 
+    def test_business_bucket_counts_distinct_actual_invoices_before_pagination(self):
+        repository = PostgresOpsTaxEtcRepository(self.connection)
+        # Repeated membership and a missing ID must not inflate invoice counts.
+        historical = {**self.batch_payload, 'business_batch_id': 'batch-history',
+                      'invoice_ids': ['etc-invoice-0', 'etc-invoice-0', 'missing-invoice']}
+        self.connection.execute("""insert into app.etc_business_batches
+            (business_batch_id,status,scope_month,invoice_count,total_amount,raw_payload)
+            values ('batch-history','manually_marked_submitted','2026-07-01',999,36,%s::jsonb)""",
+            (json.dumps({'normalized_payload': historical}),))
+        empty_batch = {'business_batch_id': 'empty', 'status': 'draft', 'invoice_ids': []}
+        self.connection.execute("""insert into app.etc_business_batches
+            (business_batch_id,status,scope_month,invoice_count,total_amount,raw_payload)
+            values ('empty','draft','2026-07-01',0,0,%s::jsonb)""",
+            (json.dumps({'normalized_payload': empty_batch}),))
+        for page in (1, 2, 3):
+            result = repository.list_etc_business_batch_summaries(
+                bucket='submitted', page=page, page_size=1, can_admin_access=True,
+            )
+            self.assertEqual(result['counts'], {'unsubmitted': 0, 'staged': 0, 'submitted': 47})
+            self.assertEqual(result['total'], 2)
+            self.assertEqual(len(result['items']), 1 if page <= 2 else 0)
+        self.connection.execute("""update app.etc_business_batches
+            set raw_payload=jsonb_set(raw_payload, '{normalized_payload,owner_user_id}', '"private-owner"')
+            where business_batch_id='batch-history'""")
+        restricted = repository.list_etc_business_batch_summaries(
+            bucket='submitted', can_admin_access=False, owner_user_ids=['other-user'], keyword='batch-history',
+        )
+        self.assertEqual(restricted['counts']['submitted'], 0)
+        self.assertEqual(restricted['total'], 0)
+        self.connection.execute("update app.etc_invoices set status='deleted' where etc_invoice_id='etc-invoice-0'")
+        filtered = repository.list_etc_business_batch_summaries(
+            bucket='submitted', page=1, page_size=1, can_admin_access=True, keyword='batch-history',
+        )
+        self.assertEqual(filtered['total'], 1)
+        self.assertEqual(filtered['counts']['submitted'], 0)
+        self.assertEqual(repository.list_etc_business_batch_summaries(
+            bucket='submitted', month='2026-08', can_admin_access=True,
+        )['counts'], {'unsubmitted': 0, 'staged': 0, 'submitted': 0})
+
     def add_bank(self):
         self.connection.execute('''insert into app.bank_transactions
             (legacy_mongo_id,account_no,account_name,txn_direction,counterparty_name_raw,normalized_counterparty_name,

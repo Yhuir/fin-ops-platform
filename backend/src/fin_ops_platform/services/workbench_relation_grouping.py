@@ -98,16 +98,6 @@ class WorkbenchRelationGroupingService:
                 "invoice_count": counts["invoice"],
                 "paired_count": len(paired_groups),
                 "unpaired_count": len(unpaired_groups),
-                "unpaired_exception_count": sum(
-                    1
-                    for group in unpaired_groups
-                    if isinstance(group.get("workbench_anomaly"), dict)
-                ),
-                "paired_exception_count": sum(
-                    1
-                    for group in paired_groups
-                    if isinstance(group.get("workbench_anomaly"), dict)
-                ),
             },
             "paired": {"groups": paired_groups},
             "unpaired": {"groups": unpaired_groups},
