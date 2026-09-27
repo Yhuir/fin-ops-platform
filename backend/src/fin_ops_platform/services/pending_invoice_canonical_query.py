@@ -887,6 +887,7 @@ classified_units as materialized (
         ) as searchable_text,
         case
             when jsonb_array_length(source.bank_summaries) > 1 and cardinality(source.relation_case_ids) > 0
+                and source.bank_summaries @> jsonb_build_array(jsonb_build_object('id', source.row_id))
             then source.relation_case_ids[1]
             else source.parent_row_id
         end as visible_group_key

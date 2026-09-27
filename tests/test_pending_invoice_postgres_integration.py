@@ -88,6 +88,48 @@ class PendingInvoicePostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(restored["acquisition_summary"], before["acquisition_summary"])
         self.assertEqual(query.rows(filtered_request)["pagination"]["total"], 0)
 
+    def test_excluded_relation_members_remain_visible_in_their_own_status(self) -> None:
+        settings = {
+            "access_control_version": 1, "page_access_accounts": [],
+            "bank_transaction_tags": {"definitions": [
+                {"code": "principal", "label": "本金", "status": "active", "direction": "expense",
+                 "output_primary_label": "外部往来款付款", "output_sub_label": "归还借款", "rules": {}},
+            ]},
+            "pending_invoice_tag_groups": {"no_invoice_required": ["principal"]},
+        }
+        self.connection.execute("insert into app.app_settings(settings_key,settings_payload) values ('app_settings',%s::jsonb)",
+                                (json.dumps(settings),))
+        identities = ["principal-a", "principal-b", "fee-a", "fee-b"]
+        for identity in identities:
+            self.connection.execute("""
+                insert into app.bank_transactions(legacy_mongo_id, account_no, txn_direction,
+                    counterparty_name_raw, amount, signed_amount, txn_date, txn_month, status)
+                values (%s, '8106', 'outflow', '关系成员客户', 100, -100, '2026-09-28', '2026-09-01', 'active')
+            """, (identity,))
+        self.connection.execute("""insert into app.bank_transaction_categories
+            (bank_transaction_id,legacy_transaction_id,category,source,status,raw_payload)
+            select id,legacy_mongo_id,'principal','manual','active','{"manual_assignment":true}'::jsonb
+            from app.bank_transactions where legacy_mongo_id like 'principal-%%'""")
+        self.connection.execute("""
+            insert into app.workbench_pair_relations(case_id, relation_mode, status, month_scope, row_ids, row_types)
+            values ('mixed-case', 'manual_confirmed', 'active', '2026-09-01', %s::text[], array['bank','bank','bank','bank'])
+        """, (identities,))
+        query = PendingInvoiceCanonicalQueryService(repository=PostgresPendingInvoiceCanonicalRepository(self.connection))
+        for status, expected in (("no_invoice_required", {"principal-a", "principal-b"}),
+                                 ("paid_pending_invoice", {"fee-a", "fee-b"})):
+            request = {"direction": ["all"], "include_statistics": ["false"], "page_size": ["1"],
+                       "filters": [json.dumps([{"field": "status_code", "operator": "in", "values": [status]}])]}
+            first = query.rows(request)
+            self.assertEqual(first["acquisition_summary"]["bank_count"], 2)
+            observed = set()
+            for page in range(1, first["pagination"]["total"] + 1):
+                for row in query.rows({**request, "page": [str(page)]})["rows"]:
+                    group = row["bank_transactions"]
+                    banks = group["summaries"] if group["has_multiple"] else [group["primary"]]
+                    self.assertEqual(row["invoice_acquisition_status"]["code"], status)
+                    observed.update(bank["parent_row_id"] for bank in banks)
+            self.assertEqual(observed, expected)
+
     def test_source_drawers_read_actual_fields_without_operational_defaults(self) -> None:
         self.connection.execute("""
             insert into app.bank_transactions(
