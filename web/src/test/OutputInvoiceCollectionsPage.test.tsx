@@ -117,7 +117,7 @@ const rowsPayload = {
       },
       collection_status: {
         code: "reversed_by_red",
-        label: "已被红冲",
+        label: "蓝票已被红冲",
         reason: "已由红字发票冲销。",
         collected_amount: "0.00",
         pending_amount: "0.00",
@@ -210,7 +210,7 @@ const rowsPayload = {
       },
       collection_status: {
         code: "reverses_blue",
-        label: "已冲销蓝票",
+        label: "红票已关联蓝票",
         reason: "已冲销对应蓝字发票。",
         collected_amount: "0.00",
         pending_amount: "0.00",
@@ -245,7 +245,7 @@ const rowsPayload = {
       displayNo: "XSFP-PENDING-001",
       totalWithTax: "62160.00",
       statusCode: "pending_collection",
-      statusLabel: "待收款",
+      statusLabel: "收款待核对",
       statusReason: "尚无 canonical 配对的收入流水。",
       collectedAmount: "0.00",
       pendingAmount: "62160.00",
@@ -308,12 +308,12 @@ const rowsPayload = {
       sortable: true,
       operators: ["in"],
       options: [
-        { value: "reversed_by_red", label: "已被红冲", count: 1 },
-        { value: "reverses_blue", label: "已冲销蓝票", count: 1 },
+        { value: "reversed_by_red", label: "蓝票已被红冲", count: 1 },
+        { value: "reverses_blue", label: "红票已关联蓝票", count: 1 },
         { value: "unmatched_red", label: "红票待核对", count: 1 },
         { value: "collected", label: "已收款", count: 1 },
         { value: "partial_collected", label: "部分收款", count: 1 },
-        { value: "pending_collection", label: "待收款", count: 1 },
+        { value: "pending_collection", label: "收款待核对", count: 1 },
       ],
     },
   ],
@@ -326,11 +326,11 @@ function jsonResponse(payload: unknown, status = 200) {
   });
 }
 
-function installFetchMock() {
+function installFetchMock(rowPayloadFor: (url: URL) => unknown = () => rowsPayload) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = new URL(String(input), "http://localhost");
     if (url.pathname === "/api/output-invoice-collections/rows") {
-      return jsonResponse(rowsPayload);
+      return jsonResponse(await rowPayloadFor(url));
     }
     if (url.pathname === "/api/output-invoice-collections/invoices/invoice-blue/detail") {
       return jsonResponse({
@@ -451,8 +451,8 @@ describe("销项发票收款情况", () => {
     expect(within(table).getByText("销项发票")).toBeVisible();
     expect(within(table).getByText("收款状态")).toBeVisible();
     expect(within(table).getByText("收入流水")).toBeVisible();
-    expect(within(table).getByText("已被红冲")).toBeVisible();
-    expect(within(table).getByText("已冲销蓝票")).toBeVisible();
+    expect(within(table).getByText("蓝票已被红冲")).toBeVisible();
+    expect(within(table).getByText("红票已关联蓝票")).toBeVisible();
     expect(within(table).getByRole("button", { name: "红蓝票 · 2" })).toBeVisible();
 
     const blueRow = within(table).getByRole("row", { name: /XSFP-BLUE-001/ });
@@ -487,7 +487,7 @@ describe("销项发票收款情况", () => {
     const reversedBlueRow = within(table).getByRole("row", { name: /XSFP-BLUE-001/ });
     const reversesBlueRow = within(table).getByRole("row", { name: /XSFP-RED-001/ });
 
-    expect(within(pendingRow).getByText("待收款")).toBeVisible();
+    expect(within(pendingRow).getByText("收款待核对")).toBeVisible();
     expect(within(pendingRow).getByText("已收 0.00")).toHaveClass("output-invoice-collection-amount--collected");
     expect(within(pendingRow).getByText("待收 62160.00")).toHaveClass("output-invoice-collection-amount--pending");
 
@@ -502,8 +502,8 @@ describe("销项发票收款情况", () => {
     expect(collectedRow.querySelector(".output-invoice-collections-table-cell--status")).not.toHaveClass("output-invoice-collection-status-cell");
 
     expect(within(unmatchedRedRow).getByText("红票待核对")).toBeVisible();
-    expect(within(reversedBlueRow).getByText("已被红冲")).toBeVisible();
-    expect(within(reversesBlueRow).getByText("已冲销蓝票")).toBeVisible();
+    expect(within(reversedBlueRow).getByText("蓝票已被红冲")).toBeVisible();
+    expect(within(reversesBlueRow).getByText("红票已关联蓝票")).toBeVisible();
     for (const redStatusRow of [unmatchedRedRow, reversedBlueRow, reversesBlueRow]) {
       expect(within(redStatusRow).queryByText(/^已收 /)).not.toBeInTheDocument();
       expect(within(redStatusRow).queryByText(/^待收 /)).not.toBeInTheDocument();
@@ -524,7 +524,7 @@ describe("销项发票收款情况", () => {
     const tableBefore = await screen.findByRole("grid", { name: "销项发票收款情况表" });
     await user.click(within(tableBefore).getByRole("button", { name: "筛选 状态" }));
     const menu = await screen.findByRole("menu", { name: "状态筛选与排序" });
-    const allStatusLabels = ["已被红冲 1", "已冲销蓝票 1", "红票待核对 1", "已收款 1", "部分收款 1", "待收款 1"];
+    const allStatusLabels = ["蓝票已被红冲 1", "红票已关联蓝票 1", "红票待核对 1", "已收款 1", "部分收款 1", "收款待核对 1"];
     allStatusLabels.forEach((label) => {
       expect(within(menu).getByRole("checkbox", { name: label })).toBeInTheDocument();
     });
@@ -543,6 +543,65 @@ describe("销项发票收款情况", () => {
     allStatusLabels.forEach((label) => {
       expect(within(menu).getByRole("checkbox", { name: label })).toBeInTheDocument();
     });
+  });
+
+  test("统计使用完整范围张数，切换复用单一筛选且保留搜索", async () => {
+    const fetchMock = installFetchMock(() => ({ ...rowsPayload, rows: rowsPayload.rows.slice(0, 1) }));
+    const user = userEvent.setup();
+    renderAuthenticatedAppAt("/output-invoice-collections");
+    const tabs = await screen.findByRole("tablist", { name: "销项发票状态分类" });
+    await within(tabs).findByRole("tab", { name: "全部 6 张" });
+    expect(within(tabs).getAllByRole("tab")).toHaveLength(7);
+    await user.type(screen.getByRole("searchbox", { name: "搜索销项发票收款情况" }), "客户");
+    await user.click(screen.getByRole("button", { name: "查询", exact: true }));
+    await user.click(await within(tabs).findByRole("tab", { name: "已收款 1 张" }));
+    await waitFor(() => {
+      const url = new URL(String(fetchMock.mock.calls.at(-1)?.[0]), "http://localhost");
+      expect(url.searchParams.get("keyword")).toBe("客户");
+      expect(url.searchParams.get("page")).toBe("1");
+      expect(JSON.parse(decodeURIComponent(url.searchParams.get("filters")!))).toEqual([{ field: "collection_status", operator: "in", values: ["collected"] }]);
+    });
+    await user.click(await within(tabs).findByRole("tab", { name: "全部 6 张" }));
+    await waitFor(() => {
+      const url = new URL(String(fetchMock.mock.calls.at(-1)?.[0]), "http://localhost");
+      expect(url.searchParams.get("keyword")).toBe("客户");
+      expect(url.searchParams.has("filters")).toBe(false);
+    });
+  });
+
+  test("表头多选有明确激活项，顶部单选替换多选", async () => {
+    const fetchMock = installFetchMock();
+    const user = userEvent.setup();
+    renderAuthenticatedAppAt("/output-invoice-collections");
+    const table = await screen.findByRole("grid", { name: "销项发票收款情况表" });
+    await user.click(within(table).getByRole("button", { name: "筛选 状态" }));
+    const menu = await screen.findByRole("menu", { name: "状态筛选与排序" });
+    await user.click(within(menu).getByRole("checkbox", { name: "已收款 1" }));
+    await user.click(within(menu).getByRole("checkbox", { name: "部分收款 1" }));
+    await user.keyboard("{Escape}");
+    expect(await screen.findByRole("tab", { name: "多状态筛选" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("tab", { name: "全部 6 张" })).toHaveAttribute("aria-selected", "false");
+    await user.click(screen.getByRole("tab", { name: "收款待核对 1 张" }));
+    await waitFor(() => {
+      const url = new URL(String(fetchMock.mock.calls.at(-1)?.[0]), "http://localhost");
+      expect(JSON.parse(decodeURIComponent(url.searchParams.get("filters")!))).toEqual([{ field: "collection_status", operator: "in", values: ["pending_collection"] }]);
+    });
+    expect(screen.queryByRole("tab", { name: "多状态筛选" })).not.toBeInTheDocument();
+  });
+
+  test("无效统计明确报错，保留表格但不显示假零或允许旧结果导出", async () => {
+    let invalid = false;
+    installFetchMock(() => invalid ? { ...rowsPayload, filter_options: [] } : rowsPayload);
+    const user = userEvent.setup();
+    renderAuthenticatedAppAt("/output-invoice-collections");
+    await screen.findByRole("tab", { name: "全部 6 张" });
+    const table = screen.getByRole("grid", { name: "销项发票收款情况表" });
+    invalid = true;
+    await user.click(screen.getByRole("button", { name: "刷新", exact: true }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("分类统计不完整或无效");
+    expect(screen.getByRole("tab", { name: "全部 — 张" })).toBeInTheDocument();
+    expect(screen.getByRole("grid", { name: "销项发票收款情况表" })).toBe(table);
+    expect(screen.getByRole("button", { name: "筛选内容导出" })).toBeDisabled();
   });
 
   test("详情只读取统一事实源与正式关联关系", async () => {

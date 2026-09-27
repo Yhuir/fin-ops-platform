@@ -3725,7 +3725,46 @@ textarea {
 
 .output-invoice-collections-query {
   align-items: flex-end;
-  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.output-invoice-collections-query .page-toolbar__group--left {
+  flex: 1 1 760px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.output-invoice-collections-query .page-toolbar__group--right {
+  flex: 1 1 430px;
+  min-width: 0;
+}
+
+.output-invoice-collections-status-section {
+  width: 100%;
+  min-width: 0;
+}
+
+.output-invoice-collections-status-caption {
+  display: flex;
+  gap: var(--fp-space-3);
+  margin-bottom: var(--fp-space-1);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-label);
+}
+
+.output-invoice-collections-status-tabs {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.output-invoice-collections-status-tabs [role="tablist"] {
+  width: max-content;
+}
+
+.output-invoice-collections-status-tabs [role="tab"] {
+  flex: 0 0 auto;
+  width: auto;
+  white-space: nowrap;
 }
 
 .output-invoice-collections-query__grid {

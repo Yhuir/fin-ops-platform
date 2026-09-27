@@ -1,4 +1,9 @@
 import type { BankSplitPart } from '../bankSplits/api';
+export const OUTPUT_COLLECTION_STATUS_CODES = [
+  "pending_collection", "partial_collected", "collected",
+  "reversed_by_red", "reverses_blue", "unmatched_red",
+] as const;
+
 export type OutputInvoiceCollectionSortDirection = "asc" | "desc";
 
 export type OutputInvoiceCollectionFilterOperator =

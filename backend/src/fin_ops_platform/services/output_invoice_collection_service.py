@@ -1375,7 +1375,7 @@ def _collection_status_for_facts(
     if has_reversal and invoice_sign > 0:
         return _collection_status(
             "reversed_by_red",
-            "已被红冲",
+            "蓝票已被红冲",
             "蓝字发票已通过 canonical 配对关系关联红字发票。",
             collected_amount=ZERO,
             pending_amount=ZERO,
@@ -1384,7 +1384,7 @@ def _collection_status_for_facts(
     if has_reversal and invoice_sign < 0:
         return _collection_status(
             "reverses_blue",
-            "已冲销蓝票",
+            "红票已关联蓝票",
             "红字发票已通过 canonical 配对关系冲销蓝字发票。",
             collected_amount=ZERO,
             pending_amount=ZERO,
@@ -1421,7 +1421,7 @@ def _collection_status_for_facts(
         )
     return _collection_status(
         "pending_collection",
-        "待收款",
+        "收款待核对",
         "尚无 canonical 配对的收入流水。",
         collected_amount=ZERO,
         pending_amount=expected,
@@ -1435,12 +1435,12 @@ def _collection_status_from_snapshot(group: dict[str, Any]) -> dict[str, Any]:
     pending = _decimal(group.get("pending_amount"))
     definitions = {
         "reversed_by_red": (
-            "已被红冲",
+            "蓝票已被红冲",
             "蓝字发票已由红字发票备注中的精确号码指向并冲销。",
             "info",
         ),
         "reverses_blue": (
-            "已冲销蓝票",
+            "红票已关联蓝票",
             "红字发票备注已精确指向被冲销的蓝字发票号码。",
             "warning",
         ),
@@ -1460,7 +1460,7 @@ def _collection_status_from_snapshot(group: dict[str, Any]) -> dict[str, Any]:
             "warning",
         ),
         "pending_collection": (
-            "待收款",
+            "收款待核对",
             "尚无唯一归属到该发票的 canonical 收入流水。",
             "pending",
         ),

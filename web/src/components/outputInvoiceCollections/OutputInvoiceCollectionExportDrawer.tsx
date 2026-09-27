@@ -120,7 +120,7 @@ export default function OutputInvoiceCollectionExportDrawer({
         {preview ? (
           <>
             <section className="output-invoice-collections-export-summary">
-              <h3>预计导出 {preview.rowCount.toLocaleString("en-US")} 行</h3>
+              <h3>预计导出 {preview.rowCount.toLocaleString("en-US")} 张</h3>
               <p>{preview.fileName}</p>
             </section>
             <section className="output-invoice-collections-export-sample">

@@ -283,7 +283,7 @@ function DataRow({
       )} columnRole="status" textValue={row.collectionStatus.label}>
         <div className="output-invoice-collection-status-content">
           <span className={`output-invoice-collection-status output-invoice-collection-status--${statusCode}`}>
-            {row.collectionStatus.label || "待收款"}
+            {row.collectionStatus.label}
           </span>
           {showCollectionAmounts ? (
             <span className="output-invoice-collection-amounts">
@@ -414,7 +414,7 @@ function PaginationControls({ page, pageSize, total, onPageChange, onPageSizeCha
 }) {
   return (
     <div className="output-invoice-collections-pagination">
-      <Select aria-label="每页行数" onSelectionChange={(key) => onPageSizeChange(Number(key))} selectedKey={String(pageSize)}>
+      <Select aria-label="每页发票张数" onSelectionChange={(key) => onPageSizeChange(Number(key))} selectedKey={String(pageSize)}>
         <Select.Trigger className="output-invoice-collections-pagination-size">
           <Select.Value />
           <Select.Indicator />
@@ -422,8 +422,8 @@ function PaginationControls({ page, pageSize, total, onPageChange, onPageSizeCha
         <Select.Popover>
           <ListBox>
             {[20, 50, 100].map((option) => (
-              <ListBox.Item id={String(option)} key={option} textValue={`${option} 条/页`}>
-                {option} 条/页
+              <ListBox.Item id={String(option)} key={option} textValue={`${option} 张/页`}>
+                {option} 张/页
               </ListBox.Item>
             ))}
           </ListBox>

@@ -1,4 +1,4 @@
-import { Button } from "@heroui/react";
+import { Button, Tabs } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
@@ -287,13 +287,22 @@ export default function OutputInvoiceCollectionsPage() {
     </div>
   ), [loading, statistics]);
 
+  const statusOptions = filterOptions.collection_status;
+  const statusFilter = query.filters.find(filter => filter.field === "collection_status");
+  const selectedStatuses = statusFilter?.values ?? [];
+  const selectedStatus = !statusFilter ? "all"
+    : selectedStatuses.length === 1 ? selectedStatuses[0] : "multiple";
+  // Counts are validated once at the API boundary and cover the full query scope.
+  const statusTotal = statusOptions?.reduce((sum, option) => sum + option.count!, 0);
+  const countsPending = loading || refreshing || Boolean(error);
+
   const actions = (
     <div className="output-invoice-collections-actions">
       <Button isDisabled={loading || refreshing} onPress={() => loadRows("refresh")} size="sm" variant="secondary">
         {refreshing ? "刷新中" : "刷新"}
       </Button>
       <Button
-        isDisabled={Boolean(error)}
+        isDisabled={loading || refreshing || Boolean(error)}
         onPress={() => setQuery((current) => ({ ...current, activeWorkflow: { kind: "export" } }))}
         size="sm"
         variant="secondary"
@@ -313,8 +322,31 @@ export default function OutputInvoiceCollectionsPage() {
           titleAccessory={titleAccessory}
         >
           <div className="output-invoice-collections-content">
-            <PageToolbar className="output-invoice-collections-query">
-              <div className="output-invoice-collections-query__grid">
+            <PageToolbar className="output-invoice-collections-query"
+              left={<div className="output-invoice-collections-status-section">
+                <div className="output-invoice-collections-status-caption">
+                  当前筛选范围 · 按发票张数
+                  {refreshing ? <span role="status">更新中…</span> : null}
+                </div>
+                <Tabs selectedKey={selectedStatus}
+                  className="output-invoice-collections-status-tabs"
+                  onSelectionChange={key => {
+                    if (key === "multiple") return;
+                    setQuery(current => ({ ...current, page: 1,
+                      filters: [...current.filters.filter(filter => filter.field !== "collection_status"),
+                        ...(key === "all" ? [] : [{ field: "collection_status", operator: "in" as const, values: [String(key)] }])],
+                    }));
+                  }}>
+                  <Tabs.List aria-label="销项发票状态分类">
+                    <Tabs.Tab id="all">全部 {countsPending || statusTotal === undefined ? "—" : statusTotal} 张</Tabs.Tab>
+                    {statusOptions?.map(option => <Tabs.Tab id={option.value} key={option.value}>
+                      {option.label} {countsPending ? "—" : option.count} 张
+                    </Tabs.Tab>)}
+                    {selectedStatus === "multiple" ? <Tabs.Tab id="multiple">多状态筛选</Tabs.Tab> : null}
+                  </Tabs.List>
+                </Tabs>
+              </div>}
+              right={<div className="output-invoice-collections-query__grid">
                 <BusinessPeriodPicker
                   allowedModes={["month"]}
                   ariaLabel="销项发票月份"
@@ -342,8 +374,8 @@ export default function OutputInvoiceCollectionsPage() {
                   placeholder="发票号、购方、业务或流水"
                   value={keywordDraft}
                 />
-              </div>
-            </PageToolbar>
+              </div>}
+            />
             {error ? <div className="output-invoice-collections-alert" role="alert">{error}</div> : null}
             {loading ? (
               <div aria-label="销项发票收款情况加载中" className="output-invoice-collections-loading">

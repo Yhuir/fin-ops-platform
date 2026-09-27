@@ -6219,7 +6219,7 @@ function outputInvoiceCollectionRowsPayload(
       },
       collection_status: {
         code: "reversed_by_red",
-        label: "已被红冲",
+        label: "蓝票已被红冲",
         reason: "该蓝字发票已与红字发票建立自动正式关联。",
         collected_amount: "0.00",
         pending_amount: "0.00",
@@ -6278,7 +6278,7 @@ function outputInvoiceCollectionRowsPayload(
       },
       collection_status: {
         code: "reverses_blue",
-        label: "已冲销蓝票",
+        label: "红票已关联蓝票",
         reason: "该红字发票已与蓝字发票建立自动正式关联。",
         collected_amount: "0.00",
         pending_amount: "0.00",
@@ -6401,7 +6401,7 @@ function outputInvoiceCollectionRowsPayload(
       },
       collection_status: {
         code: "pending_collection",
-        label: "待收款",
+        label: "收款待核对",
         reason: "发票导入后等待收入流水关系刷新。",
         collected_amount: "0.00",
         pending_amount: "65,540.00",
@@ -6427,6 +6427,14 @@ function outputInvoiceCollectionRowsPayload(
   const pageSize = positiveInteger(url?.searchParams.get("page_size"), 20);
   const filteredRows = applyOutputInvoiceCollectionListQuery(rows, url);
   const pageRows = filteredRows.slice((page - 1) * pageSize, page * pageSize);
+  const statusScopeUrl = url ? new URL(url) : undefined;
+  statusScopeUrl?.searchParams.set("filters", JSON.stringify(parseOutputInvoiceCollectionFilters(url).filter(filter => filter.field !== "collection_status")));
+  const statusRows = applyOutputInvoiceCollectionListQuery(rows, statusScopeUrl);
+  const facets = outputInvoiceCollectionFilterOptionsPayload().fields.map(field => field.field !== "collection_status" ? field : {
+    ...field, options: field.options.map(option => ({ ...option,
+      count: statusRows.filter(row => outputInvoiceCollectionFieldValue(row, "collection_status") === option.value).length,
+    })),
+  });
 
   return {
     rows: pageRows,
@@ -6452,7 +6460,7 @@ function outputInvoiceCollectionRowsPayload(
       { field: "collection_status", label: "收款状态", mode: "enum_multi", sortable: true, operators: ["in"] },
       { field: "buyer_name", label: "购方", mode: "text", sortable: true, operators: ["contains", "equals"] },
     ],
-    filter_options: outputInvoiceCollectionFilterOptionsPayload().fields,
+    filter_options: facets,
   };
 }
 
@@ -6562,12 +6570,12 @@ function outputInvoiceCollectionFilterOptionsPayload() {
         sortable: true,
         operators: ["in"],
         options: [
-          { value: "reversed_by_red", label: "已被红冲", count: 1 },
-          { value: "reverses_blue", label: "已冲销蓝票", count: 1 },
+          { value: "reversed_by_red", label: "蓝票已被红冲", count: 1 },
+          { value: "reverses_blue", label: "红票已关联蓝票", count: 1 },
           { value: "unmatched_red", label: "红票待核对", count: 0 },
           { value: "collected", label: "已收款", count: 0 },
           { value: "partial_collected", label: "部分收款", count: 0 },
-          { value: "pending_collection", label: "待收款", count: 1 },
+          { value: "pending_collection", label: "收款待核对", count: 1 },
         ],
       },
       {
@@ -6612,7 +6620,7 @@ function outputInvoiceCollectionExportPreviewPayload() {
         购方: "浏览器销项客户",
         购方识别号: "91530100E2E001",
         价税合计: "12,345.67",
-        收款状态: "已被红冲",
+        收款状态: "蓝票已被红冲",
         已收金额: "0.00",
         待收金额: "0.00",
         收款方: "浏览器销项客户",
@@ -6636,7 +6644,7 @@ function outputInvoiceCollectionExportBody(url: URL) {
       "浏览器销项客户",
       "91530100E2E001",
       "12,345.67",
-      "已被红冲",
+      "蓝票已被红冲",
       "0.00",
       "0.00",
       "浏览器销项客户",
@@ -9657,6 +9665,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           { label: "发票号码", value: row.invoice_no },
           { label: "开票日期", value: row.invoice_date },
           { label: "购买方名称", value: row.buyer_name },
+          { label: "价税合计", value: row.total_with_tax },
         ] })),
       });
     }

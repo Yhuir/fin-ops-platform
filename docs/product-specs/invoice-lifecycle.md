@@ -31,7 +31,7 @@
 | 销项发票收款情况 | `output_invoice` | canonical query 派生 `pending_collection`、`partial_collected`、`collected`、`reversed_by_red`、`reverses_blue`、`unmatched_red` |
 | 税金抵扣 | `input_invoice` | `certification_status` |
 
-进项发票使用情况和销项发票收款情况的页面表头发票数量用于核对发票拉取完整性，必须读取 rows summary 中按唯一发票 ID 统计的 `invoiceCount`。销项发票收款情况每个 canonical 发票 ID 固定一行，因此无筛选时 `pagination.total` 必须与 `invoiceCount` 相等；任何 Workbench relation 或红蓝票关系均不得折叠销项发票行。
+进项/销项发票数量均按唯一 canonical 发票 ID 统计，不能以配对组数代替。销项标题全局概览使用 canonical `statistics.invoiceCount`；表格左上方状态分类使用当前非状态筛选范围的六类计数，全部为六类之和。销项每个 canonical 发票 ID 固定一行，筛选结果的 `pagination.total` 与 `summary.invoiceCount` 一致；Workbench relation 和红蓝票关系不折叠发票行。收款待核对表示未确认收款归属，不等同客户未付款。
 
 ## 待找发票
 

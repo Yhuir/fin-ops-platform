@@ -171,6 +171,18 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         self.assertEqual(rows["collected-blue"]["bankTransactions"]["receivedTotal"], "182400.00")
         self.assertEqual(rows["target-blue"]["bankTransactions"]["receivedTotal"], "0.00")
         self.assertEqual(rows["red"]["bankTransactions"]["receivedTotal"], "0.00")
+        payload = service.list_rows(page=1, page_size=1)
+        self.assertEqual(payload["pagination"]["total"], 3)
+        self.assertEqual(payload["summary"]["invoiceCount"], 3)
+        status_field = next(field for field in service.filter_options()["fields"] if field["field"] == "collection_status")
+        counts = {item["value"]: item["count"] for item in status_field["options"]}
+        self.assertEqual(sum(counts.values()), 3)
+        self.assertEqual(counts["collected"], 1)
+        self.assertEqual(counts["reversed_by_red"], 1)
+        self.assertEqual(counts["reverses_blue"], 1)
+        labels = {row["collectionStatus"]["label"] for row in rows.values()}
+        self.assertEqual(labels, {"已收款", "蓝票已被红冲", "红票已关联蓝票"})
+
 
     def test_filter_sort_paging_and_export_use_current_contract(self) -> None:
         service = self._service(

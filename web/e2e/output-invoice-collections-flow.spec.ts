@@ -36,8 +36,8 @@ test.describe("销项发票收款情况", () => {
     await expect(table.locator(".output-invoice-collections-table-column-group", { hasText: "销项发票" })).toHaveCount(1);
     await expect(table.locator(".output-invoice-collections-table-column-group", { hasText: "收款状态" })).toHaveCount(1);
     await expect(table.locator(".output-invoice-collections-table-column-group", { hasText: "收入流水" })).toHaveCount(1);
-    await expect(table.getByText("已被红冲")).toBeVisible();
-    await expect(table.getByText("已冲销蓝票")).toBeVisible();
+    await expect(table.getByText("蓝票已被红冲")).toBeVisible();
+    await expect(table.getByText("红票已关联蓝票")).toBeVisible();
     await expect(table.getByRole("button", { name: "红蓝票 · 2" })).toHaveCount(2);
     const blueInvoiceRow = table.getByRole("row", { name: /XSFP-E2E-0001/ });
     const redInvoiceRow = table.getByRole("row", { name: /XSFP-E2E-0002/ });
@@ -139,7 +139,7 @@ test.describe("销项发票收款情况", () => {
     await page.getByRole("button", { name: "筛选 状态" }).click();
     const menu = page.getByRole("menu", { name: "状态筛选与排序" });
     const statusOptions = menu.locator("label.output-invoice-collection-filter-menu__item");
-    const reversedOption = statusOptions.filter({ hasText: "已被红冲 1" });
+    const reversedOption = statusOptions.filter({ hasText: "蓝票已被红冲 1" });
     await expect(reversedOption).toBeVisible();
     await expect(statusOptions).toHaveCount(6);
 

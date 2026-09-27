@@ -1,5 +1,6 @@
 import { mapBankSplitParts } from '../bankSplits/api';
 import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
+import { OUTPUT_COLLECTION_STATUS_CODES } from "./types";
 import type {
   OutputInvoiceCollectionDetailResponse,
   OutputInvoiceCollectionDetailTarget,
@@ -185,9 +186,13 @@ function mapInvoice(rawValue: unknown): OutputInvoiceCollectionRowsResponse["row
 
 function mapCollectionStatus(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"][number]["collectionStatus"] {
   const raw = objectValue(rawValue);
+  if (!OUTPUT_COLLECTION_STATUS_CODES.some(code => code === raw.code)
+      || typeof raw.label !== "string" || !raw.label.trim()) {
+    throw new Error("销项发票状态数据无效，请刷新重试。");
+  }
   return {
     code: stringValue(raw.code),
-    label: stringValue(raw.label),
+    label: raw.label,
     reason: stringValue(raw.reason),
     collectedAmount: stringValue(camelOrSnake(raw, "collectedAmount", "collected_amount")),
     pendingAmount: stringValue(camelOrSnake(raw, "pendingAmount", "pending_amount")),
@@ -467,8 +472,17 @@ function mapRelationDetailResponse(payload: unknown): OutputInvoiceCollectionDet
 
 function mapFilterOptionsResponse(payload: unknown): OutputInvoiceCollectionFilterOptionsResponse {
   const raw = objectValue(payload);
+  const rawFields = arrayValue(raw.fields);
+  const statusFields = rawFields.map(objectValue).filter(field => field.field === "collection_status");
+  const statusOptions = arrayValue(statusFields[0]?.options).map(objectValue);
+  if (statusFields.length !== 1 || statusOptions.length !== OUTPUT_COLLECTION_STATUS_CODES.length
+      || OUTPUT_COLLECTION_STATUS_CODES.some(code => statusOptions.filter(option => option.value === code).length !== 1)
+      || statusOptions.some(option => typeof option.label !== "string" || !option.label.trim()
+        || typeof option.count !== "number" || !Number.isSafeInteger(option.count) || option.count < 0)) {
+    throw new Error("销项发票分类统计不完整或无效，请刷新重试。");
+  }
   return {
-    fields: arrayValue(raw.fields).map((item) => {
+    fields: rawFields.map((item) => {
       const field = objectValue(item);
       return {
         field: stringValue(field.field),
@@ -476,12 +490,15 @@ function mapFilterOptionsResponse(payload: unknown): OutputInvoiceCollectionFilt
         mode: stringValue(field.mode) as OutputInvoiceCollectionRowsResponse["filterConfig"][number]["mode"],
         sortable: booleanValue(field.sortable),
         operators: arrayValue(field.operators).map(stringValue) as OutputInvoiceCollectionRowsResponse["filterConfig"][number]["operators"],
-        options: arrayValue(field.options).map((option) => {
+        options: (field.field === "collection_status"
+          ? OUTPUT_COLLECTION_STATUS_CODES.map(code => statusOptions.find(option => option.value === code)!)
+          : arrayValue(field.options)).map((option) => {
           const rawOption = objectValue(option);
           return {
             value: stringValue(rawOption.value),
             label: stringValue(rawOption.label),
-            count: rawOption.count === undefined ? undefined : numberValue(rawOption.count, 0),
+            count: field.field === "collection_status" ? rawOption.count as number
+              : rawOption.count === undefined ? undefined : numberValue(rawOption.count, 0),
           };
         }),
       };

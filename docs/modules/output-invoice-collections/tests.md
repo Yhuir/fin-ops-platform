@@ -26,8 +26,8 @@
 - row 顶层只含七个当前字段，不含 OA、receipt、manual status 或 reminder。
 - 页面只注册七个 GET route，旧 lifecycle/receipt/manual-red route 返回未匹配。
 - 前端只呈现三组表格，不显示旧按钮、旧抽屉、OA 或收据列。
-- 主表收款状态只显示状态 chip；待收款、部分收款、已收款额外显示绿色“已收”和橘黄色“待收”金额，不展示 `reason` 或 `canonical` 等内部说明。
-- 已被红冲、已冲销蓝票、红票待核对不显示无意义的零收款金额。
+- 主表收款状态只显示状态 chip；收款待核对、部分收款、已收款额外显示绿色“已收”和橘黄色“待收”金额，不展示 `reason` 或 `canonical` 等内部说明。
+- 蓝票已被红冲、红票已关联蓝票、红票待核对不显示无意义的零收款金额。
 - 状态内容布局不得改变 HeroUI `Table.Cell` 的原生 `table-cell` 行为；多条收入流水撑高整行时，状态背景必须覆盖完整行高。
 - 表格保持有界内部滚动，HeroUI 分页位于 FinanceTable footer；范围选择与搜索保持同一紧凑行且不重叠。
 - 状态筛选后的 `/rows` 仍返回六种完整状态候选；前端交互测试锁定同一 table DOM 节点，防止恢复整表 skeleton/unmount 刷新。
@@ -90,3 +90,11 @@ PostgreSQL 集成测试必须覆盖 `load_page() -> row.id -> load_row() -> rela
 ## 2026-09-27 来源详情回归
 
 按[来源详情验证责任](../../dev/source-record-details.md#验证责任)覆盖真实来源保留、内部状态/推断/替代值移除、缺失与零值、权限及读取失败；保留本模块列表、计算、导出和关系回归。公共前端入口包括 `EntityDetailContent.test.tsx`、`DetailDrawer.test.tsx` 与 `BankTransactionDrawer.test.tsx`，后者保护按 ID 读取、切换取消及禁止列表摘要回退。具体后端/浏览器执行及性能结果据实际报告，不以本节表示已通过。
+
+
+## 2026-09-28 状态按钮回归
+
+- `OutputInvoiceCollectionApi.test.ts` 覆盖全范围计数与当前页独立、真实零、缺失/非法/重复/未知状态计数、行状态缺失不得默认为待收。
+- `OutputInvoiceCollectionsPage.test.tsx` 覆盖七项、单一查询、搜索保留、多选激活态、单选替换、多选会话恢复沿用查询恢复合同；错误保留原表格但隐藏不可靠计数/禁用导出，既有迟到响应测试继续保护切换。
+- `output-invoice-status-tabs.spec.ts` 逐个点击六类及全部，核对每次一个 rows 请求、全范围计数保持、筛选及导出参数一致、宽/窄布局和零写入。
+- 既有后端多票同关系回归增加 3 张、分页及 facet 总数断言，明确不是 1 组；原输出 API 和 SQL self-excluding tests 保留。进项前端及两个原销项 E2E 文件做回归。

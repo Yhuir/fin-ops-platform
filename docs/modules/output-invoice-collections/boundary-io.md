@@ -61,11 +61,11 @@ row 顶层只包含：
 
 | code | 展示 | 判定 |
 | --- | --- | --- |
-| `pending_collection` | 待收款 | 正票且没有足额关联收入 |
+| `pending_collection` | 收款待核对 | 正票且没有足额关联收入 |
 | `partial_collected` | 部分收款 | 正票已关联部分收入 |
 | `collected` | 已收款 | 正票已关联足额收入 |
-| `reversed_by_red` | 已被红冲 | 正票处于有效 `output_invoice_reversal` 关系 |
-| `reverses_blue` | 已冲销蓝票 | 负票处于有效 `output_invoice_reversal` 关系 |
+| `reversed_by_red` | 蓝票已被红冲 | 正票处于有效 `output_invoice_reversal` 关系 |
+| `reverses_blue` | 红票已关联蓝票 | 负票处于有效 `output_invoice_reversal` 关系 |
 | `unmatched_red` | 红票待核对 | 负票没有有效红蓝票关系 |
 
 ## 一致性与性能合同
@@ -155,3 +155,14 @@ SQL 分页/筛选/汇总和 Python 行数据/详情组装使用相同范围，�
 OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../../dev/source-record-details.md)。详情投影只消费明确来源值，移除内部状态、推断费用类型、默认币种、日期替代及无来源的聚合信息；不从列表摘要或旧详情回退。银行使用父交易身份和真实交易日期，拆分操作仍由银行 owner 管理。模块列表、业务计算、导出、关系写入与原权限不变；公共成本核对信息不按原始字段规则全局删除。
 
 文件范围包含共享 `services/source_record_details.py`、所属详情 query/assembler 与前端 API 映射；银行通用抽屉按 ID 读取 `/api/bank-transactions/{id}/source-detail`，复用既有有界银行读取。没有新增 read model、cache、worker、迁移或数据库备份。旧取值删除条件、测试矩阵及性能验证见集中合同；实际执行结果另记，不以本节表示验证通过。
+
+
+## 2026-09-28 按发票张数切换状态
+
+- 页面左侧使用 HeroUI Tabs 展示全部及六种既有状态。Tabs 和表头多选共用 `query.filters.collection_status`，不引入第二份筛选状态；多选时增加当前态「多状态筛选」，单击普通分类替换多选，全部只移除状态条件。切换回到第 1 页，保留其他筛选/排序，会话恢复使用相同规则。
+- 数字只使用现有 `/rows` 响应的 `filterOptions.collection_status` 全范围 self-excluding 计数；全部为六类之和。分页、排序、银行明细展开不改变张数。同关系多发票分别计数，单票多流水不重复，红蓝票分别计数。标题保留全局概览，Tabs 明示「当前筛选范围 · 按发票张数」。
+- API 映射一次校验六种状态唯一齐全、标签非空、count 为非负安全整数；缺失/重复/未知/非法统计明确报错，不补 0，不从当前页或标题总数补算。行状态代码必须已知且 label 非空，删除表格 `label || 待收款` 旧兜底。
+- 更新显示名称为「收款待核对」「蓝票已被红冲」「红票已关联蓝票」，行、facet、导出一致；状态 code、收款计算、红蓝票识别、HTTP shape、权限、持久化和查询数量不变。
+- 更新期间保留表格结构，计数显示 — 并标示更新中；完成后同时更新行和计数，过期响应被既有 requestId/abort 边界忽略。请求错误保留错误提示及旧表格，但不显示旧统计为当前事实，加载/刷新/失败时禁用导出。
+- 样式限定销项页面，空间不足时工具栏换行、分类条内部滚动。每页数量与导出预览使用张；通用表格及进项页面没有实现改动。
+- 文件范围增加 `web/src/test/OutputInvoiceCollectionApi.test.ts`、`web/e2e/output-invoice-status-tabs.spec.ts`；没有新 service/route/worker/cache/schema，不需要数据库备份。
