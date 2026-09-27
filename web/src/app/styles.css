@@ -1393,6 +1393,21 @@ textarea {
   overflow-x: auto;
 }
 
+.input-invoice-usage-relation-tabs {
+  flex: 0 0 auto;
+  width: max-content;
+}
+
+.input-invoice-usage-relation-tabs__list {
+  width: max-content;
+}
+
+.input-invoice-usage-relation-tabs__tab {
+  flex: 0 0 auto;
+  width: auto;
+  white-space: nowrap;
+}
+
 .input-invoice-usage-query-actions {
   display: flex;
   width: 100%;
