@@ -460,7 +460,7 @@ describe("BatchAccountingPage", () => {
     const feedbackCloseRule = cssRule(styles, ".batch-accounting-feedback__close");
 
     expect(buttonRule).toContain("var(--motion-fast)");
-    expect(pageSource).toContain("<ToggleButtonGroup");
+    expect(pageSource).toContain("<SegmentGroup");
     expect(pageSource).toContain("<BusinessPeriodPicker");
     expect(pageSource).not.toContain("batch-accounting-segment__button");
     expect(inputRule).toContain("var(--motion-fast)");

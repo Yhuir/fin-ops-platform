@@ -1,3 +1,4 @@
+import { Segment, SegmentGroup } from "../components/common/SegmentedControl";
 import {
   ArrowRight,
   CheckCircle2,
@@ -9,7 +10,7 @@ import {
   UploadCloud,
   XCircle,
 } from "lucide-react";
-import { Button, Checkbox, Chip, Disclosure, DisclosureGroup, ToggleButton, ToggleButtonGroup } from "@heroui/react";
+import { Button, Checkbox, Chip, Disclosure, DisclosureGroup } from "@heroui/react";
 import type { Key } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent, type ReactNode } from "react";
 import { Link as RouterLink } from "react-router-dom";
@@ -2017,7 +2018,7 @@ export default function EtcTicketManagementPage() {
                   </Button>
                 ) : null}
               </div>
-              <ToggleButtonGroup
+              <SegmentGroup
                 aria-label="ETC批次状态"
                 className="etc-status-segmented"
                 disallowEmptySelection
@@ -2033,18 +2034,16 @@ export default function EtcTicketManagementPage() {
                   }
                 }}
               >
-                <ToggleButton id="unsubmitted" className="etc-status-segmented__button">
+                <Segment id="unsubmitted">
                   未提交 {counts.unsubmitted}
-                </ToggleButton>
-                <ToggleButton id="staged" className="etc-status-segmented__button">
-                  <ToggleButtonGroup.Separator />
+                </Segment>
+                <Segment id="staged">
                   暂存 {counts.staged}
-                </ToggleButton>
-                <ToggleButton id="submitted" className="etc-status-segmented__button">
-                  <ToggleButtonGroup.Separator />
+                </Segment>
+                <Segment id="submitted">
                   已提交 {counts.submitted}
-                </ToggleButton>
-              </ToggleButtonGroup>
+                </Segment>
+              </SegmentGroup>
               {loading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}
               {batchListError ? <StatePanel tone="error" compact>{batchListError}</StatePanel> : null}
               {!loading && !batchListError && visibleBatches.length === 0 ? <StatePanel tone="empty" compact>无匹配批次。</StatePanel> : null}

@@ -234,7 +234,7 @@ describe("cash books", () => {
   });
   test("classification switch filters server-side and never just filters the current page", async () => {
     render(<CashBooks />);
-    await userEvent.click(screen.getByRole("button", { name: "个人归还 / 冲抵" }));
+    await userEvent.click(screen.getByRole("radio", { name: "个人归还 / 冲抵" }));
     expect(mocks.query.mock.calls).toContainEqual(["/reports/turnover", expect.objectContaining({ ledger_group: "personal", personal_variant: "settlement", page: 1, page_size: 50 })]);
   });
   test("error does not display stale successful totals or a made-up zero", () => {

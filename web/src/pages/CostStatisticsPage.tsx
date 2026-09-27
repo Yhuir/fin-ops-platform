@@ -1,3 +1,4 @@
+import { Segment, SegmentGroup } from "../components/common/SegmentedControl";
 import CostStatisticsProjectCostScopeDrawer from "../components/cost-statistics/CostStatisticsProjectCostScopeDrawer";
 import { fetchProjectCostScope, saveProjectCostScope } from "../features/cost-statistics/api";
 import type { ProjectCostScope } from "../features/cost-statistics/types";
@@ -5,8 +6,6 @@ import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useR
 import {
   Button,
   Chip,
-  ToggleButton,
-  ToggleButtonGroup,
 } from "@heroui/react";
 import { useNavigate } from "react-router-dom";
 
@@ -1638,9 +1637,8 @@ export default function CostStatisticsPage() {
             <div className="cost-view-switcher" role="group" aria-label="成本统计视图切换">
               <div className="cost-view-switcher-group">
                 <span className="cost-view-switcher-label">项目成本</span>
-                <ToggleButtonGroup
+                <SegmentGroup
                   aria-label="项目成本统计视图"
-                  className="cost-view-tabs"
                   onSelectionChange={(keys) => {
                     const [key] = Array.from(keys);
                     if (key === "project" || key === "costTag" || key === "bankAccount") {
@@ -1651,17 +1649,16 @@ export default function CostStatisticsPage() {
                   selectionMode="single"
                   size="sm"
                 >
-                  <ToggleButton className="cost-view-tab" id="project">按项目</ToggleButton>
-                  <ToggleButton className="cost-view-tab" id="costTag">按成本标签</ToggleButton>
-                  <ToggleButton className="cost-view-tab" id="bankAccount">按银行账户</ToggleButton>
-                </ToggleButtonGroup>
+                  <Segment id="project">按项目</Segment>
+                  <Segment id="costTag">按成本标签</Segment>
+                  <Segment id="bankAccount">按银行账户</Segment>
+                </SegmentGroup>
               </div>
               <span aria-hidden="true" className="cost-view-switcher-divider" />
               <div className="cost-view-switcher-group">
                 <span className="cost-view-switcher-label">银行流水</span>
-                <ToggleButtonGroup
+                <SegmentGroup
                   aria-label="银行流水统计视图"
-                  className="cost-view-tabs"
                   onSelectionChange={(keys) => {
                     const [key] = Array.from(keys);
                     if (key === "time" || key === "bankTag") handleViewModeChange(key);
@@ -1670,9 +1667,9 @@ export default function CostStatisticsPage() {
                   selectionMode="single"
                   size="sm"
                 >
-                  <ToggleButton className="cost-view-tab" id="bankTag">按标签</ToggleButton>
-                  <ToggleButton className="cost-view-tab" id="time">按时间</ToggleButton>
-                </ToggleButtonGroup>
+                  <Segment id="bankTag">按标签</Segment>
+                  <Segment id="time">按时间</Segment>
+                </SegmentGroup>
               </div>
             </div>
           </div>

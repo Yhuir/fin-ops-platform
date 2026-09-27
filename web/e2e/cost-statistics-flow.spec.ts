@@ -50,7 +50,7 @@ test.describe("cost statistics browser flow", () => {
     }
     await page.getByRole("button", { name: "银行流水时间范围：年月" }).click();
     const picker = page.getByRole("dialog", { name: "银行流水时间范围选择器" });
-    await picker.getByRole("button", { name: "按月", exact: true }).click();
+    await picker.getByRole("radio", { name: "按月", exact: true }).click();
     const month = waitForExplorer(page, url => url.searchParams.get("scope") === "2026-03");
     await picker.getByRole("button", { name: "三月", exact: true }).click();
     await month;
@@ -262,9 +262,9 @@ test.describe("cost statistics browser flow", () => {
     await page.getByRole("button", { name: "导出中心" }).click();
     const dialog = page.getByRole("dialog", { name: "导出中心" });
     await expect(dialog).toBeVisible();
-    const tabs = dialog.getByRole("tablist", { name: "导出视图切换" });
-    await expect(tabs.getByRole("button")).toHaveCount(5);
-    await tabs.getByRole("button", { name: "按时间" }).click();
+    const tabs = dialog.getByRole("radiogroup", { name: "导出视图切换" });
+    await expect(tabs.getByRole("radio")).toHaveCount(5);
+    await tabs.getByRole("radio", { name: "按时间" }).click();
     const flowPreviewResponse = page.waitForResponse((response) => {
       const url = new URL(response.url());
       return response.request().method() === "GET"
@@ -278,7 +278,7 @@ test.describe("cost statistics browser flow", () => {
     await expect(dialog.getByText(/收入/).first()).toBeVisible();
     await expect(dialog.getByText(/净支出/)).toHaveCount(0);
 
-    await tabs.getByRole("button", { name: "按银行账户" }).click();
+    await tabs.getByRole("radio", { name: "按银行账户" }).click();
 
     const previewResponse = page.waitForResponse((response) => {
       const url = new URL(response.url());

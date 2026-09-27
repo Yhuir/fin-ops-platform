@@ -626,7 +626,7 @@ describe("BankFlowRuleBatchPage", () => {
     expect(filterRule).toContain("grid-template-columns");
     expect(filterRule).toContain("align-items: end");
     expect(buttonRule).toContain("var(--motion-fast)");
-    expect(pageSource).toContain("<ToggleButtonGroup");
+    expect(pageSource).toContain("<SegmentGroup");
     expect(pageSource).toContain("<BusinessPeriodPicker");
     expect(pageSource).not.toContain("bank-flow-rule-batches-segment__button");
     expect(railItemRule).toContain("var(--motion-fast)");

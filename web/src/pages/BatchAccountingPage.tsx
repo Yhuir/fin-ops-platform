@@ -1,6 +1,7 @@
+import { Segment, SegmentGroup } from "../components/common/SegmentedControl";
 import BankTransactionDrawer from "../features/bankSplits/BankTransactionDrawer";
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type MouseEvent } from "react";
-import { Button, Checkbox, Chip, ToggleButton, ToggleButtonGroup } from "@heroui/react";
+import { Button, Checkbox, Chip } from "@heroui/react";
 import { AlertTriangle, ChevronLeft, ChevronRight, RefreshCw, X } from "lucide-react";
 
 import BatchAccountingTagRulesDrawer from "../components/batchAccounting/BatchAccountingTagRulesDrawer";
@@ -669,7 +670,7 @@ export default function BatchAccountingPage() {
       )}
     >
       <div aria-label="批量账务筛选" className="batch-accounting-filter" role="region">
-        <ToggleButtonGroup
+        <SegmentGroup
           aria-label="批量账务状态"
           className="batch-accounting-segment"
           disallowEmptySelection
@@ -681,9 +682,9 @@ export default function BatchAccountingPage() {
           selectionMode="single"
           size="sm"
         >
-          <ToggleButton id="unsubmitted">未提交 {payload.summary.unsubmittedCount}</ToggleButton>
-          <ToggleButton id="submitted"><ToggleButtonGroup.Separator />已提交 {payload.summary.submittedCount}</ToggleButton>
-        </ToggleButtonGroup>
+          <Segment id="unsubmitted">未提交 {payload.summary.unsubmittedCount}</Segment>
+          <Segment id="submitted">已提交 {payload.summary.submittedCount}</Segment>
+        </SegmentGroup>
       </div>
 
       {error ? <StatePanel tone="error" title={error} /> : null}

@@ -118,7 +118,7 @@ test("compares exact groups side by side and keeps notes next to submit without 
   await page.setViewportSize({ width: 700, height: 900 });
   await expect(before).toBeVisible();
   await expect(after).toBeHidden();
-  await dialog.getByRole("button", { name: "操作后", exact: true }).click();
+  await dialog.getByRole("radio", { name: "操作后", exact: true }).click();
   await expect(after).toBeVisible();
   await expect(before).toBeHidden();
   await expect(

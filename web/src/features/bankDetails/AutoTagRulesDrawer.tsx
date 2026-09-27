@@ -1,3 +1,4 @@
+import SegmentedControl from "../../components/common/SegmentedControl";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Plus, RefreshCw, RotateCcw, Save, Trash2 } from "lucide-react";
 
@@ -505,24 +506,8 @@ export default function AutoTagRulesDrawer({
     >
       <div className="bank-auto-tag-drawer">
         <div className="bank-auto-tag-drawer-toolbar">
-          <div className="bank-auto-tag-status-tabs" role="group" aria-label="自动标签规则状态">
-            <button
-              type="button"
-              className={`bank-auto-tag-tab${tab === "active" ? " is-active" : ""}`}
-              aria-pressed={tab === "active"}
-              onClick={() => setTab("active")}
-            >
-              可用
-            </button>
-            <button
-              type="button"
-              className={`bank-auto-tag-tab${tab === "archived" ? " is-active" : ""}`}
-              aria-pressed={tab === "archived"}
-              onClick={() => setTab("archived")}
-            >
-              停用
-            </button>
-          </div>
+          <SegmentedControl label="自动标签规则状态" value={tab} onChange={setTab}
+            options={[{ key: "active", label: "可用" }, { key: "archived", label: "停用" }]} />
           <div className="bank-auto-tag-toolbar-actions">
             <ActionButton disabled={readonly} icon={<Plus aria-hidden="true" size={14} />} label="新增标签" onClick={addRule} />
             <ActionButton

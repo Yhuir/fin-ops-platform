@@ -1,3 +1,4 @@
+import "../common/segmentedControl.css";
 import { Header, Input, ListBox, Select, Tabs } from "@heroui/react";
 import { useCallback, type HTMLInputTypeAttribute, type ReactNode } from "react";
 
@@ -39,7 +40,7 @@ export function CashNotice({ error, children }: { error?: string | null; childre
 export function CashTabs({ value, onChange, tabs }: {
   value: string; onChange: (value: string) => void; tabs: { id: string; label: string }[];
 }) {
-  return <Tabs className="cash-tabs" selectedKey={value} onSelectionChange={key => onChange(String(key))}>
-    <Tabs.List aria-label="当前现金子页面视图">{tabs.map(tab => <Tabs.Tab key={tab.id} id={tab.id}>{tab.label}</Tabs.Tab>)}</Tabs.List>
+  return <Tabs className="app-segments cash-tabs" selectedKey={value} onSelectionChange={key => onChange(String(key))}>
+    <Tabs.List aria-label="当前现金子页面视图">{tabs.map(tab => <Tabs.Tab key={tab.id} id={tab.id}>{tab.label}<Tabs.Indicator /></Tabs.Tab>)}</Tabs.List>
   </Tabs>;
 }

@@ -1,3 +1,4 @@
+import SegmentedControl from "../common/SegmentedControl";
 import { Button } from "@heroui/react";
 import { useEffect, useState, type ReactNode } from "react";
 
@@ -123,7 +124,12 @@ function TurnoverBook({ onItem, initial, onChange }: { onItem: (id: string) => v
   };
   const sortColumns: Record<number, string> = { 0: "occurred_on", 9: "repayment_amount" };
   return <>
-    <div className="cash-category-switch" role="group" aria-label="往来类别">{[{ id: "all", label: "全部", color: "" }, { id: "company", label: "公司", color: "company" }, { id: "external_person", label: "外部人员", color: "external-person" }, { id: "personal_principal", label: "个人借款 / 代付", color: "personal-principal" }, { id: "personal_settlement", label: "个人归还 / 冲抵", color: "personal-settlement" }].map(option => <Button key={option.id} size="sm" variant={group === option.id ? "secondary" : "tertiary"} aria-pressed={group === option.id} onPress={() => applyGroup(option.id)}><span className={"cash-color-dot cash-color-dot--" + option.color} aria-hidden="true" />{option.label}</Button>)}</div>
+    <SegmentedControl label="往来类别" value={group} onChange={applyGroup} options={[
+      { id: "all", label: "全部", color: "" }, { id: "company", label: "公司", color: "company" },
+      { id: "external_person", label: "外部人员", color: "external-person" },
+      { id: "personal_principal", label: "个人借款 / 代付", color: "personal-principal" },
+      { id: "personal_settlement", label: "个人归还 / 冲抵", color: "personal-settlement" },
+    ].map(option => ({ key: option.id, label: <><span className={"cash-color-dot cash-color-dot--" + option.color} aria-hidden="true" />{option.label}</> }))} />
     <PeriodFilters initial={filters} initialKeyword={initial.filters.keyword ?? ""} onReset={() => {
       setFilters(allPeriod()); setGroup("all"); setSelected({}); setSort("occurred_on"); setOrder("desc"); setPage(1); setValidation(null);
     }} onApply={applyFilters}>

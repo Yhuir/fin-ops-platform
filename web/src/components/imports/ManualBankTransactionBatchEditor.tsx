@@ -1,3 +1,5 @@
+import { Tabs } from "@heroui/react";
+import "../common/segmentedControl.css";
 import { Alert, Button, Chip, Input, ListBox, Select, TextArea } from "@heroui/react";
 import { Plus, Trash2 } from "lucide-react";
 import { type ReactNode, useMemo, useEffect, useState } from "react";
@@ -268,20 +270,10 @@ export default function ManualBankTransactionBatchEditor({
         </>
       ) : (
         <>
-          <div className="manual-bank-entry__tabs" role="tablist" aria-label="待录入流水">
-            {entries.map((entry, index) => (
-              <button
-                aria-selected={entry.id === selectedId}
-                className="manual-bank-entry__tab"
-                data-active={entry.id === selectedId || undefined}
-                key={entry.id}
-                role="tab"
-                type="button"
-                onClick={() => setSelectedId(entry.id)}
-              >
-                流水 {index + 1}
-              </button>
-            ))}
+          <div className="manual-bank-entry__tabs">
+            <Tabs className="app-segments" selectedKey={selectedId} onSelectionChange={key => setSelectedId(Number(key))}>
+              <Tabs.List aria-label="待录入流水">{entries.map((entry, index) => <Tabs.Tab id={entry.id} key={entry.id} isDisabled={disabled || busy}>流水 {index + 1}<Tabs.Indicator /></Tabs.Tab>)}</Tabs.List>
+            </Tabs>
             <button
               aria-label="添加流水"
               className="manual-bank-entry__tab manual-bank-entry__tab--icon"

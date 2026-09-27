@@ -1,3 +1,4 @@
+import "../common/segmentedControl.css";
 import { Alert, Button, Chip, Input, Tabs } from "@heroui/react";
 import { FileText, Trash2, Upload } from "lucide-react";
 import { type DragEvent, useEffect, useId, useRef, useState } from "react";
@@ -183,11 +184,11 @@ export default function WorkbenchInvoiceEntryDrawer({
       title={mode === "upload" ? "管理凭证" : "录入发票"}
       width="min(800px, 100vw)"
     >
-      <Tabs selectedKey={mode} onSelectionChange={(key) => { if (!loading && !entryBusy) { setModeSelection({ targetKey, mode: String(key) as "upload" | "manual" }); setCompletion(undefined); } }}>
-        <Tabs.ListContainer className="workbench-invoice-entry-drawer__mode-tabs-container">
-          <Tabs.List aria-label="录入方式" className="workbench-invoice-entry-drawer__mode-tabs">
-            <Tabs.Tab isDisabled={loading || entryBusy} id="manual">发票录入</Tabs.Tab>
-            <Tabs.Tab isDisabled={loading || entryBusy} id="upload">补充凭证</Tabs.Tab>
+      <Tabs className="app-segments" selectedKey={mode} onSelectionChange={(key) => { if (!loading && !entryBusy) { setModeSelection({ targetKey, mode: String(key) as "upload" | "manual" }); setCompletion(undefined); } }}>
+        <Tabs.ListContainer>
+          <Tabs.List aria-label="录入方式">
+            <Tabs.Tab isDisabled={loading || entryBusy} id="manual">发票录入<Tabs.Indicator /></Tabs.Tab>
+            <Tabs.Tab isDisabled={loading || entryBusy} id="upload">补充凭证<Tabs.Indicator /></Tabs.Tab>
           </Tabs.List>
         </Tabs.ListContainer>
       </Tabs>

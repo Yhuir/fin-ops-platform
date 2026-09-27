@@ -344,9 +344,8 @@ test.describe("workbench exception browser flow", () => {
         await expect(amountFilters.getByText(title, { exact: true })).toBeVisible();
       }
       await expect(amountFilters.getByRole("radio")).toHaveCount(8);
-      await expect.poll(async () => amountFilters.evaluate(
-        (element) => getComputedStyle(element).gridTemplateColumns.split(" ").length,
-      )).toBe(4);
+      await expect(amountFilters).toHaveCSS("display", "flex");
+      await expect(amountFilters.locator(".workbench-anomaly-drawer__amount-family")).toHaveCount(AMOUNT_RULE_FAMILY_TITLES.length);
 
       await expect.poll(async () => {
         const [exceptionTypeBox, amountFiltersBox] = await Promise.all([
@@ -359,9 +358,15 @@ test.describe("workbench exception browser flow", () => {
         return amountFiltersBox.y - (exceptionTypeBox.y + exceptionTypeBox.height);
       }).toBeGreaterThanOrEqual(-1);
 
-      await expect.poll(async () => amountFilters.evaluate(
-        (element) => element.scrollWidth - element.clientWidth,
-      )).toBeLessThanOrEqual(1);
+      await expect(amountFilters).toHaveCSS("overflow-x", "auto");
+      // A single continuous strip may scroll internally; every choice must remain reachable.
+      for (const option of await amountFilters.getByRole("radio").all()) {
+        await option.evaluate(element => element.scrollIntoView({ block: "nearest", inline: "nearest" }));
+        const frame = (await amountFilters.boundingBox())!;
+        const choice = (await option.boundingBox())!;
+        expect(choice.x).toBeGreaterThanOrEqual(frame.x);
+        expect(choice.x + choice.width).toBeLessThanOrEqual(frame.x + frame.width);
+      }
       await expect.poll(async () => {
         const [headerBox, bucketBox] = await Promise.all([
           header.boundingBox(),

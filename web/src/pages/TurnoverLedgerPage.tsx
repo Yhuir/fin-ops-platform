@@ -1,4 +1,5 @@
-import { Button, Checkbox, ToggleButton, ToggleButtonGroup } from "@heroui/react";
+import { Segment, SegmentGroup } from "../components/common/SegmentedControl";
+import { Button, Checkbox } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, RefreshCw } from "lucide-react";
 
@@ -1071,7 +1072,7 @@ export default function TurnoverLedgerPage() {
         <section className="turnover-ledger-table-panel">
           <div className="turnover-ledger-table-panel__inner">
             <div className="turnover-ledger-table-panel__toolbar">
-              <ToggleButtonGroup
+              <SegmentGroup
                 aria-label="往来款账单范围"
                 className="turnover-ledger-tabs"
                 disallowEmptySelection
@@ -1085,13 +1086,12 @@ export default function TurnoverLedgerPage() {
                 selectionMode="single"
                 size="sm"
               >
-                {FAMILY_TABS.map((tab, index) => (
-                  <ToggleButton id={tab.value} key={tab.value}>
-                    {index > 0 ? <ToggleButtonGroup.Separator /> : null}
+                {FAMILY_TABS.map((tab) => (
+                  <Segment id={tab.value} key={tab.value}>
                     {tab.label}
-                  </ToggleButton>
+                  </Segment>
                 ))}
-              </ToggleButtonGroup>
+              </SegmentGroup>
               <div className="turnover-ledger-actions">
                 {selectedClosureRows.length > 0 ? (
                   <span className="turnover-ledger-selection-summary" role="status">

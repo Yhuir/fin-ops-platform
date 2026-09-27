@@ -1,3 +1,5 @@
+import { Tabs } from "@heroui/react";
+import "../common/segmentedControl.css";
 import {
   Alert, Button, Input, ListBox, PopoverContent, PopoverDialog,
   PopoverRoot, PopoverTrigger, Select,
@@ -129,8 +131,10 @@ export default function ManualInvoiceBatchEditor({
   );
 
   return <div className="manual-invoice-entry__body">
-    <div className="manual-invoice-entry__tabs" role="tablist" aria-label="待录入发票">
-      {summary.map((entry) => <button aria-selected={entry.id === selectedId} className="manual-invoice-entry__tab" data-active={entry.id === selectedId || undefined} key={entry.id} role="tab" type="button" onClick={() => { setSelectedId(entry.id); setPage(entry.saved ? "overview" : "edit"); }}>{entry.label}{entry.saved ? " ✓" : ""}</button>)}
+    <div className="manual-invoice-entry__tabs">
+      <Tabs className="app-segments" selectedKey={selectedId} onSelectionChange={key => { const entry = summary.find(item => item.id === key); if (entry) { setSelectedId(entry.id); setPage(entry.saved ? "overview" : "edit"); } }}>
+        <Tabs.List aria-label="待录入发票">{summary.map(entry => <Tabs.Tab id={entry.id} key={entry.id} isDisabled={busy || disabled}>{entry.label}{entry.saved ? " ✓" : ""}<Tabs.Indicator /></Tabs.Tab>)}</Tabs.List>
+      </Tabs>
       <button aria-label="添加发票" className="manual-invoice-entry__tab manual-invoice-entry__tab--add" disabled={busy || disabled} type="button" onClick={addInvoice}><Plus aria-hidden="true" size={15} /></button>
     </div>
     {statusMessage ? <Alert className="manual-invoice-entry__notice">{statusMessage}</Alert> : null}

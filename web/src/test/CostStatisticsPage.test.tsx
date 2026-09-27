@@ -85,7 +85,7 @@ describe("Cost statistics page", () => {
       new URL(String(url), "http://localhost").searchParams.get("scope") === "all")).toBe(true);
     await user.click(screen.getByRole("button", { name: "银行流水时间范围：年月" }));
     const picker = screen.getByRole("dialog", { name: "银行流水时间范围选择器" });
-    await user.click(within(picker).getByRole("button", { name: "按月", exact: true }));
+    await user.click(within(picker).getByRole("radio", { name: "按月", exact: true }));
     await user.click(within(picker).getByRole("button", { name: "三月", exact: true }));
     await waitUntilReady();
     await user.click(screen.getByRole("button", { name: "刷新成本统计" }));
@@ -115,7 +115,7 @@ describe("Cost statistics page", () => {
     renderPage(); await waitUntilReady();
     await user.click(screen.getByRole("button", { name: "导出中心" }));
     const dialog = screen.getByRole("dialog", { name: "导出中心" });
-    await user.click(within(dialog).getByRole("tablist").querySelector("button")!);
+    await user.click(within(dialog).getByRole("radiogroup", { name: "导出视图切换" }).querySelector("button")!);
     expect(within(dialog).getByRole("radio", { name: "全部", exact: true })).toBeChecked();
     await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
     await within(dialog).findByText(/预计导出 \d+ 条银行流水/);
@@ -349,7 +349,7 @@ describe("Cost statistics page", () => {
 
     await user.click(screen.getByRole("button", { name: "银行流水时间范围：年月" }));
     const picker = screen.getByRole("dialog", { name: "银行流水时间范围选择器" });
-    await user.click(within(picker).getByRole("button", { name: "按月", exact: true }));
+    await user.click(within(picker).getByRole("radio", { name: "按月", exact: true }));
     await user.click(within(picker).getByRole("button", { name: "三月", exact: true }));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -429,22 +429,22 @@ describe("Cost statistics page", () => {
 
     await user.click(screen.getByRole("button", { name: "导出中心" }));
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
-    const tabs = within(dialog).getByRole("tablist", { name: "导出视图切换" });
-    expect(within(tabs).getAllByRole("button").map((item) => item.textContent)).toEqual([
+    const tabs = within(dialog).getByRole("radiogroup", { name: "导出视图切换" });
+    expect(within(tabs).getAllByRole("radio").map((item) => item.textContent)).toEqual([
       "按时间",
       "按标签",
       "按银行账户",
       "按项目",
       "按成本主标签",
     ]);
-    await user.click(within(tabs).getByRole("button", { name: "按时间" }));
+    await user.click(within(tabs).getByRole("radio", { name: "按时间" }));
     await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
     expect(await within(dialog).findByText(/预计导出 \d+ 条银行流水/)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringMatching(/export-preview\?month=all&view=time/),
       expect.any(Object),
     );
-    await user.click(within(tabs).getByRole("button", { name: "按银行账户" }));
+    await user.click(within(tabs).getByRole("radio", { name: "按银行账户" }));
     await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
     expect(await within(dialog).findByText(/预计导出 \d+ 条成本明细/)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(

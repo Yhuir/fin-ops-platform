@@ -1,3 +1,4 @@
+import "../common/segmentedControl.css";
 import { Button, Chip, Input, Tabs } from "@heroui/react";
 import { CheckCircle, RotateCcw, Trash2 } from "lucide-react";
 import { useState } from "react";
@@ -171,15 +172,13 @@ export default function SettingsProjectsSection({
           </div>
         ) : null}
 
-        <Tabs
-          className="settings-project-tabs"
+        <Tabs className="app-segments settings-project-tabs"
           selectedKey={activeTab}
-          variant="secondary"
           onSelectionChange={(key) => setActiveTab(String(key) as "active" | "completed")}
         >
           <Tabs.List aria-label="项目状态">
-            <Tabs.Tab id="active">进行中 {activeProjects.length}</Tabs.Tab>
-            <Tabs.Tab id="completed">已完成 {completedProjects.length}</Tabs.Tab>
+            <Tabs.Tab id="active">进行中 {activeProjects.length}<Tabs.Indicator /></Tabs.Tab>
+            <Tabs.Tab id="completed">已完成 {completedProjects.length}<Tabs.Indicator /></Tabs.Tab>
           </Tabs.List>
         </Tabs>
         <ProjectTable

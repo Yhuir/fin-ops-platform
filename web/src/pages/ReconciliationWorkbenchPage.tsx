@@ -1,3 +1,4 @@
+import SegmentedControl from "../components/common/SegmentedControl";
 import { Button, Input, TextArea } from "@heroui/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
@@ -2946,8 +2947,9 @@ function RelationPreviewDialog({
             </div>
           </div>
         ) : null}
-        <div className="relation-preview-side-tabs" role="group" aria-label="前后对比">
-          {(["before", "after"] as const).map(side => <button key={side} type="button" aria-pressed={activeSide === side} aria-controls={`relation-preview-${side}`} onClick={() => setActiveSide(side)}>{side === "before" ? "操作前" : "操作后"}</button>)}
+        <div className="relation-preview-side-tabs">
+          <SegmentedControl label="前后对比" value={activeSide} onChange={setActiveSide}
+            options={(["before", "after"] as const).map(side => ({ key: side, label: side === "before" ? "操作前" : "操作后", controls: `relation-preview-${side}` }))} />
         </div>
         <div className="relation-preview-compare-scroll">
           <div className="relation-preview-stack" data-active-side={activeSide}>

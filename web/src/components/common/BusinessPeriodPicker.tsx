@@ -1,3 +1,4 @@
+import SegmentedControl from "./SegmentedControl";
 import {
   Button,
   PopoverContent,
@@ -111,19 +112,8 @@ export default function BusinessPeriodPicker({
   const panel = (
     <div className={inline ? "business-period-panel business-period-panel--inline" : "business-period-panel"}>
       {allowedModes.length > 1 ? (
-        <div className="business-period-modes" aria-label={`${ariaLabel}粒度`} role="group">
-          {allowedModes.map((mode) => (
-            <Button
-              key={mode}
-              aria-pressed={activeMode === mode}
-              onPress={() => setActiveMode(mode)}
-              size="sm"
-              variant={activeMode === mode ? "primary" : "tertiary"}
-            >
-              {mode === "year" ? "按年" : "按月"}
-            </Button>
-          ))}
-        </div>
+        <SegmentedControl label={`${ariaLabel}粒度`} value={activeMode} onChange={setActiveMode}
+          options={allowedModes.map(mode => ({ key: mode, label: mode === "year" ? "按年" : "按月" }))} disabled={disabled} />
       ) : null}
       {loading ? <div className="business-period-state" role="status"><Spinner size="sm" /><span>加载中</span></div> : null}
       {!loading && error ? <div className="business-period-state error" role="alert">{error}</div> : null}

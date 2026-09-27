@@ -1,3 +1,4 @@
+import SegmentedControl from "../common/SegmentedControl";
 import { Accordion, Button, Chip } from '@heroui/react';
 import { ChevronRight, Search } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
@@ -197,11 +198,9 @@ export default function CostStatisticsManualAllocationDrawer({ caseId, onCloseCa
       <div className="cost-source-body">
         {caseId ? renderEditor(caseId) : <>
         <div className="cost-source-toolbar">
-          <div className="cost-source-tabs" role="radiogroup" aria-label="成本人工分配状态">
-            {(['pending', 'allocated'] as const).map(value => <button type="button" role="radio" aria-checked={status === value} key={value} disabled={saving} onClick={() => { setStatus(value); void load(value); }}>
-              {value === 'pending' ? '待分配' : '已完成'} <span>{counts ? counts[value] : value === 'pending' ? pendingCount ?? '—' : '—'}</span>
-            </button>)}
-          </div>
+          <SegmentedControl label="成本人工分配状态" value={status} disabled={saving}
+            onChange={value => { setStatus(value); void load(value); }}
+            options={(['pending', 'allocated'] as const).map(value => ({ key: value, label: <>{value === 'pending' ? '待分配' : '已完成'} <span>{counts ? counts[value] : value === 'pending' ? pendingCount ?? '—' : '—'}</span></> }))} />
           <form className="cost-source-search" onSubmit={event => { event.preventDefault(); if (saving) return; setQuery(queryDraft.trim()); void load(status, queryDraft.trim()); }}>
             <input aria-label="搜索人工分配任务" placeholder="搜索项目、费用或申请人" value={queryDraft} onChange={event => setQueryDraft(event.target.value)} /><button className="cost-source-icon" aria-label="查询人工分配任务" type="submit" disabled={saving}><Search size={16} /></button>
           </form>

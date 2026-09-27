@@ -1,3 +1,4 @@
+import SegmentedControl from "../common/SegmentedControl";
 import { Button, Checkbox, Input, Radio, RadioGroup } from "@heroui/react";
 
 import AppDialog from "../common/AppDialog";
@@ -227,54 +228,11 @@ export default function ExportCenterModal({
       title="导出中心"
     >
         <div className="export-center-modal-body">
-          <div className="export-center-view-switcher" role="tablist" aria-label="导出视图切换">
-            <Button
-              aria-pressed={mode === "time"}
-              className="cost-view-tab"
-              onPress={() => onModeChange("time")}
-              size="sm"
-              variant={mode === "time" ? "primary" : "secondary"}
-            >
-              按时间
-            </Button>
-            <Button
-              aria-pressed={mode === "bank_tag"}
-              className="cost-view-tab"
-              onPress={() => onModeChange("bank_tag")}
-              size="sm"
-              variant={mode === "bank_tag" ? "primary" : "secondary"}
-            >
-              按标签
-            </Button>
-            <Button
-              aria-pressed={mode === "bank_account"}
-              className="cost-view-tab"
-              onPress={() => onModeChange("bank_account")}
-              size="sm"
-              variant={mode === "bank_account" ? "primary" : "secondary"}
-            >
-              按银行账户
-            </Button>
-            <Button
-              aria-pressed={mode === "project"}
-              className="cost-view-tab"
-              onPress={() => onModeChange("project")}
-              size="sm"
-              variant={mode === "project" ? "primary" : "secondary"}
-            >
-              按项目
-            </Button>
-            <Button
-              aria-pressed={mode === "cost_tag"}
-              className="cost-view-tab"
-              onPress={() => onModeChange("cost_tag")}
-              size="sm"
-              variant={mode === "cost_tag" ? "primary" : "secondary"}
-            >
-              按成本主标签
-            </Button>
-          </div>
-
+          <SegmentedControl label="导出视图切换" value={mode} disabled={isBusy} onChange={onModeChange} options={[
+            { key: "time", label: "按时间" }, { key: "bank_tag", label: "按标签" },
+            { key: "bank_account", label: "按银行账户" }, { key: "project", label: "按项目" },
+            { key: "cost_tag", label: "按成本主标签" },
+          ]} />
           {mode === "time" || mode === "bank_tag" ? (
             <div className="export-center-config-grid">
               <section className="export-center-section">

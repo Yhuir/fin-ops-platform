@@ -905,7 +905,7 @@ describe("OA pending payments page", () => {
     expect(button).toContain("var(--motion-fast)");
     expect(button).toContain("var(--ease-out-quart)");
     expect(fieldControls).toContain("var(--motion-fast)");
-    expect(pageSource).toContain("<ToggleButtonGroup");
+    expect(pageSource).toContain("<SegmentGroup");
     expect(pageSource).toContain("<BusinessPeriodPicker");
     expect(pageSource).not.toContain("oa-pending-payments-month-picker");
     expect(tableShell).toContain("height: 100%");
@@ -1317,7 +1317,7 @@ describe("OA pending payments page", () => {
       expect(lastRequest?.searchParams.get("relation_status")).toBe("all");
     });
 
-    await user.click(within(drawer).getByRole("button", { name: "已配对" }));
+    await user.click(within(drawer).getByRole("radio", { name: "已配对" }));
     await waitFor(() => {
       const lastRequest = bankCandidateRequests(fetchMock).at(-1);
       expect(lastRequest?.searchParams.get("page")).toBe("1");

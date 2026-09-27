@@ -131,7 +131,7 @@ test.describe("OA pending payments in-progress bank link browser flow", () => {
       visibleLabel: "已关联进行中OA",
       actionType: "click",
     }, async (mark) => {
-      await drawer.getByRole("button", { name: "已关联进行中OA" }).click();
+      await drawer.getByRole("radio", { name: "已关联进行中OA" }).click();
       await mark("apiLatencyMs", linkedFilterRequest);
       await mark("finalSettledLatencyMs", expect(drawer.getByText("显示 1 / 1 条")).toBeVisible());
     });
@@ -148,7 +148,7 @@ test.describe("OA pending payments in-progress bank link browser flow", () => {
       visibleLabel: "全部",
       actionType: "click",
     }, async (mark) => {
-      await drawer.getByRole("button", { name: "全部" }).click();
+      await drawer.getByRole("radio", { name: "全部", exact: true }).click();
       await mark("apiLatencyMs", allFilterRequest);
       await mark("finalSettledLatencyMs", expect(drawer.getByText("显示 3 / 3 条")).toBeVisible());
     });

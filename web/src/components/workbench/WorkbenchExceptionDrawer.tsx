@@ -1,11 +1,10 @@
+import { Segment, SegmentGroup } from "../common/SegmentedControl";
 import {
   Button,
   Disclosure,
   DisclosureGroup,
   PopoverContent,
   PopoverDialog,
-  ToggleButton,
-  ToggleButtonGroup,
 } from "@heroui/react";
 import type { Key } from "@heroui/react";
 import { MessageSquareText } from "lucide-react";
@@ -212,7 +211,7 @@ export default function WorkbenchExceptionDrawer({
 
   const bucketControls = (
     <div className="workbench-anomaly-drawer__bucket-controls" ref={bucketControlsRef}>
-      <ToggleButtonGroup
+      <SegmentGroup
         aria-label="异常状态"
         className="workbench-anomaly-drawer__bucket-segmented"
         disallowEmptySelection
@@ -226,12 +225,11 @@ export default function WorkbenchExceptionDrawer({
           }
         }}
       >
-        <ToggleButton id="unpaired">未配对异常 {bucketCounts.unpaired}</ToggleButton>
-        <ToggleButton id="paired">
-          <ToggleButtonGroup.Separator />
+        <Segment id="unpaired">未配对异常 {bucketCounts.unpaired}</Segment>
+        <Segment id="paired">
           已配对异常 {bucketCounts.paired}
-        </ToggleButton>
-      </ToggleButtonGroup>
+        </Segment>
+      </SegmentGroup>
     </div>
   );
 
@@ -247,7 +245,7 @@ export default function WorkbenchExceptionDrawer({
     >
       <div className="workbench-anomaly-drawer__filters">
         <div className="workbench-anomaly-drawer__view-row">
-          <ToggleButtonGroup
+          <SegmentGroup
             aria-label="异常类型"
             className="workbench-anomaly-drawer__view-segmented"
             disallowEmptySelection
@@ -261,12 +259,11 @@ export default function WorkbenchExceptionDrawer({
               }
             }}
           >
-            <ToggleButton id="amount">金额异常 {exceptionCounts?.amountTotal ?? 0}</ToggleButton>
-            <ToggleButton id="document_only">
-              <ToggleButtonGroup.Separator />
+            <Segment id="amount">金额异常 {exceptionCounts?.amountTotal ?? 0}</Segment>
+            <Segment id="document_only">
               仅资料异常 {exceptionCounts?.documentOnly ?? 0}
-            </ToggleButton>
-          </ToggleButtonGroup>
+            </Segment>
+          </SegmentGroup>
           <span aria-live="polite" className="workbench-anomaly-drawer__count">
             {visibleGroups.length < total ? `显示 ${visibleGroups.length} / ${total}` : `共 ${total} 项`}
           </span>
@@ -276,7 +273,7 @@ export default function WorkbenchExceptionDrawer({
             <h3 className="workbench-anomaly-drawer__filter-heading" id="amount-anomaly-category-title">
               金额异常分类
             </h3>
-            <ToggleButtonGroup
+            <SegmentGroup
               aria-label="金额异常分类"
               className="workbench-anomaly-drawer__amount-filters"
               disallowEmptySelection
@@ -299,20 +296,20 @@ export default function WorkbenchExceptionDrawer({
                     {family.codes.map((code) => {
                       const count = exceptionCounts?.byCode[code] ?? 0;
                       return (
-                        <ToggleButton
+                        <Segment
                           aria-label={`${WORKBENCH_AMOUNT_ANOMALY_LABELS[code]} ${count}`}
                           id={code}
                           key={code}
                         >
                           <span aria-hidden="true">{AMOUNT_RULE_SHORT_LABELS[code]}</span>
                           <strong aria-hidden="true">{count}</strong>
-                        </ToggleButton>
+                        </Segment>
                       );
                     })}
                   </div>
                 </div>
               ))}
-            </ToggleButtonGroup>
+            </SegmentGroup>
           </section>
         ) : null}
       </div>

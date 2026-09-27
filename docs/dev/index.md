@@ -55,3 +55,5 @@
 - [流水拆分 I/O 与验证](bank-transaction-splits.md)：API、事务边界、迁移、七类测试与发布要求。
 
 - [OA、发票与银行来源详情](source-record-details.md)：原始字段与内部状态隔离、详情 I/O、旧路径删除及验证责任。
+
+- [全 App 原生分段切换](segmented-controls.md)：展示 I/O、入口清单、旧样式删除与交互验收。

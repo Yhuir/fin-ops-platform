@@ -137,7 +137,7 @@ describe("ETC ticket management page", () => {
       /etc.*toast|etc.*feedback|etc.*notice|StatePanel/.test(pageSource) ? null : "ETC feedback/status surfaces should use project feedback classes",
       pageSource.includes("@heroui/react") ? null : "ETC page should use HeroUI primitives where appropriate",
       pageSource.includes("DisclosureGroup") && pageSource.includes("EtcDisclosureSection") ? null : "ETC workflow should use collapsible HeroUI sections",
-      pageSource.includes("ToggleButtonGroup") ? null : "ETC status switcher should use HeroUI ToggleButtonGroup",
+      pageSource.includes("SegmentGroup") ? null : "ETC status switcher should use native SegmentGroup",
       pageSource.includes("fullWidth") ? null : "ETC status switcher should use the native full-width layout",
     ].filter(Boolean);
 
@@ -168,7 +168,7 @@ describe("ETC ticket management page", () => {
     const compactProgressRule = cssRule(styles, ".etc-batch-progress__step[aria-current=\"step\"]");
     const controlMotionRule = cssRule(
       styles,
-      ".etc-page-action-link,\n.etc-primary-action,\n.etc-secondary-action,\n.etc-danger-action,\n.etc-icon-action,\n.etc-status-segmented__button,\n.etc-list-row-button,\n.etc-file-picker,\n.etc-upload-drop-box,\n.etc-reconciliation-description-toggle,\n.etc-inline-icon-action",
+      ".etc-page-action-link,\n.etc-primary-action,\n.etc-secondary-action,\n.etc-danger-action,\n.etc-icon-action,\n.etc-list-row-button,\n.etc-file-picker,\n.etc-upload-drop-box,\n.etc-reconciliation-description-toggle,\n.etc-inline-icon-action",
       "--motion-fast",
     );
     const tagRule = cssRule(styles, ".etc-count-tag,\n.etc-status-tag");

@@ -138,7 +138,7 @@ test("bank-flow layouts share the compact workspace and leave other pages unaffe
       await page.screenshot({ path: testInfo.outputPath(`${view}-${size.width}.png`) });
     }
     if (view === "按标签") {
-      await page.getByRole("navigation", { name: "银行流水下钻路径" }).getByRole("button", { name: /^主标签/ }).click();
+      await page.getByRole("radiogroup", { name: "银行流水下钻路径" }).getByRole("radio", { name: /^主标签/ }).click();
       await expect(page.getByRole("listbox", { name: "主标签", exact: true })).toBeVisible();
       await page.getByRole("option", { name: "选择主标签 项目开销", exact: true }).click();
       await expect(page.getByRole("listbox", { name: "子标签", exact: true })).toBeVisible();

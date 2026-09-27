@@ -1,4 +1,5 @@
-import { Button, Checkbox, Input, ToggleButton, ToggleButtonGroup } from "@heroui/react";
+import SegmentedControl, { Segment, SegmentGroup } from "../components/common/SegmentedControl";
+import { Button, Checkbox, Input } from "@heroui/react";
 import { ChevronLeft, ChevronRight, Download, PanelRightOpen, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -304,7 +305,7 @@ export default function OaPendingPaymentsPage() {
               className="oa-pending-payments-query"
               left={(
                 <div className="oa-pending-payments-query__grid">
-                  <ToggleButtonGroup
+                  <SegmentGroup
                     aria-label="OA流程状态视图"
                     className="oa-pending-payments-view-toggle"
                     disallowEmptySelection
@@ -316,16 +317,15 @@ export default function OaPendingPaymentsPage() {
                     selectionMode="single"
                     size="sm"
                   >
-                    <ToggleButton id="completed">
+                    <Segment id="completed">
                       已完成 OA
                       {completedCountLabel ? <span className="oa-pending-payments-view-toggle__count">{completedCountLabel}</span> : null}
-                    </ToggleButton>
-                    <ToggleButton id="in_progress">
-                      <ToggleButtonGroup.Separator />
+                    </Segment>
+                    <Segment id="in_progress">
                       进行中 OA
                       {inProgressCountLabel ? <span className="oa-pending-payments-view-toggle__count">{inProgressCountLabel}</span> : null}
-                    </ToggleButton>
-                  </ToggleButtonGroup>
+                    </Segment>
+                  </SegmentGroup>
                   <BusinessPeriodPicker
                     allowedModes={["month"]}
                     ariaLabel="OA月份筛选"
@@ -628,22 +628,9 @@ function OaBankLinkDrawer({
       width="min(560px, 100vw)"
     >
         <div className="oa-pending-payments-bank-drawer__meta">已选 OA {selectedOaRowIds.length} 条</div>
-        <div className="oa-pending-payments-bank-drawer__filters">
-          {(["all", "unmatched", "matched", "linked_in_progress"] as OaPendingPaymentBankCandidateRelationStatus[]).map((status) => (
-            <Button
-              className={relationStatus === status ? "oa-pending-payments-bank-drawer__filter oa-pending-payments-bank-drawer__filter--active" : "oa-pending-payments-bank-drawer__filter"}
-              key={status}
-              onPress={() => {
-                setRelationStatus(status);
-                setPage(1);
-              }}
-              size="sm"
-              variant={relationStatus === status ? "primary" : "tertiary"}
-            >
-              {bankCandidateFilterLabel(status)}
-            </Button>
-          ))}
-        </div>
+        <SegmentedControl label="支出流水关联状态" value={relationStatus}
+          onChange={status => { setRelationStatus(status); setPage(1); }}
+          options={(["all", "unmatched", "matched", "linked_in_progress"] as OaPendingPaymentBankCandidateRelationStatus[]).map(status => ({ key: status, label: bankCandidateFilterLabel(status) }))} />
         <label className="oa-pending-payments-bank-drawer__search">
           <span>搜索</span>
           <Input

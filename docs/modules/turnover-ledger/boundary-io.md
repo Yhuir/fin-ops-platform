@@ -155,3 +155,8 @@
 业务 owner 提供 `PostgresTurnoverSuggestionRetirementRepository.run(apply, actor_id)` 与运维 CLI `python3 -m fin_ops_platform.tools.retire_split_turnover_suggestions [--apply --operator <actor>]`。默认仅预览；apply 使用 serializable 事务并锁定候选关系，仅退役列状态和 normalized 状态均为 suggested、source=system，且至少一个旧父用途已经被两项以上、合计守恒的真实子项替代的历史快照。未拆分建议、当前子项、manual/confirmed/withdrawn、无银行证据或不守恒拆分不属于候选。
 
 退役仅物理移除该过时系统建议行，在同一事务写 `audit.events` 的完整 before 和明确 retired 标记。存在 extras 人工补充或领域事件外键引用时不处理，避免破坏用户数据或历史证据；不引入领域不支持的 deleted 状态，也不会被常规 load/save 重新载入。预览不写、重复执行无新增审计、失败整体回滚，不创建人工关系、不删除银行或子项。不读取 0180 category_payload，允许候选发布在 0179 schema 上执行，再走正常发布验证。真实 PG 测试覆盖精确集合、预览、幂等、回滚以及事务内还原 0179 schema 的运行验证。
+
+
+## 2026-09-28 原生分段切换展示
+
+本模块的视图/状态切换采用[统一 HeroUI 分段展示合同](../../dev/segmented-controls.md)。页面继续拥有选中状态、计数、权限、草稿、查询与写入回调；公共组件只输入选项/选中值/禁用状态并输出选择事件，不产生网络或持久化 I/O。已替换的独立按钮与旧选中样式同步删除；既有业务、API、现金隔离及数据库边界不变。入口范围、例外和验证责任见上述合同。

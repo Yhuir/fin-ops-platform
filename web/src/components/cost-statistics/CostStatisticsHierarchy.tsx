@@ -1,4 +1,4 @@
-import { Button } from "@heroui/react";
+import SegmentedControl from "../common/SegmentedControl";
 import { useState, type CSSProperties, type ReactNode } from "react";
 
 import CostExplorerList from "./CostExplorerList";
@@ -28,14 +28,10 @@ export default function CostStatisticsHierarchy({ lanes, detailTitle, navigation
 
   return (
     <div className="cost-hierarchy" data-lanes={lanes.length} style={{ "--cost-lane-count": lanes.length } as CSSProperties}>
-      <nav aria-label={navigationLabel} className="cost-hierarchy-breadcrumb">
-        {lanes.map((lane, index) => (
-          <Button key={lane.title} size="sm" variant={activeLane === index ? "primary" : "secondary"} onPress={() => setFocusedLane(index)}>
-            {lane.title}{lane.selectedKey ? `：${lane.items.find(item => item.key === lane.selectedKey)?.label ?? ""}` : ""}
-          </Button>
-        ))}
-        <Button size="sm" variant={activeLane === lanes.length ? "primary" : "secondary"} onPress={() => setFocusedLane(lanes.length)}>{detailTitle}</Button>
-      </nav>
+      <div className="cost-hierarchy-breadcrumb">
+        <SegmentedControl label={navigationLabel} value={String(activeLane)} onChange={key => setFocusedLane(Number(key))}
+          options={[...lanes.map((lane, index) => ({ key: String(index), label: `${lane.title}${lane.selectedKey ? `：${lane.items.find(item => item.key === lane.selectedKey)?.label ?? ""}` : ""}` })), { key: String(lanes.length), label: detailTitle }]} />
+      </div>
       <div className="cost-hierarchy-grid">
         {lanes.map((lane, index) => (
           <div key={lane.title} className={`cost-hierarchy-column${activeLane === index ? " is-current" : ""}`}>

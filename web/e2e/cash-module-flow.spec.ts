@@ -251,10 +251,10 @@ test.describe("cash module deterministic browser flow", () => {
     await expect(grid).toContainText("合成现金归还");
     const before = flowResponses;
     await page.getByRole("link", { name: "现金账目", exact: true }).click();
-    await page.getByRole("button", { name: "公司", exact: true }).click();
+    await page.getByRole("radio", { name: "公司", exact: true }).click();
     await page.getByRole("tab", { name: "有票支付", exact: true }).click();
     await page.getByRole("tab", { name: "往来账总表", exact: true }).click();
-    await expect(page.getByRole("button", { name: "公司", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("radio", { name: "公司", exact: true })).toHaveAttribute("aria-checked", "true");
     await page.getByRole("link", { name: "现金流水", exact: true }).click();
     await expect(grid).toContainText("合成现金归还"); await expect(grid).not.toContainText("合成个人借出");
     await expect(page.getByRole("textbox", { name: "搜索流水" })).toHaveValue("归还");
@@ -270,7 +270,7 @@ test.describe("cash module deterministic browser flow", () => {
     await expect(page.getByRole("grid", { name: "交易流水" })).toBeVisible();
     await expect(page.locator(".cash-workspace")).toHaveCount(0);
     await page.getByRole("link", { name: "现金账目", exact: true }).click();
-    await expect(page.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("radio", { name: "全部", exact: true })).toHaveAttribute("aria-checked", "true");
   });
 
   test("compact controls align without accounts, empty state stays below headers, and footer fits the viewport", async ({ page }, testInfo) => {

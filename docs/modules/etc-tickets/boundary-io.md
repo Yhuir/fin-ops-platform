@@ -156,3 +156,8 @@
 - 草稿 finalize 把上传 adapter 已规范化的完整附件路径保存到 business batch `oa_attachment_paths`；OA 表单只提交已注册字段，删除无效 `etcBatchId/businessBatchId/invoiceCount` 等扩展字段。草稿 ID 不等同正式 OA ID。
 - manual submitted 使用既有 target-scoped `save_etc_oa_draft_attempt` CAS，在同一事务保存提交事实并经 matching queue repository 标记精确月份；移除 submitted 后重复回调投递。幂等重复决定零业务写、零重复任务。已提交但 OA owner 为空时允许已有 `candidateOaRowId` 明确补齐；非空 owner 冲突拒绝。
 - `bind_etc_oa_sources` 是 relation UoW 内的 ETC owner 窄写：只保存确认归属、来源审计及版本，并同步 submission owner。旧 snapshot 不得覆盖新来源。ETC service 不写 relation SQL；来源关系已绑定后沿用现有批次删除保护。
+
+
+## 2026-09-28 原生分段切换展示
+
+本模块的视图/状态切换采用[统一 HeroUI 分段展示合同](../../dev/segmented-controls.md)。页面继续拥有选中状态、计数、权限、草稿、查询与写入回调；公共组件只输入选项/选中值/禁用状态并输出选择事件，不产生网络或持久化 I/O。已替换的独立按钮与旧选中样式同步删除；既有业务、API、现金隔离及数据库边界不变。入口范围、例外和验证责任见上述合同。

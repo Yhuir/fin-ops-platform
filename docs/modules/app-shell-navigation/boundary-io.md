@@ -127,3 +127,8 @@ Shell 精确展示导入 pending/processing/awaiting_confirmation/needs_review/f
 ## 2026-09-24 后台任务展示收敛
 
 App Shell 不再挂载任何页面顶部后台任务进度/完成条。删除 `BackgroundProgressBlock`、专属 CSS 和 Provider 的 primaryJob/extraCount 排序派生；任务查询、轮询和其它消费者保留。既有 AppStatusIndicator 弹层按 job ID 去重组合摘要与 active jobs；非导入任务按原能力字段和操作权限提供重试/确认，错误在弹层反馈，导入任务继续进入 SharedImportTasksButton，不重复实现导入生命周期。零新增 API、轮询、持久化或数据库迁移。
+
+
+## 2026-09-28 原生分段切换展示
+
+本模块的视图/状态切换采用[统一 HeroUI 分段展示合同](../../dev/segmented-controls.md)。页面继续拥有选中状态、计数、权限、草稿、查询与写入回调；公共组件只输入选项/选中值/禁用状态并输出选择事件，不产生网络或持久化 I/O。已替换的独立按钮与旧选中样式同步删除；既有业务、API、现金隔离及数据库边界不变。入口范围、例外和验证责任见上述合同。

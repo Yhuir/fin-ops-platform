@@ -178,7 +178,7 @@ describe("AutoTagRulesDrawer", () => {
     expect(within(drawer).queryByRole("button", { name: /下移/ })).not.toBeInTheDocument();
     expect(within(drawer).queryByText("OA中的类型")).not.toBeInTheDocument();
 
-    await user.click(within(drawer).getByRole("button", { name: "停用" }));
+    await user.click(within(drawer).getByRole("radio", { name: "停用" }));
     expect(await within(drawer).findByText("费用 / 旧奖金")).toBeInTheDocument();
   });
 

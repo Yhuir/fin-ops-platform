@@ -1,3 +1,4 @@
+import "../common/segmentedControl.css";
 import { Button, Chip, ListBox, Select, Tabs } from "@heroui/react";
 import { Plus, X } from "lucide-react";
 import { useState } from "react";
@@ -64,17 +65,15 @@ export default function SettingsPendingInvoiceTagsSection({
         <h3 id="settings-section-pending-invoice-tags-title">待找发票筛选</h3>
       </header>
       <div className="settings-section-body">
-        <Tabs
-          className="settings-pending-tabs"
+        <Tabs className="app-segments settings-pending-tabs"
           selectedKey={activeGroup}
-          variant="secondary"
           onSelectionChange={(key) => onSelectGroup(String(key) as typeof activeGroup)}
         >
           <Tabs.List aria-label="待找发票筛选分组">
             {(Object.keys(GROUP_LABELS) as Array<keyof typeof GROUP_LABELS>).map((group) => (
               <Tabs.Tab id={group} key={group}>
                 {GROUP_LABELS[group]} {groups[group].length}
-              </Tabs.Tab>
+              <Tabs.Indicator /></Tabs.Tab>
             ))}
           </Tabs.List>
         </Tabs>

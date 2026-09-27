@@ -1102,7 +1102,7 @@ describe("Turnover ledger page", () => {
 
     expect(buttonRule).toContain("--motion-fast");
     expect(buttonRule).toContain("--ease-out-quart");
-    expect(pageSource).toContain("<ToggleButtonGroup");
+    expect(pageSource).toContain("<SegmentGroup");
     expect(pageSource).not.toContain("turnover-ledger-tabs__tab");
     expect(summaryBandRule).toContain("border: 1px solid var(--fp-border)");
     expect(summaryMetricRule).toContain("min-height: 84px");

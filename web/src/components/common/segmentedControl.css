@@ -1,0 +1,76 @@
+/* Shared native single-choice presentation; no business selectors or global overrides. */
+.app-segments {
+  min-width: 0;
+  max-width: 100%;
+  flex-shrink: 1;
+}
+.app-segments.toggle-button-group,
+.app-segments > .tabs__list,
+.app-segments > .tabs__list-container > .tabs__list {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+  gap: 2px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px;
+  border: 1px solid var(--fp-border);
+  border-radius: 10px;
+  background: var(--fp-surface-muted);
+  overflow-x: auto;
+  scrollbar-width: thin;
+  box-shadow: none;
+  isolation: isolate;
+}
+.app-segments.toggle-button-group--full-width { width: 100%; }
+.app-segments .toggle-button,
+.app-segments .tabs__tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 0 auto;
+  gap: 6px;
+  min-width: 0;
+  width: auto;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--fp-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  outline-offset: -2px;
+  z-index: 0;
+}
+.app-segments.toggle-button-group--full-width > .toggle-button { flex: 1 1 0; }
+.app-segments .toggle-button::before,
+.app-segments .toggle-button::after { display: none; }
+.app-segments .toggle-button[data-selected="true"],
+.app-segments .tabs__tab[data-selected="true"] { color: var(--fp-primary); background: transparent; box-shadow: none; }
+.app-segments .toggle-button[data-hovered="true"]:not([data-selected="true"]),
+.app-segments .tabs__tab[data-hovered="true"]:not([data-selected="true"]) { background: var(--fp-primary-soft); }
+.app-segments .app-segments__indicator,
+.app-segments .tabs__indicator {
+  position: absolute;
+  inset: 0;
+  border-radius: 7px;
+  background: var(--fp-primary-soft);
+  box-shadow: none;
+  z-index: -1;
+  transition: translate 160ms ease, width 160ms ease;
+  pointer-events: none;
+}
+.app-segments__label { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.app-segments .toggle-button[data-focus-visible="true"],
+.app-segments .tabs__tab[data-focus-visible="true"] { outline: 2px solid var(--fp-primary); }
+.app-segments .toggle-button[data-disabled="true"],
+.app-segments .tabs__tab[data-disabled="true"] { opacity: .5; }
+@media (prefers-reduced-motion: reduce) {
+  .app-segments .app-segments__indicator, .app-segments .tabs__indicator { transition: none; }
+}

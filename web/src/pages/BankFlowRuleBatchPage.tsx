@@ -1,5 +1,6 @@
+import { Segment, SegmentGroup } from "../components/common/SegmentedControl";
 import BankTransactionDrawer from "../features/bankSplits/BankTransactionDrawer";
-import { Button, Checkbox, ToggleButton, ToggleButtonGroup } from "@heroui/react";
+import { Button, Checkbox } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Eye, RefreshCw } from "lucide-react";
 
@@ -768,7 +769,7 @@ export default function BankFlowRuleBatchPage() {
         <StatePanel compact tone="warning">当前页面暂不可提交、撤回或保存流水规则批次。</StatePanel>
       ) : null}
       <div aria-label="批次筛选" className="bank-flow-rule-batches-filter" role="region">
-        <ToggleButtonGroup
+        <SegmentGroup
           aria-label="批次状态"
           className="bank-flow-rule-batches-segment"
           disallowEmptySelection
@@ -780,10 +781,10 @@ export default function BankFlowRuleBatchPage() {
           selectionMode="single"
           size="sm"
         >
-          <ToggleButton id="unsubmitted">未提交 {unsubmittedCount}</ToggleButton>
-          <ToggleButton id="submitted"><ToggleButtonGroup.Separator />已提交 {payload.summary.submittedCount}</ToggleButton>
-          <ToggleButton id="withdrawn"><ToggleButtonGroup.Separator />历史 {payload.summary.withdrawnCount}</ToggleButton>
-        </ToggleButtonGroup>
+          <Segment id="unsubmitted">未提交 {unsubmittedCount}</Segment>
+          <Segment id="submitted">已提交 {payload.summary.submittedCount}</Segment>
+          <Segment id="withdrawn">历史 {payload.summary.withdrawnCount}</Segment>
+        </SegmentGroup>
         <BusinessPeriodPicker
           allowedModes={["month"]}
           ariaLabel="批次月份"

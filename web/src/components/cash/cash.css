@@ -16,12 +16,6 @@
 .cash-page h3, .cash-drawer h3 { font-size: 14px; font-weight: 600; margin: 0; }
 .cash-page h4, .cash-drawer h4 { font-size: 13px; font-weight: 600; margin: 0; }
 .cash-book-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 40px; border-bottom: 1px solid #dfe4ec; }
-.cash-tabs { display: flex; align-items: stretch; gap: 0; overflow-x: auto; border-bottom: 1px solid #dfe4ec; margin-bottom: 0; min-height: 40px; }
-.cash-book-heading > .cash-tabs { border: 0; margin: 0; }
-.cash-tabs .tabs__list { background: transparent; padding: 0; border-radius: 0; justify-content: flex-start; }
-.cash-tabs .tabs__tab { width: auto; height: 40px; min-height: 40px; padding: 0 16px; border-radius: 0; border-bottom: 2px solid transparent; color: #687384; white-space: nowrap; font-size: 13px; }
-.cash-tabs .tabs__tab[data-selected="true"] { color: #1d4ed8; border-bottom-color: #1d4ed8; font-weight: 600; }
-.cash-tabs .tabs__tab[data-focus-visible="true"] { outline: 2px solid #2563eb; outline-offset: -3px; }
 .cash-toolbar, .cash-actions, .cash-row-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .cash-toolbar { margin: 0; padding: 6px 0; min-height: 44px; }
 .cash-toolbar-actions { margin-left: auto; }
@@ -70,9 +64,6 @@
 .cash-page .finance-table__column[aria-sort="descending"]::after, .cash-drawer .finance-table__column[aria-sort="descending"]::after { content: "↓"; color: #1d4ed8; }
 .cash-sort-popover .button { justify-content: flex-start; width: 100%; }
 .cash-sort-popover .button[aria-pressed="true"] { background: #e8f0ff; color: #1d4ed8; }
-.cash-category-switch { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0; margin: 0; min-height: 40px; border-top: 1px solid #edf0f3; }
-.cash-category-switch .button { height: 28px; padding: 4px 10px; }
-.cash-category-switch .button[aria-pressed="true"] { background: #fff; outline: 1px solid #cbd5e1; }
 .cash-color-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: #9aa4b2; }
 .cash-color-dot--company { background: #e7c95d; }
 .cash-color-dot--external-person { background: #60a5fa; }

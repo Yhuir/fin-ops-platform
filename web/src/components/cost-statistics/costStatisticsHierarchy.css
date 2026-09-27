@@ -44,7 +44,6 @@
   .cost-page .cost-finance-table--fit .finance-table__scroll { overflow-x: auto; }
   .cost-page .finance-table__content { min-width: 560px; }
 }
-.cost-hierarchy-breadcrumb button { max-width: 100%; height: auto; white-space: normal; }
 @container (max-width: 600px) {
   .cost-page .cost-view-switcher { padding-bottom: 2px; }
   .cost-page .cost-header-actions { flex-wrap: nowrap; overflow-x: auto; width: 100%; }

@@ -467,3 +467,8 @@ OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../
 - `BankFlowBatchWithdrawPreview` 只通过已有 `GET /api/bank-flow-rule-batches/{id}?view=formal` 读取完整批次成员与版本，HeroUI Drawer/Button/Table 展示批次范围与撤回语义，不伪造 before/after topology。只有显式确认才将该版本交给页面编排；页面调用原批次 withdraw API 并执行一次共享写后重读。取消/读取失败零写，提交后重读失败不得重复提交，canonical epoch 变化要求重开预览。
 - 普通关系继续使用原服务端 before/after 预览及版本/幂等提交；批次维持原 owner API。无后端接口、持久化、SQL、worker、缓存、迁移或备份变更。
 - 文件新增 `web/src/components/workbench/BankFlowBatchWithdrawPreview.tsx`；测试新增同名组件测试，更新关系选择、拆分单元格及浏览器测试。
+
+
+## 2026-09-28 原生分段切换展示
+
+本模块的视图/状态切换采用[统一 HeroUI 分段展示合同](../../dev/segmented-controls.md)。页面继续拥有选中状态、计数、权限、草稿、查询与写入回调；公共组件只输入选项/选中值/禁用状态并输出选择事件，不产生网络或持久化 I/O。已替换的独立按钮与旧选中样式同步删除；既有业务、API、现金隔离及数据库边界不变。入口范围、例外和验证责任见上述合同。
