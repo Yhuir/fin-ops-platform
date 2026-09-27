@@ -7,7 +7,11 @@ from uuid import uuid4
 
 from fin_ops_platform.app.routes_bank_transaction_splits import BankTransactionSplitApiRoutes
 from fin_ops_platform.services.bank_transaction_category_service import default_bank_transaction_tag_dictionary_payload
-from fin_ops_platform.services.bank_transaction_split_service import BankTransactionSplitError, normalize_split_category, validate_split_parts
+from fin_ops_platform.services.bank_transaction_split_service import (
+    BankTransactionSplitError,
+    normalize_split_category,
+    validate_split_parts,
+)
 from fin_ops_platform.services.postgres_repositories.bank_transaction_splits import (
     PostgresBankTransactionSplitRepository,
 )
@@ -142,8 +146,8 @@ class SplitRouteTests(unittest.TestCase):
 
 class SplitDrawerProjectionTests(unittest.TestCase):
     def test_related_child_sections_have_one_parent_editor_and_original_amount(self):
-        from fin_ops_platform.services.input_invoice_usage_service import _relation_detail_sections as invoice_sections
-        from fin_ops_platform.services.oa_pending_payment_details import _relation_detail_sections as oa_sections
+        from fin_ops_platform.services.input_invoice_usage_service import source_relation_sections as invoice_sections
+        from fin_ops_platform.services.oa_pending_payment_details import source_relation_sections as oa_sections
         rows = [{"bankTransactionId":child,"parent_row_id":"parent","parent_amount":"1001497.22",
                  "amount":amount,"direction":"outflow","bank_split_parts":[{"id":"a"},{"id":"b"}]}
                 for child,amount in [("a","1000000.00"),("b","1497.22")]]
@@ -152,3 +156,38 @@ class SplitDrawerProjectionTests(unittest.TestCase):
             self.assertEqual(len(sections),1)
             self.assertEqual(sections[0]['bank_transaction_id'],'parent')
             self.assertEqual(next(field['value'] for field in sections[0]['fields'] if field['label']=='金额'),'1001497.22')
+
+
+class SplitSelectableTagsTests(unittest.TestCase):
+    def test_formal_rules_only_and_explicit_system_label(self):
+        from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
+        dictionary = default_bank_transaction_tag_dictionary_payload()
+        dictionary['definitions'] += [
+            {'code': 'formal_z', 'label': '费用 / 利息', 'path': ['费用', '利息'], 'source': 'custom', 'status': 'active', 'rules': {}, 'priority': 2, 'sort_order': 2, 'output_primary_label': '费用', 'output_sub_label': '利息'},
+            {'code': 'formal_a', 'label': '采购 / 设备', 'path': ['采购', '设备'], 'source': 'custom', 'status': 'active', 'rules': {}, 'priority': 2, 'sort_order': 1, 'output_primary_label': '采购', 'output_sub_label': '设备'},
+            {'code': 'not_a_rule', 'label': '旧标签', 'path': ['旧标签'], 'source': 'custom', 'status': 'active'},
+            {'code': 'archived_rule', 'label': '旧费用', 'path': ['旧费用'], 'source': 'custom', 'status': 'archived', 'rules': {}},
+        ]
+        selected = BankTransactionCategoryService.selectable_tag_dictionary(dictionary)
+        tags = PostgresBankTransactionSplitRepository.tag_definitions(selected)
+        codes = [tag['code'] for tag in tags]
+        self.assertNotIn('borrow_in_bank_pending_repayment', codes)
+        self.assertNotIn('not_a_rule', codes)
+        self.assertNotIn('archived_rule', codes)
+        self.assertLess(codes.index('formal_a'), codes.index('formal_z'))
+        self.assertEqual(next(tag['path'] for tag in tags if tag['code'] == 'internal_transfer'), ['内部往来款'])
+        self.assertNotIn('rules', tags[0])
+
+    def test_history_can_be_preserved_but_not_created_changed_or_forged(self):
+        from fin_ops_platform.services.bank_transaction_split_service import SPLIT_CATEGORY_FIELDS
+        old_id = str(uuid4())
+        old = {'id': old_id, 'category_code': 'retired', 'amount': '2.00',
+               **normalize_split_category({}, {'code': 'retired', 'label': '旧类', 'path': ['旧类']})}
+        request = {'id': old_id, 'category_code': 'retired', 'amount': '2.00', 'category_label_path': ['旧类']}
+        fee = {'category_code': 'interest', 'amount': '1.00'}
+        def validate(part):
+            return validate_split_parts({'parts': [part, fee]}, amount=Decimal('3.00'), current_parts=[old], definitions=DEFINITIONS)
+        self.assertEqual(validate(request)[0]['category_payload'], {key: old[key] for key in SPLIT_CATEGORY_FIELDS})
+        for patch in ({'id': None}, {'id': str(uuid4())}, {'amount': '1.00'}, {'category_label_path': ['猜测']}, {'turnover_family': 'bank'}):
+            with self.subTest(patch=patch), self.assertRaises(BankTransactionSplitError):
+                validate({**request, **patch})

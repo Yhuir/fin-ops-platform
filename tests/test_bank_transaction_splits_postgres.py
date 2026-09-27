@@ -240,3 +240,25 @@ class BankTransactionSplitPostgresTests(unittest.TestCase):
         self.assertEqual(result['samples'], 100)
         self.assertEqual(self.connection.fetch_one('SELECT count(*) AS n FROM app.bank_transactions')['n'], 1)
         self.assertEqual(self.service.read(self.parent)['version'], 0)
+
+    def test_selectable_tags_exclude_legacy_while_history_and_batch_still_read(self):
+        saved = self.service.save('txn-split-test', self.payload(), actor_id='tester')
+        self.assertNotIn('borrow_in_bank_pending_repayment', {d['code'] for d in saved['tag_definitions']})
+        self.assertEqual(next(d['path'] for d in saved['tag_definitions'] if d['code'] == 'internal_transfer'), ['内部往来款'])
+        for definition in self.settings['bank_transaction_tags']['definitions']:
+            if definition['code'] == 'test_interest':
+                definition['status'] = 'archived'
+        self.connection.execute("UPDATE app.app_settings SET settings_payload=%s WHERE settings_key='app_settings'", (jsonb(self.settings),))
+        detail = self.service.read('txn-split-test')
+        batch = self.service.read_many({'transaction_ids': ['txn-split-test', detail['parts'][1]['id']]})
+        self.assertTrue(all(row == detail for row in batch['rows']))
+        self.assertNotIn('test_interest', {d['code'] for d in detail['tag_definitions']})
+        self.assertEqual(detail['parts'], saved['parts'])
+        request = {'version': detail['version'], 'parts': [{key: part[key] for key in ('id', 'category_code', 'category_label_path', 'amount')} for part in detail['parts']]}
+        self.assertFalse(self.service.save('txn-split-test', request, actor_id='tester')['changed'])
+        request['parts'][0]['amount'] = '999999.99'
+        request['parts'][1]['amount'] = '1497.23'
+        with self.assertRaises(BankTransactionSplitError) as caught:
+            self.service.save('txn-split-test', request, actor_id='tester')
+        self.assertEqual(caught.exception.code, 'invalid_split_category')
+        self.assertEqual(self.service.read('txn-split-test')['parts'], detail['parts'])

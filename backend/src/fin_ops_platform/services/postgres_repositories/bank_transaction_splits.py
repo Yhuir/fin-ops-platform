@@ -5,7 +5,10 @@ from typing import Any, Iterator
 
 from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.bank_details_canonical_query import PostgresBankDetailsCanonicalQueryRepository
-from fin_ops_platform.services.bank_transaction_category_service import bank_transaction_tag_dictionary_display_payload
+from fin_ops_platform.services.bank_transaction_category_service import (
+    BankTransactionCategoryService,
+    bank_transaction_tag_dictionary_display_payload,
+)
 from fin_ops_platform.services.bank_transaction_split_service import SPLIT_CATEGORY_FIELDS, BankTransactionSplitError
 from fin_ops_platform.services.bank_turnover_tag_semantics import (
     EXTERNAL_TURNOVER_THIRD_LABEL_OPTIONS,
@@ -85,6 +88,7 @@ class PostgresBankTransactionSplitRepository:
         settings = PostgresBankDetailsCanonicalQueryRepository.settings_payload(transaction)
         policy = AppSettingsService.bank_category_relation_policy_snapshot(settings)
         definitions = self.tag_definitions(policy["bank_transaction_tags"])
+        selectable = self.tag_definitions(BankTransactionCategoryService.selectable_tag_dictionary(policy["bank_transaction_tags"]))
         version_row = transaction.fetch_one(
             "SELECT version FROM app.bank_transaction_split_sets WHERE bank_transaction_id = %s::uuid",
             (bank["canonical_transaction_id"],),
@@ -108,7 +112,7 @@ class PostgresBankTransactionSplitRepository:
             **self.category_instance(category),
             "turnover_third_label_options": list(EXTERNAL_TURNOVER_THIRD_LABEL_OPTIONS),
             "parts": parts,
-            "tag_definitions": definitions,
+            "tag_definitions": selectable,
             "affected_months": [bank["month"]] if bank["month"] else [],
         }
 
@@ -169,7 +173,9 @@ class PostgresBankTransactionSplitRepository:
         if len(banks) != len(transaction_ids):
             raise BankTransactionSplitError("unknown_transaction_id", "银行流水不存在。", status=404)
         settings = PostgresBankDetailsCanonicalQueryRepository.settings_payload(transaction)
-        definitions = self.tag_definitions(AppSettingsService.bank_category_relation_policy_snapshot(settings)["bank_transaction_tags"])
+        dictionary = AppSettingsService.bank_category_relation_policy_snapshot(settings)["bank_transaction_tags"]
+        definitions = self.tag_definitions(dictionary)
+        selectable = self.tag_definitions(BankTransactionCategoryService.selectable_tag_dictionary(dictionary))
         items = transaction.fetch_all(
             """SELECT bank_transaction_id::text AS parent_id,id::text AS id,category_code,amount,category_payload
                FROM app.bank_transaction_split_items WHERE bank_transaction_id=ANY(%s::uuid[]) ORDER BY position""",
@@ -189,7 +195,7 @@ class PostgresBankTransactionSplitRepository:
             **self.category_instance(categories.get(bank["transaction_id"], {})),
             "turnover_third_label_options": list(EXTERNAL_TURNOVER_THIRD_LABEL_OPTIONS),
             "parts": self.decorate_parts(by_parent.get(bank["canonical_transaction_id"], []), definitions),
-            "tag_definitions": definitions, "affected_months": [bank["month"]] if bank["month"] else [],
+            "tag_definitions": selectable, "affected_months": [bank["month"]] if bank["month"] else [],
         } for bank in banks]
 
     def persist(self, transaction: Any, *, before: dict[str, Any], parts: list[dict[str, Any]], category_code: str | None, actor_id: str, category_payload: dict[str, Any] | None = None) -> dict[str, Any]:

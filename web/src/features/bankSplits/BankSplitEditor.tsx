@@ -48,7 +48,10 @@ export default function BankSplitEditor({ transactionId, initialDetail, onSaved,
   const save = async () => {
     if (!detail || disabled) return;
     if (parts.length === 1) { setError('拆分至少需要两个子项'); return; }
-    if (parts.some(part => !tags.some(tag => tag.code === part.category_code) || amountCents(part.amount) === null || amountCents(part.amount)! <= 0n)) {
+    const unchangedHistoricalPart = (part: DraftPart) => detail.parts.some(saved => saved.id === part.id
+      && saved.category_code === part.category_code && amountCents(saved.amount) === amountCents(part.amount)
+      && saved.category_path.length === part.category_path.length && saved.category_path.every((value, index) => value === part.category_path[index]));
+    if (parts.some(part => (!tags.some(tag => tag.code === part.category_code) && !unchangedHistoricalPart(part)) || amountCents(part.amount) === null || amountCents(part.amount)! <= 0n)) {
       setError('请填写有效标签和大于零的两位小数金额'); return;
     }
     if (parts.length && difference !== 0n) { setError('子项合计必须等于流水金额'); return; }

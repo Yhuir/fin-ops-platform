@@ -68,7 +68,8 @@ def validate_split_parts(
     parts = payload.get("parts")
     if not isinstance(parts, list) or len(parts) == 1:
         raise BankTransactionSplitError("invalid_split_parts", "拆分至少需要两个子项；撤销拆分请清空子项。")
-    current_ids = {part["id"] for part in current_parts}
+    current_by_id = {part["id"]: part for part in current_parts}
+    current_ids = set(current_by_id)
     active_codes = {item["code"] for item in definitions if item.get("status") == "active"}
     seen: set[str] = set()
     result: list[dict[str, Any]] = []
@@ -77,7 +78,7 @@ def validate_split_parts(
         if not isinstance(part, dict):
             raise BankTransactionSplitError("invalid_split_parts", "子项格式不正确。")
         category_code = part.get("category_code")
-        if not isinstance(category_code, str) or category_code not in active_codes:
+        if not isinstance(category_code, str):
             raise BankTransactionSplitError("invalid_split_category", "请选择有效的银行标签。")
         raw_amount = part.get("amount")
         try:
@@ -98,7 +99,17 @@ def validate_split_parts(
             item_id = str(uuid4())
         seen.add(item_id)
         total += value
-        classification = normalize_split_category(part, next(item for item in definitions if item["code"] == category_code))
+        if category_code in active_codes:
+            classification = normalize_split_category(part, next(item for item in definitions if item["code"] == category_code))
+        else:
+            current = current_by_id.get(item_id)
+            if (current is None or current["category_code"] != category_code
+                    or Decimal(current["amount"]) != value
+                    or current["category_label_path"] != part.get("category_label_path")):
+                raise BankTransactionSplitError("invalid_split_category", "旧标签仅能原样保留；编辑子项时请选择当前有效标签。")
+            classification = {key: current[key] for key in SPLIT_CATEGORY_FIELDS}
+            if any(key in part and part[key] != classification[key] for key in SPLIT_CATEGORY_FIELDS):
+                raise BankTransactionSplitError("invalid_split_category_semantics", "历史分类内容已变化，请选择当前有效标签。")
         result.append({"id": item_id, "category_code": category_code, "amount": format(value, ".2f"), "position": position,
                        "category_payload": classification})
     if parts and total != amount:

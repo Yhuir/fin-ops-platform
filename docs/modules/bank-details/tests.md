@@ -94,3 +94,12 @@ git diff --check
 ## 2026-09-27 来源详情回归
 
 按[来源详情验证责任](../../dev/source-record-details.md#验证责任)覆盖真实来源保留、内部状态/推断/替代值移除、缺失与零值、权限及读取失败；保留本模块列表、计算、导出和关系回归。公共前端入口包括 `EntityDetailContent.test.tsx`、`DetailDrawer.test.tsx` 与 `BankTransactionDrawer.test.tsx`，后者保护按 ID 读取、切换取消及禁止列表摘要回退。具体后端/浏览器执行及性能结果据实际报告，不以本节表示已通过。
+
+
+### 拆分级联菜单与候选收敛（2026-09-27）
+
+- `tests/test_bank_transaction_splits.py`：正式规则/系统单层候选、排序、历史不可新增/修改/篡改。
+- `tests/test_bank_transaction_splits_postgres.py`：归档后历史仍可读，单笔/批量一致，原样保存无写入，修改拒绝且数据不变。
+- `web/src/test/BankSplitTagPicker.test.tsx`：hover 只浏览，叶子点击、当前值重选、Escape、禁用和长路径提示。
+- `web/src/test/BankSplitEditor.test.tsx`：历史原样保存、修改旧项拒绝及已有金额/保存/权限合同。
+- 生产浏览器逐叶验证当前正式路径；普通流水使用草稿后取消，真实 SQL 写链使用 test-owned rollback probe，不以无变化保存替代持久化验证。

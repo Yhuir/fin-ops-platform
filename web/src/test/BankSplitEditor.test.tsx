@@ -211,3 +211,22 @@ test('restoring the whole transaction uses the same complete three-column select
   fireEvent.click(screen.getByRole('button', { name: '保存', exact: true }));
   await waitFor(() => expect(saveBankSplits).toHaveBeenCalledWith('bank-1', { version: 2, parts: [], category_code: 'principal', category_label_path: ['外部往来款', '归还借款', '公司往来'] }));
 });
+
+test('an unchanged historical part remains readable and savable but cannot be modified with a retired tag', async () => {
+  const historic = { ...detail, tag_definitions: detail.tag_definitions.filter(tag => tag.code !== 'interest') };
+  vi.mocked(fetchBankSplits).mockResolvedValue(historic);
+  vi.mocked(saveBankSplits).mockResolvedValue({ ...historic, changed: false, affected_months: [] });
+  render(<BankSplitEditor transactionId="bank-1" />);
+  const amount = await screen.findByLabelText('子项 2 金额');
+  expect(screen.getByRole('combobox', { name: '子项 2 标签' })).toHaveTextContent('费用 / 利息');
+  fireEvent.change(amount, { target: { value: '1497.2' } });
+  fireEvent.change(amount, { target: { value: '1497.22' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存', exact: true }));
+  await screen.findByText('已保存');
+  expect(saveBankSplits).toHaveBeenCalledOnce();
+  fireEvent.change(amount, { target: { value: '1497.23' } });
+  fireEvent.change(screen.getByLabelText('子项 1 金额'), { target: { value: '999999.99' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存', exact: true }));
+  expect(screen.getByRole('alert')).toHaveTextContent('有效标签');
+  expect(saveBankSplits).toHaveBeenCalledOnce();
+});

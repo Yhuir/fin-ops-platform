@@ -731,6 +731,18 @@ class BankTransactionCategoryService:
         return payload
 
     @classmethod
+    def selectable_tag_dictionary(cls, dictionary: dict[str, Any]) -> dict[str, Any]:
+        """Manual split choices use the formal rules, never the historical taxonomy."""
+        normalized = cls._normalize_tag_dictionary_payload(dictionary)
+        definitions = [item for item in normalized["definitions"]
+                       if item["status"] == "active" and cls._is_auto_tag_rule_definition(item)]
+        definitions.sort(key=cls._auto_tag_rule_sort_key)
+        system = dict(BANK_AUTO_TAG_SYSTEM_RULE)
+        definitions.append({"code": BANK_AUTO_TAG_INTERNAL_TRANSFER_CODE, "status": "active", "source": "system",
+                            "label": system["label"], "path": [system["label"]]})
+        return {"version": normalized["version"], "definitions": definitions}
+
+    @classmethod
     def normalize_auto_tag_rules_update(
         cls,
         value: Any,

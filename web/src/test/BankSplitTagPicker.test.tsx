@@ -71,3 +71,27 @@ test('choosing the current leaf completes and closes the menu', async () => {
   expect(onChange).toHaveBeenCalledWith({ category_code: 'fee', category_label_path: ['费用', '利息'] });
   expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
 });
+
+test('hover browses parent levels without changing the value and a leaf click commits', async () => {
+  const onChange = vi.fn();
+  render(<BankSplitTagPicker value={{ category_code: 'fee', category_label_path: ['费用', '利息'] }}
+    tags={tags} familyOptions={familyOptions} label="标签" disabled={false} onChange={onChange} />);
+  fireEvent.click(screen.getByRole('combobox'));
+  await userEvent.hover(within(screen.getByRole('listbox', { name: '主标签' })).getByRole('option', { name: '外部往来款' }));
+  await userEvent.hover(within(screen.getByRole('listbox', { name: '子标签' })).getByRole('option', { name: '归还借款' }));
+  const bank = within(screen.getByRole('listbox', { name: '往来归属' })).getByRole('option', { name: '银行往来' });
+  await userEvent.hover(bank);
+  expect(screen.getByRole('combobox', { hidden: true })).toHaveTextContent('费用 / 利息');
+  expect(onChange).not.toHaveBeenCalled();
+  await userEvent.click(bank);
+  expect(onChange).toHaveBeenCalledTimes(1);
+  expect(onChange).toHaveBeenCalledWith({ category_code: 'repay', category_label_path: ['外部往来款', '归还借款', '银行往来'] });
+});
+
+test('disabled picker cannot open and long selected paths remain available as a title', async () => {
+  render(<BankSplitTagPicker value={{ category_code: 'repay', category_label_path: ['外部往来款', '归还借款', '银行往来'] }}
+    tags={tags} familyOptions={familyOptions} label="标签" disabled onChange={vi.fn()} />);
+  await userEvent.click(screen.getByRole('combobox'));
+  expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  expect(screen.getByTitle('外部往来款 / 归还借款 / 银行往来')).toBeVisible();
+});

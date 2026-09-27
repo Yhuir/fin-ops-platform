@@ -7,7 +7,7 @@
 - GET /api/bank-transactions/{parent-or-child-id}/splits：解析原流水，返回 transaction_id、canonical_transaction_id、amount、written_off_amount、direction、version、category_code、parts、tag_definitions、can_edit。
 - PUT 同一路径：输入 version、parts[{id?,category_code,category_label_path,amount}]；金额为十进制字符串；空 parts 撤销时提供 category_code 与 category_label_path。actor 来自登录身份。成功返回持久化完整对象、changed、affected_months；旧版本 409、不合法合计/金额/标签 400、流水不存在 404、无认证 401、无页面授权 403。
 - POST /api/bank-transactions/splits/query：输入 transaction_ids[]，输出 rows[] 与输入顺序一一对应。两个子项属于同一父项时仍按请求数返回，避免位置错绑。固定次数 SQL，无逐行 load。
-- tag_definitions 是显示合同，含 code、label、path、primary_label、sub_label、status 与配置语义，不暴露自动分类规则全文。子项与配置分开持久化，标签更新不复制成银行原始事实。
+- tag_definitions 是当前可选标签的显示合同，含 code、label、path、primary_label、sub_label、status 与配置语义，不暴露自动分类规则全文。子项与配置分开持久化，标签更新不复制成银行原始事实。
 - 平级系统标签在字典中允许 `path=[]`，拆分显示投影使用该标签自身的 `label` 作为唯一层级；有输出层级的标签使用配置层级。两种现有标签形态均纳入单元与真实 PostgreSQL 测试，不修改分类语义。
 
 ## 分类实例合同（0180）
@@ -108,3 +108,12 @@ OA 待付款、进项发票使用、销项收款的银行聚合对象，以及�
 移除 `BankSplitPartAction`、`renderPartAction`、关联台专用 `detailZone`、`scope: unit` 透传及选择模型 `unitId` 分支。整笔选择仍解析完整 canonical 子项、校验占用；保存响应、父流水旧选择清理和详情／列表重读保留。历史关系可从 OA／发票入口选择完整关系后撤回；无 OA／发票的未配对正式银行关系由 `RelationGroupGrid` 显示“撤回当前关联”，仅可操作且非只读时提供，调用既有 `onRowAction(bank member, "unlink", group)` 对精确完整正式成员执行既有预览／撤回。已配对关系沿用“更多操作 → 取消关联”。这些都是关系级操作，不恢复单项选择，也不受其他关系占用兄弟子项阻断。
 
 本次无 API shape、数据库、service/repository、read model、worker、缓存或依赖变更，不创建数据库备份。菜单分组复用配置，打开与切换不新增网络请求；性能结论以实际样本为准。测试责任与执行结果分别见银行明细和关联台模块的 tests 文档；生产结果不能由模拟 API 浏览器测试代替。
+
+
+## 2026-09-27 拆分标签候选与级联菜单
+
+- 分类 owner 的 `selectable_tag_dictionary` 复用正式有效规则和顺序，加单层系统“内部往来款”；拆分 GET、批量 query、PUT 使用同一候选集合。显示 DTO 不暴露 rules，不按自动匹配 direction 增加人工分类限制。
+- repository 的完整字典显示投影仅用于历史事实及既有消费者，不能直接作为拆分新候选。历史原样子项须同时匹配服务端 id/code/金额/完整路径/分类语义；新建或修改旧项必须使用当前有效标签，不能推断迁移。
+- `BankSplitTagPicker` 在一个菜单内完成一至三级选择，hover 父项只展开，点击叶子更新草稿，保存由 Editor 提交。触发器固定 36px，长路径单行省略；菜单桌面目标 600×360px、视口内限高，主栏始终占三分之一，二级占剩余区域、三级平分右区。分栏独立滚动，无 hover I/O。
+- 已替换拆分全字典候选入口、按深度等分全部栏宽及触发器换行样式。共享 TwoColumnTagPicker 和历史标签读取仍有调用方，保留其业务职责；无 schema、worker、cache 或银行原始事实变更。
+- 验证覆盖正式/归档/旧候选、历史原样保留与篡改拒绝、单笔批量一致、持久化回读/回滚、hover/点击/禁用/取消、共享详情与下游用途回归。
