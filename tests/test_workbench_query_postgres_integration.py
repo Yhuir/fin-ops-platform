@@ -2388,6 +2388,24 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         expected = {"oa": 2, "bank": 1, "invoice": 2}
         initial = self.repository.get_workbench_initial_page(scope_key="2026-07")
         self.assertEqual(initial["summary"]["unpaired_exception_counts"], expected)
+        # Three original bank facts remain three even though one has two units.
+        original_bank_count = self.raw_connection.fetch_one(
+            "select count(*) as n from app.bank_transactions where status='active' and txn_month='2026-07-01'"
+        )["n"]
+        self.assertEqual(initial["summary"]["bank_count"], original_bank_count)
+        self.assertEqual(initial["statistics"]["bank_transaction_count"], original_bank_count)
+        self.assertEqual(initial["summary"]["zone_counts"]["unpaired"]["bank"], original_bank_count)
+        filtered_initial = self.repository.get_workbench_initial_page(
+            scope_key="2026-07", unpaired_query={"search": "张三"},
+        )
+        self.assertEqual(filtered_initial["unpaired"]["row_counts"]["bank"], 1)
+        filtered_page = self.repository.get_workbench_groups_page(
+            scope_key="2026-07", zone="unpaired", search="张三", page_size=1,
+        )
+        self.assertEqual(filtered_page["row_counts"]["bank"], 1)
+        relation = next(g for g in filtered_page["groups"] if g.get("detail_key") == "CASE-DIRECT-1")
+        self.assertTrue(set(parts).issubset(set(relation["formal_member_ids"])))
+        self.assertEqual(relation["amount_check"]["bank_total"], "100.00")
         page = self.repository.get_workbench_groups_page(
             scope_key="2026-07", zone="unpaired", exception_bucket="unpaired", page_size=1,
         )

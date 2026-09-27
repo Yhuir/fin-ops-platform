@@ -885,3 +885,10 @@ WorkbenchSupportingDocumentFiles、groupDisplayModel、WorkbenchExceptionDrawer�
 - `WorkbenchApi.test.ts`映射实体数量；`WorkbenchExceptionDrawer.test.tsx`验证一条关系列表可以显示3 OA/2流水/5发票及切换；`WorkbenchSelection.test.tsx`继续保护审阅、详情和加载更多。
 - 浏览器 `workbench-exception-flow.spec.ts`保留两区、分类、详情按需读取、加载更多、审阅写后刷新、桌面及窄屏交互。统计文本改为实体单位，不使用已加载组数代替总数。
 - 七类责任：业务计数、repository、API合同、前端交互、跨模块读取及既有回归适用；本次没有read model/cache/worker变更，仅复用既有写后direct GET。生产验证只读。
+
+## 2026-09-28 全量流水统计父身份回归
+
+- `test_workbench_query_postgres_integration.py::test_exception_entity_counts_expand_etc_and_deduplicate_split_parent` 同时保护一个父流水拆成两个用途后，initial summary/statistics 等于原始流水事实数，两区和筛选数仍为一笔，实际成员两个与金额100元保留。
+- `test_workbench_page_query_repository.py::test_initial_bank_inventory_counts_original_parents_not_scoped_units` 保护初始查询不再按银行用途行数统计，复用既有 inventory 聚合，输出合同不变。
+- `RelationGroupGrid.test.tsx` 保护权威计数的 OA条/流水笔/发票张和无权威数时的“项明细”；`WorkbenchSelection.test.tsx` 保护零筛选结果三栏全部显示零，不回退全局数量。
+- 覆盖业务去重、repository/API读取、前端交互与既有筛选回归；没有新写链路、read model/worker/缓存或权限变化，无需新增事务、迁移和写入E2E。生产只读核对由发布验证执行。

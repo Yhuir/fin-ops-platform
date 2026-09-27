@@ -482,3 +482,10 @@ OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../
 - HeroUI native segmented controls 复用现有公共组件，实体数作为第二行；仅本抽屉局部样式，不改变其它页面。
 
 - 异常单关系汇总行保留三栏标题与金额，删除把display row counts当业务数量的冗余“项”数；ETC汇总与拆分成员不再在此冒充实体数。完整成员仍通过原详情展开读取。
+
+## 2026-09-28 全量流水统计父身份闭环
+
+- 初始 `summary.bank_count` 与 `statistics.bank_transaction_count` 复用既有 `bank_inventory` 的原始父流水唯一数；删除按 scoped bank unit 行数统计的旧路径。不以支出+收入相加替代全量，以免丢失方向未明的真实流水。
+- 两区及搜索/筛选 `row_counts.bank` 继续按明确的 `bank_transaction_id` 去重，标题单位为流水笔、OA条、发票张。已读取到零结果时使用该次查询的零数量，不再回退全区统计。
+- 共享三栏在提供权威 `totalRows` 时显示实体单位；异常详情等未提供该值的调用方明确显示“项明细”，不把拆分用途展示行解释为原始流水笔数。内部成员、组游标、分页、明细展开和选择金额保持原合同。
+- 不增加 SQL round-trip、全量 hydrate、缓存、worker、迁移、数据库备份或业务写入。

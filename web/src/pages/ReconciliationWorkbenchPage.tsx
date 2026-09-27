@@ -2329,7 +2329,7 @@ export default function ReconciliationWorkbenchPage() {
   const pairedPanes = useMemo<WorkbenchPane[]>(
     () => {
       const paneRows = buildWorkbenchPaneRows(displayPairedGroups);
-      const totals = zonePages.paired.rowCounts.rows > 0
+      const totals = zonePages.paired.page > 0
         ? zonePages.paired.rowCounts
         : workbenchData?.summary.zoneCounts.paired;
       return [
@@ -2338,13 +2338,13 @@ export default function ReconciliationWorkbenchPage() {
         { id: "invoice", title: "进销项发票", rows: paneRows.invoice, totalRows: totals?.canonicalInvoice },
       ];
     },
-    [displayPairedGroups, workbenchData?.summary.zoneCounts.paired, zonePages.paired.rowCounts],
+    [displayPairedGroups, workbenchData?.summary.zoneCounts.paired, zonePages.paired.page, zonePages.paired.rowCounts],
   );
 
   const openPanes = useMemo<WorkbenchPane[]>(
     () => {
       const paneRows = buildWorkbenchPaneRows(displayOpenGroups);
-      const totals = zonePages.unpaired.rowCounts.rows > 0
+      const totals = zonePages.unpaired.page > 0
         ? zonePages.unpaired.rowCounts
         : workbenchData?.summary.zoneCounts.unpaired;
       return [
@@ -2353,7 +2353,7 @@ export default function ReconciliationWorkbenchPage() {
         { id: "invoice", title: "进销项发票", rows: paneRows.invoice, totalRows: totals?.canonicalInvoice },
       ];
     },
-    [displayOpenGroups, workbenchData?.summary.zoneCounts.unpaired, zonePages.unpaired.rowCounts],
+    [displayOpenGroups, workbenchData?.summary.zoneCounts.unpaired, zonePages.unpaired.page, zonePages.unpaired.rowCounts],
   );
 
   const openAuxiliaryHeaderActions = useMemo(

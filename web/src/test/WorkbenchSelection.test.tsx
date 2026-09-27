@@ -2475,6 +2475,9 @@ describe("Workbench row selection and detail drawer", () => {
 
     expect(await within(unpairedZone).findByText("未配对 0 项")).toBeInTheDocument();
     expect(within(unpairedZone).getByText("当前区域暂无记录。")).toBeInTheDocument();
+    expect(within(unpairedZone).getByText("0 条")).toBeInTheDocument();
+    expect(within(unpairedZone).getByText("0 笔")).toBeInTheDocument();
+    expect(within(unpairedZone).getByText("0 张")).toBeInTheDocument();
   });
 
   test("unpaired confirm accepts two different canonical members from the same pane", async () => {

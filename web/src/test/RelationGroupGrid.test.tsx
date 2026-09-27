@@ -487,6 +487,7 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(grid).getAllByRole("rowgroup")).toHaveLength(2);
     expect(within(grid).getAllByRole("columnheader").length).toBeGreaterThan(0);
     expect(within(grid).getAllByRole("row").length).toBeGreaterThan(0);
+    expect(within(grid).getAllByText(/项明细$/).length).toBe(3);
   });
 
   test("shows server total pane counts instead of the currently loaded page row count", () => {
@@ -511,8 +512,8 @@ describe("Workbench candidate grouping layout", () => {
     );
 
     expect(screen.getByText("24 条")).toBeInTheDocument();
-    expect(screen.getByText("237 条")).toBeInTheDocument();
-    expect(screen.getByText("91 条")).toBeInTheDocument();
+    expect(screen.getByText("237 笔")).toBeInTheDocument();
+    expect(screen.getByText("91 张")).toBeInTheDocument();
   });
 
   test("shows the missing required pane on an incomplete active relation", () => {

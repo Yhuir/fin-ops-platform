@@ -2831,6 +2831,8 @@ class PostgresWorkbenchPageQueryRepository:
             ),
             bank_inventory as materialized (
                 select
+                    count(distinct coalesce(split_item.bank_transaction_id::text, bank.row_id))
+                        ::bigint as inventory_bank_transaction_total,
                     count(distinct coalesce(split_item.bank_transaction_id::text, bank.row_id)) filter (
                         where bank.bank_direction = 'payment'
                     )::bigint as inventory_expense_transaction_total,
@@ -2873,8 +2875,7 @@ class PostgresWorkbenchPageQueryRepository:
                 select
                     count(*) filter (where source.row_type = 'oa')::bigint
                         as summary_oa_count,
-                    count(*) filter (where source.row_type = 'bank')::bigint
-                        as summary_bank_count,
+                    bank_inventory.inventory_bank_transaction_total as summary_bank_count,
                     (
                         canonical_invoice_inventory.paired_canonical_invoice_count
                         + canonical_invoice_inventory.unpaired_canonical_invoice_count
@@ -2919,6 +2920,7 @@ class PostgresWorkbenchPageQueryRepository:
                 cross join bank_inventory
                 cross join overall_canonical_invoice_zone_summary canonical_invoice_inventory
                 group by
+                    bank_inventory.inventory_bank_transaction_total,
                     bank_inventory.inventory_expense_transaction_total,
                     bank_inventory.inventory_income_transaction_total,
                     canonical_invoice_inventory.paired_canonical_invoice_count,

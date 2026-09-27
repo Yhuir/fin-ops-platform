@@ -2223,3 +2223,18 @@ def test_split_tag_definitions_are_expanded_once_before_member_join() -> None:
     )[0]
     assert "left join split_tag_definitions definition" in scope_input
     assert "jsonb_array_elements" not in scope_input
+
+
+def test_initial_bank_inventory_counts_original_parents_not_scoped_units() -> None:
+    connection = _CountingQueryConnection([{
+        "record_zone": "metadata", "internal_key": None,
+        "summary_bank_count": 3,
+        "unpaired_exception_counts": {"oa": 0, "bank": 0, "invoice": 0},
+        "paired_exception_counts": {"oa": 0, "bank": 0, "invoice": 0},
+    }])
+    repository = PostgresWorkbenchPageQueryRepository(connection, tenant_id="test-tenant")
+    payload = repository._initial_page(scope_key="2026-07", paired_query=None, unpaired_query=None)
+    assert payload["summary"]["bank_count"] == 3
+    assert payload["statistics"]["bank_transaction_count"] == 3
+    assert "bank_inventory.inventory_bank_transaction_total as summary_bank_count" in connection.sql
+    assert "count(*) filter (where source.row_type = 'bank')" not in connection.sql

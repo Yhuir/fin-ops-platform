@@ -915,7 +915,9 @@ function RelationGroupGrid({
                   ) : (
                     <span>{pane.title}</span>
                   )}
-                  <span>{pane.totalRows ?? pane.rows.length} 条</span>
+                  <span>{pane.totalRows === undefined
+                      ? `${pane.rows.length} 项明细`
+                      : `${pane.totalRows} ${pane.id === "bank" ? "笔" : pane.id === "invoice" ? "张" : "条"}`}</span>
                 </div>
                 <div className="pane-header-tools">
                   {!readOnly ? (
