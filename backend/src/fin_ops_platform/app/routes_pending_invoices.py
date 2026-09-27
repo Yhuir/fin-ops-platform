@@ -154,6 +154,9 @@ class PendingInvoiceApiRoutes:
                 persist_on_success=True,
                 persist_on_unexpected=True,
             )
+        if method == "GET" and route_path.startswith("/api/bank-transactions/") and route_path.endswith("/source-detail"):
+            bank_transaction_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._json_read(headers, lambda _session: (HTTPStatus.OK, self.bank_transaction_detail(bank_transaction_id)))
         if method == "GET" and route_path.startswith("/api/pending-invoices/bank-transactions/") and route_path.endswith("/detail"):
             bank_transaction_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._json_read(headers, lambda _session: (HTTPStatus.OK, self.bank_transaction_detail(bank_transaction_id)))

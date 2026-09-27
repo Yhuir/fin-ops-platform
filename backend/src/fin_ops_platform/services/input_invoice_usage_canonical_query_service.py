@@ -24,10 +24,10 @@ from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecycleP
 from fin_ops_platform.services.invoice_relation_query_context import (
     DistributedInvoiceRelationContext,
 )
-from fin_ops_platform.services.oa_expense_details import public_oa_expense_items
 from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_query import (
     InvoiceUsageCollectionCanonicalSnapshot,
 )
+from fin_ops_platform.services.source_record_details import bank_source_detail, invoice_source_detail, oa_source_detail
 
 
 class InputInvoiceUsageCanonicalQueryService:
@@ -271,7 +271,7 @@ class InputInvoiceUsageCanonicalQueryService:
                 f"Invoice detail not found: {invoice_id}",
                 status_code=404,
             )
-        return _input_invoice_detail(group)
+        return invoice_source_detail(group)
 
     def bank_transaction_detail(
         self,
@@ -580,101 +580,16 @@ def _group_for_invoice(
     )
 
 
-def _input_invoice_detail(group: dict[str, Any]) -> dict[str, Any]:
-    primary = group["primary"]
-    lines = list(group["line_items"])
-    total = sum(
-        (
-            invoice.total_with_tax
-            if invoice.total_with_tax is not None
-            else invoice.amount + (invoice.tax_amount or 0)
-            for invoice in lines
-        ),
-        start=0,
-    )
-    return {
-        "id": primary.id,
-        "invoiceIdentityKey": group["identity_key"],
-        "invoiceNo": primary.invoice_no,
-        "invoiceCode": primary.invoice_code or "",
-        "digitalInvoiceNo": primary.digital_invoice_no or "",
-        "invoiceDate": primary.invoice_date or "",
-        "sellerName": primary.seller_name or primary.counterparty.name,
-        "sellerTaxNo": primary.seller_tax_no or primary.counterparty.tax_no or "",
-        "buyerName": primary.buyer_name or "",
-        "buyerTaxNo": primary.buyer_tax_no or "",
-        "amount": f"{sum((invoice.amount for invoice in lines), start=0):.2f}",
-        "taxAmount": f"{sum((invoice.tax_amount or 0 for invoice in lines), start=0):.2f}",
-        "totalWithTax": f"{total:.2f}",
-        "taxRate": primary.tax_rate or "",
-        "taxClassificationCode": primary.tax_classification_code or "",
-        "specificBusinessType": primary.specific_business_type or "",
-        "taxableItemName": primary.taxable_item_name or "",
-        "invoiceSource": primary.invoice_source or "",
-        "invoiceKind": primary.invoice_kind or "",
-        "invoiceStatus": primary.invoice_status_from_source
-        or str(primary.status.value),
-        "isPositiveInvoice": primary.is_positive_invoice or "",
-        "riskLevel": primary.risk_level or "",
-        "issuer": primary.issuer or "",
-        "remark": primary.remark or "",
-        "sourceBatchId": primary.source_batch_id or "",
-        "sourceLinks": list(primary.source_links),
-        "lineItems": [
-            InputInvoiceUsageQueryService._line_item_payload(invoice)
-            for invoice in lines
-        ],
-    }
-
-
 def _bank_detail(transaction: Any, *, context: DistributedInvoiceRelationContext) -> dict[str, Any]:
     relation_row_id = transaction.id
     transaction = original_bank_transaction(transaction)
-    direction = str(getattr(transaction.txn_direction, "value", transaction.txn_direction))
-    return {
-        "id": transaction.id,
-        "counterpartyName": transaction.counterparty_name_raw,
-        "tradeTime": transaction.trade_time or transaction.txn_date or "",
-        "amount": f"{transaction.amount:.2f}",
-        "direction": direction,
-        "bankName": transaction.imported_bank_name or "",
-        "accountNo": transaction.account_no,
-        "accountLast4": transaction.imported_bank_last4
-        or str(transaction.account_no or "")[-4:],
-        "counterpartyAccountNo": transaction.counterparty_account_no or "",
-        "counterpartyBankName": transaction.counterparty_bank_name or "",
-        "bookedDate": transaction.booked_date or "",
-        "summary": transaction.summary or "",
-        "remark": transaction.remark or "",
-        "currency": transaction.currency or "CNY",
-        "bankTextFields": list(transaction.bank_text_fields),
-        "relations": context.relation_summaries_for_row(relation_row_id),
-    }
+    return {**bank_source_detail(transaction), "relations": context.relation_summaries_for_row(relation_row_id)}
 
 
 def _oa_detail(record: Any | None, *, oa_id: str) -> dict[str, Any]:
     if record is None:
         return {"oaId": oa_id, "detailAvailable": False}
-    return {
-        "oaId": record.id,
-        "detailAvailable": True,
-        "applicantName": record.applicant,
-        "applicationType": record.apply_type,
-        "projectName": record.project_name_display or record.project_name,
-        "workflowNo": record.case_id or "",
-        "workflowStatus": str(getattr(record, "workflow_status", "") or ""),
-        "amount": _money(record.amount),
-        "month": record.month,
-        "reason": record.reason,
-        "counterpartyName": record.counterparty_name,
-        "detailFields": dict(record.detail_fields),
-        "expenseItems": public_oa_expense_items(record.expense_items),
-        "openUrl": str(
-            record.detail_fields.get("url")
-            or record.detail_fields.get("open_url")
-            or ""
-        ),
-    }
+    return oa_source_detail(record)
 
 
 def _input_statistics_from_rows(rows: list[dict[str, Any]]) -> dict[str, int]:

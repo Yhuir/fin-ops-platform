@@ -584,7 +584,7 @@ class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):
                     "workflow_status": "completed",
                     "project_name": "大理余热项目",
                     "amount": "332",
-                    "detail_fields": {"费用类型": "交通费"},
+                    "detail_fields": {"费用类型": "交通费", "OA单号": "2047"},
                 },
                 {
                     "row_id": "oa-exp-broken",
@@ -633,7 +633,7 @@ class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):
             "project_name": "大理余热项目",
             "amount": "332",
             "detail_fields": {"费用类型": "交通费", "OA单号": "2047"},
-            "expense_items": [{"amount": "332", "expense_content": "实际子项", "expense_item_id": "private-id"}],
+            "expense_items": [{"amount": "332", "fee_content": "实际子项", "expense_item_id": "private-id"}],
         }
         service = PendingInvoiceCanonicalQueryService(repository=repository)
 

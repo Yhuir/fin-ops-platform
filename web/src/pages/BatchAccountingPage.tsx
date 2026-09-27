@@ -916,10 +916,7 @@ export default function BatchAccountingPage() {
 
       <BankTransactionDrawer transactionId={bankDetailRow?.id ?? null} onClose={() => setBankDetailRow(null)}
         onSaved={async () => { await reloadDataAfterMutation(); }}
-        sections={bankDetailRow ? [{ title: "交易信息", fields: [
-          { label: "金额", value: bankDetailRow.amount }, { label: "对方户名", value: bankDetailRow.counterpartyName },
-          { label: "交易时间", value: bankDetailRow.tradeTime }, { label: "银行", value: bankDetailRow.bankName },
-        ] }] : []} />
+        />
       <AppDialog
         actions={(
           <>

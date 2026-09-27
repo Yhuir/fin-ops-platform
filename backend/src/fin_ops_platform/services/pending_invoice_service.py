@@ -38,6 +38,7 @@ from fin_ops_platform.services.pending_invoice_status import (
     pending_invoice_available_actions,
     pending_invoice_status_payload,
 )
+from fin_ops_platform.services.source_record_details import oa_source_detail
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
@@ -1380,13 +1381,11 @@ class PendingInvoiceQueryService:
             "counterparty_name": transaction.counterparty_name_raw,
             "counterparty_account_no": transaction.counterparty_account_no or "",
             "counterparty_bank_name": transaction.counterparty_bank_name or "",
-            "trade_time": transaction.trade_time or "",
-            "booked_date": transaction.booked_date or transaction.txn_date or "",
-            "debit_amount": _decimal_to_str(transaction.amount if transaction.txn_direction == TransactionDirection.OUTFLOW else Decimal("0.00")),
-            "credit_amount": _decimal_to_str(transaction.amount if transaction.txn_direction == TransactionDirection.INFLOW else Decimal("0.00")),
+            "transaction_date": transaction.txn_date or "",
+            "booked_date": transaction.booked_date or "",
+            "amount": _decimal_to_str(transaction.amount),
+            "txn_direction": transaction.txn_direction.value,
             "balance": _decimal_to_str(transaction.balance) if transaction.balance is not None else "",
-            "currency": transaction.currency or "",
-            "bank_name": transaction.imported_bank_name or "",
             "account_name": transaction.account_name or "",
             "summary": transaction.summary or "",
             "remark": transaction.remark or "",
@@ -1408,16 +1407,15 @@ class PendingInvoiceQueryService:
             invoice = self._import_service.get_invoice(invoice_id)
         except KeyError as exc:
             raise PendingInvoiceError("invoice_not_found", f"Invoice detail not found: {invoice_id}", status_code=HTTPStatus.NOT_FOUND) from exc
-        detail = self._invoice_payload(invoice, direction="expense")
-        detail.update(
-            {
-                "invoice_code": invoice.invoice_code or "",
-                "seller_tax_no": invoice.seller_tax_no or "",
-                "buyer_tax_no": invoice.buyer_tax_no or "",
-                "tax_amount": _decimal_to_str(invoice.tax_amount) if invoice.tax_amount is not None else "",
-                "remark": invoice.remark or "",
-            }
-        )
+        detail = {
+            key: getattr(invoice, key) for key in (
+                "id", "invoice_no", "invoice_code", "digital_invoice_no", "seller_name", "seller_tax_no",
+                "buyer_name", "buyer_tax_no", "tax_amount", "tax_rate", "total_with_tax", "remark",
+                "invoice_status_from_source", "invoice_kind", "invoice_source", "is_positive_invoice",
+                "risk_level", "issuer", "specific_business_type", "taxable_item_name", "unit", "quantity", "unit_price",
+            )
+        }
+        detail.update({"issue_date": invoice.invoice_date, "amount_without_tax": invoice.amount})
         return {
             "title": detail.get("invoice_no") or detail.get("digital_invoice_no") or invoice.id,
             "subtitle": detail.get("seller_name") or "",
@@ -1464,20 +1462,13 @@ class PendingInvoiceQueryService:
         }
 
     def _oa_detail_from_record(self, record: OAApplicationRecord, *, relation_case_id: str) -> dict[str, Any]:
+        source = oa_source_detail(record)
         detail = {
-            "oa_id": record.id,
-            "applicant": record.applicant,
-            "application_type": record.apply_type,
-            "project_name": record.project_name_display or record.project_name,
-            "workflow_no": record.case_id or "",
-            "workflow_status": record.workflow_status or record.section,
-            "amount": _decimal_to_str(_decimal_from_text(record.amount)),
-            "counterparty_name": record.counterparty_name,
-            "reason": record.reason,
-            "expense_type": record.expense_type or "",
-            "expense_content": record.expense_content or "",
-            "completed_at": record.completed_at or "",
-            **{str(key): value for key, value in dict(record.detail_fields or {}).items() if value not in (None, "")},
+            "oa_id": record.id, "applicant": source["applicantName"],
+            "application_type": source["applicationType"], "project_name": source["projectName"],
+            "workflow_no": source["workflowNo"], "workflow_status": source["workflowStatus"],
+            "amount": source["amount"], "counterparty_name": source["counterpartyName"],
+            "reason": source["reason"], **source["detailFields"],
         }
         sections = [{"title": "基本信息", "fields": _detail_fields(detail)}]
         sections.extend(oa_expense_detail_sections(record.expense_items))

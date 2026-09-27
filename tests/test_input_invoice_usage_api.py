@@ -175,15 +175,10 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         oa_payload = json.loads(oa_response.body)
         relation_payload = json.loads(relation_response.body)
         self.assertTrue(oa_payload["detailAvailable"])
-        self.assertEqual(oa_payload["workflowStatus"], "completed")
+        self.assertIsNone(oa_payload["workflowStatus"])
         self.assertNotIn("status", oa_payload)
         self.assertEqual(relation_payload["kind"], "oa")
-        self.assertEqual(
-            next(field for field in relation_payload["sections"][0]["fields"] if field["label"] == "流程状态")[
-                "value"
-            ],
-            "completed",
-        )
+        self.assertNotIn("流程状态", [field["label"] for field in relation_payload["sections"][0]["fields"]])
 
     def test_rows_and_relation_details_return_multi_relation_totals_for_oa_bank_and_invoice(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

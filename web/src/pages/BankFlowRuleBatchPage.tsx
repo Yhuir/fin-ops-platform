@@ -1211,10 +1211,7 @@ export default function BankFlowRuleBatchPage() {
       ) : null}
       <BankTransactionDrawer transactionId={bankDetailRow?.transactionId ?? null} onClose={() => setBankDetailRow(null)}
         onSaved={async () => { await reloadBatchesAfterMutation(); }}
-        sections={bankDetailRow ? [{ title: "交易信息", fields: [
-          { label: "金额", value: bankDetailRow.amount }, { label: "对方户名", value: bankDetailRow.counterpartyName },
-          { label: "交易时间", value: bankDetailRow.tradeTime }, { label: "摘要", value: bankDetailRow.summary }, { label: "备注", value: bankDetailRow.remark },
-        ] }] : []} />
+        />
     </PageScaffold>
   );
 }

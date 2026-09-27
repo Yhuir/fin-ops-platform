@@ -32,10 +32,13 @@ export default function PendingInvoiceDetailDrawer({
 }: PendingInvoiceDetailDrawerProps) {
   const { close, setDirty } = useBankSplitClose(onClose);
   const [detail, setDetail] = useState<PendingInvoiceObjectDetail | null>(null);
+  const [requestTarget, setRequestTarget] = useState<PendingInvoiceObjectDetailTarget | null>(null);
   const [loading, setLoading] = useState(false);
+  const currentRequest = requestTarget === target;
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setRequestTarget(target);
     if (!open || !target) {
       setDetail(null);
       setLoading(false);
@@ -68,15 +71,15 @@ export default function PendingInvoiceDetailDrawer({
   }, [loadDetail, open, target]);
 
   const title = target ? fallbackTitles[target.kind] : "详情";
-  const sections = detail ? preparePublicDetailSections(detail.sections) : [];
+  const sections = currentRequest && detail ? preparePublicDetailSections(detail.sections) : [];
   const body = (
     <div className="pending-invoice-detail-body">
       <BankTransactionDetailContent onSplitDirtyChange={setDirty} onBankSplitSaved={onBankSplitSaved} bankTransactionId={target?.kind === "bankTransaction" ? target.id : undefined}
-        detailAvailable={detail?.detailAvailable}
-        error={error}
-        loading={loading}
+        detailAvailable={currentRequest ? detail?.detailAvailable : undefined}
+        error={currentRequest ? error : null}
+        loading={loading || Boolean(open && target && !currentRequest)}
         sections={sections}
-        unavailableReason={detail?.unavailableReason}
+        unavailableReason={currentRequest ? detail?.unavailableReason : undefined}
       />
     </div>
   );

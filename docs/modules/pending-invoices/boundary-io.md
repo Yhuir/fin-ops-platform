@@ -72,7 +72,7 @@
 
 - OA、银行流水和发票详情统一使用共享 `EntityDetailContent` 与 HeroUI `Table`/`Chip`；标签在左、真实值在右，禁止页面私有打印版、统计概况或嵌套卡片。
 - 单条和多条使用同一公开字段合同；多条只按 `OA N`、`银行流水 N`、`发票 N` 重复分区，不输出关系数量、是否多条或内部关系元数据。relation detail 在一次只读 snapshot 中集合读取成员，不能复用 rows 全页统计查询或逐成员补查。
-- 仅展示 canonical 详情 API 实际返回且已登记为用户可见的字段；内部 ID、raw/source 字段和推导字段在共享边界过滤。发票币种等非事实字段不得用默认值补造。
+- 仅展示详情 API 实际返回且具有文件/OA来源依据的字段；内部 ID、raw/source 字段和推导字段在共享边界过滤。发票币种等非事实字段不得用默认值补造。
 - OA 单号只来自 completed OA projection 的 `workflow_no`（权威 `detail_fields.OA单号`）或进行中 admission 的真实 workflow/form number；`expense_claim`、`payment_request` 仅是内部表单类型，绝不能作为 OA 单号展示。
 - 抽屉打开后按需执行一个有界详情 GET，不按成员 N+1；所有详情时间统一为 `Asia/Shanghai` 的无时区后缀格式。
 
@@ -134,3 +134,10 @@ OA detail SQL 读取原单据 canonical expense_items，服务使用共享公共
 ## 2026-09-24 原始流水金额展示
 
 银行列表聚合输出 `original_amount`、`original_transaction_count` 与按父身份去重的完整 `bank_split_parts`；单笔 summary 输出 `parent_row_id`、`original_amount`。用途金额与已付/已收业务字段保持原意，不能被原始金额覆盖。银行金额筛选/排序、导出和详情按对应原始流水口径，关键词仍可搜索用途金额；分页与批量查询不变。具体 DTO、导出列与旧路径删除合同见 [流水拆分 I/O](../../dev/bank-transaction-splits.md#2026-09-24-银行原始金额与用途金额展示合同)。没有新增 read model、worker 或持久化事实。
+
+
+## 2026-09-27 原始详情来源隔离
+
+OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../../dev/source-record-details.md)。详情投影只消费明确来源值，移除内部状态、推断费用类型、默认币种、日期替代及无来源的聚合信息；不从列表摘要或旧详情回退。银行使用父交易身份和真实交易日期，拆分操作仍由银行 owner 管理。模块列表、业务计算、导出、关系写入与原权限不变；公共成本核对信息不按原始字段规则全局删除。
+
+文件范围包含共享 `services/source_record_details.py`、所属详情 query/assembler 与前端 API 映射；银行通用抽屉按 ID 读取 `/api/bank-transactions/{id}/source-detail`，复用既有有界银行读取。没有新增 read model、cache、worker、迁移或数据库备份。旧取值删除条件、测试矩阵及性能验证见集中合同；实际执行结果另记，不以本节表示验证通过。

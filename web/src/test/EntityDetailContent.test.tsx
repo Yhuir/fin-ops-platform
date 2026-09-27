@@ -70,6 +70,34 @@ describe("EntityDetailContent", () => {
     rerender(<EntityDetailContent detailAvailable={false} sections={[]} unavailableReason="未返回公开详情" />);
     expect(screen.getByText("未返回公开详情")).toBeInTheDocument();
   });
+
+  test("preserves source text, false, zero tax, and date precision while localizing statuses", () => {
+    const sections = preparePublicDetailSections([{ title: "基本信息", fields: [
+      { label: "备注", value: "normal" },
+      { label: "项目名称", value: "active" },
+      { label: "流程状态", value: "completed" },
+      { label: "是否正数发票", value: false },
+      { label: "税额", value: 0 },
+      { label: "开票日期", value: "2026-09-27" },
+      { label: "申请时间", value: "2026-09-27T13:52" },
+      { label: "交易时间", value: "2026-09-27T05:52Z" },
+    ] }]);
+    expect(sections[0].fields).toEqual([
+      { label: "备注", value: "normal" },
+      { label: "项目名称", value: "active" },
+      { label: "流程状态", value: "已完成" },
+      { label: "是否正数发票", value: false },
+      { label: "税额", value: 0 },
+      { label: "开票日期", value: "2026-09-27" },
+      { label: "申请时间", value: "2026-09-27 13:52" },
+      { label: "交易时间", value: "2026-09-27 13:52" },
+    ]);
+    render(<EntityDetailContent sections={sections} />);
+    expect(screen.getByText("false")).toBeInTheDocument();
+    expect(screen.getByText("normal")).toBeInTheDocument();
+    expect(screen.getByText("active")).toBeInTheDocument();
+    expect(screen.getByText("0")).toBeInTheDocument();
+  });
 });
 
 

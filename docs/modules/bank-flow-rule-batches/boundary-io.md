@@ -192,3 +192,10 @@ Canonical facts：
 银行拆分事务通过 `PostgresWorkbenchRepository.invalidate_bank_split_batches` 定位实际变化银行身份引用的 submitted 批次，标记 stale、推进版本并追加事件。冻结的成员、金额和 source proof 不改写；普通 relation/cost 变更与批次失效处于同一事务。金额与标签均未变化的显示重排不触发失效。真实 PostgreSQL 测试同时验证成功和失败回滚，保留原冻结 proof。
 
 - 曾提交（有 `submitted_at`）的 stale 批次仍展示并允许撤销，即使原 case 已合并到另一 active case；未提交 stale 不因此获得撤销入口。冻结父身份通过 relation owner 映射当前 children，再追溯历史还原，OA/发票关系保留；不存在的历史子项不得复活。
+
+
+## 2026-09-27 原始详情来源隔离
+
+OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../../dev/source-record-details.md)。详情投影只消费明确来源值，移除内部状态、推断费用类型、默认币种、日期替代及无来源的聚合信息；不从列表摘要或旧详情回退。银行使用父交易身份和真实交易日期，拆分操作仍由银行 owner 管理。模块列表、业务计算、导出、关系写入与原权限不变；公共成本核对信息不按原始字段规则全局删除。
+
+文件范围包含共享 `services/source_record_details.py`、所属详情 query/assembler 与前端 API 映射；银行通用抽屉按 ID 读取 `/api/bank-transactions/{id}/source-detail`，复用既有有界银行读取。没有新增 read model、cache、worker、迁移或数据库备份。旧取值删除条件、测试矩阵及性能验证见集中合同；实际执行结果另记，不以本节表示验证通过。

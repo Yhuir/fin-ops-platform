@@ -8,14 +8,12 @@ from fin_ops_platform.services.oa_draft_prefill import OA_INVOICE_KIND_OPTIONS, 
 OA_EXPENSE_FIELDS = (
     ("project_name", "项目名称"),
     ("amount", "报销金额"),
-    ("expense_type", "费用类型"),
     ("expense_content", "费用内容"),
     ("fee_description", "费用说明"),
     ("reimbursement_date", "报销日期"),
     ("payment_method", "支付方式"),
     ("invoice_kind", "发票种类"),
     ("ticket_count", "票据张数"),
-    ("attachment_file_count", "附件文件数"),
 )
 
 
@@ -28,13 +26,14 @@ def oa_expense_detail_sections(items: list[dict[str, Any]]) -> list[dict[str, An
                 for key, label in OA_EXPENSE_FIELDS
             ],
         }
-        for index, item in enumerate(items, start=1)
+        for index, item in enumerate(public_oa_expense_items(items), start=1)
     ]
 
 
 def public_oa_expense_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
-        {key: item[key] for key, _ in OA_EXPENSE_FIELDS if key in item}
+        {**{key: item[key] for key, _ in OA_EXPENSE_FIELDS if key in item and key != "expense_content"},
+         "expense_content": item.get("fee_content")}
         for item in items
     ]
 

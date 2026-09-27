@@ -26,10 +26,13 @@ export default function OutputInvoiceCollectionDetailDrawer({
 }: OutputInvoiceCollectionDetailDrawerProps) {
   const { close, setDirty } = useBankSplitClose(onClose);
   const [detail, setDetail] = useState<OutputInvoiceCollectionDetailResponse | null>(null);
+  const [requestTarget, setRequestTarget] = useState<OutputInvoiceCollectionDetailTarget | null>(null);
   const [loading, setLoading] = useState(false);
+  const currentRequest = requestTarget === target;
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setRequestTarget(target);
     if (!open || !target) {
       setDetail(null);
       setLoading(false);
@@ -63,8 +66,8 @@ export default function OutputInvoiceCollectionDetailDrawer({
     };
   }, [loadDetail, open, target]);
 
-  const title = detail?.title ?? drawerTitle(target);
-  const sections = detail ? preparePublicDetailSections(detail.sections) : [];
+  const title = (currentRequest ? detail?.title : undefined) ?? drawerTitle(target);
+  const sections = currentRequest && detail ? preparePublicDetailSections(detail.sections) : [];
 
   return (
     <AppDrawer
@@ -77,11 +80,11 @@ export default function OutputInvoiceCollectionDetailDrawer({
     >
       <div className="output-invoice-collection-drawer__body">
         <BankTransactionDetailContent onSplitDirtyChange={setDirty} onBankSplitSaved={onBankSplitSaved} bankTransactionId={target?.kind === "bank" ? target.id : undefined}
-          detailAvailable={detail?.detailAvailable}
-          error={error}
-          loading={loading}
+          detailAvailable={currentRequest ? detail?.detailAvailable : undefined}
+          error={currentRequest ? error : null}
+          loading={loading || Boolean(open && target && !currentRequest)}
           sections={sections}
-          unavailableReason={detail?.unavailableReason}
+          unavailableReason={currentRequest ? detail?.unavailableReason : undefined}
         />
       </div>
     </AppDrawer>

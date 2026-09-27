@@ -9,14 +9,17 @@ from fin_ops_platform.services.oa_expense_details import (
 
 class OaExpenseDetailsTests(unittest.TestCase):
     def test_public_projection_preserves_duplicate_rows_zero_and_missing_fields(self):
-        item = {"expense_content": "交通费", "amount": "0.00", "ticket_count": 0,
+        item = {"fee_content": "交通费", "expense_content": "推断内容", "amount": "0.00", "ticket_count": 0,
                 "expense_item_id": "private-id", "attachment_files": [{"url": "private-url"}]}
         public = public_oa_expense_items([item, item])
         self.assertEqual(public, [{"expense_content": "交通费", "amount": "0.00", "ticket_count": 0}] * 2)
-        sections = oa_expense_detail_sections(public)
+        sections = oa_expense_detail_sections([item, item])
         self.assertEqual([section["title"] for section in sections], ["费用明细 1", "费用明细 2"])
         fields = {field["label"]: field["value"] for field in sections[0]["fields"]}
         self.assertEqual(fields["票据张数"], "0")
+        self.assertEqual(fields["费用内容"], "交通费")
+        self.assertNotIn("费用类型", fields)
+        self.assertNotIn("附件文件数", fields)
         self.assertEqual(fields["支付方式"], "—")
         self.assertEqual(oa_expense_detail_sections([]), [])
 

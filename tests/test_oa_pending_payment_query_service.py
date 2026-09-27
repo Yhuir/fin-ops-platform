@@ -141,7 +141,8 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         from tests.test_oa_pending_payment_canonical_rows import OaPendingPaymentProjectionRowsTests
         fixture = OaPendingPaymentProjectionRowsTests()
         first, second = fixture._oa("oa-1", "40.00"), fixture._oa("oa-2", "60.00")
-        second.expense_items = [{"expense_content": "第二张原始明细", "amount": "60.00"}]
+        second.apply_type = "支付申请"
+        second.expense_items = [{"fee_content": "第二张原始明细", "amount": "60.00"}]
         bank = fixture._bank("bank-1", "100.00")
         relations = [fixture._relation("case-1", [first.id, second.id, bank.id])]
         row = fixture._build(records=[first, second], relations=relations, banks=[bank])[0]

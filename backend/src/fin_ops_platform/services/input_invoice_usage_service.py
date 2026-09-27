@@ -31,8 +31,8 @@ from fin_ops_platform.services.input_invoice_usage_query_contract import (
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.invoice_relation_query_context import DistributedInvoiceRelationContext
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
-from fin_ops_platform.services.oa_expense_details import public_oa_expense_items
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
+from fin_ops_platform.services.source_record_details import bank_source_detail, invoice_source_detail, oa_source_detail, source_relation_sections
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
@@ -263,37 +263,7 @@ class InputInvoiceUsageQueryService:
                 f"Invoice detail not found: {invoice_id}",
                 status_code=HTTPStatus.NOT_FOUND,
             )
-        primary = group["primary"]
-        lines = group["line_items"]
-        return {
-            "id": primary.id,
-            "invoiceIdentityKey": group["identity_key"],
-            "invoiceNo": primary.invoice_no,
-            "invoiceCode": primary.invoice_code or "",
-            "digitalInvoiceNo": primary.digital_invoice_no or "",
-            "invoiceDate": primary.invoice_date or "",
-            "sellerName": primary.seller_name or primary.counterparty.name,
-            "sellerTaxNo": primary.seller_tax_no or primary.counterparty.tax_no or "",
-            "buyerName": primary.buyer_name or "",
-            "buyerTaxNo": primary.buyer_tax_no or "",
-            "amount": _money(sum((_decimal(line.amount) for line in lines), start=ZERO)),
-            "taxAmount": _money(sum((_decimal(line.tax_amount) for line in lines), start=ZERO)),
-            "totalWithTax": _money(sum((_invoice_total(line) for line in lines), start=ZERO)),
-            "taxRate": primary.tax_rate or "",
-            "taxClassificationCode": primary.tax_classification_code or "",
-            "specificBusinessType": primary.specific_business_type or "",
-            "taxableItemName": primary.taxable_item_name or "",
-            "invoiceSource": primary.invoice_source or "",
-            "invoiceKind": primary.invoice_kind or "",
-            "invoiceStatus": primary.invoice_status_from_source or str(primary.status.value),
-            "isPositiveInvoice": primary.is_positive_invoice or "",
-            "riskLevel": primary.risk_level or "",
-            "issuer": primary.issuer or "",
-            "remark": primary.remark or "",
-            "sourceBatchId": primary.source_batch_id or "",
-            "sourceLinks": deepcopy(primary.source_links),
-            "lineItems": [self._line_item_payload(line) for line in lines],
-        }
+        return invoice_source_detail(group)
 
     def bank_transaction_detail(self, bank_transaction_id: str) -> dict[str, Any]:
         context = self._query_context()
@@ -304,48 +274,14 @@ class InputInvoiceUsageQueryService:
                 f"Bank transaction detail not found: {bank_transaction_id}",
                 status_code=HTTPStatus.NOT_FOUND,
             )
-        return {
-            "id": transaction.id,
-            "counterpartyName": transaction.counterparty_name_raw,
-            "tradeTime": transaction.trade_time or transaction.txn_date or "",
-            "amount": _money(transaction.amount),
-            "direction": _bank_direction(transaction),
-            "bankName": transaction.imported_bank_name or "",
-            "accountNo": transaction.account_no,
-            "accountLast4": transaction.imported_bank_last4 or str(transaction.account_no or "")[-4:],
-            "counterpartyAccountNo": transaction.counterparty_account_no or "",
-            "counterpartyBankName": transaction.counterparty_bank_name or "",
-            "bookedDate": transaction.booked_date or "",
-            "summary": transaction.summary or "",
-            "remark": transaction.remark or "",
-            "currency": transaction.currency or "",
-            "bankTextFields": deepcopy(transaction.bank_text_fields),
-            "relations": context.relation_summaries_for_row(transaction.id),
-        }
+        return {**bank_source_detail(transaction), "relations": context.relation_summaries_for_row(transaction.id)}
 
     def oa_detail(self, oa_id: str) -> dict[str, Any]:
         context = self._query_context()
         record = context.oa_records_by_id([str(oa_id)]).get(str(oa_id))
         if record is None:
             return {"oaId": str(oa_id), "detailAvailable": False}
-        return {
-            "oaId": record.id,
-            "detailAvailable": True,
-            "applicantName": record.applicant,
-            "applicationType": record.apply_type,
-            "projectName": record.project_name_display or record.project_name,
-            "workflowNo": record.case_id or "",
-            "workflowStatus": str(record.workflow_status or ""),
-            "amount": _money(record.amount),
-            "reason": record.reason,
-            "counterpartyName": record.counterparty_name,
-            "completedAt": record.completed_at or "",
-            "expenseType": record.expense_type or "",
-            "expenseContent": record.expense_content or "",
-            "expenseItems": public_oa_expense_items(record.expense_items),
-            "detailFields": deepcopy(record.detail_fields),
-            "openUrl": str(record.detail_fields.get("url") or record.detail_fields.get("open_url") or ""),
-        }
+        return oa_source_detail(record)
 
     def row_relation_details(self, row_id: str, *, kind: str) -> dict[str, Any]:
         normalized_kind = str(kind or "").strip()
@@ -1202,23 +1138,6 @@ class InputInvoiceUsageQueryService:
                     lookup.setdefault(row_id, invoice)
         return lookup
 
-    @staticmethod
-    def _line_item_payload(invoice: Invoice) -> dict[str, Any]:
-        return {
-            "id": invoice.id,
-            "taxClassificationCode": invoice.tax_classification_code or "",
-            "specificBusinessType": invoice.specific_business_type or "",
-            "taxableItemName": invoice.taxable_item_name or "",
-            "specificationModel": invoice.specification_model or "",
-            "unit": invoice.unit or "",
-            "quantity": _money(invoice.quantity) if invoice.quantity is not None else "",
-            "unitPrice": _money(invoice.unit_price) if invoice.unit_price is not None else "",
-            "amount": _money(invoice.amount),
-            "taxRate": invoice.tax_rate or "",
-            "taxAmount": _money(invoice.tax_amount),
-            "totalWithTax": _money(_invoice_total(invoice)),
-            "remark": invoice.remark or "",
-        }
 
     @staticmethod
     def _typed_relation_rows(relation: dict[str, Any]) -> list[tuple[str, str]]:
@@ -1429,61 +1348,9 @@ def input_invoice_usage_relation_details_from_row(
         "relationCount": payload.get("relationCount", 0),
         "hasMultiple": payload.get("hasMultiple", False),
         "summaries": summaries,
-        "sections": _relation_detail_sections(normalized_kind, summaries),
+        "sections": source_relation_sections(normalized_kind, summaries),
         "relations": list(relations or []),
     }
-
-
-def _relation_detail_sections(kind: str, summaries: list[Any]) -> list[dict[str, Any]]:
-    typed_summaries = [summary for summary in summaries if isinstance(summary, dict)]
-    if not typed_summaries:
-        return [{"title": "关联明细", "fields": [{"label": "状态", "value": "暂无关联记录"}]}]
-    if kind == "oa":
-        return [
-            {
-                "title": f"OA {index}",
-                "fields": [
-                    {"label": "申请人", "value": summary.get("applicantName")},
-                    {"label": "类型", "value": summary.get("applicationType")},
-                    {"label": "项目名称", "value": summary.get("projectName")},
-                    {"label": "金额", "value": summary.get("amount")},
-                    {"label": "流程状态", "value": summary.get("workflowStatus")},
-                ],
-            }
-            for index, summary in enumerate(typed_summaries, start=1)
-        ]
-    if kind == "bank":
-        typed_summaries = original_bank_summaries(typed_summaries)
-        return [
-            {
-                "title": f"银行流水 {index}",
-                "bank_transaction_id": summary["bankTransactionId"],
-                "fields": [
-                    {"label": "对方户名", "value": summary.get("counterpartyName")},
-                    {"label": "交易时间", "value": summary.get("tradeTime")},
-                    {"label": "金额", "value": summary.get("amount")},
-                    {"label": "收支方向", "value": summary.get("directionLabel") or summary.get("direction")},
-                    {"label": "银行账户", "value": summary.get("bankAccount")},
-                    {"label": "摘要", "value": summary.get("summary")},
-                    {"label": "备注", "value": summary.get("remark")},
-                ],
-            }
-            for index, summary in enumerate(typed_summaries, start=1)
-        ]
-    return [
-        {
-            "title": f"发票 {index}",
-            "fields": [
-                {"label": "发票号码", "value": summary.get("digitalInvoiceNo") or summary.get("invoiceNo")},
-                {"label": "销方名称", "value": summary.get("sellerName")},
-                {"label": "销方识别号", "value": summary.get("sellerTaxNo")},
-                {"label": "开票日期", "value": summary.get("invoiceDate")},
-                {"label": "价税合计", "value": summary.get("totalWithTax")},
-                {"label": "货物或应税劳务名称", "value": summary.get("taxableItemName")},
-            ],
-        }
-        for index, summary in enumerate(typed_summaries, start=1)
-    ]
 
 
 def _sortable_time(value: str | None) -> float:

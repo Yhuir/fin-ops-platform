@@ -384,7 +384,8 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
             relation_tone="success",
             workflow_status="completed",
         )
-        record.expense_items = [{"amount": "120.00", "expense_content": "实际明细", "attachment_files": ["private"]}]
+        record.detail_fields = {"OA单号": "SOURCE-001", "流程状态": "进行中"}
+        record.expense_items = [{"amount": "120.00", "fee_content": "实际明细", "attachment_files": ["private"]}]
         repository = RecordingInputDetailRepository(record)
         service = InputInvoiceUsageCanonicalQueryService(
             repository=repository,
@@ -396,9 +397,9 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertEqual(repository.calls, [("oa-detail-1", "tenant-a")])
         self.assertTrue(detail["detailAvailable"])
         self.assertEqual(detail["oaId"], "oa-detail-1")
-        self.assertEqual(detail["workflowNo"], "OA-001")
+        self.assertEqual(detail["workflowNo"], "SOURCE-001")
         self.assertEqual(detail["expenseItems"], [{"amount": "120.00", "expense_content": "实际明细"}])
-        self.assertEqual(detail["workflowStatus"], "completed")
+        self.assertEqual(detail["workflowStatus"], "进行中")
         self.assertNotIn("status", detail)
 
     def test_invalid_month_fails_before_opening_a_snapshot(self) -> None:

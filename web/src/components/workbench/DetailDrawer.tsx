@@ -32,26 +32,24 @@ export default function DetailDrawer({ row, loading, error, onClose, onBankSplit
   const { close, setDirty } = useBankSplitClose(onClose);
   const open = Boolean(row);
   const title = row ? drawerTitles[row.recordType] : "详情";
-  const sections = row
+  const sections = row && !loading && !error
     ? preparePublicDetailSections([{
         title: sectionTitles[row.recordType],
         fields: row.detailFields.map((field): EntityDetailField => ({
           label: field.label,
-          value: sanitizeAttachmentValue(field.value),
+          value: field.value,
         })),
       }, ...(row.expenseItems ?? []).map((item, index) => ({
         title: `费用明细 ${index + 1}`,
         fields: [
           { label: "项目名称", value: item.projectName },
           { label: "报销金额", value: item.amount },
-          { label: "费用类型", value: item.expenseType ?? "—" },
-          { label: "费用内容", value: item.expenseContent ?? "—" },
-          { label: "费用说明", value: item.feeDescription ?? "—" },
-          { label: "报销日期", value: item.reimbursementDate ?? "—" },
-          { label: "支付方式", value: item.paymentMethod ?? "—" },
-          { label: "发票种类", value: item.invoiceKind ?? "—" },
-          { label: "票据张数", value: item.ticketCount ?? "—" },
-          { label: "附件文件数", value: String(item.attachmentFileCount ?? "—") },
+          { label: "费用内容", value: item.expenseContent },
+          { label: "费用说明", value: item.feeDescription },
+          { label: "报销日期", value: item.reimbursementDate },
+          { label: "支付方式", value: item.paymentMethod },
+          { label: "发票种类", value: item.invoiceKind },
+          { label: "票据张数", value: item.ticketCount },
         ],
       }))])
     : [];
@@ -70,8 +68,4 @@ export default function DetailDrawer({ row, loading, error, onClose, onBankSplit
       </div>
     </AppDrawer>
   );
-}
-
-function sanitizeAttachmentValue(value: string) {
-  return value.replace(/\s*[（(][0-9a-f]{16,}\.(?:png|jpg|jpeg|pdf)[）)]/gi, "");
 }

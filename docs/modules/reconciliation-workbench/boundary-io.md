@@ -132,7 +132,7 @@ requested tenant/scope
 - 历史 OA 附件 parent identity 仍可在 matching、异常定位与 hydration 的单元格对齐中共用 alias 边界；但 source-owned 展示分组必须在任何 alias/`row_index` normalize 之前读取原始 source links，并只认当前 item exact ID。`id / row_id / expense_item_id` 有多个非空值时必须全部相同，否则该 item fail closed。summary/full/detail 必须输出相同展示归属；不得按金额、项目、文件名、历史 row index 或展示顺序猜测 owner。
 - group detail 按 active case/group typed owner 窄查；row detail 按 typed identity 与 active relation membership 窄查。`scope=all` 的 source-owned group 和 relation detail 必须先以目标 OA 的 exact-current item 集合一次性发现来源发票月份，再按这些有限月份集合水合全部 display-only 发票；不得退回全 scope group spine、cache fallback 或逐成员查询。
 - detail 读取 latest committed 事实，不接受 `expected_read_model_version`，不构建全 scope group CTE。
-- 发票 row detail 的用户可见关系状态只认 `invoice_bank_relation`。前端 Workbench API 映射必须从发票 `detail_fields` 删除通用原始键 `status`，并把已知 `invoice_type=input|output`、`invoice_source=manual_invoice_entry` 转为中文展示值；不得改共享详情组件、翻译 `pending` 或删除明确命名的其它发票状态字段。
+- OA、银行与发票 row detail 的原始字段统一遵循[来源详情合同](../../dev/source-record-details.md)：移除内部状态与推断/替代值，只保留可证明的来源信息；真实发票状态和 OA 流程状态保留。关系状态、进销项分类和来源归属属于原业务展示，不冒充文件字段；不改变列表、匹配与正式关系。
 - summary 列表禁止携带 raw payload、OCR/附件全文和完整 detail fields；折叠内容只在用户展开后读取。
 
 ## 输出 I/O
@@ -452,3 +452,10 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - 预览汇总表头使用既有深蓝灰 `#0f2742` 与浅色文字，错误金额使用可读的浅黄；黄蓝关系底色和前后标题区分保留。颜色仅表示展示层级。
 
 历史细分逐层校验：若更早的子关系曾过度占用银行款项或留下无对应 OA/流水的发票分区，保留最近一个有效完整父范围，不把无效子分区扩散到整个合并组。当前明确 OA 来源优先于旧历史。该校验只用于发票展示，成本/OA银行分组原算法不变。
+
+
+## 2026-09-27 原始详情来源隔离
+
+OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../../dev/source-record-details.md)。详情投影只消费明确来源值，移除内部状态、推断费用类型、默认币种、日期替代及无来源的聚合信息；不从列表摘要或旧详情回退。银行使用父交易身份和真实交易日期，拆分操作仍由银行 owner 管理。模块列表、业务计算、导出、关系写入与原权限不变；公共成本核对信息不按原始字段规则全局删除。
+
+文件范围包含共享 `services/source_record_details.py`、所属详情 query/assembler 与前端 API 映射；银行通用抽屉按 ID 读取 `/api/bank-transactions/{id}/source-detail`，复用既有有界银行读取。没有新增 read model、cache、worker、迁移或数据库备份。旧取值删除条件、测试矩阵及性能验证见集中合同；实际执行结果另记，不以本节表示验证通过。

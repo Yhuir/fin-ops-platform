@@ -4136,7 +4136,7 @@ function inputInvoiceUsageFilterOptionsPayload() {
 
 function inputInvoiceUsageRelationDetailPayload(kind: string) {
   const relationLabel = kind === "bank" ? "银行流水" : kind === "invoice" ? "发票" : "OA";
-  const summaries = kind === "oa"
+  const sourceRows = kind === "oa"
     ? [
       {
         applicant_name: "陈秀云",
@@ -4161,7 +4161,13 @@ function inputInvoiceUsageRelationDetailPayload(kind: string) {
     title: `${relationLabel}关联明细`,
     relation_count: 2,
     has_multiple: true,
-    summaries,
+    sections: sourceRows.map((row, index) => ({ title: `OA ${index + 1}`, fields: [
+      { label: "申请人", value: row.applicant_name },
+      { label: "OA类型", value: row.application_type },
+      { label: "项目名称", value: row.project_name },
+      { label: "金额", value: row.amount },
+      { label: "流程状态", value: row.workflow_status },
+    ] })),
   };
 }
 
@@ -6330,6 +6336,7 @@ function outputInvoiceCollectionRowsPayload(
       bank: {
         primary: {
           bank_transaction_id: "bank-output-e2e-003",
+          original_amount: "1,020,032.00",
           counterparty_name: "云南驰林科技有限公司",
           trade_time: "2026-05-29 15:32:37",
           amount: "1,020,032.00",
@@ -6342,6 +6349,8 @@ function outputInvoiceCollectionRowsPayload(
           relation_status: "linked",
         },
         relation_count: 2,
+        original_transaction_count: 2,
+        original_amount: "1,020,032.00",
         has_multiple: true,
         received_total: "1,020,032.00",
         detail_mode: "list",
@@ -9648,7 +9657,11 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         kind: "invoice",
         relation_count: 2,
         has_multiple: true,
-        summaries: outputInvoiceReversalRelationSummaries(),
+        sections: outputInvoiceReversalRelationSummaries().map((row, index) => ({ title: `发票 ${index + 1}`, fields: [
+          { label: "发票号码", value: row.invoice_no },
+          { label: "开票日期", value: row.invoice_date },
+          { label: "购买方名称", value: row.buyer_name },
+        ] })),
       });
     }
 

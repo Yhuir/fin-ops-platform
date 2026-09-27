@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Callable
 
+from fin_ops_platform.services.source_record_details import workbench_source_row
 from fin_ops_platform.services.workbench_direct_query_errors import (
     WorkbenchDirectQueryUnavailable,
     WorkbenchRelationPreviewSelectionError,
@@ -182,7 +183,7 @@ class WorkbenchQueryFacade:
                     "row_id": normalized_row_id,
                 },
             )
-        return WorkbenchQueryResult(HTTPStatus.OK, dict(payload))
+        return WorkbenchQueryResult(HTTPStatus.OK, {**payload, "row": workbench_source_row(payload["row"])})
 
     def relation_preview_selection(
         self,

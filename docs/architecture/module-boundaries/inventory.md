@@ -82,3 +82,5 @@
 - 2026-09-23：银行拆分事实仍由 `bank-details` owner 持有；`app.bank_transaction_units` 只投影用途子项。详情/列表显示原金融事实，成本/关联/OA/发票/往来消费用途事实。统一 I/O 与调用方测试见 [流水拆分](../../dev/bank-transaction-splits.md)。没有新增页面 read model 或 worker。
 
 - 2026-09-24：拆分子项新增银行 owner 的完整分类实例 `category_payload`；用途核对纯规则与 repository 集合 SQL 分别位于 `services/bank_split_relation_scope.py` 与 `services/postgres_repositories/bank_split_relation_scope.py`，供关联台、OA 和发票 owner 调用。仅影响核对投影，不改变正式成员、银行原事实或其它模块写边界。
+
+- 2026-09-27：三类原始详情由纯 `services/source_record_details.py` 投影，所属页面 query 保留权限和有界只读快照。银行公共抽屉新增来源详情 GET 并删除列表 sections 路径；匹配、列表和成本计算不消费该来源投影。见[来源详情合同](../../dev/source-record-details.md)，无新增事实 owner、read model 或 worker。

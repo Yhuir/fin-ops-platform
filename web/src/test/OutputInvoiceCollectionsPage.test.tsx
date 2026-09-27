@@ -359,7 +359,10 @@ function installFetchMock() {
         kind: "invoice",
         relation_count: 2,
         has_multiple: true,
-        summaries: rowsPayload.rows[0].invoice_relations.summaries,
+        sections: [
+          { title: "发票 1", fields: [{ label: "发票号码", value: "XSFP-RED-001" }] },
+          { title: "发票 2", fields: [{ label: "发票号码", value: "XSFP-BLUE-001" }] },
+        ],
       });
     }
     throw new Error(`unexpected request: ${url.pathname}`);

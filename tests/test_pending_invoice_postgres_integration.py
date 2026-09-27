@@ -36,6 +36,42 @@ class PendingInvoicePostgresIntegrationTests(unittest.TestCase):
         self.connection.close()
         truncate_test_database(self.database_url)
 
+    def test_source_drawers_read_actual_fields_without_operational_defaults(self) -> None:
+        self.connection.execute("""
+            insert into app.bank_transactions(
+                legacy_mongo_id, account_no, txn_direction, counterparty_name_raw,
+                amount, signed_amount, txn_date, txn_month, trade_time, balance, status, raw_payload
+            ) values ('source-bank', '001234', 'outflow', '源文件户名',
+                      100, -100, '2026-09-27', '2026-09-01', '2026-09-27 00:00:00', 0, 'pending',
+                      '{"normalized_payload":{"status":"pending","currency":"CNY","booked_date":"2026-09-28"}}')
+        """)
+        self.connection.execute("""
+            insert into app.invoices(legacy_mongo_id, invoice_type, invoice_no, invoice_date,
+                invoice_month, seller_name, amount, signed_amount, tax_amount, total_with_tax, status, raw_payload)
+            values ('source-invoice', 'input', 'SOURCE-001', '2026-09-27', '2026-09-01',
+                    '文件销方', 100, 100, 0, null, 'pending',
+                    '{"normalized_payload":{"invoice_status_from_source":"正常"}}')
+        """)
+        service = PendingInvoiceCanonicalQueryService(repository=PostgresPendingInvoiceCanonicalRepository(self.connection))
+        bank = service.bank_transaction_detail('source-bank')
+        fields = {field['label']: field['value'] for field in bank['sections'][0]['fields']}
+        self.assertEqual(fields['交易日期'], '2026-09-27')
+        self.assertEqual(fields['入账日期'], '2026-09-28')
+        self.assertEqual(fields['余额'], '0.00')
+        self.assertEqual(fields['账号'], '001234')
+        self.assertNotIn('状态', fields)
+        self.assertNotIn('交易时间', fields)
+        self.assertNotIn('币种', fields)
+        invoice = service.invoice_detail('source-invoice')
+        fields = {field['label']: field['value'] for field in invoice['sections'][0]['fields']}
+        self.assertEqual(fields['税额'], '0.00')
+        self.assertEqual(fields['发票状态'], '正常')
+        self.assertNotIn('价税合计', fields)
+        # A source read must not change the operational lifecycle used by other pages.
+        self.assertEqual(self.connection.fetch_one(
+            "select status from app.bank_transactions where legacy_mongo_id='source-bank'"
+        )['status'], 'pending')
+
     def test_page_reuses_compiled_bank_category_rules(self) -> None:
         self.connection.execute(
             """

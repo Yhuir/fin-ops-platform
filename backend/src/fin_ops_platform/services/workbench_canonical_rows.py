@@ -812,6 +812,7 @@ class WorkbenchCanonicalRowsBuilder:
         return {
             "id": row_id,
             "type": "oa",
+            "apply_type": payload.get("apply_type"),
             "source_kind": "oa",
             "status": "unpaired",
             "workflow_status": row.get("workflow_status") or payload.get("workflow_status"),

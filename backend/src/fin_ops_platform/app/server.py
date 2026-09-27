@@ -1797,6 +1797,8 @@ class Application:
             split_response = self._bank_transaction_split_routes().route(method, route_path, body, headers)
             if split_response is not None:
                 return split_response
+            if method == "GET" and route_path.endswith("/source-detail"):
+                return self._pending_invoice_routes().route(method, route_path, query, body, headers)
         if route_path.startswith("/api/bank-details/"):
             bank_detail_response = self._bank_details_routes().route(method, route_path, query, body, headers)
             if bank_detail_response is not None:
@@ -2228,6 +2230,7 @@ class Application:
                 "/api/pending-invoices/rows/{transaction_id}/relation-detail",
                 "/api/pending-invoices/invoice-candidates",
                 "/api/pending-invoices/bank-transactions/{bank_transaction_id}/detail",
+                "/api/bank-transactions/{bank_transaction_id}/source-detail",
                 "/api/pending-invoices/invoices/{invoice_id}/detail",
                 "/api/pending-invoices/oa/{oa_id}/detail",
                 "/api/pending-invoices/rules",

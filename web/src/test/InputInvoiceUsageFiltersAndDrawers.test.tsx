@@ -147,6 +147,23 @@ describe("InputInvoiceUsageFilterMenu", () => {
 });
 
 describe("InputInvoiceUsageDetailDrawer", () => {
+  test("switches source targets without retaining previous detail on loading or error", async () => {
+    const first: InputInvoiceUsageDetailTarget = { kind: "invoice", id: "first" };
+    const second: InputInvoiceUsageDetailTarget = { kind: "invoice", id: "second" };
+    let rejectSecond!: (error: Error) => void;
+    const loadDetail = vi.fn()
+      .mockResolvedValueOnce({ sections: [{ title: "基本信息", fields: [{ label: "备注", value: "第一张来源" }] }] })
+      .mockImplementationOnce(() => new Promise((_, reject) => { rejectSecond = reject; }));
+    const { rerender } = render(<InputInvoiceUsageDetailDrawer open target={first} loadDetail={loadDetail} onClose={() => undefined} />);
+    expect(await screen.findByText("第一张来源")).toBeInTheDocument();
+    rerender(<InputInvoiceUsageDetailDrawer open target={second} loadDetail={loadDetail} onClose={() => undefined} />);
+    expect(screen.queryByText("第一张来源")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("正在加载详情")).toBeInTheDocument();
+    rejectSecond(new Error("第二张来源不可用"));
+    expect(await screen.findByText("第二张来源不可用")).toBeInTheDocument();
+    expect(screen.queryByText("第一张来源")).not.toBeInTheDocument();
+  });
+
   test("lazy-loads full invoice detail after opening and shows a loading state", async () => {
     const target: InputInvoiceUsageDetailTarget = { kind: "invoice", id: "inv-001", rowId: "row-001" };
     const loadDetail = vi.fn<[], Promise<InputInvoiceUsageDetailPayload>>(() => new Promise(() => undefined));
@@ -290,13 +307,14 @@ describe("InputInvoiceUsageDetailDrawer", () => {
 });
 
 describe("Input invoice usage workflow drawers", () => {
-  test("OA detail mapper uses canonical workflow status and ignores legacy relation status", async () => {
+  test("OA detail mapper uses source workflow status rather than business or relation status", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       oaId: "oa-completed",
       detailAvailable: true,
       applicantName: "樊祖芳",
       workflowStatus: "completed",
       status: "unpaired",
+      detailFields: { "流程状态": "in_progress" },
     }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -305,10 +323,13 @@ describe("Input invoice usage workflow drawers", () => {
     const detail = await fetchInputInvoiceUsageOaDetail("oa-completed");
 
     expect(detail.sections[0].fields).toEqual(expect.arrayContaining([
-      expect.objectContaining({ label: "流程状态", value: "completed" }),
+      expect.objectContaining({ label: "流程状态", value: "in_progress" }),
     ]));
     expect(detail.sections[0].fields).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ value: "unpaired" }),
+    ]));
+    expect(detail.sections[0].fields).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ value: "completed" }),
     ]));
   });
 
@@ -323,7 +344,11 @@ describe("Input invoice usage workflow drawers", () => {
         kind: "oa",
         title: "OA关联明细",
         relationCount: 1,
-        summaries: [{ applicantName: "樊祖芳", amount: "100.00", workflowStatus: "completed", status: "unpaired" }],
+        sections: [{ title: "OA 1", fields: [
+          { label: "申请人", value: "樊祖芳" },
+          { label: "金额", value: "100.00" },
+          { label: "流程状态", value: "completed" },
+        ] }],
       }), {
         status: 200,
         headers: { "Content-Type": "application/json" },

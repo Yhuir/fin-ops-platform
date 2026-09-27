@@ -180,3 +180,10 @@ workbench_category_projection_rows 在既有一次有界批量查询中返回每
 `BankSplitTagPicker` 位于 `web/src/features/bankSplits/`，输入当前 code／完整路径、有效标签定义、往来归属选项与 disabled，末级选定后输出完整分类选择。单一菜单根据实际路径显示一／二／三栏，整笔分类恢复复用同一组件；不拥有 API、关联或持久化 I/O。公共成本 `TwoColumnTagPicker` 保留原职责。
 
 `BankSplitEditor/BankTransactionDetailContent` 只负责查看与编辑，已删除旧 `BankSplitPartAction/renderPartAction` 关联回调和独立归属 select。`onSaved/onBankSplitSaved` 仍返回持久化 `BankSplitDetail`，由宿主清理旧选择并重读详情／列表。金额、版本、权限、失败草稿和批量详情读取保持；无 HTTP API、数据库、read model 或 worker 变更。
+
+
+## 2026-09-27 原始详情来源隔离
+
+OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../../dev/source-record-details.md)。详情投影只消费明确来源值，移除内部状态、推断费用类型、默认币种、日期替代及无来源的聚合信息；不从列表摘要或旧详情回退。银行使用父交易身份和真实交易日期，拆分操作仍由银行 owner 管理。模块列表、业务计算、导出、关系写入与原权限不变；公共成本核对信息不按原始字段规则全局删除。
+
+文件范围包含共享 `services/source_record_details.py`、所属详情 query/assembler 与前端 API 映射；银行通用抽屉按 ID 读取 `/api/bank-transactions/{id}/source-detail`，复用既有有界银行读取。没有新增 read model、cache、worker、迁移或数据库备份。旧取值删除条件、测试矩阵及性能验证见集中合同；实际执行结果另记，不以本节表示验证通过。

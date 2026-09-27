@@ -61,6 +61,15 @@ test.describe("销项发票收款情况", () => {
     await expect(table.getByText("该红字发票已与蓝字发票建立自动正式关联。")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "收款状态规则" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "收据编号设置" })).toHaveCount(0);
+
+    await blueInvoiceRow.getByRole("button", { name: "红蓝票 · 2" }).click();
+    const sourceDrawer = page.getByRole("dialog", { name: "销项发票详情" });
+    await expect(sourceDrawer.getByRole("heading", { name: "发票 1" })).toBeVisible();
+    await expect(sourceDrawer.getByRole("heading", { name: "发票 2" })).toBeVisible();
+    await expect(sourceDrawer.getByText("XSFP-E2E-0001", { exact: true })).toBeVisible();
+    await expect(sourceDrawer.getByText("XSFP-E2E-0002", { exact: true })).toBeVisible();
+    await expect(sourceDrawer.getByText("output_invoice_reversal", { exact: true })).toHaveCount(0);
+    await sourceDrawer.getByRole("button", { name: "关闭详情抽屉" }).click();
     await expect(page.getByRole("button", { name: "状态/提醒" })).toHaveCount(0);
 
     const rowsBeforeSearch = api.count("GET /api/output-invoice-collections/rows");

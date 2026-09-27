@@ -14,7 +14,7 @@ import StatePanel from "./StatePanel";
 
 export type EntityDetailField = {
   label: string;
-  value: string | number | null | undefined;
+  value: string | number | boolean | null | undefined;
 };
 
 export type EntityDetailSection = {
@@ -40,6 +40,7 @@ const publicLabelAliases: Record<string, string> = {
   account_no: "账号",
   account_number: "账号",
   account_last4: "账号后四位",
+  account_detail_no: "账户明细编号-交易流水号",
   amount: "金额",
   application_date: "申请日期",
   application_time: "申请时间",
@@ -50,6 +51,7 @@ const publicLabelAliases: Record<string, string> = {
   bank_account_no: "账号",
   bank_name: "银行",
   bank_short_name: "银行简称",
+  bank_serial_no: "银行流水号",
   booked_date: "入账日期",
   buyer_name: "购买方名称",
   buyer_tax_no: "购买方识别号",
@@ -67,6 +69,7 @@ const publicLabelAliases: Record<string, string> = {
   invoice_no: "发票号码",
   invoice_source: "发票来源",
   invoice_status: "发票状态",
+  invoice_status_from_source: "发票状态",
   invoice_type: "发票种类",
   issue_date: "开票日期",
   completed_at: "审批完成时间",
@@ -94,8 +97,10 @@ const publicLabelAliases: Record<string, string> = {
   total_amount: "金额",
   total_with_tax: "价税合计",
   trade_time: "交易时间",
+  txn_date: "交易日期",
   voucher_no: "凭证号",
   voucher_type: "凭证类型",
+  voucher_kind: "凭证种类",
   amount_without_tax: "不含税金额",
   is_positive_invoice: "是否正数发票",
   risk_level: "发票风险等级",
@@ -103,6 +108,8 @@ const publicLabelAliases: Record<string, string> = {
   issuer: "开票人",
   workflow_no: "OA单号",
   workflow_status: "流程状态",
+  open_url: "打开链接",
+  url: "打开链接",
 };
 
 const publicLabels = new Set([
@@ -147,6 +154,7 @@ const publicLabels = new Set([
   "支付账号后四位",
   "付款方式",
   "交易时间",
+  "交易日期",
   "入账日期",
   "记账日期",
   "借方发生额",
@@ -421,9 +429,13 @@ function localizedValue(label: string, value: EntityDetailField["value"]) {
   }
   const text = value.trim();
   if (timeFieldLabels.has(label)) {
-    return formatDateTimeText(text);
+    const formatted = formatDateTimeText(text);
+    if (/^\d{4}-?\d{2}-?\d{2}[T\s]\d{2}:\d{2}(?:Z|[+-]\d{1,2}(?::?\d{2})?)?$/.test(text)) {
+      return formatted.replace(/:\d{2}$/, "");
+    }
+    return formatted;
   }
-  return statusLabels[text.toLowerCase()] ?? text;
+  return statusFieldLabels.has(label) ? statusLabels[text.toLowerCase()] ?? text : text;
 }
 
 function isEmptyValue(value: EntityDetailField["value"]) {
@@ -486,6 +498,7 @@ const timeFieldLabels = new Set([
   "完成时间",
   "审批完成时间",
   "交易时间",
+  "交易日期",
   "入账日期",
   "记账日期",
   "申请日期",

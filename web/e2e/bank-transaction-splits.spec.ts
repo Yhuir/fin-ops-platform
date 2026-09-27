@@ -12,6 +12,19 @@ test('bank detail adds labeled children, persists exact amounts and reloads comp
     category_code: 'principal', category_label_path: ['外部往来款', '归还借款', '银行往来'], turnover_third_label_options: [{ value: '银行往来', label: '银行往来' }], parts: [] as Array<{ id: string; category_code: string; category_label: string; category_path: string[]; amount: string }>, tag_definitions: tagDefinitions, can_edit: true };
   let writes = 0;
   let rejectSave = false;
+  let sourceReads = 0;
+  await page.route('**/api/bank-transactions/*/source-detail', async route => {
+    expect(route.request().method()).toBe('GET');
+    expect(new URL(route.request().url()).pathname).toContain('/bk-o-202603-001/source-detail');
+    sourceReads += 1;
+    await route.fulfill({ json: { title: '银行流水详情', detail_available: true, sections: [{
+      title: '交易信息', bank_transaction_id: 'bk-o-202603-001', fields: [
+        { label: '金额', value: '58000.00' },
+        { label: '交易日期', value: '2026-03-01' },
+        { label: '备注', value: 'normal (0123456789abcdef.pdf)' },
+      ],
+    }] } });
+  });
   await page.route('**/api/bank-transactions/*/splits', async route => {
     if (route.request().method() === 'PUT') {
       if (rejectSave) {
@@ -33,6 +46,10 @@ test('bank detail adds labeled children, persists exact amounts and reloads comp
   await page.getByRole('button', { name: '查看银行流水 智能工厂设备商 详情' }).click();
   const drawer = page.getByRole('dialog', { name: '银行流水详情' });
   await expect(drawer.getByText('流水子项拆分', { exact: true })).toBeVisible();
+  await expect(drawer.getByText('normal (0123456789abcdef.pdf)', { exact: true })).toBeVisible();
+  await expect(drawer.getByText('2026-03-01', { exact: true })).toBeVisible();
+  await expect(drawer.getByText('pending', { exact: true })).toHaveCount(0);
+  expect(sourceReads).toBe(1);
   const pickerRequests: string[] = [];
   const recordPickerRequest = (request: import('@playwright/test').Request) => { if (request.url().includes('/api/')) pickerRequests.push(request.url()); };
   page.on('request', recordPickerRequest);
@@ -74,6 +91,7 @@ test('bank detail adds labeled children, persists exact amounts and reloads comp
   await page.getByRole('button', { name: '查看银行流水 智能工厂设备商 详情' }).click();
   await expect(drawer.getByLabel('子项 1 金额')).toHaveValue('56502.78');
   await expect(drawer.getByLabel('子项 2 金额')).toHaveValue('1497.22');
+  expect(sourceReads).toBe(3);
   await expectNoUnexpectedSuccessUiErrors(page);
 });
 

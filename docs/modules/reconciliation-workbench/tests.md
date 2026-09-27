@@ -864,3 +864,8 @@ WorkbenchSupportingDocumentFiles、groupDisplayModel、WorkbenchExceptionDrawer�
 - `test_workbench_query_postgres_integration.py`：真实 PostgreSQL summary/full 读取同一展示范围，ETC summary 与普通发票身份不丢失，原一次批量 history 查询和正式版本/成员保持不变。
 - `groupDisplayModel.test.ts`、`WorkbenchApi.test.ts`、`RelationGroupGrid.test.tsx`：DTO 映射、共享发票精确跨行、主关联台相同布局、过滤不重复成员。
 - `workbench-preview-layout.spec.ts`：浏览器测量 1711.33 三栏上下边界、16000 只跨两行8000、单张只显示一次、深色表头、居中/无横向溢出；保留拆分撤回、窄屏、权限、stale、网络恢复及 fanout 回归。
+
+
+## 2026-09-27 来源详情回归
+
+按[来源详情验证责任](../../dev/source-record-details.md#验证责任)覆盖真实来源保留、内部状态/推断/替代值移除、缺失与零值、权限及读取失败；保留本模块列表、计算、导出和关系回归。公共前端入口包括 `EntityDetailContent.test.tsx`、`DetailDrawer.test.tsx` 与 `BankTransactionDrawer.test.tsx`，后者保护按 ID 读取、切换取消及禁止列表摘要回退。具体后端/浏览器执行及性能结果据实际报告，不以本节表示已通过。

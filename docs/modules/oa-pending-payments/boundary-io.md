@@ -53,7 +53,7 @@
 `statistics` 只包含已完成 OA、进行中 OA 和 canonical 进项发票数量；同 ID 同时出现时已完成优先，旧付款、流水和关系数量字段已删除。
 | OA facts export | frontend download | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`；sheet 为 `已完成OA` / `进行中OA`；只含登记的 OA 字段，20,000 行上限，`Cache-Control: no-store`。 |
 | export audit | `audit.events` | action=`oa_pending_payment_source_export_downloaded`，以 `operation.completed/success` 终态记录；只记录 actor、来源、各来源数量、总行数和文件名，不记录 OA 业务内容。 |
-| detail response | frontend drawer | canonical row hydrate 后复用既有 detail builder；missing=`404`、invalid=`400` |
+| detail response | frontend drawer | 先按 tenant/month 定位授权 descriptor；OA/银行/发票对象详情在同一快照一次 `load_facts` 后直接做来源投影，不经过列表 summary。关系详情仍由既有 relation builder 负责；missing=`404`、invalid=`400` |
 | bank candidates | frontend drawer | canonical bank facts + active formal relations；返回 relation status 与服务端 pagination |
 | write result | frontend | 业务结果、affected objects/scopes、冲突/重试信息；不含 read-model refresh/barrier/version metadata |
 | payment reconcile event | `job.outbox_events` / `oa-sync` worker | relation writer 同事务登记 `oa.payment_status.reconcile`；worker 按最新 active OA+outflow topology 幂等写外部状态与 PostgreSQL snapshot。完整 OA 权威快照以 retention 前的 current canonical OA 支付身份集合（Mongo document ID + `flowRequestId/processId`）比较完整 MySQL status 集合；确认 source flow 消失时，同事务删除 PG snapshot 并登记 `remove_missing_oa_statuses`。worker 在外部删除前以候选确定性身份定位 OA raw document，再按业务编号重读并执行 lifecycle arbitration，只把仍属于 current canonical OA 的候选视为重现，同时合并 completed + admitted canonical flow 后批量删除 MySQL 状态；source read 失败不删除。 |
@@ -70,7 +70,7 @@
 - selector 使用一个 set-based statement 完成过滤、排序、服务端分页与聚合；随后只为当前页批量 hydrate canonical records/relations/bank/invoices/status。
 - selector 与 hydrate 都不得按 relation mode 丢弃 active relation；支付状态和展示只消费成功解析的 outflow bank facts。
 - 查询次数与 page size 无关；最大 `page_size=200`，禁止逐行/逐组查询和 Python/浏览器全量分页。
-- 详情各自使用一个只读 repeatable-read snapshot，先定位 descriptor，再批量 hydrate 单一 canonical group。
+- 详情各自使用一个只读 repeatable-read snapshot，先按 tenant/month 定位 descriptor，再一次批量读取单一 canonical group facts。对象详情直接消费对应源对象，不再通过列表摘要取值；关系详情继续走列表/关系 assembler，保留原业务汇总。
 - 候选抽屉用一个 set-based statement 读取全量月份的 outflow bank facts、active relation status、keyword filter、total 和当前页；不得经 command service 全量加载后 Python 分页。
 - 导出在一个只读 repeatable-read snapshot 内执行一条 `UNION ALL` 查询并按来源稳定排序；XLSX 使用 write-only workbook，禁止逐行 SQL、页面 rows 复用、read model 或全量关系 hydrate。
 
@@ -118,7 +118,7 @@ frontend -> page API only
 
 - OA、银行流水和发票详情统一使用共享 `EntityDetailContent` 与 HeroUI `Table`/`Chip`；标签在左、真实值在右，禁止页面私有表格嵌套或内部字段表。
 - 单条和多条使用同一公开字段合同；多条只按 `OA N`、`银行流水 N`、`发票 N` 重复分区，不输出关系概况、数量或是否多条。
-- 仅展示 canonical API 实际返回且已登记为用户可见的字段；内部 ID、raw/source 字段和推导字段在共享边界过滤。
+- 仅展示详情 API 实际返回且具有文件/OA来源依据的字段；内部 ID、raw/source 字段和推导字段在共享边界过滤。
 - 抽屉打开后按需执行一个有界详情 GET，不按成员 N+1；所有详情时间统一为 `Asia/Shanghai` 的无时区后缀格式。
 
 ## 文件范围
@@ -159,7 +159,7 @@ frontend -> page API only
 
 ## 2026-09-15 日常报销子项展示修复
 
-OA 详情复用同次 canonical 批量 hydration，按请求 OA ID 选择原单据，追加全部费用明细节；多 OA 关系不得误取主 OA。列表保持父 OA 行和原有响应形状；详情不传附件原始载荷或内部子项 ID。无每子项查询、缓存或新 worker。
+OA 详情在同次 canonical 批量读取后按请求 OA ID 选择原单据，直接来源投影并追加费用明细；多 OA 关系不得误取主 OA。2026-09-27 删除列表 summary 转对象详情的旧 builder，关系详情与列表 assembler 保留；详情不传附件原始载荷或内部子项 ID。无每子项查询、缓存或新 worker。
 
 ## 右侧抽屉交互（2026-09-15）
 
@@ -191,3 +191,10 @@ SQL 分页/筛选/汇总和 Python 行数据/详情组装使用相同范围，�
 ## 2026-09-24 原始流水金额展示
 
 银行列表聚合输出 `original_amount`、`original_transaction_count` 与按父身份去重的完整 `bank_split_parts`；单笔 summary 输出 `parent_row_id`、`original_amount`。用途金额与已付/已收业务字段保持原意，不能被原始金额覆盖。银行金额筛选/排序、导出和详情按对应原始流水口径，关键词仍可搜索用途金额；分页与批量查询不变。具体 DTO、导出列与旧路径删除合同见 [流水拆分 I/O](../../dev/bank-transaction-splits.md#2026-09-24-银行原始金额与用途金额展示合同)。没有新增 read model、worker 或持久化事实。
+
+
+## 2026-09-27 原始详情来源隔离
+
+OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../../dev/source-record-details.md)。详情投影只消费明确来源值，移除内部状态、推断费用类型、默认币种、日期替代及无来源的聚合信息；不从列表摘要或旧详情回退。银行使用父交易身份和真实交易日期，拆分操作仍由银行 owner 管理。模块列表、业务计算、导出、关系写入与原权限不变；公共成本核对信息不按原始字段规则全局删除。
+
+文件范围包含共享 `services/source_record_details.py`、所属详情 query/assembler 与前端 API 映射；银行通用抽屉按 ID 读取 `/api/bank-transactions/{id}/source-detail`，复用既有有界银行读取。没有新增 read model、cache、worker、迁移或数据库备份。旧取值删除条件、测试矩阵及性能验证见集中合同；实际执行结果另记，不以本节表示验证通过。

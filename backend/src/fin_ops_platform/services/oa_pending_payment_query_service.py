@@ -6,13 +6,10 @@ from typing import Any, Callable
 
 from fin_ops_platform.services.oa_pending_payment_canonical_rows import (
     build_oa_pending_payment_rows,
-    oa_pending_payment_oa_summary,
 )
 from fin_ops_platform.services.oa_pending_payment_details import (
-    oa_pending_payment_bank_detail_from_row,
-    oa_pending_payment_invoice_detail_from_row,
-    oa_pending_payment_oa_detail_from_row,
     oa_pending_payment_relation_details_from_row,
+    oa_pending_payment_source_detail,
 )
 from fin_ops_platform.services.oa_pending_payment_export import (
     OA_PENDING_PAYMENT_EXPORT_ROW_LIMIT,
@@ -179,7 +176,7 @@ class OaPendingPaymentQueryService:
             identifier=oa_id,
             tenant_id=tenant_id,
             requested_scope_key=requested_scope_key,
-            builder=oa_pending_payment_oa_detail_from_row,
+            builder=lambda facts: oa_pending_payment_source_detail(facts, "oa", oa_id),
             not_found_code="oa_not_found",
             not_found_message=f"OA detail not found: {oa_id}",
         )
@@ -196,7 +193,7 @@ class OaPendingPaymentQueryService:
             identifier=bank_transaction_id,
             tenant_id=tenant_id,
             requested_scope_key=requested_scope_key,
-            builder=lambda row: oa_pending_payment_bank_detail_from_row(row, bank_transaction_id),
+            builder=lambda facts: oa_pending_payment_source_detail(facts, "bank", bank_transaction_id),
             not_found_code="bank_transaction_not_found",
             not_found_message=f"Bank transaction detail not found: {bank_transaction_id}",
         )
@@ -213,7 +210,7 @@ class OaPendingPaymentQueryService:
             identifier=invoice_id,
             tenant_id=tenant_id,
             requested_scope_key=requested_scope_key,
-            builder=lambda row: oa_pending_payment_invoice_detail_from_row(row, invoice_id),
+            builder=lambda facts: oa_pending_payment_source_detail(facts, "invoice", invoice_id),
             not_found_code="invoice_not_found",
             not_found_message=f"Invoice detail not found: {invoice_id}",
         )
@@ -263,10 +260,9 @@ class OaPendingPaymentQueryService:
                         not_found_message,
                         status_code=HTTPStatus.NOT_FOUND,
                     )
-                rows = self._hydrate_rows(
-                    snapshot, [descriptor], tenant_id=tenant_id,
-                    detail_oa_id=identifier if identifier_kind == "oa" else None,
-                )
+                if identifier_kind != "row":
+                    return builder(snapshot.load_facts([descriptor], tenant_id=tenant_id))
+                rows = self._hydrate_rows(snapshot, [descriptor], tenant_id=tenant_id)
         except OaPendingPaymentError:
             raise
         except ValueError as exc:
@@ -288,7 +284,6 @@ class OaPendingPaymentQueryService:
         descriptors: list[dict[str, Any]],
         *,
         tenant_id: str,
-        detail_oa_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if not descriptors:
             return []
@@ -332,12 +327,6 @@ class OaPendingPaymentQueryService:
                 "OA pending payment canonical hydration is incomplete: " + ", ".join(missing_ids)
             )
         result = [rows_by_id[row_id] for row_id in expected_ids]
-        if detail_oa_id:
-            record = next((record for record in [*completed_records, *in_progress_records]
-                           if record.id == detail_oa_id), None)
-            if record is None:
-                raise RuntimeError("OA detail target is absent from canonical hydration")
-            result = [{**row, "oa": oa_pending_payment_oa_summary(record), "expense_items": record.expense_items} for row in result]
         return result
 
     def _repository_required(self) -> Any:

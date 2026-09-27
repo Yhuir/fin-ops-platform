@@ -103,3 +103,8 @@ cd web && npm run build
 ## 原始流水金额与拆分展示回归（2026-09-24）
 
 `tests/test_bank_split_document_scope_postgres.py` 与 `tests/test_bank_split_consumers_postgres.py` 验证原始金额 1001497.22 与利息业务金额 1497.22 同时成立、同父子项去重、多父金额/标签完整、原始金额筛选、子项金额搜索、持久化第三层及导出。适用业务核心、服务、API/查询合同、跨模块链路与旧功能回归；前端交互由各页面及 BankSplitChips 测试覆盖。本次无缓存/read-model/后台任务变更，验证 canonical 查询与现有写后 GET，无需新增后台测试。
+
+
+## 2026-09-27 来源详情回归
+
+按[来源详情验证责任](../../dev/source-record-details.md#验证责任)覆盖真实来源保留、内部状态/推断/替代值移除、缺失与零值、权限及读取失败；保留本模块列表、计算、导出和关系回归。公共前端入口包括 `EntityDetailContent.test.tsx`、`DetailDrawer.test.tsx` 与 `BankTransactionDrawer.test.tsx`，后者保护按 ID 读取、切换取消及禁止列表摘要回退。具体后端/浏览器执行及性能结果据实际报告，不以本节表示已通过。

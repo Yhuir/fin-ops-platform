@@ -23,6 +23,7 @@ from fin_ops_platform.services.output_invoice_collection_service import (
 from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_query import (
     InvoiceUsageCollectionCanonicalSnapshot,
 )
+from fin_ops_platform.services.source_record_details import bank_source_detail, source_relation_sections
 
 
 class OutputInvoiceCollectionCanonicalQueryService:
@@ -223,6 +224,7 @@ class OutputInvoiceCollectionCanonicalQueryService:
             }[kind],
             "relationCount": int(relation_payload.get("relationCount") or 0),
             "summaries": list(relation_payload.get("summaries") or []),
+            "sections": source_relation_sections(kind, list(relation_payload.get("summaries") or [])),
         }
 
     def invoice_detail(
@@ -281,23 +283,7 @@ class OutputInvoiceCollectionCanonicalQueryService:
                 status_code=404,
             )
         transaction = original_bank_transaction(transaction)
-        return {
-            "id": transaction.id,
-            "counterpartyName": transaction.counterparty_name_raw,
-            "tradeTime": transaction.trade_time or transaction.txn_date or "",
-            "amount": f"{transaction.amount:.2f}",
-            "direction": str(
-                getattr(transaction.txn_direction, "value", transaction.txn_direction)
-            ),
-            "bankName": transaction.imported_bank_name or "",
-            "accountNo": transaction.account_no,
-            "accountLast4": transaction.imported_bank_last4
-            or str(transaction.account_no or "")[-4:],
-            "summary": transaction.summary or "",
-            "remark": transaction.remark or "",
-            "currency": transaction.currency or "CNY",
-            "bankTextFields": list(transaction.bank_text_fields),
-        }
+        return bank_source_detail(transaction)
 
     def _export_rows(
         self,

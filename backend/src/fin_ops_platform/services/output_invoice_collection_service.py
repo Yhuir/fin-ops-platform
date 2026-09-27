@@ -30,6 +30,7 @@ from fin_ops_platform.services.object_identity_policy import FinancialObjectIden
 from fin_ops_platform.services.output_invoice_reversal import (
     reversal_target_invoice_nos,
 )
+from fin_ops_platform.services.source_record_details import bank_source_detail, invoice_source_detail
 from fin_ops_platform.services.workbench_relation_modes import (
     OUTPUT_INVOICE_REVERSAL_RELATION_MODE,
 )
@@ -438,49 +439,8 @@ class OutputInvoiceCollectionQueryService:
         self,
         group: dict[str, Any],
     ) -> dict[str, Any]:
-        primary: Invoice = group["primary"]
-        lines: list[Invoice] = list(group["line_items"])
-        return {
-            "id": primary.id,
-            "invoiceIdentityKey": group["identity_key"],
-            "invoiceNo": primary.invoice_no,
-            "invoiceCode": primary.invoice_code or "",
-            "digitalInvoiceNo": primary.digital_invoice_no or "",
-            "invoiceDate": primary.invoice_date or "",
-            "sellerName": primary.seller_name or "",
-            "sellerTaxNo": primary.seller_tax_no or "",
-            "buyerName": primary.buyer_name or primary.counterparty.name,
-            "buyerTaxNo": primary.buyer_tax_no
-            or primary.counterparty.tax_no
-            or "",
-            "amount": _money(
-                sum((_decimal(line.amount) for line in lines), start=ZERO)
-            ),
-            "taxAmount": _money(
-                sum((_decimal(line.tax_amount) for line in lines), start=ZERO)
-            ),
-            "totalWithTax": _money(
-                sum((_invoice_total(line) for line in lines), start=ZERO)
-            ),
-            "taxRate": primary.tax_rate or "",
-            "taxClassificationCode": primary.tax_classification_code or "",
-            "specificBusinessType": primary.specific_business_type or "",
-            "taxableItemName": primary.taxable_item_name or "",
-            "invoiceSource": primary.invoice_source or "",
-            "invoiceKind": primary.invoice_kind or "",
-            "invoiceStatus": primary.invoice_status_from_source
-            or str(primary.status.value),
-            "isPositiveInvoice": primary.is_positive_invoice or "",
-            "riskLevel": primary.risk_level or "",
-            "issuer": primary.issuer or "",
-            "remark": _join_non_empty(line.remark for line in lines),
-            "reversalTargetInvoiceNos": reversal_target_invoice_nos(
-                line.remark for line in lines
-            ),
-            "sourceBatchId": primary.source_batch_id or "",
-            "sourceLinks": deepcopy(primary.source_links),
-            "lineItems": [self._line_item_payload(line) for line in lines],
-        }
+        return {**invoice_source_detail(group),
+                "reversalTargetInvoiceNos": reversal_target_invoice_nos(line.remark for line in group["line_items"])}
 
     def bank_transaction_detail(
         self,
@@ -496,25 +456,7 @@ class OutputInvoiceCollectionQueryService:
                 f"Bank transaction detail not found: {bank_transaction_id}",
                 status_code=HTTPStatus.NOT_FOUND,
             )
-        return {
-            "id": transaction.id,
-            "counterpartyName": transaction.counterparty_name_raw,
-            "tradeTime": transaction.trade_time or transaction.txn_date or "",
-            "amount": _money(transaction.amount),
-            "direction": _bank_direction(transaction),
-            "bankName": transaction.imported_bank_name or "",
-            "accountNo": transaction.account_no,
-            "accountLast4": transaction.imported_bank_last4
-            or str(transaction.account_no or "")[-4:],
-            "counterpartyAccountNo": transaction.counterparty_account_no or "",
-            "counterpartyBankName": transaction.counterparty_bank_name or "",
-            "bookedDate": transaction.booked_date or "",
-            "summary": transaction.summary or "",
-            "remark": transaction.remark or "",
-            "currency": transaction.currency or "",
-            "bankTextFields": deepcopy(transaction.bank_text_fields),
-            "relations": context.relation_summaries_for_row(transaction.id),
-        }
+        return {**bank_source_detail(transaction), "relations": context.relation_summaries_for_row(transaction.id)}
 
     def _query_context(
         self,
@@ -1094,34 +1036,6 @@ class OutputInvoiceCollectionQueryService:
     def _identity_key(invoice: Invoice) -> str:
         return OBJECT_IDENTITY_POLICY.legacy_invoice_identity_key(invoice)
 
-    @staticmethod
-    def _line_item_payload(invoice: Invoice) -> dict[str, Any]:
-        return {
-            "id": invoice.id,
-            "taxClassificationCode": invoice.tax_classification_code or "",
-            "specificBusinessType": invoice.specific_business_type or "",
-            "taxableItemName": invoice.taxable_item_name or "",
-            "specificationModel": invoice.specification_model or "",
-            "unit": invoice.unit or "",
-            "quantity": (
-                _money(invoice.quantity)
-                if invoice.quantity is not None
-                else ""
-            ),
-            "unitPrice": (
-                _money(invoice.unit_price)
-                if invoice.unit_price is not None
-                else ""
-            ),
-            "amount": _money(invoice.amount),
-            "taxRate": invoice.tax_rate or "",
-            "taxAmount": _money(invoice.tax_amount),
-            "totalWithTax": _money(_invoice_total(invoice)),
-            "remark": invoice.remark or "",
-            "reversalTargetInvoiceNos": reversal_target_invoice_nos(
-                [invoice.remark]
-            ),
-        }
 
     @staticmethod
     def _filter_config() -> list[dict[str, Any]]:

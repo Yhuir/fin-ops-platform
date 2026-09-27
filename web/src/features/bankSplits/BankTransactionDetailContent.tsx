@@ -9,7 +9,10 @@ type Props = ComponentProps<typeof EntityDetailContent> & {
   onSplitDirtyChange?: (dirty: boolean, source?: string) => void;
 };
 export default function BankTransactionDetailContent({ bankTransactionId, onBankSplitSaved, onSplitDirtyChange, ...props }: Props) {
-  const ids = [...new Set(props.sections.flatMap((section, index) => {
+  const sections = props.sections.length === 0 && bankTransactionId
+    ? [{ title: '交易信息', fields: [], bank_transaction_id: bankTransactionId }]
+    : props.sections;
+  const ids = [...new Set(sections.flatMap((section, index) => {
     const id = section.bank_transaction_id ?? (index === 0 ? bankTransactionId : undefined);
     return id ? [id] : [];
   }))];
@@ -28,7 +31,7 @@ export default function BankTransactionDetailContent({ bankTransactionId, onBank
     });
     return () => controller.abort();
   }, [batchKey, reload]);
-  return <EntityDetailContent {...props} extraFields={(section, index) => {
+  return <EntityDetailContent {...props} sections={sections} extraFields={(section, index) => {
     const id = section.bank_transaction_id ?? (index === 0 ? bankTransactionId : undefined);
     if (!id) return [];
     const initialDetail = batchKey && batch?.key === batchKey ? batch.rows[ids.indexOf(id)] : undefined;

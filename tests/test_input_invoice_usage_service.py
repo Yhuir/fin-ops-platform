@@ -567,12 +567,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
             ["completed", "completed"],
         )
         self.assertNotIn("status", row["oa"]["summaries"][0])
-        self.assertEqual(
-            next(field for field in oa_relation_detail["sections"][0]["fields"] if field["label"] == "流程状态")[
-                "value"
-            ],
-            "completed",
-        )
+        self.assertNotIn("流程状态", [field["label"] for field in oa_relation_detail["sections"][0]["fields"]])
         self.assertEqual(row["bankTransactions"]["primaryBankTransactionId"], "bank-exact")
         self.assertEqual(
             [summary["bankTransactionId"] for summary in relation_detail["summaries"]], ["bank-exact", "bank-old"]

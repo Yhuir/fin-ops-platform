@@ -2469,17 +2469,7 @@ export default function BankDetailsPage() {
       </div>
       <BankTransactionDrawer transactionId={detailTransaction?.id ?? null} onClose={() => setDetailTransaction(null)}
         onSaved={async () => { await reloadTransactionsAfterRulesMutation(); }}
-        sections={detailTransaction ? [{ title: "交易信息", fields: [
-          { label: "金额", value: detailTransaction.amount },
-          { label: "收支方向", value: detailTransaction.directionLabel },
-          { label: "对方户名", value: detailTransaction.counterpartyName },
-          { label: "交易时间", value: detailTransaction.tradeTime },
-          { label: "银行", value: detailTransaction.bankName },
-          { label: "账号后四位", value: detailTransaction.accountLast4 },
-          { label: "余额", value: detailTransaction.balance },
-          { label: "摘要", value: detailTransaction.summary },
-          { label: "备注", value: detailTransaction.noteText },
-        ] }] : []} />
+        />
       <AutoTagRulesDrawer
         open={rulesDrawerOpen}
         onClose={() => setRulesDrawerOpen(false)}

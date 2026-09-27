@@ -191,3 +191,8 @@ parser version 升为 `2026-09-23-labelled-invoice-parties-v6`，复用 adapter 
 共享 parser 保留明确票号、日期、价税合计，但未税金额/税额无法归属的证据：未知字段为空，复用 `financial_review_reason`；金额显式矛盾及总额歧义仍拒绝。已有强身份发票通过原 recognition/promotion/normalization 只补来源，使用 canonical 财务值；无已有票时即使 create_missing 也不得新建。禁止补零、猜税率或按金额匹配。
 
 同文件同票完整证据优先于先到的部分证据，并保留被选证据的 region；不拼接不同票字段。PDF 普通部分文本保持一次同页 OCR，人工上传在该页处理后返回首票；完整文本与铁路仅票价文本零额外 OCR。parser version 为 `2026-09-23-partial-financial-evidence-v7`，旧空缓存按现有版本规则失效；精确刷新按 OA row 处理，后续正常同步沿用分批准备。无新表/API/worker/cache schema。计划与验收见[闭环记录](../../dev/oa-attachment-partial-financial-evidence-plan.md)。
+
+
+## 2026-09-27 OA 原始详情字段
+
+共享 `oa_expense_details.py` 只投影真实费用子项字段：内容取原 `fee_content`，不回退推断的 `expense_content`；移除费用类型和计算的附件文件数。主单源字段由纯 `source_record_details.py` 约束，流程状态只取显式来源，修改时间不冒充审批完成时间。OA 同步、内部分类、canonical workflow 状态与其它页面业务规则不因此修改；页面不访问外部 OA。完整 I/O、旧路径清理和测试责任见[来源详情合同](../../dev/source-record-details.md)。
