@@ -1,6 +1,6 @@
 # 待找发票模块边界与 I/O
 
-日期：2026-08-18
+日期：2026-09-28
 
 ## 模块化状态
 
@@ -46,6 +46,7 @@
 | rows + summary + optional statistics | 前端页面 | 每次请求使用同一显式 `REPEATABLE READ / READ ONLY` snapshot；默认返回全期间 statistics，`include_statistics=false` 返回 `statistics=null` |
 
 全期间 `statistics` 只包含流水总数、支出、收入、OA、进项发票和销项发票数量；旧已找到/待找、现金状态和关系状态数量字段已删除。
+| acquisition_summary | 前端两层分段统计 | `bank_count` 为完整筛选下的原始流水数，`invoice_count` 为其全部用途关联的同方向发票 ID 去重数；`status_counts` 固定返回九个已定义状态键（含真实 0），保留方向及其它筛选但排除状态自身；与 rows 共用同一 snapshot，不受分页影响。 |
 | rows.filter_options | 前端筛选 | rows 首响应只返回稳定字段定义，不执行高基数 options 聚合；页面完成首响应后调用专用 `/filter-options`，每字段最多 50 项，数据库聚合且不阻塞表格首屏。 |
 | export-preview/export | 前端导出 | 复用同一 canonical row DTO；最大 20,000 行，超限先报错；不读取页面 read model |
 | relation/object detail | 前端抽屉 | active canonical relations；统一只返回 `title/subtitle?/detail_available/sections` 公开合同，`kind=bank|invoice|oa` 只控制响应分区；禁止返回 relation case、raw payload、内部 form id 或重复 summary 容器 |
@@ -64,7 +65,7 @@
   `oa.primary|summaries` canonical 容器；旧 `bank_transaction`、`invoices`、`oa_applicant` 重复字段不再输出。
 - 列表标签字典只含展示元数据；规则 matcher、account scope 和其它执行期字段只留在后端 settings/query owner。
 - 分类/确认/income override、relation members、invoice/OA/bank summaries 都批量聚合；禁止 per-row/per-group N+1。
-- 自动规则字符串使用 PostgreSQL `normalize(..., NFKC)`、空白折叠及现有“帐户→账户”口径；`include_statistics=false` 时只为请求方向构建规则匹配文本，内部转账与 relation 事实仍读取双方向 canonical rows，禁止用方向裁剪改变业务判断。
+- 自动规则字符串使用 PostgreSQL `normalize(..., NFKC)`、空白折叠及现有“帐户→账户”口径；两层互斥计数需要同时读取双方向规则与 canonical rows，已删除旧的 scan_direction 裁剪配置；不得用请求方向裁剪其它方向的计数。
 - SQL 分类后由 `pending_invoice_status_payload` 再校验；若 SQL 和领域策略分歧则请求失败。
 - 50,003 条本地 PostgreSQL canonical bank rows 和生产 SLO 实测记录在 `implementation-notes.md`；本次未新增 cache、queue、worker、materialized view、索引或依赖。
 
@@ -141,3 +142,14 @@ OA detail SQL 读取原单据 canonical expense_items，服务使用共享公共
 OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../../dev/source-record-details.md)。详情投影只消费明确来源值，移除内部状态、推断费用类型、默认币种、日期替代及无来源的聚合信息；不从列表摘要或旧详情回退。银行使用父交易身份和真实交易日期，拆分操作仍由银行 owner 管理。模块列表、业务计算、导出、关系写入与原权限不变；公共成本核对信息不按原始字段规则全局删除。
 
 文件范围包含共享 `services/source_record_details.py`、所属详情 query/assembler 与前端 API 映射；银行通用抽屉按 ID 读取 `/api/bank-transactions/{id}/source-detail`，复用既有有界银行读取。没有新增 read model、cache、worker、迁移或数据库备份。旧取值删除条件、测试矩阵及性能验证见集中合同；实际执行结果另记，不以本节表示验证通过。
+
+## 两层分段与原始流水唯一归类（2026-09-28）
+
+- 默认 `direction=all`，无隐藏状态筛选。上层方向是“全部/支出/收入”；下层是发票获取状态，均使用共享 HeroUI `InvoiceCountSegments`。共同样式不含页面业务逻辑，事件仍由页面 owner 处理。
+- `summary.source_summary` 保留搜索、日期、其它列筛选，排除方向/状态自身；下层 `status_counts` 保留方向与其它条件、排除状态自身。分页、排序不改变计数；`pagination.total` 仍是折叠后展示行数，页容量标注“行/页”。
+- 先对完整 `bank_transaction_units` 分类，再按原始 `parent_row_id` 取唯一代表：待取得/开具发票 > 金额待核对 > 已关联发票 > 流水代替发票 > 现金收入 > 无需发票。同优先级按子项 ID 稳定取代表。搜索命中任一子项时，返回该父流水的完整分类，不因筛选改变优先级。
+- relation 折叠必须同时具有相同方向、相同最终状态；列表的 bank summaries 限定当前显示父流水，原始金额按父流水去重。子项实际金额、代表操作 ID 和既有写入服务保持原义。
+- 九个后端状态只在页面 options 模块组合成六类：pending 两方向、linked 两方向、review、statement、no_invoice 两方向、cash。前端不重新判定业务状态。状态 Tabs 与表头多选共同写入 `filters.status_code`；无状态条件或全部状态均选中为“全部状态”，多选显示独立“多状态筛选”。
+- 统计字段缺失/负数/非整数是契约错误；页面显示错误和 `—`，不把失败伪装成 0。已取消的查询不得覆盖新结果。关联/规则/收入状态写成功后沿用 normal GET 回读。
+- 已删除默认支出、默认两个状态、前端 effectiveBackendFilter 推导、旧 source_where_sql 以及三页旧分段样式。既有 `filter` HTTP 参数仍有服务/导出消费者，保留其原有合同，不增加兼容旁路。
+- 本次不创建表、索引、read model、缓存或 worker，不触碰主数据库，不需要备份。

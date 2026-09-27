@@ -166,3 +166,7 @@ OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../
 - 更新期间保留表格结构，计数显示 — 并标示更新中；完成后同时更新行和计数，过期响应被既有 requestId/abort 边界忽略。请求错误保留错误提示及旧表格，但不显示旧统计为当前事实，加载/刷新/失败时禁用导出。
 - 样式限定销项页面，空间不足时工具栏换行、分类条内部滚动。每页数量与导出预览使用张；通用表格及进项页面没有实现改动。
 - 文件范围增加 `web/src/test/OutputInvoiceCollectionApi.test.ts`、`web/e2e/output-invoice-status-tabs.spec.ts`；没有新 service/route/worker/cache/schema，不需要数据库备份。
+
+## 分段控件一致性（2026-09-28）
+
+统计切换使用 `components/common/InvoiceCountSegments.tsx`（HeroUI 原生 Tabs/Indicator）。输入是页面提供的 key/label/count/selectedKey/pending，输出仅选择事件；共享组件不持有请求、缓存或业务状态。仍按发票张数，保留页面现有分类、筛选、导出与权限合同。删除页面旧的 tabs 私有 CSS；影响范围限三个显式使用此组件的发票页面。

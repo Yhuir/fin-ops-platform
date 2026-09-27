@@ -1,3 +1,4 @@
+import { pendingAcquisitionFixture } from "./pendingInvoiceFixtures";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -94,6 +95,7 @@ function installPendingInvoiceRulesSaveFetch() {
         direction,
         filter: url.searchParams.get("filter") ?? "all",
         rows,
+        acquisition_summary: pendingAcquisitionFixture(rows),
         pagination: { page: 1, page_size: 50, total: rows.length },
         summary: {
           total_rows: rows.length,

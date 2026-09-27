@@ -172,3 +172,7 @@ OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../
 - `bankRelationStatus` 直接取 canonical typed relation 是否存在，禁止根据银行详情数组是否为空猜测关系状态。
 - staged-drafts 返回所有 draft/failed/created/检测占用，新增 `draftRequestState` 和 `canRelease`；业务能力与接口写权限共同控制动作。`requesting` 禁止释放，失败/超过 HTTP timeout 两倍后只显示 `unknown`，人工核实与 reason 后可释放；不自动重试、释放或删除远端 OA。版本校验阻止并发发送和迟到完成覆盖释放。
 - 真实 PostgreSQL 验证入口：`tests/test_oa_reverse_occupancy_postgres.py`，覆盖同票并发、同批外部调用一次、未知结果恢复、迟到结果拒绝、银行单独关联及事务回滚。状态只属于反提命令，不污染来源详情、普通列表或 read model/worker。
+
+## 分段控件一致性（2026-09-28）
+
+统计切换使用 `components/common/InvoiceCountSegments.tsx`（HeroUI 原生 Tabs/Indicator）。输入是页面提供的 key/label/count/selectedKey/pending，输出仅选择事件；共享组件不持有请求、缓存或业务状态。仍按发票张数，保留页面现有分类、筛选、导出与权限合同。删除页面旧的 tabs 私有 CSS；影响范围限三个显式使用此组件的发票页面。

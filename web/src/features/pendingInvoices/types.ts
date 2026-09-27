@@ -280,6 +280,7 @@ export type PendingInvoiceRow = {
 };
 
 export type PendingInvoiceRowsResponse = {
+  acquisitionSummary: import("./statusOptions").AcquisitionSummary;
   direction: PendingInvoiceDirection;
   filter: PendingInvoiceFilter;
   rows: PendingInvoiceRow[];

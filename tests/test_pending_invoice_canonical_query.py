@@ -27,6 +27,7 @@ class _RecordingTransaction:
             "create_invoice_available_rows": 0,
             "statistics": {},
             "source_summary": {},
+            "acquisition_summary": {"bank_count": 0, "invoice_count": 0, "status_counts": {}},
             "options": [],
         }
 
@@ -63,6 +64,7 @@ class _PageRepository:
             "create_invoice_available_rows": 0,
             "statistics": {},
             "source_summary": {},
+            "acquisition_summary": {"bank_count": 0, "invoice_count": 0, "status_counts": {}},
             "options": [],
             "settings": {},
         }
@@ -191,7 +193,7 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
         self.assertNotIn("raw_rule_definitions as materialized", page_sql)
         self.assertNotIn("rule_definitions as materialized", page_sql)
         self.assertNotIn("read_model.", page_sql)
-        self.assertEqual(json.loads(str(page_params[0]))["scan_direction"], "all")
+        self.assertNotIn("scan_direction", json.loads(str(page_params[0])))
         self.assertEqual(page_params[-8:-6], (50, 50))
         self.assertIs(page_params[-6], True)
         self.assertIs(page_params[-5], False)
@@ -199,7 +201,7 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
         self.assertNotIn("read_model_status", payload)
         self.assertNotIn("source_versions", payload)
 
-    def test_without_statistics_scans_only_the_requested_direction(self) -> None:
+    def test_without_statistics_keeps_both_directions_for_self_excluding_counts(self) -> None:
         connection = _RecordingConnection()
         service = PendingInvoiceCanonicalQueryService(
             repository=PostgresPendingInvoiceCanonicalRepository(connection)
@@ -214,7 +216,7 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
         )
 
         _page_sql, page_params = connection.transaction_state.commands[4]
-        self.assertEqual(json.loads(str(page_params[0]))["scan_direction"], "expense")
+        self.assertNotIn("scan_direction", json.loads(str(page_params[0])))
         self.assertIs(page_params[-6], False)
 
     def test_compacts_common_transaction_text_rule_scans_without_cross_field_matches(self) -> None:
@@ -327,7 +329,7 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
     def test_query_template_is_bounded_and_has_no_forbidden_page_fact_sources(self) -> None:
         self.assertIn("limit %s offset %s", PAGE_QUERY_SQL.lower())
         self.assertIn("scope_summary as (", PAGE_QUERY_SQL.lower())
-        self.assertIn("from bank_source\n    where __source_where_sql__", PAGE_QUERY_SQL.lower())
+        self.assertIn("from scope_base", PAGE_QUERY_SQL.lower())
         self.assertNotIn("select count(*)::integer from scope_rows", PAGE_QUERY_SQL.lower())
         self.assertNotIn("read_model.pending_invoice", PAGE_QUERY_SQL)
         self.assertNotIn("read_model.bank_detail", PAGE_QUERY_SQL)
@@ -369,7 +371,7 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
 
         self.assertNotIn("normalize(", banks_sql)
         self.assertIn("normalize(", rule_banks_sql)
-        self.assertIn("scan_direction", rule_banks_sql)
+        self.assertNotIn("scan_direction", rule_banks_sql)
         self.assertIn("config.payload->'rule_fields'", rule_banks_sql)
         self.assertNotIn("bank.*", rule_banks_sql)
         self.assertIn("bank.row_id", rule_banks_sql)
@@ -406,6 +408,7 @@ class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):
                 "missing_invoice_rows": 0,
                 "create_invoice_available_rows": 0,
                 "statistics": {"bank_transaction_count": 0},
+                "acquisition_summary": {"bank_count": 0, "invoice_count": 0, "status_counts": {}},
                 "source_summary": {
                     "bank_transaction_rows": 0,
                     "expense_rows": 0,

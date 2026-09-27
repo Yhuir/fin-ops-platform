@@ -1,3 +1,4 @@
+import { pendingAcquisitionFixture } from "../../src/test/pendingInvoiceFixtures";
 import type { Page, Route } from "@playwright/test";
 
 import { createMinimalXlsx } from "./xlsx";
@@ -7800,7 +7801,7 @@ function pendingInvoiceImportFanoutRow() {
   };
 }
 
-function pendingInvoiceRowsPayload(
+export function pendingInvoiceRowsPayload(
   relationConfirmed: boolean,
   rowsEmpty = false,
   includeAttachExistingBatchRows = false,
@@ -8291,8 +8292,8 @@ function pendingInvoiceExportBody(relationConfirmed: boolean, url: URL) {
     ],
     [
       "导出筛选",
-      url.searchParams.get("direction") ?? "",
-      url.searchParams.get("filter") ?? "",
+      url.searchParams.get("direction") ?? "all",
+      url.searchParams.get("filter") ?? "all",
       url.searchParams.get("keyword") ?? "",
       url.searchParams.get("sort_field") ?? "",
       url.searchParams.get("sort_direction") ?? "",
@@ -10648,6 +10649,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           invoiceImportDownstreamConfirmed,
         );
       }
+      payload.acquisition_summary = pendingAcquisitionFixture(payload.rows as Array<Record<string, unknown>>);
       return json(route, url.searchParams.get("include_statistics") === "true"
         ? {
           ...payload,

@@ -1,3 +1,4 @@
+import { ACQUISITION_STATUS_CODES, type AcquisitionSummary } from "./statusOptions";
 import type { BankSplitPart } from '../bankSplits/api';
 import type {
   AttachExistingInvoiceConfirmRequest,
@@ -194,6 +195,7 @@ type ApiPendingInvoiceRow = {
 };
 
 type ApiPendingInvoiceRowsResponse = {
+  acquisition_summary: { bank_count: number; invoice_count: number; status_counts: Record<string, number> };
   direction?: string | null;
   filter?: string | null;
   rows?: ApiPendingInvoiceRow[] | null;
@@ -652,9 +654,24 @@ export function mapPendingInvoiceRow(row: ApiPendingInvoiceRow): PendingInvoiceR
   };
 }
 
+function requiredCount(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new Error("待找发票统计数据不完整，请刷新重试。");
+  return value;
+}
+
+function mapAcquisitionSummary(payload: ApiPendingInvoiceRowsResponse["acquisition_summary"]): AcquisitionSummary {
+  if (!payload || !payload.status_counts) throw new Error("待找发票统计数据不完整，请刷新重试。");
+  return {
+    bankCount: requiredCount(payload.bank_count), invoiceCount: requiredCount(payload.invoice_count),
+    statusCounts: Object.fromEntries(ACQUISITION_STATUS_CODES.map(code => [code, requiredCount(payload.status_counts[code])])) as AcquisitionSummary["statusCounts"],
+  };
+}
+
 function mapRowsResponse(payload: ApiPendingInvoiceRowsResponse, request: FetchPendingInvoiceRowsRequest): PendingInvoiceRowsResponse {
   const sourceSummary = payload.summary?.source_summary;
+  if (!sourceSummary) throw new Error("待找发票统计数据不完整，请刷新重试。");
   return {
+    acquisitionSummary: mapAcquisitionSummary(payload.acquisition_summary),
     direction: (payload.direction ?? request.direction) as PendingInvoiceDirection,
     filter: (payload.filter ?? request.filter ?? "all") as PendingInvoiceFilter,
     rows: (payload.rows ?? []).map(mapPendingInvoiceRow),
@@ -668,11 +685,11 @@ function mapRowsResponse(payload: ApiPendingInvoiceRowsResponse, request: FetchP
       missingInvoiceRows: payload.summary?.missing_invoice_rows ?? 0,
       createInvoiceAvailableRows: payload.summary?.create_invoice_available_rows ?? 0,
       sourceSummary: sourceSummary ? {
-        bankTransactionRows: numberValue(sourceSummary.bank_transaction_rows),
-        expenseRows: numberValue(sourceSummary.expense_rows),
-        incomeRows: numberValue(sourceSummary.income_rows),
-        currentDirectionRows: numberValue(sourceSummary.current_direction_rows),
-        excludedDirectionRows: numberValue(sourceSummary.excluded_direction_rows),
+        bankTransactionRows: requiredCount(sourceSummary.bank_transaction_rows),
+        expenseRows: requiredCount(sourceSummary.expense_rows),
+        incomeRows: requiredCount(sourceSummary.income_rows),
+        currentDirectionRows: requiredCount(sourceSummary.current_direction_rows),
+        excludedDirectionRows: requiredCount(sourceSummary.excluded_direction_rows),
       } : undefined,
     },
     statistics: payload.statistics ? {

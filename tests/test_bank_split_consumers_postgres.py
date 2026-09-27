@@ -195,6 +195,26 @@ class BankSplitConsumersPostgresTests(unittest.TestCase):
         self.assertEqual(task['source_allocations']['cost_lines'][0]['amount'], '1497.22')
         self.assertEqual(self.connection.fetch_one('select count(*) as count from app.cost_statistics_manual_allocations')['count'],0)
 
+    def test_pending_parent_status_precedes_filters_and_counts_split_parent_once(self):
+        query = PendingInvoiceCanonicalQueryService(repository=PostgresPendingInvoiceCanonicalRepository(self.connection))
+        request = {'direction': ['expense'], 'filter': ['all'], 'include_statistics': ['false']}
+        all_rows = query.rows(request)
+        self.assertEqual(all_rows['acquisition_summary']['bank_count'], 1)
+        self.assertEqual(all_rows['acquisition_summary']['status_counts']['paid_pending_invoice'], 1)
+        self.assertEqual(all_rows['acquisition_summary']['status_counts']['no_invoice_required'], 0)
+        # Searching the no-invoice principal must still return its pending parent, with the interest action ID.
+        principal = query.rows({**request, 'keyword': [self.principal]})
+        self.assertEqual(principal['acquisition_summary'], all_rows['acquisition_summary'])
+        self.assertEqual(principal['rows'][0]['bank_transactions']['primary']['id'], self.interest)
+        no_invoice = query.rows({**request, 'filters': [json.dumps([
+            {'field': 'status_code', 'operator': 'in', 'values': ['no_invoice_required']}])]})
+        self.assertEqual(no_invoice['rows'], [])
+        self.assertEqual(no_invoice['acquisition_summary']['bank_count'], 0)
+        self.assertEqual(no_invoice['acquisition_summary']['status_counts']['paid_pending_invoice'], 1)
+        # Original facts and split identities are never mutated by classification.
+        self.assertEqual(self.connection.fetch_one('select amount from app.bank_transactions')['amount'], Decimal('1001497.22'))
+        self.assertEqual(self.connection.fetch_one('select count(*) n from app.bank_transaction_split_items')['n'], 2)
+
     def test_pending_invoice_query_and_detail_accept_child_identity(self):
         query = PendingInvoiceCanonicalQueryService(repository=PostgresPendingInvoiceCanonicalRepository(self.connection))
         payload = query.rows({'direction':['expense'],'filter':['all'],'page':['1'],'page_size':['50']})

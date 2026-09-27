@@ -1,3 +1,4 @@
+import { pendingAcquisitionFixture } from "./pendingInvoiceFixtures";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -548,6 +549,7 @@ function installPendingInvoiceFetch(options: {
         direction,
         filter: url.searchParams.get("filter") ?? "all",
         rows,
+        acquisition_summary: pendingAcquisitionFixture(rows),
         pagination: { page: Number(url.searchParams.get("page") ?? 1), page_size: pageSize, total: rows.length },
         summary: {
           total_rows: rows.length,
@@ -1116,7 +1118,7 @@ describe("Pending invoices page", () => {
       /\.pending-invoices-table-shell\s*{[^}]*overflow:\s*hidden;/s,
     );
 
-    expect(within(page).getByText("支出流水")).toBeInTheDocument();
+    expect(within(page).getByRole("tab", { name: "全部 431 笔" })).toHaveAttribute("aria-selected", "true");
     expect(within(page).getByText("发票获取状态")).toBeInTheDocument();
     expect(within(page).getAllByText("进项发票").length).toBeGreaterThan(0);
     expect(within(page).getAllByText("OA").length).toBeGreaterThan(0);
@@ -1124,7 +1126,7 @@ describe("Pending invoices page", () => {
     expect(within(page).getByRole("columnheader", { name: "金额 / 银行账户" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "摘要 / 凭证" })).toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "状态" })).not.toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "筛选发票获取状态：已选 2 项" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "筛选发票获取状态：全部" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: /发票号码 \/ 开票日期/ })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "供应商 / 识别号" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "金额 / 支付差额" })).toBeInTheDocument();
@@ -1134,9 +1136,9 @@ describe("Pending invoices page", () => {
     expect(await within(page).findByText("云南开票供应商")).toBeInTheDocument();
     expect(within(page).queryByText("正在加载待找发票。")).not.toBeInTheDocument();
     expect(within(page).queryByText(/对方尾号/)).not.toBeInTheDocument();
-    expect(within(page).getByRole("radio", { name: "全部 431" })).toBeInTheDocument();
-    expect(within(page).getByRole("radio", { name: "支出 356" })).toBeInTheDocument();
-    expect(within(page).getByRole("radio", { name: "收入 75" })).toBeInTheDocument();
+    expect(within(page).getByRole("tab", { name: "全部 431 笔" })).toBeInTheDocument();
+    expect(within(page).getByRole("tab", { name: "支出 356 笔" })).toBeInTheDocument();
+    expect(within(page).getByRole("tab", { name: "收入 75 笔" })).toBeInTheDocument();
     expect(within(page).getByRole("heading", { name: "待找发票" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "支出待找发票规则设置" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "收入待找发票规则设置" })).toBeInTheDocument();
@@ -1174,10 +1176,9 @@ describe("Pending invoices page", () => {
     expect(within(invoicedRow).queryByText("已配对")).not.toBeInTheDocument();
 
     const request = pendingInvoiceRowsRequests(fetchMock)[0];
-    expect(request.searchParams.get("direction")).toBe("expense");
-    expect(request.searchParams.get("filter")).toBe("requires_invoice");
+    expect((request.searchParams.get("direction") ?? "all")).toBe("all");
+    expect((request.searchParams.get("filter") ?? "all")).toBe("all");
     expect(JSON.parse(request.searchParams.get("filters") ?? "[]")).toEqual([
-      { field: "status_code", operator: "in", values: ["paid_pending_invoice", "paid_invoiced"] },
     ]);
     expect(request.searchParams.get("page")).toBe("1");
     expect(request.searchParams.get("page_size")).toBe("50");
@@ -1186,57 +1187,37 @@ describe("Pending invoices page", () => {
     const pageSizeSelect = within(page).getByLabelText("每页行数");
     expect(pageSizeSelect.closest(".finance-table__footer")).not.toBeNull();
     await user.click(pageSizeSelect);
-    expect(await screen.findByRole("option", { name: "25 条/页" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "50 条/页" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "100 条/页" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "25 行/页" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "50 行/页" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "100 行/页" })).toBeInTheDocument();
   });
 
-  test("supports multi-select invoice acquisition status filters for expense rows", async () => {
+  test("shares exclusive tabs and header multi-select without hidden defaults", async () => {
     const user = userEvent.setup();
     const fetchMock = installPendingInvoiceFetch();
     renderAppAt("/pending-invoices");
-
     const page = await findPendingInvoicesPage();
     await within(page).findByText("云南开票供应商");
-
-    await user.click(within(page).getByRole("button", { name: "筛选发票获取状态：已选 2 项" }));
-    const menu = await screen.findByRole("menu");
-    expect(within(menu).queryByRole("menuitemcheckbox", { name: "需要开票" })).not.toBeInTheDocument();
-    expect(within(menu).getAllByRole("menuitemcheckbox").map((item) => item.textContent?.replace("✓", ""))).toEqual([
-      "已支付待开票",
-      "已支付已开票",
-      "流水代替发票",
-      "无需开票",
-    ]);
-    expect(within(menu).getByRole("menuitem", { name: "全选" })).toBeInTheDocument();
-    expect(within(menu).getByRole("menuitem", { name: "清空" })).toBeInTheDocument();
-
-    await user.click(within(menu).getByRole("menuitemcheckbox", { name: "已支付已开票" }));
-    await waitFor(() => {
-      const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
-      expect(latest?.searchParams.get("filter")).toBe("requires_invoice");
-      expect(JSON.parse(latest?.searchParams.get("filters") ?? "[]")).toEqual([
-        { field: "status_code", operator: "in", values: ["paid_pending_invoice"] },
-      ]);
-    });
-    expect(within(page).getByRole("button", { name: "筛选发票获取状态：已支付待开票" })).toBeInTheDocument();
-
+    expect(pendingInvoiceRowsRequests(fetchMock)[0].searchParams.get("filters")).toBeNull();
+    await user.click(within(page).getByRole("tab", { name: "支出 356 笔" }));
+    await user.click(within(page).getByRole("tab", { name: /已支付待取得发票/ }));
+    await waitFor(() => expect(JSON.parse(pendingInvoiceRowsRequests(fetchMock).at(-1)!.searchParams.get("filters")!)).toEqual([
+      { field: "status_code", operator: "in", values: ["paid_pending_invoice"] },
+    ]));
+    await user.click(within(page).getByRole("button", { name: "筛选发票获取状态：已支付待取得发票" }));
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getAllByRole("menuitemcheckbox")).toHaveLength(5);
+    await user.click(within(menu).getByRole("menuitemcheckbox", { name: "金额待核对" }));
+    expect(within(page).getByRole("tab", { name: "多状态筛选" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(JSON.parse(pendingInvoiceRowsRequests(fetchMock).at(-1)!.searchParams.get("filters")!)).toEqual([
+      { field: "status_code", operator: "in", values: ["paid_pending_invoice", "invoice_not_fully_paid"] },
+    ]));
     await user.click(within(menu).getByRole("menuitem", { name: "清空" }));
-    await waitFor(() => {
-      const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
-      expect(latest?.searchParams.get("filter")).toBe("all");
-      expect(latest?.searchParams.get("filters")).toBeNull();
-    });
-    expect(within(page).getByRole("button", { name: "筛选发票获取状态：全部" })).toBeInTheDocument();
-
+    expect(within(page).getByRole("tab", { name: /全部状态/ })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(pendingInvoiceRowsRequests(fetchMock).at(-1)!.searchParams.get("filters")).toBeNull());
     await user.click(within(menu).getByRole("menuitem", { name: "全选" }));
-    await waitFor(() => {
-      const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
-      expect(latest?.searchParams.get("filter")).toBe("all");
-      expect(JSON.parse(latest?.searchParams.get("filters") ?? "[]")).toEqual([
-        { field: "status_code", operator: "in", values: ["paid_pending_invoice", "paid_invoiced", "bank_statement_as_invoice", "no_invoice_required"] },
-      ]);
-    });
+    expect(within(page).queryByRole("tab", { name: "多状态筛选" })).not.toBeInTheDocument();
+    for (const checkbox of within(menu).getAllByRole("menuitemcheckbox")) expect(checkbox).toHaveAttribute("aria-checked", "true");
   });
 
   test("applies header dropdown filters as AND field clauses", async () => {
@@ -1263,8 +1244,7 @@ describe("Pending invoices page", () => {
       expect(filters).toEqual([
         { field: "counterparty_name", operator: "in", values: ["分期供应商"] },
         { field: "transaction_tag", operator: "in", values: ["货款 / 设备采购"] },
-        { field: "status_code", operator: "in", values: ["paid_pending_invoice", "paid_invoiced"] },
-      ]);
+        ]);
     });
 
     await user.click(within(page).getByRole("button", { name: "筛选 金额 / 银行账户" }));
@@ -1282,8 +1262,7 @@ describe("Pending invoices page", () => {
         { field: "transaction_tag", operator: "in", values: ["货款 / 设备采购"] },
         { field: "bank_account", operator: "in", values: ["光大 8826"] },
         { field: "direction", operator: "in", values: ["expense"] },
-        { field: "status_code", operator: "in", values: ["paid_pending_invoice", "paid_invoiced"] },
-      ]);
+        ]);
     });
   });
 
@@ -1321,7 +1300,7 @@ describe("Pending invoices page", () => {
     renderAppAt("/pending-invoices");
 
     const page = await findPendingInvoicesPage();
-    await user.click(await within(page).findByRole("radio", { name: "收入 75" }));
+    await user.click(await within(page).findByRole("tab", { name: "收入 75 笔" }));
     await waitFor(() => {
       const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
       expect(latest?.searchParams.get("direction")).toBe("income");
@@ -1331,15 +1310,15 @@ describe("Pending invoices page", () => {
     expect(within(page).getByText("300.00")).toBeInTheDocument();
 
     await user.click(within(page).getByRole("button", { name: "筛选发票获取状态：全部" }));
-    expect(await screen.findByRole("menuitemcheckbox", { name: "待开发票" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitemcheckbox", { name: "无需开票" })).toBeInTheDocument();
+    expect(await screen.findByRole("menuitemcheckbox", { name: "已收款待开票" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitemcheckbox", { name: "无需发票" })).toBeInTheDocument();
     expect(screen.getByRole("menuitemcheckbox", { name: "现金收入" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("menuitemcheckbox", { name: "待开发票" }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "已收款待开票" }));
     await waitFor(() => {
       const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
       expect(latest?.searchParams.get("direction")).toBe("income");
-      expect(latest?.searchParams.get("filter")).toBe("requires_invoice");
+      expect((latest?.searchParams.get("filter") ?? "all")).toBe("all");
       expect(JSON.parse(latest?.searchParams.get("filters") ?? "[]")).toEqual([
         { field: "status_code", operator: "in", values: ["income_pending_invoice"] },
       ]);
@@ -1349,7 +1328,7 @@ describe("Pending invoices page", () => {
     await waitFor(() => {
       const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
       expect(latest?.searchParams.get("direction")).toBe("income");
-      expect(latest?.searchParams.get("filter")).toBe("all");
+      expect((latest?.searchParams.get("filter") ?? "all")).toBe("all");
       expect(JSON.parse(latest?.searchParams.get("filters") ?? "[]")).toEqual([
         { field: "status_code", operator: "in", values: ["income_pending_invoice", "cash_income"] },
       ]);
@@ -1557,14 +1536,14 @@ describe("Pending invoices page", () => {
         if (!rulesSaved) {
           return upgradedRows();
         }
-        const filter = url.searchParams.get("filter") ?? "all";
-        if (filter === "requires_invoice") {
+        const codes = (JSON.parse(url.searchParams.get("filters") ?? "[]") as { field: string; values: string[] }[]).find(item => item.field === "status_code")?.values ?? [];
+        if (codes.includes("paid_pending_invoice")) {
           return [requiresRow];
         }
-        if (filter === "bank_statement_as_invoice") {
+        if (codes.includes("bank_statement_as_invoice")) {
           return [statementRow];
         }
-        if (filter === "no_invoice_required") {
+        if (codes.includes("no_invoice_required")) {
           return [noInvoiceRow];
         }
         return [requiresRow, statementRow, noInvoiceRow, unknownRow];
@@ -1573,11 +1552,11 @@ describe("Pending invoices page", () => {
     renderAppAt("/pending-invoices");
 
     const page = await findPendingInvoicesPage();
-    await user.click(within(page).getByRole("button", { name: "筛选发票获取状态：已选 2 项" }));
+    await user.click(within(page).getByRole("button", { name: "筛选发票获取状态：全部" }));
     await user.click(await screen.findByRole("menuitem", { name: "清空" }));
     await waitFor(() => {
       const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
-      expect(latest?.searchParams.get("filter")).toBe("all");
+      expect((latest?.searchParams.get("filter") ?? "all")).toBe("all");
     });
     await user.keyboard("{Escape}");
     const initialRequests = pendingInvoiceRowsRequests(fetchMock).length;
@@ -1599,7 +1578,7 @@ describe("Pending invoices page", () => {
     await user.click(await screen.findByRole("menuitemcheckbox", { name: "流水代替发票" }));
     await waitFor(() => {
       const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
-      expect(latest?.searchParams.get("filter")).toBe("bank_statement_as_invoice");
+      expect(JSON.parse(latest!.searchParams.get("filters")!)[0].values).toContain("bank_statement_as_invoice");
       expect(within(page).getByText("流水代替闭环供应商")).toBeInTheDocument();
       expect(within(page).queryByText("需要开票闭环供应商")).not.toBeInTheDocument();
       expect(within(page).queryByText("无需开票闭环供应商")).not.toBeInTheDocument();
@@ -1607,10 +1586,10 @@ describe("Pending invoices page", () => {
     });
 
     await user.click(screen.getByRole("menuitem", { name: "清空" }));
-    await user.click(await screen.findByRole("menuitemcheckbox", { name: "无需开票" }));
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: "无需发票" }));
     await waitFor(() => {
       const latest = pendingInvoiceRowsRequests(fetchMock).at(-1);
-      expect(latest?.searchParams.get("filter")).toBe("no_invoice_required");
+      expect(JSON.parse(latest!.searchParams.get("filters")!)[0].values).toContain("no_invoice_required");
       expect(within(page).getByText("无需开票闭环供应商")).toBeInTheDocument();
       expect(within(page).queryByText("流水代替闭环供应商")).not.toBeInTheDocument();
       expect(within(page).queryByText("未知标签闭环供应商")).not.toBeInTheDocument();
@@ -1624,6 +1603,7 @@ describe("Pending invoices page", () => {
 
     const page = await findPendingInvoicesPage();
     const initialRequests = pendingInvoiceRowsRequests(fetchMock).length;
+    await user.click(await within(page).findByRole("tab", { name: "支出 356 笔" }));
     await user.click(await within(page).findByRole("checkbox", { name: "选择流水 云南开票供应商" }));
     expect(within(page).getByText("已选 1 条流水")).toBeInTheDocument();
     const selectionToolbar = within(page).getByText("已选 1 条流水").closest(".pending-invoices-selection-toolbar");
@@ -1716,6 +1696,7 @@ describe("Pending invoices page", () => {
     renderAppAt("/pending-invoices");
 
     const page = await findPendingInvoicesPage();
+    await user.click(await within(page).findByRole("tab", { name: "支出 356 笔" }));
     await user.click(await within(page).findByRole("checkbox", { name: "选择流水 云南开票供应商" }));
     await user.click(within(page).getByRole("button", { name: "选择发票" }));
     await user.click(await screen.findByRole("checkbox", { name: "选择发票 DIG-CAND-001" }));
@@ -1736,6 +1717,7 @@ describe("Pending invoices page", () => {
 
     const page = await findPendingInvoicesPage();
     const initialRequests = pendingInvoiceRowsRequests(fetchMock).length;
+    await user.click(await within(page).findByRole("tab", { name: "支出 356 笔" }));
     await user.click(await within(page).findByRole("checkbox", { name: "选择流水 云南开票供应商" }));
     await user.click(await within(page).findByRole("checkbox", { name: "选择流水 云南开票供应商二号" }));
 
@@ -1821,7 +1803,7 @@ describe("Pending invoices page", () => {
     renderAppAt("/pending-invoices");
 
     const page = await findPendingInvoicesPage();
-    await user.click(await within(page).findByRole("radio", { name: "收入 75" }));
+    await user.click(await within(page).findByRole("tab", { name: "收入 75 笔" }));
     await within(page).findByText("收入批量客户A");
     expect(within(page).queryByRole("button", { name: "标记无需开票" })).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "标记现金收入" })).not.toBeInTheDocument();

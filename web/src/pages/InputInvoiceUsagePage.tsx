@@ -1,4 +1,5 @@
-import { Button, Tabs } from "@heroui/react";
+import InvoiceCountSegments from "../components/common/InvoiceCountSegments";
+import { Button } from "@heroui/react";
 import { Download } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -451,15 +452,14 @@ export default function InputInvoiceUsagePage() {
             <PageToolbar
               className="input-invoice-usage-query-toolbar"
               left={(
-                <Tabs className="input-invoice-usage-relation-tabs" selectedKey={query.filters.find((filter) => filter.field === "relation_status")?.values?.[0] ?? "all"} onSelectionChange={(key) => setQuery((current) => ({ ...current, page: 1, filters: [...current.filters.filter((filter) => filter.field !== "relation_status"), ...(key === "all" ? [] : [{ field: "relation_status", operator: "in" as const, values: [String(key)] }])] }))}>
-                  <Tabs.List aria-label="进项发票关联分类" className="input-invoice-usage-relation-tabs__list">
-                    {[{id:"all",label:"全部"},{id:"no_oa",label:"未关联 OA"},{id:"oa_no_bank",label:"有 OA／无流水"},{id:"oa_bank",label:"OA／流水均已关联"}].map((item) => {
-                      const options = filterOptions.relation_status ?? [];
-                      const count = item.id === "all" ? options.reduce((sum, option) => sum + (option.count ?? 0), 0) : (options.find((option) => option.value === item.id)?.count ?? 0);
-                      return <Tabs.Tab className="input-invoice-usage-relation-tabs__tab" id={item.id} key={item.id}>{item.label} {loading || error ? "—" : count} 张</Tabs.Tab>;
-                    })}
-                  </Tabs.List>
-                </Tabs>
+                <InvoiceCountSegments label="进项发票关联分类" unit="张" pending={loading || Boolean(error)}
+                  selectedKey={query.filters.find((filter) => filter.field === "relation_status")?.values?.[0] ?? "all"}
+                  onChange={(key) => setQuery((current) => ({ ...current, page: 1, filters: [...current.filters.filter((filter) => filter.field !== "relation_status"), ...(key === "all" ? [] : [{ field: "relation_status", operator: "in" as const, values: [key] }])] }))}
+                  options={[{id:"all",label:"全部"},{id:"no_oa",label:"未关联 OA"},{id:"oa_no_bank",label:"有 OA／无流水"},{id:"oa_bank",label:"OA／流水均已关联"}].map(item => {
+                    const options = filterOptions.relation_status;
+                    const count = item.id === "all" ? options?.reduce((sum, option) => sum + (option.count ?? 0), 0) : (options ? options.find(option => option.value === item.id)?.count ?? 0 : undefined);
+                    return { key: item.id, label: item.label, count };
+                  })} />
               )}
               right={(
                 <div className="input-invoice-usage-query-actions">

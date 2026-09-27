@@ -21,7 +21,7 @@
 
 - `filter=requires_invoice` 是最终状态桶，不是 `filter_group='requires_invoice'` 条件。
 - 正式关系只读取 active `app.workbench_pair_relations`；`turnover_manual_closure` 不属于待找发票事实。
-- relation 可跨月；同一 relation 的银行、invoice、OA members 一次批量展开并折叠成页面行。
+- relation 可跨月；同一 relation 的银行、invoice、OA members 一次批量展开；只有同方向、同父流水最终状态的成员可折叠成页面行。
 - 支出已有关联进项发票时可为 `paid_invoiced` 或 `invoice_not_fully_paid`；收入关联销项发票优先于收入 override。
 - `pending_invoice_tag_groups.version` 与 `pending_output_invoice_tag_groups.version` 独立。
 - candidates 的 `candidate_status`、`bank_relation_status` 和 `linked_bank_transaction_count` 由 canonical active relation 计算，前端不得用金额推断。
@@ -70,3 +70,7 @@
 | 2026-07-27 | 页面改为 canonical PostgreSQL 直读，删除 read-model/polling/202/fallback UI 状态 | page API/service/repository/frontend/docs | canonical repository/API tests、PendingInvoices Vitest、真实 PostgreSQL smoke |
 | 2026-07-07 | 多流水展示真实对方户名，发票/OA 多成员保持分区明细 | table/API mapper | `PendingInvoicesPage.test.tsx` |
 | 2026-06-17 | 候选关系 chip 和 attach active case restore | candidate/application service | pending invoice service/API/frontend tests |
+
+## 统计筛选状态（2026-09-28）
+
+初始为全部方向、全部状态。方向变化清除状态与行选择、回到第 1 页；其它有效查询条件保留。顶部状态单选替换表头状态多选，表头多选显示“多状态筛选”，清空只解除状态筛选。数量按原始流水笔数统计，辅助已关联发票按去重张数；从未取得的发票不推算张数。父流水最终分类优先级及两个排除自身的统计范围以 [boundary-io](boundary-io.md) 为准。

@@ -468,8 +468,8 @@ export default function PendingInvoicesTable({
               <Select.Popover>
                 <ListBox>
                   {[25, 50, 100].map((option) => (
-                    <ListBox.Item id={String(option)} key={option} textValue={`${option} 条/页`}>
-                      {option} 条/页
+                    <ListBox.Item id={String(option)} key={option} textValue={`${option} 行/页`}>
+                      {option} 行/页
                     </ListBox.Item>
                   ))}
                 </ListBox>

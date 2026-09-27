@@ -293,12 +293,7 @@ bank_cases as materialized (
     select distinct member.row_id as bank_id, member.case_id
     from relation_members member
     join bank_source owner_bank on owner_bank.row_id = member.row_id
-    cross join request_config config
     where member.row_type = 'bank'
-      and (
-          coalesce(config.payload->>'scan_direction', 'all') = 'all'
-          or owner_bank.direction = config.payload->>'scan_direction'
-      )
 ),
 case_bank_members as materialized (
     select distinct member.case_id, member.row_id as member_bank_id
@@ -616,8 +611,6 @@ rule_banks as materialized (
             else '' end as rule_bank
     from banks bank
     cross join request_config config
-    where coalesce(config.payload->>'scan_direction', 'all') = 'all'
-       or bank.direction = config.payload->>'scan_direction'
 ),
 canonical_rule_banks as materialized (
     select
@@ -714,11 +707,8 @@ effective_categories as (
         end as category_source,
         auto.definition as auto_definition
     from banks b
-    cross join request_config config
     left join internal_matches internal on internal.row_id = b.row_id
     left join auto_rules auto on auto.row_id = b.row_id
-    where coalesce(config.payload->>'scan_direction', 'all') = 'all'
-       or b.direction = config.payload->>'scan_direction'
 ),
 enriched as (
     select
@@ -796,7 +786,7 @@ classified_source as (
         end as status_code
     from enriched
 ),
-classified as materialized (
+classified_units as materialized (
     select
         source.row_id,
         source.parent_row_id,
@@ -929,30 +919,44 @@ classified as materialized (
         limit 1
     ) mapping on true
 ),
+parent_ranked as materialized (
+    select row_id, row_number() over (
+        partition by parent_row_id
+        order by case status_code
+            when 'paid_pending_invoice' then 0 when 'income_pending_invoice' then 0
+            when 'invoice_not_fully_paid' then 1
+            when 'paid_invoiced' then 2 when 'income_invoiced' then 2
+            when 'bank_statement_as_invoice' then 3
+            when 'cash_income' then 4
+            when 'no_invoice_required' then 5 when 'income_no_invoice_required' then 5
+        end, row_id
+    ) as parent_rank
+    from classified_units
+),
+classified as materialized (
+    select unit.* from classified_units unit
+    join parent_ranked ranked using (row_id) where ranked.parent_rank = 1
+),
+matching_parents as materialized (
+    select distinct parent_row_id from classified_units where __BASE_WHERE_SQL__
+),
+scope_base as materialized (
+    select row_id, parent_row_id, visible_group_key, trade_time, trade_date, amount,
+        counterparty_name, status_code, seller_name, invoice_total, oa_applicant, project_name,
+        direction, input_invoice_count, filter_group
+    from classified join matching_parents using (parent_row_id)
+),
+direction_scope as materialized (
+    select * from scope_base where __DIRECTION_WHERE_SQL__
+),
 scope_candidates as materialized (
-    select
-        row_id,
-        visible_group_key,
-        trade_time,
-        trade_date,
-        amount,
-        counterparty_name,
-        status_code,
-        seller_name,
-        invoice_total,
-        oa_applicant,
-        project_name,
-        direction,
-        input_invoice_count,
-        filter_group
-    from classified
-    where __WHERE_SQL__
+    select * from direction_scope where __STATUS_WHERE_SQL__
 ),
 scope_ranked as materialized (
     select
         candidate.*,
         row_number() over (
-            partition by candidate.visible_group_key
+            partition by candidate.visible_group_key, candidate.direction, candidate.status_code
             order by (candidate.filter_group = 'no_invoice_required') asc, candidate.trade_time desc nulls last, candidate.row_id
         ) as visible_group_rank
     from scope_candidates candidate
@@ -988,13 +992,20 @@ page_keys as materialized (
     order by page_index
     limit %s offset %s
 ),
+display_groups as materialized (
+    select visible_group_key, direction, status_code, array_agg(parent_row_id) as display_parent_ids
+    from scope_candidates group by visible_group_key, direction, status_code
+),
 page_rows as materialized (
     select
         row.*,
         page.page_index,
-        page.visible_group_rank
+        page.visible_group_rank,
+        groups.display_parent_ids
     from page_keys page
     join classified row on row.row_id = page.row_id
+    join display_groups groups on groups.visible_group_key = row.visible_group_key
+        and groups.direction = row.direction and groups.status_code = row.status_code
 ),
 page_bank_ids as materialized (
     select row_id from page_rows
@@ -1082,8 +1093,7 @@ source_summary as (
         count(distinct parent_row_id)::integer as bank_transaction_rows,
         count(distinct parent_row_id) filter (where direction = 'expense')::integer as expense_rows,
         count(distinct parent_row_id) filter (where direction = 'income')::integer as income_rows
-    from bank_source
-    where __SOURCE_WHERE_SQL__
+    from scope_base
 ),
 option_values as (
     select option.field, nullif(btrim(option.value), '') as value
@@ -1129,6 +1139,24 @@ select
         '[]'::jsonb
     ) as rows,
     coalesce((select jsonb_object_agg(row_id,metadata) from page_bank_metadata), '{{}}'::jsonb) as bank_metadata,
+    jsonb_build_object(
+        'bank_count', (select count(*) from scope_candidates),
+        'invoice_count', (select count(distinct invoice->>'id')
+            from classified_units unit join scope_candidates selected using (parent_row_id)
+            cross join lateral jsonb_array_elements(unit.invoice_summaries) invoice
+            where invoice->>'invoice_type' = case when unit.direction='expense' then 'input' else 'output' end),
+        'status_counts', (select jsonb_build_object(
+            'paid_pending_invoice', count(*) filter (where status_code='paid_pending_invoice'),
+            'paid_invoiced', count(*) filter (where status_code='paid_invoiced'),
+            'invoice_not_fully_paid', count(*) filter (where status_code='invoice_not_fully_paid'),
+            'bank_statement_as_invoice', count(*) filter (where status_code='bank_statement_as_invoice'),
+            'no_invoice_required', count(*) filter (where status_code='no_invoice_required'),
+            'income_pending_invoice', count(*) filter (where status_code='income_pending_invoice'),
+            'income_invoiced', count(*) filter (where status_code='income_invoiced'),
+            'income_no_invoice_required', count(*) filter (where status_code='income_no_invoice_required'),
+            'cash_income', count(*) filter (where status_code='cash_income')
+        ) from direction_scope)
+    ) as acquisition_summary,
     (select total from scope_summary) as total,
     (select missing_invoice_rows from scope_summary) as missing_invoice_rows,
     (select create_invoice_available_rows from scope_summary) as create_invoice_available_rows,
@@ -1661,11 +1689,6 @@ class PostgresPendingInvoiceCanonicalRepository:
             transaction.execute("set local jit = off")
             transaction.execute("set local max_parallel_workers_per_gather = 0")
             settings = self._settings(transaction)
-            scan_direction = (
-                "all"
-                if request.get("_include_statistics")
-                else str(request["direction"])
-            )
             tags = settings.get("bank_transaction_tags")
             tag_definitions = (
                 list(tags.get("definitions") or [])
@@ -1676,10 +1699,6 @@ class PostgresPendingInvoiceCanonicalRepository:
                 dict(item)
                 for item in tag_definitions
                 if isinstance(item, dict)
-                and (
-                    scan_direction == "all"
-                    or str(item.get("direction") or "any") in {"", "any", scan_direction}
-                )
             ]
             _normalization_sql, rule_match_sql, rule_match_params = (
                 compile_bank_category_rule_sql(
@@ -1689,7 +1708,6 @@ class PostgresPendingInvoiceCanonicalRepository:
                 )
             )
             config = {
-                "scan_direction": scan_direction,
                 "settings": settings,
                 "rule_fields": _rule_required_fields(definitions),
                 "groups": {
@@ -1712,14 +1730,32 @@ class PostgresPendingInvoiceCanonicalRepository:
                     for direction in ("expense", "income")
                 },
             }
-            where_sql, where_params = _where_sql(request)
-            source_where_sql, source_params = _source_where_sql(request)
+            base_request = {**request, "direction": "all", "filter": "all", "filters": [
+                item for item in request["filters"] if item["field"] not in {"status_code", "direction"}
+            ]}
+            base_sql, base_params = _where_sql(base_request)
+            direction_request = {"direction": request["direction"], "filter": "all", "filters": [
+                item for item in request["filters"] if item["field"] == "direction"
+            ]}
+            direction_sql, direction_params = _where_sql(direction_request)
+            status_sql, status_params = _where_sql({
+                "direction": "all", "filter": "all", "filters": [
+                    item for item in request["filters"] if item["field"] == "status_code"
+                ],
+            })
+            if request["filter"] != "all":
+                filter_codes = pending_invoice_filter_status_codes(
+                    direction=request["direction"], filter_name=request["filter"],
+                )
+                status_sql += " and status_code = any(%s::text[])"
+                status_params.append(list(filter_codes))
             order_sql = _order_sql(request)
             sql = (
                 PAGE_QUERY_SQL
-                .replace("__WHERE_SQL__", where_sql)
+                .replace("__BASE_WHERE_SQL__", base_sql)
+                .replace("__DIRECTION_WHERE_SQL__", direction_sql)
+                .replace("__STATUS_WHERE_SQL__", status_sql)
                 .replace("__ORDER_SQL__", order_sql)
-                .replace("__SOURCE_WHERE_SQL__", source_where_sql)
                 .replace("__RULE_MATCH_SQL__", rule_match_sql)
             )
             direction = str(request["direction"])
@@ -1729,10 +1765,11 @@ class PostgresPendingInvoiceCanonicalRepository:
                     [
                         json.dumps(config, ensure_ascii=False),
                         *rule_match_params,
-                        *where_params,
+                        *base_params,
+                        *direction_params,
+                        *status_params,
                         page_size,
                         (page - 1) * page_size,
-                        *source_params,
                         bool(request.get("_include_statistics")),
                         bool(request.get("_include_filter_options")),
                         direction,
@@ -1754,6 +1791,16 @@ class PostgresPendingInvoiceCanonicalRepository:
             page_row.update(metadata.get(page_row["row_id"], {}))
             for summary in page_row.get("bank_summaries", []):
                 summary.update(metadata.get(summary["id"], {}))
+            display_parents = set(page_row.pop("display_parent_ids"))
+            page_row["bank_summaries"] = [
+                bank for bank in page_row["bank_summaries"] if bank["parent_row_id"] in display_parents
+            ]
+            if page_row["bank_summaries"]:
+                originals = {bank["parent_row_id"]: _decimal(bank["original_amount"])
+                             for bank in page_row["bank_summaries"]}
+                page_row["original_amount"] = sum(originals.values(), Decimal("0"))
+            else:
+                page_row["original_amount"] = page_row["parent_amount"]
         payload["settings"] = settings
         return payload
 
@@ -1900,14 +1947,23 @@ class LocalPendingInvoiceCanonicalRepository:
         )
         start = (page - 1) * page_size
         selected = rows[start : start + page_size]
-        source_expense = sum(
-            getattr(transaction, "txn_direction", None) == TransactionDirection.OUTFLOW
-            for transaction in transactions
-        )
-        source_income = sum(
-            getattr(transaction, "txn_direction", None) == TransactionDirection.INFLOW
-            for transaction in transactions
-        )
+        base_request = {**request, "direction": "all", "filter": "all",
+                        "filters": [item for item in request.get("filters", [])
+                                    if item["field"] not in {"status_code", "direction"}]}
+        base_rows = [row for row in statistics_rows if _local_row_matches(row, base_request)]
+        direction_request = {**request, "filter": "all",
+                             "filters": [item for item in request.get("filters", []) if item["field"] != "status_code"]}
+        direction_rows = [row for row in statistics_rows if _local_row_matches(row, direction_request)]
+        source_expense = sum(row["_direction"] == "expense" for row in base_rows)
+        source_income = sum(row["_direction"] == "income" for row in base_rows)
+        status_counts = {code: 0 for code in (
+            "paid_pending_invoice", "paid_invoiced", "invoice_not_fully_paid", "bank_statement_as_invoice",
+            "no_invoice_required", "income_pending_invoice", "income_invoiced", "income_no_invoice_required", "cash_income",
+        )}
+        for row in direction_rows:
+            status_counts[_status_code(row)] += 1
+        invoice_ids = {invoice["id"] for row in rows
+                       for invoice in row["input_invoices"]["summaries"]}
         options: list[dict[str, Any]] = []
         if request.get("_include_filter_options"):
             for field in FILTER_EXPRESSIONS:
@@ -1921,6 +1977,7 @@ class LocalPendingInvoiceCanonicalRepository:
                     for value, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:FILTER_OPTION_LIMIT]
                 )
         return {
+            "acquisition_summary": {"bank_count": len(rows), "invoice_count": len(invoice_ids), "status_counts": status_counts},
             "rows": selected,
             "total": len(rows),
             "missing_invoice_rows": sum(
@@ -2099,6 +2156,7 @@ class PendingInvoiceCanonicalQueryService:
                 "create_invoice_available_rows": int(payload.get("create_invoice_available_rows") or 0),
                 "source_summary": dict(payload.get("source_summary") or {}),
             },
+            "acquisition_summary": payload["acquisition_summary"],
             "statistics": (
                 dict(payload.get("statistics") or {})
                 if request["_include_statistics"]
@@ -2729,18 +2787,6 @@ def _where_sql(request: dict[str, Any]) -> tuple[str, list[Any]]:
         elif operator == "eq":
             clauses.append(f"{expression} = %s::numeric")
             params.append(str(item.get("value") or "0").replace(",", ""))
-    return " and ".join(clauses) if clauses else "true", params
-
-
-def _source_where_sql(request: dict[str, Any]) -> tuple[str, list[Any]]:
-    clauses: list[str] = []
-    params: list[Any] = []
-    if request.get("date_from"):
-        clauses.append("trade_date >= %s::date")
-        params.append(request["date_from"])
-    if request.get("date_to"):
-        clauses.append("trade_date <= %s::date")
-        params.append(request["date_to"])
     return " and ".join(clauses) if clauses else "true", params
 
 

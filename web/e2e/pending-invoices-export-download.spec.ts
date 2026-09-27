@@ -116,8 +116,8 @@ test.describe("pending invoices export browser download", () => {
     if (!previewUrl) {
       throw new Error("missing export preview request");
     }
-    expect(previewUrl.searchParams.get("direction")).toBe("expense");
-    expect(previewUrl.searchParams.get("filter")).toBe("requires_invoice");
+    expect(previewUrl.searchParams.get("direction")).toBe("all");
+    expect(previewUrl.searchParams.get("filter")).toBe(null);
     expect(previewUrl.searchParams.get("keyword")).toBe("智能工厂");
     expect(previewUrl.searchParams.get("sort_field")).toBe("trade_date");
     expect(previewUrl.searchParams.get("sort_direction")).toBe("desc");
@@ -155,8 +155,8 @@ test.describe("pending invoices export browser download", () => {
     if (!downloaded) {
       throw new Error("missing export download");
     }
-    expect(exportUrl.searchParams.get("direction")).toBe("expense");
-    expect(exportUrl.searchParams.get("filter")).toBe("requires_invoice");
+    expect(exportUrl.searchParams.get("direction")).toBe("all");
+    expect(exportUrl.searchParams.get("filter")).toBe(null);
     expect(exportUrl.searchParams.get("keyword")).toBe("智能工厂");
     expect(exportUrl.searchParams.get("page")).toBeNull();
     expect(exportUrl.searchParams.get("page_size")).toBeNull();
@@ -174,8 +174,8 @@ test.describe("pending invoices export browser download", () => {
     expect(content).toContain("CASE-202603-101");
     expect(content).toContain("linked");
     expect(content).toContain("导出筛选");
-    expect(content).toContain("expense");
-    expect(content).toContain("requires_invoice");
+    expect(content).toContain("all");
+    expect(content).not.toContain("requires_invoice");
     expect(content).toContain("智能工厂");
     expect(content).toContain("trade_date");
     expect(content).toContain("desc");

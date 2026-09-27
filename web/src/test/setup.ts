@@ -1,6 +1,9 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, vi } from "vitest";
 
+// JSDOM does not implement Web Animations. Native Tabs indicators are exercised in Playwright.
+Object.defineProperty(HTMLElement.prototype, "getAnimations", { configurable: true, value: () => [] });
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();

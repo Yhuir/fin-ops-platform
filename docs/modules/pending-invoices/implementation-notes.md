@@ -567,3 +567,7 @@
 - 目标：让标题统计独立证明待找发票投影实际覆盖的完整流水与关联关系，不把当前筛选后的表格行数或统一事实源数量冒充页面统计。
 - 决策：`list_pending_invoice_rows(...)` 在同一只读事务内从 `read_model.pending_invoice_rows` 展开 `bank_transactions.summaries`，按唯一流水 ID 返回全期间 `statistics`；任一 child scope dirty/missing 时只返回不可用状态。Page Audit 继续从 canonical bank/relation facts 独立证明 expected-set，不进入页面热路径。
 - 性能边界：无新 endpoint、表、worker 或浏览器请求；统计聚合不接收 direction/filter/date/keyword/sort/page 条件。
+
+## 2026-09-28 两层互斥统计与 HeroUI 分段
+
+采用既有 canonical 查询加请求内父流水归类和聚合，不新增统计接口。窄化筛选 CTE，只对分页行加载详情；关系父 ID 集合批量聚合，避免按展示行重复扫描全集。共享组件只负责原生 Tabs/Indicator 与数量呈现，三页各自拥有筛选和统计 I/O。旧独立按钮、默认隐藏筛选及方向裁剪分支同时删除。发布后以真实响应逐项核对父 ID 去重、发票去重、导出与数量，并复用相同 HTTP probe 采样比较耗时；生产不创建/撤回真实业务关系。

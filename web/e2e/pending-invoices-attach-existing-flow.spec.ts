@@ -95,6 +95,8 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
       await gotoAndExpectPageReady(page, "/pending-invoices", "pending-invoices-page", { diagnostics });
       await mark("finalSettledLatencyMs", expect(page.getByRole("row", { name: /智能工厂设备商/ }).first()).toBeVisible());
     });
+    await page.getByRole("tab", { name: /^支出 / }).click();
+    await expect(page.getByRole("checkbox", { name: "选择流水 智能工厂设备商", exact: true })).toBeVisible();
     const rowsBeforeConfirm = api.count("GET /api/pending-invoices/rows");
 
     await setCheckbox(page.getByRole("checkbox", { name: "选择流水 智能工厂设备商二号" }));
@@ -253,6 +255,8 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
       await gotoAndExpectPageReady(page, "/pending-invoices", "pending-invoices-page", { diagnostics });
       await mark("finalSettledLatencyMs", expect(page.getByRole("row", { name: /智能工厂设备商/ }).first()).toBeVisible());
     });
+    await page.getByRole("tab", { name: /^支出 / }).click();
+    await expect(page.getByRole("checkbox", { name: "选择流水 智能工厂设备商", exact: true })).toBeVisible();
     const rowsBeforeConfirm = api.count("GET /api/pending-invoices/rows");
 
     await recordLatency({
@@ -367,6 +371,8 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
       await gotoAndExpectPageReady(page, "/pending-invoices", "pending-invoices-page", { diagnostics });
       await mark("finalSettledLatencyMs", expect(page.getByRole("row", { name: /智能工厂设备商/ }).first()).toBeVisible());
     });
+    await page.getByRole("tab", { name: /^支出 / }).click();
+    await expect(page.getByRole("checkbox", { name: "选择流水 智能工厂设备商", exact: true })).toBeVisible();
     const rowsBeforePreview = api.count("GET /api/pending-invoices/rows");
 
     await recordLatency({

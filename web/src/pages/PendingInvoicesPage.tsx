@@ -1,5 +1,6 @@
-import { Button, ToggleButton, ToggleButtonGroup } from "@heroui/react";
-import type { Key } from "@heroui/react";
+import InvoiceCountSegments from "../components/common/InvoiceCountSegments";
+import { acquisitionOptions, type AcquisitionStatusCode, type AcquisitionSummary } from "../features/pendingInvoices/statusOptions";
+import { Button } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
@@ -36,7 +37,6 @@ import type {
   AttachExistingInvoicesResult,
   FetchPendingInvoiceRowsRequest,
   PendingInvoiceDirection,
-  PendingInvoiceFilter,
   PendingInvoiceColumnFilter,
   PendingInvoiceFilterField,
   PendingInvoiceIncomeStatusCode,
@@ -56,67 +56,6 @@ const TAG_VERSION_STORAGE_KEY = "finops.bankTransactionTags.version";
 type ActiveDrawer = "rules" | "relation" | "invoicePicker" | "detail" | "export" | null;
 type RelationTarget = { transactionId: string; kind: PendingInvoiceRelationDetailKind } | null;
 type RulesDirection = Exclude<PendingInvoiceDirection, "all">;
-type StatusFilterSelection =
-  | "paid_pending_invoice"
-  | "paid_invoiced"
-  | "bank_statement_as_invoice"
-  | "no_invoice_required"
-  | "income_pending_invoice"
-  | "income_no_invoice_required"
-  | "cash_income";
-
-type StatusFilterOption = {
-  value: StatusFilterSelection;
-  label: string;
-  backendFilter: PendingInvoiceFilter;
-};
-
-const EXPENSE_STATUS_FILTER_OPTIONS: StatusFilterOption[] = [
-  { value: "paid_pending_invoice", label: "已支付待开票", backendFilter: "requires_invoice" },
-  { value: "paid_invoiced", label: "已支付已开票", backendFilter: "requires_invoice" },
-  { value: "bank_statement_as_invoice", label: "流水代替发票", backendFilter: "bank_statement_as_invoice" },
-  { value: "no_invoice_required", label: "无需开票", backendFilter: "no_invoice_required" },
-];
-
-const INCOME_STATUS_FILTER_OPTIONS: StatusFilterOption[] = [
-  { value: "income_pending_invoice", label: "待开发票", backendFilter: "requires_invoice" },
-  { value: "income_no_invoice_required", label: "无需开票", backendFilter: "no_invoice_required" },
-  { value: "cash_income", label: "现金收入", backendFilter: "cash_income" },
-];
-
-const DEFAULT_STATUS_FILTERS: StatusFilterSelection[] = ["paid_pending_invoice", "paid_invoiced"];
-
-function statusFilterOptionsForDirection(direction: PendingInvoiceDirection) {
-  if (direction === "expense") {
-    return EXPENSE_STATUS_FILTER_OPTIONS;
-  }
-  if (direction === "income") {
-    return INCOME_STATUS_FILTER_OPTIONS;
-  }
-  return [];
-}
-
-function statusFilterLabel(direction: PendingInvoiceDirection, selectedFilters: StatusFilterSelection[]) {
-  const options = statusFilterOptionsForDirection(direction);
-  if (selectedFilters.length === 0 || options.length === 0) {
-    return "全部";
-  }
-  if (selectedFilters.length === 1) {
-    return options.find((option) => option.value === selectedFilters[0])?.label ?? "全部";
-  }
-  return `已选 ${selectedFilters.length} 项`;
-}
-
-function effectiveBackendFilter(direction: PendingInvoiceDirection, selectedFilters: StatusFilterSelection[]): PendingInvoiceFilter {
-  const selected = new Set(selectedFilters);
-  const backendFilters = new Set(
-    statusFilterOptionsForDirection(direction)
-      .filter((option) => selected.has(option.value))
-      .map((option) => option.backendFilter),
-  );
-  return backendFilters.size === 1 ? [...backendFilters][0] : "all";
-}
-
 function transactionIdForRow(row: PendingInvoiceRow) {
   return row.bankTransaction.id || row.id;
 }
@@ -169,11 +108,12 @@ export default function PendingInvoicesPage() {
   const { active, activationGeneration } = useOptionalPageActivation("pending-invoices");
   const { runOperation } = useGlobalOperationOverlay();
   const { canOperateData } = useSessionPermissions();
-  const [direction, setDirection] = useState<PendingInvoiceDirection>("expense");
-  const [statusFilters, setStatusFilters] = useState<StatusFilterSelection[]>(DEFAULT_STATUS_FILTERS);
+  const [direction, setDirection] = useState<PendingInvoiceDirection>("all");
+  const [statusFilters, setStatusFilters] = useState<AcquisitionStatusCode[]>([]);
   const [rows, setRows] = useState<PendingInvoiceRow[]>([]);
   const [total, setTotal] = useState(0);
   const [sourceSummary, setSourceSummary] = useState<PendingInvoiceSourceSummary | null>(null);
+  const [acquisitionSummary, setAcquisitionSummary] = useState<AcquisitionSummary | null>(null);
   const [statistics, setStatistics] = useState<PendingInvoiceStatistics | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
@@ -209,7 +149,7 @@ export default function PendingInvoicesPage() {
 
   const query = useMemo<FetchPendingInvoiceRowsRequest>(() => ({
     direction,
-    filter: effectiveBackendFilter(direction, statusFilters),
+    filter: "all",
     keyword,
     page,
     pageSize,
@@ -221,6 +161,7 @@ export default function PendingInvoicesPage() {
 
   const applyRowsPayload = useCallback((payload: PendingInvoiceRowsResponse) => {
     setRows(payload.rows);
+    setAcquisitionSummary(payload.acquisitionSummary);
     setTotal(payload.pagination.total);
     setSourceSummary(payload.summary.sourceSummary ?? null);
     if (payload.statistics) {
@@ -260,6 +201,7 @@ export default function PendingInvoicesPage() {
     setError(null);
     fetchPendingInvoiceRows({ ...query, signal })
       .then((payload) => {
+        if (signal?.aborted) return;
         applyRowsPayload(payload);
         if (statisticsRef.current === null) {
           void loadStatistics(signal).catch(() => undefined);
@@ -273,7 +215,7 @@ export default function PendingInvoicesPage() {
           .catch(() => undefined);
       })
       .catch((caught) => {
-        if (!isAbortLikeError(caught)) {
+        if (!signal?.aborted && !isAbortLikeError(caught)) {
           statisticsRef.current = null;
           setStatistics(null);
           setError(caught instanceof Error ? caught.message : "待找发票加载失败。");
@@ -295,7 +237,7 @@ export default function PendingInvoicesPage() {
     return () => controller.abort();
   }, [active, activationGeneration, loadRows, refreshToken]);
 
-  const filterOptions = useMemo(() => statusFilterOptionsForDirection(direction), [direction]);
+  const filterOptions = useMemo(() => acquisitionOptions(direction), [direction]);
 
   const tableConfig = useMemo(() => ({
     sortField,
@@ -444,24 +386,21 @@ export default function PendingInvoicesPage() {
   const handleDirectionChange = useCallback((nextDirection: PendingInvoiceDirection) => {
     setDirection(nextDirection);
     setStatusFilters([]);
-    setColumnFilters([]);
+    setColumnFilters(current => current.filter(filter => filter.field !== "direction"));
     clearSelectedTransactions();
     setPage(1);
   }, [clearSelectedTransactions]);
 
-  const handleToggleStatusFilter = useCallback((value: StatusFilterSelection) => {
+  const handleToggleStatusFilter = useCallback((codes: AcquisitionStatusCode[]) => {
     clearSelectedTransactions();
-    setStatusFilters((current) => (
-      current.includes(value)
-        ? current.filter((item) => item !== value)
-        : [...current, value]
-    ));
+    setStatusFilters(current => codes.every(code => current.includes(code))
+      ? current.filter(code => !codes.includes(code)) : [...new Set([...current, ...codes])]);
     setPage(1);
   }, [clearSelectedTransactions]);
 
   const handleSelectAllStatusFilters = useCallback(() => {
     clearSelectedTransactions();
-    setStatusFilters(filterOptions.map((option) => option.value));
+    setStatusFilters(filterOptions.flatMap(option => option.codes));
     setPage(1);
   }, [clearSelectedTransactions, filterOptions]);
 
@@ -555,11 +494,19 @@ export default function PendingInvoicesPage() {
       : "";
 
   const summaryCounts = {
-    all: sourceSummary?.bankTransactionRows ?? 0,
-    expense: sourceSummary?.expenseRows ?? 0,
-    income: sourceSummary?.incomeRows ?? 0,
+    all: sourceSummary?.bankTransactionRows,
+    expense: sourceSummary?.expenseRows,
+    income: sourceSummary?.incomeRows,
   };
-  const statusFilterSummary = statusFilterLabel(direction, statusFilters);
+  const selectedStatus = statusFilters.length === 0 || setsEqual(new Set(statusFilters), new Set(filterOptions.flatMap(option => option.codes))) ? "all" : filterOptions.find(option =>
+    setsEqual(new Set(option.codes), new Set(statusFilters)))?.key ?? "multiple";
+  const statusFilterSummary = selectedStatus === "all" ? "全部" : selectedStatus === "multiple" ? "多状态筛选" : filterOptions.find(option => option.key === selectedStatus)!.label;
+  const statusSegments = [
+    { key: "all", label: "全部状态", count: acquisitionSummary ? Object.values(acquisitionSummary.statusCounts).reduce((sum, count) => sum + count, 0) : undefined },
+    ...filterOptions.map(option => ({ key: option.key, label: option.label,
+      count: acquisitionSummary ? option.codes.reduce((sum, code) => sum + acquisitionSummary.statusCounts[code], 0) : undefined })),
+    ...(selectedStatus === "multiple" ? [{ key: "multiple", label: "多状态筛选" }] : []),
+  ];
 
   const statusFilterControl = (
     <div
@@ -603,15 +550,15 @@ export default function PendingInvoicesPage() {
           </div>
           {filterOptions.map((option) => (
             <button
-              aria-checked={statusFilters.includes(option.value)}
+              aria-checked={option.codes.every(code => statusFilters.includes(code))}
               className="pending-invoice-status-filter-menu-item"
-              key={option.value}
-              onClick={() => handleToggleStatusFilter(option.value)}
+              key={option.key}
+              onClick={() => handleToggleStatusFilter(option.codes)}
               role="menuitemcheckbox"
               type="button"
             >
               <span className="pending-invoice-status-filter-menu-check" aria-hidden="true">
-                {statusFilters.includes(option.value) ? "✓" : ""}
+                {option.codes.every(code => statusFilters.includes(code)) ? "✓" : ""}
               </span>
               <span>{option.label}</span>
             </button>
@@ -667,22 +614,16 @@ export default function PendingInvoicesPage() {
           className="pending-invoices-toolbar"
           left={(
             <div className="pending-invoices-toolbar-left">
-              <ToggleButtonGroup
-                aria-label="待找发票流水范围"
-                className="pending-invoices-direction-segment"
-                disallowEmptySelection
-                selectedKeys={new Set<Key>([direction])}
-                selectionMode="single"
-                size="sm"
-                onSelectionChange={(keys) => {
-                  const [next] = Array.from(keys);
-                  if (next === "all" || next === "expense" || next === "income") handleDirectionChange(next);
-                }}
-              >
-                <ToggleButton id="all">全部 {summaryCounts.all}</ToggleButton>
-                <ToggleButton id="expense"><ToggleButtonGroup.Separator />支出 {summaryCounts.expense}</ToggleButton>
-                <ToggleButton id="income"><ToggleButtonGroup.Separator />收入 {summaryCounts.income}</ToggleButton>
-              </ToggleButtonGroup>
+              <InvoiceCountSegments label="待找发票流水范围" selectedKey={direction} unit="笔" pending={loading || Boolean(error)}
+                options={[{ key: "all", label: "全部", count: summaryCounts.all }, { key: "expense", label: "支出", count: summaryCounts.expense }, { key: "income", label: "收入", count: summaryCounts.income }]}
+                onChange={key => { if (key === "all" || key === "expense" || key === "income") handleDirectionChange(key); }} />
+              <InvoiceCountSegments label="发票获取状态分类" selectedKey={selectedStatus} unit="笔" pending={loading || Boolean(error)} options={statusSegments}
+                onChange={key => {
+                  if (key === "multiple") return;
+                  setStatusFilters(key === "all" ? [] : filterOptions.find(option => option.key === key)!.codes);
+                  clearSelectedTransactions(); setPage(1);
+                }} />
+              <span className="pending-invoices-count-caption">当前范围 {loading || error || !acquisitionSummary ? "—" : acquisitionSummary.bankCount} 笔流水 · 已关联发票 {loading || error || !acquisitionSummary ? "—" : acquisitionSummary.invoiceCount} 张</span>
               <div
                 className={`pending-invoices-status-text${error ? " pending-invoices-status-text--error" : ""}`}
                 role={error ? "alert" : "status"}

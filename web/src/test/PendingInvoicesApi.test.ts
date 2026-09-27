@@ -1,3 +1,4 @@
+import { pendingAcquisitionFixture } from "./pendingInvoiceFixtures";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { fetchBankDetailTransactions } from "../features/bankDetails/api";
@@ -175,6 +176,7 @@ describe("pending invoices and tag settings API mapping", () => {
           available_actions: ["view_relation"],
         },
       ],
+      acquisition_summary: { ...pendingAcquisitionFixture([]), bank_count: 51 },
       pagination: { page: 2, page_size: 25, total: 51 },
       summary: {
         total_rows: 51,
@@ -328,6 +330,14 @@ describe("pending invoices and tag settings API mapping", () => {
     });
     expect(payload).not.toHaveProperty("readModelStatus");
     expect(payload.tagDictionary?.version).toBe(9);
+  });
+
+  test.each([undefined, { bank_count: 1 }, { ...pendingAcquisitionFixture([]), invoice_count: -1 },
+    { ...pendingAcquisitionFixture([]), status_counts: { paid_invoiced: 0 } }])("rejects incomplete acquisition counts without inventing zeroes: %s", async acquisition_summary => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ acquisition_summary,
+      summary: { source_summary: { bank_transaction_rows: 0, expense_rows: 0, income_rows: 0, current_direction_rows: 0, excluded_direction_rows: 0 } }, rows: [],
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    await expect(pendingInvoicesApi.fetchPendingInvoiceRows({ direction: "all" })).rejects.toThrow("统计数据不完整");
   });
 
   test("maps filter options from top-level backend options map", async () => {

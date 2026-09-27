@@ -1393,21 +1393,6 @@ textarea {
   overflow-x: auto;
 }
 
-.input-invoice-usage-relation-tabs {
-  flex: 0 0 auto;
-  width: max-content;
-}
-
-.input-invoice-usage-relation-tabs__list {
-  width: max-content;
-}
-
-.input-invoice-usage-relation-tabs__tab {
-  flex: 0 0 auto;
-  width: auto;
-  white-space: nowrap;
-}
-
 .input-invoice-usage-query-actions {
   display: flex;
   width: 100%;
@@ -3750,21 +3735,6 @@ textarea {
   margin-bottom: var(--fp-space-1);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-}
-
-.output-invoice-collections-status-tabs {
-  max-width: 100%;
-  overflow-x: auto;
-}
-
-.output-invoice-collections-status-tabs [role="tablist"] {
-  width: max-content;
-}
-
-.output-invoice-collections-status-tabs [role="tab"] {
-  flex: 0 0 auto;
-  width: auto;
-  white-space: nowrap;
 }
 
 .output-invoice-collections-query__grid {
@@ -8076,18 +8046,15 @@ textarea {
   background: var(--fp-page);
 }
 
-.pending-invoices-direction-segment {
-  display: inline-flex;
-  align-items: center;
-}
-
 .pending-invoices-toolbar {
   min-width: 0;
 }
 
 .pending-invoices-toolbar-left {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 100%;
   gap: var(--fp-space-3);
   min-width: 0;
   flex-wrap: wrap;
@@ -9426,7 +9393,6 @@ textarea {
 }
 
 @media (max-width: 640px) {
-  .pending-invoices-direction-segment,
   .pending-invoices-toolbar-actions,
   .pending-invoices-pagination {
     width: 100%;
@@ -25352,3 +25318,60 @@ body.column-layout-dragging {
 .import-review-file-select select { max-width: 80%; padding: .4rem; border: 1px solid var(--fp-border); border-radius: .35rem; }
 
 .app-status-task-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Shared native HeroUI segments; counts and business state remain page-owned. */
+.invoice-count-segments {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+.invoice-count-segments .tabs__list {
+  width: max-content;
+  min-width: 100%;
+  padding: 4px;
+  border: 1px solid var(--fp-border);
+  border-radius: 10px;
+  background: var(--fp-surface-muted);
+}
+.invoice-count-segments .tabs__tab {
+  flex: 1 0 auto;
+  width: auto;
+  height: 36px;
+  padding-inline: 14px;
+  gap: 6px;
+  border-radius: 7px;
+  white-space: nowrap;
+}
+.invoice-count-segments .tabs__indicator {
+  border-radius: 7px;
+  background: var(--fp-primary-soft);
+  box-shadow: none;
+}
+.invoice-count-segments .tabs__tab[data-selected="true"] {
+  color: var(--fp-primary);
+}
+.invoice-count-segments__count {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.92em;
+}
+.pending-invoices-count-caption {
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-label);
+}
+
+.pending-invoices-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+.pending-invoices-toolbar .page-toolbar__group {
+  min-width: 0;
+  max-width: 100%;
+}
+.pending-invoices-toolbar-left {
+  width: 100%;
+}
+@media (max-width: 1200px) {
+  .pending-invoices-toolbar { grid-template-columns: minmax(0, 1fr); }
+  .pending-invoices-toolbar .page-toolbar__group--right { justify-content: flex-end; }
+}

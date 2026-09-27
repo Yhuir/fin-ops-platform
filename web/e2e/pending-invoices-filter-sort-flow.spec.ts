@@ -100,7 +100,7 @@ test.describe("pending invoices filter and sort browser flow", () => {
     expect(browserErrors.filter((error) => !error.includes("status of 503"))).toEqual([]);
   });
 
-  test("keeps status filters while applying column filters and amount sorting", async ({ page }, testInfo) => {
+  test("keeps explicit all-status scope while applying column filters and amount sorting", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const diagnostics = startPageDiagnostics(page);
     const api = await installDeterministicApiMocks(page, {
@@ -141,12 +141,11 @@ test.describe("pending invoices filter and sort browser flow", () => {
     if (!amountAscUrl) {
       throw new Error("missing amount ascending rows request");
     }
-    expect(amountAscUrl.searchParams.get("direction")).toBe("expense");
-    expect(amountAscUrl.searchParams.get("filter")).toBe("requires_invoice");
+    expect(amountAscUrl.searchParams.get("direction")).toBe("all");
+    expect(amountAscUrl.searchParams.get("filter")).toBe(null);
     expect(amountAscUrl.searchParams.get("page")).toBe("1");
     expect(amountAscUrl.searchParams.get("page_size")).toBe("50");
     expect(parseColumnFilters(amountAscUrl)).toEqual([
-      { field: "status_code", operator: "in", values: ["paid_pending_invoice", "paid_invoiced"] },
     ]);
     let amountDescUrl: URL | undefined;
     await recordLatency({
@@ -200,12 +199,11 @@ test.describe("pending invoices filter and sort browser flow", () => {
     if (!filteredUrl) {
       throw new Error("missing filtered rows request");
     }
-    expect(filteredUrl.searchParams.get("direction")).toBe("expense");
-    expect(filteredUrl.searchParams.get("filter")).toBe("requires_invoice");
+    expect(filteredUrl.searchParams.get("direction")).toBe("all");
+    expect(filteredUrl.searchParams.get("filter")).toBe(null);
     expect(filteredUrl.searchParams.get("sort_field")).toBe("amount");
     expect(filteredUrl.searchParams.get("sort_direction")).toBe("desc");
     expect(parseColumnFilters(filteredUrl)).toEqual(expect.arrayContaining([
-      { field: "status_code", operator: "in", values: ["paid_pending_invoice", "paid_invoiced"] },
       { field: "counterparty_name", operator: "in", values: ["智能工厂设备商二号"] },
     ]));
     await expect.poll(() => visibleCounterparties(page)).toEqual(["智能工厂设备商二号"]);

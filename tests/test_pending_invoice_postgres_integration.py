@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 
 from fin_ops_platform.services.pending_invoice_canonical_query import (
@@ -35,6 +36,57 @@ class PendingInvoicePostgresIntegrationTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.connection.close()
         truncate_test_database(self.database_url)
+
+    def test_parent_counts_invoice_dedup_self_excluding_facets_and_relation_withdrawal(self) -> None:
+        for identity, direction in (("expense-a", "outflow"), ("expense-b", "outflow"),
+                                    ("expense-c", "outflow"), ("income-a", "inflow")):
+            self.connection.execute("""
+                insert into app.bank_transactions(legacy_mongo_id, account_no, txn_direction,
+                    counterparty_name_raw, amount, signed_amount, txn_date, txn_month, status)
+                values (%s, '8106', %s, '统一查询客户', 100, %s, '2026-09-28', '2026-09-01', 'active')
+            """, (identity, direction, -100 if direction == "outflow" else 100))
+        for index in range(3):
+            self.connection.execute("""
+                insert into app.invoices(legacy_mongo_id, invoice_type, invoice_no, invoice_date,
+                    invoice_month, seller_name, amount, signed_amount, total_with_tax, status)
+                values (%s, 'input', %s, '2026-09-28', '2026-09-01', '统一查询客户', 50, 50, 50, 'active')
+            """, (f"inv-{index}", f"INV-{index}"))
+        query = PendingInvoiceCanonicalQueryService(repository=PostgresPendingInvoiceCanonicalRepository(self.connection))
+        request = {"direction": ["all"], "filter": ["all"], "include_statistics": ["false"], "page_size": ["1"]}
+        before = query.rows(request)
+        self.assertEqual(before["acquisition_summary"]["bank_count"], 4)
+        self.assertEqual(before["acquisition_summary"]["status_counts"]["paid_pending_invoice"], 3)
+        self.connection.execute("""
+            insert into app.workbench_pair_relations(case_id, relation_mode, status, month_scope, row_ids, row_types)
+            values ('counts-case', 'manual_confirmed', 'active', '2026-09-01',
+                array['expense-a','expense-b','inv-0','inv-1','inv-2'], array['bank','bank','invoice','invoice','invoice'])
+        """)
+        linked = query.rows(request)
+        self.assertEqual(linked["acquisition_summary"]["bank_count"], 4)
+        self.assertEqual(linked["acquisition_summary"]["invoice_count"], 3)
+        self.assertEqual(linked["acquisition_summary"]["status_counts"]["paid_invoiced"], 2)
+        self.assertEqual(sum(linked["acquisition_summary"]["status_counts"].values()), 4)
+        self.assertEqual(linked["pagination"]["total"], 3)  # two banks may fold to one display row
+        for direction, expected in (("all", 4), ("expense", 3), ("income", 1)):
+            result = query.rows({**request, "direction": [direction]})
+            self.assertEqual(result["summary"]["source_summary"]["bank_transaction_rows"], 4)
+            self.assertEqual(sum(result["acquisition_summary"]["status_counts"].values()), expected)
+        filtered_request = {**request, "direction": ["expense"], "filters": [json.dumps([
+            {"field": "status_code", "operator": "in", "values": ["paid_invoiced"]}])]}
+        filtered = query.rows(filtered_request)
+        self.assertEqual(filtered["acquisition_summary"]["bank_count"], 2)
+        self.assertEqual(filtered["acquisition_summary"]["invoice_count"], 3)
+        self.assertEqual(sum(filtered["acquisition_summary"]["status_counts"].values()), 3)
+        self.assertEqual(filtered["rows"][0]["bank_transactions"]["original_transaction_count"], 2)
+        self.assertEqual(filtered["rows"][0]["bank_transactions"]["original_amount"], "200.00")
+        empty = query.rows({**request, "keyword": ["不存在的客户"]})
+        self.assertEqual(empty["acquisition_summary"]["bank_count"], 0)
+        self.assertEqual(empty["acquisition_summary"]["invoice_count"], 0)
+        self.assertTrue(all(value == 0 for value in empty["acquisition_summary"]["status_counts"].values()))
+        self.connection.execute("update app.workbench_pair_relations set status='withdrawn' where case_id='counts-case'")
+        restored = query.rows(request)
+        self.assertEqual(restored["acquisition_summary"], before["acquisition_summary"])
+        self.assertEqual(query.rows(filtered_request)["pagination"]["total"], 0)
 
     def test_source_drawers_read_actual_fields_without_operational_defaults(self) -> None:
         self.connection.execute("""

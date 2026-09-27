@@ -1,4 +1,5 @@
-import { Button, Tabs } from "@heroui/react";
+import InvoiceCountSegments from "../components/common/InvoiceCountSegments";
+import { Button } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
@@ -328,23 +329,19 @@ export default function OutputInvoiceCollectionsPage() {
                   当前筛选范围 · 按发票张数
                   {refreshing ? <span role="status">更新中…</span> : null}
                 </div>
-                <Tabs selectedKey={selectedStatus}
-                  className="output-invoice-collections-status-tabs"
-                  onSelectionChange={key => {
+                <InvoiceCountSegments label="销项发票状态分类" selectedKey={selectedStatus} unit="张" pending={countsPending}
+                  options={[
+                    { key: "all", label: "全部", count: statusTotal },
+                    ...(statusOptions?.map(option => ({ key: option.value, label: option.label, count: option.count })) ?? []),
+                    ...(selectedStatus === "multiple" ? [{ key: "multiple", label: "多状态筛选" }] : []),
+                  ]}
+                  onChange={key => {
                     if (key === "multiple") return;
                     setQuery(current => ({ ...current, page: 1,
                       filters: [...current.filters.filter(filter => filter.field !== "collection_status"),
-                        ...(key === "all" ? [] : [{ field: "collection_status", operator: "in" as const, values: [String(key)] }])],
+                        ...(key === "all" ? [] : [{ field: "collection_status", operator: "in" as const, values: [key] }])],
                     }));
-                  }}>
-                  <Tabs.List aria-label="销项发票状态分类">
-                    <Tabs.Tab id="all">全部 {countsPending || statusTotal === undefined ? "—" : statusTotal} 张<Tabs.Indicator /></Tabs.Tab>
-                    {statusOptions?.map(option => <Tabs.Tab id={option.value} key={option.value}>
-                      {option.label} {countsPending ? "—" : option.count} 张<Tabs.Indicator />
-                    </Tabs.Tab>)}
-                    {selectedStatus === "multiple" ? <Tabs.Tab id="multiple">多状态筛选<Tabs.Indicator /></Tabs.Tab> : null}
-                  </Tabs.List>
-                </Tabs>
+                  }} />
               </div>}
               right={<div className="output-invoice-collections-query__grid">
                 <BusinessPeriodPicker

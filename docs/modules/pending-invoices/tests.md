@@ -78,3 +78,11 @@ FIN_OPS_TEST_DATABASE_URL=postgresql://localhost/<disposable_db> \
 ## 2026-09-27 来源详情回归
 
 按[来源详情验证责任](../../dev/source-record-details.md#验证责任)覆盖真实来源保留、内部状态/推断/替代值移除、缺失与零值、权限及读取失败；保留本模块列表、计算、导出和关系回归。公共前端入口包括 `EntityDetailContent.test.tsx`、`DetailDrawer.test.tsx` 与 `BankTransactionDrawer.test.tsx`，后者保护按 ID 读取、切换取消及禁止列表摘要回退。具体后端/浏览器执行及性能结果据实际报告，不以本节表示已通过。
+
+## 2026-09-28 原始流水统计与统一分段
+
+- PostgreSQL：一父多子只归一类、命中非代表子项的搜索不改变分类、无票状态不能重复占用；两笔流水三张共享发票统计 2 笔/3 张、分页不缩小汇总、方向/状态排除自身、空集、关系撤回后恢复。
+- HTTP/API：固定同一只读 snapshot 和查询次数；新增 acquisition_summary 的九状态完整性，缺失/非法统计拒绝伪造零值。
+- 前端：默认全部、单选/多选同步、搜索/列筛选、分页回到首页、权限与写后回读；进项/销项仅替换原生分段外观，保留其张数和查询合同。
+- Browser：`pending-invoices-status-tabs.spec.ts` 逐个选择全部/支出/收入及各状态，核对每次只有一个 rows 请求、计数/列表/导出条件、1600/960 宽度和原生 Indicator。现有 attach、收入覆盖、导出、规则恢复及进销项用例保护跨页链路。
+- 七类测试中 1/2/3/5/6/7 适用；第 4 类没有新增 read model/cache/worker，验证直接查询写后读取及旧 worker 不恢复，不添加后台任务。
