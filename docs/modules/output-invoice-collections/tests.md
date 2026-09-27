@@ -96,5 +96,5 @@ PostgreSQL 集成测试必须覆盖 `load_page() -> row.id -> load_row() -> rela
 
 - `OutputInvoiceCollectionApi.test.ts` 覆盖全范围计数与当前页独立、真实零、缺失/非法/重复/未知状态计数、行状态缺失不得默认为待收。
 - `OutputInvoiceCollectionsPage.test.tsx` 覆盖七项、单一查询、搜索保留、多选激活态、单选替换、多选会话恢复沿用查询恢复合同；错误保留原表格但隐藏不可靠计数/禁用导出，既有迟到响应测试继续保护切换。
-- `output-invoice-status-tabs.spec.ts` 逐个点击六类及全部，核对每次一个 rows 请求、全范围计数保持、筛选及导出参数一致、宽/窄布局和零写入。
+- `output-invoice-status-tabs.spec.ts` 逐个点击六类及全部，核对每次一个 rows 请求、全范围计数保持、筛选及导出参数一致、1600px 七项完整可见、960px 内部横滚、HeroUI 原生选中指示和零写入。
 - 既有后端多票同关系回归增加 3 张、分页及 facet 总数断言，明确不是 1 组；原输出 API 和 SQL self-excluding tests 保留。进项前端及两个原销项 E2E 文件做回归。

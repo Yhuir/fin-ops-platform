@@ -1,9 +1,19 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { buildPageSessionStorageKey, createStoredPayload } from "../contexts/pageSessionStorage";
 
 import { renderAuthenticatedAppAt } from "./renderHelpers";
+
+// JSDOM has no Web Animations API; real indicator rendering is covered in Playwright.
+const originalGetAnimations = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "getAnimations");
+beforeAll(() => {
+  Object.defineProperty(HTMLElement.prototype, "getAnimations", { configurable: true, value: () => [] });
+});
+afterAll(() => {
+  if (originalGetAnimations) Object.defineProperty(HTMLElement.prototype, "getAnimations", originalGetAnimations);
+  else Reflect.deleteProperty(HTMLElement.prototype, "getAnimations");
+});
 
 function collectionStatusRow({
   id,

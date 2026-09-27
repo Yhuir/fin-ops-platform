@@ -3729,7 +3729,7 @@ textarea {
 }
 
 .output-invoice-collections-query .page-toolbar__group--left {
-  flex: 1 1 760px;
+  flex: 1 1 960px;
   min-width: 0;
   max-width: 100%;
 }

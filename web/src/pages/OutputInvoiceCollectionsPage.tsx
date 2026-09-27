@@ -338,11 +338,11 @@ export default function OutputInvoiceCollectionsPage() {
                     }));
                   }}>
                   <Tabs.List aria-label="销项发票状态分类">
-                    <Tabs.Tab id="all">全部 {countsPending || statusTotal === undefined ? "—" : statusTotal} 张</Tabs.Tab>
+                    <Tabs.Tab id="all">全部 {countsPending || statusTotal === undefined ? "—" : statusTotal} 张<Tabs.Indicator /></Tabs.Tab>
                     {statusOptions?.map(option => <Tabs.Tab id={option.value} key={option.value}>
-                      {option.label} {countsPending ? "—" : option.count} 张
+                      {option.label} {countsPending ? "—" : option.count} 张<Tabs.Indicator />
                     </Tabs.Tab>)}
-                    {selectedStatus === "multiple" ? <Tabs.Tab id="multiple">多状态筛选</Tabs.Tab> : null}
+                    {selectedStatus === "multiple" ? <Tabs.Tab id="multiple">多状态筛选<Tabs.Indicator /></Tabs.Tab> : null}
                   </Tabs.List>
                 </Tabs>
               </div>}
