@@ -26,6 +26,7 @@
 .bank-split-tag-picker svg { flex-shrink:0; }
 .bank-split-tag-picker[aria-disabled="true"] { opacity:.6; cursor:not-allowed; }
 .bank-split-tag-popover { width:min(600px, calc(100vw - 24px)); padding:8px; background:var(--fp-surface); border:1px solid #dce4ee; border-radius:8px; box-shadow:0 6px 20px #142c481a; }
+.bank-split-tag-popover > [role="dialog"] { padding:0; }
 .bank-split-tag-columns { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,2fr); height:min(342px,55dvh); gap:0; font-size:14px; }
 .bank-split-tag-columns[data-depth="3"] { grid-template-columns:repeat(3,minmax(0,1fr)); }
 .bank-split-tag-columns [role="listbox"] { min-width:0; height:100%; min-height:0; padding:0 6px; overflow-y:auto; scrollbar-gutter:stable; overscroll-behavior:contain; }
