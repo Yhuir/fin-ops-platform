@@ -382,7 +382,7 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 
 ## 2026-09-24 拆分标签金额展示
 
-同父流水保持一张银行卡片和原金额。标签读取后端批量返回的完整父流水 `bank_split_parts`；未在当前关系中的兄弟子项仅可查看金额，不取得选择资格。前端以子项 ID 集合匹配现有关系成员，不按金额/标签推断成员。公共 `BankSplitPartContent` 完整显示每项标签路径，子项金额只在 portal 悬浮层显示，鼠标/聚焦/点击可查看。可操作的用途子项仍以原 child identity 和 child amount 参与选择；单一 trigger 保留 pressed 状态与键盘选择，不嵌套按钮、不增加 checkbox。只读场景不调用 selection，但仍可查看金额。组件不读写事实，不发请求，不改关系核对金额。
+同父流水保持一张银行卡片和原金额。标签读取后端批量返回的完整父流水 `bank_split_parts`；未在当前关系中的兄弟子项仅可查看金额，不取得选择资格。前端以子项 ID 集合匹配现有关系成员，不按金额/标签推断成员。公共 `BankSplitPartContent` 完整显示每项标签路径，子项金额只在 portal 悬浮层显示，鼠标/聚焦/点击可查看。标签 trigger 只查看金额，不切换 selection、不显示 pressed 选择状态、不嵌套按钮或增加 checkbox。整笔选择解析完整 child identity 和 child amount；只读场景保留金额查看。组件不读写事实，不发请求，不改关系核对金额。
 
 ## 2026-09-24 查询内异常范围优化
 
@@ -393,17 +393,19 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 
 ## 2026-09-24 整笔选择与核对金额分层
 
-拆分卡片整行选择使用完整 bank_split_parts 的 canonical 子项及 active relation_case_id，不能只选择当前筛选可见子项；其他 owner 明确拒绝整选。标签只展示，单项选择经流水详情抽屉。金额核对新增 bank_original_total、bank_related_total、evidence_required_total；Popover 显示原银行金额，真实部分关联另显示本次关联金额。标签配对规则决定需票金额，SQL 分区与领域异常一致；不改变真实票据金额或正式成员。preview/confirm 携带 bank_split_versions，事务锁后验证。详见 [闭环实施记录](split-payment-closure.md)。
+拆分卡片整行选择使用完整 bank_split_parts 的 canonical 子项及 active relation_case_id，不能只选择当前筛选可见子项；其他 owner 明确拒绝整选。标签只展示，流水详情只编辑，不再提供单项关联入口。金额核对新增 bank_original_total、bank_related_total、evidence_required_total；Popover 显示原银行金额，真实部分关联另显示本次关联金额。标签配对规则决定需票金额，SQL 分区与领域异常一致；不改变真实票据金额或正式成员。preview/confirm 携带 bank_split_versions，事务锁后验证。详见 [闭环实施记录](split-payment-closure.md)。
 
 有效拆分标签资格必须与银行分类 owner 的规则标准化一致：缺省状态为 active、内置系统规则与自定义规则分别按既有合同处理。缺失或归档用途规则不伪装成金额差额；SQL 分区和领域 completion 均保留 unpaired，blocking_reasons 为 bank_split_rule_unknown。该状态不阻止既有人工关联命令，但不能自动宣称已闭环。
 
-## 2026-09-24 子项选择入口收敛
+## 2026-09-27 仅保留整笔选择
 
-金额列移除子项选择菜单，仅展示原流水金额及金额浮层标签。单子项选择通过既有详情图标进入 DetailDrawer：关联台以 `renderPartAction(partId, version, disabled)` 向公共拆分编辑器注入操作；公共组件不 import 关联业务。权限、当前区域、ownership、版本与选择状态仍由关联台拥有，整笔及单项共用 resolveWorkbenchBankSelection。编辑中/冲突中/占用子项不可选择；编辑权限与关联权限独立。
+金额列标签仅查看金额，流水详情只负责编辑标签／金额／删除。删除 `BankSplitPartAction/renderPartAction` 回调链、单项按钮、专用 `detailZone`、`scope: unit` 透传及 `resolveWorkbenchBankSelection` 的 `unitId` 分支。整笔选择使用完整 `bank_split_parts`，缺少身份或存在其他 owner 时明确拒绝，不能静默缩减为可见／未占用子项。
+
+历史关系可通过其 OA／发票成员选择完整关系并使用既有撤回。纯银行历史关系的恢复入口由 `RelationGroupGrid` 提供：仅未配对区、bank pane、`rawGroupType=relation`、可操作且非只读时显示“撤回当前关联”，调用已有 `onRowAction(bank member, "unlink", group)`。撤回以该关系精确完整正式成员为范围，不按父流水补入其他 owner 的兄弟子项；已配对关系继续使用既有“更多操作 → 取消关联”。不新增后端 I/O、不修改版本锁或恢复单项选择。标签组件只输出分类 code 与完整路径，不接收关联回调。编辑与关联权限继续独立。
 
 保存回调携带已持久化 BankSplitDetail；清理该父流水在两区的旧选择与受影响来源组，显式读取新详情及列表，不被“抽屉打开时暂缓后台刷新”机制阻挡。不使用旧版本选择；写后回读失败明确显示已保存及读取错误。保持抽屉打开，关闭后关联选择保留。其它页面不注入此操作。业务 API、金额、成本、往来和正式关系写合同不变。
 
-详情 GET 的版本字段为 `split_version`，列表 GET 为 `bank_split_version`；前端 API adapter 在详情入口明确映射到 `bankSplitVersion`，不猜测或回退到列表字段。拆分编辑器返回的 version 必须与该字段一致才允许选择。
+详情 GET 的版本字段为 `split_version`，列表 GET 为 `bank_split_version`；前端 API adapter 在详情入口明确映射到 `bankSplitVersion`，不猜测或回退到列表字段。拆分保存后的重读继续使用该字段更新选择上下文，禁止保留旧版本身份。
 
 
 ## 2026-09-24 凭证列表仅显示金额

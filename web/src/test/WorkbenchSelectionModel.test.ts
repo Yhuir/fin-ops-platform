@@ -839,7 +839,6 @@ describe("whole split bank selection", () => {
       ["principal", "1000000.00", undefined], ["interest", "1497.22", "case-1"],
     ]);
     expect(selected.every(item => item.parentAmount === "1001497.22")).toBe(true);
-    expect(resolveWorkbenchBankSelection(bank, "interest")).toHaveLength(1);
   });
   test("rejects partial occupation and unknown ownership without silently dropping siblings", () => {
     const parts = bank.bankSplitParts!;
@@ -882,7 +881,7 @@ test("a selected formal split relation totals actual members, not purpose compar
   };
   bankRows[1].bankSplitParts = [{ ...parts[0], relation_case_id: "another-case" }, parts[1]];
   expect(() => resolveWorkbenchBankSelection(bankRows[1])).toThrow("部分子项已属于其他关联");
-  const withdrawal = buildWorkbenchSelectionContext({ explicitRows: resolveWorkbenchBankSelection(bankRows[1], "interest"), sourceGroups: [interestOnly], zoneId: "paired" });
+  const withdrawal = buildWorkbenchSelectionContext({ explicitRows: [oa], sourceGroups: [interestOnly], zoneId: "paired" });
   expect(withdrawal.summary.amounts.bank).toBe("1497.22");
   expect(withdrawal.includedRowIdentities).toEqual(interestOnly.formalMemberIdentities);
   expect(withdrawal.includedRowIdentities.some(item => item.id === "principal")).toBe(false);

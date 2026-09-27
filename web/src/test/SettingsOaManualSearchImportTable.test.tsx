@@ -8,6 +8,12 @@ import AppSidebar from "../components/shell/AppSidebar";
 import { AppChromeProvider, useAppChrome } from "../contexts/AppChromeContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import type { AppHealthStatus } from "../features/appHealth/types";
+import { BackgroundJobProgressProvider } from "../features/backgroundJobs/BackgroundJobProgressProvider";
+
+vi.mock("../features/backgroundJobs/api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../features/backgroundJobs/api")>(),
+  fetchActiveBackgroundJobs: vi.fn(async () => ({ jobs: [] })),
+}));
 
 const searchRows = [
   {
@@ -146,9 +152,11 @@ function renderTable({ withSidebar = false }: { withSidebar?: boolean } = {}) {
     <AppChromeProvider>
       {withSidebar ? (
         <SessionContext.Provider value={loadingSession}>
-          <MemoryRouter>
-            <SidebarStatusHarness />
-          </MemoryRouter>
+          <BackgroundJobProgressProvider>
+            <MemoryRouter>
+              <SidebarStatusHarness />
+            </MemoryRouter>
+          </BackgroundJobProgressProvider>
         </SessionContext.Provider>
       ) : null}
       <OaManualSearchImportTable />

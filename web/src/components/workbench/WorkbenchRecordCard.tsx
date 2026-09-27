@@ -41,7 +41,7 @@ type WorkbenchRecordCardProps = {
   highlighted?: boolean;
   searchQuery?: string;
   sheetRowMode?: "stretched" | "split";
-  onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "unpaired", scope?: "unit") => void;
+  onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
   showWorkflowActions: boolean;

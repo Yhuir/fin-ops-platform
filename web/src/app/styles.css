@@ -20516,7 +20516,7 @@ body.column-layout-dragging {
 .relation-preview-detail-popover dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .relation-preview-record-line { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: center; gap: 3px 10px; }
 .relation-preview-money { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--fp-text-primary); }
-.relation-preview-record-content .relation-preview-money { font-weight: 650; }
+.relation-preview-record-content .relation-preview-money { font-weight: 600; }
 .relation-preview-tag { max-width: 100%; height: auto; min-height: 24px; padding-block: 3px; white-space: normal; font-size: 12px; color: var(--fp-text-primary); background: var(--fp-surface); }
 .relation-preview-record .bank-split-chips { gap: 4px; align-items: center; }
 .relation-preview-record .bank-split-part-trigger { max-width: 100%; font-size: 12px; }

@@ -79,6 +79,13 @@ git diff --check
 
 `test_bank_split_consumers_postgres.py::BankSplitConsumersPostgresTests::test_workbench_hydration_shows_all_parent_parts_without_adding_other_case_members` 验证父流水两个子项在不同 case 时，单行/full/summary 均取得完整标签，当前成员与用途金额保持不变。`test_bank_details_canonical_query.py` 保留原分类语义与单次查询预算；`test_workbench_page_query_repository.py` 覆盖既有分页/摘要及分类调用合同。
 
-## 2026-09-24 公共编辑器扩展回归
+## 2026-09-24 公共编辑器扩展回归（历史，已替代）
 
-BankSplitEditor 的可选子项操作只接受持久化 ID/版本/编辑禁用状态；无回调消费者不增加操作。BankSplitEditor、BankSplitsApi、BankSplitChips、DetailDrawer 单测及 bank-transaction-splits 浏览器用例覆盖旧查看/编辑/保存/失败/金额浮层。无 API/数据库/worker 变更，不新增后端测试。
+当时的 BankSplitEditor 可选子项操作接收持久化 ID/版本/编辑禁用状态；该接口及对应操作已于 2026-09-27 移除，不能作为当前调用合同。查看／编辑／保存／失败／金额浮层的有效断言继续由 BankSplitEditor、BankSplitsApi、BankSplitChips、DetailDrawer 及 bank-transaction-splits 用例保护；当前标签和整笔选择测试责任见下节。无 API/数据库/worker 变更。
+
+## 动态拆分标签菜单（2026-09-27）
+
+- 类别 3／5／7：`BankSplitEditor.test.tsx` 与选择器测试保护一／二／三层、完整路径回显、切换上级、未完成关闭、第三层独立修改、稳定 ID、取消／删除／金额／权限／错误与冲突；保存沿用现有请求字段。
+- 类别 5／6／7：`bank-transaction-splits.spec.ts` 保护同一菜单往来归属、保存后重新打开、金额浮层零请求及失败保留草稿；成本人工标签和公共详情消费者继续运行既有回归。
+- 类别 1：金额和分类规则实现不变，复跑已有银行拆分规则测试；关联选择规则测试由关联台负责。类别 2：service/repository 不变，复跑已有事务及关系服务测试，不重复新增。类别 4 不适用：没有 read model、缓存或后台任务变更。
+- 本节记录覆盖责任，不表示测试或生产验证已通过；实际执行、发布和性能结果由本次交付记录说明。生产检查仅查看菜单草稿并取消，不改真实业务流水。

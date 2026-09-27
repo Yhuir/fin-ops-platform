@@ -810,11 +810,15 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - 回归：权限、申请人布局、长表滚动、筛选排序、凭证和发票处理入口。前端全套测试及生产构建保护共享组件；没有新增后端业务/API/缓存或任务实现，类别 1/2/3/4 不新增测试。
 - 生产验证读取同一真实关系，比较金额、成员、异常指纹及 completion；不提交真实异常接受/撤回，不以 mock 数据替代生产展示与性能证据。
 
-- 2026-09-24：`BankSplitRelationCell.test.tsx` 验证同父一行、子身份金额选择、pressed/键盘、只读不选择仍可看金额；`BankSplitChips.test.tsx` 验证新悬浮交互不引入嵌套按钮或 checkbox。
+- `BankSplitRelationCell.test.tsx` 验证同父一行、整笔选择、标签不选择且可看金额；`BankSplitChips.test.tsx` 验证浮层交互不引入嵌套按钮或 checkbox。原子项 pressed／键盘选择断言已由仅整笔选择合同替代。
 
-## 2026-09-24 详情内子项选择
+## 2026-09-27 整笔选择与拆分编辑
 
-`BankSplitRelationCell.test.tsx` 保护列表无子项选择入口且金额/浮层不变；`BankSplitEditor.test.tsx` 保护可选操作与编辑权限独立、dirty/saving/conflict 不可关联草稿；`WorkbenchBankSelectionCleanup.test.ts` 保护清理当前父流水两区旧选择、保留其它流水和 OA。`workbench-split-selection.spec.ts` 对应 RECON-WB-E2E-017，覆盖整笔 confirm、详情选择/跨关系占用/withdraw、保存后清除旧选择与新版本回读。业务选择规则、前端状态、交互、E2E与既有回归适用；后端契约、worker、read model未改变。
+类别 1／5／7：`WorkbenchSelectionModel.test.ts`、`WorkbenchSplitSelection.test.tsx` 和 `BankSplitRelationCell.test.tsx` 保护整笔选择完整子项、搜索部分命中、跨关系占用拒绝、金额浮层不改变选择及旧单项按钮缺席。`BankSplitEditor.test.tsx` 保护动态层级菜单、草稿／保存与权限；`WorkbenchBankSelectionCleanup.test.ts` 保护清理当前父流水两区旧选择、保留其它流水和 OA。
+
+类别 5／6／7：`workbench-split-selection.spec.ts` 对应 RECON-WB-E2E-017，覆盖整笔 confirm、占用错误、从 OA／发票选择既有完整关系后 withdraw、纯银行未配对正式关系“撤回当前关联”沿用 unlink 精确成员、保存后清除旧选择与新版本回读。`RelationGroupGrid.test.tsx` 同时保护撤回入口只在未配对 bank 正式关系且可操作非只读时出现，并传递原关系及银行成员；兄弟子项属于其他关系不扩张撤回集合。旧详情单项选择断言由该合同替代，不能丢弃其中占用、版本及权限保护。
+
+类别 3 沿用既有 API adapter／请求形状回归，无新 HTTP 合同；类别 2 沿用既有拆分及关联事务服务回归，无 service/repository 实现变化；类别 4 不适用，无 read model/cache/worker 变化。本节记录覆盖责任，测试和生产验证结果需另行记录，不预先宣称通过。
 
 生产真实详情发现列表/详情版本字段不同，新增 `WorkbenchApi.test.ts` 断言详情 `split_version` 明确映射；浏览器子项场景的详情 fixture 使用真实字段，避免拿列表 DTO 冒充详情 DTO。未修改 HTTP API shape、后端事务或身份键。
 

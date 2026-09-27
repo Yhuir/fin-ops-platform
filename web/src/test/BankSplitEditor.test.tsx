@@ -1,3 +1,4 @@
+import userEvent from '@testing-library/user-event';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import BankSplitEditor from '../features/bankSplits/BankSplitEditor';
 import BankTransactionDetailContent from '../features/bankSplits/BankTransactionDetailContent';
@@ -58,14 +59,16 @@ test('adds and removes draft items without writes, checks total, and cancels loc
   expect(screen.getByLabelText('子项 2 金额')).toHaveValue('1497.22');
 });
 
-test('presents two-column tag options and permits manual tag changes', async () => {
+test('completes external tags in the third column without a separate selector', async () => {
   render(<BankSplitEditor transactionId="bank-1" />);
   fireEvent.click(await screen.findByRole('combobox', { name: '子项 2 标签' }));
   const primary = await screen.findByRole('listbox', { name: '主标签' });
-  fireEvent.click(within(primary).getByRole('option', { name: '外部往来款' }));
+  await userEvent.click(within(primary).getByRole('option', { name: '外部往来款' }));
   const child = await screen.findByRole('listbox', { name: '子标签' });
-  fireEvent.click(within(child).getByRole('option', { name: '归还借款' }));
-  expect(screen.getByRole('combobox', { name: '子项 2 标签' })).toHaveTextContent('外部往来款 / 归还借款');
+  await userEvent.click(within(child).getByRole('option', { name: '归还借款' }));
+  expect(screen.getByLabelText('子项 2 标签', { selector: '[role=combobox]' })).toHaveTextContent('费用 / 利息');
+  await userEvent.click(within(screen.getByRole('listbox', { name: '往来归属' })).getByRole('option', { name: '银行往来' }));
+  expect(screen.getByRole('combobox', { name: '子项 2 标签' })).toHaveTextContent('外部往来款 / 归还借款 / 银行往来');
   expect(saveBankSplits).not.toHaveBeenCalled();
 });
 
@@ -165,8 +168,9 @@ test('saving one bank and refreshing its page retains the other bank draft witho
 test('external instance family is human-selected and remains in the complete save path', async () => {
   vi.mocked(saveBankSplits).mockResolvedValue({ ...detail, version: 3, changed: true, affected_months: [] });
   render(<BankSplitEditor transactionId="bank-1" />);
-  expect(await screen.findByLabelText('子项 1 往来归属')).toHaveValue('银行往来');
-  fireEvent.change(screen.getByLabelText('子项 1 往来归属'), { target: { value: '公司往来' } });
+  fireEvent.click(await screen.findByRole('combobox', { name: '子项 1 标签' }));
+  expect(screen.queryByLabelText('子项 1 往来归属')).not.toBeInTheDocument();
+  await userEvent.click(within(screen.getByRole('listbox', { name: '往来归属' })).getByRole('option', { name: '公司往来' }));
   fireEvent.click(screen.getByRole('button', { name: '保存', exact: true }));
   await waitFor(() => expect(saveBankSplits).toHaveBeenCalledWith('bank-1', expect.objectContaining({ parts: [
     { id: 'part-1', category_code: 'principal', amount: '1000000.00', category_label_path: ['外部往来款', '归还借款', '公司往来'] },
@@ -174,35 +178,36 @@ test('external instance family is human-selected and remains in the complete sav
   ] })));
 });
 
-test('selecting a new external code requires a fresh instance family and does not inherit another item family', async () => {
+test('incomplete external selection closes without changing the saved label or another item', async () => {
   render(<BankSplitEditor transactionId="bank-1" />);
   fireEvent.click(await screen.findByRole('combobox', { name: '子项 2 标签' }));
-  fireEvent.click(within(await screen.findByRole('listbox', { name: '主标签' })).getByRole('option', { name: '外部往来款' }));
-  fireEvent.click(within(await screen.findByRole('listbox', { name: '子标签' })).getByRole('option', { name: '归还借款' }));
-  expect(screen.getByLabelText('子项 2 往来归属')).toHaveValue('');
-  fireEvent.click(screen.getByRole('button', { name: '保存', exact: true }));
-  expect(screen.getByRole('alert')).toHaveTextContent('请选择外部往来子项的往来归属');
+  await userEvent.click(within(screen.getByRole('listbox', { name: '主标签' })).getByRole('option', { name: '外部往来款' }));
+  await userEvent.click(within(screen.getByRole('listbox', { name: '子标签' })).getByRole('option', { name: '归还借款' }));
+  fireEvent.keyDown(screen.getByRole('listbox', { name: '往来归属' }), { key: 'Escape' });
+  expect(screen.getByRole('combobox', { name: '子项 2 标签' })).toHaveTextContent('费用 / 利息');
+  expect(screen.getByRole('combobox', { name: '子项 1 标签' })).toHaveTextContent('外部往来款 / 归还借款 / 银行往来');
+  expect(screen.queryByRole('button', { name: '保存', exact: true })).not.toBeInTheDocument();
   expect(saveBankSplits).not.toHaveBeenCalled();
-  expect(screen.getByLabelText('子项 1 往来归属')).toHaveValue('银行往来');
+});
+
+test('bank details expose delete only and preserve read-only controls', async () => {
+  vi.mocked(fetchBankSplits).mockResolvedValue({ ...detail, can_edit: false });
+  render(<BankTransactionDetailContent bankTransactionId="bank-1" sections={[{ title: '交易信息', fields: [] }]} />);
+  expect(await screen.findByRole('button', { name: '删除子项 1' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '删除子项 2' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: /选中/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('combobox', { name: '子项 1 标签' }));
+  expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
 });
 
 
-test('optional saved-part actions receive the version and block dirty drafts without requiring edit permission', async () => {
-  const select = vi.fn();
-  vi.mocked(fetchBankSplits).mockResolvedValue({ ...detail, can_edit: false });
-  const view = render(<BankTransactionDetailContent bankTransactionId="bank-1" sections={[{ title: '交易信息', fields: [] }]}
-    renderPartAction={(id, version, disabled) => <button disabled={disabled} onClick={() => select(id, version)}>选中 {id}</button>} />);
-  fireEvent.click(await screen.findByRole('button', { name: '选中 part-2' }));
-  expect(select).toHaveBeenCalledWith('part-2', 2);
-  expect(saveBankSplits).not.toHaveBeenCalled();
-  view.unmount();
-  vi.mocked(fetchBankSplits).mockResolvedValue(detail);
-  render(<BankSplitEditor transactionId="bank-1" renderPartAction={(id, version, disabled) => <button disabled={disabled} onClick={() => select(id, version)}>选中 {id}</button>} />);
-  await screen.findByLabelText('子项 2 金额');
-  fireEvent.change(screen.getByLabelText('子项 2 金额'), { target: { value: '1497.20' } });
-  expect(screen.getByRole('button', { name: '选中 part-2' })).toBeDisabled();
-  fireEvent.click(screen.getByRole('button', { name: '新增流水子项' }));
-  expect(screen.getAllByRole('button', { name: /^选中 / })).toHaveLength(2);
-  fireEvent.click(screen.getByRole('button', { name: '取消', exact: true }));
-  expect(screen.getByRole('button', { name: '选中 part-2' })).toBeEnabled();
+test('restoring the whole transaction uses the same complete three-column selection', async () => {
+  vi.mocked(saveBankSplits).mockResolvedValue({ ...detail, parts: [], version: 3, changed: true, affected_months: [] });
+  render(<BankSplitEditor transactionId="bank-1" />);
+  fireEvent.click(await screen.findByRole('button', { name: '删除子项 2' }));
+  fireEvent.click(screen.getByRole('button', { name: '删除子项 1' }));
+  fireEvent.click(screen.getByRole('combobox', { name: '整笔流水标签' }));
+  await userEvent.click(within(screen.getByRole('listbox', { name: '往来归属' })).getByRole('option', { name: '公司往来' }));
+  fireEvent.click(screen.getByRole('button', { name: '保存', exact: true }));
+  await waitFor(() => expect(saveBankSplits).toHaveBeenCalledWith('bank-1', { version: 2, parts: [], category_code: 'principal', category_label_path: ['外部往来款', '归还借款', '公司往来'] }));
 });

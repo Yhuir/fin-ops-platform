@@ -33,7 +33,7 @@ BankTransactionUnit 是服务层只读用途 DTO，继承银行字段用于现�
 - 用途 SQL 由 app.bank_transactions 切到 app.bank_transaction_units；银行余额、导入去重、主身份审计保留原表。
 - 成本不再依靠外部往来本金填写“不计成本”来伪装用途；既有外部决策由迁移工具撤销。
 - 父流水已拆分时旧整笔标签写口明确拒绝，不默默覆盖子项。
-- 共享 TwoColumnTagPicker 替换成本专有重复选择器，各银行抽屉复用同一拆分组件。
+- 银行拆分使用专用 `BankSplitTagPicker`，普通层级与往来归属在同一菜单完成；删除独立归属 select 及拆分对 `TwoColumnTagPicker` 的引用。成本人工标签继续使用有效的公共 `TwoColumnTagPicker`，其行为不变。
 - 往来旧内存分类中的固定类别列表/手工回退改用配置语义及 canonical query owner。
 
 ## 测试矩阵
@@ -44,7 +44,7 @@ BankTransactionUnit 是服务层只读用途 DTO，继承银行字段用于现�
 | 服务/持久化 | 原事实不变、完整事务回滚、并发版本冲突、关系/成本/批次/往来审计、无重复副作用 |
 | API | 单笔/批量形状、权限、会话actor、错误状态、版本冲突、完整回读 |
 | 查询/缓存/后台 | canonical 列表与汇总一致、标签筛选、父行计数、关联事件、批量读取；无新增read-model/worker |
-| 前端 | 双栏选择、加删改、合计、保存错误、关闭重开、多笔草稿保护、所有详情入口 |
+| 前端 | 实际一／二／三级选择、暂选取消与回显、加删改、合计、保存错误、关闭重开、多笔草稿保护、所有详情入口 |
 | 端到端 | PostgreSQL保存→用途投影→往来/成本/待票，真实浏览器提交/回读，发布后生产回读 |
 | 旧回归 | 未拆分、导入/撤回、余额、批次/撤回历史、OA/发票、权限、过滤分页与导出 |
 
@@ -100,3 +100,11 @@ OA 待付款、进项发票使用、销项收款的银行聚合对象，以及�
 验证入口：`test_bank_split_document_scope_postgres.py`、`test_bank_split_consumers_postgres.py`，验证本息拆分的展示与业务金额隔离、同父去重、多父完整标签、金额筛选/子项搜索、持久化第三层和导出；并回归四个消费页面的 query/API/service/export 测试。
 
 关联台的完整父拆分信息由现有 `workbench_category_projection_rows` 一次 SQL 提供，原单行/full/summary hydration 均经过此边界。选中用途限定父集合后，集合聚合全部兄弟子项，再调用 owner 的装配方法；不额外查询、不复制关联成员，也不改变选择金额。真实 PostgreSQL 测试将父流水两个子项放入不同 case，验证展示完整但当前 case 仍只有自己的 child ID。
+
+## 动态标签菜单与整笔选择（2026-09-27）
+
+`features/bankSplits/BankSplitTagPicker.tsx` 输入当前 code／完整路径、有效标签定义、往来归属选项及禁用状态，只在末级选定时输出 `{category_code, category_label_path}`。分类层级来自结构化配置；外部往来第三层使用接口已有选项，不按名称或父流水推断。组件只管理菜单暂选，不请求 API、不持久化、不拥有关联能力。拆分编辑器继续负责草稿、金额、版本和现有 PUT；仅改变第三层也必须保留子项 ID 并提交完整路径。
+
+移除 `BankSplitPartAction`、`renderPartAction`、关联台专用 `detailZone`、`scope: unit` 透传及选择模型 `unitId` 分支。整笔选择仍解析完整 canonical 子项、校验占用；保存响应、父流水旧选择清理和详情／列表重读保留。历史关系可从 OA／发票入口选择完整关系后撤回；无 OA／发票的未配对正式银行关系由 `RelationGroupGrid` 显示“撤回当前关联”，仅可操作且非只读时提供，调用既有 `onRowAction(bank member, "unlink", group)` 对精确完整正式成员执行既有预览／撤回。已配对关系沿用“更多操作 → 取消关联”。这些都是关系级操作，不恢复单项选择，也不受其他关系占用兄弟子项阻断。
+
+本次无 API shape、数据库、service/repository、read model、worker、缓存或依赖变更，不创建数据库备份。菜单分组复用配置，打开与切换不新增网络请求；性能结论以实际样本为准。测试责任与执行结果分别见银行明细和关联台模块的 tests 文档；生产结果不能由模拟 API 浏览器测试代替。

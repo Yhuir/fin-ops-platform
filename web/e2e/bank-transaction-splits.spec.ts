@@ -33,14 +33,25 @@ test('bank detail adds labeled children, persists exact amounts and reloads comp
   await page.getByRole('button', { name: '查看银行流水 智能工厂设备商 详情' }).click();
   const drawer = page.getByRole('dialog', { name: '银行流水详情' });
   await expect(drawer.getByText('流水子项拆分', { exact: true })).toBeVisible();
+  const pickerRequests: string[] = [];
+  const recordPickerRequest = (request: import('@playwright/test').Request) => { if (request.url().includes('/api/')) pickerRequests.push(request.url()); };
+  page.on('request', recordPickerRequest);
   for (const [index, primary, child, amount] of [[1, '外部往来款', '归还借款', '56502.78'], [2, '费用', '利息', '1497.22']] as const) {
     await drawer.getByRole('button', { name: '新增流水子项' }).click();
+    await page.setViewportSize({ width: index === 1 ? 480 : 1440, height: 1000 });
     await drawer.getByRole('combobox', { name: `子项 ${index} 标签` }).click();
     await page.getByRole('listbox', { name: '主标签' }).getByRole('option', { name: primary, exact: true }).click();
+    await expect(page.getByRole('listbox')).toHaveCount(index === 1 ? 3 : 2);
+    const bounds = await page.locator('.bank-split-tag-popover').boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
     await page.getByRole('listbox', { name: '子标签' }).getByRole('option', { name: child, exact: true }).click();
-    if (index === 1) await drawer.getByLabel('子项 1 往来归属').selectOption('银行往来');
+    if (index === 1) await page.getByRole('listbox', { name: '往来归属' }).getByRole('option', { name: '银行往来' }).click();
     await drawer.getByLabel(`子项 ${index} 金额`).fill(amount);
   }
+  page.off('request', recordPickerRequest);
+  expect(pickerRequests).toEqual([]);
   expect(writes).toBe(0);
   await drawer.getByRole('button', { name: '保存', exact: true }).click();
   await expect(drawer.getByText('已保存', { exact: true })).toBeVisible();

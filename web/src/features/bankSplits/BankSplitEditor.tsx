@@ -1,14 +1,13 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import TwoColumnTagPicker from '../../components/common/TwoColumnTagPicker';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import BankSplitTagPicker from './BankSplitTagPicker';
 import { ApiClientError } from '../apiClient';
 import { amountCents, centsText } from './amount';
 import { fetchBankSplits, saveBankSplits, type BankSplitDetail } from './api';
 import './bankSplits.css';
 
 type DraftPart = { key: string; id?: string; category_code: string; category_path: string[]; amount: string };
-export type BankSplitPartAction = (partId: string, version: number, disabled: boolean) => ReactNode;
-type Props = { transactionId: string; initialDetail?: BankSplitDetail; onSaved?: (detail: BankSplitDetail) => void | Promise<void>; renderPartAction?: BankSplitPartAction; onDirtyChange?: (dirty: boolean) => void };
-export default function BankSplitEditor({ transactionId, initialDetail, onSaved, onDirtyChange, renderPartAction }: Props) {
+type Props = { transactionId: string; initialDetail?: BankSplitDetail; onSaved?: (detail: BankSplitDetail) => void | Promise<void>; onDirtyChange?: (dirty: boolean) => void };
+export default function BankSplitEditor({ transactionId, initialDetail, onSaved, onDirtyChange }: Props) {
   const [detail, setDetail] = useState<BankSplitDetail | null>(null);
   const [parts, setParts] = useState<DraftPart[]>([]);
   const [category, setCategory] = useState('');
@@ -42,20 +41,10 @@ export default function BankSplitEditor({ transactionId, initialDetail, onSaved,
   const parentAmount = detail ? amountCents(detail.amount) : null;
   const difference = parentAmount === null ? null : parentAmount - total;
   const disabled = saving || conflict || !detail?.can_edit;
-  const tags = detail?.tag_definitions.filter(tag => tag.status === 'active') ?? [];
-  const newCategoryPath = (code: string) => {
-    const tag = tags.find(item => item.code === code)!;
-    return tag.turnover_role === 'external_turnover' ? tag.path.slice(0, 2) : tag.path;
-  };
+  const tags = useMemo(() => detail?.tag_definitions.filter(tag => tag.status === 'active') ?? [], [detail]);
   const requiresFamily = (code: string) => tags.find(tag => tag.code === code)?.turnover_role === 'external_turnover';
   const invalidFamily = (code: string, path: string[]) => requiresFamily(code)
     && (path.length !== 3 || !detail?.turnover_third_label_options.some(option => option.value === path[2]));
-  const familySelector = (code: string, path: string[], label: string, onChange: (path: string[]) => void) => requiresFamily(code) ? (
-    <select aria-label={label} value={path[2] ?? ''} disabled={disabled} onChange={event => onChange([...path.slice(0, 2), event.target.value])}>
-      <option value="">选择往来归属</option>
-      {detail?.turnover_third_label_options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-    </select>
-  ) : null;
   const save = async () => {
     if (!detail || disabled) return;
     if (parts.length === 1) { setError('拆分至少需要两个子项'); return; }
@@ -85,23 +74,21 @@ export default function BankSplitEditor({ transactionId, initialDetail, onSaved,
     <div className="bank-split-toolbar"><button type="button" aria-label="新增流水子项" disabled={disabled} onClick={() => changed([...parts, { key: `new-${nextKey.current++}`, category_code: '', category_path: [], amount: '' }])}>＋</button></div>
     {parts.map((part, index) => <div className="bank-split-line" key={part.key}>
       <div className="bank-split-label-fields">
-        <TwoColumnTagPicker value={part.category_code} savedLabel={part.category_path.join(' / ')}
-          tags={tags} loading={false} disabled={disabled} onLoad={() => undefined} label={`子项 ${index + 1} 标签`} placeholder="选择标签"
-          onChange={tag => changed(parts.map(item => item.key === part.key ? { ...item, category_code: tag.code,
-            category_path: item.category_code === tag.code ? item.category_path : newCategoryPath(tag.code) } : item))} />
-        {familySelector(part.category_code, part.category_path, `子项 ${index + 1} 往来归属`, path => changed(parts.map(item => item.key === part.key ? { ...item, category_path: path } : item)))}
+        <BankSplitTagPicker value={{ category_code: part.category_code, category_label_path: part.category_path }}
+          tags={tags} familyOptions={detail.turnover_third_label_options} disabled={disabled} label={`子项 ${index + 1} 标签`}
+          onChange={selection => changed(parts.map(item => item.key === part.key ? { ...item, category_code: selection.category_code,
+            category_path: selection.category_label_path } : item))} />
       </div>
       <input aria-label={`子项 ${index + 1} 金额`} inputMode="decimal" value={part.amount} disabled={disabled}
         onChange={event => changed(parts.map(item => item.key === part.key ? { ...item, amount: event.target.value } : item))} />
       <div className="bank-split-line-actions">
-        {part.id ? renderPartAction?.(part.id, detail.version, dirty || saving || conflict) : null}
         <button type="button" aria-label={`删除子项 ${index + 1}`} disabled={disabled} onClick={() => changed(parts.filter(item => item.key !== part.key))}>删除</button>
       </div>
     </div>)}
     {!parts.length && dirty ? <div className="bank-split-label-fields">
-      <TwoColumnTagPicker value={category} savedLabel={categoryPath.join(' / ')} tags={tags} loading={false} disabled={disabled} onLoad={() => undefined}
-        label="整笔流水标签" placeholder="选择整笔流水标签" onChange={tag => { setCategoryPath(category === tag.code ? categoryPath : newCategoryPath(tag.code)); setCategory(tag.code); setDirty(true); }} />
-      {familySelector(category, categoryPath, '整笔流水往来归属', path => { setCategoryPath(path); setDirty(true); })}
+      <BankSplitTagPicker value={{ category_code: category, category_label_path: categoryPath }} tags={tags}
+        familyOptions={detail.turnover_third_label_options} disabled={disabled} label="整笔流水标签"
+        onChange={selection => { setCategoryPath(selection.category_label_path); setCategory(selection.category_code); setDirty(true); setError(''); setNotice(''); }} />
     </div> : null}
     {parts.length ? <div className="bank-split-total">合计 {centsText(total)}{difference !== null && difference !== 0n ? <span>差额 {centsText(difference)}</span> : null}</div> : null}
     {error ? <div role="alert">{error}</div> : null}

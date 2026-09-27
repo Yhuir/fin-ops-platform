@@ -5,7 +5,6 @@
 .bank-split-editor button:disabled { opacity:.5; cursor:default; }
 .bank-split-line { display:grid; grid-template-columns:minmax(130px,1fr) minmax(100px,140px) auto; align-items:center; gap:8px; }
 .bank-split-label-fields { display:grid; gap:6px; min-width:0; }
-.bank-split-label-fields select { width:100%; min-width:0; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:var(--fp-surface); }
 .bank-split-line input { width:100%; min-width:0; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; text-align:right; font-variant-numeric:tabular-nums; }
 .bank-split-total { display:flex; flex-wrap:wrap; gap:16px; font-variant-numeric:tabular-nums; }
 .bank-split-total span,.bank-split-editor [role="alert"] { color:#b42318; }
@@ -21,3 +20,15 @@
 @media(max-width:600px) { .bank-split-line { grid-template-columns:minmax(0,1fr) 34px; } .bank-split-line input { grid-row:2; } .bank-split-line-actions { grid-column:2; grid-row:1 / span 2; } }
 
 .bank-split-line-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+
+.bank-split-tag-picker { display:flex; align-items:center; justify-content:space-between; gap:6px; width:100%; min-width:0; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; background:var(--fp-surface); text-align:left; }
+.bank-split-tag-picker > span { white-space:normal; overflow-wrap:anywhere; }
+.bank-split-tag-picker svg { flex-shrink:0; }
+.bank-split-tag-picker[aria-disabled="true"] { opacity:.6; cursor:not-allowed; }
+.bank-split-tag-popover { width:min(640px, calc(100vw - 24px)); padding:8px; background:var(--fp-surface); border:1px solid #dce4ee; border-radius:8px; box-shadow:0 8px 28px #142c4826; }
+.bank-split-tag-columns { display:grid; gap:8px; }
+.bank-split-tag-columns [role="listbox"] { min-width:0; max-height:min(360px, 55dvh); overflow-y:auto; overscroll-behavior:contain; }
+.bank-split-tag-columns [role="listbox"] + [role="listbox"] { border-left:1px solid #dce4ee; padding-left:8px; }
+.bank-split-tag-option { display:flex; justify-content:space-between; align-items:center; padding:9px 10px; white-space:normal; overflow-wrap:anywhere; cursor:pointer; }
+.bank-split-tag-option svg { flex-shrink:0; }
+.bank-split-tag-option[data-selected="true"] { background:#e8efff; color:#214cce; }

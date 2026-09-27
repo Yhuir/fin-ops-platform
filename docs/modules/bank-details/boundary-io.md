@@ -171,10 +171,12 @@
 
 指定candidate_transaction_ids与内部candidate_transaction_relation复用同一classification_peer_bank_ids集合CTE，完整保留按金额和时间窗口补齐的内部转账候选；移除指定ID路径逐行重复扫描target_bank_rows。无目标范围的查询保持原语义，参数/DTO/查询次数/事务与标签优先级不变，无新增cache/index/worker。真实PG验证legacy/canonical ID、重复ID、缺失ID、拆分用途以及范围外对手流水；生产508条分类新旧全等，局部查询约162–188ms降为92–102ms。关联台、成本、批量账务与往来仍只消费既有分类边界。
 
-## 2026-09-24 子项选择所需的归属事实
+## 拆分整笔选择所需的归属事实
 
 workbench_category_projection_rows 在既有一次有界批量查询中返回每个 bank_split_parts 子项的 relation_case_id（未占用为 null），并按当前有效标签配对规则返回用途行 paired_requires_invoice。查询不改正式关系，兄弟子项不因展示而成为当前成员；分类、原金额、持久化与其它页面 DTO 不变。关联台使用该事实进行完整选择，不能从当前页缺席推断子项未占用。
 
-## 2026-09-24 公共拆分详情 I/O
+## 公共拆分详情 I/O（2026-09-27）
 
-BankSplitEditor/BankTransactionDetailContent 提供可选 renderPartAction(partId, version, disabled) 渲染回调，仅对已持久化子项提供 ID；dirty/saving/conflict 时阻止操作。onSaved/onBankSplitSaved 返回保存响应 BankSplitDetail，允许宿主刷新其选择上下文。关联能力由关联台注入，银行明细和其他消费者不传入，因此仍只有查看/编辑；不改 API、事实存储、标签、金额或刷新机制。
+`BankSplitTagPicker` 位于 `web/src/features/bankSplits/`，输入当前 code／完整路径、有效标签定义、往来归属选项与 disabled，末级选定后输出完整分类选择。单一菜单根据实际路径显示一／二／三栏，整笔分类恢复复用同一组件；不拥有 API、关联或持久化 I/O。公共成本 `TwoColumnTagPicker` 保留原职责。
+
+`BankSplitEditor/BankTransactionDetailContent` 只负责查看与编辑，已删除旧 `BankSplitPartAction/renderPartAction` 关联回调和独立归属 select。`onSaved/onBankSplitSaved` 仍返回持久化 `BankSplitDetail`，由宿主清理旧选择并重读详情／列表。金额、版本、权限、失败草稿和批量详情读取保持；无 HTTP API、数据库、read model 或 worker 变更。

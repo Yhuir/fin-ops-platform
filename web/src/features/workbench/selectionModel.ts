@@ -429,20 +429,19 @@ export function toggleWorkbenchSelectionRows(current: WorkbenchRecord[], request
 }
 
 /** Split amounts and ownership come from canonical sibling DTOs, never from visible/filter rows. */
-export function resolveWorkbenchBankSelection(row: WorkbenchRecord, unitId?: string): WorkbenchRecord[] {
+export function resolveWorkbenchBankSelection(row: WorkbenchRecord): WorkbenchRecord[] {
   if (row.recordType !== "bank" || !row.isSplit) return [row];
   const parts = row.bankSplitParts;
   if (!parts?.length || !row.parentRowId || !parts.some(part => part.id === row.id)) {
     throw new Error("流水拆分信息不完整，请刷新后重试。");
   }
-  const selected = unitId === undefined ? parts : parts.filter(part => part.id === unitId);
-  if (!selected.length || selected.some(part => part.relation_case_id === undefined)) {
+  if (parts.some(part => part.relation_case_id === undefined)) {
     throw new Error("流水子项关联状态不完整，请刷新后重试。");
   }
-  if (selected.some(part => part.relation_case_id !== null && part.relation_case_id !== row.caseId)) {
-    throw new Error("部分子项已属于其他关联，请打开流水详情选择可用子项，或先处理已有关系。");
+  if (parts.some(part => part.relation_case_id !== null && part.relation_case_id !== row.caseId)) {
+    throw new Error("部分子项已属于其他关联，请先通过已有关系的撤回操作处理该关系。");
   }
-  return selected.map(part => ({
+  return parts.map(part => ({
     ...row,
     id: part.id,
     caseId: part.relation_case_id ?? undefined,

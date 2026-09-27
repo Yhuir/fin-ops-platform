@@ -6,6 +6,12 @@ import { vi } from "vitest";
 import AppSidebar from "../components/shell/AppSidebar";
 import { isSidebarDisclosureItem, sidebarGroups } from "../components/shell/sidebarItems";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
+import { BackgroundJobProgressProvider } from "../features/backgroundJobs/BackgroundJobProgressProvider";
+
+vi.mock("../features/backgroundJobs/api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../features/backgroundJobs/api")>(),
+  fetchActiveBackgroundJobs: vi.fn(async () => ({ jobs: [] })),
+}));
 
 const sidebarSession: SessionContextValue = {
   status: "authenticated",
@@ -32,7 +38,9 @@ const sidebarSession: SessionContextValue = {
 };
 
 function withSidebarSession(children: React.ReactNode) {
-  return <SessionContext.Provider value={sidebarSession}>{children}</SessionContext.Provider>;
+  return <SessionContext.Provider value={sidebarSession}>
+    <BackgroundJobProgressProvider>{children}</BackgroundJobProgressProvider>
+  </SessionContext.Provider>;
 }
 
 function renderSidebar(expanded = false) {
@@ -106,16 +114,18 @@ describe("AppSidebar shell contract", () => {
   test("does not lay out permission-filtered navigation before session resolution", () => {
     render(
       <SessionContext.Provider value={{ status: "loading", refresh: () => undefined }}>
-        <MemoryRouter>
-          <AppSidebar
-            embedded={false}
-            expanded
-            isCompact={false}
-            mobileOpen={false}
-            onCloseMobile={() => undefined}
-            onToggleExpanded={() => undefined}
-          />
-        </MemoryRouter>
+        <BackgroundJobProgressProvider>
+          <MemoryRouter>
+            <AppSidebar
+              embedded={false}
+              expanded
+              isCompact={false}
+              mobileOpen={false}
+              onCloseMobile={() => undefined}
+              onToggleExpanded={() => undefined}
+            />
+          </MemoryRouter>
+        </BackgroundJobProgressProvider>
       </SessionContext.Provider>,
     );
 

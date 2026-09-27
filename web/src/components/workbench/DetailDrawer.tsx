@@ -14,7 +14,6 @@ type DetailDrawerProps = {
   error: string | null;
   onClose: () => void;
   onBankSplitSaved?: ComponentProps<typeof BankTransactionDetailContent>["onBankSplitSaved"];
-  renderPartAction?: ComponentProps<typeof BankTransactionDetailContent>["renderPartAction"];
 };
 
 const drawerTitles: Record<WorkbenchRecord["recordType"], string> = {
@@ -29,7 +28,7 @@ const sectionTitles: Record<WorkbenchRecord["recordType"], string> = {
   invoice: "基本信息",
 };
 
-export default function DetailDrawer({ row, loading, error, onClose, onBankSplitSaved, renderPartAction }: DetailDrawerProps) {
+export default function DetailDrawer({ row, loading, error, onClose, onBankSplitSaved }: DetailDrawerProps) {
   const { close, setDirty } = useBankSplitClose(onClose);
   const open = Boolean(row);
   const title = row ? drawerTitles[row.recordType] : "详情";
@@ -67,7 +66,7 @@ export default function DetailDrawer({ row, loading, error, onClose, onBankSplit
       onClose={close}
     >
       <div className="workbench-detail-drawer__body">
-        <BankTransactionDetailContent renderPartAction={renderPartAction} onSplitDirtyChange={setDirty} onBankSplitSaved={onBankSplitSaved} bankTransactionId={row?.recordType === "bank" ? row.id : undefined} error={error} loading={loading} sections={sections} />
+        <BankTransactionDetailContent onSplitDirtyChange={setDirty} onBankSplitSaved={onBankSplitSaved} bankTransactionId={row?.recordType === "bank" ? row.id : undefined} error={error} loading={loading} sections={sections} />
       </div>
     </AppDrawer>
   );
