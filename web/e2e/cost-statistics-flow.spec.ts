@@ -86,6 +86,7 @@ test.describe("cost statistics browser flow", () => {
     await expect(bankFlowViews.getByRole("radio", { name: "按标签" })).toBeVisible();
     await expect(bankFlowViews.getByRole("radio", { name: "按时间" })).toBeVisible();
     await expect(page.getByText("成本归因")).toHaveCount(0);
+    await expect(page.getByText(/^依次选择/)).toHaveCount(0);
   });
 
   test("shows signed raw flows by time and drills from tags to bank rows", async ({ page }) => {
@@ -103,6 +104,7 @@ test.describe("cost statistics browser flow", () => {
     const tagRootResponse = waitForExplorer(page, (url) => url.searchParams.get("view") === "bank_tag");
     await page.getByRole("radio", { name: "按标签" }).click();
     await tagRootResponse;
+    await expect(page.getByText("依次选择主标签和子标签")).toHaveCount(0);
     const subTagResponse = waitForExplorer(page, (url) => (
       url.searchParams.get("view") === "bank_tag"
       && url.searchParams.get("bank_tag_primary_label") === "项目开销"

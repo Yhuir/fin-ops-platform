@@ -1784,7 +1784,7 @@ export default function CostStatisticsPage() {
                 {explorerTransitionScope === "surface" ? <CostSurfaceSkeleton loading={isExplorerLoading} /> : (
                   <CostStatisticsHierarchy key={viewMode} lanes={costLanes} detailTitle="成本明细" navigationLabel="成本下钻路径">
                     <section aria-busy={isExplorerLoading && isRowsTransition} className="cost-explorer-lane cost-explorer-lane-table"><header className="cost-explorer-lane-header"><h2>成本明细</h2><CostLaneCount value={isRowsTransition ? 0 : explorerData.rowCount} /></header>
-                      {isRowsTransition ? <div className="cost-explorer-empty" /> : costPathComplete ? <CostStatisticsTable ariaLabel="成本明细表" columns={entryColumns} rows={pageRows} getRowKey={getCostEntryRowRenderKey} onRowClick={row => void openEntryDetail(row, viewMode)} getRowActionLabel={costEntryActionLabel} emptyLabel="当前选择下暂无成本明细" {...tablePaginationProps} /> : <div className="cost-explorer-empty">依次选择{costLanes.map(lane => lane.title).join("、")}查看成本明细</div>}
+                      {isRowsTransition ? <div className="cost-explorer-empty" /> : costPathComplete ? <CostStatisticsTable ariaLabel="成本明细表" columns={entryColumns} rows={pageRows} getRowKey={getCostEntryRowRenderKey} onRowClick={row => void openEntryDetail(row, viewMode)} getRowActionLabel={costEntryActionLabel} emptyLabel="当前选择下暂无成本明细" {...tablePaginationProps} /> : null}
                     </section>
                   </CostStatisticsHierarchy>
                 )}
@@ -1874,7 +1874,7 @@ export default function CostStatisticsPage() {
                           emptyLabel="该标签下没有银行流水。"
                           {...tablePaginationProps}
                         />
-                      ) : <div className="cost-explorer-empty">依次选择主标签和子标签</div>}
+                      ) : null}
                     </section>
                   </CostStatisticsHierarchy>
                 )}
