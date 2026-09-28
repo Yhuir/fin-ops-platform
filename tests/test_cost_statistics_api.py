@@ -777,7 +777,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(detail["allocation"]["oa_completed_at"], "")
         self.assertEqual(detail["allocation"]["amount"], "1250.00")
-        query = "?month=2026-03&view=project&project_name=云南溯源科技&aggregate_by=month"
+        query = "?month=2026-03&view=project&project_name=云南溯源科技"
         status, preview = self._json("/api/cost-statistics/export-summary" + query)
         self.assertEqual(status, 200)
         response = self._get("/api/cost-statistics/export" + query)
@@ -815,7 +815,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(detail_sheet["I2"].value, "刘际涛")
 
     def test_project_aggregate_keeps_source_details_and_preview_sheet_parity(self):
-        query = "?month=2026-03&view=project&project_name=云南溯源科技&aggregate_by=month"
+        query = "?month=2026-03&view=project&project_name=云南溯源科技"
         status, preview = self._json("/api/cost-statistics/export-summary" + query)
         self.assertEqual(status, 200)
         response = self._get("/api/cost-statistics/export" + query)
@@ -839,6 +839,39 @@ class CostStatisticsApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200, response.body[:200])
             self.assertEqual(self.app.handle_request("GET", path).status_code, 404)
             self.assertEqual(self.app.handle_request("POST", path + "?month=all", body=body).status_code, 400)
+
+    def test_period_export_summary_workbook_and_single_snapshot_agree(self):
+        from unittest.mock import patch
+        from io import BytesIO
+        repo = self.app._cost_statistics_canonical_repository
+        for period in ("all", "2026", "2026-03", "2025"):
+            for view in ("time", "project"):
+                query = f"?month={period}&view={view}&project_name=云南溯源科技" if view == "project" else f"?month={period}&view={view}"
+                status, summary = self._json("/api/cost-statistics/export-summary" + query)
+                self.assertEqual(status, 200, summary)
+                with patch.object(repo, "load_snapshot", wraps=repo.load_snapshot) as load:
+                    response = self._get("/api/cost-statistics/export" + query)
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(load.call_count, 1)
+                workbook = load_workbook(BytesIO(response.body))
+                self.assertEqual(workbook.sheetnames, summary["sheet_names"])
+                detail = workbook["流水明细" if view == "time" else "成本明细"]
+                self.assertEqual(detail.max_row - 1, summary["summary"]["transaction_count"])
+                self.assertFalse(any("ID" in str(cell.value) for sheet in workbook for cell in sheet[1]))
+                if period == "2025":
+                    self.assertEqual(summary["summary"]["transaction_count"], 0)
+                if view == "time" and period == "2026":
+                    self.assertEqual(workbook["按时间汇总"]["A2"].value, "2026-03")
+
+    def test_export_rejects_invalid_period_and_retired_aggregation(self):
+        for endpoint in ("export", "export-summary"):
+            for period in ("", "2026-13", "0000", "2026-02-30", "random"):
+                response = self._get(f"/api/cost-statistics/{endpoint}?month={period}&view=time")
+                self.assertEqual(response.status_code, 400, response.body)
+            for obsolete in ("aggregate_by=month", "start_date=2026-01-01", "end_month=2026-12"):
+                status, payload = self._json(f"/api/cost-statistics/{endpoint}?month=all&view=time&{obsolete}")
+                self.assertEqual(status, 400)
+                self.assertIn("不再支持旧导出参数", payload["message"])
 
     def test_retired_cost_export_filters_fail_explicitly(self):
         for endpoint in ("export", "export-summary"):

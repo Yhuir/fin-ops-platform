@@ -1,62 +1,39 @@
+import { useState } from "react";
+import { Button, Checkbox, Input } from "@heroui/react";
 import SegmentedControl from "../common/SegmentedControl";
-import { Button, Checkbox, Input, Radio, RadioGroup } from "@heroui/react";
-
 import AppDrawer from "../common/AppDrawer";
-import BusinessPeriodPicker, { nearbyBusinessYears } from "../common/BusinessPeriodPicker";
+import BusinessPeriodPicker, { type BusinessPeriodSelection } from "../common/BusinessPeriodPicker";
 import type { CostStatisticsExportSummary } from "../../features/cost-statistics/types";
 
 export type ExportCenterMode = "time" | "bank_tag" | "bank_account" | "project" | "cost_tag";
-export type ExportRangeMode = "all" | "month" | "custom";
 
 type ExportCenterDrawerProps = {
   mode: ExportCenterMode;
+  period: BusinessPeriodSelection;
+  years: string[];
+  onPeriodChange: (period: BusinessPeriodSelection) => void;
   projectOptions: string[];
   costTagOptions: string[];
   costTagLabels: Record<string, string>;
   bankAccountOptions: string[];
-  bankAccountRangeMode: ExportRangeMode;
-  bankAccountMonth: string;
-  bankAccountStartDate: string;
-  bankAccountEndDate: string;
   bankAccountSelections: string[];
   bankAccountProjectNames: string[];
   projectNames: string[];
-  projectAggregateBy: "month" | "year";
   projectCostTags: string[];
-  costTagRangeMode: ExportRangeMode;
-  costTagMonth: string;
-  costTagStartDate: string;
-  costTagEndDate: string;
   costTagSelections: string[];
-  bankFlowRangeMode: ExportRangeMode;
-  bankFlowMonth: string;
-  bankFlowStartDate: string;
-  bankFlowEndDate: string;
   summaryData: CostStatisticsExportSummary | null;
   feedback: { tone: "success" | "error"; message: string } | null;
   isSummaryLoading: boolean;
   isExporting: boolean;
   isBusy: boolean;
+  selectionEmpty: boolean;
   onClose: () => void;
   onModeChange: (mode: ExportCenterMode) => void;
-  onBankAccountRangeModeChange: (mode: ExportRangeMode) => void;
-  onBankAccountMonthChange: (month: string) => void;
-  onBankAccountStartDateChange: (date: string) => void;
-  onBankAccountEndDateChange: (date: string) => void;
-  onBankAccountSelectionsChange: (bankAccounts: string[]) => void;
-  onBankAccountProjectNamesChange: (projectNames: string[]) => void;
-  onProjectNamesChange: (projectNames: string[]) => void;
-  onProjectAggregateByChange: (aggregateBy: "month" | "year") => void;
-  onProjectCostTagsChange: (costTags: string[]) => void;
-  onCostTagRangeModeChange: (mode: ExportRangeMode) => void;
-  onCostTagMonthChange: (month: string) => void;
-  onCostTagStartDateChange: (date: string) => void;
-  onCostTagEndDateChange: (date: string) => void;
-  onCostTagSelectionsChange: (costTags: string[]) => void;
-  onBankFlowRangeModeChange: (mode: ExportRangeMode) => void;
-  onBankFlowMonthChange: (month: string) => void;
-  onBankFlowStartDateChange: (date: string) => void;
-  onBankFlowEndDateChange: (date: string) => void;
+  onBankAccountSelectionsChange: (accounts: string[]) => void;
+  onBankAccountProjectNamesChange: (projects: string[]) => void;
+  onProjectNamesChange: (projects: string[]) => void;
+  onProjectCostTagsChange: (tags: string[]) => void;
+  onCostTagSelectionsChange: (tags: string[]) => void;
   onExport: () => void;
 };
 
@@ -73,20 +50,22 @@ type CostTagSelectorProps = {
 };
 
 function CostTagSelector({ title, options, labels, selected, onChange }: CostTagSelectorProps) {
+  const [search, setSearch] = useState("");
+  const visible = options.filter(option => (labels ? labels[option] : option).toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
   const hasOptions = options.length > 0;
-  const allSelected = hasOptions && selected.length === options.length;
+  const allSelected = hasOptions && visible.every(option => selected.includes(option));
   return (
     <section className="export-center-section">
       <div className="export-center-section-header">
-        <h3>{title}</h3>
+        <h3>{title} <small>已选 {selected.length} / {options.length}</small></h3>
         <div className="export-center-inline-actions">
           <Button
-            isDisabled={!hasOptions || allSelected}
-            onPress={() => onChange(options)}
+            isDisabled={visible.length === 0 || allSelected}
+            onPress={() => onChange([...new Set([...selected, ...visible])])}
             size="sm"
             variant="secondary"
           >
-            全选
+            {search.trim() ? "全选搜索结果" : "全选"}
           </Button>
           <Button
             isDisabled={selected.length === 0}
@@ -98,9 +77,11 @@ function CostTagSelector({ title, options, labels, selected, onChange }: CostTag
           </Button>
         </div>
       </div>
+      {search && visible.length === 0 ? <span role="status">无匹配项目</span> : null}
+      {options.length > 8 ? <Input aria-label={`搜索${title}`} placeholder={`搜索${title}`} value={search} onChange={event => setSearch(event.target.value)} /> : null}
       {hasOptions ? (
         <div className="export-center-checkbox-grid" role="group" aria-label={title}>
-          {options.map((option) => (
+          {visible.map((option) => (
             <Checkbox
               className="export-center-checkbox"
               isSelected={selected.includes(option)}
@@ -113,293 +94,50 @@ function CostTagSelector({ title, options, labels, selected, onChange }: CostTag
           ))}
         </div>
       ) : (
-        <div className="cost-explorer-empty">当前没有可选成本主标签。</div>
+        <div className="cost-explorer-empty">暂无可选项。</div>
       )}
     </section>
   );
 }
 
-type DateRangeFieldsProps = {
-  startDate: string;
-  endDate: string;
-  onStartDateChange: (date: string) => void;
-  onEndDateChange: (date: string) => void;
-};
-
-function DateRangeFields({ startDate, endDate, onStartDateChange, onEndDateChange }: DateRangeFieldsProps) {
-  return (
-    <div className="project-export-range-pickers">
-      <label className="project-export-select-field">
-        <span>开始日期</span>
-        <Input aria-label="开始日期" type="date" value={startDate} onChange={(event) => onStartDateChange(event.currentTarget.value)} />
-      </label>
-      <label className="project-export-select-field">
-        <span>结束日期</span>
-        <Input aria-label="结束日期" type="date" value={endDate} onChange={(event) => onEndDateChange(event.currentTarget.value)} />
-      </label>
-    </div>
-  );
-}
-
-export default function ExportCenterDrawer({
-  mode,
-  projectOptions,
-  costTagOptions,
-  costTagLabels,
-  bankAccountOptions,
-  bankAccountRangeMode,
-  bankAccountMonth,
-  bankAccountStartDate,
-  bankAccountEndDate,
-  bankAccountSelections,
-  bankAccountProjectNames,
-  projectNames,
-  projectAggregateBy,
-  projectCostTags,
-  costTagRangeMode,
-  costTagMonth,
-  costTagStartDate,
-  costTagEndDate,
-  costTagSelections,
-  bankFlowRangeMode,
-  bankFlowMonth,
-  bankFlowStartDate,
-  bankFlowEndDate,
-  summaryData,
-  feedback,
-  isSummaryLoading,
-  isExporting,
-  isBusy,
-  onClose,
-  onModeChange,
-  onBankAccountRangeModeChange,
-  onBankAccountMonthChange,
-  onBankAccountStartDateChange,
-  onBankAccountEndDateChange,
-  onBankAccountSelectionsChange,
-  onBankAccountProjectNamesChange,
-  onProjectNamesChange,
-  onProjectAggregateByChange,
-  onProjectCostTagsChange,
-  onCostTagRangeModeChange,
-  onCostTagMonthChange,
-  onCostTagStartDateChange,
-  onCostTagEndDateChange,
-  onCostTagSelectionsChange,
-  onBankFlowRangeModeChange,
-  onBankFlowMonthChange,
-  onBankFlowStartDateChange,
-  onBankFlowEndDateChange,
-  onExport,
-}: ExportCenterDrawerProps) {
-  return (
-    <AppDrawer
-      footer={(
-        <>
-          {feedback ? <div className={`action-feedback ${feedback.tone}`}>{feedback.message}</div> : null}
-          <strong aria-live="polite">{isSummaryLoading ? '正在统计…' : summaryData ? `导出 ${summaryData.summary.transactionCount} ${mode === 'time' || mode === 'bank_tag' ? '笔' : '条成本明细'}` : '导出 —'}</strong>
-          <Button isDisabled={isBusy || !summaryData || summaryData.summary.transactionCount === 0 || feedback?.tone === "error"} isPending={isExporting} onPress={onExport} variant="primary">
-            {isExporting ? "正在导出..." : "导出"}
-          </Button>
-        </>
-      )}
-      className="export-center-drawer"
-      closeLabel="关闭导出中心"
-      closeDisabled={isExporting}
-      width="min(640px, 100vw)"
-      onClose={onClose}
-      open
-      title="导出中心"
-    >
-        <div className="export-center-drawer-body">
-          <SegmentedControl label="导出视图切换" value={mode} disabled={isBusy} onChange={onModeChange} options={[
-            { key: "time", label: "按时间" }, { key: "bank_tag", label: "按标签" },
-            { key: "bank_account", label: "按银行账户" }, { key: "project", label: "按项目" },
-            { key: "cost_tag", label: "按成本主标签" },
+export default function ExportCenterDrawer(props: ExportCenterDrawerProps) {
+  const { mode, summaryData, feedback, isSummaryLoading, isExporting } = props;
+  return <AppDrawer open title="导出中心" className="export-center-drawer" width="min(1280px, 100vw)"
+    closeLabel="关闭导出中心" closeDisabled={isExporting} onClose={props.onClose}
+    footer={<>
+      <div className="export-center-result">
+        <strong aria-live="polite">{isSummaryLoading ? "正在统计…" : summaryData ? `导出 ${summaryData.summary.transactionCount} ${mode === "time" || mode === "bank_tag" ? "笔流水" : "条成本明细"}` : props.selectionEmpty ? `导出 0 ${mode === "time" || mode === "bank_tag" ? "笔流水" : "条成本明细"}` : "导出 —"}</strong>
+        {feedback ? <span role={feedback.tone === "error" ? "alert" : "status"} className={`action-feedback ${feedback.tone}`}>{feedback.message}</span> : null}
+      </div>
+      <Button isDisabled={props.isBusy || !summaryData || summaryData.summary.transactionCount === 0} isPending={isExporting} onPress={props.onExport} variant="primary">{isExporting ? "正在导出…" : "导出"}</Button>
+    </>}>
+    <div className="export-center-drawer-body">
+      <div className="export-center-toolbar">
+        <div className="export-center-view-group"><span>项目成本</span>
+          <SegmentedControl label="项目成本导出视角" value={mode} disabled={isExporting} onChange={props.onModeChange} options={[
+            { key: "project", label: "按项目" }, { key: "cost_tag", label: "按成本标签" }, { key: "bank_account", label: "按银行账户" },
           ]} />
-          {mode === "time" || mode === "bank_tag" || mode === "project" ? (
-            <div className="export-center-config-grid">
-              <section className="export-center-section">
-                <div className="export-center-section-header">
-                  <h3>时间范围</h3>
-                </div>
-                <RadioGroup
-                  aria-label="银行流水导出时间范围"
-                  className="project-export-radio-group"
-                  onChange={(value) => onBankFlowRangeModeChange(value as ExportRangeMode)}
-                  value={bankFlowRangeMode}
-                >
-                  <Radio className="project-export-choice" value="all">
-                    <Radio.Control><Radio.Indicator /></Radio.Control>
-                    <span>全部</span>
-                  </Radio>
-                  <Radio className="project-export-choice" value="month">
-                    <Radio.Control><Radio.Indicator /></Radio.Control>
-                    <span>自定义月份</span>
-                  </Radio>
-                  <Radio className="project-export-choice" value="custom">
-                    <Radio.Control><Radio.Indicator /></Radio.Control>
-                    <span>自定义时间区间（精确到日）</span>
-                  </Radio>
-                </RadioGroup>
-                {bankFlowRangeMode === "month" ? (
-                  <BusinessPeriodPicker
-                    allowAll={false}
-                    allowedModes={["month"]}
-                    ariaLabel="银行流水统计月份"
-                    onChange={(selection) => onBankFlowMonthChange(selection.month)}
-                    selection={{ mode: "month", year: bankFlowMonth.slice(0, 4), month: bankFlowMonth }}
-                    years={nearbyBusinessYears(bankFlowMonth)}
-                  />
-                ) : bankFlowRangeMode === "custom" ? (
-                  <DateRangeFields
-                    startDate={bankFlowStartDate}
-                    endDate={bankFlowEndDate}
-                    onStartDateChange={onBankFlowStartDateChange}
-                    onEndDateChange={onBankFlowEndDateChange}
-                  />
-                ) : null}
-              </section>
-            </div>
-          ) : null}
-
-          {mode === "bank_account" ? (
-            <div className="export-center-config-grid">
-              <section className="export-center-section">
-                <div className="export-center-section-header">
-                  <h3>时间范围</h3>
-                </div>
-                <RadioGroup aria-label="银行账户成本时间范围" className="project-export-radio-group" onChange={(value) => onBankAccountRangeModeChange(value as ExportRangeMode)} value={bankAccountRangeMode}>
-                  <Radio className="project-export-choice" value="all">
-                    <Radio.Control><Radio.Indicator /></Radio.Control>
-                    <span>全部</span>
-                  </Radio>
-                  <Radio className="project-export-choice" value="month">
-                    <Radio.Control><Radio.Indicator /></Radio.Control>
-                    <span>自定义月份</span>
-                  </Radio>
-                  <Radio className="project-export-choice" value="custom">
-                    <Radio.Control><Radio.Indicator /></Radio.Control>
-                    <span>自定义时间区间（精确到日）</span>
-                  </Radio>
-                </RadioGroup>
-                {bankAccountRangeMode === "month" ? (
-                  <BusinessPeriodPicker
-                    allowAll={false}
-                    allowedModes={["month"]}
-                    ariaLabel="统计月份"
-                    onChange={(selection) => onBankAccountMonthChange(selection.month)}
-                    selection={{ mode: "month", year: bankAccountMonth.slice(0, 4), month: bankAccountMonth }}
-                    years={nearbyBusinessYears(bankAccountMonth)}
-                  />
-                ) : bankAccountRangeMode === "custom" ? (
-                  <DateRangeFields
-                    startDate={bankAccountStartDate}
-                    endDate={bankAccountEndDate}
-                    onStartDateChange={onBankAccountStartDateChange}
-                    onEndDateChange={onBankAccountEndDateChange}
-                  />
-                ) : null}
-              </section>
-              <CostTagSelector
-                title="银行账户"
-                options={bankAccountOptions}
-                selected={bankAccountSelections}
-                onChange={onBankAccountSelectionsChange}
-              />
-              <CostTagSelector
-                title="项目（可选）"
-                options={projectOptions}
-                selected={bankAccountProjectNames}
-                onChange={onBankAccountProjectNamesChange}
-              />
-            </div>
-          ) : null}
-
-          {mode === "project" ? (
-            <div className="export-center-config-grid">
-              <section className="export-center-section">
-                <div className="export-center-section-header">
-                  <h3>项目</h3>
-                </div>
-                <RadioGroup aria-label="项目聚合方式" className="project-export-radio-group" onChange={(value) => onProjectAggregateByChange(value as "month" | "year")} value={projectAggregateBy}>
-                  <Radio className="project-export-choice" value="month">
-                    <Radio.Control><Radio.Indicator /></Radio.Control>
-                    <span>按月算</span>
-                  </Radio>
-                  <Radio className="project-export-choice" value="year">
-                    <Radio.Control><Radio.Indicator /></Radio.Control>
-                    <span>按年算</span>
-                  </Radio>
-                </RadioGroup>
-                <CostTagSelector
-                  title="项目选择"
-                  options={projectOptions}
-                  selected={projectNames}
-                  onChange={onProjectNamesChange}
-                />
-              </section>
-              <CostTagSelector
-                title="成本主标签"
-                options={costTagOptions}
-                labels={costTagLabels}
-                selected={projectCostTags}
-                onChange={onProjectCostTagsChange}
-              />
-            </div>
-          ) : null}
-
-          {mode === "cost_tag" ? (
-            <div className="export-center-config-grid">
-              <section className="export-center-section">
-                <div className="export-center-section-header">
-                  <h3>时间范围</h3>
-                </div>
-                <RadioGroup aria-label="成本主标签时间范围" className="project-export-radio-group" onChange={(value) => onCostTagRangeModeChange(value as ExportRangeMode)} value={costTagRangeMode}>
-                  <Radio className="project-export-choice" value="all">
-                    <Radio.Control><Radio.Indicator /></Radio.Control>
-                    <span>全部</span>
-                  </Radio>
-                  <Radio className="project-export-choice" value="month">
-                    <Radio.Control><Radio.Indicator /></Radio.Control>
-                    <span>自定义月份</span>
-                  </Radio>
-                  <Radio className="project-export-choice" value="custom">
-                    <Radio.Control><Radio.Indicator /></Radio.Control>
-                    <span>自定义时间区间（精确到日）</span>
-                  </Radio>
-                </RadioGroup>
-                {costTagRangeMode === "month" ? (
-                  <BusinessPeriodPicker
-                    allowAll={false}
-                    allowedModes={["month"]}
-                    ariaLabel="统计月份"
-                    onChange={(selection) => onCostTagMonthChange(selection.month)}
-                    selection={{ mode: "month", year: costTagMonth.slice(0, 4), month: costTagMonth }}
-                    years={nearbyBusinessYears(costTagMonth)}
-                  />
-                ) : costTagRangeMode === "custom" ? (
-                  <DateRangeFields
-                    startDate={costTagStartDate}
-                    endDate={costTagEndDate}
-                    onStartDateChange={onCostTagStartDateChange}
-                    onEndDateChange={onCostTagEndDateChange}
-                  />
-                ) : null}
-              </section>
-              <CostTagSelector
-                title="成本主标签"
-                options={costTagOptions}
-                labels={costTagLabels}
-                selected={costTagSelections}
-                onChange={onCostTagSelectionsChange}
-              />
-            </div>
-          ) : null}
-
-          {summaryData && mode === 'project' ? <p>项目汇总 {summaryData.summary.rowCount} 条 · 成本明细 {summaryData.summary.transactionCount} 条</p> : null}
-
         </div>
-    </AppDrawer>
-  );
+        <div className="export-center-view-group"><span>银行流水</span>
+          <SegmentedControl label="银行流水导出视角" value={mode} disabled={isExporting} onChange={props.onModeChange} options={[
+            { key: "bank_tag", label: "按标签" }, { key: "time", label: "按时间" },
+          ]} />
+        </div>
+        <div className="export-center-period"><span>时间范围</span>
+          <BusinessPeriodPicker ariaLabel="导出年月" selection={props.period} years={props.years} onChange={props.onPeriodChange} disabled={isExporting} />
+        </div>
+      </div>
+      <fieldset disabled={isExporting} className="export-center-options">
+        {mode === "project" ? <div className="export-center-config-grid">
+          <CostTagSelector title="项目" options={props.projectOptions} selected={props.projectNames} onChange={props.onProjectNamesChange} />
+          <CostTagSelector title="成本主标签" options={props.costTagOptions} labels={props.costTagLabels} selected={props.projectCostTags} onChange={props.onProjectCostTagsChange} />
+        </div> : null}
+        {mode === "bank_account" ? <div className="export-center-config-grid">
+          <CostTagSelector title="项目（可选）" options={props.projectOptions} selected={props.bankAccountProjectNames} onChange={props.onBankAccountProjectNamesChange} />
+          <CostTagSelector title="银行账户" options={props.bankAccountOptions} selected={props.bankAccountSelections} onChange={props.onBankAccountSelectionsChange} />
+        </div> : null}
+        {mode === "cost_tag" ? <CostTagSelector title="成本主标签" options={props.costTagOptions} labels={props.costTagLabels} selected={props.costTagSelections} onChange={props.onCostTagSelectionsChange} /> : null}
+      </fieldset>
+    </div>
+  </AppDrawer>;
 }

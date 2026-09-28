@@ -293,11 +293,11 @@ class CostStatisticsPolicy:
         if row_shape not in {
             "raw_bank",
             "raw_cost",
-            "project_month",
-            "project_year",
+            "project_period",
+            "bank_time",
         }:
             raise ValueError("invalid cost statistics export row shape")
-        bank_flow_export = row_shape == "raw_bank"
+        bank_flow_export = row_shape in {"raw_bank", "bank_time"}
         source = self.bank_flow_rows if bank_flow_export else self.serialized_cost_rows
         normalized_project_names = {
             _clean_text(value) for value in project_names if _clean_text(value)
@@ -336,17 +336,25 @@ class CostStatisticsPolicy:
         ]
         rows.sort(key=_row_sort_key, reverse=True)
         result_rows: list[dict[str, Any]]
-        if row_shape in {"project_month", "project_year"}:
-            result_rows = _aggregate_export_rows(rows, row_shape=row_shape)
+        if row_shape == "project_period":
+            result_rows = _aggregate_export_rows(rows, period_label="全部期间" if month == "all" else month)
+        elif row_shape == "bank_time":
+            result_rows = _aggregate_bank_time_rows(rows, period=month)
         else:
             result_rows = rows
         summary = (
             _bank_flow_summary(rows) if bank_flow_export else _summary(rows)
         ) if include_summary else None
         if summary is not None:
+            if bank_flow_export:
+                summary.update({
+                    "expense_transaction_count": len({row["bank_transaction_id"] for row in rows if row["direction"] == "支出"}),
+                    "income_transaction_count": len({row["bank_transaction_id"] for row in rows if row["direction"] == "收入"}),
+                })
             summary.update(
                 {
                     "source_row_count": len(rows),
+                    "export_object_count": len({row["bank_transaction_id"] for row in rows}) if bank_flow_export else len(rows),
                     "row_count": len(result_rows),
                     "primary_tag_count": len({_cost_tag_key(row, "primary") for row in rows}),
                 }
@@ -360,6 +368,7 @@ class CostStatisticsPolicy:
                 )
         page_rows = result_rows[offset : offset + page_size]
         return {
+            "detail_rows": rows[:page_size] if row_shape in {"project_period", "bank_time"} else [],
             "summary": summary,
             "rows": page_rows,
             "next_offset": (
@@ -2001,15 +2010,28 @@ def _bank_flow_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _aggregate_bank_time_rows(rows: list[dict[str, Any]], *, period: str) -> list[dict[str, Any]]:
+    # Date range and grouping are derived from the same selected period.
+    width = 4 if period == "all" else 7 if len(period) == 4 else 10
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        label = row["trade_time"][:width] or "日期待确定"
+        buckets.setdefault(label, []).append(row)
+    return [
+        {"period_label": label, **_bank_flow_summary(items),
+         "transaction_count": len({row["bank_transaction_id"] for row in items})}
+        for label, items in sorted(buckets.items())
+    ]
+
+
 def _aggregate_export_rows(
     rows: list[dict[str, Any]],
     *,
-    row_shape: str,
+    period_label: str,
 ) -> list[dict[str, Any]]:
     buckets: dict[tuple[str, ...], dict[str, Any]] = {}
     for row in rows:
-        month = row["month"]
-        period = (str(month)[:4] if row_shape == "project_year" else str(month)) if month else "日期待确定"
+        period = period_label if row["month"] else "日期待确定"
         key = (
             period,
             row["project_name"],
@@ -2087,7 +2109,7 @@ def _row_in_export_range(
     row_date = occurred_at[:10]
     if not occurred_at and (month != "all" or start_month or end_month or start_date or end_date):
         return False
-    if month != "all" and row_month != month:
+    if month != "all" and not (row_month[:4] == month if len(month) == 4 else row_month == month):
         return False
     if start_month and row_month < start_month:
         return False

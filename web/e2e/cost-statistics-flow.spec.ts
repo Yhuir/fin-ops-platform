@@ -60,7 +60,7 @@ test.describe("cost statistics browser flow", () => {
     await expect(page.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "false");
     await page.getByRole("button", { name: "导出中心" }).click();
     const dialog = page.getByRole("dialog", { name: "导出中心" });
-    await expect(dialog.getByRole("radio", { name: "全部", exact: true })).toBeChecked();
+    await expect(dialog.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "true");
     await dialog.getByRole("button", { name: "关闭导出中心" }).click();
     const reset = waitForExplorer(page, url => url.searchParams.get("scope") === "all");
     await page.reload(); await reset;
@@ -267,13 +267,24 @@ test.describe("cost statistics browser flow", () => {
       const box = await drawer.boundingBox();
       const viewport = page.viewportSize()!;
       return Boolean(box && Math.abs(box.y) <= 1 && Math.abs(box.height - viewport.height) <= 1
-        && Math.abs(box.x + box.width - viewport.width) <= 1 && box.width <= 640);
+        && Math.abs(box.x + box.width - viewport.width) <= 1 && Math.abs(box.width - Math.min(1280, viewport.width)) <= 1);
     }).toBe(true);
-    const tabs=drawer.getByRole('radiogroup',{name:'导出视图切换'});
+    await expect(drawer.getByText("项目成本", {exact:true})).toBeVisible();
+    await expect(drawer.getByText("银行流水", {exact:true})).toBeVisible();
+    const groups = await drawer.locator('.export-center-toolbar .app-segments').evaluateAll(nodes => nodes.map(node => { const r=node.getBoundingClientRect(); return {y:r.y,height:r.height}; }));
+    const period = await drawer.locator('.business-period-picker').boundingBox();
+    for (const group of groups) {
+      expect(Math.abs(group.height - period!.height)).toBeLessThanOrEqual(1);
+      expect(Math.abs(group.y - period!.y)).toBeLessThanOrEqual(1);
+    }
+    await expect(drawer.getByText('按月算')).toHaveCount(0);
+    const tabs=drawer;
     await tabs.getByRole('radio',{name:'按时间'}).click();
     await expect(drawer.getByText(/导出 \d+ 笔/)).toBeVisible();
     await tabs.getByRole('radio',{name:'按银行账户'}).click();
     await expect(drawer.getByText(/导出 \d+ 条成本明细/)).toBeVisible();
+    await page.setViewportSize({width: 760,height:900});
+    await expect.poll(async () => { const box = await drawer.boundingBox(); return box ? box.width <= 760 : false; }).toBe(true);
     await expect(drawer.getByRole('grid')).toHaveCount(0);
     await expect(drawer.getByRole('button',{name:'仅预览'})).toHaveCount(0);
   });

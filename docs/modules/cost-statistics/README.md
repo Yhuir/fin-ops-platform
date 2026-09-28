@@ -29,7 +29,7 @@
 
 ## 读取与写入边界
 
-成本统计是 canonical direct-read 页面，不是 read model 消费者。每个 explorer、详情、预览或导出请求：
+成本统计是 canonical direct-read 页面，不是 read model 消费者。每个 explorer、详情、导出统计或下载请求：
 
 1. 在 PostgreSQL `REPEATABLE READ READ ONLY` 事务中读取本次范围所需事实；
 2. 项目成本 view 由 repository 批量读取银行流水、OA、active relation、人工分配和无 OA 设置；流水 view 只读取范围内银行流水与批量有效标签投影；
@@ -73,7 +73,7 @@
 
 - 页面：`/fin-ops/cost-statistics`
 - Explorer：`GET /api/cost-statistics/explorer`
-- 导出：`GET /api/cost-statistics/export-summary`、`GET /api/cost-statistics/export`
+- 导出：`POST /api/cost-statistics/export-summary`、`POST /api/cost-statistics/export`
 - 详情：`GET /api/cost-statistics/bank-transactions/{id}`、`GET /api/cost-statistics/allocations/{id}`
 - 无 OA 规则：`GET|PUT /api/cost-statistics/no-oa-rules`
 - 人工分配：`GET /api/cost-statistics/manual-allocations`、`GET|PUT /api/cost-statistics/manual-allocations/{case_id}`

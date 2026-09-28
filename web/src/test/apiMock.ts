@@ -4286,333 +4286,28 @@ function binaryResponse({
   } as Response;
 }
 
-function resolveCostStatisticMonths(
-  month: string,
-  startMonth?: string | null,
-  endMonth?: string | null,
-  startDate?: string | null,
-  endDate?: string | null,
-) {
-  const allMonths = Object.keys(costStatisticsProjectRows).sort();
-  let resolved = month === "all" ? allMonths : [month];
-  const derivedStartMonth = startMonth ?? (startDate ? startDate.slice(0, 7) : null);
-  const derivedEndMonth = endMonth ?? (endDate ? endDate.slice(0, 7) : null);
-  const normalizedStartMonth =
-    derivedStartMonth && derivedEndMonth && derivedStartMonth > derivedEndMonth ? derivedEndMonth : derivedStartMonth;
-  const normalizedEndMonth =
-    derivedStartMonth && derivedEndMonth && derivedStartMonth > derivedEndMonth ? derivedStartMonth : derivedEndMonth;
-  if (normalizedStartMonth) {
-    resolved = resolved.filter((item) => item >= normalizedStartMonth);
-  }
-  if (normalizedEndMonth) {
-    resolved = resolved.filter((item) => item <= normalizedEndMonth);
-  }
-  return resolved;
+function buildCostStatisticsExportFileName(month: string, view: string) {
+  const labels: Record<string, string> = {time:"按时间统计", bank_tag:"按标签统计", project:"按项目统计", cost_tag:"按成本标签统计", bank_account:"按银行账户统计"};
+  return `成本统计_${month === "all" ? "全部期间" : month}_${labels[view]}.xlsx`;
 }
 
-function buildFilteredCostTimeRows({
-  month,
-  startMonth,
-  endMonth,
-  startDate,
-  endDate,
-  projectNames,
-  expenseTypes,
-}: {
-  month: string;
-  startMonth?: string | null;
-  endMonth?: string | null;
-  startDate?: string | null;
-  endDate?: string | null;
-  projectNames?: string[];
-  expenseTypes?: string[];
-}) {
-  const projectNameSet = new Set((projectNames ?? []).filter(Boolean));
-  const expenseTypeSet = new Set((expenseTypes ?? []).filter(Boolean));
-  const normalizedStartDate = startDate && endDate && startDate > endDate ? endDate : startDate;
-  const normalizedEndDate = startDate && endDate && startDate > endDate ? startDate : endDate;
-  return resolveCostStatisticMonths(month, startMonth, endMonth, startDate, endDate)
-    .flatMap((resolvedMonth) =>
-      Object.entries(costStatisticsProjectRows[resolvedMonth] ?? {}).flatMap(([resolvedProjectName, rows]) =>
-        rows.map((row) => ({
-          transaction_id: row.transaction_id,
-          trade_time: row.trade_time,
-          direction: row.direction,
-          project_name: resolvedProjectName,
-          expense_type: row.expense_type,
-          expense_content: row.expense_content,
-          amount: row.amount,
-          oa_applicant: row.oa_applicant ?? "",
-          counterparty_name: row.counterparty_name,
-          payment_account_label: row.payment_account_label,
-        })),
-      ),
-    )
-    .filter((row) => (projectNameSet.size > 0 ? projectNameSet.has(row.project_name) : true))
-    .filter((row) => (expenseTypeSet.size > 0 ? expenseTypeSet.has(row.expense_type) : true))
-    .filter((row) => {
-      const tradeDate = row.trade_time.slice(0, 10);
-      if (normalizedStartDate && tradeDate < normalizedStartDate) {
-        return false;
-      }
-      if (normalizedEndDate && tradeDate > normalizedEndDate) {
-        return false;
-      }
-      return true;
-    })
-    .sort((left, right) => right.trade_time.localeCompare(left.trade_time));
-}
-
-function buildExpenseTypeExportLabel(expenseTypes?: string[], expenseType?: string | null) {
-  const normalized = expenseTypes?.filter(Boolean) ?? [];
-  if (normalized.length === 0) {
-    return expenseType ?? "未命名费用类型";
-  }
-  if (normalized.length === 1) {
-    return normalized[0];
-  }
-  return `${normalized[0]}等${normalized.length}类`;
-}
-
-function buildCostStatisticsExportFileName(
-  month: string,
-  view: string,
-  projectNames?: string[],
-  aggregateBy?: string | null,
-  expenseType?: string | null,
-  transactionId?: string | null,
-  startMonth?: string | null,
-  endMonth?: string | null,
-  expenseTypes?: string[],
-  startDate?: string | null,
-  endDate?: string | null,
-) {
-  const monthLabel =
-    startDate && endDate
-      ? `${startDate}至${endDate}`
-      : startMonth && endMonth
-        ? `${startMonth}至${endMonth}`
-        : month === "all"
-          ? "全部期间"
-          : month;
-  if (view === "time" || view === "bank_tag") {
-    return `成本统计_${monthLabel}_${view === "time" ? "按时间" : "按标签"}统计.xlsx`;
-  }
-  if (view === "bank_account") {
-    return `成本统计_${monthLabel}_按银行账户统计.xlsx`;
-  }
-  if (view === "month") {
-    return `成本统计_${monthLabel}_月份汇总.xlsx`;
-  }
-  if (view === "project") {
-    const projectLabel =
-      projectNames && projectNames.length > 0
-        ? projectNames.length === 1
-          ? projectNames[0]
-          : `${projectNames[0]}等${projectNames.length}个项目`
-        : "未命名项目";
-    return `成本统计_${monthLabel}_按项目统计_按${aggregateBy === "year" ? "年" : "月"}_${projectLabel}.xlsx`;
-  }
-  if (view === "expense_type") {
-    return `成本统计_${monthLabel}_按费用类型统计_${buildExpenseTypeExportLabel(expenseTypes, expenseType)}.xlsx`;
-  }
-  return `成本统计_${monthLabel}_流水详情_${projectNames?.[0] ?? "未命名项目"}_${transactionId ?? "unknown"}.xlsx`;
-}
-
-function buildCostStatisticsExportPreviewPayload({
-  month,
-  view,
-  projectNames,
-  bankAccountLabels,
-  aggregateBy,
-  expenseTypes,
-  startMonth,
-  endMonth,
-  startDate,
-  endDate,
-}: {
-  month: string;
-  view: string;
-  projectNames?: string[];
-  bankAccountLabels?: string[];
-  aggregateBy?: string | null;
-  expenseTypes?: string[];
-  startMonth?: string | null;
-  endMonth?: string | null;
-  startDate?: string | null;
-  endDate?: string | null;
-}) {
-  const rows = buildFilteredCostTimeRows({
-    month,
-    startMonth,
-    endMonth,
-    startDate,
-    endDate,
-    projectNames,
-    expenseTypes,
-  });
-  const accountRows = view === "bank_account"
-    ? rows.filter((row) => !bankAccountLabels?.length || bankAccountLabels.includes(row.payment_account_label))
-    : rows;
-  const scopeLabel =
-    startDate && endDate
-      ? `${startDate}至${endDate}`
-      : startMonth && endMonth
-        ? `${startMonth}至${endMonth}`
-        : month === "all"
-          ? "全部期间"
-          : month;
-  if (view === "time" || view === "bank_tag") {
-    const flowRows = rows.map((row) => ({
-      ...row,
-      direction: row.transaction_id === "cost-txn-002" ? "收入" : "支出",
-      ...mockBankTagForCostRow(row),
-    }));
-    const expenseAmount = flowRows
-      .filter((row) => row.direction === "支出")
-      .reduce((sum, row) => sum + Number(row.amount.replace(/,/g, "")), 0);
-    const incomeAmount = flowRows
-      .filter((row) => row.direction === "收入")
-      .reduce((sum, row) => sum + Number(row.amount.replace(/,/g, "")), 0);
-    const formatAmount = (amount: number) => amount.toLocaleString("en-US", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-    return {
-      view,
-      file_name: buildCostStatisticsExportFileName(
-        month,
-        view,
-        undefined,
-        null,
-        null,
-        null,
-        startMonth,
-        endMonth,
-        undefined,
-        startDate,
-        endDate,
-      ),
-      scope_label: scopeLabel,
-      summary: {
-        row_count: flowRows.length,
-        transaction_count: flowRows.length,
-        total_amount: formatAmount(expenseAmount - incomeAmount),
-        expense_amount: formatAmount(expenseAmount),
-        income_amount: formatAmount(incomeAmount),
-        expense_transaction_count: flowRows.filter((row) => row.direction === "支出").length,
-        income_transaction_count: flowRows.filter((row) => row.direction === "收入").length,
-        sheet_count: 1,
-      },
-      sheet_names: [view === "time" ? "按时间统计" : "按标签统计"],
-      columns: view === "time"
-        ? ["交易时间", "资金方向", "金额", "主标签", "子标签", "对方户名", "摘要/备注", "银行账户"]
-        : ["交易时间", "主标签", "子标签", "资金方向", "金额", "对方户名", "摘要/备注", "银行账户"],
-      rows: flowRows.map((row) => view === "time"
-        ? [row.trade_time, row.direction, row.amount, row.bank_tag_primary_label, row.bank_tag_sub_label, row.counterparty_name, row.expense_content, row.payment_account_label]
-        : [row.trade_time, row.bank_tag_primary_label, row.bank_tag_sub_label, row.direction, row.amount, row.counterparty_name, row.expense_content, row.payment_account_label]),
-    };
-  }
-  if (view === "project") {
-    return {
-      view,
-      file_name: buildCostStatisticsExportFileName(
-        month,
-        view,
-        projectNames,
-        aggregateBy,
-        null,
-        null,
-        startMonth,
-        endMonth,
-        undefined,
-        startDate,
-        endDate,
-      ),
-      scope_label: scopeLabel,
-      summary: {
-        row_count: rows.length,
-        transaction_count: rows.length,
-        total_amount: sumCostAmounts(rows),
-        sheet_count: 8,
-      },
-      sheet_names: [
-        "导出说明",
-        "项目汇总",
-        "按费用类型汇总",
-        "按费用内容汇总",
-        "流水明细",
-        "OA关联明细",
-        "发票关联明细",
-        "异常与未闭环",
-      ],
-      columns: ["时间", "费用类型", "金额", "费用内容", "申请/报销人", "支付账户"],
-      rows: rows.map((row) => [
-        row.trade_time,
-        row.expense_type,
-        row.amount,
-        row.expense_content,
-        row.oa_applicant ?? "",
-        row.payment_account_label,
-      ]),
-    };
-  }
-  if (view === "expense_type") {
-    return {
-      view,
-      file_name: buildCostStatisticsExportFileName(
-        month,
-        view,
-        undefined,
-        null,
-        expenseTypes?.[0] ?? null,
-        null,
-        startMonth,
-        endMonth,
-        expenseTypes,
-        startDate,
-        endDate,
-      ),
-      scope_label: scopeLabel,
-      summary: {
-        row_count: rows.length,
-        transaction_count: rows.length,
-        total_amount: sumCostAmounts(rows),
-        sheet_count: 1,
-      },
-      sheet_names: ["按费用类型统计"],
-      columns: ["时间", "项目名称", "金额", "费用内容", "申请/报销人", "支付账户"],
-      rows: rows.map((row) => [
-        row.trade_time,
-        row.project_name,
-        row.amount,
-        row.expense_content,
-        row.oa_applicant ?? "",
-        row.payment_account_label,
-      ]),
-    };
-  }
-  return {
-    view,
-    file_name: buildCostStatisticsExportFileName(month, view, undefined, null, null, null, startMonth, endMonth, undefined, startDate, endDate),
-    scope_label: scopeLabel,
-    summary: {
-      row_count: accountRows.length,
-      transaction_count: accountRows.length,
-      total_amount: sumCostAmounts(accountRows),
-      sheet_count: 1,
-    },
-    sheet_names: ["按银行账户统计"],
-    columns: ["时间", "银行账户", "项目名称", "费用类型", "金额", "费用内容"],
-    rows: accountRows.map((row) => [
-      row.trade_time,
-      row.payment_account_label,
-      row.project_name,
-      row.expense_type,
-      row.amount,
-      row.expense_content,
-    ]),
-  };
+function buildCostStatisticsExportSummary(url: URL) {
+  const month = url.searchParams.get("month")!;
+  const view = url.searchParams.get("view")!;
+  const projects = url.searchParams.getAll("project_name");
+  const accounts = url.searchParams.getAll("bank_account_label");
+  const tags = url.searchParams.getAll("bank_tag_primary_key");
+  const rows = Object.entries(costStatisticsProjectRows)
+    .filter(([period]) => month === "all" || period === month || period.slice(0,4) === month)
+    .flatMap(([,projectRows]) => Object.entries(projectRows).flatMap(([project, rows]) => rows.map(row => ({...row, project_name:project}))))
+    .filter(row => !projects.length || projects.includes(row.project_name))
+    .filter(row => !accounts.length || accounts.includes(row.payment_account_label))
+    .filter(row => !tags.length || tags.includes(mockBankTagForCostRow(row).bank_tag_primary_key));
+  const bank = view === "time" || view === "bank_tag";
+  const sheets = view === "time" ? ["按时间汇总", "流水明细"] : view === "project" ? ["按项目汇总", "成本明细"] : view === "bank_tag" ? ["按标签统计"] : ["成本明细"];
+  return {view, scope_label:month === "all" ? "全部期间" : month, sheet_names:sheets,
+    summary:{row_count:rows.length, transaction_count:bank ? new Set(rows.map(row => row.transaction_id)).size : rows.length,
+      total_amount:sumCostAmounts(rows), sheet_count:sheets.length}};
 }
 
 function isBinaryLikeResponse(value: MockFetchResult): value is Response {
@@ -5960,71 +5655,15 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       };
     },
-    "/api/cost-statistics/export-summary": ({ url }) => {
-      const month = url.searchParams.get("month") ?? "";
-      const view = url.searchParams.get("view") ?? "project";
-      const projectNames = url.searchParams.getAll("project_name");
-      const bankAccountLabels = url.searchParams.getAll("bank_account_label");
-      const aggregateBy = url.searchParams.get("aggregate_by");
-      const expenseTypes = url.searchParams.getAll("expense_type");
-      const startMonth = url.searchParams.get("start_month");
-      const endMonth = url.searchParams.get("end_month");
-      const startDate = url.searchParams.get("start_date");
-      const endDate = url.searchParams.get("end_date");
-      return {
-        body: buildCostStatisticsExportPreviewPayload({
-          month,
-          view,
-          projectNames,
-          bankAccountLabels,
-          aggregateBy,
-          expenseTypes,
-          startMonth,
-          endMonth,
-          startDate,
-          endDate,
-        }),
-      };
-    },
+    "/api/cost-statistics/export-summary": ({ url }) => ({body:buildCostStatisticsExportSummary(url)}),
     "/api/cost-statistics/export": ({ url }) => {
-      const month = url.searchParams.get("month") ?? "";
-      const view = url.searchParams.get("view") ?? "project";
-      const projectNames = url.searchParams.getAll("project_name");
-      const aggregateBy = url.searchParams.get("aggregate_by");
-      const expenseType = url.searchParams.get("expense_type");
-      const expenseTypes = url.searchParams.getAll("expense_type");
-      const transactionId = url.searchParams.get("transaction_id");
-      const startMonth = url.searchParams.get("start_month");
-      const endMonth = url.searchParams.get("end_month");
-      const startDate = url.searchParams.get("start_date");
-      const endDate = url.searchParams.get("end_date");
-      if (options.costExportErrorViews?.includes(view)) {
-        return {
-          status: 500,
-          body: { message: "cost statistics export failed" },
-        };
-      }
-      const fileName = buildCostStatisticsExportFileName(
-        month,
-        view,
-        projectNames,
-        aggregateBy,
-        expenseType,
-        transactionId,
-        startMonth,
-        endMonth,
-        expenseTypes,
-        startDate,
-        endDate,
-      );
-      return binaryResponse({
-        body: `mock export for ${fileName}`,
-        status: 200,
-        headers: {
-          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          "Content-Disposition": `attachment; filename="${fileName}"`,
-        },
-      });
+      const view = url.searchParams.get("view")!;
+      if (options.costExportErrorViews?.includes(view)) return {status:500, body:{message:"cost statistics export failed"}};
+      const fileName = buildCostStatisticsExportFileName(url.searchParams.get("month")!, view);
+      return binaryResponse({body:`mock export for ${fileName}`, status:200, headers:{
+        "Content-Type":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition":`attachment; filename="${fileName}"`,
+      }});
     },
     "/api/tax-offset/calculate": ({ jsonBody }) => {
       const month = String(jsonBody?.month ?? "");

@@ -127,7 +127,7 @@ class CostStatisticsApiRoutes:
             if query:
                 return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "invalid_cost_statistics_export_request", "message": "导出筛选必须使用请求体。"})
             query = parse_qs(body.decode("utf-8") if isinstance(body, bytes) else body or "", keep_blank_values=True)
-            retired = {"expense_type", "include_oa_details", "include_invoice_details", "include_exception_rows", "include_ignored_rows", "include_expense_content_summary", "sort_by"}.intersection(query)
+            retired = {"aggregate_by", "start_month", "end_month", "start_date", "end_date", "expense_type", "include_oa_details", "include_invoice_details", "include_exception_rows", "include_ignored_rows", "include_expense_content_summary", "sort_by"}.intersection(query)
             if retired:
                 return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "invalid_cost_statistics_export_request", "message": "不再支持旧导出参数：" + ", ".join(sorted(retired))})
         if method == "POST" and route_path == "/api/cost-statistics/export-summary":
@@ -137,11 +137,6 @@ class CostStatisticsApiRoutes:
                 project_names=query.get("project_name", []),
                 bank_tag_primary_keys=query.get("bank_tag_primary_key", []),
                 bank_account_labels=query.get("bank_account_label", []),
-                start_month=query.get("start_month", [None])[0],
-                end_month=query.get("end_month", [None])[0],
-                start_date=query.get("start_date", [None])[0],
-                end_date=query.get("end_date", [None])[0],
-                aggregate_by=query.get("aggregate_by", [None])[0],
             )
         if method == "POST" and route_path == "/api/cost-statistics/export":
             return self.handle_export(
@@ -150,11 +145,6 @@ class CostStatisticsApiRoutes:
                 project_names=query.get("project_name", []),
                 bank_tag_primary_keys=query.get("bank_tag_primary_key", []),
                 bank_account_labels=query.get("bank_account_label", []),
-                start_month=query.get("start_month", [None])[0],
-                end_month=query.get("end_month", [None])[0],
-                start_date=query.get("start_date", [None])[0],
-                end_date=query.get("end_date", [None])[0],
-                aggregate_by=query.get("aggregate_by", [None])[0],
             )
         if method == "GET" and route_path.startswith("/api/cost-statistics/bank-transactions/"):
             transaction_id = route_path.rsplit("/", 1)[-1]
@@ -409,13 +399,8 @@ class CostStatisticsApiRoutes:
         project_names: list[str] | None,
         bank_tag_primary_keys: list[str] | None,
         bank_account_labels: list[str] | None,
-        start_month: str | None = None,
-        end_month: str | None = None,
-        start_date: str | None = None,
-        end_date: str | None = None,
-        aggregate_by: str | None = None,
     ) -> Any:
-        current_month = month or self._now_provider().strftime("%Y-%m")
+        current_month = month
         if view not in {
             "time",
             "bank_tag",
@@ -440,11 +425,6 @@ class CostStatisticsApiRoutes:
                 project_names=project_names,
                 bank_tag_primary_keys=bank_tag_primary_keys,
                 bank_account_labels=bank_account_labels,
-                start_month=start_month,
-                end_month=end_month,
-                start_date=start_date,
-                end_date=end_date,
-                aggregate_by=aggregate_by,
             )
         except CostStatisticsExportLimitError as error:
             return self._json_response(
@@ -468,13 +448,8 @@ class CostStatisticsApiRoutes:
         project_names: list[str] | None,
         bank_tag_primary_keys: list[str] | None,
         bank_account_labels: list[str] | None,
-        start_month: str | None = None,
-        end_month: str | None = None,
-        start_date: str | None = None,
-        end_date: str | None = None,
-        aggregate_by: str | None = None,
     ) -> Any:
-        current_month = month or self._now_provider().strftime("%Y-%m")
+        current_month = month
         if view not in {
             "time",
             "bank_tag",
@@ -499,11 +474,6 @@ class CostStatisticsApiRoutes:
                 project_names=project_names,
                 bank_tag_primary_keys=bank_tag_primary_keys,
                 bank_account_labels=bank_account_labels,
-                start_month=start_month,
-                end_month=end_month,
-                start_date=start_date,
-                end_date=end_date,
-                aggregate_by=aggregate_by,
             )
         except CostStatisticsExportLimitError as error:
             return self._json_response(

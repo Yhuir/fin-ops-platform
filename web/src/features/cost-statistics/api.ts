@@ -793,46 +793,12 @@ export async function fetchCostEntryDetail(
   };
 }
 
-export type ProjectCostExportParams = {
-  month: string;
-  startDate?: string;
-  endDate?: string;
-  view: "project";
-  projectNames: string[];
-  bankTagPrimaryKeys?: string[];
-  aggregateBy: "month" | "year";
-};
-
-export type CostExportParams =
-  | {
-      month: string;
-      view: "time" | "bank_tag";
-      startMonth?: string;
-      endMonth?: string;
-      startDate?: string;
-      endDate?: string;
-    }
-  | {
-      month: string;
-      view: "bank_account";
-      bankAccountLabels: string[];
-      projectNames?: string[];
-      startMonth?: string;
-      endMonth?: string;
-      startDate?: string;
-      endDate?: string;
-    }
-  | ProjectCostExportParams
-  | {
-      month: string;
-      view: "cost_tag";
-      bankTagPrimaryKeys: string[];
-      startMonth?: string;
-      endMonth?: string;
-      startDate?: string;
-      endDate?: string;
-    }
-  ;
+export type CostExportParams = { month: string } & (
+  | { view: "time" | "bank_tag" }
+  | { view: "bank_account"; bankAccountLabels: string[]; projectNames?: string[] }
+  | { view: "project"; projectNames: string[]; bankTagPrimaryKeys: string[] }
+  | { view: "cost_tag"; bankTagPrimaryKeys: string[] }
+);
 
 function parseContentDispositionFileName(contentDisposition: string | null) {
   if (!contentDisposition) {
@@ -858,24 +824,10 @@ function buildCostStatisticsQuery(
     view: params.view,
   });
 
-  if ("startMonth" in params && params.startMonth) {
-    query.set("start_month", params.startMonth);
-  }
-  if ("endMonth" in params && params.endMonth) {
-    query.set("end_month", params.endMonth);
-  }
-  if ("startDate" in params && params.startDate) {
-    query.set("start_date", params.startDate);
-  }
-  if ("endDate" in params && params.endDate) {
-    query.set("end_date", params.endDate);
-  }
-
   if (params.view === "project") {
     for (const projectName of params.projectNames) {
       query.append("project_name", projectName);
     }
-    query.set("aggregate_by", params.aggregateBy);
     for (const expenseType of params.bankTagPrimaryKeys ?? []) {
       query.append("bank_tag_primary_key", expenseType);
     }
@@ -968,43 +920,7 @@ export async function exportCostStatisticsView(params: CostExportParams, signal?
   };
 }
 
-export type SummaryCostExportParams =
-  | {
-      month: string;
-      view: "time" | "bank_tag";
-      startMonth?: string;
-      endMonth?: string;
-      startDate?: string;
-      endDate?: string;
-    }
-  | {
-      month: string;
-      view: "bank_account";
-      bankAccountLabels: string[];
-      projectNames?: string[];
-      startMonth?: string;
-      endMonth?: string;
-      startDate?: string;
-      endDate?: string;
-    }
-  | {
-      month: string;
-      view: "project";
-      startDate?: string;
-      endDate?: string;
-      projectNames: string[];
-      aggregateBy: "month" | "year";
-      bankTagPrimaryKeys?: string[];
-    }
-  | {
-      month: string;
-      view: "cost_tag";
-      bankTagPrimaryKeys: string[];
-      startMonth?: string;
-      endMonth?: string;
-      startDate?: string;
-      endDate?: string;
-    };
+export type SummaryCostExportParams = CostExportParams;
 
 export async function fetchCostStatisticsExportSummary(
   params: SummaryCostExportParams,

@@ -19376,88 +19376,37 @@ body.column-layout-dragging {
   font-size: 12px;
 }
 
-.export-center-drawer-body {
-  padding: 16px;
-  display: grid;
-  gap: 24px;
+.finance-drawer.export-center-drawer { max-width: 100vw; }
+.export-center-toolbar .business-period-trigger small { display: none; }
+.export-center-drawer-body { display: flex; flex-direction: column; gap: 24px; padding: 0 8px 16px; }
+.export-center-drawer .finance-drawer__footer { justify-content: space-between; min-height: 76px; }
+.export-center-toolbar { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 20px; position: sticky; top: 0; z-index: 2; background: var(--fp-surface); padding: 8px 0 20px; border-bottom: 1px solid var(--fp-border); }
+.export-center-view-group, .export-center-period { display: grid; gap: 8px; min-width: 0; }
+.export-center-view-group > span, .export-center-period > span { color: var(--fp-text-secondary); font-size: 12px; font-weight: 600; }
+.export-center-period { margin-left: auto; width: 220px; }
+.export-center-toolbar .app-segments { height: 46px; flex-shrink: 0; }
+.export-center-toolbar .business-period-picker { --business-period-control-height: 36px; height: 46px; width: 100%; }
+.export-center-options { margin: 0; padding: 0; border: 0; min-width: 0; }
+.export-center-config-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr); gap: 28px; align-items: start; }
+.export-center-section { display: grid; align-content: start; gap: 12px; min-width: 0; }
+.export-center-config-grid > .export-center-section + .export-center-section { border-left: 1px solid var(--fp-border); padding-left: 24px; }
+.export-center-section-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.export-center-section-header h3 { margin: 0; font-size: 15px; color: var(--fp-text-primary); }
+.export-center-section-header small { margin-left: 8px; font-size: 12px; font-weight: 400; color: var(--fp-text-secondary); }
+.export-center-inline-actions { display: inline-flex; gap: 8px; }
+.export-center-checkbox-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 8px; }
+.export-center-checkbox { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; padding: 10px; border-radius: 6px; color: var(--fp-text-primary); font-size: 13px; line-height: 1.6; }
+.export-center-checkbox > span { min-width: 0; overflow-wrap: anywhere; }
+.export-center-checkbox:hover { background: var(--fp-surface-muted); }
+.export-center-checkbox[data-selected="true"] { background: var(--fp-primary-soft); }
+.export-center-result { display: grid; gap: 4px; min-width: 0; }
+.export-center-result .action-feedback { margin: 0; overflow-wrap: anywhere; font-size: 13px; }
+@media (max-width: 800px) {
+  .export-center-config-grid { grid-template-columns: 1fr; }
+  .export-center-config-grid > .export-center-section + .export-center-section { border-left: 0; border-top: 1px solid var(--fp-border); padding: 20px 0 0; }
+  .export-center-toolbar { position: static; gap: 12px; }
+  .export-center-period { margin-left: 0; }
 }
-
-.export-center-drawer .project-export-radio-group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.export-center-drawer .project-export-choice {
-  margin: 0;
-}
-
-.export-center-drawer .finance-drawer__footer {
-  justify-content: space-between;
-}
-
-.export-center-config-grid {
-  display: grid;
-  gap: var(--fp-space-3);
-}
-
-.export-center-section {
-  display: grid;
-  gap: var(--fp-space-3);
-  padding: var(--fp-space-3);
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
-  background: var(--fp-surface);
-}
-
-.export-center-section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.export-center-section-header h3 {
-  margin: 0;
-  color: #102a43;
-  font-size: 15px;
-}
-
-.export-center-inline-actions {
-  display: inline-flex;
-  gap: 8px;
-}
-
-.export-center-checkbox-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--fp-space-2);
-}
-
-.export-center-checkbox {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--fp-space-2);
-  min-height: 38px;
-  padding: 8px 10px;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
-  background: var(--fp-surface-raised);
-  color: var(--fp-text-subtle);
-  font-size: 13px;
-  font-weight: 700;
-  transition:
-    border-color var(--motion-fast) var(--ease-standard),
-    background-color var(--motion-fast) var(--ease-standard);
-}
-
-.export-center-checkbox:hover {
-  border-color: var(--fp-border-strong);
-  background: var(--fp-surface);
-}
-
-
 
 .cost-table-section,
 .cost-detail-panel-shell {

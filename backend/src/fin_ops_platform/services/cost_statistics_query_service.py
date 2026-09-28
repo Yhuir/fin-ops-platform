@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+from datetime import date
 from decimal import Decimal
 from io import BytesIO
 from typing import Any
@@ -285,194 +286,92 @@ class CostStatisticsQueryService:
         )
         return policy.no_oa_tag_candidates()
 
-    def get_export_summary(self, **kwargs: Any) -> dict[str, Any]:
-        view = str(kwargs.get("view") or "").strip()
-        month = str(kwargs.get("month") or "all").strip() or "all"
-        project_names = self._normalize_text_set(
-            kwargs.get("project_names")
-            or (
-                [kwargs.get("project_name")]
-                if kwargs.get("project_name")
-                else []
-            )
-        )
-        bank_tag_primary_keys = self._normalize_text_set(kwargs.get("bank_tag_primary_keys"))
-        bank_account_labels = self._normalize_text_set(
-            kwargs.get("bank_account_labels")
-        )
-        range_kwargs = self._range_kwargs(kwargs)
-        if view not in {
-            "time",
-            "bank_tag",
-            "bank_account",
-            "project",
-            "cost_tag",
-        }:
-            raise ValueError(
-                "view must be time, bank_tag, bank_account, project, or cost_tag."
-            )
-        if view == "project" and not project_names:
-            raise ValueError("project_name is required for project export summary")
-        if view == "cost_tag" and not bank_tag_primary_keys:
-            raise ValueError(
-                "bank_tag_primary_key is required for cost_tag export summary"
-            )
-        if view == "bank_account" and not bank_account_labels:
-            raise ValueError(
-                "bank_account_label is required for bank_account export summary"
-            )
-        aggregate_by = self._normalize_project_aggregate_by(kwargs.get("aggregate_by"))
-        row_shape = "raw_bank" if view in {"time", "bank_tag"} else "raw_cost"
-        if view == "project" and aggregate_by is not None:
-            row_shape = "project_month" if aggregate_by == "month" else "project_year"
-        policy = self._policy(view=view)
-        page = policy.export_page(
-            month=month,
-            project_names=sorted(project_names),
-            bank_tag_primary_keys=sorted(bank_tag_primary_keys),
-            row_shape=row_shape,
-            offset=0,
-            page_size=0,
+    def _load_export(self, query: dict[str, Any], *, download: bool) -> tuple[str, str, dict[str, Any]]:
+        retired = {"aggregate_by", "start_month", "end_month", "start_date", "end_date"}.intersection(query)
+        if retired:
+            raise ValueError("不再支持旧导出参数：" + ", ".join(sorted(retired)))
+        view = str(query.get("view") or "")
+        if view not in {"time", "bank_tag", "project", "cost_tag", "bank_account"}:
+            raise ValueError("unsupported export view")
+        period = str(query.get("month") or "")
+        if period != "all":
+            if re.fullmatch(r"\d{4}", period):
+                date(int(period), 1, 1)
+            elif re.fullmatch(r"\d{4}-\d{2}", period):
+                date.fromisoformat(period + "-01")
+            else:
+                raise ValueError("month must be all, YYYY, or YYYY-MM")
+        projects = sorted(self._normalize_text_set(query.get("project_names")))
+        tags = sorted(self._normalize_text_set(query.get("bank_tag_primary_keys")))
+        accounts = sorted(self._normalize_text_set(query.get("bank_account_labels")))
+        if view == "project" and not projects:
+            raise ValueError("project_name is required for project export")
+        if view == "cost_tag" and not tags:
+            raise ValueError("bank_tag_primary_key is required for cost_tag export")
+        if view == "bank_account" and not accounts:
+            raise ValueError("bank_account_label is required for bank_account export")
+        shape = {"project": "project_period", "time": "bank_time", "bank_tag": "raw_bank",
+                 "cost_tag": "raw_cost", "bank_account": "raw_cost"}[view]
+        page = self._policy(view=view).export_page(
+            month=period, start_month=None, end_month=None, start_date=None, end_date=None,
+            project_names=projects, bank_tag_primary_keys=tags, bank_account_labels=accounts,
+            row_shape=shape, offset=0, page_size=COST_STATISTICS_EXPORT_ROW_LIMIT + 1 if download else 0,
             include_summary=True,
-            bank_account_labels=sorted(bank_account_labels),
-            **range_kwargs,
         )
-        summary = self._export_page_summary(page)
-        total = int(summary.get("source_row_count") or 0)
-        self._ensure_export_row_limit(view=view, total=total)
-        scope_label = self._build_scope_label(month=month, **range_kwargs)
-        sheet_names = (["按时间统计"] if view == "time" else ["按标签统计"] if view == "bank_tag" else
-                       ["按项目汇总", "成本明细"] if row_shape in {"project_month", "project_year"} else ["成本明细"])
+        self._ensure_export_row_limit(view=view, total=page["summary"]["source_row_count"])
+        return view, period, page
+
+    @staticmethod
+    def _export_sheet_names(view: str) -> list[str]:
+        if view == "project":
+            return ["按项目汇总", "成本明细"]
+        if view == "time":
+            return ["按时间汇总", "流水明细"]
+        return ["按标签统计"] if view == "bank_tag" else ["成本明细"]
+
+    def get_export_summary(self, **kwargs: Any) -> dict[str, Any]:
+        view, period, page = self._load_export(kwargs, download=False)
+        summary = page["summary"]
         quality = self._manual_allocation_quality_from_export_summary(summary)
+        sheets = self._export_sheet_names(view)
         if quality["manual_allocation_pending_count"] > 0:
-            sheet_names.append("待分配说明")
-        return {"view": view, "scope_label": scope_label, "sheet_names": sheet_names,
-                "summary": {"transaction_count": total, "row_count": summary["row_count"],
-                            "total_amount": str(summary["total_amount"]), "sheet_count": len(sheet_names), **self._directional_summary_from_export_summary(summary), **quality}}
+            sheets.append("待分配说明")
+        return {"view": view, "scope_label": "全部期间" if period == "all" else period,
+                "sheet_names": sheets, "summary": {
+                    "transaction_count": summary["export_object_count"], "row_count": summary["row_count"],
+                    "total_amount": str(summary["total_amount"]), "sheet_count": len(sheets),
+                    **self._directional_summary_from_export_summary(summary), **quality}}
 
     def export_view(self, **kwargs: Any) -> tuple[str, bytes]:
-        view = str(kwargs.get("view") or "").strip()
-        month = str(kwargs.get("month") or "all").strip() or "all"
-        project_names = self._normalize_text_set(
-            kwargs.get("project_names")
-            or (
-                [kwargs.get("project_name")]
-                if kwargs.get("project_name")
-                else []
-            )
-        )
-        bank_tag_primary_keys = self._normalize_text_set(kwargs.get("bank_tag_primary_keys"))
-        bank_account_labels = self._normalize_text_set(
-            kwargs.get("bank_account_labels")
-        )
-        aggregate_by = self._normalize_project_aggregate_by(
-            kwargs.get("aggregate_by")
-        )
-        range_kwargs = self._range_kwargs(kwargs)
-        if view not in {
-            "time",
-            "bank_tag",
-            "bank_account",
-            "project",
-            "cost_tag",
-        }:
-            raise ValueError(f"unsupported export view: {view}")
-        if view == "project" and not project_names:
-            raise ValueError("project_name is required for project export")
-        if view == "cost_tag" and not bank_tag_primary_keys:
-            raise ValueError(
-                "bank_tag_primary_key is required for cost_tag export"
-            )
-        if view == "bank_account" and not bank_account_labels:
-            raise ValueError("bank_account_label is required for bank_account export")
-        row_shape = "raw_cost"
-        export_month = month
-        if view in {"time", "bank_tag"}:
-            row_shape = "raw_bank"
-        elif view == "project" and aggregate_by is not None:
-            row_shape = (
-                "project_month"
-                if (aggregate_by or "month") == "month"
-                else "project_year"
-            )
-        policy = self._policy(view=view)
-        page = policy.export_page(
-            month=export_month,
-            project_names=sorted(project_names),
-            bank_tag_primary_keys=sorted(bank_tag_primary_keys),
-            row_shape=row_shape,
-            offset=0,
-            page_size=COST_STATISTICS_EXPORT_ROW_LIMIT + 1,
-            include_summary=True,
-            bank_account_labels=sorted(bank_account_labels),
-            **range_kwargs,
-        )
-        summary = self._export_page_summary(page)
-        total = int(
-            summary.get("source_row_count")
-            or 0
-        )
-        self._ensure_export_row_limit(view=view, total=total)
-        entries = [
-            self._export_entry_from_row(row)
-            for row in list(page.get("rows") or [])
-        ]
-        scope_label = self._build_scope_label(month=month, **range_kwargs)
+        view, period, page = self._load_export(kwargs, download=True)
+        rows = page["rows"]
         if view == "time":
-            workbook = self._table_workbook(
-                "按时间统计",
-                [
-                    "交易时间",
-                    "资金方向",
-                    "金额",
-                    "主标签",
-                    "子标签",
-                    "对方户名",
-                    "摘要/备注",
-                    "银行账户",
-                ],
-                (self._time_row_from_entry(entry) for entry in entries),
-            )
-            filename = self._build_filename(month=scope_label, view=view)
+            workbook = self._table_workbook("按时间汇总", ["统计周期", "支出金额", "收入金额", "净支出", "流水笔数"],
+                ([row["period_label"], Decimal(row["expense_amount"]), Decimal(row["income_amount"]),
+                  Decimal(row["total_amount"]), row["transaction_count"]] for row in rows))
+            sheet = workbook.create_sheet("流水明细")
+            sheet.append(["交易时间", "资金方向", "金额", "主标签", "子标签", "对方户名", "摘要/备注", "银行账户"])
+            for row in page["detail_rows"]:
+                self._append_export_row(sheet, self._time_row_from_entry(self._export_entry_from_row(row)))
         elif view == "bank_tag":
-            workbook = self._table_workbook(
-                "按标签统计",
-                [
-                    "交易时间",
-                    "主标签",
-                    "子标签",
-                    "资金方向",
-                    "金额",
-                    "对方户名",
-                    "摘要/备注",
-                    "银行账户",
-                ],
-                (self._bank_tag_row_from_entry(entry) for entry in entries),
-            )
-            filename = self._build_filename(month=scope_label, view=view)
+            workbook = self._table_workbook("按标签统计",
+                ["交易时间", "主标签", "子标签", "资金方向", "金额", "对方户名", "摘要/备注", "银行账户"],
+                (self._bank_tag_row_from_entry(self._export_entry_from_row(row)) for row in rows))
+        elif view == "project":
+            workbook = self._table_workbook("按项目汇总",
+                ["统计周期", "项目名称", "银行主标签", "银行子标签", "金额", "费用内容", "成本明细数"],
+                ([row["period_label"], row["project_name"], row["bank_tag_primary_label"], row["bank_tag_sub_label"],
+                  Decimal(row["amount"]), row["expense_content"], row["transaction_count"]] for row in rows))
+            sheet = workbook.create_sheet("成本明细")
+            sheet.append(self._cost_export_headers())
+            for row in page["detail_rows"]:
+                self._append_export_row(sheet, self._cost_export_row(self._export_entry_from_row(row)))
         else:
-            if row_shape in {"project_month", "project_year"}:
-                headers = ["统计周期", "项目名称", "银行主标签", "银行子标签", "金额", "费用内容", "成本明细数"]
-                values = ([entry["period_label"], entry["project_name"], entry["bank_tag_primary_label"], entry["bank_tag_sub_label"], Decimal(entry["amount"]), entry["expense_content"], entry["transaction_count"]] for entry in entries)
-            else:
-                headers = self._cost_export_headers()
-                values = (self._cost_export_row(entry) for entry in entries)
-            aggregated = row_shape in {"project_month", "project_year"}
-            workbook = self._table_workbook("按项目汇总" if aggregated else "成本明细", headers, values)
-            if aggregated:
-                detail_page = policy.export_page(
-                    month=export_month, project_names=sorted(project_names),
-                    bank_tag_primary_keys=sorted(bank_tag_primary_keys), row_shape="raw_cost",
-                    offset=0, page_size=COST_STATISTICS_EXPORT_ROW_LIMIT + 1,
-                    include_summary=False, bank_account_labels=sorted(bank_account_labels), **range_kwargs,
-                )
-                detail_sheet = workbook.create_sheet("成本明细")
-                detail_sheet.append(self._cost_export_headers())
-                for row in detail_page["rows"]:
-                    self._append_export_row(detail_sheet, self._cost_export_row(self._export_entry_from_row(row)))
-            filename = self._build_filename(month=scope_label, view=view, project_name="、".join(sorted(project_names)), project_names=sorted(project_names), aggregate_by=aggregate_by)
+            workbook = self._table_workbook("成本明细", self._cost_export_headers(),
+                (self._cost_export_row(self._export_entry_from_row(row)) for row in rows))
         if view not in {"time", "bank_tag"}:
-            self._append_manual_allocation_notice(workbook, summary=summary)
+            self._append_manual_allocation_notice(workbook, summary=page["summary"])
+        filename = self._build_filename(month=period, view=view)
         return filename, self._serialize_workbook(workbook)
 
     def _policy(self, *, view: str) -> CostStatisticsPolicy:
@@ -638,11 +537,6 @@ class CostStatisticsQueryService:
         return int(payload.get("row_count") or 0)
 
     @staticmethod
-    def _export_page_summary(page: dict[str, Any]) -> dict[str, Any]:
-        summary = page.get("summary")
-        return dict(summary) if isinstance(summary, dict) else {}
-
-    @staticmethod
     def _manual_allocation_quality_from_export_summary(
         summary: dict[str, Any],
     ) -> dict[str, int]:
@@ -728,20 +622,6 @@ class CostStatisticsQueryService:
         }
 
     @staticmethod
-    def _range_kwargs(
-        kwargs: dict[str, Any],
-    ) -> dict[str, str | None]:
-        return {
-            "start_month": str(kwargs.get("start_month") or "").strip()
-            or None,
-            "end_month": str(kwargs.get("end_month") or "").strip()
-            or None,
-            "start_date": str(kwargs.get("start_date") or "").strip()
-            or None,
-            "end_date": str(kwargs.get("end_date") or "").strip() or None,
-        }
-
-    @staticmethod
     def _normalize_text_set(values: object) -> set[str]:
         if values is None:
             return set()
@@ -757,32 +637,6 @@ class CostStatisticsQueryService:
             for value in iterable
             if str(value or "").strip()
         }
-
-    @staticmethod
-    def _normalize_project_aggregate_by(value: object) -> str | None:
-        normalized = str(value or "").strip().lower()
-        if not normalized:
-            return None
-        if normalized not in {"month", "year"}:
-            raise ValueError("aggregate_by must be month or year")
-        return normalized
-
-    @staticmethod
-    def _build_scope_label(
-        *,
-        month: str,
-        start_month: str | None = None,
-        end_month: str | None = None,
-        start_date: str | None = None,
-        end_date: str | None = None,
-    ) -> str:
-        if start_date and end_date:
-            return f"{start_date}至{end_date}"
-        if start_month and end_month:
-            return f"{start_month}至{end_month}"
-        if str(month or "").strip().lower() == "all":
-            return "全部期间"
-        return month or "—"
 
     @staticmethod
     def _ensure_export_row_limit(*, view: str, total: int) -> None:
@@ -898,46 +752,11 @@ class CostStatisticsQueryService:
         return buffer.getvalue()
 
     @staticmethod
-    def _build_filename(
-        *,
-        month: str,
-        view: str,
-        project_name: str | None = None,
-        project_names: list[str] | None = None,
-        aggregate_by: str | None = None,
-    ) -> str:
-        month_segment = (
-            "全部期间"
-            if (month or "").strip().lower() == "all"
-            else month
-        )
-        if view == "time":
-            return f"成本统计_{month_segment}_按时间统计.xlsx"
-        if view == "bank_tag":
-            return f"成本统计_{month_segment}_按标签统计.xlsx"
-        if view == "bank_account":
-            return f"成本统计_{month_segment}_按银行账户统计.xlsx"
-        if view == "project":
-            if aggregate_by is not None:
-                project_label = (
-                    "、".join(
-                        project_names
-                        or ([project_name] if project_name else [])
-                    )
-                    or "未命名项目"
-                )
-                period = "月" if aggregate_by == "month" else "年"
-                return (
-                    f"成本统计_{month_segment}_按项目统计_按{period}_"
-                    f"{_sanitize_filename(project_label)}.xlsx"
-                )
-            return (
-                f"成本统计_{month_segment}_项目明细_"
-                f"{_sanitize_filename(project_name or '未命名项目')}.xlsx"
-            )
-        if view == "cost_tag":
-            return f"成本统计_{month_segment}_按流水标签统计.xlsx"
-        raise ValueError(f"unsupported export view: {view}")
+    def _build_filename(*, month: str, view: str) -> str:
+        period = "全部期间" if month == "all" else month
+        label = {"time": "按时间统计", "bank_tag": "按标签统计", "project": "按项目统计",
+                 "cost_tag": "按成本标签统计", "bank_account": "按银行账户统计"}[view]
+        return f"成本统计_{period}_{label}.xlsx"
 
 
 def _plain_money(value: Decimal) -> str:
@@ -951,14 +770,3 @@ def _decimal_from_value(value: object) -> Decimal | None:
         return Decimal(str(value).replace(",", ""))
     except Exception:
         return None
-
-
-def _sanitize_filename(value: str) -> str:
-    sanitized = (
-        str(value or "")
-        .strip()
-        .replace("/", "-")
-        .replace("\\", "-")
-        .replace(":", "：")
-    )
-    return sanitized[:80] if len(sanitized) > 80 else sanitized

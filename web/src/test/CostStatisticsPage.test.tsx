@@ -93,7 +93,7 @@ describe("Cost statistics page", () => {
     expect(screen.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "false");
     await user.click(screen.getByRole("button", { name: "导出中心" }));
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
-    expect(within(dialog).getByRole("radio", { name: "全部", exact: true })).toBeChecked();
+    expect(within(dialog).getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "true");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       "/api/cost-statistics/export-summary", expect.objectContaining({ method: "POST", body: expect.stringMatching(/month=all&view=time/) })));
     page.unmount();
@@ -108,26 +108,75 @@ describe("Cost statistics page", () => {
     }
   });
 
-  test("exports all without fabricated date bounds and rejects an incomplete custom range", async () => {
+  test("export period is independent, survives view switches, and removed controls cannot affect downloads", async () => {
     const fetchMock = installMockApiFetch();
     const user = userEvent.setup();
     renderPage(); await waitUntilReady();
     await user.click(screen.getByRole("button", { name: "导出中心" }));
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
-    await user.click(within(dialog).getByRole("radiogroup", { name: "导出视图切换" }).querySelector("button")!);
-    expect(within(dialog).getByRole("radio", { name: "全部", exact: true })).toBeChecked();
-    await within(dialog).findByText(/导出 \d+ 笔/);
-    const previewCalls = () => fetchMock.mock.calls.filter(([url]) => String(url).includes("/export-summary"));
-    const url = new URL(String(previewCalls().at(-1)![0]) + "?" + String(previewCalls().at(-1)![1]?.body), "http://localhost");
-    expect(url.searchParams.get("month")).toBe("all");
-    expect(url.searchParams.has("start_date")).toBe(false);
-    expect(url.searchParams.has("end_date")).toBe(false);
-    const count = previewCalls().length;
-    await user.click(within(dialog).getByRole("radio", { name: "自定义时间区间（精确到日）" }));
+    expect(within(dialog).queryByText("按月算")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("自定义时间区间（精确到日）")).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "导出年月：年月" }));
+    const picker = screen.getByRole("dialog", { name: "导出年月选择器" });
+    await user.click(within(picker).getByRole("radio", { name: "按年" }));
+    await user.click(within(picker).getByRole("button", { name: "2026年", exact: true }));
+    await user.click(within(dialog).getByRole("radio", { name: "按时间" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/cost-statistics/export-summary",
+      expect.objectContaining({ body: "month=2026&view=time" })));
+    expect(within(dialog).getByRole("button", { name: "导出年月：2026年" })).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("radio", { name: "按项目" }));
+    const projects = within(dialog).getByRole("group", { name: "项目", exact: true }).closest("section")!;
+    await user.click(within(projects).getByRole("button", { name: "清空" }));
     expect(within(dialog).getByRole("button", { name: "导出", exact: true })).toBeDisabled();
-    expect(previewCalls()).toHaveLength(count);
+    await user.click(within(dialog).getByRole("radio", { name: "按时间" }));
+    await user.click(within(dialog).getByRole("radio", { name: "按项目" }));
+    expect(within(dialog).getByRole("button", { name: "导出", exact: true })).toBeDisabled();
+    expect(within(projects).getAllByRole("checkbox").every(box => !(box as HTMLInputElement).checked)).toBe(true);
   });
 
+
+  test("late export statistics cannot replace a newer selection", async () => {
+    installMockApiFetch();
+    const originalFetch = globalThis.fetch;
+    const pending: Array<(count: number) => void> = [];
+    globalThis.fetch = vi.fn(async (input, init) => {
+      if (!String(input).endsWith("/cost-statistics/export-summary")) return originalFetch(input, init);
+      const response = await originalFetch(input, init);
+      const payload = await response.json();
+      return new Promise<Response>(resolve => pending.push(count => resolve(new Response(JSON.stringify({
+        ...payload, summary:{...payload.summary, transaction_count:count},
+      }), {headers:{"Content-Type":"application/json"}}))));
+    });
+    const user = userEvent.setup();
+    renderPage(); await waitUntilReady();
+    await user.click(screen.getByRole("button", {name:"导出中心"}));
+    const dialog = await screen.findByRole("dialog", {name:"导出中心"});
+    await waitFor(() => expect(pending).toHaveLength(1));
+    await user.click(within(dialog).getByRole("radio", {name:"按时间"}));
+    await waitFor(() => expect(pending).toHaveLength(2));
+    pending[1](222);
+    expect(await within(dialog).findByText("导出 222 笔流水")).toBeInTheDocument();
+    pending[0](111);
+    await waitFor(() => expect(within(dialog).queryByText(/导出 111/)).not.toBeInTheDocument());
+    expect(within(dialog).getByText("导出 222 笔流水")).toBeInTheDocument();
+  });
+
+  test("export errors preserve the period and permit an explicit retry", async () => {
+    const fetchMock = installMockApiFetch({costExportErrorViews:["time"]});
+    const user = userEvent.setup();
+    renderPage(); await waitUntilReady();
+    await user.click(screen.getByRole("button", {name:"导出中心"}));
+    const dialog = await screen.findByRole("dialog", {name:"导出中心"});
+    await user.click(within(dialog).getByRole("radio", {name:"按时间"}));
+    const download = within(dialog).getByRole("button", {name:"导出", exact:true});
+    await waitFor(() => expect(download).toBeEnabled());
+    await user.click(download);
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("cost statistics export failed");
+    expect(within(dialog).getByRole("radio", {name:"按时间"})).toHaveAttribute("aria-checked", "true");
+    expect(download).toBeEnabled();
+    await user.click(download);
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/cost-statistics/export"))).toHaveLength(2));
+  });
 
   test("preserves external turnover facets at the end and drills into each direction independently", async () => {
     installMockApiFetch();
@@ -426,13 +475,13 @@ describe("Cost statistics page", () => {
 
     await user.click(screen.getByRole("button", { name: "导出中心" }));
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
-    const tabs = within(dialog).getByRole("radiogroup", { name: "导出视图切换" });
+    const tabs = dialog;
     expect(within(tabs).getAllByRole("radio").map((item) => item.textContent)).toEqual([
-      "按时间",
-      "按标签",
-      "按银行账户",
       "按项目",
-      "按成本主标签",
+      "按成本标签",
+      "按银行账户",
+      "按标签",
+      "按时间",
     ]);
     await user.click(within(tabs).getByRole("radio", { name: "按时间" }));
     expect(await within(dialog).findByText(/导出 \d+ 笔/)).toBeInTheDocument();

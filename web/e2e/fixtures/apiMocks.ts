@@ -5555,7 +5555,7 @@ function costAllocationPayload(
   };
 }
 
-function costStatisticsExportPreviewPayload(
+function costStatisticsExportFixture(
   url: URL,
   relationConfirmed = false,
   includeWorkbenchRelationEvidence = false,
@@ -5563,13 +5563,14 @@ function costStatisticsExportPreviewPayload(
   const month = url.searchParams.get("month") ?? "all";
   const view = url.searchParams.get("view") ?? "project";
   const projectNames = new Set(url.searchParams.getAll("project_name").filter(Boolean));
-  const expenseTypes = new Set(url.searchParams.getAll("expense_type").filter(Boolean));
+  const primaryTags = new Set(url.searchParams.getAll("bank_tag_primary_key").filter(Boolean));
   const bankAccountLabels = new Set(url.searchParams.getAll("bank_account_label").filter(Boolean));
-  const rows = costAttributedRows(month, relationConfirmed, includeWorkbenchRelationEvidence)
+  const rows = costAttributedRows("all", relationConfirmed, includeWorkbenchRelationEvidence)
+    .filter(row => month === "all" || row.trade_time.startsWith(month))
     .filter((row) => (projectNames.size > 0 ? projectNames.has(row.project_name) : true))
-    .filter((row) => (expenseTypes.size > 0 ? expenseTypes.has(row.expense_type) : true))
+    .filter((row) => (primaryTags.size > 0 ? primaryTags.has(`primary:${costBankTagForRow(row).bank_tag_primary_label}`) : true))
     .filter((row) => (bankAccountLabels.size > 0 ? bankAccountLabels.has(row.bank_account_label) : true));
-  const bankFlowRows = costBankFlowRows(month, relationConfirmed, includeWorkbenchRelationEvidence);
+  const bankFlowRows = costBankFlowRows("all", relationConfirmed, includeWorkbenchRelationEvidence).filter(row => month === "all" || row.trade_time.startsWith(month));
   const bankFlowExpense = bankFlowRows
     .filter((row) => row.direction === "支出")
     .reduce((sum, row) => sum + Number(row.amount.replace(/,/g, "")), 0);
@@ -5585,10 +5586,10 @@ function costStatisticsExportPreviewPayload(
     : view === "bank_tag"
       ? "成本统计_全部期间_按标签统计.xlsx"
       : view === "project"
-    ? "成本统计_全部期间_按项目统计_按月_云南溯源科技.xlsx"
+    ? "成本统计_全部期间_按项目统计.xlsx"
     : view === "bank_account"
       ? "成本统计_全部期间_按银行账户统计.xlsx"
-      : "成本统计_全部期间_按费用类型统计.xlsx";
+      : "成本统计_全部期间_按成本标签统计.xlsx";
   const bankFlowView = view === "time" || view === "bank_tag";
   const columns = view === "time"
     ? ["交易时间", "资金方向", "金额", "主标签", "子标签", "对方户名", "摘要/备注", "银行账户"]
@@ -5609,11 +5610,11 @@ function costStatisticsExportPreviewPayload(
         expense_transaction_count: bankFlowRows.filter((row) => row.direction === "支出").length,
         income_transaction_count: bankFlowRows.filter((row) => row.direction === "收入").length,
       } : {}),
-      sheet_count: view === "project" ? 8 : 1,
+      sheet_count: view === "project" || view === "time" ? 2 : 1,
     },
     sheet_names: view === "project"
-      ? ["导出说明", "项目汇总", "成本明细"]
-      : [view === "bank_account" ? "按银行账户统计" : view === "time" ? "按时间统计" : view === "bank_tag" ? "按标签统计" : "按费用类型统计"],
+      ? ["按项目汇总", "成本明细"]
+      : view === "time" ? ["按时间汇总", "流水明细"] : [view === "bank_tag" ? "按标签统计" : "成本明细"],
     columns,
     rows: bankFlowView
       ? bankFlowRows.map((row) => view === "time"
@@ -5628,46 +5629,8 @@ function costStatisticsExportBody(
   relationConfirmed = false,
   includeWorkbenchRelationEvidence = false,
 ) {
-  const month = url.searchParams.get("month") ?? "all";
-  const projectNames = new Set(url.searchParams.getAll("project_name").filter(Boolean));
-  const expenseTypes = new Set(url.searchParams.getAll("expense_type").filter(Boolean));
-  const bankAccountLabels = new Set(url.searchParams.getAll("bank_account_label").filter(Boolean));
-  const exportRows = costAttributedRows(
-    month,
-    relationConfirmed,
-    includeWorkbenchRelationEvidence,
-  )
-    .filter((row) => (projectNames.size > 0 ? projectNames.has(row.project_name) : true))
-    .filter((row) => (expenseTypes.size > 0 ? expenseTypes.has(row.expense_type) : true))
-    .filter((row) => (bankAccountLabels.size > 0 ? bankAccountLabels.has(row.bank_account_label) : true));
-  const preview = costStatisticsExportPreviewPayload(
-    url,
-    relationConfirmed,
-    includeWorkbenchRelationEvidence,
-  );
-  return [
-    preview.file_name,
-    ["成本ID", ...preview.columns].join(","),
-    ...exportRows.map((row) => [
-      row.transaction_id,
-      row.trade_time,
-      row.bank_account_label,
-      row.project_name,
-      row.expense_type,
-      row.amount,
-      row.expense_content,
-    ].join(",")),
-    [
-      "导出筛选",
-      `view=${url.searchParams.get("view") ?? ""}`,
-      `month=${url.searchParams.get("month") ?? ""}`,
-      `project_name=${url.searchParams.getAll("project_name").join("|")}`,
-      `bank_account_label=${url.searchParams.getAll("bank_account_label").join("|")}`,
-      `expense_type=${url.searchParams.getAll("expense_type").join("|")}`,
-      `page=${url.searchParams.get("page") ?? ""}`,
-      `page_size=${url.searchParams.get("page_size") ?? ""}`,
-    ].join(","),
-  ].join("\n");
+  const fixture = costStatisticsExportFixture(url, relationConfirmed, includeWorkbenchRelationEvidence);
+  return [fixture.file_name, fixture.columns.join(","), ...fixture.rows.map(row => row.join(","))].join("\n");
 }
 
 function bankFlowRuleBatchVersion(status: BankFlowRuleBrowserBatchStatus) {
@@ -9341,11 +9304,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       url.search = route.request().postData() ?? "";
     }
     if (path === "/api/cost-statistics/export-summary") {
-      return json(route, costStatisticsExportPreviewPayload(
-        url,
-        relationConfirmed,
-        Boolean(options.costStatisticsRelationFanout),
-      ));
+      const fixture = costStatisticsExportFixture(url, relationConfirmed, Boolean(options.costStatisticsRelationFanout));
+      return json(route, { view: fixture.view, scope_label: fixture.scope_label, summary: fixture.summary, sheet_names: fixture.sheet_names });
     }
 
     if (path === "/api/cost-statistics/export") {

@@ -13,6 +13,47 @@ from fin_ops_platform.services.cost_statistics_policy import (
 
 
 class CostStatisticsPolicyTests(unittest.TestCase):
+    def test_export_period_merges_months_but_preserves_detail_amounts(self):
+        groups = [self._group(group_id=f"case-{i}", oa_rows=[self._oa(f"oa-{i}", amount=amount)],
+                   bank_rows=[self._bank(f"bank-{i}", amount, trade_time=day)])
+                  for i, (day, amount) in enumerate([("2025-12-31 23:59:59", "50.00"),
+                      ("2026-01-01 00:00:00", "100.00"), ("2026-02-28 12:00:00", "200.00")])]
+        policy = self._policy(groups)
+        for period, amount, count in [("all", "350.00", 3), ("2026", "300.00", 2), ("2026-02", "200.00", 1), ("2027", "0.00", 0)]:
+            with self.subTest(period=period):
+                page = policy.export_page(month=period, start_month=None, end_month=None,
+                    start_date=None, end_date=None, project_names=["项目A"], bank_tag_primary_keys=[],
+                    row_shape="project_period", offset=0, page_size=100, include_summary=True)
+                self.assertEqual(page["summary"]["total_amount"], amount)
+                self.assertEqual(page["summary"]["export_object_count"], count)
+                self.assertEqual(len(page["detail_rows"]), count)
+                self.assertEqual(len(page["rows"]), 1 if count else 0)
+                self.assertEqual(sum((Decimal(row["amount"]) for row in page["rows"]), Decimal(0)), Decimal(amount))
+                self.assertEqual(sum((Decimal(row["amount"]) for row in page["detail_rows"]), Decimal(0)), Decimal(amount))
+
+    def test_bank_time_export_groups_periods_and_counts_original_split_transactions(self):
+        policy = self._policy([], bank_rows=[
+            {**self._bank("unit-1", "80.00", trade_time="2026-02-01 12:00:00"), "parent_row_id": "original"},
+            {**self._bank("unit-2", "20.00", trade_time="2026-02-01 12:00:00"), "parent_row_id": "original"},
+            self._bank("refund", "10.00", direction="inflow", trade_time="2026-02-02 12:00:00"),
+            self._bank("last-year", "50.00", trade_time="2025-12-31 23:59:59"),
+            self._bank("undated", "5.00", trade_time=""),
+        ])
+        for period, labels, count in [("all", ["2025", "2026", "日期待确定"], 4),
+                                      ("2026", ["2026-02"], 2),
+                                      ("2026-02", ["2026-02-01", "2026-02-02"], 2)]:
+            with self.subTest(period=period):
+                page = policy.export_page(month=period, start_month=None, end_month=None, start_date=None,
+                    end_date=None, project_names=[], bank_tag_primary_keys=[], row_shape="bank_time",
+                    offset=0, page_size=100, include_summary=True)
+                self.assertEqual([row["period_label"] for row in page["rows"]], labels)
+                self.assertEqual(page["summary"]["export_object_count"], count)
+                self.assertEqual(len(page["detail_rows"]), count + 1)
+                self.assertEqual(sum((Decimal(row["total_amount"]) for row in page["rows"]), Decimal(0)), Decimal(page["summary"]["total_amount"]))
+                if period != "all":
+                    self.assertEqual(page["summary"]["expense_transaction_count"], 1)
+                    self.assertEqual(page["summary"]["income_transaction_count"], 1)
+
     def test_split_principal_is_excluded_and_unique_interest_is_automatic_despite_legacy_flag(self) -> None:
         principal = {**self._bank("principal-unit", "1000000.00", tag_code="custom-principal"),
                      "turnover_role": "external_turnover", "parent_row_id": "bank-parent", "is_split": True}

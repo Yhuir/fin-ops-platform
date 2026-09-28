@@ -9,7 +9,7 @@ import {
 } from "@heroui/react";
 import { useNavigate } from "react-router-dom";
 
-import BusinessPeriodPicker from "../components/common/BusinessPeriodPicker";
+import BusinessPeriodPicker, { type BusinessPeriodSelection } from "../components/common/BusinessPeriodPicker";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import QuerySearch from "../components/common/QuerySearch";
 import CostStatisticsHierarchy, { type CostHierarchyLane } from "../components/cost-statistics/CostStatisticsHierarchy";
@@ -17,7 +17,6 @@ import CostStatisticsManualAllocationDrawer from "../components/cost-statistics/
 import CostStatisticsNoOaRulesDrawer from "../components/cost-statistics/CostStatisticsNoOaRulesDrawer";
 import ExportCenterDrawer, {
   type ExportCenterMode,
-  type ExportRangeMode,
 } from "../components/cost-statistics/ExportCenterDrawer";
 import CostStatisticsTable, {
   type CostStatisticsTableColumn,
@@ -110,6 +109,7 @@ function getExplorerTransitionScope(
 }
 
 type CostStatisticsExportReferenceData = {
+  years: string[];
   projects: CostProjectExplorerRow[];
   costTags: CostTagExplorerRow[];
   bankAccounts: CostBankExplorerRow[];
@@ -234,41 +234,6 @@ function costEntryActionLabel(row: CostExplorerEntryRow) {
   return `查看${row.rowKind !== "bank_transaction" ? "成本明细" : "银行流水"} ${target} ${formatCostTradeTime(row.occurredAt) || "时间未知"} ${formatCostAmount(row.amount)}`;
 }
 
-function buildMonthDateBounds(month: string) {
-  const [yearText, monthText] = month.split("-");
-  const year = Number(yearText);
-  const monthNumber = Number(monthText);
-  const startDate = `${month}-01`;
-  const lastDay = new Date(year, monthNumber, 0).getDate();
-  const endDate = `${month}-${String(lastDay).padStart(2, "0")}`;
-  return { startDate, endDate };
-}
-
-function normalizeDateRange(startDate: string, endDate: string) {
-  return startDate <= endDate ? { startDate, endDate } : { startDate: endDate, endDate: startDate };
-}
-
-function getExportRangeFromScope(
-  mode: ExplorerScopeMode,
-  year: string,
-  month: string,
-): { mode: ExportRangeMode; startDate: string; endDate: string } {
-  if (mode === "all") {
-    return { mode: "all", startDate: "", endDate: "" };
-  }
-  if (mode === "month") {
-    return { mode: "month", ...buildMonthDateBounds(month) };
-  }
-  return { mode: "custom", startDate: `${year}-01-01`, endDate: `${year}-12-31` };
-}
-
-function exportDateParams(mode: ExportRangeMode, month: string, startDate: string, endDate: string) {
-  if (mode === "all") return { month: "all" };
-  if (mode === "month") return { month };
-  if (!startDate || !endDate) return null;
-  return { month: "all", ...normalizeDateRange(startDate, endDate) };
-}
-
 function getCostStatisticsLoadErrorMessage(error: unknown) {
   if (error instanceof ApiClientError) {
     const message = error.message.trim();
@@ -333,7 +298,6 @@ export default function CostStatisticsPage() {
   const navigate = useNavigate();
   const { setWorkbenchHeaderActions } = useAppChrome();
   const { canOperateData } = useSessionPermissions();
-  const defaultMonthBounds = buildMonthDateBounds(DEFAULT_MONTH);
   const costPageSession = usePageSessionState<CostStatisticsPageSession>({
     pageKey: "cost-statistics",
     stateKey: "explorerState",
@@ -415,15 +379,11 @@ export default function CostStatisticsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchComposing, setIsSearchComposing] = useState(false);
 
-  const [bankAccountRangeMode, setBankAccountRangeMode] = useState<ExportRangeMode>("all");
-  const [bankAccountMonth, setBankAccountMonth] = useState(DEFAULT_MONTH);
-  const [bankAccountStartDate, setBankAccountStartDate] = useState(defaultMonthBounds.startDate);
-  const [bankAccountEndDate, setBankAccountEndDate] = useState(defaultMonthBounds.endDate);
+  const [exportPeriod, setExportPeriod] = useState<BusinessPeriodSelection>({ mode: "all", year: DEFAULT_MONTH.slice(0, 4), month: DEFAULT_MONTH });
   const [bankAccountSelections, setBankAccountSelections] = useState<string[]>([]);
   const [bankAccountProjectNames, setBankAccountProjectNames] = useState<string[]>([]);
 
   const [projectExportNames, setProjectExportNames] = useState<string[]>([]);
-  const [projectAggregateBy, setProjectAggregateBy] = useState<"month" | "year">("month");
   const [projectCostTags, setProjectCostTags] = useState<string[]>([]);
   const projectScopeMode = costSession.projectScopeMode;
   const projectScopeYear = costSession.projectScopeYear;
@@ -438,15 +398,7 @@ export default function CostStatisticsPage() {
   const bankFlowScopeMode = costSession.bankFlowScopeMode;
   const bankFlowScopeYear = costSession.bankFlowScopeYear;
   const bankFlowScopeMonth = costSession.bankFlowScopeMonth;
-  const [costTagRangeMode, setCostTagRangeMode] = useState<ExportRangeMode>("all");
-  const [costTagMonth, setCostTagMonth] = useState(DEFAULT_MONTH);
-  const [costTagStartDate, setCostTagStartDate] = useState(defaultMonthBounds.startDate);
-  const [costTagEndDate, setCostTagEndDate] = useState(defaultMonthBounds.endDate);
   const [costTagSelections, setCostTagSelections] = useState<string[]>([]);
-  const [bankFlowRangeMode, setBankFlowRangeMode] = useState<ExportRangeMode>("all");
-  const [bankFlowMonth, setBankFlowMonth] = useState(DEFAULT_MONTH);
-  const [bankFlowStartDate, setBankFlowStartDate] = useState(defaultMonthBounds.startDate);
-  const [bankFlowEndDate, setBankFlowEndDate] = useState(defaultMonthBounds.endDate);
   const [selectedProjectName, setSelectedProjectName] = useState<string | null>(null);
   const [selectedCostPrimary, setSelectedCostPrimary] = useState<string | null>(null);
   const [selectedCostSub, setSelectedCostSub] = useState<string | null>(null);
@@ -1214,6 +1166,7 @@ export default function CostStatisticsPage() {
         return null;
       }
       const referenceData = {
+        years: projectPage.availableYears,
         projects: projectPage.facets.projects,
         costTags: costTagPage.facets.costTagPrimary,
         bankAccounts: bankAccountPage.facets.bankAccounts,
@@ -1238,9 +1191,7 @@ export default function CostStatisticsPage() {
 
   async function openExportCenter() {
     setExportFeedback(null); setExportSummary(null);
-    setBankFlowRangeMode('all'); setBankFlowStartDate(''); setBankFlowEndDate('');
-    setCostTagRangeMode('all'); setCostTagStartDate(''); setCostTagEndDate('');
-    setBankAccountRangeMode('all'); setBankAccountStartDate(''); setBankAccountEndDate('');
+    setExportPeriod({ mode: "all", year: DEFAULT_MONTH.slice(0, 4), month: DEFAULT_MONTH });
     const reference = await loadExportReferenceData();
     if (!reference) return;
     updateProjectExportSelection(reference.projects.map(row => row.projectName), reference);
@@ -1251,83 +1202,22 @@ export default function CostStatisticsPage() {
     setIsExportCenterOpen(true);
   }
 
-  async function handleExportCenterModeChange(mode: ExportCenterMode) {
+  function handleExportCenterModeChange(mode: ExportCenterMode) {
     setExportFeedback(null);
     setExportSummary(null);
-    if (mode === "time" || mode === "bank_tag") {
-      setExportCenterMode(mode);
-      return;
-    }
-    const referenceData = await loadExportReferenceData();
-    if (!referenceData) {
-      return;
-    }
     setExportCenterMode(mode);
-    if (mode === "project") {
-      const projectOptions = (referenceData?.projects ?? []).map((row) => row.projectName);
-      const nextProjectNames =
-        projectExportNames.length > 0
-          ? projectExportNames
-          : selectedProjectName
-            ? [selectedProjectName]
-            : projectOptions.slice(0, 1);
-      updateProjectExportSelection(nextProjectNames, referenceData);
-    }
-    if (mode === "cost_tag" && costTagSelections.length === 0) {
-      setCostTagSelections(selectedCostPrimary ? [selectedCostPrimary] : []);
-    }
-    if (mode === "bank_account" && bankAccountSelections.length === 0) {
-      setBankAccountSelections(
-        selectedBankAccountLabel
-          ? [selectedBankAccountLabel]
-          : referenceData.bankAccounts.slice(0, 1).map((row) => row.bankAccountLabel),
-      );
-      setBankAccountProjectNames(selectedBankProjectName ? [selectedBankProjectName] : []);
-    }
   }
 
   function buildExportParamsFromState(): CostExportParams | null {
-    if (exportCenterMode === "time" || exportCenterMode === "bank_tag") {
-      const range = exportDateParams(bankFlowRangeMode, bankFlowMonth, bankFlowStartDate, bankFlowEndDate);
-      return range ? { ...range, view: exportCenterMode } : null;
-    }
+    const month = exportPeriod.mode === "all" ? "all" : exportPeriod.mode === "year" ? exportPeriod.year : exportPeriod.month;
+    if (exportCenterMode === "time" || exportCenterMode === "bank_tag") return { month, view: exportCenterMode };
     if (exportCenterMode === "bank_account") {
-      if (bankAccountSelections.length === 0) {
-        return null;
-      }
-      const range = exportDateParams(bankAccountRangeMode, bankAccountMonth, bankAccountStartDate, bankAccountEndDate);
-      return range ? {
-        ...range,
-        view: "bank_account",
-        bankAccountLabels: bankAccountSelections,
-        projectNames: bankAccountProjectNames,
-      } : null;
+      return bankAccountSelections.length ? { month, view: "bank_account", bankAccountLabels: bankAccountSelections, projectNames: bankAccountProjectNames } : null;
     }
-
     if (exportCenterMode === "project") {
-      if (projectExportNames.length === 0 || projectCostTags.length === 0) {
-        return null;
-      }
-      const dates = exportDateParams(bankFlowRangeMode, bankFlowMonth, bankFlowStartDate, bankFlowEndDate);
-      if (!dates) return null;
-      return {
-        ...dates,
-        view: "project",
-        projectNames: projectExportNames,
-        aggregateBy: projectAggregateBy,
-        bankTagPrimaryKeys: projectCostTags,
-      };
+      return projectExportNames.length && projectCostTags.length ? { month, view: "project", projectNames: projectExportNames, bankTagPrimaryKeys: projectCostTags } : null;
     }
-
-    if (costTagSelections.length === 0) {
-      return null;
-    }
-    const range = exportDateParams(costTagRangeMode, costTagMonth, costTagStartDate, costTagEndDate);
-    return range ? {
-      ...range,
-      view: "cost_tag",
-      bankTagPrimaryKeys: costTagSelections,
-    } : null;
+    return costTagSelections.length ? { month, view: "cost_tag", bankTagPrimaryKeys: costTagSelections } : null;
   }
 
   async function runExport(params: CostExportParams) {
@@ -1389,11 +1279,13 @@ export default function CostStatisticsPage() {
     exportSummaryRequestRef.current = controller;
     setIsSummaryLoading(true);
     setExportFeedback(null);
+    const timer = window.setTimeout(() => {
     fetchCostStatisticsExportSummary(JSON.parse(exportSummaryKey) as SummaryCostExportParams, controller.signal)
       .then(payload => { if (!controller.signal.aborted) setExportSummary(payload); })
       .catch(reason => { if (!controller.signal.aborted) setExportFeedback({ tone: 'error', message: reason instanceof Error ? reason.message : '导出统计失败' }); })
       .finally(() => { if (!controller.signal.aborted) setIsSummaryLoading(false); });
-    return () => controller.abort();
+    }, 150);
+    return () => { window.clearTimeout(timer); controller.abort(); };
   }, [isExportCenterOpen, exportSummaryKey]);
 
   async function handleExportFromCenter() {
@@ -1866,51 +1758,26 @@ export default function CostStatisticsPage() {
       {isExportCenterOpen ? (
         <ExportCenterDrawer
           mode={exportCenterMode}
+          period={exportPeriod}
+          years={exportReferenceData?.years ?? []}
+          onPeriodChange={(period) => { setExportPeriod(period); setExportSummary(null); }}
           projectOptions={exportProjectOptions}
           costTagOptions={allCostTagOptions}
           costTagLabels={Object.fromEntries((exportReferenceData?.costTags ?? []).map(row => [row.key, row.label]))}
           bankAccountOptions={exportBankAccountOptions}
-          bankAccountRangeMode={bankAccountRangeMode}
-          bankAccountMonth={bankAccountMonth}
-          bankAccountStartDate={bankAccountStartDate}
-          bankAccountEndDate={bankAccountEndDate}
           bankAccountSelections={bankAccountSelections}
           bankAccountProjectNames={bankAccountProjectNames}
           projectNames={projectExportNames}
-          projectAggregateBy={projectAggregateBy}
           projectCostTags={projectCostTags}
-          costTagRangeMode={costTagRangeMode}
-          costTagMonth={costTagMonth}
-          costTagStartDate={costTagStartDate}
-          costTagEndDate={costTagEndDate}
           costTagSelections={costTagSelections}
-          bankFlowRangeMode={bankFlowRangeMode}
-          bankFlowMonth={bankFlowMonth}
-          bankFlowStartDate={bankFlowStartDate}
-          bankFlowEndDate={bankFlowEndDate}
           summaryData={exportSummary}
           feedback={exportFeedback}
           isSummaryLoading={isSummaryLoading}
           isExporting={isExporting}
           isBusy={isExportActionBusy}
+          selectionEmpty={exportSummaryKey === "null"}
           onClose={() => setIsExportCenterOpen(false)}
           onModeChange={(mode) => void handleExportCenterModeChange(mode)}
-          onBankAccountRangeModeChange={(mode) => {
-            setBankAccountRangeMode(mode);
-            setExportSummary(null);
-          }}
-          onBankAccountMonthChange={(month) => {
-            setBankAccountMonth(month);
-            setExportSummary(null);
-          }}
-          onBankAccountStartDateChange={(date) => {
-            setBankAccountStartDate(date);
-            setExportSummary(null);
-          }}
-          onBankAccountEndDateChange={(date) => {
-            setBankAccountEndDate(date);
-            setExportSummary(null);
-          }}
           onBankAccountSelectionsChange={(bankAccounts) => {
             setBankAccountSelections(bankAccounts);
             setExportSummary(null);
@@ -1920,51 +1787,15 @@ export default function CostStatisticsPage() {
             setExportSummary(null);
           }}
           onProjectNamesChange={(projectNames) => {
-            updateProjectExportSelection(projectNames);
-            setExportSummary(null);
-          }}
-          onProjectAggregateByChange={(aggregateBy) => {
-            setProjectAggregateBy(aggregateBy);
+            setProjectExportNames(projectNames);
             setExportSummary(null);
           }}
           onProjectCostTagsChange={(costTags) => {
             setProjectCostTags(costTags);
             setExportSummary(null);
           }}
-          onCostTagRangeModeChange={(mode) => {
-            setCostTagRangeMode(mode);
-            setExportSummary(null);
-          }}
-          onCostTagMonthChange={(month) => {
-            setCostTagMonth(month);
-            setExportSummary(null);
-          }}
-          onCostTagStartDateChange={(date) => {
-            setCostTagStartDate(date);
-            setExportSummary(null);
-          }}
-          onCostTagEndDateChange={(date) => {
-            setCostTagEndDate(date);
-            setExportSummary(null);
-          }}
           onCostTagSelectionsChange={(costTags) => {
             setCostTagSelections(costTags);
-            setExportSummary(null);
-          }}
-          onBankFlowRangeModeChange={(mode) => {
-            setBankFlowRangeMode(mode);
-            setExportSummary(null);
-          }}
-          onBankFlowMonthChange={(month) => {
-            setBankFlowMonth(month);
-            setExportSummary(null);
-          }}
-          onBankFlowStartDateChange={(date) => {
-            setBankFlowStartDate(date);
-            setExportSummary(null);
-          }}
-          onBankFlowEndDateChange={(date) => {
-            setBankFlowEndDate(date);
             setExportSummary(null);
           }}
           onExport={() => void handleExportFromCenter()}
