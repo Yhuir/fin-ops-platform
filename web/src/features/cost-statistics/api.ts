@@ -937,7 +937,7 @@ function exportErrorMessageFromText(rawText: string, fallback: string) {
 
 export async function exportCostStatisticsView(params: CostExportParams, signal?: AbortSignal) {
   const query = buildCostStatisticsQuery(params);
-  const response = await apiFetch(`/api/cost-statistics/export?${query.toString()}`, { method: "GET", signal });
+  const response = await apiFetch("/api/cost-statistics/export", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: query.toString(), signal });
   const contentType = typeof response.headers?.get === "function" ? response.headers.get("Content-Type") ?? "" : "";
 
   if (!response.ok) {
@@ -1012,9 +1012,11 @@ export async function fetchCostStatisticsExportSummary(
 ): Promise<CostStatisticsExportSummary> {
   const query = buildCostStatisticsQuery(params);
   const payload = await requestJson<ApiCostStatisticsExportSummary>(
-    `/api/cost-statistics/export-summary?${query.toString()}`,
+    "/api/cost-statistics/export-summary",
     {
-      method: "GET",
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: query.toString(),
       signal,
     },
   );

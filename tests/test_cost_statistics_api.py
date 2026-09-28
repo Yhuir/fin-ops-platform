@@ -80,6 +80,9 @@ class CostStatisticsApiTests(unittest.TestCase):
         )
 
     def _get(self, path: str):
+        if path.split("?", 1)[0] in {"/api/cost-statistics/export", "/api/cost-statistics/export-summary"}:
+            endpoint, _, query = path.partition("?")
+            return self.app.handle_request("POST", endpoint, body=query)
         return self.app.handle_request("GET", path)
 
     def _json(self, path: str) -> tuple[int, dict[str, object]]:
@@ -823,6 +826,19 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertNotIn(self.bank_id, [cell.value for cell in workbook["成本明细"][2]])
         self.assertFalse(any("ID" in str(cell.value) for cell in workbook["成本明细"][1]))
         self.assertEqual(workbook["按项目汇总"]["E2"].value, 1250)
+
+    def test_export_body_accepts_long_project_selection_and_retires_get(self):
+        from urllib.parse import urlencode
+
+        projects = [self.oa.project_name] + ["长项目名称" * 20 + str(index) for index in range(31)]
+        body = urlencode({"month": "all", "view": "project", "project_name": projects}, doseq=True)
+        self.assertGreater(len(body), 8000)
+        for endpoint in ("export-summary", "export"):
+            path = f"/api/cost-statistics/{endpoint}"
+            response = self.app.handle_request("POST", path, body=body)
+            self.assertEqual(response.status_code, 200, response.body[:200])
+            self.assertEqual(self.app.handle_request("GET", path).status_code, 404)
+            self.assertEqual(self.app.handle_request("POST", path + "?month=all", body=body).status_code, 400)
 
     def test_retired_cost_export_filters_fail_explicitly(self):
         for endpoint in ("export", "export-summary"):

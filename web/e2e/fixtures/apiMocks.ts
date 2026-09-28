@@ -9337,6 +9337,9 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, costStatisticsExplorerPagePayload(url, payload));
     }
 
+    if (["/api/cost-statistics/export-summary", "/api/cost-statistics/export"].includes(path)) {
+      url.search = route.request().postData() ?? "";
+    }
     if (path === "/api/cost-statistics/export-summary") {
       return json(route, costStatisticsExportPreviewPayload(
         url,

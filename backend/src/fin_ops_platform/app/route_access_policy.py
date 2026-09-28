@@ -5,6 +5,8 @@ from fin_ops_platform.services.access_control_service import ALL_PAGE_KEYS, ASSI
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 _READ_ONLY_POST_ROUTES = frozenset(
     {
+        "/api/cost-statistics/export-summary",
+        "/api/cost-statistics/export",
         "/api/input-invoice-usage/oa-reverse/preview",
         "/api/pending-invoices/attach-existing-invoices/preview",
         "/api/pending-invoices/invoice-candidates/batch",

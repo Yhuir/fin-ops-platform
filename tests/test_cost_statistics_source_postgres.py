@@ -228,10 +228,10 @@ class CostSourcePostgresTests(unittest.TestCase):
             self.assertEqual(self.query.get_explorer_page(scope='all',view=view,filters={'bank_tag_primary_key':'label:费用'},cursor=None,page_size=20)['summary']['total_amount'],'1497.22')
             from urllib.parse import urlencode
             query=urlencode({'month':'2026-08','view':view,'project_name':'测试项目','bank_tag_primary_key':'label:费用','bank_account_label':rows[0]['bank_account_label']})
-            preview=app.handle_request('GET','/api/cost-statistics/export-summary?'+query)
+            preview=app.handle_request('POST','/api/cost-statistics/export-summary',body=query)
             self.assertEqual(preview.status_code,200,preview.body)
             self.assertEqual(json.loads(preview.body)['summary']['total_amount'],'1497.22')
-            exported=app.handle_request('GET','/api/cost-statistics/export?'+query)
+            exported=app.handle_request('POST','/api/cost-statistics/export',body=query)
             self.assertEqual(exported.status_code,200)
             from io import BytesIO
 
@@ -1106,7 +1106,7 @@ class CostSourcePostgresTests(unittest.TestCase):
             self.assertIsNone(detail['allocation']['oa_original_amount'])
             self.assertEqual(detail['allocation']['oa_id'],'')
             self.assertEqual(detail['reconciliation']['difference'],'192.00')
-        response=app.handle_request('GET','/api/cost-statistics/export-summary?month=2026-08&view=project&project_name=测试项目')
+        response=app.handle_request('POST','/api/cost-statistics/export-summary',body='month=2026-08&view=project&project_name=测试项目')
         self.assertEqual(response.status_code,200,response.body)
         self.assertEqual(json.loads(response.body)['summary']['transaction_count'],3)
         self.assertEqual(json.loads(response.body)['summary']['manual_allocation_pending_count'],1)

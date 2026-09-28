@@ -17,7 +17,7 @@
 
 前端公共 `FilteredExportDrawer` 只管理临时筛选与异步请求生命周期；三个 feature API 各自翻译领域参数，页面不把 DTO 或全量数据传给抽屉。成本复用自己的导出配置，外壳使用 `AppDrawer`。
 
-四个 owner 的 `GET /api/<owner>/export-summary` 返回数量和必要候选；`GET /api/<owner>/export` 返回 XLSX。原 `export-preview` route、页面调用和样例投影退役，无兼容别名。权限映射仍由对应页面权限保护，下载沿用审计边界。
+进项、销项和待票的 `GET /api/<owner>/export-summary` 返回数量和必要候选；`GET /api/<owner>/export` 返回 XLSX。成本两个端点统一使用 `POST` 和 `application/x-www-form-urlencoded` 请求体，沿用重复键筛选合同；不把多选项目名放进 URL，原 GET 导出端点退役。POST 只读分类和页面权限不变。原 `export-preview` route、页面调用和样例投影退役，无兼容别名。权限映射仍由对应页面权限保护，下载沿用审计边界。
 
 统计走 canonical repository/service，不加载浏览器全量对象，不新增 read model、缓存、worker 或依赖。下载保留 20,000 对象上限。进项分组仅用于判定，导出展开不重算或修改关联/支付关系。待找发票使用同一查询链的原始流水投影，不重建另一套分类。
 
@@ -33,3 +33,5 @@
 - 四页面、API 与公共抽屉 86 项通过，额外规则/抽屉回归 36 项通过；相关 Chromium 场景 27 项全部经最终复核通过。
 - 全量前端曾运行 1,634 项：1,625 通过，9 失败；其中本次抽屉结构断言已更新并复跑通过。其余 8 项分别在未修改的 `d0f73c51` 基线重现，涉及旧组数断言、按月控件角色和缺少状态字段的测试样例，不把它们报告为本次回归通过。
 - `scripts/verify.sh lint`、`scripts/verify.sh docs`、TypeScript 和 production build 通过。生产验证的实际版本、计数、文件及计时保存在本次交付验证记录。
+
+- 生产浏览器发现成本全选项目名导致 URL 超长，统计和下载改为 POST 表单请求体，已补长请求/退役 GET/只读权限分类测试。追加 28 项 API/权限、3 项真实 PostgreSQL、26 项前端、12 项 Chromium 流程和布局验证通过。

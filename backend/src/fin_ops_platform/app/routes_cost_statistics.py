@@ -4,6 +4,7 @@ from datetime import datetime
 from http import HTTPStatus
 from time import monotonic
 from typing import Any, Callable
+from urllib.parse import parse_qs
 
 from fin_ops_platform.app.auth import OARequestSession, actor_id_for_session
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
@@ -122,11 +123,14 @@ class CostStatisticsApiRoutes:
                 page_size=query.get("page_size", [None])[0],
                 include_statistics=query.get("include_statistics", [None])[0],
             )
-        if method == "GET" and route_path in {"/api/cost-statistics/export", "/api/cost-statistics/export-summary"}:
+        if method == "POST" and route_path in {"/api/cost-statistics/export", "/api/cost-statistics/export-summary"}:
+            if query:
+                return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "invalid_cost_statistics_export_request", "message": "导出筛选必须使用请求体。"})
+            query = parse_qs(body.decode("utf-8") if isinstance(body, bytes) else body or "", keep_blank_values=True)
             retired = {"expense_type", "include_oa_details", "include_invoice_details", "include_exception_rows", "include_ignored_rows", "include_expense_content_summary", "sort_by"}.intersection(query)
             if retired:
                 return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "invalid_cost_statistics_export_request", "message": "不再支持旧导出参数：" + ", ".join(sorted(retired))})
-        if method == "GET" and route_path == "/api/cost-statistics/export-summary":
+        if method == "POST" and route_path == "/api/cost-statistics/export-summary":
             return self.handle_export_summary(
                 month=query.get("month", [None])[0],
                 view=query.get("view", [None])[0],
@@ -139,7 +143,7 @@ class CostStatisticsApiRoutes:
                 end_date=query.get("end_date", [None])[0],
                 aggregate_by=query.get("aggregate_by", [None])[0],
             )
-        if method == "GET" and route_path == "/api/cost-statistics/export":
+        if method == "POST" and route_path == "/api/cost-statistics/export":
             return self.handle_export(
                 month=query.get("month", [None])[0],
                 view=query.get("view", [None])[0],

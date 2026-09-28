@@ -7511,7 +7511,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     const rawUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     const url = new URL(rawUrl, "http://localhost");
     const jsonBody =
-      typeof init?.body === "string" && init.body.length > 0
+      typeof init?.body === "string" && init.body.length > 0 && !["/api/cost-statistics/export-summary", "/api/cost-statistics/export"].includes(url.pathname)
         ? (JSON.parse(init.body) as Record<string, unknown>)
         : null;
     const formData = init?.body instanceof FormData ? init.body : null;
@@ -8078,6 +8078,10 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       });
     }
 
+    if (["/api/cost-statistics/export-summary", "/api/cost-statistics/export"].includes(url.pathname)) {
+      if (init?.method !== "POST") throw new Error("Cost export requires POST");
+      url.search = String(init.body);
+    }
     const handler = handlers[url.pathname];
     if (!handler) {
       throw new Error(`Unhandled fetch mock for ${url.pathname}`);

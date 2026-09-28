@@ -10,6 +10,8 @@ from fin_ops_platform.app.route_access_policy import (
 class RouteAccessPolicyTests(unittest.TestCase):
     def test_state_changing_classification_is_used_only_for_audit(self) -> None:
         self.assertFalse(is_state_changing_request("GET", "/api/workbench"))
+        for endpoint in ("export", "export-summary"):
+            self.assertFalse(is_state_changing_request("POST", f"/api/cost-statistics/{endpoint}"))
         self.assertFalse(is_state_changing_request("POST", "/api/workbench/actions/confirm-link/preview"))
         self.assertTrue(is_state_changing_request("POST", "/api/workbench/exceptions/review"))
         self.assertTrue(is_state_changing_request("PUT", "/api/pending-invoices/rules"))

@@ -95,7 +95,7 @@ describe("Cost statistics page", () => {
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
     expect(within(dialog).getByRole("radio", { name: "全部", exact: true })).toBeChecked();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringMatching(/export-summary\?month=all&view=time/), expect.any(Object)));
+      "/api/cost-statistics/export-summary", expect.objectContaining({ method: "POST", body: expect.stringMatching(/month=all&view=time/) })));
     page.unmount();
     fetchMock.mockClear();
     renderPage();
@@ -117,8 +117,8 @@ describe("Cost statistics page", () => {
     await user.click(within(dialog).getByRole("radiogroup", { name: "导出视图切换" }).querySelector("button")!);
     expect(within(dialog).getByRole("radio", { name: "全部", exact: true })).toBeChecked();
     await within(dialog).findByText(/导出 \d+ 笔/);
-    const previewCalls = () => fetchMock.mock.calls.filter(([url]) => String(url).includes("/export-summary?"));
-    const url = new URL(String(previewCalls().at(-1)![0]), "http://localhost");
+    const previewCalls = () => fetchMock.mock.calls.filter(([url]) => String(url).includes("/export-summary"));
+    const url = new URL(String(previewCalls().at(-1)![0]) + "?" + String(previewCalls().at(-1)![1]?.body), "http://localhost");
     expect(url.searchParams.get("month")).toBe("all");
     expect(url.searchParams.has("start_date")).toBe(false);
     expect(url.searchParams.has("end_date")).toBe(false);
@@ -437,14 +437,14 @@ describe("Cost statistics page", () => {
     await user.click(within(tabs).getByRole("radio", { name: "按时间" }));
     expect(await within(dialog).findByText(/导出 \d+ 笔/)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringMatching(/export-summary\?month=all&view=time/),
-      expect.any(Object),
+      "/api/cost-statistics/export-summary",
+      expect.objectContaining({ method: "POST", body: expect.stringMatching(/month=all&view=time/) }),
     );
     await user.click(within(tabs).getByRole("radio", { name: "按银行账户" }));
     expect(await within(dialog).findByText(/导出 \d+ 条/)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringMatching(/export-summary\?month=all&view=bank_account.*bank_account_label=/),
-      expect.any(Object),
+      "/api/cost-statistics/export-summary",
+      expect.objectContaining({ method: "POST", body: expect.stringMatching(/month=all&view=bank_account.*bank_account_label=/) }),
     );
   });
 

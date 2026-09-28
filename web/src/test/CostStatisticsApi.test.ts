@@ -230,18 +230,18 @@ describe("Cost statistics export API", () => {
       expect.any(Object),
     );
     expect(global.fetch).toHaveBeenCalledWith(
-      `/api/cost-statistics/export-summary?month=all&view=project&project_name=${encodeURIComponent("云南溯源科技")}&aggregate_by=month`,
-      expect.any(Object),
+      "/api/cost-statistics/export-summary",
+      expect.objectContaining({ method: "POST", body: `month=all&view=project&project_name=${encodeURIComponent("云南溯源科技")}&aggregate_by=month` }),
     );
     expect(global.fetch).toHaveBeenCalledWith(
-      `/api/cost-statistics/export?month=all&view=project&project_name=${encodeURIComponent("云南溯源科技")}&aggregate_by=month`,
-      expect.any(Object),
+      "/api/cost-statistics/export",
+      expect.objectContaining({ method: "POST", body: `month=all&view=project&project_name=${encodeURIComponent("云南溯源科技")}&aggregate_by=month` }),
     );
     const yearRange = { month: "all", view: "project" as const, projectNames: ["云南溯源科技"],
       aggregateBy: "month" as const, startDate: "2025-01-01", endDate: "2025-12-31" };
     await fetchCostStatisticsExportSummary(yearRange);
     await exportCostStatisticsView(yearRange);
-    const scopedCalls = vi.mocked(global.fetch).mock.calls.slice(-2).map(([input]) => new URL(String(input), "http://localhost"));
+    const scopedCalls = vi.mocked(global.fetch).mock.calls.slice(-2).map(([input, init]) => new URL(String(input) + "?" + String(init?.body), "http://localhost"));
     expect(scopedCalls.map(url => url.pathname)).toEqual(["/api/cost-statistics/export-summary", "/api/cost-statistics/export"]);
     expect(scopedCalls[0].search).toBe(scopedCalls[1].search);
     expect(scopedCalls[0].searchParams.get("month")).toBe("all");
