@@ -3139,9 +3139,9 @@ function etcBusinessBatchListPayload(
   return {
     items: batches.slice((page - 1) * pageSize, page * pageSize),
     counts: {
-      unsubmitted: batchBucket === "unsubmitted" ? total * etcBusinessBatchInvoiceItems().length : 0,
-      staged: batchBucket === "staged" ? total * etcBusinessBatchInvoiceItems().length : 0,
-      submitted: batchBucket === "submitted" ? total * etcBusinessBatchInvoiceItems().length : 0,
+      unsubmitted: batchBucket === "unsubmitted" ? total : 0,
+      staged: batchBucket === "staged" ? total : 0,
+      submitted: batchBucket === "submitted" ? total : 0,
     },
     pagination: {
       page,

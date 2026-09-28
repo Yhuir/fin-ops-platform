@@ -69,7 +69,7 @@ export type EtcInvoiceListPayload = {
   };
 };
 
-export type EtcBusinessBatchInvoiceCounts = {
+export type EtcBusinessBatchCounts = {
   unsubmitted: number;
   staged: number;
   submitted: number;
@@ -163,7 +163,7 @@ export type EtcBusinessBatchDetail = EtcBusinessBatchSummary & {
 };
 
 export type EtcBusinessBatchListPayload = {
-  counts: EtcBusinessBatchInvoiceCounts;
+  counts: EtcBusinessBatchCounts;
   items: EtcBusinessBatchSummary[];
   statistics?: EtcPageStatistics;
   pagination: {

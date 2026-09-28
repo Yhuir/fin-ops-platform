@@ -163,7 +163,7 @@ describe("etc api", () => {
       global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [], counts }), {
         status: 200, headers: { "Content-Type": "application/json" },
       })) as typeof fetch;
-      await expect(fetchEtcBusinessBatches()).rejects.toThrow("ETC 发票统计响应无效");
+      await expect(fetchEtcBusinessBatches()).rejects.toThrow("ETC 批次统计响应无效");
     },
   );
 

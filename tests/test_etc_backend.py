@@ -2401,6 +2401,45 @@ class EtcServiceTests(unittest.TestCase):
         self.assertEqual(fake_oa.draft_payloads, [])
 
 
+class EtcBusinessBatchCountTests(unittest.TestCase):
+    def test_local_batch_counts_ignore_invoice_members_and_follow_visible_state(self):
+        with TemporaryDirectory() as directory:
+            store = ApplicationStateStore(Path(directory))
+            batches = {
+                key: {"business_batch_id": key, "status": status, "invoice_ids": members}
+                for key, status, members in [
+                    ("empty", "draft", []),
+                    ("first", "imported", ["shared", "shared", "missing"]),
+                    ("second", "imported", ["shared"]),
+                    ("staged", "oa_draft_creating", []),
+                    ("submitted", "manually_marked_submitted", []),
+                    ("deleted", "deleted", []),
+                    ("replaced", "superseded", []),
+                ]
+            }
+            snapshot = {"business_batches": batches, "invoices": {
+                "shared": {"id": "shared", "status": "deleted", "total_amount": "1"},
+            }}
+            with patch.object(store, "load_etc_state", return_value=snapshot), patch.object(
+                store, "load_etc_reconciliation_state", return_value={"tasks": {"orphan": {"task_id": "orphan"}}},
+            ):
+                for bucket, expected in (("unsubmitted", 3), ("staged", 1), ("submitted", 1)):
+                    for page in (1, 2):
+                        result = store.list_etc_business_batch_summaries(
+                            bucket=bucket, page=page, page_size=1, can_admin_access=True,
+                        )
+                        self.assertEqual(result["counts"], {"unsubmitted": 3, "staged": 1, "submitted": 1})
+                        self.assertEqual(result["total"], expected)
+                        self.assertEqual(len(result["items"]), int(page <= expected))
+                batches["empty"]["status"] = "oa_confirmation_pending"
+                moved = store.list_etc_business_batch_summaries(bucket="staged", can_admin_access=True)
+                self.assertEqual(moved["counts"], {"unsubmitted": 2, "staged": 2, "submitted": 1})
+                batches["first"]["owner_user_id"] = "private-owner"
+                hidden = store.list_etc_business_batch_summaries(bucket="unsubmitted", owner_user_ids=["other"])
+                self.assertEqual(hidden["counts"]["unsubmitted"], 1)
+                self.assertEqual(hidden["total"], 1)
+
+
 class EtcApiTests(unittest.TestCase):
     def test_retired_business_batch_import_routes_cannot_write_facts(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -3986,7 +4025,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertLessEqual(len(list_response.body.encode("utf-8")), 250 * 1024)
         list_payload = json.loads(list_response.body)["data"]
         self.assertEqual(list_payload["total"], 1)
-        self.assertEqual(list_payload["counts"]["unsubmitted"], 65)
+        self.assertEqual(list_payload["counts"]["unsubmitted"], 1)
         self.assertEqual(list_payload["items"][0]["invoiceSummary"]["count"], 65)
         self.assertNotIn("invoiceIds", list_payload["items"][0])
         self.assertEqual(detail_response.status_code, 200)
@@ -4015,7 +4054,6 @@ class EtcApiTests(unittest.TestCase):
                 return [{
                     "bucket": "unsubmitted",
                     "batch_count": 1,
-                    "invoice_count": 65,
                     "etc_invoice_count": 65,
                     "input_invoice_count": 1158,
                 }]
@@ -4079,9 +4117,10 @@ class EtcApiTests(unittest.TestCase):
         self.assertIn("left join lateral", list_page_sql)
         self.assertIn("min(invoice.invoice_date) as invoice_date_start", list_page_sql)
         self.assertEqual(list_count_sql.count("from app.etc_business_batches"), 1)
-        self.assertIn("count(distinct invoice.etc_invoice_id)", list_count_sql)
+        self.assertNotIn("bucket_invoice_counts", list_count_sql)
+        self.assertIn("count(*)::integer as batch_count", list_count_sql)
         self.assertNotIn("cross join lateral unnest", list_count_sql)
-        self.assertEqual(list_payload["counts"]["unsubmitted"], 65)
+        self.assertEqual(list_payload["counts"]["unsubmitted"], 1)
         self.assertEqual(list_payload["statistics"]["input_invoice_count"], 1158)
         self.assertEqual(list_payload["statistics"]["invoice_count"], 65)
         self.assertEqual(list_payload["items"][0]["invoice_date_start"], "2026-03-28")
@@ -5530,7 +5569,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(business_batch["status"], "imported")
         self.assertEqual(business_batch["invoiceSummary"]["count"], 2)
         self.assertEqual(business_batch["importBatchIds"], ["etc_import_batch_0001"])
-        self.assertEqual(active_business_batches["data"]["counts"]["unsubmitted"], 2)
+        self.assertEqual(active_business_batches["data"]["counts"]["unsubmitted"], 1)
         self.assertEqual(active_business_batches["data"]["total"], 1)
         self.assertEqual(active_business_batches["data"]["items"][0]["businessBatchId"], business_batch["businessBatchId"])
 

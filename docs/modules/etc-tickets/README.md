@@ -90,9 +90,9 @@
 - `e2e-coverage.md`：维护 ETC 票据管理 Spec-first 合同到自动化覆盖的映射。
 - `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。
 
-## 2026-09-28 业务统计按发票张数
+## 2026-09-28 业务批次状态按批统计
 
-- `GET /api/etc/business-batches` 的 `counts.unsubmitted/staged/submitted` 统一为当前权限和查询范围内，按正式 `app.etc_invoices.etc_invoice_id` 去重的真实成员发票张数；取业务批次明确 `invoice_ids` 成员并排除不存在/已删除票，不使用批次 `invoice_count` 标量相加。ETC 成员并非全部已桥接统一 `app.invoices`，不得强制 canonical pool 连接导致漏票。
-- 三状态切换显示“张”；新建但尚未导入发票的批次贡献 0 张且仍可选、可操作。历史批次保留成员，跨状态存在同票时分别表达各状态成员事实，不擅自删除历史或假定合计互斥。
-- `pagination.total`/`total` 继续为所选状态的批次数，仅服务批次 rail 分页。统计在分页前计算，与当前页 `items.length` 无关。PostgreSQL 继续同一 repeatable-read read-only snapshot 的两次集合查询；不新增请求、缓存、worker 或写入。
-- 删除前端 OA 草稿创建/失败时 `counts ± 1` 的批次数乐观计算；请求中显示加载状态，成功后消费现有重读结果。缺失/非法统计响应报错，初始或失败不显示伪造的 0。
+- `GET /api/etc/business-batches` 的 `counts.unsubmitted/staged/submitted` 按当前权限及查询范围内有效业务批次身份计数，单位为“批”；新建空批次也计 1 批，成员发票重复、缺失或删除不改变有效批次的身份。既有状态映射、可见性和筛选规则不变。
+- 三状态互斥且覆盖同一查询范围内的有效批次；当前 bucket 的 counts 等于 `pagination.total`/`total`，在分页前计算，与当前页 `items.length` 无关。卡片和详情的发票张数、金额及顶部 canonical 发票汇总保留原口径。
+- PostgreSQL 复用已有 `bucket_counts.batch_count`，删除状态计数专用的 `bucket_invoice_counts` 发票成员展开/关联/去重；本地存储同步按批次计数。继续同一 repeatable-read read-only snapshot 的两次集合查询，不新增接口、缓存、worker、迁移或业务写入。
+- 前端使用 `EtcBusinessBatchCounts` 和既有 HeroUI 分段组件，不保留旧发票计数类型或 `counts ± 1` 乐观计算。请求中显示加载状态，成功后消费现有重读结果；缺失/非法统计响应报错，初始或失败不显示伪造的 0。

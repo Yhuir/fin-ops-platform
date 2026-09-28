@@ -238,6 +238,7 @@ test.describe("ETC ticket management browser flow", () => {
 
     await page.goto("/etc-tickets");
     await expect(page.getByText("121 批")).toBeVisible();
+    await expect(page.getByRole("radio", { name: "未提交 121批", exact: true })).toHaveAttribute("aria-checked", "true");
     await expect(page.getByText("显示 1-50 / 121")).toBeVisible();
 
     const secondPageResponse = waitForEtcBusinessBatches(page);
@@ -254,6 +255,7 @@ test.describe("ETC ticket management browser flow", () => {
     expect(thirdPageUrl.searchParams.get("page")).toBe("3");
     await expect(page.getByTestId("etc-batch-row-etc-business-page-121")).toBeVisible();
     await expect(page.getByText("显示 101-121 / 121")).toBeVisible();
+    await expect(page.getByRole("radio", { name: "未提交 121批", exact: true })).toHaveAttribute("aria-checked", "true");
     expect(browserErrors).toEqual([]);
   });
 
@@ -281,7 +283,7 @@ test.describe("ETC ticket management browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       await page.goto("/etc-tickets");
-      await page.getByRole("radio", { name: "暂存 2张" }).click();
+      await page.getByRole("radio", { name: "暂存 1批" }).click();
       const downloadButton = page.getByRole("button", { name: "下载发票PDF" });
       await mark("firstVisibleResponseLatencyMs", expect(downloadButton).toBeVisible());
       const downloadPromise = page.waitForEvent("download");
@@ -303,8 +305,8 @@ test.describe("ETC ticket management browser flow", () => {
 
     await page.goto("/etc-tickets");
     await expect(page.getByTestId("etc-ticket-management-page")).toBeVisible();
-    await expect(page.getByRole("radio", { name: "未提交 0张" })).toBeVisible();
-    await page.getByRole("radio", { name: "暂存 2张" }).click();
+    await expect(page.getByRole("radio", { name: "未提交 0批" })).toBeVisible();
+    await page.getByRole("radio", { name: "暂存 1批" }).click();
     await expect(page.getByRole("region", { name: "审批提交确认" })).toContainText("已发起审批草稿创建，等待确认。");
     await expect(page.getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "我已在 OA 系统上删除该 OA 草稿" })).toBeEnabled();
@@ -357,9 +359,9 @@ test.describe("ETC ticket management browser flow", () => {
     expect(recovered).toBe(true);
 
     await expect(page.getByText("ETC业务批次加载暂时失败，请刷新后重试。")).toHaveCount(0);
-    await expect(page.getByRole("radio", { name: "未提交 2张" })).toHaveAttribute("aria-checked", "true");
-    await expect(page.getByRole("radio", { name: "暂存 0张" })).toBeVisible();
-    await expect(page.getByRole("radio", { name: "已提交 0张" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "未提交 1批" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("radio", { name: "暂存 0批" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "已提交 0批" })).toBeVisible();
     const row = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(row).toBeVisible();
     await expect(row).toContainText("2026年3月 ETC发票");
@@ -398,7 +400,7 @@ test.describe("ETC ticket management browser flow", () => {
       await page.goto("/etc-tickets");
       await mark("finalSettledLatencyMs", expect(page.getByTestId("etc-ticket-management-page")).toBeVisible());
     });
-    await expect(page.getByRole("radio", { name: "未提交 2张" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("radio", { name: "未提交 1批" })).toHaveAttribute("aria-checked", "true");
     const row = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(row).toBeVisible();
     await expect(row).toContainText("2026年3月 ETC发票");
@@ -430,7 +432,7 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(page.getByText("ETC业务批次删除暂时失败，请重试。")).toBeVisible();
     await expect(page.getByRole("dialog", { name: "删除批次" })).toBeVisible();
     await expect(row).toBeVisible();
-    await expect(page.getByRole("radio", { name: "未提交 2张" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("radio", { name: "未提交 1批" })).toHaveAttribute("aria-checked", "true");
 
     await recordLatency({
       operationId: "etc-tickets.confirm-delete-unsubmitted-retry",
@@ -447,9 +449,9 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(page.getByText("ETC业务批次删除暂时失败，请重试。")).toHaveCount(0);
     await expect(page.getByRole("dialog", { name: "删除批次" })).toHaveCount(0);
     await expect(page.getByTestId("etc-batch-row-etc-business-e2e-001")).toHaveCount(0);
-    await expect(page.getByRole("radio", { name: "未提交 0张" })).toHaveAttribute("aria-checked", "true");
-    await expect(page.getByRole("radio", { name: "暂存 0张" })).toBeVisible();
-    await expect(page.getByRole("radio", { name: "已提交 0张" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "未提交 0批" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("radio", { name: "暂存 0批" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "已提交 0批" })).toBeVisible();
     await expect(page.getByText("无匹配批次。")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
@@ -474,17 +476,17 @@ test.describe("ETC ticket management browser flow", () => {
       await page.goto("/etc-tickets");
       await mark("finalSettledLatencyMs", expect(page.getByTestId("etc-ticket-management-page")).toBeVisible());
     });
-    await expect(page.getByRole("radio", { name: "未提交 0张" })).toHaveAttribute("aria-checked", "true");
-    await expect(page.getByRole("radio", { name: "暂存 0张" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "未提交 0批" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("radio", { name: "暂存 0批" })).toBeVisible();
     await recordLatency({
       operationId: "etc-tickets.open-submitted-bucket",
-      visibleLabel: "已提交 2张",
+      visibleLabel: "已提交 1批",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("radio", { name: "已提交 2张" }).click();
-      await mark("finalSettledLatencyMs", expect(page.getByRole("radio", { name: "已提交 2张" })).toHaveAttribute("aria-checked", "true"));
+      await page.getByRole("radio", { name: "已提交 1批" }).click();
+      await mark("finalSettledLatencyMs", expect(page.getByRole("radio", { name: "已提交 1批" })).toHaveAttribute("aria-checked", "true"));
     });
-    await expect(page.getByRole("radio", { name: "已提交 2张" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("radio", { name: "已提交 1批" })).toHaveAttribute("aria-checked", "true");
 
     const row = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(row).toBeVisible();
@@ -523,9 +525,9 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(page.getByText("ETC业务批次删除暂时失败，请重试。")).toBeVisible();
     await expect(page.getByRole("dialog", { name: "删除批次" })).toBeVisible();
     await expect(row).toBeVisible();
-    await expect(page.getByRole("radio", { name: "已提交 2张" })).toHaveAttribute("aria-checked", "true");
-    await expect(page.getByRole("radio", { name: "暂存 0张" })).toBeVisible();
-    await expect(page.getByRole("radio", { name: "未提交 0张" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "已提交 1批" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("radio", { name: "暂存 0批" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "未提交 0批" })).toBeVisible();
 
     await expect(deleteDialog.getByRole("button", { name: "确认删除" })).toBeEnabled();
     await recordLatency({
@@ -543,9 +545,9 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(page.getByText("ETC业务批次删除暂时失败，请重试。")).toHaveCount(0);
     await expect(page.getByRole("dialog", { name: "删除批次" })).toHaveCount(0);
     await expect(page.getByTestId("etc-batch-row-etc-business-e2e-001")).toHaveCount(0);
-    await expect(page.getByRole("radio", { name: "已提交 0张" })).toHaveAttribute("aria-checked", "true");
-    await expect(page.getByRole("radio", { name: "暂存 0张" })).toBeVisible();
-    await expect(page.getByRole("radio", { name: "未提交 0张" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "已提交 0批" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("radio", { name: "暂存 0批" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "未提交 0批" })).toBeVisible();
     await expect(page.getByText("无匹配批次。")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
@@ -865,9 +867,9 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(page.getByRole("dialog", { name: "确认 OA 草稿处理结果" })).toBeVisible();
     await expect(resultDialog.getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" })).toBeEnabled();
     await expect(resultDialog.getByRole("button", { name: "我已在 OA 系统上删除该 OA 草稿" })).toBeEnabled();
-    await expect(page.getByRole("radio", { name: "未提交 0张" })).toBeVisible();
-    await expect(page.getByRole("radio", { name: "暂存 2张" })).toHaveAttribute("aria-checked", "true");
-    await expect(page.getByRole("radio", { name: "已提交 0张" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "未提交 0批" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "暂存 1批" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("radio", { name: "已提交 0批" })).toBeVisible();
 
     await recordLatency({
       operationId: "etc-tickets.manual-status-submitted-retry",
@@ -880,12 +882,12 @@ test.describe("ETC ticket management browser flow", () => {
       );
       await resultDialog.getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" }).click();
       expect((await mark("apiLatencyMs", recoveredManualStatusResponse)).status()).toBe(200);
-      await mark("finalSettledLatencyMs", expect(page.getByRole("radio", { name: "已提交 2张" })).toHaveAttribute("aria-checked", "true"));
+      await mark("finalSettledLatencyMs", expect(page.getByRole("radio", { name: "已提交 1批" })).toHaveAttribute("aria-checked", "true"));
     });
     expect(api.count("POST /api/etc/business-batches/etc-business-e2e-001/manual-oa-status")).toBe(2);
 
     await expect(page.getByText("人工确认暂时失败，请重试。")).toHaveCount(0);
-    await expect(page.getByRole("radio", { name: "已提交 2张" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("radio", { name: "已提交 1批" })).toHaveAttribute("aria-checked", "true");
     const submittedRow = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(submittedRow).toBeVisible();
     await expect(submittedRow).toContainText("人工确认已提交");
@@ -912,9 +914,9 @@ test.describe("ETC ticket management browser flow", () => {
     });
     await expect(page.getByRole("heading", { name: "ETC票据" })).toBeVisible();
     await expect(page.getByRole("radiogroup", { name: "ETC批次状态" })).toBeVisible();
-    await expect(page.getByRole("radio", { name: "未提交 2张" })).toHaveAttribute("aria-checked", "true");
-    await expect(page.getByRole("radio", { name: "暂存 0张" })).toBeVisible();
-    await expect(page.getByRole("radio", { name: "已提交 0张" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "未提交 1批" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("radio", { name: "暂存 0批" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "已提交 0批" })).toBeVisible();
     const statusWidths = await page.getByRole("radio", { name: /未提交|暂存|已提交/ }).evaluateAll((buttons) =>
       buttons.map((button) => Math.round(button.getBoundingClientRect().width)),
     );
@@ -977,11 +979,11 @@ test.describe("ETC ticket management browser flow", () => {
     }, async (mark) => {
       await resultDialog.getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" }).click();
       expect((await mark("apiLatencyMs", manualStatusResponse)).status()).toBe(200);
-      await mark("finalSettledLatencyMs", expect(page.getByRole("radio", { name: "已提交 2张" })).toHaveAttribute("aria-checked", "true"));
+      await mark("finalSettledLatencyMs", expect(page.getByRole("radio", { name: "已提交 1批" })).toHaveAttribute("aria-checked", "true"));
     });
     expect(api.count("POST /api/etc/business-batches/etc-business-e2e-001/manual-oa-status")).toBe(1);
 
-    await expect(page.getByRole("radio", { name: "已提交 2张" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("radio", { name: "已提交 1批" })).toHaveAttribute("aria-checked", "true");
     await expect(page.getByRole("button", { name: "提交审批" })).toHaveCount(0);
     const submittedRow = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(submittedRow).toBeVisible();

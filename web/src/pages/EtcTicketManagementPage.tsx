@@ -58,7 +58,7 @@ import {
 } from "../features/etc/api";
 import { buildEtcOaDraftReviewUrl } from "../features/etc/oaNavigation";
 import type {
-  EtcBusinessBatchInvoiceCounts,
+  EtcBusinessBatchCounts,
   EtcBusinessBatchDetail,
   EtcBusinessBatchBucket,
   EtcBusinessBatchStatus,
@@ -678,7 +678,7 @@ export default function EtcTicketManagementPage() {
     pageSize: BUSINESS_BATCH_PAGE_SIZE,
     total: 0,
   });
-  const [counts, setCounts] = useState<EtcBusinessBatchInvoiceCounts | null>(null);
+  const [counts, setCounts] = useState<EtcBusinessBatchCounts | null>(null);
   const [statistics, setStatistics] = useState<EtcPageStatistics | null>(null);
   const [businessBatches, setBusinessBatches] = useState<EtcBusinessBatchSummary[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState("");
@@ -2019,13 +2019,13 @@ export default function EtcTicketManagementPage() {
                 }}
               >
                 <Segment id="unsubmitted">
-                  未提交 {loading || draftCreating ? "…" : counts === null || batchListError ? "—" : `${counts.unsubmitted}张`}
+                  未提交 {loading || draftCreating ? "…" : counts === null || batchListError ? "—" : `${counts.unsubmitted}批`}
                 </Segment>
                 <Segment id="staged">
-                  暂存 {loading || draftCreating ? "…" : counts === null || batchListError ? "—" : `${counts.staged}张`}
+                  暂存 {loading || draftCreating ? "…" : counts === null || batchListError ? "—" : `${counts.staged}批`}
                 </Segment>
                 <Segment id="submitted">
-                  已提交 {loading || draftCreating ? "…" : counts === null || batchListError ? "—" : `${counts.submitted}张`}
+                  已提交 {loading || draftCreating ? "…" : counts === null || batchListError ? "—" : `${counts.submitted}批`}
                 </Segment>
               </SegmentGroup>
               {loading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}

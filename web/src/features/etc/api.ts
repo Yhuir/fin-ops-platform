@@ -1414,7 +1414,7 @@ export async function fetchEtcBusinessBatches(query: EtcBusinessBatchQuery = {})
   if (!counts || ![counts.unsubmitted, counts.staged, counts.submitted].every(
     (count) => typeof count === "number" && Number.isSafeInteger(count) && count >= 0,
   )) {
-    throw new Error("ETC 发票统计响应无效，请刷新重试。");
+    throw new Error("ETC 批次统计响应无效，请刷新重试。");
   }
   return {
     counts: {

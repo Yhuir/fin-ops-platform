@@ -4,7 +4,7 @@
 
 - OA 待付款：流程/支付流水两层切换，业务摘要与合并行分页分开，见 [OA I/O](../modules/oa-pending-payments/boundary-io.md)。
 - 批量账务、流水规则批次：状态入口使用原始流水笔数，操作批次及其分页保留，见 [批量账务](../modules/batch-accounting/boundary-io.md)、[流水规则批次](../modules/bank-flow-rule-batches/boundary-io.md)。
-- ETC：状态入口统计真实 ETC 发票成员张数，批次仍是操作对象，见 [ETC](../modules/etc-tickets/boundary-io.md)。
+- ETC：状态入口和列表分页按真实业务批次数统计（批），空批次也计 1 批；卡片和详情仍按发票张数展示。这是业务实体批次管理，不是配对关系展示分组，见 [ETC](../modules/etc-tickets/boundary-io.md)。
 - 关联台异常：分别提供 OA、原始流水、发票数量，不把混合对象相加冒充关系数，见 [关联台](../modules/reconciliation-workbench/boundary-io.md)。
 - 进项、销项、待找发票已有实体统计继续保持；进项无消费的组数摘要删除。待找发票不能推断尚未取得的发票张数。
 

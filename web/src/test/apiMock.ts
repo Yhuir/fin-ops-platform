@@ -549,9 +549,9 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
         ok: true,
         data: {
           counts: {
-            unsubmitted: new Set(filteredBatches.filter((batch) => businessBatchBucket(batch) === "unsubmitted").flatMap((batch) => invoicesForBatch(batch).map((invoice) => invoice.id))).size,
-            staged: new Set(filteredBatches.filter((batch) => businessBatchBucket(batch) === "staged").flatMap((batch) => invoicesForBatch(batch).map((invoice) => invoice.id))).size,
-            submitted: new Set(filteredBatches.filter((batch) => businessBatchBucket(batch) === "submitted").flatMap((batch) => invoicesForBatch(batch).map((invoice) => invoice.id))).size,
+            unsubmitted: filteredBatches.filter((batch) => businessBatchBucket(batch) === "unsubmitted").length,
+            staged: filteredBatches.filter((batch) => businessBatchBucket(batch) === "staged").length,
+            submitted: filteredBatches.filter((batch) => businessBatchBucket(batch) === "submitted").length,
           },
           items: cloneJson(rows.slice((page - 1) * pageSize, page * pageSize)),
           pagination: {

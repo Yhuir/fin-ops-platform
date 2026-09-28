@@ -60,9 +60,9 @@ class EtcFormalMatchingPostgresTests(unittest.TestCase):
                 values (%s,'batch-source','submitted',%s,'2026-07-31','公路公司',%s,0,%s,'{}')''',
                 (f'etc-invoice-{i}', f'ETC-NO-{i}', amount, amount))
 
-    def test_business_bucket_counts_distinct_actual_invoices_before_pagination(self):
+    def test_business_bucket_counts_batches_before_pagination(self):
         repository = PostgresOpsTaxEtcRepository(self.connection)
-        # Repeated membership and a missing ID must not inflate invoice counts.
+        # Batch identity determines counts, regardless of repeated, missing or deleted invoice members.
         historical = {**self.batch_payload, 'business_batch_id': 'batch-history',
                       'invoice_ids': ['etc-invoice-0', 'etc-invoice-0', 'missing-invoice']}
         self.connection.execute("""insert into app.etc_business_batches
@@ -78,7 +78,7 @@ class EtcFormalMatchingPostgresTests(unittest.TestCase):
             result = repository.list_etc_business_batch_summaries(
                 bucket='submitted', page=page, page_size=1, can_admin_access=True,
             )
-            self.assertEqual(result['counts'], {'unsubmitted': 0, 'staged': 0, 'submitted': 47})
+            self.assertEqual(result['counts'], {'unsubmitted': 1, 'staged': 0, 'submitted': 2})
             self.assertEqual(result['total'], 2)
             self.assertEqual(len(result['items']), 1 if page <= 2 else 0)
         self.connection.execute("""update app.etc_business_batches
@@ -94,10 +94,27 @@ class EtcFormalMatchingPostgresTests(unittest.TestCase):
             bucket='submitted', page=1, page_size=1, can_admin_access=True, keyword='batch-history',
         )
         self.assertEqual(filtered['total'], 1)
-        self.assertEqual(filtered['counts']['submitted'], 0)
+        self.assertEqual(filtered['counts']['submitted'], 1)
         self.assertEqual(repository.list_etc_business_batch_summaries(
             bucket='submitted', month='2026-08', can_admin_access=True,
         )['counts'], {'unsubmitted': 0, 'staged': 0, 'submitted': 0})
+
+    def test_business_bucket_counts_follow_batch_state_and_exclude_deleted(self):
+        repository = PostgresOpsTaxEtcRepository(self.connection)
+        for status, bucket in (("draft", "unsubmitted"), ("oa_draft_creating", "staged"),
+                               ("oa_confirmation_pending", "staged"),
+                               ("manually_marked_submitted", "submitted")):
+            self.connection.execute("update app.etc_business_batches set status=%s where business_batch_id='batch-source'", (status,))
+            result = repository.list_etc_business_batch_summaries(bucket=bucket, can_admin_access=True)
+            self.assertEqual(result['counts'], {name: int(name == bucket) for name in ('unsubmitted', 'staged', 'submitted')})
+            self.assertEqual(result['total'], 1)
+            self.assertEqual(result['items'][0]['invoice_count'], 47)
+        for status in ('deleted', 'superseded'):
+            self.connection.execute("update app.etc_business_batches set status=%s where business_batch_id='batch-source'", (status,))
+            result = repository.list_etc_business_batch_summaries(bucket='submitted', can_admin_access=True)
+            self.assertEqual(sum(result['counts'].values()), 0)
+            self.assertEqual(result['total'], 0)
+            self.assertEqual(result['items'], [])
 
     def add_bank(self):
         self.connection.execute('''insert into app.bank_transactions
