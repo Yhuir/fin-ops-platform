@@ -289,7 +289,7 @@ test.describe("cost statistics browser flow", () => {
     await expect(drawer.getByRole('button',{name:'仅预览'})).toHaveCount(0);
   });
 
-  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }, { width: 760, height: 640 }]) {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }, { width: 760, height: 600 }, { width: 600, height: 900 }]) {
     test(`export lists scroll independently without toolbar overlap at ${viewport.width}`, async ({ page }) => {
       await page.setViewportSize(viewport);
       const api = await installDeterministicApiMocks(page, { sessionMode: "user", costStatisticsLongExportLists: true });
@@ -305,6 +305,9 @@ test.describe("cost statistics browser flow", () => {
         const box = await drawer.boundingBox();
         return box ? Math.abs(box.x + box.width - viewport.width) : Infinity;
       }).toBeLessThan(0.01);
+      for (const list of [projects, tags]) {
+        expect(await list.evaluate(node => node.clientHeight)).toBeGreaterThanOrEqual(80);
+      }
       const toolbar = drawer.locator(".export-center-toolbar");
       const toolbarBefore = await toolbar.boundingBox();
       const footer = drawer.locator(".finance-drawer__footer");

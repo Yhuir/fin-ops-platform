@@ -19404,9 +19404,11 @@ body.column-layout-dragging {
 .export-center-checkbox[data-selected="true"] { background: var(--fp-primary-soft); }
 .export-center-result { display: grid; gap: 4px; min-width: 0; }
 .export-center-result .action-feedback { margin: 0; overflow-wrap: anywhere; font-size: 13px; }
-@media (max-width: 800px) {
+@media (max-width: 640px) {
   .export-center-config-grid { grid-template-columns: 1fr; grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .export-center-config-grid > .export-center-section + .export-center-section { border-left: 0; border-top: 1px solid var(--fp-border); padding: 12px 0 0; }
+}
+@media (max-width: 800px) {
   .export-center-toolbar { gap: 12px; padding-bottom: 12px; }
   .export-center-drawer-body { gap: 12px; }
   .export-center-period { margin-left: 0; }
