@@ -76,6 +76,7 @@ type ApiMockOptions = {
   costStatisticsExplorerFailOnce?: boolean;
   costStatisticsExplorerFailuresBeforeSuccess?: number;
   costStatisticsLargeDataset?: boolean;
+  costStatisticsLongExportLists?: boolean;
   costStatisticsRelationFanout?: boolean;
   inputInvoiceUsageExportRowLimitError?: boolean;
   inputInvoiceUsageFilterSortRows?: boolean;
@@ -9297,7 +9298,17 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         Boolean(options.costStatisticsRelationFanout),
         Boolean(options.costStatisticsLargeDataset),
       );
-      return json(route, costStatisticsExplorerPagePayload(url, payload));
+      const result = costStatisticsExplorerPagePayload(url, payload);
+      if (options.costStatisticsLongExportLists) {
+        result.facets.projects = [...result.facets.projects, ...Array.from({ length: 60 }, (_, index) => ({
+          project_name: `滚动验证项目 ${index + 1}`, total_amount: "100.00", primary_tag_count: 30,
+        }))];
+        result.facets.cost_tag_primary = [...result.facets.cost_tag_primary, ...Array.from({ length: 30 }, (_, index) => ({
+          key: `primary:滚动标签${index + 1}`, label: `滚动标签${index + 1}`,
+          total_amount: "100.00", row_count: 1, project_count: 60,
+        }))];
+      }
+      return json(route, result);
     }
 
     if (["/api/cost-statistics/export-summary", "/api/cost-statistics/export"].includes(path)) {

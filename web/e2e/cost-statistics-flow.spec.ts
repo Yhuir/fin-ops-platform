@@ -289,6 +289,74 @@ test.describe("cost statistics browser flow", () => {
     await expect(drawer.getByRole('button',{name:'仅预览'})).toHaveCount(0);
   });
 
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }, { width: 760, height: 640 }]) {
+    test(`export lists scroll independently without toolbar overlap at ${viewport.width}`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      const api = await installDeterministicApiMocks(page, { sessionMode: "user", costStatisticsLongExportLists: true });
+      await page.goto("/cost-statistics");
+      await page.getByRole("button", { name: "导出中心" }).click();
+      const drawer = page.getByRole("dialog", { name: "导出中心" });
+      const projects = drawer.getByRole("region", { name: "项目列表", exact: true });
+      const tags = drawer.getByRole("region", { name: "成本主标签列表", exact: true });
+      await expect.poll(() => projects.getByRole("checkbox").count()).toBeGreaterThanOrEqual(60);
+      await expect.poll(() => tags.getByRole("checkbox").count()).toBeGreaterThanOrEqual(30);
+      await expect(drawer.getByRole("button", { name: "导出", exact: true })).toBeEnabled();
+      await expect.poll(async () => {
+        const box = await drawer.boundingBox();
+        return box ? Math.abs(box.x + box.width - viewport.width) : Infinity;
+      }).toBeLessThan(0.01);
+      const toolbar = drawer.locator(".export-center-toolbar");
+      const toolbarBefore = await toolbar.boundingBox();
+      const footer = drawer.locator(".finance-drawer__footer");
+      const footerBefore = await footer.boundingBox();
+      const calls = api.count("POST /api/cost-statistics/export-summary");
+      const position = (locator: typeof projects) => locator.evaluate(node => node.scrollTop);
+      await projects.hover();
+      await page.mouse.wheel(0, 600);
+      await expect.poll(() => position(projects)).toBeGreaterThan(0);
+      expect(await position(tags)).toBe(0);
+      const projectScroll = await position(projects);
+      await tags.hover();
+      await page.mouse.wheel(0, 500);
+      await expect.poll(() => position(tags)).toBeGreaterThan(0);
+      expect(await position(projects)).toBe(projectScroll);
+      expect(await toolbar.boundingBox()).toEqual(toolbarBefore);
+      expect(await footer.boundingBox()).toEqual(footerBefore);
+      expect(await drawer.locator(".finance-drawer__body").evaluate(node => node.scrollTop)).toBe(0);
+      expect(api.count("POST /api/cost-statistics/export-summary")).toBe(calls);
+      // Actual hit testing catches checkbox/content leaking over the toolbar, including its top gap.
+      expect(await toolbar.evaluate(node => {
+        const r = node.getBoundingClientRect();
+        return [r.top - 4, r.top + 4, r.bottom - 4].every(y => {
+          const hit = document.elementFromPoint(r.left + 40, y);
+          return !hit?.closest(".export-center-list");
+        });
+      })).toBe(true);
+      const tagScroll = await position(tags);
+      await drawer.getByRole("textbox", { name: "搜索项目", exact: true }).fill("项目 60");
+      await expect(projects.getByRole("checkbox")).toHaveCount(1);
+      expect(await position(projects)).toBe(0);
+      expect(await position(tags)).toBe(tagScroll);
+      await drawer.getByRole("textbox", { name: "搜索项目", exact: true }).fill("");
+      await projects.focus();
+      await page.keyboard.press("End");
+      await expect.poll(async () => projects.evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop)).toBeLessThan(2);
+      await projects.getByText("滚动验证项目 60", { exact: true }).click();
+      const afterSelection = await position(projects);
+      await expect.poll(() => api.count("POST /api/cost-statistics/export-summary")).toBeGreaterThan(calls);
+      await expect(drawer.getByRole("button", { name: "导出", exact: true })).toBeEnabled();
+      expect(await position(projects)).toBe(afterSelection);
+      await page.mouse.wheel(0, 1000);
+      expect(await drawer.locator(".finance-drawer__body").evaluate(node => node.scrollTop)).toBe(0);
+      expect(await page.evaluate(() => window.scrollY)).toBe(0);
+      await drawer.getByRole("radio", { name: "按银行账户" }).click();
+      expect(await drawer.getByRole("region", { name: "项目（可选）列表" }).evaluate(node => node.scrollTop)).toBe(0);
+      await drawer.getByRole("button", { name: "关闭导出中心" }).click();
+      await expect(drawer).toBeHidden();
+      await expectNoUnexpectedSuccessUiErrors(page);
+    });
+  }
+
   test("saves no-OA rules and refreshes the affected cost explorer", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
 

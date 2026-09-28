@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button, Checkbox, Input } from "@heroui/react";
 import SegmentedControl from "../common/SegmentedControl";
 import AppDrawer from "../common/AppDrawer";
@@ -51,6 +51,7 @@ type CostTagSelectorProps = {
 
 function CostTagSelector({ title, options, labels, selected, onChange }: CostTagSelectorProps) {
   const [search, setSearch] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
   const visible = options.filter(option => (labels ? labels[option] : option).toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
   const hasOptions = options.length > 0;
   const allSelected = hasOptions && visible.every(option => selected.includes(option));
@@ -77,25 +78,30 @@ function CostTagSelector({ title, options, labels, selected, onChange }: CostTag
           </Button>
         </div>
       </div>
-      {search && visible.length === 0 ? <span role="status">无匹配项目</span> : null}
-      {options.length > 8 ? <Input aria-label={`搜索${title}`} placeholder={`搜索${title}`} value={search} onChange={event => setSearch(event.target.value)} /> : null}
-      {hasOptions ? (
-        <div className="export-center-checkbox-grid" role="group" aria-label={title}>
-          {visible.map((option) => (
-            <Checkbox
-              className="export-center-checkbox"
-              isSelected={selected.includes(option)}
-              key={option}
-              onChange={() => onChange(toggleSelection(selected, option))}
-            >
-              <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
-              <span>{labels ? labels[option] : option}</span>
-            </Checkbox>
-          ))}
-        </div>
-      ) : (
-        <div className="cost-explorer-empty">暂无可选项。</div>
-      )}
+      {options.length > 8 ? <Input aria-label={`搜索${title}`} placeholder={`搜索${title}`} value={search} onChange={event => {
+        setSearch(event.target.value);
+        if (listRef.current) listRef.current.scrollTop = 0;
+      }} /> : null}
+      <div className="export-center-list" role="region" aria-label={`${title}列表`} tabIndex={0} ref={listRef}>
+        {search && visible.length === 0 ? <span role="status">无匹配{title}</span> : null}
+        {hasOptions ? (
+          <div className="export-center-checkbox-grid" role="group" aria-label={title}>
+            {visible.map((option) => (
+              <Checkbox
+                className="export-center-checkbox"
+                isSelected={selected.includes(option)}
+                key={option}
+                onChange={() => onChange(toggleSelection(selected, option))}
+              >
+                <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                <span>{labels ? labels[option] : option}</span>
+              </Checkbox>
+            ))}
+          </div>
+        ) : (
+          <div className="cost-explorer-empty">暂无可选项。</div>
+        )}
+      </div>
     </section>
   );
 }
@@ -127,7 +133,7 @@ export default function ExportCenterDrawer(props: ExportCenterDrawerProps) {
           <BusinessPeriodPicker ariaLabel="导出年月" selection={props.period} years={props.years} onChange={props.onPeriodChange} disabled={isExporting} />
         </div>
       </div>
-      <fieldset disabled={isExporting} className="export-center-options">
+      <fieldset key={mode} disabled={isExporting} className="export-center-options">
         {mode === "project" ? <div className="export-center-config-grid">
           <CostTagSelector title="项目" options={props.projectOptions} selected={props.projectNames} onChange={props.onProjectNamesChange} />
           <CostTagSelector title="成本主标签" options={props.costTagOptions} labels={props.costTagLabels} selected={props.projectCostTags} onChange={props.onProjectCostTagsChange} />
