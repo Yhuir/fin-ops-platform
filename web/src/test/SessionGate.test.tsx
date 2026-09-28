@@ -22,6 +22,7 @@ describe("OA session gate", () => {
     render(<App />);
 
     expect(screen.getByText("正在验证 OA 会话...")).toBeInTheDocument();
+    expect(screen.queryByText("请稍候，系统正在确认当前账号是否可访问财务运营平台。")).not.toBeInTheDocument();
     expect(await screen.findByRole("navigation", { name: "主导航" })).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "关联台" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/session/me", expect.any(Object));

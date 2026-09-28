@@ -1034,7 +1034,7 @@ export default function CostStatisticsPage() {
       }
     : {
         title: "正在加载成本统计",
-        detail: "正在从统一事实源读取数据，完成后将自动开放操作。",
+        detail: null,
       };
   const lockStatusCanRetry = effectiveCostPageState === "error";
 
@@ -1742,7 +1742,7 @@ export default function CostStatisticsPage() {
             <span className="cost-lock-status-indicator" aria-hidden="true" />
             <span className="cost-lock-status-copy">
               <strong>{lockStatusCopy.title}</strong>
-              <small>{lockStatusCopy.detail}</small>
+              {lockStatusCopy.detail ? <small>{lockStatusCopy.detail}</small> : null}
             </span>
             {lockStatusCanRetry ? (
               <button className="cost-lock-retry" type="button" onClick={handleManualRefresh}>

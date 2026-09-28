@@ -628,7 +628,10 @@ describe("ETC ticket management page", () => {
     await waitFor(() => {
       expect(within(page).queryByText("新建ETC批次")).not.toBeInTheDocument();
     });
-    expect(within(page).getByText("选择左侧批次，或新建批次。")).toBeInTheDocument();
+    expect(within(page).getByRole("heading", { name: "选择一个批次" })).toBeInTheDocument();
+    expect(within(page).queryByText("选择左侧批次，或新建批次。")).not.toBeInTheDocument();
+    expect(within(page).queryByText("从左侧列表选择批次，或新建一个批次开始处理。")).not.toBeInTheDocument();
+    expect(within(page).queryByText("暂无批次流程。")).not.toBeInTheDocument();
   });
 
   test("does not render orphan reconciliation tasks as visible ETC batches", async () => {

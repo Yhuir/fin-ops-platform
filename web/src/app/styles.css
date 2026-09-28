@@ -295,6 +295,8 @@ textarea {
 }
 
 .business-period-picker--segmented {
+  --business-period-control-height: 36px;
+
   width: fit-content;
   max-width: 100%;
   flex: 0 1 auto;
@@ -2918,12 +2920,8 @@ textarea {
 }
 
 /* Only these page toolbars use the 46px segmented-control outer height. */
-:is(.oa-pending-payments-query, .output-invoice-collections-query) .business-period-picker {
-  --business-period-control-height: 36px;
-}
-
-:is(.oa-pending-payments-query, .output-invoice-collections-query) .query-search__field,
-:is(.oa-pending-payments-query, .output-invoice-collections-query) .query-search > button {
+:is(.oa-pending-payments-query, .output-invoice-collections-query, .cost-section-heading-actions) .query-search__field,
+:is(.oa-pending-payments-query, .output-invoice-collections-query, .cost-section-heading-actions) .query-search > button {
   height: 46px;
   min-height: 46px;
 }
@@ -3736,7 +3734,7 @@ textarea {
   min-width: 0;
 }
 
-.output-invoice-collections-status-caption {
+.output-invoice-collections-refresh-status {
   display: flex;
   gap: var(--fp-space-3);
   margin-bottom: var(--fp-space-1);
@@ -3956,12 +3954,6 @@ textarea {
   color: var(--fp-text-primary);
   font-size: var(--fp-text-label);
   font-weight: 700;
-}
-
-.output-invoice-collection-filter-menu__subtitle {
-  color: var(--fp-text-secondary);
-  font-size: 12px;
-  line-height: 1.35;
 }
 
 .output-invoice-collection-filter-menu__divider {
@@ -5469,13 +5461,6 @@ textarea {
   font-size: var(--fp-text-title-sm);
   font-weight: 700;
   letter-spacing: 0;
-}
-
-.batch-accounting-bank-panel__subtitle {
-  margin: 2px 0 0;
-  color: var(--fp-text-muted);
-  font-size: var(--fp-text-caption);
-  line-height: var(--fp-leading-tight);
 }
 
 .batch-accounting-bank-panel__state {
@@ -10216,14 +10201,6 @@ textarea {
   min-height: 48px;
   border-top: 1px solid var(--fp-border);
   padding: var(--fp-space-2) var(--fp-space-3);
-}
-
-.import-workflow-summary-empty {
-  margin: 0;
-  border-block: 1px solid var(--fp-border-subtle);
-  padding: var(--fp-space-4) 0;
-  color: var(--fp-text-muted);
-  font-size: var(--fp-text-body);
 }
 
 .import-workflow-result-list {
@@ -21215,7 +21192,8 @@ body.column-layout-dragging {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 32px;
+  height: 46px;
+  min-height: 46px;
   padding: 0 12px;
   border: 1px solid var(--bank-border);
   border-radius: 8px;
@@ -21233,7 +21211,6 @@ body.column-layout-dragging {
 .bank-auto-rules-button:hover,
 .bank-auto-rules-button:focus-visible {
   background: var(--bank-hover);
-  outline: none;
 }
 
 .bank-transaction-grid {
@@ -24534,7 +24511,6 @@ body.column-layout-dragging {
   font-weight: 700;
 }
 
-.etc-batch-context__title p,
 .etc-current-task-heading p {
   margin: 5px 0 0;
   color: var(--fp-text-secondary);

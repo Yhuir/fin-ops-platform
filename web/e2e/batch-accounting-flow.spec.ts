@@ -126,7 +126,7 @@ test.describe("batch accounting browser flow", () => {
     const bankPanel = page.getByRole("region", { name: "批量账务流水" });
     const bankHeader = bankPanel.locator(".batch-accounting-bank-panel__header");
     const title = bankPanel.locator(".batch-accounting-bank-panel__title");
-    const subtitle = bankPanel.locator(".batch-accounting-bank-panel__subtitle");
+    await expect(bankPanel.getByText("对方户名精确匹配批量账务集中处理")).toHaveCount(0);
     const yearInput = page.getByRole("button", { name: "流水年份：年月" });
     const pagination = page.getByRole("group", { name: "批量账务流水分页" });
     const tagRulesButton = page.getByRole("button", { name: "批量账务标签规则" });
@@ -157,20 +157,17 @@ test.describe("batch accounting browser flow", () => {
 
     const headerBox = await bankHeader.boundingBox();
     const titleBox = await title.boundingBox();
-    const subtitleBox = await subtitle.boundingBox();
     const yearBox = await yearInput.boundingBox();
     const paginationBox = await pagination.boundingBox();
 
     expect(headerBox).not.toBeNull();
     expect(titleBox).not.toBeNull();
-    expect(subtitleBox).not.toBeNull();
     expect(yearBox).not.toBeNull();
     expect(paginationBox).not.toBeNull();
     expect(titleBox!.height).toBeLessThan(38);
-    expect(subtitleBox!.height).toBeLessThan(48);
 
     const headerRight = headerBox!.x + headerBox!.width + 1;
-    for (const box of [titleBox!, subtitleBox!, yearBox!, paginationBox!]) {
+    for (const box of [titleBox!, yearBox!, paginationBox!]) {
       expect(box.x).toBeGreaterThanOrEqual(headerBox!.x - 1);
       expect(box.x + box.width).toBeLessThanOrEqual(headerRight);
     }

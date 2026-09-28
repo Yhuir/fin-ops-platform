@@ -379,7 +379,6 @@ export default function TaxOffsetPage() {
     <PageScaffold
       title="税金抵扣计划与试算"
       titleAccessory={titleAccessory}
-      description="围绕进项票认证计划与已认证结果，做本月税金抵扣试算、导入核对与计划保存。"
       actions={(
         <div className="tax-page-actions">
           {headerStatusMessage ? (

@@ -238,7 +238,6 @@ export default function PaymentStatusRulesDrawer({
                 priority: Math.max(0, ...current.map((rule) => rule.priority)) + 1, enabled: true,
                 conditions: { hasOa: true, hasBank: true, fullyMatched: true },
               }])}>新增规则</Button> : null}
-              <p>按优先级从小到大匹配，首条命中生效；未命中规则的发票保留未命中状态。同一输出分类共用显示名称，修改名称会同步更新该分类的全部规则。</p>
               <div aria-label="支付状态规则" className="input-invoice-usage-payment-rules-list" role="list">
                 {draftRules.map((rule, index) => (
                   <article className="input-invoice-usage-payment-rule-row" key={rule.id || rule.code || rule.label} role="listitem">

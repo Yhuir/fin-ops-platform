@@ -278,7 +278,7 @@ test.describe("cash module deterministic browser flow", () => {
     await page.route("**/api/cash/settings/accounts?**", route => route.fulfill({ json: { rows: [], pagination: { page: 1, page_size: 100, total: 0 } } }));
     await page.route("**/api/cash/flows?**", route => route.fulfill({ json: { rows: [], pagination: { page: 1, page_size: 50, total: 0 }, summary: { period: { date_from: "2026-01-01", date_to: "2026-09-07" }, filtered_totals: { income_amount: "0.00", expense_amount: "0.00", transfer_amount: "0.00", flow_count: 0 }, account_balances: [] } } }));
     await page.setViewportSize({ width: 1800, height: 847 }); await page.goto("/cash?section=flows");
-    const grid = page.getByRole("grid", { name: "现金流水明细" }); await expect(grid).toContainText("该范围内没有现金流水");
+    const grid = page.getByRole("grid", { name: "现金流水明细" }); await expect(grid).toContainText("当前范围无现金流水");
     const geometry = await page.locator(".cash-page").evaluate(root => {
       const controls = [...root.querySelectorAll('.cash-toolbar input[type="date"]')].map(node => node.getBoundingClientRect());
       const table = root.querySelector(".cash-main-table")!, header = table.querySelector("thead")!, empty = table.querySelector(".cash-empty")!;

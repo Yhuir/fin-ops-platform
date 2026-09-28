@@ -473,7 +473,7 @@ describe("现金读取、更正、删除", () => {
     expect(screen.getByText(/影响：0 个任务，0 个事项，0 笔处理/)).toBeInTheDocument(); expect(writes).toHaveLength(0);
     await screen.findByText("本笔现金没有来源事项。");
     await user.click(screen.getByRole("button", { name: "确认删除" }));
-    await screen.findByText(/该范围内没有现金流水/);
+    await screen.findByText(/当前范围无现金流水/);
     expect(screen.queryByText("合成手工收款")).not.toBeInTheDocument();
     expect(writes).toHaveLength(1);
     expect(http.mock.calls.filter(([url, init]) => url.startsWith("/api/cash/flows?") && init?.method === "GET").length).toBeGreaterThan(1);

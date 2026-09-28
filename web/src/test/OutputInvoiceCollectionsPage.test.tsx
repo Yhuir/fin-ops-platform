@@ -532,8 +532,10 @@ describe("销项发票收款情况", () => {
     renderAuthenticatedAppAt("/output-invoice-collections");
 
     const tableBefore = await screen.findByRole("grid", { name: "销项发票收款情况表" });
+    expect(screen.queryByText("当前筛选范围 · 按发票张数")).not.toBeInTheDocument();
     await user.click(within(tableBefore).getByRole("button", { name: "筛选 状态" }));
     const menu = await screen.findByRole("menu", { name: "状态筛选与排序" });
+    expect(within(menu).queryByText("筛选项来自当前后端查询上下文")).not.toBeInTheDocument();
     const allStatusLabels = ["蓝票已被红冲 1", "红票已关联蓝票 1", "红票待核对 1", "已收款 1", "部分收款 1", "收款待核对 1"];
     allStatusLabels.forEach((label) => {
       expect(within(menu).getByRole("checkbox", { name: label })).toBeInTheDocument();

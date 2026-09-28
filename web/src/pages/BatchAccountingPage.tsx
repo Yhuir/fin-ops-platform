@@ -687,7 +687,6 @@ export default function BatchAccountingPage() {
           <header className="batch-accounting-bank-panel__header">
             <div>
               <h2 className="batch-accounting-bank-panel__title">批量账务流水</h2>
-              <p className="batch-accounting-bank-panel__subtitle">对方户名精确匹配批量账务集中处理</p>
             </div>
             <BusinessPeriodPicker
               allowAll
@@ -788,7 +787,7 @@ export default function BatchAccountingPage() {
                     onChange={(event) => setDifferenceNote(event.target.value)}
                     value={differenceNote}
                   />
-                  <small id="batch-accounting-difference-note-help">金额不一致时必须填写，提交后视为人工差额闭环。</small>
+                  <small id="batch-accounting-difference-note-help">金额不一致时必填，确认关联即接受该差额。</small>
                 </div>
               ) : null}
               <QuerySearch

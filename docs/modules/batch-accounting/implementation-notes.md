@@ -445,3 +445,7 @@
 - 生产并发 4 复测中未提交列表 p95 为 `1738.024ms`，但响应组装不足 `1ms`；耗时集中在 canonical PostgreSQL snapshot。
 - 旧 SQL 以 `value = any(relation.row_ids)` 逐行检查 active relation，不能使用既有 `workbench_pair_relations_row_ids_gin`。查询改为等价的 `relation.row_ids @> array[value]`，复用已有索引，不新增 migration 或基础设施。
 - 1,083 条流水、401 条 OA、1,500 个 active relation 的本地 A/B 从约 `2.7s` 降至 `50–58ms`；API shape、候选口径、提交/撤回写链和其他页面 I/O 均不变。
+
+## 2026-09-28 文案与年月工具栏
+
+本模块涉及的文案精简/组件尺寸及回归责任见[界面说明与年月工具栏](../../dev/ui-copy-and-toolbar.md)。业务状态、API、数据I/O、权限和持久化边界不变；错误与必要操作影响提示保留。

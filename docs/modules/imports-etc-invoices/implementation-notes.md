@@ -273,3 +273,7 @@
 - 生产四并发探针发现旧 `ready-for-import` 返回约 649KB，对每个 task 重复加载并序列化 source、信用卡、票根、核对、解析和审计明细，p95 超过 2.5s。
 - endpoint 收敛为导入选择器的单次摘要投影：ready 与 unavailable 共用一次查询，只返回标题、状态、期间、金额、票数、车牌和 blocker；ETC 对账详情仍走原 detail API。
 - 不新增 Redis、缓存、read model、索引、worker 或迁移；根因是错误 DTO/查询边界，直接删除无关 I/O。
+
+## 2026-09-28 文案与年月工具栏
+
+本模块涉及的文案精简/组件尺寸及回归责任见[界面说明与年月工具栏](../../dev/ui-copy-and-toolbar.md)。业务状态、API、数据I/O、权限和持久化边界不变；错误与必要操作影响提示保留。

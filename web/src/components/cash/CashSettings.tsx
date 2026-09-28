@@ -351,7 +351,7 @@ function CashPaymentGuide({ keyword, onChange }: { keyword: string; onChange: (v
   const needle = keyword.trim();
   const rows = paymentGuideRows.filter((row) => !needle || Object.values(row).some((value) => value.includes(needle)));
   return <section className="cash-section" aria-label="支付办理说明">
-    <p className="cash-hint">参考说明，不会提交 OA 或执行付款。现行与拟调整方式不自动成为任务规则。</p>
+    <p className="cash-hint">仅作记录，不提交 OA、不执行付款或生成任务。</p>
     <div className="cash-toolbar"><CashInput label="办理说明关键词" value={keyword} onChange={onChange} placeholder="类别、申请人或所需单据" /></div>
     <FinanceTable ariaLabel="支付办理参考" minWidth={1050}>
       <FinanceTableHeader>{["类别", "概要", "申请人", "所需单据", "收款方", "办理说明"].map((name, index) => <FinanceTableColumn key={name} id={name} isRowHeader={index === 0}>{name}</FinanceTableColumn>)}</FinanceTableHeader>

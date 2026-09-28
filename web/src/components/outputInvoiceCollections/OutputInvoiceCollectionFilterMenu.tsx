@@ -169,7 +169,6 @@ export default function OutputInvoiceCollectionFilterMenu({
           >
         <div className="output-invoice-collection-filter-menu__header">
           <div className="output-invoice-collection-filter-menu__title">{fieldConfig.label}</div>
-          <div className="output-invoice-collection-filter-menu__subtitle">筛选项来自当前后端查询上下文</div>
         </div>
         <MenuAction onClick={() => onSort("asc")}>
           <ArrowUp aria-hidden="true" size={14} />

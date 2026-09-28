@@ -60,7 +60,7 @@ export function CashFlowComposition({ parts, onChange, kind, existingItem, defau
       </>}
       <Button size="sm" variant="secondary" isDisabled={disabled} onPress={() => onChange([...parts, newFlowPart("settlement", kind)])}>登记还款 / 回款 / 费用结算</Button>
     </div>
-    {parts.length === 0 && <p className="cash-hint">普通收付可直接保存。涉及借款、真实费用或归还时，在此明确登记；不会按分类自动猜账。</p>}
+    {parts.length === 0 && <p className="cash-hint">涉及借款、费用或归还时，请登记关联事项。</p>}
     {parts.map((part, index) => <div className="cash-composition-row" key={part.id}>
       <div className="cash-toolbar"><h4>{index + 1}. {part.mode === "loan" ? "新增借款 / 代付" : part.mode === "expense" ? "登记实际费用" : "已有事项结算"}</h4>
         {!(existingItem && index === 0) && <Button size="sm" variant="tertiary" isDisabled={disabled} onPress={() => onChange(parts.filter(row => row.id !== part.id))}>移除</Button>}</div>
@@ -85,6 +85,5 @@ export function CashFlowComposition({ parts, onChange, kind, existingItem, defau
         <CashInput label="本次处理金额" value={part.amount} onChange={amount => update(part.id, { amount })} required disabled={disabled} />
       </>}
     </div>)}
-    {parts.length > 0 && <p className="cash-hint">现金只登记一次。借款资金与费用处理按各自口径校验，保存时全部一起成功或一起撤回。</p>}
   </section>;
 }

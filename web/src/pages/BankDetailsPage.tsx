@@ -2289,14 +2289,14 @@ export default function BankDetailsPage() {
                 </div>
 
                 <div className="bank-header-controls">
-                  <button
+                  <Button
                     className="bank-auto-rules-button"
-                    onClick={() => setRulesDrawerOpen(true)}
-                    type="button"
+                    onPress={() => setRulesDrawerOpen(true)}
+                    variant="secondary"
                   >
                     <Tags aria-hidden="true" size={14} />
                     自动标签规则
-                  </button>
+                  </Button>
                   <BusinessPeriodPicker
                     ariaLabel="银行明细时间范围"
                     onChange={(selection) => applyDateFilter(createDateFilter(

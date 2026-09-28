@@ -121,9 +121,9 @@ export default function CostStatisticsNoOaRulesDrawer({
         {error ? <div className="cost-tag-rules-state error">{error}</div> : null}
         {!loading && rules ? (
           <>
-            <div className="cost-tag-rules-intro">这里只管理当前确实存在无 active OA 关系的支出标签。统计时仍逐笔判断；同标签下已有 OA 的流水不会进入虚拟项目。</div>
+            <div className="cost-tag-rules-intro">仅统计所选标签下未关联 OA 的支出流水。</div>
             <Button className="cost-no-oa-add" isDisabled={!canSave || saving || interactionLocked} onPress={addProject} size="sm" variant="secondary"><Plus aria-hidden="true" size={15} />新增虚拟项目</Button>
-            {projects.length === 0 ? <div className="cost-tag-rules-state">尚未创建虚拟项目，也不会默认纳入任何无 OA 流水。</div> : null}
+            {projects.length === 0 ? <div className="cost-tag-rules-state">尚未配置无 OA 成本范围。</div> : null}
             <div className="cost-no-oa-projects">
               {projects.map((project) => {
                 const expanded = expandedId === project.id;

@@ -64,7 +64,7 @@ export default function BankFlowBatchWithdrawPreview({ batchId, onClose, onSubmi
       {detail ? <>
         <h3>{detail.batch.batchLabel} · {detail.rows.length} 笔流水</h3>
         <p>批次：{detail.batch.batchId}；合计金额：{detail.batch.totalAmount}</p>
-        <p>确认后撤回整个流水规则批次，下列流水恢复为可处理状态。若批次参与过后续合并，服务端按正式关系历史先撤回合并，再撤回原批次，保留其他恢复关系；原始流水不会删除。</p>
+        <p>撤回整个批次及其后续合并关系，下列流水恢复为可处理状态；其他恢复关系与原始流水保留。</p>
         <FinanceTable ariaLabel="待撤回批次流水" minWidth={650}>
           <FinanceTableHeader>
             <FinanceTableColumn id="date" columnRole="date">交易时间</FinanceTableColumn>

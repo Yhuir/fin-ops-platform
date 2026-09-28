@@ -776,7 +776,7 @@ describe("BatchAccountingPage", () => {
       expect(screen.getByText("已选 OA 金额 700.00")).toBeInTheDocument();
       expect(screen.getByText("差额 500.00")).toBeInTheDocument();
       expect(screen.getByLabelText("差额说明")).toBeInTheDocument();
-      expect(screen.getByText("金额不一致时必须填写，提交后视为人工差额闭环。")).toBeInTheDocument();
+      expect(screen.getByText("金额不一致时必填，确认关联即接受该差额。")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();
 
       await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));

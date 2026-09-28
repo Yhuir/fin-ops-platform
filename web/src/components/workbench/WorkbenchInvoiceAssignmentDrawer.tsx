@@ -142,7 +142,7 @@ export default function WorkbenchInvoiceAssignmentDrawer({
           </section>
 
           <p className="workbench-invoice-assignment-drawer__guidance">
-            请选择这张发票实际对应的 OA 付款明细。同组内有唯一金额依据的发票会自动归属；未能唯一确定时可在这里指定，可同时选择多个明细。
+            选择对应的 OA 付款明细，可多选。
           </p>
 
           {errorMessage ? (

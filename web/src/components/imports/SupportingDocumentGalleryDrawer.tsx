@@ -170,7 +170,7 @@ export default function SupportingDocumentGalleryDrawer({
       ) : (
         <div className="space-y-5">
           <p className="m-0 text-sm text-default-600">
-            查看关联台上传的全部有效补充凭证。这里仅供查看，不会把文件录入发票池。
+            补充凭证，不计入发票池
           </p>
           {errorMessage ? (
             <Alert role="alert" status="danger">

@@ -82,3 +82,63 @@ test('OA toolbar preserves payment and month filters when searching and clearing
   expect(JSON.parse(decodeURIComponent(url.searchParams.get('filters')!))[0].values).toEqual(['paid']);
   expect(api.count('GET /api/oa-pending-payments/rows') - before).toBe(2);
 });
+
+for (const [route, scope, peers, endpoint] of [
+  ['cost-statistics', '.cost-section-heading-actions', '.query-search__field, .query-search > button', '/api/cost-statistics/explorer'],
+  ['bank-details', '.bank-header-controls', '.bank-auto-rules-button', '/api/bank-details/transactions'],
+  ['bank-flow-rule-batches', '.bank-flow-rule-batches-filter', '.app-segments', '/api/bank-flow-rule-batches'],
+]) {
+  test(`${route} period picker matches its toolbar without changing filter requests`, async ({ page }, info) => {
+    await installDeterministicApiMocks(page, { sessionMode: 'user' });
+    await page.goto(`/${route}`);
+    const toolbar = page.locator(scope).first();
+    const picker = toolbar.locator('.business-period-picker');
+    await expect(picker).toBeVisible();
+    for (const width of [1800, 1280, 390]) {
+      await page.setViewportSize({ width, height: 1000 });
+      const controls = await toolbar.locator(`.business-period-picker, ${peers}`).evaluateAll(nodes => nodes.map(node => {
+        const r = node.getBoundingClientRect(); return { height: r.height, y: r.y, right: r.right, x: r.x };
+      }));
+      expect(controls.length).toBeGreaterThan(1);
+      for (const r of controls) {
+        expect(Math.abs(r.height - 46)).toBeLessThanOrEqual(1);
+        expect(r.x).toBeGreaterThanOrEqual(0);
+        expect(r.right).toBeLessThanOrEqual(width + 1);
+      }
+      if (width === 1800) expect(Math.max(...controls.map(r => r.y)) - Math.min(...controls.map(r => r.y))).toBeLessThanOrEqual(1);
+      await page.screenshot({ path: info.outputPath(`${route}-${width}.png`), animations: 'disabled' });
+    }
+    await page.setViewportSize({ width: 1800, height: 1000 });
+    const requests: string[] = [];
+    page.on('request', request => { if (new URL(request.url()).pathname === endpoint) requests.push(request.url()); });
+    await picker.locator('.business-period-trigger').click();
+    await expect(page.getByRole('dialog').last()).toBeVisible();
+    expect(requests).toHaveLength(0);
+    if (route !== 'bank-flow-rule-batches') await page.getByRole('dialog').last().getByRole('radio', { name: '按月', exact: true }).click();
+    expect(requests).toHaveLength(0);
+    const response = page.waitForResponse(r => new URL(r.url()).pathname === endpoint);
+    await page.getByRole('dialog').last().getByRole('button', { name: '四月', exact: true }).click();
+    expect((await response).ok()).toBe(true);
+    await expect(picker.locator('.business-period-trigger')).toContainText('4月');
+    const reset = page.waitForResponse(r => new URL(r.url()).pathname === endpoint);
+    await picker.getByRole('button', { name: '全部', exact: true }).click();
+    expect((await reset).ok()).toBe(true);
+    await expect(picker.getByRole('button', { name: '全部', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    if (route === 'bank-details') {
+      await toolbar.getByRole('button', { name: '自动标签规则' }).click();
+      await expect(page.getByRole('dialog')).toBeVisible();
+    }
+  });
+}
+
+test('redundant copy is absent while payment rules remain editable', async ({ page }) => {
+  await installDeterministicApiMocks(page, { sessionMode: 'user' });
+  await page.goto('/input-invoice-usage');
+  await page.getByRole('button', { name: '发票与支付状态规则设置' }).click();
+  const drawer = page.getByRole('dialog');
+  await expect(drawer.getByText(/按优先级从小到大匹配/)).toHaveCount(0);
+  await expect(drawer.getByRole('button', { name: '新增规则' })).toBeVisible();
+  const before = await drawer.getByRole('listitem').count();
+  await drawer.getByRole('button', { name: '新增规则' }).click();
+  await expect(drawer.getByRole('listitem')).toHaveCount(before + 1);
+});

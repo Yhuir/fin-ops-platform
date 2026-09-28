@@ -447,9 +447,9 @@ test.describe("tax offset browser flow", () => {
         mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         buffer: Buffer.from("tax-certified-import-e2e"),
       });
-      await mark("finalSettledLatencyMs", expect(dialog.getByText(`已选择 1 个文件，当前页面月份为 ${currentBusinessMonth()}。确认导入后会刷新当前税金抵扣页。`)).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(dialog.getByText(`已选 1 个文件 · 当前月份 ${currentBusinessMonth()}`)).toBeVisible());
     });
-    await expect(dialog.getByText(`已选择 1 个文件，当前页面月份为 ${currentBusinessMonth()}。确认导入后会刷新当前税金抵扣页。`)).toBeVisible();
+    await expect(dialog.getByText(`已选 1 个文件 · 当前月份 ${currentBusinessMonth()}`)).toBeVisible();
 
     await recordLatency({
       operationId: "tax-offset.preview-certified-import",

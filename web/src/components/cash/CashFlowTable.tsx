@@ -93,7 +93,7 @@ export default function CashFlowTable({ itemId, taskOccurrenceId, initialCriteri
 
     {data && !query.loading && <>
       <div className="cash-summary"><span>筛选合计：收入 {cashAmount(data.summary.filtered_totals.income_amount)}</span><span>支出 {cashAmount(data.summary.filtered_totals.expense_amount)}</span><span>内部转账 {cashAmount(data.summary.filtered_totals.transfer_amount)}</span><Button size="sm" variant="tertiary" aria-expanded={showBalances} onPress={() => setShowBalances(!showBalances)}>账户期间余额</Button></div>
-      {data.summary.account_balances.some(row => row.ending_balance?.startsWith("-")) && <p className="cash-hint">部分账户账面为负，请核对或补录。系统不会自动生成收入补平。</p>}
+      {data.summary.account_balances.some(row => row.ending_balance?.startsWith("-")) && <p className="cash-hint">部分账户账面为负，请核对或补录。</p>}
       {showBalances && <AppDrawer open title="账户期间余额" width={960} className="cash-module cash-drawer" onClose={() => setShowBalances(false)}><FinanceTable ariaLabel="账户期间余额" minWidth={900}>
         <FinanceTableHeader>{["账户", "记账范围", "期间期初", "已知起算余额", "期间转入", "期间转出", "期末余额"].map((label, index) => <FinanceTableColumn key={label} isRowHeader={index === 0}>{label}</FinanceTableColumn>)}</FinanceTableHeader>
         <FinanceTableBody>{data.summary.account_balances.map(row => <FinanceTableRow key={row.account_id} id={row.account_id}>
@@ -117,7 +117,7 @@ export default function CashFlowTable({ itemId, taskOccurrenceId, initialCriteri
             {index === 9 && <CashFilterPopover column label="来源" value={criteria.sources} onApply={sources => applyCriteria({ sources, page: 1 })} options={[{ value: "manual", label: "手动录入" }, { value: "monthly_task", label: "每月任务" }]} />}
           </CashColumnHeader>
         </FinanceTableColumn>)}</FinanceTableHeader>
-        <FinanceTableBody renderEmptyState={() => <p className="cash-empty" role="status">{query.loading ? "正在读取现金流水…" : query.error ? "读取失败，请刷新重试。" : "该范围内没有现金流水。可调整日期查看历史，或新增实际收付。"}</p>}>{(data?.rows ?? []).map(row => <FinanceTableRow key={row.id} id={row.id} textValue={row.content}>
+        <FinanceTableBody renderEmptyState={() => <p className="cash-empty" role="status">{query.loading ? "正在读取现金流水…" : query.error ? "读取失败，请刷新重试。" : "当前范围无现金流水。"}</p>}>{(data?.rows ?? []).map(row => <FinanceTableRow key={row.id} id={row.id} textValue={row.content}>
           <FinanceTableCell columnRole="date">{row.occurred_on}</FinanceTableCell>
           <FinanceTableCell columnRole="account">{row.from_account?.name}{row.kind === "transfer" ? " → " : ""}{row.to_account?.name}</FinanceTableCell>
           <FinanceTableCell columnRole="description">{row.project === null ? "无项目" : row.project.name_snapshot}</FinanceTableCell>

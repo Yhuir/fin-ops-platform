@@ -626,3 +626,7 @@
 - 共享分类 CTE 现在始终只保留导入银行名称和尾号两个标量，不恢复完整 payload；流水批量查询直接使用由完整账号生成的 canonical `candidate.account_key`，删除旧的名称加尾号身份重建。
 - 已提交历史不做数据库迁移或 payload 改写；列表与详情仅用同一 canonical snapshot 中已读取的成员流水修正银行显示名称，历史 batch id、account key、成员、金额、关系和事件保持不变。
 - 查询次数、snapshot 边界和前端 API 均未改变；没有新增自连接、N+1、cache、read model、worker、migration 或 fallback。
+
+## 2026-09-28 文案与年月工具栏
+
+本模块涉及的文案精简/组件尺寸及回归责任见[界面说明与年月工具栏](../../dev/ui-copy-and-toolbar.md)。业务状态、API、数据I/O、权限和持久化边界不变；错误与必要操作影响提示保留。

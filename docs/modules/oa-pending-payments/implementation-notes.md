@@ -761,3 +761,7 @@
 - 外部删除：既有 `oa-sync` worker 批量复查 completed projection 与 pending admission，跳过队列等待期间重现的 flow，再用一个参数化 MySQL DELETE 删除仍缺失 flow 的所有行。重复事件删除零行即成功，失败 rollback 并走既有 bounded retry/dead-letter。
 - 边界：month sync、精确附件刷新和本地 retention prune 都不能证明 OA 源删除，禁止触发外部删除；完整 `all` source identity 可以删除未曾进入 canonical retention scope 的真实 external orphan，但 OA 源仍存在的超期 flow 必须保留。页面 GET 不访问 MySQL/Mongo，热路径查询数量不变。
 - 数据与架构：无 migration、无新表/worker/read model/cache/hash/baseline/gate、无数据库备份；只扩展现有 snapshot、relation UoW、durable event 与 MySQL repository 边界。
+
+## 2026-09-28 文案与年月工具栏
+
+本模块涉及的文案精简/组件尺寸及回归责任见[界面说明与年月工具栏](../../dev/ui-copy-and-toolbar.md)。业务状态、API、数据I/O、权限和持久化边界不变；错误与必要操作影响提示保留。

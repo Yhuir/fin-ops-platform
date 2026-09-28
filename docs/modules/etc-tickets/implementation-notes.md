@@ -1027,3 +1027,7 @@
 
 - 根因：ETC Page Audit 仍优先拿 OA 提交金额核对 ETC 发票成员，导致有明确 `partial` coverage / `gap_reason` 的三个历史批次被误报为汇总损坏。
 - 修复：审计与页面统一优先读取 `amount_breakdown.etc_invoice_amount`，其次读取 `invoice_summary.amount`；OA 金额只保留为旧记录缺少 ETC 汇总字段时的末级 fallback。本次不修改历史业务数据，不新增 API、read model、worker 或缓存。
+
+## 2026-09-28 文案与年月工具栏
+
+本模块涉及的文案精简/组件尺寸及回归责任见[界面说明与年月工具栏](../../dev/ui-copy-and-toolbar.md)。业务状态、API、数据I/O、权限和持久化边界不变；错误与必要操作影响提示保留。

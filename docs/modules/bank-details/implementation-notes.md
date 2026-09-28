@@ -590,3 +590,7 @@
 - 清理：删除未接线的 `after_category_mutation` 回调；Bank Details 与 Turnover 的 PostgreSQL 标签写统一进入同一闭环，不新增通知、队列、worker、缓存、API 或页面 refresh。
 - 历史数据：扩展既有 fingerprint-bound `workbench-requirement-repair`，只自动修复有持久化分类来源证据的 snapshot drift；规则推导或未知来源仅报告人工复核。保留 dry-run、幂等续跑、history、rollback 与 exempt owner 合同。
 - 测试：`tests/test_bank_category_relation_closure_service.py` 覆盖原子更新、no-op、外层事务提交后发布和失败不污染镜像；repair tests 覆盖 persisted drift 与 rule-derived fail closed；Bank Details、Turnover、Workbench command 和架构守卫回归保护旧页面。
+
+## 2026-09-28 文案与年月工具栏
+
+本模块涉及的文案精简/组件尺寸及回归责任见[界面说明与年月工具栏](../../dev/ui-copy-and-toolbar.md)。业务状态、API、数据I/O、权限和持久化边界不变；错误与必要操作影响提示保留。

@@ -469,3 +469,7 @@ PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_cost_stati
 | cost_allocated | 990.6 | 1076.4 | 1071.2 |
 
 执行入口包括 `bash scripts/verify.sh lint`、`bash scripts/verify.sh docs`、`pytest tests -q`（独占PG）、成本179项unittest、前端全量verify及受影响组件复跑、TypeScript/Vite build、成本/拆分Chromium测试、正式deploy-oa.sh和认证http_slo_probe。全量后端既有55项依赖外部条件跳过，不宣称这些场景已验证。
+
+## 2026-09-28 文案与年月工具栏
+
+本模块涉及的文案精简/组件尺寸及回归责任见[界面说明与年月工具栏](../../dev/ui-copy-and-toolbar.md)。业务状态、API、数据I/O、权限和持久化边界不变；错误与必要操作影响提示保留。

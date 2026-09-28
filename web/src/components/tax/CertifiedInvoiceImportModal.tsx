@@ -136,9 +136,9 @@ export default function CertifiedInvoiceImportModal({
 
   const fileHint = useMemo(() => {
     if (selectedFiles.length === 0) {
-      return "支持一次选择多个 Excel 文件，先预览识别结果，再确认导入并刷新本页。";
+      return "支持多个 Excel 文件";
     }
-    return `已选择 ${selectedFiles.length} 个文件，当前页面月份为 ${currentMonth}。确认导入后会刷新当前税金抵扣页。`;
+    return `已选 ${selectedFiles.length} 个文件 · 当前月份 ${currentMonth}`;
   }, [currentMonth, selectedFiles.length]);
 
   function updateSelectedFiles(files: File[]) {
@@ -244,7 +244,6 @@ export default function CertifiedInvoiceImportModal({
       maxWidth="md"
       open
       title="已认证发票导入"
-      description="在税金抵扣页内完成已认证发票预览、确认导入和页面刷新，不跳转到关联台导入界面。"
       onClose={() => {
         if (!isConfirming) {
           onClose();

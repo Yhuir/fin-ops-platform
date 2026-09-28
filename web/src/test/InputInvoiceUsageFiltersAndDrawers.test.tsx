@@ -1423,6 +1423,7 @@ describe("Input invoice usage workflow drawers", () => {
     const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: ["陈秀云", "周洁莹"], rules: [{ id: "r1", statusCode: "paid", label: "已付款", description: "", priority: 1, enabled: true, conditions: { applicantName: "陈秀云", hasOa: true } }] };
     const saveRules = vi.fn((request) => Promise.resolve({ ...payload, version: 2, rules: request.rules }));
     render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} saveRules={saveRules} onClose={() => undefined} />);
+    expect(screen.queryByText(/按优先级从小到大匹配/)).not.toBeInTheDocument();
     await user.click(await screen.findByLabelText("已付款 OA 申请人条件"));
     await user.click(await screen.findByRole("option", { name: "周洁莹" }));
     await user.click(screen.getByRole("button", { name: "保存" }));

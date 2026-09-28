@@ -325,10 +325,7 @@ export default function OutputInvoiceCollectionsPage() {
           <div className="output-invoice-collections-content">
             <PageToolbar className="output-invoice-collections-query"
               left={<div className="output-invoice-collections-status-section">
-                <div className="output-invoice-collections-status-caption">
-                  当前筛选范围 · 按发票张数
-                  {refreshing ? <span role="status">更新中…</span> : null}
-                </div>
+                {refreshing ? <div className="output-invoice-collections-refresh-status" role="status">更新中…</div> : null}
                 <InvoiceCountSegments label="销项发票状态分类" selectedKey={selectedStatus} unit="张" pending={countsPending}
                   options={[
                     { key: "all", label: "全部", count: statusTotal },

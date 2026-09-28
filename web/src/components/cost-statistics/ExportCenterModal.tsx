@@ -414,7 +414,7 @@ export default function ExportCenterModal({
             </div>
           ) : null}
 
-          <section className="export-center-preview">
+          {isPreviewLoading || preview ? <section className="export-center-preview">
             <div className="export-center-preview-header">
               <h3>预览结果</h3>
               {preview ? <span>{preview.scopeLabel}</span> : null}
@@ -471,10 +471,8 @@ export default function ExportCenterModal({
                   </FinanceTable>
                 </div>
               </div>
-            ) : (
-              <div className="cost-explorer-empty">先选择筛选条件，再点“仅预览”查看导出范围。</div>
-            )}
-          </section>
+            ) : null}
+          </section> : null}
         </div>
     </AppDialog>
   );

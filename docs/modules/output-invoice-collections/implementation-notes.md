@@ -490,3 +490,7 @@
 - 目标：标题同时展示销项发票、OA/收入流水关联、收款、红字和收据覆盖，且始终代表页面投影全期间数据。
 - 决策：rows 主响应从 `output_invoice_collection` 完整投影展开 `invoiceRelations.summaries`，按唯一发票 ID 返回 `statistics` / `statistics_status`；筛选、月份、排序和分页不参与统计。Page Audit 保持 canonical expected-set 独立对照。
 - 旧链路：删除前端 `titleInvoiceCount`、`loadTitleTotal`、`queryAffectsTitleTotal` 与 `page_size=1` 额外标题请求，禁止恢复第二浏览器 I/O。
+
+## 2026-09-28 文案与年月工具栏
+
+本模块涉及的文案精简/组件尺寸及回归责任见[界面说明与年月工具栏](../../dev/ui-copy-and-toolbar.md)。业务状态、API、数据I/O、权限和持久化边界不变；错误与必要操作影响提示保留。

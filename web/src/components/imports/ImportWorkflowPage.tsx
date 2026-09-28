@@ -328,7 +328,7 @@ function ImportSummaryPanel({
   onOpenReview?: () => void;
 }) {
   if (!audit) {
-    return <p className="import-workflow-summary-empty">选择文件并开始预览后，将在这里显示导入统计。</p>;
+    return null;
   }
   const batchDuplicateCount = Math.max(0, audit.originalCount - audit.importableCount - audit.existingDuplicateCount - audit.updateCount - audit.suspectedDuplicateCount - audit.errorCount);
   const reviewCount = audit.suspectedDuplicateCount + audit.errorCount;

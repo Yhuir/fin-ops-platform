@@ -2124,9 +2124,6 @@ export default function EtcTicketManagementPage() {
                         </StatusChip>
                       ) : null}
                     </div>
-                    {!selectedBatch ? (
-                      <p>从左侧列表选择批次，或新建一个批次开始处理。</p>
-                    ) : null}
                   </div>
                   {activeStatus === "unsubmitted" ? (
                     <div className="etc-section-actions" aria-label="当前批次操作">
@@ -2234,7 +2231,7 @@ export default function EtcTicketManagementPage() {
                   <div className="etc-current-task-heading">
                     <div>
                       <h3>核对工作区</h3>
-                      <p>{selectedTask ? formatTaskTitle(selectedTask) : "选择左侧批次，或新建批次。"}</p>
+                      {selectedTask ? <p>{formatTaskTitle(selectedTask)}</p> : null}
                     </div>
                   </div>
 
@@ -2289,13 +2286,13 @@ export default function EtcTicketManagementPage() {
                                 <UploadBlock
                                   label="信用卡账单"
                                   accept=".pdf,application/pdf"
-                                  helperText="拖拽 PDF 到这里，或点击选择文件。"
+                                  helperText="支持 PDF 文件"
                                   disabled={!taskIsMutable || taskActionLoading}
                                   onFiles={handleUploadCreditCardStatement}
                                 />
                                 <UploadBlock
                                   label="票根网"
-                                  helperText="支持 TXT 或无扩展名的票根网行程文本，可多选或拖拽。"
+                                  helperText="支持 TXT 或无扩展名的行程文本，可多选"
                                   multiple
                                   disabled={!taskIsMutable || taskActionLoading || hasLegacyNonTxtTicketRootSource}
                                   disabledReason={hasLegacyNonTxtTicketRootSource ? "已有非 TXT 来源，删除后可导入。" : undefined}
@@ -2642,7 +2639,7 @@ export default function EtcTicketManagementPage() {
                         </DisclosureGroup>
 
                       </div>
-                    ) : !taskLoading && !taskListError ? (
+                    ) : selectedBatch && !taskLoading && !taskListError ? (
                       <StatePanel tone="empty">暂无批次流程。</StatePanel>
                     ) : null}
                   </div>
@@ -2650,10 +2647,8 @@ export default function EtcTicketManagementPage() {
               </section>
               ) : null}
 
+              {selectedBatch ? (
               <section className="etc-batch-records" aria-label="ETC批次详情">
-                {!selectedBatch ? (
-                  <StatePanel tone="empty">选择左侧批次。</StatePanel>
-                ) : (
                   <DisclosureGroup
                     allowsMultipleExpanded
                     className="etc-disclosure-group etc-disclosure-group--detail"
@@ -2715,8 +2710,8 @@ export default function EtcTicketManagementPage() {
                       </EtcDisclosureSection>
                     ) : null}
                   </DisclosureGroup>
-                )}
               </section>
+              ) : null}
             </div>
           </div>
         </div>

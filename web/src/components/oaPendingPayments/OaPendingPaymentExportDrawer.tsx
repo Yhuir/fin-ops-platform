@@ -103,7 +103,7 @@ export default function OaPendingPaymentExportDrawer({
       width="min(440px, 100vw)"
     >
       <div className="oa-pending-payment-export-drawer__body">
-        <p>选择需要导出的 OA 来源。导出范围不受当前页面月份、搜索、筛选或分页影响。</p>
+        <p>导出所选来源的全部 OA，不受页面筛选限制。</p>
         <div className="oa-pending-payment-export-drawer__options">
           <ExportSourceCheckbox
             checked={allSelected}

@@ -348,3 +348,7 @@
 - 将五张指标卡和独立试算卡合并为一个连续 HeroUI 汇总带；字段、试算口径、保存动作和 API 合同不变。
 - 删除 `TaxSummaryCards`、`TaxResultPanel` 及其旧样式，不保留并行 UI 或兼容选择器。
 - 本次只有前端展示 I/O，没有改变 canonical repository、read model、worker、权限或跨页面链路。
+
+## 2026-09-28 文案与年月工具栏
+
+本模块涉及的文案精简/组件尺寸及回归责任见[界面说明与年月工具栏](../../dev/ui-copy-and-toolbar.md)。业务状态、API、数据I/O、权限和持久化边界不变；错误与必要操作影响提示保留。

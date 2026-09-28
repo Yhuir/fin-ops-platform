@@ -59,7 +59,7 @@ function CorrectionFlowPicker({ excludeId, onSelect, onClose }: {
     {query.data && <><ul className="cash-choice-list">{query.data.rows.map(row => <li key={row.id}>
       <Button type="button" size="sm" variant="tertiary" isDisabled={row.id === excludeId || row.kind === "transfer"} onPress={() => onSelect(row)}>
         {row.occurred_on} · {row.content} · {cashAmount(row.amount)}</Button></li>)}</ul>
-      {!query.data.rows.length && <p>当前范围没有匹配流水，可调整时间范围查询。不会自动新增现金。</p>}
+      {!query.data.rows.length && <p>当前范围无匹配流水。</p>}
       <FinanceTablePagination {...query.data.pagination} pageSize={20} onPageChange={setPage} /></>}
     {query.error && <Button type="button" size="sm" onPress={query.reload}>重新读取</Button>}
   </section>;
@@ -214,7 +214,7 @@ function CorrectionsPanel({ flowId, mode, onChange, onValidityChange }: Props) {
       <Button type="button" size="sm" variant="tertiary" onPress={() => setEditor({ type: "settlement", row })}>更正此处理</Button></li>)}</ul>;
   }
   return <section className="cash-section" aria-label="现金来源与关联纠错">
-    <h3>来源与关联纠错</h3><p className="cash-muted">仅选择确实错误的项目。这里不立即写入，最终随本笔现金{mode === "edit" ? "保存" : "删除"}在同一事务提交。</p>
+    <h3>来源与关联纠错</h3><p className="cash-muted">更正随本次{mode === "edit" ? "保存" : "删除"}生效。</p>
     <CashNotice error={result.error} />
     {!!(sources.length + settlements.length + references.length) && <section aria-label="待提交纠错"><h4>已采用 {sources.length + settlements.length + references.length} 项纠错</h4>
       {([ ["source", sources, setSources], ["settlement", settlements, setSettlements], ["reference", references, setReferences] ] as const).map(([group, rows, setter]) => <ul key={group}>{rows.map(row => <li key={row.key}>{row.label}<Button type="button" size="sm" variant="tertiary" onPress={() => setter(values => values.filter(value => value.key !== row.key))}>取消此纠错</Button></li>)}</ul>)}
