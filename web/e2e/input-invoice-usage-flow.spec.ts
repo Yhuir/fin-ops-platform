@@ -875,3 +875,62 @@ test("unknown OA creation requires verified local release and requesting batches
   expect(String(releaseBody?.reason)).toContain("已到 OA 核实并删除可能存在的草稿");
   expect(api.count("POST /api/input-invoice-usage/oa-reverse/oa-draft")).toBe(0);
 });
+
+
+test("OA reverse shows full invoice numbers and unlinked-OA scope without extra preview requests", async ({ page }, testInfo) => {
+  await installDeterministicApiMocks(page, { sessionMode: "admin" });
+  const numbers = ["00123456789012345678", "26317000003099582123456789012345"];
+  let previewRequests = 0;
+  await page.route("**/api/input-invoice-usage/oa-reverse/preview", async (route) => {
+    previewRequests += 1;
+    const body = route.request().postDataJSON();
+    const rows = numbers.map((number, index) => ({ invoiceId: `full-number-${index}`, invoiceNo: number,
+      invoiceDate: "2026-09-01", sellerName: "完整号码测试销方", totalWithTax: "10.00",
+      bankRelationStatus: index === 0 ? "linked" : "unlinked", oaRelationStatus: "unlinked" }));
+    const filtered = body.bankRelation === "all" || !body.bankRelation ? rows : rows.filter((row) => row.bankRelationStatus === body.bankRelation);
+    await route.fulfill({ json: { previewId: "full-number-preview", previewHash: "full-number-hash",
+      targetApplicantCode: "chen_xiuyun", targetApplicantName: "陈秀云", targetApplicants: [{ code: "chen_xiuyun", name: "陈秀云" }],
+      invoiceCount: filtered.length, totalWithTax: String(filtered.length * 10),
+      relationCounts: { all: 2, linked: 1, unlinked: 1 }, pagination: { page: 1, pageSize: 50, total: filtered.length },
+      invoiceRows: filtered, groups: [], rejectedInvoices: [], canCreateDraft: false } });
+  });
+  await page.goto("/input-invoice-usage");
+  await page.getByRole("button", { name: "以发票反提 OA" }).click();
+  await expect(page.getByRole("heading", { name: "未关联 OA 的发票" })).toBeVisible();
+  const grid = page.getByRole("grid", { name: "反提 OA 候选发票清单" });
+  await expect(grid.getByText(numbers[0], { exact: true })).toBeVisible();
+  expect(previewRequests).toBe(1);
+  for (const [width, zoom] of [[1600, 1], [900, 1], [1100, 1.5]]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.evaluate((value) => { document.documentElement.style.zoom = String(value); }, zoom);
+    for (const number of numbers) {
+      const cell = grid.getByText(number, { exact: true });
+      await cell.scrollIntoViewIfNeeded();
+      const layout = await cell.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const parent = element.closest("td, [role='rowheader'], [role='gridcell']")!;
+        const bounds = parent.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        const range = document.createRange(); range.selectNodeContents(element);
+        return { text: element.textContent, overflow: element.scrollWidth > element.clientWidth + 1,
+          ellipsis: style.textOverflow === "ellipsis", contained: rect.left >= bounds.left && rect.right <= bounds.right + 1,
+          glyphsContained: Array.from(range.getClientRects()).every((r) => r.left >= bounds.left && r.right <= bounds.right + 1 && r.top >= bounds.top && r.bottom <= bounds.bottom + 1) };
+      });
+      expect(layout).toEqual({ text: number, overflow: false, ellipsis: false, contained: true, glyphsContained: true });
+    }
+    await page.screenshot({ path: testInfo.outputPath(`oa-full-numbers-${width}-${zoom}.png`), fullPage: true });
+  }
+  expect(previewRequests).toBe(1);
+  await page.evaluate(() => { document.documentElement.style.zoom = "1"; });
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  const filter = page.getByRole("button", { name: /筛选流水关联状态/ });
+  for (const label of ["已关联流水", "未关联流水", "全部"]) {
+    await filter.click();
+    await expect(page.getByRole("option", { name: "全部 2 张", exact: true })).toBeVisible();
+    await expect(page.getByRole("option", { name: "已关联流水 1 张", exact: true })).toBeVisible();
+    await expect(page.getByRole("option", { name: "未关联流水 1 张", exact: true })).toBeVisible();
+    await page.getByRole("option", { name: new RegExp(`^${label} `) }).click();
+    await expect(grid.getByRole("checkbox")).toHaveCount(label === "全部" ? 2 : 1);
+  }
+  expect(previewRequests).toBe(4);
+});

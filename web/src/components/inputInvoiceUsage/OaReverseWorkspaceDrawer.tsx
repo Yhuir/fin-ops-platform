@@ -497,7 +497,7 @@ export default function OaReverseWorkspaceDrawer({
                   <SummaryMetric label="候选发票数" value={`${preview.invoiceCount} 张`} />
                   <SummaryMetric label="候选价税合计" value={formatMoney(preview.totalWithTax, "-")} />
                 </div>
-                <Section title="候选发票清单">
+                <Section title="未关联 OA 的发票">
                   {preview ? (
                     <div className="input-invoice-usage-oa-actions">
                       <Button
@@ -535,7 +535,7 @@ export default function OaReverseWorkspaceDrawer({
                   <FinanceTable ariaLabel="反提 OA 候选发票清单" className="input-invoice-usage-oa-table" minWidth={680}>
                     <FinanceTableHeader>
                       <FinanceTableColumn columnRole="selection">选择</FinanceTableColumn>
-                      <FinanceTableColumn columnRole="identity" isRowHeader>发票号码</FinanceTableColumn>
+                      <FinanceTableColumn columnRole="identity" isRowHeader className="input-invoice-usage-oa-table__number">发票号码</FinanceTableColumn>
                       <FinanceTableColumn columnRole="account">销方</FinanceTableColumn>
                       <FinanceTableColumn columnRole="amount">价税合计</FinanceTableColumn>
                       <FinanceTableColumn columnRole="status">流水关联</FinanceTableColumn>
@@ -588,7 +588,7 @@ export default function OaReverseWorkspaceDrawer({
                                 </Checkbox.Control>
                               </Checkbox>
                             </FinanceTableCell>
-                            <FinanceTableCell columnRole="identity" textValue={invoiceNumber}>
+                            <FinanceTableCell columnRole="identity" className="input-invoice-usage-oa-table__number" textValue={invoiceNumber}>
                               <TableCellStack
                                 className="input-invoice-usage-oa-table__invoice"
                                 primary={invoiceNumber}
@@ -652,7 +652,7 @@ export default function OaReverseWorkspaceDrawer({
 }
 
 const BANK_RELATION_FILTER_OPTIONS: Array<{ value: OaRelationFilter; label: string }> = [
-  { value: "all", label: "全部流水关联" },
+  { value: "all", label: "全部" },
   { value: "linked", label: "已关联流水" },
   { value: "unlinked", label: "未关联流水" },
 ];
@@ -928,7 +928,7 @@ function StagedDraftsPanel({
           <div className="input-invoice-usage-rules-table-shell">
             <FinanceTable ariaLabel={`${item.targetApplicantName || "目标申请人"}暂存发票`} className="input-invoice-usage-oa-table" minWidth={620}>
               <FinanceTableHeader>
-                <FinanceTableColumn id="number" isRowHeader columnRole="identity">发票号码</FinanceTableColumn>
+                <FinanceTableColumn id="number" isRowHeader columnRole="identity" className="input-invoice-usage-oa-table__number">发票号码</FinanceTableColumn>
                 <FinanceTableColumn id="seller" columnRole="identity">销方</FinanceTableColumn>
                 <FinanceTableColumn id="date" columnRole="date">开票日期</FinanceTableColumn>
                 <FinanceTableColumn id="amount" columnRole="amount">价税合计</FinanceTableColumn>
@@ -936,7 +936,7 @@ function StagedDraftsPanel({
               <FinanceTableBody>
                 {item.invoiceRows.map((invoice) => (
                   <FinanceTableRow id={`${invoice.invoiceId}:${invoice.displayNo || invoice.invoiceNumber}`} key={`${invoice.invoiceId}:${invoice.displayNo || invoice.invoiceNumber}`}>
-                    <FinanceTableCell columnRole="identity">{invoice.displayNo || invoice.invoiceNumber || "未识别号码"}</FinanceTableCell>
+                    <FinanceTableCell columnRole="identity" className="input-invoice-usage-oa-table__number">{invoice.displayNo || invoice.invoiceNumber || "未识别号码"}</FinanceTableCell>
                     <FinanceTableCell columnRole="identity">{invoice.sellerName || "-"}</FinanceTableCell>
                     <FinanceTableCell columnRole="date">{invoice.issueDate || "-"}</FinanceTableCell>
                     <FinanceTableCell className="input-invoice-usage-oa-table__amount" columnRole="amount">{formatMoney(invoice.totalWithTax, "-")}</FinanceTableCell>
@@ -1029,7 +1029,7 @@ function SubmittedHistoryPanel({
           <div className="input-invoice-usage-rules-table-shell">
             <FinanceTable ariaLabel={`${item.targetApplicantName || "目标申请人"}已提交发票`} className="input-invoice-usage-oa-table" minWidth={620}>
               <FinanceTableHeader>
-                <FinanceTableColumn id="number" isRowHeader columnRole="identity">发票号码</FinanceTableColumn>
+                <FinanceTableColumn id="number" isRowHeader columnRole="identity" className="input-invoice-usage-oa-table__number">发票号码</FinanceTableColumn>
                 <FinanceTableColumn id="seller" columnRole="identity">销方</FinanceTableColumn>
                 <FinanceTableColumn id="date" columnRole="date">开票日期</FinanceTableColumn>
                 <FinanceTableColumn id="amount" columnRole="amount">价税合计</FinanceTableColumn>
@@ -1037,7 +1037,7 @@ function SubmittedHistoryPanel({
               <FinanceTableBody>
                 {item.invoices.map((invoice) => (
                   <FinanceTableRow id={`${invoice.invoiceNo}:${invoice.sellerName}:${invoice.invoiceDate}`} key={`${invoice.invoiceNo}:${invoice.sellerName}:${invoice.invoiceDate}`}>
-                    <FinanceTableCell columnRole="identity">{invoice.invoiceNo || "-"}</FinanceTableCell>
+                    <FinanceTableCell columnRole="identity" className="input-invoice-usage-oa-table__number">{invoice.invoiceNo || "-"}</FinanceTableCell>
                     <FinanceTableCell columnRole="identity">{invoice.sellerName || "-"}</FinanceTableCell>
                     <FinanceTableCell columnRole="date">{invoice.invoiceDate || "-"}</FinanceTableCell>
                     <FinanceTableCell className="input-invoice-usage-oa-table__amount" columnRole="amount">{formatMoney(invoice.totalWithTax, "-")}</FinanceTableCell>

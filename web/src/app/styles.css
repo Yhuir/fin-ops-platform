@@ -2628,8 +2628,21 @@ textarea {
   width: 142px;
 }
 
+.input-invoice-usage-oa-table .input-invoice-usage-oa-table__number {
+  width: 28ch;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .input-invoice-usage-oa-table__invoice {
-  max-width: 280px;
+  width: 100%;
+}
+
+.input-invoice-usage-oa-table__invoice .finance-cell-stack__primary {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
 }
 
 .input-invoice-usage-oa-table__invoice .finance-cell-stack__primary,

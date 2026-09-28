@@ -670,7 +670,7 @@ describe("Input invoice usage workflow drawers", () => {
     expect(within(screen.getByText("SD-INV-002").closest("td") as HTMLElement).getByText("2026-05-02")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "创建本地批次" })).not.toBeInTheDocument();
     expect(screen.queryByText("尚未创建本地批次。")).not.toBeInTheDocument();
-    const candidateSection = screen.getByRole("heading", { name: "候选发票清单" }).closest("section") as HTMLElement;
+    const candidateSection = screen.getByRole("heading", { name: "未关联 OA 的发票" }).closest("section") as HTMLElement;
     const createDraftButton = within(candidateSection).getByRole("button", { name: "创建 OA 草稿" });
     const candidateSearchInput = within(candidateSection).getByLabelText("搜索候选发票");
     expect(createDraftButton.compareDocumentPosition(candidateSearchInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -978,6 +978,30 @@ describe("Input invoice usage workflow drawers", () => {
       expectedVersion: 2,
       decision: "submitted",
     })));
+  });
+
+  test("OA reverse describes the unlinked-OA scope and preserves full invoice numbers", async () => {
+    const user = userEvent.setup();
+    const number = "00123456789012345678";
+    const first = { ...createReadyPreviewPayload.groups[0].invoiceRows![0], displayNo: number, invoiceNumber: number };
+    const loadPreview = vi.fn((request) => Promise.resolve({ ...createReadyPreviewPayload,
+      invoiceCount: request.bankRelation === "linked" ? 1 : request.bankRelation === "unlinked" ? 384 : 385,
+      relationCounts: { all: 385, linked: 1, unlinked: 384 },
+      groups: [], invoiceRows: [first],
+    }));
+    render(<OaReverseWorkspaceDrawer open loadPreview={loadPreview} onClose={() => undefined} />);
+    expect(await screen.findByRole("heading", { name: "未关联 OA 的发票" })).toBeInTheDocument();
+    expect(screen.getByText(number, { exact: true })).toHaveTextContent(number);
+    expect(screen.getByRole("checkbox", { name: `选择候选发票 ${number}` })).toBeEnabled();
+    expect(screen.queryByText(/全部流水关联/)).not.toBeInTheDocument();
+    for (const [label, bankRelation] of [["已关联流水", "linked"], ["未关联流水", "unlinked"], ["全部", "all"]]) {
+      await user.click(screen.getByLabelText("筛选流水关联状态"));
+      expect(screen.getByRole("option", { name: "全部 385 张", exact: true })).toHaveTextContent("全部 385 张");
+      expect(screen.getByRole("option", { name: "已关联流水 1 张", exact: true })).toHaveTextContent("已关联流水 1 张");
+      expect(screen.getByRole("option", { name: "未关联流水 384 张", exact: true })).toHaveTextContent("未关联流水 384 张");
+      await user.click(screen.getByRole("option", { name: new RegExp(`^${label} `) }));
+      await waitFor(() => expect(loadPreview).toHaveBeenLastCalledWith(expect.objectContaining({ bankRelation, page: 1 })));
+    }
   });
 
   test("OA reverse keeps cross-page selection and disables occupied invoices without reducing totals", async () => {
