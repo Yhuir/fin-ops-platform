@@ -15,7 +15,7 @@
 .cash-page .button, .cash-drawer .button, .cash-filter-popover .button { min-height: 32px; height: 32px; padding: 4px 10px; border-radius: 6px; font-size: 13px; box-shadow: none; }
 .cash-page h3, .cash-drawer h3 { font-size: 14px; font-weight: 600; margin: 0; }
 .cash-page h4, .cash-drawer h4 { font-size: 13px; font-weight: 600; margin: 0; }
-.cash-book-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 40px; border-bottom: 1px solid #dfe4ec; }
+.cash-book-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 40px; }
 .cash-toolbar, .cash-actions, .cash-row-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .cash-toolbar { margin: 0; padding: 6px 0; min-height: 44px; }
 .cash-toolbar-actions { margin-left: auto; }
@@ -183,7 +183,7 @@
 .cash-personal-grid .finance-table__column:nth-child(14) { width: 126px; }
 @media (max-width: 900px) {
   .cash-book-heading { align-items: stretch; flex-direction: column; gap: 4px; }
-  .cash-book-heading .cash-actions { padding-bottom: 10px; }
+  .cash-book-heading .cash-actions { order: -1; padding-bottom: 4px; }
   .cash-form-grid { grid-template-columns: 1fr; }
   .cash-toolbar > .cash-field { flex: 1 1 140px; }
   .cash-page.page-stack { padding: 0 12px; }
@@ -202,3 +202,6 @@
 .cash-drawer .cash-flow-kind input:focus-visible + span { outline: 2px solid #1d4ed8; outline-offset: 2px; }
 .cash-drawer .cash-flow-kind:disabled label { cursor: default; opacity: .65; }
 .cash-drawer .cash-flow-fixed-kind { margin-bottom: 16px; font-weight: 600; color: #344054; }
+
+.cash-book-surface { flex: 1; min-height: 0; }
+.cash-book-surface > .switch-surface__body { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }

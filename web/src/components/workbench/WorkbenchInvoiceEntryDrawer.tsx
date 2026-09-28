@@ -184,14 +184,16 @@ export default function WorkbenchInvoiceEntryDrawer({
       title={mode === "upload" ? "管理凭证" : "录入发票"}
       width="min(800px, 100vw)"
     >
-      <Tabs className="app-segments" selectedKey={mode} onSelectionChange={(key) => { if (!loading && !entryBusy) { setModeSelection({ targetKey, mode: String(key) as "upload" | "manual" }); setCompletion(undefined); } }}>
+      <div className="switch-surface">
+      <Tabs className="app-segments switch-surface__scope" selectedKey={mode} onSelectionChange={(key) => { if (!loading && !entryBusy) { setModeSelection({ targetKey, mode: String(key) as "upload" | "manual" }); setCompletion(undefined); } }}>
         <Tabs.ListContainer>
           <Tabs.List aria-label="录入方式">
-            <Tabs.Tab isDisabled={loading || entryBusy} id="manual">发票录入<Tabs.Indicator /></Tabs.Tab>
-            <Tabs.Tab isDisabled={loading || entryBusy} id="upload">补充凭证<Tabs.Indicator /></Tabs.Tab>
+            <Tabs.Tab isDisabled={loading || entryBusy} id="manual">发票录入</Tabs.Tab>
+            <Tabs.Tab isDisabled={loading || entryBusy} id="upload">补充凭证</Tabs.Tab>
           </Tabs.List>
         </Tabs.ListContainer>
       </Tabs>
+      <div className="switch-surface__body switch-surface__body--padded">
       {errorMessage ? <Alert className="manual-invoice-entry__notice manual-invoice-entry__notice--danger">{errorMessage}</Alert> : null}
       {mode === "upload" && !saved && !loading && errorMessage ? <Button variant="secondary" onPress={() => setLoadAttempt((current) => current + 1)}>重新读取凭证</Button> : null}
       {mode === "manual" && target ? (
@@ -274,6 +276,8 @@ export default function WorkbenchInvoiceEntryDrawer({
           </div>
         </div>
       ) : null}
+      </div>
+      </div>
     </AppDrawer>
   );
 }

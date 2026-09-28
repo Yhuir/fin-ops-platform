@@ -1,3 +1,4 @@
+import { writeFile } from 'node:fs/promises';
 import { expect, test } from './fixtures/strictTest';
 
 const enabled = process.env.FIN_OPS_E2E_PRODUCTION_COUNTS === '1';
@@ -15,7 +16,7 @@ for (const path of ['oa-pending-payments','input-invoice-usage','output-invoice-
     await page.goto(`/fin-ops/${path}`);
     const selector = '.app-segments [role="radio"], .invoice-count-segments [role="tab"]';
     const controls=page.locator(selector);
-    await expect(controls.first().locator('.stable-count')).toContainText(/\d/);
+    await expect(controls.first().locator('.stable-count')).toContainText(/\d/, { timeout: 30_000 });
     const records=[];
     for(const index of [1,0]) {
       const target=controls.nth(index);
@@ -50,5 +51,67 @@ for (const path of ['oa-pending-payments','input-invoice-usage','output-invoice-
     expect(failures).toEqual([]);
     await info.attach('production-count-measurements',{body:JSON.stringify(records,null,2),contentType:'application/json'});
     await page.screenshot({path:info.outputPath(`${path}.png`)});
+  });
+}
+
+for (const path of ['oa-pending-payments', 'input-invoice-usage', 'pending-invoices']) {
+  test(`production hierarchy interaction latency: ${path}`, async ({ page }, info) => {
+    test.skip(!enabled || !token, 'Explicit production count verification and local admin token are required.');
+    test.setTimeout(240_000);
+    await page.context().addCookies([{ name: 'Admin-Token', value: token!, domain: 'www.yn-sourcing.com', path: '/', secure: true, sameSite: 'Lax' }]);
+    const failures: string[] = [];
+    const reads: { path: string; method: string }[] = [];
+    page.on('request', request => {
+      if (request.url().includes('/fin-ops-api/')) reads.push({ path: new URL(request.url()).pathname, method: request.method() });
+    });
+    page.on('response', response => { if (response.url().includes('/fin-ops-api/') && response.status() >= 400) failures.push(`${response.status()} ${new URL(response.url()).pathname}`); });
+    await page.goto(`/fin-ops/${path}`);
+    // The same scope exists before and after the layout change, so measurements are comparable.
+    const scope = page.getByRole(path === 'oa-pending-payments' ? 'radiogroup' : 'tablist', {
+      name: path === 'oa-pending-payments' ? 'OA流程状态视图' : path === 'input-invoice-usage' ? '进项发票关联分类' : '待找发票流水范围', exact: true,
+    });
+    const controls = scope.getByRole(path === 'oa-pending-payments' ? 'radio' : 'tab');
+    await expect(controls.first().locator('.stable-count')).toContainText(/\d/, { timeout: 30_000 });
+    const samples: { feedbackMs: number; completeMs: number; requests: number }[] = [];
+    for (let sample = 0; sample < 100; sample++) {
+      await expect(page.locator('[data-count-pending="true"]')).toHaveCount(0);
+      const selected = await controls.nth(0).getAttribute(path === 'oa-pending-payments' ? 'aria-checked' : 'aria-selected');
+      const target = controls.nth(selected === 'true' ? 1 : 0);
+      const before = reads.length;
+      await target.evaluate(element => {
+        element.addEventListener('pointerdown', () => {
+          const start = performance.now();
+          element.setAttribute('data-latency-start', String(start));
+          const painted = () => {
+            if (element.getAttribute('aria-checked') === 'true' || element.getAttribute('aria-selected') === 'true') {
+              requestAnimationFrame(() => element.setAttribute('data-latency-ms', String(performance.now() - start)));
+            } else requestAnimationFrame(painted);
+          };
+          element.removeAttribute('data-latency-ms');
+          requestAnimationFrame(painted);
+        }, { once: true });
+      });
+      const response = page.waitForResponse(response => new URL(response.url()).pathname === `/fin-ops-api/api/${path}/rows` && response.request().method() === 'GET');
+      await target.click();
+      expect((await response).status()).toBe(200);
+      await expect(target).toHaveAttribute('data-latency-ms', /\d/);
+      await expect(page.locator('[data-count-pending="true"]')).toHaveCount(0);
+      const result = await target.evaluate(element => ({
+        feedbackMs: Number(element.getAttribute('data-latency-ms')),
+        completeMs: performance.now() - Number(element.getAttribute('data-latency-start')),
+      }));
+      samples.push({ ...result, requests: reads.length - before });
+    }
+    const percentile = (values: number[], fraction: number) => [...values].sort((a, b) => a - b)[Math.ceil(values.length * fraction) - 1];
+    const feedback = samples.map(sample => sample.feedbackMs);
+    const complete = samples.map(sample => sample.completeMs);
+    const report = { path, samples: samples.length, feedback: { p50: percentile(feedback, .5), p95: percentile(feedback, .95), p99: percentile(feedback, .99) },
+      complete: { p50: percentile(complete, .5), p95: percentile(complete, .95), p99: percentile(complete, .99) }, requestCounts: samples.map(sample => sample.requests), failures };
+    const reportPath = info.outputPath('production-switch-latency.json');
+    await writeFile(reportPath, JSON.stringify(report, null, 2));
+    await info.attach('production-switch-latency', { path: reportPath, contentType: 'application/json' });
+    expect(reads.filter(request => !['GET', 'HEAD', 'OPTIONS'].includes(request.method))).toEqual([]);
+    expect(failures).toEqual([]);
+    expect(samples.every(sample => sample.requests > 0)).toBe(true);
   });
 }

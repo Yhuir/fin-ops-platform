@@ -1,4 +1,4 @@
-import CountLabel from "../components/common/CountLabel";
+import { CountedLabel } from "../components/common/CountLabel";
 import { Segment, SegmentGroup } from "../components/common/SegmentedControl";
 import {
   ArrowRight,
@@ -2020,15 +2020,9 @@ export default function EtcTicketManagementPage() {
                   }
                 }}
               >
-                <Segment id="unsubmitted">
-                  未提交 <CountLabel value={batchListError ? undefined : counts?.unsubmitted} unit="批" />
-                </Segment>
-                <Segment id="staged">
-                  暂存 <CountLabel value={batchListError ? undefined : counts?.staged} unit="批" />
-                </Segment>
-                <Segment id="submitted">
-                  已提交 <CountLabel value={batchListError ? undefined : counts?.submitted} unit="批" />
-                </Segment>
+                <Segment id="unsubmitted"><CountedLabel label="未提交" value={batchListError ? undefined : counts?.unsubmitted} unit="批" /></Segment>
+                <Segment id="staged"><CountedLabel label="暂存" value={batchListError ? undefined : counts?.staged} unit="批" /></Segment>
+                <Segment id="submitted"><CountedLabel label="已提交" value={batchListError ? undefined : counts?.submitted} unit="批" /></Segment>
               </SegmentGroup>
               <div className="etc-batch-scroll" aria-busy={loading}>
                 {loading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}

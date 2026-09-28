@@ -887,7 +887,6 @@ describe("OA pending payments page", () => {
     const loading = cssRule(styles, ".oa-pending-payments-loading__bar,\\n.oa-pending-payments-loading__panel");
     const detailButton = cssRule(styles, ".oa-pending-payments-detail-button");
     const sortButton = cssRule(styles, ".oa-pending-payments-sort-button");
-    const viewToggle = cssRule(styles, ".oa-pending-payments-view-toggle");
     const tableCell = cssRule(styles, ".oa-pending-payments-table-cell");
     const invoiceColumn = cssRule(styles, ".oa-pending-payments-table-sub-header--invoice");
     const statusColumn = cssRule(styles, ".oa-pending-payments-table-sub-header--status");
@@ -915,7 +914,6 @@ describe("OA pending payments page", () => {
     expect(loading).toContain("border-radius: var(--fp-radius-sm)");
     expect(detailButton).toContain("var(--motion-fast)");
     expect(sortButton).toContain("var(--motion-fast)");
-    expect(viewToggle).toContain("display: inline-flex");
     expect(tableCell).toContain("font-size: 12px");
     expect(invoiceColumn).toContain("width: 13%");
     expect(statusColumn).toContain("width: 8%");

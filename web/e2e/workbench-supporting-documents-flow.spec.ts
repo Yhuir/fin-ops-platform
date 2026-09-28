@@ -114,7 +114,7 @@ test("exception details keep voucher files and amount management for the exact O
   await page.route("**/api/workbench?*", route => route.fulfill({ json: initial }));
   await page.route("**/api/workbench/groups?*", route => route.fulfill({ json: {
     month: "all", zone: "unpaired", groups: [group], total: 1, has_more: false, next_cursor: null,
-    exception_counts: { total: { oa: 1, bank: 1, invoice: 0 }, amount_total: { oa: 0, bank: 0, invoice: 0 }, document_only: { oa: 1, bank: 1, invoice: 0 }, by_code: Object.fromEntries(["oa_bank_equal_invoice_more", "oa_bank_equal_invoice_less", "oa_invoice_equal_bank_more", "oa_invoice_equal_bank_less", "bank_invoice_equal_oa_less", "bank_invoice_equal_oa_more", "all_amounts_different", "expense_item_amount_mismatch"].map(code => [code, { oa: 0, bank: 0, invoice: 0 }])) },
+    exception_counts: { total: { oa: 1, bank: 0, invoice: 0 }, amount_total: { oa: 0, bank: 0, invoice: 0 }, document_only: { oa: 1, bank: 0, invoice: 0 }, by_code: Object.fromEntries(["oa_bank_equal_invoice_more", "oa_bank_equal_invoice_less", "oa_invoice_equal_bank_more", "oa_invoice_equal_bank_less", "bank_invoice_equal_oa_less", "bank_invoice_equal_oa_more", "all_amounts_different", "expense_item_amount_mismatch"].map(code => [code, { oa: 0, bank: 0, invoice: 0 }])) },
   } }));
   await page.route("**/api/workbench/groups/detail?*", route => route.fulfill({ json: { group } }));
   await page.route("**/api/workbench/oa-invoice-supplements/documents?*", route => {
@@ -125,9 +125,9 @@ test("exception details keep voucher files and amount management for the exact O
   });
   await page.reload();
   const zone = page.getByTestId("zone-unpaired");
-  await zone.getByRole("button", { name: "未配对异常 OA 1条 · 流水 1笔 · 发票 1张 | 已配对异常 OA 0条 · 流水 0笔 · 发票 0张" }).click();
+  await zone.getByRole("button", { name: "未配对异常 OA 1条 · 流水 0笔 · 发票 0张 | 已配对异常 OA 0条 · 流水 0笔 · 发票 0张" }).click();
   const exceptions = page.getByRole("dialog", { name: "异常处理" });
-  await exceptions.getByRole("radio", { name: "仅资料异常 1" }).click();
+  await exceptions.getByRole("radio", { name: "仅资料异常 OA 1条 · 流水 0笔 · 发票 0张" }).click();
   await exceptions.getByRole("button", { name: "展开异常明细" }).click();
   const grid = exceptions.getByRole("grid", { name: "未配对三栏关联表" });
   await expect(grid.getByRole("link", { name: "历史凭证.pdf" })).toBeVisible();

@@ -177,8 +177,8 @@ export default function SettingsProjectsSection({
           onSelectionChange={(key) => setActiveTab(String(key) as "active" | "completed")}
         >
           <Tabs.List aria-label="项目状态">
-            <Tabs.Tab id="active">进行中 {activeProjects.length}<Tabs.Indicator /></Tabs.Tab>
-            <Tabs.Tab id="completed">已完成 {completedProjects.length}<Tabs.Indicator /></Tabs.Tab>
+            <Tabs.Tab id="active">进行中 {activeProjects.length}</Tabs.Tab>
+            <Tabs.Tab id="completed">已完成 {completedProjects.length}</Tabs.Tab>
           </Tabs.List>
         </Tabs>
         <ProjectTable

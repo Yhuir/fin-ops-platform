@@ -223,7 +223,8 @@ function CorrectionsPanel({ flowId, mode, onChange, onValidityChange }: Props) {
     {editor?.type === "source" && <SourceEditor key={`source:${editor.row.id}`} item={editor.row} flowId={flowId} mode={mode} onSave={row => adopt(row, "source")} onClose={() => setEditor(null)} />}
     {editor?.type === "settlement" && <SettlementCorrection key={`settlement:${editor.row.id}`} row={editor.row} onSave={row => adopt(row, "settlement")} onClose={() => setEditor(null)} />}
     {editor?.type === "reference" && <ReferenceCorrection key={`reference:${editor.row.id}`} row={editor.row} onSave={row => adopt(row, "reference")} onClose={() => setEditor(null)} />}
-    {!editor && <><CashTabs value={view} onChange={value => { setView(value); setPage(1); setSelected(null); }} tabs={[{ id: "sources", label: "本笔来源事项" }, { id: "allocations", label: "本笔现金分配" }]} />
+    {!editor && <div className="switch-surface"><CashTabs className="switch-surface__scope" value={view} onChange={value => { setView(value); setPage(1); setSelected(null); }} tabs={[{ id: "sources", label: "本笔来源事项" }, { id: "allocations", label: "本笔现金分配" }]} />
+      <div className="switch-surface__body switch-surface__body--padded">
       <CashNotice error={sourcesQuery.error?.message ?? flowsQuery.error?.message} />{(sourcesQuery.loading || flowsQuery.loading) && <p role="status">正在读取关联记录…</p>}
       {view === "sources" && sourcesQuery.data && <><ul className="cash-choice-list">{sourcesQuery.data.rows.map(row => <li key={row.id}>
         <span>{row.content} · {itemTypeLabels[row.type]} · {cashAmount(row.original_amount)}</span><Button type="button" size="sm" variant="tertiary" onPress={() => setEditor({ type: "source", row })}>更正来源</Button>
@@ -238,6 +239,7 @@ function CorrectionsPanel({ flowId, mode, onChange, onValidityChange }: Props) {
         {children.data && <><ul className="cash-choice-list">{children.data.rows.map(row => <li key={row.id}><span>{row.content} · {cashAmount(row.original_amount)}</span><Button type="button" size="sm" variant="tertiary" onPress={() => setEditor({ type: "reference", row })}>更正引用</Button></li>)}</ul>{!children.data.rows.length && <p>没有引用此事项的子事项。</p>}<FinanceTablePagination {...children.data.pagination} pageSize={20} onPageChange={setDetailPage} /></>}
         {(details.error || children.error) && <Button type="button" size="sm" onPress={() => { details.reload(); children.reload(); }}>重新读取后续关联</Button>}
       </section>}
-    </>}
+      </div>
+    </div>}
   </section>;
 }

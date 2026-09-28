@@ -16,9 +16,10 @@ test("continuous native controls keep one cost view, no reselection read, and co
   await page.getByRole("radio", { name: "按时间", exact: true }).click();
   await expect(page.getByRole("heading", { name: "按时间统计" })).toBeVisible();
   await expect(views.getByRole("radio", { checked: true })).toHaveCount(1);
-  await expect(views.locator('[data-slot="tabs-indicator"]')).toHaveCount(1);
-  const indicator = await views.locator('[data-slot="tabs-indicator"]').evaluate(el => ({ background: getComputedStyle(el).backgroundColor, shadow: getComputedStyle(el).boxShadow, height: el.getBoundingClientRect().height }));
-  expect(indicator.background).toBe("rgb(29, 78, 216)"); expect(indicator.shadow).toBe("none"); expect(indicator.height).toBe(36);
+  const selected = views.getByRole("radio", { checked: true });
+  await expect(selected).toHaveCSS("background-color", "rgb(29, 78, 216)");
+  await expect(selected).toHaveCSS("box-shadow", "none");
+  await expect(selected).toHaveCSS("height", "40px");
   for (const width of [1600, 960, 390]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2)).toBe(true);
@@ -61,9 +62,7 @@ test("date granularity changes only its panel until an actual date is chosen", a
 // All four presentation owners must expose the same high-contrast selection.
 async function expectSelectedContrast(control: import("@playwright/test").Locator) {
   await expect(control).toHaveCSS("color", "rgb(255, 255, 255)");
-  const indicator = control.locator('[data-slot="tabs-indicator"]');
-  if (await indicator.count()) await expect(indicator).toHaveCSS("background-color", "rgb(29, 78, 216)");
-  else await expect(control).toHaveCSS("background-color", "rgb(29, 78, 216)");
+  await expect(control).toHaveCSS("background-color", "rgb(29, 78, 216)");
   const colors = await control.evaluate(el => Array.from(el.querySelectorAll("span, small, strong, svg")).filter(x => x.textContent?.trim() || x.tagName.toLowerCase() === "svg").map(x => getComputedStyle(x).color));
   expect(colors.every(color => color === "rgb(255, 255, 255)")).toBe(true);
 }
@@ -130,4 +129,71 @@ test("reverse OA tabs keep high contrast during hover and keyboard switching", a
   await expect(focused).toBeFocused();
   await expect(focused).toHaveCSS("outline-style", "solid");
   await page.screenshot({ path: testInfo.outputPath("contrast-reverse-tabs.png"), animations: "disabled" });
+});
+
+for (const path of ['oa-pending-payments', 'input-invoice-usage', 'pending-invoices']) {
+  test(`scope and subordinate controls share the result surface: ${path}`, async ({ page }, info) => {
+    await installDeterministicApiMocks(page, { sessionMode: 'user' });
+    await page.goto(`/${path}`);
+    const surface = page.locator('.switch-surface').first();
+    const scope = surface.locator('.switch-surface__scope').first();
+    const body = surface.locator(':scope > .switch-surface__body');
+    await expect(scope).toBeVisible();
+    await expect(body.getByRole('grid').first()).toBeVisible();
+    const scopeBox = await scope.boundingBox();
+    const bodyBox = await body.boundingBox();
+    expect(Math.abs(bodyBox!.y - (scopeBox!.y + scopeBox!.height))).toBeLessThanOrEqual(1);
+    const lower = body.locator('.app-segments, .invoice-count-segments').first();
+    await expect(lower).toBeVisible();
+    await expect(scope.locator('[data-selected="true"]')).toHaveCSS('height', '40px');
+    await expect(lower.locator('[data-selected="true"]')).toHaveCSS('height', '36px');
+    for (const width of [1440, 960, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2)).toBe(true);
+      await page.screenshot({ path: info.outputPath(`hierarchy-${path}-${width}.png`) });
+    }
+  });
+}
+
+test('unselected boundaries and compact count geometry survive digit changes', async ({ page }) => {
+  await installDeterministicApiMocks(page, { sessionMode: 'user' });
+  await page.goto('/oa-pending-payments');
+  const group = page.getByRole('radiogroup', { name: '支付流水', exact: true });
+  await group.getByRole('radio', { name: /未关联流水/ }).click();
+  const first = group.getByRole('radio').first();
+  const second = group.getByRole('radio').nth(1);
+  await expect(first).toHaveAttribute('aria-checked', 'false');
+  await expect(second).toHaveAttribute('aria-checked', 'false');
+  const separator = await first.evaluate(el => {
+    const css = getComputedStyle(el, '::after');
+    return { display: css.display, width: css.width, background: css.backgroundColor };
+  });
+  expect(separator.display).toBe('block');
+  expect(separator.width).toBe('1px');
+  expect(separator.background).not.toBe('rgba(0, 0, 0, 0)');
+  // Isolate the CSS contract from business counting: exercise the rendered count with wider values.
+  const geometry = await first.evaluate(el => {
+    const count = el.querySelector('.stable-count')!;
+    const label = el.querySelector('.counted-label__content > span')!;
+    return ['0条', '56条', '432条', '123456条'].map(value => {
+      count.textContent = value;
+      const button = el.getBoundingClientRect(), text = label.getBoundingClientRect(), number = count.getBoundingClientRect();
+      return { width: button.width, height: button.height, gap: number.left - text.right,
+        centreError: Math.abs((text.left + number.right) / 2 - (button.left + button.right) / 2) };
+    });
+  });
+  expect(new Set(geometry.map(x => x.width)).size).toBe(1);
+  for (const item of geometry) { expect(item.gap).toBe(6); expect(item.centreError).toBeLessThanOrEqual(1); }
+});
+
+test('settings scope styling does not leak into nested project tabs', async ({ page }) => {
+  await installDeterministicApiMocks(page, { sessionMode: 'admin' });
+  await page.goto('/settings');
+  const scope = page.getByRole('tablist', { name: '设置分类' });
+  await scope.getByRole('tab', { name: '项目状态', exact: true }).click();
+  await expect(scope.getByRole('tab', { selected: true })).toHaveCSS('height', '40px');
+  const nested = page.getByRole('tablist', { name: '项目状态' });
+  await expect(nested.getByRole('tab', { selected: true })).toHaveCSS('height', '36px');
+  await nested.getByRole('tab', { name: /已完成/ }).click();
+  await expect(scope.getByRole('tab', { selected: true })).toHaveText('项目状态');
 });

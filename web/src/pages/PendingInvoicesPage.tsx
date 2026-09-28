@@ -606,13 +606,16 @@ export default function PendingInvoicesPage() {
         title="待找发票"
         titleAccessory={titleAccessory}
       >
+        <div className="switch-surface">
+        <InvoiceCountSegments className="switch-surface__scope" label="待找发票流水范围" selectedKey={direction} unit="笔" pending={loading} invalid={Boolean(error)}
+                options={[{ key: "all", label: "全部", count: summaryCounts.all }, { key: "expense", label: "支出", count: summaryCounts.expense }, { key: "income", label: "收入", count: summaryCounts.income }]}
+                onChange={key => { if (key === "all" || key === "expense" || key === "income") handleDirectionChange(key); }} />
+        <div className="switch-surface__body">
         <PageToolbar
           className="pending-invoices-toolbar"
           left={(
             <div className="pending-invoices-toolbar-left">
-              <InvoiceCountSegments label="待找发票流水范围" selectedKey={direction} unit="笔" pending={loading} invalid={Boolean(error)}
-                options={[{ key: "all", label: "全部", count: summaryCounts.all }, { key: "expense", label: "支出", count: summaryCounts.expense }, { key: "income", label: "收入", count: summaryCounts.income }]}
-                onChange={key => { if (key === "all" || key === "expense" || key === "income") handleDirectionChange(key); }} />
+
               <InvoiceCountSegments label="发票获取状态分类" selectedKey={selectedStatus} unit="笔" pending={loading} invalid={Boolean(error)} options={statusSegments}
                 onChange={key => {
                   if (key === "multiple") return;
@@ -720,6 +723,8 @@ export default function PendingInvoicesPage() {
             setPage(1);
           }}
         />
+        </div>
+        </div>
       </PageScaffold>
       <PendingInvoiceRulesDrawer
         open={activeDrawer === "rules"}

@@ -1,4 +1,4 @@
-import CountLabel from "../components/common/CountLabel";
+import { CountedLabel } from "../components/common/CountLabel";
 import SegmentedControl, { Segment, SegmentGroup } from "../components/common/SegmentedControl";
 import { Button, Checkbox, Input } from "@heroui/react";
 import { ChevronLeft, ChevronRight, Download, PanelRightOpen, SlidersHorizontal } from "lucide-react";
@@ -303,11 +303,11 @@ export default function OaPendingPaymentsPage() {
     <>
       <div className="oa-pending-payments-page" data-testid="oa-pending-payments-page">
         <PageScaffold title="OA 待付款核对" titleAccessory={titleAccessory} actions={actions}>
-          <div className="oa-pending-payments-content">
+          <div className="oa-pending-payments-content switch-surface">
             <SegmentGroup
               aria-label="OA流程状态视图"
               aria-busy={(loading || refreshing) && !error}
-              className="oa-pending-payments-view-toggle"
+              className="switch-surface__scope"
               disallowEmptySelection
               onSelectionChange={(keys) => {
                 const [next] = Array.from(keys);
@@ -318,14 +318,13 @@ export default function OaPendingPaymentsPage() {
               size="sm"
             >
               <Segment id="completed">
-                已完成 OA
-                <span className="oa-pending-payments-view-toggle__count"><CountLabel value={summary?.viewCounts?.completed} unit="条" /></span>
+                <CountedLabel label="已完成 OA" value={summary?.viewCounts?.completed} unit="条" />
               </Segment>
               <Segment id="in_progress">
-                进行中 OA
-                <span className="oa-pending-payments-view-toggle__count"><CountLabel value={summary?.viewCounts?.in_progress} unit="条" /></span>
+                <CountedLabel label="进行中 OA" value={summary?.viewCounts?.in_progress} unit="条" />
               </Segment>
             </SegmentGroup>
+            <div className="switch-surface__body">
             <PageToolbar
               className="oa-pending-payments-query"
               left={(
@@ -344,9 +343,9 @@ export default function OaPendingPaymentsPage() {
                     }
                   }}
                 >
-                  <Segment id="all">全部 <CountLabel value={statusCount("all")} unit="条" /></Segment>
-                  <Segment id="paid">已关联流水 <CountLabel value={statusCount("paid")} unit="条" /></Segment>
-                  <Segment id="unpaid">未关联流水 <CountLabel value={statusCount("unpaid")} unit="条" /></Segment>
+                  <Segment id="all"><CountedLabel label="全部" value={statusCount("all")} unit="条" /></Segment>
+                  <Segment id="paid"><CountedLabel label="已关联流水" value={statusCount("paid")} unit="条" /></Segment>
+                  <Segment id="unpaid"><CountedLabel label="未关联流水" value={statusCount("unpaid")} unit="条" /></Segment>
                 </SegmentGroup>
               )}
               right={(
@@ -428,6 +427,7 @@ export default function OaPendingPaymentsPage() {
                 />
               </>
             )}
+            </div>
           </div>
         </PageScaffold>
       </div>

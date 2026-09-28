@@ -272,7 +272,7 @@ export default function ManualBankTransactionBatchEditor({
         <>
           <div className="manual-bank-entry__tabs">
             <Tabs className="app-segments" selectedKey={selectedId} onSelectionChange={key => setSelectedId(Number(key))}>
-              <Tabs.List aria-label="待录入流水">{entries.map((entry, index) => <Tabs.Tab id={entry.id} key={entry.id} isDisabled={disabled || busy}>流水 {index + 1}<Tabs.Indicator /></Tabs.Tab>)}</Tabs.List>
+              <Tabs.List aria-label="待录入流水">{entries.map((entry, index) => <Tabs.Tab id={entry.id} key={entry.id} isDisabled={disabled || busy}>流水 {index + 1}</Tabs.Tab>)}</Tabs.List>
             </Tabs>
             <button
               aria-label="添加流水"

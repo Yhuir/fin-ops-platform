@@ -73,7 +73,7 @@ export default function SettingsPendingInvoiceTagsSection({
             {(Object.keys(GROUP_LABELS) as Array<keyof typeof GROUP_LABELS>).map((group) => (
               <Tabs.Tab id={group} key={group}>
                 {GROUP_LABELS[group]} {groups[group].length}
-              <Tabs.Indicator /></Tabs.Tab>
+              </Tabs.Tab>
             ))}
           </Tabs.List>
         </Tabs>

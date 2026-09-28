@@ -368,17 +368,11 @@ test.describe("workbench exception browser flow", () => {
         expect(choice.x + choice.width).toBeLessThanOrEqual(frame.x + frame.width);
       }
       await expect.poll(async () => {
-        const [headerBox, bucketBox] = await Promise.all([
-          header.boundingBox(),
-          bucketControls.boundingBox(),
-        ]);
-        if (!headerBox || !bucketBox) {
-          return Number.POSITIVE_INFINITY;
-        }
-        return Math.abs(
-          (bucketBox.y + bucketBox.height / 2) - (headerBox.y + headerBox.height / 2),
-        );
-      }).toBeLessThanOrEqual(2);
+        const bucketBox = await bucketControls.boundingBox();
+        const bodyBox = await drawer.locator('.switch-surface__body').boundingBox();
+        if (!bucketBox || !bodyBox) return Number.POSITIVE_INFINITY;
+        return Math.abs(bodyBox.y - (bucketBox.y + bucketBox.height));
+      }).toBeLessThanOrEqual(1);
       await expect.poll(async () => drawer.evaluate(
         (element) => element.scrollWidth - element.clientWidth,
       )).toBeLessThanOrEqual(1);

@@ -57,7 +57,8 @@ test("two native segment rows partition bank counts and share status/export quer
   await expect(statusTabs.getByRole("tab", { name:"全部状态 9 笔" })).toHaveAttribute("aria-selected", "true");
   for (const width of [1600,960]) {
     await page.setViewportSize({width,height:1000});
-    await expect(statusTabs.locator('[data-slot="tabs-indicator"]')).toHaveCount(1);
+    await expect(statusTabs.getByRole('tab', { selected: true })).toHaveCount(1);
+  await expect(statusTabs.getByRole('tab', { selected: true })).toHaveCSS('background-color', 'rgb(29, 78, 216)');
     expect(await page.locator('.pending-invoices-toolbar').evaluate(el => el.scrollWidth <= el.clientWidth+1)).toBe(true);
     await page.screenshot({path:info.outputPath(`pending-segments-${width}.png`),animations:"disabled"});
   }

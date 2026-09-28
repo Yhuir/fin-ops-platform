@@ -27,3 +27,16 @@ test("first loading is unknown rather than a fabricated zero", () => {
   expect(screen.getByRole("tab", { name: "全部 — 笔" })).toBeVisible();
   expect(screen.queryByRole("tab", { name: "全部 0 笔" })).not.toBeInTheDocument();
 });
+
+
+test("compact labels expose only the real count and keep the same tab across digit changes", () => {
+  const props = { label: "数量", selectedKey: "all", unit: "张" as const, onChange: vi.fn() };
+  const { rerender } = render(<InvoiceCountSegments {...props} options={[{ key: "all", label: "全部", count: 0 }]} />);
+  const tab = screen.getByRole("tab", { name: "全部 0 张" });
+  for (const count of [56, 432, 123456, 1234567]) {
+    rerender(<InvoiceCountSegments {...props} options={[{ key: "all", label: "全部", count }]} />);
+    expect(screen.getByRole("tab", { name: `全部 ${count} 张` })).toBe(tab);
+    expect(tab).toHaveAttribute("aria-selected", "true");
+  }
+  expect(props.onChange).not.toHaveBeenCalled();
+});

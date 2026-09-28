@@ -1,4 +1,4 @@
-import { Tabs, ToggleButton, ToggleButtonGroup } from "@heroui/react";
+import { ToggleButton, ToggleButtonGroup } from "@heroui/react";
 import type { ComponentProps, ReactNode } from "react";
 
 import "./segmentedControl.css";
@@ -11,7 +11,7 @@ export function SegmentGroup({ className, "aria-busy": busy, ...props }: Omit<Co
 }
 
 export function Segment({ children, ...props }: Omit<ComponentProps<typeof ToggleButton>, "children"> & { children: ReactNode }) {
-  return <ToggleButton {...props}><span className="app-segments__label">{children}</span><Tabs.Indicator className="app-segments__indicator" /></ToggleButton>;
+  return <ToggleButton {...props}><span className="app-segments__label">{children}</span></ToggleButton>;
 }
 
 export default function SegmentedControl<K extends string>({ label, value, options, onChange, disabled, pending, className }: {

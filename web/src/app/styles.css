@@ -2872,19 +2872,6 @@ textarea {
   min-height: 46px;
 }
 
-.oa-pending-payments-view-toggle {
-  display: inline-flex;
-  align-items: center;
-  border: 0;
-  background: transparent;
-}
-
-.oa-pending-payments-view-toggle__count {
-  font-size: var(--fp-text-caption);
-  font-weight: 700;
-  white-space: nowrap;
-}
-
 .oa-pending-payments-field {
   display: flex;
   align-items: center;
@@ -17852,7 +17839,7 @@ body.column-layout-dragging {
 .settings-save-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 12px; }
 .settings-draft-status { font-size: 13px; color: var(--fp-text-secondary); }
 .settings-tabs { display: block; width: 100%; min-width: 0; }
-.settings-tab-panel { min-width: 0; padding: 28px 0 0; }
+.settings-tab-panel { min-width: 0; padding: 16px; }
 .settings-content-panel { min-width: 0; min-height: 0; }
 .settings-section-panel { width: 100%; min-width: 0; background: var(--fp-surface); }
 
@@ -24725,49 +24712,6 @@ body.column-layout-dragging {
 .import-review-file-select select { max-width: 80%; padding: .4rem; border: 1px solid var(--fp-border); border-radius: .35rem; }
 
 .app-status-task-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-
-/* Shared native HeroUI segments; counts and business state remain page-owned. */
-.invoice-count-segments {
-  max-width: 100%;
-  min-width: 0;
-  overflow-x: auto;
-}
-.invoice-count-segments .tabs__list {
-  width: max-content;
-  min-width: 100%;
-  padding: 4px;
-  border: 1px solid var(--fp-border);
-  border-radius: 10px;
-  background: var(--fp-surface-muted);
-}
-.invoice-count-segments .tabs__tab {
-  flex: 1 0 auto;
-  width: auto;
-  height: 36px;
-  padding-inline: 14px;
-  gap: 6px;
-  border-radius: 7px;
-  white-space: nowrap;
-}
-.invoice-count-segments .tabs__indicator {
-  border-radius: 7px;
-  background: var(--fp-primary);
-  box-shadow: none;
-}
-.invoice-count-segments .tabs__tab { color: var(--fp-text-secondary); }
-.invoice-count-segments .tabs__tab[data-selected="true"] { color: #fff; }
-.invoice-count-segments .tabs__tab[data-hovered="true"]:not([data-selected="true"]) {
-  background: var(--fp-primary-soft);
-}
-.invoice-count-segments .tabs__tab[data-focus-visible="true"] {
-  outline: 2px solid var(--fp-primary);
-  outline-offset: -3px;
-}
-.invoice-count-segments .tabs__tab[data-selected="true"][data-focus-visible="true"] { outline-color: #fff; }
-.invoice-count-segments__count {
-  font-variant-numeric: tabular-nums;
-  font-size: 0.92em;
-}
 
 .pending-invoices-toolbar {
   display: grid;

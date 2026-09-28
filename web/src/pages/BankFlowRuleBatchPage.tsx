@@ -1,4 +1,4 @@
-import CountLabel from "../components/common/CountLabel";
+import { CountedLabel } from "../components/common/CountLabel";
 import { Segment, SegmentGroup } from "../components/common/SegmentedControl";
 import BankTransactionDrawer from "../features/bankSplits/BankTransactionDrawer";
 import { Button, Checkbox } from "@heroui/react";
@@ -788,9 +788,9 @@ export default function BankFlowRuleBatchPage() {
           selectionMode="single"
           size="sm"
         >
-          <Segment id="unsubmitted">未提交 <CountLabel value={!hasCounts || error ? undefined : payload.summary.draftRowCount} unit="笔" spaced /></Segment>
-          <Segment id="submitted">已提交 <CountLabel value={!hasCounts || error ? undefined : payload.summary.submittedRowCount} unit="笔" spaced /></Segment>
-          <Segment id="withdrawn">历史 <CountLabel value={!hasCounts || error ? undefined : payload.summary.withdrawnRowCount} unit="笔" spaced /></Segment>
+          <Segment id="unsubmitted"><CountedLabel label="未提交" value={!hasCounts || error ? undefined : payload.summary.draftRowCount} unit="笔" spaced /></Segment>
+          <Segment id="submitted"><CountedLabel label="已提交" value={!hasCounts || error ? undefined : payload.summary.submittedRowCount} unit="笔" spaced /></Segment>
+          <Segment id="withdrawn"><CountedLabel label="历史" value={!hasCounts || error ? undefined : payload.summary.withdrawnRowCount} unit="笔" spaced /></Segment>
         </SegmentGroup>
         <BusinessPeriodPicker
           allowedModes={["month"]}

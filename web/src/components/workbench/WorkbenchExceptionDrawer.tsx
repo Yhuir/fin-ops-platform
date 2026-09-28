@@ -1,4 +1,4 @@
-import CountLabel from "../common/CountLabel";
+import { CountedLabel } from "../common/CountLabel";
 import "./workbenchEntityCounts.css";
 import { formatWorkbenchEntityCounts } from "../../features/workbench/entityCounts";
 import { Segment, SegmentGroup } from "../common/SegmentedControl";
@@ -215,7 +215,7 @@ export default function WorkbenchExceptionDrawer({
     <div className="workbench-anomaly-drawer__bucket-controls" ref={bucketControlsRef}>
       <SegmentGroup
         aria-label="异常状态"
-        className="workbench-anomaly-drawer__bucket-segmented"
+        className="workbench-anomaly-drawer__bucket-segmented switch-surface__scope"
         disallowEmptySelection
         selectedKeys={new Set<Key>([bucket])}
         selectionMode="single"
@@ -239,12 +239,14 @@ export default function WorkbenchExceptionDrawer({
     <AppDrawer
       ariaBusy={loading}
       className="workbench-anomaly-drawer"
-      headerActions={bucketControls}
       open={open}
       title="异常处理"
       width="min(1740px, 96vw)"
       onClose={onClose}
     >
+      <div className="switch-surface">
+      {bucketControls}
+      <div className="switch-surface__body switch-surface__body--padded">
       <div className="workbench-anomaly-drawer__filters" aria-busy={loading && !error}>
         <div className="workbench-anomaly-drawer__view-row">
           <SegmentGroup
@@ -454,6 +456,8 @@ export default function WorkbenchExceptionDrawer({
           </div>
         ) : null}
       </div>
+      </div>
+      </div>
     </AppDrawer>
   );
 }
@@ -632,5 +636,5 @@ function paneSummary(group: WorkbenchRelationGroup, paneId: WorkbenchRecordType)
 }
 
 function EntityCountLabel({ counts }: { counts: WorkbenchEntityCounts | null | undefined }) {
-  return <>OA <CountLabel value={counts?.oa} unit="条" /> · 流水 <CountLabel value={counts?.bank} unit="笔" /> · 发票 <CountLabel value={counts?.invoice} unit="张" /></>;
+  return <><CountedLabel label="OA" value={counts?.oa} unit="条" /> · <CountedLabel label="流水" value={counts?.bank} unit="笔" /> · <CountedLabel label="发票" value={counts?.invoice} unit="张" /></>;
 }

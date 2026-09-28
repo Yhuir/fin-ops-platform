@@ -133,7 +133,7 @@ export default function ManualInvoiceBatchEditor({
   return <div className="manual-invoice-entry__body">
     <div className="manual-invoice-entry__tabs">
       <Tabs className="app-segments" selectedKey={selectedId} onSelectionChange={key => { const entry = summary.find(item => item.id === key); if (entry) { setSelectedId(entry.id); setPage(entry.saved ? "overview" : "edit"); } }}>
-        <Tabs.List aria-label="待录入发票">{summary.map(entry => <Tabs.Tab id={entry.id} key={entry.id} isDisabled={busy || disabled}>{entry.label}{entry.saved ? " ✓" : ""}<Tabs.Indicator /></Tabs.Tab>)}</Tabs.List>
+        <Tabs.List aria-label="待录入发票">{summary.map(entry => <Tabs.Tab id={entry.id} key={entry.id} isDisabled={busy || disabled}>{entry.label}{entry.saved ? " ✓" : ""}</Tabs.Tab>)}</Tabs.List>
       </Tabs>
       <button aria-label="添加发票" className="manual-invoice-entry__tab manual-invoice-entry__tab--add" disabled={busy || disabled} type="button" onClick={addInvoice}><Plus aria-hidden="true" size={15} /></button>
     </div>

@@ -1,4 +1,4 @@
-import CountLabel from "../components/common/CountLabel";
+import { CountedLabel } from "../components/common/CountLabel";
 import { Segment, SegmentGroup } from "../components/common/SegmentedControl";
 import BankTransactionDrawer from "../features/bankSplits/BankTransactionDrawer";
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type MouseEvent } from "react";
@@ -674,8 +674,8 @@ export default function BatchAccountingPage() {
           selectionMode="single"
           size="sm"
         >
-          <Segment id="unsubmitted">未提交 <CountLabel value={!hasCounts || error ? undefined : payload.summary.unsubmittedCount} unit="笔" spaced /></Segment>
-          <Segment id="submitted">已提交 <CountLabel value={!hasCounts || error ? undefined : payload.summary.submittedCount} unit="笔" spaced /></Segment>
+          <Segment id="unsubmitted"><CountedLabel label="未提交" value={!hasCounts || error ? undefined : payload.summary.unsubmittedCount} unit="笔" spaced /></Segment>
+          <Segment id="submitted"><CountedLabel label="已提交" value={!hasCounts || error ? undefined : payload.summary.submittedCount} unit="笔" spaced /></Segment>
         </SegmentGroup>
       </div>
 

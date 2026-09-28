@@ -34,7 +34,8 @@ test("all status tabs use invoice counts, one query, and the same export filters
   await expect(tabs.getByRole("tab", { name: `全部 ${scopeCount} 张` })).toHaveAttribute("aria-selected", "true");
   await page.setViewportSize({ width: 1600, height: 1000 });
   expect(await tabs.evaluate(el => el.scrollWidth <= el.parentElement!.clientWidth + 1)).toBe(true);
-  await expect(tabs.locator('[data-slot="tabs-indicator"]')).toHaveCount(1);
+  await expect(tabs.getByRole('tab', { selected: true })).toHaveCount(1);
+  await expect(tabs.getByRole('tab', { selected: true })).toHaveCSS('background-color', 'rgb(29, 78, 216)');
   await page.screenshot({ path: info.outputPath("output-status-tabs-wide.png"), animations: "disabled" });
   await page.setViewportSize({ width: 960, height: 900 });
   await page.screenshot({ path: info.outputPath("output-status-tabs-narrow.png"), animations: "disabled" });
