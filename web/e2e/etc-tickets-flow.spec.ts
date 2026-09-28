@@ -452,7 +452,8 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(page.getByRole("radio", { name: "未提交 0批" })).toHaveAttribute("aria-checked", "true");
     await expect(page.getByRole("radio", { name: "暂存 0批" })).toBeVisible();
     await expect(page.getByRole("radio", { name: "已提交 0批" })).toBeVisible();
-    await expect(page.getByText("无匹配批次。")).toBeVisible();
+    await expect(page.getByRole("list", { name: "ETC批次列表" }).getByRole("listitem")).toHaveCount(0);
+    await expect(page.getByText("无匹配批次。")).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
   });
@@ -548,7 +549,8 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(page.getByRole("radio", { name: "已提交 0批" })).toHaveAttribute("aria-checked", "true");
     await expect(page.getByRole("radio", { name: "暂存 0批" })).toBeVisible();
     await expect(page.getByRole("radio", { name: "未提交 0批" })).toBeVisible();
-    await expect(page.getByText("无匹配批次。")).toBeVisible();
+    await expect(page.getByRole("list", { name: "ETC批次列表" }).getByRole("listitem")).toHaveCount(0);
+    await expect(page.getByText("无匹配批次。")).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
   });

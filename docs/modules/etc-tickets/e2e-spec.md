@@ -39,3 +39,7 @@ ETC 票据管理页面以 `/api/etc/business-batches*` 和 `etc_business_batches
 - 生产历史 ETC 迁移、orphan task 清理、旧 business batch pickle 和历史半迁移 relation。
 - 真实 PostgreSQL/RabbitMQ/Redis/systemd import/workbench worker drain、tax/cost 页面展示和长队列重试。
 - 真实 Workbench、税金抵扣、成本统计、search 全量重建后的最终页面展示。
+
+## ETC-TICKET-E2E-013：批次栏几何与内容完整
+
+在1600/1280/960/390 CSS px窗口下，空列表→请求中→9条批次→空列表，外框/切换条/分页位置尺寸差异≤1 CSS px；切换条无纵向滚动。跨年标题和大金额完整在行框内；滚动末项不被分页遮挡。重复选择当前批次无额外读取。成功空列表无“无匹配批次。”卡片；失败不能伪装空结果。生产只读逐项选择真实批次，复核内容与详情读取。

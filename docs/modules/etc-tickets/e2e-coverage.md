@@ -30,3 +30,5 @@
 2. staging 运行 ETC import -> business batch -> manual submitted -> Workbench summary -> 税金/成本 canonical 展示的真实 worker drain smoke。
 3. 对生产历史 migration/cleanup 先 dry-run，再在运维窗口 execute，并做 Workbench paired/open 口径 smoke。
 4. 若新增 ETC 页面 import confirm 或其它 mutation 级网络恢复 Browser 主链路，必须捕获 destructive mutation 失败、relation command failure 和页面恢复状态；OA draft、manual OA status、未提交/已提交 business batch delete/reset、source file delete 与 ticket-root source upload 暂时失败重试已由本地 Browser 覆盖。
+
+| `ETC-TICKET-E2E-013` | `covered-local / production-readonly` | `web/e2e/etc-batch-rail-layout.spec.ts` | 4种视口的空/加载/有数据切换，外框/切换条/分页几何；跨年与大金额排版压力、末项可达、重复选择零请求。既有ETC流程继续覆盖删除、权限、上传失败恢复和OA状态。生产只读结果随发布报告记录。 |

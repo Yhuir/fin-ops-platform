@@ -622,7 +622,9 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByText("无匹配批次。")).toBeInTheDocument();
+    await waitFor(() => expect(within(page).getByRole("radio", { name: "未提交 0批" })).toBeEnabled());
+    expect(within(page).getByRole("list", { name: "ETC批次列表" })).toBeEmptyDOMElement();
+    expect(within(page).queryByText("无匹配批次。")).not.toBeInTheDocument();
     await waitFor(() => {
       expect(within(page).queryByText("新建ETC批次")).not.toBeInTheDocument();
     });
@@ -677,7 +679,9 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     expect(await within(page).findByRole("radio", { name: "未提交 0批" })).toBeInTheDocument();
-    expect(await within(page).findByText("无匹配批次。")).toBeInTheDocument();
+    await waitFor(() => expect(within(page).getByRole("radio", { name: "未提交 0批" })).toBeEnabled());
+    expect(within(page).getByRole("list", { name: "ETC批次列表" })).toBeEmptyDOMElement();
+    expect(within(page).queryByText("无匹配批次。")).not.toBeInTheDocument();
     expect(within(page).queryByTestId("etc-batch-row-ETC-RECON-000011")).not.toBeInTheDocument();
     expect(within(page).queryByText("新建ETC批次")).not.toBeInTheDocument();
   });

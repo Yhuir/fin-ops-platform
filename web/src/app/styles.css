@@ -22838,46 +22838,6 @@ body.column-layout-dragging {
   box-shadow: none;
 }
 
-.etc-batch-list {
-  display: grid;
-  gap: 8px;
-  padding: 0;
-  margin: 0;
-  list-style: none;
-}
-
-.etc-batch-row {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: stretch;
-  border: 1px solid #dbe3ef;
-  border-radius: 8px;
-  background: #ffffff;
-  overflow: hidden;
-}
-
-.etc-batch-row.submitted {
-  background: #f1f5f9;
-}
-
-.etc-row-title {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  color: #172033;
-  font-size: 13px;
-}
-
-.etc-batch-fields {
-  display: grid;
-  gap: 5px 12px;
-  margin-top: 8px;
-  color: #486581;
-  font-size: 12px;
-}
-
 .etc-list,
 .etc-source-file-list {
   display: grid;
@@ -22892,18 +22852,6 @@ body.column-layout-dragging {
   color: #52677a;
   font-size: 12px;
   font-weight: 700;
-}
-
-.etc-list-row-button {
-  display: grid;
-  gap: 8px;
-  width: 100%;
-  padding: 11px 12px;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  background: transparent;
-  border: 0;
 }
 
 .etc-list-row-button:hover,
@@ -23971,10 +23919,6 @@ body.column-layout-dragging {
   .etc-oa-amount-summary {
     grid-template-columns: 1fr;
   }
-
-  .etc-batch-rail {
-    min-height: auto;
-  }
 }
 
 .etc-page {
@@ -24287,7 +24231,6 @@ body.column-layout-dragging {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 16%, transparent);
 }
 
-.etc-batch-row,
 .etc-source-file-row,
 .etc-detail-metrics > div,
 .etc-reconciliation-metrics > div,
@@ -24305,10 +24248,6 @@ body.column-layout-dragging {
   transition:
     border-color var(--motion-fast) var(--ease-out-quart),
     background-color var(--motion-fast) var(--ease-out-quart);
-}
-
-.etc-batch-row.submitted {
-  background: color-mix(in srgb, var(--fp-surface-muted) 70%, var(--fp-surface));
 }
 
 .etc-count-tag,
@@ -24419,46 +24358,6 @@ body.column-layout-dragging {
   font-variant-numeric: tabular-nums;
 }
 
-.etc-batch-list {
-  gap: 0;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
-  overflow: hidden;
-}
-
-.etc-batch-row,
-.etc-batch-row.submitted {
-  border: 0;
-  border-bottom: 1px solid var(--fp-border);
-  border-radius: 0;
-  background: var(--fp-surface);
-}
-
-.etc-batch-row:last-child {
-  border-bottom: 0;
-}
-
-.etc-list-row-button {
-  gap: var(--fp-space-1);
-  padding: 8px 10px;
-}
-
-.etc-row-title {
-  justify-content: space-between;
-  gap: var(--fp-space-2);
-  font-size: 13px;
-}
-
-.etc-batch-fields {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px 10px;
-  margin-top: 0;
-  color: var(--fp-text-secondary);
-  font-size: 12px;
-  line-height: 1.3;
-}
-
 .etc-detail-metrics {
   gap: 0;
   overflow: hidden;
@@ -24554,13 +24453,13 @@ body.column-layout-dragging {
   align-items: start;
 }
 
+/* Header, status and pagination never compete with batch content for height. */
 .etc-batch-rail {
   position: sticky;
   top: var(--fp-space-3);
-  display: flex;
-  min-height: min(720px, calc(100vh - 184px));
-  max-height: calc(100vh - 148px);
-  flex-direction: column;
+  display: grid;
+  height: min(720px, calc(100dvh - 184px));
+  grid-template-rows: minmax(36px, max-content) 46px minmax(0, 1fr) max-content;
   gap: var(--fp-space-2);
   padding: var(--fp-space-3);
   overflow: hidden;
@@ -24569,15 +24468,58 @@ body.column-layout-dragging {
   background: var(--fp-surface);
 }
 
-.etc-batch-rail .etc-batch-list {
+.etc-batch-scroll {
   min-height: 0;
-  flex: 1;
-  align-content: start;
   overflow: auto;
   scrollbar-gutter: stable;
-  border: 0;
   border-top: 1px solid var(--fp-border);
-  border-radius: 0;
+}
+
+.etc-batch-list {
+  display: grid;
+  grid-auto-rows: max-content;
+  gap: 0;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.etc-batch-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  align-items: stretch;
+  border-bottom: 1px solid var(--fp-border);
+  background: var(--fp-surface);
+}
+
+.etc-list-row-button {
+  display: grid;
+  gap: var(--fp-space-1);
+  min-width: 0;
+  padding: 8px 10px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  overflow-wrap: anywhere;
+}
+
+.etc-row-title {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--fp-space-2);
+  color: var(--fp-text-primary);
+  font-size: 13px;
+}
+
+.etc-batch-fields {
+  color: var(--fp-text-secondary);
+  font-size: 12px;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
 }
 
 .etc-batch-pagination {
@@ -24587,10 +24529,6 @@ body.column-layout-dragging {
 
 .etc-batch-pagination .finance-table-pagination__summary {
   width: 100%;
-}
-
-.etc-batch-rail .etc-batch-row {
-  border-bottom: 1px solid var(--fp-border);
 }
 
 .etc-batch-rail .etc-list-row-button[data-selected="true"] {
@@ -24859,12 +24797,7 @@ body.column-layout-dragging {
 
   .etc-batch-rail {
     position: static;
-    min-height: auto;
-    max-height: none;
-  }
-
-  .etc-batch-rail .etc-batch-list {
-    max-height: 320px;
+    height: 480px;
   }
 }
 

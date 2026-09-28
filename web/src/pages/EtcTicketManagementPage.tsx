@@ -2028,73 +2028,74 @@ export default function EtcTicketManagementPage() {
                   已提交 {loading || draftCreating ? "…" : counts === null || batchListError ? "—" : `${counts.submitted}批`}
                 </Segment>
               </SegmentGroup>
-              {loading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}
-              {batchListError ? <StatePanel tone="error" compact>{batchListError}</StatePanel> : null}
-              {!loading && !batchListError && visibleBatches.length === 0 ? <StatePanel tone="empty" compact>无匹配批次。</StatePanel> : null}
-              <ul className="etc-batch-list" aria-label="ETC批次列表">
-                {visibleBatches.map((batch) => {
-                  const deletable = canDeleteBatch(batch);
-                  const selected = selectedBatchId === batch.businessBatchId;
-                  const rowSummary = `${batch.invoiceSummary.count} 张 · ${formatMoney(batch.invoiceSummary.amount)} 元`;
-                  const displayTitle = batchDisplayTitle(batch);
-                  const selectRow = () => {
-                    if (selectedBatchIdRef.current === batch.businessBatchId) {
-                      return;
-                    }
-                    setBusinessBatchDetail(null);
-                    setSelectedTask(null);
-                    setTaskListError(null);
-                    setTaskLoading(true);
-                    selectedBatchIdRef.current = batch.businessBatchId;
-                    setSelectedBatchId(batch.businessBatchId);
-                  };
-                  return (
-                    <li
-                      key={batch.businessBatchId}
-                      className={`etc-batch-row ${batch.status}`}
-                      data-testid={`etc-batch-row-${batch.businessBatchId}`}
-                    >
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        className="etc-list-row-button"
-                        aria-label={`查看批次 ${displayTitle}`}
-                        aria-current={selected ? "true" : undefined}
-                        data-selected={selected ? "true" : undefined}
-                        onClick={selectRow}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            selectRow();
-                          }
-                        }}
+              <div className="etc-batch-scroll" aria-busy={loading}>
+                {loading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}
+                {batchListError ? <StatePanel tone="error" compact>{batchListError}</StatePanel> : null}
+                <ul className="etc-batch-list" aria-label="ETC批次列表">
+                  {visibleBatches.map((batch) => {
+                    const deletable = canDeleteBatch(batch);
+                    const selected = selectedBatchId === batch.businessBatchId;
+                    const rowSummary = `${batch.invoiceSummary.count} 张 · ${formatMoney(batch.invoiceSummary.amount)} 元`;
+                    const displayTitle = batchDisplayTitle(batch);
+                    const selectRow = () => {
+                      if (selectedBatchIdRef.current === batch.businessBatchId) {
+                        return;
+                      }
+                      setBusinessBatchDetail(null);
+                      setSelectedTask(null);
+                      setTaskListError(null);
+                      setTaskLoading(true);
+                      selectedBatchIdRef.current = batch.businessBatchId;
+                      setSelectedBatchId(batch.businessBatchId);
+                    };
+                    return (
+                      <li
+                        key={batch.businessBatchId}
+                        className={`etc-batch-row ${batch.status}`}
+                        data-testid={`etc-batch-row-${batch.businessBatchId}`}
                       >
-                        <span className="etc-row-title">
-                          <strong>{displayTitle}</strong>
-                          <StatusChip tone={businessBatchTone(batch.status)}>
-                            {businessBatchStatusLabel(batch.status)}
-                          </StatusChip>
-                        </span>
-                        <span className="etc-batch-fields">
-                          <span>{rowSummary}</span>
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        className="etc-icon-action etc-icon-action--danger"
-                        aria-label={deletable ? `删除批次 ${displayTitle}` : deleteBatchDisabledReason(batch)}
-                        title={deletable ? "删除批次" : deleteBatchDisabledReason(batch)}
-                        disabled={!deletable || deleteSubmitting}
-                        onClick={(event) => {
-                          openDeleteBatchDialog(batch, event);
-                        }}
-                      >
-                        <Trash2 aria-hidden="true" size={16} />
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          className="etc-list-row-button"
+                          aria-label={`查看批次 ${displayTitle}`}
+                          aria-current={selected ? "true" : undefined}
+                          data-selected={selected ? "true" : undefined}
+                          onClick={selectRow}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              selectRow();
+                            }
+                          }}
+                        >
+                          <span className="etc-row-title">
+                            <strong>{displayTitle}</strong>
+                            <StatusChip tone={businessBatchTone(batch.status)}>
+                              {businessBatchStatusLabel(batch.status)}
+                            </StatusChip>
+                          </span>
+                          <span className="etc-batch-fields">
+                            <span>{rowSummary}</span>
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          className="etc-icon-action etc-icon-action--danger"
+                          aria-label={deletable ? `删除批次 ${displayTitle}` : deleteBatchDisabledReason(batch)}
+                          title={deletable ? "删除批次" : deleteBatchDisabledReason(batch)}
+                          disabled={!deletable || deleteSubmitting}
+                          onClick={(event) => {
+                            openDeleteBatchDialog(batch, event);
+                          }}
+                        >
+                          <Trash2 aria-hidden="true" size={16} />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
               <FinanceTablePagination
                 className="etc-batch-pagination"
                 compact

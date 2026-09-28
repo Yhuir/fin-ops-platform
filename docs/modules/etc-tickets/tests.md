@@ -212,3 +212,9 @@ bash scripts/verify.sh docs
 - `tests/test_etc_backend.py` 保留 65 张发票固定 list=2/detail=3 查询预算，明确 counts=1、pagination total=1、invoiceSummary.count=65；既有权限、提交/撤回、删除 API 回归继续适用。
 - `EtcApi.test.ts` 保留非法/缺失统计拒绝；`EtcTicketManagementPage.test.tsx` 和 ETC Playwright 场景验证批数文案、刷新、暂存/提交、空批次与 121 批分页合同。
 - 七类测试分别由上述业务/存储、服务/API、列表刷新、组件交互、状态流程和既有功能回归覆盖；无独立 read model/cache/worker 变更，不增加这些专项测试。生产只读核对三 bucket counts 与分页及全量批次身份一致，不对真实批次做测试写入。
+
+## 2026-09-28 左栏稳定布局
+
+- `e2e/etc-batch-rail-layout.spec.ts`：1600/1280/960/390宽度，空列表、挂起请求、有数据的尺寸一致；长标题/大金额不裁切，末项完整可达，重复选择零读取；列表失败及刷新恢复不移动控件。排版压力用浏览器内文本替换隔离业务状态；真实生产9条批次另行只读检查。
+- `EtcTicketManagementPage.test.tsx` 与 `etc-tickets-flow.spec.ts`：空列表通过加载完成后的0批和空list断言，不依赖已删除的提示。既有失败恢复、121批分页、草稿、删除等测试保留。
+- 测试类别5（UI交互）、6（合成API浏览器流程）、7（回归）适用；类别1/2/3/4业务、service、API、read model/cache/worker未修改，不新增后端测试。不修改共享切换控件或其他页面样式。
