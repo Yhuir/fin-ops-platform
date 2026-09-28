@@ -2486,7 +2486,7 @@ export default function ReconciliationWorkbenchPage() {
   return (
     <div className="workbench-shell">
       <div className="page-stack">
-        <header className="page-header">
+        <header className="page-header workbench-page-header">
           <div className="page-title-row">
             <h1 className="page-title">关联台</h1>
             <div className="page-title-accessory">

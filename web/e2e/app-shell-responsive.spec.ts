@@ -20,6 +20,8 @@ test.describe("app shell responsive browser smoke", () => {
       { path: "/input-invoice-usage", title: "进项发票使用情况" },
       { path: "/pending-invoices", title: "待找发票" },
       { path: "/bank-details", title: "银行明细" },
+      { path: "/cost-statistics", title: "成本统计" },
+      { path: "/", title: "关联台" },
     ] as const;
 
     let baseline: { top: number; left: number } | null = null;
@@ -60,6 +62,55 @@ test.describe("app shell responsive browser smoke", () => {
     expect(operationsInset.top).toBeCloseTo(16, 1);
     expect(operationsInset.left).toBeCloseTo(16, 1);
   });
+
+  for (const scenario of [
+    { name: "desktop", width: 1440, path: "/" },
+    { name: "narrow", width: 390, path: "/" },
+    { name: "embedded", width: 1280, path: "/?embedded=oa" },
+  ]) {
+    test(`workbench header stays readable and statistics remain local: ${scenario.name}`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width: scenario.width, height: 900 });
+      const api = await installDeterministicApiMocks(page, { sessionMode: "admin" });
+      await page.goto(scenario.path);
+      const header = page.locator(".workbench-page-header");
+      const trigger = page.getByRole("button", { name: "关联台数据统计", exact: true });
+      await expect(trigger).toBeVisible();
+      await expect(header.locator(".page-statistics-skeleton")).toHaveCount(0);
+      const geometry = await header.evaluate(element => {
+        const rect = element.getBoundingClientRect();
+        const title = element.querySelector("h1")!.getBoundingClientRect();
+        const body = element.closest(".page-body")!.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return {
+          top: title.top - body.top,
+          left: title.left - body.left,
+          bottomPadding: parseFloat(style.paddingBottom),
+          height: rect.height,
+          clipped: Array.from(element.querySelectorAll("h1, .page-statistics-value, .page-statistics-chevron"))
+            .some(node => {
+              const item = node.getBoundingClientRect();
+              return item.left < rect.left || item.right > rect.right || item.bottom > rect.bottom;
+            }),
+        };
+      });
+      expect(geometry.top).toBeCloseTo(16, 1);
+      expect(geometry.left).toBeCloseTo(16, 1);
+      expect(geometry.bottomPadding).toBe(12);
+      expect(geometry.height).toBeGreaterThanOrEqual(53);
+      expect(geometry.clipped).toBe(false);
+      const requestsBefore = api.count("GET /api/workbench");
+      await trigger.focus();
+      await page.keyboard.press("Enter");
+      const details = page.getByRole("dialog", { name: "关联台数据统计详情", exact: true });
+      await expect(details).toBeVisible();
+      await expect(details).toContainText("已完成 OA");
+      await page.keyboard.press("Escape");
+      await expect(details).toBeHidden();
+      await expect(trigger).toBeFocused();
+      expect(api.count("GET /api/workbench")).toBe(requestsBefore);
+      await header.screenshot({ path: testInfo.outputPath(`workbench-header-${scenario.name}.png`) });
+    });
+  }
 
   test("opens the compact navigation drawer and closes it after route navigation", async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 390, height: 844 });

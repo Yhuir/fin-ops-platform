@@ -12037,6 +12037,10 @@ body.workbench-page-mode .page-stack {
   position: relative;
 }
 
+.workbench-page-header {
+  padding: var(--fp-space-4) var(--fp-space-4) var(--fp-space-3);
+}
+
 .workbench-zone-stack {
   display: grid;
   gap: 18px;
