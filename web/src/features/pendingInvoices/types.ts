@@ -512,13 +512,7 @@ export type AttachExistingInvoicesResult = {
   row: PendingInvoiceRow | null;
 };
 
-export type PendingInvoiceExportPreview = {
-  fileName: string;
-  rowCount: number;
-  scopeLabel: string;
-  columns: string[];
-  sampleRows: Array<Record<string, string>>;
-};
+
 
 export type PendingInvoiceExportDownload = {
   blob: Blob;

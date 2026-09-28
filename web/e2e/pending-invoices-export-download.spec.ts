@@ -96,7 +96,7 @@ test.describe("pending invoices export browser download", () => {
       await mark("finalSettledLatencyMs", expect(page.getByRole("row", { name: /智能工厂设备商/ })).toBeVisible());
     });
 
-    const previewDialog = page.getByRole("dialog", { name: "导出预览" });
+    const previewDialog = page.getByRole("dialog", { name: "导出待找发票" });
     let previewUrl: URL | undefined;
     await recordLatency({
       operationId: "pending-invoices.open-export-preview",
@@ -105,7 +105,7 @@ test.describe("pending invoices export browser download", () => {
     }, async (mark) => {
       const previewRequest = page.waitForRequest((request) => {
         const url = new URL(request.url());
-        return request.method() === "GET" && url.pathname.endsWith("/api/pending-invoices/export-preview");
+        return request.method() === "GET" && url.pathname.endsWith("/api/pending-invoices/export-summary");
       });
       await page.getByRole("button", { name: "筛选内容导出" }).click();
       await mark("apiLatencyMs", previewRequest);
@@ -118,19 +118,14 @@ test.describe("pending invoices export browser download", () => {
     }
     expect(previewUrl.searchParams.get("direction")).toBe("all");
     expect(previewUrl.searchParams.get("filter")).toBe(null);
-    expect(previewUrl.searchParams.get("keyword")).toBe("智能工厂");
-    expect(previewUrl.searchParams.get("sort_field")).toBe("trade_date");
-    expect(previewUrl.searchParams.get("sort_direction")).toBe("desc");
+    expect(previewUrl.searchParams.get("keyword")).toBeNull();
+    expect(previewUrl.searchParams.get("sort_field")).toBeNull();
+    expect(previewUrl.searchParams.get("sort_direction")).toBeNull();
     expect(previewUrl.searchParams.get("page")).toBeNull();
     expect(previewUrl.searchParams.get("page_size")).toBeNull();
 
-    const previewTable = previewDialog.getByRole("grid", { name: "导出样例" });
-    await expect(previewTable).toContainText("OA申请人");
-    await expect(previewTable).toContainText("进项发票号码");
-    await expect(previewTable).toContainText("陈涛");
-    await expect(previewTable).toContainText("12561048");
-    await expect(previewTable).toContainText("CASE-202603-101");
-    await expect(previewTable).toContainText("linked");
+    await expect(previewDialog.getByText('导出 1 笔')).toBeVisible();
+    await expect(previewDialog.getByRole('grid')).toHaveCount(0);
 
     let exportUrl: URL | undefined;
     let downloaded: Download | undefined;
@@ -144,10 +139,10 @@ test.describe("pending invoices export browser download", () => {
         return request.method() === "GET" && url.pathname.endsWith("/api/pending-invoices/export");
       });
       const download = page.waitForEvent("download");
-      await previewDialog.getByRole("button", { name: "下载导出" }).click();
+      await previewDialog.getByRole("button", { name: "下载 Excel" }).click();
       exportUrl = new URL((await mark("apiLatencyMs", exportRequest)).url());
       downloaded = await mark("finalSettledLatencyMs", download);
-      await expect(previewDialog.getByText("已生成 pending-invoices.xlsx")).toBeVisible();
+      await expect(previewDialog.getByText("已导出 pending-invoices.xlsx")).toBeVisible();
     });
     if (!exportUrl) {
       throw new Error("missing export request");
@@ -157,7 +152,7 @@ test.describe("pending invoices export browser download", () => {
     }
     expect(exportUrl.searchParams.get("direction")).toBe("all");
     expect(exportUrl.searchParams.get("filter")).toBe(null);
-    expect(exportUrl.searchParams.get("keyword")).toBe("智能工厂");
+    expect(exportUrl.searchParams.get("keyword")).toBeNull();
     expect(exportUrl.searchParams.get("page")).toBeNull();
     expect(exportUrl.searchParams.get("page_size")).toBeNull();
 
@@ -166,21 +161,15 @@ test.describe("pending invoices export browser download", () => {
     await downloaded.saveAs(downloadPath);
     const content = await readXlsxText(downloadPath);
 
-    expect(content).toContain("bk-o-202603-001");
     expect(content).toContain("智能工厂设备商");
     expect(content).toContain("已支付已开票");
     expect(content).toContain("陈涛");
     expect(content).toContain("12561048");
-    expect(content).toContain("CASE-202603-101");
-    expect(content).toContain("linked");
-    expect(content).toContain("导出筛选");
-    expect(content).toContain("all");
     expect(content).not.toContain("requires_invoice");
-    expect(content).toContain("智能工厂");
-    expect(content).toContain("trade_date");
-    expect(content).toContain("desc");
+    expect(content).not.toContain("流水ID");
+    expect(content).not.toContain("关系案例");
     expect(content).not.toContain("已支付待开票");
-    await expect(previewDialog.getByText("已生成 pending-invoices.xlsx")).toBeVisible();
+    await expect(previewDialog.getByText("已导出 pending-invoices.xlsx")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
 
     expect(browserErrors).toEqual([]);
@@ -204,7 +193,7 @@ test.describe("pending invoices export browser download", () => {
       await gotoAndExpectPageReady(page, "/pending-invoices", "pending-invoices-page", { diagnostics });
       await mark("finalSettledLatencyMs", expect(page.getByTestId("pending-invoices-page")).toBeVisible());
     });
-    const previewDialog = page.getByRole("dialog", { name: "导出预览" });
+    const previewDialog = page.getByRole("dialog", { name: "导出待找发票" });
     await recordLatency({
       operationId: "pending-invoices.open-export-preview-row-limit",
       visibleLabel: "筛选内容导出",
@@ -212,9 +201,9 @@ test.describe("pending invoices export browser download", () => {
     }, async (mark) => {
       await page.getByRole("button", { name: "筛选内容导出" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(previewDialog).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(previewDialog.getByRole("grid", { name: "导出样例" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(previewDialog.getByText("导出 1 笔")).toBeVisible());
     });
-    await expect(previewDialog.getByRole("grid", { name: "导出样例" })).toBeVisible();
+    await expect(previewDialog.getByText("导出 1 笔")).toBeVisible();
 
     const exportRequest = page.waitForRequest((request) => {
       const url = new URL(request.url());
@@ -226,13 +215,13 @@ test.describe("pending invoices export browser download", () => {
       visibleLabel: "下载导出",
       actionType: "download",
     }, async (mark) => {
-      await previewDialog.getByRole("button", { name: "下载导出" }).click();
+      await previewDialog.getByRole("button", { name: "下载 Excel" }).click();
       await mark("apiLatencyMs", exportRequest);
       await mark("firstVisibleResponseLatencyMs", expect(previewDialog.getByRole("alert")).toContainText("待找发票导出超过 20000 行，请缩小筛选范围后重试。"));
     });
 
     await expect(previewDialog.getByRole("alert")).toContainText("待找发票导出超过 20000 行，请缩小筛选范围后重试。");
-    await expect(previewDialog.getByText("已生成 pending-invoices.xlsx")).toHaveCount(0);
+    await expect(previewDialog.getByText("已导出 pending-invoices.xlsx")).toHaveCount(0);
     expect(await downloadAttempt).toBe(false);
     expect(api.count("GET /api/pending-invoices/export")).toBe(1);
     expect(browserErrors.filter((error) => !error.includes("status of 400"))).toEqual([]);

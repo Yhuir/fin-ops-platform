@@ -5960,7 +5960,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       };
     },
-    "/api/cost-statistics/export-preview": ({ url }) => {
+    "/api/cost-statistics/export-summary": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";
       const view = url.searchParams.get("view") ?? "project";
       const projectNames = url.searchParams.getAll("project_name");

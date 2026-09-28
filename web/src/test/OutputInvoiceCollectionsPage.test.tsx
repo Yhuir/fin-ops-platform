@@ -533,16 +533,9 @@ describe("销项发票收款情况", () => {
 
     const tableBefore = await screen.findByRole("grid", { name: "销项发票收款情况表" });
     expect(screen.queryByText("当前筛选范围 · 按发票张数")).not.toBeInTheDocument();
-    await user.click(within(tableBefore).getByRole("button", { name: "筛选 状态" }));
-    const menu = await screen.findByRole("menu", { name: "状态筛选与排序" });
-    expect(within(menu).queryByText("筛选项来自当前后端查询上下文")).not.toBeInTheDocument();
-    const allStatusLabels = ["蓝票已被红冲 1", "红票已关联蓝票 1", "红票待核对 1", "已收款 1", "部分收款 1", "收款待核对 1"];
-    allStatusLabels.forEach((label) => {
-      expect(within(menu).getByRole("checkbox", { name: label })).toBeInTheDocument();
-    });
-
-    await user.click(within(menu).getByRole("checkbox", { name: "已收款 1" }));
-
+    expect(within(tableBefore).queryByRole('button', { name: '筛选 状态' })).not.toBeInTheDocument();
+    const tabs = screen.getByRole('tablist', { name: '销项发票状态分类' });
+    await user.click(within(tabs).getByRole('tab', { name: '已收款 1 张' }));
     await waitFor(() => {
       const rowRequests = fetchMock.mock.calls
         .map(([input]) => new URL(String(input), "http://localhost"))
@@ -552,9 +545,8 @@ describe("销项发票收款情况", () => {
     });
 
     expect(document.querySelector('[aria-label="销项发票收款情况表"]')).toBe(tableBefore);
-    allStatusLabels.forEach((label) => {
-      expect(within(menu).getByRole("checkbox", { name: label })).toBeInTheDocument();
-    });
+    expect(within(tabs).getAllByRole('tab')).toHaveLength(7);
+    expect(screen.queryByText('更新中…')).not.toBeInTheDocument();
   });
 
   test("统计使用完整范围张数，切换复用单一筛选且保留搜索", async () => {
@@ -581,24 +573,17 @@ describe("销项发票收款情况", () => {
     });
   });
 
-  test("表头多选有明确激活项，顶部单选替换多选", async () => {
-    const fetchMock = installFetchMock();
-    const user = userEvent.setup();
-    renderAuthenticatedAppAt("/output-invoice-collections");
-    const table = await screen.findByRole("grid", { name: "销项发票收款情况表" });
-    await user.click(within(table).getByRole("button", { name: "筛选 状态" }));
-    const menu = await screen.findByRole("menu", { name: "状态筛选与排序" });
-    await user.click(within(menu).getByRole("checkbox", { name: "已收款 1" }));
-    await user.click(within(menu).getByRole("checkbox", { name: "部分收款 1" }));
-    await user.keyboard("{Escape}");
-    expect(await screen.findByRole("tab", { name: "多状态筛选" })).toHaveAttribute("aria-selected", "true");
-    expect(await screen.findByRole("tab", { name: "全部 6 张" })).toHaveAttribute("aria-selected", "false");
-    await user.click(screen.getByRole("tab", { name: "收款待核对 1 张" }));
+  test("顶部单选替换状态且表头不再提供重复筛选", async () => {
+    const fetchMock = installFetchMock(); const user = userEvent.setup();
+    renderAuthenticatedAppAt('/output-invoice-collections');
+    await screen.findByRole('grid', { name: '销项发票收款情况表' });
+    expect(screen.queryByRole('button', { name: '筛选 状态' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: '已收款 1 张' }));
+    await user.click(screen.getByRole('tab', { name: '收款待核对 1 张' }));
     await waitFor(() => {
-      const url = new URL(String(fetchMock.mock.calls.at(-1)?.[0]), "http://localhost");
-      expect(JSON.parse(decodeURIComponent(url.searchParams.get("filters")!))).toEqual([{ field: "collection_status", operator: "in", values: ["pending_collection"] }]);
+      const url = new URL(String(fetchMock.mock.calls.at(-1)?.[0]), 'http://localhost');
+      expect(JSON.parse(decodeURIComponent(url.searchParams.get('filters')!))).toEqual([{field:'collection_status',operator:'in',values:['pending_collection']}]);
     });
-    expect(screen.queryByRole("tab", { name: "多状态筛选" })).not.toBeInTheDocument();
   });
 
   test("无效统计明确报错，保留表格但不显示假零或允许旧结果导出", async () => {

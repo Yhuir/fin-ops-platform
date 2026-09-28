@@ -272,7 +272,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertNotIn("read_model.workbench_relation", sql)
         self.assertNotIn("read_model.invoice_lifecycle", sql)
 
-    def test_input_payment_status_facets_exclude_only_their_own_filter(self) -> None:
+    def test_input_overview_ignores_table_filters(self) -> None:
         connection = RecordingConnection()
         repository = PostgresInputInvoiceUsageQueryRepository(connection)
 
@@ -293,10 +293,10 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         )
 
         sql = "\n".join(connection.transactions[0].statements)
-        self.assertEqual(sql.count("seller_name = any(%s::text[])"), 3)
-        self.assertEqual(sql.count("status_code = any(%s::text[])"), 2)
+        self.assertEqual(sql.count("seller_name = any(%s::text[])"), 1)
+        self.assertEqual(sql.count("status_code = any(%s::text[])"), 1)
 
-    def test_output_collection_status_facets_exclude_only_their_own_filter(self) -> None:
+    def test_output_overview_ignores_table_filters(self) -> None:
         connection = RecordingConnection()
         repository = PostgresOutputInvoiceCollectionQueryRepository(connection)
 
@@ -321,7 +321,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         )
 
         sql = "\n".join(connection.transactions[0].statements)
-        self.assertEqual(sql.count("buyer_name = any(%s::text[])"), 2)
+        self.assertEqual(sql.count("buyer_name = any(%s::text[])"), 1)
         self.assertEqual(sql.count("status_code = any(%s::text[])"), 1)
 
     def test_output_row_lookup_hashes_the_same_group_key_as_list_rows(self) -> None:

@@ -5,7 +5,7 @@ import {
   fetchCostStatisticsManualAllocations,
   fetchCostStatisticsManualAllocation,
   fetchCostStatisticsExplorerPage,
-  fetchCostStatisticsExportPreview,
+  fetchCostStatisticsExportSummary,
   fetchCostStatisticsNoOaRules,
   saveCostStatisticsNoOaRules,
   saveCostStatisticsManualAllocation,
@@ -180,7 +180,7 @@ describe("Cost statistics export API", () => {
           next_cursor: "cursor-2",
         }), { status: 200 });
       }
-      if (url.startsWith("/api/cost-statistics/export-preview")) {
+      if (url.startsWith("/api/cost-statistics/export-summary")) {
         return new Response(JSON.stringify({
           view: "project",
           file_name: "preview.xlsx",
@@ -212,7 +212,7 @@ describe("Cost statistics export API", () => {
       pageSize: 50,
       includeStatistics: false,
     });
-    await fetchCostStatisticsExportPreview({
+    await fetchCostStatisticsExportSummary({
       month: "all",
       view: "project",
       projectNames: ["云南溯源科技"],
@@ -230,7 +230,7 @@ describe("Cost statistics export API", () => {
       expect.any(Object),
     );
     expect(global.fetch).toHaveBeenCalledWith(
-      `/api/cost-statistics/export-preview?month=all&view=project&project_name=${encodeURIComponent("云南溯源科技")}&aggregate_by=month`,
+      `/api/cost-statistics/export-summary?month=all&view=project&project_name=${encodeURIComponent("云南溯源科技")}&aggregate_by=month`,
       expect.any(Object),
     );
     expect(global.fetch).toHaveBeenCalledWith(
@@ -239,10 +239,10 @@ describe("Cost statistics export API", () => {
     );
     const yearRange = { month: "all", view: "project" as const, projectNames: ["云南溯源科技"],
       aggregateBy: "month" as const, startDate: "2025-01-01", endDate: "2025-12-31" };
-    await fetchCostStatisticsExportPreview(yearRange);
+    await fetchCostStatisticsExportSummary(yearRange);
     await exportCostStatisticsView(yearRange);
     const scopedCalls = vi.mocked(global.fetch).mock.calls.slice(-2).map(([input]) => new URL(String(input), "http://localhost"));
-    expect(scopedCalls.map(url => url.pathname)).toEqual(["/api/cost-statistics/export-preview", "/api/cost-statistics/export"]);
+    expect(scopedCalls.map(url => url.pathname)).toEqual(["/api/cost-statistics/export-summary", "/api/cost-statistics/export"]);
     expect(scopedCalls[0].search).toBe(scopedCalls[1].search);
     expect(scopedCalls[0].searchParams.get("month")).toBe("all");
     expect(scopedCalls[0].searchParams.get("start_date")).toBe("2025-01-01");

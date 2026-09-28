@@ -2291,7 +2291,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("CostStatisticsApiRoutes does not own route dispatch")
         for snippet in (
             'route_path == "/api/cost-statistics/explorer"',
-            'route_path == "/api/cost-statistics/export-preview"',
+            'route_path == "/api/cost-statistics/export-summary"',
             'route_path == "/api/cost-statistics/export"',
             'route_path.startswith("/api/cost-statistics/bank-transactions/")',
             'route_path.startswith("/api/cost-statistics/allocations/")',
@@ -2568,7 +2568,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "def route(",
             "/api/output-invoice-collections/rows",
             "/api/output-invoice-collections/filter-options",
-            "/api/output-invoice-collections/export-preview",
+            "/api/output-invoice-collections/export-summary",
             "/api/output-invoice-collections/export",
             "/api/output-invoice-collections/invoices/",
             "/api/output-invoice-collections/bank-transactions/",
@@ -2605,7 +2605,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "class OutputInvoiceCollectionCanonicalQueryService",
             "def rows(",
             "def filter_options(",
-            "def export_preview(",
+            "def export_summary(",
             "def export(",
             "def relation_details(",
         ):
@@ -3749,7 +3749,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for required in (
             "/api/input-invoice-usage/rows",
             "/api/input-invoice-usage/filter-options",
-            "/api/input-invoice-usage/export-preview",
+            "/api/input-invoice-usage/export-summary",
             "/api/input-invoice-usage/export",
             "/api/input-invoice-usage/payment-status-rules",
             "update_payment_status_rules",
@@ -3758,7 +3758,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "/api/input-invoice-usage/oa/",
             "/api/input-invoice-usage/rows/",
             "relation_details",
-            "export_preview",
+            "export_summary",
             "def export(",
         ):
             if required not in route_class:

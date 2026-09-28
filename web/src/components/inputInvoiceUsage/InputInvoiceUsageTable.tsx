@@ -455,7 +455,7 @@ export default function InputInvoiceUsageTable({
                 separated
               />
               <HeaderCell label="货物或应税劳务名称" separated />
-              <HeaderCell label={<span className="input-invoice-usage-table-column-heading"><span>支付状态</span>{filterMenu("payment_status", "支付状态")}</span>} strongSeparated emphasized />
+              <HeaderCell label={<span className="input-invoice-usage-table-column-heading"><span>支付状态</span></span>} strongSeparated emphasized />
               <HeaderCell
                 label={(
                   <CompositeFilterMenu

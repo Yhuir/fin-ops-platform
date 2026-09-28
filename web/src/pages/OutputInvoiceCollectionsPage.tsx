@@ -14,9 +14,7 @@ import { DEFAULT_MONTH } from "../contexts/MonthContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import {
-  downloadOutputInvoiceCollectionExport,
   fetchOutputInvoiceCollectionBankTransactionDetail,
-  fetchOutputInvoiceCollectionExportPreview,
   fetchOutputInvoiceCollectionInvoiceDetail,
   fetchOutputInvoiceCollectionRowRelationDetail,
   fetchOutputInvoiceCollectionRows,
@@ -90,7 +88,7 @@ function validateQuery(value: unknown): value is OutputInvoiceCollectionQuery {
 
 function restoreQuery(raw: unknown): OutputInvoiceCollectionQuery {
   if (!validateQuery(raw)) return initialQuery;
-  const filters = raw.filters.filter((filter) => !["invoice_date", "bank_trade_time"].includes(filter.field));
+  const filters = raw.filters.filter((filter) => !["invoice_date", "bank_trade_time"].includes(filter.field)).map(filter => (['collection_status'].includes(filter.field) && filter.values && filter.values.length > 1 ? { ...filter, values: [filter.values[0]] } : filter));
   const dateScopeChanged = Boolean(raw.month || raw.invoiceDateFrom || raw.invoiceDateTo)
     || filters.length !== raw.filters.length;
   return {
@@ -270,7 +268,6 @@ export default function OutputInvoiceCollectionsPage() {
     return fetchOutputInvoiceCollectionRowRelationDetail(target);
   }, []);
 
-  const exportRequest = rowsRequest;
 
   const titleAccessory = useMemo(() => (
     <div className="page-title-accessory-group">
@@ -290,9 +287,7 @@ export default function OutputInvoiceCollectionsPage() {
 
   const statusOptions = filterOptions.collection_status;
   const statusFilter = query.filters.find(filter => filter.field === "collection_status");
-  const selectedStatuses = statusFilter?.values ?? [];
-  const selectedStatus = !statusFilter ? "all"
-    : selectedStatuses.length === 1 ? selectedStatuses[0] : "multiple";
+  const selectedStatus = statusFilter?.values?.[0] ?? "all";
   // Counts are validated once at the API boundary and cover the full query scope.
   const statusTotal = statusOptions?.reduce((sum, option) => sum + option.count!, 0);
   const countsPending = loading || refreshing || Boolean(error);
@@ -325,15 +320,12 @@ export default function OutputInvoiceCollectionsPage() {
           <div className="output-invoice-collections-content">
             <PageToolbar className="output-invoice-collections-query"
               left={<div className="output-invoice-collections-status-section">
-                {refreshing ? <div className="output-invoice-collections-refresh-status" role="status">更新中…</div> : null}
                 <InvoiceCountSegments label="销项发票状态分类" selectedKey={selectedStatus} unit="张" pending={countsPending}
                   options={[
                     { key: "all", label: "全部", count: statusTotal },
                     ...(statusOptions?.map(option => ({ key: option.value, label: option.label, count: option.count })) ?? []),
-                    ...(selectedStatus === "multiple" ? [{ key: "multiple", label: "多状态筛选" }] : []),
                   ]}
                   onChange={key => {
-                    if (key === "multiple") return;
                     setQuery(current => ({ ...current, page: 1,
                       filters: [...current.filters.filter(filter => filter.field !== "collection_status"),
                         ...(key === "all" ? [] : [{ field: "collection_status", operator: "in" as const, values: [key] }])],
@@ -413,8 +405,6 @@ export default function OutputInvoiceCollectionsPage() {
         target={query.detailTarget}
       />
       <OutputInvoiceCollectionExportDrawer
-        downloadExport={() => downloadOutputInvoiceCollectionExport(exportRequest)}
-        loadPreview={() => fetchOutputInvoiceCollectionExportPreview(exportRequest)}
         onClose={() => setQuery((current) => ({ ...current, activeWorkflow: null }))}
         open={query.activeWorkflow?.kind === "export"}
       />

@@ -1,3 +1,4 @@
+import { selectionFilters, type ExportSelection, type ExportSummary, type ExportOption } from "../exports/types";
 import { mapBankSplitParts } from '../bankSplits/api';
 import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
 import { OUTPUT_COLLECTION_STATUS_CODES } from "./types";
@@ -5,7 +6,6 @@ import type {
   OutputInvoiceCollectionDetailResponse,
   OutputInvoiceCollectionDetailTarget,
   OutputInvoiceCollectionExportDownload,
-  OutputInvoiceCollectionExportPreview,
   OutputInvoiceCollectionFilter,
   OutputInvoiceCollectionFilterOptionsResponse,
   OutputInvoiceCollectionQuery,
@@ -59,11 +59,6 @@ function camelOrSnake(source: Record<string, unknown>, camel: string, snake: str
 
 function encodeFilters(filters: OutputInvoiceCollectionFilter[]) {
   return encodeURIComponent(JSON.stringify(filters));
-}
-
-function objectStringMap(value: unknown): Record<string, string> {
-  const raw = objectValue(value);
-  return Object.fromEntries(Object.entries(raw).map(([key, item]) => [key, stringValue(item)]));
 }
 
 function appendRowsQuery(params: URLSearchParams, request: FetchRowsRequest, includePagination = true) {
@@ -514,23 +509,15 @@ export async function fetchOutputInvoiceCollectionRows(request: FetchRowsRequest
   return mapRowsResponse(payload);
 }
 
-export async function fetchOutputInvoiceCollectionExportPreview(
-  request: FetchRowsRequest,
-): Promise<OutputInvoiceCollectionExportPreview> {
-  const payload = await apiRequestJson<unknown>(
-    `/api/output-invoice-collections/export-preview?${buildRowsQuery(request, false)}`,
-    { method: "GET", signal: request.signal },
-  );
-  const raw = objectValue(payload);
-  return {
-    fileName: stringValue(camelOrSnake(raw, "fileName", "file_name") ?? "销项发票收款情况.xlsx"),
-    rowCount: numberValue(camelOrSnake(raw, "rowCount", "row_count"), 0),
-    scopeLabel: stringValue(camelOrSnake(raw, "scopeLabel", "scope_label")),
-    columns: arrayValue(raw.columns).map(stringValue),
-    sampleRows: arrayValue(camelOrSnake(raw, "sampleRows", "sample_rows")).map(objectStringMap),
-    message: stringValue(raw.message),
-  };
+function exportRequest(selection: ExportSelection) { return { page: 1, pageSize: 1, keyword: '', month: '', invoiceDateFrom: selection.startDate, invoiceDateTo: selection.endDate, filters: selectionFilters(selection), sortField: 'invoice_date', sortDirection: 'desc' as const }; }
+export async function fetchOutputInvoiceCollectionExportSummary(selection: ExportSelection, signal: AbortSignal): Promise<ExportSummary> {
+  const url = `/api/output-invoice-collections/export-summary?${buildRowsQuery(exportRequest(selection))}`;
+  const raw = await apiRequestJson<{ row_count: number; filter_options: { field: string; options: ExportOption[] }[] }>(url, { method: 'GET', signal });
+  const status = raw.filter_options.find(item => item.field === 'collection_status');
+  if (!status) throw new Error('收款状态统计缺失');
+  return { rowCount: raw.row_count, groups: [{ field: 'collection_status', label: '收款状态', options: status.options }] };
 }
+export function downloadOutputInvoiceCollectionSelection(selection: ExportSelection) { return downloadOutputInvoiceCollectionExport(exportRequest(selection)); }
 
 export async function downloadOutputInvoiceCollectionExport(request: FetchRowsRequest): Promise<OutputInvoiceCollectionExportDownload> {
   return requestExportBlob(`/api/output-invoice-collections/export?${buildRowsQuery(request, false)}`, {

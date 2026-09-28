@@ -241,10 +241,10 @@ class BankSplitConsumersPostgresTests(unittest.TestCase):
 
         from fin_ops_platform.services.pending_invoice_service import PendingInvoiceQueryService
         exported = PendingInvoiceQueryService._export_row(1, payload['rows'][0])
-        self.assertEqual(exported['借方金额'], '1001497.22')
-        self.assertEqual(exported['流水金额合计'], '1001497.22')
-        self.assertEqual(exported['已付合计'], '1497.22')
-        self.assertIn('费用 / 利息：1497.22', exported['流水拆分'])
+        self.assertEqual(exported['借方金额'], Decimal('1001497.22'))
+        self.assertNotIn('流水金额合计', exported)
+        self.assertNotIn('流水ID', exported)
+        self.assertNotIn('已付合计', exported)
 
         detail = query.bank_transaction_detail(self.interest)
         self.assertEqual(detail['sections'][0]['bank_transaction_id'],'bank-parent')

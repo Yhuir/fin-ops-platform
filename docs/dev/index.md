@@ -61,3 +61,5 @@
 - [页面业务数量](entity-counts.md)：OA 条数、发票张数、原始流水笔数与内部组分页的边界。
 
 - [界面说明与年月工具栏](ui-copy-and-toolbar.md)：冗余文案清理、必要信息保留、原生工具栏等高及回归责任。
+
+- [独立导出筛选与真实对象计数](export-filters-and-counts.md)：四个导出 owner 的范围、字段、计数和验证合同。

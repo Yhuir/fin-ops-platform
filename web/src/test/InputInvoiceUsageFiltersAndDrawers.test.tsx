@@ -62,7 +62,7 @@ describe("Input invoice usage workflow primitive targets", () => {
         ? null
         : "InputInvoiceUsageFilterMenu.tsx should use HeroUI Checkbox and preserve radio menu semantics",
       sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx"].includes("AppDrawer") ? null : "InputInvoiceUsageDetailDrawer.tsx should use AppDrawer",
-      sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx"].includes("AppDrawer") ? null : "InputInvoiceUsageExportDrawer.tsx should use AppDrawer",
+      sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx"].includes("FilteredExportDrawer") ? null : "InputInvoiceUsageExportDrawer.tsx should use AppDrawer",
       sourceByPath["src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx"].includes("AppDrawer") ? null : "PaymentStatusRulesDrawer.tsx should use AppDrawer",
       sourceByPath["src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx"].includes("AppDrawer") ? null : "OaReverseWorkspaceDrawer.tsx should use AppDrawer",
     ].filter(Boolean);

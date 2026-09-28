@@ -938,14 +938,8 @@ function installPendingInvoiceFetch(options: {
         affected_months: ["2026-05"],
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
-    if (url.pathname === "/api/pending-invoices/export-preview") {
-      return new Response(JSON.stringify({
-        file_name: "pending-invoices.xlsx",
-        row_count: 128,
-        scope_label: "当前筛选和排序",
-        columns: ["对方户名", "状态"],
-        sample_rows: [{ counterparty_name: "云南开票供应商", status_label: "已支付待开票" }],
-      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    if (url.pathname === "/api/pending-invoices/export-summary") {
+      return new Response(JSON.stringify({ row_count: 1, source_summary: { expense_rows: 1, income_rows: 0 }, acquisition_summary: { status_counts: Object.fromEntries(['paid_pending_invoice','paid_invoiced','invoice_not_fully_paid','bank_statement_as_invoice','no_invoice_required','income_pending_invoice','income_invoiced','income_no_invoice_required','cash_income'].map(code => [code, code === 'paid_pending_invoice' ? 1 : 0])) } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
     if (url.pathname === "/api/pending-invoices/export") {
       if (options.exportDownloadResponse) {
@@ -1395,11 +1389,14 @@ describe("Pending invoices page", () => {
     await user.click(screen.getByRole("button", { name: "关闭规则抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: "筛选内容导出" }));
-    expect(await screen.findByRole("heading", { name: "导出预览" })).toBeInTheDocument();
-    expect(screen.getByText("预计导出 128 行")).toBeInTheDocument();
-    expect(screen.getByRole("grid", { name: "导出样例" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "下载导出" }));
-    expect(await screen.findByText("已生成 pending-invoices.xlsx")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "导出待找发票" })).toBeInTheDocument();
+    expect(await screen.findByText("导出 1 笔")).toBeInTheDocument();
+    expect(screen.queryByRole("grid", { name: "导出样例" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "下载 Excel" })).toBeEnabled());
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:test'), revokeObjectURL: vi.fn() }));
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    await user.click(screen.getByRole("button", { name: "下载 Excel" }));
+    expect(await screen.findByText("已导出 pending-invoices.xlsx")).toBeInTheDocument();
   }, 45_000);
 
   test("shows backend export row-limit messages inside the export drawer", async () => {
@@ -1418,11 +1415,14 @@ describe("Pending invoices page", () => {
 
     const page = await findPendingInvoicesPage();
     await user.click(within(page).getByRole("button", { name: "筛选内容导出" }));
-    expect(await screen.findByRole("heading", { name: "导出预览" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "下载导出" }));
+    expect(await screen.findByRole("heading", { name: "导出待找发票" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "下载 Excel" })).toBeEnabled());
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:test'), revokeObjectURL: vi.fn() }));
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    await user.click(screen.getByRole("button", { name: "下载 Excel" }));
 
     expect(await screen.findByText("待找发票导出超过 20000 行，请缩小筛选范围后重试。")).toBeInTheDocument();
-    expect(screen.queryByText("已生成 pending-invoices.xlsx")).not.toBeInTheDocument();
+    expect(screen.queryByText("已导出 pending-invoices.xlsx")).not.toBeInTheDocument();
   });
 
   test("keeps pending invoice rule draft and shows conflict feedback on stale version", async () => {

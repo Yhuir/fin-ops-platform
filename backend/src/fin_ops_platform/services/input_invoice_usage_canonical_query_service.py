@@ -211,18 +211,7 @@ class InputInvoiceUsageCanonicalQueryService:
             kwargs.get("sort_direction"),
         )
         if self._repository is None:
-            payload = self._row_assembler.list_rows(
-                page=1,
-                page_size=min(limit, 200),
-                keyword=kwargs.get("keyword"),
-                invoice_date_from=invoice_date_from,
-                invoice_date_to=invoice_date_to,
-                month=month,
-                filters=parsed_filters,
-                sort_field=sort_field,
-                sort_direction=sort_direction,
-            )
-            return payload
+            raise RuntimeError("Invoice export requires the canonical repository.")
         snapshot = self._repository.load_page(
             page=1,
             page_size=limit,
@@ -235,13 +224,13 @@ class InputInvoiceUsageCanonicalQueryService:
             sort_direction=sort_direction,
             tenant_id=tenant_id,
         )
-        return self._payload(
-            snapshot,
-            filters=parsed_filters,
-            sort_field=sort_field,
-            sort_direction=sort_direction,
-            include_statistics=False,
-        )
+        invoices = {invoice.id: invoice for group in snapshot.groups for invoice in group["line_items"]}
+        return {
+            "rows": [{"invoice": self._row_assembler._invoice_summary(invoice, [invoice])}
+                     for invoice in invoices.values()],
+            "total": snapshot.summary["invoiceCount"],
+            "filterOptions": snapshot.facet_counts,
+        }
 
     def rows_by_invoice_ids(
         self,

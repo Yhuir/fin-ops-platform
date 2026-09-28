@@ -40,24 +40,7 @@ CENT = Decimal("0.01")
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 OUTPUT_INVOICE_COLLECTION_EXPORT_ROW_LIMIT = 20_000
 OUTPUT_INVOICE_COLLECTION_EXPORT_COLUMNS = [
-    "序号",
-    "发票号码",
-    "开票日期",
-    "购方",
-    "购方识别号",
-    "价税合计",
-    "收款状态",
-    "已收金额",
-    "待收金额",
-    "收款方",
-    "收款日期",
-    "收款金额",
-    "关联收款金额",
-    "流水拆分",
-    "收款银行",
-    "摘要",
-    "冲红蓝字发票号码",
-    "红蓝票关系",
+    "序号", "发票号码", "开票日期", "购方", "购方识别号", "不含税金额", "税率", "税额", "价税合计", "货物或应税劳务名称", "备注",
 ]
 
 FILTER_CONFIG: dict[str, dict[str, Any]] = {
@@ -310,31 +293,6 @@ class OutputInvoiceCollectionQueryService:
             },
         }
 
-    def export_preview(
-        self,
-        *,
-        keyword: str | None = None,
-        invoice_date_from: str | None = None,
-        invoice_date_to: str | None = None,
-        month: str | None = None,
-        filters: str | list[dict[str, Any]] | None = None,
-        sort_field: str | None = "invoice_date",
-        sort_direction: str | None = "desc",
-        tenant_id: str = "default",
-    ) -> dict[str, Any]:
-        return self.export_preview_for_rows(
-            rows=self._export_rows(
-                keyword=keyword,
-                invoice_date_from=invoice_date_from,
-                invoice_date_to=invoice_date_to,
-                month=month,
-                filters=filters,
-                sort_field=sort_field,
-                sort_direction=sort_direction,
-                tenant_id=tenant_id,
-            )
-        )
-
     def export(
         self,
         *,
@@ -360,29 +318,6 @@ class OutputInvoiceCollectionQueryService:
             )
         )
 
-    def export_preview_for_rows(
-        self,
-        *,
-        rows: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        self._ensure_export_row_limit(rows)
-        sample_rows = [
-            self._export_row(index, row)
-            for index, row in enumerate(rows[:5], start=1)
-        ]
-        file_name = self._export_file_name()
-        return {
-            "file_name": file_name,
-            "fileName": file_name,
-            "row_count": len(rows),
-            "rowCount": len(rows),
-            "scope_label": "当前筛选",
-            "scopeLabel": "当前筛选",
-            "columns": list(OUTPUT_INVOICE_COLLECTION_EXPORT_COLUMNS),
-            "sample_rows": sample_rows,
-            "sampleRows": sample_rows,
-        }
-
     def export_for_rows(
         self,
         rows: list[dict[str, Any]],
@@ -400,6 +335,10 @@ class OutputInvoiceCollectionQueryService:
                     for column in OUTPUT_INVOICE_COLLECTION_EXPORT_COLUMNS
                 ]
             )
+        for cells in sheet.iter_rows(min_row=2):
+            for cell in cells:
+                if isinstance(cell.value, str):
+                    cell.data_type = "s"
         for column_cells in sheet.columns:
             first_cell = column_cells[0]
             sheet.column_dimensions[first_cell.column_letter].width = min(
@@ -715,6 +654,7 @@ class OutputInvoiceCollectionQueryService:
             "reversalTargetInvoiceNos": reversal_target_invoice_nos(
                 line.remark for line in line_items
             ),
+            "remark": primary.remark or "",
             "lineItemCount": len(line_items),
             "hasMoreInvoiceLines": len(line_items) > 1,
             "isPositiveInvoice": primary.is_positive_invoice or "",
@@ -1314,54 +1254,12 @@ class OutputInvoiceCollectionQueryService:
 
     @staticmethod
     def _export_row(index: int, row: dict[str, Any]) -> dict[str, Any]:
-        invoice = dict(row.get("invoice") or {})
-        collection = dict(row.get("collectionStatus") or {})
-        bank = _first_relation_summary(
-            dict(row.get("bankTransactions") or {})
-        )
-        reversal_invoices = [
-            item
-            for item in _relation_summaries(
-                dict(row.get("invoiceRelations") or {})
-            )
-            if str(item.get("relationMode") or "")
-            == OUTPUT_INVOICE_REVERSAL_RELATION_MODE
-            and str(item.get("invoiceId") or "") != str(row.get("invoiceId") or "")
-        ]
-        return {
-            "序号": index,
-            "发票号码": invoice.get("displayNo")
-            or invoice.get("invoiceNo")
-            or "",
-            "开票日期": invoice.get("invoiceDate")
-            or invoice.get("issueDate")
-            or "",
-            "购方": invoice.get("buyerName") or "",
-            "购方识别号": invoice.get("buyerTaxNo") or "",
-            "价税合计": invoice.get("totalWithTax") or "",
-            "收款状态": collection.get("label")
-            or collection.get("code")
-            or "",
-            "已收金额": collection.get("collectedAmount") or "",
-            "待收金额": collection.get("pendingAmount") or "",
-            "收款方": bank.get("counterpartyName") or "",
-            "收款日期": bank.get("tradeTime") or "",
-            "收款金额": bank.get("original_amount") or "",
-            "关联收款金额": bank.get("receivedTotal") or "",
-            "流水拆分": "；".join(
-                f"{' / '.join(part['category_path'])}：{part['amount']}"
-                for part in bank.get("bank_split_parts", [])
-            ),
-            "收款银行": bank.get("bankName") or "",
-            "摘要": bank.get("summary") or "",
-            "冲红蓝字发票号码": _join_non_empty(
-                invoice.get("reversalTargetInvoiceNos") or []
-            ),
-            "红蓝票关系": _join_non_empty(
-                item.get("displayNo") or item.get("invoiceNo")
-                for item in reversal_invoices
-            ),
-        }
+        invoice = row["invoice"]
+        return {"序号": index, "发票号码": invoice["digitalInvoiceNo"] or invoice["invoiceNo"], "开票日期": invoice["invoiceDate"],
+                "购方": invoice["buyerName"], "购方识别号": invoice["buyerTaxNo"],
+                "不含税金额": Decimal(invoice["amount"]), "税率": invoice["taxRate"],
+                "税额": Decimal(invoice["taxAmount"]), "价税合计": Decimal(invoice["totalWithTax"]),
+                "货物或应税劳务名称": invoice["taxableItemName"], "备注": invoice["remark"]}
 
 
 def _collection_status_for_facts(

@@ -2238,11 +2238,11 @@ class Application:
                 "/api/pending-invoices/rows/{transaction_id}/income-status",
                 "/api/pending-invoices/rows/{transaction_id}/attach-existing-invoice/preview",
                 "/api/pending-invoices/rows/{transaction_id}/attach-existing-invoice",
-                "/api/pending-invoices/export-preview",
+                "/api/pending-invoices/export-summary",
                 "/api/pending-invoices/export",
                 "/api/input-invoice-usage/rows",
                 "/api/input-invoice-usage/filter-options",
-                "/api/input-invoice-usage/export-preview",
+                "/api/input-invoice-usage/export-summary",
                 "/api/input-invoice-usage/export",
                 "/api/input-invoice-usage/payment-status-rules",
                 "/api/input-invoice-usage/oa-reverse/preview",
@@ -2326,7 +2326,7 @@ class Application:
                 "/api/tax-offset/calculate",
                 "/api/tax-offset/plans",
                 "/api/cost-statistics/explorer",
-                "/api/cost-statistics/export-preview",
+                "/api/cost-statistics/export-summary",
                 "/api/cost-statistics/export",
                 "/api/cost-statistics/bank-transactions/{transaction_id}",
                 "/api/cost-statistics/allocations/{allocation_id}",
@@ -5245,7 +5245,6 @@ class Application:
             return service
         query_service = self._input_invoice_usage_page_query_service()
         service = InputInvoiceUsageExportService(
-            row_page_loader=query_service.export_page,
             row_export_loader=query_service.export_rows,
         )
         self._input_invoice_usage_export_service_instance = service

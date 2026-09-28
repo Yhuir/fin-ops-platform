@@ -334,7 +334,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(rows["inv-chen"]["paymentStatus"]["code"], "cash_turnover")
         self.assertEqual(rows["inv-paid"]["paymentStatus"]["code"], "paid")
         self.assertEqual(rows["inv-fallback"]["paymentStatus"]["code"], "pending")
-        self.assertEqual("未命中规则", rows["inv-fallback"]["paymentStatus"]["label"])
+        self.assertEqual("待核对", rows["inv-fallback"]["paymentStatus"]["label"])
 
     def test_payment_status_uses_linked_oa_and_bank_totals_for_multi_relation(self) -> None:
         vendor = self._counterparty("vendor", "昭通市昭阳区豪然精品酒店")

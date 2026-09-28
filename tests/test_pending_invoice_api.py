@@ -104,7 +104,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
                 "GET",
                 f"/api/pending-invoices/invoices/{invoice_id}/detail",
             )
-            export_preview_response = app.handle_request("GET", "/api/pending-invoices/export-preview?direction=expense")
+            export_preview_response = app.handle_request("GET", "/api/pending-invoices/export-summary?direction=expense")
             export_response = app.handle_request("GET", "/api/pending-invoices/export?direction=expense")
             rules_response = app.handle_request("GET", "/api/pending-invoices/rules")
 
@@ -130,7 +130,8 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertTrue(invoice_detail_payload["sections"])
         self.assertNotIn("invoice", invoice_detail_payload)
         self.assertEqual(export_preview_response.status_code, 200)
-        self.assertIn("columns", export_preview_payload)
+        self.assertEqual(export_preview_payload["row_count"], 1)
+        self.assertNotIn("sample_rows", export_preview_payload)
         self.assertEqual(export_response.status_code, 200)
         self.assertTrue(export_response.body)
         self.assertEqual(rules_response.status_code, 200)
@@ -167,7 +168,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
             if hasattr(app, "_pending_invoice_api_routes"):
                 delattr(app, "_pending_invoice_api_routes")
 
-            preview_response = app.handle_request("GET", "/api/pending-invoices/export-preview?direction=expense")
+            preview_response = app.handle_request("GET", "/api/pending-invoices/export-summary?direction=expense")
             export_response = app.handle_request("GET", "/api/pending-invoices/export?direction=expense")
 
         preview_payload = json.loads(preview_response.body)
@@ -181,7 +182,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertEqual([call["page"] for call in repository.calls], [1, 1])
         self.assertEqual(
             [call["page_size"] for call in repository.calls],
-            [PENDING_INVOICE_EXPORT_ROW_LIMIT + 1, PENDING_INVOICE_EXPORT_ROW_LIMIT + 1],
+            [0, PENDING_INVOICE_EXPORT_ROW_LIMIT + 1],
         )
 
     def test_batch_attach_existing_invoice_endpoints(self) -> None:
@@ -278,7 +279,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
 
             rows_response = app.handle_request("GET", "/api/pending-invoices/rows?direction=expense&filter=all")
             filter_options_response = app.handle_request("GET", "/api/pending-invoices/filter-options?direction=expense")
-            export_preview_response = app.handle_request("GET", "/api/pending-invoices/export-preview?direction=expense")
+            export_preview_response = app.handle_request("GET", "/api/pending-invoices/export-summary?direction=expense")
             export_response = app.handle_request("GET", "/api/pending-invoices/export?direction=expense")
             income_response = app.handle_request("GET", "/api/pending-invoices/rows?direction=income&filter=cash_income")
 

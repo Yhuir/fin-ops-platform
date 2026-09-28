@@ -1,3 +1,4 @@
+import { selectionFilters, type ExportSelection, type ExportSummary, type ExportOption } from "../exports/types";
 import { mapBankSplitParts } from '../bankSplits/api';
 import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
 import type {
@@ -5,7 +6,6 @@ import type {
   CreateInputInvoiceUsageOaReverseBatchRequest,
   InputInvoiceUsageDetailResponse,
   InputInvoiceUsageExportDownload,
-  InputInvoiceUsageExportPreview,
   InputInvoiceUsageDetailTarget,
   InputInvoiceUsageFilter,
   InputInvoiceUsageFilterOptionsResponse,
@@ -754,11 +754,6 @@ function mapOaReverseStagedDrafts(payload: unknown): InputInvoiceUsageOaReverseS
   };
 }
 
-function objectStringMap(value: unknown): Record<string, string> {
-  const raw = objectValue(value);
-  return Object.fromEntries(Object.entries(raw).map(([key, item]) => [key, stringValue(item)]));
-}
-
 function parseContentDispositionFileName(contentDisposition: string | null) {
   if (!contentDisposition) {
     return null;
@@ -827,21 +822,15 @@ export async function fetchInputInvoiceUsageRows(request: FetchRowsRequest): Pro
   return mapRowsResponse(payload);
 }
 
-export async function fetchInputInvoiceUsageExportPreview(request: FetchRowsRequest): Promise<InputInvoiceUsageExportPreview> {
-  const payload = await apiRequestJson<unknown>(`/api/input-invoice-usage/export-preview?${buildRowsQuery(request)}`, {
-    method: "GET",
-    signal: request.signal,
-  });
-  const raw = objectValue(unwrapData(payload));
-  return {
-    fileName: stringValue(camelOrSnake(raw, "fileName", "file_name") ?? "进项发票使用情况.xlsx"),
-    rowCount: numberValue(camelOrSnake(raw, "rowCount", "row_count"), 0),
-    scopeLabel: stringValue(camelOrSnake(raw, "scopeLabel", "scope_label")),
-    columns: arrayValue(raw.columns).map(stringValue),
-    sampleRows: arrayValue(camelOrSnake(raw, "sampleRows", "sample_rows")).map(objectStringMap),
-    message: stringValue(raw.message),
-  };
+function exportRequest(selection: ExportSelection) { return { page: 1, pageSize: 1, keyword: '', month: '', invoiceDateFrom: selection.startDate, invoiceDateTo: selection.endDate, filters: selectionFilters(selection), sortField: 'invoice_date', sortDirection: 'desc' as const }; }
+export async function fetchInputInvoiceUsageExportSummary(selection: ExportSelection, signal: AbortSignal): Promise<ExportSummary> {
+  const url = `/api/input-invoice-usage/export-summary?${buildRowsQuery(exportRequest(selection))}`;
+  const raw = await apiRequestJson<{ row_count: number; filter_options: Record<string, ExportOption[]> }>(url, { method: 'GET', signal });
+  const relationLabels: Record<string,string> = { no_oa: '未关联 OA', oa_no_bank: '有 OA / 无流水', oa_bank: 'OA / 流水均已关联' };
+  const relations = Object.entries(relationLabels).map(([value, label]) => ({ value, label, count: raw.filter_options.relation_status.find(item => item.value === value)?.count ?? 0 }));
+  return { rowCount: raw.row_count, groups: [{ field: 'relation_status', label: '关联情况', options: relations }, { field: 'payment_status', label: '支付状态', options: raw.filter_options.payment_status }] };
 }
+export function downloadInputInvoiceUsageSelection(selection: ExportSelection) { return downloadInputInvoiceUsageExport(exportRequest(selection)); }
 
 export async function downloadInputInvoiceUsageExport(request: FetchRowsRequest): Promise<InputInvoiceUsageExportDownload> {
   return requestExportBlob(`/api/input-invoice-usage/export?${buildRowsQuery(request)}`, {

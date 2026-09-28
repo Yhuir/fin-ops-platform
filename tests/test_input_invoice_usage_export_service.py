@@ -1,159 +1,40 @@
-from __future__ import annotations
-
-import unittest
 from io import BytesIO
+from unittest import TestCase
+from unittest.mock import Mock
 
 from fin_ops_platform.services.input_invoice_usage_export_service import (
-    INPUT_INVOICE_USAGE_EXPORT_ROW_LIMIT,
     InputInvoiceUsageExportError,
     InputInvoiceUsageExportService,
 )
 from openpyxl import load_workbook
 
 
-class InputInvoiceUsageExportServiceTests(unittest.TestCase):
-    def test_export_preview_collects_filtered_rows_and_formats_sample_columns(self) -> None:
-        loader = StaticPageLoader(
-            [
-                self._row("row-1", "inv-1", "3001", "供应商甲", "100.50"),
-                self._row("row-2", "inv-2", "3002", "供应商乙", "200.00"),
-            ]
-        )
-        service = InputInvoiceUsageExportService(row_page_loader=loader)
+class InputInvoiceUsageExportServiceTests(TestCase):
+    def test_summary_reads_no_details_and_passes_exact_filters(self):
+        loader = Mock(return_value={"total": 47, "rows": [], "filterOptions": {"payment_status": []}})
+        result = InputInvoiceUsageExportService(row_export_loader=loader).export_summary(filters=[{"field": "relation_status", "operator": "in", "values": ["oa_bank"]}])
+        self.assertEqual(result, {"row_count": 47, "filter_options": {"payment_status": []}})
+        self.assertEqual(loader.call_args.kwargs["limit"], 0)
+        self.assertEqual(loader.call_args.kwargs["filters"][0]["values"], ["oa_bank"])
+        self.assertNotIn("sample_rows", result)
 
-        preview = service.export_preview(
-            month="2026-05",
-            keyword="供应商",
-            filters='[{"field":"seller_name","operator":"contains","value":"供应商"}]',
-            sort_field="total_with_tax",
-            sort_direction="desc",
-        )
+    def test_file_has_public_fields_exact_identifiers_numeric_money_and_safe_text(self):
+        invoice = {"invoiceNo": "00123456789012345678", "invoiceCode": "0012", "sellerTaxNo": "000123", "sellerName": "=SUM(1,2)", "invoiceDate": "2026-09-01", "specificBusinessType": "", "taxableItemName": "服务", "amount": "100.00", "taxRate": "6%", "taxAmount": "6.00", "totalWithTax": "106.00"}
+        loader = Mock(return_value={"total": 1, "rows": [{"invoice": invoice}]})
+        filename, data = InputInvoiceUsageExportService(row_export_loader=loader).export()
+        self.assertTrue(filename.endswith('.xlsx'))
+        sheet = load_workbook(BytesIO(data)).active
+        headers = [cell.value for cell in sheet[1]]
+        self.assertFalse(any('ID' in field or '状态代码' in field for field in headers))
+        self.assertEqual(sheet['B2'].value, invoice['invoiceNo'])
+        self.assertEqual(sheet['E2'].data_type, 's')
+        self.assertEqual(sheet['L2'].value, 106)
+        self.assertEqual(sheet.max_row, 2)
 
-        self.assertNotIn("readModelStatus", preview)
-        self.assertEqual(preview["row_count"], 2)
-        self.assertEqual(preview["columns"][0], "序号")
-        self.assertEqual(preview["sample_rows"][0]["发票号码"], "3001")
-        self.assertEqual(preview["sample_rows"][0]["支付状态"], "未付")
-        self.assertEqual(loader.calls[0]["month"], "2026-05")
-        self.assertEqual(loader.calls[0]["sort_field"], "total_with_tax")
-        self.assertEqual(loader.calls[0]["sort_direction"], "desc")
-
-    def test_export_xlsx_uses_same_rows_and_column_order(self) -> None:
-        service = InputInvoiceUsageExportService(
-            row_page_loader=StaticPageLoader([self._row("row-1", "inv-1", "3001", "供应商甲", "100.50")])
-        )
-
-        filename, content = service.export(month="2026-05")
-
-        self.assertTrue(filename.startswith("进项发票使用情况-"))
-        workbook = load_workbook(BytesIO(content), data_only=True)
-        sheet = workbook["进项发票使用情况"]
-        self.assertEqual(sheet["A1"].value, "序号")
-        self.assertEqual(sheet["B1"].value, "行ID")
-        self.assertEqual(sheet["C2"].value, "inv-1")
-        self.assertEqual(sheet["D2"].value, "3001")
-        self.assertEqual(sheet["F2"].value, "供应商甲")
-        self.assertEqual(sheet["N2"].value, "未付")
-
-    def test_export_skips_title_statistics_on_every_page(self) -> None:
-        loader = StaticPageLoader(
-            [self._row(f"row-{index}", f"inv-{index}", str(index), "供应商", "1.00") for index in range(201)]
-        )
-        service = InputInvoiceUsageExportService(row_page_loader=loader)
-
-        preview = service.export_preview(month="2026-05")
-
-        self.assertEqual(preview["row_count"], 201)
-        self.assertEqual([call["include_statistics"] for call in loader.calls], [False, False])
-
-    def test_export_ignores_removed_read_model_metadata(self) -> None:
-        loader = RefreshingPageLoader()
-        service = InputInvoiceUsageExportService(row_page_loader=loader)
-
-        preview = service.export_preview(month="2026-05")
-
-        self.assertEqual(preview["row_count"], 0)
-        self.assertNotIn("readModelStatus", preview)
-        self.assertTrue(service.export(month="2026-05")[1])
-
-    def test_row_limit_is_enforced_before_building_workbook(self) -> None:
-        service = InputInvoiceUsageExportService(row_page_loader=StaticPageLoader([], total=INPUT_INVOICE_USAGE_EXPORT_ROW_LIMIT + 1))
-
-        with self.assertRaises(InputInvoiceUsageExportError) as context:
-            service.export(month="2026-05")
-
-        self.assertEqual(context.exception.error_code, "input_invoice_usage_export_row_limit_exceeded")
-
-    @staticmethod
-    def _row(row_id: str, invoice_id: str, invoice_no: str, seller_name: str, total_with_tax: str) -> dict[str, object]:
-        return {
-            "id": row_id,
-            "invoiceId": invoice_id,
-            "invoice": {
-                "displayNo": invoice_no,
-                "invoiceNo": invoice_no,
-                "sellerTaxNo": "91530000SELLER",
-                "sellerName": seller_name,
-                "issueDate": "2026-05-20",
-                "specificBusinessType": "现代服务",
-                "taxableItemName": "服务费",
-                "amountWithoutTax": "94.81",
-                "taxRate": "6%",
-                "taxAmount": "5.69",
-                "totalWithTax": total_with_tax,
-            },
-            "paymentStatus": {"label": "未付", "reason": "未匹配支付流水"},
-            "oa": {
-                "primary": {
-                    "applicant": "陈秀云",
-                    "applicationType": "报销",
-                    "projectName": "项目一",
-                }
-            },
-            "bankTransactions": {
-                "primary": {
-                    "id": "bank-1",
-                    "bankName": "中国银行",
-                    "tradeTime": "2026-05-21 10:00:00",
-                    "amount": "100.50",
-                    "directionLabel": "支出",
-                    "counterpartyName": seller_name,
-                    "summary": "服务费",
-                    "remark": "银行备注",
-                }
-            },
-        }
-
-
-class StaticPageLoader:
-    def __init__(self, rows: list[dict[str, object]], *, total: int | None = None) -> None:
-        self._rows = rows
-        self._total = total
-        self.calls: list[dict[str, object]] = []
-
-    def __call__(self, **kwargs: object) -> dict[str, object]:
-        self.calls.append(dict(kwargs))
-        page = int(kwargs.get("page") or 1)
-        page_size = int(kwargs.get("page_size") or 500)
-        start = (page - 1) * page_size
-        page_rows = self._rows[start : start + page_size]
-        total = self._total if self._total is not None else len(self._rows)
-        return {
-            "rows": page_rows,
-            "pagination": {"page": page, "pageSize": page_size, "total": total},
-        }
-
-
-class RefreshingPageLoader:
-    def __call__(self, **_kwargs: object) -> dict[str, object]:
-        return {
-            "status": "refreshing",
-            "read_model_status": "refreshing",
-            "readModelStatus": "refreshing",
-            "read_model_scope_key": "month:2026-05",
-            "message": "进项发票使用情况读模型正在刷新。",
-        }
-
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_limit_is_real_invoice_count_and_failure_is_not_replaced_by_partial_file(self):
+        loader = Mock(return_value={"total": 20001, "rows": []})
+        with self.assertRaises(InputInvoiceUsageExportError):
+            InputInvoiceUsageExportService(row_export_loader=loader).export()
+        loader.side_effect = RuntimeError('database unavailable')
+        with self.assertRaisesRegex(RuntimeError, 'database unavailable'):
+            InputInvoiceUsageExportService(row_export_loader=loader).export_summary()

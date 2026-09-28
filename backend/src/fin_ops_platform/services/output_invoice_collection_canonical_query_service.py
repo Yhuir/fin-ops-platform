@@ -155,14 +155,9 @@ class OutputInvoiceCollectionCanonicalQueryService:
             },
         }
 
-    def export_preview(
-        self,
-        query: dict[str, list[str]],
-        *,
-        tenant_id: str = "default",
-    ) -> dict[str, Any]:
-        rows = self._export_rows(query, tenant_id=tenant_id)
-        return self._row_assembler.export_preview_for_rows(rows=rows)
+    def export_summary(self, query: dict[str, list[str]], *, tenant_id: str = "default") -> dict[str, Any]:
+        payload = self.rows({**query, "page": ["1"], "page_size": ["1"]}, tenant_id=tenant_id)
+        return {"row_count": payload["summary"]["invoiceCount"], "filter_options": payload["filterOptions"]}
 
     def export(
         self,
@@ -336,16 +331,18 @@ class OutputInvoiceCollectionCanonicalQueryService:
             sort_direction=sort_direction,
             tenant_id=tenant_id,
         )
-        if snapshot.pagination["total"] > OUTPUT_INVOICE_COLLECTION_EXPORT_ROW_LIMIT:
+        if snapshot.summary["invoiceCount"] > OUTPUT_INVOICE_COLLECTION_EXPORT_ROW_LIMIT:
             raise OutputInvoiceCollectionError(
                 "output_invoice_collection_export_row_limit_exceeded",
                 "当前筛选结果超过 20000 行，请缩小筛选范围后导出。",
                 details={
-                    "total": snapshot.pagination["total"],
+                    "total": snapshot.summary["invoiceCount"],
                     "limit": OUTPUT_INVOICE_COLLECTION_EXPORT_ROW_LIMIT,
                 },
             )
-        return self._rows_from_snapshot(snapshot)
+        invoices = {invoice.id: invoice for group in snapshot.groups for invoice in group["line_items"]}
+        return [{"invoice": self._row_assembler._invoice_summary(invoice, [invoice])}
+                for invoice in invoices.values()]
 
     def _payload(
         self,

@@ -1490,23 +1490,6 @@ class PendingInvoiceQueryService:
             "sections": sections,
         }
 
-    def export_preview_for_rows(
-        self,
-        *,
-        rows: list[dict[str, Any]],
-        filters: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        return {
-            "file_name": f"待找发票-{datetime.now(UTC).date().isoformat()}.xlsx",
-            "row_count": len(rows),
-            "scope_label": "当前筛选",
-            "columns": _pending_invoice_export_columns(),
-            "sample_rows": [self._export_row(index, row) for index, row in enumerate(rows[:20], start=1)],
-            "rows": [self._export_row(index, row) for index, row in enumerate(rows[:20], start=1)],
-            "pagination": {"preview_count": min(len(rows), 20), "total": len(rows), "limit": 20},
-            "filters": dict(filters or {}),
-        }
-
     def export_for_rows(self, *, rows: list[dict[str, Any]]) -> tuple[str, bytes]:
         from io import BytesIO
 
@@ -1523,7 +1506,10 @@ class PendingInvoiceQueryService:
             cell.alignment = Alignment(horizontal="center")
         for index, row in enumerate(rows, start=1):
             export_row = self._export_row(index, row)
-            sheet.append([export_row.get(column, "") for column in columns])
+            sheet.append([export_row[column] for column in columns])
+            for cell in sheet[sheet.max_row]:
+                if isinstance(cell.value, str):
+                    cell.data_type = "s"
         for column_cells in sheet.columns:
             max_length = max(len(str(cell.value or "")) for cell in column_cells)
             sheet.column_dimensions[column_cells[0].column_letter].width = min(max(max_length + 2, 12), 32)
@@ -1534,39 +1520,22 @@ class PendingInvoiceQueryService:
 
     @staticmethod
     def _export_row(index: int, row: dict[str, Any]) -> dict[str, Any]:
-        bank_group = row["bank_transactions"]
-        bank = bank_group["primary"]
-        status = row.get("invoice_acquisition_status") if isinstance(row.get("invoice_acquisition_status"), dict) else {}
-        invoices = row.get("input_invoices") if isinstance(row.get("input_invoices"), dict) else {}
-        primary_invoice = invoices.get("primary") if isinstance(invoices.get("primary"), dict) else {}
-        payment_summary = invoices.get("payment_summary") if isinstance(invoices.get("payment_summary"), dict) else {}
-        oa = row.get("oa") if isinstance(row.get("oa"), dict) else {}
-        primary_oa = oa.get("primary") if isinstance(oa.get("primary"), dict) else {}
+        bank = row["bank_transactions"]["primary"]
+        invoices = row["input_invoices"]
+        invoice_rows = invoices["summaries"] if invoices["has_multiple"] else ([invoices["primary"]] if invoices["primary"] else [])
+        oa = row["oa"]
+        oa_rows = oa["summaries"] if oa["has_multiple"] else ([oa["primary"]] if oa["primary"] else [])
         return {
-            "序号": index,
-            "流水ID": row.get("id"),
-            "交易日期": bank.get("trade_date") or str(bank.get("trade_time") or "")[:10],
-            "对方户名": bank.get("counterparty_name"),
-            "借方金额": bank["original_amount"] if Decimal(bank["debit_amount"]) > 0 else "0.00",
-            "贷方金额": bank["original_amount"] if Decimal(bank["credit_amount"]) > 0 else "0.00",
-            "流水金额合计": bank_group["original_amount"],
-            "流水拆分": "；".join(
-                f"{' / '.join(part['category_path'])}：{part['amount']}"
-                for part in bank_group["bank_split_parts"]
-            ),
-            "银行": bank.get("bank_name"),
-            "账号尾号": bank.get("account_last4"),
-            "摘要": bank.get("summary"),
-            "备注": bank.get("remark"),
-            "状态": status.get("label"),
-            "状态代码": status.get("code"),
-            "发票号码": primary_invoice.get("invoice_no") or primary_invoice.get("digital_invoice_no"),
-            "销方名称": primary_invoice.get("seller_name"),
-            "价税合计": payment_summary.get("invoice_total") or primary_invoice.get("total_with_tax"),
-            "已付合计": payment_summary.get("paid_total"),
-            "剩余金额": payment_summary.get("remaining_amount"),
-            "OA申请人": primary_oa.get("applicant") or row.get("oa_applicant"),
-            "项目": primary_oa.get("project_name"),
+            "序号": index, "交易日期": bank["trade_time"], "对方户名": bank["counterparty_name"],
+            "借方金额": Decimal(bank["original_amount"]) if Decimal(bank["debit_amount"]) > 0 else Decimal("0"),
+            "贷方金额": Decimal(bank["original_amount"]) if Decimal(bank["credit_amount"]) > 0 else Decimal("0"),
+            "银行": bank.get("bank_name", ""), "账号尾号": bank["account_last4"],
+            "摘要": bank["summary"], "备注": bank["remark"],
+            "状态": row["invoice_acquisition_status"]["label"],
+            "发票号码": "；".join(dict.fromkeys(str(item.get("digital_invoice_no") or item.get("invoice_no") or "") for item in invoice_rows)),
+            "销方名称": "；".join(dict.fromkeys(str(item.get("seller_name") or "") for item in invoice_rows)),
+            "OA申请人": "；".join(dict.fromkeys(str(item.get("applicant") or "") for item in oa_rows)),
+            "项目": "；".join(dict.fromkeys(str(item.get("project_name") or "") for item in oa_rows)),
         }
 
     def _candidate_status(self, transaction_id: str, invoice_id: str) -> str:
@@ -2845,29 +2814,7 @@ def _reverse_date_key(value: Any) -> str:
 
 
 def _pending_invoice_export_columns() -> list[str]:
-    return [
-        "序号",
-        "流水ID",
-        "交易日期",
-        "对方户名",
-        "借方金额",
-        "贷方金额",
-        "流水金额合计",
-        "流水拆分",
-        "银行",
-        "账号尾号",
-        "摘要",
-        "备注",
-        "状态",
-        "状态代码",
-        "发票号码",
-        "销方名称",
-        "价税合计",
-        "已付合计",
-        "剩余金额",
-        "OA申请人",
-        "项目",
-    ]
+    return ["序号", "交易日期", "对方户名", "借方金额", "贷方金额", "银行", "账号尾号", "摘要", "备注", "状态", "发票号码", "销方名称", "OA申请人", "项目"]
 
 
 def _detail_fields(payload: dict[str, Any]) -> list[dict[str, str]]:

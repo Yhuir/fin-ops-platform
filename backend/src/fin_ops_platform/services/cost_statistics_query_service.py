@@ -8,12 +8,12 @@ from io import BytesIO
 from typing import Any
 
 from openpyxl import Workbook
+from openpyxl.cell import WriteOnlyCell
 
 from fin_ops_platform.services.cost_statistics_policy import CostStatisticsPolicy
 from fin_ops_platform.services.search_query import normalize_money_search_query
 
 COST_STATISTICS_EXPORT_ROW_LIMIT = 20000
-COST_STATISTICS_EXPORT_PREVIEW_SIZE = 8
 
 
 class CostStatisticsExportLimitError(ValueError):
@@ -285,7 +285,7 @@ class CostStatisticsQueryService:
         )
         return policy.no_oa_tag_candidates()
 
-    def get_export_preview(self, **kwargs: Any) -> dict[str, Any]:
+    def get_export_summary(self, **kwargs: Any) -> dict[str, Any]:
         view = str(kwargs.get("view") or "").strip()
         month = str(kwargs.get("month") or "all").strip() or "all"
         project_names = self._normalize_text_set(
@@ -312,14 +312,14 @@ class CostStatisticsQueryService:
                 "view must be time, bank_tag, bank_account, project, or cost_tag."
             )
         if view == "project" and not project_names:
-            raise ValueError("project_name is required for project export preview")
+            raise ValueError("project_name is required for project export summary")
         if view == "cost_tag" and not bank_tag_primary_keys:
             raise ValueError(
-                "bank_tag_primary_key is required for cost_tag export preview"
+                "bank_tag_primary_key is required for cost_tag export summary"
             )
         if view == "bank_account" and not bank_account_labels:
             raise ValueError(
-                "bank_account_label is required for bank_account export preview"
+                "bank_account_label is required for bank_account export summary"
             )
         aggregate_by = self._normalize_project_aggregate_by(kwargs.get("aggregate_by"))
         row_shape = "raw_bank" if view in {"time", "bank_tag"} else "raw_cost"
@@ -332,7 +332,7 @@ class CostStatisticsQueryService:
             bank_tag_primary_keys=sorted(bank_tag_primary_keys),
             row_shape=row_shape,
             offset=0,
-            page_size=COST_STATISTICS_EXPORT_ROW_LIMIT + 1,
+            page_size=0,
             include_summary=True,
             bank_account_labels=sorted(bank_account_labels),
             **range_kwargs,
@@ -340,72 +340,15 @@ class CostStatisticsQueryService:
         summary = self._export_page_summary(page)
         total = int(summary.get("source_row_count") or 0)
         self._ensure_export_row_limit(view=view, total=total)
-        entries = [
-            self._export_entry_from_row(row)
-            for row in list(page.get("rows") or [])[:COST_STATISTICS_EXPORT_PREVIEW_SIZE]
-        ]
         scope_label = self._build_scope_label(month=month, **range_kwargs)
-        if view == "time":
-            columns = [
-                "交易时间",
-                "资金方向",
-                "金额",
-                "主标签",
-                "子标签",
-                "对方户名",
-                "摘要/备注",
-                "银行账户",
-            ]
-            rows = [self._time_row_from_entry(entry) for entry in entries]
-            sheet_names = ["按时间统计"]
-            file_name = self._build_filename(month=scope_label, view=view)
-            extra = self._directional_summary_from_export_summary(summary)
-        elif view == "bank_tag":
-            columns = [
-                "交易时间",
-                "主标签",
-                "子标签",
-                "资金方向",
-                "金额",
-                "对方户名",
-                "摘要/备注",
-                "银行账户",
-            ]
-            rows = [self._bank_tag_row_from_entry(entry) for entry in entries]
-            sheet_names = ["按标签统计"]
-            file_name = self._build_filename(month=scope_label, view=view)
-            extra = self._directional_summary_from_export_summary(summary)
-        else:
-            if row_shape in {"project_month", "project_year"}:
-                columns = ["统计周期", "项目名称", "银行主标签", "银行子标签", "金额", "费用内容", "成本明细数"]
-                rows = [[entry["period_label"], entry["project_name"], entry["bank_tag_primary_label"], entry["bank_tag_sub_label"], entry["amount"], entry["expense_content"], entry["transaction_count"]] for entry in entries]
-            else:
-                columns = self._cost_export_headers()
-                rows = [self._cost_export_row(entry) for entry in entries]
-            sheet_names = ["按项目汇总", "成本明细"] if row_shape in {"project_month", "project_year"} else ["成本明细"]
-            file_name = self._build_filename(month=scope_label, view=view, project_name="、".join(sorted(project_names)), project_names=sorted(project_names), aggregate_by=aggregate_by)
-            extra = {}
-        if view not in {"time", "bank_tag"}:
-            allocation_quality = self._manual_allocation_quality_from_export_summary(
-                summary
-            )
-            extra.update(allocation_quality)
-            if allocation_quality["manual_allocation_pending_count"] > 0:
-                sheet_names.append("待分配说明")
-        return self._preview_payload(
-            view=view,
-            file_name=file_name,
-            scope_label=scope_label,
-            sheet_names=sheet_names,
-            columns=columns,
-            rows=rows,
-            total_count=total,
-            total_amount=_plain_money(
-                _decimal_from_value(summary.get("total_amount"))
-                or Decimal("0.00")
-            ),
-            summary_extra=extra,
-        )
+        sheet_names = (["按时间统计"] if view == "time" else ["按标签统计"] if view == "bank_tag" else
+                       ["按项目汇总", "成本明细"] if row_shape in {"project_month", "project_year"} else ["成本明细"])
+        quality = self._manual_allocation_quality_from_export_summary(summary)
+        if quality["manual_allocation_pending_count"] > 0:
+            sheet_names.append("待分配说明")
+        return {"view": view, "scope_label": scope_label, "sheet_names": sheet_names,
+                "summary": {"transaction_count": total, "row_count": summary["row_count"],
+                            "total_amount": str(summary["total_amount"]), "sheet_count": len(sheet_names), **self._directional_summary_from_export_summary(summary), **quality}}
 
     def export_view(self, **kwargs: Any) -> tuple[str, bytes]:
         view = str(kwargs.get("view") or "").strip()
@@ -510,7 +453,7 @@ class CostStatisticsQueryService:
         else:
             if row_shape in {"project_month", "project_year"}:
                 headers = ["统计周期", "项目名称", "银行主标签", "银行子标签", "金额", "费用内容", "成本明细数"]
-                values = ([entry["period_label"], entry["project_name"], entry["bank_tag_primary_label"], entry["bank_tag_sub_label"], entry["amount"], entry["expense_content"], entry["transaction_count"]] for entry in entries)
+                values = ([entry["period_label"], entry["project_name"], entry["bank_tag_primary_label"], entry["bank_tag_sub_label"], Decimal(entry["amount"]), entry["expense_content"], entry["transaction_count"]] for entry in entries)
             else:
                 headers = self._cost_export_headers()
                 values = (self._cost_export_row(entry) for entry in entries)
@@ -526,7 +469,7 @@ class CostStatisticsQueryService:
                 detail_sheet = workbook.create_sheet("成本明细")
                 detail_sheet.append(self._cost_export_headers())
                 for row in detail_page["rows"]:
-                    detail_sheet.append(self._cost_export_row(self._export_entry_from_row(row)))
+                    self._append_export_row(detail_sheet, self._cost_export_row(self._export_entry_from_row(row)))
             filename = self._build_filename(month=scope_label, view=view, project_name="、".join(sorted(project_names)), project_names=sorted(project_names), aggregate_by=aggregate_by)
         if view not in {"time", "bank_tag"}:
             self._append_manual_allocation_notice(workbook, summary=summary)
@@ -847,40 +790,11 @@ class CostStatisticsQueryService:
             raise CostStatisticsExportLimitError(view=view, total=total)
 
     @staticmethod
-    def _preview_payload(
-        *,
-        view: str,
-        file_name: str,
-        scope_label: str,
-        sheet_names: list[str],
-        columns: list[str],
-        rows: list[list[Any]],
-        total_count: int,
-        total_amount: str,
-        summary_extra: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        return {
-            "view": view,
-            "file_name": file_name,
-            "scope_label": scope_label,
-            "summary": {
-                "row_count": total_count,
-                "transaction_count": total_count,
-                "total_amount": total_amount,
-                "sheet_count": len(sheet_names),
-                **dict(summary_extra or {}),
-            },
-            "sheet_names": sheet_names,
-            "columns": columns,
-            "rows": rows[:COST_STATISTICS_EXPORT_PREVIEW_SIZE],
-        }
-
-    @staticmethod
     def _time_row_from_entry(entry: dict[str, Any]) -> list[Any]:
         return [
             entry["trade_time"],
             entry["direction"],
-            _plain_money(entry["amount_decimal"]),
+            entry["amount_decimal"],
             entry["bank_tag_primary_label"],
             entry["bank_tag_sub_label"],
             entry["counterparty_name"],
@@ -895,7 +809,7 @@ class CostStatisticsQueryService:
             entry["bank_tag_primary_label"],
             entry["bank_tag_sub_label"],
             entry["direction"],
-            _plain_money(entry["amount_decimal"]),
+            entry["amount_decimal"],
             entry["counterparty_name"],
             entry["expense_content"],
             entry["payment_account_label"],
@@ -922,14 +836,13 @@ class CostStatisticsQueryService:
 
     @staticmethod
     def _cost_export_headers() -> list[str]:
-        return ["付款日期", "项目名称", "银行账户", "银行主标签", "银行子标签", "银行完整标签", "成本金额", "费用内容", "申请/报销人", "来源流水ID", "成本明细ID", "OA单号", "原OA费用类型", "分配状态"]
+        return ["付款日期", "项目名称", "银行账户", "银行主标签", "银行子标签", "银行完整标签", "成本金额", "费用内容", "申请/报销人", "原OA费用类型", "分配状态"]
 
     @staticmethod
     def _cost_export_row(entry: dict[str, Any]) -> list[Any]:
         return [entry["trade_time"] or "日期待完善", entry["project_name"], entry["bank_account_label"],
                 entry["bank_tag_primary_label"], entry["bank_tag_sub_label"], " / ".join(entry["bank_tag_label_path"]),
-                entry["amount"], entry["expense_content"], entry["oa_applicant"], entry["transaction_id"],
-                entry["entry_id"], entry["oa_id"], entry["expense_type"],
+                Decimal(entry["amount"]), entry["expense_content"], entry["oa_applicant"], entry["expense_type"],
                 "人工补充" if entry["row_kind"] == "manual_allocation" else "来源已确定"]
 
     @staticmethod
@@ -942,10 +855,20 @@ class CostStatisticsQueryService:
         sheet = workbook.create_sheet(title)
         sheet.append(headers)
         for row in rows:
-            sheet.append(row)
+            CostStatisticsQueryService._append_export_row(sheet, row)
         for index in range(1, len(headers) + 1):
             sheet.column_dimensions[chr(64 + index)].width = 18
         return workbook
+
+    @staticmethod
+    def _append_export_row(sheet: Any, row: list[Any]) -> None:
+        cells = []
+        for value in row:
+            cell = WriteOnlyCell(sheet, value=value)
+            if isinstance(value, str):
+                cell.data_type = "s"
+            cells.append(cell)
+        sheet.append(cells)
 
     @classmethod
     def _append_manual_allocation_notice(

@@ -34,7 +34,7 @@ function api() {
     confirmAttachExistingInvoice: (request: AttachExistingInvoiceConfirmRequest) => Promise<unknown>;
     previewAttachExistingInvoices: (request: AttachExistingInvoicesPreviewRequest) => Promise<unknown>;
     confirmAttachExistingInvoices: (request: AttachExistingInvoicesConfirmRequest) => Promise<unknown>;
-    fetchPendingInvoiceExportPreview: (request: FetchPendingInvoiceRowsRequest) => Promise<unknown>;
+    fetchPendingInvoiceExportSummary: (selection: {values: Record<string,string[]>; startDate: string; endDate: string}, signal: AbortSignal) => Promise<unknown>;
     downloadPendingInvoiceExport: (request: FetchPendingInvoiceRowsRequest) => Promise<{ blob: Blob; fileName: string }>;
     savePendingInvoiceIncomeStatuses: typeof pendingInvoicesApi.savePendingInvoiceIncomeStatuses;
   };
@@ -382,7 +382,7 @@ describe("pending invoices and tag settings API mapping", () => {
     expect(api().confirmAttachExistingInvoice).toBeTypeOf("function");
     expect(api().previewAttachExistingInvoices).toBeTypeOf("function");
     expect(api().confirmAttachExistingInvoices).toBeTypeOf("function");
-    expect(api().fetchPendingInvoiceExportPreview).toBeTypeOf("function");
+    expect(api().fetchPendingInvoiceExportSummary).toBeTypeOf("function");
     expect(api().downloadPendingInvoiceExport).toBeTypeOf("function");
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -540,14 +540,13 @@ describe("pending invoices and tag settings API mapping", () => {
           affected_months: ["2026-05"],
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
-      if (url.pathname === "/api/pending-invoices/export-preview") {
+      if (url.pathname === "/api/pending-invoices/export-summary") {
         expect(url.searchParams.get("page")).toBeNull();
         return new Response(JSON.stringify({
           file_name: "pending-invoices.xlsx",
           row_count: 128,
-          scope_label: "当前筛选",
-          columns: ["对方户名", "发票状态"],
-          sample_rows: [{ counterparty_name: "云南供应商", status_label: "已支付待开票" }],
+          source_summary: { expense_rows: 128, income_rows: 0 },
+          acquisition_summary: { status_counts: Object.fromEntries(['paid_pending_invoice','paid_invoiced','invoice_not_fully_paid','bank_statement_as_invoice','no_invoice_required','income_pending_invoice','income_invoiced','income_no_invoice_required','cash_income'].map(code => [code, code === 'paid_pending_invoice' ? 128 : 0])) },
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       if (url.pathname === "/api/pending-invoices/export") {
@@ -629,15 +628,9 @@ describe("pending invoices and tag settings API mapping", () => {
     });
     expect(confirm).toMatchObject({ status: "completed", relationCaseId: "case_001", affectedMonths: ["2026-05"] });
 
-    const exportPreview = await api().fetchPendingInvoiceExportPreview({
-      direction: "expense",
-      filter: "requires_invoice",
-      page: 7,
-      pageSize: 25,
-      sortField: "trade_date",
-      sortDirection: "desc",
-    });
-    expect(exportPreview).toMatchObject({ fileName: "pending-invoices.xlsx", rowCount: 128, sampleRows: [{ counterpartyName: "云南供应商" }] });
+    const summary = await api().fetchPendingInvoiceExportSummary({ values: {}, startDate: '', endDate: '' }, new AbortController().signal);
+    expect(summary).toMatchObject({ rowCount: 128 });
+    expect(summary).not.toHaveProperty('sampleRows');
 
     const downloaded = await api().downloadPendingInvoiceExport({ direction: "expense", filter: "requires_invoice", page: 7, pageSize: 25 });
     expect(downloaded.fileName).toBe("pending-invoices.xlsx");

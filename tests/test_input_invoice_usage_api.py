@@ -952,7 +952,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
 
             preview_response = app.handle_request(
                 "GET",
-                f"/api/input-invoice-usage/export-preview?filters={filters}&sort_field=total_with_tax&sort_direction=desc",
+                f"/api/input-invoice-usage/export-summary?filters={filters}&sort_field=total_with_tax&sort_direction=desc",
             )
             export_response = app.handle_request(
                 "GET",
@@ -962,16 +962,16 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         preview_payload = json.loads(preview_response.body)
         self.assertEqual(preview_response.status_code, 200)
         self.assertEqual(preview_payload["row_count"], 1)
-        self.assertEqual(preview_payload["sample_rows"][0]["发票号码"], "4001")
+        self.assertNotIn("sample_rows", preview_payload)
         self.assertEqual(export_response.status_code, 200)
         self.assertIn(
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             export_response.headers["Content-Type"],
         )
         workbook = load_workbook(BytesIO(export_response.body), data_only=True)
-        sheet = workbook["进项发票使用情况"]
-        self.assertEqual(sheet["D2"].value, "4001")
-        self.assertEqual(sheet["F2"].value, "导出供应商甲")
+        sheet = workbook["进项发票"]
+        self.assertEqual(sheet["B2"].value, "4001")
+        self.assertEqual(sheet["E2"].value, "导出供应商甲")
 
     def test_export_ignores_legacy_read_model_repository(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -979,7 +979,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
             self._install_service(app, invoices=[])
             app._input_invoice_usage_sql_read_repository = object()
 
-            preview_response = app.handle_request("GET", "/api/input-invoice-usage/export-preview?month=2026-05")
+            preview_response = app.handle_request("GET", "/api/input-invoice-usage/export-summary?month=2026-05")
             export_response = app.handle_request("GET", "/api/input-invoice-usage/export?month=2026-05")
 
         self.assertEqual(preview_response.status_code, 200)
@@ -1061,6 +1061,14 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         ):
             if hasattr(app, attr):
                 delattr(app, attr)
+
+        # HTTP mapping fixture; real grouped canonical export is covered by PostgreSQL tests.
+        from fin_ops_platform.services.input_invoice_usage_export_service import InputInvoiceUsageExportService
+        def export_loader(*, limit, **query):
+            query.pop("tenant_id", None)
+            payload = query_service.list_rows(page=1, page_size=200, **query)
+            return {"rows": payload["rows"][:limit], "total": payload["pagination"]["total"], "filterOptions": {}}
+        app._input_invoice_usage_export_service_instance = InputInvoiceUsageExportService(row_export_loader=export_loader)
 
         credential_service = app._oa_applicant_credential_service()
         for code, name in (("chen_xiuyun", "陈秀云"), ("zhou_jieying", "周洁莹")):

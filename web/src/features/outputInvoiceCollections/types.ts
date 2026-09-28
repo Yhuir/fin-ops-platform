@@ -181,14 +181,7 @@ export type OutputInvoiceCollectionFilterOptionsResponse = {
   }>;
 };
 
-export type OutputInvoiceCollectionExportPreview = {
-  fileName: string;
-  rowCount: number;
-  scopeLabel: string;
-  columns: string[];
-  sampleRows: Array<Record<string, string>>;
-  message?: string;
-};
+
 
 export type OutputInvoiceCollectionExportDownload = {
   blob: Blob;

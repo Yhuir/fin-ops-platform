@@ -15,10 +15,10 @@ import QuerySearch from "../components/common/QuerySearch";
 import CostStatisticsHierarchy, { type CostHierarchyLane } from "../components/cost-statistics/CostStatisticsHierarchy";
 import CostStatisticsManualAllocationDrawer from "../components/cost-statistics/CostStatisticsManualAllocationDrawer";
 import CostStatisticsNoOaRulesDrawer from "../components/cost-statistics/CostStatisticsNoOaRulesDrawer";
-import ExportCenterModal, {
+import ExportCenterDrawer, {
   type ExportCenterMode,
   type ExportRangeMode,
-} from "../components/cost-statistics/ExportCenterModal";
+} from "../components/cost-statistics/ExportCenterDrawer";
 import CostStatisticsTable, {
   type CostStatisticsTableColumn,
 } from "../components/cost-statistics/CostStatisticsTable";
@@ -32,11 +32,11 @@ import {
   exportCostStatisticsView,
   fetchCostStatisticsExplorerPage,
   fetchCostStatisticsNoOaRules,
-  fetchCostStatisticsExportPreview,
+  fetchCostStatisticsExportSummary,
   fetchCostEntryDetail,
   saveCostStatisticsNoOaRules,
   type CostExportParams,
-  type PreviewCostExportParams,
+  type SummaryCostExportParams,
 } from "../features/cost-statistics/api";
 import { ApiClientError } from "../features/apiClient";
 import { formatCostAmount } from "../features/cost-statistics/format";
@@ -49,7 +49,7 @@ import type {
   CostStatisticsNoOaRules,
   CostStatisticsExplorerPage,
   CostStatisticsExplorerPageRequest,
-  CostStatisticsExportPreview,
+  CostStatisticsExportSummary,
   CostExplorerEntryRow,
   CostEntryDetail,
 } from "../features/cost-statistics/types";
@@ -389,10 +389,10 @@ export default function CostStatisticsPage() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
-  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [isSummaryLoading, setIsSummaryLoading] = useState(false);
   const [exportFeedback, setExportFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [isExportCenterOpen, setIsExportCenterOpen] = useState(false);
-  const [exportPreview, setExportPreview] = useState<CostStatisticsExportPreview | null>(null);
+  const [exportSummary, setExportSummary] = useState<CostStatisticsExportSummary | null>(null);
   const [exportCenterMode, setExportCenterMode] = useState<ExportCenterMode>("bank_account");
   const [domainRefreshNonce, setDomainRefreshNonce] = useState(0);
   const splitRefreshRequestKeyRef = useRef<string | null>(null);
@@ -470,7 +470,7 @@ export default function CostStatisticsPage() {
   const statisticsRequestRef = useRef<AbortController | null>(null);
   const exportReferenceRequestRef = useRef<AbortController | null>(null);
   const exportRequestRef = useRef<AbortController | null>(null);
-  const exportPreviewRequestRef = useRef<AbortController | null>(null);
+  const exportSummaryRequestRef = useRef<AbortController | null>(null);
   const paginationRequestRef = useRef<AbortController | null>(null);
   const detailRequestRef = useRef<AbortController | null>(null);
   const loadedStatisticsRefreshKeyRef = useRef<string | undefined>(undefined);
@@ -891,7 +891,7 @@ export default function CostStatisticsPage() {
     explorerRequestRef.current?.abort();
     exportReferenceRequestRef.current?.abort();
     exportRequestRef.current?.abort();
-    exportPreviewRequestRef.current?.abort();
+    exportSummaryRequestRef.current?.abort();
     paginationRequestRef.current?.abort();
     detailRequestRef.current?.abort();
   }, []);
@@ -1052,7 +1052,7 @@ export default function CostStatisticsPage() {
         queueMicrotask(() => lockStatusRef.current?.focus());
       }
       setIsExportCenterOpen(false);
-      setExportPreview(null);
+      setExportSummary(null);
       invalidateExportReferenceData();
       resetDetailSelection();
       return;
@@ -1237,60 +1237,23 @@ export default function CostStatisticsPage() {
   }
 
   async function openExportCenter() {
-    setExportFeedback(null);
-    setExportPreview(null);
-    const bankFlowRange = getExportRangeFromScope(bankFlowScopeMode, bankFlowScopeYear, bankFlowScopeMonth);
-    setBankFlowRangeMode(bankFlowRange.mode);
-    setBankFlowMonth(bankFlowScopeMonth);
-    setBankFlowStartDate(bankFlowRange.startDate);
-    setBankFlowEndDate(bankFlowRange.endDate);
-    const costTagRange = getExportRangeFromScope(costTagScopeMode, costTagScopeYear, costTagScopeMonth);
-    setCostTagRangeMode(costTagRange.mode);
-    setCostTagMonth(costTagScopeMonth);
-    setCostTagStartDate(costTagRange.startDate);
-    setCostTagEndDate(costTagRange.endDate);
-    const bankAccountRange = getExportRangeFromScope(bankAccountScopeMode, bankAccountScopeYear, bankAccountScopeMonth);
-    setBankAccountRangeMode(bankAccountRange.mode);
-    setBankAccountMonth(bankAccountScopeMonth);
-    setBankAccountStartDate(bankAccountRange.startDate);
-    setBankAccountEndDate(bankAccountRange.endDate);
-    if (viewMode === "time" || viewMode === "bankTag") {
-      setExportCenterMode(viewMode === "time" ? "time" : "bank_tag");
-      setIsExportCenterOpen(true);
-      return;
-    }
-    const referenceData = await loadExportReferenceData();
-    if (!referenceData) {
-      return;
-    }
-    if (viewMode === "project") {
-      setExportCenterMode("project");
-      const projectOptions = (referenceData?.projects ?? []).map((row) => row.projectName);
-      const nextProjectNames =
-        projectExportNames.length > 0
-          ? projectExportNames
-          : selectedProjectName
-            ? [selectedProjectName]
-            : projectOptions.slice(0, 1);
-      updateProjectExportSelection(nextProjectNames, referenceData);
-    } else if (viewMode === "costTag") {
-      setExportCenterMode("cost_tag");
-      setCostTagSelections(selectedCostPrimary ? [selectedCostPrimary] : []);
-    } else {
-      setExportCenterMode("bank_account");
-      setBankAccountSelections(
-        selectedBankAccountLabel
-          ? [selectedBankAccountLabel]
-          : referenceData.bankAccounts.slice(0, 1).map((row) => row.bankAccountLabel),
-      );
-      setBankAccountProjectNames(selectedBankProjectName ? [selectedBankProjectName] : []);
-    }
+    setExportFeedback(null); setExportSummary(null);
+    setBankFlowRangeMode('all'); setBankFlowStartDate(''); setBankFlowEndDate('');
+    setCostTagRangeMode('all'); setCostTagStartDate(''); setCostTagEndDate('');
+    setBankAccountRangeMode('all'); setBankAccountStartDate(''); setBankAccountEndDate('');
+    const reference = await loadExportReferenceData();
+    if (!reference) return;
+    updateProjectExportSelection(reference.projects.map(row => row.projectName), reference);
+    setCostTagSelections(reference.costTags.map(row => row.key));
+    setBankAccountSelections(reference.bankAccounts.map(row => row.bankAccountLabel));
+    setBankAccountProjectNames([]);
+    setExportCenterMode(viewMode === 'time' ? 'time' : viewMode === 'bankTag' ? 'bank_tag' : viewMode === 'project' ? 'project' : viewMode === 'costTag' ? 'cost_tag' : 'bank_account');
     setIsExportCenterOpen(true);
   }
 
   async function handleExportCenterModeChange(mode: ExportCenterMode) {
     setExportFeedback(null);
-    setExportPreview(null);
+    setExportSummary(null);
     if (mode === "time" || mode === "bank_tag") {
       setExportCenterMode(mode);
       return;
@@ -1345,8 +1308,7 @@ export default function CostStatisticsPage() {
       if (projectExportNames.length === 0 || projectCostTags.length === 0) {
         return null;
       }
-      const range = getExportRangeFromScope(projectScopeMode, projectScopeYear, projectScopeMonth);
-      const dates = exportDateParams(range.mode, projectScopeMonth, range.startDate, range.endDate);
+      const dates = exportDateParams(bankFlowRangeMode, bankFlowMonth, bankFlowStartDate, bankFlowEndDate);
       if (!dates) return null;
       return {
         ...dates,
@@ -1366,14 +1328,6 @@ export default function CostStatisticsPage() {
       view: "cost_tag",
       bankTagPrimaryKeys: costTagSelections,
     } : null;
-  }
-
-  function buildPreviewParamsFromState(): PreviewCostExportParams | null {
-    const params = buildExportParamsFromState();
-    if (!params) {
-      return null;
-    }
-    return params;
   }
 
   async function runExport(params: CostExportParams) {
@@ -1426,41 +1380,21 @@ export default function CostStatisticsPage() {
     }
   }
 
-  async function handleExportPreview() {
-    const params = buildPreviewParamsFromState();
-    if (!params) {
-      setExportFeedback({
-        tone: "error",
-        message: "请先补全导出筛选条件。",
-      });
-      return;
-    }
-    exportPreviewRequestRef.current?.abort();
+  const exportSummaryKey = JSON.stringify(buildExportParamsFromState());
+  useEffect(() => {
+    setExportSummary(null);
+    setIsSummaryLoading(false);
+    if (!isExportCenterOpen || exportSummaryKey === 'null') return;
     const controller = new AbortController();
-    exportPreviewRequestRef.current = controller;
+    exportSummaryRequestRef.current = controller;
+    setIsSummaryLoading(true);
     setExportFeedback(null);
-    setIsPreviewLoading(true);
-    try {
-      const payload = await fetchCostStatisticsExportPreview(params, controller.signal);
-      if (controller.signal.aborted) {
-        return;
-      }
-      setExportPreview(payload);
-    } catch (caught) {
-      if (controller.signal.aborted || isAbortLikeError(caught)) {
-        return;
-      }
-      setExportFeedback({
-        tone: "error",
-        message: caught instanceof Error ? caught.message : "导出预览加载失败，请稍后重试。",
-      });
-    } finally {
-      if (exportPreviewRequestRef.current === controller) {
-        exportPreviewRequestRef.current = null;
-        setIsPreviewLoading(false);
-      }
-    }
-  }
+    fetchCostStatisticsExportSummary(JSON.parse(exportSummaryKey) as SummaryCostExportParams, controller.signal)
+      .then(payload => { if (!controller.signal.aborted) setExportSummary(payload); })
+      .catch(reason => { if (!controller.signal.aborted) setExportFeedback({ tone: 'error', message: reason instanceof Error ? reason.message : '导出统计失败' }); })
+      .finally(() => { if (!controller.signal.aborted) setIsSummaryLoading(false); });
+    return () => controller.abort();
+  }, [isExportCenterOpen, exportSummaryKey]);
 
   async function handleExportFromCenter() {
     const params = buildExportParamsFromState();
@@ -1600,7 +1534,7 @@ export default function CostStatisticsPage() {
       ? undefined
       : () => void loadExplorerPage(failedExplorerPage),
   };
-  const isExportActionBusy = isExportReferenceLoading || isExporting || isPreviewLoading;
+  const isExportActionBusy = isExportReferenceLoading || isExporting || isSummaryLoading;
   const isBankFlowView = viewMode === "time" || viewMode === "bankTag";
   const titleAccessory = (
     <div className="page-title-accessory-group">
@@ -1930,7 +1864,7 @@ export default function CostStatisticsPage() {
       />
 
       {isExportCenterOpen ? (
-        <ExportCenterModal
+        <ExportCenterDrawer
           mode={exportCenterMode}
           projectOptions={exportProjectOptions}
           costTagOptions={allCostTagOptions}
@@ -1944,7 +1878,6 @@ export default function CostStatisticsPage() {
           bankAccountProjectNames={bankAccountProjectNames}
           projectNames={projectExportNames}
           projectAggregateBy={projectAggregateBy}
-          projectPeriodLabel={projectScopeMode === "all" ? "全部" : projectScopeMode === "year" ? `${projectScopeYear}年` : projectScopeMonth}
           projectCostTags={projectCostTags}
           costTagRangeMode={costTagRangeMode}
           costTagMonth={costTagMonth}
@@ -1955,86 +1888,85 @@ export default function CostStatisticsPage() {
           bankFlowMonth={bankFlowMonth}
           bankFlowStartDate={bankFlowStartDate}
           bankFlowEndDate={bankFlowEndDate}
-          preview={exportPreview}
+          summaryData={exportSummary}
           feedback={exportFeedback}
-          isPreviewLoading={isPreviewLoading}
+          isSummaryLoading={isSummaryLoading}
           isExporting={isExporting}
           isBusy={isExportActionBusy}
           onClose={() => setIsExportCenterOpen(false)}
           onModeChange={(mode) => void handleExportCenterModeChange(mode)}
           onBankAccountRangeModeChange={(mode) => {
             setBankAccountRangeMode(mode);
-            setExportPreview(null);
+            setExportSummary(null);
           }}
           onBankAccountMonthChange={(month) => {
             setBankAccountMonth(month);
-            setExportPreview(null);
+            setExportSummary(null);
           }}
           onBankAccountStartDateChange={(date) => {
             setBankAccountStartDate(date);
-            setExportPreview(null);
+            setExportSummary(null);
           }}
           onBankAccountEndDateChange={(date) => {
             setBankAccountEndDate(date);
-            setExportPreview(null);
+            setExportSummary(null);
           }}
           onBankAccountSelectionsChange={(bankAccounts) => {
             setBankAccountSelections(bankAccounts);
-            setExportPreview(null);
+            setExportSummary(null);
           }}
           onBankAccountProjectNamesChange={(projectNames) => {
             setBankAccountProjectNames(projectNames);
-            setExportPreview(null);
+            setExportSummary(null);
           }}
           onProjectNamesChange={(projectNames) => {
             updateProjectExportSelection(projectNames);
-            setExportPreview(null);
+            setExportSummary(null);
           }}
           onProjectAggregateByChange={(aggregateBy) => {
             setProjectAggregateBy(aggregateBy);
-            setExportPreview(null);
+            setExportSummary(null);
           }}
           onProjectCostTagsChange={(costTags) => {
             setProjectCostTags(costTags);
-            setExportPreview(null);
+            setExportSummary(null);
           }}
           onCostTagRangeModeChange={(mode) => {
             setCostTagRangeMode(mode);
-            setExportPreview(null);
+            setExportSummary(null);
           }}
           onCostTagMonthChange={(month) => {
             setCostTagMonth(month);
-            setExportPreview(null);
+            setExportSummary(null);
           }}
           onCostTagStartDateChange={(date) => {
             setCostTagStartDate(date);
-            setExportPreview(null);
+            setExportSummary(null);
           }}
           onCostTagEndDateChange={(date) => {
             setCostTagEndDate(date);
-            setExportPreview(null);
+            setExportSummary(null);
           }}
           onCostTagSelectionsChange={(costTags) => {
             setCostTagSelections(costTags);
-            setExportPreview(null);
+            setExportSummary(null);
           }}
           onBankFlowRangeModeChange={(mode) => {
             setBankFlowRangeMode(mode);
-            setExportPreview(null);
+            setExportSummary(null);
           }}
           onBankFlowMonthChange={(month) => {
             setBankFlowMonth(month);
-            setExportPreview(null);
+            setExportSummary(null);
           }}
           onBankFlowStartDateChange={(date) => {
             setBankFlowStartDate(date);
-            setExportPreview(null);
+            setExportSummary(null);
           }}
           onBankFlowEndDateChange={(date) => {
             setBankFlowEndDate(date);
-            setExportPreview(null);
+            setExportSummary(null);
           }}
-          onPreview={() => void handleExportPreview()}
           onExport={() => void handleExportFromCenter()}
         />
       ) : null}

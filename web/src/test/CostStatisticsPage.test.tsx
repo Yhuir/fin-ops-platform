@@ -92,11 +92,10 @@ describe("Cost statistics page", () => {
     await waitUntilReady();
     expect(screen.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "false");
     await user.click(screen.getByRole("button", { name: "导出中心" }));
-    const dialog = screen.getByRole("dialog", { name: "导出中心" });
-    expect(within(dialog).getByRole("radio", { name: "自定义月份", exact: true })).toBeChecked();
-    await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
+    const dialog = await screen.findByRole("dialog", { name: "导出中心" });
+    expect(within(dialog).getByRole("radio", { name: "全部", exact: true })).toBeChecked();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringMatching(/export-preview\?month=2026-03&view=time/), expect.any(Object)));
+      expect.stringMatching(/export-summary\?month=all&view=time/), expect.any(Object)));
     page.unmount();
     fetchMock.mockClear();
     renderPage();
@@ -114,20 +113,18 @@ describe("Cost statistics page", () => {
     const user = userEvent.setup();
     renderPage(); await waitUntilReady();
     await user.click(screen.getByRole("button", { name: "导出中心" }));
-    const dialog = screen.getByRole("dialog", { name: "导出中心" });
+    const dialog = await screen.findByRole("dialog", { name: "导出中心" });
     await user.click(within(dialog).getByRole("radiogroup", { name: "导出视图切换" }).querySelector("button")!);
     expect(within(dialog).getByRole("radio", { name: "全部", exact: true })).toBeChecked();
-    await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
-    await within(dialog).findByText(/预计导出 \d+ 条银行流水/);
-    const previewCalls = () => fetchMock.mock.calls.filter(([url]) => String(url).includes("/export-preview?"));
+    await within(dialog).findByText(/导出 \d+ 笔/);
+    const previewCalls = () => fetchMock.mock.calls.filter(([url]) => String(url).includes("/export-summary?"));
     const url = new URL(String(previewCalls().at(-1)![0]), "http://localhost");
     expect(url.searchParams.get("month")).toBe("all");
     expect(url.searchParams.has("start_date")).toBe(false);
     expect(url.searchParams.has("end_date")).toBe(false);
     const count = previewCalls().length;
     await user.click(within(dialog).getByRole("radio", { name: "自定义时间区间（精确到日）" }));
-    await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
-    expect(await within(dialog).findByText("请先补全导出筛选条件。")).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "导出", exact: true })).toBeDisabled();
     expect(previewCalls()).toHaveLength(count);
   });
 
@@ -421,7 +418,7 @@ describe("Cost statistics page", () => {
     expect(screen.getByRole("heading", { name: "按项目统计" })).toBeInTheDocument();
   });
 
-  test("export center offers cost and bank-flow views and supports both previews", async () => {
+  test("export center offers cost and bank-flow views and shows independent export counts", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderPage();
@@ -438,17 +435,15 @@ describe("Cost statistics page", () => {
       "按成本主标签",
     ]);
     await user.click(within(tabs).getByRole("radio", { name: "按时间" }));
-    await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
-    expect(await within(dialog).findByText(/预计导出 \d+ 条银行流水/)).toBeInTheDocument();
+    expect(await within(dialog).findByText(/导出 \d+ 笔/)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringMatching(/export-preview\?month=all&view=time/),
+      expect.stringMatching(/export-summary\?month=all&view=time/),
       expect.any(Object),
     );
     await user.click(within(tabs).getByRole("radio", { name: "按银行账户" }));
-    await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
-    expect(await within(dialog).findByText(/预计导出 \d+ 条成本明细/)).toBeInTheDocument();
+    expect(await within(dialog).findByText(/导出 \d+ 条/)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringMatching(/export-preview\?month=all&view=bank_account.*bank_account_label=/),
+      expect.stringMatching(/export-summary\?month=all&view=bank_account.*bank_account_label=/),
       expect.any(Object),
     );
   });

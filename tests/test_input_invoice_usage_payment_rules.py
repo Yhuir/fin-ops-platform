@@ -286,7 +286,7 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
             )
             self.assertEqual(provider.payment_status_rules_payload()["rules"], [])
             result = provider.evaluate(PaymentStatusEvaluationContext(True, False, "王五", False, False))
-            self.assertEqual(result["label"], "未命中规则")
+            self.assertEqual(result["label"], "待核对")
             self.assertEqual(result["matchedRuleId"], "")
 
     def test_priority_disabled_and_amount_guard_are_explicit(self) -> None:

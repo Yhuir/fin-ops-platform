@@ -48,7 +48,7 @@
 全期间 `statistics` 只包含流水总数、支出、收入、OA、进项发票和销项发票数量；旧已找到/待找、现金状态和关系状态数量字段已删除。
 | acquisition_summary | 前端两层分段统计 | `bank_count` 为完整筛选下的原始流水数，`invoice_count` 为其全部用途关联的同方向发票 ID 去重数；`status_counts` 固定返回九个已定义状态键（含真实 0），保留方向及其它筛选但排除状态自身；与 rows 共用同一 snapshot，不受分页影响。 |
 | rows.filter_options | 前端筛选 | rows 首响应只返回稳定字段定义，不执行高基数 options 聚合；页面完成首响应后调用专用 `/filter-options`，每字段最多 50 项，数据库聚合且不阻塞表格首屏。 |
-| export-preview/export | 前端导出 | 复用同一 canonical row DTO；最大 20,000 行，超限先报错；不读取页面 read model |
+| export-summary/export | 前端导出 | 复用同一 canonical row DTO；最大 20,000 行，超限先报错；不读取页面 read model |
 | relation/object detail | 前端抽屉 | active canonical relations；统一只返回 `title/subtitle?/detail_available/sections` 公开合同，`kind=bank|invoice|oa` 只控制响应分区；禁止返回 relation case、raw payload、内部 form id 或重复 summary 容器 |
 | OA 栏状态 | 前端 | 使用 HeroUI 原生 chip 显示申请类型与“已完成/进行中”；移除 OA “已配对” chip，relation status 不替代 workflow status |
 | 发票栏 | 前端 | 有发票号码/日期即表达已有发票关系，不再重复显示“已配对” chip |
@@ -158,3 +158,10 @@ OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../
 ## 2026-09-28 查询区域布局
 
 - 移除“当前范围 N 笔流水 · 已关联发票 N 张”说明及专属样式；保留 acquisitionSummary 对状态计数的供给、加载/错误反馈和 API 字段。
+
+
+## 2026-09-28 独立导出筛选
+
+本模块导出抽屉、统计与文件的当前合同见 [独立导出筛选与真实对象计数](../../dev/export-filters-and-counts.md)。原导出预览接口和样例数据不再作为运行时输出；统计与下载复用领域查询。页面权限不变，无持久化、worker 或 read model 变更。
+
+当前导出以 [独立导出合同](../../dev/export-filters-and-counts.md) 为准：抽屉独立筛选，无预览；保留真实业务字段，不导出内部 relation/ID 字段。

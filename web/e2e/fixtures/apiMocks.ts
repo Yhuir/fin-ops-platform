@@ -4172,59 +4172,11 @@ function inputInvoiceUsageRelationDetailPayload(kind: string) {
   };
 }
 
-function inputInvoiceUsageExportPreviewPayload() {
-  return {
-    file_name: "input-invoice-usage.xlsx",
-    row_count: 1,
-    scope_label: "当前筛选",
-    columns: [
-      "发票号码",
-      "销方名称",
-      "价税合计",
-      "支付状态",
-      "OA申请人",
-      "OA金额",
-      "支出流水对方户名",
-      "关系案例",
-      "关系状态",
-    ],
-    sample_rows: [
-      {
-        发票号码: "SD-INV-E2E-0001",
-        销方名称: "浏览器进项供应商",
-        价税合计: "88.00",
-        支付状态: "待处理",
-        OA申请人: "陈秀云",
-        OA金额: "88.00",
-        支出流水对方户名: "浏览器进项供应商",
-        关系案例: "CASE-INPUT-E2E-001",
-        关系状态: "linked",
-      },
-    ],
-  };
+function inputInvoiceUsageExportSummaryPayload() {
+  return {row_count:1,filter_options:{relation_status:[{value:'oa_with_bank',label:'OA / 流水均已关联',count:1}],payment_status:[{value:'pending',label:'待核对',count:1}]}};
 }
-
-function inputInvoiceUsageExportBody(url: URL) {
-  return [
-    "发票号码,销方名称,价税合计,支付状态,OA申请人,OA金额,支出流水对方户名,关系案例,关系状态",
-    [
-      "SD-INV-E2E-0001",
-      "浏览器进项供应商",
-      "88.00",
-      "待处理",
-      "陈秀云",
-      "88.00",
-      "浏览器进项供应商",
-      "CASE-INPUT-E2E-001",
-      "linked",
-    ].join(","),
-    `keyword=${url.searchParams.get("keyword") ?? ""}`,
-    `sort_field=${url.searchParams.get("sort_field") ?? ""}`,
-    `sort_direction=${url.searchParams.get("sort_direction") ?? ""}`,
-    `filters=${url.searchParams.get("filters") ?? ""}`,
-    `page=${url.searchParams.get("page") ?? ""}`,
-    `page_size=${url.searchParams.get("page_size") ?? ""}`,
-  ].join("\n");
+function inputInvoiceUsageExportBody(_url: URL) {
+  return createMinimalXlsx([['发票号码','销方名称','价税合计'],['SD-INV-E2E-0001','浏览器进项供应商','88.00']]);
 }
 
 function inputInvoiceOaReverseInvoice(index: 1 | 2) {
@@ -6611,73 +6563,11 @@ function outputInvoiceCollectionFilterOptionsPayload() {
   };
 }
 
-function outputInvoiceCollectionExportPreviewPayload() {
-  return {
-    file_name: "output-invoice-collections.xlsx",
-    row_count: 2,
-    scope_label: "当前筛选",
-    columns: [
-      "序号",
-      "发票号码",
-      "开票日期",
-      "购方",
-      "购方识别号",
-      "价税合计",
-      "收款状态",
-      "已收金额",
-      "待收金额",
-      "收款方",
-      "收款时间",
-      "收款金额",
-      "收款银行",
-      "摘要",
-      "红蓝票关系",
-    ],
-    sample_rows: [
-      {
-        序号: "1",
-        发票号码: "XSFP-E2E-0001",
-        开票日期: "2026-05-02",
-        购方: "浏览器销项客户",
-        购方识别号: "91530100E2E001",
-        价税合计: "12,345.67",
-        收款状态: "蓝票已被红冲",
-        已收金额: "0.00",
-        待收金额: "0.00",
-        收款方: "浏览器销项客户",
-        收款时间: "2026-05-03 10:30:00",
-        收款金额: "5,000.00",
-        收款银行: "建设银行 8106",
-        摘要: "浏览器 e2e 客户回款",
-        红蓝票关系: "自动红蓝票关系 · XSFP-E2E-0002 · output_invoice_reversal",
-      },
-    ],
-  };
+function outputInvoiceCollectionExportSummaryPayload() {
+  return {row_count:2,filter_options:[{field:'collection_status',options:[{value:'reversed_by_red',label:'蓝票已被红冲',count:1},{value:'reverses_blue',label:'红票已关联蓝票',count:1}]}]};
 }
-
-function outputInvoiceCollectionExportBody(url: URL) {
-  return createMinimalXlsx([
-    ["序号", "发票号码", "开票日期", "购方", "购方识别号", "价税合计", "收款状态", "已收金额", "待收金额", "收款方", "收款时间", "收款金额", "收款银行", "摘要", "红蓝票关系"],
-    [
-      "1",
-      "XSFP-E2E-0001",
-      "2026-05-02",
-      "浏览器销项客户",
-      "91530100E2E001",
-      "12,345.67",
-      "蓝票已被红冲",
-      "0.00",
-      "0.00",
-      "浏览器销项客户",
-      "2026-05-03 10:30:00",
-      "5,000.00",
-      "建设银行 8106",
-      "浏览器 e2e 客户回款",
-      "自动红蓝票关系 · XSFP-E2E-0002 · output_invoice_reversal",
-    ],
-    ["keyword", url.searchParams.get("keyword") ?? ""],
-    ["page", url.searchParams.get("page") ?? ""],
-  ], "销项收款");
+function outputInvoiceCollectionExportBody(_url: URL) {
+  return createMinimalXlsx([['序号','发票号码','购方','价税合计'],['1','XSFP-E2E-0001','浏览器销项客户','12345.67'],['2','XSFP-E2E-0002','浏览器销项客户','-12345.67']]);
 }
 
 function amountSummary() {
@@ -8273,53 +8163,12 @@ function pendingInvoiceFilterSortOptionsPayload() {
   };
 }
 
-function pendingInvoiceExportPreviewPayload(relationConfirmed: boolean) {
-  const row = pendingInvoiceRow(relationConfirmed);
-  const invoice = row.input_invoices.primary;
-  const oa = row.oa.primary;
-  return {
-    file_name: "pending-invoices.xlsx",
-    row_count: 1,
-    scope_label: "当前筛选和排序",
-    columns: ["流水ID", "对方户名", "发票获取状态", "OA申请人", "进项发票号码", "关系案例", "关系状态"],
-    sample_rows: [{
-      流水ID: row.id,
-      对方户名: row.bank_transaction.counterparty_name,
-      发票获取状态: row.invoice_acquisition_status.label,
-      OA申请人: oa?.applicant ?? "",
-      进项发票号码: invoice?.invoice_no ?? "",
-      关系案例: invoice?.relation_case_id ?? oa?.relation_case_id ?? "",
-      关系状态: invoice?.relation_status ?? oa?.relation_status ?? "",
-    }],
-  };
+function pendingInvoiceExportSummaryPayload(relationConfirmed: boolean) {
+  return {row_count:1,source_summary:{expense_rows:1,income_rows:0},acquisition_summary:{status_counts:Object.fromEntries(['paid_pending_invoice','paid_invoiced','invoice_not_fully_paid','bank_statement_as_invoice','no_invoice_required','income_pending_invoice','income_invoiced','income_no_invoice_required','cash_income'].map(code=>[code,code===(relationConfirmed?'paid_invoiced':'paid_pending_invoice')?1:0]))}};
 }
-
-function pendingInvoiceExportBody(relationConfirmed: boolean, url: URL) {
+function pendingInvoiceExportBody(relationConfirmed: boolean, _url: URL) {
   const row = pendingInvoiceRow(relationConfirmed);
-  const invoice = row.input_invoices.primary;
-  const oa = row.oa.primary;
-  return createMinimalXlsx([
-    ["流水ID", "对方户名", "发票获取状态", "OA申请人", "进项发票号码", "关系案例", "关系状态", "摘要"],
-    [
-      row.id,
-      row.bank_transaction.counterparty_name,
-      row.invoice_acquisition_status.label,
-      oa?.applicant ?? "",
-      invoice?.invoice_no ?? "",
-      invoice?.relation_case_id ?? oa?.relation_case_id ?? "",
-      invoice?.relation_status ?? oa?.relation_status ?? "",
-      row.bank_transaction.summary,
-    ],
-    [
-      "导出筛选",
-      url.searchParams.get("direction") ?? "all",
-      url.searchParams.get("filter") ?? "all",
-      url.searchParams.get("keyword") ?? "",
-      url.searchParams.get("sort_field") ?? "",
-      url.searchParams.get("sort_direction") ?? "",
-      url.searchParams.get("filters") ?? "",
-    ],
-  ], "待找发票");
+  return createMinimalXlsx([['对方户名','发票获取状态','OA申请人','发票号码','摘要'],[row.bank_transaction.counterparty_name,row.invoice_acquisition_status.label,row.oa.primary?.applicant??'',row.input_invoices.primary?.invoice_no??'',row.bank_transaction.summary]]);
 }
 
 function bankDetailsExportBody(relationConfirmed: boolean, url: URL) {
@@ -9190,7 +9039,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, inputInvoiceUsageRelationDetailPayload(url.searchParams.get("kind") ?? "oa"));
     }
 
-    if (path === "/api/input-invoice-usage/export-preview") {
+    if (path === "/api/input-invoice-usage/export-summary") {
       if (options.inputInvoiceUsageExportRowLimitError) {
         return json(route, {
           error: {
@@ -9200,7 +9049,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           },
         }, 400);
       }
-      return json(route, inputInvoiceUsageExportPreviewPayload());
+      return json(route, inputInvoiceUsageExportSummaryPayload());
     }
 
     if (path === "/api/input-invoice-usage/export") {
@@ -9488,7 +9337,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, costStatisticsExplorerPagePayload(url, payload));
     }
 
-    if (path === "/api/cost-statistics/export-preview") {
+    if (path === "/api/cost-statistics/export-summary") {
       return json(route, costStatisticsExportPreviewPayload(
         url,
         relationConfirmed,
@@ -9612,7 +9461,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       ));
     }
 
-    if (path === "/api/output-invoice-collections/export-preview") {
+    if (path === "/api/output-invoice-collections/export-summary") {
       if (options.outputInvoiceCollectionExportRowLimitError) {
         return json(route, {
           error: {
@@ -9622,7 +9471,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           },
         }, 400);
       }
-      return json(route, outputInvoiceCollectionExportPreviewPayload());
+      return json(route, outputInvoiceCollectionExportSummaryPayload());
     }
 
     if (path === "/api/output-invoice-collections/export") {
@@ -10767,8 +10616,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       });
     }
 
-    if (path === "/api/pending-invoices/export-preview") {
-      return json(route, pendingInvoiceExportPreviewPayload(relationConfirmed));
+    if (path === "/api/pending-invoices/export-summary") {
+      return json(route, pendingInvoiceExportSummaryPayload(relationConfirmed));
     }
 
     if (path === "/api/pending-invoices/export") {

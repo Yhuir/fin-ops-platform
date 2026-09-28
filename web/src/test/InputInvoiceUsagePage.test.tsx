@@ -258,10 +258,11 @@ function installInputInvoiceUsageFetch(
         headers: { "Content-Type": "application/json" },
       });
     }
-    if (url.pathname === "/api/input-invoice-usage/export-preview") {
+    if (url.pathname === "/api/input-invoice-usage/export-summary") {
       return new Response(JSON.stringify({
         file_name: "进项发票使用情况-2026-05-31.xlsx",
         row_count: 1,
+        filter_options: { relation_status: [{value: "no_oa",label:"未关联 OA",count:1}], payment_status: [{value:"pending",label:"待核对",count:1}] },
         scope_label: "当前筛选",
         columns: ["序号", "发票号码", "销方名称"],
         sample_rows: [{ "序号": 1, "发票号码": "SD-INV-2026-0001", "销方名称": "云南长文本供应商科技发展有限公司第一分公司" }],
@@ -419,7 +420,7 @@ describe("Input invoice usage page", () => {
         ? null
         : "InputInvoiceUsageFilterMenu.tsx should use HeroUI Checkbox and preserve radio menu semantics",
       sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx"].includes("AppDrawer") ? null : "InputInvoiceUsageDetailDrawer.tsx should use AppDrawer for the right drawer shape",
-      sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx"].includes("AppDrawer") ? null : "InputInvoiceUsageExportDrawer.tsx should use AppDrawer for the right drawer shape",
+      sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx"].includes("FilteredExportDrawer") ? null : "InputInvoiceUsageExportDrawer.tsx should use AppDrawer for the right drawer shape",
       sourceByPath["src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx"].includes("AppDrawer") ? null : "PaymentStatusRulesDrawer.tsx should use AppDrawer for the right drawer shape",
       sourceByPath["src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx"].includes("AppDrawer") ? null : "OaReverseWorkspaceDrawer.tsx should use AppDrawer for the right drawer shape",
     ].filter(Boolean);
@@ -577,7 +578,8 @@ describe("Input invoice usage page", () => {
     expect(within(headerRow).getAllByRole("columnheader")).toHaveLength(10);
     expect(within(headerRow).getByRole("button", { name: "按开票日期排序" })).toBeInTheDocument();
     expect(within(headerRow).getByRole("button", { name: "筛选 销方名称" })).toBeInTheDocument();
-    expect(within(headerRow).getByRole("button", { name: "筛选 支付状态" })).toBeInTheDocument();
+    expect(within(headerRow).queryByRole("button", { name: "筛选 支付状态" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "进项发票支付状态" })).toBeInTheDocument();
     expect(within(headerRow).getByRole("button", { name: "筛选 OA / OA申请人" })).toBeInTheDocument();
     expect(within(headerRow).getByRole("button", { name: "筛选 项目名称" })).toBeInTheDocument();
     expect(within(headerRow).getByRole("button", { name: "筛选 对方户名" })).toBeInTheDocument();
@@ -610,7 +612,7 @@ describe("Input invoice usage page", () => {
     expect(within(page).queryByText(/outflow/)).not.toBeInTheDocument();
     expect(within(page).getByText("支出")).toBeInTheDocument();
     expect(within(page).getByText("交通银行 3847")).toBeInTheDocument();
-    expect(within(page).getByText("待处理").closest(".input-invoice-usage-payment-cell")).toBeInTheDocument();
+    expect(within(within(page).getByRole("grid")).getByText("待处理").closest(".input-invoice-usage-payment-cell")).toBeInTheDocument();
 
     await user.click(within(page).getByRole("button", { name: "按开票日期排序" }));
     await waitFor(() => {
@@ -1053,14 +1055,14 @@ describe("Input invoice usage page", () => {
     const page = await screen.findByTestId("input-invoice-usage-page");
     await user.click(within(page).getByRole("button", { name: "筛选内容导出" }));
 
-    expect(await screen.findByText("预计导出 1 行")).toBeInTheDocument();
+    expect(await screen.findByText("导出 1 张")).toBeInTheDocument();
     expect(screen.getAllByText("SD-INV-2026-0001").length).toBeGreaterThanOrEqual(1);
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return url.pathname === "/api/input-invoice-usage/export-preview";
+      return url.pathname === "/api/input-invoice-usage/export-summary";
     })).toBe(true);
 
-    await user.click(screen.getByRole("button", { name: "下载导出" }));
+    await user.click(screen.getByRole("button", { name: "下载 Excel" }));
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([input]) => {
         const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -1088,8 +1090,8 @@ describe("Input invoice usage page", () => {
     const page = await screen.findByTestId("input-invoice-usage-page");
     await user.click(within(page).getByRole("button", { name: "筛选内容导出" }));
 
-    expect(await screen.findByText("预计导出 1 行")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "下载导出" }));
+    expect(await screen.findByText("导出 1 张")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "下载 Excel" }));
 
     expect(await screen.findByText("进项发票使用情况导出超过 20000 行，请缩小筛选范围后重试。")).toBeInTheDocument();
     expect(screen.queryByText("已生成 进项.xlsx")).not.toBeInTheDocument();

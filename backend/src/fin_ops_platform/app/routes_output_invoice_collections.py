@@ -57,10 +57,10 @@ class OutputInvoiceCollectionApiRoutes:
             )
         if (
             method == "GET"
-            and route_path == "/api/output-invoice-collections/export-preview"
+            and route_path == "/api/output-invoice-collections/export-summary"
         ):
             return self._json_read(
-                headers, lambda session: self.export_preview(query, session=session)
+                headers, lambda session: self.export_summary(query, session=session)
             )
         if method == "GET" and route_path == "/api/output-invoice-collections/export":
             session, auth_error = self._read_session(headers)
@@ -136,13 +136,13 @@ class OutputInvoiceCollectionApiRoutes:
             query, tenant_id=_tenant_id(session)
         )
 
-    def export_preview(
+    def export_summary(
         self,
         query: dict[str, list[str]],
         *,
         session: OARequestSession | None = None,
     ) -> tuple[HTTPStatus, dict[str, Any]]:
-        return HTTPStatus.OK, self._query_service.export_preview(
+        return HTTPStatus.OK, self._query_service.export_summary(
             query, tenant_id=_tenant_id(session)
         )
 

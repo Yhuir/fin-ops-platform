@@ -62,9 +62,9 @@ test("two native segment rows partition bank counts and share status/export quer
     await page.screenshot({path:info.outputPath(`pending-segments-${width}.png`),animations:"disabled"});
   }
   await statusTabs.getByRole("tab", { name:/^金额待核对 / }).click();
-  const preview = page.waitForResponse(r => r.url().includes("/api/pending-invoices/export-preview"));
+  const preview = page.waitForResponse(r => r.url().includes("/api/pending-invoices/export-summary"));
   await page.getByRole("button", { name:"筛选内容导出" }).click();
   const url = new URL((await preview).url());
-  expect(JSON.parse(url.searchParams.get("filters")!)).toEqual([{field:"status_code",operator:"in",values:["invoice_not_fully_paid"]}]);
+  expect(url.searchParams.has("filters")).toBe(false);
   expect(errors).toEqual([]);
 });

@@ -60,7 +60,7 @@ test.describe("cost statistics browser flow", () => {
     await expect(page.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "false");
     await page.getByRole("button", { name: "导出中心" }).click();
     const dialog = page.getByRole("dialog", { name: "导出中心" });
-    await expect(dialog.getByRole("radio", { name: "自定义月份" })).toBeChecked();
+    await expect(dialog.getByRole("radio", { name: "全部", exact: true })).toBeChecked();
     await dialog.getByRole("button", { name: "关闭导出中心" }).click();
     const reset = waitForExplorer(page, url => url.searchParams.get("scope") === "all");
     await page.reload(); await reset;
@@ -257,42 +257,19 @@ test.describe("cost statistics browser flow", () => {
     await expect(page.getByRole("grid", { name: "成本明细表" })).toContainText("云南溯源科技");
   });
 
-  test("previews bank-flow and bank-account exports", async ({ page }) => {
-    await installDeterministicApiMocks(page, { sessionMode: "user" });
-
-    await page.goto("/cost-statistics");
-    await page.getByRole("button", { name: "导出中心" }).click();
-    const dialog = page.getByRole("dialog", { name: "导出中心" });
-    await expect(dialog).toBeVisible();
-    const tabs = dialog.getByRole("radiogroup", { name: "导出视图切换" });
-    await expect(tabs.getByRole("radio")).toHaveCount(5);
-    await tabs.getByRole("radio", { name: "按时间" }).click();
-    const flowPreviewResponse = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return response.request().method() === "GET"
-        && url.pathname.endsWith("/api/cost-statistics/export-preview")
-        && url.searchParams.get("view") === "time";
-    });
-    await dialog.getByRole("button", { name: "仅预览" }).click();
-    await flowPreviewResponse;
-    await expect(dialog.getByText(/预计导出 \d+ 条银行流水/)).toBeVisible();
-    await expect(dialog.getByText(/支出/).first()).toBeVisible();
-    await expect(dialog.getByText(/收入/).first()).toBeVisible();
-    await expect(dialog.getByText(/净支出/)).toHaveCount(0);
-
-    await tabs.getByRole("radio", { name: "按银行账户" }).click();
-
-    const previewResponse = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return response.request().method() === "GET"
-        && url.pathname.endsWith("/api/cost-statistics/export-preview")
-        && url.searchParams.get("view") === "bank_account";
-    });
-    await dialog.getByRole("button", { name: "仅预览" }).click();
-    const previewUrl = new URL((await previewResponse).url());
-    expect(previewUrl.searchParams.has("bank_account_label")).toBe(true);
-    await expect(dialog.getByText(/预计导出 \d+ 条成本明细/)).toBeVisible();
-    await expect(dialog.getByRole("grid", { name: "导出预览表" })).toContainText("银行账户");
+  test("export drawer counts independent bank and cost selections without preview", async ({ page }) => {
+    await installDeterministicApiMocks(page, { sessionMode: 'user' });
+    await page.goto('/cost-statistics');
+    await page.getByRole('button', {name:'导出中心'}).click();
+    const drawer = page.getByRole('dialog', {name:'导出中心'});
+    await expect(drawer.getByRole('button', {name:'导出',exact:true})).toBeEnabled();
+    const tabs=drawer.getByRole('radiogroup',{name:'导出视图切换'});
+    await tabs.getByRole('radio',{name:'按时间'}).click();
+    await expect(drawer.getByText(/导出 \d+ 笔/)).toBeVisible();
+    await tabs.getByRole('radio',{name:'按银行账户'}).click();
+    await expect(drawer.getByText(/导出 \d+ 条成本明细/)).toBeVisible();
+    await expect(drawer.getByRole('grid')).toHaveCount(0);
+    await expect(drawer.getByRole('button',{name:'仅预览'})).toHaveCount(0);
   });
 
   test("saves no-OA rules and refreshes the affected cost explorer", async ({ page }) => {

@@ -395,14 +395,7 @@ export type InputInvoiceUsageOaReverseStagedDraftsResponse = {
   items: InputInvoiceUsageOaReverseBatch[];
 };
 
-export type InputInvoiceUsageExportPreview = {
-  fileName: string;
-  rowCount: number;
-  scopeLabel: string;
-  columns: string[];
-  sampleRows: Array<Record<string, string>>;
-  message?: string;
-};
+
 
 export type InputInvoiceUsageExportDownload = {
   blob: Blob;

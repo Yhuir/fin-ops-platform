@@ -32,8 +32,8 @@ class RecordingQueryService:
     def filter_options(self, query: object, *, tenant_id: str) -> dict[str, Any]:
         return self._record("filter_options", query, tenant_id)
 
-    def export_preview(self, query: object, *, tenant_id: str) -> dict[str, Any]:
-        return self._record("export_preview", query, tenant_id)
+    def export_summary(self, query: object, *, tenant_id: str) -> dict[str, Any]:
+        return self._record("export_summary", query, tenant_id)
 
     def export(self, query: object, *, tenant_id: str) -> tuple[str, bytes]:
         self._record("export", query, tenant_id)
@@ -83,7 +83,7 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
         cases = [
             ("rows", "/api/output-invoice-collections/rows"),
             ("filter_options", "/api/output-invoice-collections/filter-options"),
-            ("export_preview", "/api/output-invoice-collections/export-preview"),
+            ("export_summary", "/api/output-invoice-collections/export-summary"),
             ("export", "/api/output-invoice-collections/export"),
             (
                 "invoice_detail",

@@ -116,6 +116,7 @@ export default function OutputInvoiceCollectionsTable({
       aria-busy={refreshing}
       className="finance-page-table-frame output-invoice-collections-table-frame"
     >
+      {refreshing ? <span className="output-invoice-collections-busy" role="progressbar" aria-label="正在加载收款情况" /> : null}
       <FinanceTable
         ariaLabel="销项发票收款情况表"
         className="output-invoice-collections-table"
@@ -153,7 +154,7 @@ export default function OutputInvoiceCollectionsTable({
                     {column.groupLabel ?? "\u00a0"}
                   </span>
                   <span className="output-invoice-collections-table-header-stack">
-                    {column.field && config ? (
+                    {column.field && column.field !== "collection_status" && config ? (
                       <OutputInvoiceCollectionFilterMenu
                         currentFilter={currentFilter(column.field) as OutputInvoiceCollectionFilterValue | null}
                         fieldConfig={{ ...config, label: column.label }}

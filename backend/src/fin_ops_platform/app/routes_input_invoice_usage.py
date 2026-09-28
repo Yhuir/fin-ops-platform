@@ -57,8 +57,8 @@ class InputInvoiceUsageApiRoutes:
             return self.rows(query, headers)
         if method == "GET" and route_path == "/api/input-invoice-usage/filter-options":
             return self.filter_options(query, headers)
-        if method == "GET" and route_path == "/api/input-invoice-usage/export-preview":
-            return self.export_preview(query, headers)
+        if method == "GET" and route_path == "/api/input-invoice-usage/export-summary":
+            return self.export_summary(query, headers)
         if method == "GET" and route_path == "/api/input-invoice-usage/export":
             return self.export(query, headers)
         if method == "GET" and route_path == "/api/input-invoice-usage/payment-status-rules":
@@ -221,7 +221,7 @@ class InputInvoiceUsageApiRoutes:
             return self._payment_rules_error_response(exc)
         return self._json_response(HTTPStatus.OK, updated)
 
-    def export_preview(self, query: dict[str, list[str]], headers: dict[str, str] | None) -> Any:
+    def export_summary(self, query: dict[str, list[str]], headers: dict[str, str] | None) -> Any:
         _session, auth_error = self._resolve_read_session(
             headers,
             denied_message="当前账户没有访问进项发票使用情况页面权限。",
@@ -229,7 +229,7 @@ class InputInvoiceUsageApiRoutes:
         if auth_error is not None:
             return auth_error
         try:
-            payload = self._export_service.export_preview(
+            payload = self._export_service.export_summary(
                 **self._export_query_kwargs(query),
                 tenant_id=_tenant_id(_session),
             )

@@ -201,7 +201,11 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
             sort_direction="desc",
         )
         options = service.filter_options()
-        preview = service.export_preview()
+        from io import BytesIO
+        from openpyxl import load_workbook
+        _, content = service.export()
+        sheet = load_workbook(BytesIO(content)).active
+        columns = [cell.value for cell in sheet[1]]
 
         self.assertEqual(payload["pagination"], {"page": 1, "pageSize": 1, "total": 2})
         self.assertEqual(payload["rows"][0]["invoiceId"], "a")
@@ -209,8 +213,8 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         self.assertIn("collection_status", fields)
         self.assertNotIn("receipt_status", fields)
         self.assertNotIn("oa_status", fields)
-        self.assertIn("红蓝票关系", preview["columns"])
-        self.assertFalse(any("收据" in column or "OA" in column for column in preview["columns"]))
+        self.assertIn("价税合计", columns)
+        self.assertFalse(any("收据" in column or "OA" in column for column in columns))
 
     def test_red_invoice_remark_drives_display_search_detail_and_export_evidence(self) -> None:
         target_invoice_no = "26532000000395506981"
@@ -232,7 +236,11 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         row = service.list_rows()["rows"][0]
         detail = service.invoice_detail("red-with-remark")
         searched = service.list_rows(keyword=target_invoice_no)
-        preview = service.export_preview()
+        from io import BytesIO
+        from openpyxl import load_workbook
+        _, content = service.export()
+        sheet = load_workbook(BytesIO(content)).active
+        columns = [cell.value for cell in sheet[1]]
 
         self.assertEqual(
             row["invoice"]["reversalTargetInvoiceNos"],
@@ -244,10 +252,10 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
             [target_invoice_no],
         )
         self.assertEqual(searched["pagination"]["total"], 1)
-        self.assertIn("冲红蓝字发票号码", preview["columns"])
+        self.assertIn("备注", columns)
         self.assertEqual(
-            preview["sampleRows"][0]["冲红蓝字发票号码"],
-            target_invoice_no,
+            sheet.cell(2, columns.index("备注") + 1).value,
+            remark,
         )
 
     def test_non_contract_remark_does_not_invent_a_reversal_target(self) -> None:

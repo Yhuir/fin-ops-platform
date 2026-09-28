@@ -239,14 +239,14 @@ class CostStatisticsApiTests(unittest.TestCase):
         )
 
         status, export_preview = self._json(
-            "/api/cost-statistics/export-preview?month=2026-03&view=time"
+            "/api/cost-statistics/export-summary?month=2026-03&view=time"
         )
         self.assertEqual(status, 200)
         self.assertEqual(export_preview["summary"]["row_count"], 3)
         self.assertEqual(export_preview["summary"]["expense_amount"], "3350.00")
         self.assertEqual(export_preview["summary"]["income_amount"], "1250.00")
         self.assertEqual(export_preview["summary"]["total_amount"], "2100.00")
-        self.assertIn("资金方向", export_preview["columns"])
+        self.assertNotIn("columns", export_preview)
 
         response = self._get(
             "/api/cost-statistics/export?month=2026-03&view=bank_tag"
@@ -670,14 +670,15 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(detail["payment_evidence"][0]["amount"], "1250.00")
 
         status, preview = self._json(
-            "/api/cost-statistics/export-preview"
+            "/api/cost-statistics/export-summary"
             "?month=2026-03&view=project"
             "&project_name=项目B"
         )
         self.assertEqual(status, 200)
         self.assertEqual(preview["summary"]["total_amount"], "750.00")
-        applicant_column = preview["columns"].index("申请/报销人")
-        self.assertEqual(preview["rows"][0][applicant_column], "报销成员甲")
+        response = self._get("/api/cost-statistics/export?month=2026-03&view=project&project_name=项目B")
+        sheet = load_workbook(__import__("io").BytesIO(response.body))["成本明细"]
+        self.assertEqual(sheet["I2"].value, "报销成员甲")
 
         edited_allocations = [
             {
@@ -774,25 +775,25 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(detail["allocation"]["oa_completed_at"], "")
         self.assertEqual(detail["allocation"]["amount"], "1250.00")
         query = "?month=2026-03&view=project&project_name=云南溯源科技&aggregate_by=month"
-        status, preview = self._json("/api/cost-statistics/export-preview" + query)
+        status, preview = self._json("/api/cost-statistics/export-summary" + query)
         self.assertEqual(status, 200)
         response = self._get("/api/cost-statistics/export" + query)
         self.assertEqual(response.status_code, 200)
         workbook = load_workbook(filename=__import__("io").BytesIO(response.body))
         self.assertEqual(workbook.sheetnames, preview["sheet_names"])
-        self.assertEqual(workbook["按项目汇总"]["E2"].value, "1250.00")
-        self.assertIn(self.bank_id, [cell.value for cell in workbook["成本明细"][2]])
+        self.assertEqual(workbook["按项目汇总"]["E2"].value, 1250)
+        self.assertNotIn(self.bank_id, [cell.value for cell in workbook["成本明细"][2]])
+        self.assertFalse(any("ID" in str(cell.value) for cell in workbook["成本明细"][1]))
 
     def test_export_preview_and_workbook_use_canonical_snapshot(self) -> None:
         status, preview = self._json(
-            "/api/cost-statistics/export-preview"
+            "/api/cost-statistics/export-summary"
             "?month=2026-03&view=project"
             "&project_name=云南溯源科技"
         )
         self.assertEqual(status, 200)
         self.assertEqual(preview["summary"]["row_count"], 1)
-        applicant_column = preview["columns"].index("申请/报销人")
-        self.assertEqual(preview["rows"][0][applicant_column], "刘际涛")
+        self.assertNotIn("rows", preview)
 
         response = self._get(
             "/api/cost-statistics/export"
@@ -812,18 +813,19 @@ class CostStatisticsApiTests(unittest.TestCase):
 
     def test_project_aggregate_keeps_source_details_and_preview_sheet_parity(self):
         query = "?month=2026-03&view=project&project_name=云南溯源科技&aggregate_by=month"
-        status, preview = self._json("/api/cost-statistics/export-preview" + query)
+        status, preview = self._json("/api/cost-statistics/export-summary" + query)
         self.assertEqual(status, 200)
         response = self._get("/api/cost-statistics/export" + query)
         self.assertEqual(response.status_code, 200)
         workbook = load_workbook(filename=__import__("io").BytesIO(response.body))
         self.assertEqual(workbook.sheetnames, preview["sheet_names"])
         self.assertIn("按项目汇总", workbook.sheetnames)
-        self.assertIn(self.bank_id, [cell.value for cell in workbook["成本明细"][2]])
-        self.assertEqual(workbook["按项目汇总"]["E2"].value, "1250.00")
+        self.assertNotIn(self.bank_id, [cell.value for cell in workbook["成本明细"][2]])
+        self.assertFalse(any("ID" in str(cell.value) for cell in workbook["成本明细"][1]))
+        self.assertEqual(workbook["按项目汇总"]["E2"].value, 1250)
 
     def test_retired_cost_export_filters_fail_explicitly(self):
-        for endpoint in ("export", "export-preview"):
+        for endpoint in ("export", "export-summary"):
             status, payload = self._json(f"/api/cost-statistics/{endpoint}?month=all&view=project&project_name=云南溯源科技&expense_type=旧分类")
             self.assertEqual(status, 400)
             self.assertEqual(payload["error"], "invalid_cost_statistics_export_request")

@@ -1,23 +1,14 @@
 import SegmentedControl from "../common/SegmentedControl";
 import { Button, Checkbox, Input, Radio, RadioGroup } from "@heroui/react";
 
-import AppDialog from "../common/AppDialog";
+import AppDrawer from "../common/AppDrawer";
 import BusinessPeriodPicker, { nearbyBusinessYears } from "../common/BusinessPeriodPicker";
-import {
-  FinanceTable,
-  FinanceTableBody,
-  FinanceTableCell,
-  FinanceTableColumn,
-  FinanceTableHeader,
-  FinanceTableRow,
-} from "../common/FinanceTable";
-import type { CostStatisticsExportPreview } from "../../features/cost-statistics/types";
-import { formatCostAmount } from "../../features/cost-statistics/format";
+import type { CostStatisticsExportSummary } from "../../features/cost-statistics/types";
 
 export type ExportCenterMode = "time" | "bank_tag" | "bank_account" | "project" | "cost_tag";
 export type ExportRangeMode = "all" | "month" | "custom";
 
-type ExportCenterModalProps = {
+type ExportCenterDrawerProps = {
   mode: ExportCenterMode;
   projectOptions: string[];
   costTagOptions: string[];
@@ -31,7 +22,6 @@ type ExportCenterModalProps = {
   bankAccountProjectNames: string[];
   projectNames: string[];
   projectAggregateBy: "month" | "year";
-  projectPeriodLabel: string;
   projectCostTags: string[];
   costTagRangeMode: ExportRangeMode;
   costTagMonth: string;
@@ -42,9 +32,9 @@ type ExportCenterModalProps = {
   bankFlowMonth: string;
   bankFlowStartDate: string;
   bankFlowEndDate: string;
-  preview: CostStatisticsExportPreview | null;
+  summaryData: CostStatisticsExportSummary | null;
   feedback: { tone: "success" | "error"; message: string } | null;
-  isPreviewLoading: boolean;
+  isSummaryLoading: boolean;
   isExporting: boolean;
   isBusy: boolean;
   onClose: () => void;
@@ -67,7 +57,6 @@ type ExportCenterModalProps = {
   onBankFlowMonthChange: (month: string) => void;
   onBankFlowStartDateChange: (date: string) => void;
   onBankFlowEndDateChange: (date: string) => void;
-  onPreview: () => void;
   onExport: () => void;
 };
 
@@ -152,7 +141,7 @@ function DateRangeFields({ startDate, endDate, onStartDateChange, onEndDateChang
   );
 }
 
-export default function ExportCenterModal({
+export default function ExportCenterDrawer({
   mode,
   projectOptions,
   costTagOptions,
@@ -166,7 +155,6 @@ export default function ExportCenterModal({
   bankAccountProjectNames,
   projectNames,
   projectAggregateBy,
-  projectPeriodLabel,
   projectCostTags,
   costTagRangeMode,
   costTagMonth,
@@ -177,9 +165,9 @@ export default function ExportCenterModal({
   bankFlowMonth,
   bankFlowStartDate,
   bankFlowEndDate,
-  preview,
+  summaryData,
   feedback,
-  isPreviewLoading,
+  isSummaryLoading,
   isExporting,
   isBusy,
   onClose,
@@ -202,42 +190,38 @@ export default function ExportCenterModal({
   onBankFlowMonthChange,
   onBankFlowStartDateChange,
   onBankFlowEndDateChange,
-  onPreview,
   onExport,
-}: ExportCenterModalProps) {
+}: ExportCenterDrawerProps) {
   return (
-    <AppDialog
-      actions={(
+    <AppDrawer
+      footer={(
         <>
           {feedback ? <div className={`action-feedback ${feedback.tone}`}>{feedback.message}</div> : null}
-          <Button isDisabled={isBusy} onPress={onPreview} variant="secondary">
-            仅预览
-          </Button>
-          <Button isDisabled={isBusy} isPending={isExporting} onPress={onExport} variant="primary">
+          <strong aria-live="polite">{isSummaryLoading ? '正在统计…' : summaryData ? `导出 ${summaryData.summary.transactionCount} ${mode === 'time' || mode === 'bank_tag' ? '笔' : '条成本明细'}` : '导出 —'}</strong>
+          <Button isDisabled={isBusy || !summaryData || summaryData.summary.transactionCount === 0 || feedback?.tone === "error"} isPending={isExporting} onPress={onExport} variant="primary">
             {isExporting ? "正在导出..." : "导出"}
           </Button>
         </>
       )}
-      className="export-center-modal"
+      className="export-center-drawer"
       closeLabel="关闭导出中心"
-      disableEscapeClose={isBusy}
-      isDismissable={!isBusy}
-      maxWidth="lg"
+      closeDisabled={isExporting}
+      width="min(640px, 100vw)"
       onClose={onClose}
       open
       title="导出中心"
     >
-        <div className="export-center-modal-body">
+        <div className="export-center-drawer-body">
           <SegmentedControl label="导出视图切换" value={mode} disabled={isBusy} onChange={onModeChange} options={[
             { key: "time", label: "按时间" }, { key: "bank_tag", label: "按标签" },
             { key: "bank_account", label: "按银行账户" }, { key: "project", label: "按项目" },
             { key: "cost_tag", label: "按成本主标签" },
           ]} />
-          {mode === "time" || mode === "bank_tag" ? (
+          {mode === "time" || mode === "bank_tag" || mode === "project" ? (
             <div className="export-center-config-grid">
               <section className="export-center-section">
                 <div className="export-center-section-header">
-                  <h3>银行流水时间范围</h3>
+                  <h3>时间范围</h3>
                 </div>
                 <RadioGroup
                   aria-label="银行流水导出时间范围"
@@ -338,7 +322,6 @@ export default function ExportCenterModal({
                 <div className="export-center-section-header">
                   <h3>项目</h3>
                 </div>
-                <p>时间范围：{projectPeriodLabel}</p>
                 <RadioGroup aria-label="项目聚合方式" className="project-export-radio-group" onChange={(value) => onProjectAggregateByChange(value as "month" | "year")} value={projectAggregateBy}>
                   <Radio className="project-export-choice" value="month">
                     <Radio.Control><Radio.Indicator /></Radio.Control>
@@ -414,66 +397,9 @@ export default function ExportCenterModal({
             </div>
           ) : null}
 
-          {isPreviewLoading || preview ? <section className="export-center-preview">
-            <div className="export-center-preview-header">
-              <h3>预览结果</h3>
-              {preview ? <span>{preview.scopeLabel}</span> : null}
-            </div>
-            {isPreviewLoading ? (
-              <div className="cost-explorer-empty">正在生成导出预览...</div>
-            ) : preview ? (
-              <div className="export-center-preview-body">
-                <div className="export-center-preview-summary">
-                  <strong>
-                    预计导出 {preview.summary.transactionCount} 条
-                    {preview.view === "time" || preview.view === "bank_tag" ? "银行流水" : "成本明细"}
-                  </strong>
-                  <span>预计 {preview.summary.sheetCount} 个 sheet</span>
-                  {preview.view === "time" || preview.view === "bank_tag" ? (
-                    <>
-                      <span>支出 {formatCostAmount(preview.summary.expenseAmount ?? "0.00")}</span>
-                      <span>收入 {formatCostAmount(preview.summary.incomeAmount ?? "0.00")}</span>
-                    </>
-                  ) : <span>总金额 {formatCostAmount(preview.summary.totalAmount)}</span>}
-                </div>
-                <div className="export-center-sheet-list">
-                  {preview.sheetNames.map((sheetName) => (
-                    <span key={sheetName} className="export-center-sheet-chip">
-                      {sheetName}
-                    </span>
-                  ))}
-                </div>
-                <div className="export-center-file-name">{preview.fileName}</div>
-                <div className="cost-table-shell">
-                  <FinanceTable ariaLabel="导出预览表" className="cost-table" minWidth={720}>
-                    <FinanceTableHeader>
-                      {preview.columns.map((column, index) => (
-                        <FinanceTableColumn id={column} isRowHeader={index === 0} key={column} columnRole={column.includes("金额") ? "amount" : index === 0 ? "identity" : "description"}>{column}</FinanceTableColumn>
-                      ))}
-                    </FinanceTableHeader>
-                    <FinanceTableBody>
-                      {preview.rows.length === 0 ? (
-                        <FinanceTableRow id="empty">
-                          {preview.columns.map((column, index) => <FinanceTableCell className={index === 0 ? "cost-table-empty" : undefined} columnRole={column.includes("金额") ? "amount" : index === 0 ? "identity" : "description"} key={column}>{index === 0 ? `当前条件下没有可导出的${preview.view === "time" || preview.view === "bank_tag" ? "银行流水" : "成本数据"}。` : "-"}</FinanceTableCell>)}
-                        </FinanceTableRow>
-                      ) : (
-                        preview.rows.map((row, rowIndex) => (
-                          <FinanceTableRow id={`${rowIndex}-${row.join("-")}`} key={`${rowIndex}-${row.join("-")}`} className="cost-table-row">
-                            {row.map((cell, cellIndex) => (
-                              <FinanceTableCell columnRole={preview.columns[cellIndex]?.includes("金额") ? "amount" : cellIndex === 0 ? "identity" : "description"} key={`${rowIndex}-${cellIndex}`}>
-                                {preview.columns[cellIndex]?.includes("金额") ? formatCostAmount(cell) : cell}
-                              </FinanceTableCell>
-                            ))}
-                          </FinanceTableRow>
-                        ))
-                      )}
-                    </FinanceTableBody>
-                  </FinanceTable>
-                </div>
-              </div>
-            ) : null}
-          </section> : null}
+          {summaryData && mode === 'project' ? <p>项目汇总 {summaryData.summary.rowCount} 条 · 成本明细 {summaryData.summary.transactionCount} 条</p> : null}
+
         </div>
-    </AppDialog>
+    </AppDrawer>
   );
 }

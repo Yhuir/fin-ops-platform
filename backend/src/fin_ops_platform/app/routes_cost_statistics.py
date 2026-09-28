@@ -122,12 +122,12 @@ class CostStatisticsApiRoutes:
                 page_size=query.get("page_size", [None])[0],
                 include_statistics=query.get("include_statistics", [None])[0],
             )
-        if method == "GET" and route_path in {"/api/cost-statistics/export", "/api/cost-statistics/export-preview"}:
+        if method == "GET" and route_path in {"/api/cost-statistics/export", "/api/cost-statistics/export-summary"}:
             retired = {"expense_type", "include_oa_details", "include_invoice_details", "include_exception_rows", "include_ignored_rows", "include_expense_content_summary", "sort_by"}.intersection(query)
             if retired:
                 return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "invalid_cost_statistics_export_request", "message": "不再支持旧导出参数：" + ", ".join(sorted(retired))})
-        if method == "GET" and route_path == "/api/cost-statistics/export-preview":
-            return self.handle_export_preview(
+        if method == "GET" and route_path == "/api/cost-statistics/export-summary":
+            return self.handle_export_summary(
                 month=query.get("month", [None])[0],
                 view=query.get("view", [None])[0],
                 project_names=query.get("project_name", []),
@@ -456,7 +456,7 @@ class CostStatisticsApiRoutes:
             )
         return self._file_response(filename, content)
 
-    def handle_export_preview(
+    def handle_export_summary(
         self,
         *,
         month: str | None,
@@ -481,7 +481,7 @@ class CostStatisticsApiRoutes:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
-                    "error": "invalid_cost_statistics_export_preview_request",
+                    "error": "invalid_cost_statistics_export_summary_request",
                     "message": (
                         "view must be time, bank_tag, bank_account, project, "
                         "or cost_tag."
@@ -489,7 +489,7 @@ class CostStatisticsApiRoutes:
                 },
             )
         try:
-            payload = self._query_service.get_export_preview(
+            payload = self._query_service.get_export_summary(
                 month=current_month,
                 view=view,
                 project_names=project_names,
@@ -511,7 +511,7 @@ class CostStatisticsApiRoutes:
         except ValueError as error:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_cost_statistics_export_preview_request", "message": str(error)},
+                {"error": "invalid_cost_statistics_export_summary_request", "message": str(error)},
             )
         return self._json_response(HTTPStatus.OK, payload)
 

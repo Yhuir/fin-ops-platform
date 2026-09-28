@@ -32,7 +32,12 @@ from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecycleP
 from fin_ops_platform.services.invoice_relation_query_context import DistributedInvoiceRelationContext
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
-from fin_ops_platform.services.source_record_details import bank_source_detail, invoice_source_detail, oa_source_detail, source_relation_sections
+from fin_ops_platform.services.source_record_details import (
+    bank_source_detail,
+    invoice_source_detail,
+    oa_source_detail,
+    source_relation_sections,
+)
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")

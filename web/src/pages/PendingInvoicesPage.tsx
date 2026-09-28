@@ -20,9 +20,7 @@ import { useSessionPermissions } from "../contexts/SessionContext";
 import { formatMoney } from "../features/money";
 import {
   confirmAttachExistingInvoices,
-  downloadPendingInvoiceExport,
   fetchPendingInvoiceCandidatesBatch,
-  fetchPendingInvoiceExportPreview,
   fetchPendingInvoiceFilterOptions,
   fetchPendingInvoiceObjectDetail,
   fetchPendingInvoiceRelationDetail,
@@ -380,8 +378,6 @@ export default function PendingInvoicesPage() {
     throw result.error;
   }, [applyRowsPayload, direction, loadStatistics, query, rulesDirection, runOperation, statusFilters]);
   const loadCandidates = useCallback(fetchPendingInvoiceCandidatesBatch, []);
-  const loadExportPreview = useCallback(() => fetchPendingInvoiceExportPreview(query), [query]);
-  const handleDownloadExport = useCallback(() => downloadPendingInvoiceExport(query), [query]);
 
   const handleDirectionChange = useCallback((nextDirection: PendingInvoiceDirection) => {
     setDirection(nextDirection);
@@ -758,8 +754,6 @@ export default function PendingInvoicesPage() {
       />
       <PendingInvoiceExportDrawer
         open={activeDrawer === "export"}
-        loadPreview={loadExportPreview}
-        downloadExport={handleDownloadExport}
         onClose={closeDrawer}
       />
     </div>

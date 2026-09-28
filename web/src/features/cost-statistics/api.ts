@@ -7,7 +7,7 @@ import type {
   CostStatisticsManualAllocationSummary,
   CostSourceAllocations,
   CostProjectExplorerRow,
-  CostStatisticsExportPreview,
+  CostStatisticsExportSummary,
   CostStatisticsExplorerPage,
   CostStatisticsExplorerPageRequest,
   CostStatisticsNoOaRules,
@@ -288,16 +288,13 @@ type ApiCostAllocationDetail = {
   };
 };
 
-type ApiCostStatisticsExportPreview = {
+type ApiCostStatisticsExportSummary = {
   view: "time" | "bank_tag" | "bank_account" | "project" | "cost_tag";
-  file_name: string;
   scope_label: string;
   summary: ApiCostSummary & {
     sheet_count: number;
   };
   sheet_names: string[];
-  columns: string[];
-  rows: string[][];
 };
 
 type ApiCostStatisticsTagRuleTag = {
@@ -854,7 +851,7 @@ function parseContentDispositionFileName(contentDisposition: string | null) {
 }
 
 function buildCostStatisticsQuery(
-  params: CostExportParams | PreviewCostExportParams,
+  params: CostExportParams | SummaryCostExportParams,
 ) {
   const query = new URLSearchParams({
     month: params.month,
@@ -971,7 +968,7 @@ export async function exportCostStatisticsView(params: CostExportParams, signal?
   };
 }
 
-export type PreviewCostExportParams =
+export type SummaryCostExportParams =
   | {
       month: string;
       view: "time" | "bank_tag";
@@ -1009,13 +1006,13 @@ export type PreviewCostExportParams =
       endDate?: string;
     };
 
-export async function fetchCostStatisticsExportPreview(
-  params: PreviewCostExportParams,
+export async function fetchCostStatisticsExportSummary(
+  params: SummaryCostExportParams,
   signal?: AbortSignal,
-): Promise<CostStatisticsExportPreview> {
+): Promise<CostStatisticsExportSummary> {
   const query = buildCostStatisticsQuery(params);
-  const payload = await requestJson<ApiCostStatisticsExportPreview>(
-    `/api/cost-statistics/export-preview?${query.toString()}`,
+  const payload = await requestJson<ApiCostStatisticsExportSummary>(
+    `/api/cost-statistics/export-summary?${query.toString()}`,
     {
       method: "GET",
       signal,
@@ -1024,7 +1021,6 @@ export async function fetchCostStatisticsExportPreview(
 
   return {
     view: payload.view,
-    fileName: payload.file_name,
     scopeLabel: payload.scope_label,
     summary: {
       rowCount: payload.summary.row_count,
@@ -1037,8 +1033,6 @@ export async function fetchCostStatisticsExportPreview(
       incomeTransactionCount: optionalCount(payload.summary.income_transaction_count),
     },
     sheetNames: payload.sheet_names,
-    columns: payload.columns,
-    rows: payload.rows,
   };
 }
 import type { ProjectCostScope } from "./types";

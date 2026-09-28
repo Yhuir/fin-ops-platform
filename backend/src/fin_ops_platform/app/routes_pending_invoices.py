@@ -98,8 +98,8 @@ class PendingInvoiceApiRoutes:
             return self._json_read(headers, lambda _session: (HTTPStatus.OK, self.invoice_candidates(query)))
         if method == "POST" and route_path == "/api/pending-invoices/invoice-candidates/batch":
             return self._json_body_read(body, headers, lambda payload: self.invoice_candidates_batch(payload))
-        if method == "GET" and route_path == "/api/pending-invoices/export-preview":
-            return self._json_read(headers, lambda _session: self.export_preview(query))
+        if method == "GET" and route_path == "/api/pending-invoices/export-summary":
+            return self._json_read(headers, lambda _session: self.export_summary(query))
         if method == "GET" and route_path == "/api/pending-invoices/export":
             return self._export_read(query, headers)
         if method == "GET" and route_path == "/api/pending-invoices/rules":
@@ -282,12 +282,8 @@ class PendingInvoiceApiRoutes:
             actor_id=_actor_id(session, "pending_invoice_income_status"),
         )
 
-    def export_preview(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
-        rows_payload = self._page_query_service.all_rows(query)
-        return HTTPStatus.OK, self._query_service.export_preview_for_rows(
-            rows=list(rows_payload.get("rows") or []),
-            filters=_query_kwargs(query),
-        )
+    def export_summary(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
+        return HTTPStatus.OK, self._page_query_service.export_summary(query)
 
     def export(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any] | PendingInvoiceExportFile]:
         rows_payload = self._page_query_service.all_rows(query)

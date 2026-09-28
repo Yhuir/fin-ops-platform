@@ -203,18 +203,18 @@ class PostgresInputInvoiceUsageQueryRepository:
                 row_id=row_id,
             )
             status_where_sql, status_where_params = _where_sql(
-                keyword=keyword,
+                keyword=None,
                 invoice_date_from=invoice_date_from,
                 invoice_date_to=invoice_date_to,
-                filters=_filters_without_field(filters, "payment_status"),
+                filters=[item for item in filters if item["field"] == "relation_status"],
                 field_sql=_INPUT_FIELDS,
                 invoice_ids=invoice_ids,
                 row_id=row_id,
             )
             relation_where_sql, relation_where_params = _where_sql(
-                keyword=keyword, invoice_date_from=invoice_date_from,
+                keyword=None, invoice_date_from=invoice_date_from,
                 invoice_date_to=invoice_date_to,
-                filters=[item for item in filters if item["field"] not in {"relation_status", "bank_relation"}],
+                filters=[],
                 field_sql=_INPUT_FIELDS, invoice_ids=invoice_ids, row_id=row_id,
             )
             filtered_sql = (
@@ -360,7 +360,7 @@ class PostgresInputInvoiceUsageQueryRepository:
             for rule in list(payment_settings.get("rules") or [])
             if str(rule.get("statusCode") or "").strip()
         }
-        labels["pending"] = "未命中规则"
+        labels["pending"] = "待核对"
         return InvoiceUsageCollectionCanonicalSnapshot(
             groups=facts["groups"],
             supporting_groups=[],
@@ -484,10 +484,10 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                 row_id=row_id,
             )
             status_where_sql, status_where_params = _where_sql(
-                keyword=keyword,
+                keyword=None,
                 invoice_date_from=invoice_date_from,
                 invoice_date_to=invoice_date_to,
-                filters=_filters_without_field(filters, "collection_status"),
+                filters=[],
                 field_sql=_OUTPUT_FIELDS,
                 keyword_extra_columns=("invoice_remarks",),
                 row_id=row_id,

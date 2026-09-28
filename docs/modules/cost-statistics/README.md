@@ -73,7 +73,7 @@
 
 - 页面：`/fin-ops/cost-statistics`
 - Explorer：`GET /api/cost-statistics/explorer`
-- 导出：`GET /api/cost-statistics/export-preview`、`GET /api/cost-statistics/export`
+- 导出：`GET /api/cost-statistics/export-summary`、`GET /api/cost-statistics/export`
 - 详情：`GET /api/cost-statistics/bank-transactions/{id}`、`GET /api/cost-statistics/allocations/{id}`
 - 无 OA 规则：`GET|PUT /api/cost-statistics/no-oa-rules`
 - 人工分配：`GET /api/cost-statistics/manual-allocations`、`GET|PUT /api/cost-statistics/manual-allocations/{case_id}`
@@ -127,3 +127,5 @@
 当前完整关系仅有一笔支出时，它对应全部已关联 OA 的固定目标；历史中曾经只关联部分 OA，不等于最终支付只属于那部分 OA。多笔支出才使用正式历史子组区分来源，明确引用冲突仍停止自动判断。
 
 部分自动结果保留固定 OA 目标；已确定来源进入统计，未处理金额留在 pending。详情只对剩余成本单元和来源生成建议，前端合并确定行与建议行初始化草稿。最终保存保持原完整/混合审批规则。没有正式证据时保留人工，不把金额展示分组当作来源。
+
+当前导出以 [独立导出合同](../../dev/export-filters-and-counts.md) 为准：抽屉独立筛选，无预览；保留真实业务字段，不导出内部 relation/ID 字段。

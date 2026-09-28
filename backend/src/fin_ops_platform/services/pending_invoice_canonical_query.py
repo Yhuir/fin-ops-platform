@@ -965,7 +965,7 @@ scope_ranked as materialized (
 scope_rows as materialized (
     select *
     from scope_ranked
-    where visible_group_rank = 1
+    where __DISPLAY_GROUP_FILTER__
 ),
 scope_summary as (
     select
@@ -1753,6 +1753,7 @@ class PostgresPendingInvoiceCanonicalRepository:
             order_sql = _order_sql(request)
             sql = (
                 PAGE_QUERY_SQL
+                .replace("__DISPLAY_GROUP_FILTER__", "true" if request.get("_export_objects") else "visible_group_rank = 1")
                 .replace("__BASE_WHERE_SQL__", base_sql)
                 .replace("__DIRECTION_WHERE_SQL__", direction_sql)
                 .replace("__STATUS_WHERE_SQL__", status_sql)
@@ -1793,6 +1794,8 @@ class PostgresPendingInvoiceCanonicalRepository:
             for summary in page_row.get("bank_summaries", []):
                 summary.update(metadata.get(summary["id"], {}))
             display_parents = set(page_row.pop("display_parent_ids"))
+            if request.get("_export_objects"):
+                display_parents = {page_row["parent_row_id"]}
             page_row["bank_summaries"] = [
                 bank for bank in page_row["bank_summaries"] if bank["parent_row_id"] in display_parents
             ]
@@ -2176,8 +2179,22 @@ class PendingInvoiceCanonicalQueryService:
         payload = self._repository.query(request, page=1, page_size=1)
         return _filter_options_payload(request, payload)
 
+    def export_summary(self, query: dict[str, list[str]]) -> dict[str, Any]:
+        request = _request(query)
+        request.update(_include_statistics=False, _include_filter_options=False, _export_objects=True)
+        payload = self._repository.query(request, page=1, page_size=0)
+        total = int(payload["total"])
+        if total > PENDING_INVOICE_EXPORT_ROW_LIMIT:
+            raise PendingInvoiceError("pending_invoice_export_row_limit_exceeded",
+                f"导出结果超过 {PENDING_INVOICE_EXPORT_ROW_LIMIT} 笔，请缩小筛选范围。",
+                details={"total": total, "limit": PENDING_INVOICE_EXPORT_ROW_LIMIT})
+        return {"row_count": total,
+                "acquisition_summary": payload["acquisition_summary"],
+                "source_summary": payload["source_summary"]}
+
     def all_rows(self, query: dict[str, list[str]]) -> dict[str, Any]:
         request = _request(query)
+        request["_export_objects"] = True
         request["_include_statistics"] = False
         request["_include_filter_options"] = False
         payload = self._repository.query(

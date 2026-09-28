@@ -323,7 +323,12 @@ def evaluate_payment_status(settings: dict[str, Any], context: PaymentStatusEval
             break
         if rule["enabled"] and _conditions_match(rule["conditions"], context):
             return _status_payload(rule)
-    return {"code": "pending", "label": "未命中规则", "reason": "未命中已启用的支付规则", "matchedRuleId": "", "severity": "warning"}
+    if not context.has_oa:
+        reason = "缺少 OA 关联；已有流水" if context.has_bank else "缺少 OA 和流水关联"
+    else:
+        reason = "缺少流水关联" if not context.has_bank else "付款金额或支付条件待核对"
+    return {"code": "pending", "label": "待核对", "reason": reason,
+            "matchedRuleId": "", "severity": "warning"}
 
 
 def _normalize_rules(value: Any) -> list[dict[str, Any]]:

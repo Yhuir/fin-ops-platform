@@ -328,9 +328,8 @@ export type CostAllocationDetail = {
 
 export type CostEntryDetail = CostBankTransactionDetail | CostAllocationDetail;
 
-export type CostStatisticsExportPreview = {
+export type CostStatisticsExportSummary = {
   view: "time" | "bank_tag" | "bank_account" | "project" | "cost_tag";
-  fileName: string;
   scopeLabel: string;
   summary: {
     rowCount: number;
@@ -343,8 +342,6 @@ export type CostStatisticsExportPreview = {
     incomeTransactionCount?: number;
   };
   sheetNames: string[];
-  columns: string[];
-  rows: string[][];
 };
 
 export type CostStatisticsTagRuleTag = {

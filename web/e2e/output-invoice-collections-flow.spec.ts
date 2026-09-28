@@ -82,23 +82,23 @@ test.describe("销项发票收款情况", () => {
     expect(api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThan(rowsBeforeSearch);
 
     const previewResponse = page.waitForResponse((response) =>
-      response.url().includes("/api/output-invoice-collections/export-preview")
+      response.url().includes("/api/output-invoice-collections/export-summary")
       && response.request().method() === "GET");
     await page.getByRole("button", { name: "筛选内容导出" }).click();
     expect((await previewResponse).status()).toBe(200);
-    const exportDrawer = page.getByRole("dialog", { name: "筛选内容导出" });
+    const exportDrawer = page.getByRole("dialog", { name: "导出销项发票" });
     await expect(exportDrawer).toBeVisible();
-    await expect(exportDrawer.getByRole("grid", { name: "销项发票收款情况导出样例" }))
-      .toContainText("自动红蓝票关系");
+    await expect(exportDrawer.getByText('导出 2 张')).toBeVisible();
+    await expect(exportDrawer.getByRole('grid')).toHaveCount(0);
 
     let download: Download | undefined;
     const downloadPromise = page.waitForEvent("download");
-    await exportDrawer.getByRole("button", { name: "下载导出" }).click();
+    await exportDrawer.getByRole("button", { name: "下载 Excel" }).click();
     download = await downloadPromise;
     expect(download.suggestedFilename()).toBe("output-invoice-collections.xlsx");
     const savePath = testInfo.outputPath("output-invoice-collections.xlsx");
     await download.saveAs(savePath);
-    expect(await readXlsxText(savePath)).toContain("output_invoice_reversal");
+    expect(await readXlsxText(savePath)).toContain("XSFP-E2E-0001");
 
     expect(api.calls.some((call) => /^(POST|PUT|PATCH|DELETE) /.test(call))).toBe(false);
     await expectNoUnexpectedSuccessUiErrors(page);
@@ -129,27 +129,23 @@ test.describe("销项发票收款情况", () => {
     expect(api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThanOrEqual(2);
   });
 
-  test("固定表头内的收款状态筛选使用可点击的 Portal 并刷新结果", async ({ page }) => {
+  test("顶部状态切换刷新结果且表头不再重复筛选", async ({ page }) => {
     await installDeterministicApiMocks(page, {
       outputInvoiceCollectionListInteractions: true,
       sessionMode: "user",
     });
 
     await page.goto("/output-invoice-collections");
-    await page.getByRole("button", { name: "筛选 状态" }).click();
-    const menu = page.getByRole("menu", { name: "状态筛选与排序" });
-    const statusOptions = menu.locator("label.output-invoice-collection-filter-menu__item");
-    const reversedOption = statusOptions.filter({ hasText: "蓝票已被红冲 1" });
-    await expect(reversedOption).toBeVisible();
-    await expect(statusOptions).toHaveCount(6);
-
-    const filteredRowsPromise = page.waitForResponse(rowsResponse);
+    await expect(page.getByRole('button', { name: '筛选 状态' })).toHaveCount(0);
+    const tabs=page.getByRole('tablist',{name:'销项发票状态分类'});
+    const reversedOption=tabs.getByRole('tab',{name:'蓝票已被红冲 1 张'});
+    const filteredRowsPromise = page.waitForResponse(response => rowsResponse(response) && new URL(response.url()).searchParams.has("filters"));
     await reversedOption.click();
     const filteredRowsUrl = new URL((await filteredRowsPromise).url());
     expect(JSON.parse(decodeURIComponent(filteredRowsUrl.searchParams.get("filters") ?? "[]"))).toEqual([
       { field: "collection_status", operator: "in", values: ["reversed_by_red"] },
     ]);
-    await expect(statusOptions).toHaveCount(6);
+    await expect(tabs.getByRole("tab")).toHaveCount(7);
     await page.keyboard.press("Escape");
     await expect(page.getByRole("row", { name: /XSFP-E2E-0001/ })).toBeVisible();
     await expect(page.getByRole("row", { name: /XSFP-E2E-0002/ })).toHaveCount(0);

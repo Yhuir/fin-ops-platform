@@ -125,7 +125,9 @@ class CostSourcePostgresTests(unittest.TestCase):
         self.assertEqual(self.connection.fetch_one("select amount,signed_amount,balance from app.bank_transactions where legacy_mongo_id='bank-1'"),original)
 
     def test_principal_history_repair_reconfirms_without_inheriting_crossed_sources(self):
-        from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
+        from fin_ops_platform.services.postgres_repositories.workbench_relation import (
+            PostgresWorkbenchRelationRepository,
+        )
         from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
 
         self.loan_fixture('1000000.00', split=True)
@@ -226,9 +228,9 @@ class CostSourcePostgresTests(unittest.TestCase):
             self.assertEqual(self.query.get_explorer_page(scope='all',view=view,filters={'bank_tag_primary_key':'label:费用'},cursor=None,page_size=20)['summary']['total_amount'],'1497.22')
             from urllib.parse import urlencode
             query=urlencode({'month':'2026-08','view':view,'project_name':'测试项目','bank_tag_primary_key':'label:费用','bank_account_label':rows[0]['bank_account_label']})
-            preview=app.handle_request('GET','/api/cost-statistics/export-preview?'+query)
+            preview=app.handle_request('GET','/api/cost-statistics/export-summary?'+query)
             self.assertEqual(preview.status_code,200,preview.body)
-            self.assertIn('利息',preview.body)
+            self.assertEqual(json.loads(preview.body)['summary']['total_amount'],'1497.22')
             exported=app.handle_request('GET','/api/cost-statistics/export?'+query)
             self.assertEqual(exported.status_code,200)
             from io import BytesIO
@@ -782,7 +784,7 @@ class CostSourcePostgresTests(unittest.TestCase):
         self.scope_service().update_project_cost_scope({"expected_version":1,"selected_tag_codes":[]},actor_id="cost-test")
         with self.assertRaises(ValueError):
             self.query.get_explorer_page(scope="all",view="project",filters=filters,cursor=page["next_cursor"],page_size=1)
-        preview=self.query.get_export_preview(view="project",month="all",project_names=["测试项目"])
+        preview=self.query.get_export_summary(view="project",month="all",project_names=["测试项目"])
         self.assertEqual(preview["summary"]["row_count"],0)
 
     def test_scope_http_contract_and_concurrent_writes(self):
@@ -1104,10 +1106,10 @@ class CostSourcePostgresTests(unittest.TestCase):
             self.assertIsNone(detail['allocation']['oa_original_amount'])
             self.assertEqual(detail['allocation']['oa_id'],'')
             self.assertEqual(detail['reconciliation']['difference'],'192.00')
-        response=app.handle_request('GET','/api/cost-statistics/export-preview?month=2026-08&view=project&project_name=测试项目')
+        response=app.handle_request('GET','/api/cost-statistics/export-summary?month=2026-08&view=project&project_name=测试项目')
         self.assertEqual(response.status_code,200,response.body)
-        self.assertIn('人工补充测试费用',response.body)
-        self.assertIn('人工补充',response.body)
+        self.assertEqual(json.loads(response.body)['summary']['transaction_count'],3)
+        self.assertEqual(json.loads(response.body)['summary']['manual_allocation_pending_count'],1)
         for status in ('pending','allocated'):
             tasks=self.service.list_tasks(cursor=None,page_size=20,status=status,query='人工补充测试费用',can_save=True)
             if tasks['items']:

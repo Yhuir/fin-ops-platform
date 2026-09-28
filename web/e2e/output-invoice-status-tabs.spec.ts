@@ -42,10 +42,10 @@ test("all status tabs use invoice counts, one query, and the same export filters
   expect(await toolbar.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   await tabs.getByRole("tab", { name: /蓝票已被红冲/ }).click();
   await expect(tabs.getByRole("tab", { name: /蓝票已被红冲/ })).toHaveAttribute("aria-selected", "true");
-  const previewResponse = page.waitForResponse(r => new URL(r.url()).pathname === "/api/output-invoice-collections/export-preview");
+  const previewResponse = page.waitForResponse(r => new URL(r.url()).pathname === "/api/output-invoice-collections/export-summary");
   await page.getByRole("button", { name: "筛选内容导出" }).click();
   const previewUrl = new URL((await previewResponse).url());
-  expect(JSON.parse(decodeURIComponent(previewUrl.searchParams.get("filters")!))).toEqual([{field:"collection_status",operator:"in",values:["reversed_by_red"]}]);
+  expect(previewUrl.searchParams.has("filters")).toBe(false);
   expect(api.count("GET /api/output-invoice-collections/filter-options")).toBe(0);
   expect(api.calls.some(call => /^(POST|PUT|PATCH|DELETE) /.test(call))).toBe(false);
   expect(errors).toEqual([]);

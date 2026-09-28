@@ -131,7 +131,7 @@
 - `PUT /api/cost-statistics/manual-allocations/{relation_case_id}`：请求字段为 relation_case_id、expected_version、scope_version、source_fingerprint、oa_amount_locks、manual_items、oa_cost_tag_overrides、allocations[{unit_id,amount}]、source_allocations、non_cost_amount、non_cost_reason。source_allocations 固定含 cost_lines[{unit_id,bank_transaction_id,amount}]、refund_links[{refund_transaction_id,bank_transaction_id,amount}]、non_cost_lines[{bank_transaction_id,amount}]。逐单元来源金额必须闭合、逐支出不得超分、逐退款必须完整。普通完整分配满足 C+X=N，OA 单元锁定时目标须等于原额减范围外成本，解锁可人工减额；混合审批/已保存的单来源部分分配允许 C+X≤N，剩余不自动变成非成本。来源行正数，所有金额两位小数字符串。
 - 保存一次事务写分配和 audit，保留既有 CAS、事实指纹与 member locks。400 输入/金额错误（source 错误附 field_errors），403 无权限，404 任务不存在，409 版本/事实/并发冲突。200 保存成功仍可能 pending，客户端不得硬编码完成；缺标签/账户/日期保留已保存决定，补资料后 GET 收敛。N=0 不产生任务，N<0 明确完整性错误。
 - `GET /api/cost-statistics/allocations/{allocation_id}`：OA 来源成本详情，带当前 view/scope；`GET /bank-transactions/{transaction_id}`：真实流水和无 OA 成本行详情。两个 endpoint 都从一致性快照读取，缺少对象 404，非法参数 400。
-- `GET /api/cost-statistics/export-preview|export`：正式五 view，project_name/bank_account_label/bank_tag_primary_key 选择，month 与日期范围，项目可 aggregate_by=month|year。preview 最多 8 行、download 最多 20,000 成本明细。按项目聚合额外保留逐来源成本明细表；14 列包含银行账户、主/子/完整标签、付款日期、成本金额、来源 ID、原 OA 与状态。旧 expense_type 和无效 OA/发票附表参数明确 400。
+- `GET /api/cost-statistics/export-summary|export`：正式五 view，project_name/bank_account_label/bank_tag_primary_key 选择，month 与日期范围，项目可 aggregate_by=month|year。summary 只返回统计、download 最多 20,000 成本明细。按项目聚合额外保留逐来源成本明细表；11 列包含银行账户、主/子/完整标签、付款日期、成本金额、费用内容、申请人、原 OA 费用类型与分配状态，不输出内部 ID。旧 expense_type 和无效 OA/发票附表参数明确 400。
 - `GET|PUT /api/cost-statistics/no-oa-rules` 保持原合同：默认 projects=[]；稳定项目 id/display_name/tag_codes，候选为无 active OA 支出使用过的真实银行标签，标签→虚拟项目互斥，版本 CAS 与权限不变。
 - 所有读请求为 single RR/RO canonical snapshot；不使用 Cost read model/cache/worker，include_statistics=false 时 statistics=null。旧 time-tag-rules 仍返回 404。
 
@@ -1499,7 +1499,7 @@ System Audit 的 `overall_status=pass` 只证明该 immutable snapshot 内 18 �
 
 - `GET /api/output-invoice-collections/rows`
 - `GET /api/output-invoice-collections/filter-options`
-- `GET /api/output-invoice-collections/export-preview`
+- `GET /api/output-invoice-collections/export-summary`
 - `GET /api/output-invoice-collections/export`
 - `GET /api/output-invoice-collections/invoices/{invoice_id}/detail`
 - `GET /api/output-invoice-collections/bank-transactions/{transaction_id}/detail`
@@ -1584,3 +1584,5 @@ Workbench 银行用途 DTO 的 bank_split_parts 新增 relation_case_id（null �
 支付规则 GET 返回真实 `applicantOptions` 及派生条件解释；PUT 仍用 `expectedVersion/idempotencyKey/rules`，不再接收有效的 pendingDirections 配置。规则包含稳定 id、输出分类、显示名、优先级、enabled 和明确条件。可新增/删除/修改申请人，同类输出共享文案；规则为空不补回默认项。保存使用现有 family CAS，审计与设置原子提交。配置格式由 migration0182 一次性更新。
 
 进项发票 canonical row 的 `bankRelationStatus: linked | unlinked` 取自正式 typed 关联成员；不以流水详情是否能被加载判断关系。反提 `invoiceRows` 使用同一字段与流水筛选保持一致。
+
+四个导出 owner 的最新筛选/计数/列合同见 [独立导出筛选](export-filters-and-counts.md)。

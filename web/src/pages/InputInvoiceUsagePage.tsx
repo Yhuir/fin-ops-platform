@@ -17,9 +17,7 @@ import PaymentStatusRulesDrawer from "../components/inputInvoiceUsage/PaymentSta
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import {
-  downloadInputInvoiceUsageExport,
   fetchInputInvoiceUsageBankTransactionDetail,
-  fetchInputInvoiceUsageExportPreview,
   fetchInputInvoiceUsageInvoiceDetail,
   fetchInputInvoiceUsageOaDetail,
   fetchInputInvoiceUsagePaymentStatusRules,
@@ -104,7 +102,7 @@ function restoreQuery(raw: unknown): InputInvoiceUsageQuery {
   if (!validateQuery(raw)) {
     return initialQuery;
   }
-  const filters = raw.filters.filter((filter) => !["invoice_date", "bank_trade_time"].includes(filter.field));
+  const filters = raw.filters.filter((filter) => !["invoice_date", "bank_trade_time"].includes(filter.field)).map(filter => (['relation_status', 'payment_status'].includes(filter.field) && filter.values && filter.values.length > 1 ? { ...filter, values: [filter.values[0]] } : filter));
   const dateScopeChanged = Boolean(raw.month || raw.invoiceDateFrom || raw.invoiceDateTo)
     || filters.length !== raw.filters.length;
   return {
@@ -360,30 +358,6 @@ export default function InputInvoiceUsagePage() {
     }, request.signal)
   ), []);
 
-  const exportRequest = useMemo(() => ({
-    page: query.page,
-    pageSize: query.pageSize,
-    keyword: query.keyword,
-    invoiceDateFrom: query.invoiceDateFrom,
-    invoiceDateTo: query.invoiceDateTo,
-    month: query.month,
-    filters: query.filters,
-    sortField: query.sortField,
-    sortDirection: query.sortDirection,
-  }), [
-    query.filters,
-    query.invoiceDateFrom,
-    query.invoiceDateTo,
-    query.keyword,
-    query.month,
-    query.page,
-    query.pageSize,
-    query.sortDirection,
-    query.sortField,
-  ]);
-
-  const loadExportPreview = useCallback(() => fetchInputInvoiceUsageExportPreview(exportRequest), [exportRequest]);
-  const downloadExport = useCallback(() => downloadInputInvoiceUsageExport(exportRequest), [exportRequest]);
   const exportDisabled = Boolean(error);
   const actions = useMemo(() => (
     <PageToolbar className="input-invoice-usage-actions">
@@ -483,6 +457,10 @@ export default function InputInvoiceUsagePage() {
                 </div>
               )}
             />
+            <InvoiceCountSegments label="进项发票支付状态" unit="张" pending={loading || Boolean(error)}
+              selectedKey={query.filters.find(filter => filter.field === 'payment_status')?.values?.[0] ?? 'all'}
+              onChange={key => setQuery(current => ({ ...current, page: 1, filters: [...current.filters.filter(filter => filter.field !== 'payment_status'), ...(key === 'all' ? [] : [{ field: 'payment_status', operator: 'in' as const, values: [key] }])] }))}
+              options={[{ key: 'all', label: '全部', count: filterOptions.payment_status?.reduce((total, option) => total + (option.count ?? 0), 0) }, ...(filterOptions.payment_status ?? []).map(option => ({ key: option.value, label: option.label, count: option.count }))]} />
             {error ? <StatePanel tone="error" compact>{error}</StatePanel> : null}
             {loading ? (
               <div aria-label="进项发票使用情况加载中" className="input-invoice-usage-loading" role="status">
@@ -546,8 +524,6 @@ export default function InputInvoiceUsagePage() {
       />
       <InputInvoiceUsageExportDrawer
         open={query.activeWorkflow === "export"}
-        loadPreview={loadExportPreview}
-        downloadExport={downloadExport}
         onClose={handleCloseWorkflow}
       />
       <OaDraftPrefillDrawer

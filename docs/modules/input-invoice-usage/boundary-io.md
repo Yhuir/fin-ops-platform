@@ -160,7 +160,7 @@ OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../
 - canonical repository 通过同一 SQL builder 的 invoice-level 模式复用 active relations；无全量 Python 过滤、分页循环或逐票查询。金额比较事实随当前页 snapshot 进入 assembler，移除“任意单笔金额相等即可判整个组匹配”的旧路径。
 - 目标申请人经 OA credential owner 的 `applicant_options()` 只读端口提供 code/name，仅 enabled 且有凭据者可选；不暴露密码或用户名。不使用固定六人名单。规则申请人选项独立来自 canonical OA 的真实 applicant。
 - 未关联 OA 的已占用发票仍计入候选，行附带 `occupiedBatchId/occupiedBatchStatus` 并禁选。反提 repository 复用 relation owner 的成员锁及 invoice row lock，保存新 batch 前检查已有有效 OA 关系与其他未释放批次；复用现有状态和审计，不创建占用表或新状态。
-- 支付规则支持新增、删除、修改申请人/条件。输出 code 为 `paid/cash_turnover/offset/waiting_payment`；同类输出统一显示名，多个冲规则合并为一个筛选项。未命中为显式 `pending/未命中规则`，不是可编辑兜底规则。原因由命中条件生成，列表、预览与导出一致。
+- 支付规则支持新增、删除、修改申请人/条件。输出 code 为 `paid/cash_turnover/offset/waiting_payment`；同类输出统一显示名，多个冲规则合并为一个筛选项。未命中为显式 `pending/待核对`，不是可编辑兜底规则。原因由命中条件生成，列表、预览与导出一致。
 - 规则 save 沿现有 app_settings family CAS，配置与审计同事务；读取不补回删除规则。Migration 0182 一次性转换旧配置（offset 合并、移除 pending_default/pendingDirections/手写原因），保留其它配置及 raw normalized 镜像。输出标签冲突则明确终止转换。旧程序不能消费新配置，发布失败应向前修复。
 - 前端使用 HeroUI 原生 Tabs/Select/ListBox/Checkbox/Input/Button/SearchField 和已有 AppDrawer；仅删除本页重复边框、阴影及过期样式，不改全局组件。
 - 文件范围增加 `0182_input_invoice_payment_rules_editable.sql`、OA credentials 的非敏感选项端口及 reverse repository 占用保护；无新 worker/read model/cache，无整库备份，不删除主数据库。
@@ -187,3 +187,8 @@ OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../
 - 候选、暂存和已提交表格的发票号码列只在本抽屉内预留列宽并允许完整换行，保留原字符串与前导零；取消候选号码的 280px 限制和继承省略行为。公共 FinanceTable 的默认样式不改，无新增 API、统计、状态或网络请求。
 - 组件测试覆盖完整号码、新文案与三个筛选参数；Playwright 覆盖 20/30 位号码、前导零、桌面/窄屏/150% 缩放等效视口的字形边界和分页筛选流程。既有预览、选择、占用及草稿流程回归继续运行。
 - 测试责任：前端组件、关键流程集成与既有回归适用；业务规则、service、API 合同未修改，不新增对应测试。列表查询沿用现有合同并验证筛选刷新；独立 read model/cache/worker 不适用。生产只读 preview 与页面视觉核对，不创建或提交真实 OA，无迁移或数据库备份。
+
+
+## 2026-09-28 独立导出筛选
+
+本模块导出抽屉、统计与文件的当前合同见 [独立导出筛选与真实对象计数](../../dev/export-filters-and-counts.md)。原导出预览接口和样例数据不再作为运行时输出；统计与下载复用领域查询。页面权限不变，无持久化、worker 或 read model 变更。

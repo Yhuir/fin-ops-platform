@@ -1,3 +1,4 @@
+import { selectionFilters, type ExportSelection, type ExportSummary, type ExportOption } from "../exports/types";
 import { ACQUISITION_STATUS_CODES, type AcquisitionSummary } from "./statusOptions";
 import type { BankSplitPart } from '../bankSplits/api';
 import type {
@@ -21,7 +22,6 @@ import type {
   PendingInvoiceDetailSection,
   PendingInvoiceDirection,
   PendingInvoiceExportDownload,
-  PendingInvoiceExportPreview,
   PendingInvoiceFilter,
   PendingInvoiceFilterOptionsResponse,
   PendingInvoiceIncomeStatusCode,
@@ -343,13 +343,7 @@ type ApiAttachResult = {
   row?: ApiPendingInvoiceRow | null;
 };
 
-type ApiExportPreview = {
-  file_name?: string | null;
-  row_count?: number | string | null;
-  scope_label?: string | null;
-  columns?: unknown[] | null;
-  sample_rows?: Array<Record<string, unknown>> | null;
-};
+
 
 type ApiIncomeStatusResult = {
   status?: string | null;
@@ -415,14 +409,6 @@ function issueList(value: unknown): string[] {
     }
     return String(item).trim();
   }).filter(Boolean);
-}
-
-function objectStringMap(value: Record<string, unknown>): Record<string, string> {
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [snakeToCamel(key), item === null || item === undefined ? "" : String(item)]));
-}
-
-function snakeToCamel(value: string) {
-  return value.replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase());
 }
 
 export function mapBankTransactionTagDictionary(value: ApiTagDictionary | null | undefined): BankTransactionTagDictionary | undefined {
@@ -1177,19 +1163,15 @@ export async function confirmAttachExistingInvoices(request: AttachExistingInvoi
   };
 }
 
-export async function fetchPendingInvoiceExportPreview(request: FetchPendingInvoiceRowsRequest): Promise<PendingInvoiceExportPreview> {
-  const payload = await requestJson<ApiExportPreview>(`/api/pending-invoices/export-preview?${buildRowsQuery(request, false)}`, {
-    method: "GET",
-    signal: request.signal,
-  });
-  return {
-    fileName: stringValue(payload.file_name, "待找发票.xlsx"),
-    rowCount: numberValue(payload.row_count),
-    scopeLabel: stringValue(payload.scope_label),
-    columns: stringList(payload.columns),
-    sampleRows: (payload.sample_rows ?? []).map(objectStringMap),
-  };
+function exportRequest(selection: ExportSelection): FetchPendingInvoiceRowsRequest { return { direction: 'all' as const, filter: 'all' as const, dateFrom: selection.startDate, dateTo: selection.endDate, filters: selectionFilters(selection).map(filter => { if (filter.field !== 'direction' && filter.field !== 'status_code') throw new Error('无效的导出筛选'); return { ...filter, field: filter.field }; }) }; }
+export async function fetchPendingInvoiceExportSummary(selection: ExportSelection, signal: AbortSignal): Promise<ExportSummary> {
+  const url = `/api/pending-invoices/export-summary?${buildRowsQuery(exportRequest(selection))}`;
+  const raw = await requestJson<{ row_count: number; source_summary: { expense_rows: number; income_rows: number }; acquisition_summary: { status_counts: Record<string, number> } }>(url, { method: 'GET', signal });
+  const labels: Record<string,string> = { paid_pending_invoice: '已支付待开票', paid_invoiced: '已支付已开票', invoice_not_fully_paid: '金额待核对', bank_statement_as_invoice: '流水代替发票', no_invoice_required: '支出无需发票', income_pending_invoice: '已收款待开票', income_invoiced: '已收款已开票', income_no_invoice_required: '收入无需发票', cash_income: '现金收入' };
+  const options: ExportOption[] = Object.entries(labels).map(([value,label]) => ({ value,label,count: raw.acquisition_summary.status_counts[value] }));
+  return { rowCount: raw.row_count, groups: [{ field: 'direction', label: '收支方向', options: [{ value:'expense', label:'支出',count:raw.source_summary.expense_rows },{ value:'income',label:'收入',count:raw.source_summary.income_rows }] }, { field:'status_code',label:'发票获取状态',options }] };
 }
+export function downloadPendingInvoiceSelection(selection: ExportSelection) { return downloadPendingInvoiceExport(exportRequest(selection)); }
 
 function parseContentDispositionFileName(contentDisposition: string | null): string | null {
   if (!contentDisposition) {
