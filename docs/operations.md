@@ -76,8 +76,10 @@ git status --short
 
 ## 一键发布
 
+本机发布通过 token wrapper 向正式入口提供激活检查凭证；不用把 token 写进命令参数：
+
 ```bash
-./scripts/deploy-oa.sh
+scripts/with-production-admin-token.sh ./scripts/deploy-oa.sh
 ```
 
 常用受控模式：
@@ -87,7 +89,7 @@ git status --short
 ./scripts/deploy-oa.sh --no-activate
 
 # 激活服务器上已验证的 exact release
-./scripts/deploy-oa.sh --activate-existing --release-name <release-name>
+scripts/with-production-admin-token.sh ./scripts/deploy-oa.sh --activate-existing --release-name <release-name>
 ```
 
 脚本构建前端、打包 versioned release、上传、运行候选校验，然后调用 root deploy control。不要直接覆盖

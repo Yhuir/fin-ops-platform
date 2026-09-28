@@ -20,4 +20,4 @@ python3 -m pip install -r backend/requirements.txt
 cd web && npm ci
 ```
 
-准备本地专用运行环境后，在独立终端分别运行 `./scripts/start-backend.sh` 与 `./scripts/start-web.sh`。具体配置见[开发说明](docs/development.md)。生产使用 `./scripts/deploy-oa.sh`。
+准备本地专用运行环境后，在独立终端分别运行 `./scripts/start-backend.sh` 与 `./scripts/start-web.sh`。具体配置见[开发说明](docs/development.md)。生产发布通过 `scripts/with-production-admin-token.sh ./scripts/deploy-oa.sh` 加载本机凭证。
