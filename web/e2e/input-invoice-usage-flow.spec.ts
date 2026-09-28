@@ -901,8 +901,8 @@ test("OA reverse shows full invoice numbers and unlinked-OA scope without extra 
   await expect(grid.getByText(numbers[0], { exact: true })).toBeVisible();
   expect(previewRequests).toBe(1);
   for (const [width, zoom] of [[1600, 1], [900, 1], [1100, 1.5]]) {
-    await page.setViewportSize({ width, height: 1000 });
-    await page.evaluate((value) => { document.documentElement.style.zoom = String(value); }, zoom);
+    // Browser zoom reduces the CSS viewport; CSS zoom on the root distorts fixed overlays.
+    await page.setViewportSize({ width: Math.round(width / zoom), height: Math.round(1000 / zoom) });
     for (const number of numbers) {
       const cell = grid.getByText(number, { exact: true });
       await cell.scrollIntoViewIfNeeded();
@@ -913,7 +913,7 @@ test("OA reverse shows full invoice numbers and unlinked-OA scope without extra 
         const style = getComputedStyle(element);
         const range = document.createRange(); range.selectNodeContents(element);
         return { text: element.textContent, overflow: element.scrollWidth > element.clientWidth + 1,
-          ellipsis: style.textOverflow === "ellipsis", contained: rect.left >= bounds.left && rect.right <= bounds.right + 1,
+          ellipsis: style.textOverflow === "ellipsis", contained: rect.left >= bounds.left && rect.right <= bounds.right + 1 && rect.left >= 0 && rect.right <= window.innerWidth,
           glyphsContained: Array.from(range.getClientRects()).every((r) => r.left >= bounds.left && r.right <= bounds.right + 1 && r.top >= bounds.top && r.bottom <= bounds.bottom + 1) };
       });
       expect(layout).toEqual({ text: number, overflow: false, ellipsis: false, contained: true, glyphsContained: true });
