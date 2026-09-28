@@ -55,7 +55,7 @@ test("ordinary date filters start in all time and preserve only same-visit selec
   const pickerTrigger = page.getByRole("button", { name: "银行明细时间范围：年月" });
   await pickerTrigger.click();
   const picker = page.getByRole("dialog", { name: "银行明细时间范围选择器" });
-  await picker.getByRole("button", { name: "按月", exact: true }).click();
+  await picker.getByRole("radio", { name: "按月", exact: true }).click();
   const chosen = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/api/bank-details/transactions")
     && Boolean(new URL(response.url()).searchParams.get("date_from")));
   await picker.getByRole("button", { name: "一月", exact: true }).click();
