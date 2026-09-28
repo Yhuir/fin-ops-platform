@@ -1,38 +1,30 @@
-# Derived Lifecycle 模块维护入口
+# 领域任务通知
 
+入口：`跨模块任务边界`。
 
-- Module key: `domain-events-lifecycle`
-- 类型: 资源模块
-- Route: `N/A`
-- Page key: `N/A`
+在业务写入需要异步处理时传递精确领域意图，不承担页面刷新或浏览器业务状态。
 
-## 修改前必读
+## 边界与 I/O
 
-- `docs/app-architecture/pages.md`
-- `docs/app-architecture/runtime-and-ownership.md`
+输入：owner、tenant、event/job identity、幂等信息、精确对象/月份和审计上下文。输出：与事实一致提交的领域任务及后续结果。
 
-## 代码入口
+## 当前业务约定
 
-- `backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py`
+- OA 同步和支付状态使用 outbox；设置重置和关系要求重算使用对应事件；匹配使用独立 dirty scopes。
+- 导入通过 job.import_jobs 直接领取，不经第二事件中转。
+- 同事务写入保证事实与通知一致；消费者按版本/幂等处理重复和重试。
+- 普通写后当前页面按需 GET，其他页面下次访问查询相同事实；不广播隐藏页面 I/O。
 
-## 当前边界
+## 依赖方向
 
-状态：close。
+[后台任务](../runtime-workers/README.md)、[正式关联关系](../workbench-relations/README.md)、[设置](../settings/README.md)、[OA 集成](../oa-integration/README.md)。依赖表示调用或事实消费，不允许读取其它页面的展示结果作为业务事实。
 
-前端 finance domain event/业务 BroadcastChannel 已删除。后端 `DerivedDataLifecycleService` 只服务管理员设置重置与历史 ETC repair 两个显式维护入口；普通导入、关系写入、OA sync、规则/Drawer 保存不通过本模块 fan out。
+## 代码与验证入口
 
-## 维护触发器
+- [backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py](../../../backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py)
+- [tests/test_derived_data_lifecycle_service.py](../../../tests/test_derived_data_lifecycle_service.py)
+- [tests/test_settings_data_reset_service.py](../../../tests/test_settings_data_reset_service.py)
+- [web/src/test/PageRouteHost.test.tsx](../../../web/src/test/PageRouteHost.test.tsx)
+- [web/e2e/settings-data-reset-flow.spec.ts](../../../web/e2e/settings-data-reset-flow.spec.ts)
 
-发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
-
-- 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。
-- API contract、DTO shape、错误字段、权限校验、状态值或响应 freshness 字段变化。
-- 业务状态、UI 状态、read model 状态、worker 状态或状态流转变化。
-- 跨页面刷新、domain event、derived lifecycle、dirty scope、outbox 或缓存边界变化。
-- 测试入口、回归范围、验证命令或未测风险变化。
-
-## 本目录文件
-
-- `state-machine.md`：维护当前有效状态和状态流转；不适用时写明原因。
-- `tests.md`：维护七类测试适用性、现有测试入口、验证命令和回归范围。
-- `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。
+通用查询、事务、权限与错误边界见[系统架构](../../../ARCHITECTURE.md)；验证方法见[开发说明](../../development.md)。测试文件是可执行证据，本文不保存某一次测试的通过记录。

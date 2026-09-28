@@ -45,13 +45,7 @@ class NightlyCITests(unittest.TestCase):
         self.assertIn("npm test -- --run", script)
         self.assertIn("npm run build", script)
         self.assertIn("npm run e2e:smoke", script)
-        self.assertIn("docs/dev/nightly-ci.md", script)
-        self.assertIn("docs/dev/spec-first-e2e-audit.md", script)
-        self.assertIn("docs/dev/spec-first-e2e-inventory.md", script)
-        self.assertIn("docs/dev/testing-closure-state.md", script)
-        self.assertIn("docs/dev/testing-closure-dependency-map.md", script)
-        self.assertIn("e2e-spec.md", script)
-        self.assertIn("e2e-coverage.md", script)
+        self.assertIn("python3 -m unittest tests.test_documentation -v", script)
         self.assertRegex(
             script,
             re.compile(
@@ -60,10 +54,10 @@ class NightlyCITests(unittest.TestCase):
             ),
         )
 
-    def test_docs_verification_falls_back_when_ripgrep_is_unavailable(self) -> None:
+    def test_docs_verification_runs_with_only_python_and_shell_utilities(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_bin = Path(temp_dir)
-            for command in ("dirname", "find", "git", "grep", "sort"):
+            for command in ("dirname", "python3"):
                 executable = shutil.which(command)
                 self.assertIsNotNone(executable, f"Required test command is unavailable: {command}")
                 os.symlink(executable, temp_bin / command)
@@ -86,6 +80,7 @@ class NightlyCITests(unittest.TestCase):
             "production-route-shell.spec.ts",
             "production-cash-readonly.spec.ts",
             "production-date-defaults.spec.ts",
+            "production-count-stability.spec.ts",
         }
         # Real cash writes require their explicit disposable PostgreSQL HTTP fixture.
         infrastructure_specs = {"cash-real-api-flow.spec.ts"}

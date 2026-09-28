@@ -1,4 +1,0 @@
-# Phase 13 Deferred Items
-
-- Resolved by `2bdb5c89e`: the four stale test-only `AccessControlService.required_permission` reads in `tests/test_etc_backend.py` and `tests/test_etc_invoice_pdf_bundle_service.py` now use explicit canonical Settings ACL setup. No open 13-07 deferred item remains.
-- Resolved for 13-15 (2026-08-02): `2298ba8c8` canonicalized the two cleanup target hashes; exact candidate `main-2298ba8c-settings-acl-20260802` is safe, bootstrap is already-exact-noop, and fresh dual-identity preflight is `cutover_eligible=true` with `blockers=[]`. Root independently verified the `root:root 0600` bootstrap SHA `c98c1f2b…` and preflight SHA `b031faea…`; the user's blanket approval covers the unchanged-facts Task 4 scope. The older `main-db914d7c…`/`f12f287b0` candidates, artifacts and approvals remain prohibited. Production activation and T0–T4 plus 005/006 evidence remain pending only in 13-05.

@@ -70,7 +70,7 @@ describe("Workbench pane display model", () => {
     const zone = await screen.findByTestId("zone-unpaired");
     await user.click(within(zone).getByRole("button", { name: "银行流水时间筛选：年月" }));
     const picker = await screen.findByRole("dialog", { name: "银行流水时间筛选选择器" });
-    await user.click(within(picker).getByRole("button", { name: "按月" }));
+    await user.click(within(picker).getByRole("radio", { name: "按月" }));
     await user.click(within(picker).getByRole("button", { name: "四月" }));
     const monthButton = within(zone).getByRole("button", { name: "银行流水时间筛选：2026年4月" });
     expect(monthButton).toBeInTheDocument();

@@ -1,98 +1,43 @@
-# ETC票据管理 模块维护入口
+# ETC 票据
 
-- Module key: `etc-tickets`
-- 类型: 页面模块
-- Route: `/etc-tickets`
-- Page key: `etc-tickets`
+入口：`/etc-tickets`。
 
-## 修改前必读
+管理 ETC 业务批次、对账任务、信用卡与票根证据、票据附件和 OA 草稿。
 
-- `docs/product-specs/imports-and-etc.md`
-- `docs/operations/etc-business-batches.md`
-- `docs/app-architecture/pages.md`
-- `docs/app-architecture/runtime-and-ownership.md`
-- `docs/dev/api-contracts.md`
-- `docs/dev/testing-closure-dependency-map.md`
-- `docs/modules/imports-etc-invoices/README.md`
-- `docs/modules/reconciliation-workbench/README.md`
-- `docs/modules/tax-offset/README.md`
-- `docs/modules/cost-statistics/README.md`
-- `docs/modules/domain-events-lifecycle/README.md`
+## 边界与 I/O
 
-## 代码入口
+输入：unsubmitted/staged/submitted bucket、服务端页码、精确 batch/task ID、版本、稳定草稿请求键。输出：批次摘要、counts/statistics/pagination、按需批次/任务详情、OA 草稿状态和发票 PDF。
 
-- `web/src/pages/EtcTicketManagementPage.tsx`
-- `web/src/features/etc/*`
-- `web/src/components/workbench/CandidateGroupGrid.tsx`
-- `backend/src/fin_ops_platform/app/server.py` 中 `/api/etc*` dispatch。
-- `backend/src/fin_ops_platform/services/etc_service.py`
-- `backend/src/fin_ops_platform/services/etc_business_batch_application_service.py`
-- `backend/src/fin_ops_platform/services/etc_invoice_pdf_bundle_service.py`
-- `backend/src/fin_ops_platform/services/invoice_attachment_recognition_service.py`
-- `backend/src/fin_ops_platform/services/etc_document_parsers.py`
-- `backend/src/fin_ops_platform/services/etc_reconciliation_service.py`
-- `backend/src/fin_ops_platform/services/etc_reconciliation_source_upload_service.py`
-- `backend/src/fin_ops_platform/services/import_processing_service.py`
-- `backend/src/fin_ops_platform/services/workbench_canonical_rows.py`
-- `backend/src/fin_ops_platform/services/workbench_pair_relation_service.py`
-- `backend/src/fin_ops_platform/services/workbench_relation_command_service.py`
-- `backend/src/fin_ops_platform/services/workbench_relation_read_facade.py`
-- `backend/src/fin_ops_platform/services/historical_etc_repair_service.py`
-- `backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py`
-- `backend/src/fin_ops_platform/tools/cleanup_orphan_etc_reconciliation_tasks.py`
+## 当前业务约定
 
-## 当前边界
+- 列表固定每页 50 批，批次数取 pagination.total，详情不嵌入列表。切批次同时失效旧 task，写目标必须是当前批次已加载 task；重复选中同批次零 I/O。
+- OA 草稿 prepare 在锁内保存 attempt/预填快照，外部 HTTP 在锁外，finalize 对单批版本 CAS；重复 key 不创建第二个草稿，未知结果走显式核实恢复。
+- OA 金额来自对账事实，发票合计独立展示，不能互相替代；附件上传有界并发，只接纳已知 OA 文件地址合同。
+- ETC 原始票据与统一发票池身份分别归属，通过精确 existing-link 连接，metadata 更新不得覆盖正式财务字段。
+- 提交状态变化在 owner 事务中通知精确 matching scopes；matcher 通过正式关系命令建立 ETC summary 成员及链接。
+- 合并 PDF 按稳定顺序每票一页，来源不可读、损坏或不符合页面合同整包失败，成功记录下载审计。
 
-关注 ETC 票据、人工业务批次、导入草稿、OA 提交人工确认、source files、reconciliation task workflow、业务批次删除/reset，以及提交后在关联台的 `etc_invoice_summary` 投影。
+## 依赖方向
 
-当前事实边界：
+[ETC 发票导入](../imports-etc-invoices/README.md)、[OA 集成](../oa-integration/README.md)、[正式关联关系](../workbench-relations/README.md)、[后台任务](../runtime-workers/README.md)。依赖表示调用或事实消费，不允许读取其它页面的展示结果作为业务事实。
 
-- 用户可见事实源是 `/api/etc/business-batches*` 与 `etc_business_batches`；`etc_reconciliation_tasks` 保留为导入、核对、source file 和 workflow 状态。
-- ETC 票据管理页不提供月份、车牌或关键词搜索框；左侧列表通过窄 `business-batches` summary 查询读取全部用户可见业务批次，并分为互斥的“未提交 / 暂存 / 已提交”三个 bucket。后端 `month`、`plate`、`keyword` 参数继续作为兼容/运维查询合同保留。用户点击创建草稿后，`oa_draft_creating` 与 `oa_confirmation_pending` 都属于暂存。
-- 页面使用左侧批次 rail 和右侧连续工作面；四阶段 `准备核对资料 → 确认核对结果 → 导入 ETC 发票 → 提交 OA 审批` 只从当前 business batch 与绑定 task 投影。该 UI 投影不发请求、不保存状态、不改变 API/read model/worker；失败、部分失败、回退和人工确认均保留非完成语义。
-- “新建批次”入口调用 `POST /api/etc/business-batches`；前端不直接把空 reconciliation task 当作批次展示，后端 application service 负责编排 task + active business batch 并返回统一 business batch payload。
-- 未提交业务批次标题由 business batch `title` 持久化；页面允许点击批次标题内联编辑，保存走 `PATCH /api/etc/business-batches/{id}` 并使用 `expectedVersion`。保存成功后必须同步 linked reconciliation task title，确保 `/imports/etc-invoices` ready task 下拉显示最新标题；已提交/closed 批次标题锁定。
-- 没有 active business batch 绑定的 task-only 记录不得进入左侧批次列表或 tab 计数；只可作为 workflow 内部状态、异常恢复线索或运维清理对象处理。
-- 旧 `/api/etc/batches*` 后端兼容入口、前端测试 mock 假后端、invoice-id 级 `/api/etc/invoices/revoke-submitted` 回退入口和 ETC `oa-status/refresh` 入口已删除；页面、测试和运维入口不得重新依赖它们。
-- ETC 专用 OA 自动检测链路已移除；创建 OA 草稿后只允许用户通过 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`，不得通过 invoice id 直接回退提交状态。
-- OA 草稿金额只取已完成对账任务的 `oaTotalAmount`；业务批次 `invoiceSummary` 只表示当前实际导入的 ETC 发票数量与含税金额。两者不一致时页面必须同时如实显示差额，但不得改写 OA 草稿金额或阻断提交；该对比只做前端纯计算，不增加 API/read model/worker I/O。
-- 已选中的同一业务批次重复点击必须保持当前 detail/task，不清空发票明细，也不重复请求；只有切换到另一个批次才失效旧详情并并发读取新 detail/task。
-- OA 草稿创建后的结果弹窗只提供两个状态决定：“我已在 OA 系统上完成 OA 草稿的提交”进入已提交，“我已在 OA 系统上删除该 OA 草稿”回到未提交。打开草稿与下载发票 PDF 只保留在暂存批次的常驻操作区，不混入结果决定弹窗。
-- OA 草稿创建拆为本地 prepare、锁外 OA I/O、CAS finalize；请求必须携带稳定 `idempotencyKey`。附件通过 OA adapter 以默认 4、最多 8 路有界并发上传并保持顺序。点击创建后前端立即把目标批次放入暂存；同页请求仍在执行时禁用决定按钮，避免与 finalize 竞态；请求结束或重新进入页面后，`oa_draft_creating` 与 `oa_confirmation_pending` 都直接显示既有两个决定。App 不检测 OA 是否已生成草稿，也不自动重试；用户按 OA 中的实际操作声明“已提交”或“已删除草稿”。管理员 recovery 只保留给历史/技术修复，不进入普通页面。
-- OA 草稿创建成功后，页面提供当前业务批次 ETC 发票 PDF 合并下载。批次 `invoice_ids` 是成员事实源，application service 负责范围校验与审计，PDF bundle service 只通过文件读取端口读取对象存储/本地字节并按开票日期、发票号、ID 稳定排序；每张来源必须恰好一页，任一缺失、损坏、hash 不一致或多页时整包失败，不允许静默漏票。
-- `submitted` 只表示 ETC 批次已人工确认提交，不等于关联台三项已配对；状态变化会把精确月份投递到既有 `workbench-matching` durable queue，由 OA 的 `etc_batch_id` 把 ETC summary 挂入已有 OA/流水正式关系。已 submitted 决定允许无业务写的幂等重放，用于修复历史漏投；缺 OA 时必须保持未配对并显式审计，不能按金额猜测。
-- 左侧批次名称使用成员发票最早/最晚开票月份范围，缺日期时只回退 scope month，不再使用提交/创建日期。
-- ETC 发票本质上是进项发票；统一发票池只保留 `app.invoices` 内的正式进/销项发票。ETC 专用导入保存 ZIP 内命中本批次的 PDF/XML 和 ETC metadata，用于 OA 附件和 summary 展示；不得因为 ETC ZIP 中出现一张票就在统一发票池创建新发票。
-- 未提交批次允许本地删除；已提交但尚无正式 `oa_row_id` 的本地批次仍可 reset。已绑定正式 OA 行的 submitted 批次禁止普通删除，避免真实 OA、ETC 发票成员和关联台关系被拆散。历史错误 reset 只能通过指纹守卫的精确 tombstone 恢复工具处理。
-- 已提交业务批次删除/reset 在修改本地批次前必须先通过 Workbench relation command boundary 的 canonical write safety；权限/session、DB/目标写模型不可用、owner 状态或 relation version/idempotency/row occupation 冲突时 fail fast，不得乐观删除本地批次或 relation。普通 `workbench_relation` distribution non-fresh 只作为读侧诊断，不能作为默认写阻断条件。
-- ETC 历史 repair 只保留显式受控运维入口：`HistoricalEtcRepairService` 处理既有历史合同，单个已删除 submitted tombstone 使用 `restore_deleted_etc_business_batch`；已提交批次缺失成员只允许 `repair_submitted_etc_batch_members` 按 business/submission/external 三重 owner、精确发票号与车牌、目标/结果金额和 dry-run fingerprint 原子补齐。成员修复不得改 OA 草稿或已关闭对账任务，不得伪造附件，并须通过既有 historical ETC lifecycle 让 Workbench 收敛。旧 historical business batch migration、脚本 `--apply` 直写 relation 与 existing batch link service/tool 已删除；不得恢复 operator-only 平行写链。
-- source file 上传必须先落对象存储，再追加 source file 元数据；对象存储失败不得留下半写入 source file、版本号或审计事件。
-- source file 元数据、解析结果和派生明细必须共享同一个 `file_id` 生命周期；慢 OCR 的解析提交与删除必须互斥，源文件已删除时不得再提交解析结果。历史孤儿解析结果必须通过既有 source file 删除边界清理，不得由前端过滤掩盖。
-- 信用卡 PDF 上传先解析可选文字；只有未识别到交易行时才回退到按页渲染的布局 OCR。OCR 成功结果必须保留人工核对警告，不得把图像识别结果冒充为无风险的文本解析。
-- ETC 导入确认只在 existing canonical metadata 真变更时推进 canonical source version；关联台、税金、成本等消费者各自在访问/重新激活时按 owner 合同读取。业务批次 manual submitted/not-submitted 同样只提交 owner facts/version/audit，OA draft create 不改变下游事实；删除与显式历史迁移按各自 owner 合同处理。所有流程都不允许旧 ETC 模块创建新的 canonical invoice。
-- ETC 页面自身没有 manifest read model；统一 Audit 直接在一个只读 repeatable-read PostgreSQL snapshot 内证明 business batch/task/file/ETC invoice/import/submission/canonical invoice bridge 与 import queue，并阻断 creating 缺失 durable attempt、无 draft 的 pending、bucket 错配和退回后占用未释放。creating 等待时长不是错误，因为 App 不拥有 OA 外部状态。Workbench、税金抵扣、成本统计和 invoice lifecycle 只是下游影响目标，不得登记成 ETC 页面已消费 read model；shared Workbench relation 由关联台 Audit 负责。
+## 代码与验证入口
 
-## 维护触发器
+- [web/src/pages/EtcTicketManagementPage.tsx](../../../web/src/pages/EtcTicketManagementPage.tsx)
+- [backend/src/fin_ops_platform/app/server.py](../../../backend/src/fin_ops_platform/app/server.py)
+- [backend/src/fin_ops_platform/services/etc_service.py](../../../backend/src/fin_ops_platform/services/etc_service.py)
+- [backend/src/fin_ops_platform/services/etc_business_batch_application_service.py](../../../backend/src/fin_ops_platform/services/etc_business_batch_application_service.py)
+- [backend/src/fin_ops_platform/services/etc_invoice_pdf_bundle_service.py](../../../backend/src/fin_ops_platform/services/etc_invoice_pdf_bundle_service.py)
+- [backend/src/fin_ops_platform/services/invoice_attachment_recognition_service.py](../../../backend/src/fin_ops_platform/services/invoice_attachment_recognition_service.py)
+- [backend/src/fin_ops_platform/services/etc_document_parsers.py](../../../backend/src/fin_ops_platform/services/etc_document_parsers.py)
+- [backend/src/fin_ops_platform/services/etc_reconciliation_service.py](../../../backend/src/fin_ops_platform/services/etc_reconciliation_service.py)
+- [backend/src/fin_ops_platform/services/etc_reconciliation_source_upload_service.py](../../../backend/src/fin_ops_platform/services/etc_reconciliation_source_upload_service.py)
+- [backend/src/fin_ops_platform/services/import_processing_service.py](../../../backend/src/fin_ops_platform/services/import_processing_service.py)
+- [web/e2e/etc-tickets-flow.spec.ts](../../../web/e2e/etc-tickets-flow.spec.ts)
+- [tests/test_etc_backend.py](../../../tests/test_etc_backend.py)
+- [tests/test_etc_invoice_pdf_bundle_service.py](../../../tests/test_etc_invoice_pdf_bundle_service.py)
+- [tests/test_etc_reconciliation_service.py](../../../tests/test_etc_reconciliation_service.py)
+- [tests/test_repair_etc_business_batch_summary_tool.py](../../../tests/test_repair_etc_business_batch_summary_tool.py)
+- [tests/test_import_processing_service.py](../../../tests/test_import_processing_service.py)
 
-发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
-
-- 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。
-- API contract、DTO shape、错误字段、权限校验、状态值或响应 freshness 字段变化。
-- 业务状态、UI 状态、read model 状态、worker 状态或状态流转变化。
-- 跨页面刷新、domain event、derived lifecycle、dirty scope、outbox 或缓存边界变化。
-- 测试入口、回归范围、验证命令或未测风险变化。
-
-## 本目录文件
-
-- `state-machine.md`：维护当前有效状态和状态流转；不适用时写明原因。
-- `tests.md`：维护七类测试适用性、现有测试入口、验证命令和回归范围。
-- `e2e-spec.md`：维护 ETC 票据管理 Spec-first Browser 业务验收合同。
-- `e2e-coverage.md`：维护 ETC 票据管理 Spec-first 合同到自动化覆盖的映射。
-- `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。
-
-## 2026-09-28 业务批次状态按批统计
-
-- `GET /api/etc/business-batches` 的 `counts.unsubmitted/staged/submitted` 按当前权限及查询范围内有效业务批次身份计数，单位为“批”；新建空批次也计 1 批，成员发票重复、缺失或删除不改变有效批次的身份。既有状态映射、可见性和筛选规则不变。
-- 三状态互斥且覆盖同一查询范围内的有效批次；当前 bucket 的 counts 等于 `pagination.total`/`total`，在分页前计算，与当前页 `items.length` 无关。卡片和详情的发票张数、金额及顶部 canonical 发票汇总保留原口径。
-- PostgreSQL 复用已有 `bucket_counts.batch_count`，删除状态计数专用的 `bucket_invoice_counts` 发票成员展开/关联/去重；本地存储同步按批次计数。继续同一 repeatable-read read-only snapshot 的两次集合查询，不新增接口、缓存、worker、迁移或业务写入。
-- 前端使用 `EtcBusinessBatchCounts` 和既有 HeroUI 分段组件，不保留旧发票计数类型或 `counts ± 1` 乐观计算。请求中显示加载状态，成功后消费现有重读结果；缺失/非法统计响应报错，初始或失败不显示伪造的 0。
+通用查询、事务、权限与错误边界见[系统架构](../../../ARCHITECTURE.md)；验证方法见[开发说明](../../development.md)。测试文件是可执行证据，本文不保存某一次测试的通过记录。

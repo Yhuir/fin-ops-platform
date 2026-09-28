@@ -1,89 +1,44 @@
-# OA 集成模块维护入口
+# OA 集成
 
-- Module key: `oa-integration`
-- 类型: 资源模块
-- Route: `N/A`
-- Page key: `N/A`
+入口：`外部系统适配边界`。
 
-## 修改前必读
+提供身份、Mongo 来源同步、支付状态及角色适配、附件识别和申请人凭据能力。
 
-- `docs/architecture/oa-integration.md`
-- `docs/references/external-systems.md`
-- `deploy/oa/README.md`
-- `docs/app-architecture/runtime-and-ownership.md`
-- `docs/app-architecture/pages.md`
-- `docs/dev/api-contracts.md`
-- `docs/product-specs/invoice-lifecycle.md`
-- `docs/product-specs/imports-and-etc.md`
-- `docs/modules/permissions-and-audit/README.md`
-- `docs/modules/input-invoice-usage/README.md`
-- `docs/modules/oa-pending-payments/README.md`
-- `docs/modules/imports-etc-invoices/README.md`
-- `docs/modules/etc-tickets/README.md`
+## 边界与 I/O
 
-## 代码入口
+输入：受信 token、Settings ACL/预填、同步 scope、精确 OA IDs 和来源附件。输出：身份、PostgreSQL OA/准入/附件事实、支付状态同步结果、非敏感申请人及窄项目目录。
 
-- OA identity/session：`backend/src/fin_ops_platform/app/auth.py`、`backend/src/fin_ops_platform/services/oa_identity_service.py`、`web/src/features/session/api.ts`
-- OA 菜单 ACL 投影：`backend/src/fin_ops_platform/services/oa_role_sync_service.py`、`backend/src/fin_ops_platform/tools/settings_access_control_preflight.py`、`deploy/oa/bin/finops-deploy-control.sh`
-- OA Mongo 只读 adapter：`backend/src/fin_ops_platform/services/mongo_oa_adapter.py`
-- 现金项目资料窄只读口：`backend/src/fin_ops_platform/services/cash_oa_projects.py`；实际字段/10 阶段字典及例外边界见 `boundary-io.md` 的“现金项目只读例外”。
-- OA 投影与同步：`backend/src/fin_ops_platform/services/oa_projection_sync.py`、`backend/src/fin_ops_platform/services/postgres_repositories/oa_projection.py`、`backend/src/fin_ops_platform/app/worker.py`
-- OA 待付款：`backend/src/fin_ops_platform/app/routes_oa_pending_payments.py`、`backend/src/fin_ops_platform/services/oa_pending_payment_query_service.py`、`backend/src/fin_ops_platform/services/oa_pending_payment_canonical_rows.py`、`backend/src/fin_ops_platform/services/postgres_repositories/oa_pending_payment_query.py`
-- OA 手动搜索/导入：`backend/src/fin_ops_platform/services/oa_manual_import_service.py`、`backend/src/fin_ops_platform/app/server.py`
-- OA 附件发票识别：`backend/src/fin_ops_platform/services/oa_attachment_invoice_service.py`、`backend/src/fin_ops_platform/services/invoice_attachment_recognition_service.py`
-- 目标申请人凭据：`backend/src/fin_ops_platform/services/oa_applicant_credentials.py`、`backend/src/fin_ops_platform/services/target_oa_applicant_token_provider.py`
-- 进项发票 OA 反提：`backend/src/fin_ops_platform/services/input_invoice_usage_oa_reverse_service.py`
-- ETC OA 草稿/人工确认：`backend/src/fin_ops_platform/services/etc_service.py`、`backend/src/fin_ops_platform/services/etc_business_batch_application_service.py`、`backend/src/fin_ops_platform/app/routes_etc.py`
-- 前端入口：`web/src/features/session/api.ts`、`web/src/pages/InputInvoiceUsagePage.tsx`、`web/src/pages/OaPendingPaymentsPage.tsx`、`web/src/pages/EtcTicketManagementPage.tsx`、`web/src/components/settings/SettingsOaApplicantCredentialsSection.tsx`、`web/src/components/settings/OaManualSearchImportTable.tsx`
+## 当前业务约定
 
-## 当前边界
+- OA Mongo 财务源只读；worker 一次读取范围内来源，输出 completed 与 admission 视图。任何必需来源读取失败不提交部分权威集合。
+- 仅完整 all 权威快照能证明源消失；清理 active 成员与本地快照后，通过精确事件复核并删除对应外部支付状态，month/retention 不证明源删除。
+- 支付状态由当前 active outflow 收敛；MySQL 写回由专用 adapter 执行，不向 Mongo 写业务。
+- 附件解析以当前强身份和来源桥接统一发票池，避免重复发票及跨 OA 弱指纹猜测；API 不运行全量同步/OCR。
+- OA 角色同步只消费当前 page ACL：有页面的普通用户对应 finops_app_user，固定管理员对应 finops_admin；菜单不是权限事实源。
+- ETC/反提外部创建使用冻结配置、持久请求身份与显式未知结果恢复；凭据只经 owner 使用，不返回密码。
+- 现金项目与成本项目目录通过各自窄只读端口，不能把外部元数据通道扩张为页面财务源。
 
-- OA 主系统负责登录态、菜单 iframe、canonical username、信息性 roles/permissions 和原始付款申请/报销/项目数据。
-- 本系统不修改 OA 原始业务库；对 OA Mongo 只读读取、映射、缓存和投影。
-- OA 费用类型按表单精确读取权威字段：支付申请父记录读取 `EtcOAFormFieldMapping.category`（默认 `category`，可由既有环境配置覆盖），日常报销子项只读取 `schedule[].purposeType`。两种表单不得共享模糊候选键或递归扫描同名字段；未知值保持空，不伪造“其他”。
-- `Admin-Token` 只作为身份来源；OA roles/permissions 不授予 APP 访问。固定 `YNSYLP005` 与 Settings canonical ACL 是唯一 APP authority，后端 direct API guard 与前端 `SessionGate` 分别强制执行同一结果。
-- `finops:app:view` 只定位唯一 OA menu。Runtime 验证唯一 menu、`finops_app_user` / `finops_admin` 两个专用 role 和 exact 两绑定后，只替换两组 role members；历史分层 role 和 non-dedicated binding cleanup 只在 migration/preflight 识别，deployment 稳态只读验证 exact topology。
-- OA 同步通过 worker / durable queue 原子写入本系统 PostgreSQL canonical OA、admission、payment-status 与 watermark facts。完整 `all` 权威快照以 lifecycle arbitration 后、local retention 前的 current canonical OA 支付身份集合（Mongo document ID + `flowRequestId/processId`）确认 MySQL status flow 已真实消失时，同一事务清理 PG 状态/关系并登记外部状态删除；worker 在删除 MySQL 前以候选确定性身份定位两个配置 OA 表单的原始文档，再按业务编号重读同组流程并复用 lifecycle arbitration，只有候选仍属于 current canonical OA 才作为重现项跳过，同时合并 completed + admitted canonical flow；source read 失败则重试。month sync 与 retention 裁剪不得声明源删除。同步不 fan-out 页面 refresh；关联台及其它 direct 页面下一次 GET 读取已提交 facts。共享 `workbench_relation` 由其 owner 按独立消费者合同维护，不得恢复 page `workbench` runtime。
-- OA 附件解析结果不直接等同于正式发票事实。附件发票识别只有三种结果：命中统一发票池则建立/补充关系，判定为正式发票且池内不存在时可受控创建并关联，非正式票据、残缺号码、多义匹配或未知证据直接忽略。受控创建由设置页 `OA附件发票晋级` 控制：默认 `link_existing_only` 只关联已有发票，`disabled` 完全跳过 promotion，只有 `create_missing` 才允许创建缺失的统一发票池记录。
-- completed 与唯一的 `in_progress + expense_claim` 复用上述同一识别/promotion 边界；进行中发票必须带明确子付款项来源。普通同步只处理 OA owner 内容真实变化的 scope，精确刷新可为选中记录补发 matching reconciliation；进行中支付申请不扩展附件解析。
-- 目标 OA 申请人凭据只允许 admin 维护，API / settings response 不得回显 password；创建草稿时用目标申请人账号登录 OA 并只使用返回 token。
-- ETC 与进项发票 OA 草稿只创建或本地撤销绑定，不自动删除或撤销真实 OA 草稿/流程。
-- 真实 OA 登录、RSA 加密、OA 草稿页面、生产 Mongo 字段变体和 OA 菜单角色同步必须通过 staging/生产前 smoke 补证，本地测试只能保护 contract 与失败处理。
+## 依赖方向
 
-## 影响面
+[设置](../settings/README.md)、[权限与审计](../permissions-and-audit/README.md)、[后台任务](../runtime-workers/README.md)、[进项发票使用](../input-invoice-usage/README.md)、[ETC 票据](../etc-tickets/README.md)、[现金账](../cash/README.md)。依赖表示调用或事实消费，不允许读取其它页面的展示结果作为业务事实。
 
-## ACL role sync boundary
+## 代码与验证入口
 
-- OA role sync 只消费 settings owner 传入的 normalized snapshot；admin assignment 永远注入固定 `YNSYLP005`，不能从请求、环境变量或 OA 当前角色反推。
-- fixed selector 必须精确为 `finops:app:view`，且 menu、`finops_app_user` / `finops_admin` 两角色和两条 binding 都唯一。任何 disabled、missing、drift 或 timeout 都在 DML 前 fail closed。
-- runtime 只替换两个专用 role members；不创建/删除 menu、role、binding，不改业务 role/member 或其他 menu。non-dedicated fixed-menu binding 属于阻断性漂移，deployment 不再自动清理或回滚。
-- generic settings save 与 ACL no-op 都是零 OA I/O；只有 ACL 真实变化执行一次 target sync。若 DB/audit 失败，最多执行一次 previous snapshot compensation；补偿失败返回 inconsistent 并要求人工核对。
-- MySQL connect/read/write timeout 分别受限；OA 密码、token、成员明文不进入发布 evidence。
+- [backend/src/fin_ops_platform/app/auth.py](../../../backend/src/fin_ops_platform/app/auth.py)
+- [backend/src/fin_ops_platform/services/oa_identity_service.py](../../../backend/src/fin_ops_platform/services/oa_identity_service.py)
+- [web/src/features/session/api.ts](../../../web/src/features/session/api.ts)
+- [backend/src/fin_ops_platform/services/oa_role_sync_service.py](../../../backend/src/fin_ops_platform/services/oa_role_sync_service.py)
+- [backend/src/fin_ops_platform/tools/settings_access_control_preflight.py](../../../backend/src/fin_ops_platform/tools/settings_access_control_preflight.py)
+- [backend/src/fin_ops_platform/services/mongo_oa_adapter.py](../../../backend/src/fin_ops_platform/services/mongo_oa_adapter.py)
+- [backend/src/fin_ops_platform/services/cash_oa_projects.py](../../../backend/src/fin_ops_platform/services/cash_oa_projects.py)
+- [backend/src/fin_ops_platform/services/oa_projection_sync.py](../../../backend/src/fin_ops_platform/services/oa_projection_sync.py)
+- [backend/src/fin_ops_platform/services/postgres_repositories/oa_projection.py](../../../backend/src/fin_ops_platform/services/postgres_repositories/oa_projection.py)
+- [backend/src/fin_ops_platform/app/worker.py](../../../backend/src/fin_ops_platform/app/worker.py)
+- [tests/test_mongo_oa_adapter.py](../../../tests/test_mongo_oa_adapter.py)
+- [tests/test_session_api.py](../../../tests/test_session_api.py)
+- [tests/test_oa_projection_sync_service.py](../../../tests/test_oa_projection_sync_service.py)
+- [tests/test_oa_attachment_invoice_service.py](../../../tests/test_oa_attachment_invoice_service.py)
+- [tests/test_oa_attachment_invoice_promotion_service.py](../../../tests/test_oa_attachment_invoice_promotion_service.py)
+- [tests/test_oa_attachment_invoice_promotion_tool.py](../../../tests/test_oa_attachment_invoice_promotion_tool.py)
 
-| 入口 | 影响范围 | 关键风险 |
-| --- | --- | --- |
-| `/api/session/me` / session bootstrap | 所有页面、所有 API 权限、page session scope | OA 超时、无权限、token 过期、页面集合或 005 管理边界错误 |
-| OA Mongo adapter | Workbench、OA 待付款、进项使用、ETC、税金、成本、搜索 | 外部字段变体、Mongo 断连、缓存 backoff、附件发票 identity、附件 promotion 模式误配置 |
-| OA sync worker / canonical snapshot | 关联台 projection、待找发票、OA 待付款、进/销项等 direct 页面 | worker 未入队、canonical snapshot 半写入、retention cutoff、旧 relation row id 迁移 |
-| OA 手动搜索/导入 | 设置页、Workbench、历史 OA 补录 | 未完成单据误导入、附件刷新失败、手动 marker 删除后 stale scope |
-| OA applicant credentials | 设置页、进项发票 OA 反提 | 非 admin 修改、password 泄漏、pgcrypto key/配置缺失 |
-| Target OA applicant login | 进项 OA 草稿、ETC 草稿 | HTTP/网络/无效 JSON/无 token 不能伪装成功，错误不能泄露密码 |
-| Input invoice OA reverse | 进项使用、OA 关系、审计、read model invalidation | preview hash stale、version conflict、idempotency、人工 submitted/not_submitted |
-| ETC OA draft/manual status | ETC 票据、关联台、税金、成本 | 本地状态和真实 OA 状态混淆，删除本地批次误删真实 OA |
-| OA role sync / deploy | OA 菜单可见性、APP direct denial、exact topology verification | 菜单投影漂移被误当 APP authority、恢复已退休的宽删业务 role/member/menu 写路径 |
-
-## 维护触发器
-
-发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
-
-- 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。
-- API contract、DTO shape、错误字段、权限校验、状态值或响应 freshness 字段变化。
-- 业务状态、UI 状态、read model 状态、worker 状态或状态流转变化。
-- 跨页面刷新、domain event、derived lifecycle、dirty scope、outbox 或缓存边界变化。
-- 测试入口、回归范围、验证命令或未测风险变化。
-
-## 本目录文件
-
-- `state-machine.md`：维护当前有效状态和状态流转；不适用时写明原因。
-- `tests.md`：维护七类测试适用性、现有测试入口、验证命令和回归范围。
-- `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。
+通用查询、事务、权限与错误边界见[系统架构](../../../ARCHITECTURE.md)；验证方法见[开发说明](../../development.md)。测试文件是可执行证据，本文不保存某一次测试的通过记录。

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 
 from fin_ops_platform.app.server import Application
@@ -10,8 +9,6 @@ from fin_ops_platform.services.postgres_repositories.workbench_idempotency impor
     PostgresWorkbenchIdempotencyRepository,
 )
 from fin_ops_platform.services.workbench_idempotency import InMemoryWorkbenchIdempotencyRepository
-
-DOC_PATH = Path("docs/architecture/backend-refactor/workbench-durable-idempotency-rollout-readiness.md")
 
 
 class _Connection:
@@ -42,25 +39,6 @@ def _new_application(connection: object | None = None) -> Application:
 
 
 class WorkbenchDurableIdempotencyRolloutTests(unittest.TestCase):
-    def test_rollout_readiness_document_exists_and_records_gate_matrix(self) -> None:
-        self.assertTrue(DOC_PATH.exists(), "PF-P040 must add a durable idempotency rollout readiness document.")
-
-        text = DOC_PATH.read_text(encoding="utf-8")
-        for token in (
-            "Rollout Readiness Matrix",
-            "ready",
-            "documented-risk",
-            "production-always-on",
-            "transaction-bound reserve/commit",
-            "committed replay",
-            "same-key different-fingerprint conflict",
-            "expired reserved takeover",
-            "in-progress duplicate policy",
-            "actor/tenant auth context",
-            "cleanup/retention",
-            "rollback",
-        ):
-            self.assertIn(token, text)
 
     def test_postgres_runtime_always_uses_durable_idempotency(self) -> None:
         app = _new_application()
@@ -76,16 +54,6 @@ class WorkbenchDurableIdempotencyRolloutTests(unittest.TestCase):
         store = Application._workbench_write_idempotency_store(app, "_test_idempotency_store", _Connection())
 
         self.assertIsInstance(store, InMemoryWorkbenchIdempotencyRepository)
-
-    def test_readiness_document_keeps_remaining_operational_risks_explicit(self) -> None:
-        self.assertTrue(DOC_PATH.exists())
-
-        text = DOC_PATH.read_text(encoding="utf-8")
-        self.assertIn("PostgreSQL integration", text)
-        self.assertIn("| reserved/in-progress duplicate policy | ready |", text)
-        self.assertIn("| expired reserved takeover | ready |", text)
-        self.assertIn("| failed reservation policy | ready |", text)
-        self.assertIn("cleanup/retention", text)
 
 
 if __name__ == "__main__":

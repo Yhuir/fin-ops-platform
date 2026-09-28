@@ -1,97 +1,42 @@
-# App Shell 与导航模块维护入口
+# 应用壳与导航
 
-- Module key: `app-shell-navigation`
-- 类型: 资源模块
-- Route: `N/A`
-- Page key: `N/A`
+入口：`全局前端入口`。
 
-## 修改前必读
+负责页面注册、按需路由、侧栏、会话与全局任务状态。业务数据和写入归页面模块。
 
-- `docs/app-architecture/pages.md`
-- `docs/app-architecture/runtime-and-ownership.md`
-- `docs/modules/permissions-and-audit/README.md`
-- `docs/modules/app-health-operations/README.md`
-- `docs/modules/domain-events-lifecycle/README.md`
-- `docs/refactor-ui/module_inventory.md`
+## 边界与 I/O
 
-## 代码入口
+输入：pageRegistry、当前 route、session allowed_page_keys 和任务摘要。输出：当前页挂载、菜单过滤、标题/焦点、全局操作和任务入口。
 
-- `web/src/app/App.tsx`：provider 组合、BrowserRouter、shell layout、compact sidebar、本地 sidebar 展开状态。
-- `web/src/contexts/GlobalOperationOverlayContext.tsx`：写操作级全屏 overlay provider；页面通过 hook 包裹 mutating action。
-- `web/src/app/pageRegistry.tsx`：页面注册表、route chunks、sidebar groups 的唯一事实源。
-- `web/src/app/router.tsx`：把 `appPageRoutes` 交给 `PageRouteHost`；旧 `/imports` 精确入口无请求重定向到银行流水导入。
-- `web/src/app/PageRouteHost.tsx`：route match、未知路由 redirect、当前页面挂载、lazy fallback、`PageRuntimeProvider`。
-- `web/src/components/shell/AppSidebar.tsx`：桌面/移动侧栏、固定品牌/导航/账号三区、active route、HeroUI Disclosure 导入分组、桌面可见 paper 在 `232px/72px` 间平滑展开收起、收缩态仅保留居中 toggle、hover/focus/touch preload。
-- `web/src/components/shell/AppSidebarAccount.tsx`：只消费现有 SessionContext 的当前 OA 用户入口与身份详情弹层，不发起独立请求。
-- `web/src/components/shell/AppStatusIndicator.tsx`：静态品牌图标、静态运行状态点和全局运行状态弹层入口。
-- `web/src/components/shell/sidebarItems.ts`：只重导出 `pageRegistry` 的 `sidebarGroups`，不能维护第二份导航事实。
-- `web/src/components/shell/AppTopBar.tsx`：compact top bar 和移动端打开菜单。
-- `web/src/contexts/PageRuntimeContext.tsx`：当前页面激活上下文、active page event 订阅。
-- `web/src/contexts/PageSessionStateContext.tsx`：用户隔离的页面轻量 session state。
-- `web/src/hooks/useFinanceTableSession.ts`：表格分页、排序、选择、滚动位置的页面 session 绑定。
+## 当前业务约定
 
-## 当前边界
+- 只挂载当前 route；切换按注册信息更新标题与主内容焦点，菜单可见性不能替代后端授权。
+- 页面会话保存非敏感查询/布局，不保存业务事实；现金使用可卸载的局部状态。
+- focus、visibility、BFCache 不触发全站业务查询；普通写入不广播隐藏页面刷新。
+- 共享导入任务可显式打开独立工作流实例，不覆盖当前未保存草稿；任务轮询复用现有 owner。
+- 页面默认日期由各模块约定，普通财务列表重新进入清理日期为全部，税金保持业务月，普通刷新保留本次选择。
 
-- 页面注册表是 route、page key、lazy chunk preload 和侧栏导航项的唯一事实源；侧栏不能维护第二份路由清单。
-- `PageRouteHost` 每次只挂载当前匹配 route。离开页面会卸载旧页面 React tree，不保留隐藏 DOM frame、mounted cache、TTL/LRU snapshot 或旧页面 data payload。
-- `PageRuntimeProvider` 对当前页面提供稳定的 `active: true`、`pageKey` 与初始 generation。它不监听 focus/visibility/BFCache，不协调业务页面刷新。
-- `AppPageRoute.preload()` 和 sidebar item `preload()` 只预加载 lazy route chunk。预加载失败不能改变当前 route，也不能阻塞点击导航。
-- 页面 session state 只保存当前浏览器标签页内的轻量 UI 状态，例如查询、筛选、分页、排序、tab、选中行、展开行和详情 drawer target；不保存 read model payload、业务事实、权限事实、loading/error/toast 或失败中的提交。
-- `SessionGate` 是 shell 级入口。它只消费 canonical session 的 `allowed/allowed_page_keys/can_admin_access`；OA roles/permissions 与 `finops:app:view` 不能授予 APP access。会话 loading/forbidden/expired/error 会阻止业务 route 渲染；侧栏仅在 session 完成后渲染获权页面，避免未授权页面闪现和布局跳动。
-- `SessionGate` 和 OA menu 都是 UX/visibility 强制层，不替代 backend authorization。denied 用户直接输入 `/fin-ops/` 不挂载业务 route；直接调用受保护 API 仍由 backend canonical ACL guard 返回 `403 permission_denied`。
-- OA 菜单变更只以 role projection 后的新 `/system/menu/getRouters` 响应或新 OA shell session 验收；刷新前的旧 DOM、旧 router payload 或截图不能证明撤权成功/失败。
-- `AppStatusIndicator` 在 shell 中消费后端 app status projection；路由切换不能改变全局状态事实。
-- 侧栏账号区只消费 SessionContext 已归一化的 `displayName/username/deptName`，不加载 OA 头像、不重取 session、不提供业务写操作。
-- `GlobalOperationOverlayProvider` 是 shell 级交互保护层。它只承载写操作后的短暂等待和错误反馈，不保存业务 payload，不决定 freshness，不替代 App Status 或页面 read boundary。页面不得各自实现第二套全屏操作阻塞层。
-- 三个 import page 是独立 route，并从 page registry 组成单层 HeroUI Disclosure“导入”分组；父项不发业务请求，当前子项按 route 高亮并自动展开。
+## 依赖方向
 
-## 影响面
+[权限与审计](../permissions-and-audit/README.md)、[后台任务](../runtime-workers/README.md)、[公共财务表格](../finance-table-system/README.md)。依赖表示调用或事实消费，不允许读取其它页面的展示结果作为业务事实。
 
-| 改动点 | 可能影响 |
-| --- | --- |
-| `pageRegistry.tsx` 新增/删除/改 route | 页面入口、侧栏分组、App Status domain registry、测试里 route/sidebar 数量、未知路由 redirect |
-| `PageRouteHost.tsx` route match/mount 策略 | 页面状态清理、旧页面 API 请求和 toast、lazy fallback、浏览器生命周期零业务 I/O |
-| `AppSidebar.tsx` active/preload/mobile drawer | 侧栏高亮、移动端导航关闭、hover/focus 预加载、导入分组展开与子路由 active 行为 |
-| `App.tsx` provider 顺序 | session、page session、import draft、background jobs、App Health、MonthProvider |
-| `GlobalOperationOverlayContext.tsx` 语义 | 所有接入页面的写操作 loading/error 体验；不能污染普通页面 loading、App Status 或业务事实 |
-| `PageSessionStateContext.tsx` key/scope/TTL | 所有页面筛选/分页/排序/选中状态恢复、用户切换隔离 |
-| `PageRuntimeContext.tsx` runtime identity | 当前 route 身份；禁止承载业务刷新协调 |
-| `SessionGate` / OA embedded shell | canonical session 与 APP route mount；menu visibility 与 backend direct API denial 必须分别验证，不能互相代替 |
+## 代码与验证入口
 
-## 测试入口
+- [web/src/app/App.tsx](../../../web/src/app/App.tsx)
+- [web/src/contexts/GlobalOperationOverlayContext.tsx](../../../web/src/contexts/GlobalOperationOverlayContext.tsx)
+- [web/src/app/pageRegistry.tsx](../../../web/src/app/pageRegistry.tsx)
+- [web/src/app/router.tsx](../../../web/src/app/router.tsx)
+- [web/src/app/PageRouteHost.tsx](../../../web/src/app/PageRouteHost.tsx)
+- [web/src/components/shell/AppSidebar.tsx](../../../web/src/components/shell/AppSidebar.tsx)
+- [web/src/components/shell/AppSidebarAccount.tsx](../../../web/src/components/shell/AppSidebarAccount.tsx)
+- [web/src/components/shell/AppStatusIndicator.tsx](../../../web/src/components/shell/AppStatusIndicator.tsx)
+- [web/src/components/shell/sidebarItems.ts](../../../web/src/components/shell/sidebarItems.ts)
+- [web/src/components/shell/AppTopBar.tsx](../../../web/src/components/shell/AppTopBar.tsx)
+- [web/src/test/PageRouteHost.test.tsx](../../../web/src/test/PageRouteHost.test.tsx)
+- [web/src/test/AppSidebar.test.tsx](../../../web/src/test/AppSidebar.test.tsx)
+- [web/src/test/App.test.tsx](../../../web/src/test/App.test.tsx)
+- [web/src/test/GlobalOperationOverlayContext.test.tsx](../../../web/src/test/GlobalOperationOverlayContext.test.tsx)
+- [web/src/test/SessionGate.test.tsx](../../../web/src/test/SessionGate.test.tsx)
+- [web/src/test/PageSessionStateContext.test.tsx](../../../web/src/test/PageSessionStateContext.test.tsx)
 
-- `web/src/test/PageRouteHost.test.tsx`
-- `web/src/test/AppSidebar.test.tsx`
-- `web/src/test/App.test.tsx`
-- `web/src/test/GlobalOperationOverlayContext.test.tsx`
-- `web/src/test/SessionGate.test.tsx`
-- `web/src/test/PageSessionStateContext.test.tsx`
-- `web/src/test/useFinanceTableSession.test.tsx`
-- `tests/test_platform_runtime_boundary_guards.py`
-- `tests/test_session_api.py`
-- `tests/test_auth_guard.py`
-- `web/e2e/permissions-role-matrix.spec.ts`
-
-## ACL 证据边界
-
-- 本地自动化由 `SessionGate.test.tsx`、`App.test.tsx`、`PageRouteHost.test.tsx` 和权限矩阵保护 admin/full/read/denied、direct route、18-route registry 与 ACL restore；OA hostile roles/permissions 只保留为信息字段。
-- backend direct API denial 由 `tests/test_session_api.py`、`tests/test_auth_guard.py` 和 `tests/test_route_access_policy.py` 独立证明，不能用 sidebar/menu 隐藏替代。
-- 生产 fresh token、fresh `/system/menu/getRouters`、三专用 role exact set 与 finally restore 只接受 root-owned post-deploy artifact/hash；当前文档只记录已实现 release-prep 合同，不声称生产已部署或证据已采集。
-
-## 维护触发器
-
-发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
-
-- 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。
-- API contract、DTO shape、错误字段、权限校验、状态值或响应 freshness 字段变化。
-- 业务状态、UI 状态、read model 状态、worker 状态或状态流转变化。
-- 跨页面刷新、domain event、derived lifecycle、dirty scope、outbox 或缓存边界变化。
-- 测试入口、回归范围、验证命令或未测风险变化。
-
-## 本目录文件
-
-- `state-machine.md`：维护当前有效状态和状态流转；不适用时写明原因。
-- `tests.md`：维护七类测试适用性、现有测试入口、验证命令和回归范围。
-- `e2e-spec.md`：维护 App Shell 与导航的 Spec-first Browser E2E 合同。
-- `e2e-coverage.md`：维护 Spec ID 到 Playwright/Vitest 证据的覆盖矩阵和外部风险。
-- `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。
+通用查询、事务、权限与错误边界见[系统架构](../../../ARCHITECTURE.md)；验证方法见[开发说明](../../development.md)。测试文件是可执行证据，本文不保存某一次测试的通过记录。

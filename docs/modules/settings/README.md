@@ -1,97 +1,43 @@
-# 设置模块维护入口
+# 设置
 
-- Module key: `settings`
-- 类型：页面模块 / 高风险配置域
-- Route: `/settings`
-- Page key: `settings`
+入口：`/settings`。
 
-## 修改前必读
+拥有平台设置、配置版本、页面 ACL、OA 凭据及数据重置控制面；业务模块消费其明确配置端口。
 
-- `docs/product-specs/platform-settings-health.md`
-- `docs/operations/data-safety.md`
-- `docs/operations/runtime-worker-governance.md`
-- `docs/app-architecture/runtime-and-ownership.md`
-- `docs/app-architecture/pages.md`
-- `docs/dev/api-contracts.md`
-- `docs/dev/testing-closure-dependency-map.md`
-- `docs/modules/read-models/README.md`
-- `docs/modules/runtime-workers/README.md`
-- `docs/modules/domain-events-lifecycle/README.md`
-- 受影响下游模块：`reconciliation-workbench`、`bank-details`、`pending-invoices`、`tax-offset`、`cost-statistics`、`input-invoice-usage`、`output-invoice-collections`、`oa-pending-payments`、`imports-*`、`etc-tickets`
+## 边界与 I/O
 
-## 代码入口
+输入：普通设置、独立 family 的 expected_version、管理员完整 accounts[{username,page_keys}]、受信 session。输出：配置、版本、允许页面集合、非敏感选项与显式后台任务。
 
-- `web/src/pages/SettingsPage.tsx`
-- `web/src/components/settings/*`
-- `web/src/features/workbench/api.ts`
-- `backend/src/fin_ops_platform/app/routes_settings.py` 中 `/api/workbench/settings*`、数据重置和 OA 申请人凭据 routes
-- `backend/src/fin_ops_platform/app/server.py` 中 settings route owner 组装和 durable reset enqueue
-- `backend/src/fin_ops_platform/services/settings_data_reset_job.py`
-- `backend/src/fin_ops_platform/services/runtime_worker_handlers.py` 中 `SettingsDataResetRuntimeFactory`
-- `backend/src/fin_ops_platform/services/app_settings_service.py`
-- `backend/src/fin_ops_platform/services/settings_data_reset_service.py`
-- `backend/src/fin_ops_platform/services/oa_applicant_credentials.py`
-- `backend/src/fin_ops_platform/services/target_oa_applicant_token_provider.py`
-- `backend/src/fin_ops_platform/services/postgres_repositories/oa_applicant_credentials.py`
-- `backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py`
-- `backend/src/fin_ops_platform/services/app_status_domain_registry.py`
+## 当前业务约定
 
-## 当前边界
+- YNSYLP005 是固定管理员；普通账号仅按页面集合授权，缺席或空集合拒绝。权限 evaluator 属于 permissions-and-audit。
+- 普通 settings API 不接受 ACL 字段；专用 ACL GET/PUT 仅管理员可用。用户名规范化保留真实拼写，重复/未知 page key 拒绝。
+- 配置、CAS 和 durable audit 同事务；语义 no-op 不递增版本或触发外部写入。OA 成员同步失败明确返回，不能伪报成功。
+- 成本标签、批量账务选择、银行要求、支付规则与预填配置各有 family 及版本，调用者不访问服务私有 snapshot。
+- OA 预填配置可由获权用户只读，管理员编辑；命令批次冻结当时配置。
+- 数据重置委托专门安全服务及 settings-maintenance，普通保存不触发跨页查询。
 
-设置模块维护平台级配置事实，不只是设置页 UI。当前边界包括：
+## 依赖方向
 
-- 项目范围：OA 项目同步、手工项目、已完成项目、本地删除 override。
-- 访问控制：`/settings` 的“访问账户”是唯一人工入口；独立 admin-only `GET/PUT /api/workbench/settings/access-control` 维护普通账号的 `username + page_keys` 完整集合。列表缺席或空页面集合表示无权访问。唯一权限管理员 `YNSYLP005` 固定且不可由 APP 修改，generic settings 与 Workbench modal 均无 ACL I/O。
-- OA 用户合同：新增账户必须通过 OA `sys_user` 搜索取得 canonical username 和显示姓名；比较与去重使用共享 casefold key，碰撞、控制字符、重复、停用账号和 protected-admin 输入在 OA role 写入前拒绝。
-- 写入合同：专用 PUT 使用独立 `access_control_version` / `expected_version`、PostgreSQL CAS 和同事务 durable audit；semantic no-op 零 PostgreSQL/audit/OA I/O。真实变化只投影 `finops_app_user` 与 `finops_admin` 两个 OA 角色，OA target、PostgreSQL commit 和补偿按明确的 502/503 状态收敛。
-- 关联台设置：列布局、银行账户映射、OA 留存时间、OA 导入表单类型/状态过滤、OA 附件发票 promotion 模式、OA 发票抵扣申请人。
-- 业务规则：待找发票标签组、免 OA 和往来款标签选择；银行明细自动标签规则只读返回给 settings 页面作为候选事实，`AppSettingsService.update_settings(...)` 不暴露 `bank_transaction_tags` 写参数，写入只能走银行明细 `自动标签规则` 抽屉/API。
-- 成本统计规则：只保留 `cost_statistics_no_oa_projects`，保存多个虚拟项目及互斥标签归属，默认项目数组为空。旧 `cost_statistics_time_tag_selection` 已从 runtime normalization、持久化和公开 payload 删除。无 OA 候选资格和逐笔 active OA 保护由成本统计 owner 从 canonical 银行/OA 关系计算；设置 owner 只负责 schema、CAS、持久化和审计。
-- OA 申请人凭据：独立凭据事实源，只允许 admin 维护，普通 settings payload 不能包含密码、密文或 token。
-- 数据重置：银行流水域、发票域、OA 源重置与重建；必须保护禁止删除目标、
-  保留必要事实、记录 job progress，并确保 canonical 页面下一次 GET 读取重置后的事实。
+[权限与审计](../permissions-and-audit/README.md)、[OA 集成](../oa-integration/README.md)、[数据安全与重置](../data-safety-reset/README.md)、[后台任务](../runtime-workers/README.md)。依赖表示调用或事实消费，不允许读取其它页面的展示结果作为业务事实。
 
-设置模块本身多数事实写入 `ApplicationStateStore`。变更会影响多个页面的下一次
-canonical query，也可能影响 `workbench` 或 `workbench_relation` owner 的显式 maintenance 合同；
-任何改动都必须先做影响面评估，但普通保存不广播 page refresh。
+## 代码与验证入口
 
-当前 HTTP I/O 边界已关闭：`SettingsApiRoutes` 负责 settings path matching、body/query parsing、权限 gate、错误码和 response shape；`server.py` 不再定义 `_handle_api_workbench_settings*` 旧 handler。`AppSettingsService` 只从持久化 settings store 刷新事实，缺失字段由 normalizer/default contract 处理，不再用旧内存 `_snapshot` 补齐持久化结果。
+- [web/src/pages/SettingsPage.tsx](../../../web/src/pages/SettingsPage.tsx)
+- [web/src/features/workbench/api.ts](../../../web/src/features/workbench/api.ts)
+- [backend/src/fin_ops_platform/app/routes_settings.py](../../../backend/src/fin_ops_platform/app/routes_settings.py)
+- [backend/src/fin_ops_platform/app/server.py](../../../backend/src/fin_ops_platform/app/server.py)
+- [backend/src/fin_ops_platform/services/settings_data_reset_job.py](../../../backend/src/fin_ops_platform/services/settings_data_reset_job.py)
+- [backend/src/fin_ops_platform/services/runtime_worker_handlers.py](../../../backend/src/fin_ops_platform/services/runtime_worker_handlers.py)
+- [backend/src/fin_ops_platform/services/app_settings_service.py](../../../backend/src/fin_ops_platform/services/app_settings_service.py)
+- [backend/src/fin_ops_platform/services/settings_data_reset_service.py](../../../backend/src/fin_ops_platform/services/settings_data_reset_service.py)
+- [backend/src/fin_ops_platform/services/oa_applicant_credentials.py](../../../backend/src/fin_ops_platform/services/oa_applicant_credentials.py)
+- [backend/src/fin_ops_platform/services/target_oa_applicant_token_provider.py](../../../backend/src/fin_ops_platform/services/target_oa_applicant_token_provider.py)
+- [tests/test_app_settings_service.py](../../../tests/test_app_settings_service.py)
+- [tests/test_workbench_settings_sync_api.py](../../../tests/test_workbench_settings_sync_api.py)
+- [tests/test_oa_role_sync_service.py](../../../tests/test_oa_role_sync_service.py)
+- [tests/test_permissions_write_entry_inventory.py](../../../tests/test_permissions_write_entry_inventory.py)
+- [tests/test_settings_data_reset_service.py](../../../tests/test_settings_data_reset_service.py)
+- [web/e2e/permissions-role-matrix.spec.ts](../../../web/e2e/permissions-role-matrix.spec.ts)
 
-## 当前页面呈现
-
-- 设置标题下使用 HeroUI `Tabs` 水平导航；空间不足时横向滚动，保留原生键盘导航。旧二级左栏和移动端 Select 已删除，App 全局侧栏不变。
-- 8 个子页面共用可用区域内居中的工作区（最大 1440px），标题、Tab、内容边界对齐。OA 配置使用标签/控件行，凭据采用双列表单；窄屏按容器宽度收拢。
-- 表单、按钮、标签页、选择器、复选框、状态标签、进度条和弹窗使用 HeroUI；访问账户使用 HeroUI ListBox，OA 新增使用 HeroUI Button。
-- 普通设置草稿保留在 `SettingsPageContent`，切换 Tab 不保存、不重新读取普通设置。按钮明确为“保存全部设置”，显示未保存状态；ACL、凭据和数据重置仍各自独立提交。
-- 访问账户保留账户/页面双栏；项目状态和待找发票筛选使用标签页；数据重置使用紧凑操作列表。静态说明文案已移除，运行状态、校验错误和不可逆操作确认仍按安全合同显示。
-
-## 关键影响
-
-| 设置动作 | 后端事实 | 可见性合同 |
-| --- | --- | --- |
-| 待找发票规则保存 | income/expense rule version 原子递增 | 待找发票下一次 GET 直接应用；不 fan-out retired page scope |
-| 银行标签/自动标签保存 | 只允许银行明细规则 API 写入并记录 audit | canonical 页面下次 GET 读取；共享 no-OA/Search 只按各自 owner 合同处理 |
-| 项目范围变化 | project settings/version | 成本统计、关联台等 direct 页面下次 GET 直接读取；不发布 page Workbench refresh |
-| 访问控制 no-op / 真实变化 | `app.app_settings` ACL family + 独立 version；真实变化同事务写 `audit.events` | no-op 零写入；页面变化仅提交 App，成员变化差量投影 OA 两专用角色；下一次 session/API 使用新 snapshot；失败按同步/恢复状态返回 502/503 |
-| OA 导入过滤/留存/promotion | state store，供后续 OA sync/reset 使用 | 页面下次 GET 读取已提交 OA canonical facts |
-| OA 申请人凭据维护 | 独立 credential repository | 进项 OA 反提 token provider 使用；普通 settings payload 不含 secret |
-| 数据重置 | `settings.data_reset.requested` durable event + `settings-maintenance` worker | API 只校验权限/密码并入队；worker 执行 canonical cleanup、登记派生刷新并请求 Gunicorn graceful reload，job 显示进度/失败 |
-| 启动补扫与恢复 | `settings-maintenance` / `workbench-matching` worker | API 构造与启动无业务写副作用；stale scan 仅在 matching worker 显式启用时执行 |
-
-## 维护触发器
-
-发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
-
-- 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。
-- API contract、DTO shape、错误字段、权限校验、状态值或响应 freshness 字段变化。
-- 业务状态、UI 状态、read model 状态、worker 状态或状态流转变化。
-- 跨页面刷新、domain event、derived lifecycle、dirty scope、outbox 或缓存边界变化。
-- 测试入口、回归范围、验证命令或未测风险变化。
-
-## 本目录文件
-
-- `state-machine.md`：维护当前有效状态和状态流转；不适用时写明原因。
-- `tests.md`：维护七类测试适用性、现有测试入口、验证命令和回归范围。
-- `e2e-spec.md`：维护设置页 Spec-first Browser 业务验收合同。
-- `e2e-coverage.md`：维护设置页 Spec-first 合同到自动化覆盖的映射。
-- `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。
+通用查询、事务、权限与错误边界见[系统架构](../../../ARCHITECTURE.md)；验证方法见[开发说明](../../development.md)。测试文件是可执行证据，本文不保存某一次测试的通过记录。

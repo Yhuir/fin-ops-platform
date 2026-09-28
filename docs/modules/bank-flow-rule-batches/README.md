@@ -1,92 +1,43 @@
-# 流水规则批量处理 模块维护入口
+# 流水规则批量处理
 
-- Module key: `bank-flow-rule-batches`
-- 类型: 页面模块
-- Route: `/bank-flow-rule-batches`
-- Page key: `bank-flow-rule-batches`
-- 状态: implementation-complete / production-validation-pending。未提交候选由页面 API 在 PostgreSQL `REPEATABLE READ / READ ONLY` snapshot 中从银行流水、当前有效分类、paired policy 与 active relation 实时推导；`app.bank_flow_rule_batches/events` 只保存 submitted、withdrawn、stale 等正式业务历史。页面不读取 read model，不 enqueue 或 polling；旧 canonical draft owner/producer/event/worker/replay/deploy 链已删除。旧 no-OA 仍是独立 legacy 模块。
+入口：`/bank-flow-rule-batches`。
 
-## 修改前必读
+根据银行用途和标签要求实时构造待提交候选，管理正式批次提交与撤回。
 
-- `docs/architecture/module-boundaries/README.md`
-- `docs/architecture/module-boundaries/inventory.md`
-- `docs/architecture/module-boundaries/canonical-facts.md`
-- `docs/architecture/module-boundaries/read-model-contracts.md`
-- `docs/modules/bank-details/boundary-io.md`
-- `docs/modules/workbench-relations/boundary-io.md`
-- `docs/modules/reconciliation-workbench/boundary-io.md`
-- `docs/dev/api-contracts.md`
+## 边界与 I/O
 
-## 当前代码入口
+输入：month/type/status/bucket/account_key/page/page_size；候选详情携带 view=candidate 与 scope_month。提交携带选中成员、规则版本和幂等身份。输出：summary、batches、pagination、详情和命令结果；page_size 最大 200。
 
-当前代码使用 bank-flow 独立 HTTP route、application boundary、canonical query repository、canonical 批次/事件表和 tag-rule settings key 承载业务入口；新页面和生产 API 不接收或返回 `selected_tag_codes`。
+## 当前业务约定
 
-- Frontend page: `web/src/pages/BankFlowRuleBatchPage.tsx`，通过 `/bank-flow-rule-batches` route 作为流水规则批量处理页。
-- Frontend feature: `web/src/features/bankFlowRuleBatches/api.ts`（HTTP/DTO mapping）、`types.ts`（public DTO/domain types）、`policy.ts`（状态/权限策略）、`viewModel.ts`（格式化、规则 grid view model）、`components.tsx`（分页、状态标签、label rail）。API 指向 `/api/bank-flow-rule-batches`。
-- Backend route: `backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py`，只承载 `/api/bank-flow-rule-batches/*`。
-- Backend service: `backend/src/fin_ops_platform/services/bank_flow_rule_batch_application_service.py`，新提交写 `relation_mode=bank_flow_rule_batch`；共享批次计算内核在中性 `bank_batch_application_service.py` / `bank_batch_service.py`，由显式 relation mode/schema/ID prefix 直接生成正式 bank-flow 领域错误和身份，bank-flow 不继承 no-OA application service，route 不保留 legacy 错误翻译或 fallback。
-- Backend query: `backend/src/fin_ops_platform/services/postgres_repositories/bank_flow_rule_batch_canonical_query.py`；SQL 在同一 snapshot 读取当前候选输入与正式历史，精确月份使用 ±2 天窗口，省略月份时一次读取全部 non-deleted canonical 流水；不读 persisted draft、Workbench projection 或 no-OA fallback。
-- 未提交候选使用 `bank_flow_rule_batch_canonical_query.py` 中的共享 live builder 与 `BankBatchService` 内核；页面读取、提交事务复核和 Audit 不得复制第二套匹配算法。
-- 内部转账的 ±2 天窗口允许发现月末/月初配对，但 candidate 只归最早成员月份所有，相邻月份不得重复生成。
-- submit、submit-selection、withdraw、reset 的 relation/history 与 batch/events 由 `save_bank_flow_rule_batch_mutation(...)` 的单个 caller-owned PostgreSQL transaction 原子提交；本地 StateStore 以单个 `state.pkl` 原子替换提供等价无半写语义。
-- Rule persistence: `app_settings.bank_flow_rule_batch_tag_rules.requirements_by_tag_code`；新 API 和服务边界只读写 `rules`，拒绝 `selected_tag_codes`，重复 `tag_code` fail fast。`0111_bank_flow_rule_batch_tag_rules_canonical_shape.sql` 已将一次性复制的 legacy selected seed 合并并删除。
-- Browser E2E: `web/e2e/bank-flow-rule-batches-flow.spec.ts`。
+- 候选由当前银行分类、设置和 active relation 在同一快照构造，不把待提交候选作为持久事实。
+- 正式 batch、events、关系和历史通过同一事务保存；提交重检成员占用、规则与选择证明。
+- 内部转账使用跨月边界窗口，批次归最早成员月份；候选账户身份复用 canonical account_key。
+- 标签要求改变时，配置、后台任务和 settings-maintenance 事件同事务提交。任务成功后才提示重算完成。
+- 撤回处理所选正式批次及后续合并历史；没有 active owner 时关系撤回幂等完成。
+- 冲突清理旧选择和详情后回读一次，不自动重复提交。
 
-## 当前目标边界
+## 依赖方向
 
-流水规则批量处理只处理无需 OA、也无需发票即可直接生成批次的银行流水。页面右侧抽屉以紧凑 xlsx/grid 方式维护每个银行明细标签的 OA/发票要求；需要任一单据的流水退出本页面未提交区，交由关联台、待找发票等单据流程处理。
+[银行明细](../bank-details/README.md)、[设置](../settings/README.md)、[正式关联关系](../workbench-relations/README.md)、[后台任务](../runtime-workers/README.md)。依赖表示调用或事实消费，不允许读取其它页面的展示结果作为业务事实。
 
-核心规则：
+## 代码与验证入口
 
-- 标签管理抽屉左侧 `收支类型 / 流水主标签 / 流水子标签` 来自银行明细当前 active 标签事实，只读展示，不能在本模块新增、编辑或删除。
-- 右侧只保留 `OA`、`发票` 两列勾选。勾选表示该标签的业务闭环需要对应单据，并作为活跃正式关系进入 paired/unpaired 的要求。
-- 新增或未配置的银行标签默认勾选 `OA` 和 `发票`，避免新标签自动进入无需 OA/发票闭环。
-- 未提交主/子标签和批次的生成资格固定为 active tag 且 `requires_oa=false`、`requires_invoice=false`；任一勾选、规则缺失或标签归档都不得进入未提交区。
-- 已提交/历史 bucket 保留批次提交时冻结的标签和 requirement snapshot，不受当前勾选、标签 active 状态或改名影响。
-- 未提交候选还必须排除任一 canonical active relation 已占用的银行流水；页面查询和提交入口均不得用可能滞后的 Workbench relation read model 代替 canonical relation source bundle。
-- 旧 `selected_tag_codes` 不迁移为新事实源；实现时应移除或只作为只读 legacy 输入清理，所有流水重新按新规则计算。
-- 页面提交的是银行流水批量关系事实。由于未提交资格已经排除需单据标签，新 relation 的 requirement 必须为双 false；active relation 决定 ownership。关系仍持久化规则证明，但当前活跃关系会在相关标签的 OA/发票要求发生语义变化后，由 durable 后台任务增量重算。
-- 规则保存只比较 `requires_oa/requires_invoice` 的真实语义差异；仅扫描持久化 tag proof 命中变化标签的 active 正式 relation，并用关系内完整标签集合做 OR 重算。正式性由 active `status` 与 `relation_mode` 判定，不以 `case_id` 历史前缀判定。设置 CAS、可见 background job 与 outbox event 在同一事务提交；页面等待该任务成功后刷新并提示“已重算”。已提交/已撤回批次历史 payload 不改写。
-- 从本页面提交的有效批次包含至少 3 条流水时，关联台在未配对和已配对中均可独立折叠；1 到 2 条直接展示。展开复用已加载精简成员，不发详情请求。
-- 页面固定使用“主标签 → 子标签 → 账户批次/流水”三栏；表格列顺序为选择、对方户名、交易时间、金额、按需出现的关联、摘要/用途/备注。主/子标签只在 rail 与右栏标题路径显示一次，行内不重复标签或银行账户。
-- 可选流水只使用表头 checkbox 统一全选/半选与逐行 checkbox；顶部仅在已有选择时显示选择数和“清空选择”。checkbox 必须渲染可见 control/indicator，不得只留下隐藏 input。
-- 本页 linked 提示只显示“已关联”和 OA/发票数量，不向用户渲染内部 relation case id；case id 仍保留在 API 数据与 Audit 证据中。
-- 右栏只有流水列表承担纵向滚动，表格不再创建嵌套纵向滚动区；窄屏按单列布局降级。
+- [web/src/pages/BankFlowRuleBatchPage.tsx](../../../web/src/pages/BankFlowRuleBatchPage.tsx)
+- [web/src/features/bankFlowRuleBatches/api.ts](../../../web/src/features/bankFlowRuleBatches/api.ts)
+- [backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py](../../../backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py)
+- [backend/src/fin_ops_platform/services/bank_flow_rule_batch_application_service.py](../../../backend/src/fin_ops_platform/services/bank_flow_rule_batch_application_service.py)
+- [backend/src/fin_ops_platform/services/postgres_repositories/bank_flow_rule_batch_canonical_query.py](../../../backend/src/fin_ops_platform/services/postgres_repositories/bank_flow_rule_batch_canonical_query.py)
+- [web/src/features/dateTime.ts](../../../web/src/features/dateTime.ts)
+- [backend/src/fin_ops_platform/services/bank_relation_requirement_recalculation.py](../../../backend/src/fin_ops_platform/services/bank_relation_requirement_recalculation.py)
+- [backend/src/fin_ops_platform/services/bank_details_canonical_query.py](../../../backend/src/fin_ops_platform/services/bank_details_canonical_query.py)
+- [backend/src/fin_ops_platform/services/bank_flow_rule_batch_canonical_query.py](../../../backend/src/fin_ops_platform/services/bank_flow_rule_batch_canonical_query.py)
+- [backend/src/fin_ops_platform/services/postgres_state_store.py](../../../backend/src/fin_ops_platform/services/postgres_state_store.py)
+- [web/e2e/bank-flow-rule-batches-flow.spec.ts](../../../web/e2e/bank-flow-rule-batches-flow.spec.ts)
+- [web/src/test/BankFlowRuleBatchPage.test.tsx](../../../web/src/test/BankFlowRuleBatchPage.test.tsx)
+- [web/src/test/BankFlowRuleBatchPolicy.test.ts](../../../web/src/test/BankFlowRuleBatchPolicy.test.ts)
+- [tests/test_bank_details_canonical_query.py](../../../tests/test_bank_details_canonical_query.py)
+- [tests/test_bank_flow_rule_batch_canonical_query_repository.py](../../../tests/test_bank_flow_rule_batch_canonical_query_repository.py)
+- [tests/test_bank_flow_rule_batch_application_service.py](../../../tests/test_bank_flow_rule_batch_application_service.py)
 
-## 不属于本模块事实源
-
-- 银行明细标签定义、自动匹配规则和分类确认归 `bank-details`。
-- Workbench relation canonical fact 归 `workbench-relations`。
-- 关联台 paired/unpaired 展示归 `reconciliation-workbench` direct query/hydration；
-  bank-flow 折叠摘要必须输出 `source_kind=bank_flow_rule_batch_summary`、
-  `invoice_relation.code=bank_flow_rule_batch` 和 `流水规则` display tag，不得复用
-  `no_oa_bank_batch_summary` 或 `免OA` 标签。
-- 旧 no-OA 批次历史事实仅作为 backend legacy API/read-model 兼容风险处理；本模块不再提供旧 no-OA 历史重算页面入口或 API。
-
-## 维护触发器
-
-发生以下变化时必须更新本目录和相关上游/下游模块文档：
-
-- 页面名称、路由、导航、抽屉 grid、筛选、分页、提交、撤回或权限变化。
-- 标签规则 DTO、默认值、乐观锁、审计、错误码或保存语义变化。
-- 批量提交 relation mode、metadata、折叠展示或 paired/open 判定变化。
-- 旧 no-OA 迁移/运维工具若未来重新引入，必须作为独立运维模块建模，不能挂回本页面链路。
-- canonical query、read-model cleanup、operation barrier、dirty scope 或 API response shape 变化。
-- Playwright E2E 业务验收范围变化。
-
-## 本目录文件
-
-- `boundary-io.md`：模块边界、I/O、持久化、文件范围、依赖方向和旧代码删除条件。
-- `state-machine.md`：标签规则、批量提交、关联台展示和 reset 状态机。
-- `tests.md`：七类测试适用性、计划测试入口和验证命令。
-- `e2e-spec.md`：Spec-first Playwright E2E 业务验收合同。
-- `e2e-coverage.md`：E2E spec 到当前自动化覆盖的映射和缺口。
-- `implementation-notes.md`：提炼后的决策、验收、风险和后续事项。
-
-## 2026-09-28 原始流水去重统计
-
-- Summary 的 `*_row_count` 是当前有效 canonical 原始流水笔数，不再累加用途行或历史批次成员次数。repository 在现有 canonical 查询中提供单位到 `parent_row_id` 的身份映射；service 在状态、标签及主/子标签各自集合内去重。
-- `label_counts` 输出 `primary_label`、`sub_label`（null 表示主标签汇总）与 `total_row_count/draft_row_count/submitted_row_count/withdrawn_row_count`，供分类栏直接显示；前端不得累加子分类数替代主分类去重数。
-- `total_row_count` 按各状态集合并集去重；历史撤回与当前提交/候选可能包含相同流水，因此各状态数不保证可加。已删除 canonical 流水或已移除用途成员没有可证明 parent 身份时不计业务实体数，但历史批次仍保留、可查看及按原合同操作。
-- `draft_count/submitted_count/withdrawn_count` 仍是操作批次数，用于内部存在性及批次分页；页面状态按钮改用原始流水笔数。分类栏移除“批·条”混用，只显示去重笔数，分页只显示页码。
-- 查询数保持不变，不修改批次冻结成员、金额、提交/撤回、权限、read model 或 worker。旧的成员数累加和浏览器跨类别相加链路已移除。
+通用查询、事务、权限与错误边界见[系统架构](../../../ARCHITECTURE.md)；验证方法见[开发说明](../../development.md)。测试文件是可执行证据，本文不保存某一次测试的通过记录。

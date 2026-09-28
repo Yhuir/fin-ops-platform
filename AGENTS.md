@@ -1,78 +1,15 @@
-# fin-ops-platform Agent 导航
+# fin-ops-platform 协作入口
 
-这份文件是本仓库的入口地图。它告诉后续 Agent 先读什么、去哪里找事实、哪些内容只作为历史归档。
+先读 [README](README.md)、[系统架构](ARCHITECTURE.md)，再从[模块索引](docs/modules/README.md)定位直接模块及上下游。每个模块的 README 是其职责、I/O、业务不变量和测试入口的唯一文档。
 
-## 读文档顺序
-
-1. `README.md`：项目定位、运行入口和文档地图。
-2. `ARCHITECTURE.md`：系统边界、模块关系、数据流和演进方向。
-3. `docs/index.md`：长期文档索引。
-4. `docs/app-architecture/README.md`：当前 app 架构、页面、运行时序和跨页面影响关系。
-5. `docs/modules/README.md`：按页面或关键功能域定位模块维护文档。
-6. `docs/architecture/module-boundaries/README.md`：模块边界、I/O、文件范围、read model 合同和 GSD 维护规则。
-7. `docs/product-specs/index.md`：按业务专题阅读需求。
-8. `docs/dev/index.md`：按开发任务查接口、测试和本地运行说明。
-9. `docs/operations/index.md`：部署、数据重置、备份、监控和故障处理。
-
-## 文档事实源
-
-- 产品和业务口径以 `docs/product-specs/` 为准。
-- 当前 app 页面、运行时调用链、read model/worker 和页面间影响关系以 `docs/app-architecture/` 为准。
-- 页面或关键功能域的日常维护入口以 `docs/modules/` 为准；模块文档用于定位上下文、状态机、测试矩阵和实施记录，不替代产品、架构、开发或运维长期事实源。
-- 模块边界、I/O、文件范围索引和 read model 合同以 `docs/architecture/module-boundaries/` 为准；模块级边界细节以对应 `docs/modules/<module>/boundary-io.md` 为准。
-- 系统边界和长期技术决策以 `ARCHITECTURE.md` 和 `docs/architecture/` 为准。
-- 运行、测试、接口契约以 `docs/dev/`、`backend/README.md`、`web/README.md` 为准。
-- 部署和生产操作以 `docs/operations/` 与 `deploy/oa/README.md` 为准。
-- 历史 prompt、旧计划和阶段执行记录不作为当前需求或架构依据；仍有价值的结论应提炼到长期文档。
-
-## 代码变更前的模块边界检查
-
-- 每次修改代码、新增功能、修 Bug、调整 API、改页面、改 read model/worker、改权限、改导入导出、改部署或删除旧代码前，必须先识别直接受影响模块和上下游受影响模块。
-- 使用 `docs/architecture/module-boundaries/inventory.md` 定位模块后，必须读取每个受影响模块的 `docs/modules/<module>/boundary-io.md`；不要只读模块 `README.md`。
-- 跨模块改动必须读取所有直接模块和上下游模块的 `boundary-io.md`，并明确输入 I/O、输出 I/O、文件范围、依赖方向和旧代码删除条件是否变化。
-- 涉及 read model 或 worker 时，还必须读取 `docs/architecture/module-boundaries/read-model-contracts.md`、`docs/modules/read-models/boundary-io.md`、`docs/modules/runtime-workers/boundary-io.md` 和 `docs/operations/runtime-worker-governance.md`。
-- 如果改动改变模块职责、输入 I/O、输出 I/O、文件范围、依赖方向、read model scope、worker、API response shape、权限、测试矩阵或旧代码删除条件，必须同步更新对应 `boundary-io.md`。
-
-## 写文档约定
-
-- 文档默认使用中文。
-- 每次修改或新增功能前，先识别目标页面/功能域，读取 `docs/architecture/module-boundaries/README.md`、`docs/architecture/module-boundaries/inventory.md`、`docs/modules/README.md`、对应 `docs/modules/<module>/README.md` 和 `docs/modules/<module>/boundary-io.md`；若涉及状态机、API、read model、worker、权限、部署或测试，还要读取该模块下的相关维护文档和其链接的长期事实源。
-- 每次功能、API、架构、read model/worker、运维、权限审计或数据流相关变更，都必须先做 docs impact assessment。
-- 每次修改或新增功能后，若模块事实、状态机、测试矩阵、跨页面影响、实施决策或验证方式发生变化，必须同步维护对应 `docs/modules/<module>/` 文档；如果目标模块目录不存在，先创建模块骨架并在 `docs/modules/README.md` 登记。
-- 每次模块边界、I/O、文件范围或 read model 合同变化后，必须同步维护 `docs/architecture/module-boundaries/` 和对应 `docs/modules/<module>/boundary-io.md`。
-- 只有影响长期事实源时才更新 docs：业务口径更新 `docs/product-specs/`，页面/API/运行时更新 `docs/app-architecture/` 或 `docs/dev/`，部署/数据安全/worker 更新 `docs/operations/`。
-- 纯内部实现、测试修复、无边界变化的小重构可以不改 docs，但最终说明必须写明 `docs 不适用`。
-- 长期重构可以维护状态机或 state log，例如 `docs/architecture/backend-refactor/migration-state-log.md`；state log 只记录进度和决策，不替代产品、API、架构或运维事实源。
-- 不把新的 Codex prompt 写进主文档树；模块目录中的 `implementation-notes.md` 只记录提炼后的目标、决策、验收和风险，不保存原始 prompt。
-- 不在根目录散放临时 Excel、PDF、ZIP、截图或导出物。
-- 大文件样例放本地 `fixtures/`，不要让自动化测试依赖真实业务文件。
-
-## 工作约束
-
-- 优先读取现有代码和现有文档，不猜测字段、接口或数据库结构。
-- 后端 Python 改动优先运行 `bash scripts/verify.sh lint`；需要自动修复导入排序时先运行 `python3 -m ruff check --select I --fix backend/src tests scripts`，再复跑 lint。
-- 需要生产 admin token 做性能验证、只读 smoke 或其它生产操作时，先使用 `scripts/with-production-admin-token.sh <command>` 自动加载本机 token；默认读取 `~/.config/fin-ops-platform/admin-token.env`，或读取 `FIN_OPS_LOCAL_ADMIN_TOKEN_ENV` 指定的文件。不要把 token 粘贴到聊天、提交到仓库或打印到日志；本机缺失时让用户运行一次 `scripts/with-production-admin-token.sh --store`。
-- 变更范围保持最小；如果整理范围扩大到重构代码或改变业务口径，先说明并等待确认。
-- 开发和修复默认采用 Ponytail 原则：先判断是否需要新增代码，优先复用现有模块、边界、helper、service、repository、read model gateway 和测试模式；删除旧逻辑优先于叠加兼容分支，不为未来需求新增抽象。
-- 复杂设计、跨模块改动、边界不清、旧链路迁移或生产级风险变更前，必须先做 grill-me 式追问：目标、受影响模块、输入 I/O、输出 I/O、事实源、旧链路、测试责任和回滚风险是否清楚；不清楚则先澄清或查代码事实源。
-- 开发和修复必须遵循当前模块化架构，保持清晰边界和 I/O；禁止让页面、route、service、repository、worker、read model、API DTO 互相污染职责。
-- 修复旧模块或迁移新链路时，必须识别并移除会继续影响新链路的旧代码逻辑；不要用并行旧路径、隐藏 fallback 或重复实现来绕过当前边界。
-- 删除或替换旧逻辑前，必须对受影响链路做全量扫描：入口、调用方、API client、service、repository、worker、read model、测试和文档；跨模块或删除公共符号时，还必须做 whole-repo symbol/text scan。
-- 大型跨模块、read model/worker、后端边界重构或需要全量定位的任务必须使用 GSD 流程。GSD 过程产物可以留在 `.planning/`，但长期事实必须沉淀到 `docs/`；不要把原始 prompt 写入主文档树。
-- 修复旧模块时，优先保持最小变更；但当旧模块职责边界已经错误，且继续补丁会让接口约定、数据流、测试责任或运维边界更分散时，不要在旧模块继续堆砌代码。应先设计符合当前架构方向的中心边界，小步迁移调用点，再删除重复、过期或绕过新边界的旧路径。此类重构必须有测试保护，并且不得扩大到与当前目标无关的业务行为。
-- 生产级需求必须同时考虑权限、审计、回滚、数据一致性和验证方式。
-- 后端改动必须遵循现有重构方向：`server.py` 只做路由、依赖组装和 HTTP 映射；业务逻辑放入 `services/`；持久化和 SQL 细节放入 repository；后台任务放入 worker/service。
-- service 构造函数必须接收明确依赖，例如 repository、queue、store、orchestrator、settings provider；不要把整个 `Application` 传给 service。
-- service 不直接读取 HTTP cookie/header，不直接 import `app.auth`，不构造 Flask/HTTP response。
-- repository 可以知道 SQL 表结构；业务 service 不应散落 SQL。
-
-## Worker + Read Model 治理约束
-
-- Worker 不得依赖 `Application`、`app.server`、`app.auth`、HTTP response 或 HTTP 状态对象。
-- Read model 查询必须走 freshness/status/enqueue 边界，不能让页面读旧 read model 却伪装 fresh。
-- Read model refresh 的事实源是 PostgreSQL durable queue：`job.outbox_events` 与 `job.read_model_dirty_scopes`。
-- 所有非事务 read model refresh 请求必须先通过 `ReadModelRefreshGateway` / scope policy registry 做 normalize、validate 和 dedupe，再委托 `RuntimeQueueRepository.enqueue_read_model_refresh(...)`；事务内 writer 必须保持同一业务事务并承担等价 scope contract。业务 service 不直接 SQL 写 `job.outbox_events` 或 `job.read_model_dirty_scopes`。
-- Redis 只能缓存 fresh gate 之后的 payload；RabbitMQ 只能作为可选 transport/wakeup，不能作为 read model 状态事实源。
-- 新增 read model 或 worker 时，必须同步更新 registry、manifest/systemd env、tests、docs。
-- `workbench` 保留 active generation 原子发布模型；不要把它机械套成普通 read model gateway。
-- 生产发布入口是 `./scripts/deploy-oa.sh`。发布和运维细节以 `docs/operations/runtime-worker-governance.md` 与 `deploy/oa/README.md` 为准。
+- 先核对代码、API/schema 与测试，不把文档描述当作实现证据。当前页面从 PostgreSQL canonical facts 直读。
+- 保持模块化单体与明确 owner；route 只做鉴权、参数和 HTTP 映射，业务在 service，SQL 在 repository，异步执行在登记 worker。
+- 修改前识别输入/输出、调用方、共享状态、权限和跨页面影响。删除符号时全仓检查静态引用、动态注册、部署配置、测试和文档。
+- 复用既有能力，保持最小差异。不加隐藏 fallback、兼容旧链、重复抽象或无实际用途的门禁。不能把正常错误处理、幂等和事务回滚当作冗余删除。
+- 新行为先明确合同，再修改有意义的相关测试；纯文档不机械新增业务测试。验证入口见[开发说明](docs/development.md)。不能用跳过、放宽断言或删除有效测试隐藏失败。
+- Python 修改运行 `bash scripts/verify.sh lint`；必要时只对相关文件用 Ruff 修复 import 排序。
+- 文档默认中文，只维护当前事实，不生成计划、状态日志、执行记录或退役说明。修改边界/业务/操作方式时更新对应最终文档；纯内部实现可说明文档不适用。
+- 不默认启动 GSD、建立新文档体系或做无关重构。范围扩大到业务/API/数据库结构变化时先明确说明。
+- 生产发布只用 `./scripts/deploy-oa.sh`，具体安全和恢复合同见[运行说明](docs/operations.md)。生产 token 只通过 `scripts/with-production-admin-token.sh <command>` 加载，不打印或提交。
+- 主数据库不可删除。测试使用明确可丢弃的独立数据库；任务自产恢复工件验证后按对应工具的精确清理合同删除，不触碰常规备份。
+- 完成后报告改动、验证命令、实际结果和剩余风险；涉及行为修改时说明七类测试的适用性：业务、service、API、异步/缓存、前端、跨模块链路、既有回归。

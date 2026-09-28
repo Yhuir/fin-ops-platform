@@ -1,61 +1,40 @@
-# 待找发票 模块维护入口
+# 待找发票
 
+入口：`/pending-invoices`。
 
-- Module key: `pending-invoices`
-- 类型: 页面模块
-- Route: `/pending-invoices`
-- Page key: `pending-invoices`
+按银行收支用途核对发票取得状态，提供候选选择、已有发票关联、收入状态维护和规则设置。
 
-## 修改前必读
+## 边界与 I/O
 
-- `docs/product-specs/invoice-lifecycle.md`
-- `docs/app-architecture/runtime-and-ownership.md`
-- `docs/app-architecture/pages.md`
-- `docs/dev/api-contracts.md`
-- `docs/operations/runtime-worker-governance.md`
+输入：direction/filter/date/keyword/field filters/sort/page/include_statistics；写操作输入精确流水/发票集合、版本与受信 actor。输出：rows、summary、statistics、acquisition_summary、候选、详情和导出。
 
-## 代码入口
+## 当前业务约定
 
-- `web/src/pages/PendingInvoicesPage.tsx`
-- `web/src/components/pendingInvoices/*`
-- `web/src/features/pendingInvoices/api.ts`
-- `backend/src/fin_ops_platform/app/routes_pending_invoices.py`
-- `backend/src/fin_ops_platform/services/pending_invoice_canonical_query.py`
-- `backend/src/fin_ops_platform/services/pending_invoice_service.py`
-- `backend/src/fin_ops_platform/services/pending_invoice_rules_application_service.py`
+- 银行分类复用银行 owner；关系读取 active typed members，跨月关系不按当前月份截断，排除 turnover_manual_closure。
+- OA completed/in-progress 与 ETC 正式发票成员都来自 PostgreSQL 当前事实；银行用途与父流水金额区分，原始流水计数按父身份去重。
+- 两层状态统计按完整筛选计算，状态自身条件从状态候选统计中排除；九类状态包含真实零值，不从当前页推导。
+- 首屏不聚合高基数候选，filter-options 后续有界读取，每字段最多 50 项；发票候选使用服务端过滤排序分页。
+- 关联命令由正式关系 owner 提交；失败保留用户选择，成功才回读。合法空集、加载和错误分开显示。
+- 详情只返回公开来源字段；导出复用业务查询，最大 20,000 行，超限明确报错。
 
-## 当前边界
+## 依赖方向
 
-页面只调用 `/api/pending-invoices/*`。生产只读请求由 `PendingInvoiceCanonicalQueryService` 和 `PostgresPendingInvoiceCanonicalRepository` 直接读取 PostgreSQL canonical facts；route 只负责鉴权、参数转交与 HTTP 映射。页面不读取 `pending_invoice`、`bank_detail`、`workbench_relation` 或 `search` read model，不再展示或轮询 `read_model_status`、`source_versions`、refresh job，也没有 202/fallback 分支。
+[银行明细](../bank-details/README.md)、[正式关联关系](../workbench-relations/README.md)、[发票导入](../imports-invoices/README.md)、[OA 待付款核对](../oa-pending-payments/README.md)。依赖表示调用或事实消费，不允许读取其它页面的展示结果作为业务事实。
 
-rows、summary、全期间 statistics、filter options、筛选、排序、服务端分页和导出使用 bounded set-based SQL。一次 rows 响应在同一个显式 `REPEATABLE READ / READ ONLY` snapshot 内读取 app settings 与页面查询；固定两次 SELECT，不逐行/逐组访问数据库，不先把全量 payload 加载到 Python 或浏览器。
+## 代码与验证入口
 
-页面事实来自 `app.bank_transactions`、`app.bank_transaction_categories`、`app.bank_transaction_category_confirmations`、`app.pending_invoice_manual_invoice_commands`、`app.invoices`、`app.oa_applications`、`app.app_settings`。正式配对关系只来自 `app.workbench_pair_relations` 中 `status='active'` 的事实，并排除 `relation_mode='turnover_manual_closure'`；跨月 relation 不按当前月截断。
+- [web/src/pages/PendingInvoicesPage.tsx](../../../web/src/pages/PendingInvoicesPage.tsx)
+- [web/src/features/pendingInvoices/api.ts](../../../web/src/features/pendingInvoices/api.ts)
+- [backend/src/fin_ops_platform/app/routes_pending_invoices.py](../../../backend/src/fin_ops_platform/app/routes_pending_invoices.py)
+- [backend/src/fin_ops_platform/services/pending_invoice_canonical_query.py](../../../backend/src/fin_ops_platform/services/pending_invoice_canonical_query.py)
+- [backend/src/fin_ops_platform/services/pending_invoice_service.py](../../../backend/src/fin_ops_platform/services/pending_invoice_service.py)
+- [backend/src/fin_ops_platform/services/pending_invoice_rules_application_service.py](../../../backend/src/fin_ops_platform/services/pending_invoice_rules_application_service.py)
+- [backend/src/fin_ops_platform/app/server.py](../../../backend/src/fin_ops_platform/app/server.py)
+- [tests/test_pending_invoice_canonical_query.py](../../../tests/test_pending_invoice_canonical_query.py)
+- [tests/test_pending_invoice_api.py](../../../tests/test_pending_invoice_api.py)
+- [tests/test_etc_relation_page_reads_postgres.py](../../../tests/test_etc_relation_page_reads_postgres.py)
+- [tests/test_bank_split_consumers_postgres.py](../../../tests/test_bank_split_consumers_postgres.py)
+- [tests/test_pending_invoice_service.py](../../../tests/test_pending_invoice_service.py)
+- [tests/test_pending_invoice_relation_identity.py](../../../tests/test_pending_invoice_relation_identity.py)
 
-状态仍由已有 `pending_invoice_status_payload` 业务策略校验：支出/收入/现金收入、`paid_invoiced`、无需开票、OA/进销项覆盖、规则优先级和收入 override 口径不变。SQL 分类结果若与领域策略不一致会失败，而不是静默返回另一套口径。
-
-候选发票、流水/发票/OA 详情和 relation detail 同样走页面 canonical repository。选择已有发票、收入状态、规则保存的权限、审计、幂等、CAS/占用冲突和 command/relation 写模型保持不变；写成功后页面重新 GET canonical facts，不等待 read-model barrier。
-
-待找发票不创建新发票。旧 `preview_manual_invoice` / `confirm_manual_invoice` service 写链已经删除；用户需要单张录入时只能进入“发票导入 → 发票录入”，由统一 file import preview/confirm job 写入 canonical 发票池，且不会自动关联当前银行流水。
-
-页面使用共享 `FinanceTable` 的有界表内滚动和 sticky 表头；HeroUI 页容量选择器、范围和上一页/下一页统一位于表格 footer，不保留表格外的旧分页容器。
-
-`pending_invoice`、`search-pending`、`invoice_lifecycle` 页面 projection/worker 与独立 Search runtime 已删除。`workbench_relation` 共享 distribution 仅供仍登记消费者使用，本页面直接读取 canonical facts，不消费它。
-
-## 维护触发器
-
-发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
-
-- 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。
-- API contract、DTO shape、错误字段、权限校验、状态值或响应 freshness 字段变化。
-- 业务状态、UI 状态、read model 状态、worker 状态或状态流转变化。
-- 跨页面刷新、domain event、derived lifecycle、dirty scope、outbox 或缓存边界变化。
-- 测试入口、回归范围、验证命令或未测风险变化。
-
-## 本目录文件
-
-- `e2e-spec.md`：维护 Spec-first Browser E2E 用户流程和验收合同。
-- `e2e-coverage.md`：维护 Spec ID 到 Playwright/API/integration 覆盖的映射和缺口。
-- `state-machine.md`：维护当前有效状态和状态流转；不适用时写明原因。
-- `tests.md`：维护七类测试适用性、现有测试入口、验证命令和回归范围。
-- `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。
+通用查询、事务、权限与错误边界见[系统架构](../../../ARCHITECTURE.md)；验证方法见[开发说明](../../development.md)。测试文件是可执行证据，本文不保存某一次测试的通过记录。

@@ -316,6 +316,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         app._bank_flow_rule_batch_canonical_query_repository = SimpleNamespace(
             read_page=lambda *_args, **_kwargs: {
                 "candidate_rows": candidate_rows,
+                "bank_parent_ids": {},
                 "active_relations": [],
                 "formal_items": [],
                 "tag_policy": app._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload(),

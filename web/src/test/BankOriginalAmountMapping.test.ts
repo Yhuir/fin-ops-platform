@@ -3,6 +3,8 @@ import { fetchInputInvoiceUsageRows } from '../features/inputInvoiceUsage/api';
 import { fetchOutputInvoiceCollectionRows } from '../features/outputInvoiceCollections/api';
 import { mapPendingInvoiceRow } from '../features/pendingInvoices/api';
 
+import { OUTPUT_COLLECTION_STATUS_CODES } from '../features/outputInvoiceCollections/types';
+
 const bank = { id: 'interest', parent_row_id: 'loan', amount: '1497.22', original_amount: '1001497.22', counterpartyName: '贷款户' };
 const parts = [{ id: 'interest', category_code: 'interest', category_label: '利息', category_path: ['费用', '利息'], amount: '1497.22' }];
 const query = { page: 1, pageSize: 20, keyword: '', invoiceDateFrom: '', invoiceDateTo: '', month: '', filters: [], sortField: '', sortDirection: '' as const };
@@ -12,7 +14,7 @@ test.each([
   ['input', fetchInputInvoiceUsageRows],
   ['output', fetchOutputInvoiceCollectionRows],
 ] as const)('%s preserves business amount and reads parent display aggregate without summing child identities', async (_name, fetchRows) => {
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ rows: [{ id: 'invoice', invoice: {}, bank: {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ filterOptions: [{ field: 'collection_status', options: OUTPUT_COLLECTION_STATUS_CODES.map((value, index) => ({ value, label: value, count: index === 0 ? 1 : 0 })) }], rows: [{ id: 'invoice', collectionStatus: { code: 'pending_collection', label: '收款待核对' }, invoice: {}, bank: {
     primary: bank, summaries: [bank, { ...bank, id: 'principal', amount: '1000000.00' }],
     original_amount: '1001497.22', original_transaction_count: 1, bank_split_parts: parts,
     relationCount: 2, receivedTotal: '1497.22',

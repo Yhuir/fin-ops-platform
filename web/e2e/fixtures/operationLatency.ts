@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { Page, TestInfo } from "@playwright/test";
@@ -145,7 +146,7 @@ export type WorkbenchDirectCommitVisibilityRecorder = {
 };
 
 const workbenchDirectCommitVisibilityReportPath = fileURLToPath(new URL(
-  "../../../.planning/phases/40-performance-contract-hot-path-closure/40-workbench-direct-commit-visibility-p99.json",
+  "../../../outputs/workbench-direct-commit-visibility-p99.json",
   import.meta.url,
 ));
 
@@ -272,6 +273,7 @@ export function createWorkbenchDirectCommitVisibilityRecorder(
       )) {
         throw new Error("production smoke cannot replace missing or failed isolated p99 evidence");
       }
+      await mkdir(dirname(workbenchDirectCommitVisibilityReportPath), { recursive: true });
       const temporaryPath = `${workbenchDirectCommitVisibilityReportPath}.${process.pid}.tmp`;
       await writeFile(temporaryPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
       await rename(temporaryPath, workbenchDirectCommitVisibilityReportPath);

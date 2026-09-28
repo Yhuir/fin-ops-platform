@@ -33,7 +33,7 @@ class PlaywrightE2EStrictDiagnosticsTests(unittest.TestCase):
             "receipt_to_dom_us",
             "isolated",
             "production_smoke",
-            "40-workbench-direct-commit-visibility-p99.json",
+            "outputs/workbench-direct-commit-visibility-p99.json",
             "import.meta.url",
         ):
             self.assertIn(required, helper)
@@ -113,9 +113,9 @@ class PlaywrightE2EStrictDiagnosticsTests(unittest.TestCase):
         for spec_path in sorted(E2E_DIR.glob("*.spec.ts")):
             source = spec_path.read_text(encoding="utf-8")
             relative = spec_path.relative_to(REPO_ROOT).as_posix()
-            if 'from "@playwright/test"' in source:
+            if re.search(r"""from\s+["']@playwright/test["']""", source):
                 direct_imports.append(relative)
-            if 'from "./fixtures/strictTest"' not in source:
+            if not re.search(r"""from\s+["']\./fixtures/strictTest["']""", source):
                 missing_strict_imports.append(relative)
 
         self.assertEqual(
@@ -219,6 +219,10 @@ class PlaywrightE2EStrictDiagnosticsTests(unittest.TestCase):
             r"成功|已保存|已创建|已提交|已确认|已撤回|导入成功|保存|确认导入|POST /api|PUT /api|DELETE /api|PATCH /api",
         )
         allowed_without_guard = {
+            # Read-only layout/preview specs inspect labels and assert no mutation.
+            "web/e2e/etc-batch-rail-layout.spec.ts",
+            "web/e2e/segmented-controls.spec.ts",
+            "web/e2e/workbench-preview-layout.spec.ts",
             "web/e2e/oa-pending-payments-nonfresh-flow.spec.ts",
             "web/e2e/permissions-role-matrix.spec.ts",
             "web/e2e/workbench-permissions-flow.spec.ts",

@@ -1,7 +1,7 @@
 import { expect, test } from "./fixtures/strictTest";
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
-// UI-SEG-01..04: docs/dev/segmented-controls.md. Synthetic API only.
+// UI-SEG-01..04: docs/ui.md. Synthetic API only.
 test("continuous native controls keep one cost view, no reselection read, and contained narrow geometry", async ({ page }, testInfo) => {
   await installDeterministicApiMocks(page, { sessionMode: "user" });
   const reads: string[] = [];

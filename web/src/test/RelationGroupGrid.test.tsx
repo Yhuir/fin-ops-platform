@@ -583,6 +583,8 @@ describe("Workbench candidate grouping layout", () => {
       scope_key: "all",
       oa_status: { code: "ready", message: "OA 已同步" },
       summary: {
+        unpaired_exception_counts: { oa: 0, bank: 0, invoice: 0 },
+        paired_exception_counts: { oa: 0, bank: 0, invoice: 0 },
         oa_count: 0,
         bank_count: 3,
         invoice_count: 0,
@@ -779,6 +781,12 @@ describe("Workbench candidate grouping layout", () => {
           }),
           { status: 200 },
         );
+      }
+      if (url.pathname === "/api/bank-flow-rule-batches/BANKFLOW-202603-FEE" && url.searchParams.get("view") === "formal") {
+        return new Response(JSON.stringify({
+          batch: { batch_id: "BANKFLOW-202603-FEE", batch_label: "流水规则手续费批次", status: "submitted", can_withdraw: true, version: 7, total_amount: "100.00" },
+          rows: payload.paired.groups[0].bank_rows.map(row => ({ transaction_id: row.id, amount: row.debit_amount })),
+        }), { status: 200 });
       }
       if (url.pathname === "/api/bank-flow-rule-batches/BANKFLOW-202603-FEE/withdraw") {
         expect(init?.method).toBe("POST");
@@ -2087,6 +2095,12 @@ describe("Workbench candidate grouping layout", () => {
     const groupRow = await screen.findByTestId("candidate-group-paired-bank-flow-rule-batch:BANKFLOW-202603-FEE");
     fireEvent.click(within(groupRow).getAllByRole("row").find((row) => row.hasAttribute("data-row-id"))!);
     fireEvent.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
+
+    const preview = await screen.findByRole("dialog", { name: "撤回关联" });
+    const confirm = await within(preview).findByRole("button", { name: "确认撤回" });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/withdraw"))).toBe(false);
+    fireEvent.click(confirm);
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(

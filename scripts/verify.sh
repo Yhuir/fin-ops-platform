@@ -105,80 +105,9 @@ run_e2e() {
   npm run e2e:smoke
 }
 
-find_stale_doc_refs() {
-  local pattern="$1"
-  if command -v rg >/dev/null 2>&1; then
-    rg -n "$pattern" README.md docs backend web deploy -g '*.md' -g '!docs/dev/testing.md'
-    return
-  fi
-  git grep -n -E "$pattern" -- \
-    README.md \
-    ':(glob)docs/**/*.md' \
-    ':(glob)backend/**/*.md' \
-    ':(glob)web/**/*.md' \
-    ':(glob)deploy/**/*.md' \
-    ':(exclude)docs/dev/testing.md'
-}
-
-doc_file_matches() {
-  local pattern="$1"
-  local path="$2"
-  if command -v rg >/dev/null 2>&1; then
-    rg -q "$pattern" "$path"
-    return
-  fi
-  grep -Eq "$pattern" "$path"
-}
-
 run_docs() {
   cd "$ROOT_DIR"
-  stale_refs="$(find_stale_doc_refs "docs/product/|OA 集成当前 app 技术方案" || true)"
-  if [[ -n "$stale_refs" ]]; then
-    printf '%s\n' "$stale_refs"
-    echo "Stale documentation reference found." >&2
-    exit 1
-  fi
-
-  for required in \
-    docs/dev/testing.md \
-    docs/dev/nightly-ci.md \
-    docs/dev/spec-first-e2e-audit.md \
-    docs/dev/spec-first-e2e-inventory.md \
-    docs/dev/testing-closure-state.md \
-    docs/dev/testing-closure-dependency-map.md \
-    docs/modules/README.md \
-    .planning/README.md
-  do
-    if [[ ! -f "$required" ]]; then
-      echo "Missing required documentation file: $required" >&2
-      exit 1
-    fi
-  done
-
-  if ! doc_file_matches "不作为当前需求、架构、API 或验收事实源" .planning/README.md; then
-    echo ".planning/README.md must state that GSD records are not current facts." >&2
-    exit 1
-  fi
-
-  if ! doc_file_matches "不作为当前 app 后端、API、read model、worker 或生产运行事实源" docs/refactor-ui/README.md; then
-    echo "docs/refactor-ui/README.md must scope prompt/state files to UI migration only." >&2
-    exit 1
-  fi
-
-  if ! doc_file_matches "\.planning/.*不作为当前需求、架构、API 或验收事实源" docs/index.md; then
-    echo "docs/index.md must document the .planning fact-source boundary." >&2
-    exit 1
-  fi
-
-  while IFS= read -r module_readme; do
-    module_dir="$(dirname "$module_readme")"
-    for required in e2e-spec.md e2e-coverage.md; do
-      if [[ ! -f "$module_dir/$required" ]]; then
-        echo "Missing Spec-first E2E documentation file: $module_dir/$required" >&2
-        exit 1
-      fi
-    done
-  done < <(find docs/modules -mindepth 2 -maxdepth 2 -name README.md | sort)
+  python3 -m unittest tests.test_documentation -v
 }
 
 run_infra_smoke() {

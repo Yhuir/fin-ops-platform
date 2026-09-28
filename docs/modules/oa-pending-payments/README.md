@@ -1,101 +1,37 @@
-# OA 待付款核对模块维护入口
+# OA 待付款核对
 
-- Module key：`oa-pending-payments`
-- Route：`/oa-pending-payments`
-- Page key：`oa-pending-payments`
-- 当前状态：页面通过 PostgreSQL canonical facts 直读；无页面 read model。
+入口：`/oa-pending-payments`。
 
-## 修改前必读
+展示准入的进行中/已完成 OA，核对支付与正式关系，支持选择银行流水建立或扩展关系。
 
-- `docs/modules/oa-pending-payments/boundary-io.md`
-- `docs/modules/oa-pending-payments/state-machine.md`
-- `docs/modules/oa-pending-payments/tests.md`
-- `docs/modules/oa-pending-payments/performance-integrity-design.md`
-- `docs/modules/oa-integration/boundary-io.md`
-- `docs/modules/workbench-relations/boundary-io.md`
-- `docs/modules/input-invoice-usage/boundary-io.md`
-- `docs/modules/permissions-and-audit/boundary-io.md`
+## 边界与 I/O
 
-## 代码入口
+输入：分页、日期、搜索、状态与排序，以及 OA/银行精确身份和命令版本。输出：canonical OA rows、summary/statistics、关系与来源详情、候选及导出。
 
-- 前端：`web/src/pages/OaPendingPaymentsPage.tsx`、`web/src/components/oaPendingPayments/*`、`web/src/features/oaPendingPayments/*`
-- API route：`backend/src/fin_ops_platform/app/routes_oa_pending_payments.py`
-- 页面 query service：`backend/src/fin_ops_platform/services/oa_pending_payment_query_service.py`
-- 页面 PostgreSQL repository：`backend/src/fin_ops_platform/services/postgres_repositories/oa_pending_payment_query.py`
-- 查询/导出合同与纯组装：`oa_pending_payment_query_contract.py`、`oa_pending_payment_export.py`、`oa_pending_payment_canonical_rows.py`、`oa_pending_payment_details.py`
-- 命令：`oa_pending_payment_command_service.py`、`workbench_relation_command_service.py`
-- Canonical snapshot owners：`postgres_repositories/oa_pending_payment_source_snapshot.py`、`oa_pending_payment_admission.py`、`oa_projection.py`
-- 支付状态自动同步：`oa_payment_status_reconcile.py`、`oa_payment_status_reconcile_contract.py`、`postgres_repositories/oa_payment_status_reconcile.py`；复用 `oa-sync` worker。
-- System Audit 子页 proof：`postgres_repositories/page_business_audit.py`；OA 待付款页面不展示 Audit 控件。
+## 当前业务约定
 
-## 当前有效读链路
+- 页面只读 PostgreSQL OA、准入与支付状态快照；请求热路径不访问外部财务源。
+- 关系创建/扩展调用正式关系 owner，唯一 active case 可扩展并保留原发票；多个 owner 或版本冲突明确失败。
+- OA source 的权威同步负责准入变化、源删除及关系成员清理；页面不猜外部删除。
+- 支付状态由 OA worker 根据当前 active outflow 关系收敛，有支出为已支付、无支出为待支付；失败状态不被自动覆盖。
+- OA 财务事实变化按实际月份通知匹配；仅支付状态变化不重新匹配。
+- 分段数量按真实 OA 身份计算，详情按需读取，分页与金额统计同快照。
 
-```text
-browser
-  -> GET /api/oa-pending-payments/rows
-  -> route：单次鉴权、参数转交、HTTP 映射
-  -> OaPendingPaymentQueryService
-  -> PostgresOaPendingPaymentQueryRepository
-  -> REPEATABLE READ / READ ONLY snapshot
-     -> completed OA + in-progress admission + payment-status snapshots
-     -> app.workbench_pair_relations(status=active)
-     -> canonical bank/input-invoice facts
-     -> SQL filters/sort/paging/summary/facets + 当前页批量 hydrate
-  -> 200 canonical JSON
-```
+## 依赖方向
 
-页面请求不访问 OA Mongo/MySQL、对象存储、Redis、RabbitMQ、read-model queue、Workbench 页面 payload 或 `workbench_relation` projection。`rows`、`summary`、`statistics`、`filterOptions` 和当前页 descriptors 在同一个显式数据库快照内读取；详情和银行候选分别使用同一 repository 的只读快照。
+[OA 集成](../oa-integration/README.md)、[正式关联关系](../workbench-relations/README.md)、[银行明细](../bank-details/README.md)、[后台任务](../runtime-workers/README.md)。依赖表示调用或事实消费，不允许读取其它页面的展示结果作为业务事实。
 
-导出链路为 `GET /api/oa-pending-payments/export?sources=completed,in_progress`。它在一个只读快照中直接读取 `app.oa_applications` 和 `app.oa_pending_payment_admissions`，以 write-only workbook 生成 XLSX；不读取或导出流水、发票、关系、read model、raw payload，也不受页面月份、搜索、筛选、排序和分页影响。
+## 代码与验证入口
 
-前端只保留 loading、empty、error、手工刷新和写后重新 GET。页面不解释 `read_model_status`、source versions、refresh enqueue、`202`、`304` 或 ETag，也不做 polling。
+- [web/src/pages/OaPendingPaymentsPage.tsx](../../../web/src/pages/OaPendingPaymentsPage.tsx)
+- [backend/src/fin_ops_platform/app/routes_oa_pending_payments.py](../../../backend/src/fin_ops_platform/app/routes_oa_pending_payments.py)
+- [backend/src/fin_ops_platform/services/oa_pending_payment_query_service.py](../../../backend/src/fin_ops_platform/services/oa_pending_payment_query_service.py)
+- [backend/src/fin_ops_platform/services/postgres_repositories/oa_pending_payment_query.py](../../../backend/src/fin_ops_platform/services/postgres_repositories/oa_pending_payment_query.py)
+- [tests/test_etc_relation_page_reads_postgres.py](../../../tests/test_etc_relation_page_reads_postgres.py)
+- [tests/test_bank_split_document_scope_postgres.py](../../../tests/test_bank_split_document_scope_postgres.py)
+- [tests/test_mongo_oa_adapter.py](../../../tests/test_mongo_oa_adapter.py)
+- [tests/test_oa_projection_sql_runtime.py](../../../tests/test_oa_projection_sql_runtime.py)
+- [tests/test_oa_pending_payment_source_snapshot_repository.py](../../../tests/test_oa_pending_payment_source_snapshot_repository.py)
+- [tests/test_oa_payment_status_reconcile_service.py](../../../tests/test_oa_payment_status_reconcile_service.py)
 
-## 页面合同
-
-- 首屏和所有列表查询只调用 `GET /api/oa-pending-payments/rows`；旧 `filter-options` endpoint 保持不存在。
-- 成功响应固定为 `200`，公开字段为 `rows`、`pagination`、`summary`、`statistics`、`filterConfig`、`filterOptions`、`appliedFilters`、`sort`、`viewMode`。
-- 不返回 `readModelStatus`、`read_model_status`、source versions、refresh target、job、cache/version metadata。
-- 筛选、排序、分页、summary、facets 均由 SQL set-based 执行；最大 `page_size=200`，禁止浏览器或 Python 全量分页。
-- OA、银行、发票和 relation detail 继续惰性读取；未找到返回结构化 `404`，非法查询返回 `400`。
-- `bank-transaction-candidates` 直接从 PostgreSQL bank facts 与 active formal relations 做状态筛选、排序和分页；不再经 command service 全量加载。
-- `paymentStatus` 仍由既有纯业务组装和 lifecycle policy 计算，前端不得自行推断。
-- 右上角“导出 OA”只允许选择 `completed` / `in_progress`，默认全选且至少选择一种；返回一个 XLSX，选中的每个来源对应一个 sheet，空来源保留表头，最多 20,000 条 OA。
-
-## Completed 与 in-progress
-
-- `completed` 主行来自 `app.oa_applications`。
-- `in_progress` 主行来自 `app.oa_pending_payment_admissions`。
-- completed 正式关系读取 `app.workbench_pair_relations` 中全部 `status='active'` 的事实。
-- `turnover_manual_closure` 等混合收支关系中，只有成功解析的 outflow bank member 是本页支付证据；inflow 只保留为周转上下文，不进入页面流水、已付金额或写回金额。
-- completed 与 in-progress 关系统一读取 `app.workbench_pair_relations.status='active'`；workflow status 只决定关联台 paired/unpaired gate，不产生 pending owner 或 promotion。
-- 银行流水和发票只是 relation evidence，不替代 OA 主行。
-
-## 支付状态自动同步
-
-页面与 page command 不直接写 OA 支付状态。正式 relation 的 repository 在关系创建、扩展、撤回或恢复事务中登记 `oa.payment_status.reconcile` durable event；现有 `oa-sync` worker 始终查询最新 active topology：存在 OA+canonical outflow 就写已支付，金额差额只保留为异常；不存在 active outflow 时写待支付，不保留历史写回归属门禁。完整 `all` OA 权威同步在生命周期去重后、local retention 过滤前提取 current canonical OA 的 Mongo 文档 ID 与 `flowRequestId/processId` 支付身份，并与完整 MySQL payment-status flow 集合比较；只有 flow 在 current canonical OA 源中确实消失时，才在同一 snapshot 事务删除 PostgreSQL 状态并登记外部删除事件。worker 执行 MySQL DELETE 前以候选确定性身份定位原始文档，再按业务编号重读同组流程并执行 lifecycle arbitration，同时合并已完成投影与进行中准入；历史 raw document 仍在但已被新流程取代时继续删除，源读取失败则事件失败重试。月度同步、精确刷新和本地 retention 裁剪不能证明 OA 源删除，因此不得删除外部状态。收入、inactive/candidate、缺 flow id 和 `pay_status=2` 均不得伪造成功。
-
-`link-bank-transactions` 只负责正式关系命令，成功响应 `paymentStatusSync.code=queued`。人工 `writeback-paid` / `confirm-paid` API、按钮和 direct command 写入均已删除。外部 MySQL 与 PostgreSQL snapshot 由同一幂等 worker handler 收敛，页面只通过普通 GET 观察结果，不回退读取外部系统。
-
-## 旧链清理结果
-
-`oa_pending_payment` 旧 read model、projector、worker、manifest、App Status registry、deploy env 和 invoice-lifecycle 间接依赖已删除。invoice lifecycle 页面也已切换为 canonical direct read。历史 migration/表暂留作回滚证据，没有运行时 reader/writer。
-
-旧 pending relation repository、bank claim、promotion service 及关联台 claim 排除链已删除；migration `0136` 后旧关系表只读审计，不参与页面或写命令。
-
-## 明确不做
-
-- 不新增 cache、worker、queue、materialized view、统一大而全 service、双读或 fallback。
-- 不在 route/server 堆 SQL 或业务组合，不把 `Application` 传入 service。
-- 不读取 Workbench page read model 或 `workbench_relation` projection 作为正式关系事实。
-- 不因缺少生产 `EXPLAIN` 证据新增索引；索引建议和 migration 编号由主控统一处理。
-
-## 本目录文件
-
-- `boundary-io.md`：模块边界、直接/上下游 I/O、事实所有权和旧链删除状态。
-- `state-machine.md`：业务、UI、写回和错误状态。
-- `tests.md`：七类测试责任、命令和剩余风险。
-- `performance-integrity-design.md`：查询次数、快照和生产性能门槛。
-- `e2e-spec.md` / `e2e-coverage.md`：浏览器合同与覆盖映射。
-- `implementation-notes.md`：历史实施记录；历史 read-model 设计不覆盖本页当前合同。
-
-两层流程/支付流水切换与分页计数的区别见 [实体计数合同](boundary-io.md#2026-09-28-oa-实体计数与支付流水切换)。
+通用查询、事务、权限与错误边界见[系统架构](../../../ARCHITECTURE.md)；验证方法见[开发说明](../../development.md)。测试文件是可执行证据，本文不保存某一次测试的通过记录。

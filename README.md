@@ -1,77 +1,23 @@
-# fin-ops-platform
+# 财务运营平台
 
-`fin-ops-platform` 是一个以银企核销为核心的财务运营平台，覆盖导入、关联工作台、核销、台账、OA 接入、税金抵扣、ETC、成本统计、银行明细、免 OA 批次和后台任务治理。
+面向财务人员的 OA、银行流水与发票核对平台，提供导入、关联、进销项、税金、成本、往来和独立现金业务。前端 React + TypeScript，后端 Python HTTP API，业务事实保存在 PostgreSQL。
 
-## 当前技术栈
+## 设计与架构
 
-- 后端：Python，业务服务在 `backend/src/fin_ops_platform/`。
-- 前端：React + TypeScript + Vite，正式工程在 `web/`。
-- 持久化：PostgreSQL 是生产 app 状态和业务事实的唯一读写库；OA MongoDB 仅通过适配层只读接入。当前 runtime 不读取 app Mongo，也没有 app Mongo fallback、shadow-read 或导出/审计旁路。
-- 部署：支持 OA 同域 iframe 集成，前端 `/fin-ops/`，后端 `/fin-ops-api/`。
+本仓库只维护一套当前版本说明，按模块拆分以便定位，不保存开发计划、执行日志、退役说明或重复规范。
 
-## 快速启动
+- [系统架构](ARCHITECTURE.md)：边界、数据流、事务、性能和部署形态。
+- [模块与页面](docs/modules/README.md)：每个页面和共享能力的 I/O、业务规则、依赖与实现入口。
+- [界面约定](docs/ui.md)：公共组件、状态、金额、表格与交互。
+- [开发与验证](docs/development.md)：本地运行、测试、脚本与隔离测试库。
+- [部署与运行](docs/operations.md)：发布、监控、凭证、恢复和数据安全。
+- [Agent 导航](AGENTS.md)：修改代码和文档的最小协作规则。
 
-安装后端依赖：
-
-```bash
-python -m pip install -r backend/requirements.txt
-```
-
-检查后端：
+## 本地启动
 
 ```bash
-PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+python3 -m pip install -r backend/requirements.txt
+cd web && npm ci
 ```
 
-启动后端：
-
-```bash
-./scripts/start-backend.sh
-```
-
-启动前端：
-
-```bash
-cd web
-npm install
-npm run dev
-```
-
-## 验证
-
-```bash
-PYTHONPATH=backend/src python3 -m unittest discover -s tests -v
-cd web && npm test
-cd web && npm run build
-```
-
-## 文档入口
-
-- Agent 导航：`AGENTS.md`
-- 架构总览：`ARCHITECTURE.md`
-- 产品和界面原则：`DESIGN.md`
-- 可靠性基线：`RELIABILITY.md`
-- 安全和权限：`SECURITY.md`
-- 文档地图：`docs/index.md`
-- 当前 app 架构：`docs/app-architecture/README.md`
-- 页面和功能模块维护：`docs/modules/README.md`
-- 产品规格：`docs/product-specs/index.md`
-- 开发文档：`docs/dev/index.md`
-- 运维文档：`docs/operations/index.md`
-- 部署说明：`deploy/oa/README.md`
-
-## 仓库结构
-
-```text
-backend/        Python 后端
-web/            React 前端
-tests/          后端测试
-docs/           长期文档和归档
-deploy/         部署资产
-fixtures/       本地手工验收样例，不作为自动化测试事实源
-scripts/        开发和运行脚本
-```
-
-## 归档说明
-
-历史 prompt、旧计划和阶段执行记录不再保留为当前文档入口。仍有价值的结论已提炼到长期文档，原始业务源少量保留在 `docs/references/`。
+准备本地专用运行环境后，在独立终端分别运行 `./scripts/start-backend.sh` 与 `./scripts/start-web.sh`。具体配置见[开发说明](docs/development.md)。生产使用 `./scripts/deploy-oa.sh`。

@@ -33,7 +33,7 @@ from tests.postgres_test_utils import (
     truncate_test_database,
 )
 
-IMPACT_MATRIX_PATH = Path("docs/dev/write-operation-impact-matrix.json")
+IMPACT_MATRIX_PATH = Path("tests/fixtures/write-operation-impact-matrix.json")
 EXPECTED_PROFILE_PAIRS = {
     "bank_invoice": (
         "workbench_relation_confirm_bank_invoice_cross_page",

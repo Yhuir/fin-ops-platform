@@ -1,69 +1,43 @@
-# 银行明细模块维护入口
+# 银行明细
 
-- Module key: `bank-details`
-- 类型：页面模块
-- Route：`/bank-details`
-- Page key：`bank-details`
+入口：`/bank-details`。
 
-## 同时间顺序与余额
+负责原始银行流水、有效分类、分类规则、人工标签与持久化用途拆分。原始金额、余额和导入身份由银行事实保留；其他模块通过用途视图消费拆分子项。
 
-- [同时间流水顺序与账户余额修复](../../dev/bank-same-time-ordering-repair-plan.md)：2026-09-08 本地实现与验证进行中，未发布；本目录记录配套代码合同，实际验收及剩余风险以计划执行记录为准。
-- 同账户、同币种、同实际时间的完整流水组，复用共享 SQL 判断账后余额衔接；分页、搜索和导出使用同一顺序。`same_time_order_status` 区分普通时间顺序、余额衔接确认和待核实。
-- 列表只对覆盖当前页前缀的完整时间组判定顺序，完整候选日期仍参与缺时间检测；复用 classifier 已有 `account_key`，不增加身份 hash 计算。旧本地账户读取方法及其 wrapper 已删除，有效断言迁入真实 PostgreSQL 测试。
-- 账户余额独立输出 `confirmed`、`last_known`、`unresolved`、`missing`；存在未确认账户的币种不输出部分合计充当总余额。
+## 边界与 I/O
 
-## 修改前必读
+输入：账户、日期、搜索、分类、排序、分页；分类或拆分命令携带精确流水身份、版本与服务端 actor。输出：账户、流水、完整筛选统计、详情、导出及写入结果。rows 与统计在同一只读快照查询。
 
-- `docs/product-specs/bank-turnover-and-no-oa.md`
-- `docs/app-architecture/pages.md`
-- `docs/app-architecture/runtime-and-ownership.md`
-- `docs/dev/api-contracts.md`
-- `docs/modules/bank-account-balance/boundary-io.md`
-- `docs/modules/workbench-relations/boundary-io.md`
+## 当前业务约定
 
-## 代码入口
+- 分类优先级和自动规则复用同一 canonical SQL classifier，消费者不复制算法。
+- 拆分必须金额守恒，稳定子项身份与完整 category_payload 在银行 owner 事务保存；原流水只显示一次，业务金额与原始金额不得混算。
+- 拆分会通过所属 owner 同事务处理受影响的正式关系、往来补充及成本决定；仅顺序变化不等同业务用途改变。
+- 同时间组的顺序由余额衔接证据判断，分页与导出一致；不能用稳定展示 ID 伪造末笔证明。
+- 详情通过原始父交易 ID 定向读取来源字段，公共抽屉不从列表拼凑来源。
+- 写入成功回读当前页；旧请求不得覆盖新账户、筛选或分页。
 
-- `web/src/pages/BankDetailsPage.tsx`
-- `web/src/features/bankDetails/*`
-- `backend/src/fin_ops_platform/app/routes_bank_details.py`
-- `backend/src/fin_ops_platform/services/bank_details_application_service.py`
-- `backend/src/fin_ops_platform/services/bank_details_canonical_query.py`
-- `backend/src/fin_ops_platform/services/bank_transaction_ordering_sql.py`
-- `backend/src/fin_ops_platform/services/bank_account_balance_canonical_rows.py`
-- `backend/src/fin_ops_platform/services/bank_details_service.py`
-- `backend/src/fin_ops_platform/services/bank_transaction_category_mutation_writer.py`
+## 依赖方向
 
-## 当前边界
+[银行账户余额](../bank-account-balance/README.md)、[正式关联关系](../workbench-relations/README.md)、[外部往来款](../turnover-ledger/README.md)、[成本统计](../cost-statistics/README.md)、[银行流水导入](../imports-bank-transactions/README.md)。依赖表示调用或事实消费，不允许读取其它页面的展示结果作为业务事实。
 
-银行明细页面已经迁移为 PostgreSQL canonical direct read：
+## 代码与验证入口
 
-- 浏览器只调用 `/api/bank-details/accounts`、`/api/bank-details/transactions`、导出和本模块写 API。
-- route 只负责鉴权、参数解析与 HTTP 映射；查询组合由 `BankDetailsCanonicalQueryService` 负责，SQL 由 `PostgresBankDetailsCanonicalQueryRepository` 负责。
-- rows、statistics、category counts 与当前页关系标签在同一个 `REPEATABLE READ READ ONLY` snapshot 中读取。
-- 正式关系只读取 `app.workbench_pair_relations` 中 `status=active` 的事实；关系 overlap 查询只接收当前可见或导出目标流水 IDs，不读取 Workbench 页面 payload、`workbench_relation` projection 或其它页面 read model。
-- 账户列表和余额直接以有界 SQL 聚合 canonical `app.bank_transactions`；账户事实输入保留既有 identity、metadata 一致性，币种归一与列表排序共用空币种按 CNY 的原规则。余额取共享判定的可靠末余额，无法确认时保留账户并明确状态，不在 Python 或浏览器全量聚合。
-- 页面响应不再携带 `read_model_status`、`source_versions`、refresh scope/job/barrier；前端不轮询。loading、empty、error 与用户重试仍是可观察状态。
-- 账户、流水、标签统计和规则分别保存请求错误；切换账户或刷新后的过期结果不得覆盖当前内容，任一成功请求不得清除其他请求的失败。
-- 分类、候选确认和人工补分类继续走 canonical fact、审计和定向写入；effective 标签实际变化时，同一事务重冻结既有 active 普通关系的 requirement metadata/history。页面仍只重新 GET 一次，不通知关联台、不产生跨页 refresh。
+- [web/src/pages/BankDetailsPage.tsx](../../../web/src/pages/BankDetailsPage.tsx)
+- [backend/src/fin_ops_platform/app/routes_bank_details.py](../../../backend/src/fin_ops_platform/app/routes_bank_details.py)
+- [backend/src/fin_ops_platform/services/bank_details_application_service.py](../../../backend/src/fin_ops_platform/services/bank_details_application_service.py)
+- [backend/src/fin_ops_platform/services/bank_details_canonical_query.py](../../../backend/src/fin_ops_platform/services/bank_details_canonical_query.py)
+- [backend/src/fin_ops_platform/services/bank_transaction_ordering_sql.py](../../../backend/src/fin_ops_platform/services/bank_transaction_ordering_sql.py)
+- [backend/src/fin_ops_platform/services/bank_account_balance_canonical_rows.py](../../../backend/src/fin_ops_platform/services/bank_account_balance_canonical_rows.py)
+- [backend/src/fin_ops_platform/services/bank_details_service.py](../../../backend/src/fin_ops_platform/services/bank_details_service.py)
+- [backend/src/fin_ops_platform/services/bank_transaction_category_mutation_writer.py](../../../backend/src/fin_ops_platform/services/bank_transaction_category_mutation_writer.py)
+- [backend/src/fin_ops_platform/services/bank_details_export_service.py](../../../backend/src/fin_ops_platform/services/bank_details_export_service.py)
+- [backend/src/fin_ops_platform/app/server.py](../../../backend/src/fin_ops_platform/app/server.py)
+- [tests/test_bank_details_canonical_query.py](../../../tests/test_bank_details_canonical_query.py)
+- [tests/test_bank_same_time_ordering_postgres.py](../../../tests/test_bank_same_time_ordering_postgres.py)
+- [tests/test_bank_details_routes.py](../../../tests/test_bank_details_routes.py)
+- [tests/test_bank_details_export_service.py](../../../tests/test_bank_details_export_service.py)
+- [tests/test_bank_auto_tag_rules_api.py](../../../tests/test_bank_auto_tag_rules_api.py)
+- [tests/test_bank_split_consumers_postgres.py](../../../tests/test_bank_split_consumers_postgres.py)
 
-旧 `bank_detail` / `bank_account_balance` read model、worker、下游 tagged-row ports、backfill 和部署单元已在跨页面清理中删除。历史 migration/表暂留作回滚证据，不存在页面或 worker 运行时调用方。
-
-## 维护触发器
-
-- 页面筛选、排序、分页、导出、drawer/dialog、权限或可观察状态变化。
-- API 参数、响应 shape、错误码、CAS/审计或写后重读变化。
-- canonical 表、账户 identity、分类规则、active relation membership 或 snapshot 一致性变化。
-- 查询次数、最大页大小、导出上限或性能 guard 变化。
-- 共享旧 read model 消费者完成迁移，满足删除条件。
-
-## 本目录文件
-
-- `boundary-io.md`：当前 direct-read I/O、文件范围和旧链删除状态。
-- `state-machine.md`：业务写状态与页面 loading/empty/error 状态。
-- `tests.md`：七类测试、验证命令和剩余风险。
-- `e2e-spec.md` / `e2e-coverage.md`：Browser 业务合同与覆盖映射。
-- `implementation-notes.md`：提炼后的实施决策和验收记录。
-
-## 持久化流水拆分（2026-09-23）
-
-银行事实保留原身份、金额和余额；`bank_transaction_split_sets/items` 持久化人工子项，`bank_transaction_units` 是派生用途视图。各页面共用 `web/src/features/bankSplits/` 抽屉编辑器，银行 owner 编排关系/成本/往来/批次 owner 的原子变更。无新增 worker/read model。详见 [I/O 与测试矩阵](../../dev/bank-transaction-splits.md)。
+通用查询、事务、权限与错误边界见[系统架构](../../../ARCHITECTURE.md)；验证方法见[开发说明](../../development.md)。测试文件是可执行证据，本文不保存某一次测试的通过记录。

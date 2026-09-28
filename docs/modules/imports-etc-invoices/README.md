@@ -1,90 +1,46 @@
-# ETC发票导入 模块维护入口
+# ETC 发票导入
 
+入口：`/imports/etc-invoices`。
 
-- Module key: `imports-etc-invoices`
-- 类型: 页面模块
-- Route: `/imports/etc-invoices`
-- Page key: `imports.etc-invoices`
+把 ETC 文件预览、确认和来源关联纳入共同导入工作流，领域解析及成员归属由 ETC owner 负责。
 
-## 修改前必读
+## 边界与 I/O
 
-- `docs/product-specs/imports-and-etc.md`
-- `docs/operations/etc-business-batches.md`
-- `docs/product-specs/invoice-lifecycle.md`
-- `docs/app-architecture/runtime-and-ownership.md`
-- `docs/app-architecture/pages.md`
-- `docs/dev/api-contracts.md`
-- `docs/operations/runtime-worker-governance.md`
-- `docs/modules/etc-tickets/README.md`
-- `docs/modules/domain-events-lifecycle/README.md`
-- `docs/modules/runtime-workers/README.md`
-- `docs/modules/reconciliation-workbench/README.md`
-- `docs/modules/tax-offset/README.md`
-- `docs/modules/cost-statistics/README.md`
+输入：ETC 文件、目标任务/批次、预览版本与确认文件集合。输出：持久预览、任务状态、ETC 成员/附件引用、统一发票链接和受影响月份。
 
-## 代码入口
+## 当前业务约定
 
-- `web/src/pages/imports/ImportEtcInvoicesPage.tsx`
-- `web/src/components/imports/ImportWorkflowPage.tsx`
-- `web/src/features/etc/api.ts`
-- `web/src/features/etc/types.ts`
-- `web/src/features/imports/importRoutes.ts`
-- `backend/src/fin_ops_platform/app/server.py`
-- `backend/src/fin_ops_platform/services/etc_service.py`
-- `backend/src/fin_ops_platform/services/etc_reconciliation_service.py`
-- `backend/src/fin_ops_platform/services/etc_reconciliation_zip_filter.py`
-- `backend/src/fin_ops_platform/services/etc_document_parsers.py`
-- `backend/src/fin_ops_platform/services/import_processing_service.py`
-- `backend/src/fin_ops_platform/services/invoice_attachment_recognition_service.py`
-- `backend/src/fin_ops_platform/services/import_job_queue.py`
-- `backend/src/fin_ops_platform/services/runtime_worker_handlers.py`
-- `backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py`
-- `backend/src/fin_ops_platform/services/app_status_domain_registry.py`
-- `backend/src/fin_ops_platform/services/app_status_job_registry.py`
+- 上传登记后由 import worker 直接领取同一 job 的 prepare 阶段，持久预览后等待确认；confirm 固化范围和版本，commit 阶段才写正式财务事实。
+- job.import_jobs 是任务状态源。claim_version、owner 与 lease 隔离过期执行者；事实、来源、审计、必要匹配通知和成功状态在同一事务提交。
+- 银行、发票、ETC 已登记任务向具备平台访问权的用户共享复核、确认、重试和结束处理；私人草稿仍校验创建者，OA/认证任务按各自 owner 规则处理。
+- 操作人取后端 session，worker 按实际操作人的当前权限复核；创建人与文件来源不改写。
+- 数据问题进入 needs_review，暂时失败有限重试；确认冲突要求重新复核，不自动确认。取消与正式提交互锁，明确结束的任务不可重试，已读不代表结束。
+- 预览行服务端分页 limit 最大 100，摘要不携带无界结果；无可确认文件保留明细并待复核。页面只显式恢复选中的任务，不自动复原其他私人草稿。
+- 附件准备和文件解析在短财务事务之外；最终成员、附件引用、metadata、session 和任务成功同事务提交。
+- 任务与批次按精确身份关联，页面使用最新批次标题；已确认成员不得因重试生成第二份。
+- worker 完成后页面重新读取 PostgreSQL 状态，不依赖 API 重启或进程内旧对象。
 
-## 当前边界
+## 依赖方向
 
-`/imports/etc-invoices` 只渲染 `ImportWorkflowPage mode="etc_invoice"`。页面不走通用 `/imports/files/*` 发票文件导入，而是通过 `web/src/features/etc/api.ts` 调用 `/api/etc/import/preview`、`/api/etc/import/confirm` 和 `/api/etc/import/discard`。每次进入页面都从空白本地草稿开始；显式“清空”只放弃当前页面生成且归当前认证用户所有的未确认 preview。
+[ETC 票据](../etc-tickets/README.md)、[发票导入](../imports-invoices/README.md)、[后台任务](../runtime-workers/README.md)、[权限与审计](../permissions-and-audit/README.md)。依赖表示调用或事实消费，不允许读取其它页面的展示结果作为业务事实。
 
-ETC 发票导入必须绑定一个已经确认且可导入的 ETC 对账任务。预览阶段会用对账任务的 confirmed item set 过滤 ZIP 内发票，并把 task version/hash/generation、原始 ZIP file object、preview counts/fingerprint 和 requirement match edges 持久化；确认阶段从 durable session 重读、校验 freshness，只 enqueue `etc_invoice_import.confirm`。独立 worker prepare 一次解析并持久化 manifest；确认只校验 metadata，commit 读取 manifest，通过 EtcImportUow 原子提交当前批次和任务结果。
+## 代码与验证入口
 
-页面不存在 own read model。统一 Audit 在一个 `REPEATABLE READ READ ONLY` snapshot 内复用 ETC tickets canonical collector，并独立证明 session/file/object、preview match、task、business/import batch、ETC invoice、existing canonical bridge 与 canonical import job；历史 import outbox 只作存量审计。Workbench/tax/cost/lifecycle 是独立消费者，不由导入页面拥有。
+- [web/src/pages/imports/ImportEtcInvoicesPage.tsx](../../../web/src/pages/imports/ImportEtcInvoicesPage.tsx)
+- [web/src/components/imports/ImportWorkflowPage.tsx](../../../web/src/components/imports/ImportWorkflowPage.tsx)
+- [web/src/features/etc/api.ts](../../../web/src/features/etc/api.ts)
+- [web/src/features/etc/types.ts](../../../web/src/features/etc/types.ts)
+- [web/src/features/imports/importRoutes.ts](../../../web/src/features/imports/importRoutes.ts)
+- [backend/src/fin_ops_platform/app/server.py](../../../backend/src/fin_ops_platform/app/server.py)
+- [backend/src/fin_ops_platform/services/etc_service.py](../../../backend/src/fin_ops_platform/services/etc_service.py)
+- [backend/src/fin_ops_platform/services/etc_reconciliation_service.py](../../../backend/src/fin_ops_platform/services/etc_reconciliation_service.py)
+- [backend/src/fin_ops_platform/services/etc_reconciliation_zip_filter.py](../../../backend/src/fin_ops_platform/services/etc_reconciliation_zip_filter.py)
+- [backend/src/fin_ops_platform/services/etc_document_parsers.py](../../../backend/src/fin_ops_platform/services/etc_document_parsers.py)
+- [web/e2e/imports-etc-invoices-flow.spec.ts](../../../web/e2e/imports-etc-invoices-flow.spec.ts)
+- [tests/test_etc_backend.py](../../../tests/test_etc_backend.py)
+- [tests/test_etc_reconciliation_import_cleanup_service.py](../../../tests/test_etc_reconciliation_import_cleanup_service.py)
+- [tests/test_import_job_queue.py](../../../tests/test_import_job_queue.py)
+- [tests/test_import_processing_service.py](../../../tests/test_import_processing_service.py)
+- [web/src/test/EtcTicketManagementPage.test.tsx](../../../web/src/test/EtcTicketManagementPage.test.tsx)
 
-ETC 发票导入确认会创建或复用 task-scoped ETC business batch，写入 ETC import batch、ETC invoice metadata 与 PDF/XML 附件关系，并推进 canonical version；普通确认不触发页面 derived lifecycle。ETC ZIP 不再直接创建统一发票池事实；统一发票池 `app.invoices` 只由正式进/销项发票导入，或 OA 附件识别 service 判定为正式发票且池内不存在时受控创建。业务批次后续 OA 草稿、人工确认“已提交/未提交”、删除和 summary row 释放属于 ETC 票据管理模块；本模块测试必须证明这些写入口零页面 fan-out、消费者访问时收敛。
-
-ETC 导入 runtime 删除链路只清理 ETC task、import batch、business batch 和 ETC metadata 自有事实，不再调用通用 import service 删除或改写 canonical invoice。历史版本造成的 `app.invoices` ETC-created canonical 污染只能通过 `docs/operations/invoice-pool-cleanup.md` 的备份/dry-run/确认流程处理。旧 `POST /api/etc/import` 及 business-batch 下 `etc-import/preview`、`etc-import/confirm` 已移除并返回 404；正式入口只有 `/api/etc/import/preview|confirm|discard`。
-
-核心 fan-out：
-
-| 动作 | 事实源 / 事件 | 影响 |
-| --- | --- | --- |
-| ready task 查询 | `EtcReconciliationTaskService.list_import_task_summaries()` | ETC 导入页 task selector；单次读取窄摘要，不加载任务明细、文件或解析行 |
-| zip preview | `EtcImportPreviewService.prepare(...)` + 一次 archive manifest | 当前导入页 preview、missing requirements、duplicate audit |
-| preview stale | `stale_reconciliation_task_preview` 或 `preview_stale` | 当前导入页必须清空 preview 并要求重新预览 |
-| confirm queued | canonical `job.import_jobs` | 导入页 job feedback、App Status/App Health；job source 必须携带 `task_id`、`affected_domains=["imports_etc_invoices","etc_tickets"]` 和 route `/imports/etc-invoices` |
-| confirm processed | `ImportProcessingService.execute_etc_invoice_import_confirm_job(...)` | ETC business batch、ETC invoice metadata、PDF/XML 附件关系；只关联已存在 canonical invoice，不创建新 canonical invoice |
-| access convergence | canonical ETC source version | existing canonical metadata 真变更时只推进精确月份 source version；关联台、invoice lifecycle、税金与成本统计在各自 owner 边界读取。历史 repair 是显式维护入口，不进入导入热路径 |
-| OA 草稿/人工状态 | `oa-draft`、`manual-oa-status` | OA draft create 只更新 ETC business batch / reconciliation task / audit；manual submitted / not-submitted 不重连 canonical invoice，只按精确月份触发 `etc_business_batch_status_changed` 更新关联台。税金不刷新，成本不直投且只在 Workbench 成功发布后收敛一次 |
-| 业务批次删除 | business batch delete | ETC 票据管理和真实发票事实释放；按返回的精确影响范围刷新 downstream |
-
-ETC 导入页 ready task 下拉展示 `EtcReconciliationTask.title`。ETC 票据管理页允许未提交 business batch 在提交前修改 `title`，保存后会同步 linked reconciliation task title；因此导入页不得缓存旧标题或自行从 business batch ID 派生标题。
-
-## 维护触发器
-
-发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
-
-- 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。
-- API contract、DTO shape、错误字段、权限校验、状态值或响应 freshness 字段变化。
-- 业务状态、UI 状态、read model 状态、worker 状态或状态流转变化。
-- 跨页面刷新、domain event、derived lifecycle、dirty scope、outbox 或缓存边界变化。
-- 测试入口、回归范围、验证命令或未测风险变化。
-
-## 本目录文件
-
-- `e2e-spec.md`：维护 Spec-first Browser E2E 合同。
-- `e2e-coverage.md`：维护 Spec ID 到自动化覆盖和未测风险的映射。
-- `state-machine.md`：维护当前有效状态和状态流转；不适用时写明原因。
-- `tests.md`：维护七类测试适用性、现有测试入口、验证命令和回归范围。
-- `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。
-
-2026-09-21：完整执行合同见 [boundary-io.md](boundary-io.md#2026-09-21-单任务与原子提交)。新增 `etc_import_manifest.py` 与 `etc_import_uow.py`，分别负责准备工件编码和事务提交。
+通用查询、事务、权限与错误边界见[系统架构](../../../ARCHITECTURE.md)；验证方法见[开发说明](../../development.md)。测试文件是可执行证据，本文不保存某一次测试的通过记录。

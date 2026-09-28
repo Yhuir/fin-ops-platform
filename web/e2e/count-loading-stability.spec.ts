@@ -1,6 +1,5 @@
-import { expect, test } from "./fixtures/strictTest";
+import { expect, test, type Locator } from "./fixtures/strictTest";
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
-import type { Locator } from "@playwright/test";
 
 async function boxes(controls: Locator) {
   return controls.evaluateAll(elements => elements.map(element => {
