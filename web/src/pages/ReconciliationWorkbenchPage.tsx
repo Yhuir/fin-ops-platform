@@ -1708,7 +1708,6 @@ export default function ReconciliationWorkbenchPage() {
 
   const resetExceptionDrawerListState = useCallback((
     bucket: "unpaired" | "paired",
-    clearCounts: boolean,
   ) => {
     exceptionDrawerRequestRef.current?.abort();
     exceptionDrawerRequestRef.current = null;
@@ -1716,9 +1715,6 @@ export default function ReconciliationWorkbenchPage() {
     invalidateExceptionGroupDetailRequests();
     setExceptionDrawerGroups([]);
     setExceptionDrawerPage(createInitialZonePageInfo(bucket));
-    if (clearCounts) {
-      setExceptionDrawerCounts(null);
-    }
     setExceptionDrawerLoading(true);
     setExceptionDrawerLoadingMore(false);
     setExceptionDrawerError(null);
@@ -1738,7 +1734,7 @@ export default function ReconciliationWorkbenchPage() {
     if (bucket === exceptionDrawerBucket) {
       return;
     }
-    resetExceptionDrawerListState(bucket, true);
+    resetExceptionDrawerListState(bucket);
     setExceptionDrawerRequestedCode(null);
     setExceptionDrawerSelectedCode(null);
     setExceptionDrawerBucket(bucket);
@@ -1748,7 +1744,7 @@ export default function ReconciliationWorkbenchPage() {
     if (view === exceptionDrawerView) {
       return;
     }
-    resetExceptionDrawerListState(exceptionDrawerBucket, false);
+    resetExceptionDrawerListState(exceptionDrawerBucket);
     setExceptionDrawerRequestedCode(null);
     setExceptionDrawerSelectedCode(null);
     setExceptionDrawerView(view);
@@ -1758,7 +1754,7 @@ export default function ReconciliationWorkbenchPage() {
     if (code === exceptionDrawerSelectedCode) {
       return;
     }
-    resetExceptionDrawerListState(exceptionDrawerBucket, false);
+    resetExceptionDrawerListState(exceptionDrawerBucket);
     setExceptionDrawerRequestedCode(code);
     setExceptionDrawerSelectedCode(code);
   }, [exceptionDrawerBucket, exceptionDrawerSelectedCode, resetExceptionDrawerListState]);

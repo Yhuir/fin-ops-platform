@@ -40,6 +40,9 @@ describe('独立导出筛选', () => {
     await screen.findByText('导出 3 张');
     await user.click(screen.getByRole('checkbox', { name: /未关联 OA/ }));
     expect(screen.getByRole('button', { name: '下载 Excel' })).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: /未关联 OA/ }).closest('label')).toHaveTextContent('2');
+    expect(screen.getByRole('checkbox', { name: /OA \/ 流水均已关联/ }).closest('label')).toHaveTextContent('1');
+    expect(download).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: '全选' }));
     expect(await screen.findByText('导出 1 张')).toBeVisible();
     await act(async () => { resolveOld({ ...summary, rowCount: 99 }); });

@@ -1,3 +1,4 @@
+import CountLabel from "../common/CountLabel";
 import SegmentedControl from "../common/SegmentedControl";
 import { Accordion, Button, Chip } from '@heroui/react';
 import { ChevronRight, Search } from 'lucide-react';
@@ -135,7 +136,6 @@ export default function CostStatisticsManualAllocationDrawer({ caseId, onCloseCa
   useEffect(() => () => { listRequest.current?.abort(); details.current.forEach(controller => controller.abort()); }, []);
   const acceptSaved = (id: string, saved: CostStatisticsManualAllocationTask) => {
     setCase(id, { task: saved, draft: createSourceDraft(saved), dirty: false, conflict: false, saving: false, error: undefined, unconfirmedRequest: undefined, notice: '已保存' });
-    setCounts(null);
     if (!caseId) void load();
     if (!caseId && (saved.status !== status || saved.decisionMode === 'automatic' && saved.status === 'allocated')) {
       setItems(list => list.filter(item => item.relationCaseId !== id)); setExpanded(null);
@@ -198,9 +198,9 @@ export default function CostStatisticsManualAllocationDrawer({ caseId, onCloseCa
       <div className="cost-source-body">
         {caseId ? renderEditor(caseId) : <>
         <div className="cost-source-toolbar">
-          <SegmentedControl label="成本人工分配状态" value={status} disabled={saving}
+          <SegmentedControl label="成本人工分配状态" pending={loading && !error} value={status} disabled={saving}
             onChange={value => { setStatus(value); void load(value); }}
-            options={(['pending', 'allocated'] as const).map(value => ({ key: value, label: <>{value === 'pending' ? '待分配' : '已完成'} <span>{counts ? counts[value] : value === 'pending' ? pendingCount ?? '—' : '—'}</span></> }))} />
+            options={(['pending', 'allocated'] as const).map(value => ({ key: value, label: <>{value === 'pending' ? '待分配' : '已完成'} <CountLabel value={error ? undefined : counts ? counts[value] : value === 'pending' ? pendingCount : undefined} /></> }))} />
           <form className="cost-source-search" onSubmit={event => { event.preventDefault(); if (saving) return; setQuery(queryDraft.trim()); void load(status, queryDraft.trim()); }}>
             <input aria-label="搜索人工分配任务" placeholder="搜索项目、费用或申请人" value={queryDraft} onChange={event => setQueryDraft(event.target.value)} /><button className="cost-source-icon" aria-label="查询人工分配任务" type="submit" disabled={saving}><Search size={16} /></button>
           </form>

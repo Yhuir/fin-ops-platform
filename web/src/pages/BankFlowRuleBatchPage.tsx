@@ -1,3 +1,4 @@
+import CountLabel from "../components/common/CountLabel";
 import { Segment, SegmentGroup } from "../components/common/SegmentedControl";
 import BankTransactionDrawer from "../features/bankSplits/BankTransactionDrawer";
 import { Button, Checkbox } from "@heroui/react";
@@ -168,6 +169,7 @@ export default function BankFlowRuleBatchPage() {
   const [selectedAccountForSubmit, setSelectedAccountForSubmit] = useState<string | null>(null);
   const [batchPage, setBatchPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [hasCounts, setHasCounts] = useState(false);
   const [tagLoading, setTagLoading] = useState(false);
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -216,6 +218,7 @@ export default function BankFlowRuleBatchPage() {
     setDetails({});
     setDetailErrors({});
     setPayload(nextPayload);
+    setHasCounts(true);
     clearSelection();
   }, [clearSelection]);
 
@@ -704,7 +707,6 @@ export default function BankFlowRuleBatchPage() {
     });
   };
 
-  const unsubmittedCount = payload.summary.draftRowCount;
   const resetListScope = useCallback(() => {
     clearSelection();
     suppressNextAutoSelectRef.current = false;
@@ -774,6 +776,7 @@ export default function BankFlowRuleBatchPage() {
       ) : null}
       <div aria-label="批次筛选" className="bank-flow-rule-batches-filter" role="region">
         <SegmentGroup
+          aria-busy={loading && !error}
           aria-label="批次状态"
           className="bank-flow-rule-batches-segment"
           disallowEmptySelection
@@ -785,9 +788,9 @@ export default function BankFlowRuleBatchPage() {
           selectionMode="single"
           size="sm"
         >
-          <Segment id="unsubmitted">未提交 {unsubmittedCount} 笔</Segment>
-          <Segment id="submitted">已提交 {payload.summary.submittedRowCount} 笔</Segment>
-          <Segment id="withdrawn">历史 {payload.summary.withdrawnRowCount} 笔</Segment>
+          <Segment id="unsubmitted">未提交 <CountLabel value={!hasCounts || error ? undefined : payload.summary.draftRowCount} unit="笔" spaced /></Segment>
+          <Segment id="submitted">已提交 <CountLabel value={!hasCounts || error ? undefined : payload.summary.submittedRowCount} unit="笔" spaced /></Segment>
+          <Segment id="withdrawn">历史 <CountLabel value={!hasCounts || error ? undefined : payload.summary.withdrawnRowCount} unit="笔" spaced /></Segment>
         </SegmentGroup>
         <BusinessPeriodPicker
           allowedModes={["month"]}

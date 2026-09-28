@@ -1,3 +1,4 @@
+import CountLabel from "../components/common/CountLabel";
 import SegmentedControl, { Segment, SegmentGroup } from "../components/common/SegmentedControl";
 import { Button, Checkbox, Input } from "@heroui/react";
 import { ChevronLeft, ChevronRight, Download, PanelRightOpen, SlidersHorizontal } from "lucide-react";
@@ -278,13 +279,11 @@ export default function OaPendingPaymentsPage() {
   ), [canOperateData, loadRows, loading, query.viewMode, refreshing, selectedOaRowIds.size]);
   const visibleError = error ?? actionError;
   const isEmpty = !loading && !refreshing && !visibleError && rows.length === 0;
-  const completedCountLabel = loading ? "…" : formatViewCount(summary?.viewCounts?.completed);
-  const inProgressCountLabel = loading ? "…" : formatViewCount(summary?.viewCounts?.in_progress);
   const paymentValues = query.filters.find(filter => filter.field === "payment_status")?.values ?? [];
   const paymentSelection = paymentValues.length === 1 ? paymentValues[0] : "all";
-  const statusCount = (key: "all" | "paid" | "unpaid") => loading ? "…" : summary
-    ? `${key === "all" ? summary.statusCounts.paid + summary.statusCounts.unpaid : summary.statusCounts[key]}条`
-    : "—";
+  const statusCount = (key: "all" | "paid" | "unpaid") => summary
+    ? key === "all" ? summary.statusCounts.paid + summary.statusCounts.unpaid : summary.statusCounts[key]
+    : undefined;
   const titleAccessory = (
     <div className="page-title-accessory-group">
       <PageStatisticsPopover
@@ -307,6 +306,7 @@ export default function OaPendingPaymentsPage() {
           <div className="oa-pending-payments-content">
             <SegmentGroup
               aria-label="OA流程状态视图"
+              aria-busy={(loading || refreshing) && !error}
               className="oa-pending-payments-view-toggle"
               disallowEmptySelection
               onSelectionChange={(keys) => {
@@ -319,11 +319,11 @@ export default function OaPendingPaymentsPage() {
             >
               <Segment id="completed">
                 已完成 OA
-                {completedCountLabel ? <span className="oa-pending-payments-view-toggle__count">{completedCountLabel}</span> : null}
+                <span className="oa-pending-payments-view-toggle__count"><CountLabel value={summary?.viewCounts?.completed} unit="条" /></span>
               </Segment>
               <Segment id="in_progress">
                 进行中 OA
-                {inProgressCountLabel ? <span className="oa-pending-payments-view-toggle__count">{inProgressCountLabel}</span> : null}
+                <span className="oa-pending-payments-view-toggle__count"><CountLabel value={summary?.viewCounts?.in_progress} unit="条" /></span>
               </Segment>
             </SegmentGroup>
             <PageToolbar
@@ -331,6 +331,7 @@ export default function OaPendingPaymentsPage() {
               left={(
                 <SegmentGroup
                   aria-label="支付流水"
+                  aria-busy={(loading || refreshing) && !error}
                   disallowEmptySelection
                   selectedKeys={new Set([paymentSelection])}
                   selectionMode="single"
@@ -343,9 +344,9 @@ export default function OaPendingPaymentsPage() {
                     }
                   }}
                 >
-                  <Segment id="all">全部 {statusCount("all")}</Segment>
-                  <Segment id="paid">已关联流水 {statusCount("paid")}</Segment>
-                  <Segment id="unpaid">未关联流水 {statusCount("unpaid")}</Segment>
+                  <Segment id="all">全部 <CountLabel value={statusCount("all")} unit="条" /></Segment>
+                  <Segment id="paid">已关联流水 <CountLabel value={statusCount("paid")} unit="条" /></Segment>
+                  <Segment id="unpaid">未关联流水 <CountLabel value={statusCount("unpaid")} unit="条" /></Segment>
                 </SegmentGroup>
               )}
               right={(
@@ -458,10 +459,6 @@ export default function OaPendingPaymentsPage() {
       />
     </>
   );
-}
-
-function formatViewCount(count: number | null | undefined): string {
-  return typeof count === "number" && Number.isFinite(count) ? `${count}条` : "";
 }
 
 function linkBankSuccessMessage(result: LinkOaPendingPaymentBankTransactionsResponse): string {

@@ -94,3 +94,7 @@
 ## 发票页面统计分段（2026-09-28）
 
 共享 `InvoiceCountSegments.tsx` 属于展示组件，只接收 `{label, selectedKey, options:[{key,label,count}], unit, pending, onChange}`。渲染 HeroUI Tabs、Tab、Indicator；未加载/错误由调用方传入 pending 展示 `—`，没有自动补数、业务分类、全局状态或 API。调用方为待找、进项使用、销项收款三个页面；CSS 限定 `.invoice-count-segments`，不改变其它 Tabs 或表格公共行为。
+
+### 2026-09-29 计数加载展示
+
+分段计数保留、未知/零值区分及视觉回归合同见[共享分段控件](../../dev/segmented-controls.md#2026-09-29-加载期间计数与布局稳定)。统计事实、API、权限和持久化I/O不变；公共展示组件不接管业务状态，旧显示值不用于新查询的导出或写入。

@@ -1,3 +1,4 @@
+import CountLabel from "../common/CountLabel";
 import "./workbenchEntityCounts.css";
 import { formatWorkbenchEntityCounts } from "../../features/workbench/entityCounts";
 import { Segment, SegmentGroup } from "../common/SegmentedControl";
@@ -226,9 +227,9 @@ export default function WorkbenchExceptionDrawer({
           }
         }}
       >
-        <Segment id="unpaired"><span>未配对异常</span>{" "}<small>{formatWorkbenchEntityCounts(bucketCounts.unpaired)}</small></Segment>
+        <Segment id="unpaired"><span>未配对异常</span>{" "}<small><EntityCountLabel counts={bucketCounts.unpaired} /></small></Segment>
         <Segment id="paired">
-          <span>已配对异常</span>{" "}<small>{formatWorkbenchEntityCounts(bucketCounts.paired)}</small>
+          <span>已配对异常</span>{" "}<small><EntityCountLabel counts={bucketCounts.paired} /></small>
         </Segment>
       </SegmentGroup>
     </div>
@@ -244,7 +245,7 @@ export default function WorkbenchExceptionDrawer({
       width="min(1740px, 96vw)"
       onClose={onClose}
     >
-      <div className="workbench-anomaly-drawer__filters">
+      <div className="workbench-anomaly-drawer__filters" aria-busy={loading && !error}>
         <div className="workbench-anomaly-drawer__view-row">
           <SegmentGroup
             aria-label="异常类型"
@@ -260,9 +261,9 @@ export default function WorkbenchExceptionDrawer({
               }
             }}
           >
-            <Segment id="amount"><span>金额异常</span>{" "}<small>{formatWorkbenchEntityCounts(exceptionCounts?.amountTotal)}</small></Segment>
+            <Segment id="amount"><span>金额异常</span>{" "}<small><EntityCountLabel counts={exceptionCounts?.amountTotal} /></small></Segment>
             <Segment id="document_only">
-              <span>仅资料异常</span>{" "}<small>{formatWorkbenchEntityCounts(exceptionCounts?.documentOnly)}</small>
+              <span>仅资料异常</span>{" "}<small><EntityCountLabel counts={exceptionCounts?.documentOnly} /></small>
             </Segment>
           </SegmentGroup>
           <span aria-live="polite" className="workbench-anomaly-drawer__count">
@@ -305,7 +306,7 @@ export default function WorkbenchExceptionDrawer({
                           key={code}
                         >
                           <span aria-hidden="true">{AMOUNT_RULE_SHORT_LABELS[code]}</span>
-                          <strong aria-hidden="true">{count}</strong>
+                          <strong aria-hidden="true"><EntityCountLabel counts={exceptionCounts?.byCode[code]} /></strong>
                         </Segment>
                       );
                     })}
@@ -628,4 +629,8 @@ function paneSummary(group: WorkbenchRelationGroup, paneId: WorkbenchRecordType)
       : group.amountCheck?.invoiceTotal;
   const fallbackTotal = summarizeWorkbenchRows(rows).amounts[paneId];
   return { count, total: formatMoney(amountCheckTotal || fallbackTotal) };
+}
+
+function EntityCountLabel({ counts }: { counts: WorkbenchEntityCounts | null | undefined }) {
+  return <>OA <CountLabel value={counts?.oa} unit="条" /> · 流水 <CountLabel value={counts?.bank} unit="笔" /> · 发票 <CountLabel value={counts?.invoice} unit="张" /></>;
 }

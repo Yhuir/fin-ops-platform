@@ -193,3 +193,23 @@ it('accepts an interrupted automatic no-op at the same version without creating 
   expect(saveCostStatisticsManualAllocation).toHaveBeenCalledOnce();
   expect(fetchCostStatisticsManualAllocations).not.toHaveBeenCalled();
 });
+
+it('keeps task counts during a delayed list refresh without enabling stale saves', async () => {
+  const user = userEvent.setup();
+  const props = {canSave:true, onSaved:vi.fn()};
+  const view = render(<Drawer {...props} refreshKey="1"/>);
+  await user.click(screen.getByRole('button', {name:'打开成本人工分配'}));
+  await screen.findByRole('textbox', {name:'分配金额 1'});
+  const pending = screen.getByRole('radio', {name:/待分配.*1/});
+  const original = pending.textContent;
+  let finish!: (value: Awaited<ReturnType<typeof fetchCostStatisticsManualAllocations>>) => void;
+  vi.mocked(fetchCostStatisticsManualAllocations).mockImplementationOnce(() => new Promise(resolve => {finish = resolve;}));
+  view.rerender(<Drawer {...props} refreshKey="2"/>);
+  await waitFor(() => expect(finish).toBeDefined());
+  expect(pending).toHaveTextContent(original!);
+  expect(pending.closest('[aria-busy]')).toHaveAttribute('aria-busy', 'true');
+  expect(saveCostStatisticsManualAllocation).not.toHaveBeenCalled();
+  await act(async () => finish({items:[], counts:{pending:0,allocated:1}, rowCount:0}));
+  expect(await screen.findByRole('radio', {name:/待分配.*0/})).toBeInTheDocument();
+  expect(pending.closest('[aria-busy]')).toHaveAttribute('aria-busy', 'false');
+});

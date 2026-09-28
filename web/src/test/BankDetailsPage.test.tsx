@@ -389,7 +389,7 @@ describe("Bank details page", () => {
     expect(requestUrls(fetchMock, "/api/bank-details/transactions")[0]?.searchParams.get("account_key")).toBe("icbc:6386");
     await user.click(within(page).getByRole("button", { name: "银行明细时间范围：年月" }));
     const picker = await screen.findByRole("dialog", { name: "银行明细时间范围选择器" });
-    await user.click(within(picker).getByRole("button", { name: "按月" }));
+    await user.click(within(picker).getByRole("radio", { name: "按月" }));
     await user.click(within(picker).getByRole("button", { name: "四月" }));
     await waitFor(() => expect(requestUrls(fetchMock, "/api/bank-details/transactions").at(-1)?.searchParams.get("date_from")).toBe("2026-04-01"));
     await user.click(within(page).getByRole("button", { name: "刷新银行明细" }));
@@ -1311,7 +1311,7 @@ describe("Bank details page", () => {
 
     await user.click(within(page).getByRole("button", { name: "银行明细时间范围：2025年" }));
     datePicker = screen.getByRole("dialog", { name: "银行明细时间范围选择器" });
-    await user.click(within(datePicker).getByRole("button", { name: "按月" }));
+    await user.click(within(datePicker).getByRole("radio", { name: "按月" }));
     await user.click(within(datePicker).getByRole("button", { name: "2026年" }));
     await user.click(within(datePicker).getByRole("button", { name: "三月" }));
     await waitFor(() => {
@@ -1356,7 +1356,7 @@ describe("Bank details page", () => {
 
     await user.click(within(page).getByRole("button", { name: "银行明细时间范围：年月" }));
     const datePicker = screen.getByRole("dialog", { name: "银行明细时间范围选择器" });
-    await user.click(within(datePicker).getByRole("button", { name: "按月" }));
+    await user.click(within(datePicker).getByRole("radio", { name: "按月" }));
     await user.click(within(datePicker).getByRole("button", { name: "四月" }));
 
     await waitFor(() => {

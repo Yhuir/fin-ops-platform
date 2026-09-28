@@ -1,3 +1,4 @@
+import CountLabel from "../components/common/CountLabel";
 import { Segment, SegmentGroup } from "../components/common/SegmentedControl";
 import {
   ArrowRight,
@@ -2004,6 +2005,7 @@ export default function EtcTicketManagementPage() {
               </div>
               <SegmentGroup
                 aria-label="ETC批次状态"
+                aria-busy={(loading || draftCreating) && !batchListError}
                 className="etc-status-segmented"
                 disallowEmptySelection
                 fullWidth
@@ -2019,13 +2021,13 @@ export default function EtcTicketManagementPage() {
                 }}
               >
                 <Segment id="unsubmitted">
-                  未提交 {loading || draftCreating ? "…" : counts === null || batchListError ? "—" : `${counts.unsubmitted}批`}
+                  未提交 <CountLabel value={batchListError ? undefined : counts?.unsubmitted} unit="批" />
                 </Segment>
                 <Segment id="staged">
-                  暂存 {loading || draftCreating ? "…" : counts === null || batchListError ? "—" : `${counts.staged}批`}
+                  暂存 <CountLabel value={batchListError ? undefined : counts?.staged} unit="批" />
                 </Segment>
                 <Segment id="submitted">
-                  已提交 {loading || draftCreating ? "…" : counts === null || batchListError ? "—" : `${counts.submitted}批`}
+                  已提交 <CountLabel value={batchListError ? undefined : counts?.submitted} unit="批" />
                 </Segment>
               </SegmentGroup>
               <div className="etc-batch-scroll" aria-busy={loading}>

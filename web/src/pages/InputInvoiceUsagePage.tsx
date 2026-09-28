@@ -426,7 +426,7 @@ export default function InputInvoiceUsagePage() {
             <PageToolbar
               className="input-invoice-usage-query-toolbar"
               left={(
-                <InvoiceCountSegments label="进项发票关联分类" unit="张" pending={loading || Boolean(error)}
+                <InvoiceCountSegments label="进项发票关联分类" unit="张" pending={loading || refreshing} invalid={Boolean(error)}
                   selectedKey={query.filters.find((filter) => filter.field === "relation_status")?.values?.[0] ?? "all"}
                   onChange={(key) => setQuery((current) => ({ ...current, page: 1, filters: [...current.filters.filter((filter) => filter.field !== "relation_status"), ...(key === "all" ? [] : [{ field: "relation_status", operator: "in" as const, values: [key] }])] }))}
                   options={[{id:"all",label:"全部"},{id:"no_oa",label:"未关联 OA"},{id:"oa_no_bank",label:"有 OA／无流水"},{id:"oa_bank",label:"OA／流水均已关联"}].map(item => {
@@ -457,7 +457,7 @@ export default function InputInvoiceUsagePage() {
                 </div>
               )}
             />
-            <InvoiceCountSegments label="进项发票支付状态" unit="张" pending={loading || Boolean(error)}
+            <InvoiceCountSegments label="进项发票支付状态" unit="张" pending={loading || refreshing} invalid={Boolean(error)}
               selectedKey={query.filters.find(filter => filter.field === 'payment_status')?.values?.[0] ?? 'all'}
               onChange={key => setQuery(current => ({ ...current, page: 1, filters: [...current.filters.filter(filter => filter.field !== 'payment_status'), ...(key === 'all' ? [] : [{ field: 'payment_status', operator: 'in' as const, values: [key] }])] }))}
               options={[{ key: 'all', label: '全部', count: filterOptions.payment_status?.reduce((total, option) => total + (option.count ?? 0), 0) }, ...(filterOptions.payment_status ?? []).map(option => ({ key: option.value, label: option.label, count: option.count }))]} />

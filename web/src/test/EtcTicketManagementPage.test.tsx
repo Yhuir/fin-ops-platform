@@ -3868,7 +3868,7 @@ describe("ETC ticket management page", () => {
     }));
     const startingDialog = await screen.findByRole("dialog", { name: "确认 OA 草稿处理结果" });
     expect(startingDialog).toHaveTextContent("已发起 OA 草稿创建");
-    expect(screen.getByText("暂存 …")).toBeInTheDocument();
+    expect(page.querySelector(".etc-status-segmented")).toHaveTextContent("暂存 0批");
     expect(within(startingDialog).getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" })).toBeDisabled();
     expect(within(startingDialog).getByRole("button", { name: "我已在 OA 系统上删除该 OA 草稿" })).toBeDisabled();
     await act(async () => {

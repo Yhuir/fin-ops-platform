@@ -290,7 +290,7 @@ export default function OutputInvoiceCollectionsPage() {
   const selectedStatus = statusFilter?.values?.[0] ?? "all";
   // Counts are validated once at the API boundary and cover the full query scope.
   const statusTotal = statusOptions?.reduce((sum, option) => sum + option.count!, 0);
-  const countsPending = loading || refreshing || Boolean(error);
+  const countsPending = loading || refreshing;
 
   const actions = (
     <div className="output-invoice-collections-actions">
@@ -320,7 +320,7 @@ export default function OutputInvoiceCollectionsPage() {
           <div className="output-invoice-collections-content">
             <PageToolbar className="output-invoice-collections-query"
               left={<div className="output-invoice-collections-status-section">
-                <InvoiceCountSegments label="销项发票状态分类" selectedKey={selectedStatus} unit="张" pending={countsPending}
+                <InvoiceCountSegments label="销项发票状态分类" selectedKey={selectedStatus} unit="张" pending={countsPending} invalid={Boolean(error)}
                   options={[
                     { key: "all", label: "全部", count: statusTotal },
                     ...(statusOptions?.map(option => ({ key: option.value, label: option.label, count: option.count })) ?? []),

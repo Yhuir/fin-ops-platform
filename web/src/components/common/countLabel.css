@@ -1,0 +1,8 @@
+.count-update-boundary { display: contents; }
+.stable-count { display: inline-flex; align-items: baseline; white-space: pre; font-variant-numeric: tabular-nums; }
+.stable-count__number { display: inline-block; min-width: var(--count-width, 6ch); text-align: right; }
+.stable-count--unit { min-width: var(--count-width, calc(6ch + 1em)); }
+/* The ETC rail already owns three equal-width buttons. */
+.etc-status-segmented { --count-width: 0; }
+/* Feedback is painted in existing space and never inserts a loading row. */
+:is(.app-segments, .invoice-count-segments)[data-count-pending="true"] { box-shadow: inset 0 -2px 0 var(--fp-primary); }

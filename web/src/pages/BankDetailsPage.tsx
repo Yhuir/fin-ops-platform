@@ -1,3 +1,4 @@
+import CountLabel from "../components/common/CountLabel";
 import BankSplitChips from "../features/bankSplits/BankSplitChips";
 import BankTransactionDrawer from "../features/bankSplits/BankTransactionDrawer";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type RefObject } from "react";
@@ -332,6 +333,8 @@ function categoryFilterKey(filter: BankCategoryFilter) {
 }
 
 type BankCategoryFilterControlProps = {
+  countsPending: boolean;
+  countsUnavailable: boolean;
   categoryCounts: BankTransactionCategoryCounts;
   totalCount: number;
   visibleCategorySummary: CategorySummaryItem[];
@@ -510,6 +513,8 @@ function useCloseOnOutsidePointer(open: boolean, rootRef: RefObject<HTMLElement 
 }
 
 function BankCategoryFilterControl({
+  countsPending = false,
+  countsUnavailable = false,
   categoryCounts = EMPTY_CATEGORY_COUNTS,
   totalCount = 0,
   visibleCategorySummary = [],
@@ -557,21 +562,21 @@ function BankCategoryFilterControl({
   ) => {
     return (
       <ListBoxItem
-        aria-label={`${label} ${count}`}
+        aria-label={`${label} ${countsUnavailable ? "—" : count}`}
         className={`bank-category-filter-row ${className}`.trim()}
         data-level={level}
         id={categoryFilterKey(filter)}
       >
         <span className="bank-category-filter-row-content">
           <span className="bank-category-filter-label">{label}</span>
-          <span className="bank-category-filter-count">{count}</span>
+          <span className="bank-category-filter-count"><CountLabel value={countsUnavailable ? undefined : count} /></span>
         </span>
       </ListBoxItem>
     );
   };
 
   return (
-    <div className="bank-category-filter-float">
+    <div className="bank-category-filter-float" aria-busy={countsPending}>
       <PopoverRoot isOpen={categoryPanelOpen} onOpenChange={setCategoryPanelOpen}>
         <PopoverTrigger
           aria-label={`标签筛选：${selectedCategoryLabel}`}
@@ -1510,9 +1515,9 @@ export default function BankDetailsPage() {
     keyword: searchKeyword,
   }), [dateFilter.dateFrom, dateFilter.dateTo, searchKeyword, selectedTransactionAccountKey]);
   const categorySnapshotCurrent = categoryFilterSnapshot.queryKey === categoryFilterQueryKey;
-  const categoryCounts = categorySnapshotCurrent ? categoryFilterSnapshot.categoryCounts : EMPTY_CATEGORY_COUNTS;
-  const categoryOptions = categorySnapshotCurrent ? categoryFilterSnapshot.tagDefinitions : [];
-  const categoryFilterTotalCount = categorySnapshotCurrent ? categoryFilterSnapshot.totalCount : 0;
+  const categoryCounts = categoryFilterSnapshot.categoryCounts;
+  const categoryOptions = categoryFilterSnapshot.tagDefinitions;
+  const categoryFilterTotalCount = categoryFilterSnapshot.totalCount;
 
   const applyCategorySnapshotPayload = useCallback((payload: BankDetailTransactionsResponse, snapshotQueryKey: string) => {
     setCategoryFilterSnapshot((current) => ({
@@ -2318,6 +2323,8 @@ export default function BankDetailsPage() {
 
             <div className="bank-transaction-grid bank-transaction-grid-readable">
               <BankCategoryFilterControl
+                countsPending={!categorySnapshotCurrent && !categoryCountsError && !transactionsError}
+                countsUnavailable={!categoryFilterSnapshot.queryKey || Boolean(categoryCountsError || transactionsError)}
                 categoryCounts={effectiveCategoryCounts}
                 totalCount={categoryFilterTotalCount}
                 visibleCategorySummary={visibleCategorySummary}

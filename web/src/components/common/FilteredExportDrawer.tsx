@@ -1,3 +1,4 @@
+import CountLabel from "./CountLabel";
 import { Button, Checkbox, Input } from '@heroui/react';
 import { useEffect, useState } from 'react';
 import type { ExportSelection, ExportSummary } from '../../features/exports/types';
@@ -55,7 +56,7 @@ export default function FilteredExportDrawer({ title, unit, onClose, loadSummary
     footer={<div className="filtered-export-footer"><strong aria-live="polite">导出 {count === null || invalidDates || error ? '—' : count.toLocaleString()} {unit}</strong>
       <Button variant="primary" isPending={downloading} isDisabled={!current || !count || Boolean(error) || invalidDates || downloading} onPress={handleDownload}>下载 Excel</Button></div>}>
     <div className="filtered-export-content">
-      <fieldset disabled={downloading} className="filtered-export-fields">
+      <fieldset disabled={downloading} className="filtered-export-fields" aria-busy={!current && !empty && !error && !invalidDates}>
         <section className="filtered-export-group"><h3>时间范围</h3><div className="filtered-export-dates">
           <label>开始日期<Input aria-label="导出开始日期" type="date" value={selection.startDate} onChange={e => setSelection(old => ({ ...old, startDate: e.target.value }))} /></label>
           <label>结束日期<Input aria-label="导出结束日期" type="date" value={selection.endDate} onChange={e => setSelection(old => ({ ...old, endDate: e.target.value }))} /></label>
@@ -68,12 +69,12 @@ export default function FilteredExportDrawer({ title, unit, onClose, loadSummary
               onChange={() => choose(group.field, (selected ?? group.options.map(item => item.value)).includes(option.value)
                 ? (selected ?? group.options.map(item => item.value)).filter(value => value !== option.value)
                 : [...(selected ?? []), option.value])}>
-              <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control><span className="filtered-export-label">{option.label}</span><span className="filtered-export-count">{current ? option.count.toLocaleString() : '—'} {unit}</span>
+              <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control><span className="filtered-export-label">{option.label}</span><span className="filtered-export-count"><CountLabel value={error ? undefined : option.count} unit={unit} spaced /></span>
             </Checkbox>;
           })}</div>
         </section>)}
       </fieldset>
-      {!current && !empty && !error && !invalidDates ? <div role="status">正在统计…</div> : null}
+      <div className="filtered-export-status" role="status">{!current && !empty && !error && !invalidDates ? "正在统计…" : ""}</div>
       {invalidDates ? <div role="alert">开始日期不能晚于结束日期。</div> : null}
       {error ? <div role="alert">{error}<Button variant="ghost" onPress={() => setSelection(old => ({ ...old }))}>重试</Button></div> : null}
       {completed ? <div role="status">{completed}</div> : null}

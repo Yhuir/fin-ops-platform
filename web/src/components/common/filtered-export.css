@@ -11,3 +11,5 @@
 .filtered-export-dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .filtered-export-dates label { display: grid; gap: 8px; font-size: 13px; }
 @media (max-width: 420px) { .filtered-export-content { padding: 16px; } .filtered-export-dates { grid-template-columns: 1fr; } }
+
+.filtered-export-status { min-height: 1.5em; }

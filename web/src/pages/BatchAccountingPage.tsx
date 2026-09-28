@@ -1,3 +1,4 @@
+import CountLabel from "../components/common/CountLabel";
 import { Segment, SegmentGroup } from "../components/common/SegmentedControl";
 import BankTransactionDrawer from "../features/bankSplits/BankTransactionDrawer";
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type MouseEvent } from "react";
@@ -222,6 +223,7 @@ export default function BatchAccountingPage() {
   const [bankPage, setBankPage] = useState(1);
   const [oaPage, setOaPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [hasCounts, setHasCounts] = useState(false);
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
@@ -305,6 +307,7 @@ export default function BatchAccountingPage() {
 
   const applyBatchAccountingPayload = useCallback((nextPayload: BatchAccountingResponse) => {
     setPayload(nextPayload);
+    setHasCounts(true);
     setBankRowsById((current) => ({
       ...current,
       ...Object.fromEntries(nextPayload.bankRows.map((row) => [row.id, row])),
@@ -659,6 +662,7 @@ export default function BatchAccountingPage() {
     >
       <div aria-label="批量账务筛选" className="batch-accounting-filter" role="region">
         <SegmentGroup
+          aria-busy={loading && !error}
           aria-label="批量账务状态"
           className="batch-accounting-segment"
           disallowEmptySelection
@@ -670,8 +674,8 @@ export default function BatchAccountingPage() {
           selectionMode="single"
           size="sm"
         >
-          <Segment id="unsubmitted">未提交 {payload.summary.unsubmittedCount} 笔</Segment>
-          <Segment id="submitted">已提交 {payload.summary.submittedCount} 笔</Segment>
+          <Segment id="unsubmitted">未提交 <CountLabel value={!hasCounts || error ? undefined : payload.summary.unsubmittedCount} unit="笔" spaced /></Segment>
+          <Segment id="submitted">已提交 <CountLabel value={!hasCounts || error ? undefined : payload.summary.submittedCount} unit="笔" spaced /></Segment>
         </SegmentGroup>
       </div>
 

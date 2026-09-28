@@ -1707,7 +1707,7 @@ describe("OA pending payments page", () => {
     await waitFor(() => expect(rowsRequests(fetchMock).at(-1)!.searchParams.get("filters")).toBeNull());
   });
 
-  test("does not show the previous scope's counts while a new scope is loading", async () => {
+  test("keeps counts during a scope transition and replaces them when the response succeeds", async () => {
     const pending = deferred();
     installOaPendingPaymentsFetch({ rowsResponses: [
       { status: 200, payload: rowsPayload },
@@ -1716,8 +1716,8 @@ describe("OA pending payments page", () => {
     renderAuthenticatedAppAt("/oa-pending-payments");
     await screen.findByRole("radio", { name: "已关联流水 50条" });
     await userEvent.click(screen.getByRole("radio", { name: /进行中 OA/ }));
-    expect(await screen.findByRole("radio", { name: "已关联流水 …" })).toBeInTheDocument();
-    expect(screen.queryByRole("radio", { name: "已关联流水 50条" })).not.toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "已关联流水 50条" })).toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: "支付流水" }).closest("[aria-busy]")).toHaveAttribute("aria-busy", "true");
     pending.resolve();
     expect(await screen.findByRole("radio", { name: "已关联流水 20条" })).toBeInTheDocument();
   });
