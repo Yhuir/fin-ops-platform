@@ -263,6 +263,12 @@ test.describe("cost statistics browser flow", () => {
     await page.getByRole('button', {name:'导出中心'}).click();
     const drawer = page.getByRole('dialog', {name:'导出中心'});
     await expect(drawer.getByRole('button', {name:'导出',exact:true})).toBeEnabled();
+    await expect.poll(async () => {
+      const box = await drawer.boundingBox();
+      const viewport = page.viewportSize()!;
+      return Boolean(box && Math.abs(box.y) <= 1 && Math.abs(box.height - viewport.height) <= 1
+        && Math.abs(box.x + box.width - viewport.width) <= 1 && box.width <= 640);
+    }).toBe(true);
     const tabs=drawer.getByRole('radiogroup',{name:'导出视图切换'});
     await tabs.getByRole('radio',{name:'按时间'}).click();
     await expect(drawer.getByText(/导出 \d+ 笔/)).toBeVisible();

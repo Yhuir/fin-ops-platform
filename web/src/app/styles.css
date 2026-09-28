@@ -19376,66 +19376,24 @@ body.column-layout-dragging {
   font-size: 12px;
 }
 
-.export-center-drawer-layer {
-  position: fixed;
-  inset: 0;
-  z-index: 1500;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--fp-space-6);
-}
-
-.export-center-drawer-backdrop {
-  position: absolute;
-  inset: 0;
-  border: 0;
-  background: rgba(15, 23, 42, 0.42);
-}
-
-.export-center-drawer {
-  position: relative;
-  z-index: 1;
-  width: min(1120px, calc(100vw - 40px));
-  max-height: min(88vh, 920px);
-  overflow: hidden;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-lg);
-  background: var(--fp-surface);
-  box-shadow: var(--fp-shadow-dialog);
-}
-
-.export-center-drawer-header,
-.export-center-drawer-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--fp-space-4);
-  padding: var(--fp-space-4) var(--fp-space-5);
-  border-bottom: 1px solid var(--fp-border-subtle);
-}
-
-.export-center-drawer-header h2 {
-  margin: 0;
-  color: var(--fp-text);
-  font-size: var(--fp-text-headline);
-}
-
-.export-center-drawer-header p {
-  margin: 8px 0 0;
-  color: #486581;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
 .export-center-drawer-body {
-  overflow: auto;
-  padding: var(--fp-space-4) var(--fp-space-5);
+  padding: 16px;
   display: grid;
-  gap: var(--fp-space-3);
-  background: var(--fp-surface);
+  gap: 24px;
+}
+
+.export-center-drawer .project-export-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.export-center-drawer .project-export-choice {
+  margin: 0;
+}
+
+.export-center-drawer .finance-drawer__footer {
+  justify-content: space-between;
 }
 
 .export-center-config-grid {
@@ -19500,18 +19458,6 @@ body.column-layout-dragging {
 }
 
 
-
-.export-center-drawer-footer {
-  border-top: 1px solid var(--fp-border-subtle);
-  border-bottom: 0;
-  background: var(--fp-surface);
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.export-center-drawer-footer .action-feedback {
-  margin-right: auto;
-}
 
 .cost-table-section,
 .cost-detail-panel-shell {
