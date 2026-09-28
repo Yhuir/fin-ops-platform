@@ -14,7 +14,16 @@ for (const route of ['oa-pending-payments', 'output-invoice-collections', 'pendi
     if (route === 'pending-invoices') await expect(page.getByText(/^当前范围 .*笔流水/)).toHaveCount(0);
     for (const width of [1800, 1280, 390]) {
       await page.setViewportSize({ width, height: 1000 });
+      if (route === 'oa-pending-payments') {
+        // Stress count-label width without changing query or business state.
+        await page.getByRole('radiogroup', { name: '支付流水' }).locator('.app-segments__label').evaluateAll(labels => labels.forEach(label => {
+          label.textContent = label.textContent!.replace(/\d+条/, '99999条');
+        }));
+      }
       const toolbar = page.locator(route === 'pending-invoices' ? '.pending-invoices-toolbar' : `.${route}-query`);
+      const toolbarBox = await toolbar.boundingBox();
+      expect(toolbarBox!.x).toBeGreaterThanOrEqual(0);
+      expect(toolbarBox!.x + toolbarBox!.width).toBeLessThanOrEqual(width);
       expect(await toolbar.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
       const search = toolbar.getByRole('search');
       await expect(search.getByRole('button', { name: '查询' })).toBeInViewport();
