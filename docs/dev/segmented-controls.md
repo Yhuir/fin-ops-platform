@@ -7,7 +7,7 @@
 - `web/src/components/common/SegmentedControl.tsx` 提供受控的 HeroUI `ToggleButtonGroup` / `ToggleButton` 展示封装；`SegmentGroup` / `Segment` 供现有集合选择回调、空选择和分组标题使用，`SegmentedControl` 供简单选项列表使用。
 - 输入为选项稳定 key、标签（业务 owner 提供计数）、当前选择、禁用状态、无障碍名称和选择回调；输出只有用户选择。重复选中不产生新回调。公共组件不请求 API、不写存储、不计算数量、不接管草稿或页面挂载。
 - 已有内容 Tabs 保留 HeroUI `Tabs` 的状态和 panel 语义，统一使用 `app-segments` 样式及原生 `Tabs.Indicator`。原生指示器也用于 ToggleButtonGroup 的选择上下文，不添加动画依赖或自行计算选中块位置。
-- `segmentedControl.css` 只作用于显式采用 `app-segments` 的控件；连续浅底框、浅蓝选中块、键盘焦点、减少动画偏好、内部横向滚动。短组可以 fullWidth；不强制所有工具栏占满整行。
+- `segmentedControl.css` 只作用于显式采用 `app-segments` 的控件；连续浅底框、品牌实蓝选中块与白字、键盘焦点、减少动画偏好、内部横向滚动。短组可以 fullWidth；不强制所有工具栏占满整行。
 - 日期外层保留 HeroUI Button + Popover 的复合语义；打开弹层、切换年/月粒度均不提交日期，实际日期选择才调用原 onChange。
 
 ## 入口清单
@@ -24,7 +24,7 @@
 | 手工导入 | 动态流水/发票标签 | 原稳定 ID、编辑/概览、保存标记、附件、草稿与禁用状态 |
 | 共享时间选择 | 年/月粒度与外层范围框 | 不新增日期模式；不改变查询值或年月网格的日历语义 |
 
-待找发票、进项、销项的 `InvoiceCountSegments` 和反提 OA 状态控件保持现状，不重复迁移；销项使用的公共日期框随共享控件统一外观，统计控件/计数合同不变。
+待找发票、进项、销项的 `InvoiceCountSegments` 和反提 OA 状态控件共享同一高对比配色要求，保留现有结构；统计控件/计数合同不变。
 
 表单 RadioGroup、现金收支类型字段、账户树、记录选择、多选筛选、保存/删除、排序、分页和展开收起不是本次视图分段控件，不转换。
 
@@ -54,3 +54,14 @@
 组件回归、原生控件交互、ETC 等宽、异常抽屉 1440/1024 视口与逐项可达性已验证。窄屏金额分类允许控件内部滚动，页面和抽屉不能横向溢出。
 
 扩展浏览器回归发现既有 `cost-source-allocation.spec.ts` 的 100 行展开/收起动画用例不能稳定满足 400ms 采样断言；在改动前 main `6ce804303` 的独立工作树同样复现。该用例及动画实现未改动，也未跳过或放宽断言。此项属于现有成本抽屉动画风险，不作为本次切换控件通过的证据。
+
+
+## 2026-09-28 高对比选中态
+
+- 四个展示入口为 `segmentedControl.css` 的 app-segments、`styles.css` 的 invoice-count-segments、BusinessPeriodPicker、反提 OA 专用 Tabs。使用已有 HeroUI 原生状态属性；选中 #1d4ed8 / #fff，未选中 #475569，容器 #eef3f8，hover #e8f0ff。普通文字对比度目标≥4.5:1；选中白字约6.70:1。数字、单位与图标跟随文字，删除 OA 计数透明度。
+- 选中焦点使用内缩白色2px轮廓，未选中使用蓝色轮廓；PopoverTrigger 使用原生 :focus-visible，不能假定它和 Button 有相同 data 属性。焦点不依赖新增阴影或额外容器。
+- 日期外层全部和已应用年月均使用强选中态；浏览年份只显示边框，实际生效的年/月仍按原 selection 标记。只改变年份按钮的 variant/data-browsed 呈现，不改变 activeYear、selection、onChange 或请求。年月网格保持原来的 Button，不强制改为分段条。
+- 删除原浅蓝选中块、反提 OA 无引用 --active 别名及取消焦点的规则，保留全局 primary-soft 和表格/提示背景。无新增依赖、业务状态、API、数据库或兜底路径。
+- 账户树、批次记录、附件和表单单选仍是原来的列表/表单结构，不纳入分段条 CSS；扫描其选择规则，避免误改 .active/[aria-pressed] 全局选择器。
+- `e2e/segmented-controls.spec.ts` 核对十个主要页面的真实 computed colors、文本后代颜色、hover，另核对年月浏览/应用/焦点、反提 OA 三状态及键盘交互；保留成本跨组单选、重复点击零请求、动态发票草稿、窄屏和日期粒度零请求检查。`BusinessPeriodPicker.test.tsx` 补充浏览年份不提交日期、选月份只调用一次。
+- CSS-only 页面入口复用原回调，无业务 I/O 变更。测试类别5/6/7适用；类别1/2/3/4不新增后端测试。生产只读验证状态呈现和切换响应，性能测量是用户可见选中反馈，不冒充全部业务数据加载耗时。

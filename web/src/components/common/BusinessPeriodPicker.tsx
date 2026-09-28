@@ -134,7 +134,8 @@ export default function BusinessPeriodPicker({
                     }
                   }}
                   size="sm"
-                  variant={activeYear === candidateYear ? "primary" : "tertiary"}
+                  data-browsed={activeYear === candidateYear ? "true" : undefined}
+                  variant={activeMode === "year" && selection.mode === "year" && selection.year === candidateYear ? "primary" : "tertiary"}
                 >
                   {candidateYear}年
                 </Button>

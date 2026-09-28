@@ -316,9 +316,9 @@ textarea {
   color: var(--fp-text-secondary);
   box-shadow: none;
 }
-.business-period-picker--segmented .business-period-all[aria-pressed="true"] {
-  background: var(--fp-primary-soft);
-  color: var(--fp-primary);
+.business-period-picker .business-period-all[aria-pressed="true"] {
+  background: var(--fp-primary);
+  color: #fff;
 }
 .business-period-picker--segmented .business-period-trigger {
   min-width: 0;
@@ -382,11 +382,33 @@ textarea {
   border-color: var(--fp-primary);
 }
 
-.business-period-picker--segmented .business-period-trigger.is-active {
+.business-period-picker .business-period-trigger.is-active {
+  background: var(--fp-primary);
+  color: #fff;
+}
+.business-period-trigger.is-active small { color: inherit; }
+.business-period-picker--segmented .business-period-all:not([aria-pressed="true"]):hover,
+.business-period-picker--segmented .business-period-trigger:not(.is-active):hover {
   background: var(--fp-primary-soft);
+}
+.business-period-trigger:focus-visible {
+  outline: 2px solid var(--fp-primary);
+  outline-offset: -3px;
+}
+.business-period-picker .business-period-all[aria-pressed="true"][data-focus-visible="true"],
+.business-period-trigger.is-active[data-focus-visible="true"],
+.business-period-trigger.is-active:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: -3px;
+}
+.business-period-grid .button[aria-pressed="true"] {
+  background: var(--fp-primary);
+  color: #fff;
+}
+.business-period-grid .button[data-browsed="true"]:not([aria-pressed="true"]) {
+  box-shadow: inset 0 0 0 1px var(--fp-primary);
   color: var(--fp-primary);
 }
-.business-period-picker--segmented .business-period-trigger.is-active small { color: inherit; }
 
 .business-period-popover {
   width: min(340px, calc(100vw - 24px));
@@ -2596,17 +2618,20 @@ textarea {
   border-right: 0;
 }
 
-.input-invoice-usage-oa-tab:hover,
-.input-invoice-usage-oa-tab:focus-visible {
-  background: var(--fp-surface);
-  color: var(--fp-text-primary);
-  outline: none;
+.input-invoice-usage-oa-tab:hover:not([aria-selected="true"]) {
+  background: var(--fp-primary-soft);
 }
 
-.input-invoice-usage-oa-tab--active,
 .input-invoice-usage-oa-tab[aria-selected="true"] {
-  background: var(--fp-primary-soft);
-  color: var(--fp-primary-hover);
+  background: var(--fp-primary);
+  color: #fff;
+}
+.input-invoice-usage-oa-tab[data-focus-visible="true"] {
+  outline: 2px solid var(--fp-primary);
+  outline-offset: -3px;
+}
+.input-invoice-usage-oa-tab[aria-selected="true"][data-focus-visible="true"] {
+  outline-color: #fff;
 }
 
 .input-invoice-usage-oa-table {
@@ -2882,7 +2907,6 @@ textarea {
 .oa-pending-payments-view-toggle__count {
   font-size: var(--fp-text-caption);
   font-weight: 700;
-  opacity: 0.82;
   white-space: nowrap;
 }
 
@@ -25084,12 +25108,19 @@ body.column-layout-dragging {
 }
 .invoice-count-segments .tabs__indicator {
   border-radius: 7px;
-  background: var(--fp-primary-soft);
+  background: var(--fp-primary);
   box-shadow: none;
 }
-.invoice-count-segments .tabs__tab[data-selected="true"] {
-  color: var(--fp-primary);
+.invoice-count-segments .tabs__tab { color: var(--fp-text-secondary); }
+.invoice-count-segments .tabs__tab[data-selected="true"] { color: #fff; }
+.invoice-count-segments .tabs__tab[data-hovered="true"]:not([data-selected="true"]) {
+  background: var(--fp-primary-soft);
 }
+.invoice-count-segments .tabs__tab[data-focus-visible="true"] {
+  outline: 2px solid var(--fp-primary);
+  outline-offset: -3px;
+}
+.invoice-count-segments .tabs__tab[data-selected="true"][data-focus-visible="true"] { outline-color: #fff; }
 .invoice-count-segments__count {
   font-variant-numeric: tabular-nums;
   font-size: 0.92em;

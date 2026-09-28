@@ -52,7 +52,7 @@
 .app-segments .toggle-button::before,
 .app-segments .toggle-button::after { display: none; }
 .app-segments .toggle-button[data-selected="true"],
-.app-segments .tabs__tab[data-selected="true"] { color: var(--fp-primary); background: transparent; box-shadow: none; }
+.app-segments .tabs__tab[data-selected="true"] { color: #fff; background: transparent; box-shadow: none; }
 .app-segments .toggle-button[data-hovered="true"]:not([data-selected="true"]),
 .app-segments .tabs__tab[data-hovered="true"]:not([data-selected="true"]) { background: var(--fp-primary-soft); }
 .app-segments .app-segments__indicator,
@@ -60,7 +60,7 @@
   position: absolute;
   inset: 0;
   border-radius: 7px;
-  background: var(--fp-primary-soft);
+  background: var(--fp-primary);
   box-shadow: none;
   z-index: -1;
   transition: translate 160ms ease, width 160ms ease;
@@ -69,6 +69,8 @@
 .app-segments__label { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
 .app-segments .toggle-button[data-focus-visible="true"],
 .app-segments .tabs__tab[data-focus-visible="true"] { outline: 2px solid var(--fp-primary); }
+.app-segments .toggle-button[data-selected="true"][data-focus-visible="true"],
+.app-segments .tabs__tab[data-selected="true"][data-focus-visible="true"] { outline-color: #fff; outline-offset: -3px; }
 .app-segments .toggle-button[data-disabled="true"],
 .app-segments .tabs__tab[data-disabled="true"] { opacity: .5; }
 @media (prefers-reduced-motion: reduce) {

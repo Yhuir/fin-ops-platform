@@ -87,4 +87,21 @@ describe("BusinessPeriodPicker", () => {
     expect(formatMonthLabel("2026-12")).toBe("2026年12月");
     expect(formatMonthLabel("bad-value")).toBe("2026年1月");
   });
+  test("browsing a year in month mode does not mark a date applied or notify the owner", async () => {
+    const user = userEvent.setup(); const onChange = vi.fn();
+    renderPeriodPicker({ allowAll: true, allowedModes: ["year", "month"], selection: { mode: "all", year: "2026", month: "2026-03" }, onChange });
+    const allButton = screen.getByRole("button", { name: "全部", exact: true });
+    await user.click(screen.getByRole("button", { name: "月份：年月" }));
+    await user.click(screen.getByRole("radio", { name: "按月" }));
+    const year = screen.getByRole("button", { name: "2027年" });
+    await user.click(year);
+    expect(year).toHaveAttribute("data-browsed", "true");
+    expect(year).toHaveAttribute("aria-pressed", "false");
+    expect(allButton).toHaveAttribute("aria-pressed", "true");
+    expect(onChange).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "五月" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith({ mode: "month", year: "2027", month: "2027-05" });
+  });
+
 });

@@ -385,7 +385,7 @@ Use one state component for loading, empty, error, stale, refreshing, permission
 | 筛选浮层 | 常规宽280px，长项目名可320px，上限为视口减24px；搜索在顶、候选滚动、操作在底 | 高度上限min(360px,可用视口高度)；候选加载/错误只占浮层区域；读失败不伪装无选项 |
 | 表头 | 高36px、12px/600字、浅底色；排序/筛选入口预留固定宽度 | 只给真实支持的列加入口；排序与筛选不互相触发；aria-sort描述当前排序 |
 | 表体 | 默认44px行高、13px字、金额右对齐和tabular-nums | 36px仅用于明确的简单紧凑表；长金额不截断，不为塞进一屏缩字；null、0和接口错误分开 |
-| Tabs | 40px高、13px字、当前项#1d4ed8/600与2px底线 | 使用HeroUI Tabs，切换仅挂载活动业务视图，不同时预取所有Tab；键盘焦点保留 |
+| Tabs | 一体浅底分段框、13px字、当前项#1d4ed8实底/白字、清晰键盘焦点 | 使用HeroUI Tabs，切换仅挂载活动业务视图，不同时预取所有Tab；键盘焦点保留 |
 | Checkbox | HeroUI Checkbox/CheckboxGroup，文字13px、整行可点 | 选中、混合、禁用、焦点均可辨；业务配置checkbox不当作临时过滤器 |
 | Drawer/Dialog | 沿用AppDrawer的420/560/720px及视口约束；小表单/确认沿用已有Dialog | 抽屉内部浮层遵循相同样式；不使用大卡片、海报说明、重复副标题 |
 
@@ -409,3 +409,8 @@ Use one state component for loading, empty, error, stale, refreshing, permission
 Figma Make提供排版、层级、密度、行色和浮层视觉参考；不迁移其模拟业务、Router、全局CSS或store。依据已读活跃源码记录核对相关变化，不重复全工程审计。现金先落实§7；其他页仍按现有规范运行，未经授权不改全局主题和公共默认行为。
 
 使用普通组件测试和浏览器几何/视觉检查：默认、打开、搜索中、错误、应用、关闭均检查；相同视口菜单开关前后固定区域差值≤1 CSS px、底层滚动位置不变。与Make使用同视口/缩放/等价合成数据比较，不承诺操作系统字体逐像素一致；不新增截图hash、冻结截图或视觉发布平台。
+
+
+## 8. 全 App 切换控件高对比状态
+
+页面、抽屉、统计分类及年月选择遵循[分段控件合同](docs/dev/segmented-controls.md)：实蓝选中块配白字，未选中深灰字，hover浅蓝，键盘焦点独立可见；数字和单位不降低透明度。保持已有原生 HeroUI 结构及业务状态，不改全局 primary-soft，不将操作按钮、表格行、导航或记录列表机械套成分段条。日期浏览年份与已应用年月保留不同视觉含义。
