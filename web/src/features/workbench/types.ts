@@ -105,13 +105,11 @@ export function isWorkbenchAmountAnomalyCode(value: unknown): value is Workbench
 export type WorkbenchExceptionView = "amount" | "document_only";
 export type WorkbenchExceptionBucket = "unpaired" | "paired";
 
-export type WorkbenchEntityCounts = { oa: number; bank: number; invoice: number };
-
 export type WorkbenchExceptionCounts = {
-  total: WorkbenchEntityCounts;
-  amountTotal: WorkbenchEntityCounts;
-  documentOnly: WorkbenchEntityCounts;
-  byCode: Record<WorkbenchAmountAnomalyCode, WorkbenchEntityCounts>;
+  total: number;
+  amountTotal: number;
+  documentOnly: number;
+  byCode: Record<WorkbenchAmountAnomalyCode, number>;
 };
 
 export type WorkbenchAnomalyItem = {
@@ -528,8 +526,8 @@ export type WorkbenchSummary = {
   invoiceCount: number;
   pairedCount: number;
   unpairedCount: number;
-  unpairedExceptionCounts: WorkbenchEntityCounts;
-  pairedExceptionCounts: WorkbenchEntityCounts;
+  unpairedExceptionCounts: number;
+  pairedExceptionCounts: number;
   totalCount: number;
   zoneCounts: Record<WorkbenchZoneId, WorkbenchZoneCounts>;
 };

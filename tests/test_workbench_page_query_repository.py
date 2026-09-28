@@ -260,13 +260,10 @@ def test_exception_amount_view_returns_additive_counts_and_auto_code_cursor() ->
         "oa_count": 2,
         "bank_count": 2,
         "invoice_count": 2,
-        "entity_counts": {
-            key: {"oa": count, "bank": count + 1, "invoice": count + 2}
-            for key, count in {
-                "total": 4, "amount_total": 3, "document_only": 1,
-                **{code: 2 if code == selected_code else 0 for code in AMOUNT_EXCEPTION_CODES},
-            }.items()
-        },
+        "exception_total": 4,
+        "amount_exception_total": 3,
+        "document_only_exception_total": 1,
+        **{f"exception_count_{code}": 0 for code in AMOUNT_EXCEPTION_CODES},
         "selected_exception_code": selected_code,
         f"exception_count_{selected_code}": 2,
         "exception_count_all_amounts_different": 1,
@@ -288,10 +285,10 @@ def test_exception_amount_view_returns_additive_counts_and_auto_code_cursor() ->
     assert payload["total"] == 2
     assert payload["selected_exception_code"] == selected_code
     assert payload["exception_counts"] == {
-        "total": metadata["entity_counts"]["total"],
-        "amount_total": metadata["entity_counts"]["amount_total"],
-        "document_only": metadata["entity_counts"]["document_only"],
-        "by_code": {code: metadata["entity_counts"][code] for code in AMOUNT_EXCEPTION_CODES},
+        "total": 4,
+        "amount_total": 3,
+        "document_only": 1,
+        "by_code": {code: metadata[f"exception_count_{code}"] for code in AMOUNT_EXCEPTION_CODES},
     }
 
     assert len(connection.calls) == 1
@@ -404,8 +401,8 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
         "statistics_in_progress_oa_total": 18,
         "expense_transaction_count": 1043,
         "income_transaction_count": 159,
-        "unpaired_exception_counts": {"oa": 0, "bank": 0, "invoice": 0},
-        "paired_exception_counts": {"oa": 0, "bank": 0, "invoice": 0},
+        "unpaired_exception_counts": 0,
+        "paired_exception_counts": 0,
     }
     connection = _CountingQueryConnection(
         [
@@ -567,8 +564,8 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
         "case:case-1",
         "row:bank:bank-1",
     ]
-    assert payload["summary"]["unpaired_exception_counts"] == {"oa": 0, "bank": 0, "invoice": 0}
-    assert payload["summary"]["paired_exception_counts"] == {"oa": 0, "bank": 0, "invoice": 0}
+    assert payload["summary"]["unpaired_exception_counts"] == 0
+    assert payload["summary"]["paired_exception_counts"] == 0
     assert payload["statistics"] == {
         "oa_count": 433,
         "bank_transaction_count": 1,
@@ -604,8 +601,8 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
 def test_initial_page_keeps_member_sort_aggregation_only_for_explicitly_sorted_zone() -> None:
     connection = _CountingQueryConnection(
         [{"record_zone": "metadata", "internal_key": None,
-          "unpaired_exception_counts": {"oa": 0, "bank": 0, "invoice": 0},
-          "paired_exception_counts": {"oa": 0, "bank": 0, "invoice": 0}}]
+          "unpaired_exception_counts": 0,
+          "paired_exception_counts": 0}]
     )
     repository = PostgresWorkbenchPageQueryRepository(connection, tenant_id="test-tenant")
 
@@ -2229,8 +2226,8 @@ def test_initial_bank_inventory_counts_original_parents_not_scoped_units() -> No
     connection = _CountingQueryConnection([{
         "record_zone": "metadata", "internal_key": None,
         "summary_bank_count": 3,
-        "unpaired_exception_counts": {"oa": 0, "bank": 0, "invoice": 0},
-        "paired_exception_counts": {"oa": 0, "bank": 0, "invoice": 0},
+        "unpaired_exception_counts": 0,
+        "paired_exception_counts": 0,
     }])
     repository = PostgresWorkbenchPageQueryRepository(connection, tenant_id="test-tenant")
     payload = repository._initial_page(scope_key="2026-07", paired_query=None, unpaired_query=None)

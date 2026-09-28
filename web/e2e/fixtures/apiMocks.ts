@@ -1820,8 +1820,8 @@ function workbenchSummary(
       invoice_count: 210,
       paired_count: 5,
       unpaired_count: 205,
-      unpaired_exception_counts: { oa: (0), bank: (0), invoice: (0) },
-      paired_exception_counts: { oa: (0), bank: (0), invoice: (0) },
+      unpaired_exception_counts: (0),
+      paired_exception_counts: (0),
       ignored_count: 0,
     };
   }
@@ -1831,8 +1831,8 @@ function workbenchSummary(
     invoice_count: 1,
     paired_count: relationConfirmed && (!amountMismatchScenario || amountMismatchDecision === "accept_paired") ? 1 : 0,
     unpaired_count: relationConfirmed && (!amountMismatchScenario || amountMismatchDecision === "accept_paired") ? 0 : 1,
-    unpaired_exception_counts: { oa: (amountMismatchScenario && amountMismatchDecision !== "accept_paired" ? 1 : 0), bank: (amountMismatchScenario && amountMismatchDecision !== "accept_paired" ? 1 : 0), invoice: (amountMismatchScenario && amountMismatchDecision !== "accept_paired" ? 1 : 0) },
-    paired_exception_counts: { oa: (amountMismatchScenario && amountMismatchDecision === "accept_paired" ? 1 : 0), bank: (amountMismatchScenario && amountMismatchDecision === "accept_paired" ? 1 : 0), invoice: (amountMismatchScenario && amountMismatchDecision === "accept_paired" ? 1 : 0) },
+    unpaired_exception_counts: (amountMismatchScenario && amountMismatchDecision !== "accept_paired" ? 1 : 0),
+    paired_exception_counts: (amountMismatchScenario && amountMismatchDecision === "accept_paired" ? 1 : 0),
     ignored_count: 0,
   };
 }
@@ -1886,10 +1886,10 @@ function workbenchExceptionProjection<T extends Record<string, unknown>>(
     groups: selectedGroups,
     selectedExceptionCode: selectedCode,
     counts: {
-      total: countWorkbenchRows([...amountGroups, ...documentOnlyGroups] as never),
-      amount_total: countWorkbenchRows(amountGroups as never),
-      document_only: countWorkbenchRows(documentOnlyGroups as never),
-      by_code: Object.fromEntries(WORKBENCH_AMOUNT_EXCEPTION_CODES.map((code) => [code, countWorkbenchRows(amountGroups.filter((group) => primaryAmountCode(group) === code) as never)])),
+      total: [...amountGroups, ...documentOnlyGroups].length,
+      amount_total: amountGroups.length,
+      document_only: documentOnlyGroups.length,
+      by_code: Object.fromEntries(WORKBENCH_AMOUNT_EXCEPTION_CODES.map((code) => [code, amountGroups.filter((group) => primaryAmountCode(group) === code).length])),
     },
   };
 }
@@ -9559,8 +9559,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             invoice_count: 2,
             paired_count: pairedGroups.length,
             unpaired_count: unpairedGroups.length,
-            paired_exception_counts: { oa: (0), bank: (0), invoice: (0) },
-            unpaired_exception_counts: countWorkbenchRows(unpairedGroups),
+            paired_exception_counts: (0),
+            unpaired_exception_counts: unpairedGroups.length,
           },
           paired: {
             ...payload.paired,
@@ -9607,8 +9607,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             bank_count: 0,
             invoice_count: 0,
             unpaired_count: 1,
-            unpaired_exception_counts: countWorkbenchRows(groups),
-            paired_exception_counts: { oa: (0), bank: (0), invoice: (0) },
+            unpaired_exception_counts: groups.length,
+            paired_exception_counts: (0),
           },
           invoice_inventory: {
             ...payload.invoice_inventory,
@@ -9664,8 +9664,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             invoice_count: relationConfirmed ? 1 : 0,
             paired_count: relationConfirmed ? 2 : 1,
             unpaired_count: relationConfirmed ? 0 : 1,
-            unpaired_exception_counts: { oa: (0), bank: (0), invoice: (0) },
-            paired_exception_counts: { oa: (0), bank: (0), invoice: (0) },
+            unpaired_exception_counts: (0),
+            paired_exception_counts: (0),
             ignored_count: 0,
           },
           statistics: {

@@ -2106,12 +2106,12 @@ function toGroupedWorkbenchPayload(payload: {
       invoice_count: payload.summary.invoice_count,
       paired_count: pairedGroups.length,
       unpaired_count: unpairedGroups.length,
-      unpaired_exception_counts: countMockWorkbenchRows(unpairedGroups.filter(
+      unpaired_exception_counts: unpairedGroups.filter(
         (group) => (group as { workbench_anomaly?: object }).workbench_anomaly != null,
-      )),
-      paired_exception_counts: countMockWorkbenchRows(pairedGroups.filter(
+      ).length,
+      paired_exception_counts: pairedGroups.filter(
         (group) => (group as { workbench_anomaly?: object }).workbench_anomaly != null,
-      )),
+      ).length,
     },
     statistics: {
       oa_count: payload.summary.oa_count,
@@ -4747,10 +4747,10 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           ...(exceptionBucket ? {
             selected_exception_code: selectedExceptionCode,
             exception_counts: {
-              total: countMockWorkbenchRows([...amountGroups, ...documentOnlyGroups]),
-              amount_total: countMockWorkbenchRows(amountGroups),
-              document_only: countMockWorkbenchRows(documentOnlyGroups),
-              by_code: Object.fromEntries(amountCodes.map((code) => [code, countMockWorkbenchRows(amountGroups.filter((group) => primaryAmountCode(group) === code))])),
+              total: [...amountGroups, ...documentOnlyGroups].length,
+              amount_total: amountGroups.length,
+              document_only: documentOnlyGroups.length,
+              by_code: Object.fromEntries(amountCodes.map((code) => [code, amountGroups.filter((group) => primaryAmountCode(group) === code).length])),
             },
           } : {}),
         },

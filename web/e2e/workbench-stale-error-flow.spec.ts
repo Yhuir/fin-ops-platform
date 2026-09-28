@@ -141,7 +141,7 @@ test.describe("workbench direct error browser flow", () => {
 
     await page
       .getByTestId("zone-unpaired")
-      .getByRole("button", { name: /未配对异常 OA \d+条.*已配对异常 OA \d+条/ })
+      .getByRole("button", { name: /未配对异常 \d+组.*已配对异常 \d+组/ })
       .click();
     const drawer = page.getByRole("dialog", { name: "异常处理" });
     await expect(drawer).toBeVisible();

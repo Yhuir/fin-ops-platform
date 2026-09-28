@@ -33,7 +33,7 @@ test.describe("workbench exception browser flow", () => {
     const mainHoverBackground = await mainHeader.evaluate((element) => getComputedStyle(element).backgroundColor);
     expect(mainHoverBackground).toBe("rgb(51, 65, 85)");
     await page.getByTestId("zone-unpaired").getByRole("button", {
-      name: "未配对异常 OA 1条 · 流水 1笔 · 发票 1张 | 已配对异常 OA 0条 · 流水 0笔 · 发票 0张",
+      name: "未配对异常 1组 | 已配对异常 0组",
     }).click();
 
     const drawer = page.getByRole("dialog", { name: "异常处理" });
@@ -74,11 +74,11 @@ test.describe("workbench exception browser flow", () => {
     await page.goto("/");
     await page
       .getByTestId("zone-unpaired")
-      .getByRole("button", { name: /未配对异常 OA \d+条.*已配对异常 OA \d+条/ })
+      .getByRole("button", { name: /未配对异常 \d+组.*已配对异常 \d+组/ })
       .click();
 
     const drawer = page.getByRole("dialog", { name: "异常处理" });
-    await expect(drawer.locator(".workbench-anomaly-drawer__count")).toHaveText("OA 51条 · 流水 51笔 · 发票 51张");
+    await expect(drawer.locator(".workbench-anomaly-drawer__count")).toHaveText("当前结果：51组");
     expect(api.count("GET /api/workbench/groups")).toBe(1);
     expect(api.count("GET /api/workbench/groups/detail")).toBe(0);
     expect(groupRequestUrls[0]?.searchParams.get("exception_view")).toBe("amount");
@@ -89,7 +89,7 @@ test.describe("workbench exception browser flow", () => {
     expect(api.count("GET /api/workbench/groups/detail")).toBe(1);
 
     await drawer.getByRole("button", { name: "加载更多异常" }).click();
-    await expect(drawer.locator(".workbench-anomaly-drawer__count")).toHaveText("OA 51条 · 流水 51笔 · 发票 51张");
+    await expect(drawer.locator(".workbench-anomaly-drawer__count")).toHaveText("当前结果：51组");
     expect(api.count("GET /api/workbench/groups")).toBe(2);
     const loadMoreUrl = groupRequestUrls.find((url) => url.searchParams.has("cursor"));
     expect(loadMoreUrl?.searchParams.get("cursor")).toBeTruthy();
@@ -97,7 +97,7 @@ test.describe("workbench exception browser flow", () => {
     expect(loadMoreUrl?.searchParams.get("exception_view")).toBe("amount");
     expect(loadMoreUrl?.searchParams.has("exception_code")).toBe(false);
 
-    await drawer.getByRole("radio", { name: "三项不一致 OA 0条 · 流水 0笔 · 发票 0张" }).click();
+    await drawer.getByRole("radio", { name: "三项不一致 0组" }).click();
     await expect(drawer.getByText("当前分类没有金额异常。")).toBeVisible();
     const categoryUrl = [...groupRequestUrls].reverse().find((url) => (
       url.searchParams.get("exception_code") === "all_amounts_different"
@@ -114,14 +114,14 @@ test.describe("workbench exception browser flow", () => {
     await page.goto("/");
     await page
       .getByTestId("zone-unpaired")
-      .getByRole("button", { name: "未配对异常 OA 1条 · 流水 0笔 · 发票 0张 | 已配对异常 OA 0条 · 流水 0笔 · 发票 0张" })
+      .getByRole("button", { name: "未配对异常 1组 | 已配对异常 0组" })
       .click();
 
     const exceptionDrawer = page.getByRole("dialog", { name: "异常处理" });
     await expect(
       exceptionDrawer.locator(".workbench-anomaly-drawer__amount-filters"),
     ).toBeVisible();
-    await exceptionDrawer.getByRole("radio", { name: "仅资料异常 OA 1条 · 流水 0笔 · 发票 0张" }).click();
+    await exceptionDrawer.getByRole("radio", { name: "仅资料异常 1组" }).click();
     await expect(
       exceptionDrawer.locator(".workbench-anomaly-drawer__amount-filters"),
     ).toHaveCount(0);
@@ -146,11 +146,11 @@ test.describe("workbench exception browser flow", () => {
     await page.goto("/");
     await page
       .getByTestId("zone-unpaired")
-      .getByRole("button", { name: "未配对异常 OA 1条 · 流水 0笔 · 发票 2张 | 已配对异常 OA 0条 · 流水 0笔 · 发票 0张" })
+      .getByRole("button", { name: "未配对异常 1组 | 已配对异常 0组" })
       .click();
 
     const exceptionDrawer = page.getByRole("dialog", { name: "异常处理" });
-    await exceptionDrawer.getByRole("radio", { name: "仅资料异常 OA 1条 · 流水 0笔 · 发票 2张" }).click();
+    await exceptionDrawer.getByRole("radio", { name: "仅资料异常 1组" }).click();
     await exceptionDrawer.getByRole("button", { name: "展开异常明细" }).click();
     const indicator = exceptionDrawer.getByRole("button", {
       name: "该发票有 1 项异常，查看详情",
@@ -216,7 +216,7 @@ test.describe("workbench exception browser flow", () => {
     })).toHaveCount(0);
     await page
       .getByTestId("zone-unpaired")
-      .getByRole("button", { name: "未配对异常 OA 1条 · 流水 1笔 · 发票 1张 | 已配对异常 OA 0条 · 流水 0笔 · 发票 0张" })
+      .getByRole("button", { name: "未配对异常 1组 | 已配对异常 0组" })
       .click();
 
     const drawer = page.getByRole("dialog", { name: "异常处理" });
@@ -249,7 +249,7 @@ test.describe("workbench exception browser flow", () => {
     const bucketLoadsBeforeAccept = api.count("GET /api/workbench/groups");
     await drawer.getByRole("button", { name: "接受异常并进入已配对" }).click();
 
-    await expect(drawer.getByRole("radio", { name: "未配对异常 OA 0条 · 流水 0笔 · 发票 0张" })).toHaveAttribute("aria-checked", "true");
+    await expect(drawer.getByRole("radio", { name: "未配对异常 0组" })).toHaveAttribute("aria-checked", "true");
     await expect(drawer.getByText("当前分类没有金额异常。")).toBeVisible();
     await expect(pairedZone.getByRole("button", {
       name: "该发票有 1 项异常，查看详情",
@@ -265,10 +265,10 @@ test.describe("workbench exception browser flow", () => {
     expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeAccept + 1);
     expect(api.count("GET /api/workbench/groups")).toBe(bucketLoadsBeforeAccept + 1);
     await expect(unpairedZone.getByRole("button", {
-      name: "未配对异常 OA 0条 · 流水 0笔 · 发票 0张 | 已配对异常 OA 1条 · 流水 1笔 · 发票 1张",
+      name: "未配对异常 0组 | 已配对异常 1组",
     })).toBeVisible();
 
-    await drawer.getByRole("radio", { name: "已配对异常 OA 1条 · 流水 1笔 · 发票 1张" }).click();
+    await drawer.getByRole("radio", { name: "已配对异常 1组" }).click();
     await drawer.getByRole("button", { name: "展开异常明细" }).first().click();
     const reviewedPanel = drawer.getByRole("region", { name: "异常审阅" });
     await expect(reviewedPanel.getByText("已接受该异常风险")).toBeVisible();
@@ -288,7 +288,7 @@ test.describe("workbench exception browser flow", () => {
     const bucketLoadsBeforeWithdraw = api.count("GET /api/workbench/groups");
     await drawer.getByRole("button", { name: "撤回到未配对" }).click();
 
-    await expect(drawer.getByRole("radio", { name: "已配对异常 OA 0条 · 流水 0笔 · 发票 0张" })).toHaveAttribute("aria-checked", "true");
+    await expect(drawer.getByRole("radio", { name: "已配对异常 0组" })).toHaveAttribute("aria-checked", "true");
     await expect(drawer.getByText("当前分类没有金额异常。")).toBeVisible();
     await expect(unpairedZone.getByRole("button", {
       name: "该发票有 1 项异常，查看详情",
@@ -307,7 +307,7 @@ test.describe("workbench exception browser flow", () => {
     expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeWithdraw + 1);
     expect(api.count("GET /api/workbench/groups")).toBe(bucketLoadsBeforeWithdraw + 1);
     await expect(unpairedZone.getByRole("button", {
-      name: "未配对异常 OA 1条 · 流水 1笔 · 发票 1张 | 已配对异常 OA 0条 · 流水 0笔 · 发票 0张",
+      name: "未配对异常 1组 | 已配对异常 0组",
     })).toBeVisible();
     await drawer.getByRole("button", { name: "关闭抽屉" }).click();
     await expect(drawer).toHaveCount(0);
@@ -325,7 +325,7 @@ test.describe("workbench exception browser flow", () => {
     await page.goto("/");
     await page
       .getByTestId("zone-unpaired")
-      .getByRole("button", { name: "未配对异常 OA 1条 · 流水 1笔 · 发票 1张 | 已配对异常 OA 0条 · 流水 0笔 · 发票 0张" })
+      .getByRole("button", { name: "未配对异常 1组 | 已配对异常 0组" })
       .click();
 
     const drawer = page.getByRole("dialog", { name: "异常处理" });
@@ -429,7 +429,7 @@ test("shows confirmation notes beside the anomaly icon without loading detail or
     sessionMode: "user", workbenchAmountMismatchScenario: true, workbenchInitialRelationConfirmed: true,
   });
   await page.goto("/");
-  await page.getByTestId("zone-unpaired").getByRole("button", { name: "未配对异常 OA 1条 · 流水 1笔 · 发票 1张 | 已配对异常 OA 0条 · 流水 0笔 · 发票 0张" }).click();
+  await page.getByTestId("zone-unpaired").getByRole("button", { name: "未配对异常 1组 | 已配对异常 0组" }).click();
   const drawer = page.getByRole("dialog", { name: "异常处理" });
   const group = drawer.locator(".workbench-anomaly-drawer__group").first();
   const heading = group.locator(".workbench-anomaly-drawer__heading");
@@ -497,14 +497,14 @@ test("wraps long confirmation notes in a bounded popover and clears it when swit
   });
   await page.goto("/");
   const summaryResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/workbench/groups");
-  await page.getByTestId("zone-unpaired").getByRole("button", { name: "未配对异常 OA 1条 · 流水 1笔 · 发票 1张 | 已配对异常 OA 0条 · 流水 0笔 · 发票 0张" }).click();
+  await page.getByTestId("zone-unpaired").getByRole("button", { name: "未配对异常 1组 | 已配对异常 0组" }).click();
   const summary = await (await summaryResponse).json();
   const longNote = "第一段确认依据：" + "此处记录已核实的质保金说明。".repeat(60) + "\n第二段：" + "x".repeat(400);
   summary.groups[0].workbench_anomaly.confirmation.note = longNote;
   await page.route("**/api/workbench/groups?*", (route) => route.fulfill({ json: summary }));
   await page.reload();
   await page.setViewportSize({ width: 600, height: 800 });
-  await page.getByTestId("zone-unpaired").getByRole("button", { name: "未配对异常 OA 1条 · 流水 1笔 · 发票 1张 | 已配对异常 OA 0条 · 流水 0笔 · 发票 0张" }).click();
+  await page.getByTestId("zone-unpaired").getByRole("button", { name: "未配对异常 1组 | 已配对异常 0组" }).click();
   const drawer = page.getByRole("dialog", { name: "异常处理" });
   await drawer.getByRole("button", { name: "查看确认关联备注" }).hover();
   const popover = page.getByRole("dialog", { name: "确认关联备注" });
@@ -518,7 +518,7 @@ test("wraps long confirmation notes in a bounded popover and clears it when swit
   expect(geometry.height).toBeLessThanOrEqual(320);
   expect(geometry.left).toBeGreaterThanOrEqual(0);
   expect(geometry.right).toBeLessThanOrEqual(600);
-  await drawer.getByRole("radio", { name: "已配对异常 OA 0条 · 流水 0笔 · 发票 0张" }).click();
+  await drawer.getByRole("radio", { name: "已配对异常 0组" }).click();
   await expect(popover).toHaveCount(0);
 });
 
@@ -529,7 +529,7 @@ test.describe("confirmation note touch access", () => {
       sessionMode: "user", workbenchAmountMismatchScenario: true, workbenchInitialRelationConfirmed: true,
     });
     await page.goto("/");
-    await page.getByTestId("zone-unpaired").getByRole("button", { name: "未配对异常 OA 1条 · 流水 1笔 · 发票 1张 | 已配对异常 OA 0条 · 流水 0笔 · 发票 0张" }).tap();
+    await page.getByTestId("zone-unpaired").getByRole("button", { name: "未配对异常 1组 | 已配对异常 0组" }).tap();
     const drawer = page.getByRole("dialog", { name: "异常处理" });
     const trigger = drawer.getByRole("button", { name: "查看确认关联备注" });
     const popover = page.getByRole("dialog", { name: "确认关联备注" });

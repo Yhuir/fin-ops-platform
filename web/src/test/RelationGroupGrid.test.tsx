@@ -583,8 +583,8 @@ describe("Workbench candidate grouping layout", () => {
       scope_key: "all",
       oa_status: { code: "ready", message: "OA 已同步" },
       summary: {
-        unpaired_exception_counts: { oa: 0, bank: 0, invoice: 0 },
-        paired_exception_counts: { oa: 0, bank: 0, invoice: 0 },
+        unpaired_exception_counts: 0,
+        paired_exception_counts: 0,
         oa_count: 0,
         bank_count: 3,
         invoice_count: 0,

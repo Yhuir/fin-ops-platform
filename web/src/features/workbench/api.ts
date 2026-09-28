@@ -26,7 +26,6 @@ import type {
   WorkbenchAmountAnomalyCode,
   WorkbenchExceptionBucket,
   WorkbenchExceptionCounts,
-  WorkbenchEntityCounts,
   WorkbenchExceptionView,
   WorkbenchOaImportOption,
   WorkbenchOaSyncStatus,
@@ -273,8 +272,8 @@ type ApiWorkbenchPayload = {
     invoice_count: number;
     paired_count: number;
     unpaired_count: number;
-    unpaired_exception_counts: WorkbenchEntityCounts;
-    paired_exception_counts: WorkbenchEntityCounts;
+    unpaired_exception_counts: number;
+    paired_exception_counts: number;
     zone_counts?: Partial<Record<WorkbenchZoneId, ApiWorkbenchZoneCounts>>;
   };
   paired: {
@@ -316,10 +315,10 @@ type ApiWorkbenchGroupsPayload = {
   next_cursor?: string | null;
   selected_exception_code?: string | null;
   exception_counts?: {
-    total: WorkbenchEntityCounts;
-    amount_total: WorkbenchEntityCounts;
-    document_only: WorkbenchEntityCounts;
-    by_code: Record<string, WorkbenchEntityCounts>;
+    total: number;
+    amount_total: number;
+    document_only: number;
+    by_code: Record<string, number>;
   } | null;
   groups: ApiWorkbenchGroup[];
 };
@@ -2072,8 +2071,8 @@ function mapSummaryCounts(summary: ApiWorkbenchPayload["summary"]): WorkbenchSum
     invoiceCount,
     pairedCount: toCount(summary.paired_count),
     unpairedCount: toCount(summary.unpaired_count),
-    unpairedExceptionCounts: mapEntityCounts(summary.unpaired_exception_counts),
-    pairedExceptionCounts: mapEntityCounts(summary.paired_exception_counts),
+    unpairedExceptionCounts: parseExceptionGroupCount(summary.unpaired_exception_counts),
+    pairedExceptionCounts: parseExceptionGroupCount(summary.paired_exception_counts),
     totalCount: oaCount + bankCount + invoiceCount,
     zoneCounts,
   };
@@ -2110,26 +2109,27 @@ function mapWorkbenchZonePage(
   };
 }
 
-function mapEntityCounts(value: WorkbenchEntityCounts): WorkbenchEntityCounts {
-  if (!value || [value.oa, value.bank, value.invoice].some((count) => !Number.isSafeInteger(count) || count < 0)) {
-    throw new Error("关联台实体数量无效，请刷新后重试。");
+function parseExceptionGroupCount(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error("异常关系组数无效，请刷新后重试。");
   }
-  return { oa: value.oa, bank: value.bank, invoice: value.invoice };
+  return value;
 }
 
 function mapWorkbenchExceptionCounts(
   value: ApiWorkbenchGroupsPayload["exception_counts"],
 ): WorkbenchExceptionCounts | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
+  if (value == null) return undefined;
+  if (typeof value !== "object") {
+    throw new Error("异常关系组数无效，请刷新后重试。");
   }
   return {
-    total: mapEntityCounts(value.total),
-    amountTotal: mapEntityCounts(value.amount_total),
-    documentOnly: mapEntityCounts(value.document_only),
+    total: parseExceptionGroupCount(value.total),
+    amountTotal: parseExceptionGroupCount(value.amount_total),
+    documentOnly: parseExceptionGroupCount(value.document_only),
     byCode: Object.fromEntries(WORKBENCH_AMOUNT_ANOMALY_CODES.map((code) => [
       code,
-      mapEntityCounts(value.by_code[code]),
+      parseExceptionGroupCount(value.by_code?.[code]),
     ])) as WorkbenchExceptionCounts["byCode"],
   };
 }
@@ -2908,7 +2908,7 @@ export async function fetchWorkbenchGroupsPage(
     directReadRequestInit(signal, readOptions),
   );
   if (query.exceptionBucket && !payload.exception_counts) {
-    throw new Error("关联台异常实体数量缺失，请刷新后重试。");
+    throw new Error("关联台异常关系组数缺失，请刷新后重试。");
   }
   return {
     zone,

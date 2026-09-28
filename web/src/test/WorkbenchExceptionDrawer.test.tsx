@@ -1,4 +1,3 @@
-import { formatWorkbenchEntityCounts } from "../features/workbench/entityCounts";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -41,18 +40,18 @@ const anomalyItems: WorkbenchAnomalyItem[] = [
 ];
 
 const exceptionCounts: WorkbenchExceptionCounts = {
-  total: { oa: 1, bank: 1, invoice: 1 },
-  amountTotal: { oa: 1, bank: 1, invoice: 1 },
-  documentOnly: { oa: 0, bank: 0, invoice: 0 },
+  total: 1,
+  amountTotal: 1,
+  documentOnly: 0,
   byCode: {
-    oa_bank_equal_invoice_more: { oa: 0, bank: 0, invoice: 0 },
-    oa_bank_equal_invoice_less: { oa: 0, bank: 0, invoice: 0 },
-    oa_invoice_equal_bank_more: { oa: 0, bank: 0, invoice: 0 },
-    oa_invoice_equal_bank_less: { oa: 0, bank: 0, invoice: 0 },
-    bank_invoice_equal_oa_less: { oa: 0, bank: 0, invoice: 0 },
-    bank_invoice_equal_oa_more: { oa: 0, bank: 0, invoice: 0 },
-    all_amounts_different: { oa: 1, bank: 1, invoice: 1 },
-    expense_item_amount_mismatch: { oa: 0, bank: 0, invoice: 0 },
+    oa_bank_equal_invoice_more: 0,
+    oa_bank_equal_invoice_less: 0,
+    oa_invoice_equal_bank_more: 0,
+    oa_invoice_equal_bank_less: 0,
+    bank_invoice_equal_oa_less: 0,
+    bank_invoice_equal_oa_more: 0,
+    all_amounts_different: 1,
+    expense_item_amount_mismatch: 0,
   },
 };
 
@@ -102,8 +101,8 @@ function renderDrawer(
     <WorkbenchExceptionDrawer
       bucket={bucket}
       bucketCounts={{
-        unpaired: bucket === "unpaired" ? exceptionCounts.total : { oa: 0, bank: 0, invoice: 0 },
-        paired: bucket === "paired" ? exceptionCounts.total : { oa: 0, bank: 0, invoice: 0 },
+        unpaired: bucket === "unpaired" ? exceptionCounts.total : 0,
+        paired: bucket === "paired" ? exceptionCounts.total : 0,
       }}
       canOperateData={canOperateData}
       columnLayouts={options.columnLayouts}
@@ -140,16 +139,16 @@ async function expandFirstGroup(user: ReturnType<typeof userEvent.setup>) {
 describe("WorkbenchExceptionDrawer", () => {
   it("uses status tabs, view counts, and eight compact server-classification entries", () => {
     renderDrawer("unpaired");
-    expect(screen.getByRole("radio", { name: "未配对异常 OA 1条 · 流水 1笔 · 发票 1张" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("radio", { name: "已配对异常 OA 0条 · 流水 0笔 · 发票 0张" })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "金额异常 OA 1条 · 流水 1笔 · 发票 1张" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("radio", { name: "仅资料异常 OA 0条 · 流水 0笔 · 发票 0张" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "未配对异常 1组" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "已配对异常 0组" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "金额异常 1组" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "仅资料异常 0组" })).toBeInTheDocument();
     const amountFilters = screen.getByRole("radiogroup", { name: "金额异常分类" });
     const amountFilterOptions = within(amountFilters).getAllByRole("radio");
     expect(amountFilterOptions).toHaveLength(8);
     expect(amountFilterOptions.map((option) => option.getAttribute("aria-label"))).toEqual(
       WORKBENCH_AMOUNT_ANOMALY_CODES.map((code) => (
-        `${WORKBENCH_AMOUNT_ANOMALY_LABELS[code]} ${formatWorkbenchEntityCounts(exceptionCounts.byCode[code])}`
+        `${WORKBENCH_AMOUNT_ANOMALY_LABELS[code]} ${exceptionCounts.byCode[code]}组`
       )),
     );
     expect(
@@ -159,19 +158,37 @@ describe("WorkbenchExceptionDrawer", () => {
     ).toEqual(["OA = 流水", "OA = 发票", "流水 = 发票", "三项互异", "费用明细"]);
     expect(document.querySelector(".workbench-anomaly-drawer__amount-filter-scroll")).not.toBeInTheDocument();
     expect(document.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent(
-      "OA 1条 · 流水 1笔 · 发票 1张",
+      "1组",
     );
   });
 
-  it("shows business entities independently of the one relation row", () => {
-    const counts = { oa: 3, bank: 2, invoice: 5 };
+  it("shows server group totals independently of the loaded relation count", () => {
+    const counts = 26;
     renderDrawer("unpaired", vi.fn(), true, group("unpaired"), {
       counts: { ...exceptionCounts, total: counts, amountTotal: counts,
         byCode: { ...exceptionCounts.byCode, all_amounts_different: counts } },
     });
-    expect(screen.getByRole("radio", { name: "金额异常 OA 3条 · 流水 2笔 · 发票 5张" })).toBeVisible();
-    expect(document.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent("OA 3条 · 流水 2笔 · 发票 5张");
+    expect(screen.getByRole("radio", { name: "金额异常 26组" })).toBeVisible();
+    expect(document.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent("26组");
     expect(screen.queryByText("共 1 项")).not.toBeInTheDocument();
+  });
+
+  it("counts one multi-member relation once and keeps details separate", () => {
+    const multiMember = group("unpaired");
+    multiMember.rowCounts = { oa: 1, bank: 2, invoice: 6 };
+    renderDrawer("unpaired", vi.fn(), true, multiMember);
+    expect(screen.getByRole("radio", { name: "金额异常 1组" })).toBeVisible();
+    expect(document.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent("当前结果：1组");
+    expect(document.querySelector(".workbench-anomaly-drawer__filters")).not.toHaveTextContent("6张");
+  });
+
+  it("shows zero when the loaded amount view has no category, not an unknown count", () => {
+    renderDrawer("unpaired", vi.fn(), true, group("unpaired"), {
+      selectedExceptionCode: null,
+      counts: { ...exceptionCounts, total: 0, amountTotal: 0,
+        byCode: { ...exceptionCounts.byCode, all_amounts_different: 0 } },
+    });
+    expect(document.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent("当前结果：0组");
   });
 
   it("hides the amount classification group in the document-only view", () => {
@@ -180,7 +197,7 @@ describe("WorkbenchExceptionDrawer", () => {
       selectedExceptionCode: null,
     });
 
-    expect(screen.getByRole("radio", { name: "仅资料异常 OA 0条 · 流水 0笔 · 发票 0张" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "仅资料异常 0组" })).toHaveAttribute("aria-checked", "true");
     expect(screen.queryByRole("radiogroup", { name: "金额异常分类" })).not.toBeInTheDocument();
   });
 
@@ -193,9 +210,9 @@ describe("WorkbenchExceptionDrawer", () => {
       onExceptionCodeChange,
     });
 
-    await user.click(screen.getByRole("radio", { name: "仅资料异常 OA 0条 · 流水 0笔 · 发票 0张" }));
+    await user.click(screen.getByRole("radio", { name: "仅资料异常 0组" }));
     expect(onViewChange).toHaveBeenCalledWith("document_only");
-    await user.click(screen.getByRole("radio", { name: "OA 流水一致，票多 OA 0条 · 流水 0笔 · 发票 0张" }));
+    await user.click(screen.getByRole("radio", { name: "OA 流水一致，票多 0组" }));
     expect(onExceptionCodeChange).toHaveBeenCalledWith("oa_bank_equal_invoice_more");
   });
 

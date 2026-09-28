@@ -1,6 +1,4 @@
-import { CountedLabel } from "../common/CountLabel";
-import "./workbenchEntityCounts.css";
-import { formatWorkbenchEntityCounts } from "../../features/workbench/entityCounts";
+import CountLabel, { CountedLabel } from "../common/CountLabel";
 import { Segment, SegmentGroup } from "../common/SegmentedControl";
 import {
   Button,
@@ -22,7 +20,6 @@ import {
   type WorkbenchAmountAnomalyCode,
   type WorkbenchColumnLayouts,
   type WorkbenchExceptionCounts,
-  type WorkbenchEntityCounts,
   type WorkbenchExceptionView,
   type WorkbenchRecord,
   type WorkbenchRecordType,
@@ -35,7 +32,7 @@ import WorkbenchAnomalyIndicator from "./WorkbenchAnomalyIndicator";
 type WorkbenchExceptionDrawerProps = {
   open: boolean;
   bucket: "unpaired" | "paired";
-  bucketCounts: Record<"unpaired" | "paired", WorkbenchEntityCounts | null>;
+  bucketCounts: Record<"unpaired" | "paired", number | null>;
   view: WorkbenchExceptionView;
   selectedExceptionCode: WorkbenchAmountAnomalyCode | null;
   exceptionCounts: WorkbenchExceptionCounts | null;
@@ -227,9 +224,9 @@ export default function WorkbenchExceptionDrawer({
           }
         }}
       >
-        <Segment id="unpaired"><span>未配对异常</span>{" "}<small><EntityCountLabel counts={bucketCounts.unpaired} /></small></Segment>
+        <Segment id="unpaired"><CountedLabel label="未配对异常" value={bucketCounts.unpaired} unit="组" /></Segment>
         <Segment id="paired">
-          <span>已配对异常</span>{" "}<small><EntityCountLabel counts={bucketCounts.paired} /></small>
+          <CountedLabel label="已配对异常" value={bucketCounts.paired} unit="组" />
         </Segment>
       </SegmentGroup>
     </div>
@@ -263,15 +260,15 @@ export default function WorkbenchExceptionDrawer({
               }
             }}
           >
-            <Segment id="amount"><span>金额异常</span>{" "}<small><EntityCountLabel counts={exceptionCounts?.amountTotal} /></small></Segment>
+            <Segment id="amount"><CountedLabel label="金额异常" value={exceptionCounts?.amountTotal} unit="组" /></Segment>
             <Segment id="document_only">
-              <span>仅资料异常</span>{" "}<small><EntityCountLabel counts={exceptionCounts?.documentOnly} /></small>
+              <CountedLabel label="仅资料异常" value={exceptionCounts?.documentOnly} unit="组" />
             </Segment>
           </SegmentGroup>
           <span aria-live="polite" className="workbench-anomaly-drawer__count">
-            {formatWorkbenchEntityCounts(view === "document_only"
+            当前结果：<CountLabel unit="组" value={view === "document_only"
               ? exceptionCounts?.documentOnly
-              : selectedExceptionCode ? exceptionCounts?.byCode[selectedExceptionCode] : null)}
+              : selectedExceptionCode ? exceptionCounts?.byCode[selectedExceptionCode] : exceptionCounts?.amountTotal} />
           </span>
         </div>
         {view === "amount" ? (
@@ -300,15 +297,14 @@ export default function WorkbenchExceptionDrawer({
                   </span>
                   <div className="workbench-anomaly-drawer__amount-family-options">
                     {family.codes.map((code) => {
-                      const count = formatWorkbenchEntityCounts(exceptionCounts?.byCode[code]);
+                      const count = exceptionCounts?.byCode[code];
                       return (
                         <Segment
-                          aria-label={`${WORKBENCH_AMOUNT_ANOMALY_LABELS[code]} ${count}`}
+                          aria-label={`${WORKBENCH_AMOUNT_ANOMALY_LABELS[code]} ${count == null ? "—" : count}组`}
                           id={code}
                           key={code}
                         >
-                          <span aria-hidden="true">{AMOUNT_RULE_SHORT_LABELS[code]}</span>
-                          <strong aria-hidden="true"><EntityCountLabel counts={exceptionCounts?.byCode[code]} /></strong>
+                          <span aria-hidden="true"><CountedLabel label={AMOUNT_RULE_SHORT_LABELS[code]} value={count} unit="组" /></span>
                         </Segment>
                       );
                     })}
@@ -633,8 +629,4 @@ function paneSummary(group: WorkbenchRelationGroup, paneId: WorkbenchRecordType)
       : group.amountCheck?.invoiceTotal;
   const fallbackTotal = summarizeWorkbenchRows(rows).amounts[paneId];
   return { count, total: formatMoney(amountCheckTotal || fallbackTotal) };
-}
-
-function EntityCountLabel({ counts }: { counts: WorkbenchEntityCounts | null | undefined }) {
-  return <><CountedLabel label="OA" value={counts?.oa} unit="条" /> · <CountedLabel label="流水" value={counts?.bank} unit="笔" /> · <CountedLabel label="发票" value={counts?.invoice} unit="张" /></>;
 }

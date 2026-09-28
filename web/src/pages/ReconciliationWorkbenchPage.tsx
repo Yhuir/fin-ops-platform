@@ -1,4 +1,3 @@
-import { formatWorkbenchEntityCounts } from "../features/workbench/entityCounts";
 import SegmentedControl from "../components/common/SegmentedControl";
 import { Button, Input, TextArea } from "@heroui/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -69,7 +68,6 @@ import type {
   WorkbenchRelationGroup,
   WorkbenchData,
   WorkbenchExceptionCounts,
-  WorkbenchEntityCounts,
   WorkbenchExceptionView,
   WorkbenchGroupsPageQuery,
   WorkbenchInitialPageResult,
@@ -407,7 +405,7 @@ export default function ReconciliationWorkbenchPage() {
   const [exceptionDrawerPage, setExceptionDrawerPage] = useState<WorkbenchZonePageInfo>(
     () => createInitialZonePageInfo("unpaired"),
   );
-  const [pairedExceptionCounts, setPairedExceptionCounts] = useState<WorkbenchEntityCounts | null>(null);
+  const [pairedExceptionCounts, setPairedExceptionCounts] = useState<number | null>(null);
   const [exceptionDrawerLoading, setExceptionDrawerLoading] = useState(false);
   const [exceptionDrawerLoadingMore, setExceptionDrawerLoadingMore] = useState(false);
   const [exceptionDrawerError, setExceptionDrawerError] = useState<string | null>(null);
@@ -2355,7 +2353,7 @@ export default function ReconciliationWorkbenchPage() {
   const openAuxiliaryHeaderActions = useMemo(
     () => [
       {
-        label: `未配对异常 ${formatWorkbenchEntityCounts(workbenchData?.summary.unpairedExceptionCounts)} | 已配对异常 ${formatWorkbenchEntityCounts(pairedExceptionCounts)}`,
+        label: `未配对异常 ${(workbenchData?.summary.unpairedExceptionCounts == null ? "—" : `${workbenchData.summary.unpairedExceptionCounts}组`)} | 已配对异常 ${(pairedExceptionCounts == null ? "—" : `${pairedExceptionCounts}组`)}`,
         onClick: handleOpenExceptionDrawer,
         tone: "danger" as const,
       },

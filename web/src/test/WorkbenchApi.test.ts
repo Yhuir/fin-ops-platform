@@ -1166,8 +1166,8 @@ describe("workbench api bank amount mapping", () => {
                 invoice_count: 0,
                 paired_count: 1,
                 unpaired_count: 1,
-                unpaired_exception_counts: { oa: (0), bank: (0), invoice: (0) },
-                paired_exception_counts: { oa: (3), bank: (3), invoice: (3) },
+                unpaired_exception_counts: (0),
+                paired_exception_counts: (3),
                 zone_counts: {
                   paired: {
                     groups: 1,
@@ -1326,7 +1326,7 @@ describe("workbench api bank amount mapping", () => {
     ]);
 
     expect(result.data.summary.pairedCount).toBe(1);
-    expect(result.data.summary.pairedExceptionCounts).toEqual({ oa: 3, bank: 3, invoice: 3 });
+    expect(result.data.summary.pairedExceptionCounts).toBe(3);
     expect(duplicateResult).toEqual(result);
     expect(result.data.summary.zoneCounts.paired.bank).toBe(7);
     expect(result.data.summary.zoneCounts.paired.canonicalInvoice).toBe(410);
@@ -1385,12 +1385,12 @@ describe("workbench api bank amount mapping", () => {
         invoice_count: 0,
         paired_count: 0,
         unpaired_count: 0,
-        unpaired_exception_counts: { oa: (0), bank: (0), invoice: (0) },
-        paired_exception_counts: { oa: (0), bank: (0), invoice: (0) },
+        unpaired_exception_counts: (0),
+        paired_exception_counts: (0),
       },
       paired: {
         page_size: 50,
-        total: { oa: 0, bank: 0, invoice: 0 },
+        total: 0,
         row_counts: { oa: 0, bank: 0, invoice: 0, rows: 0 },
         has_more: false,
         next_cursor: null,
@@ -1398,7 +1398,7 @@ describe("workbench api bank amount mapping", () => {
       },
       unpaired: {
         page_size: 50,
-        total: { oa: 0, bank: 0, invoice: 0 },
+        total: 0,
         row_counts: { oa: 0, bank: 0, invoice: 0, rows: 0 },
         has_more: false,
         next_cursor: null,
@@ -1703,6 +1703,30 @@ describe("workbench api bank amount mapping", () => {
     expect(result.groups[0].rows.invoice[0].displayOnly).toBeUndefined();
   });
 
+  test.each([undefined, null, -1, 1.5, "1", { oa: 1, bank: 1, invoice: 6 }])(
+    "rejects invalid or legacy exception group counts: %j", async (invalid) => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+        month: "all", zone: "unpaired", page_size: 10, total: 0,
+        has_more: false, groups: [],
+        exception_counts: { total: invalid, amount_total: 0, document_only: 0, by_code: {} },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      await expect(fetchWorkbenchGroupsPage("all", "unpaired", null, 10, undefined, {
+        exceptionBucket: "unpaired", exceptionView: "amount",
+      })).rejects.toThrow("异常关系组数无效");
+    },
+  );
+
+  test("rejects missing exception classification counts instead of displaying zero", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      month: "all", zone: "unpaired", page_size: 10, total: 0,
+      has_more: false, groups: [],
+      exception_counts: { total: 0, amount_total: 0, document_only: 0, by_code: {} },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    await expect(fetchWorkbenchGroupsPage("all", "unpaired", null, 10, undefined, {
+      exceptionBucket: "unpaired", exceptionView: "amount",
+    })).rejects.toThrow("异常关系组数无效");
+  });
+
   test("serializes workbench group page SQL query controls", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
@@ -1711,23 +1735,23 @@ describe("workbench api bank amount mapping", () => {
           zone: "unpaired",
           page: 2,
           page_size: 25,
-          total: { oa: 0, bank: 0, invoice: 0 },
+          total: 0,
           has_more: false,
           next_cursor: null,
           selected_exception_code: "oa_bank_equal_invoice_less",
           exception_counts: {
-            total: { oa: 9, bank: 9, invoice: 9 },
-            amount_total: { oa: 7, bank: 7, invoice: 7 },
-            document_only: { oa: 2, bank: 2, invoice: 2 },
+            total: 9,
+            amount_total: 7,
+            document_only: 2,
             by_code: {
-              oa_bank_equal_invoice_more: { oa: 1, bank: 1, invoice: 1 },
-              oa_bank_equal_invoice_less: { oa: 2, bank: 2, invoice: 2 },
-              oa_invoice_equal_bank_more: { oa: 1, bank: 1, invoice: 1 },
-              oa_invoice_equal_bank_less: { oa: 1, bank: 1, invoice: 1 },
-              bank_invoice_equal_oa_less: { oa: 1, bank: 1, invoice: 1 },
-              bank_invoice_equal_oa_more: { oa: 1, bank: 1, invoice: 1 },
-              all_amounts_different: { oa: 0, bank: 0, invoice: 0 },
-              expense_item_amount_mismatch: { oa: 0, bank: 0, invoice: 0 },
+              oa_bank_equal_invoice_more: 1,
+              oa_bank_equal_invoice_less: 2,
+              oa_invoice_equal_bank_more: 1,
+              oa_invoice_equal_bank_less: 1,
+              bank_invoice_equal_oa_less: 1,
+              bank_invoice_equal_oa_more: 1,
+              all_amounts_different: 0,
+              expense_item_amount_mismatch: 0,
             },
           },
           groups: [],
@@ -1775,18 +1799,18 @@ describe("workbench api bank amount mapping", () => {
     expect(url.searchParams.get("exception_code")).toBe("oa_bank_equal_invoice_less");
     expect(result.selectedExceptionCode).toBe("oa_bank_equal_invoice_less");
     expect(result.exceptionCounts).toEqual({
-      total: { oa: 9, bank: 9, invoice: 9 },
-      amountTotal: { oa: 7, bank: 7, invoice: 7 },
-      documentOnly: { oa: 2, bank: 2, invoice: 2 },
+      total: 9,
+      amountTotal: 7,
+      documentOnly: 2,
       byCode: {
-        oa_bank_equal_invoice_more: { oa: 1, bank: 1, invoice: 1 },
-        oa_bank_equal_invoice_less: { oa: 2, bank: 2, invoice: 2 },
-        oa_invoice_equal_bank_more: { oa: 1, bank: 1, invoice: 1 },
-        oa_invoice_equal_bank_less: { oa: 1, bank: 1, invoice: 1 },
-        bank_invoice_equal_oa_less: { oa: 1, bank: 1, invoice: 1 },
-        bank_invoice_equal_oa_more: { oa: 1, bank: 1, invoice: 1 },
-        all_amounts_different: { oa: 0, bank: 0, invoice: 0 },
-              expense_item_amount_mismatch: { oa: 0, bank: 0, invoice: 0 },
+        oa_bank_equal_invoice_more: 1,
+        oa_bank_equal_invoice_less: 2,
+        oa_invoice_equal_bank_more: 1,
+        oa_invoice_equal_bank_less: 1,
+        bank_invoice_equal_oa_less: 1,
+        bank_invoice_equal_oa_more: 1,
+        all_amounts_different: 0,
+              expense_item_amount_mismatch: 0,
       },
     });
     expect(JSON.parse(url.searchParams.get("column_filters") ?? "{}")).toEqual({

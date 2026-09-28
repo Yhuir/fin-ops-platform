@@ -2669,37 +2669,6 @@ def _canonical_invoice_count_for_keyed_groups_sql(keyed_groups_name: str) -> str
     """
 
 
-# Count affected business identities, never display groups or split units.
-_EXCEPTION_ENTITY_CTES = """
-exception_entities as materialized (
-    select groups.internal_key, groups.zone, member.row_type,
-           case when member.row_type = 'bank'
-                then coalesce(split.bank_transaction_id::text, member.row_id)
-                else member.row_id end as entity_id
-    from effective_groups groups
-    join anomaly_states anomaly on anomaly.internal_key = groups.internal_key
-    join canonical_group_members member on member.internal_key = groups.internal_key
-    left join app.bank_transaction_split_items split
-      on member.row_type = 'bank' and split.id::text = member.row_id
-    where member.row_type <> 'invoice' or not exists (
-        select 1 from etc_summary_keys summary where summary.row_id = member.row_id
-    )
-    union all
-    select groups.internal_key, groups.zone, 'invoice', invoice.canonical_invoice_row_id
-    from effective_groups groups
-    join anomaly_states anomaly on anomaly.internal_key = groups.internal_key
-    join canonical_group_members member
-      on member.internal_key = groups.internal_key and member.row_type = 'invoice'
-    join etc_summary_canonical_invoice_members invoice on invoice.summary_row_id = member.row_id
-)
-"""
-_ENTITY_COUNTS_SQL = """jsonb_build_object(
-    'oa', count(distinct entity.entity_id) filter (where entity.row_type = 'oa'),
-    'bank', count(distinct entity.entity_id) filter (where entity.row_type = 'bank'),
-    'invoice', count(distinct entity.entity_id) filter (where entity.row_type = 'invoice')
-)"""
-
-
 class PostgresWorkbenchPageQueryRepository:
     """Direct Workbench page reads from canonical PostgreSQL facts."""
 
@@ -2804,7 +2773,6 @@ class PostgresWorkbenchPageQueryRepository:
             {_ANOMALY_STATE_CTES},
             {_EFFECTIVE_GROUPS_CTES},
             {_CANONICAL_INVOICE_GROUP_MEMBER_CTES},
-            {_EXCEPTION_ENTITY_CTES},
             overall_group_summary as materialized (
                 select
                     count(*) filter (where groups.zone = 'paired')::bigint
@@ -2821,10 +2789,8 @@ class PostgresWorkbenchPageQueryRepository:
                         as missing_bank_group_count,
                     count(*) filter (where 'invoice' = any(groups.missing_row_types))::bigint
                         as missing_invoice_group_count,
-                    (select {_ENTITY_COUNTS_SQL} from exception_entities entity
-                     where entity.zone = 'unpaired') as unpaired_exception_counts,
-                    (select {_ENTITY_COUNTS_SQL} from exception_entities entity
-                     where entity.zone = 'paired') as paired_exception_counts
+                    count(anomaly.internal_key) filter (where groups.zone = 'unpaired')::bigint as unpaired_exception_counts,
+                    count(anomaly.internal_key) filter (where groups.zone = 'paired')::bigint as paired_exception_counts
                 from effective_groups groups
                 left join anomaly_states anomaly
                   on anomaly.internal_key = groups.internal_key
@@ -3302,8 +3268,8 @@ class PostgresWorkbenchPageQueryRepository:
                 null::bigint as missing_oa_group_count,
                 null::bigint as missing_bank_group_count,
                 null::bigint as missing_invoice_group_count,
-                null::jsonb as unpaired_exception_counts,
-                null::jsonb as paired_exception_counts,
+                null::bigint as unpaired_exception_counts,
+                null::bigint as paired_exception_counts,
                 null::bigint as summary_oa_count,
                 null::bigint as summary_bank_count,
                 null::bigint as summary_invoice_count,
@@ -3525,30 +3491,6 @@ class PostgresWorkbenchPageQueryRepository:
             ),
             """
             exception_filter_ctes_sql = f"""
-            {_EXCEPTION_ENTITY_CTES},
-            exception_entity_categories as materialized (
-                select entity.*, category.key
-                from exception_entities entity
-                join base_filtered_groups groups on groups.internal_key = entity.internal_key
-                join anomaly_states anomaly on anomaly.internal_key = entity.internal_key
-                cross join lateral (values
-                    ('total'),
-                    (case when anomaly.exception_code is not null then 'amount_total'
-                          when anomaly.has_document_anomaly then 'document_only' end),
-                    (anomaly.exception_code)
-                ) category(key)
-                where category.key is not null
-            ),
-            exception_entity_counts as materialized (
-                select jsonb_object_agg(category.key, category.counts) as entity_counts
-                from (
-                    select keys.key, {_ENTITY_COUNTS_SQL} as counts
-                    from unnest(array['total', 'amount_total', 'document_only',
-                        {", ".join(repr(code) for code in AMOUNT_EXCEPTION_CODES)}]::text[]) keys(key)
-                    left join exception_entity_categories entity on entity.key = keys.key
-                    group by keys.key
-                ) category
-            ),
             exception_counts as materialized (
                 select
                     count(anomaly.internal_key)::bigint as exception_total,
@@ -3598,10 +3540,10 @@ class PostgresWorkbenchPageQueryRepository:
             ),
             """
             exception_select_sql = """,
-                   exception_entity_counts.entity_counts,
+                   exception_counts.*,
                    selected_exception.exception_code as selected_exception_code"""
             exception_join_sql = """
-            cross join exception_entity_counts
+            cross join exception_counts
             cross join selected_exception
             """
             exception_params = [
@@ -3728,11 +3670,11 @@ class PostgresWorkbenchPageQueryRepository:
             exception_payload = {
                 "selected_exception_code": resolved_exception_code,
                 "exception_counts": {
-                    "total": metadata["entity_counts"]["total"],
-                    "amount_total": metadata["entity_counts"]["amount_total"],
-                    "document_only": metadata["entity_counts"]["document_only"],
+                    "total": int(metadata["exception_total"]),
+                    "amount_total": int(metadata["amount_exception_total"]),
+                    "document_only": int(metadata["document_only_exception_total"]),
                     "by_code": {
-                        code: metadata["entity_counts"][code]
+                        code: int(metadata[f"exception_count_{code}"])
                         for code in AMOUNT_EXCEPTION_CODES
                     },
                 },
