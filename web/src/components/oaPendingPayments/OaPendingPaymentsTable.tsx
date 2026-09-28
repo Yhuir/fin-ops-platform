@@ -37,7 +37,6 @@ import type {
 import { formatMoney } from "../../features/money";
 import { formatDateTimeText } from "../../features/dateTime";
 import OaWorkflowStatusChip from "../common/OaWorkflowStatusChip";
-import QuerySearch from "../common/QuerySearch";
 
 type OaColumnFilterValue = InputInvoiceUsageFilterValue;
 
@@ -47,13 +46,9 @@ type OaPendingPaymentsTableProps = {
   pageSize: number;
   total: number;
   oaCount?: number;
-  keywordDraft: string;
   filterConfigs: OaPendingPaymentFieldConfig[];
   filterOptions: Record<string, OaPendingPaymentFilterOption[]>;
   filters: OaPendingPaymentFilter[];
-  onKeywordDraftChange: (value: string) => void;
-  onKeywordSubmit: () => void;
-  onKeywordClear: () => void;
   onFilterApply: (filter: OaColumnFilterValue) => void;
   onFilterClear: (field: string) => void;
   onSortChange: (field: string, direction?: OaPendingPaymentSortDirection) => void;
@@ -143,13 +138,9 @@ export default function OaPendingPaymentsTable({
   pageSize,
   total,
   oaCount,
-  keywordDraft,
   filterConfigs,
   filterOptions,
   filters,
-  onKeywordDraftChange,
-  onKeywordSubmit,
-  onKeywordClear,
   onFilterApply,
   onFilterClear,
   onSortChange,
@@ -168,17 +159,6 @@ export default function OaPendingPaymentsTable({
       className="finance-page-table-frame oa-pending-payments-table-frame"
       data-testid="oa-pending-payments-table-frame"
     >
-      <div className="oa-pending-payments-table-toolbar">
-        <QuerySearch
-          ariaLabel="搜索OA待付款核对"
-          className="oa-pending-payments-table-search"
-          onChange={onKeywordDraftChange}
-          onClear={onKeywordClear}
-          onSubmit={onKeywordSubmit}
-          placeholder="搜索 OA / 流水 / 发票"
-          value={keywordDraft}
-        />
-      </div>
       <FinanceTable
         ariaLabel="OA待付款核对表格"
         className="oa-pending-payments-table oa-pending-payments-table-shell"

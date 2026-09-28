@@ -361,7 +361,6 @@ export default function OutputInvoiceCollectionsPage() {
                 />
                 <QuerySearch
                   ariaLabel="搜索销项发票收款情况"
-                  className="output-invoice-collections-search-cluster"
                   onChange={setKeywordDraft}
                   onClear={() => {
                     setKeywordDraft("");

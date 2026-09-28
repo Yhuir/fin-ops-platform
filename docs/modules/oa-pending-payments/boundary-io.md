@@ -60,7 +60,7 @@
 | formal relation mutation | PostgreSQL | 只调用 `WorkbenchRelationCommandService`；扩展唯一 active case 时保留原 case 和发票成员，冲突或多个 owner fail closed |
 | matching dirty scopes | `job.workbench_matching_dirty_scopes` | admission 或 completed OA canonical snapshot 发生匹配相关变化时，在同一业务事务中标记实际月份及前后各两个月；仅 payment-status 变化不触发匹配。 |
 | Audit UI | admin frontend | 单次读取 operations Audit；不等待 operation barrier，不参与页面正确性 |
-| table frame | frontend | 与进项发票使用情况、销项发票收款情况、待找发票共用 `finance-page-table-frame` 有界高度和 contained 内部滚动；本页工具栏仍占用 frame 的独立首行 |
+| table frame | frontend | 与进项发票使用情况、销项发票收款情况、待找发票共用 `finance-page-table-frame` 有界高度和 contained 内部滚动；年月与搜索由页面工具栏持有，frame 仅容纳表格，不再保留搜索独立首行 |
 
 ## Snapshot 与查询责任
 
@@ -211,3 +211,9 @@ OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../
 - 两层 HeroUI 分段分别控制流程视图与支付流水关联。第二层共享 `filters.payment_status`，保留既有 active outflow 判断，不引入足额付款规则或外部写回。错误/缺失统计明确报错，不从展示行或当前页补算。
 - 底部业务摘要展示筛选后的 OA 条数，分页仍按展示行执行，容量明确标为“行/页”；共享 FinanceTablePagination 的可选 summary 仅替换文案，默认调用方行为不变。
 - 查询仍在单个只读 snapshot 的同一集合 SQL 中聚合，不增加请求、缓存、worker 或持久化字段。
+
+## 2026-09-28 查询工具栏整理
+
+- 页面第一层保留流程视图；第二层左侧为“全部/已关联流水/未关联流水”，按 OA ID 去重统计，仍消费既有 active outflow 判定，不新增足额付款规则。右侧依次为年月、搜索、查询。
+- 搜索 QuerySearch 归页面，沿用既有 draft/submit/clear 和异步请求保护。表格移除关键词及搜索回调 props、旧工具栏和占位样式；表格筛选/排序/分页/详情 I/O 不变。
+- 本页及销项查询区局部统一46px外框；窄屏允许换行。共享组件默认样式、API、权限、持久化和统计合同不变。

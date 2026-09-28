@@ -86,3 +86,9 @@ FIN_OPS_TEST_DATABASE_URL=postgresql://localhost/<disposable_db> \
 - 前端：默认全部、单选/多选同步、搜索/列筛选、分页回到首页、权限与写后回读；进项/销项仅替换原生分段外观，保留其张数和查询合同。
 - Browser：`pending-invoices-status-tabs.spec.ts` 逐个选择全部/支出/收入及各状态，核对每次只有一个 rows 请求、计数/列表/导出条件、1600/960 宽度和原生 Indicator。现有 attach、收入覆盖、导出、规则恢复及进销项用例保护跨页链路。
 - 七类测试中 1/2/3/5/6/7 适用；第 4 类没有新增 read model/cache/worker，验证直接查询写后读取及旧 worker 不恢复，不添加后台任务。
+
+## 2026-09-28 工具栏回归
+
+- `web/e2e/query-toolbar-layout.spec.ts` 覆盖三页1800/1280/390宽度、查询控件等高/可达、OA新文案与搜索移出表格、待票说明移除，以及OA状态+月份+关键词提交/清空保留条件、输入不立即请求。
+- 保留本模块组件和浏览器流程的加载失败恢复、列筛选、排序、分页、详情和权限回归；共享分段/年月控件由 segmented-controls 用例保护。
+- 本次适用类别5前端交互、6合成API查询流程、7既有功能回归；无业务算法、service、API合同、read model/cache/worker变更，不新增类别1—4后端专项测试。生产查询验证只读，不写真实业务数据。

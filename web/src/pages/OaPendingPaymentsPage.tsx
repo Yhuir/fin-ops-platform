@@ -8,6 +8,7 @@ import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/
 import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import PageToolbar from "../components/common/PageToolbar";
+import QuerySearch from "../components/common/QuerySearch";
 import StatePanel from "../components/common/StatePanel";
 import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer";
 import OaPendingPaymentExportDrawer from "../components/oaPendingPayments/OaPendingPaymentExportDrawer";
@@ -304,31 +305,51 @@ export default function OaPendingPaymentsPage() {
       <div className="oa-pending-payments-page" data-testid="oa-pending-payments-page">
         <PageScaffold title="OA 待付款核对" titleAccessory={titleAccessory} actions={actions}>
           <div className="oa-pending-payments-content">
+            <SegmentGroup
+              aria-label="OA流程状态视图"
+              className="oa-pending-payments-view-toggle"
+              disallowEmptySelection
+              onSelectionChange={(keys) => {
+                const [next] = Array.from(keys);
+                if (next === "completed" || next === "in_progress") handleViewModeChange(next);
+              }}
+              selectedKeys={new Set([query.viewMode])}
+              selectionMode="single"
+              size="sm"
+            >
+              <Segment id="completed">
+                已完成 OA
+                {completedCountLabel ? <span className="oa-pending-payments-view-toggle__count">{completedCountLabel}</span> : null}
+              </Segment>
+              <Segment id="in_progress">
+                进行中 OA
+                {inProgressCountLabel ? <span className="oa-pending-payments-view-toggle__count">{inProgressCountLabel}</span> : null}
+              </Segment>
+            </SegmentGroup>
             <PageToolbar
               className="oa-pending-payments-query"
               left={(
-                <div className="oa-pending-payments-query__grid">
-                  <SegmentGroup
-                    aria-label="OA流程状态视图"
-                    className="oa-pending-payments-view-toggle"
-                    disallowEmptySelection
-                    onSelectionChange={(keys) => {
-                      const [next] = Array.from(keys);
-                      if (next === "completed" || next === "in_progress") handleViewModeChange(next);
-                    }}
-                    selectedKeys={new Set([query.viewMode])}
-                    selectionMode="single"
-                    size="sm"
-                  >
-                    <Segment id="completed">
-                      已完成 OA
-                      {completedCountLabel ? <span className="oa-pending-payments-view-toggle__count">{completedCountLabel}</span> : null}
-                    </Segment>
-                    <Segment id="in_progress">
-                      进行中 OA
-                      {inProgressCountLabel ? <span className="oa-pending-payments-view-toggle__count">{inProgressCountLabel}</span> : null}
-                    </Segment>
-                  </SegmentGroup>
+                <SegmentGroup
+                  aria-label="支付流水"
+                  disallowEmptySelection
+                  selectedKeys={new Set([paymentSelection])}
+                  selectionMode="single"
+                  size="sm"
+                  onSelectionChange={(keys) => {
+                    const [key] = Array.from(keys);
+                    if (key === "all") handleFilterClear("payment_status");
+                    else if (key === "paid" || key === "unpaid") {
+                      handleFilterApply({ field: "payment_status", operator: "in", values: [key] });
+                    }
+                  }}
+                >
+                  <Segment id="all">全部 {statusCount("all")}</Segment>
+                  <Segment id="paid">已关联流水 {statusCount("paid")}</Segment>
+                  <Segment id="unpaid">未关联流水 {statusCount("unpaid")}</Segment>
+                </SegmentGroup>
+              )}
+              right={(
+                <div className="oa-pending-payments-query-controls">
                   <BusinessPeriodPicker
                     allowedModes={["month"]}
                     ariaLabel="OA月份筛选"
@@ -344,27 +365,17 @@ export default function OaPendingPaymentsPage() {
                     }}
                     years={nearbyBusinessYears(query.month || DEFAULT_MONTH)}
                   />
+                  <QuerySearch
+                    ariaLabel="搜索OA待付款核对"
+                    onChange={setKeywordDraft}
+                    onClear={handleKeywordClear}
+                    onSubmit={handleKeywordSubmit}
+                    placeholder="搜索 OA / 流水 / 发票"
+                    value={keywordDraft}
+                  />
                 </div>
               )}
             />
-            <SegmentGroup
-              aria-label="支付流水"
-              disallowEmptySelection
-              selectedKeys={new Set([paymentSelection])}
-              selectionMode="single"
-              size="sm"
-              onSelectionChange={(keys) => {
-                const [key] = Array.from(keys);
-                if (key === "all") handleFilterClear("payment_status");
-                else if (key === "paid" || key === "unpaid") {
-                  handleFilterApply({ field: "payment_status", operator: "in", values: [key] });
-                }
-              }}
-            >
-              <Segment id="all">全部 {statusCount("all")}</Segment>
-              <Segment id="paid">已关联 {statusCount("paid")}</Segment>
-              <Segment id="unpaid">未关联 {statusCount("unpaid")}</Segment>
-            </SegmentGroup>
             {visibleError ? (
               <div className="oa-pending-payments-alert" role="alert">
                 {visibleError}
@@ -395,13 +406,9 @@ export default function OaPendingPaymentsPage() {
                   pageSize={query.pageSize}
                   total={total}
                   oaCount={summary?.oaCount}
-                  keywordDraft={keywordDraft}
                   filterConfigs={filterConfigs}
                   filterOptions={filterOptions}
                   filters={query.filters}
-                  onKeywordDraftChange={setKeywordDraft}
-                  onKeywordClear={handleKeywordClear}
-                  onKeywordSubmit={handleKeywordSubmit}
                   onFilterApply={handleFilterApply}
                   onFilterClear={handleFilterClear}
                   onSortChange={handleSortChange}

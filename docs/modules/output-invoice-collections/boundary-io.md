@@ -170,3 +170,7 @@ OA、发票和银行右侧抽屉中的原始信息遵循[来源详情合同](../
 ## 分段控件一致性（2026-09-28）
 
 统计切换使用 `components/common/InvoiceCountSegments.tsx`（HeroUI 原生 Tabs/Indicator）。输入是页面提供的 key/label/count/selectedKey/pending，输出仅选择事件；共享组件不持有请求、缓存或业务状态。仍按发票张数，保留页面现有分类、筛选、导出与权限合同。删除页面旧的 tabs 私有 CSS；影响范围限三个显式使用此组件的发票页面。
+
+## 2026-09-28 查询区域布局
+
+- 年月、搜索和查询在本页统一46px外框并对齐状态切换条；窄屏换行。删除旧搜索 grid/input 样式，复用 QuerySearch 原生布局；不更改日期、状态、搜索、导出合同或共享默认样式。

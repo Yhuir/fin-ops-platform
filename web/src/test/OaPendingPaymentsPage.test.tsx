@@ -1109,7 +1109,8 @@ describe("OA pending payments page", () => {
     expect(allMonthsButton).toHaveAttribute("aria-pressed", "true");
 
     const tableFrame = within(page).getByTestId("oa-pending-payments-table-frame");
-    await user.type(within(tableFrame).getByLabelText("搜索OA待付款核对"), "张三");
+    expect(within(tableFrame).queryByLabelText("搜索OA待付款核对")).not.toBeInTheDocument();
+    await user.type(within(page).getByLabelText("搜索OA待付款核对"), "张三");
     await user.keyboard("{Enter}");
     await waitFor(() => {
       expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("keyword")).toBe("张三");
@@ -1693,7 +1694,7 @@ describe("OA pending payments page", () => {
     const fetchMock = installOaPendingPaymentsFetch();
     renderAuthenticatedAppAt("/oa-pending-payments");
     const page = await screen.findByTestId("oa-pending-payments-page");
-    const segment = await within(page).findByRole("radio", { name: "已关联 50条" });
+    const segment = await within(page).findByRole("radio", { name: "已关联流水 50条" });
     expect(within(page).getByRole("radio", { name: "全部 60条" })).toBeInTheDocument();
     expect(within(page).getByText("符合条件 60 条 OA · 第 1/3 页")).toBeInTheDocument();
     await userEvent.click(segment);
@@ -1713,12 +1714,12 @@ describe("OA pending payments page", () => {
       { status: 200, payload: { ...rowsPayload, summary: { ...rowsPayload.summary, oaCount: 23, statusCounts: { paid: 20, unpaid: 3 } } }, delay: pending.promise },
     ] });
     renderAuthenticatedAppAt("/oa-pending-payments");
-    await screen.findByRole("radio", { name: "已关联 50条" });
+    await screen.findByRole("radio", { name: "已关联流水 50条" });
     await userEvent.click(screen.getByRole("radio", { name: /进行中 OA/ }));
-    expect(await screen.findByRole("radio", { name: "已关联 …" })).toBeInTheDocument();
-    expect(screen.queryByRole("radio", { name: "已关联 50条" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("radio", { name: "已关联流水 …" })).toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: "已关联流水 50条" })).not.toBeInTheDocument();
     pending.resolve();
-    expect(await screen.findByRole("radio", { name: "已关联 20条" })).toBeInTheDocument();
+    expect(await screen.findByRole("radio", { name: "已关联流水 20条" })).toBeInTheDocument();
   });
 
   test("rereads the last valid page when a refresh removes the current page", async () => {

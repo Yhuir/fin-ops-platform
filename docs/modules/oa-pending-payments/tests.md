@@ -249,3 +249,9 @@ cd web && npm run build
 真实 PostgreSQL `test_entity_counts_are_independent_of_group_paging_and_status_filter` 验证同组多 OA、当页一行与全量条数分离、支付状态自身排除、筛选候选条数、撤回后状态变化和空集合真实 0。前端用例验证分段统计、共享 filters、页码重置、统计合同错误不冒充行数及原有权限/抽屉/异步请求回归。覆盖业务核心、repository/service、API 合同、组件交互、关联撤回读链和旧功能；无新增 read model/cache/worker。
 
 额外覆盖范围切换期间不展示上一范围数字、刷新后总页数减少时重读最后有效页。浏览器几何断言以当前原生分段的实际 padding/gap 计算，保留像素误差限制。
+
+## 2026-09-28 工具栏回归
+
+- `web/e2e/query-toolbar-layout.spec.ts` 覆盖三页1800/1280/390宽度、查询控件等高/可达、OA新文案与搜索移出表格、待票说明移除，以及OA状态+月份+关键词提交/清空保留条件、输入不立即请求。
+- 保留本模块组件和浏览器流程的加载失败恢复、列筛选、排序、分页、详情和权限回归；共享分段/年月控件由 segmented-controls 用例保护。
+- 本次适用类别5前端交互、6合成API查询流程、7既有功能回归；无业务算法、service、API合同、read model/cache/worker变更，不新增类别1—4后端专项测试。生产查询验证只读，不写真实业务数据。

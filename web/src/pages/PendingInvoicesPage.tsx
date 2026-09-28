@@ -623,7 +623,6 @@ export default function PendingInvoicesPage() {
                   setStatusFilters(key === "all" ? [] : filterOptions.find(option => option.key === key)!.codes);
                   clearSelectedTransactions(); setPage(1);
                 }} />
-              <span className="pending-invoices-count-caption">当前范围 {loading || error || !acquisitionSummary ? "—" : acquisitionSummary.bankCount} 笔流水 · 已关联发票 {loading || error || !acquisitionSummary ? "—" : acquisitionSummary.invoiceCount} 张</span>
               <div
                 className={`pending-invoices-status-text${error ? " pending-invoices-status-text--error" : ""}`}
                 role={error ? "alert" : "status"}

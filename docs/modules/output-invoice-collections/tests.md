@@ -98,3 +98,9 @@ PostgreSQL 集成测试必须覆盖 `load_page() -> row.id -> load_row() -> rela
 - `OutputInvoiceCollectionsPage.test.tsx` 覆盖七项、单一查询、搜索保留、多选激活态、单选替换、多选会话恢复沿用查询恢复合同；错误保留原表格但隐藏不可靠计数/禁用导出，既有迟到响应测试继续保护切换。
 - `output-invoice-status-tabs.spec.ts` 逐个点击六类及全部，核对每次一个 rows 请求、全范围计数保持、筛选及导出参数一致、1600px 七项完整可见、960px 内部横滚、HeroUI 原生选中指示和零写入。
 - 既有后端多票同关系回归增加 3 张、分页及 facet 总数断言，明确不是 1 组；原输出 API 和 SQL self-excluding tests 保留。进项前端及两个原销项 E2E 文件做回归。
+
+## 2026-09-28 工具栏回归
+
+- `web/e2e/query-toolbar-layout.spec.ts` 覆盖三页1800/1280/390宽度、查询控件等高/可达、OA新文案与搜索移出表格、待票说明移除，以及OA状态+月份+关键词提交/清空保留条件、输入不立即请求。
+- 保留本模块组件和浏览器流程的加载失败恢复、列筛选、排序、分页、详情和权限回归；共享分段/年月控件由 segmented-controls 用例保护。
+- 本次适用类别5前端交互、6合成API查询流程、7既有功能回归；无业务算法、service、API合同、read model/cache/worker变更，不新增类别1—4后端专项测试。生产查询验证只读，不写真实业务数据。

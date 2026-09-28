@@ -2881,20 +2881,46 @@ textarea {
 
 .oa-pending-payments-content {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   gap: var(--fp-space-3);
 }
 
 .oa-pending-payments-query {
-  align-items: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
-.oa-pending-payments-query__grid {
+.oa-pending-payments-query .page-toolbar__group--right {
+  flex: 0 1 580px;
+  min-width: 0;
+  max-width: 100%;
+  margin-left: auto;
+}
+
+.oa-pending-payments-query-controls {
   display: grid;
-  width: 100%;
-  grid-template-columns: minmax(220px, 280px) minmax(220px, 280px);
-  align-items: end;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
   gap: var(--fp-space-2);
+  width: 100%;
+  min-width: 0;
+}
+
+.oa-pending-payments-query-controls .query-search {
+  width: 100%;
+  min-width: 0;
+}
+
+/* Only these page toolbars use the 46px segmented-control outer height. */
+:is(.oa-pending-payments-query, .output-invoice-collections-query) .business-period-picker {
+  --business-period-control-height: 36px;
+}
+
+:is(.oa-pending-payments-query, .output-invoice-collections-query) .query-search__field,
+:is(.oa-pending-payments-query, .output-invoice-collections-query) .query-search > button {
+  height: 46px;
+  min-height: 46px;
 }
 
 .oa-pending-payments-view-toggle {
@@ -3024,24 +3050,9 @@ textarea {
 .oa-pending-payments-table-frame {
   position: relative;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   border: 1px solid var(--fp-border);
   background: var(--fp-surface);
-}
-
-.oa-pending-payments-table-toolbar {
-  display: flex;
-  min-height: 46px;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--fp-space-2);
-  border-bottom: 1px solid var(--fp-border);
-  background: color-mix(in srgb, var(--fp-surface-muted) 38%, var(--fp-surface));
-  padding: var(--fp-space-2) var(--fp-space-3);
-}
-
-.oa-pending-payments-table-search {
-  width: min(100%, 340px);
 }
 
 .oa-pending-payments-table-shell {
@@ -3693,11 +3704,13 @@ textarea {
 
 .output-invoice-collections-content {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   gap: var(--fp-space-3);
 }
 
-.output-invoice-collections-query {
+.output-invoice-collections-page .output-invoice-collections-query {
+  flex-direction: row;
   align-items: flex-end;
   flex-wrap: wrap;
 }
@@ -3774,41 +3787,6 @@ textarea {
 
 .output-invoice-collections-field input:focus-visible,
 .output-invoice-collections-field select:focus-visible {
-  border-color: var(--fp-primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 18%, transparent);
-}
-
-.output-invoice-collections-search-cluster {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: minmax(220px, 1fr) auto;
-  align-items: end;
-  gap: var(--fp-space-2);
-}
-
-.output-invoice-collections-search-input {
-  width: 100%;
-  min-height: 34px;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
-  background: var(--fp-surface);
-  color: var(--fp-text-primary);
-  font: inherit;
-  font-size: var(--fp-text-body);
-  font-weight: 600;
-  outline: none;
-  padding: 0 var(--fp-space-3);
-  transition:
-    border-color var(--motion-fast) var(--ease-out-quart),
-    box-shadow var(--motion-fast) var(--ease-out-quart),
-    background-color var(--motion-fast) var(--ease-out-quart);
-}
-
-.output-invoice-collections-search-input:hover {
-  border-color: var(--fp-border-strong);
-}
-
-.output-invoice-collections-search-input:focus-visible {
   border-color: var(--fp-primary);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 18%, transparent);
 }
@@ -5224,34 +5202,19 @@ textarea {
 }
 
 @media (max-width: 640px) {
-  .output-invoice-collections-query__grid {
+  .output-invoice-collections-query__grid,
+  .oa-pending-payments-query-controls {
     grid-template-columns: 1fr;
   }
 
-  .output-invoice-collections-search-cluster {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 1180px) {
-  .oa-pending-payments-query__grid {
-    grid-template-columns: repeat(2, minmax(220px, 1fr));
-  }
-
-  .oa-pending-payments-field--search {
-    grid-column: span 2;
+  .output-invoice-collections-query .page-toolbar__group--right,
+  .oa-pending-payments-query .page-toolbar__group--right {
+    flex: none;
+    width: 100%;
   }
 }
 
 @media (max-width: 720px) {
-  .oa-pending-payments-query__grid {
-    grid-template-columns: 1fr;
-  }
-
-  .oa-pending-payments-field--search {
-    grid-column: auto;
-  }
-
   .oa-pending-payments-pagination {
     flex-wrap: wrap;
     justify-content: flex-start;
@@ -25057,10 +25020,6 @@ body.column-layout-dragging {
 .invoice-count-segments__count {
   font-variant-numeric: tabular-nums;
   font-size: 0.92em;
-}
-.pending-invoices-count-caption {
-  color: var(--fp-text-secondary);
-  font-size: var(--fp-text-label);
 }
 
 .pending-invoices-toolbar {
