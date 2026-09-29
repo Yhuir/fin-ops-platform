@@ -1041,6 +1041,9 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             values ('batch-search', 'submitted', 1, 2216.56, %s::text[])
         """, (ids,))
         self.raw_connection.execute("update app.bank_transactions set summary='材料款' where legacy_mongo_id=any(%s::text[])", (ids,))
+        self.connection.statements.clear()
+        self.assertEqual(self.repository._fold_amount_member_ids("all", "97.52"), [])
+        self.assertEqual(len(self.connection.statements), 1)  # Direct hit needs no fold hydration.
         result = self.repository.get_workbench_groups_page(scope_key="all", zone="unpaired", search="97.52")
         batch = next(g for g in result["groups"] if g.get("detail_key") == "batch-search")
         self.assertEqual(set(batch["bank_folds"][0]["member_ids"]), set(ids))

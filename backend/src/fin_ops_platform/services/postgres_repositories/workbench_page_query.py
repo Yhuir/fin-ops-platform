@@ -5656,6 +5656,9 @@ class PostgresWorkbenchPageQueryRepository:
                        or {self._relation_has_scoped_member_sql('relation')})
                 group by relation.case_id, relation.row_types, relation.row_ids
                 having count(*) >= 4
+                   -- Direct member hits already select this complete relation.
+                   -- Only hydrate folds when they can add a new search hit.
+                   and not bool_or(round(abs(bank.amount), 2)::text ilike %s)
                    and (cardinality(array_positions(relation.row_types, 'oa')) > 1
                         or exists (select 1 from app.oa_applications oa
                             where oa.row_id=any(relation.row_ids)
@@ -5676,7 +5679,8 @@ class PostgresWorkbenchPageQueryRepository:
             from app.workbench_pair_relations relation
             join eligible using (case_id)
             order by relation.case_id
-        """, (scope_key, None if scope_key == 'all' else month_start(scope_key), self._tenant_id, _literal_ilike_pattern(fragment)))
+        """, (scope_key, None if scope_key == 'all' else month_start(scope_key), self._tenant_id,
+              _literal_ilike_pattern(fragment), _literal_ilike_pattern(fragment)))
         groups = self._hydrate_groups(month=scope_key, descriptors=descriptors, detail_level="summary")
         result = sorted({member for group in groups for fold in group.get("bank_folds", [])
                          if fragment in format(Decimal(fold["summary_row"]["amount"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f")
