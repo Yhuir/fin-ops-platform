@@ -36,7 +36,7 @@ test('production bank actions and all invoice statuses remain usable without wri
   await page.setViewportSize({ width: 1440, height: 1000 });
   for (const tab of await tabs.getByRole('tab').all()) {
     if (await tab.getAttribute('aria-selected') === 'true') continue;
-    const response = page.waitForResponse(r => new URL(r.url()).pathname === '/fin-ops-api/output-invoice-collections/rows');
+    const response = page.waitForResponse(r => new URL(r.url()).pathname === '/fin-ops-api/api/output-invoice-collections/rows');
     await tab.click();
     expect((await response).status()).toBe(200);
     await expect(tab).toHaveAttribute('aria-selected', 'true');
