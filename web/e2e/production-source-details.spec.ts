@@ -86,7 +86,7 @@ test('production shared source drawers preserve complete records across pages wi
   await inspect(page.getByRole('button', { name: /^查看发票.*详情$/ }).first(), 'workbench-invoice');
   await page.goto('/fin-ops/cost-statistics');
   await page.getByRole('radio', { name: '按时间', exact: true }).click();
-  await inspect(page.getByRole('button', { name: /^查看银行流水.*详情$/ }).first(), 'cost-bank');
+  await inspect(page.getByRole('grid', { name: '按时间银行流水表' }).getByRole('button', { name: /^查看银行流水 / }).first(), 'cost-bank');
   expect(writes).toEqual([]); expect(failures).toEqual([]);
   await info.attach('production-source-details', { body: JSON.stringify(metrics, null, 2), contentType: 'application/json' });
 });
