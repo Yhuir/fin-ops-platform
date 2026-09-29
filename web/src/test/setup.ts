@@ -1,8 +1,13 @@
 import "@testing-library/jest-dom/vitest";
-import { afterEach, vi } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
 
 // JSDOM does not implement Web Animations. Native Tabs indicators are exercised in Playwright.
 Object.defineProperty(HTMLElement.prototype, "getAnimations", { configurable: true, value: () => [] });
+
+// JSDOM has no layout observer; responsive geometry is verified in real Chromium.
+beforeEach(() => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+});
 
 afterEach(() => {
   vi.restoreAllMocks();

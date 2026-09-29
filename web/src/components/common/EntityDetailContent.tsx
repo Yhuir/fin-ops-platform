@@ -1,5 +1,5 @@
 import { Chip, Tabs } from "@heroui/react";
-import { useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { formatDateTimeText } from "../../features/dateTime";
 import StatePanel from "./StatePanel";
@@ -324,6 +324,21 @@ function DetailDocuments({ sections, extraFields, initialDocumentKey, beforeDocu
   });
   const entries = [...documents.entries()];
   const [selected, setSelected] = useState(initialDocumentKey ?? entries[0][0]);
+  useLayoutEffect(() => {
+    const nav = root.current?.querySelector<HTMLElement>('[role="tablist"]');
+    if (!nav) return;
+    const revealSelected = () => {
+      const tab = nav.querySelector<HTMLElement>('[aria-selected="true"]');
+      if (!tab) return;
+      const bounds = nav.getBoundingClientRect(), item = tab.getBoundingClientRect();
+      if (item.left < bounds.left) nav.scrollLeft += item.left - bounds.left;
+      else if (item.right > bounds.right) nav.scrollLeft += item.right - bounds.right;
+    };
+    revealSelected();
+    const observer = new ResizeObserver(revealSelected);
+    observer.observe(nav);
+    return () => observer.disconnect();
+  }, [selected]);
   const active = documents.get(selected);
   if (!active) return <StatePanel compact tone="error">所选单据不在当前详情中。</StatePanel>;
   const content = active.sections.map(({section, index: sectionIndex}) => <section className="entity-detail-section" key={sectionIndex}>

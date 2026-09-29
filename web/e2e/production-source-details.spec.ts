@@ -9,7 +9,7 @@ test('production shared source drawers preserve complete records across pages wi
   test.setTimeout(300_000);
   await page.context().addCookies([{ name: 'Admin-Token', value: token!, domain: 'www.yn-sourcing.com', path: '/', secure: true, sameSite: 'Lax' }]);
   const writes: string[] = [], failures: number[] = [], metrics: object[] = [], requests: string[] = [];
-  page.on('request', request => {if (request.url().includes('/fin-ops-api/')) requests.push(request.url());});
+  page.on('request', request => {if (request.url().includes('/fin-ops-api/') && new URL(request.url()).pathname !== '/fin-ops-api/api/app-health') requests.push(request.url());});
   await page.route('**/fin-ops-api/**', async route => {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(route.request().method())) {
       writes.push(new URL(route.request().url()).pathname); await route.abort('blockedbyclient');
@@ -91,6 +91,10 @@ test('production shared source drawers preserve complete records across pages wi
         return el.getBoundingClientRect().left - body.getBoundingClientRect().left;
       })).toBeLessThanOrEqual((width === 480 ? 16 : 24) + (ids.size > 1 ? 18 : 1));
       expect(await drawer.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+      if (ids.size > 1) await expect.poll(() => drawer.getByRole('tab', {selected: true}).evaluate(el => {
+        const tab = el.getBoundingClientRect(), nav = el.closest('[role=tablist]')!.getBoundingClientRect();
+        return tab.left >= nav.left - 1 && tab.right <= nav.right + 1;
+      })).toBe(true);
       await scroll.evaluate(el => { el.scrollTop = el.scrollHeight; });
       expect(await scroll.evaluate(el => el.scrollTop + el.clientHeight >= el.scrollHeight - 2)).toBe(true);
       await scroll.evaluate(el => { el.scrollTop = 0; });

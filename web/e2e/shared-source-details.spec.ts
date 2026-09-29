@@ -25,6 +25,10 @@ test('full invoice navigation, compact left-aligned values and one reachable scr
   await expect(drawer.getByRole('tablist', {name: '单据导航'})).toBeVisible();
   for (const width of [1440, 1024, 480]) {
     await page.setViewportSize({width, height: 800});
+    await expect.poll(() => drawer.getByRole('tab', {selected: true}).evaluate(el => {
+      const tab = el.getBoundingClientRect(), nav = el.closest('[role=tablist]')!.getBoundingClientRect();
+      return tab.left >= nav.left-1 && tab.right <= nav.right+1;
+    })).toBe(true);
     const nav = drawer.getByRole('tablist');
     for (const [index, number] of numbers.entries()) {
       const tab = nav.getByRole('tab').nth(index);
