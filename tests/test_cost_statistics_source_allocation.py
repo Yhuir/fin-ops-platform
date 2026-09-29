@@ -415,3 +415,71 @@ class AutomaticFormalSourceTests(unittest.TestCase):
         task = SourceSuggestionTests().fixture()
         task['waiting_oa_ids'] = ['unknown']
         self.assertIsNone(automatic_relation_sources(task, [], []))
+
+
+class ApprovalAllocationTests(unittest.TestCase):
+    policy = AutomaticFormalSourceTests.policy
+
+    def snapshot_policy(self, policy, group):
+        from fin_ops_platform.services.cost_statistics_policy import CostStatisticsPolicy
+        return CostStatisticsPolicy({'settings': policy._settings, 'cost_groups': [group],
+                                     'bank_rows': group['bank_rows'], 'bank_statistics': {}})
+
+    def test_waiting_source_is_not_manual_and_completion_counts_once(self):
+        policy, group = self.policy((6868.55,) * 9, (6868.55,) * 9,
+                                   refs={str(i): [str(i)] for i in range(9)})
+        group['oa_rows'][0]['workflow_status'] = 'in_progress'
+        waiting = self.snapshot_policy(policy, group)
+        self.assertEqual(waiting.manual_allocation_tasks, [])
+        self.assertEqual(waiting.pending_manual_allocation_count, 0)
+        self.assertEqual(len(waiting.serialized_cost_rows), 8)
+        self.assertEqual(sum(Decimal(r['amount']) for r in waiting.serialized_cost_rows), Decimal('54948.40'))
+        self.assertEqual(waiting.allocation_tasks[0]['pending_reasons'], ['oa_in_progress'])
+        group['oa_rows'][0]['workflow_status'] = 'completed'
+        complete = self.snapshot_policy(policy, group)
+        self.assertEqual(len(complete.serialized_cost_rows), 9)
+        self.assertEqual(sum(Decimal(r['amount']) for r in complete.serialized_cost_rows), Decimal('61816.95'))
+        self.assertEqual(complete.manual_allocation_tasks, [])
+        group['oa_rows'][0]['workflow_status'] = 'in_progress'
+        self.assertEqual(len(self.snapshot_policy(policy, group).serialized_cost_rows), 8)
+
+    def test_same_amount_uses_unique_payment_facts_not_row_order(self):
+        policy, group = self.policy((8000, 8000), (8000, 8000))
+        for i, row in enumerate(group['oa_rows']):
+            row.update(application_date=f'2026-08-{14 + i * 10}', counterparty_name='设备公司')
+        for i, row in enumerate(group['bank_rows']):
+            row.update(trade_time=f'2026-08-{14 + i * 10} 12:00:00', counterparty_name='设备公司')
+        group['oa_rows'][1]['workflow_status'] = 'in_progress'
+        for reverse in [False, True]:
+            if reverse:
+                group['bank_rows'].reverse()
+            result = self.snapshot_policy(policy, group)
+            self.assertEqual([(r['transaction_id'], r['amount']) for r in result.serialized_cost_rows], [('0', '8000.00')])
+            self.assertEqual(result.manual_allocation_tasks, [])
+        group['oa_rows'][1]['application_date'] = '2026-08-14'
+        group['bank_rows'][0]['trade_time'] = '2026-08-14 12:00:00'
+        ambiguous = self.snapshot_policy(policy, group)
+        self.assertEqual(ambiguous.serialized_cost_rows, [])
+        self.assertEqual(ambiguous.pending_manual_allocation_count, 1)
+
+    def test_waiting_does_not_hide_real_difference_or_missing_metadata(self):
+        policy, group = self.policy((100, 300), (450,))
+        group['oa_rows'][1]['workflow_status'] = 'in_progress'
+        result = self.snapshot_policy(policy, group)
+        self.assertEqual(result.pending_manual_allocation_count, 1)
+        self.assertIn('source_required', result.allocation_tasks[0]['pending_reasons'])
+        policy, group = self.policy((100, 300), (400,))
+        group['oa_rows'][1]['workflow_status'] = 'in_progress'
+        group['bank_rows'][0]['trade_time'] = ''
+        result = self.snapshot_policy(policy, group)
+        self.assertEqual(result.pending_manual_allocation_count, 1)
+        self.assertIn('source_date_missing', result.allocation_tasks[0]['pending_reasons'])
+
+    def test_equal_group_total_cannot_offset_wrong_waiting_source(self):
+        from fin_ops_platform.services.cost_statistics_source_allocation import account_for_waiting_sources
+        task = {'status': 'pending', 'pending_reasons': ['source_required', 'oa_in_progress'],
+                'bank_events': [{'transaction_id': 'a', 'event_kind': 'outflow', 'amount': '100.00'},
+                                {'transaction_id': 'b', 'event_kind': 'outflow', 'amount': '100.00'}],
+                'source_allocations': {'cost_lines': [{'unit_id': 'done', 'bank_transaction_id': 'a', 'amount': '100.00'}]}}
+        account_for_waiting_sources(task, [{'unit_id': 'waiting', 'bank_transaction_id': 'a', 'amount': '100.00'}])
+        self.assertIn('source_required', task['pending_reasons'])

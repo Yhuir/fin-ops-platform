@@ -19,7 +19,7 @@ beforeEach(()=>{
 });
 it('refreshes formal facts while preserving a conflicting dirty draft until explicit reload',async()=>{
  const user=userEvent.setup();const props={canSave:true,onSaved:vi.fn(),refreshKey:'1'};
- const view=render(<Drawer {...props}/>);await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));
+ const view=render(<Drawer {...props}/>);await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));await user.click(await screen.findByRole('button',{name:/^项目 /}));
  const input=await screen.findByRole('textbox',{name:'分配金额 1'});
  await user.clear(input);await user.type(input,'80');await user.tab();
  task={...task,sourceFingerprint:'changed',relationVersion:2,units:task.units.map(u=>({...u,expenseContent:'更新的费用'}))};
@@ -40,13 +40,13 @@ it('ignores an obsolete detail response after a newer refresh',async()=>{
  let finish!:(t:CostStatisticsManualAllocationTask)=>void;
  vi.mocked(fetchCostStatisticsManualAllocation).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
  const user=userEvent.setup();const props={canSave:true,onSaved:vi.fn()};const view=render(<Drawer {...props} refreshKey="1"/>);
- await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));await waitFor(()=>expect(finish).toBeDefined());
+ await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));await user.click(await screen.findByRole('button',{name:/^项目 /}));await waitFor(()=>expect(finish).toBeDefined());
  const old=structuredClone(task);task={...task,units:task.units.map(u=>({...u,expenseContent:'最新费用'}))};
  view.rerender(<Drawer {...props} refreshKey="2"/>);await screen.findAllByText('最新费用');
  await act(async()=>finish(old));expect(screen.queryByText('原始费用')).not.toBeInTheDocument();
 });
 it('rechecks an open drawer on window focus even without a page refresh',async()=>{
- const user=userEvent.setup();render(<Drawer canSave onSaved={vi.fn()}/>);await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));await screen.findAllByText('原始费用');
+ const user=userEvent.setup();render(<Drawer canSave onSaved={vi.fn()}/>);await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));await user.click(await screen.findByRole('button',{name:/^项目 /}));await screen.findAllByText('原始费用');
  task={...task,units:task.units.map(u=>({...u,expenseContent:'另一个页面修改'}))};
  await act(async()=>window.dispatchEvent(new Event('focus')));await screen.findAllByText('另一个页面修改');
  expect(saveCostStatisticsManualAllocation).not.toHaveBeenCalled();
@@ -59,7 +59,7 @@ it('reopens an inactive task whose earlier request was aborted by refresh', asyn
   vi.mocked(fetchCostStatisticsManualAllocation).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
   const user=userEvent.setup();
   const view=render(<Drawer canSave onSaved={vi.fn()} refreshKey="1"/>);
-  await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));
+  await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));await user.click(await screen.findByRole('button',{name:/^项目 /}));
   await waitFor(()=>expect(finish).toBeDefined());
   await user.click(screen.getByRole('button',{name:/项目二/}));
   await screen.findAllByText('原始费用');
@@ -80,7 +80,7 @@ it('retains acknowledged save feedback when unchanged pending facts refresh', as
   });
   const props={canSave:true,onSaved:vi.fn()};
   const view=render(<Drawer {...props} refreshKey="1"/>);
-  await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));
+  await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));await user.click(await screen.findByRole('button',{name:/^项目 /}));
   await screen.findByRole('textbox',{name:'分配金额 1'});
   await user.click(screen.getByRole('button',{name:'保存'}));
   await screen.findByText('已保存');
@@ -98,7 +98,7 @@ it('discards an older tag catalogue response without resetting manual draft', as
   vi.mocked(fetchCostManualTags).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
   vi.mocked(fetchCostManualTags).mockResolvedValue([{code:'new',label:'费用 / 新标签',primary_label:'费用',sub_label:'新标签'}]);
   render(<Drawer canSave onSaved={vi.fn()}/>);
-  await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));
+  await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));await user.click(await screen.findByRole('button',{name:/^项目 /}));
   await screen.findByRole('textbox',{name:'分配金额 1'});
   await user.click(screen.getByRole('button',{name:'新增人工成本'}));
   const content=screen.getByRole('textbox',{name:'人工成本项'});
@@ -124,7 +124,7 @@ it('keeps one expanded task, preserves edits, and does not reopen on a late resp
   vi.mocked(fetchCostStatisticsManualAllocations).mockResolvedValue({items:[summary,{...summary,relationCaseId:'case-2',projectNames:['项目二']}],counts:{pending:2,allocated:0},rowCount:2});
   const user = userEvent.setup();
   render(<Drawer canSave onSaved={vi.fn()}/>);
-  await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));
+  await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));await user.click(await screen.findByRole('button',{name:/^项目 /}));
   const amount = await screen.findByRole('textbox',{name:'分配金额 1'});
   await user.clear(amount); await user.type(amount,'80');
   let finish!:(t:CostStatisticsManualAllocationTask)=>void;
@@ -161,7 +161,7 @@ it('opens automatic cost directly without reading manual lists and retains its s
 it('shows stale manual decisions as pending review instead of completed', async () => {
   task = {...task,decisionMode:'manual',version:3,status:'stale',pendingReasons:['allocation_stale']};
   const user = userEvent.setup(); render(<Drawer canSave onSaved={vi.fn()}/>);
-  await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));
+  await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));await user.click(await screen.findByRole('button',{name:/^项目 /}));
   expect(await screen.findByRole('button',{name:/项目 待复核/})).toBeVisible();
   expect(screen.queryByRole('button',{name:/项目 已完成/})).not.toBeInTheDocument();
   expect(screen.queryByRole('textbox',{name:'分配金额 1'})).not.toBeInTheDocument();
@@ -170,7 +170,7 @@ it('shows stale manual decisions as pending review instead of completed', async 
 it('disables unchanged metadata-waiting saves but permits actual edits', async () => {
   task={...task,pendingReasons:['bank_account_missing','source_date_missing'],sourceAllocations:task.suggestedSourceAllocations,suggestedSourceAllocations:null};
   const user=userEvent.setup();render(<Drawer canSave onSaved={vi.fn()}/>);
-  await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));
+  await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));await user.click(await screen.findByRole('button',{name:/^项目 /}));
   await screen.findByRole('textbox',{name:'分配金额 1'});
   expect(screen.getByRole('button',{name:/项目 待补资料/})).toBeVisible();
   expect(screen.getByRole('button',{name:'保存'})).toBeDisabled();
@@ -198,7 +198,7 @@ it('keeps task counts during a delayed list refresh without enabling stale saves
   const user = userEvent.setup();
   const props = {canSave:true, onSaved:vi.fn()};
   const view = render(<Drawer {...props} refreshKey="1"/>);
-  await user.click(screen.getByRole('button', {name:'打开成本人工分配'}));
+  await user.click(screen.getByRole('button', {name:'打开成本人工分配'}));await user.click(await screen.findByRole('button',{name:/^项目 /}));
   await screen.findByRole('textbox', {name:'分配金额 1'});
   const pending = screen.getByRole('radio', {name:/待分配.*1/});
   const original = pending.textContent;
@@ -212,4 +212,30 @@ it('keeps task counts during a delayed list refresh without enabling stale saves
   await act(async () => finish({items:[], counts:{pending:0,allocated:1}, rowCount:0}));
   expect(await screen.findByRole('radio', {name:/待分配.*0/})).toBeInTheDocument();
   expect(pending.closest('[aria-busy]')).toHaveAttribute('aria-busy', 'false');
+});
+
+it('opens and reopens collapsed, fetches details only on expansion, and ignores late list expansion', async () => {
+  const user = userEvent.setup();
+  const props = {canSave:true, onSaved:vi.fn()};
+  const view = render(<Drawer {...props} refreshKey="1"/>);
+  await user.click(screen.getByRole('button', {name:'打开成本人工分配'}));
+  let heading = await screen.findByRole('button', {name:/^项目 /});
+  expect(heading).toHaveAttribute('aria-expanded', 'false');
+  expect(fetchCostStatisticsManualAllocation).not.toHaveBeenCalled();
+  await user.click(heading);
+  await screen.findByRole('textbox', {name:'分配金额 1'});
+  let finish!: (value: Awaited<ReturnType<typeof fetchCostStatisticsManualAllocations>>) => void;
+  vi.mocked(fetchCostStatisticsManualAllocations).mockImplementationOnce(() => new Promise(resolve => {finish = resolve;}));
+  view.rerender(<Drawer {...props} refreshKey="2"/>);
+  await waitFor(() => expect(finish).toBeDefined());
+  await user.click(heading);
+  await act(async () => finish({items:[{...task, projectNames:['项目'], unitCount:1, bankEventCount:1}], counts:{pending:1,allocated:0}, rowCount:1}));
+  expect(heading).toHaveAttribute('aria-expanded', 'false');
+  expect(fetchCostStatisticsManualAllocation).toHaveBeenCalledTimes(1);
+  await user.click(screen.getByRole('button', {name:/关闭/}));
+  await user.click(screen.getByRole('button', {name:'打开成本人工分配'}));
+  heading = await screen.findByRole('button', {name:/^项目 /});
+  expect(heading).toHaveAttribute('aria-expanded', 'false');
+  expect(fetchCostStatisticsManualAllocation).toHaveBeenCalledTimes(1);
+  expect(saveCostStatisticsManualAllocation).not.toHaveBeenCalled();
 });

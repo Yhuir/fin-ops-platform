@@ -330,6 +330,7 @@ describe("Cost statistics page", () => {
 
     await user.click(screen.getByRole("button", { name: "打开成本人工分配" }));
     const drawer = await screen.findByRole("dialog", { name: "成本人工分配" });
+    await user.click(drawer.querySelector<HTMLButtonElement>(".cost-source-task-heading")!);
     expect(await within(drawer).findByRole("heading", { name: /银行流水/ })).toBeInTheDocument();
     expect(within(drawer).queryByText(/bank-manual-00/)).not.toBeInTheDocument();
     expect(within(drawer).getAllByText("项目开销", { exact: true }).length).toBeGreaterThan(0);

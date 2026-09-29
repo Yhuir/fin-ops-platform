@@ -147,6 +147,11 @@ async function sourceScenario(page: Page, options: { restoreAutomatic?: boolean;
     await expect(drawer.getByText('暂无待分配任务')).toBeVisible();
     await drawer.getByRole('radio', {name: '已完成 0'}).click();
   }
+  if (!options.automatic) {
+    await expect(drawer.locator('.cost-source-task-heading').first()).toHaveAttribute('aria-expanded', 'false');
+    expect(details).toBe(0);
+    await drawer.locator('.cost-source-task-heading').first().click();
+  }
   if (!options.detailFailure && !options.automatic) await expect(drawer.getByRole('heading', { name: /银行流水/ })).toBeVisible();
   const unit = drawer.locator('.cost-source-table tbody').first();
   return { drawer, unit, task, writes: () => writes, body: () => savedBody, details: () => details };
@@ -186,6 +191,8 @@ test('mixed approval saves only completed 8000 and keeps the other 8000 waiting 
   expect(scene.body()!.non_cost_amount).toBe('0.00');
   await scene.drawer.getByRole('button', {name: /关闭/}).click();
   await page.getByRole('button', {name: '打开成本人工分配'}).click();
+  await expect(scene.drawer.locator('.cost-source-task-heading').first()).toHaveAttribute('aria-expanded', 'false');
+  await scene.drawer.locator('.cost-source-task-heading').first().click();
   await expect(scene.unit.getByRole('textbox', {name: '分配金额 1', exact: true})).toHaveValue('8000.00');
   await expect(scene.drawer.getByText('待审批', {exact:true})).toBeVisible();
   await page.screenshot({path: '/tmp/cost-mixed-partial-1440.png', animations: 'disabled'});
@@ -215,6 +222,7 @@ test('splits 600 across real bank accounts, moves only completed tasks, and pres
     { unit_id: 'oa-1', bank_transaction_id: 'bank-b', amount: '250.00' },
   ], refund_links: [], non_cost_lines: [] });
   await scene.drawer.getByRole('radio', { name: '已完成 1' }).click();
+  await scene.drawer.locator('.cost-source-task-heading').first().click();
   await expect(scene.unit.getByRole('textbox', { name: '分配金额 1', exact: true })).toHaveValue('350.00');
   await expect(scene.unit.getByRole('textbox', { name: '分配金额 2', exact: true })).toHaveValue('250.00');
   await expectNoUnexpectedSuccessUiErrors(page);
@@ -228,6 +236,7 @@ test('keeps a saved task pending when a bank tag is missing and rehydrates after
   await expect(scene.drawer.getByRole('radio', { name: '待分配 1' })).toBeVisible();
   await scene.drawer.getByRole('button', { name: /关闭/ }).click();
   await page.getByRole('button', { name: '打开成本人工分配' }).click();
+  await scene.drawer.locator('.cost-source-task-heading').first().click();
   await expect(scene.unit.getByRole('textbox', { name: '分配金额 2', exact: true })).toHaveValue('250.00');
   await expectNoUnexpectedSuccessUiErrors(page);
 });
@@ -361,6 +370,7 @@ test('keeps a successful allocation committed when the statistics refresh fails'
   await failedRead;
   await expect(scene.drawer.getByText('暂无待分配任务')).toBeVisible();
   await scene.drawer.getByRole('radio', { name: '已完成 1' }).click();
+  await scene.drawer.locator('.cost-source-task-heading').first().click();
   await expect(scene.unit.getByRole('textbox', { name: '分配金额 1', exact: true })).toHaveValue('350.00');
   expect(scene.writes()).toBe(1);
 });
@@ -433,6 +443,7 @@ test('COST-E2E-014 screenshot three OA four bank suggestions save as four source
   expect(scene.body()!.allocations.map((line: {amount: string}) => line.amount)).toEqual(['88050.00', '29350.00', '469600.00']);
   expect(scene.body()!.source_allocations.cost_lines.map((line: {amount: string}) => line.amount)).toEqual(['64996.69', '23053.31', '29350.00', '469600.00']);
   await scene.drawer.getByRole('radio', { name: /已完成/ }).click();
+  await scene.drawer.locator('.cost-source-task-heading').first().click();
   await expect(scene.drawer.locator('.cost-source-table').getByRole('combobox', {name:/来源流水/})).toHaveCount(4);
   await expectNoUnexpectedSuccessUiErrors(page);
 });
@@ -567,6 +578,7 @@ test('scoped hotel task omits excluded loan, saves only scoped source and keeps 
   expect(scene.body()!.non_cost_amount).toBe('0.00');
   expect(scene.body()!.source_allocations.cost_lines).toEqual([{unit_id:'oa-1',bank_transaction_id:'hotel',amount:'2100.00'}]);
   await scene.drawer.getByRole('radio',{name:'已完成 1'}).click();
+  await scene.drawer.locator('.cost-source-task-heading').first().click();
   await expect(scene.unit.getByRole('textbox')).toHaveValue('2100.00');
   await page.setViewportSize({width:390,height:844});
   await expect(scene.drawer.getByText(/范围外|借出款/)).toHaveCount(0);
@@ -596,6 +608,7 @@ test('seven historical OA groups prefill fourteen sources, stay editable and sur
   await expect.poll(scene.writes).toBe(1);
   expect(scene.body()!.source_allocations.cost_lines).toHaveLength(14);
   await scene.drawer.getByRole('radio',{name:'已完成 1'}).click();
+  await scene.drawer.locator('.cost-source-task-heading').first().click();
   await expect(table.getByRole('combobox', {name:/来源流水/})).toHaveCount(14);
   expect(await table.getByRole('textbox').evaluateAll(inputs=>inputs.map(input=>(input as HTMLInputElement).value))).toEqual(expected);
   await expectNoUnexpectedSuccessUiErrors(page);
@@ -625,6 +638,7 @@ test('manual supplemental cost closes residual, saves and reloads without creati
   expect(scene.body()!.source_allocations.cost_lines.map((r:{amount:string})=>r.amount)).toEqual(['600.00','192.00']);
   expect(scene.task.units).toHaveLength(1);
   await scene.drawer.getByRole('radio',{name:/已完成/}).click();
+  await scene.drawer.locator('.cost-source-task-heading').first().click();
   await expect(scene.drawer.getByRole('textbox',{name:'人工成本项',exact:true})).toHaveValue('补充服务费');
   await expect(scene.drawer.getByText('分配金额一致',{exact:true})).toBeVisible();
   await page.setViewportSize({width:1280,height:800});
@@ -771,6 +785,7 @@ test('OA cost tag edits survive save and reopen, then explicitly restore source 
   await expect.poll(()=>scene.writes()).toBe(1);
   expect(scene.body()!.oa_cost_tag_overrides).toEqual([{unit_id:'oa-1',bank_transaction_id:'bank-a',cost_tag_code:'service'}]);
   await scene.drawer.getByRole('radio',{name:/已完成/}).click();
+  await scene.drawer.locator('.cost-source-task-heading').first().click();
   await expect(picker).toContainText('费用 / 服务费');
   const toggle=scene.drawer.locator('.cost-source-task-heading').first();
   await toggle.click();await toggle.click();

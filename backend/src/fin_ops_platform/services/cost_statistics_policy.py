@@ -17,12 +17,16 @@ from fin_ops_platform.services.cost_statistics_oa_cost_tags import cost_tag_fiel
 from fin_ops_platform.services.cost_statistics_scope import read_project_cost_scope, source_in_project_cost_scope
 from fin_ops_platform.services.cost_statistics_source_allocation import (
     SourceAllocationError,
+    account_for_waiting_sources,
+    approval_source_decision,
     automatic_relation_sources,
     complete_source_task,
+    requires_manual_allocation,
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     COMPLETED_WORKFLOW_STATUS_ALIASES,
 )
+from fin_ops_platform.services.workbench_relation_alignment_service import evidenced_payment_pairs, row_payment_evidence
 
 ZERO = Decimal("0.00")
 MONEY_QUANTUM = Decimal("0.01")
@@ -115,7 +119,7 @@ class CostStatisticsPolicy:
     @cached_property
     def manual_allocation_tasks(self) -> list[dict[str, Any]]:
         return [task for task in self.allocation_tasks
-                if task["in_project_cost_scope"] and (task["status"] != "allocated" or task["decision_mode"] == "manual")]
+                if requires_manual_allocation(task)]
 
     @cached_property
     def pending_manual_allocation_count(self) -> int:
@@ -773,7 +777,7 @@ def _cost_entries(
                     project_id=project["id"],
                 )
             )
-    visible_tasks = [task for task in manual_tasks if task["in_project_cost_scope"]]
+    visible_tasks = [task for task in manual_tasks if requires_manual_allocation(task)]
     stale_count = sum("allocation_stale" in task["pending_reasons"] for task in visible_tasks)
     pending_count = sum(task["status"] == "pending" for task in visible_tasks) - stale_count
     return (
@@ -1075,8 +1079,12 @@ def _manual_allocation_task(
         unit["lock_oa_amount"] = default_lock
         unit["outside_cost_amount"] = "0.00"
     if manual_record is None:
-        decision = automatic_relation_sources(task, [*outflows, *refunds], group.get("source_relation_groups", []))
-        return project_source_task(task, decision, automatic=True)
+        pairs = evidenced_payment_pairs(
+            [row_payment_evidence({**row, "type": "oa"}) for row in group["oa_rows"]],
+            [row_payment_evidence({**row, "type": "bank"}) for row in outflows],
+        ).pairs
+        decision, waiting = approval_source_decision(task, [*outflows, *refunds], group.get("source_relation_groups", []), pairs)
+        return account_for_waiting_sources(project_source_task(task, decision, automatic=True), waiting)
     task.update(
         {
             "version": int(manual_record.get("version") or 0),
@@ -1152,10 +1160,12 @@ def _manual_allocation_task(
         checked = covered_source_task(stored_task, decision)
         if checked["allocations"] != ordered_allocations or checked["non_cost_amount"] != task["non_cost_amount"]:
             raise CostStatisticsAllocationConflictError("保存的来源明细与分配合计不一致。")
+    waiting = []
     if task["waiting_oa_ids"] and decision is not None:
         eligible_ids = {u["unit_id"] for u in units if u["cost_eligible"]} | {u["unit_id"] for u in task["manual_items"]}
+        waiting = [line for line in decision["cost_lines"] if line["unit_id"] not in eligible_ids]
         decision = {**decision, "cost_lines": [line for line in decision["cost_lines"] if line["unit_id"] in eligible_ids]}
-    return project_source_task(task, decision)
+    return account_for_waiting_sources(project_source_task(task, decision), waiting)
 
 
 def _complete_source_task(task: dict[str, Any], source_allocations: Any = None) -> dict[str, Any]:

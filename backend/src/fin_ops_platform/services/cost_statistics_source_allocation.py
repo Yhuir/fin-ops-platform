@@ -180,6 +180,7 @@ def automatic_source_allocations(task: dict[str, Any]) -> dict[str, Any] | None:
 
 def automatic_relation_sources(
     task: dict[str, Any], bank_rows: list[dict[str, Any]], relation_groups: list[dict[str, Any]],
+    *, evidence_pairs: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
     """Resolve independent formal ownership components, never amount combinations."""
     units_by_oa: dict[str, list[dict[str, Any]]] = {}
@@ -192,6 +193,9 @@ def automatic_relation_sources(
     # historical subset may predate later OA additions; it is not exclusive.
     multiple_sources = sum(e["event_kind"] == "outflow" for e in task["bank_events"]) > 1
     refs_by_bank = {row["id"]: set(row.get("source_oa_ids", [])) for row in bank_rows}
+    for oa_id, bank_id in (evidence_pairs or {}).items():
+        if not refs_by_bank.get(bank_id):
+            refs_by_bank[bank_id] = {oa_id}
     if not any(refs_by_bank.values()) and (not multiple_sources or len(all_oa) == 1):
         return automatic_source_allocations({**task})
     allowed_by_bank = {id: frozenset(group["oa_row_ids"]) & all_oa
@@ -256,6 +260,53 @@ def automatic_relation_sources(
             for kind in result:
                 result[kind].extend(decision[kind])
     return result if any(result.values()) else None
+
+
+def approval_source_decision(
+    task: dict[str, Any], bank_rows: list[dict[str, Any]], relation_groups: list[dict[str, Any]],
+    evidence_pairs: dict[str, str],
+) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
+    """Resolve ownership before approval eligibility; waiting lines never become cost."""
+    ownership = {**task, "units": [{**u, "cost_eligible": True} for u in task["units"]],
+                 "bank_events": [{k: v for k, v in e.items() if k != "allowed_unit_ids"} for e in task["bank_events"]],
+                 "allows_partial": bool(task["waiting_oa_ids"]) and Decimal(task["difference"]) > ZERO,
+                 "allocations": [{"unit_id": u["unit_id"], "amount": u["oa_original_amount"]} for u in task["units"]]
+                 if Decimal(task["difference"]) == ZERO else []}
+    decision = automatic_relation_sources(ownership, bank_rows, relation_groups, evidence_pairs=evidence_pairs)
+    if decision is None:
+        return None, []
+    waiting_ids = {u["unit_id"] for u in task["units"] if not u["cost_eligible"]}
+    waiting = [line for line in decision["cost_lines"] if line["unit_id"] in waiting_ids]
+    return {**decision, "cost_lines": [line for line in decision["cost_lines"] if line["unit_id"] not in waiting_ids]}, waiting
+
+
+def account_for_waiting_sources(task: dict[str, Any], waiting: list[dict[str, str]]) -> dict[str, Any]:
+    """Exclude approval-only tasks only after every in-scope payment is accounted for."""
+    if task["status"] == "stale" or "allocation_stale" in task["pending_reasons"]:
+        return task
+    events = {e["transaction_id"]: Decimal(e["amount"]) for e in task["bank_events"] if e["event_kind"] == "outflow"}
+    usage = dict.fromkeys(events, ZERO)
+    for lines in (task.get("source_allocations") or {}).values():
+        for line in lines:
+            usage[line["bank_transaction_id"]] += Decimal(line["amount"])
+    reserved = ZERO
+    for line in waiting:
+        bank_id = line["bank_transaction_id"]
+        if bank_id in usage:
+            amount = Decimal(line["amount"])
+            usage[bank_id] += amount
+            reserved += amount
+    # A total alone is insufficient: no source can borrow another source's balance.
+    if reserved > ZERO and usage == events:
+        task["pending_reasons"] = [r for r in task["pending_reasons"] if r not in {"source_required", "amount_required"}]
+    return task
+
+
+def requires_manual_allocation(task: dict[str, Any]) -> bool:
+    return task["in_project_cost_scope"] and (
+        task["status"] != "allocated" and any(r != "oa_in_progress" for r in task["pending_reasons"])
+        or task["status"] == "allocated" and task["decision_mode"] == "manual"
+    )
 
 
 # Bound detail-only combinatorial work; exhaustion is unknown, never a match.

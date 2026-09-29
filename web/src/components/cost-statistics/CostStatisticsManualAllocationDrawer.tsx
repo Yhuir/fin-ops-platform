@@ -69,7 +69,9 @@ export default function CostStatisticsManualAllocationDrawer({ caseId, onCloseCa
   const [items, setItems] = useState<CostStatisticsManualAllocationSummary[]>([]);
   const [counts, setCounts] = useState<{ pending: number; allocated: number } | null>(null);
   const [nextCursor, setNextCursor] = useState<string>();
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [expanded, updateExpanded] = useState<string | null>(null);
+  const expandedRef = useRef<string | null>(null);
+  const setExpanded = (id: string | null) => { expandedRef.current = id; updateExpanded(id); };
   const [states, setStates] = useState<Record<string, TaskState>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
@@ -109,7 +111,7 @@ export default function CostStatisticsManualAllocationDrawer({ caseId, onCloseCa
       setItems(current => cursor ? [...current, ...page.items.filter(item => !current.some(old => old.relationCaseId === item.relationCaseId))] : page.items);
       setCounts(page.counts); setNextCursor(page.nextCursor);
       if (!cursor) {
-        const first = page.items.some(item => item.relationCaseId === expanded) ? expanded : page.items[0]?.relationCaseId ?? null;
+        const first = page.items.some(item => item.relationCaseId === expandedRef.current) ? expandedRef.current : null;
         setExpanded(first); if (first) void loadDetail(first, true);
       }
     } catch (caught) { if (!controller.signal.aborted) setError('人工分配任务加载失败，请重试'); }
@@ -191,7 +193,7 @@ export default function CostStatisticsManualAllocationDrawer({ caseId, onCloseCa
     </>;
   };
   return <>
-    <Button aria-label="打开成本人工分配" className="cost-page-action cost-manual-allocation-trigger" size="sm" variant="secondary" onPress={() => { setOpen(true); void load(); }}>
+    <Button aria-label="打开成本人工分配" className="cost-page-action cost-manual-allocation-trigger" size="sm" variant="secondary" onPress={() => { setExpanded(null); setOpen(true); void load(); }}>
       待分配{(pendingCount ?? counts?.pending) !== undefined ? <Chip color="warning" size="sm" variant="soft">{pendingCount ?? counts?.pending}</Chip> : null}
     </Button>
     <AppDrawer open={open} title="成本人工分配" width="min(1320px, 100vw)" className="cost-source-drawer" onClose={close} closeDisabled={saving}>

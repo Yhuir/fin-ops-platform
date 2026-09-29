@@ -314,6 +314,53 @@ class CostSourcePostgresTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.service.get_task("cost-source-case", can_save=True)
 
+    def test_approval_only_auto_sources_http_transition_and_bank_view_isolation(self):
+        from tests.app_test_support import build_local_state_application
+        app = build_local_state_application()
+        app._cost_statistics_api_routes._manual_allocation_service = self.service
+        app._cost_statistics_api_routes._query_service = self.query
+        self.add_interest_tag()
+        self.connection.execute("""update app.app_settings set settings_payload=jsonb_set(settings_payload,
+            '{cost_statistics_project_cost_scope,selected_tag_codes}','["interest-test"]'::jsonb)""")
+        self.connection.execute("""insert into app.bank_transaction_categories
+            (bank_transaction_id,legacy_transaction_id,category,source,status,raw_payload)
+            select id,legacy_mongo_id,'interest-test','manual','active','{"manual_assignment":true}'::jsonb
+            from app.bank_transactions""")
+        with self.connection.transaction() as tx:
+            tx.execute("select set_config('fin_ops.correction_reason', 'isolated approval allocation fixture', true)")
+            tx.execute("update app.bank_transactions set amount=8000,signed_amount=-8000,counterparty_name_raw='设备公司'")
+            for oa_id, day, status in [('oa-a', '2026-08-01', 'completed'), ('oa-b', '2026-09-01', 'in_progress')]:
+                tx.execute("""update app.oa_applications set amount=8000,workflow_status=%s,
+                    normalized_payload=normalized_payload || %s::jsonb where row_id=%s""",
+                    (status, json.dumps({'amount':'8000.00','application_date':day,'counterparty_name':'设备公司'}), oa_id))
+        def get(path):
+            response = app.handle_request('GET', path)
+            self.assertEqual(response.status_code, 200)
+            return json.loads(response.body)
+        list_path = '/api/cost-statistics/manual-allocations?status=pending&page_size=50'
+        self.assertEqual(get(list_path)['counts'], {'pending':0, 'allocated':0})
+        self.assertEqual(get(list_path)['items'], [])
+        detail = get('/api/cost-statistics/manual-allocations/cost-source-case')
+        self.assertEqual(detail['pending_reasons'], ['oa_in_progress'])
+        self.assertEqual(detail['source_allocations']['cost_lines'], [
+            {'unit_id':'oa:oa-a','bank_transaction_id':'bank-1','amount':'8000.00'}])
+        def totals():
+            return {view:get('/api/cost-statistics/explorer?scope=all&view=' + view)['summary']['total_amount']
+                    for view in ('project','cost_tag','bank_account','bank_tag','time')}
+        before = totals()
+        self.assertEqual([before[v] for v in ('project','cost_tag','bank_account')], ['8000.00'] * 3)
+        self.connection.execute("update app.oa_applications set workflow_status='completed' where row_id='oa-b'")
+        after = totals()
+        self.assertEqual([after[v] for v in ('project','cost_tag','bank_account')], ['16000.00'] * 3)
+        self.assertEqual([before[v] for v in ('bank_tag','time')], [after[v] for v in ('bank_tag','time')])
+        self.assertEqual(totals(), after)
+        self.assertEqual(get(list_path)['counts'], {'pending':0,'allocated':0})
+        self.assertEqual(self.connection.fetch_one('select count(*) as n from app.cost_statistics_manual_allocations')['n'], 0)
+        self.connection.execute("update app.oa_applications set workflow_status='in_progress' where row_id='oa-b'")
+        self.assertEqual(totals(), before)
+        self.connection.execute("update app.workbench_pair_relations set status='cancelled',version=version+1")
+        self.assertEqual(totals()['project'], '0.00')
+
     def test_mixed_status_partial_http_save_completion_and_withdrawal(self):
         from tests.app_test_support import build_local_state_application
         app = build_local_state_application()
