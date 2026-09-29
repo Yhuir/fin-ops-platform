@@ -14,6 +14,7 @@ type CostExplorerListProps<Row> = {
   isActive: (row: Row) => boolean;
   onSelect: (row: Row) => void;
   getPrimaryText: (row: Row) => string;
+  renderPrimary?: (row: Row) => ReactNode;
   renderSecondary?: (row: Row) => ReactNode;
   renderMeta?: (row: Row) => ReactNode;
 };
@@ -28,6 +29,7 @@ export default function CostExplorerList<Row>({
   isActive,
   onSelect,
   getPrimaryText,
+  renderPrimary,
   renderSecondary,
   renderMeta,
 }: CostExplorerListProps<Row>) {
@@ -94,7 +96,7 @@ export default function CostExplorerList<Row>({
                   }}
                 >
                   <div className="cost-explorer-item-main">
-                    <strong>{primaryText}</strong>
+                    <strong>{renderPrimary ? renderPrimary(item) : primaryText}</strong>
                     {secondary != null ? <span className="cost-explorer-item-secondary">{secondary}</span> : null}
                   </div>
                   {renderMeta ? <div className="cost-explorer-item-meta">{renderMeta(item)}</div> : null}

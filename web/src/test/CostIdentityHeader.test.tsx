@@ -1,0 +1,31 @@
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { vi } from "vitest";
+import CostIdentityHeader from "../components/cost-statistics/CostIdentityHeader";
+
+test("draft names apply once, cancellation discards changes, and sorting is independent", async () => {
+  const user = userEvent.setup();
+  const apply = vi.fn(); const sort = vi.fn();
+  render(<CostIdentityHeader label="申请人" options={["甲", "乙", ""]} selected={["甲"]} order="desc" onApply={apply} onSort={sort} />);
+  await user.click(screen.getByRole("button", { name: "筛选申请人，已选1项" }));
+  let dialog = screen.getByRole("dialog", { name: "筛选申请人" });
+  await user.click(within(dialog).getByRole("checkbox", { name: "乙" }));
+  expect(apply).not.toHaveBeenCalled();
+  await user.keyboard("{Escape}");
+  await user.click(screen.getByRole("button", { name: "筛选申请人，已选1项" }));
+  dialog = screen.getByRole("dialog", { name: "筛选申请人" });
+  expect(within(dialog).getByRole("checkbox", { name: "乙" })).not.toBeChecked();
+  await user.click(within(dialog).getByRole("checkbox", { name: "乙" }));
+  await user.click(within(dialog).getByRole("button", { name: "应用" }));
+  expect(apply).toHaveBeenCalledTimes(1);
+  expect(apply).toHaveBeenCalledWith(["乙", "甲"]);
+  await user.click(screen.getByRole("button", { name: "时间倒序，点击切换正序" }));
+  expect(sort).toHaveBeenCalledTimes(1);
+  expect(sort).toHaveBeenCalledWith("asc");
+  await user.click(screen.getByRole("button", { name: "筛选申请人，已选1项" }));
+  dialog = screen.getByRole("dialog", { name: "筛选申请人" });
+  await user.click(within(dialog).getByRole("button", { name: "清空" }));
+  await user.click(within(dialog).getByRole("checkbox", { name: "未填写" }));
+  await user.click(within(dialog).getByRole("button", { name: "应用" }));
+  expect(apply).toHaveBeenLastCalledWith([""]);
+});

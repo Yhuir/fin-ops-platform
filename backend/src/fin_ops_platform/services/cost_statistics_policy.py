@@ -172,7 +172,6 @@ class CostStatisticsPolicy:
             base_rows = [
                 row for row in base_rows if _row_matches_query(row, query)
             ]
-        base_rows.sort(key=_row_sort_key, reverse=True)
         project_name = _clean_text(filters.get("project_name"))
         bank_account_label = _clean_text(filters.get("bank_account_label"))
         tag_primary = _clean_text(filters.get("bank_tag_primary_label"))
@@ -226,13 +225,23 @@ class CostStatisticsPolicy:
                 "view must be time, project, cost_tag, bank_account, or bank_tag"
             )
 
+        identity_field = "counterparty_name" if bank_flow_view else "oa_applicant"
+        identity_options = sorted({str(row.get(identity_field) or "") for row in row_matches})
+        selected_names = set(json.loads(filters.get("identity_names") or "[]"))
+        if selected_names:
+            row_matches = [row for row in row_matches if str(row.get(identity_field) or "") in selected_names]
+        descending = filters.get("sort_order", "desc") == "desc"
+        # Missing dates stay last in either direction. The cursor uses this exact key.
+        def page_sort_key(row: dict[str, Any]) -> tuple[str, str, str, str]:
+            key = _row_sort_key(row)
+            return key if key[0] or descending else ("\uffff", *key[1:])
+
+        row_matches = sorted(row_matches, key=page_sort_key, reverse=descending)
         matched_row_count = len(row_matches)
         if cursor_values is not None:
-            row_matches = [
-                row
-                for row in row_matches
-                if _cursor_tuple(row) < cursor_values
-            ]
+            row_matches = [row for row in row_matches if (
+                page_sort_key(row) < cursor_values if descending else page_sort_key(row) > cursor_values
+            )]
         page_rows = row_matches[: page_size + 1]
         has_more = len(page_rows) > page_size
         page_rows = page_rows[:page_size]
@@ -262,9 +271,10 @@ class CostStatisticsPolicy:
             "secondary_facets": secondary_facets,
             "tertiary_facets": tertiary_facets,
             "quaternary_facets": quaternary_facets,
+            "identity_options": identity_options,
             "row_count": matched_row_count,
             "rows": page_rows,
-            "next_cursor_values": _cursor_tuple(page_rows[-1])
+            "next_cursor_values": page_sort_key(page_rows[-1])
             if has_more and page_rows
             else None,
             "allocation_quality": None if bank_flow_view else {
@@ -2130,10 +2140,6 @@ def _row_sort_key(row: dict[str, Any]) -> tuple[str, str, str, str]:
         _row_identity(row),
         str(row.get("row_key") or ""),
     )
-
-
-def _cursor_tuple(row: dict[str, Any]) -> tuple[str, str, str, str]:
-    return _row_sort_key(row)
 
 
 def _tag_primary(row: dict[str, Any]) -> str:

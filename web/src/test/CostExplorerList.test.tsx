@@ -70,9 +70,9 @@ test("keeps keyboard selection accessible", async () => {
 
 
 test("preserves both amounts and counts and distinguishes loading from empty", () => {
-  const props = { title: "主标签", count: 1, items: rows.slice(0, 1), emptyLabel: "没有标签", getKey: (row: Row) => row.id, getPrimaryText: (row: Row) => row.name, isActive: () => false, onSelect: vi.fn(), renderSecondary: () => "2 个子标签", renderMeta: () => <><span>支 120.00</span><span>收 80.00</span></> };
+  const props = { title: "主标签", count: 1, items: rows.slice(0, 1), emptyLabel: "没有标签", getKey: (row: Row) => row.id, getPrimaryText: (row: Row) => row.name, isActive: () => false, onSelect: vi.fn(), renderSecondary: () => "2", renderMeta: () => <><span>支 120.00</span><span>收 80.00</span></> };
   const { rerender } = render(<CostExplorerList {...props} />);
-  expect(screen.getByText("2 个子标签")).toBeVisible();
+  expect(screen.getByText("2")).toBeVisible();
   expect(screen.getByText("支 120.00")).toBeVisible();
   expect(screen.getByText("收 80.00")).toBeVisible();
   rerender(<CostExplorerList {...props} items={[]} loading />);

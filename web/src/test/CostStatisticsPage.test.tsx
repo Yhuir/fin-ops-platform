@@ -388,7 +388,7 @@ describe("Cost statistics page", () => {
     await user.click(screen.getByRole("radio", { name: "按时间" }));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringMatching(/scope=all&view=time&page_size=1(?:&|$)/),
+        expect.stringMatching(/scope=all&view=time&sort_order=desc&page_size=1(?:&|$)/),
         expect.any(Object),
       );
     });
@@ -399,7 +399,7 @@ describe("Cost statistics page", () => {
     await user.click(within(picker).getByRole("button", { name: "三月", exact: true }));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringMatching(/scope=2026-03&view=time&page_size=1(?:&|$)/),
+        expect.stringMatching(/scope=2026-03&view=time&sort_order=desc&page_size=1(?:&|$)/),
         expect.any(Object),
       );
     });
@@ -523,7 +523,7 @@ test('saving a split refreshes cost lists without closing or remounting the acti
   await waitUntilReady();
   await user.click(screen.getByRole('radio', { name: '按时间' }));
   const grid = await screen.findByRole('grid', { name: '按时间银行流水表' });
-  await user.click(within(grid).getAllByRole('button')[0]);
+  await user.click(within(grid).getAllByRole('button', { name: /^查看银行流水/ })[0]);
   const drawer = await screen.findByRole('dialog', { name: '银行流水详情' });
   await within(drawer).findByLabelText('子项 1 金额');
   const listReads = () => fetchMock.mock.calls.filter(call => String(call[0]).includes('/api/cost-statistics/explorer')).length;

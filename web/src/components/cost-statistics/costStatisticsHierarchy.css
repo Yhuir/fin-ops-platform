@@ -80,3 +80,27 @@
 .cost-page > .cost-analysis-toolbar { flex: 0 0 auto; padding: 0; margin: 0; }
 .cost-page > .cost-lock-surface { border: 1px solid var(--fp-border); border-radius: 0 8px 8px 8px; background: var(--fp-surface); }
 .cost-page .cost-hierarchy-breadcrumb { padding: 8px; border-bottom: 1px solid var(--fp-border); background: var(--fp-surface); }
+
+.cost-page .cost-account-lines .bank-account-value {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.cost-page .cost-bank-tag-view .cost-explorer-item,
+.cost-page .cost-bank-tag-view .cost-explorer-item-content { min-height: 48px; }
+.cost-page .cost-bank-tag-view .cost-explorer-item-content { padding-block: 12px; }
+.cost-page .cost-bank-tag-view .cost-explorer-item-main strong { font-size: 14px; }
+
+.cost-identity-header { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.cost-identity-filter, .cost-identity-time button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  min-height: 28px; border-radius: 4px; color: inherit; cursor: pointer;
+}
+.cost-identity-filter { padding: 2px 4px; }
+.cost-identity-filter.is-active { color: #1d4ed8; background: #e8efff; }
+.cost-identity-time { display: inline-flex; align-items: center; white-space: nowrap; }
+.cost-identity-time button { min-width: 28px; font-size: 16px; }
+.cost-identity-filter:hover, .cost-identity-time button:hover { background: #e8efff; }
+.cost-identity-filter:focus-visible, .cost-identity-time button:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }

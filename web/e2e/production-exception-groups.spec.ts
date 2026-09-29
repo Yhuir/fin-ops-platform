@@ -64,12 +64,12 @@ test('production exception groups agree across summary, classifications, paginat
     for (const code of WORKBENCH_AMOUNT_ANOMALY_CODES) {
       const category = drawer.getByRole('radio', { name: `${WORKBENCH_AMOUNT_ANOMALY_LABELS[code]} ${counts.by_code[code]}组`, exact: true });
       await category.click();
-      await expect(drawer.locator('.workbench-anomaly-drawer__count')).toHaveText(`当前结果：${counts.by_code[code]}组`);
+      await expect(drawer.getByText(/当前结果/)).toHaveCount(0);
       await expect(drawer.getByText('正在加载异常关系…', { exact: true })).toHaveCount(0);
       expect(await drawer.locator('.workbench-anomaly-drawer__group').count()).toBe(Math.min(counts.by_code[code], 10));
     }
     await drawer.getByRole('radio', { name: `仅资料异常 ${counts.document_only}组`, exact: true }).click();
-    await expect(drawer.locator('.workbench-anomaly-drawer__count')).toHaveText(`当前结果：${counts.document_only}组`);
+    await expect(drawer.getByText(/当前结果/)).toHaveCount(0);
     await expect(drawer.getByText('正在加载异常关系…', { exact: true })).toHaveCount(0);
     await drawer.getByRole('radio', { name: `金额异常 ${counts.amount_total}组`, exact: true }).click();
     await expect(drawer.getByText('正在加载异常关系…', { exact: true })).toHaveCount(0);
@@ -80,6 +80,15 @@ test('production exception groups agree across summary, classifications, paginat
       expect((await detail).status()).toBe(200);
       await expect(drawer.locator('.workbench-anomaly-drawer__detail-grid')).toBeVisible();
       await expect(drawer.locator('.detail-state-panel.error')).toHaveCount(0);
+      await page.setViewportSize({ width: 1440, height: 600 });
+      const scroller = drawer.locator('.workbench-anomaly-drawer__content');
+      await expect.poll(() => scroller.evaluate(node => node.scrollHeight - node.clientHeight)).toBeGreaterThan(0);
+      await scroller.hover(); await page.mouse.wheel(0, 12000);
+      await expect.poll(() => scroller.evaluate(node => Math.abs(node.scrollHeight - node.clientHeight - node.scrollTop))).toBeLessThanOrEqual(2);
+      await page.screenshot({ path: info.outputPath(`${bucket}-expanded-bottom.png`) });
+      await page.mouse.wheel(0, -12000);
+      await expect.poll(() => scroller.evaluate(node => node.scrollTop)).toBe(0);
+      await page.setViewportSize({ width: 1440, height: 1000 });
     }
     metrics.push({ bucket, counts, pages, distinctGroups: ids.size });
   }

@@ -5417,6 +5417,16 @@ function costStatisticsExplorerPagePayload(
   } else if (view === "bank_tag" && bankTagPrimaryLabel && bankTagSubLabel) {
     matchedRows = selectedPrimaryRows.filter((row) => row.bank_tag_sub_label === bankTagSubLabel);
   }
+  const identityField = view === "time" || view === "bank_tag" ? "counterparty_name" : "oa_applicant";
+  const identityOptions = [...new Set(matchedRows.map(row => row[identityField] || ""))].sort();
+  const identityNames: string[] = JSON.parse(url.searchParams.get("identity_names") || "[]");
+  if (identityNames.length) matchedRows = matchedRows.filter(row => identityNames.includes(row[identityField] || ""));
+  const ascending = url.searchParams.get("sort_order") === "asc";
+  matchedRows = [...matchedRows].sort((a, b) => {
+    if (!a.trade_time !== !b.trade_time) return a.trade_time ? -1 : 1;
+    const compared = a.trade_time.localeCompare(b.trade_time) || a.transaction_id.localeCompare(b.transaction_id);
+    return ascending ? compared : -compared;
+  });
   const rows = matchedRows.slice(cursorOffset, cursorOffset + pageSize).map((row) => {
     const bankFlowView = view === "time" || view === "bank_tag";
     const allocationId = `oa:${row.transaction_id}`;
@@ -5461,6 +5471,7 @@ function costStatisticsExplorerPagePayload(
       bank_account_count: Array.from(bankGroups.keys()).filter((label) => label !== "银行账户未确定").length,
       cost_transaction_count: costRows.length,
     },
+    identity_options: identityOptions,
     available_years: Array.from(new Set(payload.cost_rows.map((row) => row.trade_time.slice(0, 4)))).sort().reverse(),
     facets: {
       projects: view === "project" ? projects : view === "bank_account" && bankAccountLabel ? bankProjects : [],

@@ -13,6 +13,54 @@ from fin_ops_platform.services.cost_statistics_policy import (
 
 
 class CostStatisticsPolicyTests(unittest.TestCase):
+    def test_identity_filters_sort_and_cursor_cover_all_five_views(self):
+        names = ["甲", "乙", "", "甲", "乙", "甲", "", "乙"]
+        groups = [self._group(group_id=f"identity-{i}",
+            oa_rows=[{**self._oa(f"oa-{i}", completed_at=""), "applicant": name}],
+            bank_rows=[{**self._bank(f"bank-{i}", "100.00", trade_time=("" if i >= 6 else f"2026-05-{18 + i // 2} 10:00:00")), "counterparty_name": name}])
+            for i, name in enumerate(names)]
+        policy = self._policy(groups)
+        for view in ["project", "cost_tag", "bank_account", "bank_tag", "time"]:
+            with self.subTest(view=view):
+                filters = {"project_name": "项目A", "bank_account_label": "建设银行 8106",
+                    "bank_tag_primary_key": "label:材料款", "bank_tag_sub_key": "label:材料款",
+                    "bank_tag_primary_label": "材料款", "bank_tag_sub_label": "材料款"}
+                request = dict(scope_kind="all", scope_value=None, view=view, filters=filters, cursor_values=None, page_size=50)
+                # Resolve the real cost keys; OA-derived cost tags need not equal bank tags.
+                if view not in {"time", "bank_tag"}:
+                    root = policy.explorer_page(**request)
+                    main = root["tertiary_facets"] if view == "bank_account" else root["secondary_facets"] if view == "project" else root["primary_facets"]
+                    filters["bank_tag_primary_key"] = main[0]["key"]
+                    root = policy.explorer_page(**request)
+                    sub = root["quaternary_facets"] if view == "bank_account" else root["tertiary_facets"] if view == "project" else root["secondary_facets"]
+                    filters["bank_tag_sub_key"] = sub[0]["key"]
+                baseline = policy.explorer_page(**request)
+                self.assertEqual(baseline["row_count"], 8)
+                self.assertEqual(baseline["identity_options"], ["", "乙", "甲"])
+                field = "counterparty_name" if view in {"time", "bank_tag"} else "oa_applicant"
+                for order in ["asc", "desc"]:
+                    filters.update(identity_names=json.dumps(["甲", "乙", "甲"]), sort_order=order)
+                    first = policy.explorer_page(**{**request, "page_size": 2})
+                    self.assertEqual(first["row_count"], 6)
+                    self.assertEqual(first["summary"], baseline["summary"])
+                    self.assertEqual(first["identity_options"], baseline["identity_options"])
+                    rows = list(first["rows"])
+                    cursor = first["next_cursor_values"]
+                    while cursor:
+                        page = policy.explorer_page(**{**request, "page_size": 2, "cursor_values": cursor})
+                        rows.extend(page["rows"])
+                        cursor = page["next_cursor_values"]
+                    self.assertEqual(len({row["entry_id"] for row in rows}), 6)
+                    self.assertTrue(all(row[field] in {"甲", "乙"} for row in rows))
+                    dates = [row["occurred_at"] for row in rows if row["occurred_at"]]
+                    self.assertEqual(dates, sorted(dates, reverse=order == "desc"))
+                    if any(not row["occurred_at"] for row in rows):
+                        self.assertFalse(rows[-1]["occurred_at"])
+                filters["identity_names"] = '[""]'
+                self.assertEqual(policy.explorer_page(**request)["row_count"], 2)
+                filters["identity_names"] = '["不存在"]'
+                self.assertEqual(policy.explorer_page(**request)["rows"], [])
+
     def test_export_period_merges_months_but_preserves_detail_amounts(self):
         groups = [self._group(group_id=f"case-{i}", oa_rows=[self._oa(f"oa-{i}", amount=amount)],
                    bank_rows=[self._bank(f"bank-{i}", amount, trade_time=day)])

@@ -96,6 +96,7 @@ type ApiCostBankTagSubExplorerRow = {
 };
 
 type ApiCostStatisticsExplorerPage = {
+  identity_options: string[];
   scope: string;
   view: CostStatisticsExplorerPage["view"];
   summary: ApiCostSummary;
@@ -539,6 +540,8 @@ export async function fetchCostStatisticsExplorerPage(
       bank_tag_primary_label: request.view === "bank_tag" ? request.bankTagPrimaryLabel : undefined,
       bank_tag_sub_label: request.view === "bank_tag" ? request.bankTagSubLabel : undefined,
       query: request.query,
+      identity_names: request.identityNames?.length ? JSON.stringify(request.identityNames) : undefined,
+      sort_order: request.sortOrder,
       cursor: request.cursor,
       page_size: request.pageSize ? String(request.pageSize) : undefined,
       include_statistics: request.includeStatistics === false ? "false" : undefined,
@@ -551,6 +554,7 @@ export async function fetchCostStatisticsExplorerPage(
 
   const facets = payload.facets ?? {};
   return {
+    identityOptions: payload.identity_options,
     scope: payload.scope,
     view: payload.view,
     summary: mapSummary(payload.summary),

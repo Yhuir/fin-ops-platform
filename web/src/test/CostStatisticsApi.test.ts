@@ -167,6 +167,7 @@ describe("Cost statistics export API", () => {
             transaction_count: 0,
             total_amount: "0.00",
           },
+          identity_options: [],
           available_years: ["2026", "2025"],
           facets: {
             projects: [{
@@ -274,6 +275,7 @@ describe("Cost statistics export API", () => {
           bank_account_count: 3,
           cost_transaction_count: 12000,
         },
+        identity_options: [],
         available_years: ["2026"],
         facets: {},
         rows: [{
@@ -339,6 +341,7 @@ describe("Cost statistics export API", () => {
           untagged_transaction_count: 0,
           bank_tag_count: 1,
         },
+        identity_options: [],
         available_years: ["2026"],
         facets: {
           bank_tag_primary: [{
@@ -422,6 +425,7 @@ describe("Cost statistics export API", () => {
           transaction_count: 1,
           total_amount: "90.00",
         },
+        identity_options: [],
         available_years: ["2026"],
         facets: {
           projects: [{
@@ -511,6 +515,7 @@ describe("Cost statistics export API", () => {
           transaction_count: 0,
           total_amount: "0.00",
         },
+        identity_options: [],
         available_years: ["2026"],
         facets: {},
         rows: [],

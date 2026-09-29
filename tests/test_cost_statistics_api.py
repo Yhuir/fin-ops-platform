@@ -944,6 +944,39 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(empty_payload["summary"]["total_amount"], "0.00")
         self.assertEqual(empty_payload["facets"]["cost_tag_primary"], [])
 
+    def test_identity_query_contract_and_options_use_unfiltered_scope(self):
+        from urllib.parse import urlencode
+        base = "/api/cost-statistics/explorer?scope=all&view=time"
+        status, original = self._json(base)
+        self.assertEqual(status, 200)
+        self.assertEqual(original["identity_options"], ["昆明设备供应商"])
+        for names, count in [(["昆明设备供应商", "昆明设备供应商"], 1), (["不存在"], 0), ([""], 0), ([], 1)]:
+            for order in ["asc", "desc"]:
+                status, payload = self._json(base + "&" + urlencode({"identity_names": json.dumps(names), "sort_order": order}))
+                self.assertEqual(status, 200)
+                self.assertEqual(payload["row_count"], count)
+                self.assertEqual(len(payload["rows"]), count)
+                self.assertEqual(payload["identity_options"], original["identity_options"])
+                self.assertEqual(payload["summary"], original["summary"])
+        for params in [{"sort_order": "wrong"}, {"identity_names": "{}"}, {"identity_names": "null"}, {"identity_names": "[1]"}, {"identity_names": "bad"}, {"identity_names": json.dumps(["a" * 201])}]:
+            status, payload = self._json(base + "&" + urlencode(params))
+            self.assertEqual(status, 400)
+            self.assertEqual(payload["error"], "invalid_cost_statistics_query")
+            self.assertTrue(payload["message"])
+
+    def test_identity_cursor_normalization_and_binding(self):
+        service = self.app._cost_statistics_query_service
+        view, filters = service._normalize_page_query("time", {"identity_names": '["乙", "甲", "甲"]', "sort_order": "asc"})
+        _, reordered = service._normalize_page_query("time", {"identity_names": '["甲", "乙"]', "sort_order": "asc"})
+        self.assertEqual(filters, reordered)
+        binding = service._page_query_binding(scope="all", view=view, filters=filters, page_size=2)
+        cursor = service._encode_page_cursor(("2026-03-10", "2026-03-10 21:27:55", "id", "row"), query_binding=binding)
+        self.assertEqual(service._decode_page_cursor(cursor, query_binding=binding)[2], "id")
+        for changes in [{"sort_order": "desc"}, {"identity_names": '["甲"]'}]:
+            changed = service._page_query_binding(scope="all", view=view, filters={**filters, **changes}, page_size=2)
+            with self.assertRaises(ValueError):
+                service._decode_page_cursor(cursor, query_binding=changed)
+
     def test_invalid_query_contracts_fail_closed(self) -> None:
         cases = (
             (

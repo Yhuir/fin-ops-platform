@@ -128,6 +128,7 @@ class CostStatisticsQueryService:
                 else None
             ),
             "available_years": list(raw_page.get("available_years") or []),
+            "identity_options": raw_page["identity_options"],
             "facets": facets,
             "rows": [
                 dict(row)
@@ -438,6 +439,19 @@ class CostStatisticsQueryService:
             keys.update({"bank_tag_primary_label", "bank_tag_sub_label"})
         normalized_filters = {key: str(filters.get(key) or "").strip() for key in sorted(keys)}
         normalized_filters["query"] = query
+        sort_order = filters.get("sort_order") or "desc"
+        if sort_order not in {"asc", "desc"}:
+            raise ValueError("sort_order must be asc or desc")
+        try:
+            names = json.loads(filters.get("identity_names") or "[]")
+        except (TypeError, ValueError) as error:
+            raise ValueError("identity_names must be a JSON array of names") from error
+        if not isinstance(names, list) or len(names) > 200 or any(
+            not isinstance(name, str) or len(name) > 200 for name in names
+        ):
+            raise ValueError("identity_names must contain at most 200 strings of at most 200 characters")
+        normalized_filters["identity_names"] = json.dumps(sorted(set(names)), ensure_ascii=False)
+        normalized_filters["sort_order"] = sort_order
         return normalized_view, normalized_filters
 
     @staticmethod
@@ -519,6 +533,7 @@ class CostStatisticsQueryService:
             },
             "statistics": {},
             "available_years": [],
+            "identity_options": [],
             "facets": {
                 "projects": [],
                     "bank_accounts": [],

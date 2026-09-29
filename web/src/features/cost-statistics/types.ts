@@ -94,6 +94,7 @@ export type CostStatisticsView =
   | "bank_tag";
 
 export type CostStatisticsExplorerPage = {
+  identityOptions: string[];
   scope: string;
   view: CostStatisticsView;
   summary: CostSummary;
@@ -237,6 +238,8 @@ export type SaveCostStatisticsManualAllocationRequest = {
 };
 
 export type CostStatisticsExplorerPageRequest = {
+  identityNames?: string[];
+  sortOrder?: "asc" | "desc";
   scope: string;
   view: CostStatisticsView;
   projectName?: string;

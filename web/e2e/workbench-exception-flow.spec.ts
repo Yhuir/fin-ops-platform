@@ -78,7 +78,8 @@ test.describe("workbench exception browser flow", () => {
       .click();
 
     const drawer = page.getByRole("dialog", { name: "异常处理" });
-    await expect(drawer.locator(".workbench-anomaly-drawer__count")).toHaveText("当前结果：51组");
+    await expect(drawer.getByRole("radio", { name: "金额异常 51组", exact: true })).toBeVisible();
+    await expect(drawer.getByText(/当前结果/)).toHaveCount(0);
     expect(api.count("GET /api/workbench/groups")).toBe(1);
     expect(api.count("GET /api/workbench/groups/detail")).toBe(0);
     expect(groupRequestUrls[0]?.searchParams.get("exception_view")).toBe("amount");
@@ -89,7 +90,8 @@ test.describe("workbench exception browser flow", () => {
     expect(api.count("GET /api/workbench/groups/detail")).toBe(1);
 
     await drawer.getByRole("button", { name: "加载更多异常" }).click();
-    await expect(drawer.locator(".workbench-anomaly-drawer__count")).toHaveText("当前结果：51组");
+    await expect(drawer.getByRole("radio", { name: "金额异常 51组", exact: true })).toBeVisible();
+    await expect(drawer.getByText(/当前结果/)).toHaveCount(0);
     expect(api.count("GET /api/workbench/groups")).toBe(2);
     const loadMoreUrl = groupRequestUrls.find((url) => url.searchParams.has("cursor"));
     expect(loadMoreUrl?.searchParams.get("cursor")).toBeTruthy();
@@ -395,7 +397,13 @@ test.describe("workbench exception browser flow", () => {
     await drawer.getByRole("button", { name: "展开异常明细" }).first().click();
     const review = drawer.getByRole("region", { name: "异常审阅" });
     await expect(review).toBeVisible();
-    await review.scrollIntoViewIfNeeded();
+    await page.setViewportSize({ width: 1440, height: 600 });
+    const scroller = drawer.locator(".workbench-anomaly-drawer__content");
+    await expect.poll(() => scroller.evaluate(node => node.scrollHeight - node.clientHeight)).toBeGreaterThan(0);
+    await scroller.hover();
+    await page.mouse.wheel(0, 2400);
+    await expect.poll(() => scroller.evaluate(node => node.scrollTop)).toBeGreaterThan(0);
+    await expect(review).toBeInViewport();
     await expect(drawer.getByRole("button", {
       name: "该发票有 1 项异常，查看详情",
     })).toBeVisible();

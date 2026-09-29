@@ -27,6 +27,7 @@ export type CostStatisticsAmountCell = {
 export type CostStatisticsTableColumn<Row> = {
   key: string;
   header: string;
+  headerContent?: ReactNode;
   headerClassName?: string;
   cellClassName?: string;
   width?: number;
@@ -44,6 +45,7 @@ type CostStatisticsTableProps<Row extends object> = {
   onRowClick?: (row: Row) => void;
   getRowActionLabel?: (row: Row) => string;
   fitContainer?: boolean;
+  resetKey?: string;
   page: number;
   pageSize: number;
   total: number;
@@ -62,6 +64,7 @@ export default function CostStatisticsTable<Row extends object>({
   onRowClick,
   getRowActionLabel,
   fitContainer = false,
+  resetKey,
   page,
   pageSize,
   total,
@@ -75,7 +78,7 @@ export default function CostStatisticsTable<Row extends object>({
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
-  }, [page]);
+  }, [page, resetKey]);
 
   const totalPages = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
 
@@ -98,7 +101,7 @@ export default function CostStatisticsTable<Row extends object>({
               id={column.key}
               isRowHeader={columnIndex === 0}
             >
-              {column.header}
+              {column.headerContent ?? column.header}
             </FinanceTableColumn>
           ))}
         </FinanceTableHeader>

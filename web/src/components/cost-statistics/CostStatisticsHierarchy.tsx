@@ -4,7 +4,7 @@ import { useState, type CSSProperties, type ReactNode } from "react";
 import CostExplorerList from "./CostExplorerList";
 import "./costStatisticsHierarchy.css";
 
-type Item = { key: string; label: string; meta: ReactNode; secondary?: ReactNode };
+type Item = { key: string; label: string; primary?: ReactNode; meta: ReactNode; secondary?: ReactNode };
 export type CostHierarchyLane = {
   title: string;
   selectedKey: string | null;
@@ -46,6 +46,7 @@ export default function CostStatisticsHierarchy({ lanes, detailTitle, navigation
               getPrimaryText={item => item.label}
               isActive={item => item.key === lane.selectedKey}
               onSelect={item => { lane.onSelect(item.key); setFocusedLane(index + 1); }}
+              renderPrimary={item => item.primary ?? item.label}
               renderMeta={item => item.meta}
               renderSecondary={item => item.secondary}
             />

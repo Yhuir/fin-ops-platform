@@ -157,9 +157,7 @@ describe("WorkbenchExceptionDrawer", () => {
       ),
     ).toEqual(["OA = 流水", "OA = 发票", "流水 = 发票", "三项互异", "费用明细"]);
     expect(document.querySelector(".workbench-anomaly-drawer__amount-filter-scroll")).not.toBeInTheDocument();
-    expect(document.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent(
-      "1组",
-    );
+    expect(screen.queryByText(/当前结果/)).not.toBeInTheDocument();
   });
 
   it("shows server group totals independently of the loaded relation count", () => {
@@ -169,7 +167,7 @@ describe("WorkbenchExceptionDrawer", () => {
         byCode: { ...exceptionCounts.byCode, all_amounts_different: counts } },
     });
     expect(screen.getByRole("radio", { name: "金额异常 26组" })).toBeVisible();
-    expect(document.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent("26组");
+    expect(screen.queryByText(/当前结果/)).not.toBeInTheDocument();
     expect(screen.queryByText("共 1 项")).not.toBeInTheDocument();
   });
 
@@ -178,7 +176,7 @@ describe("WorkbenchExceptionDrawer", () => {
     multiMember.rowCounts = { oa: 1, bank: 2, invoice: 6 };
     renderDrawer("unpaired", vi.fn(), true, multiMember);
     expect(screen.getByRole("radio", { name: "金额异常 1组" })).toBeVisible();
-    expect(document.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent("当前结果：1组");
+    expect(screen.queryByText(/当前结果/)).not.toBeInTheDocument();
     expect(document.querySelector(".workbench-anomaly-drawer__filters")).not.toHaveTextContent("6张");
   });
 
@@ -188,7 +186,8 @@ describe("WorkbenchExceptionDrawer", () => {
       counts: { ...exceptionCounts, total: 0, amountTotal: 0,
         byCode: { ...exceptionCounts.byCode, all_amounts_different: 0 } },
     });
-    expect(document.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent("当前结果：0组");
+    expect(screen.getByRole("radio", { name: "金额异常 0组" })).toBeVisible();
+    expect(screen.queryByText(/当前结果/)).not.toBeInTheDocument();
   });
 
   it("hides the amount classification group in the document-only view", () => {

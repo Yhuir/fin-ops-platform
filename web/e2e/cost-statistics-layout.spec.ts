@@ -101,11 +101,13 @@ test("bank-flow layouts share the compact workspace and leave other pages unaffe
     await page.getByRole("radio", { name: view, exact: true }).click();
     if (view === "按标签") {
       const option = page.getByRole("option", { name: "选择主标签 项目开销", exact: true });
-      await expect(option).toContainText("个子标签");
+      await expect(option).not.toContainText("个子标签");
+      await expect(option.locator(".cost-list-count")).toHaveText(/^\d+$/);
       await expect(option.getByText("支", { exact: true })).toBeVisible();
       const height = await option.evaluate(node => node.getBoundingClientRect().height);
       expect(height).toBeGreaterThanOrEqual(projectItemHeight);
-      expect(height).toBeLessThan(66);
+      expect(height).toBeLessThanOrEqual(76); // Two amount lines plus the requested 12px vertical padding.
+      await expect(option.locator(".cost-explorer-item-main strong")).toHaveCSS("font-size", "14px");
       await option.click();
       await page.getByRole("option", { name: "选择子标签 设备材料", exact: true }).click();
     }

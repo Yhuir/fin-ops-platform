@@ -1,4 +1,4 @@
-import CountLabel, { CountedLabel } from "../common/CountLabel";
+import { CountedLabel } from "../common/CountLabel";
 import { Segment, SegmentGroup } from "../common/SegmentedControl";
 import {
   Button,
@@ -265,11 +265,6 @@ export default function WorkbenchExceptionDrawer({
               <CountedLabel label="仅资料异常" value={exceptionCounts?.documentOnly} unit="组" />
             </Segment>
           </SegmentGroup>
-          <span aria-live="polite" className="workbench-anomaly-drawer__count">
-            当前结果：<CountLabel unit="组" value={view === "document_only"
-              ? exceptionCounts?.documentOnly
-              : selectedExceptionCode ? exceptionCounts?.byCode[selectedExceptionCode] : exceptionCounts?.amountTotal} />
-          </span>
         </div>
         {view === "amount" ? (
           <section aria-labelledby="amount-anomaly-category-title" className="workbench-anomaly-drawer__amount-section">

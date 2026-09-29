@@ -1,3 +1,5 @@
+import BankAccountValue from "../components/BankAccountValue";
+import CostIdentityHeader from "../components/cost-statistics/CostIdentityHeader";
 import { Segment, SegmentGroup } from "../components/common/SegmentedControl";
 import CostStatisticsProjectCostScopeDrawer from "../components/cost-statistics/CostStatisticsProjectCostScopeDrawer";
 import { fetchProjectCostScope, saveProjectCostScope } from "../features/cost-statistics/api";
@@ -484,6 +486,19 @@ export default function CostStatisticsPage() {
     ...(viewMode === "bankTag" && selectedBankTagSubLabel ? { bankTagSubLabel: selectedBankTagSubLabel } : {}),
     ...(searchQuery ? { query: searchQuery } : {}),
   };
+  const identityContextKey = JSON.stringify(explorerRequest);
+  const [identityViews, setIdentityViews] = useState<Partial<Record<CostViewMode, { context: string; names: string[]; order: "asc" | "desc" }>>>({});
+  const identityState = identityViews[viewMode];
+  const identityNames = identityState?.context === identityContextKey ? identityState.names : [];
+  const sortOrder = identityState?.order ?? "desc";
+  // Derive the cleared filter before requesting, then retain that state for this view.
+  useEffect(() => {
+    setIdentityViews(current => current[viewMode]?.context === identityContextKey ? current : {
+      ...current, [viewMode]: { context: identityContextKey, names: [], order: current[viewMode]?.order ?? "desc" },
+    });
+  }, [identityContextKey, viewMode]);
+  explorerRequest.identityNames = identityNames;
+  explorerRequest.sortOrder = sortOrder;
   const explorerRequestKey = JSON.stringify(explorerRequest);
   const statisticsRefreshKey = `${activationGeneration}:${domainRefreshNonce}:${explorerView}:${explorerScope}`;
   const explorerData = loadedExplorer?.payload ?? null;
@@ -861,7 +876,7 @@ export default function CostStatisticsPage() {
   const costPrimaryRows = costAncestorsReady ? explorerData?.facets.costTagPrimary ?? [] : [];
   const costSubRows = costAncestorsReady && loadedRequest?.bankTagPrimaryKey === explorerRequest.bankTagPrimaryKey ? explorerData?.facets.costTagSub ?? [] : [];
   const costLanes: CostHierarchyLane[] = [];
-  if (viewMode === "bankAccount") costLanes.push({ title: "银行账户", loading: false, emptyLabel: "当前范围暂无数据", selectedKey: selectedBankAccountLabel, items: bankRows.map(row => ({ key: row.bankAccountLabel, label: row.bankAccountLabel, meta: <span className="cost-list-amount">{formatCostAmount(row.totalAmount)}</span> })), onSelect: key => { setSelectedBankAccountLabel(key); setSelectedBankProjectName(null); clearCostTags(); } });
+  if (viewMode === "bankAccount") costLanes.push({ title: "银行账户", loading: false, emptyLabel: "当前范围暂无数据", selectedKey: selectedBankAccountLabel, items: bankRows.map(row => ({ key: row.bankAccountLabel, label: row.bankAccountLabel, primary: <span className="cost-account-lines"><BankAccountValue value={row.bankAccountLabel} /></span>, meta: <span className="cost-list-amount">{formatCostAmount(row.totalAmount)}</span> })), onSelect: key => { setSelectedBankAccountLabel(key); setSelectedBankProjectName(null); clearCostTags(); } });
   if (viewMode === "project" || viewMode === "bankAccount") costLanes.push({ title: "项目名", loading: false, emptyLabel: viewMode === "bankAccount" && !selectedBankAccountLabel ? "请先选择银行账户" : "当前范围暂无数据", selectedKey: viewMode === "project" ? selectedProjectName : selectedBankProjectName, items: (viewMode === "project" ? projectRows : bankProjectRows).map(row => ({ key: row.projectName, label: row.projectName, meta: <span className="cost-list-amount">{formatCostAmount(row.totalAmount)}</span> })), onSelect: key => { if (viewMode === "project") setSelectedProjectName(key); else setSelectedBankProjectName(key); clearCostTags(); } });
   costLanes.push({ title: "成本主标签", loading: false, emptyLabel: viewMode !== "costTag" && !(viewMode === "project" ? selectedProjectName : selectedBankProjectName) ? "请先选择项目名" : "当前范围暂无数据", selectedKey: selectedCostPrimary, items: costPrimaryRows.map(row => ({ key: row.key, label: row.label, meta: <span className="cost-list-amount">{formatCostAmount(row.totalAmount)}</span> })), onSelect: key => { setSelectedCostPrimary(key); setSelectedCostSub(null); resetDetailSelection(); } });
   costLanes.push({ title: "成本子标签", loading: false, emptyLabel: !selectedCostPrimary ? "请先选择成本主标签" : "当前范围暂无数据", selectedKey: selectedCostSub, items: costSubRows.map(row => ({ key: row.key, label: row.label, meta: <span className="cost-list-amount">{formatCostAmount(row.totalAmount)}</span> })), onSelect: key => { setSelectedCostSub(key); resetDetailSelection(); } });
@@ -874,7 +889,7 @@ export default function CostStatisticsPage() {
       emptyLabel: "当前时间范围没有银行标签。",
       items: bankTagPrimaryRows.map(row => ({
         key: row.primaryLabel, label: row.primaryLabel,
-        secondary: <Chip className="cost-list-count" size="sm" variant="soft"><Chip.Label>{row.subTagCount} 个子标签</Chip.Label></Chip>,
+        secondary: <Chip className="cost-list-count" size="sm" variant="soft"><Chip.Label>{row.subTagCount}</Chip.Label></Chip>,
         meta: <div className="cost-explorer-item-meta-stack"><DirectionAmount amount={row.expenseAmount} label="支出" tone="expense" hideWhenZero /><DirectionAmount amount={row.incomeAmount} label="收入" tone="income" hideWhenZero /></div>,
       })),
       onSelect: key => { setSelectedBankTagPrimaryLabel(key); setSelectedBankTagSubLabel(null); setSelectedBankTagEntryId(null); setEntryDetail(null); },
@@ -1300,6 +1315,15 @@ export default function CostStatisticsPage() {
     await runExport(params);
   }
 
+  const identityHeader = <CostIdentityHeader
+    key={`${viewMode}:${identityContextKey}`}
+    label={viewMode === "time" || viewMode === "bankTag" ? "对方户名" : "申请人"}
+    options={explorerData ? explorerData.identityOptions : []}
+    selected={identityNames}
+    order={sortOrder}
+    onApply={names => setIdentityViews(current => ({ ...current, [viewMode]: { context: identityContextKey, names, order: sortOrder } }))}
+    onSort={order => setIdentityViews(current => ({ ...current, [viewMode]: { context: identityContextKey, names: identityNames, order } }))}
+  />;
   const entryColumns = useMemo<CostStatisticsTableColumn<CostExplorerEntryRow>[]>(
     () => {
       if (viewMode === "time" || viewMode === "bankTag") {
@@ -1307,6 +1331,7 @@ export default function CostStatisticsPage() {
           {
             key: "counterparty",
             header: "对方户名 / 时间",
+            headerContent: identityHeader,
             headerClassName: "cost-entry-identity",
             flex: 1.15,
             getTextValue: (row) => `${row.counterpartyName} ${formatCostTradeTime(row.occurredAt)}`,
@@ -1344,21 +1369,23 @@ export default function CostStatisticsPage() {
       const identityColumn: CostStatisticsTableColumn<CostExplorerEntryRow> = viewMode === "costTag"
         ? {
             key: "projectName",
-            header: "项目名 / 申请/报销人",
+            header: "申请人 / 时间",
+            headerContent: identityHeader,
             headerClassName: "cost-entry-identity cost-entry-identity--project",
             cellClassName: "cost-entry-identity",
             getTextValue: (row) => `${row.projectName} ${row.oaApplicant} ${formatCostTradeTime(row.occurredAt)}`,
             render: (row) => (
               <EntryIdentity
-                label={row.projectName}
-                secondaryLabel={row.oaApplicant}
+                label={row.oaApplicant}
+                secondaryLabel={row.projectName}
                 occurredAt={row.occurredAt}
               />
             ),
           }
         : {
               key: "oaApplicant",
-              header: "申请/报销人",
+              header: "申请人 / 时间",
+              headerContent: identityHeader,
               headerClassName: "cost-entry-identity",
               cellClassName: "cost-entry-identity",
               getTextValue: (row) => `${row.oaApplicant} ${formatCostTradeTime(row.occurredAt)}`,
@@ -1382,7 +1409,7 @@ export default function CostStatisticsPage() {
         { key: "expenseContent", header: "费用内容", flex: 1.1, render: (row) => row.expenseContent },
       ];
     },
-    [viewMode],
+    [viewMode, identityHeader],
   );
 
   const activeEntryId =
@@ -1611,7 +1638,7 @@ export default function CostStatisticsPage() {
                 {explorerTransitionScope === "surface" ? <CostSurfaceSkeleton loading={isExplorerLoading} /> : (
                   <CostStatisticsHierarchy key={viewMode} lanes={costLanes} detailTitle="成本明细" navigationLabel="成本下钻路径">
                     <section aria-busy={isExplorerLoading && isRowsTransition} className="cost-explorer-lane cost-explorer-lane-table"><header className="cost-explorer-lane-header"><h2>成本明细</h2><CostLaneCount value={isRowsTransition ? 0 : explorerData.rowCount} /></header>
-                      {isRowsTransition ? <div className="cost-explorer-empty" /> : costPathComplete ? <CostStatisticsTable ariaLabel="成本明细表" columns={entryColumns} rows={pageRows} getRowKey={getCostEntryRowRenderKey} onRowClick={row => void openEntryDetail(row, viewMode)} getRowActionLabel={costEntryActionLabel} emptyLabel="当前选择下暂无成本明细" {...tablePaginationProps} /> : null}
+                      {isRowsTransition ? <div className="cost-explorer-empty" /> : costPathComplete ? <CostStatisticsTable resetKey={explorerRequestKey} ariaLabel="成本明细表" columns={entryColumns} rows={pageRows} getRowKey={getCostEntryRowRenderKey} onRowClick={row => void openEntryDetail(row, viewMode)} getRowActionLabel={costEntryActionLabel} emptyLabel="当前选择下暂无成本明细" {...tablePaginationProps} /> : null}
                     </section>
                   </CostStatisticsHierarchy>
                 )}
@@ -1646,6 +1673,7 @@ export default function CostStatisticsPage() {
                         <CostLaneCount value={explorerData?.rowCount ?? selectedTimeRows.length} />
                       </header>
                       <CostStatisticsTable
+                        resetKey={explorerRequestKey}
                         ariaLabel="按时间银行流水表"
                         columns={entryColumns}
                         rows={selectedTimeRows}
@@ -1662,7 +1690,7 @@ export default function CostStatisticsPage() {
             ) : null}
 
             {viewMode === "bankTag" ? (
-              <div className="cost-analysis-layout explorer-layout grid min-h-0 grid-cols-1 gap-3">
+              <div className="cost-analysis-layout cost-bank-tag-view explorer-layout grid min-h-0 grid-cols-1 gap-3">
                 <div className="cost-section-heading cost-view-scope-heading">
                   <div className="cost-section-heading-copy">
                     <h2>按标签统计</h2>
@@ -1692,6 +1720,7 @@ export default function CostStatisticsPage() {
                         <div className="cost-explorer-empty" />
                       ) : selectedBankTagPrimaryLabel && selectedBankTagSubLabel ? (
                         <CostStatisticsTable
+                          resetKey={explorerRequestKey}
                           ariaLabel="按标签银行流水表"
                           columns={entryColumns}
                           rows={selectedBankTagRows}

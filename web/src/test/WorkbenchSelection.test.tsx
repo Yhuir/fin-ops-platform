@@ -2164,9 +2164,7 @@ describe("Workbench row selection and detail drawer", () => {
 
     await user.click(await screen.findByRole("button", { name: /未配对异常 51组 \| 已配对异常 0组/ }));
     const drawer = await screen.findByRole("dialog", { name: "异常处理" });
-    await waitFor(() => expect(drawer.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent(
-      "51组",
-    ));
+    await within(drawer).findByRole("radio", { name: "金额异常 51组" });
     await user.click(within(drawer).getByRole("button", { name: "加载更多异常" }));
     await waitFor(() => expect(loadMoreStarted).toBe(true));
 
@@ -2196,15 +2194,13 @@ describe("Workbench row selection and detail drawer", () => {
       "aria-checked",
       "true",
     );
-    expect(drawer.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent(
-      "1组",
-    );
+    expect(within(drawer).getByRole("radio", { name: "金额异常 1组" })).toBeVisible();
+    expect(within(drawer).queryByText(/当前结果/)).not.toBeInTheDocument();
 
     await user.click(await within(drawer).findByRole("radio", { name: "三项不一致 0组" }));
     expect(await within(drawer).findByText("当前分类没有金额异常。")).toBeInTheDocument();
-    expect(drawer.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent(
-      "0组",
-    );
+    expect(within(drawer).getByRole("radio", { name: "三项不一致 0组" })).toHaveAttribute("aria-checked", "true");
+    expect(within(drawer).getByRole("radio", { name: "未配对异常 1组" })).toBeVisible();
     const categoryRead = [...fetchMock.mock.calls].reverse().find(([input]) => {
       const url = new URL(fetchPath(input), "http://localhost");
       return url.pathname === "/api/workbench/groups"

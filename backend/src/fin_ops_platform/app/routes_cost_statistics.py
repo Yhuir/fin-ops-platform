@@ -109,6 +109,8 @@ class CostStatisticsApiRoutes:
             )
         if method == "GET" and route_path == "/api/cost-statistics/explorer":
             return self.handle_explorer(
+                identity_names=query.get("identity_names", [None])[0],
+                sort_order=query.get("sort_order", [None])[0],
                 scope=query.get("scope", [None])[0],
                 view=query.get("view", [None])[0],
                 project_name=query.get("project_name", [None])[0],
@@ -348,6 +350,8 @@ class CostStatisticsApiRoutes:
         include_statistics: str | None,
         bank_tag_primary_key: str | None = None,
         bank_tag_sub_key: str | None = None,
+        identity_names: str | None = None,
+        sort_order: str | None = None,
     ) -> Any:
         current_scope = scope or self._now_provider().strftime("%Y-%m")
         started_at = monotonic()
@@ -370,6 +374,8 @@ class CostStatisticsApiRoutes:
                     "bank_tag_primary_key": bank_tag_primary_key,
                     "bank_tag_sub_key": bank_tag_sub_key,
                     "query": search_query,
+                    "identity_names": identity_names,
+                    "sort_order": sort_order,
                 },
                 cursor=cursor,
                 page_size=int(page_size or 50),

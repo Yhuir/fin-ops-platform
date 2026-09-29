@@ -14726,6 +14726,21 @@ body.column-layout-dragging {
   flex-direction: column;
 }
 
+/* Each wrapper must pass the bounded drawer height to the list scroller. */
+.workbench-anomaly-drawer .finance-drawer__body > .switch-surface,
+.workbench-anomaly-drawer .switch-surface__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.workbench-anomaly-drawer__filters {
+  flex-shrink: 0;
+  max-height: 45%;
+  overflow-y: auto;
+}
+
 .workbench-anomaly-drawer__bucket-controls {
   display: flex;
   min-width: 0;
@@ -14736,13 +14751,6 @@ body.column-layout-dragging {
   min-width: 286px;
 }
 
-.workbench-anomaly-drawer__count {
-  margin-left: auto;
-  color: #677789;
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-}
 
 .workbench-anomaly-drawer__filters {
   display: flex;
@@ -15034,10 +15042,6 @@ body.column-layout-dragging {
     flex-wrap: wrap;
   }
 
-  .workbench-anomaly-drawer__count {
-    width: 100%;
-    margin-left: 0;
-  }
 
 }
 
