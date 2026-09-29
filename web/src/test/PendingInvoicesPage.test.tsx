@@ -1065,8 +1065,8 @@ describe("Pending invoices page", () => {
     await within(page).findByText("云南开票供应商");
 
     await user.click(within(page).getByRole("button", { name: "流水详情 云南开票供应商" }));
-    const bankDrawer = await screen.findByRole("dialog", { name: "流水详情" });
-    expect(within(bankDrawer).getByRole("heading", { name: "流水详情" })).toBeInTheDocument();
+    const bankDrawer = await screen.findByRole("dialog", { name: "银行流水详情" });
+    expect(within(bankDrawer).getByRole("heading", { name: "银行流水详情" })).toBeInTheDocument();
     expect(within(bankDrawer).queryByRole("heading", { name: "云南开票供应商" })).not.toBeInTheDocument();
     expect(within(bankDrawer).getByText("账号")).toBeInTheDocument();
     expect(within(bankDrawer).getByText("交易时间")).toBeInTheDocument();
@@ -1076,7 +1076,7 @@ describe("Pending invoices page", () => {
     expect(within(bankDrawer).queryByText("txn_imported_0412")).not.toBeInTheDocument();
     expect(within(bankDrawer).queryByText("raw_payload")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "流水详情" })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "银行流水详情" })).not.toBeInTheDocument());
 
     await user.click(within(page).getByRole("button", { name: /发票详情 DIG-CAND-OA/ }));
     const invoiceDrawer = await screen.findByRole("dialog", { name: "发票详情" });

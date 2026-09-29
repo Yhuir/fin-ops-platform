@@ -30,6 +30,9 @@ test('production shared source drawers preserve complete records across pages wi
     expect(Array.isArray(sections)).toBe(true);
     expect(sections.length).toBeGreaterThan(0);
     const drawer = page.locator('[role="dialog"].source-detail-drawer');
+    const expectedTitle = sample === 'oa' || sample === 'workbench-oa' ? 'OA详情'
+      : sample.includes('invoice') || sample === 'red-blue' ? '发票详情' : '银行流水详情';
+    await expect(drawer.getByRole('heading', { name: expectedTitle, exact: true })).toBeVisible();
     await expect(drawer.locator('.entity-detail-table').first()).toBeVisible();
     const firstPaintMs = Date.now() - started;
     const ids = new Set(sections.map((section: { document_id: string }) => section.document_id));
@@ -58,6 +61,11 @@ test('production shared source drawers preserve complete records across pages wi
     for (const width of [1440, 480]) {
       await page.setViewportSize({ width, height: 900 });
       const scroll = drawer.locator('.finance-drawer__body');
+      await expect(scroll).toHaveCSS('padding-left', width === 480 ? '16px' : '24px');
+      expect(await drawer.locator('.entity-detail-table').first().evaluate(el => {
+        const body = el.closest('.finance-drawer__body')!;
+        return el.getBoundingClientRect().left - body.getBoundingClientRect().left;
+      })).toBeLessThanOrEqual((width === 480 ? 16 : 24) + (ids.size > 1 ? 18 : 1));
       expect(await drawer.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
       await scroll.evaluate(el => { el.scrollTop = el.scrollHeight; });
       expect(await scroll.evaluate(el => el.scrollTop + el.clientHeight >= el.scrollHeight - 2)).toBe(true);

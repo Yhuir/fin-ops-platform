@@ -17,8 +17,8 @@ type PendingInvoiceDetailDrawerProps = {
   onBankSplitSaved?: () => void | Promise<void>;
 };
 
-const fallbackTitles: Record<PendingInvoiceObjectDetailTarget["kind"], string> = {
-  bankTransaction: "流水详情",
+const drawerTitles: Record<PendingInvoiceObjectDetailTarget["kind"], string> = {
+  bankTransaction: "银行流水详情",
   invoice: "发票详情",
   oa: "OA详情",
 };
@@ -33,7 +33,7 @@ export default function PendingInvoiceDetailDrawer({
   const { close, setDirty } = useBankSplitClose(onClose);
   const { detail, error, loading } = useSourceDetail(open, target, loadDetail);
 
-  const title = target ? fallbackTitles[target.kind] : "详情";
+  const title = target ? drawerTitles[target.kind] : "详情";
   const sections = detail ? preparePublicDetailSections(detail.sections) : [];
   const body = (
     <div className="pending-invoice-detail-body">

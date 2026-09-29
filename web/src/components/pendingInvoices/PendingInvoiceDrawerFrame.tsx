@@ -39,7 +39,7 @@ export default function PendingInvoiceDrawerFrame({
       title={title}
       width={width}
     >
-      <div className="pending-invoice-drawer__body">{children}</div>
+      {sourceDetail ? children : <div className="pending-invoice-drawer__body">{children}</div>}
     </AppDrawer>
   );
 }
