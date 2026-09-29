@@ -483,3 +483,20 @@ class ApprovalAllocationTests(unittest.TestCase):
                 'source_allocations': {'cost_lines': [{'unit_id': 'done', 'bank_transaction_id': 'a', 'amount': '100.00'}]}}
         account_for_waiting_sources(task, [{'unit_id': 'waiting', 'bank_transaction_id': 'a', 'amount': '100.00'}])
         self.assertIn('source_required', task['pending_reasons'])
+
+    def test_excluded_principal_oa_cannot_compete_for_cost_payment_evidence(self):
+        from tests.test_cost_statistics_policy import CostStatisticsPolicyTests
+        f = CostStatisticsPolicyTests()
+        group = f._group(oa_rows=[
+            {**f._oa('principal', amount='100.00'), 'counterparty_name':'设备公司', 'application_date':'2026-08-01'},
+            f._oa('cost', amount='200.00')], bank_rows=[
+            {**f._bank('principal-bank','100.00'), 'turnover_role':'external_turnover'},
+            {**f._bank('cost-1','100.00',trade_time='2026-08-01'), 'counterparty_name':'设备公司'},
+            f._bank('cost-2','100.00')])
+        group['source_relation_groups'] = [
+            {'oa_row_ids':['principal'], 'bank_row_ids':['principal-bank']},
+            {'oa_row_ids':['cost'], 'bank_row_ids':['cost-1','cost-2']}]
+        policy = f._policy([group])
+        self.assertEqual(policy.manual_allocation_tasks, [])
+        self.assertCountEqual([(r['transaction_id'],r['amount']) for r in policy.serialized_cost_rows],
+                              [('cost-1','100.00'),('cost-2','100.00')])

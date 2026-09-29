@@ -1079,8 +1079,9 @@ def _manual_allocation_task(
         unit["lock_oa_amount"] = default_lock
         unit["outside_cost_amount"] = "0.00"
     if manual_record is None:
+        cost_oa_ids = {unit["oa_id"] for unit in units}
         pairs = evidenced_payment_pairs(
-            [row_payment_evidence({**row, "type": "oa"}) for row in group["oa_rows"]],
+            [row_payment_evidence({**row, "type": "oa"}) for row in group["oa_rows"] if row["id"] in cost_oa_ids],
             [row_payment_evidence({**row, "type": "bank"}) for row in outflows],
         ).pairs
         decision, waiting = approval_source_decision(task, [*outflows, *refunds], group.get("source_relation_groups", []), pairs)
