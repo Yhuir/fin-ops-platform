@@ -134,14 +134,15 @@ def source_detail_sections(kind: str, payload: dict[str, Any]) -> list[dict[str,
         raise ValueError(f"Unknown source detail kind: {kind}")
     identifier = str(payload.get("oaId") if kind == "oa" else payload.get("id") or "")
     if kind == "invoice":
-        polarity = {"是": "蓝字", "否": "红字"}.get(str(payload.get("isPositiveInvoice")), "发票")
-        title = " · ".join(filter(None, [polarity, payload.get("digitalInvoiceNo") or payload.get("invoiceNo")]))
+        polarity = {"是": "蓝字", "否": "红字", "True": "蓝字", "False": "红字"}.get(str(payload.get("isPositiveInvoice")))
+        title_values = (polarity, payload.get("buyerName"), payload.get("totalWithTax"))
     elif kind == "bank":
-        title = " · ".join(str(value) for value in (payload.get("counterpartyName"), payload.get("transactionDate")) if value)
+        title_values = (payload.get("counterpartyName"), payload.get("amount"))
     else:
-        title = " · ".join(str(value) for value in (payload.get("applicantName"), payload.get("workflowNo")) if value)
-    metadata = {"document_id": identifier, "document_kind": kind,
-                "document_title": title or {"bank": "银行流水", "invoice": "发票", "oa": "OA"}[kind]}
+        title_values = (payload.get("applicantName"), payload.get("amount"))
+    title = " · ".join(format(value, "f") if isinstance(value, Decimal) else str(value)
+                       for value in title_values if value is not None and value != "")
+    metadata = {"document_id": identifier, "document_kind": kind, "document_title": title}
     if kind == "bank":
         metadata["bank_transaction_id"] = identifier
     sections = []

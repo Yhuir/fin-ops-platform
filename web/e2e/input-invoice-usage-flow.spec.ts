@@ -545,7 +545,7 @@ test.describe("input invoice usage browser flow", () => {
     await expect(row).toBeVisible();
     await expect(row.getByText("合计 188.00")).toBeVisible();
 
-    const detailDrawer = page.getByRole("dialog", { name: "OA关联明细" });
+    const detailDrawer = page.getByRole("dialog", { name: "OA详情" });
     await recordLatency({
       operationId: "input-invoice-usage.open-relation-detail-fresh",
       visibleLabel: "查看陈秀云关联OA 2 条",
@@ -555,17 +555,19 @@ test.describe("input invoice usage browser flow", () => {
       await row.getByRole("button", { name: "查看陈秀云关联OA 2 条" }).click();
       expect((await mark("apiLatencyMs", detailResponsePromise)).status()).toBe(200);
       await mark("firstVisibleResponseLatencyMs", expect(detailDrawer).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(detailDrawer.getByText("OA 1")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(detailDrawer.getByRole("tab", {name: "1 陈秀云 · 88.00"})).toBeVisible());
     });
     await expect(detailDrawer).toBeVisible();
     await expect(detailDrawer.getByText("关联概况")).toHaveCount(0);
     await expect(detailDrawer.getByText("关系数量")).toHaveCount(0);
     await expect(detailDrawer.getByText("是否多条")).toHaveCount(0);
     await expect(detailDrawer.getByText("关联摘要")).toHaveCount(0);
-    await expect(detailDrawer.getByText("OA 1")).toBeVisible();
+    await expect(detailDrawer.getByRole("tab", {name: "1 陈秀云 · 88.00"})).toBeVisible();
     await expect(detailDrawer.getByText("陈秀云", { exact: true })).toBeVisible();
     await expect(detailDrawer.getByText("88.00", { exact: true })).toBeVisible();
-    await expect(detailDrawer.getByText("OA 2")).toBeVisible();
+    await detailDrawer.getByRole("tab", {name: "2 刘际涛 · 100.00"}).click();
+    await expect(detailDrawer.getByText("陈秀云", {exact: true})).toHaveCount(0);
+    await expect(detailDrawer.getByRole("tabpanel")).toHaveCount(1);
     await expect(detailDrawer.getByText("刘际涛", { exact: true })).toBeVisible();
     await expect(detailDrawer.getByText("100.00", { exact: true })).toBeVisible();
     await expect(detailDrawer.getByText("详情暂不可用")).toHaveCount(0);

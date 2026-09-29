@@ -4163,7 +4163,7 @@ function inputInvoiceUsageRelationDetailPayload(kind: string) {
     title: `${relationLabel}关联明细`,
     relation_count: 2,
     has_multiple: true,
-    sections: sourceRows.map((row, index) => ({ title: `OA ${index + 1}`, fields: [
+    sections: sourceRows.map((row, index) => ({ title: "申请信息", document_id: `source-oa-${index}`, document_kind: "oa", document_title: `${row.applicant_name} · ${row.amount}`, fields: [
       { label: "申请人", value: row.applicant_name },
       { label: "OA类型", value: row.application_type },
       { label: "项目名称", value: row.project_name },
@@ -9518,7 +9518,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         kind: "invoice",
         relation_count: 2,
         has_multiple: true,
-        sections: outputInvoiceReversalRelationSummaries().map((row, index) => ({ title: "发票信息", document_id: `output-relation-${index}`, document_kind: "invoice", document_title: `${index ? "红字" : "蓝字"} · ${row.invoice_no}`, fields: [
+        sections: outputInvoiceReversalRelationSummaries().map((row, index) => ({ title: "发票信息", document_id: `output-relation-${index}`, document_kind: "invoice", document_title: `${index ? "红字" : "蓝字"} · ${row.buyer_name} · ${row.total_with_tax}`, fields: [
           { label: "发票号码", value: row.invoice_no },
           { label: "开票日期", value: row.invoice_date },
           { label: "购买方名称", value: row.buyer_name },

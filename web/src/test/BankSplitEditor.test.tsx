@@ -234,3 +234,51 @@ test('an unchanged historical part remains readable and savable but cannot be mo
   expect(screen.getByRole('alert')).toHaveTextContent('有效标签');
   expect(saveBankSplits).toHaveBeenCalledOnce();
 });
+
+const groupedBanks = ['bank-1', 'bank-2'].map((id, index) => ({
+  title: '交易信息', document_id: id, document_kind: 'bank' as const,
+  document_title: `公司 · ${index + 1}`, bank_transaction_id: id,
+  fields: [{label: '金额', value: detail.amount}],
+}));
+
+test('switch confirmation preserves a canceled draft and discards only after approval without eager split reads', async () => {
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  const dirty = vi.fn();
+  const view = render(<BankTransactionDetailContent sections={groupedBanks} onSplitDirtyChange={dirty} />);
+  fireEvent.click(screen.getByRole('button', {name: '流水子项拆分'}));
+  fireEvent.change(await screen.findByLabelText('子项 1 金额'), {target: {value: '999999.00'}});
+  view.rerender(<BankTransactionDetailContent sections={groupedBanks.map(section => ({...section}))} onSplitDirtyChange={dirty} />);
+  fireEvent.click(screen.getByRole('tab', {name: '2 公司 · 2'}));
+  expect(confirm).toHaveBeenCalledOnce();
+  expect(screen.getByLabelText('子项 1 金额')).toHaveValue('999999.00');
+  expect(fetchBankSplits).toHaveBeenCalledOnce();
+  confirm.mockReturnValue(true);
+  fireEvent.click(screen.getByRole('tab', {name: '2 公司 · 2'}));
+  expect(screen.queryByLabelText('子项 1 金额')).not.toBeInTheDocument();
+  expect(dirty).toHaveBeenLastCalledWith(false, 'bank-1');
+  expect(saveBankSplits).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', {name: '流水子项拆分'}));
+  await screen.findByLabelText('子项 1 金额');
+  expect(fetchBankSplits).toHaveBeenLastCalledWith('bank-2', expect.any(AbortSignal));
+  confirm.mockRestore();
+});
+
+test('cannot switch a saving bank, then saves against that identity and permits navigation', async () => {
+  let finish!: (value: Awaited<ReturnType<typeof saveBankSplits>>) => void;
+  vi.mocked(saveBankSplits).mockReturnValue(new Promise(resolve => {finish = resolve;}));
+  const confirm = vi.spyOn(window, 'confirm');
+  render(<BankTransactionDetailContent sections={groupedBanks} />);
+  fireEvent.click(screen.getByRole('button', {name: '流水子项拆分'}));
+  fireEvent.change(await screen.findByLabelText('子项 1 金额'), {target: {value: '1000000.0'}});
+  fireEvent.click(screen.getByRole('button', {name: '保存', exact: true}));
+  fireEvent.click(screen.getByRole('tab', {name: '2 公司 · 2'}));
+  expect(screen.getByRole('tab', {name: '1 公司 · 1'})).toHaveAttribute('aria-selected', 'true');
+  expect(confirm).not.toHaveBeenCalled();
+  expect(saveBankSplits).toHaveBeenCalledWith('bank-1', expect.any(Object));
+  finish({...detail, changed: true, version: 3, affected_months: []});
+  await screen.findByText('已保存');
+  fireEvent.click(screen.getByRole('tab', {name: '2 公司 · 2'}));
+  expect(screen.getByRole('tab', {name: '2 公司 · 2'})).toHaveAttribute('aria-selected', 'true');
+  expect(screen.queryByText('已保存')).not.toBeInTheDocument();
+  confirm.mockRestore();
+});

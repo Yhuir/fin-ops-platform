@@ -26,10 +26,11 @@ test.describe("销项发票自动红蓝票关系", () => {
     await expect(drawer.getByText("关联概况")).toHaveCount(0);
     await expect(drawer.getByText("关系数量", { exact: true })).toHaveCount(0);
     await expect(drawer.getByText("是否多条", { exact: true })).toHaveCount(0);
-    await drawer.getByRole("button", {name: "展开全部", exact: true}).click();
     await expect(drawer.getByRole("cell", {name: "XSFP-E2E-0001", exact: true})).toBeVisible();
-    await expect(drawer.getByRole("cell", {name: "XSFP-E2E-0002", exact: true})).toBeVisible();
     await expect(drawer.getByText("12,345.67", { exact: true })).toBeVisible();
+    await drawer.getByRole("tab").nth(1).click();
+    await expect(drawer.getByRole("cell", {name: "XSFP-E2E-0002", exact: true})).toBeVisible();
+    await expect(drawer.getByRole("cell", {name: "XSFP-E2E-0001", exact: true})).toHaveCount(0);
     await expect(drawer.getByText("-12,345.67", { exact: true })).toBeVisible();
     await expect(drawer.getByText("output_invoice_reversal")).toHaveCount(0);
 

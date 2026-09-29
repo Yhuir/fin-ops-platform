@@ -4,7 +4,7 @@ import { installDeterministicApiMocks } from './fixtures/apiMocks';
 const numbers = ['2653400000097888906', '2653400000097888907'];
 function invoiceSections() {
   return numbers.flatMap((number, index) => {
-    const metadata = {document_id: `invoice-${index}`, document_kind: 'invoice', document_title: `${index ? '红字' : '蓝字'} · ${number}`};
+    const metadata = {document_id: `invoice-${index}`, document_kind: 'invoice', document_title: `${index ? '红字' : '蓝字'} · 测试科技有限公司 · ${index ? '-' : ''}2100.00`};
     return [
       {title: '发票信息', fields: [{label: '数电发票号码', value: number}, {label: '开票日期', value: '2026-07-15'}, {label: '发票票种', value: '数电发票（普通发票）'}], ...metadata},
       {title: '购销双方', fields: [{label: '销方名称', value: '测试供应商有限公司'}, {label: '销方识别号', value: '915300000000000001'}, {label: '购买方名称', value: '测试科技有限公司'}, {label: '购买方识别号', value: '915300000000000002'}], ...metadata},
@@ -16,34 +16,42 @@ function invoiceSections() {
 
 test('full invoice navigation, compact left-aligned values and one reachable scroll area', async ({page}, info) => {
   await installDeterministicApiMocks(page, {sessionMode: 'user'});
-  await page.route('**/api/output-invoice-collections/rows/*/relation-details*', route => route.fulfill({json: {kind: 'invoice', sections: invoiceSections()}}));
+  let detailReads = 0;
+  await page.route('**/api/output-invoice-collections/rows/*/relation-details*', route => {detailReads++; return route.fulfill({json: {kind: 'invoice', sections: invoiceSections()}});});
   await page.goto('/output-invoice-collections');
   const trigger = page.getByRole('button', {name: '红蓝票 · 2'}).first();
   await trigger.click();
   const drawer = page.getByRole('dialog', {name: '发票详情', exact: true});
-  await expect(drawer.getByRole('navigation', {name: '单据导航'})).toBeVisible();
+  await expect(drawer.getByRole('tablist', {name: '单据导航'})).toBeVisible();
   for (const width of [1440, 1024, 480]) {
     await page.setViewportSize({width, height: 800});
-    const nav = drawer.getByRole('navigation');
+    const nav = drawer.getByRole('tablist');
     for (const [index, number] of numbers.entries()) {
-      const button = nav.getByRole('button', {name: `${index ? '红字' : '蓝字'} · ${number}`, exact: true});
-      await button.scrollIntoViewIfNeeded();
-      await expect(button).toBeVisible();
-      expect(await button.evaluate(el => el.scrollWidth <= el.clientWidth && getComputedStyle(el).textOverflow !== 'ellipsis')).toBe(true);
+      const tab = nav.getByRole('tab').nth(index);
+      await tab.click();
+      await expect(tab).toHaveAttribute('aria-selected', 'true');
+      await expect(drawer.getByRole('cell', {name: number, exact: true})).toBeVisible();
+      await expect(drawer.getByRole('cell', {name: numbers[1-index], exact: true})).toHaveCount(0);
+      await expect(drawer.getByRole('tabpanel')).toHaveCount(1);
+      expect(await tab.evaluate(el => el.scrollWidth <= el.clientWidth && getComputedStyle(el).textOverflow !== 'ellipsis')).toBe(true);
     }
-    const expand = nav.getByRole('button', {name: '展开全部', exact: true});
-    if (await expand.count()) await expand.click();
-    await expect(drawer.locator('.entity-detail-document__body:visible')).toHaveCount(2);
-    const amount = drawer.locator('.entity-detail-row__amount').first();
-    await expect(amount).toHaveCSS('text-align', 'left');
+    await expect(drawer.locator('.entity-detail-row__amount').first()).toHaveCSS('text-align', 'left');
     const scroll = drawer.locator('.finance-drawer__body');
     await scroll.evaluate(el => { el.scrollTop = el.scrollHeight; });
     expect(await scroll.evaluate(el => el.scrollTop > 0 && el.scrollTop + el.clientHeight >= el.scrollHeight - 2)).toBe(true);
+    await expect(nav).toBeInViewport();
     expect(await drawer.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-    await page.screenshot({animations: "disabled", path: info.outputPath(`invoices-${width}.png`)});
-    await scroll.evaluate(el => { el.scrollTop = 0; });
+    await page.screenshot({animations: "disabled", path: info.outputPath(`invoices-bottom-${width}.png`)});
+    await nav.getByRole('tab').first().click();
+    expect(await scroll.evaluate(el => el.scrollTop)).toBe(0);
     await page.screenshot({animations: "disabled", path: info.outputPath(`invoices-top-${width}.png`)});
   }
+  await page.setViewportSize({width: 1440, height: 900});
+  await page.evaluate(() => {document.documentElement.style.zoom = '1.25';});
+  expect(await drawer.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  await page.screenshot({animations: 'disabled', path: info.outputPath('invoices-125-percent.png')});
+  await page.evaluate(() => {document.documentElement.style.zoom = '';});
+  expect(detailReads).toBe(1);
   await drawer.getByRole('button', {name: '关闭详情抽屉'}).click();
   await expect(drawer).toBeHidden();
   // React Aria restores grid focus to the originating cell and its first control.
@@ -72,3 +80,42 @@ test('bank source opens without split IO and aligns dates, money and account fie
   expect(splitReads).toBe(0);
   await expect(drawer.getByRole('button', {name: '流水子项拆分'})).toBeVisible();
 });
+
+for (const kind of ['oa', 'bank'] as const) {
+  test(`${kind} multi-document navigation preserves complete names, active fields and keyboard selection`, async ({page}, info) => {
+    await installDeterministicApiMocks(page, {sessionMode: 'user'});
+    const titles = kind === 'oa' ? ['张三 · 8000.00', '李四 · 0.00', '张三 · 8000.00']
+      : ['云南某某设备供应与技术服务有限公司 · 10000.00', '收款公司 · 0.00', '另一家公司 · 500.00'];
+    let reads = 0;
+    const sections = titles.map((title, index) => ({document_id: `${kind}-${index}`, document_kind: kind, document_title: title,
+      title: kind === 'oa' ? '申请信息' : '交易信息', fields: [{label: '备注', value: `单据 ${index+1} 原文`}, {label: '金额', value: String(index)}]}));
+    await page.route(kind === 'oa' ? '**/api/oa-pending-payments/oa/*/detail' : '**/api/bank-transactions/*/source-detail', route => {
+      reads++; return route.fulfill({json: {detail_available: true, sections}});
+    });
+    await page.goto(kind === 'oa' ? '/oa-pending-payments' : '/bank-details');
+    await page.getByRole('button', {name: kind === 'oa' ? /^查看 OA .*详情$/ : /^查看银行流水.*详情$/}).first().click();
+    const drawer = page.getByRole('dialog', {name: kind === 'oa' ? 'OA详情' : '银行流水详情', exact: true});
+    const tabs = drawer.getByRole('tab');
+    await expect(tabs).toHaveCount(3);
+    for (let index = 0; index < 3; index++) {
+      await tabs.nth(index).click();
+      await expect(tabs.nth(index)).toHaveText(`${index+1}${titles[index]}`);
+      await expect(drawer.getByRole('cell', {name: `单据 ${index+1} 原文`, exact: true})).toBeVisible();
+      await expect(drawer.getByRole('tabpanel')).toHaveCount(1);
+      await expect(drawer.getByRole('cell', {name: /单据 \d 原文/})).toHaveCount(1);
+    }
+    await tabs.first().focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(tabs.nth(1)).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
+    expect(reads).toBe(1);
+    for (const width of [1440,480]) {
+      await page.setViewportSize({width, height: 800});
+      await tabs.first().click();
+      if (width === 1440) expect(await drawer.getByRole('tablist').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      expect(await tabs.first().evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      await page.screenshot({animations: 'disabled', path: info.outputPath(`${kind}-${width}.png`)});
+    }
+  });
+}

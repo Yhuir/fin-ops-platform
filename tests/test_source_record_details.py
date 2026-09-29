@@ -18,6 +18,7 @@ from fin_ops_platform.services.pending_invoice_canonical_query import PendingInv
 from fin_ops_platform.services.source_record_details import (
     bank_source_detail,
     invoice_source_detail,
+    source_detail_sections,
     workbench_source_row,
 )
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
@@ -47,6 +48,22 @@ def _fields(payload: dict[str, object], section: int | None = None) -> dict[str,
 
 
 class SourceRecordProjectionTests(unittest.TestCase):
+    def test_navigation_titles_use_original_names_and_amounts_only(self) -> None:
+        cases = [
+            ("oa", {"oaId": "oa-1", "applicantName": "张三", "amount": Decimal("8000.00"), "workflowNo": "2440"}, "张三 · 8000.00"),
+            ("oa", {"oaId": "oa-2", "applicantName": "李四", "amount": None, "workflowNo": "private-id", "expenseItems": [{"amount": "30"}]}, "李四"),
+            ("bank", {"id": "bank-1", "counterpartyName": "公司", "amount": Decimal("0.00")}, "公司 · 0.00"),
+            ("invoice", {"id": "red", "buyerName": "购方", "totalWithTax": "-2100.00", "isPositiveInvoice": False, "invoiceNo": "123"}, "红字 · 购方 · -2100.00"),
+            ("invoice", {"id": "blue", "buyerName": "购方", "amount": "100", "totalWithTax": None, "isPositiveInvoice": "是"}, "蓝字 · 购方"),
+            ("bank", {"id": "bank-2", "amount": Decimal("10.123400")}, "10.123400"),
+        ]
+        for kind, payload, expected in cases:
+            with self.subTest(kind=kind, payload=payload):
+                sections = source_detail_sections(kind, payload)
+                self.assertTrue(sections)
+                self.assertTrue(all(section["document_title"] == expected for section in sections))
+                self.assertTrue(all(section["document_id"] == payload.get("oaId", payload.get("id")) for section in sections))
+
     def test_invoice_missing_source_values_do_not_use_operational_defaults(self) -> None:
         invoice = _invoice()
         result = invoice_source_detail(_invoice_group(invoice))

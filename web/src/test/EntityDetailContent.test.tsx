@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 import EntityDetailContent, {
   preparePublicDetailSections,
@@ -114,21 +114,45 @@ test("public OA expense counts preserve zero while internal counts remain hidden
   ]}]);
 });
 
-test('keeps separate invoices, complete identifiers, and every line in one expandable drawer', async () => {
-  const { fireEvent } = await import('@testing-library/react');
-  const blue = '蓝字 · 26534000000097888906', red = '红字 · 26534000000097888907';
-  const sections = preparePublicDetailSections([
-    {title: '发票信息', document_id: 'blue', document_kind: 'invoice', document_title: blue, fields: [{label: '备注', value: '蓝票原文'}]},
-    {title: '货物或应税劳务明细 1', document_id: 'blue', document_kind: 'invoice', document_title: blue, fields: [{label: '数量', value: 0}]},
-    {title: '发票信息', document_id: 'red', document_kind: 'invoice', document_title: red, fields: [{label: '备注', value: '红票原文'}]},
-  ]);
-  render(<EntityDetailContent sections={sections} />);
-  expect(screen.getByText('蓝票原文')).toBeVisible();
-  expect(screen.queryByText('红票原文')).not.toBeInTheDocument();
-  expect(screen.getAllByRole('button', {name: red})[0]).toHaveTextContent('26534000000097888907');
-  fireEvent.click(screen.getByRole('button', {name: '展开全部'}));
-  expect(screen.getByText('红票原文')).toBeVisible();
+const documents = [
+  {title: '申请信息', document_id: 'oa-1', document_kind: 'oa' as const, document_title: '张三 · 8000', fields: [{label: 'OA单号', value: '2440'}]},
+  {title: '费用明细 1', document_id: 'oa-1', document_kind: 'oa' as const, document_title: '张三 · 8000', fields: [{label: '金额', value: 0}]},
+  {title: '申请信息', document_id: 'oa-2', document_kind: 'oa' as const, document_title: '张三 · 8000', fields: [{label: 'OA单号', value: '2441'}]},
+];
+
+test('switches only the selected source document and all its sections using stable identities', () => {
+  const {rerender} = render(<EntityDetailContent sections={documents} />);
+  expect(screen.getByText('2440')).toBeVisible();
   expect(screen.getByText('0')).toBeVisible();
-  fireEvent.click(screen.getByRole('button', {name: '收起全部'}));
-  expect(screen.getByText('红票原文')).not.toBeVisible();
+  expect(screen.queryByText('2441')).not.toBeInTheDocument();
+  const second = screen.getByRole('tab', {name: '2 张三 · 8000'});
+  fireEvent.click(second);
+  expect(second).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByText('2441')).toBeVisible();
+  expect(screen.queryByText('2440')).not.toBeInTheDocument();
+  expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
+  rerender(<EntityDetailContent sections={documents.map(section => ({...section}))} />);
+  expect(screen.getByText('2441')).toBeVisible();
+  expect(screen.queryByRole('button', {name: /全部/})).not.toBeInTheDocument();
+});
+
+test('honors explicit initial selection and surfaces an invalid identity without selecting another record', () => {
+  const {rerender} = render(<EntityDetailContent sections={documents} initialDocumentKey="oa:oa-2" />);
+  expect(screen.getByText('2441')).toBeVisible();
+  rerender(<EntityDetailContent sections={documents} initialDocumentKey="oa:missing" />);
+  expect(screen.getByText('所选单据不在当前详情中。')).toBeVisible();
+  expect(screen.queryByText('2440')).not.toBeInTheDocument();
+});
+
+test('plain and single-document sections have no navigation; switches reset only the drawer body scroll', () => {
+  const {rerender,container} = render(<div className="finance-drawer__body"><EntityDetailContent sections={documents} /></div>);
+  const body = container.firstElementChild!;
+  body.scrollTop = 200;
+  fireEvent.click(screen.getByRole('tab', {name: '1 张三 · 8000'}));
+  expect(body.scrollTop).toBe(200);
+  fireEvent.click(screen.getByRole('tab', {name: '2 张三 · 8000'}));
+  expect(body.scrollTop).toBe(0);
+  rerender(<EntityDetailContent sections={documents.slice(0,2)} />);
+  expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+  expect(screen.getByText('2440')).toBeVisible();
 });

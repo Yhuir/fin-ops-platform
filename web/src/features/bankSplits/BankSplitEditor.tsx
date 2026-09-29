@@ -6,8 +6,8 @@ import { fetchBankSplits, saveBankSplits, type BankSplitDetail } from './api';
 import './bankSplits.css';
 
 type DraftPart = { key: string; id?: string; category_code: string; category_path: string[]; amount: string };
-type Props = { transactionId: string; initialDetail?: BankSplitDetail; onSaved?: (detail: BankSplitDetail) => void | Promise<void>; onDirtyChange?: (dirty: boolean) => void };
-export default function BankSplitEditor({ transactionId, initialDetail, onSaved, onDirtyChange }: Props) {
+type Props = { transactionId: string; initialDetail?: BankSplitDetail; onSaved?: (detail: BankSplitDetail) => void | Promise<void>; onDirtyChange?: (dirty: boolean) => void; onSavingChange?: (saving: boolean) => void };
+export default function BankSplitEditor({ transactionId, initialDetail, onSaved, onDirtyChange, onSavingChange }: Props) {
   const [detail, setDetail] = useState<BankSplitDetail | null>(null);
   const [parts, setParts] = useState<DraftPart[]>([]);
   const [category, setCategory] = useState('');
@@ -57,7 +57,7 @@ export default function BankSplitEditor({ transactionId, initialDetail, onSaved,
     if (parts.length && difference !== 0n) { setError('子项合计必须等于流水金额'); return; }
     if (!parts.length && !tags.some(tag => tag.code === category)) { setError('请选择整笔流水标签'); return; }
     if (parts.some(part => invalidFamily(part.category_code, part.category_path)) || (!parts.length && invalidFamily(category, categoryPath))) { setError('请选择外部往来子项的往来归属'); return; }
-    setSaving(true); setError(''); setNotice('');
+    setSaving(true); onSavingChange?.(true); setError(''); setNotice('');
     try {
       const response = await saveBankSplits(transactionId, {
         version: detail.version,
@@ -69,7 +69,7 @@ export default function BankSplitEditor({ transactionId, initialDetail, onSaved,
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '保存拆分失败');
       if (reason instanceof ApiClientError && reason.status === 409) setConflict(true);
-    } finally { setSaving(false); }
+    } finally { setSaving(false); onSavingChange?.(false); }
   };
   if (loading) return <span role="status">正在读取拆分…</span>;
   if (!detail) return <div role="alert">{error}<button type="button" onClick={() => setReload(value => value + 1)}>重试</button></div>;
