@@ -67,6 +67,38 @@ afterEach(() => {
 });
 
 describe("PageRouteHost", () => {
+  test.each(["render", "import"])("isolates %s failures and lets the user navigate away", async (kind) => {
+    const user = userEvent.setup();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const Broken = kind === "import"
+      ? lazy(() => Promise.reject(new Error("Failed to fetch dynamically imported module: https://example.test/fin-ops/assets/old.js")))
+      : () => { throw new Error("render failed"); };
+    const routes = [
+      createRoute("/a", "page-a", Broken),
+      createRoute("/b", "page-b", () => <p>正常页面</p>),
+    ];
+    render(
+      <><nav aria-label="测试导航"><Link to="/b">进入正常页面</Link></nav><PageRouteHost routes={routes} /></>,
+      { wrapper: Harness },
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("页面暂时无法显示");
+    expect(screen.getByRole("button", { name: "重新加载页面" })).toBeVisible();
+    expect(screen.getByRole("navigation", { name: "测试导航" })).toBeVisible();
+    await user.click(screen.getByRole("link", { name: "进入正常页面" }));
+    expect(await screen.findByText("正常页面")).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  test("checks permission before mounting an inaccessible failing page", async () => {
+    const denied = vi.fn(() => { throw new Error("must not mount"); });
+    render(<PageRouteHost routes={[
+      createRoute("/b", "page-b", () => <p>授权页面</p>),
+      createRoute("/a", "denied-page", denied),
+    ]} />, { wrapper: Harness });
+    expect(await screen.findByText("授权页面")).toBeVisible();
+    expect(denied).not.toHaveBeenCalled();
+  });
+
   test("does not gate route switching behind animation timers", () => {
     const source = readFileSync("src/app/PageRouteHost.tsx", "utf8");
 

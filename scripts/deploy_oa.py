@@ -362,6 +362,10 @@ def build_deploy_control_contract_check() -> str:
             "      printf '%s\\n' 'deploy-control helper does not expose the production-equivalent release gate' >&2",
             "      exit 68",
             "    fi",
+            "    if ! grep -q 'FRONTEND_PUBLISHER' \"$DEPLOY_CONTROL\"; then",
+            "      printf '%s\\n' 'deploy-control helper lacks retained frontend assets; install the reviewed candidate helper before activation' >&2",
+            "      exit 68",
+            "    fi",
             "    if grep -q '^  activate)' \"$DEPLOY_CONTROL\"; then",
             "      printf '%s\\n' 'deploy-control helper still exposes the ungated activate command' >&2",
             "      exit 68",
@@ -479,6 +483,8 @@ def build_remote_command(config: DeploymentConfig, remote_script: str) -> list[s
 
 def build_release_gate_command(config: DeploymentConfig) -> list[str]:
     return build_ssh_base_command(config) + [
+        f"grep -q FRONTEND_PUBLISHER {shlex.quote(config.deploy_control_path)} "
+        "|| { echo 'Install the reviewed frontend resource publisher helper before activation' >&2; exit 68; }; "
         "sudo -n "
         f"{shlex.quote(config.deploy_control_path)} "
         f"release-gate-activate {shlex.quote(config.release_name)}"
@@ -732,6 +738,7 @@ def build_frontend(config: DeploymentConfig) -> None:
         env={
             **dict(os.environ),
             "VITE_APP_BASE_PATH": config.frontend_base_path,
+            "VITE_BUILD_ID": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=config.root_dir, text=True).strip(),
         },
     )
 

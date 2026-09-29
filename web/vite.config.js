@@ -16,6 +16,7 @@ export default defineConfig(function (_a) {
     return {
         base: normalizeBasePath(env.VITE_APP_BASE_PATH),
         plugins: [react(), tailwindcss()],
+        define: { __APP_BUILD_ID__: JSON.stringify(env.VITE_BUILD_ID || mode) },
         server: {
             proxy: {
                 "/api": {

@@ -1,3 +1,4 @@
+import { reportRouteFailure } from "../../app/routeDiagnostics";
 import { Disclosure, Drawer, Separator } from "@heroui/react";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useState } from "react";
@@ -46,7 +47,7 @@ function SidebarLink({
   const Icon = item.icon;
   const active = item.active === false ? false : isSidebarItemActive(pathname, search, item.to, item.end);
   const prefetchRoute = () => {
-    item.preload().catch(() => undefined);
+    item.preload().catch((error: unknown) => reportRouteFailure("preload", item.to, error));
   };
 
   return (

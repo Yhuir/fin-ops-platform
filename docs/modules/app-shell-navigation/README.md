@@ -10,6 +10,8 @@
 
 ## 当前业务约定
 
+- 页面路由使用独立错误边界；懒加载或渲染失败保留侧栏，切换路由清除页面错误。手动“重新加载页面”重新取得入口，不自动刷新或无限重试。
+- 预加载及页面异常诊断仅记录构建版本、路由路径、错误类别和静态资源路径，不记录原始异常内容、查询参数或业务值。
 - 只挂载当前 route；切换按注册信息更新标题与主内容焦点，菜单可见性不能替代后端授权。
 - 页面会话保存非敏感查询/布局，不保存业务事实；现金使用可卸载的局部状态。
 - focus、visibility、BFCache 不触发全站业务查询；普通写入不广播隐藏页面刷新。
@@ -26,6 +28,8 @@
 - [web/src/contexts/GlobalOperationOverlayContext.tsx](../../../web/src/contexts/GlobalOperationOverlayContext.tsx)
 - [web/src/app/pageRegistry.tsx](../../../web/src/app/pageRegistry.tsx)
 - [web/src/app/router.tsx](../../../web/src/app/router.tsx)
+- [web/src/app/PageRouteErrorBoundary.tsx](../../../web/src/app/PageRouteErrorBoundary.tsx)
+- [web/e2e/frontend-release.spec.ts](../../../web/e2e/frontend-release.spec.ts)
 - [web/src/app/PageRouteHost.tsx](../../../web/src/app/PageRouteHost.tsx)
 - [web/src/components/shell/AppSidebar.tsx](../../../web/src/components/shell/AppSidebar.tsx)
 - [web/src/components/shell/AppSidebarAccount.tsx](../../../web/src/components/shell/AppSidebarAccount.tsx)

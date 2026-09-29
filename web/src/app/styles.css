@@ -24684,3 +24684,12 @@ body.column-layout-dragging {
 @media (max-width: 600px) {
   .source-detail-drawer .finance-drawer__header, .source-detail-drawer .finance-drawer__body { margin: 0; padding: 16px; }
 }
+
+.page-route-error {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+}
+.page-route-error h1 { margin: 0; font-size: 20px; }

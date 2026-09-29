@@ -265,6 +265,8 @@ class DeployOAScriptTest(unittest.TestCase):
 
         self.assertEqual(
             command[-1],
+            "grep -q FRONTEND_PUBLISHER /usr/local/sbin/finops-deploy-control "
+            "|| { echo 'Install the reviewed frontend resource publisher helper before activation' >&2; exit 68; }; "
             "sudo -n /usr/local/sbin/finops-deploy-control "
             "release-gate-activate main-abcdef1-20260524170000",
         )
@@ -1115,7 +1117,7 @@ class DeployOAScriptTest(unittest.TestCase):
 
         self.assertIn("release_gate_005", frontend)
         self.assertIn("YNSYLP005", frontend)
-        self.assertIn("published_dist_exact", frontend)
+        self.assertIn("published_release_complete", frontend)
         self.assertIn("/health/ready", frontend)
         self.assertIn("/fin-ops/api/session/me", frontend)
         self.assertNotIn("rabbitmq_topology", frontend)

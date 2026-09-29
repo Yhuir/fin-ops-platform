@@ -3,6 +3,7 @@ import { Suspense, useEffect, useMemo } from "react";
 
 import { PageRuntimeProvider } from "../contexts/PageRuntimeContext";
 import { useOptionalSessionPermissions } from "../contexts/SessionContext";
+import PageRouteErrorBoundary from "./PageRouteErrorBoundary";
 import { pageLabelForKey, type AppPageRoute } from "./pageRegistry";
 
 function routeMatchesPath(route: AppPageRoute, pathname: string) {
@@ -52,9 +53,11 @@ export default function PageRouteHost({ routes }: { routes: AppPageRoute[] }) {
         activationGeneration: 1,
       }}
     >
-      <Suspense fallback={<PageRouteFallback pageKey={matchedRoute.pageKey} />}>
-        <PageComponent />
-      </Suspense>
+      <PageRouteErrorBoundary key={matchedRoute.path} route={matchedRoute.path}>
+        <Suspense fallback={<PageRouteFallback pageKey={matchedRoute.pageKey} />}>
+          <PageComponent />
+        </Suspense>
+      </PageRouteErrorBoundary>
     </PageRuntimeProvider>
   );
 }

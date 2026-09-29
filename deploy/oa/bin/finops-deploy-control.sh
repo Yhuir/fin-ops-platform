@@ -1461,22 +1461,8 @@ start_oa_sync_enqueue_timer() {
 
 publish_frontend() {
   local src="$1"
-  local dist="$src/web/dist"
-  local parent tmp backup
-  [[ -f "$dist/index.html" ]] || die "release frontend dist missing: $dist"
-  parent="$(dirname "$FRONTEND_DIR")"
-  tmp="$parent/.dist.deploy.$$"
-  backup="$parent/.dist.previous"
-  mkdir -p "$parent"
-  rm -rf -- "$tmp"
-  cp -a "$dist" "$tmp"
-  chmod -R a+rX "$tmp"
-  rm -rf -- "$backup"
-  if [[ -d "$FRONTEND_DIR" ]]; then
-    mv "$FRONTEND_DIR" "$backup"
-  fi
-  mv "$tmp" "$FRONTEND_DIR"
-  rm -rf -- "$backup"
+  "$API_PYTHON" "$FRONTEND_PUBLISHER" publish \
+    --source "$src/web/dist" --dist "$FRONTEND_DIR" --release-root "$RELEASE_ROOT"
 }
 
 restart_services() {
@@ -2410,7 +2396,7 @@ release_gate_frontend_checkpoint() (
   worker_inventory_report "$src" "$inventory_report"
   candidate_status "$release" --json >"$candidate_report"
   active_releases="$(active_release_names)"
-  if diff -qr -- "$src/web/dist" "$FRONTEND_DIR" >/dev/null; then
+  if "$API_PYTHON" "$FRONTEND_PUBLISHER" verify --source "$src/web/dist" --dist "$FRONTEND_DIR"; then
     dist_match=true
   fi
   if ! health_metrics="$(curl --silent --show-error --connect-timeout 5 --max-time 15 \
@@ -2492,7 +2478,7 @@ checks = {
     ),
     "public_index": public_request["http_status"] == 200,
     "public_asset": bool(os.environ.get("ASSET_URL")) and asset_request["http_status"] == 200,
-    "published_dist_exact": os.environ.get("DIST_MATCH") == "true",
+    "published_release_complete": os.environ.get("DIST_MATCH") == "true",
 }
 passed = all(checks.values())
 payload = {
@@ -3117,7 +3103,12 @@ release_gate_activate() {
     || die "release-gate-activate accepts release name and optional --resume-forward-repair"
   local admin_token previous_release active_count evidence_dir profile_report release_profile
   local schema_plan_path schema_evidence_required
-  release_src "$release" >/dev/null
+  # One activation owns resource publishing and cleanup, including automatic rollback.
+  exec 9>"$RELEASE_ROOT/.activation.lock"
+  flock -n 9 || die "another release activation is running"
+  local FRONTEND_PUBLISHER
+  FRONTEND_PUBLISHER="$(release_src "$release")/scripts/frontend_assets.py"
+  [[ -f "$FRONTEND_PUBLISHER" ]] || die "candidate frontend publisher is missing"
   assert_runtime_env_contract
   candidate_status "$release" --json >/dev/null
   IFS= read -r admin_token
@@ -3255,6 +3246,9 @@ PY
     rollback_release_gate \
       "$release" "$previous_release" "$admin_token" "$evidence_dir" timer_start "$release_profile"
   fi
+  # Only prune after the candidate has passed all release checkpoints.
+  "$API_PYTHON" "$FRONTEND_PUBLISHER" cleanup --dist "$FRONTEND_DIR" \
+    || die "release is active and verified, but frontend resource cleanup failed"
   rm -f -- "$profile_report" "$schema_plan_path"
   trap - EXIT
 }

@@ -103,7 +103,7 @@ Runtime/ACL profile 的激活顺序固定为：
 2. 进入 maintenance，停止 API 和当前 worker；
 3. 执行 migration 与 schema check；
 4. 安装当前 worker helper/unit/env，退役 registry 外资产；
-5. API/worker drop-in 指向 exact release，前端从该 release 的 `web/dist` 暂存后切换到发布目录；
+5. API/worker drop-in 指向 exact release，前端先发布该 release 的不可变资源，再原子替换 HTML 入口；
 6. 安装并 enable OA sync enqueue timer，但在发布门禁期间保持 stopped；
 7. 启动四个 worker 和 API；
 8. 运行 T+0 与 T+30 release checkpoint；
@@ -221,3 +221,26 @@ p50/p95/p99、canonical audit、health、worker、PostgreSQL outbox/dead-letter 
 ```
 
 `production-shell` 使用 OA cookie token 变量，wrapper 加载后在子进程内赋值，不打印凭据。公网耗时包含网络与代理，若超标需结合服务器本地 API/SQL 耗时定位，不能单看 HTTP 200 判断性能。
+
+
+## 前端跨版本资源生命周期
+
+`publish_frontend` 调用候选 release 的 `scripts/frontend_assets.py`。同一次激活和自动回滚始终使用这份发布工具，因此回滚到尚无该工具的历史构建也不会恢复整体删除资源的旧行为。
+
+- 发布用同目录临时文件及原子替换发布 JS/CSS，所有文件就绪后原子替换 `dist/index.html`；资源同名内容冲突明确拒绝。
+- 激活持有 `/opt/fin-ops/releases/.activation.lock`，覆盖预检查、发布、回滚及成功后的清理；并发激活明确拒绝。
+- 私有清单 `/www/wwwroot/fin-ops/.frontend-assets.json` 独立于后端 release 清理，保存版本的资源路径、HTML 和退出服务时间。不得把清单当作业务数据库或手工重置。
+- 当前 HTML 对应版本和上一可回滚前端版本保留；其他版本退出服务后保留七天。成功发布后清理无保留版本引用的过期资源，不触碰未登记文件。
+- 首次迁移扫描现存七天内构建及当前 HTML 对应构建，不扫描备份目录；无法找到当前构建时拒绝迁移。中断复制在下一次发布恢复。
+- 校验当前入口及目标构建文件内容，允许清单登记的历史资源；未知额外资源仍报错。资源 404 不回落到 HTML。
+- 资源可访问不代表不兼容 API 可以继续供旧前端使用；API 破坏性变更必须另外设计版本切换。
+
+修改 root-owned 发布 helper 后，需要管理员按已审阅候选 release 的精确文件及摘要安装；标准部署不会自行提升权限或替换 helper。部署前合同检查拒绝仍使用整体目录替换的 helper。
+
+跨发布浏览器验证使用两个真实构建。先将旧构建目录准备在仓库外，再在 `web/` 执行：
+
+```bash
+FIN_OPS_E2E_PREVIOUS_DIST=/absolute/path/to/previous/dist npm run e2e:release
+```
+
+该测试只使用本地临时发布目录和模拟业务 API，覆盖旧标签页跨发布、回滚后新标签页、模块失败后的导航及手动恢复。生产验收另外保留发布前标签页，部署后通过菜单打开尚未访问的页面，不能只逐页 `goto`。
