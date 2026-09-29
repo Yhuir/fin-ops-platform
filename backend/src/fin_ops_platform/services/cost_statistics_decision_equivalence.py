@@ -6,6 +6,7 @@ from typing import Any
 
 from fin_ops_platform.services.cost_statistics_policy import CostStatisticsPolicy
 from fin_ops_platform.services.cost_statistics_scope import PROJECT_COST_SCOPE_KEY, read_project_cost_scope
+from fin_ops_platform.services.cost_statistics_source_allocation import SourceAllocationError, automatic_source_allocations
 
 
 def automatic_task(snapshot: dict[str, Any], case_id: str) -> dict[str, Any] | None:
@@ -36,17 +37,27 @@ def automatic_equivalence_reason(record: dict[str, Any], task: dict[str, Any] | 
         return "non_cost_decision"
     if record["oa_amount_locks"] != {u["unit_id"]: u["lock_oa_amount"] for u in task["units"]}:
         return "amount_lock_decision"
+    def amounts(rows: list[dict[str, Any]]) -> list[tuple[str, Decimal]]:
+        return sorted((line["unit_id"], Decimal(line["amount"])) for line in rows)
+    if amounts(record["allocations"]) != amounts(task["allocations"]):
+        return "different_amounts"
     source = record["source_allocations"]
     if source is None:
-        return "missing_sources"
+        # Reconstruct from the saved amounts, never from the automatic cost lines.
+        # Disable partial approval allocation: it would replace the saved amounts.
+        try:
+            source = automatic_source_allocations({
+                **task, "allocations": record["allocations"], "allows_partial": False,
+                "non_cost_amount": record["non_cost_amount"],
+            })
+        except SourceAllocationError as exc:
+            return f"historical_sources_invalid:{exc.code}"
+        if source is None:
+            return "missing_sources"
     if source["refund_links"] or source["non_cost_lines"]:
         return "refund_or_non_cost_decision"
     def lines(rows: list[dict[str, Any]]) -> list[tuple[str, str, Decimal]]:
         return sorted((line["unit_id"], line["bank_transaction_id"], Decimal(line["amount"])) for line in rows)
     if lines(source["cost_lines"]) != lines(task["source_allocations"]["cost_lines"]):
         return "different_sources"
-    def amounts(rows: list[dict[str, Any]]) -> list[tuple[str, Decimal]]:
-        return sorted((line["unit_id"], Decimal(line["amount"])) for line in rows)
-    if amounts(record["allocations"]) != amounts(task["allocations"]):
-        return "different_amounts"
     return ""

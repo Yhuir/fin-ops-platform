@@ -78,6 +78,17 @@ class PostgresCostDecisionStorageTests(TestCase):
         self.assertEqual((restored["decision_mode"], restored["version"]), ("manual", 3))
         self.assertEqual(self.repository.list_by_case_ids(["cost-decision"])["cost-decision"]["version"], 3)
 
+    def test_absent_historical_sources_remain_sql_null_on_insert_and_restore(self):
+        before = self.repository.save(**decision_values(source_allocations=None))
+        self.assertIsNone(before['source_allocations'])
+        self.repository.retire_to_automatic(relation_case_id='cost-decision', expected_version=1, actor_id='migration')
+        restored = self.repository.save(**decision_values(source_allocations=None, expected_version=2))
+        self.assertEqual((restored['decision_mode'], restored['version']), ('manual', 3))
+        self.assertIsNone(restored['source_allocations'])
+        self.assertTrue(self.connection.fetch_one(
+            "select source_allocations is null as absent from app.cost_statistics_manual_allocations where relation_case_id='cost-decision'"
+        )['absent'])
+
     def test_candidates_include_missing_relations_but_exclude_automatic_markers(self):
         self.repository.save(**decision_values())
         self.repository.save(**decision_values(relation_case_id="automatic-case", decision_mode="automatic"))

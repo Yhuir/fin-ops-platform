@@ -1018,6 +1018,94 @@ class CostSourcePostgresTests(unittest.TestCase):
         self.assertEqual(report['changed_count'], 0)
         self.assertEqual(report['items'][0]['reason'], 'amount_lock_decision')
 
+    def test_historical_expense_items_without_sources_retire_and_restore(self):
+        from fin_ops_platform.services.cost_statistics_automatic_migration_service import (
+            CostStatisticsAutomaticMigrationService,
+        )
+
+        from tests.app_test_support import build_local_state_application
+        items = [{'expense_item_id': f'item-{index}', 'project_name': '测试项目',
+                  'expense_type': '材料费', 'expense_content': f'采购{index}', 'amount': amount}
+                 for index, amount in enumerate(('135.00', '215.00'))]
+        self.add_interest_tag()
+        with self.connection.transaction() as tx:
+            tx.execute("select set_config('fin_ops.correction_reason', 'isolated historical allocation fixture', true)")
+            tx.execute("update app.bank_transactions set amount=350,signed_amount=-350 where legacy_mongo_id='bank-1'")
+            tx.execute("update app.workbench_pair_relations set row_ids=array['oa-a','bank-1'],row_types=array['oa','bank']")
+            tx.execute("""update app.oa_applications set form_type='日常报销',amount=350,
+                normalized_payload=%s::jsonb where row_id='oa-a'""",
+                (json.dumps({'id': 'oa-a', 'amount': '350.00', 'project_name': '测试项目', 'expense_items': items}),))
+            tx.execute("""insert into app.bank_transaction_categories
+                (bank_transaction_id,legacy_transaction_id,category,source,status,raw_payload)
+                select id,legacy_mongo_id,'interest-test','manual','active','{"manual_assignment":true}'::jsonb
+                from app.bank_transactions where legacy_mongo_id='bank-1'""")
+        self.scope_service().update_project_cost_scope({'expected_version': 1, 'selected_tag_codes': ['interest-test']}, actor_id='test')
+        task = self.service.get_task('cost-source-case', can_save=True)
+        self.assertEqual(task['status'], 'allocated')
+        self.assertEqual([u['oa_id'] for u in task['units']], ['oa-a', 'oa-a'])
+        self.assertEqual([a['amount'] for a in task['allocations']], ['135.00', '215.00'])
+        fields = {key: task[key] for key in (
+            'relation_case_id', 'relation_version', 'source_fingerprint', 'oa_total',
+            'gross_outflow_total', 'wrong_payment_refund_total', 'net_outflow_total',
+            'allocations', 'source_allocations', 'manual_items', 'oa_cost_tag_overrides',
+            'non_cost_amount', 'non_cost_reason')}
+        repository = PostgresCostStatisticsManualAllocationRepository(self.connection)
+        repository.save(**fields, oa_amount_locks={u['unit_id']: u['lock_oa_amount'] for u in task['units']},
+                        decision_mode='manual', expected_version=0, actor_id='historical')
+        self.connection.execute('update app.cost_statistics_manual_allocations set source_allocations=null')
+        before = repository.list_by_case_ids(['cost-source-case'])['cost-source-case']
+        business_before = {table: self.connection.fetch_all(f'select to_jsonb(t) as row from {table} t order by id')
+                           for table in ('app.bank_transactions', 'app.bank_transaction_categories',
+                                         'app.oa_applications', 'app.workbench_pair_relations')}
+        app = build_local_state_application()
+        app._cost_statistics_api_routes._manual_allocation_service = self.service
+        pages = {view: self.query.get_explorer_page(scope='all', view=view, filters={}, cursor=None, page_size=20)
+                 for view in ('project', 'cost_tag', 'bank_account', 'bank_tag', 'time')}
+        preview = self.migrate_automatic()
+        self.assertEqual((preview['eligible_count'], preview['changed_count']), (1, 0), preview)
+        self.assertEqual(repository.list_by_case_ids(['cost-source-case'])['cost-source-case'], before)
+        with patch.object(PostgresOperationsAuditRepository, 'append_operation_event', side_effect=RuntimeError('audit unavailable')):
+            with self.assertRaisesRegex(RuntimeError, 'audit unavailable'):
+                self.migrate_automatic(True)
+        self.assertEqual(repository.list_by_case_ids(['cost-source-case'])['cost-source-case'], before)
+        stale_payload = self.current_payload()
+        self.assertEqual(self.migrate_automatic(True)['changed_count'], 1)
+        after = repository.list_by_case_ids(['cost-source-case'])['cost-source-case']
+        self.assertEqual((after['decision_mode'], after['version']), ('automatic', 2))
+        self.assertIsNone(after['source_allocations'])  # Preserve the original historical evidence.
+        self.assertEqual(after['allocations'], before['allocations'])
+        for status in ('pending', 'allocated'):
+            response = app.handle_request('GET', f'/api/cost-statistics/manual-allocations?status={status}&page_size=20')
+            self.assertEqual(response.status_code, 200, response.body)
+            result = json.loads(response.body)
+            self.assertEqual(result['items'], [])
+            self.assertEqual(result['counts'], {'pending': 0, 'allocated': 0})
+            self.assertEqual(result['row_count'], 0)
+        for view, page in pages.items():
+            current = self.query.get_explorer_page(scope='all', view=view, filters={}, cursor=None, page_size=20)
+            self.assertEqual(current, page)
+        self.assertEqual(self.migrate_automatic(True)['changed_count'], 0)
+        with self.assertRaises(CostStatisticsManualAllocationConflictError):
+            self.save(stale_payload)
+        events = self.connection.fetch_all("select payload from audit.events where action='cost_statistics.manual_allocation.retire_automatic'")
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]['payload']['before'], before)
+        with self.connection.transaction() as tx:
+            service = CostStatisticsAutomaticMigrationService(
+                canonical_repository=PostgresCostStatisticsCanonicalRepository(tx, transaction_bound=True),
+                allocation_repository=PostgresCostStatisticsManualAllocationRepository(tx),
+                audit_repository=PostgresOperationsAuditRepository(tx))
+            restored = service.restore(case_id='cost-source-case', expected_version=2, actor_id='restore-test')
+            self.assertEqual(restored['version'], 3)
+            with self.assertRaisesRegex(ValueError, 'decision changed'):
+                service.restore(case_id='cost-source-case', expected_version=2, actor_id='restore-test')
+        restored = repository.list_by_case_ids(['cost-source-case'])['cost-source-case']
+        self.assertIsNone(restored['source_allocations'])
+        self.assertEqual(restored['allocations'], before['allocations'])
+        self.assertEqual(self.service.get_task('cost-source-case', can_save=True)['source_allocations'], task['source_allocations'])
+        for table, rows in business_before.items():
+            self.assertEqual(self.connection.fetch_all(f'select to_jsonb(t) as row from {table} t order by id'), rows)
+
     def test_editing_scoped_automatic_decision_preserves_outside_sources(self):
         self.add_interest_tag()
         self.connection.execute("""insert into app.bank_transaction_categories
