@@ -418,7 +418,7 @@ describe("Workbench columns and inline actions", () => {
       expect(detailTrigger).not.toHaveClass("row-action-btn");
       expect(detailTrigger).not.toHaveAttribute("title");
     }
-    expect(within(bankRow as HTMLElement).getByRole("button", { name: "更多操作" })).toBeInTheDocument();
+    expect(within(bankRow as HTMLElement).queryByRole("button", { name: "更多操作" })).not.toBeInTheDocument();
     expect(within(bankRow as HTMLElement).queryByRole("button", { name: "详情" })).not.toBeInTheDocument();
     expect(within(openInvoiceRow as HTMLElement).queryByRole("button", { name: "更多操作" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "忽略" })).not.toBeInTheDocument();

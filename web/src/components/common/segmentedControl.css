@@ -55,3 +55,23 @@
 .switch-surface__body--padded { padding: 12px; }
 .switch-surface__body--padded > :first-child { margin-top: 0; }
 .switch-surface__body--padded > :last-child { margin-bottom: 0; }
+
+/* Output invoice status options remain visible; other pages retain their own rail layout. */
+.invoice-count-segments.output-invoice-status-segments > :is(.tabs__list, .tabs__list-container),
+.invoice-count-segments.output-invoice-status-segments > .tabs__list-container > .tabs__list {
+  max-width: 100%;
+  overflow: visible;
+}
+.invoice-count-segments.output-invoice-status-segments > .tabs__list,
+.invoice-count-segments.output-invoice-status-segments > .tabs__list-container > .tabs__list {
+  flex-wrap: wrap;
+  width: 100%;
+  row-gap: 4px;
+}
+.invoice-count-segments.output-invoice-status-segments > .tabs__list > .tabs__tab,
+.invoice-count-segments.output-invoice-status-segments > .tabs__list-container > .tabs__list > .tabs__tab {
+  flex: 0 0 auto;
+  height: 34px;
+  min-height: 34px;
+  padding-inline: 9px;
+}

@@ -1874,11 +1874,6 @@ export default function ReconciliationWorkbenchPage() {
     action: WorkbenchInlineAction,
     group: WorkbenchRelationGroup,
   ) => {
-    if (action === "relation-status") {
-      openActionResultDialog(`当前关联情况：${row.status}`, "关联情况");
-      return;
-    }
-
     if (!ensureCanWriteWorkbench()) {
       return;
     }

@@ -12,13 +12,13 @@ const cancelCashSpecialPath = "/api/workbench/actions/cancel-cash-special";
 const workbenchRowIds = ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"];
 const workbenchRowTypes = ["oa", "bank", "invoice"];
 
-async function openPairedBankRowMenu(page: Page) {
+async function findPairedBankRow(page: Page) {
   const pairedGroup = page.getByTestId(pairedGroupTestId);
   await expect(pairedGroup).toBeVisible();
 
   const bankRow = pairedGroup.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ });
   await expect(bankRow).toBeVisible();
-  await bankRow.getByRole("button", { name: "更多" }).click();
+  await expect(bankRow.getByRole("button", { name: /更多/ })).toHaveCount(0);
 
   return { pairedGroup, bankRow };
 }
@@ -46,7 +46,7 @@ function expectWorkbenchRowIds(body: Record<string, unknown>) {
 }
 
 test.describe("workbench cash special browser flow", () => {
-  test("handles cash pass-through, ticket purchase, and cancel special processing", async ({ page }) => {
+  test("handles cash pass-through, ticket purchase, and cancel special processing", async ({ page }, info) => {
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "user",
       workbenchInitialRelationConfirmed: true,
@@ -56,10 +56,16 @@ test.describe("workbench cash special browser flow", () => {
     await page.goto("/");
     await expect(page.getByTestId(pairedGroupTestId)).toBeVisible();
 
+    const note = page.locator('.workbench-bank-note-content').filter({ has: page.getByRole('button', { name: '确认为过账' }) });
+    await expect(note).toHaveCSS('flex-direction', 'column');
+    const actionsBox = (await note.locator('.row-actions').boundingBox())!;
+    const textBox = (await note.locator(':scope > :first-child').boundingBox())!;
+    expect(actionsBox.y).toBeGreaterThanOrEqual(textBox.y + textBox.height);
+    await page.screenshot({ path: info.outputPath("cash-text-actions.png"), animations: "disabled" });
     const workbenchLoadsBeforePassThrough = api.count(workbenchLoadPath);
-    await openPairedBankRowMenu(page);
+    await findPairedBankRow(page);
     const passThroughResponse = waitForWorkbenchPost(page, passThroughPath);
-    await page.getByRole("menuitem", { name: "确认为过账" }).click();
+    await page.getByRole("button", { name: "确认为过账" }).click();
 
     expect((await passThroughResponse).status()).toBe(200);
     await expect(page.getByRole("dialog", { name: "全局操作进度" })).toHaveCount(0);
@@ -76,8 +82,8 @@ test.describe("workbench cash special browser flow", () => {
     await expectNoUnexpectedSuccessUiErrors(page);
 
     const workbenchLoadsBeforeTicket = api.count(workbenchLoadPath);
-    await openPairedBankRowMenu(page);
-    await page.getByRole("menuitem", { name: "确认为买票" }).click();
+    await findPairedBankRow(page);
+    await page.getByRole("button", { name: "确认为买票" }).click();
 
     const ticketDialog = page.getByRole("dialog", { name: "确认买票成本" });
     await expect(ticketDialog).toBeVisible();
@@ -115,9 +121,9 @@ test.describe("workbench cash special browser flow", () => {
     await expectNoUnexpectedSuccessUiErrors(page);
 
     const workbenchLoadsBeforeCancel = api.count(workbenchLoadPath);
-    await openPairedBankRowMenu(page);
+    await findPairedBankRow(page);
     const cancelResponse = waitForWorkbenchPost(page, cancelCashSpecialPath);
-    await page.getByRole("menuitem", { name: "取消现金处理" }).click();
+    await page.getByRole("button", { name: "取消现金处理" }).click();
 
     expect((await cancelResponse).status()).toBe(200);
     await expect(page.getByRole("dialog", { name: "全局操作进度" })).toHaveCount(0);
@@ -133,4 +139,32 @@ test.describe("workbench cash special browser flow", () => {
     expect(api.count(workbenchLoadPath)).toBe(workbenchLoadsBeforeCancel + 1);
     await expectNoUnexpectedSuccessUiErrors(page);
   });
+});
+
+test("canceling ticket entry does not write; a rejected cash action does not refresh or retry", async ({ page }) => {
+  const api = await installDeterministicApiMocks(page, {
+    sessionMode: "user", workbenchInitialRelationConfirmed: true, workbenchCashSpecialActions: true,
+  });
+  await page.goto("/");
+  await findPairedBankRow(page);
+  const loads = api.count(workbenchLoadPath);
+  await page.getByRole("button", { name: "确认为买票" }).click();
+  const dialog = page.getByRole("dialog", { name: "确认买票成本" });
+  await dialog.getByRole("button", { name: "取消", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(api.count(`POST ${ticketPurchasePath}`)).toBe(0);
+  let writes = 0;
+  await page.route(`**${passThroughPath}`, async route => {
+    writes++;
+    await route.fulfill({ status: 409, json: { error: "当前关联已变更" } });
+  });
+  await page.getByRole("button", { name: "确认为过账" }).click();
+  const failure = page.getByRole("dialog", { name: "全局操作进度" });
+  await expect(failure.getByRole("heading", { name: "操作失败" })).toBeVisible();
+  await expect(failure.getByText("关联台数据已变化，请刷新后重新预览。")).toBeVisible();
+  await failure.getByRole("button", { name: "确定", exact: true }).click();
+  await expect(page.getByRole("button", { name: "确认为过账" })).toBeEnabled();
+  expect(writes).toBe(1);
+  expect(api.count(workbenchLoadPath)).toBe(loads);
+  expect(api.count(operationBarrierPath)).toBe(0);
 });

@@ -156,9 +156,20 @@ function WorkbenchRecordCard({
             className={`record-card-cell cell-${column.kind ?? "text"}${column.className ? ` ${column.className}` : ""}`}
             role="cell"
           >
-            <div className={`record-card-cell-content${isApplicant ? " workbench-oa-applicant-content" : ""}${showLeadingControl ? " record-card-cell-content-with-inline-control" : ""}`}>
+            <div className={`record-card-cell-content${paneId === "bank" && column.key === "note" ? " workbench-bank-note-content" : ""}${isApplicant ? " workbench-oa-applicant-content" : ""}${showLeadingControl ? " record-card-cell-content-with-inline-control" : ""}`}>
               {showLeadingControl ? <span className="record-card-inline-prefix-control">{leadingControl}</span> : null}
               {renderCellValue(column, value, row, paneId, zoneId, showInlineDetail, () => onOpenDetail(row), searchQuery, bankPartsContent)}
+              {paneId === "bank" && column.key === "note" && !readOnly ? (
+                <RowActions
+                  availableActions={row.availableActions}
+                  canOperateData={canOperateData}
+                  recordType={row.recordType}
+                  showDetailAction={!isSummaryRow && !showInlineDetail}
+                  showWorkflowActions={showWorkflowActions}
+                  onAction={action => onRowAction(row, action)}
+                  onOpenDetail={() => onOpenDetail(row)}
+                />
+              ) : null}
               {isApplicant ? (
                 showApplicantDetail || anomalyIndicator ? (
                   <span className="workbench-oa-applicant-actions">
@@ -177,26 +188,6 @@ function WorkbenchRecordCard({
           </div>
         );
       })}
-      {paneId === "bank" && !readOnly ? (
-        <div className="record-card-compact-actions">
-          <RowActions
-            compact
-            availableActions={row.availableActions}
-            canOperateData={canOperateData}
-            recordType={row.recordType}
-            showDetailAction={!isSummaryRow && !showInlineDetail}
-            showWorkflowActions={showWorkflowActions}
-            onAction={(action, event) => {
-              event?.stopPropagation();
-              onRowAction(row, action);
-            }}
-            onOpenDetail={(event) => {
-              event?.stopPropagation();
-              onOpenDetail(row);
-            }}
-          />
-        </div>
-      ) : null}
     </div>
   );
 }

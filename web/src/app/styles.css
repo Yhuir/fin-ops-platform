@@ -3652,13 +3652,13 @@ textarea {
 }
 
 .output-invoice-collections-query .page-toolbar__group--left {
-  flex: 1 1 960px;
+  flex: 1 1 1200px;
   min-width: 0;
   max-width: 100%;
 }
 
 .output-invoice-collections-query .page-toolbar__group--right {
-  flex: 1 1 430px;
+  flex: 1 1 480px;
   min-width: 0;
 }
 
@@ -15601,11 +15601,20 @@ body.column-layout-dragging {
 
 .row-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   align-items: flex-start;
-  gap: 3px;
-  position: relative;
-  min-width: max-content;
+  gap: 6px;
+  min-width: 0;
+}
+
+.workbench-bank-note-content {
+  flex-direction: column;
+}
+
+.record-card-bank .row-actions {
+  justify-content: center;
+  margin-top: 6px;
 }
 
 .candidate-grid-body {
@@ -15728,39 +15737,6 @@ body.column-layout-dragging {
   }
 }
 
-.record-card-compact-actions {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  z-index: 5;
-  opacity: 0.34;
-  transition: opacity 120ms ease;
-}
-
-.record-card:hover .record-card-compact-actions,
-.record-card:focus-within .record-card-compact-actions {
-  opacity: 1;
-}
-
-.row-actions-compact {
-  min-width: 0;
-}
-
-.row-actions-compact button {
-  width: 24px;
-  min-width: 24px;
-  height: 24px;
-  min-height: 24px;
-  border: 1px solid #d8e1eb;
-  border-radius: 7px;
-  background: rgba(255, 255, 255, 0.94);
-  color: #334155;
-}
-
-.row-menu-item-warning {
-  color: #b54708;
-}
-
 .row-action-btn,
 .detail-close-btn {
   display: inline-flex;
@@ -15829,53 +15805,6 @@ body.column-layout-dragging {
   border-color: #f4c145;
   background: #fff7de;
   color: #9a6700;
-}
-
-.row-menu-wrap {
-  position: relative;
-}
-
-.row-menu {
-  position: absolute;
-  top: 30px;
-  right: 0;
-  min-width: 132px;
-  padding: 4px;
-  border: 1px solid #d8e1eb;
-  border-radius: 12px;
-  background: #ffffff;
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
-  display: grid;
-  gap: 2px;
-  z-index: 4;
-}
-
-.row-menu-portal {
-  z-index: 70;
-}
-
-.row-menu-item {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  min-height: 28px;
-  padding: 0 9px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: #243b53;
-  font-size: 12px;
-  font-weight: 700;
-  text-align: left;
-  cursor: pointer;
-}
-
-.row-menu-item:hover {
-  background: #f2f7fd;
-}
-
-.row-menu-item.warning {
-  color: #b54708;
 }
 
 .pane-splitter {

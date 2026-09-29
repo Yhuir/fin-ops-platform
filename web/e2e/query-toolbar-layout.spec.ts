@@ -39,10 +39,12 @@ for (const route of ['oa-pending-payments', 'output-invoice-collections', 'pendi
         if (width === 1800) {
           expect(Math.abs(boxes[0].y - boxes[1].y)).toBeLessThanOrEqual(1);
           expect(boxes[0].right).toBeLessThanOrEqual(boxes[1].x);
-          const segments = toolbar.getByRole(route === 'oa-pending-payments' ? 'radiogroup' : 'tablist');
-          const segmentBox = await segments.boundingBox();
-          expect(Math.abs(segmentBox!.y - boxes[0].y)).toBeLessThanOrEqual(1);
-          expect(Math.abs(segmentBox!.height - boxes[0].height)).toBeLessThanOrEqual(1);
+          if (route === 'oa-pending-payments') {
+            const segments = toolbar.getByRole('radiogroup');
+            const segmentBox = await segments.boundingBox();
+            expect(Math.abs(segmentBox!.y - boxes[0].y)).toBeLessThanOrEqual(1);
+            expect(Math.abs(segmentBox!.height - boxes[0].height)).toBeLessThanOrEqual(1);
+          }
         }
       }
       await page.screenshot({ path: info.outputPath(`${route}-${width}.png`), animations: 'disabled' });

@@ -320,7 +320,7 @@ export default function OutputInvoiceCollectionsPage() {
           <div className="output-invoice-collections-content">
             <PageToolbar className="output-invoice-collections-query"
               left={<div className="output-invoice-collections-status-section">
-                <InvoiceCountSegments label="销项发票状态分类" selectedKey={selectedStatus} unit="张" pending={countsPending} invalid={Boolean(error)}
+                <InvoiceCountSegments className="output-invoice-status-segments" label="销项发票状态分类" selectedKey={selectedStatus} unit="张" pending={countsPending} invalid={Boolean(error)}
                   options={[
                     { key: "all", label: "全部", count: statusTotal },
                     ...(statusOptions?.map(option => ({ key: option.value, label: option.label, count: option.count })) ?? []),
