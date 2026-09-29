@@ -8,6 +8,8 @@ const legacyWorkbenchTables = new Set([
 ]);
 
 const approvedNativeTableSurfaces = new Set([
+  // Static source key/value pairs use native row headers, without data-grid selection/sorting.
+  "components/common/EntityDetailContent.tsx",
   "features/bankDetails/AutoTagRulesDrawer.tsx",
   // Grouped source-entry form with per-OA add rows; not a selectable data-list surface.
   "components/cost-statistics/CostSourceAllocationForm.tsx",

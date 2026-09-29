@@ -79,7 +79,7 @@ class EtcRelationPageReadsTests(unittest.TestCase):
         pending = PendingInvoiceCanonicalQueryService(repository=PostgresPendingInvoiceCanonicalRepository(self.connection))
         row = pending.rows({'direction':['expense'],'filter':['all']})['rows'][0]
         self.assertEqual(row['input_invoices']['relation_count'], 47)
-        self.assertEqual(len(pending.relation_detail('etc-bank',direction='expense',kind='invoice')['sections']),47)
+        self.assertEqual(len({section['document_id'] for section in pending.relation_detail('etc-bank',direction='expense',kind='invoice')['sections']}),47)
         usage = InputInvoiceUsageCanonicalQueryService(repository=PostgresInputInvoiceUsageQueryRepository(self.connection),
             row_assembler=InputInvoiceUsageQueryService(import_service=ImportNormalizationService(), payment_rules_provider=_UnexpectedPaymentRulesProvider()))
         payload = usage.rows({'keyword':['NO-47']})
@@ -98,8 +98,9 @@ class EtcRelationPageReadsTests(unittest.TestCase):
 
     def test_export_expands_real_invoice_members_and_count_does_not_hydrate_preview(self):
         from io import BytesIO
-        from openpyxl import load_workbook
+
         from fin_ops_platform.services.input_invoice_usage_export_service import InputInvoiceUsageExportService
+        from openpyxl import load_workbook
         usage = InputInvoiceUsageCanonicalQueryService(repository=PostgresInputInvoiceUsageQueryRepository(self.connection),
             row_assembler=InputInvoiceUsageQueryService(import_service=ImportNormalizationService(), payment_rules_provider=_UnexpectedPaymentRulesProvider()))
         service = InputInvoiceUsageExportService(row_export_loader=usage.export_rows)
@@ -117,10 +118,11 @@ class EtcRelationPageReadsTests(unittest.TestCase):
         self.assertEqual(service.export_summary()["row_count"],46)
 
     def test_pending_export_expands_banks_without_duplicating_group_amounts(self):
-        from io import BytesIO
         from decimal import Decimal
-        from openpyxl import load_workbook
+        from io import BytesIO
+
         from fin_ops_platform.services.pending_invoice_service import PendingInvoiceQueryService
+        from openpyxl import load_workbook
         self.connection.execute("""insert into app.bank_transactions(legacy_mongo_id,account_no,txn_direction,counterparty_name_raw,amount,signed_amount,txn_date,txn_month,status)
             values ('etc-bank-2','8106','outflow','ETC还款',24,-24,'2026-05-20','2026-05-01','pending')""")
         self.connection.execute("""update app.workbench_pair_relations set row_ids=array_append(row_ids,'etc-bank-2'),row_types=array_append(row_types,'bank')""")

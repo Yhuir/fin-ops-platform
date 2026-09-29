@@ -79,9 +79,10 @@ test.describe("input invoice usage relation browser fan-out", () => {
     await expect(workflow).toBeVisible();
     const candidateInvoice = workflow.getByRole("row", { name: /SD-INV-E2E-REL-001/ });
     await expect(candidateInvoice).toBeVisible();
-    await expect(candidateInvoice.getByText("未关联oa")).toBeVisible();
+    await expect(candidateInvoice.getByText("未关联流水")).toBeVisible();
+    await candidateInvoice.locator("label").click();
     await expect(workflow.getByLabel("选择候选发票 SD-INV-E2E-REL-001")).toBeChecked();
-    await expect(workflow.getByLabel("选择候选发票 SD-INV-E2E-001")).toBeChecked();
+    await expect(workflow.getByLabel("选择候选发票 SD-INV-E2E-001")).not.toBeChecked();
     expect(api.count("POST /api/input-invoice-usage/oa-reverse/oa-draft")).toBe(0);
 
     await recordLatency({
@@ -134,9 +135,8 @@ test.describe("input invoice usage relation browser fan-out", () => {
     });
     await expect(refreshedWorkflow).toBeVisible();
     const linkedInvoice = refreshedWorkflow.getByRole("row", { name: /SD-INV-E2E-REL-001/ });
-    await expect(linkedInvoice).toBeVisible();
-    await expect(linkedInvoice.getByText("已关联oa")).toBeVisible();
-    await expect(refreshedWorkflow.getByLabel("已关联 OA 发票 SD-INV-E2E-REL-001 不可选择")).toBeDisabled();
+    await expect(linkedInvoice).toHaveCount(0);
+    await expect(refreshedWorkflow.getByLabel("选择候选发票 SD-INV-E2E-REL-001")).toHaveCount(0);
     expect(api.count("POST /api/input-invoice-usage/oa-reverse/oa-draft")).toBe(0);
 
     await recordLatency({

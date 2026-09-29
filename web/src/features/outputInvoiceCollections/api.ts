@@ -1,3 +1,4 @@
+import { sourceDetailSections } from "../sourceDetail";
 import { selectionFilters, type ExportSelection, type ExportSummary, type ExportOption } from "../exports/types";
 import { mapBankSplitParts } from '../bankSplits/api';
 import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
@@ -340,129 +341,22 @@ function mapRowsResponse(payload: unknown): OutputInvoiceCollectionRowsResponse 
   };
 }
 
-function detailField(label: string, value: unknown): OutputInvoiceCollectionDetailResponse["sections"][number]["fields"][number] {
-  return {
-    label,
-    value: value === undefined || value === null || typeof value === "object"
-      ? ""
-      : typeof value === "boolean"
-        ? value ? "是" : "否"
-        : stringValue(value),
-  };
-}
-
-function detailSection(title: string, fields: OutputInvoiceCollectionDetailResponse["sections"][number]["fields"]) {
-  return { title, fields: fields.filter((field) => stringValue(field.value).trim() !== "") };
-}
-
-function compactDetailSections(sections: OutputInvoiceCollectionDetailResponse["sections"]) {
-  return sections.filter((section) => section.fields.length > 0);
-}
-
-function bankDirectionLabel(value: unknown) {
-  const raw = stringValue(value);
-  if (raw === "inflow" || raw === "income") {
-    return "收入";
-  }
-  if (raw === "outflow" || raw === "expense") {
-    return "支出";
-  }
-  return raw;
-}
-
 function mapInvoiceDetailResponse(payload: unknown): OutputInvoiceCollectionDetailResponse {
   const raw = objectValue(payload);
-  const invoiceNo = stringValue(camelOrSnake(raw, "digitalInvoiceNo", "digital_invoice_no") ?? camelOrSnake(raw, "invoiceNo", "invoice_no"));
-  const reversalTargetInvoiceNos = arrayValue(
-    camelOrSnake(raw, "reversalTargetInvoiceNos", "reversal_target_invoice_nos"),
-  ).map(stringValue).filter(Boolean);
-  const sections = compactDetailSections([
-    detailSection("发票主信息", [
-      detailField("发票号码", camelOrSnake(raw, "invoiceNo", "invoice_no")),
-      detailField("发票代码", camelOrSnake(raw, "invoiceCode", "invoice_code")),
-      detailField("数电发票号码", camelOrSnake(raw, "digitalInvoiceNo", "digital_invoice_no")),
-      detailField("开票日期", camelOrSnake(raw, "invoiceDate", "invoice_date")),
-      detailField("销方名称", camelOrSnake(raw, "sellerName", "seller_name")),
-      detailField("销方识别号", camelOrSnake(raw, "sellerTaxNo", "seller_tax_no")),
-      detailField("购买方名称", camelOrSnake(raw, "buyerName", "buyer_name")),
-      detailField("购买方识别号", camelOrSnake(raw, "buyerTaxNo", "buyer_tax_no")),
-    ]),
-    detailSection("金额与税额", [
-      detailField("不含税金额", raw.amount),
-      detailField("税率", camelOrSnake(raw, "taxRate", "tax_rate")),
-      detailField("税额", camelOrSnake(raw, "taxAmount", "tax_amount")),
-      detailField("价税合计", camelOrSnake(raw, "totalWithTax", "total_with_tax")),
-    ]),
-    detailSection("业务与票据", [
-      detailField("税收分类编码", camelOrSnake(raw, "taxClassificationCode", "tax_classification_code")),
-      detailField("特定业务类型", camelOrSnake(raw, "specificBusinessType", "specific_business_type")),
-      detailField("货物或应税劳务名称", camelOrSnake(raw, "taxableItemName", "taxable_item_name")),
-      detailField("被冲红蓝字发票号码", reversalTargetInvoiceNos.join("；")),
-      detailField("发票来源", camelOrSnake(raw, "invoiceSource", "invoice_source")),
-      detailField("发票票种", camelOrSnake(raw, "invoiceKind", "invoice_kind")),
-      detailField("发票状态", camelOrSnake(raw, "invoiceStatus", "invoice_status")),
-      detailField("是否正数发票", camelOrSnake(raw, "isPositiveInvoice", "is_positive_invoice")),
-      detailField("发票风险等级", camelOrSnake(raw, "riskLevel", "risk_level")),
-      detailField("开票人", raw.issuer),
-      detailField("备注", raw.remark),
-    ]),
-    ...arrayValue(camelOrSnake(raw, "lineItems", "line_items")).map((item, index) => {
-      const line = objectValue(item);
-      return detailSection(`货物或应税劳务明细 ${index + 1}`, [
-        detailField("货物或应税劳务名称", camelOrSnake(line, "taxableItemName", "taxable_item_name")),
-        detailField("规格型号", camelOrSnake(line, "specificationModel", "specification_model")),
-        detailField("单位", line.unit),
-        detailField("数量", line.quantity),
-        detailField("单价", camelOrSnake(line, "unitPrice", "unit_price")),
-        detailField("金额", line.amount),
-        detailField("税率", camelOrSnake(line, "taxRate", "tax_rate")),
-        detailField("税额", camelOrSnake(line, "taxAmount", "tax_amount")),
-        detailField("价税合计", camelOrSnake(line, "totalWithTax", "total_with_tax")),
-        detailField("备注", line.remark),
-      ]);
-    }),
-  ]);
-  return { title: "销项发票详情", subtitle: invoiceNo, sections };
+  return {title: "发票详情", detailAvailable: raw.detailAvailable !== false,
+    sections: raw.detailAvailable === false ? [] : sourceDetailSections(raw.sections)};
 }
 
 function mapBankDetailResponse(payload: unknown): OutputInvoiceCollectionDetailResponse {
   const raw = objectValue(payload);
-  return {
-    title: "流水详情",
-    subtitle: stringValue(camelOrSnake(raw, "counterpartyName", "counterparty_name")),
-    sections: compactDetailSections([
-      detailSection("流水主信息", [
-        detailField("对方户名", camelOrSnake(raw, "counterpartyName", "counterparty_name")),
-        detailField("交易日期", camelOrSnake(raw, "transactionDate", "transaction_date")),
-        detailField("金额", raw.amount),
-        detailField("收支方向", bankDirectionLabel(camelOrSnake(raw, "directionLabel", "direction_label") ?? raw.direction)),
-        detailField("账号", camelOrSnake(raw, "accountNo", "account_no")),
-      ]),
-      detailSection("摘要与备注", [
-        detailField("摘要", raw.summary),
-        detailField("备注", raw.remark),
-      ]),
-    ]),
-  };
+  return {title: "银行流水详情", detailAvailable: raw.detailAvailable !== false,
+    sections: raw.detailAvailable === false ? [] : sourceDetailSections(raw.sections)};
 }
 
 function mapRelationDetailResponse(payload: unknown): OutputInvoiceCollectionDetailResponse {
   const raw = objectValue(payload);
-  const title = stringValue(raw.kind) === "bank" ? "流水详情" : "销项发票详情";
-  return {
-    title,
-    detailAvailable: camelOrSnake(raw, "detailAvailable", "detail_available") !== false,
-    sections: compactDetailSections(arrayValue(raw.sections).map(value => {
-      const section = objectValue(value);
-      return {
-        bank_transaction_id: stringValue(section.bank_transaction_id) || undefined,
-        ...detailSection(stringValue(section.title), arrayValue(section.fields).map(value => {
-          const field = objectValue(value);
-          return detailField(stringValue(field.label), field.value);
-        })),
-      };
-    })),
-  };
+  return {title: raw.kind === "bank" ? "银行流水详情" : raw.kind === "oa" ? "OA详情" : "发票详情",
+    detailAvailable: raw.detailAvailable !== false, sections: sourceDetailSections(raw.sections)};
 }
 
 function mapFilterOptionsResponse(payload: unknown): OutputInvoiceCollectionFilterOptionsResponse {

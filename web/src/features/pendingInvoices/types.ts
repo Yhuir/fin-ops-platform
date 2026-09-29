@@ -1,3 +1,4 @@
+import type { EntityDetailSection } from "../../components/common/EntityDetailContent";
 import type { BankSplitPart } from '../bankSplits/api';
 export type PendingInvoiceDirection = "expense" | "income" | "all";
 
@@ -350,11 +351,7 @@ export type PendingInvoiceDetailField = {
   value: string | number | null | undefined;
 };
 
-export type PendingInvoiceDetailSection = {
-  bank_transaction_id?: string;
-  title: string;
-  fields: PendingInvoiceDetailField[];
-};
+export type PendingInvoiceDetailSection = EntityDetailSection;
 
 export type PendingInvoiceObjectDetail = {
   title: string;

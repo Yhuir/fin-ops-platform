@@ -1,3 +1,4 @@
+import type { EntityDetailSection } from "../../components/common/EntityDetailContent";
 import type { BankSplitPart } from '../bankSplits/api';
 export const OUTPUT_COLLECTION_STATUS_CODES = [
   "pending_collection", "partial_collected", "collected",
@@ -193,8 +194,5 @@ export type OutputInvoiceCollectionDetailResponse = {
   subtitle?: string;
   detailAvailable?: boolean;
   unavailableReason?: string;
-  sections: Array<{
-    title: string;
-    fields: Array<{ label: string; value: string | number | null | undefined }>;
-  }>;
+  sections: EntityDetailSection[];
 };

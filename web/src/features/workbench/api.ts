@@ -1,3 +1,4 @@
+import { sourceDetailSections } from "../sourceDetail";
 import type { BankSplitPart } from '../bankSplits/api';
 import { fetchImportTaskResult, waitForImportCompletion, type ImportPreparationAccepted } from "../imports/preparation";
 import type {
@@ -205,6 +206,7 @@ type ApiWorkbenchRow = {
   available_actions?: string[];
   summary_fields?: Record<string, unknown>;
   detail_fields?: Record<string, unknown>;
+  source_sections?: unknown;
   tags?: string[];
   cost_excluded?: boolean | null;
   special_metadata?: Record<string, unknown> | null;
@@ -3743,7 +3745,7 @@ export async function fetchWorkbenchRowDetail(
     signal,
     },
   );
-  return mapRow({ ...payload.row, bank_split_version: payload.row.split_version });
+  return { ...mapRow({ ...payload.row, bank_split_version: payload.row.split_version }), sourceSections: sourceDetailSections(payload.row.source_sections) };
 }
 
 export async function confirmWorkbenchLink(payload: ConfirmLinkPayload): Promise<WorkbenchActionResult> {

@@ -262,10 +262,10 @@ export default function OutputInvoiceCollectionsPage() {
     });
   }, []);
 
-  const loadDetail = useCallback((target: OutputInvoiceCollectionDetailTarget) => {
-    if (target.kind === "invoice") return fetchOutputInvoiceCollectionInvoiceDetail(target.id);
-    if (target.kind === "bank") return fetchOutputInvoiceCollectionBankTransactionDetail(target.id);
-    return fetchOutputInvoiceCollectionRowRelationDetail(target);
+  const loadDetail = useCallback((target: OutputInvoiceCollectionDetailTarget, signal?: AbortSignal) => {
+    if (target.kind === "invoice") return fetchOutputInvoiceCollectionInvoiceDetail(target.id, signal);
+    if (target.kind === "bank") return fetchOutputInvoiceCollectionBankTransactionDetail(target.id, signal);
+    return fetchOutputInvoiceCollectionRowRelationDetail(target, signal);
   }, []);
 
 

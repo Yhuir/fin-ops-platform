@@ -4,12 +4,12 @@ from copy import deepcopy
 from typing import Any
 
 from fin_ops_platform.services.bank_transaction_unit import original_bank_transaction
-from fin_ops_platform.services.oa_expense_details import oa_expense_detail_sections
 from fin_ops_platform.services.source_record_details import (
     bank_source_detail,
     invoice_source_detail,
     oa_source_detail,
     source_detail_sections,
+    source_invoice_groups,
     source_relation_sections,
 )
 
@@ -27,15 +27,13 @@ def oa_pending_payment_source_detail(facts: dict[str, Any], kind: str, identifie
     elif kind == "bank":
         payload = bank_source_detail(original_bank_transaction(record))
     else:
-        payload = invoice_source_detail({"primary": record, "line_items": [record], "identity_key": record.id})
+        payload = invoice_source_detail(next(group for group in source_invoice_groups(records) if any(line.id == identifier for line in group["line_items"])))
     sections = source_detail_sections(kind, payload)
-    if kind == "oa":
-        sections.extend(oa_expense_detail_sections(record.expense_items))
     return {"id": record.id, "title": {"oa": "OA详情", "bank": "银行流水详情", "invoice": "发票详情"}[kind],
             "detailAvailable": True, "sections": sections}
 
 
-def oa_pending_payment_relation_details_from_row(row: dict[str, Any], *, kind: str) -> dict[str, Any]:
+def oa_pending_payment_relation_details_from_row(row: dict[str, Any], *, kind: str, facts: dict[str, Any]) -> dict[str, Any]:
     normalized_kind = _text(kind)
     if normalized_kind not in {"oa", "bank", "invoice"}:
         raise ValueError("kind must be oa, bank or invoice.")
@@ -61,7 +59,9 @@ def oa_pending_payment_relation_details_from_row(row: dict[str, Any], *, kind: s
         "relationCount": relation_payload.get("relationCount", 0),
         "hasMultiple": relation_payload.get("hasMultiple", False),
         "summaries": deepcopy(summaries),
-        "sections": source_relation_sections(normalized_kind, summaries),
+        "sections": source_relation_sections(normalized_kind, summaries,
+            groups=source_invoice_groups(facts["invoices"]), transactions=facts["bank_transactions"],
+            oa_records=[*facts.get("completed_records", []), *facts.get("in_progress_records", [])]),
         "relations": _relation_summaries_from_row(row),
     }
 

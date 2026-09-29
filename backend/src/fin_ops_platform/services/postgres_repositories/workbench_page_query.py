@@ -21,6 +21,7 @@ from fin_ops_platform.services.postgres_repositories.common import (
     text,
     text_list,
 )
+from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_sql import (
     completed_oa_application_date_sql,
     completed_oa_application_time_sql,
@@ -32,6 +33,11 @@ from fin_ops_platform.services.postgres_repositories.supporting_document_invoice
 )
 from fin_ops_platform.services.postgres_repositories.workbench_page_hydration import (
     PostgresWorkbenchPageHydrationRepository,
+)
+from fin_ops_platform.services.source_record_details import (
+    bank_source_detail,
+    invoice_source_detail,
+    source_invoice_groups,
 )
 from fin_ops_platform.services.workbench_anomaly_contract import (
     AMOUNT_EXCEPTION_CODES,
@@ -3823,6 +3829,16 @@ class PostgresWorkbenchPageQueryRepository:
                            "debit_amount": amount if row.get("debit_amount") else None,
                            "credit_amount": amount if row.get("credit_amount") else None,
                            "detail_fields": {**row.get("detail_fields", {}), "amount": amount}}
+                if normalized_row_type == "bank":
+                    record = PostgresCoreRepository(self._connection).get_transaction(str(row.get("parent_row_id") or normalized_row_id))
+                    if record is None:
+                        raise ValueError("银行流水原始详情不可用")
+                    row = {**row, "source_sections": bank_source_detail(record)["sections"]}
+                if normalized_row_type == "invoice":
+                    records = PostgresCoreRepository(self._connection).list_invoice_document_members([normalized_row_id])
+                    documents = source_invoice_groups(records)
+                    row = {**row, "source_sections": [section for document in documents
+                                                      for section in invoice_source_detail(document)["sections"]]}
                 return {
                     "month": normalized_scope,
                     "scope_key": normalized_scope,

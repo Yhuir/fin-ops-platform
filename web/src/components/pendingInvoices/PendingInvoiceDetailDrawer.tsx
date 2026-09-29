@@ -1,6 +1,6 @@
 import { useBankSplitClose } from "../../features/bankSplits/useBankSplitClose";
 import BankTransactionDetailContent from "../../features/bankSplits/BankTransactionDetailContent";
-import { useEffect, useState } from "react";
+import { useSourceDetail } from "../../features/useSourceDetail";
 
 import type {
   PendingInvoiceObjectDetail,
@@ -12,7 +12,7 @@ import PendingInvoiceDrawerFrame from "./PendingInvoiceDrawerFrame";
 type PendingInvoiceDetailDrawerProps = {
   open: boolean;
   target: PendingInvoiceObjectDetailTarget | null;
-  loadDetail: (target: PendingInvoiceObjectDetailTarget) => Promise<PendingInvoiceObjectDetail>;
+  loadDetail: (target: PendingInvoiceObjectDetailTarget, signal?: AbortSignal) => Promise<PendingInvoiceObjectDetail>;
   onClose: () => void;
   onBankSplitSaved?: () => void | Promise<void>;
 };
@@ -31,61 +31,24 @@ export default function PendingInvoiceDetailDrawer({
   onBankSplitSaved,
 }: PendingInvoiceDetailDrawerProps) {
   const { close, setDirty } = useBankSplitClose(onClose);
-  const [detail, setDetail] = useState<PendingInvoiceObjectDetail | null>(null);
-  const [requestTarget, setRequestTarget] = useState<PendingInvoiceObjectDetailTarget | null>(null);
-  const [loading, setLoading] = useState(false);
-  const currentRequest = requestTarget === target;
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setRequestTarget(target);
-    if (!open || !target) {
-      setDetail(null);
-      setLoading(false);
-      setError(null);
-      return undefined;
-    }
-    let active = true;
-    setLoading(true);
-    setError(null);
-    setDetail(null);
-    loadDetail(target)
-      .then((payload) => {
-        if (active) {
-          setDetail(payload);
-        }
-      })
-      .catch((reason: unknown) => {
-        if (active) {
-          setError(reason instanceof Error ? reason.message : "详情加载失败");
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setLoading(false);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [loadDetail, open, target]);
+  const { detail, error, loading } = useSourceDetail(open, target, loadDetail);
 
   const title = target ? fallbackTitles[target.kind] : "详情";
-  const sections = currentRequest && detail ? preparePublicDetailSections(detail.sections) : [];
+  const sections = detail ? preparePublicDetailSections(detail.sections) : [];
   const body = (
     <div className="pending-invoice-detail-body">
       <BankTransactionDetailContent onSplitDirtyChange={setDirty} onBankSplitSaved={onBankSplitSaved} bankTransactionId={target?.kind === "bankTransaction" ? target.id : undefined}
-        detailAvailable={currentRequest ? detail?.detailAvailable : undefined}
-        error={currentRequest ? error : null}
-        loading={loading || Boolean(open && target && !currentRequest)}
+        detailAvailable={detail?.detailAvailable}
+        error={error}
+        loading={loading}
         sections={sections}
-        unavailableReason={currentRequest ? detail?.unavailableReason : undefined}
+        unavailableReason={detail?.unavailableReason}
       />
     </div>
   );
 
   return (
-    <PendingInvoiceDrawerFrame
+    <PendingInvoiceDrawerFrame sourceDetail
       closeLabel="关闭详情抽屉"
       onClose={close}
       open={open}

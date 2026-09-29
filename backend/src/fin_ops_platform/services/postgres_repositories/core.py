@@ -480,6 +480,26 @@ class PostgresCoreRepository:
             (normalized_ids, normalized_ids),
         )
 
+    def list_invoice_document_members(self, invoice_ids: list[str]) -> list[Invoice]:
+        identifiers = self._unique_texts(invoice_ids)
+        if not identifiers:
+            return []
+        return self._fetch_invoices_by_clause(
+            """status <> 'deleted' and id in (
+                select member.id from app.invoices member
+                join app.invoices selected on (
+                    member.id = selected.id
+                    or (nullif(selected.digital_invoice_no, '') is not null
+                        and member.digital_invoice_no = selected.digital_invoice_no)
+                    or (nullif(selected.invoice_code, '') is not null
+                        and nullif(selected.invoice_no, '') is not null
+                        and member.invoice_code = selected.invoice_code and member.invoice_no = selected.invoice_no)
+                ) and member.invoice_type = selected.invoice_type
+                where selected.status <> 'deleted'
+                  and (selected.legacy_mongo_id = any(%s::text[]) or selected.id::text = any(%s::text[]))
+            )""", (identifiers, identifiers),
+        )
+
     def list_submitted_etc_invoices(self) -> list[Invoice]:
         rows = self._connection.fetch_all(
             """

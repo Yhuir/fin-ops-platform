@@ -228,7 +228,7 @@ class OaPendingPaymentQueryService:
             identifier=row_id,
             tenant_id=tenant_id,
             requested_scope_key=requested_scope_key,
-            builder=lambda row: oa_pending_payment_relation_details_from_row(row, kind=kind),
+            builder=lambda data: oa_pending_payment_relation_details_from_row(data["row"], kind=kind, facts=data["facts"]),
             not_found_code="row_not_found",
             not_found_message=f"OA pending payment row not found: {row_id}",
         )
@@ -262,7 +262,8 @@ class OaPendingPaymentQueryService:
                     )
                 if identifier_kind != "row":
                     return builder(snapshot.load_facts([descriptor], tenant_id=tenant_id))
-                rows = self._hydrate_rows(snapshot, [descriptor], tenant_id=tenant_id)
+                facts = snapshot.load_facts([descriptor], tenant_id=tenant_id)
+                rows = self._hydrate_rows(snapshot, [descriptor], tenant_id=tenant_id, facts=facts)
         except OaPendingPaymentError:
             raise
         except ValueError as exc:
@@ -274,7 +275,7 @@ class OaPendingPaymentQueryService:
                 status_code=HTTPStatus.NOT_FOUND,
             )
         try:
-            return builder(rows[0])
+            return builder({"row": rows[0], "facts": facts})
         except ValueError as exc:
             raise OaPendingPaymentError("invalid_relation_kind", str(exc)) from exc
 
@@ -284,10 +285,12 @@ class OaPendingPaymentQueryService:
         descriptors: list[dict[str, Any]],
         *,
         tenant_id: str,
+        facts: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         if not descriptors:
             return []
-        facts = repository.load_facts(descriptors, tenant_id=tenant_id)
+        if facts is None:
+            facts = repository.load_facts(descriptors, tenant_id=tenant_id)
         completed_records = list(facts.get("completed_records") or [])
         in_progress_records = list(facts.get("in_progress_records") or [])
         relations = list(facts.get("relations") or [])

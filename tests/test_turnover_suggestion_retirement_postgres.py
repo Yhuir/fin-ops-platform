@@ -7,10 +7,10 @@ from uuid import uuid4
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.common import jsonb
 from fin_ops_platform.services.postgres_repositories.page_business_audit import audit_page_canonical_data
-from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_repositories.turnover_suggestion_retirement import (
     PostgresTurnoverSuggestionRetirementRepository,
 )
+from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 
 from tests.postgres_test_utils import apply_test_migrations, require_postgres_test_database_url, truncate_test_database
 

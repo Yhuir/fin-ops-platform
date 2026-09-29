@@ -1,3 +1,4 @@
+import type { EntityDetailSection } from "../../components/common/EntityDetailContent";
 import type { BankSplitPart } from '../bankSplits/api';
 export type OaPendingPaymentSortDirection = "asc" | "desc";
 export type OaPendingPaymentViewMode = "completed" | "in_progress";
@@ -269,5 +270,5 @@ export type OaPendingPaymentDetailResponse = {
   subtitle?: string;
   detailAvailable?: boolean;
   unavailableReason?: string;
-  sections: Array<{ title: string; fields: Array<{ label: string; value: string | number | null | undefined }> }>;
+  sections: EntityDetailSection[];
 };

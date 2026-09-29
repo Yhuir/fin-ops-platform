@@ -60,11 +60,3 @@ export function mapBankSplitParts(value: unknown): BankSplitPart[] | undefined {
     return part as BankSplitPart;
   });
 }
-
-export async function getBankTransactionSplitsBatch(transactionIds: string[], signal?: AbortSignal) {
-  const response = await apiRequestJson<{ rows: BankSplitDetail[] }>('/api/bank-transactions/splits/query', {
-    method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ transaction_ids: transactionIds }),
-  }, { allowHtmlFallback: false });
-  if (!Array.isArray(response.rows) || response.rows.length !== transactionIds.length) throw new Error('批量流水拆分详情不完整');
-  return response.rows;
-}

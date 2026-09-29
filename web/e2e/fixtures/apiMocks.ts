@@ -9501,6 +9501,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, {
         kind: "invoice",
         invoice: outputInvoiceCollectionRowsPayload().rows[0]?.invoice,
+        sections: [{title: "发票信息", document_id: "out-e2e-001", document_kind: "invoice", fields: [{label: "发票号码", value: "XSFP-E2E-0001"}, {label: "价税合计", value: "12345.67"}]}],
       });
     }
 
@@ -9508,6 +9509,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, {
         kind: "bank",
         bank: outputInvoiceCollectionRowsPayload().rows[0]?.bank,
+        sections: [{title: "交易信息", document_id: "bank-output-e2e-001", document_kind: "bank", bank_transaction_id: "bank-output-e2e-001", fields: [{label: "收入金额", value: "12345.67"}]}],
       });
     }
 
@@ -9516,7 +9518,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         kind: "invoice",
         relation_count: 2,
         has_multiple: true,
-        sections: outputInvoiceReversalRelationSummaries().map((row, index) => ({ title: `发票 ${index + 1}`, fields: [
+        sections: outputInvoiceReversalRelationSummaries().map((row, index) => ({ title: "发票信息", document_id: `output-relation-${index}`, document_kind: "invoice", document_title: `${index ? "红字" : "蓝字"} · ${row.invoice_no}`, fields: [
           { label: "发票号码", value: row.invoice_no },
           { label: "开票日期", value: row.invoice_date },
           { label: "购买方名称", value: row.buyer_name },
@@ -10179,7 +10181,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       if (url.searchParams.get("row_type") !== row.type) {
         return json(route, { error: "workbench_row_type_required" }, 400);
       }
-      return json(route, { row });
+      return json(route, { row: { ...row, source_sections: [{title: row.type === "bank" ? "交易信息" : row.type === "invoice" ? "发票信息" : "申请信息", document_id: row.id, document_kind: row.type, ...(row.type === "bank" ? {bank_transaction_id: row.id} : {}), fields: row.type === "oa" ? [{label: "申请人", value: row.applicant}, {label: "项目名称", value: row.project_name}, {label: "审批完成时间", value: "2026-03-28 18:10"}] : row.type === "bank" ? [{label: "对方户名", value: row.counterparty_name}, {label: "支出金额", value: row.debit_amount}, {label: "备注", value: row.remark}] : [{label: "发票号码", value: row.invoice_no}, {label: "销方名称", value: row.seller_name}]}] } });
     }
 
     if (path === "/api/workbench/settings") {

@@ -11,8 +11,9 @@ from decimal import Decimal
 from typing import Any
 
 from fin_ops_platform.domain.models import Invoice
-from fin_ops_platform.services.bank_transaction_unit import original_bank_summaries
-from fin_ops_platform.services.oa_expense_details import public_oa_expense_items
+from fin_ops_platform.services.bank_transaction_unit import original_bank_summaries, original_bank_transaction
+from fin_ops_platform.services.oa_expense_details import OA_EXPENSE_FIELDS, public_oa_expense_items
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
 
 def source_money(value: Any) -> str:
@@ -45,7 +46,7 @@ def invoice_source_detail(group: dict[str, Any]) -> dict[str, Any]:
     lines: list[Invoice] = list(group["line_items"])
     # A group sum is a business result, not a value printed on a source row.
     single = lines[0] if len(lines) == 1 else None
-    return {
+    payload = {
         "id": primary.id,
         "invoiceIdentityKey": group["identity_key"],
         "invoiceNo": primary.invoice_no if primary.invoice_no != primary.id else None,
@@ -72,6 +73,8 @@ def invoice_source_detail(group: dict[str, Any]) -> dict[str, Any]:
         "remark": primary.remark,
         "lineItems": [invoice_source_line(line) for line in lines],
     }
+    payload["sections"] = source_detail_sections("invoice", payload)
+    return payload
 
 
 OA_SOURCE_DETAIL_KEYS = frozenset({
@@ -93,7 +96,7 @@ def oa_source_fields(fields: dict[str, Any]) -> dict[str, Any]:
 def oa_source_detail(record: Any) -> dict[str, Any]:
     payment = record.apply_type in {"payment_request", "付款申请", "支付申请"}
     fields = oa_source_fields(record.detail_fields)
-    return {
+    payload = {
         "oaId": record.id, "detailAvailable": True,
         "applicantName": record.applicant, "applicationType": record.apply_type,
         "projectName": record.project_name if payment else None,
@@ -103,45 +106,72 @@ def oa_source_detail(record: Any) -> dict[str, Any]:
         "counterpartyName": record.counterparty_name,
         "detailFields": fields, "expenseItems": public_oa_expense_items(record.expense_items),
     }
+    payload["sections"] = source_detail_sections("oa", payload)
+    return payload
+
+
+# These are source projections, shared by every page. Identity metadata is used
+# for grouping/navigation only and is never rendered as a document field.
+SOURCE_FIELD_GROUPS = {
+    "bank": (
+        ("交易信息", (("transactionDate", "交易日期"), ("bookedDate", "入账日期"), ("amount", "金额"), ("balance", "余额"), ("summary", "摘要"))),
+        ("账户信息", (("accountName", "账户名称"), ("accountNo", "账号"), ("counterpartyName", "对方户名"), ("counterpartyAccountNo", "对方账号"), ("counterpartyBankName", "对方开户机构"))),
+        ("凭证与备注", (("bankSerialNo", "银行流水号"), ("enterpriseSerialNo", "企业流水号"), ("accountDetailNo", "账户明细编号-交易流水号"), ("voucherKind", "凭证种类"), ("voucherNo", "凭证号"), ("remark", "备注"))),
+    ),
+    "invoice": (
+        ("发票信息", (("digitalInvoiceNo", "数电发票号码"), ("invoiceNo", "发票号码"), ("invoiceCode", "发票代码"), ("invoiceDate", "开票日期"), ("invoiceKind", "发票票种"), ("invoiceSource", "发票来源"), ("invoiceStatus", "发票状态"), ("isPositiveInvoice", "是否正数发票"), ("riskLevel", "发票风险等级"), ("issuer", "开票人"))),
+        ("购销双方", (("sellerName", "销方名称"), ("sellerTaxNo", "销方识别号"), ("buyerName", "购买方名称"), ("buyerTaxNo", "购买方识别号"))),
+        ("金额与税额", (("amount", "不含税金额"), ("taxRate", "税率"), ("taxAmount", "税额"), ("totalWithTax", "价税合计"))),
+        ("业务信息", (("taxClassificationCode", "税收分类编码"), ("specificBusinessType", "特定业务类型"), ("taxableItemName", "货物或应税劳务名称"), ("remark", "备注"))),
+    ),
+    "oa": (("申请信息", (("applicantName", "申请人"), ("applicationType", "OA类型"), ("projectName", "项目名称"), ("amount", "金额"), ("reason", "申请事由"), ("counterpartyName", "收款方"))),),
+}
+INVOICE_LINE_FIELDS = (("taxableItemName", "货物或应税劳务名称"), ("taxClassificationCode", "税收分类编码"), ("specificBusinessType", "特定业务类型"), ("specificationModel", "规格型号"), ("unit", "单位"), ("quantity", "数量"), ("unitPrice", "单价"), ("amount", "金额"), ("taxRate", "税率"), ("taxAmount", "税额"), ("totalWithTax", "价税合计"), ("remark", "备注"))
 
 
 def source_detail_sections(kind: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
-    """Existing section DTO for consumers that do not use the camel-case adapters."""
-    if kind == "bank":
-        labels = {"counterpartyName": "对方户名", "transactionDate": "交易日期",
-                  "amount": "金额", "accountNo": "账号", "bookedDate": "入账日期",
-                  "accountName": "账户名称", "bankSerialNo": "银行流水号",
-                  "enterpriseSerialNo": "企业流水号", "voucherKind": "凭证种类",
-                  "voucherNo": "凭证号", "accountDetailNo": "账户明细编号-交易流水号",
-                  "counterpartyAccountNo": "对方账号", "counterpartyBankName": "对方开户机构",
-                  "balance": "余额", "summary": "摘要", "remark": "备注"}
-    elif kind == "invoice":
-        labels = {"invoiceNo": "发票号码", "invoiceCode": "发票代码", "digitalInvoiceNo": "数电发票号码",
-                  "invoiceDate": "开票日期", "sellerName": "销方名称", "sellerTaxNo": "销方识别号",
-                  "buyerName": "购买方名称", "buyerTaxNo": "购买方识别号", "amount": "不含税金额",
-                  "taxAmount": "税额", "totalWithTax": "价税合计", "taxRate": "税率",
-                  "invoiceKind": "发票票种", "invoiceStatus": "发票状态", "isPositiveInvoice": "是否正数发票",
-                  "riskLevel": "发票风险等级", "issuer": "开票人", "remark": "备注",
-                  "taxableItemName": "货物或应税劳务名称", "specificBusinessType": "特定业务类型",
-                  "invoiceSource": "发票来源"}
-    elif kind == "oa":
-        labels = {"applicantName": "申请人", "applicationType": "OA类型", "projectName": "项目名称",
-                  "amount": "金额", "reason": "申请事由", "counterpartyName": "收款方"}
-    else:
+    if kind not in SOURCE_FIELD_GROUPS:
         raise ValueError(f"Unknown source detail kind: {kind}")
-    fields = [{"label": label, "value": payload[key]} for key, label in labels.items()
-              if payload.get(key) is not None and payload.get(key) != ""]
-    if kind == "oa":
-        fields.extend({"label": key, "value": value} for key, value in payload["detailFields"].items()
-                      if value is not None and value != "")
-    section = {"title": {"bank": "银行流水", "invoice": "发票", "oa": "OA信息"}[kind], "fields": fields}
+    identifier = str(payload.get("oaId") if kind == "oa" else payload.get("id") or "")
+    if kind == "invoice":
+        polarity = {"是": "蓝字", "否": "红字"}.get(str(payload.get("isPositiveInvoice")), "发票")
+        title = " · ".join(filter(None, [polarity, payload.get("digitalInvoiceNo") or payload.get("invoiceNo")]))
+    elif kind == "bank":
+        title = " · ".join(str(value) for value in (payload.get("counterpartyName"), payload.get("transactionDate")) if value)
+    else:
+        title = " · ".join(str(value) for value in (payload.get("applicantName"), payload.get("workflowNo")) if value)
+    metadata = {"document_id": identifier, "document_kind": kind,
+                "document_title": title or {"bank": "银行流水", "invoice": "发票", "oa": "OA"}[kind]}
     if kind == "bank":
-        section["bank_transaction_id"] = payload["id"]
-    return [section]
+        metadata["bank_transaction_id"] = identifier
+    sections = []
+    def append(title: str, values: Any, fields: Any) -> None:
+        projected = [{"label": label, "value": format(values[key], "f") if isinstance(values[key], Decimal) else values[key]} for key, label in fields
+                     if values.get(key) is not None and values.get(key) != ""]
+        if projected:
+            sections.append({"title": title, "fields": projected, **metadata})
+    for section_title, labels in SOURCE_FIELD_GROUPS[kind]:
+        if kind == "bank":
+            amount_label = {"inflow": "收入金额", "outflow": "支出金额"}.get(payload.get("direction"), "金额")
+            labels = [(key, amount_label if key == "amount" else label) for key, label in labels]
+        values = payload
+        if kind == "oa":
+            values = {**payload, "applicationType": {"payment_request": "支付申请", "expense_claim": "日常报销"}.get(payload.get("applicationType"), payload.get("applicationType"))}
+        append(section_title, values, labels)
+    if kind == "oa":
+        fields = payload.get("detailFields") or {}
+        append("单据信息", fields, [(key, key) for key in fields if key in OA_SOURCE_DETAIL_KEYS])
+        for index, item in enumerate(payload.get("expenseItems") or [], 1):
+            append(f"费用明细 {index}", item, OA_EXPENSE_FIELDS)
+    if kind == "invoice":
+        for index, item in enumerate(payload.get("lineItems") or [], 1):
+            append(f"货物或应税劳务明细 {index}", item, INVOICE_LINE_FIELDS)
+    return sections
 
 
 def bank_source_detail(transaction: Any) -> dict[str, Any]:
-    return {
+    transaction = original_bank_transaction(transaction)
+    payload = {
         "id": transaction.id,
         "counterpartyName": (
             transaction.counterparty_name_raw
@@ -165,6 +195,8 @@ def bank_source_detail(transaction: Any) -> dict[str, Any]:
         "balance": source_money(transaction.balance),
         "bankTextFields": list(transaction.bank_text_fields),
     }
+    payload["sections"] = source_detail_sections("bank", payload)
+    return payload
 
 
 BANK_SOURCE_KEYS = frozenset({
@@ -198,7 +230,11 @@ def workbench_source_row(row: dict[str, Any]) -> dict[str, Any]:
         if payment:
             details["申请事由"] = row.get("reason")
             details["项目名称"] = row.get("project_name")
-        return {**row, "detail_fields": details,
+        payload = query_source_detail("oa", {"oa_id": row["id"], "applicant": row.get("applicant"),
+            "application_type": row.get("apply_type"), "project_name": row.get("project_name"),
+            "amount": row.get("amount"), "reason": row.get("reason"), "counterparty_name": row.get("counterparty_name"),
+            "detail_fields": fields, "expense_items": row.get("expense_items") or []})
+        return {**row, "detail_fields": details, "source_sections": payload["sections"],
                 "expense_items": public_oa_expense_items(row.get("expense_items") or [])}
     keys = BANK_SOURCE_KEYS if kind == "bank" else INVOICE_SOURCE_KEYS
     details = {key: value for key, value in fields.items() if key in keys}
@@ -209,47 +245,97 @@ def workbench_source_row(row: dict[str, Any]) -> dict[str, Any]:
     return {**row, "detail_fields": details}
 
 
-def source_relation_sections(kind: str, summaries: list[Any]) -> list[dict[str, Any]]:
-    typed_summaries = [summary for summary in summaries if isinstance(summary, dict)]
-    if not typed_summaries:
-        return []
-    if kind == "oa":
-        return [
-            {
-                "title": f"OA {index}",
-                "fields": [
-                    {"label": "申请人", "value": summary.get("applicantName")},
-                    {"label": "类型", "value": summary.get("applicationType")},
-                ],
-            }
-            for index, summary in enumerate(typed_summaries, start=1)
-        ]
-    if kind == "bank":
-        typed_summaries = original_bank_summaries(typed_summaries)
-        return [
-            {
-                "title": f"银行流水 {index}",
-                "bank_transaction_id": summary["bankTransactionId"],
-                "fields": [
-                    {"label": "对方户名", "value": summary.get("counterpartyName")},
-                    {"label": "金额", "value": summary.get("amount")},
-                    {"label": "收支方向", "value": summary.get("directionLabel") or summary.get("direction")},
-                    {"label": "摘要", "value": summary.get("summary")},
-                    {"label": "备注", "value": summary.get("remark")},
-                ],
-            }
-            for index, summary in enumerate(typed_summaries, start=1)
-        ]
-    return [
-        {
-            "title": f"发票 {index}",
-            "fields": [
-                {"label": "发票号码", "value": summary.get("invoiceNo")},
-                {"label": "数电发票号码", "value": summary.get("digitalInvoiceNo")},
-                {"label": "开票日期", "value": summary.get("invoiceDate")},
-                {"label": "货物或应税劳务名称", "value": summary.get("taxableItemName")},
-            ],
-        }
-        for index, summary in enumerate(typed_summaries, start=1)
-    ]
+def source_invoice_groups(invoices: list[Invoice]) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, Invoice]] = {}
+    policy = FinancialObjectIdentityPolicy()
+    for invoice in sorted(invoices, key=lambda invoice: invoice.id):
+        key = f"{invoice.invoice_type.value}:{policy.legacy_invoice_identity_key(invoice)}"
+        grouped.setdefault(key, {})[invoice.id] = invoice
+    return [{"identity_key": key, "primary": next(iter(lines.values())), "line_items": list(lines.values())}
+            for key, lines in grouped.items()]
 
+
+def source_relation_sections(kind: str, summaries: list[Any], *, groups: list[dict[str, Any]],
+                             transactions: list[Any], oa_records: list[Any]) -> list[dict[str, Any]]:
+    """Resolve all members against one authorized snapshot; never use summary fields as detail."""
+    typed = [item for item in summaries if isinstance(item, dict)]
+    if kind == "bank":
+        typed = original_bank_summaries(typed)
+    sections: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    banks = {record.id: original_bank_transaction(record) for record in transactions}
+    banks.update({record.id: record for record in list(banks.values())})
+    oas = {record.id: record for record in oa_records}
+    groups = source_invoice_groups([line for group in groups for line in group["line_items"]])
+    invoices = {line.id: group for group in groups for line in group["line_items"]}
+    for summary in typed:
+        key = {"bank": "bankTransactionId", "invoice": "invoiceId", "oa": "oaId"}[kind]
+        identifier = str(summary.get(key) or summary.get("id") or "")
+        if kind == "bank":
+            record = banks.get(identifier)
+            payload = bank_source_detail(record) if record is not None else None
+        elif kind == "oa":
+            record = oas.get(identifier)
+            payload = oa_source_detail(record) if record is not None else None
+        else:
+            group = invoices.get(identifier)
+            payload = invoice_source_detail(group) if group is not None else None
+        if payload is None:
+            raise ValueError("关联单据原始详情不可用")
+        identity = str(payload.get("oaId") if kind == "oa" else payload["id"])
+        if identity not in seen:
+            seen.add(identity)
+            sections.extend(payload["sections"])
+    return sections
+
+
+# Explicit adapters for the existing canonical SQL query DTOs.
+QUERY_SOURCE_KEYS = {
+    "bank": {"id": "id", "transaction_date": "transactionDate", "booked_date": "bookedDate", "txn_direction": "direction", "amount": "amount", "balance": "balance", "summary": "summary", "remark": "remark", "account_name": "accountName", "account_no": "accountNo", "counterparty_name": "counterpartyName", "counterparty_account_no": "counterpartyAccountNo", "counterparty_bank_name": "counterpartyBankName", "statement_serial_no": "bankSerialNo", "enterprise_serial_no": "enterpriseSerialNo", "voucher_type": "voucherKind", "voucher_no": "voucherNo", "account_detail_no": "accountDetailNo"},
+    "invoice": {"id": "id", "invoice_no": "invoiceNo", "digital_invoice_no": "digitalInvoiceNo", "invoice_code": "invoiceCode", "issue_date": "invoiceDate", "seller_name": "sellerName", "seller_tax_no": "sellerTaxNo", "buyer_name": "buyerName", "buyer_tax_no": "buyerTaxNo", "amount_without_tax": "amount", "tax_amount": "taxAmount", "tax_rate": "taxRate", "total_with_tax": "totalWithTax", "tax_classification_code": "taxClassificationCode", "specific_business_type": "specificBusinessType", "taxable_item_name": "taxableItemName", "invoice_source": "invoiceSource", "invoice_kind": "invoiceKind", "invoice_status_from_source": "invoiceStatus", "is_positive_invoice": "isPositiveInvoice", "risk_level": "riskLevel", "issuer": "issuer", "remark": "remark", "model": "specificationModel", "unit": "unit", "quantity": "quantity", "unit_price": "unitPrice"},
+}
+
+
+def query_source_detail(kind: str, row: dict[str, Any]) -> dict[str, Any]:
+    if kind == "invoice" and row.get("line_items"):
+        lines = sorted(row["line_items"], key=lambda item: item["id"])
+        row = {**lines[0], "line_items": lines}
+    if kind == "oa":
+        fields = row.get("detail_fields") or {}
+        payment = row.get("application_type") in {"payment_request", "付款申请", "支付申请"}
+        payload = {"oaId": row.get("oa_id"), "applicantName": row.get("applicant"),
+                   "applicationType": row.get("application_type"), "detailFields": oa_source_fields(fields),
+                   "projectName": row.get("project_name") if payment else None,
+                   "amount": row.get("amount") if payment or fields.get("金额来源") == "主表总金额" else None,
+                   "reason": row.get("reason") if payment else None, "counterpartyName": row.get("counterparty_name"),
+                   "workflowNo": oa_source_fields(fields).get("OA单号"),
+                   "expenseItems": public_oa_expense_items(row.get("expense_items") or [])}
+    else:
+        payload = {target: row.get(source) for source, target in QUERY_SOURCE_KEYS[kind].items()}
+        if kind == "bank" and payload.get("amount") in (None, ""):
+            if row.get("credit_amount") not in (None, "") and row.get("debit_amount") in (None, ""):
+                payload.update(amount=row["credit_amount"], direction="inflow")
+            elif row.get("debit_amount") not in (None, "") and row.get("credit_amount") in (None, ""):
+                payload.update(amount=row["debit_amount"], direction="outflow")
+        if kind == "invoice":
+            lines = row.get("line_items") or [row]
+            payload["lineItems"] = [{target: line.get(source) for source, target in QUERY_SOURCE_KEYS[kind].items()} for line in lines]
+            if len(lines) > 1:
+                for key in ("amount", "taxAmount", "totalWithTax"):
+                    payload[key] = None
+    for data in [payload, *payload.get("lineItems", [])]:
+        for key in ("amount", "balance", "taxAmount", "totalWithTax"):
+            if data.get(key) not in (None, ""):
+                data[key] = source_money(data[key])
+    payload["sections"] = source_detail_sections(kind, payload)
+    return payload
+
+
+def query_invoice_sections(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for row in rows:
+        key = ("digital", row["digital_invoice_no"]) if row.get("digital_invoice_no") else (
+            ("paper", row["invoice_code"], row["invoice_no"]) if row.get("invoice_code") and row.get("invoice_no") else ("id", row["id"]))
+        grouped.setdefault((row.get("invoice_type"), *key), []).append(row)
+    return [section for lines in grouped.values()
+            for section in query_source_detail("invoice", {**lines[0], "line_items": lines})["sections"]]

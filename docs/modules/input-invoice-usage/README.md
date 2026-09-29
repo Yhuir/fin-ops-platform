@@ -10,6 +10,8 @@
 
 ## 当前业务约定
 
+- OA、流水与发票详情及多项关联详情统一从授权 canonical 快照投影原始字段；关系摘要只定位成员，不能充当原始详情。
+
 - 同一只读快照组合 canonical 发票、active relation、OA 与银行用途。列表按关系组件展示，数量按去重发票张数统计，金额按实体去重。
 - relation_status 为 no_oa/oa_no_bank/oa_bank；facet 排除自身筛选，不把缺失详情误判为无关系。
 - 支付规则支持新增、删除和修改；输出 paid/cash_turnover/offset/waiting_payment，未命中为显式待核对。配置与审计由 Settings owner CAS 保存，读取不补造规则。

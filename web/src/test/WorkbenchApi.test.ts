@@ -1933,6 +1933,7 @@ describe("workbench api bank amount mapping", () => {
           row: {
             id: "bank-1",
             source_kind: "bank_transaction",
+            source_sections: [{title: "交易信息", fields: [{label: "金额", value: "120.00"}]}],
             source_id: "bank-1",
             amount: "120.00",
             occurred_on: "2026-05-02",
@@ -1958,6 +1959,7 @@ describe("workbench api bank amount mapping", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ row: {
       id: "interest-child", type: "bank", amount: "1497.22", debit_amount: "1497.22", parent_row_id: "bank-parent",
       parent_amount: "1001497.22", is_split: true, split_version: 2,
+      source_sections: [{title: "交易信息", fields: [{label: "支出金额", value: "1001497.22"}]}],
       bank_split_parts: [{ id: "interest-child", amount: "1497.22", category_code: "interest",
         category_label: "利息", category_path: ["费用", "利息"], relation_case_id: null }],
     } }), { status: 200, headers: { "Content-Type": "application/json" } }));

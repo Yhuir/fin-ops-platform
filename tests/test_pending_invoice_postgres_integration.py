@@ -148,7 +148,7 @@ class PendingInvoicePostgresIntegrationTests(unittest.TestCase):
         """)
         service = PendingInvoiceCanonicalQueryService(repository=PostgresPendingInvoiceCanonicalRepository(self.connection))
         bank = service.bank_transaction_detail('source-bank')
-        fields = {field['label']: field['value'] for field in bank['sections'][0]['fields']}
+        fields = {field['label']: field['value'] for section in bank['sections'] for field in section['fields']}
         self.assertEqual(fields['交易日期'], '2026-09-27')
         self.assertEqual(fields['入账日期'], '2026-09-28')
         self.assertEqual(fields['余额'], '0.00')
@@ -157,7 +157,7 @@ class PendingInvoicePostgresIntegrationTests(unittest.TestCase):
         self.assertNotIn('交易时间', fields)
         self.assertNotIn('币种', fields)
         invoice = service.invoice_detail('source-invoice')
-        fields = {field['label']: field['value'] for field in invoice['sections'][0]['fields']}
+        fields = {field['label']: field['value'] for section in invoice['sections'] for field in section['fields']}
         self.assertEqual(fields['税额'], '0.00')
         self.assertEqual(fields['发票状态'], '正常')
         self.assertNotIn('价税合计', fields)

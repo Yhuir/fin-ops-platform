@@ -2,10 +2,14 @@
 import argparse
 import json
 
-from fin_ops_platform.services.cost_statistics_automatic_migration_service import CostStatisticsAutomaticMigrationService
+from fin_ops_platform.services.cost_statistics_automatic_migration_service import (
+    CostStatisticsAutomaticMigrationService,
+)
 from fin_ops_platform.services.cost_statistics_canonical_repository import PostgresCostStatisticsCanonicalRepository
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-from fin_ops_platform.services.postgres_repositories.cost_statistics_manual_allocation import PostgresCostStatisticsManualAllocationRepository
+from fin_ops_platform.services.postgres_repositories.cost_statistics_manual_allocation import (
+    PostgresCostStatisticsManualAllocationRepository,
+)
 from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
 
 

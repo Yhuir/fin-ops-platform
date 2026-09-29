@@ -10,6 +10,8 @@
 
 ## 当前业务约定
 
+- 来源详情返回统一的 source_sections：流水按父交易定向读取 canonical 字段，发票按真实票身份读取全部商品行；页面分组或列表字段不能代替来源详情。
+
 - WorkbenchQueryFacade 通过专属 PostgreSQL repository 在一个短只读快照查询。首屏两区各 10 组，后续游标续读；精确计数在 cursor 和 LIMIT 前计算，hydrate 仅处理当前页 keys。
 - 正式成员归 workbench-relations；页面分组、来源展示归属和 display-only 发票不能改变成员、版本或完成状态。
 - 人工关联允许同栏或跨栏成员；金额异常需要备注，成员存在、身份、占用和版本仍严格检查。

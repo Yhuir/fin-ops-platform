@@ -93,6 +93,7 @@ export async function downloadOaPendingPaymentSources(
 
 export async function fetchOaPendingPaymentDetail(
   target: OaPendingPaymentDetailTarget,
+  signal?: AbortSignal,
 ): Promise<OaPendingPaymentDetailResponse> {
   const params = new URLSearchParams();
   if (target.scopeKey) {
@@ -101,23 +102,23 @@ export async function fetchOaPendingPaymentDetail(
   const scopeQuery = params.size > 0 ? `?${params.toString()}` : "";
   if (target.kind === "oa") {
     return apiRequestJson<OaPendingPaymentDetailResponse>(
-      `/api/oa-pending-payments/oa/${encodeURIComponent(target.id)}/detail${scopeQuery}`,
+      `/api/oa-pending-payments/oa/${encodeURIComponent(target.id)}/detail${scopeQuery}`, { signal },
     );
   }
   if (target.kind === "bank") {
     return apiRequestJson<OaPendingPaymentDetailResponse>(
-      `/api/oa-pending-payments/bank-transactions/${encodeURIComponent(target.id)}/detail${scopeQuery}`,
+      `/api/oa-pending-payments/bank-transactions/${encodeURIComponent(target.id)}/detail${scopeQuery}`, { signal },
     );
   }
   if (target.kind === "invoice") {
     return apiRequestJson<OaPendingPaymentDetailResponse>(
-      `/api/oa-pending-payments/invoices/${encodeURIComponent(target.id)}/detail${scopeQuery}`,
+      `/api/oa-pending-payments/invoices/${encodeURIComponent(target.id)}/detail${scopeQuery}`, { signal },
     );
   }
   const kind = target.relationKind ?? "bank";
   params.set("kind", kind);
   return apiRequestJson<OaPendingPaymentDetailResponse>(
-    `/api/oa-pending-payments/rows/${encodeURIComponent(target.rowId ?? target.id)}/relation-details?${params.toString()}`,
+    `/api/oa-pending-payments/rows/${encodeURIComponent(target.rowId ?? target.id)}/relation-details?${params.toString()}`, { signal },
   );
 }
 

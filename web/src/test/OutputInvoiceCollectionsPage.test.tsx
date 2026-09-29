@@ -111,6 +111,7 @@ const rowsPayload = {
       invoice: {
         id: "invoice-blue",
         display_no: "XSFP-BLUE-001",
+        sections: [{title: "购销双方", fields: [{label: "购买方名称", value: "云南客户有限公司"}]}],
         invoice_no: "BLUE-001",
         issue_date: "2026-07-08",
         buyer_name: "云南客户有限公司",
@@ -159,7 +160,8 @@ const rowsPayload = {
         primary: {
           id: "invoice-red",
           display_no: "XSFP-RED-001",
-          invoice_no: "RED-001",
+          sections: [{title: "业务信息", fields: [{label: "备注", value: "被红冲蓝字数电发票号码：26532000000395506981"}]}],
+        invoice_no: "RED-001",
           invoice_date: "2026-07-10",
           buyer_name: "云南客户有限公司",
           total_with_tax: "-182400.00",
@@ -175,7 +177,8 @@ const rowsPayload = {
           {
             id: "invoice-red",
             display_no: "XSFP-RED-001",
-            invoice_no: "RED-001",
+            sections: [{title: "业务信息", fields: [{label: "备注", value: "被红冲蓝字数电发票号码：26532000000395506981"}]}],
+        invoice_no: "RED-001",
             invoice_date: "2026-07-10",
             buyer_name: "云南客户有限公司",
             total_with_tax: "-182400.00",
@@ -186,7 +189,8 @@ const rowsPayload = {
           {
             id: "invoice-blue",
             display_no: "XSFP-BLUE-001",
-            invoice_no: "BLUE-001",
+            sections: [{title: "购销双方", fields: [{label: "购买方名称", value: "云南客户有限公司"}]}],
+        invoice_no: "BLUE-001",
             invoice_date: "2026-07-08",
             buyer_name: "云南客户有限公司",
             total_with_tax: "182400.00",
@@ -203,6 +207,7 @@ const rowsPayload = {
       invoice: {
         id: "invoice-red",
         display_no: "XSFP-RED-001",
+        sections: [{title: "业务信息", fields: [{label: "备注", value: "被红冲蓝字数电发票号码：26532000000395506981"}]}],
         invoice_no: "RED-001",
         issue_date: "2026-07-10",
         buyer_name: "云南客户有限公司",
@@ -236,7 +241,8 @@ const rowsPayload = {
         primary: {
           id: "invoice-blue",
           display_no: "XSFP-BLUE-001",
-          invoice_no: "BLUE-001",
+          sections: [{title: "购销双方", fields: [{label: "购买方名称", value: "云南客户有限公司"}]}],
+        invoice_no: "BLUE-001",
           invoice_date: "2026-07-08",
           buyer_name: "云南客户有限公司",
           total_with_tax: "182400.00",
@@ -344,6 +350,7 @@ function installFetchMock(rowPayloadFor: (url: URL) => unknown = () => rowsPaylo
     }
     if (url.pathname === "/api/output-invoice-collections/invoices/invoice-blue/detail") {
       return jsonResponse({
+        sections: [{title: "购销双方", fields: [{label: "购买方名称", value: "云南客户有限公司"}]}],
         invoice_no: "BLUE-001",
         digital_invoice_no: "XSFP-BLUE-001",
         invoice_date: "2026-07-08",
@@ -354,6 +361,7 @@ function installFetchMock(rowPayloadFor: (url: URL) => unknown = () => rowsPaylo
     }
     if (url.pathname === "/api/output-invoice-collections/invoices/invoice-red/detail") {
       return jsonResponse({
+        sections: [{title: "业务信息", fields: [{label: "备注", value: "被红冲蓝字数电发票号码：26532000000395506981"}]}],
         invoice_no: "RED-001",
         digital_invoice_no: "XSFP-RED-001",
         invoice_date: "2026-07-10",
@@ -608,20 +616,19 @@ describe("销项发票收款情况", () => {
     renderAuthenticatedAppAt("/output-invoice-collections");
 
     await user.click(await screen.findByRole("button", { name: "查看发票 XSFP-BLUE-001 详情" }));
-    const invoiceDrawer = await screen.findByRole("dialog", { name: "销项发票详情" });
-    expect(within(invoiceDrawer).getByText("云南客户有限公司")).toBeVisible();
+    const invoiceDrawer = await screen.findByRole("dialog", { name: "发票详情" });
+    expect(await within(invoiceDrawer).findByText("云南客户有限公司")).toBeVisible();
     await user.click(within(invoiceDrawer).getByRole("button", { name: "关闭详情抽屉" }));
 
     await user.click(screen.getByRole("button", { name: "查看发票 XSFP-RED-001 详情" }));
-    const redInvoiceDrawer = await screen.findByRole("dialog", { name: "销项发票详情" });
-    expect(within(redInvoiceDrawer).getByText("被冲红蓝字发票号码")).toBeVisible();
-    expect(within(redInvoiceDrawer).getByText("26532000000395506981")).toBeVisible();
-    expect(within(redInvoiceDrawer).getByText("被红冲蓝字数电发票号码：26532000000395506981")).toBeVisible();
+    const redInvoiceDrawer = await screen.findByRole("dialog", { name: "发票详情" });
+    expect(within(redInvoiceDrawer).queryByText("被冲红蓝字发票号码")).not.toBeInTheDocument();
+    expect(await within(redInvoiceDrawer).findByText("被红冲蓝字数电发票号码：26532000000395506981")).toBeVisible();
     await user.click(within(redInvoiceDrawer).getByRole("button", { name: "关闭详情抽屉" }));
 
     await user.click(screen.getByRole("button", { name: "红蓝票 · 2" }));
-    const relationDrawer = await screen.findByRole("dialog", { name: "销项发票详情" });
-    expect(within(relationDrawer).getByRole("heading", { name: "发票 1" })).toBeVisible();
+    const relationDrawer = await screen.findByRole("dialog", { name: "发票详情" });
+    expect(await within(relationDrawer).findByRole("heading", { name: "发票 1" })).toBeVisible();
     expect(within(relationDrawer).getByRole("heading", { name: "发票 2" })).toBeVisible();
     expect(within(relationDrawer).getByText("XSFP-RED-001")).toBeVisible();
     expect(within(relationDrawer).getByText("XSFP-BLUE-001")).toBeVisible();

@@ -21,13 +21,14 @@ test.describe("销项发票自动红蓝票关系", () => {
       && response.request().method() === "GET");
     await blueRow.getByRole("button", { name: "红蓝票 · 2" }).click();
     expect((await detailResponse).status()).toBe(200);
-    const drawer = page.getByRole("dialog", { name: "销项发票详情" });
+    const drawer = page.getByRole("dialog", { name: "发票详情" });
     await expect(drawer).toBeVisible();
     await expect(drawer.getByText("关联概况")).toHaveCount(0);
     await expect(drawer.getByText("关系数量", { exact: true })).toHaveCount(0);
     await expect(drawer.getByText("是否多条", { exact: true })).toHaveCount(0);
-    await expect(drawer.getByText("XSFP-E2E-0001")).toBeVisible();
-    await expect(drawer.getByText("XSFP-E2E-0002")).toBeVisible();
+    await drawer.getByRole("button", {name: "展开全部", exact: true}).click();
+    await expect(drawer.getByRole("cell", {name: "XSFP-E2E-0001", exact: true})).toBeVisible();
+    await expect(drawer.getByRole("cell", {name: "XSFP-E2E-0002", exact: true})).toBeVisible();
     await expect(drawer.getByText("12,345.67", { exact: true })).toBeVisible();
     await expect(drawer.getByText("-12,345.67", { exact: true })).toBeVisible();
     await expect(drawer.getByText("output_invoice_reversal")).toHaveCount(0);

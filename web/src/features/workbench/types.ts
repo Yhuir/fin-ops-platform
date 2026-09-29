@@ -1,3 +1,4 @@
+import type { EntityDetailSection } from "../../components/common/EntityDetailContent";
 import type { BankSplitPart } from '../bankSplits/api';
 import type {
   BankTransactionTagDictionary,
@@ -201,6 +202,7 @@ export type WorkbenchRecord = {
   counterparty: string;
   tableValues: Record<string, string>;
   detailFields: WorkbenchDetailField[];
+  sourceSections?: EntityDetailSection[];
   actionVariant: WorkbenchActionVariant;
   availableActions: string[];
   tags?: string[];

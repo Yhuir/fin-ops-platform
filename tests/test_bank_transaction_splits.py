@@ -152,10 +152,14 @@ class SplitDrawerProjectionTests(unittest.TestCase):
                  "amount":amount,"direction":"outflow","bank_split_parts":[{"id":"a"},{"id":"b"}]}
                 for child,amount in [("a","1000000.00"),("b","1497.22")]]
         for build in (invoice_sections,oa_sections):
-            sections=build('bank',rows)
-            self.assertEqual(len(sections),1)
+            from fin_ops_platform.domain.enums import TransactionDirection
+            from fin_ops_platform.domain.models import BankTransaction
+            parent = BankTransaction(id='parent', account_no='1234', counterparty_name_raw='原始对方',
+                txn_direction=TransactionDirection.OUTFLOW, amount=Decimal('1001497.22'), signed_amount=Decimal('-1001497.22'))
+            sections=build('bank',rows, groups=[], transactions=[parent], oa_records=[])
+            self.assertEqual({section['document_id'] for section in sections}, {'parent'})
             self.assertEqual(sections[0]['bank_transaction_id'],'parent')
-            self.assertEqual(next(field['value'] for field in sections[0]['fields'] if field['label']=='金额'),'1001497.22')
+            self.assertEqual(next(field['value'] for field in sections[0]['fields'] if field['label']=='支出金额'),'1001497.22')
 
 
 class SplitSelectableTagsTests(unittest.TestCase):

@@ -1,7 +1,6 @@
 from decimal import Decimal
 
 import pytest
-
 from fin_ops_platform.services.bank_split_relation_scope import bank_split_comparison_rows
 
 

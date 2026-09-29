@@ -1,4 +1,4 @@
-import { fetchBankSplits, getBankTransactionSplitsBatch, saveBankSplits } from '../features/bankSplits/api';
+import { fetchBankSplits, saveBankSplits } from '../features/bankSplits/api';
 import { ApiClientError } from '../features/apiClient';
 
 const payload = { transaction_id: 'bank/1', canonical_transaction_id: 'canonical-1', amount: '100.00', direction: 'expense', version: 0, category_code: 'fee', category_label_path: ['费用'], turnover_third_label_options: [], parts: [], tag_definitions: [], can_edit: true };
@@ -34,19 +34,4 @@ test('rejects invalid detail response instead of silently treating it as unsplit
 test('permission failure remains visible', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ error: 'forbidden', message: '无操作权限' }, { status: 403 })));
   await expect(fetchBankSplits('bank-1')).rejects.toBeInstanceOf(ApiClientError);
-});
-
-
-test('batch reads preserve requested identities and order in a single request', async () => {
-  const second = { ...payload, transaction_id: 'bank-2', canonical_transaction_id: 'canonical-2' };
-  const fetch = vi.fn().mockResolvedValue(Response.json({ rows: [second, payload] })); vi.stubGlobal('fetch', fetch);
-  expect(await getBankTransactionSplitsBatch(['bank-2', 'bank/1'])).toEqual([second, payload]);
-  expect(fetch).toHaveBeenCalledOnce();
-  expect(fetch.mock.calls[0][1].method).toBe('POST');
-  expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ transaction_ids: ['bank-2', 'bank/1'] });
-});
-
-test('batch rejects missing identities rather than rendering incomplete parent facts', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ rows: [payload] })));
-  await expect(getBankTransactionSplitsBatch(['bank-1', 'bank-2'])).rejects.toThrow('批量流水拆分详情不完整');
 });

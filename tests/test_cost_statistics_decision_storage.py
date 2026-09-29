@@ -2,13 +2,12 @@ from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
 
-from psycopg.errors import CheckViolation
-
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.cost_statistics_manual_allocation import (
     InMemoryCostStatisticsManualAllocationRepository,
     PostgresCostStatisticsManualAllocationRepository,
 )
+from psycopg.errors import CheckViolation
 
 from tests.postgres_test_utils import apply_test_migrations, require_postgres_test_database_url, truncate_test_database
 

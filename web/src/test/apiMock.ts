@@ -3013,7 +3013,7 @@ function buildWorkbenchDetail(rowId: string) {
     },
   };
 
-  return details[rowId] ?? {
+  const payload = details[rowId] ?? {
     row: {
       id: rowId,
       type: "oa",
@@ -3035,6 +3035,13 @@ function buildWorkbenchDetail(rowId: string) {
       },
     },
   };
+  const row = payload.row as Record<string, unknown>;
+  const fields = row.detail_fields as Record<string, unknown>;
+  const labels = ['支出金额', '账号', '账户名称', '余额', '对方账号', '对方开户机构', '记账日期', '摘要', '备注', '账户明细编号-交易流水号', '企业流水号', '凭证种类', '凭证号', '发票代码', '发票号码', 'OA单号'];
+  if (row.type === 'bank') fields['支出金额'] = row.debit_amount;
+  row.source_sections = [{title: '基本信息', document_id: row.id, document_kind: row.type,
+    fields: labels.filter(label => fields[label] != null).map(label => ({label, value: fields[label]}))}];
+  return payload;
 }
 
 function buildTaxOffsetPayload(month: string) {
@@ -7413,6 +7420,12 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       manualAllocationNonCostReason = String(jsonBody?.non_cost_reason ?? "");
       manualAllocationVersion += 1;
       return jsonResponse({ body: buildManualAllocationTask(relationCaseId) });
+    }
+    if (method === "GET" && /^\/api\/bank-transactions\/[^/]+\/source-detail$/.test(url.pathname)) {
+      const id = decodeURIComponent(url.pathname.split('/').at(-2)!);
+      return jsonResponse({ body: { detail_available: true, sections: [{ title: '交易信息',
+        document_id: id, document_kind: 'bank', bank_transaction_id: id,
+        fields: [{ label: '支出金额', value: '100.00' }, {label: '余额', value: '200.00'}] }] } });
     }
     if (
       url.pathname.startsWith("/api/cost-statistics/bank-transactions/")

@@ -65,21 +65,21 @@ test("shows net allocation and paid-wrong refund as negative drawer evidence", (
 
   render(<CostEntryDetailPanel detail={detail} />);
 
-  const basic = screen.getByRole("grid", { name: "基本信息详情" });
+  const basic = screen.getByRole("table", { name: "基本信息详情" });
   expect(within(basic).getByText("本项净成本")).toBeInTheDocument();
   expect(within(basic).getAllByText("710.00")).toHaveLength(2);
   expect(within(basic).getByText("本笔支出流水原额")).toBeInTheDocument();
   expect(within(basic).getByText("1050.00")).toBeInTheDocument();
-  const source = screen.getByRole("grid", { name: "银行来源详情" });
+  const source = screen.getByRole("table", { name: "银行来源详情" });
   expect(within(source).getByText("bank-1050")).toBeInTheDocument();
   expect(within(source).getByText("2026-08-01 15:58:31")).toBeInTheDocument();
 
-  const reconciliation = screen.getByRole("grid", { name: "金额核对详情" });
+  const reconciliation = screen.getByRole("table", { name: "金额核对详情" });
   expect(within(reconciliation).getByText("关系净支出")).toBeInTheDocument();
   expect(within(reconciliation).getByText("付错退款")).toBeInTheDocument();
   expect(within(reconciliation).getByText("-35.00")).toBeInTheDocument();
 
-  const refundEvidence = screen.getByRole("grid", { name: "关系内银行流水 2详情" });
+  const refundEvidence = screen.getByRole("table", { name: "关系内银行流水 2详情" });
   expect(within(refundEvidence).getByText("付错退款金额")).toBeInTheDocument();
   expect(within(refundEvidence).getByText("-35.00")).toBeInTheDocument();
   expect(within(refundEvidence).getByText("退报销多转款")).toBeInTheDocument();

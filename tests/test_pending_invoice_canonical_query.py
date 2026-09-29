@@ -580,9 +580,9 @@ class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):
             "invoice_rows": [],
             "oa_rows": [
                 {
-                    "row_id": "oa-exp-2047",
+                    "oa_id": "oa-exp-2047",
                     "workflow_no": "2047",
-                    "form_type": "expense_claim",
+                    "application_type": "expense_claim",
                     "applicant": "樊祖芳",
                     "workflow_status": "completed",
                     "project_name": "大理余热项目",
@@ -590,9 +590,9 @@ class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):
                     "detail_fields": {"费用类型": "交通费", "OA单号": "2047"},
                 },
                 {
-                    "row_id": "oa-exp-broken",
+                    "oa_id": "oa-exp-broken",
                     "workflow_no": "expense_claim",
-                    "form_type": "expense_claim",
+                    "application_type": "expense_claim",
                     "applicant": "樊祖芳",
                     "workflow_status": "completed",
                 },
@@ -602,7 +602,7 @@ class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):
 
         payload = service.relation_detail("bank-1", direction="expense", kind="all")
 
-        self.assertEqual([section["title"] for section in payload["sections"]], ["银行流水", "OA 1", "OA 2"])
+        self.assertEqual([section["title"] for section in payload["sections"]], ["交易信息", "账户信息", "申请信息", "单据信息", "申请信息"])
         serialized = json.dumps(payload, ensure_ascii=False)
         self.assertIn('"OA单号", "value": "2047"', serialized)
         self.assertIn('"OA类型", "value": "日常报销"', serialized)
@@ -643,18 +643,18 @@ class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):
         bank = service.bank_transaction_detail("bank-1")
         invoice = service.invoice_detail("invoice-1")
         oa = service.oa_detail("oa-exp-2047")
-        self.assertEqual(oa["sections"][1]["title"], "费用明细 1")
-        self.assertIn({"label": "费用内容", "value": "实际子项"}, oa["sections"][1]["fields"])
+        self.assertEqual(oa["sections"][2]["title"], "费用明细 1")
+        self.assertIn({"label": "费用内容", "value": "实际子项"}, oa["sections"][2]["fields"])
         self.assertNotIn("private-id", json.dumps(oa))
 
-        self.assertEqual(bank["sections"][0]["title"], "支出流水")
-        self.assertIn({"label": "账号", "value": "8106"}, bank["sections"][0]["fields"])
-        self.assertEqual(invoice["sections"][0]["title"], "进项发票")
+        self.assertEqual(bank["sections"][0]["title"], "交易信息")
+        self.assertIn({"label": "账号", "value": "8106"}, bank["sections"][1]["fields"])
+        self.assertEqual(invoice["sections"][0]["title"], "发票信息")
         self.assertIn(
             {"label": "数电发票号码", "value": "26534000000097888906"},
             invoice["sections"][0]["fields"],
         )
-        self.assertIn({"label": "OA单号", "value": "2047"}, oa["sections"][0]["fields"])
+        self.assertIn({"label": "OA单号", "value": "2047"}, oa["sections"][1]["fields"])
         self.assertIn({"label": "OA类型", "value": "日常报销"}, oa["sections"][0]["fields"])
         for payload in (bank, invoice, oa):
             serialized = json.dumps(payload, ensure_ascii=False)

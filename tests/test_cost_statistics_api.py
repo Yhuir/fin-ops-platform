@@ -841,8 +841,8 @@ class CostStatisticsApiTests(unittest.TestCase):
             self.assertEqual(self.app.handle_request("POST", path + "?month=all", body=body).status_code, 400)
 
     def test_period_export_summary_workbook_and_single_snapshot_agree(self):
-        from unittest.mock import patch
         from io import BytesIO
+        from unittest.mock import patch
         repo = self.app._cost_statistics_canonical_repository
         for period in ("all", "2026", "2026-03", "2025"):
             for view in ("time", "project"):

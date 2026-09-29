@@ -464,8 +464,8 @@ describe("Input invoice usage page", () => {
     expect(button).toContain("var(--ease-out-quart)");
     expect(tableAction).toContain("var(--motion-fast)");
     expect(drawerBody).toContain("gap: var(--fp-space-3)");
-    expect(detailSection).toContain("padding: var(--fp-space-3) 0");
-    expect(styles).toMatch(/\.entity-detail-section \+ \.entity-detail-section\s*{[^}]*border-top:\s*1px solid var\(--fp-border\)/s);
+    expect(detailSection).toContain("padding: 0");
+    expect(styles).toMatch(/\.entity-detail-section \+ \.entity-detail-section\s*{[^}]*margin-top:\s*16px/s);
     expect(filterTrigger).toContain("var(--motion-fast)");
     expect(paymentCell).toContain("color-mix(in srgb, var(--fp-warning-soft)");
     expect(stickyHeader).toContain("position: sticky");
@@ -871,17 +871,17 @@ describe("Input invoice usage page", () => {
     expect(within(page).queryByRole("button", { name: "查看OA 刘际涛 详情" })).not.toBeInTheDocument();
 
     await user.click(within(page).getByRole("button", { name: "查看刘际涛关联OA 2 条" }));
-    const oaDrawer = await screen.findByRole("dialog", { name: "OA关联明细" });
+    const oaDrawer = await screen.findByRole("dialog", { name: "OA详情" });
     expect(within(oaDrawer).getByText("刘际涛")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: "查看云南银行交易对方户名很长很长需要换行显示关联流水 2 条" }));
-    const bankDrawer = await screen.findByRole("dialog", { name: "银行流水关联明细" });
+    const bankDrawer = await screen.findByRole("dialog", { name: "银行流水详情" });
     expect(within(bankDrawer).getByText("银行流水 1")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: "查看发票 SD-INV-2026-0001 关联发票 2 张" }));
-    const invoiceDrawer = await screen.findByRole("dialog", { name: "发票关联明细" });
+    const invoiceDrawer = await screen.findByRole("dialog", { name: "发票详情" });
     expect(within(invoiceDrawer).getByText("发票 1")).toBeInTheDocument();
 
     const relationRequests = fetchMock.mock.calls

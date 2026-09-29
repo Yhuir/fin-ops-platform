@@ -1,6 +1,5 @@
 """Confirmation must compare split revisions after locking canonical parents."""
 import pytest
-
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.workbench_relation_command_service import (
     WorkbenchRelationCommandError,

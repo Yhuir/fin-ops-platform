@@ -1,3 +1,4 @@
+import { sourceDetailSections } from "../sourceDetail";
 import { selectionFilters, type ExportSelection, type ExportSummary, type ExportOption } from "../exports/types";
 import { ACQUISITION_STATUS_CODES, type AcquisitionSummary } from "./statusOptions";
 import type { BankSplitPart } from '../bankSplits/api';
@@ -19,7 +20,6 @@ import type {
   PendingInvoiceBankTransactionSummary,
   PendingInvoiceCandidate,
   PendingInvoiceCandidatesResponse,
-  PendingInvoiceDetailSection,
   PendingInvoiceDirection,
   PendingInvoiceExportDownload,
   PendingInvoiceFilter,
@@ -887,14 +887,7 @@ function detailPath(target: PendingInvoiceObjectDetailTarget) {
 }
 
 function mapDetailPayload(payload: ApiDetailPayload, fallbackTitle: string): PendingInvoiceObjectDetail {
-  const sections: PendingInvoiceDetailSection[] = (payload.sections ?? []).map((section) => ({
-    title: stringValue(section.title, "详情"),
-    bank_transaction_id: section.bank_transaction_id,
-    fields: (section.fields ?? []).map((field) => ({
-      label: stringValue(field.label),
-      value: field.value,
-    })).filter((field) => field.label),
-  }));
+  const sections = payload.detail_available === false ? [] : sourceDetailSections(payload.sections);
   return {
     title: stringValue(payload.title, fallbackTitle),
     subtitle: stringValue(payload.subtitle),

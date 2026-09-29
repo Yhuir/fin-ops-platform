@@ -855,10 +855,10 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             ) values
                 ('bank-direct-1', '6222000011118106', '基本户', 'outflow',
                  '云南腾安科技有限公司', 100, -100, '2026-07-22', '2026-07-01',
-                 '2026-07-22 10:00:00+08', '材料款', '{}'::jsonb, 'active'),
+                 '2026-07-22 10:00:00+08', '材料款', '{}'::jsonb, 'pending'),
                 ('same-text-id', '6222000011118107', '基本户', 'outflow',
                  '银行同名', 10, -10, '2026-07-23', '2026-07-01',
-                 '2026-07-23 10:00:00+08', '同名', '{}'::jsonb, 'active')
+                 '2026-07-23 10:00:00+08', '同名', '{}'::jsonb, 'pending')
             """
         )
         self.raw_connection.execute(
@@ -870,30 +870,30 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             ) values
                 (
                     'same-text-id', 'input', 'INV-SAME', '2026-07-23', '2026-07-01',
-                    10, 10, 10, 'active', 'visible', null,
+                    10, 10, 10, 'pending', 'visible', null,
                     '[]'::jsonb, '{}'::jsonb
                 ),
                 (
                     'canonical-etc-direct-1', 'input', 'ETC-INV-DIRECT',
-                    '2026-07-24', '2026-07-01', 88, 88, 88, 'active',
+                    '2026-07-24', '2026-07-01', 88, 88, 88, 'pending',
                     'hidden_after_etc_submission', 'etc-invoice-direct-1',
                     '[]'::jsonb, '{}'::jsonb
                 ),
                 (
                     'canonical-etc-direct-2', 'input', 'ETC-INV-LINKED',
-                    '2026-07-24', '2026-07-01', 44, 44, 44, 'active',
+                    '2026-07-24', '2026-07-01', 44, 44, 44, 'pending',
                     'hidden_after_etc_submission', 'etc-invoice-direct-2',
                     '[]'::jsonb, '{}'::jsonb
                 ),
                 (
                     'canonical-etc-direct-3', 'input', 'ETC-INV-SPECIAL',
-                    '2026-07-25', '2026-07-01', 33, 33, 33, 'active',
+                    '2026-07-25', '2026-07-01', 33, 33, 33, 'pending',
                     'hidden_after_etc_submission', 'etc-invoice-direct-3',
                     '[]'::jsonb, '{}'::jsonb
                 ),
                 (
                     'canonical-etc-direct-4', 'input', 'ETC-INV-DIRECT-SECOND',
-                    '2026-07-24', '2026-07-01', 11, 11, 11, 'active',
+                    '2026-07-24', '2026-07-01', 11, 11, 11, 'pending',
                     'hidden_after_etc_submission', 'etc-invoice-direct-4',
                     '[]'::jsonb, '{}'::jsonb
                 )
@@ -2390,7 +2390,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(initial["summary"]["unpaired_exception_counts"], expected)
         # Three original bank facts remain three even though one has two units.
         original_bank_count = self.raw_connection.fetch_one(
-            "select count(*) as n from app.bank_transactions where status='active' and txn_month='2026-07-01'"
+            "select count(*) as n from app.bank_transactions where status <> 'deleted' and txn_month='2026-07-01'"
         )["n"]
         self.assertEqual(initial["summary"]["bank_count"], original_bank_count)
         self.assertEqual(initial["statistics"]["bank_transaction_count"], original_bank_count)
@@ -3716,12 +3716,12 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 (
                     'invoice-source-owned-145-a', 'input',
                     'SOURCE-OWNED-INV-145-A', '2026-07-20', '2026-07-01',
-                    145, 145, 145, 'active', 'visible', %s::jsonb, '{}'::jsonb
+                    145, 145, 145, 'pending', 'visible', %s::jsonb, '{}'::jsonb
                 ),
                 (
                     'invoice-source-owned-145-b', 'input',
                     'SOURCE-OWNED-INV-145-B', '2026-07-20', '2026-07-01',
-                    145, 145, 145, 'active', 'visible', %s::jsonb, '{}'::jsonb
+                    145, 145, 145, 'pending', 'visible', %s::jsonb, '{}'::jsonb
                 )
             """,
             (source_links, source_links),

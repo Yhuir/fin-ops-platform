@@ -8,6 +8,7 @@ type PendingInvoiceDrawerFrameProps = {
   closeLabel: string;
   width?: number | string;
   children: ReactNode;
+  sourceDetail?: boolean;
   completion?: ReactNode;
   closeDisabled?: boolean;
   footer?: ReactNode;
@@ -16,6 +17,7 @@ type PendingInvoiceDrawerFrameProps = {
 
 export default function PendingInvoiceDrawerFrame({
   open,
+  sourceDetail = false,
   title,
   closeLabel,
   width = 720,
@@ -29,7 +31,7 @@ export default function PendingInvoiceDrawerFrame({
     <AppDrawer
       completion={completion}
       closeDisabled={closeDisabled}
-      className="pending-invoice-drawer"
+      className={`pending-invoice-drawer${sourceDetail ? " source-detail-drawer" : ""}`}
       closeLabel={closeLabel}
       footer={footer}
       onClose={onClose}

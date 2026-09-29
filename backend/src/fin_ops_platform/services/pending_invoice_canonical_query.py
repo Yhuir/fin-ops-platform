@@ -14,7 +14,6 @@ from fin_ops_platform.services.bank_details_canonical_query import (
 from fin_ops_platform.services.bank_transaction_category_service import (
     bank_transaction_tag_dictionary_display_payload,
 )
-from fin_ops_platform.services.oa_expense_details import oa_expense_detail_sections
 from fin_ops_platform.services.pending_invoice_relation_identity import (
     is_valid_pending_invoice_oa_row_id,
 )
@@ -41,7 +40,12 @@ from fin_ops_platform.services.postgres_repositories.bank_transaction_splits imp
 )
 from fin_ops_platform.services.postgres_repositories.relation_invoice_members import RELATION_INVOICE_READ_SQL
 from fin_ops_platform.services.search_query import normalize_money_search_query
-from fin_ops_platform.services.source_record_details import oa_source_fields, source_money
+from fin_ops_platform.services.source_record_details import (
+    oa_source_fields,
+    query_invoice_sections,
+    query_source_detail,
+    source_money,
+)
 
 PAGE_SIZE_LIMIT = 200
 FILTER_OPTION_LIMIT = 50
@@ -1429,15 +1433,16 @@ select
         ''
     ) as enterprise_serial_no,
     coalesce(
-        raw_payload->'normalized_payload'->>'voucher_type',
-        raw_payload->>'voucher_type',
+        raw_payload->'normalized_payload'->>'voucher_kind',
+        raw_payload->>'voucher_kind',
         ''
     ) as voucher_type,
     coalesce(
         raw_payload->'normalized_payload'->>'voucher_no',
         raw_payload->>'voucher_no',
         ''
-    ) as voucher_no
+    ) as voucher_no,
+    coalesce(raw_payload->'normalized_payload'->>'account_detail_no', raw_payload->>'account_detail_no', '') as account_detail_no
 from app.bank_transactions
 where status <> 'deleted'
   and id = (select parent_bank_transaction_id from app.bank_transaction_units where coalesce(legacy_mongo_id, id::text) = (select row_id from requested)
@@ -1445,7 +1450,7 @@ where status <> 'deleted'
 limit 1
 """
 
-INVOICE_DETAIL_SQL = """
+INVOICE_SOURCE_SQL = """
 select
     coalesce(legacy_mongo_id, id::text) as id,
     coalesce(invoice_no, '') as invoice_no,
@@ -1467,7 +1472,8 @@ select
     coalesce(raw_payload->'normalized_payload'->>'is_positive_invoice', raw_payload->>'is_positive_invoice', '') as is_positive_invoice,
     coalesce(raw_payload->'normalized_payload'->>'risk_level', raw_payload->>'risk_level', '') as risk_level,
     coalesce(raw_payload->'normalized_payload'->>'issuer', raw_payload->>'issuer', '') as issuer,
-    coalesce(raw_payload->'normalized_payload'->>'model', raw_payload->>'model', '') as model,
+    coalesce(raw_payload->'normalized_payload'->>'specification_model', raw_payload->>'specification_model', '') as model,
+    coalesce(raw_payload->'normalized_payload'->>'tax_classification_code', raw_payload->>'tax_classification_code', '') as tax_classification_code,
     coalesce(raw_payload->'normalized_payload'->>'unit', raw_payload->>'unit', '') as unit,
     coalesce(raw_payload->'normalized_payload'->>'quantity', raw_payload->>'quantity', '') as quantity,
     coalesce(raw_payload->'normalized_payload'->>'unit_price', raw_payload->>'unit_price', '') as unit_price,
@@ -1476,9 +1482,21 @@ select
     invoice_type
 from app.invoices
 where status <> 'deleted'
-  and coalesce(legacy_mongo_id, id::text) = %s
-limit 1
+
 """
+
+INVOICE_MEMBER_MATCH = """(line.id = selected.id or
+    (nullif(selected.digital_invoice_no, '') is not null and line.digital_invoice_no = selected.digital_invoice_no) or
+    (nullif(selected.invoice_code, '') is not null and nullif(selected.invoice_no, '') is not null
+     and line.invoice_code = selected.invoice_code and line.invoice_no = selected.invoice_no))
+    and line.invoice_type = selected.invoice_type"""
+INVOICE_DETAIL_SQL = f"""
+with source_invoices as not materialized ({INVOICE_SOURCE_SQL})
+select selected.*, (select jsonb_agg(to_jsonb(line) order by line.id)
+                   from source_invoices line where {INVOICE_MEMBER_MATCH}) as line_items
+from source_invoices selected where selected.id = %s limit 1
+"""
+
 
 OA_DETAIL_SQL = """
 with workflow_oa as (
@@ -1576,55 +1594,28 @@ bank_rows as materialized (
         coalesce(bank.remark, '') as remark,
         coalesce(bank.bank_serial_no, '') as statement_serial_no,
         coalesce(bank.raw_payload->'normalized_payload'->>'enterprise_serial_no', bank.raw_payload->>'enterprise_serial_no', '') as enterprise_serial_no,
-        coalesce(bank.raw_payload->'normalized_payload'->>'voucher_type', bank.raw_payload->>'voucher_type', '') as voucher_type,
-        coalesce(bank.raw_payload->'normalized_payload'->>'voucher_no', bank.raw_payload->>'voucher_no', '') as voucher_no
+        coalesce(bank.raw_payload->'normalized_payload'->>'voucher_kind', bank.raw_payload->>'voucher_kind', '') as voucher_type,
+        coalesce(bank.raw_payload->'normalized_payload'->>'voucher_no', bank.raw_payload->>'voucher_no', '') as voucher_no,
+        coalesce(bank.raw_payload->'normalized_payload'->>'account_detail_no', bank.raw_payload->>'account_detail_no', '') as account_detail_no
     from bank_member_ids member
     join app.bank_transaction_units unit on coalesce(unit.legacy_mongo_id, unit.id::text) = member.row_id
     join app.bank_transactions bank on bank.id = unit.parent_bank_transaction_id
      and bank.status <> 'deleted'
 ),
+source_invoices as not materialized ({INVOICE_SOURCE_SQL}),
 invoice_rows as materialized (
-    select
-        coalesce(invoice.legacy_mongo_id, invoice.id::text) as id,
-        invoice.invoice_type,
-        coalesce(invoice.invoice_no, '') as invoice_no,
-        coalesce(invoice.digital_invoice_no, '') as digital_invoice_no,
-        coalesce(invoice.invoice_code, '') as invoice_code,
-        coalesce(invoice.invoice_date::text, '') as issue_date,
-        invoice.amount as amount_without_tax,
-        invoice.tax_rate,
-        invoice.tax_amount,
-        invoice.total_with_tax,
-        coalesce(invoice.seller_name, '') as seller_name,
-        coalesce(invoice.seller_tax_no, '') as seller_tax_no,
-        coalesce(invoice.buyer_name, '') as buyer_name,
-        coalesce(invoice.buyer_tax_no, '') as buyer_tax_no,
-        coalesce(invoice.raw_payload->'normalized_payload'->>'specific_business_type', invoice.raw_payload->>'specific_business_type', '') as specific_business_type,
-        coalesce(invoice.raw_payload->'normalized_payload'->>'taxable_item_name', invoice.raw_payload->>'taxable_item_name', '') as taxable_item_name,
-        coalesce(invoice.raw_payload->'normalized_payload'->>'invoice_source', invoice.raw_payload->>'invoice_source', '') as invoice_source,
-        coalesce(invoice.raw_payload->'normalized_payload'->>'invoice_kind', invoice.raw_payload->>'invoice_kind', '') as invoice_kind,
-        coalesce(invoice.raw_payload->'normalized_payload'->>'is_positive_invoice', invoice.raw_payload->>'is_positive_invoice', '') as is_positive_invoice,
-        coalesce(invoice.raw_payload->'normalized_payload'->>'risk_level', invoice.raw_payload->>'risk_level', '') as risk_level,
-        coalesce(invoice.raw_payload->'normalized_payload'->>'issuer', invoice.raw_payload->>'issuer', '') as issuer,
-        coalesce(invoice.raw_payload->'normalized_payload'->>'model', invoice.raw_payload->>'model', '') as model,
-        coalesce(invoice.raw_payload->'normalized_payload'->>'unit', invoice.raw_payload->>'unit', '') as unit,
-        coalesce(invoice.raw_payload->'normalized_payload'->>'quantity', invoice.raw_payload->>'quantity', '') as quantity,
-        coalesce(invoice.raw_payload->'normalized_payload'->>'unit_price', invoice.raw_payload->>'unit_price', '') as unit_price,
-        coalesce(invoice.raw_payload->'normalized_payload'->>'remark', invoice.raw_payload->>'remark', '') as remark
-    from relation_members member
-    join app.invoices invoice
-      on coalesce(invoice.legacy_mongo_id, invoice.id::text) = member.row_id
-     and invoice.status <> 'deleted'
-    where member.row_type = 'invoice'
+    select distinct line.* from source_invoices line
+    join source_invoices selected on {INVOICE_MEMBER_MATCH}
+    join relation_members member on member.row_id = selected.id and member.row_type = 'invoice'
 ),
 oa_member_ids as materialized (
     select row_id from relation_members where row_type = 'oa'
 ),
 oa_rows as materialized (
     select
-        oa.row_id,
+        oa.row_id as oa_id,
         oa.applicant,
-        oa.form_type,
+        oa.form_type as application_type,
         oa.project_name,
         oa.workflow_no,
         coalesce(oa.workflow_status, oa.status, '') as workflow_status,
@@ -1635,7 +1626,8 @@ oa_rows as materialized (
         coalesce(oa.normalized_payload->>'reason', '') as reason,
         coalesce(oa.normalized_payload->>'expense_type', '') as expense_type,
         coalesce(oa.normalized_payload->>'expense_content', '') as expense_content,
-        coalesce(oa.normalized_payload->'detail_fields', '{{}}'::jsonb) as detail_fields
+        coalesce(oa.normalized_payload->'detail_fields', '{{}}'::jsonb) as detail_fields,
+        coalesce(oa.normalized_payload->'expense_items', '[]'::jsonb) as expense_items
     from oa_member_ids member
     join app.oa_applications oa on oa.row_id = member.row_id
     where oa.workflow_status is null
@@ -1660,7 +1652,8 @@ oa_rows as materialized (
             when jsonb_typeof(admission.source_payload->'detail_fields') = 'object'
             then admission.source_payload->'detail_fields'
             else '{{}}'::jsonb
-        end
+        end,
+        coalesce(admission.source_payload->'expense_items', '[]'::jsonb)
     from oa_member_ids member
     join app.oa_pending_payment_admissions admission on admission.oa_id = member.row_id
     where admission.tenant_id = 'default'
@@ -1669,7 +1662,7 @@ oa_rows as materialized (
 select
     coalesce((select jsonb_agg(to_jsonb(bank) order by bank.transaction_date desc nulls last, bank.id) from bank_rows bank), '[]'::jsonb) as bank_rows,
     coalesce((select jsonb_agg(to_jsonb(invoice) order by invoice.issue_date desc nulls last, invoice.id) from invoice_rows invoice), '[]'::jsonb) as invoice_rows,
-    coalesce((select jsonb_agg(to_jsonb(oa) order by oa.application_date desc nulls last, oa.row_id) from oa_rows oa), '[]'::jsonb) as oa_rows
+    coalesce((select jsonb_agg(to_jsonb(oa) order by oa.application_date desc nulls last, oa.oa_id) from oa_rows oa), '[]'::jsonb) as oa_rows
 """
 
 
@@ -2259,36 +2252,8 @@ class PendingInvoiceCanonicalQueryService:
                 f"Bank transaction not found: {bank_transaction_id}",
                 status_code=HTTPStatus.NOT_FOUND,
             )
-        direction = _bank_direction(row)
-        raw_amount = row.get("amount")
-        if raw_amount in (None, "") and direction:
-            raw_amount = row.get("credit_amount") if direction == "inflow" else row.get("debit_amount")
-        detail = {
-            "id": str(row.get("id") or ""),
-            "account_no": str(row.get("account_no") or ""),
-            "account_name": str(row.get("account_name") or ""),
-            "txn_direction": str(row.get("txn_direction") or ""),
-            "counterparty_name": str(row.get("counterparty_name") or ""),
-            "counterparty_account_no": str(row.get("counterparty_account_no") or ""),
-            "counterparty_bank_name": str(row.get("counterparty_bank_name") or ""),
-            "transaction_date": row.get("transaction_date"),
-            "booked_date": str(row.get("booked_date") or ""),
-            "amount": source_money(raw_amount) if raw_amount not in (None, "") else "",
-            "balance": source_money(row.get("balance")) if row.get("balance") is not None else "",
-            "bank_name": str(row.get("bank_name") or ""),
-            "summary": str(row.get("summary") or ""),
-            "remark": str(row.get("remark") or ""),
-            "statement_serial_no": str(row.get("statement_serial_no") or ""),
-            "enterprise_serial_no": str(row.get("enterprise_serial_no") or ""),
-            "voucher_type": str(row.get("voucher_type") or ""),
-            "voucher_no": str(row.get("voucher_no") or ""),
-        }
-        return {
-            "title": detail["counterparty_name"] or detail["id"],
-            "subtitle": detail["transaction_date"] or "",
-            "detail_available": True,
-            "sections": [{"title": _bank_section_title(detail), "fields": _bank_detail_fields(detail), "bank_transaction_id": detail["id"]}],
-        }
+        return {"title": "银行流水详情", "detail_available": True,
+                "sections": query_source_detail("bank", row)["sections"]}
 
     def invoice_detail(self, invoice_id: str) -> dict[str, Any]:
         row = self._repository.invoice_detail(str(invoice_id or "").strip())
@@ -2298,41 +2263,8 @@ class PendingInvoiceCanonicalQueryService:
                 f"Invoice detail not found: {invoice_id}",
                 status_code=HTTPStatus.NOT_FOUND,
             )
-        detail = {
-            "id": str(row.get("id") or ""),
-            "invoice_no": str(row.get("invoice_no") or ""),
-            "digital_invoice_no": str(row.get("digital_invoice_no") or ""),
-            "invoice_code": str(row.get("invoice_code") or ""),
-            "issue_date": str(row.get("issue_date") or ""),
-            "amount_without_tax": source_money(row.get("amount_without_tax")) if row.get("amount_without_tax") not in (None, "") else "",
-            "tax_rate": row.get("tax_rate"),
-            "total_with_tax": source_money(row.get("total_with_tax")) if row.get("total_with_tax") not in (None, "") else "",
-            "seller_name": str(row.get("seller_name") or ""),
-            "seller_tax_no": str(row.get("seller_tax_no") or ""),
-            "buyer_name": str(row.get("buyer_name") or ""),
-            "buyer_tax_no": str(row.get("buyer_tax_no") or ""),
-            "tax_amount": source_money(row.get("tax_amount")) if row.get("tax_amount") not in (None, "") else "",
-            "specific_business_type": str(row.get("specific_business_type") or ""),
-            "taxable_item_name": str(row.get("taxable_item_name") or ""),
-            "invoice_source": str(row.get("invoice_source") or ""),
-            "invoice_kind": str(row.get("invoice_kind") or ""),
-            "is_positive_invoice": row.get("is_positive_invoice"),
-            "risk_level": str(row.get("risk_level") or ""),
-            "issuer": str(row.get("issuer") or ""),
-            "model": str(row.get("model") or ""),
-            "unit": str(row.get("unit") or ""),
-            "quantity": row.get("quantity"),
-            "unit_price": row.get("unit_price"),
-            "remark": str(row.get("remark") or ""),
-            "invoice_type": str(row.get("invoice_type") or ""),
-            "invoice_status_from_source": row.get("invoice_status_from_source"),
-        }
-        return {
-            "title": detail["invoice_no"] or detail["digital_invoice_no"] or detail["id"],
-            "subtitle": detail["seller_name"],
-            "detail_available": True,
-            "sections": [{"title": _invoice_section_title(detail), "fields": _invoice_detail_fields(detail)}],
-        }
+        return {"title": "发票详情", "detail_available": True,
+                "sections": query_source_detail("invoice", row)["sections"]}
 
     def oa_detail(self, oa_id: str) -> dict[str, Any]:
         normalized_oa_id = str(oa_id or "").strip()
@@ -2351,26 +2283,8 @@ class PendingInvoiceCanonicalQueryService:
                 "unavailable_reason": "OA 投影尚未同步，不能展示完整支付申请。",
                 "reason": "OA detail projection is unavailable.",
             }
-        detail = {
-            "oa_id": normalized_oa_id,
-            "applicant": str(row.get("applicant") or ""),
-            "application_type": str(row.get("application_type") or ""),
-            "project_name": str(row.get("project_name") or ""),
-            "workflow_no": str(row.get("workflow_no") or ""),
-            "status": str(row.get("status") or ""),
-            "amount": source_money(row.get("amount")) if row.get("amount") not in (None, "") else "",
-            "month": str(row.get("month") or ""),
-            "counterparty_name": str(row.get("counterparty_name") or ""),
-            "reason": str(row.get("reason") or ""),
-            "detail_fields": dict(row.get("detail_fields") or {}) if isinstance(row.get("detail_fields"), dict) else {},
-        }
-        return {
-            "title": detail["workflow_no"] or "OA详情",
-            "subtitle": detail["project_name"],
-            "detail_available": True,
-            "sections": [{"title": _oa_section_title(detail), "fields": _oa_detail_fields(detail)}]
-            + oa_expense_detail_sections(row.get("expense_items") or []),
-        }
+        return {"title": "OA详情", "detail_available": True,
+                "sections": query_source_detail("oa", row)["sections"]}
 
     def relation_detail(
         self,
@@ -2401,11 +2315,11 @@ class PendingInvoiceCanonicalQueryService:
             )
         sections: list[dict[str, Any]] = []
         if normalized_kind in {"all", "bank"}:
-            sections.extend(_detail_sections(bank_rows, "银行流水", _bank_detail_fields))
+            sections.extend([section for row in bank_rows for section in query_source_detail("bank", row)["sections"]])
         if normalized_kind in {"all", "invoice"}:
-            sections.extend(_detail_sections(invoice_rows, "发票", _invoice_detail_fields))
+            sections.extend(query_invoice_sections(invoice_rows))
         if normalized_kind in {"all", "oa"}:
-            sections.extend(_detail_sections(oa_rows, "OA", _oa_detail_fields))
+            sections.extend([section for row in oa_rows for section in query_source_detail("oa", row)["sections"]])
         return {
             "title": "关系详情",
             "detail_available": bool(sections),
@@ -2532,160 +2446,6 @@ def _optional_decimal(value: Any) -> Decimal | None:
             "invalid_amount",
             "amount filters must be valid decimal values.",
         ) from exc
-
-
-def _detail_sections(
-    rows: list[dict[str, Any]],
-    title: str,
-    field_builder: Callable[[dict[str, Any]], list[dict[str, str]]],
-) -> list[dict[str, Any]]:
-    multiple = len(rows) > 1
-    sections: list[dict[str, Any]] = []
-    for index, row in enumerate(rows, start=1):
-        if not isinstance(row, dict):
-            continue
-        fields = field_builder(dict(row))
-        if fields:
-            sections.append({
-                "title": f"{title} {index}" if multiple else title,
-                "fields": fields,
-                **({"bank_transaction_id": str(row["id"])} if title == "银行流水" else {}),
-            })
-    return sections
-
-
-def _public_detail_fields(items: list[tuple[str, Any]]) -> list[dict[str, str]]:
-    result: list[dict[str, str]] = []
-    for label, value in items:
-        if value is None or isinstance(value, (dict, list, tuple, set)):
-            continue
-        normalized = str(value).strip()
-        if not normalized or normalized in {"—", "--"}:
-            continue
-        result.append({"label": label, "value": normalized})
-    return result
-
-
-def _bank_section_title(row: dict[str, Any]) -> str:
-    return {"inflow": "收入流水", "outflow": "支出流水"}.get(_bank_direction(row), "银行流水")
-
-
-def _bank_direction(row: dict[str, Any]) -> str:
-    direction = str(row.get("txn_direction") or "").strip().lower()
-    if direction in {"inflow", "income", "收入"}:
-        return "inflow"
-    if direction in {"outflow", "expense", "支出"}:
-        return "outflow"
-    has_credit = row.get("credit_amount") not in (None, "")
-    has_debit = row.get("debit_amount") not in (None, "")
-    if has_credit and not has_debit:
-        return "inflow"
-    if has_debit and not has_credit:
-        return "outflow"
-    return ""
-
-
-def _bank_detail_fields(row: dict[str, Any]) -> list[dict[str, str]]:
-    direction = _bank_direction(row)
-    amount = row.get("amount")
-    if amount in (None, "") and direction:
-        amount = row.get("credit_amount") if direction == "inflow" else row.get("debit_amount")
-    amount_label = {"inflow": "收入金额", "outflow": "支出金额"}.get(direction, "金额")
-    return _public_detail_fields(
-        [
-            ("交易日期", row.get("transaction_date")),
-            ("入账日期", row.get("booked_date")),
-            ("收支方向", {"inflow": "收入", "outflow": "支出"}.get(direction)),
-            (amount_label, source_money(amount) if amount not in (None, "") else ""),
-            ("银行", row.get("bank_name")),
-            ("账户名称", row.get("account_name")),
-            ("账号", row.get("account_no")),
-            ("对方户名", row.get("counterparty_name")),
-            ("对方账号", row.get("counterparty_account_no")),
-            ("对方开户机构", row.get("counterparty_bank_name")),
-            ("余额", source_money(row.get("balance")) if row.get("balance") not in (None, "") else ""),
-            ("摘要", row.get("summary")),
-            ("备注", row.get("remark")),
-            ("银行流水号", row.get("statement_serial_no")),
-            ("企业流水号", row.get("enterprise_serial_no")),
-            ("凭证类型", row.get("voucher_type")),
-            ("凭证号", row.get("voucher_no")),
-        ]
-    )
-
-
-def _invoice_type_label(value: Any) -> str:
-    normalized = str(value or "").strip().lower()
-    if normalized in {"input", "expense", "进项", "进项发票"}:
-        return "进项发票"
-    if normalized in {"output", "income", "销项", "销项发票"}:
-        return "销项发票"
-    return str(value or "").strip()
-
-
-def _invoice_section_title(row: dict[str, Any]) -> str:
-    return _invoice_type_label(row.get("invoice_type")) or "发票"
-
-
-def _invoice_detail_fields(row: dict[str, Any]) -> list[dict[str, str]]:
-    return _public_detail_fields(
-        [
-            ("发票状态", row.get("invoice_status_from_source")),
-            ("发票代码", row.get("invoice_code")),
-            ("发票号码", row.get("invoice_no")),
-            ("数电发票号码", row.get("digital_invoice_no")),
-            ("开票日期", row.get("issue_date")),
-            ("销方名称", row.get("seller_name")),
-            ("销方识别号", row.get("seller_tax_no")),
-            ("购买方名称", row.get("buyer_name")),
-            ("购买方识别号", row.get("buyer_tax_no")),
-            ("不含税金额", source_money(row.get("amount_without_tax")) if row.get("amount_without_tax") not in (None, "") else ""),
-            ("税率", row.get("tax_rate")),
-            ("税额", source_money(row.get("tax_amount")) if row.get("tax_amount") not in (None, "") else ""),
-            ("价税合计", source_money(row.get("total_with_tax")) if row.get("total_with_tax") not in (None, "") else ""),
-            ("货物或应税劳务名称", row.get("taxable_item_name")),
-            ("特定业务类型", row.get("specific_business_type")),
-            ("发票来源", row.get("invoice_source")),
-            ("发票票种", row.get("invoice_kind")),
-            ("是否正数发票", row.get("is_positive_invoice")),
-            ("发票风险等级", row.get("risk_level")),
-            ("开票人", row.get("issuer")),
-            ("规格型号", row.get("model")),
-            ("单位", row.get("unit")),
-            ("数量", row.get("quantity")),
-            ("单价", row.get("unit_price")),
-            ("备注", row.get("remark")),
-        ]
-    )
-
-
-def _oa_type_label(value: Any) -> str:
-    normalized = str(value or "").strip().lower()
-    if normalized in {"expense_claim", "日常报销"}:
-        return "日常报销"
-    if normalized in {"payment_request", "付款申请", "支付申请"}:
-        return "支付申请"
-    return str(value or "").strip()
-
-
-def _oa_section_title(row: dict[str, Any]) -> str:
-    return _oa_type_label(row.get("application_type") or row.get("form_type")) or "OA"
-
-
-def _oa_detail_fields(row: dict[str, Any]) -> list[dict[str, str]]:
-    details = row.get("detail_fields")
-    details = details if isinstance(details, dict) else {}
-    payment = _oa_type_label(row.get("application_type") or row.get("form_type")) == "支付申请"
-    source_amount = row.get("amount") if payment or details.get("金额来源") == "主表总金额" else None
-    return _public_detail_fields([
-        ("申请人", row.get("applicant")),
-        ("OA类型", _oa_type_label(row.get("application_type") or row.get("form_type"))),
-        ("项目名称", row.get("project_name") if payment else None),
-        ("金额", source_money(source_amount) if source_amount not in (None, "") else None),
-        ("申请事由", row.get("reason") if payment else None),
-        ("收款方", row.get("counterparty_name")),
-        *oa_source_fields(details).items(),
-    ])
 
 
 def _request(query: dict[str, list[str]]) -> dict[str, Any]:

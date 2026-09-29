@@ -336,17 +336,17 @@ export default function InputInvoiceUsagePage() {
     loadRows("refresh");
   }, [loadRows]);
 
-  const loadDetail = useCallback((target: InputInvoiceUsageDetailTarget) => {
+  const loadDetail = useCallback((target: InputInvoiceUsageDetailTarget, signal?: AbortSignal) => {
     if (target.kind === "invoice") {
-      return fetchInputInvoiceUsageInvoiceDetail(target.id);
+      return fetchInputInvoiceUsageInvoiceDetail(target.id, signal);
     }
     if (target.kind === "bank") {
-      return fetchInputInvoiceUsageBankTransactionDetail(target.id);
+      return fetchInputInvoiceUsageBankTransactionDetail(target.id, signal);
     }
     if (target.kind === "oa") {
-      return fetchInputInvoiceUsageOaDetail(target.id);
+      return fetchInputInvoiceUsageOaDetail(target.id, signal);
     }
-    return fetchInputInvoiceUsageRowRelationDetail(target);
+    return fetchInputInvoiceUsageRowRelationDetail(target, signal);
   }, []);
 
   const loadOaReversePreview = useCallback((request: OaReversePreviewRequest) => (

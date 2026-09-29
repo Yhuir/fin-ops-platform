@@ -2,11 +2,11 @@ import userEvent from '@testing-library/user-event';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import BankSplitEditor from '../features/bankSplits/BankSplitEditor';
 import BankTransactionDetailContent from '../features/bankSplits/BankTransactionDetailContent';
-import { fetchBankSplits, getBankTransactionSplitsBatch, saveBankSplits, type BankSplitDetail } from '../features/bankSplits/api';
+import { fetchBankSplits, saveBankSplits, type BankSplitDetail } from '../features/bankSplits/api';
 import { ApiClientError } from '../features/apiClient';
 import { amountCents, centsText } from '../features/bankSplits/amount';
 
-vi.mock('../features/bankSplits/api', () => ({ fetchBankSplits: vi.fn(), getBankTransactionSplitsBatch: vi.fn(), saveBankSplits: vi.fn() }));
+vi.mock('../features/bankSplits/api', () => ({ fetchBankSplits: vi.fn(), saveBankSplits: vi.fn() }));
 const detail: BankSplitDetail = {
   transaction_id: 'bank-1', canonical_transaction_id: 'canonical-1', amount: '1001497.22', direction: 'expense', version: 2,
   category_code: 'principal', category_label_path: ['外部往来款', '归还借款', '银行往来'], turnover_third_label_options: [{ value: '银行往来', label: '银行往来' }, { value: '公司往来', label: '公司往来' }], can_edit: true,
@@ -90,6 +90,8 @@ test('read-only permission disables mutations and non-bank detail does not load 
   expect(fetchBankSplits).not.toHaveBeenCalled();
   vi.mocked(fetchBankSplits).mockResolvedValue({ ...detail, can_edit: false });
   view.rerender(<BankTransactionDetailContent bankTransactionId="bank-1" sections={[{ title: '交易信息', fields: [{ label: '金额', value: detail.amount }] }]} />);
+  expect(fetchBankSplits).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', {name: '流水子项拆分'}));
   expect(await screen.findByRole('button', { name: '新增流水子项' })).toBeDisabled();
   expect(screen.getByLabelText('子项 1 金额')).toBeDisabled();
 });
@@ -115,16 +117,17 @@ test('removing every part restores an explicitly selected whole-transaction cate
   await waitFor(() => expect(saveBankSplits).toHaveBeenCalledWith('bank-1', { version: 2, parts: [], category_code: 'principal', category_label_path: ['外部往来款', '归还借款', '银行往来'] }));
 });
 
-test('bank detail sections batch-read distinct bank identities instead of merging sections or requesting each bank', async () => {
-  vi.mocked(getBankTransactionSplitsBatch).mockResolvedValue([detail, { ...detail, transaction_id: 'second-bank' }]);
+test('bank detail sections read each editor only after its operation is opened', async () => {
   render(<BankTransactionDetailContent sections={[
     { title: '交易信息', bank_transaction_id: 'first-bank', fields: [{ label: '金额', value: '1001497.22' }] },
     { title: '交易信息', bank_transaction_id: 'second-bank', fields: [{ label: '金额', value: '1001497.22' }] },
   ]} />);
-  await waitFor(() => expect(screen.getAllByLabelText('子项 1 金额')).toHaveLength(2));
-  expect(getBankTransactionSplitsBatch).toHaveBeenCalledOnce();
-  expect(getBankTransactionSplitsBatch).toHaveBeenCalledWith(['first-bank', 'second-bank'], expect.any(AbortSignal));
   expect(fetchBankSplits).not.toHaveBeenCalled();
+  for (const button of screen.getAllByRole('button', {name: '流水子项拆分'})) fireEvent.click(button);
+  await waitFor(() => expect(screen.getAllByLabelText('子项 1 金额')).toHaveLength(2));
+  expect(fetchBankSplits).toHaveBeenCalledTimes(2);
+  expect(fetchBankSplits).toHaveBeenCalledWith('first-bank', expect.any(AbortSignal));
+  expect(fetchBankSplits).toHaveBeenCalledWith('second-bank', expect.any(AbortSignal));
 });
 
 test('failed persistence retains edits and never announces success', async () => {
@@ -141,8 +144,6 @@ test('failed persistence retains edits and never announces success', async () =>
 
 
 test('saving one bank and refreshing its page retains the other bank draft without refetching split facts', async () => {
-  const second = { ...detail, transaction_id: 'second-bank' };
-  vi.mocked(getBankTransactionSplitsBatch).mockResolvedValue([detail, second]);
   vi.mocked(saveBankSplits).mockResolvedValue({ ...detail, version: 3, changed: true, affected_months: ['2026-04'] });
   const refresh = vi.fn();
   const sections = [
@@ -150,6 +151,8 @@ test('saving one bank and refreshing its page retains the other bank draft witho
     { title: '第二笔', bank_transaction_id: 'second-bank', fields: [{ label: '金额', value: detail.amount }] },
   ];
   const { rerender } = render(<BankTransactionDetailContent sections={sections} onBankSplitSaved={refresh} />);
+  expect(fetchBankSplits).not.toHaveBeenCalled();
+  for (const button of screen.getAllByRole('button', {name: '流水子项拆分'})) fireEvent.click(button);
   await waitFor(() => expect(screen.getAllByLabelText('子项 1 金额')).toHaveLength(2));
   fireEvent.change(screen.getAllByLabelText('子项 1 金额')[1], { target: { value: '999999.00' } });
   fireEvent.change(screen.getAllByLabelText('子项 2 金额')[1], { target: { value: '1498.22' } });
@@ -160,7 +163,7 @@ test('saving one bank and refreshing its page retains the other bank draft witho
   expect(screen.getAllByLabelText('子项 1 金额')[1]).toHaveValue('999999.00');
   expect(screen.getAllByLabelText('子项 2 金额')[1]).toHaveValue('1498.22');
   expect(screen.getByRole('button', { name: '保存', exact: true })).toBeEnabled();
-  expect(getBankTransactionSplitsBatch).toHaveBeenCalledOnce();
+  expect(fetchBankSplits).toHaveBeenCalledTimes(2);
   expect(saveBankSplits).toHaveBeenCalledOnce();
 });
 
@@ -193,6 +196,7 @@ test('incomplete external selection closes without changing the saved label or a
 test('bank details expose delete only and preserve read-only controls', async () => {
   vi.mocked(fetchBankSplits).mockResolvedValue({ ...detail, can_edit: false });
   render(<BankTransactionDetailContent bankTransactionId="bank-1" sections={[{ title: '交易信息', fields: [] }]} />);
+  fireEvent.click(screen.getByRole('button', {name: '流水子项拆分'}));
   expect(await screen.findByRole('button', { name: '删除子项 1' })).toBeDisabled();
   expect(screen.getByRole('button', { name: '删除子项 2' })).toBeDisabled();
   expect(screen.queryByRole('button', { name: /选中/ })).not.toBeInTheDocument();

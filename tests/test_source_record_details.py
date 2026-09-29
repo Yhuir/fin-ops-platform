@@ -41,8 +41,9 @@ def _invoice_group(*lines: Invoice) -> dict[str, object]:
     return {"primary": lines[0], "line_items": list(lines), "identity_key": "source-invoice-1"}
 
 
-def _fields(payload: dict[str, object], section: int = 0) -> dict[str, str]:
-    return {item["label"]: item["value"] for item in payload["sections"][section]["fields"]}
+def _fields(payload: dict[str, object], section: int | None = None) -> dict[str, str]:
+    sections = [payload["sections"][section]] if section is not None else [entry for entry in payload["sections"] if not entry["title"].startswith("费用明细")]
+    return {item["label"]: item["value"] for entry in sections for item in entry["fields"]}
 
 
 class SourceRecordProjectionTests(unittest.TestCase):
@@ -235,7 +236,7 @@ class SourceDetailApiTests(unittest.TestCase):
     def test_canonical_bank_without_amount_or_direction_does_not_invent_zero_expense(self) -> None:
         self.repository.bank_transaction_detail.return_value = {"id": "bank-1", "account_no": "001234"}
         result = self.service.bank_transaction_detail("bank-1")
-        self.assertEqual(result["sections"][0]["title"], "银行流水")
+        self.assertEqual(result["sections"][0]["title"], "账户信息")
         self.assertEqual(_fields(result), {"账号": "001234"})
 
     def test_canonical_bank_known_amount_without_direction_stays_unclassified(self) -> None:
@@ -250,8 +251,8 @@ class SourceDetailApiTests(unittest.TestCase):
                     "id": "bank-1", "txn_direction": direction, "amount": 0,
                 }
                 result = self.service.bank_transaction_detail("bank-1")
-                self.assertEqual(result["sections"][0]["title"], f"{label}流水")
-                self.assertEqual(_fields(result), {"收支方向": label, f"{label}金额": "0.00"})
+                self.assertEqual(result["sections"][0]["title"], "交易信息")
+                self.assertEqual(_fields(result), {f"{label}金额": "0.00"})
 
     def test_oa_pending_source_detail_uses_exact_source_id_not_matching_amount_or_relation_id(self) -> None:
         first = _invoice(seller_name="第一张发票的销方")
@@ -275,8 +276,8 @@ class SourceDetailApiTests(unittest.TestCase):
         fields = _fields(self.service.invoice_detail("invoice-1"))
         self.assertEqual(fields["税额"], "0.00")
         self.assertEqual(fields["价税合计"], "0.00")
-        self.assertEqual(fields["数量"], "0")
-        self.assertEqual(fields["是否正数发票"], "False")
+        self.assertEqual(fields["数量"], 0)
+        self.assertEqual(fields["是否正数发票"], False)
         self.assertEqual(fields["发票状态"], "已作废")
 
     def test_canonical_oa_keeps_original_fields_and_omits_inferred_summary(self) -> None:
@@ -295,8 +296,8 @@ class SourceDetailApiTests(unittest.TestCase):
         self.assertEqual(fields["申请日期"], "2026-09-27")
         for label in ("费用类型", "审批完成时间", "金额", "申请事由", "项目名称", "月份"):
             self.assertNotIn(label, fields)
-        expense_fields = _fields(result, 1)
-        self.assertEqual(expense_fields["报销金额"], "0")
+        expense_fields = {item["label"]: item["value"] for entry in result["sections"] if entry["title"] == "费用明细 1" for item in entry["fields"]}
+        self.assertEqual(expense_fields["报销金额"], 0)
         self.assertEqual(expense_fields["费用内容"], "原始费用内容")
         self.assertNotIn("费用类型", expense_fields)
 

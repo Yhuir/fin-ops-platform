@@ -1,34 +1,16 @@
 import BankTransactionDetailContent from "../../features/bankSplits/BankTransactionDetailContent";
-import type { CostEntryDetail } from "../../features/cost-statistics/types";
+import type { CostAllocationDetail } from "../../features/cost-statistics/types";
 import { formatCostAmount } from "../../features/cost-statistics/format";
 import {
   preparePublicDetailSections,
   type EntityDetailSection,
 } from "../common/EntityDetailContent";
 
-export default function CostEntryDetailPanel({ detail, onBankSplitSaved, onSplitDirtyChange }: { detail: CostEntryDetail; onBankSplitSaved?: () => void | Promise<void>; onSplitDirtyChange?: (dirty: boolean, source?: string) => void }) {
-  return <BankTransactionDetailContent onBankSplitSaved={onBankSplitSaved} onSplitDirtyChange={onSplitDirtyChange} bankTransactionId={detail.kind === "bank_transaction" ? detail.bankTransaction.id : undefined} sections={costDetailSections(detail)} />;
+export default function CostEntryDetailPanel({ detail, onBankSplitSaved, onSplitDirtyChange }: { detail: CostAllocationDetail; onBankSplitSaved?: () => void | Promise<void>; onSplitDirtyChange?: (dirty: boolean, source?: string) => void }) {
+  return <BankTransactionDetailContent onBankSplitSaved={onBankSplitSaved} onSplitDirtyChange={onSplitDirtyChange} sections={costDetailSections(detail)} />;
 }
 
-function costDetailSections(detail: CostEntryDetail) {
-  if (detail.kind === "bank_transaction") {
-    const transaction = detail.bankTransaction;
-    return preparePublicDetailSections([{
-      title: "交易信息",
-      fields: [
-        { label: "交易时间", value: transaction.tradeTime },
-        { label: "收支方向", value: transaction.direction },
-        { label: transaction.direction === "收入" ? "收入金额" : "支出金额", value: formatCostAmount(transaction.amount) },
-        { label: "对方户名", value: transaction.counterpartyName },
-        { label: "银行账户", value: transaction.paymentAccountLabel },
-        { label: "摘要", value: transaction.expenseContent },
-        { label: "备注", value: transaction.remark },
-        { label: "归属项目", value: transaction.projectName },
-        { label: "费用类型", value: transaction.expenseType },
-      ],
-    }]);
-  }
-
+function costDetailSections(detail: CostAllocationDetail) {
   const allocation = detail.allocation;
   const sections: EntityDetailSection[] = [{
     title: "基本信息",

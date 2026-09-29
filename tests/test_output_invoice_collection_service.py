@@ -202,6 +202,7 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         )
         options = service.filter_options()
         from io import BytesIO
+
         from openpyxl import load_workbook
         _, content = service.export()
         sheet = load_workbook(BytesIO(content)).active
@@ -237,6 +238,7 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         detail = service.invoice_detail("red-with-remark")
         searched = service.list_rows(keyword=target_invoice_no)
         from io import BytesIO
+
         from openpyxl import load_workbook
         _, content = service.export()
         sheet = load_workbook(BytesIO(content)).active
@@ -312,8 +314,15 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
             transactions=[bank],
             relations=[self._relation("case", ["invoice", "bank"], ["invoice", "bank"])],
         )
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        snapshot = SimpleNamespace(
+            groups=assembler._invoice_groups(month=None, context=assembler._query_context()),
+            supporting_groups=[], transactions=[bank], oa_records=[],
+            relations=[{**self._relation("case", ["invoice", "bank"], ["invoice", "bank"]), "status": "active"}],
+        )
         canonical = OutputInvoiceCollectionCanonicalQueryService(
-            repository=None,
+            repository=Mock(load_row=Mock(return_value=snapshot)),
             row_assembler=assembler,
         )
         row_id = assembler.list_rows()["rows"][0]["id"]

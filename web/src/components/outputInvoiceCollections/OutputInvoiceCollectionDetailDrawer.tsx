@@ -1,6 +1,6 @@
 import { useBankSplitClose } from "../../features/bankSplits/useBankSplitClose";
 import BankTransactionDetailContent from "../../features/bankSplits/BankTransactionDetailContent";
-import { useEffect, useState } from "react";
+import { useSourceDetail } from "../../features/useSourceDetail";
 
 import AppDrawer from "../common/AppDrawer";
 import { preparePublicDetailSections } from "../common/EntityDetailContent";
@@ -12,7 +12,7 @@ import type {
 type OutputInvoiceCollectionDetailDrawerProps = {
   open: boolean;
   target: OutputInvoiceCollectionDetailTarget | null;
-  loadDetail: (target: OutputInvoiceCollectionDetailTarget) => Promise<OutputInvoiceCollectionDetailResponse>;
+  loadDetail: (target: OutputInvoiceCollectionDetailTarget, signal?: AbortSignal) => Promise<OutputInvoiceCollectionDetailResponse>;
   onClose: () => void;
   onBankSplitSaved?: () => void | Promise<void>;
 };
@@ -25,53 +25,14 @@ export default function OutputInvoiceCollectionDetailDrawer({
   onBankSplitSaved,
 }: OutputInvoiceCollectionDetailDrawerProps) {
   const { close, setDirty } = useBankSplitClose(onClose);
-  const [detail, setDetail] = useState<OutputInvoiceCollectionDetailResponse | null>(null);
-  const [requestTarget, setRequestTarget] = useState<OutputInvoiceCollectionDetailTarget | null>(null);
-  const [loading, setLoading] = useState(false);
-  const currentRequest = requestTarget === target;
-  const [error, setError] = useState<string | null>(null);
+  const { detail, error, loading } = useSourceDetail(open, target, loadDetail);
 
-  useEffect(() => {
-    setRequestTarget(target);
-    if (!open || !target) {
-      setDetail(null);
-      setLoading(false);
-      setError(null);
-      return undefined;
-    }
-
-    let active = true;
-    setLoading(true);
-    setError(null);
-    setDetail(null);
-    loadDetail(target)
-      .then((payload) => {
-        if (active) {
-          setDetail(payload);
-        }
-      })
-      .catch((reason: unknown) => {
-        if (active) {
-          setError(reason instanceof Error ? reason.message : "详情加载失败");
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setLoading(false);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [loadDetail, open, target]);
-
-  const title = (currentRequest ? detail?.title : undefined) ?? drawerTitle(target);
-  const sections = currentRequest && detail ? preparePublicDetailSections(detail.sections) : [];
+  const title = detail?.title ?? drawerTitle(target);
+  const sections = detail ? preparePublicDetailSections(detail.sections) : [];
 
   return (
     <AppDrawer
-      className="output-invoice-collection-drawer"
+      className="output-invoice-collection-drawer source-detail-drawer"
       closeLabel="关闭详情抽屉"
       onClose={close}
       open={open}
@@ -80,11 +41,11 @@ export default function OutputInvoiceCollectionDetailDrawer({
     >
       <div className="output-invoice-collection-drawer__body">
         <BankTransactionDetailContent onSplitDirtyChange={setDirty} onBankSplitSaved={onBankSplitSaved} bankTransactionId={target?.kind === "bank" ? target.id : undefined}
-          detailAvailable={currentRequest ? detail?.detailAvailable : undefined}
-          error={currentRequest ? error : null}
-          loading={loading || Boolean(open && target && !currentRequest)}
+          detailAvailable={detail?.detailAvailable}
+          error={error}
+          loading={loading}
           sections={sections}
-          unavailableReason={currentRequest ? detail?.unavailableReason : undefined}
+          unavailableReason={detail?.unavailableReason}
         />
       </div>
     </AppDrawer>
@@ -93,7 +54,7 @@ export default function OutputInvoiceCollectionDetailDrawer({
 
 function drawerTitle(target: OutputInvoiceCollectionDetailTarget | null) {
   if (target?.kind === "bank" || target?.relationKind === "bank") {
-    return "流水详情";
+    return "银行流水详情";
   }
-  return "销项发票详情";
+  return "发票详情";
 }

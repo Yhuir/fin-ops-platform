@@ -31,7 +31,7 @@ export default function BankTransactionDrawer({ transactionId, onClose, onSaved 
   }, [transactionId]);
 
   const current = result?.id === transactionId ? result : null;
-  return <AppDrawer open={Boolean(transactionId)} title="银行流水详情" width="min(800px, 100vw)" onClose={close}>
+  return <AppDrawer className="source-detail-drawer" open={Boolean(transactionId)} title="银行流水详情" width="min(800px, 100vw)" onClose={close}>
     {transactionId ? <BankTransactionDetailContent key={transactionId} bankTransactionId={transactionId}
       sections={current?.detail ? preparePublicDetailSections(current.detail.sections) : []}
       loading={!current} error={current?.error} detailAvailable={current?.detail?.detail_available}

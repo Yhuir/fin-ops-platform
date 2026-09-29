@@ -1,15 +1,7 @@
 import { Chip } from "@heroui/react";
-import type { ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 
 import { formatDateTimeText } from "../../features/dateTime";
-import {
-  FinanceTable,
-  FinanceTableBody,
-  FinanceTableCell,
-  FinanceTableColumn,
-  FinanceTableHeader,
-  FinanceTableRow,
-} from "./FinanceTable";
 import StatePanel from "./StatePanel";
 
 export type EntityDetailField = {
@@ -21,6 +13,9 @@ export type EntityDetailSection = {
   title: string;
   fields: EntityDetailField[];
   bank_transaction_id?: string;
+  document_id?: string;
+  document_title?: string;
+  document_kind?: "oa" | "bank" | "invoice";
 };
 
 type EntityDetailContentProps = {
@@ -310,41 +305,59 @@ export default function EntityDetailContent({
     return <StatePanel compact tone="info">{emptyMessage}</StatePanel>;
   }
 
-  return (
-    <div className="entity-detail-content">
-      {sections.map((section, sectionIndex) => (
-        <section className="entity-detail-section" key={`${section.title}-${sectionIndex}`}>
-          <h3 className="entity-detail-section__title">{section.title}</h3>
-          <FinanceTable ariaLabel={`${section.title}详情`} className="entity-detail-table" minWidth={0}>
-            <FinanceTableHeader>
-              <FinanceTableColumn id="label" isRowHeader columnRole="identity">字段</FinanceTableColumn>
-              <FinanceTableColumn id="value" columnRole="description">内容</FinanceTableColumn>
-            </FinanceTableHeader>
-            <FinanceTableBody>
-              {section.fields.map((field, fieldIndex) => (
-                <FinanceTableRow id={`${sectionIndex}-${fieldIndex}`} key={`${field.label}-${fieldIndex}`}>
-                  <FinanceTableCell columnRole="identity">{field.label}</FinanceTableCell>
-                  <FinanceTableCell
-                    className={amountLabels.has(field.label) ? "entity-detail-row__amount" : undefined}
-                    columnRole="description"
-                  >
-                    {renderValue(field)}
-                  </FinanceTableCell>
-                </FinanceTableRow>
-              ))}
-              {(extraFields?.(section, sectionIndex) ?? []).map(field => (
-                <FinanceTableRow id={`extra-${sectionIndex}-${field.label}`} key={`extra-${field.label}`}>
-                  <FinanceTableCell columnRole="identity">{field.label}</FinanceTableCell>
-                  <FinanceTableCell columnRole="description">{field.content}</FinanceTableCell>
-                </FinanceTableRow>
-              ))}
-            </FinanceTableBody>
-          </FinanceTable>
-        </section>
-      ))}
-    </div>
-  );
+  return <DetailDocuments key={sections.map(section => section.document_id ?? section.title).join('|')}
+    sections={sections} extraFields={extraFields} />;
 }
+
+function DetailDocuments({ sections, extraFields }: Pick<EntityDetailContentProps, 'sections' | 'extraFields'>) {
+  const prefix = useId();
+  const documents = new Map<string, { title: string; sections: Array<{ section: EntityDetailSection; index: number }> }>();
+  sections.forEach((section, index) => {
+    const key = section.document_id ? `${section.document_kind}:${section.document_id}` : 'single';
+    if (!documents.has(key)) documents.set(key, { title: section.document_title ?? section.title, sections: [] });
+    documents.get(key)!.sections.push({ section, index });
+  });
+  const entries = [...documents.entries()];
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(entries.slice(0, 1).map(([key]) => key)));
+  const visited = useRef(new Set(entries.slice(0, 1).map(([key]) => key)));
+  expanded.forEach(key => visited.current.add(key));
+  const multiple = entries.length > 1;
+  return <div className="entity-detail-content">
+    {multiple && <nav className="entity-detail-index" aria-label="单据导航">
+      {entries.map(([key, document], index) => <button type="button" key={key} aria-controls={`${prefix}-${index}`}
+        onClick={() => {
+          setExpanded(current => new Set([...current, key]));
+          requestAnimationFrame(() => documentElement(`${prefix}-${index}`)?.scrollIntoView({ block: 'start' }));
+        }}>{document.title}</button>)}
+      <button type="button" className="entity-detail-index__expand" onClick={() => setExpanded(
+        expanded.size === entries.length ? new Set() : new Set(entries.map(([key]) => key)))}>
+        {expanded.size === entries.length ? '收起全部' : '展开全部'}
+      </button>
+    </nav>}
+    {entries.map(([key, document], index) => {
+      const content = document.sections.map(({section, index: sectionIndex}) => <section className="entity-detail-section" key={sectionIndex}>
+        <h3 className="entity-detail-section__title">{section.title}</h3>
+        <table className="entity-detail-table" aria-label={`${section.title}详情`}>
+          <tbody>{section.fields.map((field, fieldIndex) => <tr key={`${field.label}-${fieldIndex}`}>
+            <th scope="row">{field.label}</th><td className={amountLabels.has(field.label) ? 'entity-detail-row__amount' : undefined}>{renderValue(field)}</td>
+          </tr>)}</tbody>
+        </table>
+        {(extraFields?.(section, sectionIndex) ?? []).map(field => <div className="entity-detail-actions" key={field.label}>
+          <h4>{field.label}</h4>{field.content}
+        </div>)}
+      </section>);
+      return multiple ? <section className="entity-detail-document" id={`${prefix}-${index}`} key={key}>
+        <button type="button" className="entity-detail-document__toggle" aria-expanded={expanded.has(key)} aria-controls={`${prefix}-${index}-body`}
+          onClick={() => setExpanded(current => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; })}>
+          <span>{document.title}</span><span aria-hidden="true">{expanded.has(key) ? '−' : '+'}</span>
+        </button>
+        <div id={`${prefix}-${index}-body`} hidden={!expanded.has(key)} className="entity-detail-document__body">{visited.current.has(key) ? content : null}</div>
+      </section> : <div key={key}>{content}</div>;
+    })}
+  </div>;
+}
+
+function documentElement(id: string) { return document.getElementById(id); }
 
 export function preparePublicDetailSections(sections: EntityDetailSection[]): EntityDetailSection[] {
   const prepared: EntityDetailSection[] = [];
@@ -359,12 +372,7 @@ export function preparePublicDetailSections(sections: EntityDetailSection[]): En
     if (fields.length === 0) {
       continue;
     }
-    const previous = prepared[prepared.length - 1];
-    if (previous?.title === title && previous.bank_transaction_id === section.bank_transaction_id) {
-      previous.fields.push(...fields);
-    } else {
-      prepared.push({ title, fields, ...(section.bank_transaction_id ? { bank_transaction_id: section.bank_transaction_id } : {}) });
-    }
+    prepared.push({ ...section, title, fields });
   }
   return prepared;
 }

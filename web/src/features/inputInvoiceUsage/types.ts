@@ -1,3 +1,4 @@
+import type { EntityDetailSection } from "../../components/common/EntityDetailContent";
 import type { BankSplitPart } from '../bankSplits/api';
 export type InputInvoiceUsageSortDirection = "asc" | "desc";
 
@@ -175,10 +176,7 @@ export type InputInvoiceUsageDetailResponse = {
   subtitle?: string;
   detailAvailable?: boolean;
   unavailableReason?: string;
-  sections: Array<{
-    title: string;
-    fields: Array<{ label: string; value: string | number | null | undefined }>;
-  }>;
+  sections: EntityDetailSection[];
 };
 
 export type InputInvoiceUsagePaymentStatusRulesResponse = {

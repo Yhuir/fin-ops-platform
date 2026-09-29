@@ -11,6 +11,11 @@ afterEach(() => vi.unstubAllGlobals());
 
 test.each([fetchInputInvoiceUsageInvoiceDetail, fetchOutputInvoiceCollectionInvoiceDetail])("invoice detail preserves every source line without substituting group totals or missing tax", async (loadDetail) => {
   sourceResponse({ id: "internal-id", invoiceNo: "SOURCE-INVOICE", invoiceStatus: "正常", isPositiveInvoice: false,
+    sections: [
+      {title: "发票信息", fields: [{label: "发票状态", value: "正常"}, {label: "是否正数发票", value: false}]},
+      {title: "货物或应税劳务明细 1", fields: [{label: "货物或应税劳务名称", value: "第一条真实项目"}, {label: "金额", value: "100.00"}, {label: "税额", value: "0.00"}]},
+      {title: "货物或应税劳务明细 2", fields: [{label: "货物或应税劳务名称", value: "第二条真实项目"}, {label: "金额", value: "50.00"}]},
+    ],
     amount: "", taxAmount: "", totalWithTax: "", lineItems: [
       { taxableItemName: "第一条真实项目", amount: "100.00", taxAmount: "0.00", totalWithTax: "100.00" },
       { taxableItemName: "第二条真实项目", amount: "50.00", taxAmount: null, totalWithTax: null },
@@ -29,6 +34,7 @@ test.each([fetchInputInvoiceUsageInvoiceDetail, fetchOutputInvoiceCollectionInvo
 
 test.each([fetchInputInvoiceUsageBankTransactionDetail, fetchOutputInvoiceCollectionBankTransactionDetail])("bank detail uses source date and full account instead of configured or inferred display data", async (loadDetail) => {
   sourceResponse({ id: "bank-1", transactionDate: "2026-09-27", accountNo: "SOURCE-ACCOUNT", amount: "0.00",
+    sections: [{title: "交易信息", fields: [{label: "交易日期", value: "2026-09-27"}, {label: "金额", value: "0.00"}, {label: "账号", value: "SOURCE-ACCOUNT"}]}],
     tradeTime: "2026-09-27 00:00:00", bankName: "用户设置银行", accountLast4: "1234", status: "pending", remark: "normal" });
   const detail = await loadDetail("bank-1");
   const fields = detail.sections.flatMap(section => section.fields);
@@ -41,7 +47,7 @@ test.each([fetchInputInvoiceUsageBankTransactionDetail, fetchOutputInvoiceCollec
 });
 
 test("OA without source process status does not substitute operational workflow status", async () => {
-  sourceResponse({ detailAvailable: true, applicantName: "真实申请人", workflowStatus: "completed", detailFields: {} });
+  sourceResponse({ detailAvailable: true, applicantName: "真实申请人", workflowStatus: "completed", detailFields: {}, sections: [{title: "申请信息", fields: [{label: "申请人", value: "真实申请人"}]}] });
   const detail = await fetchInputInvoiceUsageOaDetail("oa-1");
   expect(detail.sections.flatMap(section => section.fields).some(field => field.label === "流程状态")).toBe(false);
 });
@@ -57,7 +63,13 @@ test.each([fetchInputInvoiceUsageRowRelationDetail, fetchOutputInvoiceCollection
     { label: "备注", value: "原始备注" }, { label: "余额", value: 0 },
   ] }], summaries: [{ id: "wrong-bank", counterpartyName: "不可信摘要" }] });
   const detail = await loadDetail({ kind: "relationList", id: "relation-row", relationKind: "bank" });
-  expect(detail.sections).toEqual([{ title: "银行流水 1", bank_transaction_id: "source-bank", fields: [
-    { label: "备注", value: "原始备注" }, { label: "余额", value: "0" },
+  expect(detail.sections).toMatchObject([{ title: "银行流水 1", bank_transaction_id: "source-bank", fields: [
+    { label: "备注", value: "原始备注" }, { label: "余额", value: 0 },
   ] }]);
+});
+
+
+test("a missing source projection fails visibly instead of reconstructing it from the list DTO", async () => {
+  sourceResponse({invoiceNo: "list-only", amount: "999.00"});
+  await expect(fetchInputInvoiceUsageInvoiceDetail("invoice")).rejects.toThrow("原始详情响应缺少字段表");
 });

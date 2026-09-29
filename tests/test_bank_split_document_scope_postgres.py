@@ -97,11 +97,13 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
         self.assertEqual(invoice['rows'][0]['bankTransactions']['amount'],'1497.22')
         self.assert_original_bank_display(invoice['rows'][0]['bankTransactions'])
         self.assertEqual(invoice['rows'][0]['paymentStatus']['code'],'paid')
-        from fin_ops_platform.services.input_invoice_usage_export_service import InputInvoiceUsageExportService
-        export = InputInvoiceUsageExportService._formal_row(1, invoice['rows'][0])
-        self.assertEqual(export['流水金额'], '1001497.22')
-        self.assertEqual(export['关联金额'], '1497.22')
-        self.assertIn('费用 / 利息：1497.22', export['流水拆分'])
+        from fin_ops_platform.services.input_invoice_usage_export_service import (
+            INPUT_INVOICE_USAGE_EXPORT_COLUMNS,
+            InputInvoiceUsageExportService,
+        )
+        export = dict(zip(INPUT_INVOICE_USAGE_EXPORT_COLUMNS, InputInvoiceUsageExportService._formal_row(1, invoice['rows'][0]), strict=True))
+        self.assertEqual(export['价税合计'], Decimal('1497.22'))
+        self.assertNotIn('流水金额', export)
         self.assertEqual(self.connection.fetch_one("select amount_check from app.workbench_pair_relations")['amount_check'],{'matched':False})
 
     def test_principal_document_uses_principal_bucket_instead_of_deleting_it(self):

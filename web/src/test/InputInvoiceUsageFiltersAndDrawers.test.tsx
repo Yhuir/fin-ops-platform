@@ -178,7 +178,7 @@ describe("InputInvoiceUsageDetailDrawer", () => {
     );
 
     expect(within(screen.getByLabelText("正在加载详情")).getByRole("status")).toBeInTheDocument();
-    await waitFor(() => expect(loadDetail).toHaveBeenCalledWith(target));
+    await waitFor(() => expect(loadDetail).toHaveBeenCalledWith(target, expect.any(AbortSignal)));
   });
 
   test("supports invoice, bank, OA and relation-list detail payloads without faking unavailable OA detail", async () => {
@@ -315,6 +315,7 @@ describe("Input invoice usage workflow drawers", () => {
       workflowStatus: "completed",
       status: "unpaired",
       detailFields: { "流程状态": "in_progress" },
+      sections: [{title: "单据信息", fields: [{label: "流程状态", value: "in_progress"}]}],
     }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -363,7 +364,7 @@ describe("Input invoice usage workflow drawers", () => {
       scopeKey: "2026-05",
     });
 
-    expect(detail.title).toBe("OA关联明细");
+    expect(detail.title).toBe("OA详情");
     expect(detail.detailAvailable).toBe(true);
     expect(detail.sections).toHaveLength(1);
     expect(detail.sections[0].title).toBe("OA 1");

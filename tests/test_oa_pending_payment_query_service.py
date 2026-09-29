@@ -130,7 +130,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         repository.load_facts = load
         service = OaPendingPaymentQueryService(repository=repository)
         detail = service.oa_detail(record.id, tenant_id="default")
-        self.assertEqual([s["title"] for s in detail["sections"]], ["OA信息", "费用明细 1", "费用明细 2"])
+        self.assertEqual([s["title"] for s in detail["sections"]], ["申请信息", "费用明细 1", "费用明细 2"])
         self.assertIn({"label": "报销金额", "value": "70"}, detail["sections"][2]["fields"])
         self.assertNotIn("private", json.dumps(detail))
         self.assertEqual(len(repository.load_calls), 1)

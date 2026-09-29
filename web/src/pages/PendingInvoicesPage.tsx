@@ -353,10 +353,10 @@ export default function PendingInvoicesPage() {
   }
 
   const loadRelation = useCallback(
-    (transactionId: string) => fetchPendingInvoiceRelationDetail(transactionId, direction, relationTarget?.kind ?? "all"),
+    (transactionId: string, signal?: AbortSignal) => fetchPendingInvoiceRelationDetail(transactionId, direction, relationTarget?.kind ?? "all", signal),
     [direction, relationTarget?.kind],
   );
-  const loadObjectDetail = useCallback((target: PendingInvoiceObjectDetailTarget) => fetchPendingInvoiceObjectDetail(target), []);
+  const loadObjectDetail = useCallback((target: PendingInvoiceObjectDetailTarget, signal?: AbortSignal) => fetchPendingInvoiceObjectDetail(target, signal), []);
   const loadRules = useCallback(() => fetchPendingInvoiceRules(rulesDirection), [rulesDirection]);
   const saveRules = useCallback(async (payload: Parameters<typeof savePendingInvoiceRules>[0]) => {
     const result = await runOperation({

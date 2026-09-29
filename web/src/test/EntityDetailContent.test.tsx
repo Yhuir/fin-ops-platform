@@ -38,14 +38,15 @@ describe("EntityDetailContent", () => {
           { label: "申请人", value: "张三" },
           { label: "状态", value: "未配对" },
           { label: "金额", value: 0 },
-          { label: "项目名称", value: "年度检修项目" },
         ],
+      },
+      { title: "基本信息", fields: [{ label: "项目名称", value: "年度检修项目" }],
       },
     ]);
 
     render(<EntityDetailContent sections={sections} />);
 
-    expect(screen.getByRole("heading", { name: "基本信息" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { name: "基本信息" })).toHaveLength(2);
     expect(screen.getByText("0")).toBeInTheDocument();
     expect(screen.getByText("未配对")).toBeInTheDocument();
     expect(screen.queryByText("CASE-001")).not.toBeInTheDocument();
@@ -111,4 +112,23 @@ test("public OA expense counts preserve zero while internal counts remain hidden
   expect(sections).toEqual([{title: "费用明细 1", fields: [
     { label: "票据张数", value: 34 }, { label: "附件文件数", value: 0 },
   ]}]);
+});
+
+test('keeps separate invoices, complete identifiers, and every line in one expandable drawer', async () => {
+  const { fireEvent } = await import('@testing-library/react');
+  const blue = '蓝字 · 26534000000097888906', red = '红字 · 26534000000097888907';
+  const sections = preparePublicDetailSections([
+    {title: '发票信息', document_id: 'blue', document_kind: 'invoice', document_title: blue, fields: [{label: '备注', value: '蓝票原文'}]},
+    {title: '货物或应税劳务明细 1', document_id: 'blue', document_kind: 'invoice', document_title: blue, fields: [{label: '数量', value: 0}]},
+    {title: '发票信息', document_id: 'red', document_kind: 'invoice', document_title: red, fields: [{label: '备注', value: '红票原文'}]},
+  ]);
+  render(<EntityDetailContent sections={sections} />);
+  expect(screen.getByText('蓝票原文')).toBeVisible();
+  expect(screen.queryByText('红票原文')).not.toBeInTheDocument();
+  expect(screen.getAllByRole('button', {name: red})[0]).toHaveTextContent('26534000000097888907');
+  fireEvent.click(screen.getByRole('button', {name: '展开全部'}));
+  expect(screen.getByText('红票原文')).toBeVisible();
+  expect(screen.getByText('0')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', {name: '收起全部'}));
+  expect(screen.getByText('红票原文')).not.toBeVisible();
 });

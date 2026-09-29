@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 import DetailDrawer from "../components/workbench/DetailDrawer";
 import type { WorkbenchRecord } from "../features/workbench/types";
@@ -33,6 +33,10 @@ function buildOaRow(): WorkbenchRecord {
       { label: "申请时间", value: "2026-03-20" },
       { label: "备注", value: "normal (0123456789abcdef.pdf)" },
     ],
+    sourceSections: [{title: "基本信息", fields: [
+      {label: "申请人", value: "真实申请人"}, {label: "流程状态", value: "completed"},
+      {label: "申请日期", value: "2026-03-20"}, {label: "备注", value: "normal (0123456789abcdef.pdf)"},
+    ]}],
     actionVariant: "detail-only",
     availableActions: ["detail"],
   };
@@ -46,7 +50,7 @@ describe("DetailDrawer", () => {
     expect(screen.getByText("真实申请人")).toBeInTheDocument();
     expect(screen.getByText("已完成")).toBeInTheDocument();
     expect(screen.getByText("2026-03-20")).toBeInTheDocument();
-    expect(screen.getByRole("grid", { name: "基本信息详情" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "基本信息详情" })).toBeInTheDocument();
     expect(screen.getByText("normal (0123456789abcdef.pdf)")).toBeInTheDocument();
   });
 });
@@ -59,6 +63,10 @@ test("OA detail exposes every expense including duplicate labels without exposin
     amount, expenseContent: "设备报销", reimbursementDate: "2025-12-27",
     paymentMethod: "微信支付", invoiceKind: "普通发票/行政收据", ticketCount: index === 0 ? "34" : "0", attachmentFileCount: 0,
   }));
+  row.sourceSections = [...row.sourceSections!, ...row.expenseItems.map((item, index) => ({
+    title: `费用明细 ${index + 1}`, fields: [{label: "报销金额", value: item.amount}, {label: "费用内容", value: item.expenseContent},
+    {label: "支付方式", value: item.paymentMethod}, {label: "票据张数", value: item.ticketCount}],
+  }))];
   render(<DetailDrawer row={row} loading={false} error={null} onClose={() => undefined} />);
   expect(screen.getByText("费用明细 1")).toBeInTheDocument();
   expect(screen.getByText("费用明细 2")).toBeInTheDocument();
@@ -88,6 +96,7 @@ test("bank source detail renders transaction date, amount and remark with splitt
     { label: "amount", value: "100.00" },
     { label: "remark", value: "normal" },
   ] };
+  row.sourceSections = [{title: "交易信息", fields: row.detailFields}];
   render(<DetailDrawer row={row} loading={false} error={null} onClose={() => undefined} />);
   expect(screen.queryByText("pending")).not.toBeInTheDocument();
   expect(screen.queryByText("状态")).not.toBeInTheDocument();
@@ -96,6 +105,8 @@ test("bank source detail renders transaction date, amount and remark with splitt
   expect(screen.getByText("2026-09-27")).toBeInTheDocument();
   expect(screen.getByText("100.00")).toBeInTheDocument();
   expect(screen.getByText("normal")).toBeInTheDocument();
+  expect(screen.queryByText("拆分编辑器")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "流水子项拆分"}));
   expect(screen.getByText("拆分编辑器")).toBeInTheDocument();
 });
 
@@ -105,6 +116,7 @@ test("invoice keeps its uploaded source status and zero tax", () => {
     { label: "tax_amount", value: "0" },
     { label: "invoice_no", value: "INV-SOURCE" },
   ] };
+  row.sourceSections = [{title: "发票信息", fields: row.detailFields}];
   render(<DetailDrawer row={row} loading={false} error={null} onClose={() => undefined} />);
   expect(screen.getByText("发票状态")).toBeInTheDocument();
   expect(screen.getByText("正常")).toBeInTheDocument();

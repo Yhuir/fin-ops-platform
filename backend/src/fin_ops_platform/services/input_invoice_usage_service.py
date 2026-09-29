@@ -36,6 +36,7 @@ from fin_ops_platform.services.source_record_details import (
     bank_source_detail,
     invoice_source_detail,
     oa_source_detail,
+    source_invoice_groups,
     source_relation_sections,
 )
 
@@ -300,6 +301,10 @@ class InputInvoiceUsageQueryService:
             kind=normalized_kind,
             relations=context.relation_summaries_for_row(row["invoiceId"]),
             relation_payload=relation_payload,
+            sections=source_relation_sections(normalized_kind, relation_payload["summaries"],
+                groups=source_invoice_groups(context.list_invoices(month="all", invoice_type=InvoiceType.INPUT)),
+                transactions=list(context.bank_transactions_by_id().values()),
+                oa_records=list(context.oa_records_by_id([str(item.get("oaId") or item.get("id") or "") for item in relation_payload["summaries"]]).values())),
         )
 
     def payment_status_rules(self) -> dict[str, Any]:
@@ -1287,6 +1292,7 @@ def input_invoice_usage_relation_details_from_row(
     kind: str,
     relations: list[dict[str, Any]] | None = None,
     relation_payload: dict[str, Any] | None = None,
+    sections: list[dict[str, Any]],
 ) -> dict[str, Any]:
     normalized_kind = str(kind or "").strip()
     if normalized_kind not in {"oa", "bank", "invoice"}:
@@ -1314,7 +1320,7 @@ def input_invoice_usage_relation_details_from_row(
         "relationCount": payload.get("relationCount", 0),
         "hasMultiple": payload.get("hasMultiple", False),
         "summaries": summaries,
-        "sections": source_relation_sections(normalized_kind, summaries),
+        "sections": sections,
         "relations": list(relations or []),
     }
 

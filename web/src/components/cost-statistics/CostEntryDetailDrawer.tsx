@@ -43,9 +43,9 @@ export default function CostEntryDetailDrawer({ open, rowKind, detail, loading, 
             <Button onPress={onRetry} size="sm" variant="secondary">重试</Button>
           </div>
         ) : null}
-        {!loading && !error && detail ? <>
+        {!loading && !error && detail && detail.kind !== "bank_transaction" ? <>
           <CostEntryDetailPanel onSplitDirtyChange={setDirty} onBankSplitSaved={onBankSplitSaved} detail={detail} />
-          {detail.kind !== "bank_transaction" && onAdjust ? <Button size="sm" variant="secondary" onPress={() => onAdjust(detail.reconciliation.relationCaseId)}>调整分配</Button> : null}
+          {onAdjust ? <Button size="sm" variant="secondary" onPress={() => onAdjust(detail.reconciliation.relationCaseId)}>调整分配</Button> : null}
         </> : null}
       </div>
     </AppDrawer>

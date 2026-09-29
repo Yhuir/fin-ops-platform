@@ -122,7 +122,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertEqual(confirm_payload["relation_mode"], "pending_invoice_attach_existing_invoice")
         self.assertEqual(relation_response.status_code, 200)
         self.assertTrue(relation_payload["detail_available"])
-        self.assertEqual(relation_payload["sections"][0]["title"], "银行流水")
+        self.assertEqual(relation_payload["sections"][0]["title"], "交易信息")
         self.assertNotIn("transaction_summary", relation_payload)
         self.assertNotIn("relation_case_ids", relation_payload)
         self.assertEqual(invoice_detail_response.status_code, 200)

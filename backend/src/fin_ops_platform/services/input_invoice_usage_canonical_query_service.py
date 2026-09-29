@@ -27,7 +27,13 @@ from fin_ops_platform.services.invoice_relation_query_context import (
 from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_query import (
     InvoiceUsageCollectionCanonicalSnapshot,
 )
-from fin_ops_platform.services.source_record_details import bank_source_detail, invoice_source_detail, oa_source_detail
+from fin_ops_platform.services.source_record_details import (
+    bank_source_detail,
+    invoice_source_detail,
+    oa_source_detail,
+    source_invoice_groups,
+    source_relation_sections,
+)
 
 
 class InputInvoiceUsageCanonicalQueryService:
@@ -282,7 +288,7 @@ class InputInvoiceUsageCanonicalQueryService:
             [invoice_id],
             tenant_id=tenant_id,
         )
-        group = _group_for_invoice(snapshot.groups, invoice_id)
+        group = _group_for_invoice(source_invoice_groups([line for group in snapshot.groups for line in group["line_items"]]), invoice_id)
         if group is None:
             raise InputInvoiceUsageError(
                 "invoice_not_found",
@@ -360,6 +366,9 @@ class InputInvoiceUsageCanonicalQueryService:
                 str(row.get("invoiceId") or "")
             ),
             relation_payload=relation_payload,
+            sections=source_relation_sections(kind, relation_payload["summaries"],
+                groups=[*snapshot.groups, *snapshot.supporting_groups],
+                transactions=snapshot.transactions, oa_records=snapshot.oa_records),
         )
 
     def payment_status_rules(self) -> dict[str, Any]:

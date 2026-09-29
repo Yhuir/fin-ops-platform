@@ -63,9 +63,9 @@ test.describe("销项发票收款情况", () => {
     await expect(page.getByRole("button", { name: "收据编号设置" })).toHaveCount(0);
 
     await blueInvoiceRow.getByRole("button", { name: "红蓝票 · 2" }).click();
-    const sourceDrawer = page.getByRole("dialog", { name: "销项发票详情" });
-    await expect(sourceDrawer.getByRole("heading", { name: "发票 1" })).toBeVisible();
-    await expect(sourceDrawer.getByRole("heading", { name: "发票 2" })).toBeVisible();
+    const sourceDrawer = page.getByRole("dialog", { name: "发票详情" });
+    await sourceDrawer.getByRole("button", { name: "展开全部", exact: true }).click();
+    await expect(sourceDrawer.locator(".entity-detail-document__body:visible")).toHaveCount(2);
     await expect(sourceDrawer.getByText("XSFP-E2E-0001", { exact: true })).toBeVisible();
     await expect(sourceDrawer.getByText("XSFP-E2E-0002", { exact: true })).toBeVisible();
     await expect(sourceDrawer.getByText("output_invoice_reversal", { exact: true })).toHaveCount(0);

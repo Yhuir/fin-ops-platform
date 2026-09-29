@@ -1,3 +1,4 @@
+import BankTransactionDrawer from "../features/bankSplits/BankTransactionDrawer";
 import BankAccountValue from "../components/BankAccountValue";
 import CostIdentityHeader from "../components/cost-statistics/CostIdentityHeader";
 import { Segment, SegmentGroup } from "../components/common/SegmentedControl";
@@ -1107,6 +1108,7 @@ export default function CostStatisticsPage() {
     if (source === "bankTag") {
       setSelectedBankTagEntryId(row.entryId);
     }
+    if (row.rowKind === "bank_transaction") { detailRequestRef.current?.abort(); setEntryDetail(null); return; }
     await loadEntryDetail(row.entryId, row.rowKind, source);
   }
 
@@ -1750,6 +1752,8 @@ export default function CostStatisticsPage() {
         </div>
       </div>
 
+      <BankTransactionDrawer transactionId={activeRowKind === "bank_transaction" ? activeEntryId : null}
+        onClose={resetDetailSelection} onSaved={() => { splitRefreshRequestKeyRef.current = explorerRequestKey; setDomainRefreshNonce(value => value + 1); }} />
       <CostEntryDetailDrawer
         onBankSplitSaved={() => { splitRefreshRequestKeyRef.current = explorerRequestKey; setDomainRefreshNonce(value => value + 1); }}
         onAdjust={!isBankFlowView && canOperateData && !interactionLocked ? caseId => { resetDetailSelection(); setAllocationCaseId(caseId); } : undefined}
@@ -1762,7 +1766,7 @@ export default function CostStatisticsPage() {
             void loadEntryDetail(activeEntryId, activeRowKind, viewMode);
           }
         }}
-        open={Boolean(activeEntryId)}
+        open={Boolean(activeEntryId) && activeRowKind !== "bank_transaction"}
         rowKind={activeRowKind}
       />
 

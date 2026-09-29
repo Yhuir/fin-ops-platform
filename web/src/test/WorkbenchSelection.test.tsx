@@ -728,8 +728,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(dialog).getByText("杭州溯源科技有限公司招商银行基本户")).toBeInTheDocument();
     expect(within(dialog).queryByText("招商银行 9123")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("资金方向")).not.toBeInTheDocument();
-    expect(within(dialog).getByText("收支方向")).toBeInTheDocument();
-    expect(within(dialog).getByText("支出").closest("[data-slot='chip']")).not.toBeNull();
+    expect(within(dialog).getByText("支出金额")).toBeInTheDocument();
     expect(oaRow).toHaveAttribute("data-row-state", "related");
     expect(bankRow).toHaveAttribute("data-row-state", "related");
     expect(fetchMock).toHaveBeenCalledWith(
@@ -881,10 +880,8 @@ describe("Workbench row selection and detail drawer", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "发票详情" });
     expect(within(dialog).queryByText("pending")).not.toBeInTheDocument();
-    expect(within(dialog).getByText("发票种类")).toBeInTheDocument();
-    expect(within(dialog).getByText("进项发票")).toBeInTheDocument();
-    expect(within(dialog).getByText("发票来源")).toBeInTheDocument();
-    expect(within(dialog).getByText("人工录入")).toBeInTheDocument();
+    expect(await within(dialog).findByText("00061345")).toBeInTheDocument();
+    expect(within(dialog).queryByText("人工录入")).not.toBeInTheDocument();
   });
 
   test("OA attachment invoice detail shows source expense item and attachment fields", async () => {
@@ -899,8 +896,8 @@ describe("Workbench row selection and detail drawer", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "发票详情" });
 
-    expect(within(dialog).getByText("来源附件文件名")).toBeInTheDocument();
-    expect(within(dialog).getByText("设备尾款附件发票.pdf")).toBeInTheDocument();
+    expect(await within(dialog).findByText("12561048")).toBeInTheDocument();
+    expect(within(dialog).queryByText("来源附件文件名")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("来源OA单号")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("oa-o-202603-001")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("来源OA明细行号")).not.toBeInTheDocument();

@@ -23,7 +23,11 @@ from fin_ops_platform.services.output_invoice_collection_service import (
 from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_query import (
     InvoiceUsageCollectionCanonicalSnapshot,
 )
-from fin_ops_platform.services.source_record_details import bank_source_detail, source_relation_sections
+from fin_ops_platform.services.source_record_details import (
+    bank_source_detail,
+    source_invoice_groups,
+    source_relation_sections,
+)
 
 
 class OutputInvoiceCollectionCanonicalQueryService:
@@ -199,7 +203,9 @@ class OutputInvoiceCollectionCanonicalQueryService:
                 "invalid_relation_kind",
                 "kind must be bank or invoice.",
             )
-        row = self.row_by_id(row_id, tenant_id=tenant_id)
+        snapshot = self._repository.load_row(row_id, tenant_id=tenant_id)
+        row = next((item for item in self._rows_from_snapshot(snapshot)
+                    if item.get("id") == row_id or item.get("invoiceId") == row_id), None)
         if row is None:
             raise OutputInvoiceCollectionError(
                 "row_not_found",
@@ -219,7 +225,9 @@ class OutputInvoiceCollectionCanonicalQueryService:
             }[kind],
             "relationCount": int(relation_payload.get("relationCount") or 0),
             "summaries": list(relation_payload.get("summaries") or []),
-            "sections": source_relation_sections(kind, list(relation_payload.get("summaries") or [])),
+            "sections": source_relation_sections(kind, list(relation_payload.get("summaries") or []),
+                groups=[*snapshot.groups, *snapshot.supporting_groups],
+                transactions=snapshot.transactions, oa_records=snapshot.oa_records),
         }
 
     def invoice_detail(
@@ -234,7 +242,7 @@ class OutputInvoiceCollectionCanonicalQueryService:
         group = next(
             (
                 candidate
-                for candidate in snapshot.groups
+                for candidate in source_invoice_groups([line for group in snapshot.groups for line in group["line_items"]])
                 if invoice_id
                 in {
                     str(getattr(invoice, "id", "") or "")

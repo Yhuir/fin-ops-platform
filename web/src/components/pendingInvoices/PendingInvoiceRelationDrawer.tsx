@@ -1,6 +1,6 @@
 import { useBankSplitClose } from "../../features/bankSplits/useBankSplitClose";
 import BankTransactionDetailContent from "../../features/bankSplits/BankTransactionDetailContent";
-import { useEffect, useMemo, useState } from "react";
+import { useSourceDetail } from "../../features/useSourceDetail";
 
 import type { PendingInvoiceRelationDetail, PendingInvoiceRelationDetailKind } from "../../features/pendingInvoices/types";
 import { preparePublicDetailSections } from "../common/EntityDetailContent";
@@ -10,7 +10,7 @@ type PendingInvoiceRelationDrawerProps = {
   open: boolean;
   transactionId: string | null;
   detailKind?: PendingInvoiceRelationDetailKind;
-  loadDetail: (transactionId: string) => Promise<PendingInvoiceRelationDetail>;
+  loadDetail: (transactionId: string, signal?: AbortSignal) => Promise<PendingInvoiceRelationDetail>;
   onClose: () => void;
   onBankSplitSaved?: () => void | Promise<void>;
 };
@@ -31,46 +31,12 @@ export default function PendingInvoiceRelationDrawer({
   onBankSplitSaved,
 }: PendingInvoiceRelationDrawerProps) {
   const { close, setDirty } = useBankSplitClose(onClose);
-  const [detail, setDetail] = useState<PendingInvoiceRelationDetail | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { detail, error, loading } = useSourceDetail(open, transactionId, loadDetail);
 
-  useEffect(() => {
-    if (!open || !transactionId) {
-      setDetail(null);
-      setLoading(false);
-      setError(null);
-      return undefined;
-    }
-    let active = true;
-    setLoading(true);
-    setError(null);
-    setDetail(null);
-    loadDetail(transactionId)
-      .then((payload) => {
-        if (active) {
-          setDetail(payload);
-        }
-      })
-      .catch((reason: unknown) => {
-        if (active) {
-          setError(reason instanceof Error ? reason.message : "详情加载失败");
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setLoading(false);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [loadDetail, open, transactionId]);
-
-  const sections = useMemo(() => detail ? preparePublicDetailSections(detail.sections) : [], [detail]);
+  const sections = detail ? preparePublicDetailSections(detail.sections) : [];
 
   return (
-    <PendingInvoiceDrawerFrame
+    <PendingInvoiceDrawerFrame sourceDetail
       closeLabel="关闭详情抽屉"
       onClose={close}
       open={open}

@@ -525,6 +525,7 @@ test('saving a split refreshes cost lists without closing or remounting the acti
   const grid = await screen.findByRole('grid', { name: '按时间银行流水表' });
   await user.click(within(grid).getAllByRole('button', { name: /^查看银行流水/ })[0]);
   const drawer = await screen.findByRole('dialog', { name: '银行流水详情' });
+  await user.click(await within(drawer).findByRole('button', {name: '流水子项拆分'}));
   await within(drawer).findByLabelText('子项 1 金额');
   const listReads = () => fetchMock.mock.calls.filter(call => String(call[0]).includes('/api/cost-statistics/explorer')).length;
   const before = listReads();
