@@ -2532,11 +2532,8 @@ def _group_page_anomaly_state_ctes(
     # member of each hit; nonmatching groups cannot affect filtered totals/zone.
     search_filter = """
       and exists (
-          select 1 from canonical_group_members member
-          join groups_source_search_hits hit
-            on hit.row_type = member.row_type and hit.row_id = member.row_id
-           and hit.internal_key = member.internal_key
-          where member.internal_key = groups.internal_key
+          select 1 from groups_source_search_hits hit
+          where hit.internal_key = groups.internal_key
       )
     """ if has_search else ""
     return f"""
@@ -5481,12 +5478,8 @@ class PostgresWorkbenchPageQueryRepository:
             if not search_hit_name:
                 raise ValueError("Workbench search hit boundary is required.")
             clauses.append(
-                "exists (select 1 from canonical_group_members search_member "
-                f"join {search_hit_name} search_hit "
-                "on search_hit.row_type = search_member.row_type "
-                "and search_hit.row_id = search_member.row_id "
-                "and search_hit.internal_key = search_member.internal_key "
-                "where search_member.internal_key = groups.internal_key)"
+                f"exists (select 1 from {search_hit_name} search_hit "
+                "where search_hit.internal_key = groups.internal_key)"
             )
         if normalized_exception_bucket := text(exception_bucket):
             if normalized_exception_bucket not in {"unpaired", "paired"}:
@@ -5701,18 +5694,17 @@ class PostgresWorkbenchPageQueryRepository:
         definitions = (settings.get("bank_transaction_tags") or {}).get("definitions", [])
         tag_sql, tag_params = bank_category_classification_cte(
             definitions=definitions, date_from=None, date_to=None, use_units=True,
-            candidate_transaction_relation="search_bank_keys", defer_full_payload=True,
+            defer_full_payload=True,
             tenant_id=self._tenant_id,
         )
         tags_name = f"{prefix}_search_bank_tags"
         sql = f"""
             {tags_name} as materialized (
-                with search_bank_keys as (select row_id from needed_keys where row_type = 'bank'),
-                {tag_sql}
+                with {tag_sql}
                 select row_id, concat_ws(' / ', effective_category_primary_label,
                     effective_category_sub_label, effective_category_third_label,
                     effective_category_label) as label
-                from classified_with_semantics
+                from classified_filter_rows
             ),
         """
         params = list(tag_params)
@@ -5727,18 +5719,17 @@ class PostgresWorkbenchPageQueryRepository:
             params.extend(term_params)
             names.append(name)
         hit_name = f"{prefix}_source_search_hits"
-        # AND across terms, OR across members/fields. Returning whole groups also
-        # preserves the complete evidence needed by anomaly classification.
-        conditions = " and ".join(
-            f"exists (select 1 from canonical_group_members m join {name} h "
-            "on h.row_type=m.row_type and h.row_id=m.row_id "
-            "where m.internal_key=g.internal_key)" for name in names
+        # Join each term's hits to membership once, then intersect group keys.
+        # This preserves whole-group AND semantics without per-group rescans.
+        group_hits = " union all ".join(
+            f"select distinct m.internal_key, {index} as term_index "
+            f"from canonical_group_members m join {name} h "
+            "on h.row_type=m.row_type and h.row_id=m.row_id"
+            for index, name in enumerate(names)
         )
         sql += f"""{hit_name} as materialized (
-            select distinct g.internal_key, member.row_type, member.row_id
-            from canonical_groups g
-            join canonical_group_members member on member.internal_key=g.internal_key
-            where {conditions}
+            select internal_key from ({group_hits}) matches
+            group by internal_key having count(*) = {len(names)}
         ),"""
         return sql, params, hit_name
 

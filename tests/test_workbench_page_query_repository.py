@@ -1747,7 +1747,7 @@ def test_filter_sql_escapes_literal_search_and_preserves_and_or_semantics() -> N
         time_filters={"invoice": {"mode": "year", "year": "2026"}},
     )
 
-    assert "search_hit.row_type = search_member.row_type" in where_sql.lower()
+    assert "search_hit.internal_key = groups.internal_key" in where_sql.lower()
     assert "searchable_text" not in where_sql.lower()
     assert "test_source_search_hits" in search_ctes
     assert r"%100\%\_\\%" in search_params
@@ -2200,8 +2200,8 @@ def test_search_anomaly_scope_keeps_groups_whole_and_exception_universe_complete
     searched = _group_page_anomaly_state_ctes(exception_bucket=None, has_search=True)
     candidates = searched.split("latest_anomaly_decisions", 1)[0]
     assert "select groups.*" in candidates
-    assert "join groups_source_search_hits hit" in candidates
-    assert "member.internal_key = groups.internal_key" in candidates
+    assert "from groups_source_search_hits hit" in candidates
+    assert "hit.internal_key = groups.internal_key" in candidates
     assert "limit" not in candidates.lower()
     assert _group_page_anomaly_state_ctes(
         exception_bucket="unpaired", has_search=True,
