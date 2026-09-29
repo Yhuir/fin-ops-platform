@@ -220,18 +220,38 @@ class PostgresOaPendingPaymentQueryRepository:
         base_where: list[str] = []
         base_params: list[Any] = []
         if month:
-            base_where.append("scope_key = %s")
+            base_where.append("%s = any(scope_keys)")
             base_params.append(month)
-        if trade_date_from:
-            base_where.append("bank_trade_time >= %s::date")
-            base_params.append(trade_date_from)
-        if trade_date_to:
-            base_where.append("bank_trade_time < (%s::date + interval '1 day')")
-            base_params.append(trade_date_to)
         if keyword:
             base_where.append("searchable_text ilike %s")
             base_params.append(f"%{keyword}%")
-        for clause, params in _filter_clauses([item for item in filters if item["field"] != "payment_status"]):
+        member_fields = {
+            "oa": {"oa_applicant", "oa_application_type", "oa_project_name"},
+            "bank": {"bank_trade_time", "bank_name", "bank_account", "bank_direction", "bank_counterparty_name", "bank_summary"},
+            "invoice": {"invoice_no", "invoice_date", "seller_name"},
+        }
+        for kind, fields in member_fields.items():
+            clauses = _filter_clauses([item for item in filters if item["field"] in fields])
+            if kind == "bank":
+                if trade_date_from:
+                    clauses.append(("bank_trade_time >= %s::date", [trade_date_from]))
+                if trade_date_to:
+                    clauses.append(("bank_trade_time < (%s::date + interval '1 day')", [trade_date_to]))
+            if not clauses:
+                continue
+            if kind == "oa":
+                source = "canonical_oa member"
+                membership = "member.oa_id = any(canonical_rows.oa_ids) and member.source_kind = canonical_rows.source_kind"
+            else:
+                source = f"{kind}_edges member"
+                membership = "member.row_id = canonical_rows.row_id"
+            conditions = " and ".join(clause for clause, _ in clauses)
+            base_where.append(f"exists (select 1 from {source} where {membership} and {conditions})")
+            base_params.extend(param for _, params in clauses for param in params)
+        grouped_fields = {field for fields in member_fields.values() for field in fields}
+        for clause, params in _filter_clauses([
+            item for item in filters if item["field"] not in grouped_fields | {"payment_status"}
+        ]):
             base_where.append(clause)
             base_params.extend(params)
 
@@ -244,13 +264,6 @@ class PostgresOaPendingPaymentQueryRepository:
             else "oa_workflow_status = 'completed'"
         )
         base_where_sql = " and ".join(base_where) if base_where else "true"
-        option_values_sql = ",\n                        ".join(
-            (
-                f"('{field}', nullif(btrim({field}::text), ''), "
-                f"nullif(btrim({_option_label_expression(field)}::text), ''))"
-            )
-            for field in OPTION_FIELDS
-        )
         order_sql = _order_sql(sort_field, sort_direction)
         result = self._connection.fetch_one(
             f"""
@@ -272,7 +285,11 @@ class PostgresOaPendingPaymentQueryRepository:
                     (select count(distinct oa_id) from filtered_rows
                      cross join lateral unnest(oa_ids) as member(oa_id))::integer as oa_count,
                     coalesce(sum(oa_amount), 0) as oa_amount_total,
-                    coalesce(sum(bank_paid_total), 0) as bank_paid_total
+                    coalesce((select sum(bank_amount) from (
+                        select distinct bank.member_id, bank.bank_amount
+                        from bank_edges bank
+                        join filtered_rows filtered on filtered.row_id = bank.row_id
+                    ) unique_banks), 0) as bank_paid_total
                 from filtered_rows
             ),
             view_counts as (
@@ -293,14 +310,30 @@ class PostgresOaPendingPaymentQueryRepository:
                 cross join lateral unnest(oa_ids) as member(oa_id)
             ),
             option_values(field, value, label, oa_id) as (
-                select options.field, options.value, options.label, member.oa_id
-                from filtered_rows
-                cross join lateral unnest(oa_ids) as member(oa_id)
-                cross join lateral (
-                    values
-                        {option_values_sql}
-                ) as options(field, value, label)
-                where options.field <> 'payment_status'
+                select options.field, options.value, options.value, member.oa_id
+                from filtered_rows filtered
+                join canonical_oa member
+                  on member.oa_id = any(filtered.oa_ids)
+                 and member.source_kind = filtered.source_kind
+                cross join lateral (values
+                    ('oa_applicant', member.oa_applicant),
+                    ('oa_application_type', member.oa_application_type),
+                    ('oa_project_name', member.oa_project_name)
+                ) options(field, value)
+                union all
+                select options.field, options.value, options.value, oa.oa_id
+                from filtered_rows filtered
+                join bank_edges bank on bank.row_id = filtered.row_id
+                cross join lateral unnest(filtered.oa_ids) as oa(oa_id)
+                cross join lateral (values
+                    ('bank_name', bank.bank_name), ('bank_account', bank.bank_account),
+                    ('bank_direction', bank.bank_direction), ('bank_counterparty_name', bank.bank_counterparty_name)
+                ) options(field, value)
+                union all
+                select 'seller_name', invoice.seller_name, invoice.seller_name, oa.oa_id
+                from filtered_rows filtered
+                join invoice_edges invoice on invoice.row_id = filtered.row_id
+                cross join lateral unnest(filtered.oa_ids) as oa(oa_id)
                 union all
                 select 'payment_status', payment_status, payment_status_label, member.oa_id
                 from status_rows
@@ -320,12 +353,12 @@ class PostgresOaPendingPaymentQueryRepository:
                 from (
                     select
                         field,
-                        value,
-                        max(label) as max_label,
+                        btrim(value) as value,
+                        max(nullif(btrim(label), '')) as max_label,
                         count(distinct oa_id)::integer as option_count
                     from option_values
-                    where value is not null
-                    group by field, value
+                    where nullif(btrim(value), '') is not null
+                    group by field, btrim(value)
                 ) counts
                 group by field
             ),
@@ -654,7 +687,7 @@ class PostgresOaPendingPaymentQueryRepository:
         where = [predicate]
         params: list[Any] = [text(tenant_id) or "default", identifier]
         if month:
-            where.append("scope_key = %s")
+            where.append("%s = any(scope_keys)")
             params.append(month)
         row = self._connection.fetch_one(
             f"""
@@ -750,6 +783,8 @@ def _filter_clauses(filters: list[dict[str, Any]]) -> list[tuple[str, list[Any]]
         field = text(item.get("field")) or ""
         operator = text(item.get("operator")) or ""
         expression, mode = FILTER_FIELDS[field]
+        if mode == "date":
+            expression = f"{expression}::date"
         if operator == "contains":
             clauses.append((f"{expression} ilike %s", [f"%{text(item.get('value')) or ''}%"]))
         elif operator == "equals":
@@ -781,12 +816,6 @@ def _filter_clauses(filters: list[dict[str, Any]]) -> list[tuple[str, list[Any]]
 def _order_sql(sort_field: str, sort_direction: str) -> str:
     expression = FILTER_FIELDS[sort_field][0]
     return f"{expression} {sort_direction} nulls last, row_id"
-
-
-def _option_label_expression(field: str) -> str:
-    if field == "payment_status":
-        return "payment_status_label"
-    return field
 
 
 def _descriptor_oa_ids(
@@ -861,7 +890,8 @@ canonical_oa as materialized (
 workflow_relation_groups as materialized (
     select
         oa.source_kind,
-        oa.scope_key,
+        min(oa.scope_key) as scope_key,
+        array_agg(distinct oa.scope_key) as scope_keys,
         relation.case_id as relation_id,
         array_agg(oa.oa_id order by member.ordinality) as oa_ids,
         relation.row_ids,
@@ -870,7 +900,7 @@ workflow_relation_groups as materialized (
     cross join lateral unnest(relation.row_ids) with ordinality as member(row_id, ordinality)
     join canonical_oa oa on oa.oa_id = member.row_id
     where relation.status = 'active'
-    group by oa.source_kind, oa.scope_key, relation.case_id, relation.row_ids, relation.row_types
+    group by oa.source_kind, relation.case_id, relation.row_ids, relation.row_types
 ),
 relation_groups as materialized (
     select * from workflow_relation_groups
@@ -879,6 +909,7 @@ standalone_groups as materialized (
     select
         oa.source_kind,
         oa.scope_key,
+        array[oa.scope_key]::text[] as scope_keys,
         null::text as relation_id,
         array[oa.oa_id]::text[] as oa_ids,
         array[oa.oa_id]::text[] as row_ids,
@@ -888,7 +919,6 @@ standalone_groups as materialized (
         select 1
         from relation_groups relation
         where relation.source_kind = oa.source_kind
-          and relation.scope_key = oa.scope_key
           and oa.oa_id = any(relation.oa_ids)
     )
 ),
@@ -901,6 +931,7 @@ group_oa as materialized (
     select
         groups.source_kind,
         groups.scope_key,
+        groups.scope_keys,
         groups.relation_id,
         groups.oa_ids,
         groups.row_ids,
@@ -911,7 +942,7 @@ group_oa as materialized (
                     || substring(encode(digest(groups.oa_ids[1], 'sha1'), 'hex') from 1 for 16)
             else 'oa_pending_payment_relation_'
                 || substring(
-                    encode(digest(groups.relation_id || ':' || groups.scope_key, 'sha1'), 'hex')
+                    encode(digest(groups.relation_id || ':' || groups.source_kind, 'sha1'), 'hex')
                     from 1 for 16
                 )
         end as row_id,
@@ -928,11 +959,11 @@ group_oa as materialized (
     from groups
     join canonical_oa oa
       on oa.source_kind = groups.source_kind
-     and oa.scope_key = groups.scope_key
      and oa.oa_id = any(groups.oa_ids)
     group by
         groups.source_kind,
         groups.scope_key,
+        groups.scope_keys,
         groups.relation_id,
         groups.oa_ids,
         groups.row_ids,
@@ -943,6 +974,7 @@ group_members as materialized (
         group_oa.row_id,
         group_oa.source_kind,
         group_oa.scope_key,
+        group_oa.scope_keys,
         member.row_id as member_id,
         lower(coalesce(member_type.row_type, '')) as member_type,
         member.ordinality
@@ -997,7 +1029,7 @@ raw_bank_edges as materialized (
 ),
 {_OA_BANK_SCOPE_CTES},
 bank_edges as materialized (
-    select bank.*, row_number() over (
+    select bank.*, bank.txn_direction as bank_direction, row_number() over (
         partition by bank.row_id
         order by abs(bank.bank_amount-coalesce(oa.oa_amount,0)), bank.bank_trade_time desc nulls last, bank.member_id
     ) as primary_rank
@@ -1098,6 +1130,7 @@ canonical_rows as materialized (
     select
         group_oa.row_id,
         group_oa.scope_key,
+        group_oa.scope_keys,
         group_oa.source_kind,
         group_oa.relation_id,
         group_oa.oa_ids,
@@ -1186,7 +1219,7 @@ def list_oa_pending_payment_relation_visibility_gaps(
         left join canonical_rows consumer
           on consumer.source_kind = expected.source_kind
          and consumer.relation_id = expected.relation_id
-         and consumer.scope_key = expected.scope_key
+         and expected.scope_key = any(consumer.scope_keys)
         where consumer.relation_id is null
            or consumer.existing_outflow_count = 0
            or consumer.payment_status <> 'paid'

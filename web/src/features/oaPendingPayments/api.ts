@@ -96,23 +96,19 @@ export async function fetchOaPendingPaymentDetail(
   signal?: AbortSignal,
 ): Promise<OaPendingPaymentDetailResponse> {
   const params = new URLSearchParams();
-  if (target.scopeKey) {
-    params.set("month", target.scopeKey);
-  }
-  const scopeQuery = params.size > 0 ? `?${params.toString()}` : "";
   if (target.kind === "oa") {
     return apiRequestJson<OaPendingPaymentDetailResponse>(
-      `/api/oa-pending-payments/oa/${encodeURIComponent(target.id)}/detail${scopeQuery}`, { signal },
+      `/api/oa-pending-payments/oa/${encodeURIComponent(target.id)}/detail`, { signal },
     );
   }
   if (target.kind === "bank") {
     return apiRequestJson<OaPendingPaymentDetailResponse>(
-      `/api/oa-pending-payments/bank-transactions/${encodeURIComponent(target.id)}/detail${scopeQuery}`, { signal },
+      `/api/oa-pending-payments/bank-transactions/${encodeURIComponent(target.id)}/detail`, { signal },
     );
   }
   if (target.kind === "invoice") {
     return apiRequestJson<OaPendingPaymentDetailResponse>(
-      `/api/oa-pending-payments/invoices/${encodeURIComponent(target.id)}/detail${scopeQuery}`, { signal },
+      `/api/oa-pending-payments/invoices/${encodeURIComponent(target.id)}/detail`, { signal },
     );
   }
   const kind = target.relationKind ?? "bank";

@@ -19,7 +19,6 @@ from fin_ops_platform.services.oa_payment_status_service import PAY_STATUS_PAID,
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
-OA_PENDING_PAYMENT_PROJECTION_RULES_VERSION = "oa-pending-payment:canonical-relation-v7"
 OA_APPLICATION_TIME_FIELDS = (
     "审批完成时间",
     "申请时间",
@@ -45,18 +44,17 @@ def build_oa_pending_payment_rows(
     invoices: list[Invoice],
     payment_statuses_by_flow_id: dict[str, OAPaymentStatusRecord] | None,
     flow_id_resolver: Callable[[OAApplicationRecord], str | None],
-    scope_key: str,
+    source_kind: str,
     lifecycle_policy: InvoiceLifecyclePolicy | None = None,
 ) -> list[dict[str, Any]]:
-    """Build one OA month shard from already-loaded canonical facts."""
+    """Build relation groups for one workflow state from canonical facts."""
 
-    month_records = [
+    source_records = [
         record
         for record in records
         if isinstance(record, OAApplicationRecord)
-        and str(record.month or "").startswith(scope_key[:7])
     ]
-    records_by_id = {record.id: record for record in month_records}
+    records_by_id = {record.id: record for record in source_records}
     relations_by_row_id = _relations_by_row_id(relations)
     banks_by_id = {bank.id: bank for bank in bank_transactions if isinstance(bank, BankTransaction)}
     invoices_by_id = {invoice.id: invoice for invoice in invoices if isinstance(invoice, Invoice)}
@@ -65,7 +63,7 @@ def build_oa_pending_payment_rows(
     emitted_relations: set[str] = set()
     grouped_oa_ids: set[str] = set()
 
-    for record in month_records:
+    for record in source_records:
         for relation in relations_by_row_id.get(record.id, []):
             relation_identity = _relation_row_identity(relation)
             if not relation_identity or relation_identity in emitted_relations:
@@ -85,14 +83,14 @@ def build_oa_pending_payment_rows(
                     invoices_by_id=invoices_by_id,
                     payment_statuses_by_flow_id=payment_statuses_by_flow_id,
                     flow_id_resolver=flow_id_resolver,
-                    scope_key=scope_key,
+                    source_kind=source_kind,
                     lifecycle_policy=policy,
                 )
             )
             emitted_relations.add(relation_identity)
             grouped_oa_ids.update(item.id for item in relation_records)
 
-    for record in month_records:
+    for record in source_records:
         if record.id in grouped_oa_ids:
             continue
         rows.append(
@@ -160,7 +158,7 @@ def _relation_group_row(
     invoices_by_id: dict[str, Invoice],
     payment_statuses_by_flow_id: dict[str, OAPaymentStatusRecord] | None,
     flow_id_resolver: Callable[[OAApplicationRecord], str | None],
-    scope_key: str,
+    source_kind: str,
     lifecycle_policy: InvoiceLifecyclePolicy,
 ) -> dict[str, Any]:
     oa_payload = _oa_group_payload(records, relation)
@@ -169,7 +167,7 @@ def _relation_group_row(
     invoice_payload = _invoice_relation_payload(oa_amount, [relation], invoices_by_id)
     payment_status = _payment_status_for_amount(oa_payload.get("amount"), bank_payload, lifecycle_policy)
     row = {
-        "id": _relation_row_id(_relation_row_identity(relation), scope_key=scope_key),
+        "id": _relation_row_id(_relation_row_identity(relation), source_kind=source_kind),
         "oa": oa_payload,
         "paymentStatus": payment_status,
         "oaPaymentWriteback": _oa_payment_writeback_status(
@@ -517,8 +515,8 @@ def _row_id(oa_id: str) -> str:
     return "oa_pending_payment_row_" + sha1(str(oa_id).encode("utf-8")).hexdigest()[:16]
 
 
-def _relation_row_id(identity: str, *, scope_key: str) -> str:
-    return "oa_pending_payment_relation_" + sha1(f"{identity}:{scope_key[:7]}".encode("utf-8")).hexdigest()[:16]
+def _relation_row_id(identity: str, *, source_kind: str) -> str:
+    return "oa_pending_payment_relation_" + sha1(f"{identity}:{source_kind}".encode("utf-8")).hexdigest()[:16]
 
 
 def _parse_decimal(value: Any) -> Decimal | None:

@@ -154,6 +154,11 @@ export default function OaPendingPaymentsPage() {
     return () => controller.abort();
   }, [active, activationGeneration, loadRows]);
 
+  useEffect(() => {
+    setSelectedOaRowIds(new Set());
+    setDetailTarget(null);
+  }, [query.keyword, query.filters, query.viewMode, query.tradeDateFrom, query.tradeDateTo]);
+
   const handleKeywordSubmit = useCallback(() => {
     setQuery((current) => ({ ...current, page: 1, keyword: keywordDraft.trim() }));
   }, [keywordDraft]);

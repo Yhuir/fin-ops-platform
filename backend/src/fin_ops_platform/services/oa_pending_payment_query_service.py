@@ -298,15 +298,8 @@ class OaPendingPaymentQueryService:
         invoices = list(facts.get("invoices") or [])
         payment_statuses = dict(facts.get("payment_statuses") or {})
         rows_by_id: dict[str, dict[str, Any]] = {}
-        scopes = sorted(
-            {
-                (str(descriptor.get("scope_key") or ""), str(descriptor.get("source_kind") or ""))
-                for descriptor in descriptors
-            }
-        )
-        for scope_key, source_kind in scopes:
-            if not scope_key:
-                continue
+        source_kinds = sorted({str(descriptor["source_kind"]) for descriptor in descriptors})
+        for source_kind in source_kinds:
             rows = build_oa_pending_payment_rows(
                 records=completed_records if source_kind == "completed" else in_progress_records,
                 relations=relations,
@@ -314,7 +307,7 @@ class OaPendingPaymentQueryService:
                 invoices=invoices,
                 payment_statuses_by_flow_id=payment_statuses,
                 flow_id_resolver=PostgresOaPendingPaymentStatusSnapshotReader.resolve_flow_id,
-                scope_key=scope_key,
+                source_kind=source_kind,
             )
             rows_by_id.update(
                 {

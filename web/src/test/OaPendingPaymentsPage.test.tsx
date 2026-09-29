@@ -1497,6 +1497,23 @@ describe("OA pending payments page", () => {
     expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
   });
 
+  test("clears selected OA when the committed search scope changes", async () => {
+    const fetchMock = installOaPendingPaymentsFetch();
+    const user = userEvent.setup();
+    renderAuthenticatedAppAt("/oa-pending-payments");
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    await within(page).findByText("候选付款人");
+    await user.click(within(page).getByRole("radio", { name: /进行中 OA/ }));
+    await waitFor(() => expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("view_mode")).toBe("in_progress"));
+    const row = within(page).getByRole("row", { name: /候选付款人/ });
+    await user.click(within(row).getByRole("checkbox", { name: /候选付款人/ }));
+    expect(within(page).getByRole("button", { name: /关联支出流水/ })).toBeEnabled();
+    const search = within(page).getByRole("searchbox");
+    await user.type(search, "新条件");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(within(page).getByRole("button", { name: /关联支出流水/ })).toBeDisabled());
+  });
+
   test("opens OA, bank, relation drawers and reuses pending invoice rules endpoint", async () => {
     const fetchMock = installOaPendingPaymentsFetch();
     const user = userEvent.setup();
@@ -1544,7 +1561,7 @@ describe("OA pending payments page", () => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       return (
         url.pathname === "/api/oa-pending-payments/bank-transactions/bank-001/detail"
-        && url.searchParams.get("month") === "2026-01"
+        && !url.searchParams.has("month")
       );
     })).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => {
@@ -1556,7 +1573,7 @@ describe("OA pending payments page", () => {
       return (
         url.pathname === "/api/oa-pending-payments/rows/oa-payment-group-case-001/relation-details"
         && url.searchParams.get("kind") === "oa"
-        && url.searchParams.get("month") === "2026-01"
+        && !url.searchParams.has("month")
       );
     })).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => {
@@ -1564,7 +1581,7 @@ describe("OA pending payments page", () => {
       return (
         url.pathname === "/api/oa-pending-payments/rows/oa-payment-group-case-001/relation-details"
         && url.searchParams.get("kind") === "bank"
-        && url.searchParams.get("month") === "2026-01"
+        && !url.searchParams.has("month")
       );
     })).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => {
@@ -1572,7 +1589,7 @@ describe("OA pending payments page", () => {
       return (
         url.pathname === "/api/oa-pending-payments/rows/oa-payment-group-case-001/relation-details"
         && url.searchParams.get("kind") === "invoice"
-        && url.searchParams.get("month") === "2026-01"
+        && !url.searchParams.has("month")
       );
     })).toBe(true);
   });

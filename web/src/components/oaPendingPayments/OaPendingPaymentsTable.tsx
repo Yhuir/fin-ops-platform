@@ -241,7 +241,6 @@ export default function OaPendingPaymentsTable({
                             onClick={() => onOpenDetail({
                               kind: "oa",
                               id: row.oa.id,
-                              scopeKey: detailScopeKey(row),
                             })}
                           />
                         </span>
@@ -973,12 +972,10 @@ function hasBankTransaction(row: OaPendingPaymentRow): boolean {
 }
 
 function bankDetailTarget(row: OaPendingPaymentRow): OaPendingPaymentDetailTarget | null {
-  const scopeKey = detailScopeKey(row);
   if (row.bankTransaction.detailMode === "single" && row.bankTransaction.primaryBankTransactionId) {
     return {
       kind: "bank",
       id: row.bankTransaction.primaryBankTransactionId,
-      scopeKey,
     };
   }
   if (row.bankTransaction.detailMode === "list") {
@@ -987,19 +984,16 @@ function bankDetailTarget(row: OaPendingPaymentRow): OaPendingPaymentDetailTarge
       id: row.id,
       rowId: row.id,
       relationKind: "bank",
-      scopeKey,
     };
   }
   return null;
 }
 
 function invoiceDetailTarget(row: OaPendingPaymentRow): OaPendingPaymentDetailTarget | null {
-  const scopeKey = detailScopeKey(row);
   if (row.invoice.detailMode === "single" && row.invoice.primaryInvoiceId) {
     return {
       kind: "invoice",
       id: row.invoice.primaryInvoiceId,
-      scopeKey,
     };
   }
   if (row.invoice.detailMode === "list") {
@@ -1008,7 +1002,6 @@ function invoiceDetailTarget(row: OaPendingPaymentRow): OaPendingPaymentDetailTa
       id: row.id,
       rowId: row.id,
       relationKind: "invoice",
-      scopeKey,
     };
   }
   return null;
@@ -1021,15 +1014,9 @@ function oaRelationDetailTarget(row: OaPendingPaymentRow): OaPendingPaymentDetai
       id: row.id,
       rowId: row.id,
       relationKind: "oa",
-      scopeKey: detailScopeKey(row),
     };
   }
   return null;
-}
-
-function detailScopeKey(row: OaPendingPaymentRow): string | undefined {
-  const scopeKey = String(row.oa.month ?? "").slice(0, 7);
-  return /^\d{4}-\d{2}$/.test(scopeKey) ? scopeKey : undefined;
 }
 
 function extraRelationCount(relationCount: number | undefined): number {

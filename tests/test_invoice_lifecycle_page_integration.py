@@ -104,7 +104,7 @@ class InvoiceLifecyclePageIntegrationTests(unittest.TestCase):
             invoices=[],
             payment_statuses_by_flow_id={},
             flow_id_resolver=lambda _record: None,
-            scope_key="2026-01",
+            source_kind="completed",
             lifecycle_policy=policy,
         )
         row = rows[0]

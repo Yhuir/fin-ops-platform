@@ -683,6 +683,85 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(empty["summary"]["oaCount"], 0)
         self.assertEqual(empty["summary"]["statusCounts"], {"paid": 0, "unpaid": 0})
 
+    def test_cross_month_group_preserves_members_filters_status_and_unique_bank_total(self) -> None:
+        self.test_canonical_page_query_observes_active_relation_changes_without_read_model_refresh()
+        first = replace(_record(), applicant="甲", project_name="项目甲", detail_fields={})
+        second = replace(first, id="oa-cross-june", month="2026-06", applicant="乙", project_name="项目乙")
+        pending = replace(_in_progress_record(), month="2026-07", amount="100.00")
+        unrelated = replace(pending, id="oa-unrelated")
+        self._source_snapshot().commit_authoritative_snapshot(
+            scope_key="all", tenant_id="default", projection_records=[first, second],
+            authoritative_payment_flow_ids=["flow-in-progress-1"],
+            admission_records=[pending, unrelated], payment_statuses={
+                "flow-in-progress-1": OAPaymentStatusRecord(flow_id="flow-in-progress-1", pay_status=0),
+            },
+        )
+        self.connection.execute("""
+            update app.workbench_pair_relations
+            set status='active', row_ids=array['oa-integration-1','oa-cross-june','oa-in-progress-1','bank-direct-query'],
+                row_types=array['oa','oa','oa','bank'], raw_payload='{}'::jsonb
+            where case_id='oa-direct-query'
+        """)
+        self.connection.execute("""
+            update app.workbench_pair_relations set raw_payload=jsonb_build_object('normalized_payload',
+                jsonb_build_object('case_id',case_id,'status',status,'relation_mode',relation_mode,
+                    'row_ids',row_ids,'row_types',row_types,'version',version))
+            where case_id='oa-direct-query'
+        """)
+        service = OaPendingPaymentQueryService(repository=PostgresOaPendingPaymentQueryRepository(self.connection))
+        result = service.rows({}, tenant_id="default")
+        self.assertEqual(result['pagination']['total'], 1)
+        self.assertEqual(result['summary']['oaCount'], 2)
+        self.assertEqual(float(result['summary']['bankPaidTotal']), 100)
+        row = result['rows'][0]
+        self.assertEqual(row['oa']['amount'], '200.00')
+        self.assertEqual(row['oa']['relationCount'], 2)
+        self.assertEqual({m['oaId'] for m in row['oa']['summaries']}, {first.id, second.id})
+        self.assertEqual({o['value'] for o in result['filterOptions']['oa_applicant']}, {'甲', '乙'})
+        detail = service.relation_details(row['id'], kind='oa', tenant_id='default')
+        self.assertEqual(len(detail['summaries']), 2)
+        for query in ({'month': ['2026-06']}, {'keyword': ['项目乙']}, {'filters': [json.dumps([
+            {'field':'oa_applicant','operator':'in','values':['乙']},
+            {'field':'oa_project_name','operator':'in','values':['项目乙']},
+        ])]}):
+            filtered = service.rows(query, tenant_id='default')
+            self.assertEqual(filtered['rows'][0]['id'], row['id'])
+            self.assertEqual(filtered['rows'][0]['oa']['relationCount'], 2)
+        false_match = service.rows({'filters':[json.dumps([
+            {'field':'oa_applicant','operator':'in','values':['甲']},
+            {'field':'oa_project_name','operator':'in','values':['项目乙']},
+        ])]}, tenant_id='default')
+        self.assertEqual(false_match['rows'], [])
+        progress = service.rows({'view_mode':['in_progress']}, tenant_id='default')
+        self.assertEqual(progress['summary']['oaCount'], 2)
+        self.assertEqual(progress['pagination']['total'], 2)
+        linked = next(r for r in progress['rows'] if r['bankTransaction']['relationCount'])
+        self.assertNotEqual(linked['id'], row['id'])
+        self.assertEqual(linked['oa']['relationCount'], 1)
+        # A date matching a non-primary bank must retain the complete group.
+        self.connection.execute("""
+            insert into app.bank_transactions(legacy_mongo_id,account_no,counterparty_name_raw,txn_direction,amount,signed_amount,
+                txn_date,txn_month,status,raw_payload)
+            values ('bank-later','622200001234','非首条供应商','outflow',100,-100,'2026-07-20','2026-07-01','pending','{}')
+        """)
+        self.connection.execute("""
+            update app.workbench_pair_relations set row_ids=array_append(row_ids,'bank-later'),
+                row_types=array_append(row_types,'bank') where case_id='oa-direct-query'
+        """)
+        self.connection.execute("""
+            update app.workbench_pair_relations set raw_payload=jsonb_build_object('normalized_payload',
+                jsonb_build_object('case_id',case_id,'status',status,'relation_mode',relation_mode,
+                    'row_ids',row_ids,'row_types',row_types,'version',version))
+            where case_id='oa-direct-query'
+        """)
+        dated = service.rows({'trade_date_from':['2026-05-01'],'trade_date_to':['2026-05-31']},tenant_id='default')
+        self.assertEqual(dated['rows'][0]['bankTransaction']['relationCount'], 2)
+        self.assertEqual(float(dated['summary']['bankPaidTotal']), 200)
+        self.connection.execute("update app.workbench_pair_relations set status='withdrawn' where case_id='oa-direct-query'")
+        unlinked = service.rows({}, tenant_id='default')
+        self.assertEqual(unlinked['pagination']['total'], 2)
+        self.assertEqual(float(unlinked['summary']['bankPaidTotal']), 0)
+
     def test_export_reads_both_oa_fact_sources_without_queue_or_non_oa_fields(self) -> None:
         completed = _record()
         in_progress = _in_progress_record()

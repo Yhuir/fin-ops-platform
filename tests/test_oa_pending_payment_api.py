@@ -340,7 +340,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             invoices=[],
             payment_statuses_by_flow_id={},
             flow_id_resolver=lambda _record: None,
-            scope_key="2026-05",
+            source_kind="completed",
         )
         row = rows[0]
 

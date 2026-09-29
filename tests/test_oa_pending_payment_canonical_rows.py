@@ -57,17 +57,26 @@ class OaPendingPaymentProjectionRowsTests(unittest.TestCase):
         self.assertEqual(rows[0]["paymentStatus"]["code"], "unpaid")
         self.assertEqual(rows[0]["paymentStatus"]["label"], "待支付")
 
-    def test_month_shard_excludes_cross_month_oa_member(self) -> None:
+    def test_relation_combines_cross_month_oa_members(self) -> None:
         may = self._oa("oa-may", "100.00", month="2026-05")
         june = self._oa("oa-june", "200.00", month="2026-06")
         bank = self._bank("bank-1", "100.00")
         relation = self._relation("case-cross-month", [may.id, june.id, bank.id])
 
-        rows = self._build(records=[may, june], relations=[relation], banks=[bank], scope_key="2026-05")
+        rows = self._build(records=[may, june], relations=[relation], banks=[bank])
 
         self.assertEqual(len(rows), 1)
-        self.assertEqual([item["oaId"] for item in rows[0]["oa"]["summaries"]], [may.id])
-        self.assertEqual(rows[0]["oa"]["amount"], "100.00")
+        self.assertEqual([item["oaId"] for item in rows[0]["oa"]["summaries"]], [may.id, june.id])
+        self.assertEqual(rows[0]["oa"]["amount"], "300.00")
+
+    def test_workflow_groups_have_distinct_stable_identities(self) -> None:
+        relation = self._relation("case-states", ["oa-done", "oa-pending", "bank-1"])
+        bank = self._bank("bank-1", "100.00")
+        completed = self._build(records=[self._oa("oa-done", "50.00")], relations=[relation], banks=[bank])
+        pending = self._build(records=[self._oa("oa-pending", "50.00")], relations=[relation], banks=[bank], source_kind="in_progress")
+        self.assertNotEqual(completed[0]["id"], pending[0]["id"])
+        self.assertEqual(completed[0]["oa"]["relationCount"], 1)
+        self.assertEqual(pending[0]["oa"]["relationCount"], 1)
 
     def test_missing_or_non_outflow_bank_fact_fails_closed_for_writeback(self) -> None:
         record = self._oa("oa-1", "100.00")
@@ -135,7 +144,7 @@ class OaPendingPaymentProjectionRowsTests(unittest.TestCase):
             invoices=[],
             payment_statuses_by_flow_id=statuses,
             flow_id_resolver=lambda record: f"flow-{record.id[-1]}",
-            scope_key="2026-05",
+            source_kind="completed",
         )
 
         self.assertEqual(rows[0]["oaPaymentWriteback"]["code"], "written")
@@ -148,7 +157,7 @@ class OaPendingPaymentProjectionRowsTests(unittest.TestCase):
         relations: list[dict[str, object]],
         banks: list[BankTransaction] | None = None,
         invoices: list[Invoice] | None = None,
-        scope_key: str = "2026-05",
+        source_kind: str = "completed",
     ) -> list[dict[str, object]]:
         return build_oa_pending_payment_rows(
             records=records,
@@ -157,7 +166,7 @@ class OaPendingPaymentProjectionRowsTests(unittest.TestCase):
             invoices=list(invoices or []),
             payment_statuses_by_flow_id=None,
             flow_id_resolver=lambda _record: None,
-            scope_key=scope_key,
+            source_kind=source_kind,
         )
 
     @staticmethod

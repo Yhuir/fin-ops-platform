@@ -262,7 +262,6 @@ export type OaPendingPaymentDetailTarget = {
   id: string;
   rowId?: string;
   relationKind?: "oa" | "bank" | "invoice";
-  scopeKey?: string;
 };
 
 export type OaPendingPaymentDetailResponse = {
