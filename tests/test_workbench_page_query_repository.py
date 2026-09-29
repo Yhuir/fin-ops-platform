@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -1786,7 +1785,6 @@ def test_source_search_projection_matches_visible_grid_fields_only() -> None:
         "invoice.buyer_name",
         "invoice.buyer_tax_no",
         "invoice.tax_rate",
-        "invoice.tax_amount",
     ):
         assert visible_expression.lower() in normalized_sql
 
@@ -1840,7 +1838,7 @@ def test_source_search_reuses_preexpanded_bank_account_mappings() -> None:
     assert "from app.app_settings search_settings" not in normalized_sql
 
 
-def test_etc_summary_search_uses_batch_ids_invoice_numbers_and_exact_amount() -> None:
+def test_etc_summary_search_uses_batch_ids_invoice_numbers_and_amount_fragment() -> None:
     search_ctes, search_params, _hit_name = (
         PostgresWorkbenchPageQueryRepository._source_search_hit_ctes(
             prefix="etc",
@@ -1853,8 +1851,9 @@ def test_etc_summary_search_uses_batch_ids_invoice_numbers_and_exact_amount() ->
     assert "submission_batch_id" in normalized_sql
     assert "from app.etc_invoices etc_invoice" in normalized_sql
     assert "etc_invoice.invoice_no" in normalized_sql
-    assert "etc_batch.total_amount = %s::numeric" in normalized_sql
-    assert Decimal("1549.00") in search_params
+    assert "round(etc_batch.total_amount, 2)::text ilike %s" in normalized_sql
+    assert "%1549.00%" in search_params
+    assert "round(invoice.tax_amount, 2)::text ilike %s" in normalized_sql
 
 
 def test_grouped_filter_contract_rejects_legacy_flat_values() -> None:

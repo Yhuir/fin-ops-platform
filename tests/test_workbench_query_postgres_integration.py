@@ -1060,6 +1060,8 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 self.assertEqual(set(pure["formal_member_ids"]), set(ids))
                 self.assertEqual(set(pure["bank_folds"][0]["member_ids"]), set(ids))
                 self.assertEqual(Decimal(pure["bank_folds"][0]["summary_row"]["amount"]), Decimal("2216.56"))
+        partial = self.repository.get_workbench_groups_page(scope_key="all", zone="paired", search="216.5")
+        self.assertTrue(any(g.get("detail_key") == "batch-search" for g in partial["groups"]))
         # Presentation folding is independent of the business batch's status.
         self.raw_connection.execute("update app.bank_flow_rule_batches set status='withdrawn' where batch_id='batch-search'")
         independent = self.repository.get_workbench_groups_page(scope_key="all", zone="paired", search="2216.56")
@@ -1540,6 +1542,78 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             "etc_invoice_summary",
             {row["source_kind"] for row in invoice_rows},
         )
+
+    def test_contains_search_preserves_identifiers_and_combines_group_members(self) -> None:
+        with self.raw_connection.transaction() as transaction:
+            transaction.execute("select set_config('fin_ops.correction_reason', 'search fixture', true)")
+            transaction.execute("""
+                update app.bank_transactions set amount=6868.55, signed_amount=-6868.55,
+                    account_no='0093', counterparty_name_raw='组合户名', summary='材料款'
+                where legacy_mongo_id='bank-direct-1'
+            """)
+        for row_id, amount, account in (("contains-large", "1006868.55", "1393"),
+                                        ("contains-no", "68.68", "1393")):
+            self.raw_connection.execute("""
+                insert into app.bank_transactions(legacy_mongo_id, account_no, txn_direction,
+                    counterparty_name_raw, amount, signed_amount, txn_date, txn_month,
+                    trade_time, raw_payload, status)
+                values (%s,%s,'outflow','片段测试',%s,-%s::numeric,'2026-07-15','2026-07-01',
+                    '2026-07-15 12:00:00+08','{}'::jsonb,'active')
+            """, (row_id, account, amount, amount))
+        self.raw_connection.execute("""
+            insert into app.oa_pending_payment_admissions
+                (tenant_id,scope_key,oa_id,workflow_status,amount,source_signature,source_payload)
+            values ('default','2026-07','contains-pending','in_progress',6868.55,'contains',
+                    '{"applicant":"片段申请人","reason":"原始内容"}'::jsonb)
+        """)
+
+        def pages(query: str):
+            return [self.repository.get_workbench_groups_page(
+                scope_key='all', zone=zone, search=query, page_size=200,
+            ) for zone in ('paired', 'unpaired')]
+
+        def ids(query: str, kind='bank'):
+            return {r['id'] for p in pages(query) for g in p['groups'] for r in g[kind+'_rows']}
+
+        self.assertTrue({'bank-direct-1', 'contains-large'} <= ids('6868'))
+        self.assertNotIn('contains-no', ids('6868'))
+        self.assertIn('contains-pending', ids('6868', 'oa'))
+        self.assertIn('contains-large', ids('￥6,868.55'))
+        self.assertIn('contains-large', ids('.55'))
+        self.assertIn('bank-direct-1', ids('0093'))
+        self.assertNotIn('contains-large', ids('0093'))
+        self.assertNotIn('contains-no', ids('0093'))
+        self.assertIn('bank-direct-1', ids('组合户名 6868'))
+        self.assertIn('bank-direct-1', ids('货款 材料采购'))
+        self.assertIn('bank-direct-1', ids('张三 组合户名'))
+        self.assertNotIn('contains-large', ids('张三 组合户名'))
+        self.assertEqual(ids('组合户名 不存在的词'), set())
+        self.assertEqual(ids('6868.550000'), set())  # storage precision is not displayed
+        initial = self.repository.get_workbench_initial_page(
+            scope_key='all', unpaired_query={'search': '组合户名 6868'},
+            paired_query={'search': '组合户名 6868'})
+        for zone in ('paired', 'unpaired'):
+            expected = self.repository.get_workbench_groups_page(
+                scope_key='all', zone=zone, search='组合户名 6868')
+            self.assertEqual(initial[zone]['total'], expected['total'])
+            options = self.repository.get_workbench_filter_options(
+                scope_key='all', zone=zone, pane='bank', facet='column',
+                column='counterparty', search='组合户名 6868')
+            self.assertEqual({option['value'] for option in options['options']},
+                             {'组合户名'} if expected['total'] else set())
+        for zone in ('paired', 'unpaired'):
+            first = self.repository.get_workbench_groups_page(
+                scope_key='all', zone=zone, search='6868', page_size=1)
+            seen = [g['group_id'] for g in first['groups']]
+            cursor = first['next_cursor']
+            while cursor:
+                page = self.repository.get_workbench_groups_page(
+                    scope_key='all', zone=zone, search='6868', page_size=1, cursor=cursor)
+                self.assertEqual(page['total'], first['total'])
+                seen.extend(g['group_id'] for g in page['groups'])
+                cursor = page['next_cursor']
+            self.assertEqual(len(seen), first['total'])
+            self.assertEqual(len(seen), len(set(seen)))
 
     def test_unified_search_covers_visible_oa_bank_and_invoice_columns(self) -> None:
         self.raw_connection.execute(

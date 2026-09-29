@@ -616,7 +616,7 @@ function renderBankMoneyValue(
   return (
     <span className="money-cell-stack">
       <span className={`money-cell-value${bankPartsContent || row.bankSplitParts?.length ? " bank-split-parent-amount" : ""}`}>
-        <span>{highlightSearchText(displayedValue, searchQuery)}</span>
+        <span>{highlightSearchText(displayedValue, searchQuery, true)}</span>
       </span>
       {shouldShowDirectionTag || shouldShowAccount ? (
         <span className="money-cell-meta-row">
@@ -681,7 +681,7 @@ function renderOaMoneyValue(
   return (
     <span className="money-cell-stack">
       <span className="money-cell-value">
-        <span>{highlightSearchText(displayedValue, searchQuery)}</span>
+        <span>{highlightSearchText(displayedValue, searchQuery, true)}</span>
       </span>
     </span>
   );
@@ -746,13 +746,18 @@ function renderOaProjectValue(
   );
 }
 
-function highlightSearchText(value: string, query: string) {
+function highlightSearchText(value: string, query: string, amount = false) {
   const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
   if (!normalizedQuery) {
     return value;
   }
   const normalizedValue = value.toLocaleLowerCase("zh-CN");
-  const queryParts = Array.from(new Set(normalizedQuery.split(/\s+/).filter(Boolean)))
+  const queryParts = Array.from(new Set(normalizedQuery.split(/\s+/).filter(Boolean).map((part) => {
+    if (!amount) return part;
+    const fragment = part.replace(/^[￥¥]/, "");
+    return /^[+-]?(?:(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d*)?|\.\d*)$/.test(fragment)
+      ? fragment.replace(/,/g, "").replace(/^\+/, "") : part;
+  })))
     .sort((left, right) => right.length - left.length);
   const matches: Array<{ start: number; end: number }> = [];
   let offset = 0;
@@ -898,11 +903,11 @@ function renderInvoiceAmountValue(grossAmount: string, amount: string, taxRate: 
 
   return (
     <span className="compound-cell-value invoice-amount-value">
-      <span className="compound-cell-primary cell-text-value cell-text-value-full">{highlightSearchText(formatMoney(grossAmount, "--"), searchQuery)}</span>
+      <span className="compound-cell-primary cell-text-value cell-text-value-full">{highlightSearchText(formatMoney(grossAmount, "--"), searchQuery, true)}</span>
       {hasAmount || showTaxMeta ? (
         <span className="compound-cell-secondary">
           <span className="cell-text-value cell-text-value-full cell-subtext-value">
-            {highlightSearchText(`${hasAmount ? formatMoney(amount) : "--"}${showTaxMeta ? ` ${taxRate} (${formatMoney(taxAmount)})` : ""}`, searchQuery)}
+            {highlightSearchText(`${hasAmount ? formatMoney(amount) : "--"}${showTaxMeta ? ` ${taxRate} (${formatMoney(taxAmount)})` : ""}`, searchQuery, true)}
           </span>
         </span>
       ) : null}

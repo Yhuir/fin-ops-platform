@@ -4,7 +4,6 @@ import json
 from http import HTTPStatus
 from typing import Any, Callable
 
-from fin_ops_platform.services.search_query import canonicalize_money_search_query
 from fin_ops_platform.services.workbench_anomaly_contract import (
     AMOUNT_EXCEPTION_CODES,
     EXCEPTION_VIEWS,
@@ -378,7 +377,7 @@ class WorkbenchReadApiRoutes:
 
     @staticmethod
     def _normalize_search_query(value: object, name: str) -> str:
-        normalized = canonicalize_money_search_query(value)
+        normalized = str(value or "").strip()
         if len(normalized) > WORKBENCH_SEARCH_QUERY_MAX_LENGTH:
             raise ValueError(f"{name} must be at most {WORKBENCH_SEARCH_QUERY_MAX_LENGTH} characters.")
         return normalized

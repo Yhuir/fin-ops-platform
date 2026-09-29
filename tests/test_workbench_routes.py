@@ -221,8 +221,8 @@ class WorkbenchReadApiRoutesTests(unittest.TestCase):
             ],
         )
 
-    def test_groups_normalizes_equivalent_money_search_queries(self) -> None:
-        for query in ("202", "202.0", "202.00", "￥202.00", "¥202.00"):
+    def test_groups_preserves_text_and_amount_search_queries(self) -> None:
+        for query in ("0093", "0000", "202.0", "202.00", "￥202.00", "¥202.00", "刘树刚 6868"):
             with self.subTest(query=query):
                 facade = FakeWorkbenchQueryFacade()
                 routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
@@ -230,7 +230,7 @@ class WorkbenchReadApiRoutesTests(unittest.TestCase):
                 status, _payload = routes.groups("all", zone="unpaired", search=query)
 
                 self.assertEqual(status, HTTPStatus.OK)
-                self.assertEqual(facade.calls[0]["search"], "202")
+                self.assertEqual(facade.calls[0]["search"], query)
 
         facade = FakeWorkbenchQueryFacade()
         routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)

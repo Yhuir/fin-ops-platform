@@ -1491,7 +1491,7 @@ function bankFlowRuleConfirmResultPayload() {
 }
 
 function buildLargeWorkbenchGroup(index: number, zone: WorkbenchZone = "unpaired") {
-  const suffix = String(index).padStart(3, "0");
+  const suffix = `${zone === "paired" ? "paired-" : ""}${String(index).padStart(3, "0")}`;
   const caseId = `CASE-LARGE-202603-${suffix}`;
   const amount = `${(42000 + index * 137).toLocaleString("en-US")}.00`;
   const supplier = `长列表供应商${suffix}有限公司`;
@@ -10181,7 +10181,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       if (url.searchParams.get("row_type") !== row.type) {
         return json(route, { error: "workbench_row_type_required" }, 400);
       }
-      return json(route, { row: { ...row, source_sections: [{title: row.type === "bank" ? "交易信息" : row.type === "invoice" ? "发票信息" : "申请信息", document_id: row.id, document_kind: row.type, ...(row.type === "bank" ? {bank_transaction_id: row.id} : {}), fields: row.type === "oa" ? [{label: "申请人", value: row.applicant}, {label: "项目名称", value: row.project_name}, {label: "审批完成时间", value: "2026-03-28 18:10"}] : row.type === "bank" ? [{label: "对方户名", value: row.counterparty_name}, {label: "支出金额", value: row.debit_amount}, {label: "备注", value: row.remark}] : [{label: "发票号码", value: row.invoice_no}, {label: "销方名称", value: row.seller_name}]}] } });
+      return json(route, { row: { ...row, source_sections: [{title: row.type === "bank" ? "交易信息" : row.type === "invoice" ? "发票信息" : "申请信息", document_id: row.id, document_kind: row.type, ...(row.type === "bank" ? {bank_transaction_id: row.id} : {}), fields: row.type === "oa" ? [{label: "申请人", value: row.applicant}, {label: "项目名称", value: row.project_name}, {label: "审批完成时间", value: "2026-03-28 18:10"}] : row.type === "bank" ? [{label: "对方户名", value: row.counterparty_name}, {label: "支出金额", value: row.debit_amount}, {label: "备注", value: row.remark}, ...Object.entries(row.detail_fields ?? {}).filter(([label]) => label === "账户明细编号-交易流水号").map(([label, value]) => ({label, value: String(value)}))] : [{label: "发票号码", value: row.invoice_no}, {label: "销方名称", value: row.seller_name}]}] } });
     }
 
     if (path === "/api/workbench/settings") {

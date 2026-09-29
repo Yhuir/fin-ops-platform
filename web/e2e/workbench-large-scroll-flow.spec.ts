@@ -206,7 +206,8 @@ test.describe("workbench large dataset browser flow", () => {
     const rows = openZone.locator('[data-testid^="candidate-group-unpaired-"] [role="row"]');
     await expect(rows).toHaveCount(30);
     for (let index = 0; index < 30; index += 1) {
-      await rows.nth(index).getByRole("cell").first().click({ force: true });
+      await rows.nth(index).getByRole("cell").first().locator(".cell-text-value").first().click();
+      await expect(openZone.getByText(`已选 ${index + 1}`, { exact: true })).toBeVisible();
     }
     await expect(openZone.getByText("已选 30")).toBeVisible();
 

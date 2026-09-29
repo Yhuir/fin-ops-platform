@@ -7,7 +7,6 @@ import type {
   WorkbenchRecordType,
   WorkbenchSourceKind,
 } from "./types";
-import { normalizeMoneySearchQuery } from "../money";
 import { parseWorkbenchAmountCents, workbenchComparableAmountCents } from "./selectionModel";
 
 const workbenchPaneIds: WorkbenchRecordType[] = ["oa", "bank", "invoice"];
@@ -745,7 +744,7 @@ export function mergeWorkbenchGroupsById(
 
 export function buildWorkbenchServerPageQuery(state: WorkbenchZoneDisplayState): WorkbenchGroupsPageQuery {
   const query: WorkbenchGroupsPageQuery = {};
-  const search = normalizeMoneySearchQuery(state.searchQuery);
+  const search = state.searchQuery.trim();
   if (search) {
     query.search = search;
   }

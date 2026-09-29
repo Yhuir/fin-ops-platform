@@ -3,12 +3,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from copy import deepcopy
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, ROUND_HALF_UP
 from hashlib import sha256
 from typing import Any, TypeVar
 
 from fin_ops_platform.services.bank_details_canonical_query import (
     PostgresBankDetailsCanonicalQueryRepository,
+    bank_category_classification_cte,
 )
 from fin_ops_platform.services.bank_transaction_category_service import BANK_AUTO_TAG_EDITABLE_CODES
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
@@ -64,6 +65,8 @@ from fin_ops_platform.services.workbench_page_cursor import (
     encode_workbench_page_cursor,
     workbench_query_hash,
 )
+
+from fin_ops_platform.services.workbench_search import amount_search_fragment, search_terms
 
 T = TypeVar("T")
 WORKBENCH_DIRECT_QUERY_TIMEOUT_SECONDS = 5
@@ -2532,6 +2535,7 @@ def _group_page_anomaly_state_ctes(
           select 1 from canonical_group_members member
           join groups_source_search_hits hit
             on hit.row_type = member.row_type and hit.row_id = member.row_id
+           and hit.internal_key = member.internal_key
           where member.internal_key = groups.internal_key
       )
     """ if has_search else ""
@@ -2680,7 +2684,7 @@ class PostgresWorkbenchPageQueryRepository:
 
     def __init__(self, connection: Any, *, tenant_id: str) -> None:
         self._connection = connection
-        self._fold_search_results: dict[tuple[str, Decimal], list[str]] = {}
+        self._fold_search_results: dict[tuple[str, str], list[str]] = {}
         self._tenant_id = str(tenant_id or "").strip()
         if not self._tenant_id:
             raise ValueError("tenant_id is required for Workbench direct queries.")
@@ -3071,10 +3075,10 @@ class PostgresWorkbenchPageQueryRepository:
         exception_bucket = text(payload.get("exception_bucket"))
         if exception_bucket not in {None, "unpaired", "paired"}:
             raise ValueError("exception_bucket must be unpaired or paired.")
-        search_ctes, search_params, search_hit_name = self._source_search_hit_ctes(
+        search_ctes, search_params, search_hit_name = self._search_hit_ctes(
             prefix=zone,
             search=normalized_search,
-            fold_member_ids=self._fold_amount_member_ids(scope_key, normalized_search),
+            scope_key=scope_key,
         )
         bank_tag_row_ids = self._resolve_bank_tag_filter_row_ids(
             scope_key=scope_key,
@@ -3430,10 +3434,10 @@ class PostgresWorkbenchPageQueryRepository:
             or cursor_exception_code not in AMOUNT_EXCEPTION_CODES
         ):
             raise WorkbenchPageCursorError("cursor exception partition is invalid.")
-        search_ctes, search_params, search_hit_name = self._source_search_hit_ctes(
+        search_ctes, search_params, search_hit_name = self._search_hit_ctes(
             prefix="groups",
             search=normalized_search,
-            fold_member_ids=self._fold_amount_member_ids(normalized_scope, normalized_search),
+            scope_key=normalized_scope,
         )
         bank_tag_row_ids = self._resolve_bank_tag_filter_row_ids(
             scope_key=normalized_scope,
@@ -4641,10 +4645,10 @@ class PostgresWorkbenchPageQueryRepository:
             expected_query_hash=query_hash,
             expected_sort=cursor_sort,
         )
-        search_ctes, search_params, search_hit_name = self._source_search_hit_ctes(
+        search_ctes, search_params, search_hit_name = self._search_hit_ctes(
             prefix="options",
             search=normalized_search,
-            fold_member_ids=self._fold_amount_member_ids(normalized_scope, normalized_search),
+            scope_key=normalized_scope,
         )
         bank_tag_row_ids = self._resolve_bank_tag_filter_row_ids(
             scope_key=normalized_scope,
@@ -5481,6 +5485,7 @@ class PostgresWorkbenchPageQueryRepository:
                 f"join {search_hit_name} search_hit "
                 "on search_hit.row_type = search_member.row_type "
                 "and search_hit.row_id = search_member.row_id "
+                "and search_hit.internal_key = search_member.internal_key "
                 "where search_member.internal_key = groups.internal_key)"
             )
         if normalized_exception_bucket := text(exception_bucket):
@@ -5554,10 +5559,10 @@ class PostgresWorkbenchPageQueryRepository:
             bank_filters.pop("amount", None)
         if not bank_filters:
             filters_without_tags.pop("bank", None)
-        search_ctes, search_params, search_hit_name = self._source_search_hit_ctes(
+        search_ctes, search_params, search_hit_name = self._search_hit_ctes(
             prefix="bank_tag_candidates",
             search=search,
-            fold_member_ids=self._fold_amount_member_ids(scope_key, search),
+            scope_key=scope_key,
         )
         where_sql, where_params = self._group_filters(
             zone=zone,
@@ -5634,23 +5639,11 @@ class PostgresWorkbenchPageQueryRepository:
         ]
 
     def _fold_amount_member_ids(self, scope_key: str, search: str | None) -> list[str]:
-        """Numeric search uses the same folds as display, before pagination.
-
-        SQL narrows to active relations with >=4 banks each no greater than
-        the searched total, and sufficient gross amount. Bank-only relations fold as
-        one whole pane, so their candidate sum must equal the searched total.
-        Only their compact DTOs are read in this request's snapshot;
-        there is no full-detail/global payload or per-relation query loop.
-        """
-        if not search:
+        """Search actual display folds, using substring-safe candidate pruning."""
+        fragment = amount_search_fragment(search or "")
+        if fragment is None:
             return []
-        try:
-            amount = abs(Decimal(search.replace(",", "")))
-        except InvalidOperation:
-            return []
-        if not amount.is_finite():
-            return []
-        key = (scope_key, amount)
+        key = (scope_key, fragment)
         if key in self._fold_search_results:
             return self._fold_search_results[key]
         descriptors = self._connection.fetch_all(f"""
@@ -5665,14 +5658,21 @@ class PostgresWorkbenchPageQueryRepository:
                   on member.row_type = 'bank'
                  and member.row_id = coalesce(bank.legacy_mongo_id, bank.id::text)
                  and bank.status <> 'deleted'
-                 and abs(bank.amount) <= %s::numeric
                 where relation.status = 'active'
                   and (scope.scope_key = 'all' or relation.month_scope = scope.scope_month
                        or {self._relation_has_scoped_member_sql('relation')})
-                group by relation.case_id, relation.row_types
-                having count(*) >= 4 and sum(abs(bank.amount)) >= %s::numeric
-                   and (relation.row_types && array['oa','invoice']::text[]
-                        or sum(abs(bank.amount)) = %s::numeric)
+                group by relation.case_id, relation.row_types, relation.row_ids
+                having count(*) >= 4
+                   and (cardinality(array_positions(relation.row_types, 'oa')) > 1
+                        or exists (select 1 from app.oa_applications oa
+                            where oa.row_id=any(relation.row_ids)
+                              and jsonb_array_length(case when jsonb_typeof(oa.normalized_payload->'expense_items')='array'
+                                  then oa.normalized_payload->'expense_items' else '[]'::jsonb end)>0)
+                        or exists (select 1 from app.oa_pending_payment_admissions pending
+                            where pending.oa_id=any(relation.row_ids)
+                              and jsonb_array_length(case when jsonb_typeof(pending.source_payload->'expense_items')='array'
+                                  then pending.source_payload->'expense_items' else '[]'::jsonb end)>0)
+                        or round(sum(abs(bank.amount)), 2)::text ilike %s)
             )
             select 'case:' || relation.case_id as internal_key,
                    relation.case_id as detail_key, 'relation'::text as group_kind,
@@ -5683,12 +5683,64 @@ class PostgresWorkbenchPageQueryRepository:
             from app.workbench_pair_relations relation
             join eligible using (case_id)
             order by relation.case_id
-        """, (scope_key, None if scope_key == 'all' else month_start(scope_key), self._tenant_id, amount, amount, amount))
+        """, (scope_key, None if scope_key == 'all' else month_start(scope_key), self._tenant_id, _literal_ilike_pattern(fragment)))
         groups = self._hydrate_groups(month=scope_key, descriptors=descriptors, detail_level="summary")
         result = sorted({member for group in groups for fold in group.get("bank_folds", [])
-                         if Decimal(fold["summary_row"]["amount"]) == amount for member in fold["member_ids"]})
+                         if fragment in format(Decimal(fold["summary_row"]["amount"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f")
+                         for member in fold["member_ids"]})
         self._fold_search_results[key] = result
         return result
+
+    def _search_hit_ctes(
+        self, *, prefix: str, search: str | None, scope_key: str,
+    ) -> tuple[str, list[Any], str | None]:
+        terms = search_terms(search or "")
+        if not terms:
+            return "", [], None
+        settings = PostgresBankDetailsCanonicalQueryRepository.settings_payload(self._connection)
+        definitions = (settings.get("bank_transaction_tags") or {}).get("definitions", [])
+        tag_sql, tag_params = bank_category_classification_cte(
+            definitions=definitions, date_from=None, date_to=None, use_units=True,
+            candidate_transaction_relation="search_bank_keys", defer_full_payload=True,
+            tenant_id=self._tenant_id,
+        )
+        tags_name = f"{prefix}_search_bank_tags"
+        sql = f"""
+            {tags_name} as materialized (
+                with search_bank_keys as (select row_id from needed_keys where row_type = 'bank'),
+                {tag_sql}
+                select row_id, concat_ws(' / ', effective_category_primary_label,
+                    effective_category_sub_label, effective_category_third_label,
+                    effective_category_label) as label
+                from classified_with_semantics
+            ),
+        """
+        params = list(tag_params)
+        names = []
+        for index, term in enumerate(terms):
+            term_sql, term_params, name = self._source_search_hit_ctes(
+                prefix=f"{prefix}_term_{index}", search=term,
+                fold_member_ids=self._fold_amount_member_ids(scope_key, term),
+                bank_tags_name=tags_name,
+            )
+            sql += term_sql
+            params.extend(term_params)
+            names.append(name)
+        hit_name = f"{prefix}_source_search_hits"
+        # AND across terms, OR across members/fields. Returning whole groups also
+        # preserves the complete evidence needed by anomaly classification.
+        conditions = " and ".join(
+            f"exists (select 1 from canonical_group_members m join {name} h "
+            "on h.row_type=m.row_type and h.row_id=m.row_id "
+            "where m.internal_key=g.internal_key)" for name in names
+        )
+        sql += f"""{hit_name} as materialized (
+            select distinct g.internal_key, member.row_type, member.row_id
+            from canonical_groups g
+            join canonical_group_members member on member.internal_key=g.internal_key
+            where {conditions}
+        ),"""
+        return sql, params, hit_name
 
     @staticmethod
     def _source_search_hit_ctes(
@@ -5696,6 +5748,7 @@ class PostgresWorkbenchPageQueryRepository:
         prefix: str,
         search: str | None,
         fold_member_ids: list[str] | None = None,
+        bank_tags_name: str | None = None,
     ) -> tuple[str, list[Any], str | None]:
         normalized = PostgresWorkbenchPageQueryRepository._search(search)
         if not normalized:
@@ -5723,8 +5776,6 @@ class PostgresWorkbenchPageQueryRepository:
                 "item.value->>'expense_type'",
                 "item.value->>'fee_content'",
                 "item.value->>'fee_description'",
-                "coalesce(item.value->>'amount', "
-                "item.value->>'settlement_amount', item.value->>'total_with_tax')",
             ]
             predicate, params = text_predicates(expressions)
             return (
@@ -5756,16 +5807,12 @@ class PostgresWorkbenchPageQueryRepository:
                              then {payload_sql}->'expense_items'
                              else '[]'::jsonb end
                     ) item(value)
-                    where {normalized_item_amount} ~ '^[+-]?[0-9]+([.][0-9]+)?$'
-                      and {normalized_item_amount}::numeric = %s::numeric
+                    where case when {normalized_item_amount} ~ '^[+-]?[0-9]+([.][0-9]+)?$'
+                         then round({normalized_item_amount}::numeric, 2)::text end ilike %s
                 )
             """
 
-        amount: Decimal | None = None
-        try:
-            amount = Decimal(normalized.replace(",", ""))
-        except (InvalidOperation, ValueError):
-            pass
+        amount_fragment = amount_search_fragment(normalized)
         search_date: str | None = None
         try:
             search_date = datetime.strptime(normalized, "%Y-%m-%d").date().isoformat()
@@ -5876,9 +5923,6 @@ class PostgresWorkbenchPageQueryRepository:
                 "invoice.buyer_name",
                 "invoice.buyer_tax_no",
                 "invoice.tax_rate",
-                "invoice.tax_amount::text",
-                "invoice.amount::text",
-                "coalesce(invoice.total_with_tax, invoice.amount)::text",
                 "invoice.invoice_date::text",
             ]
         )
@@ -5906,6 +5950,13 @@ class PostgresWorkbenchPageQueryRepository:
         oa_predicates = [oa_text, oa_expense_text]
         pending_predicates = [pending_text, pending_expense_text]
         bank_predicates = [bank_text]
+        if bank_tags_name:
+            bank_predicates.append(
+                f"exists (select 1 from {bank_tags_name} tag "
+                "where tag.row_id=coalesce(bank.legacy_mongo_id, bank.id::text) "
+                "and tag.label ilike %s)"
+            )
+            bank_params.append(pattern)
         invoice_predicates = [invoice_text]
         if label_matches("已完成"):
             oa_predicates.append("true")
@@ -5969,22 +6020,21 @@ class PostgresWorkbenchPageQueryRepository:
             )
         fold_amount_union = ""
         fold_amount_params: list[Any] = []
-        if amount is not None:
-            oa_predicates.append("oa.amount = %s::numeric")
-            oa_predicates.append(expense_item_amount_predicate("oa.normalized_payload"))
-            pending_predicates.append("pending.amount = %s::numeric")
-            pending_predicates.append(
-                expense_item_amount_predicate("pending.source_payload")
-            )
-            bank_predicates.append("abs(bank.amount) = abs(%s::numeric)")
+        if amount_fragment is not None:
+            amount_pattern = _literal_ilike_pattern(amount_fragment)
+            oa_predicates.extend(["round(oa.amount, 2)::text ilike %s",
+                                  expense_item_amount_predicate("oa.normalized_payload")])
+            pending_predicates.extend(["round(pending.amount, 2)::text ilike %s",
+                                       expense_item_amount_predicate("pending.source_payload")])
+            bank_predicates.append("(round(abs(bank.amount), 2)::text ilike %s or round(abs(bank.parent_amount), 2)::text ilike %s)")
             invoice_predicates.append(
-                "(invoice.amount = %s::numeric "
-                "or invoice.tax_amount = %s::numeric "
-                "or coalesce(invoice.total_with_tax, invoice.amount) = %s::numeric)"
+                "(round(invoice.amount, 2)::text ilike %s "
+                "or round(invoice.tax_amount, 2)::text ilike %s "
+                "or round(coalesce(invoice.total_with_tax, invoice.amount), 2)::text ilike %s)"
             )
-            oa_params.extend([amount, amount])
-            pending_params.extend([amount, amount])
-            bank_params.append(amount)
+            oa_params.extend([amount_pattern, amount_pattern])
+            pending_params.extend([amount_pattern, amount_pattern])
+            bank_params.extend([amount_pattern, amount_pattern])
             if fold_member_ids:
                 fold_amount_union = """
                     union
@@ -5994,9 +6044,9 @@ class PostgresWorkbenchPageQueryRepository:
                       on needed.row_type = 'bank' and needed.row_id = member.row_id
                 """
                 fold_amount_params.append(fold_member_ids)
-            invoice_params.extend([amount, amount, amount])
-            etc_predicates.append("etc_batch.total_amount = %s::numeric")
-            etc_params.append(amount)
+            invoice_params.extend([amount_pattern] * 3)
+            etc_predicates.append("round(etc_batch.total_amount, 2)::text ilike %s")
+            etc_params.append(amount_pattern)
         if search_date is not None:
             oa_predicates.append(
                 "(oa.application_date = %s::date or oa.approved_at::date = %s::date)"

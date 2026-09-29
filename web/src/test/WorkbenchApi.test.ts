@@ -1997,6 +1997,14 @@ describe("workbench api bank amount mapping", () => {
     });
   });
 
+  test.each(["0093", "26532000000000000001", "￥6,868.55", "刘树刚 6868"])(
+    "preserves the literal zone search %s", (search) => {
+      const state = createEmptyWorkbenchZoneDisplayState();
+      state.searchQuery = ` ${search} `;
+      expect(buildWorkbenchServerPageQuery(state).search).toBe(search);
+    },
+  );
+
   test("keeps server filtered summary groups without local preview exclusion", () => {
     const state = createEmptyWorkbenchZoneDisplayState();
     state.activePaneId = "bank";

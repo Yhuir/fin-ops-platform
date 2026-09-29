@@ -119,7 +119,10 @@ test('saving splits clears only that bank selection and reloads the saved versio
   await page.route('**/api/workbench?*', route => route.fulfill({ json: payload }));
   await page.route('**/api/workbench/rows/*?*', route => {
     const { bank_split_version, ...detailRow } = bank;
-    return route.fulfill({ json: { row: { ...detailRow, split_version: bank_split_version } } });
+    return route.fulfill({ json: { row: { ...detailRow, split_version: bank_split_version, source_sections: [{
+      title: "交易信息", document_id: bank.id, document_kind: "bank", bank_transaction_id: "parent-bank",
+      fields: [{ label: "金额", value: "58000.00" }],
+    }] } } });
   });
   let writes = 0;
   await page.route('**/api/bank-transactions/*/splits', async route => {
@@ -143,6 +146,7 @@ test('saving splits clears only that bank selection and reloads the saved versio
   await expect(zone.getByText('已选 2', { exact: true })).toBeVisible();
   await bankRow.getByRole('button', { name: /查看银行流水.*详情/ }).click();
   const drawer = page.getByRole('dialog', { name: '银行流水详情' });
+  await drawer.getByRole('button', { name: '流水子项拆分', exact: true }).click();
   await drawer.getByLabel('子项 1 金额').fill('56999.00');
   await drawer.getByLabel('子项 2 金额').fill('1001.00');
   await expect(drawer.getByRole('button', { name: /选中子项/ })).toHaveCount(0);
