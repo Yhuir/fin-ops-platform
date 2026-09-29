@@ -66,7 +66,11 @@ from fin_ops_platform.services.workbench_page_cursor import (
     workbench_query_hash,
 )
 
-from fin_ops_platform.services.workbench_search import amount_search_fragment, search_terms
+from fin_ops_platform.services.workbench_search import (
+    amount_search_fragment,
+    fold_amount_search_minimum,
+    search_terms,
+)
 
 T = TypeVar("T")
 WORKBENCH_DIRECT_QUERY_TIMEOUT_SECONDS = 5
@@ -5636,6 +5640,9 @@ class PostgresWorkbenchPageQueryRepository:
         fragment = amount_search_fragment(search or "")
         if fragment is None:
             return []
+        minimum = fold_amount_search_minimum(fragment)
+        if minimum is None:
+            return []
         key = (scope_key, fragment)
         if key in self._fold_search_results:
             return self._fold_search_results[key]
@@ -5656,6 +5663,7 @@ class PostgresWorkbenchPageQueryRepository:
                        or {self._relation_has_scoped_member_sql('relation')})
                 group by relation.case_id, relation.row_types, relation.row_ids
                 having count(*) >= 4
+                   and round(sum(abs(bank.amount)), 2) >= %s
                    -- Direct member hits already select this complete relation.
                    -- Only hydrate folds when they can add a new search hit.
                    and not bool_or(round(abs(bank.amount), 2)::text ilike %s)
@@ -5680,7 +5688,7 @@ class PostgresWorkbenchPageQueryRepository:
             join eligible using (case_id)
             order by relation.case_id
         """, (scope_key, None if scope_key == 'all' else month_start(scope_key), self._tenant_id,
-              _literal_ilike_pattern(fragment), _literal_ilike_pattern(fragment)))
+              minimum, _literal_ilike_pattern(fragment), _literal_ilike_pattern(fragment)))
         groups = self._hydrate_groups(month=scope_key, descriptors=descriptors, detail_level="summary")
         result = sorted({member for group in groups for fold in group.get("bank_folds", [])
                          if fragment in format(Decimal(fold["summary_row"]["amount"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f")
