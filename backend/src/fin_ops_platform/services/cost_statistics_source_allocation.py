@@ -192,6 +192,15 @@ def automatic_relation_sources(
     # With one payment, the current formal relation owns every OA target. A
     # historical subset may predate later OA additions; it is not exclusive.
     multiple_sources = sum(e["event_kind"] == "outflow" for e in task["bank_events"]) > 1
+    # A complete, mutually unique payment proof is stronger than historical
+    # merge partitions. Current formal membership and explicit source references
+    # still apply; partial evidence must not erase any remaining ownership scope.
+    full_payment_proof = (
+        evidence_pairs is not None and set(evidence_pairs) == all_oa
+        and len(set(evidence_pairs.values())) == len(evidence_pairs)
+        and set(evidence_pairs.values()) == {e["transaction_id"] for e in task["bank_events"]}
+        and all(e["event_kind"] == "outflow" for e in task["bank_events"])
+    )
     refs_by_bank = {row["id"]: set(row.get("source_oa_ids", [])) for row in bank_rows}
     for oa_id, bank_id in (evidence_pairs or {}).items():
         if not refs_by_bank.get(bank_id):
@@ -199,7 +208,7 @@ def automatic_relation_sources(
     if not any(refs_by_bank.values()) and (not multiple_sources or len(all_oa) == 1):
         return automatic_source_allocations({**task})
     allowed_by_bank = {id: frozenset(group["oa_row_ids"]) & all_oa
-                       for group in relation_groups for id in group["bank_row_ids"]} if multiple_sources else {}
+                       for group in relation_groups for id in group["bank_row_ids"]} if multiple_sources and not full_payment_proof else {}
     # Index identical ownership sets once, avoiding a banks × OA adjacency matrix.
     candidates: dict[frozenset[str], list[dict[str, Any]]] = {}
     blocked: set[str] = set()

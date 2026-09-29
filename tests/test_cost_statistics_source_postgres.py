@@ -319,6 +319,12 @@ class CostSourcePostgresTests(unittest.TestCase):
         app = build_local_state_application()
         app._cost_statistics_api_routes._manual_allocation_service = self.service
         app._cost_statistics_api_routes._query_service = self.query
+        current = {'case_id':'cost-source-case', 'row_ids':['oa-a','oa-b','bank-1','bank-2'],
+                   'row_types':['oa','oa','bank','bank']}
+        history = {'operation_type':'confirm_link', 'after_relations':[current], 'before_relations':[
+            {'case_id':'old-a','row_ids':['oa-a','bank-2'],'row_types':['oa','bank']},
+            {'case_id':'old-b','row_ids':['oa-b','bank-1'],'row_types':['oa','bank']}]}
+        self.connection.execute("insert into app.workbench_pair_relation_history(case_id,event_type,raw_payload) values ('cost-source-case','confirm_link',%s::jsonb)", (json.dumps(history),))
         self.add_interest_tag()
         self.connection.execute("""update app.app_settings set settings_payload=jsonb_set(settings_payload,
             '{cost_statistics_project_cost_scope,selected_tag_codes}','["interest-test"]'::jsonb)""")

@@ -500,3 +500,22 @@ class ApprovalAllocationTests(unittest.TestCase):
         self.assertEqual(policy.manual_allocation_tasks, [])
         self.assertCountEqual([(r['transaction_id'],r['amount']) for r in policy.serialized_cost_rows],
                               [('cost-1','100.00'),('cost-2','100.00')])
+
+    def test_complete_payment_evidence_resolves_crossed_merge_history(self):
+        policy, group = self.policy((8000, 8000), (8000, 8000), groups=[
+            {'oa_row_ids': ['0'], 'bank_row_ids': ['1']},
+            {'oa_row_ids': ['1'], 'bank_row_ids': ['0']},
+        ])
+        for kind in ['oa_rows', 'bank_rows']:
+            for i, row in enumerate(group[kind]):
+                row.update(counterparty_name='设备公司')
+                row['application_date' if kind == 'oa_rows' else 'trade_time'] = f'2026-08-{14 + i * 10}'
+        group['oa_rows'][1]['workflow_status'] = 'in_progress'
+        result = self.snapshot_policy(policy, group)
+        self.assertEqual(result.manual_allocation_tasks, [])
+        self.assertEqual([(r['transaction_id'], r['amount']) for r in result.serialized_cost_rows], [('0', '8000.00')])
+        # An explicit source contradiction is not just obsolete merge membership.
+        group['bank_rows'][0]['source_oa_ids'] = ['1']
+        conflict = self.snapshot_policy(policy, group)
+        self.assertEqual(conflict.pending_manual_allocation_count, 1)
+        self.assertEqual(conflict.serialized_cost_rows, [])
