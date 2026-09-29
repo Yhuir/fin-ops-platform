@@ -94,6 +94,8 @@
 .cost-page .cost-bank-tag-view .cost-explorer-item-main strong { font-size: 14px; }
 
 .cost-identity-header { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.cost-identity-popover { display: flex; flex-direction: column; }
+.cost-identity-popover .column-filter-dialog { flex: 1; min-width: 0; padding: 0; }
 .cost-identity-filter, .cost-identity-time button {
   display: inline-flex; align-items: center; justify-content: center; gap: 4px;
   min-height: 28px; border-radius: 4px; color: inherit; cursor: pointer;

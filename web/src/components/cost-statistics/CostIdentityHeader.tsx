@@ -24,7 +24,7 @@ export default function CostIdentityHeader({ label, options, selected, order, on
       <PopoverTrigger className={`cost-identity-filter${selected.length ? " is-active" : ""}`} aria-label={`筛选${label}${selected.length ? `，已选${selected.length}项` : ""}`}>
         {label}<span aria-hidden="true">▾</span>{selected.length > 0 ? <span>{selected.length}</span> : null}
       </PopoverTrigger>
-      <PopoverContent className="column-filter-popover" containerPadding={12} maxHeight={380} offset={8} placement="bottom start">
+      <PopoverContent className="column-filter-popover cost-identity-popover" containerPadding={12} maxHeight={380} offset={8} placement="bottom start">
         <PopoverDialog aria-label={`筛选${label}`} className="column-filter-dialog">
           <SearchField aria-label={`搜索${label}选项`} onChange={setSearch} value={search}>
             <SearchField.Group className="column-filter-search-group">

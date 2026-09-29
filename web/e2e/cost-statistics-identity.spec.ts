@@ -71,7 +71,10 @@ test("all five views filter the full scope, sort, paginate, and clear independen
     const box = await menu.boundingBox();
     expect(box!.x).toBeGreaterThanOrEqual(0); expect(box!.x + box!.width).toBeLessThanOrEqual(1024);
     expect(box!.y + box!.height).toBeLessThanOrEqual(600);
-    await page.keyboard.press("Escape");
+    await expect(menu.getByRole("button", { name: "清空", exact: true })).toBeInViewport({ ratio: 1 });
+    await expect(menu.getByRole("button", { name: "应用", exact: true })).toBeInViewport({ ratio: 1 });
+    await menu.getByRole("button", { name: "清空", exact: true }).click();
+    await menu.getByRole("button", { name: "应用", exact: true }).click();
     await page.setViewportSize({ width: 1920, height: 900 });
   }
   expect(paginatedViews).toBeGreaterThanOrEqual(3);

@@ -114,8 +114,11 @@ test('production cost explorer verifies five identity filters, stable pagination
     const bounds = (await menu.boundingBox())!;
     expect(bounds.x).toBeGreaterThanOrEqual(0); expect(bounds.x + bounds.width).toBeLessThanOrEqual(1024);
     expect(bounds.y + bounds.height).toBeLessThanOrEqual(600);
-    await page.screenshot({ path: info.outputPath(`${view}-compact-menu.png`) });
-    await page.keyboard.press('Escape');
+    await expect(menu.getByRole('button', { name: '清空', exact: true })).toBeInViewport({ ratio: 1 });
+    await expect(menu.getByRole('button', { name: '应用', exact: true })).toBeInViewport({ ratio: 1 });
+    await page.screenshot({ path: info.outputPath(`${view}-compact-menu.png`), animations: 'disabled' });
+    await menu.getByRole('button', { name: '清空', exact: true }).click();
+    await menu.getByRole('button', { name: '应用', exact: true }).click();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     await page.setViewportSize({ width: 1920, height: 1000 });
     metrics.push({ view, total: allRows.length, candidateCount: candidates.length, filtered: expectedRows.length, ascendingRows: asc.length });
