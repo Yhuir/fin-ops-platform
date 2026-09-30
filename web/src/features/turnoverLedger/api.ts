@@ -199,7 +199,6 @@ type ApiTurnoverLedgerGroup = {
   flow_rows?: ApiTurnoverLedgerGroupedRow[];
   allocation_lots?: ApiTurnoverLedgerGroupedRow[];
   lot_rows?: ApiTurnoverLedgerGroupedRow[];
-  rows?: ApiTurnoverLedgerGroupedRow[];
 };
 
 type ApiTurnoverLedgerGroupedResponse = {
@@ -208,6 +207,9 @@ type ApiTurnoverLedgerGroupedResponse = {
   groups?: ApiTurnoverLedgerGroup[];
   pagination?: ApiTurnoverLedgerResponse["pagination"];
   statistics?: {
+    group_count?: number;
+    filtered_transaction_count?: number;
+    family_group_counts?: Record<string, number>;
     transaction_count?: number | null;
     expense_transaction_count?: number | null;
     income_transaction_count?: number | null;
@@ -268,7 +270,7 @@ type ApiTurnoverLedgerExportRow = {
 type ApiTurnoverLedgerExportPreview = {
   file_name?: string | null;
   scope_label?: string | null;
-  summary?: ApiTurnoverLedgerExportSummary;
+  totals?: ApiTurnoverLedgerExportSummary;
   columns?: string[];
   rows?: ApiTurnoverLedgerExportRow[];
 };
@@ -659,12 +661,8 @@ function mapGroupedRow(row: ApiTurnoverLedgerGroupedRow, fallbackRowKind = ""): 
 }
 
 function mapGroup(group: ApiTurnoverLedgerGroup): TurnoverLedgerGroup {
-  const rows = (group.rows ?? []).map((row) => mapGroupedRow(row));
-  const summaryRow = group.summary_row
-    ? mapGroupedRow(group.summary_row, "summary")
-    : rows[0]
-      ? { ...rows[0], rowKind: rows[0].rowKind || "summary" }
-      : null;
+  if (!group.summary_row) throw new Error("往来分组缺少 summary_row");
+  const summaryRow = mapGroupedRow(group.summary_row, "summary");
   const flowRows = (group.flow_rows ?? []).map((row) => mapGroupedRow(row, "flow") as TurnoverLedgerFlowRow);
   const allocationLots = (group.allocation_lots ?? []).map((row) => (
     mapGroupedRow(row, "allocation_lot") as TurnoverLedgerAllocationLot
@@ -680,17 +678,16 @@ function mapGroup(group: ApiTurnoverLedgerGroup): TurnoverLedgerGroup {
     pendingDirection,
     pendingDirectionLabel: text(group.pending_direction_label),
     pendingAmount,
-    pendingRepaymentAmount: text(group.pending_repayment_amount, pendingDirection === "repayment" ? pendingAmount : "0.00"),
+    pendingRepaymentAmount: text(group.pending_repayment_amount, "0.00"),
     repaidAmount: text(group.repaid_amount, "0.00"),
-    pendingCollectionAmount: text(group.pending_collection_amount, pendingDirection === "collection" ? pendingAmount : "0.00"),
+    pendingCollectionAmount: text(group.pending_collection_amount, "0.00"),
     collectedAmount: text(group.collected_amount, "0.00"),
     closedAmount: "0.00",
     cashPairLinked: Boolean(group.cash_pair_linked),
     pairedUnsettled: Boolean(group.paired_unsettled),
     cashClosureLinked: Boolean(group.cash_closure_linked),
-    rowSpan: numberValue(group.row_span) || rows.length,
+    rowSpan: numberValue(group.row_span),
     groupTone: normalizeTone(group.group_tone),
-    rows,
     summaryRow,
     flowRows,
     allocationLots,
@@ -823,12 +820,16 @@ export async function fetchTurnoverLedgerGrouped({
   family = "all",
   direction = "all",
   status,
+  query = "",
+  settlementStatus = "all",
   page = 1,
   pageSize = 100,
   signal,
 }: FetchTurnoverLedgerRequest = {}): Promise<TurnoverLedgerGroupedResponse> {
   const params = new URLSearchParams();
   params.set("view", "grouped");
+  params.set("query", query);
+  params.set("settlement_status", settlementStatus);
   params.set("family", family);
   params.set("direction", direction);
   if (status) {
@@ -850,6 +851,9 @@ export async function fetchTurnoverLedgerGrouped({
       total: payload.pagination?.total ?? payload.groups?.length ?? 0,
     },
     statistics: payload.statistics ? {
+      groupCount: optionalCount(payload.statistics.group_count),
+      filteredTransactionCount: optionalCount(payload.statistics.filtered_transaction_count),
+      familyGroupCounts: payload.statistics.family_group_counts,
       transactionCount: optionalCount(payload.statistics.transaction_count),
       expenseTransactionCount: optionalCount(payload.statistics.expense_transaction_count),
       incomeTransactionCount: optionalCount(payload.statistics.income_transaction_count),
@@ -978,11 +982,15 @@ export async function saveTurnoverRelationExtra(
 export async function fetchTurnoverLedgerExportPreview(
   {
     family = "all",
+    query = "",
+    settlementStatus = "all",
     signal,
-  }: Pick<FetchTurnoverLedgerRequest, "family" | "signal"> = {},
+  }: Pick<FetchTurnoverLedgerRequest, "family" | "query" | "settlementStatus" | "signal"> = {},
 ): Promise<TurnoverLedgerExportPreview> {
   const params = new URLSearchParams();
   params.set("family", family);
+  params.set("query", query);
+  params.set("settlement_status", settlementStatus);
   const payload = await requestJson<ApiTurnoverLedgerExportPreview>(
     `/api/turnover-ledger/export-preview?${params.toString()}`,
     { method: "GET", signal },
@@ -991,10 +999,10 @@ export async function fetchTurnoverLedgerExportPreview(
     fileName: text(payload.file_name, "往来款台账.xlsx"),
     scopeLabel: text(payload.scope_label),
     summary: {
-      rowCount: numberValue(payload.summary?.row_count),
-      pendingRepaymentAmount: text(payload.summary?.pending_repayment_amount, "0.00"),
-      pendingCollectionAmount: text(payload.summary?.pending_collection_amount, "0.00"),
-      accruedInterest: text(payload.summary?.accrued_interest, "0.00"),
+      rowCount: numberValue(payload.totals?.row_count),
+      pendingRepaymentAmount: text(payload.totals?.pending_repayment_amount, "0.00"),
+      pendingCollectionAmount: text(payload.totals?.pending_collection_amount, "0.00"),
+      accruedInterest: text(payload.totals?.accrued_interest, "0.00"),
     },
     columns: stringList(payload.columns),
     rows: (payload.rows ?? []).map(mapExportRow),
@@ -1004,11 +1012,15 @@ export async function fetchTurnoverLedgerExportPreview(
 export async function downloadTurnoverLedgerExport(
   {
     family = "all",
+    query = "",
+    settlementStatus = "all",
     signal,
-  }: Pick<FetchTurnoverLedgerRequest, "family" | "signal"> = {},
+  }: Pick<FetchTurnoverLedgerRequest, "family" | "query" | "settlementStatus" | "signal"> = {},
 ): Promise<TurnoverLedgerExportDownload> {
   const params = new URLSearchParams();
   params.set("family", family);
+  params.set("query", query);
+  params.set("settlement_status", settlementStatus);
   return requestBlob(`/api/turnover-ledger/export?${params.toString()}`, {
     method: "GET",
     signal,

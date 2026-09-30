@@ -10,7 +10,12 @@ import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import StatePanel from "../components/common/StatePanel";
 import TurnoverLedgerExportDialog from "../components/turnoverLedger/TurnoverLedgerExportDialog";
 import TurnoverLedgerExtraDrawer from "../components/turnoverLedger/TurnoverLedgerExtraDrawer";
-import TurnoverLedgerGroupedTable, { formatMoney, formatNullable } from "../components/turnoverLedger/TurnoverLedgerGroupedTable";
+import TurnoverLedgerGroupedTable from "../components/turnoverLedger/TurnoverLedgerGroupedTable";
+import { formatMoney, formatNullable } from "../features/turnoverLedger/presentation";
+import QuerySearch from "../components/common/QuerySearch";
+import TurnoverLedgerSummary from "../components/turnoverLedger/TurnoverLedgerSummary";
+import TurnoverLedgerSelect from "../components/turnoverLedger/TurnoverLedgerSelect";
+import "../components/turnoverLedger/turnoverLedger.css";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
@@ -33,16 +38,15 @@ import type {
   TurnoverLedgerExportPreview,
   TurnoverLedgerExtra,
   TurnoverLedgerFamily,
-  TurnoverLedgerFamilySummary,
+  TurnoverLedgerGroup,
   TurnoverLedgerGroupedResponse,
   TurnoverLedgerGroupedRow,
-  TurnoverLedgerSummary,
   TurnoverLedgerTagDefinition,
   TurnoverLedgerTagSelection,
   TurnoverRelationDetail,
 } from "../features/turnoverLedger/types";
 
-const DEFAULT_PAGE_SIZE = 50;
+const DEFAULT_PAGE_SIZE = 20;
 
 const FAMILY_TABS: Array<{ value: TurnoverLedgerFamily; label: string }> = [
   { value: "all", label: "全部" },
@@ -51,22 +55,6 @@ const FAMILY_TABS: Array<{ value: TurnoverLedgerFamily; label: string }> = [
   { value: "bank", label: "银行往来" },
   { value: "business", label: "业务往来" },
 ];
-
-const FAMILY_BREAKDOWN_ORDER = FAMILY_TABS.filter((tab) => tab.value !== "all") as Array<{
-  value: Exclude<TurnoverLedgerFamily, "all">;
-  label: string;
-}>;
-
-const DEFAULT_SUMMARY: TurnoverLedgerSummary = {
-  pendingRepaymentAmount: "0.00",
-  repaidAmount: "0.00",
-  pendingCollectionAmount: "0.00",
-  collectedAmount: "0.00",
-  closedAmount: "0.00",
-  suggestedCount: 0,
-  conflictCount: 0,
-  rowCount: 0,
-};
 
 const DEFAULT_EXTRA: TurnoverLedgerExtra = {
   relationId: "",
@@ -105,47 +93,6 @@ function isAbortLikeError(caught: unknown) {
   return caught instanceof Error && (caught.name === "AbortError" || /aborted|abort/i.test(caught.message));
 }
 
-type SummaryBreakdownMetric =
-  | "pendingRepaymentAmount"
-  | "repaidAmount"
-  | "pendingCollectionAmount"
-  | "collectedAmount";
-
-function familySummaryAmount(summary: TurnoverLedgerFamilySummary | undefined, metric: SummaryBreakdownMetric) {
-  return formatMoney(summary?.[metric] ?? "0.00");
-}
-
-function SummaryMetric({
-  label,
-  value,
-  breakdown,
-  testId,
-}: {
-  label: string;
-  value: string | number;
-  breakdown: Array<{ label: string; value: string }>;
-  testId: string;
-}) {
-  return (
-    <div className="turnover-ledger-summary-metric" data-testid={testId}>
-      <span className="turnover-ledger-summary-metric__label">
-        {label}
-      </span>
-      <span className="turnover-ledger-summary-metric__value">
-        {value}
-      </span>
-      <span className="turnover-ledger-summary-metric__breakdown">
-        {breakdown.map((item) => (
-          <span className="turnover-ledger-summary-metric__breakdown-row" key={item.label}>
-            <span>{item.label}</span>
-            <span>{item.value}</span>
-          </span>
-        ))}
-      </span>
-    </div>
-  );
-}
-
 function extraFromRow(row: TurnoverLedgerGroupedRow): TurnoverLedgerExtra {
   return {
     relationId: relationIdForRow(row),
@@ -172,17 +119,12 @@ function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function moneyNumber(value: string | null | undefined) {
-  const parsed = Number(String(value ?? "").replace(/,/g, "").trim());
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function moneyCents(value: number) {
   return Math.round(value * 100);
 }
 
 function flowBankRowId(row: TurnoverLedgerGroupedRow) {
-  return cleanText(row.sourceBankRowId) || cleanText(row.bankRowIds[0]) || cleanText(row.flowId);
+  return cleanText(row.sourceBankRowId);
 }
 
 function cashClosureCaseIdForRow(row: TurnoverLedgerGroupedRow) {
@@ -253,46 +195,14 @@ function normalizeCashDirection(value: string | null | undefined): ClosureCashDi
   return "unknown";
 }
 
-function closureCashDirection(row: TurnoverLedgerGroupedRow): ClosureCashDirection {
-  const flowDirection = normalizeCashDirection(row.flowDirection);
-  if (flowDirection !== "unknown") {
-    return flowDirection;
-  }
-  const borrowAmount = moneyNumber(row.borrowAmount);
-  const repaymentAmount = moneyNumber(row.repaymentAmount);
-  if (borrowAmount > 0 && repaymentAmount <= 0) {
-    return normalizeCashDirection(row.borrowDirection);
-  }
-  if (repaymentAmount > 0 && borrowAmount <= 0) {
-    return normalizeCashDirection(row.repaymentDirection);
-  }
-  return "unknown";
-}
-
-function closureAmount(row: TurnoverLedgerGroupedRow) {
-  const flowAmount = moneyNumber(row.flowAmount);
-  if (flowAmount > 0) {
-    return flowAmount;
-  }
-  const borrowAmount = moneyNumber(row.borrowAmount);
-  const repaymentAmount = moneyNumber(row.repaymentAmount);
-  if (borrowAmount > 0 && repaymentAmount <= 0) {
-    return borrowAmount;
-  }
-  if (repaymentAmount > 0 && borrowAmount <= 0) {
-    return repaymentAmount;
-  }
-  return Math.max(borrowAmount, repaymentAmount);
-}
-
 function buildClosurePreview(rows: TurnoverLedgerGroupedRow[]) {
   const items: ClosurePreviewItem[] = rows.map((row) => {
-    const direction = closureCashDirection(row);
+    const direction = normalizeCashDirection(row.flowDirection);
     return {
       bankRowId: flowBankRowId(row),
       direction,
       directionLabel: direction === "income" ? "收入" : direction === "expense" ? "支出" : "未知方向",
-      amount: closureAmount(row),
+      amount: Number(row.flowAmount),
       row,
     };
   });
@@ -308,7 +218,8 @@ function buildClosurePreview(rows: TurnoverLedgerGroupedRow[]) {
     incomeAmount,
     expenseAmount,
     delta,
-    canConfirm: rows.length >= 2 && incomeItems.length >= 1 && expenseItems.length >= 1 && incomeCents === expenseCents,
+    canConfirm: rows.length >= 2 && items.every((item) => item.bankRowId && item.direction !== "unknown" && Number.isFinite(item.amount) && item.amount > 0)
+      && incomeItems.length >= 1 && expenseItems.length >= 1 && incomeCents === expenseCents,
   };
 }
 
@@ -326,6 +237,12 @@ export default function TurnoverLedgerPage() {
   const { canOperateData } = useSessionPermissions();
   const [family, setFamily] = useState<TurnoverLedgerFamily>("all");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [draftQuery, setDraftQuery] = useState("");
+  const [query, setQuery] = useState("");
+  const composingQuery = useRef(false);
+  const [settlementStatus, setSettlementStatus] = useState<"all" | "settled" | "unsettled">("all");
+  const [detailGroup, setDetailGroup] = useState<TurnoverLedgerGroup | null>(null);
   const [ledger, setLedger] = useState<TurnoverLedgerGroupedResponse | null>(null);
   const [tagSelection, setTagSelection] = useState<TurnoverLedgerTagSelection>(EMPTY_TAG_SELECTION);
   const [tagDrawerOpen, setTagDrawerOpen] = useState(false);
@@ -344,6 +261,7 @@ export default function TurnoverLedgerPage() {
   const [mutatingRelation, setMutatingRelation] = useState(false);
   const [closureCompletion, setClosureCompletion] = useState<string | undefined>();
   const [closureDrawerOpen, setClosureDrawerOpen] = useState(false);
+  const [closureMode, setClosureMode] = useState<"confirm" | "withdraw">("confirm");
   const [closureSubmitting, setClosureSubmitting] = useState(false);
   const [closureSelection, setClosureSelection] = useState<ClosureSelection | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
@@ -360,23 +278,12 @@ export default function TurnoverLedgerPage() {
   } | null>(null);
   const activeExtraEditorRef = useRef<{ relationId: string; controller: AbortController } | null>(null);
 
-  const summary = ledger?.summary ?? DEFAULT_SUMMARY;
   const groups = ledger?.groups ?? [];
-  const familySummaryMap = useMemo(() => new Map((ledger?.familySummaries ?? []).map((item) => [item.family, item])), [
-    ledger?.familySummaries,
-  ]);
-  const summaryBreakdown = useCallback((metric: SummaryBreakdownMetric) => (
-    FAMILY_BREAKDOWN_ORDER.map((item) => ({
-      label: item.label,
-      value: familySummaryAmount(familySummaryMap.get(item.value), metric),
-    }))
-  ), [familySummaryMap]);
   const selectedClosureRows = closureSelection?.rows ?? [];
   const selectedFlowRowIds = useMemo(
     () => new Set(selectedClosureRows.map(flowBankRowId).filter(Boolean)),
     [selectedClosureRows],
   );
-  const closurePreview = useMemo(() => buildClosurePreview(selectedClosureRows), [selectedClosureRows]);
   const selectedRowsContainCashClosure = selectedClosureRows.some(isCashClosureLinkedRow);
   const selectedRowsContainOpenClosureCandidate = selectedClosureRows.some((row) => !isCashClosureLinkedRow(row));
   const selectedRowsAllCashClosure = selectedClosureRows.length > 0
@@ -396,6 +303,10 @@ export default function TurnoverLedgerPage() {
     const relationIds = new Set(selectedClosureRows.map(cashClosureRelationIdForRow).filter(Boolean));
     return relationIds.size === 1 ? Array.from(relationIds)[0] : "";
   }, [selectedClosureRows, selectedRowsAllCashClosure]);
+  const closurePreviewRows = selectedRowsAllCashClosure
+    ? groups.find((group) => group.groupId === closureSelection?.groupId)?.flowRows.filter((row) => row.cashClosureCaseId === selectedCashClosureCaseId) ?? []
+    : selectedClosureRows;
+  const closurePreview = useMemo(() => buildClosurePreview(closurePreviewRows), [closurePreviewRows]);
   const canWithdrawSelectedCashClosure = Boolean(
     canOperateData
       && selectedRowsAllCashClosure
@@ -447,20 +358,24 @@ export default function TurnoverLedgerPage() {
         family,
         direction: "all",
         page: requestedPage,
-        pageSize: DEFAULT_PAGE_SIZE,
+        pageSize,
+        query,
+        settlementStatus,
         signal: requestContext.controller.signal,
       });
       if (activeLedgerRequestRef.current !== requestContext || requestContext.controller.signal.aborted) {
         return null;
       }
-      const totalPages = Math.max(1, Math.ceil(nextLedger.pagination.total / DEFAULT_PAGE_SIZE));
+      const totalPages = Math.max(1, Math.ceil(nextLedger.pagination.total / pageSize));
       if (requestedPage > totalPages) {
         requestedPage = totalPages;
         nextLedger = await fetchTurnoverLedgerGrouped({
           family,
           direction: "all",
           page: requestedPage,
-          pageSize: DEFAULT_PAGE_SIZE,
+          pageSize,
+        query,
+        settlementStatus,
           signal: requestContext.controller.signal,
         });
         if (activeLedgerRequestRef.current !== requestContext || requestContext.controller.signal.aborted) {
@@ -493,7 +408,7 @@ export default function TurnoverLedgerPage() {
         setLoading(false);
       }
     }
-  }, [family, page]);
+  }, [family, page, pageSize, query, settlementStatus]);
 
   const reloadLedgerAfterMutation = useCallback(async () => {
     const nextLedger = await requestLedger({ surfaceError: false, throwOnError: true });
@@ -567,7 +482,7 @@ export default function TurnoverLedgerPage() {
     const controller = new AbortController();
     setExportLoading(true);
     setExportError(null);
-    fetchTurnoverLedgerExportPreview({ family: exportFamily, signal: controller.signal })
+    fetchTurnoverLedgerExportPreview({ family: exportFamily, query, settlementStatus, signal: controller.signal })
       .then(setExportPreview)
       .catch((caught: unknown) => {
         if (isAbortLikeError(caught)) {
@@ -884,7 +799,6 @@ export default function TurnoverLedgerPage() {
     }
     const relationId = selectedCashClosureRelationId;
     const cashClosureCaseId = selectedCashClosureCaseId;
-    const affectedRowIds = selectedClosureRows.map(flowBankRowId).filter(Boolean);
     let postMutationSyncWarning = "";
     const result = await runOperation({
       loadingMessage: "正在撤回外部往来闭环...",
@@ -967,7 +881,7 @@ export default function TurnoverLedgerPage() {
   const handleDownloadExport = async () => {
     setExportDownloading(true);
     try {
-      const download = await downloadTurnoverLedgerExport({ family: exportFamily });
+      const download = await downloadTurnoverLedgerExport({ family: exportFamily, query, settlementStatus });
       const blob = download.blob;
       const href = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
@@ -993,9 +907,8 @@ export default function TurnoverLedgerPage() {
         ariaLabel="外部往来款管理数据统计"
         loading={loading && !ledger}
         coreItems={[
-          { label: "往来流水", value: visibleStatistics?.transactionCount, unit: "笔" },
-          { label: "支出", value: visibleStatistics?.expenseTransactionCount, unit: "笔", tone: "expense" },
-          { label: "收入", value: visibleStatistics?.incomeTransactionCount, unit: "笔", tone: "income" },
+          { label: "往来对象", value: visibleStatistics?.groupCount, unit: "个" },
+          { label: "流水", value: visibleStatistics?.filteredTransactionCount, unit: "笔" },
         ]}
         detailItems={[]}
       />
@@ -1012,7 +925,7 @@ export default function TurnoverLedgerPage() {
             <Button
               className="turnover-ledger-button"
               isDisabled={ledgerNavigationDisabled}
-              onPress={() => loadLedger()}
+              onPress={() => { setClosureSelection(null); loadLedger(); }}
               size="sm"
               variant="secondary"
             >
@@ -1042,32 +955,7 @@ export default function TurnoverLedgerPage() {
             {error}
           </StatePanel>
         ) : null}
-        <div className="turnover-ledger-summary-band">
-          <SummaryMetric
-            label="当前待还款金额"
-            value={formatMoney(summary.pendingRepaymentAmount)}
-            breakdown={summaryBreakdown("pendingRepaymentAmount")}
-            testId="turnover-summary-pending-repayment"
-          />
-          <SummaryMetric
-            label="累计已还款金额"
-            value={formatMoney(summary.repaidAmount)}
-            breakdown={summaryBreakdown("repaidAmount")}
-            testId="turnover-summary-repaid"
-          />
-          <SummaryMetric
-            label="当前待收款金额"
-            value={formatMoney(summary.pendingCollectionAmount)}
-            breakdown={summaryBreakdown("pendingCollectionAmount")}
-            testId="turnover-summary-pending-collection"
-          />
-          <SummaryMetric
-            label="累计已收款金额"
-            value={formatMoney(summary.collectedAmount)}
-            breakdown={summaryBreakdown("collectedAmount")}
-            testId="turnover-summary-collected"
-          />
-        </div>
+        <TurnoverLedgerSummary ledger={ledger} />
 
         <section className="turnover-ledger-table-panel">
           <div className="turnover-ledger-table-panel__inner">
@@ -1088,55 +976,59 @@ export default function TurnoverLedgerPage() {
               >
                 {FAMILY_TABS.map((tab) => (
                   <Segment id={tab.value} key={tab.value}>
-                    {tab.label}
+                    {tab.label.replace("往来", "")} <span className="turnover-tab-count">{ledger?.statistics?.familyGroupCounts?.[tab.value] ?? "—"}</span>
                   </Segment>
                 ))}
               </SegmentGroup>
+            </div>
+            <div className="turnover-query-toolbar">
+              <div className="turnover-query-fields">
+                <QuerySearch ariaLabel="搜索往来对象" placeholder="搜索往来对象" value={draftQuery} onChange={setDraftQuery} maxLength={200}
+                  disabled={ledgerNavigationDisabled} onCompositionChange={(value) => { composingQuery.current = value; }}
+                  onSubmit={() => { if (!composingQuery.current) { setQuery(draftQuery.trim()); setPage(1); setClosureSelection(null); } }}
+                  onClear={() => { setDraftQuery(""); setQuery(""); setPage(1); setClosureSelection(null); }} />
+                <TurnoverLedgerSelect label="结算状态" value={settlementStatus} disabled={ledgerNavigationDisabled}
+                  options={[{ value: "all", label: "全部结算状态" }, { value: "unsettled", label: "未结清" }, { value: "settled", label: "已结清" }]}
+                  onChange={(value) => { setSettlementStatus(value as typeof settlementStatus); setPage(1); setClosureSelection(null); }} />
+              </div>
               <div className="turnover-ledger-actions">
                 {selectedClosureRows.length > 0 ? (
                   <span className="turnover-ledger-selection-summary" role="status">
                     已选 {selectedClosureRows.length} 笔
                   </span>
                 ) : null}
-                <Button
-                  className={`turnover-ledger-button${selectedRowsAllCashClosure ? " turnover-ledger-button--warning" : ""}`}
-                  isDisabled={!canRunClosurePrimaryAction}
-                  onPress={() => {
-                    if (selectedRowsAllCashClosure) {
-                      void handleWithdrawSelectedCashClosure();
-                      return;
-                    }
-                    setClosureCompletion(undefined);
-                    setClosureDrawerOpen(true);
-                  }}
-                  size="sm"
-                  variant={selectedRowsAllCashClosure ? "danger" : "secondary"}
-                >
-                  {closureActionLabel}
-                </Button>
+                {selectedClosureRows.length > 0 ? <>
+                  <Button variant="ghost" size="sm" onPress={() => setClosureSelection(null)}>清除选择</Button>
+                  <Button className="turnover-ledger-button" isDisabled={!canRunClosurePrimaryAction} onPress={() => { setClosureCompletion(undefined); setClosureMode(selectedRowsAllCashClosure ? "withdraw" : "confirm"); setClosureDrawerOpen(true); }} size="sm" variant={selectedRowsAllCashClosure ? "danger" : "primary"}>{closureActionLabel}</Button>
+                </> : null}
                 <Button className="turnover-ledger-button turnover-ledger-button--primary" onPress={handleOpenExport} size="sm" variant="primary">
                   <Download aria-hidden="true" size={16} strokeWidth={2.2} />
                   下载表格
                 </Button>
               </div>
             </div>
-            <div className="turnover-ledger-table-panel__divider" />
             <TurnoverLedgerGroupedTable
               groups={groups}
               loading={loading}
               showEmptyState={!error}
               onEdit={handleOpenEditor}
+              onDetails={setDetailGroup}
               selectedFlowRowIds={selectedFlowRowIds}
               onToggleFlowSelection={handleToggleClosureRow}
               actionsDisabled={!canOperateData}
             />
+            <div className="turnover-register-footer">
+            <TurnoverLedgerSelect label="每页对象数" value={String(pageSize)} disabled={ledgerNavigationDisabled}
+              options={[20, 50, 100].map((value) => ({ value: String(value), label: `每页 ${value} 个` }))}
+              onChange={(value) => { setPageSize(Number(value)); setPage(1); setClosureSelection(null); }} />
             <FinanceTablePagination
               page={ledger?.pagination.page ?? page}
-              pageSize={ledger?.pagination.pageSize ?? DEFAULT_PAGE_SIZE}
+              pageSize={ledger?.pagination.pageSize ?? pageSize}
               total={ledger?.pagination.total ?? 0}
               isDisabled={ledgerNavigationDisabled}
               onPageChange={handlePageChange}
             />
+            </div>
           </div>
         </section>
       </PageScaffold>
@@ -1238,63 +1130,44 @@ export default function TurnoverLedgerPage() {
       <AppDrawer
         className="turnover-ledger-drawer"
         completion={closureCompletion}
-        closeDisabled={closureSubmitting}
-        closeLabel="关闭确认外部往来闭环"
+        closeDisabled={closureSubmitting || mutatingRelation}
+        closeLabel={`关闭${closureMode === "withdraw" ? "撤回" : "确认"}外部往来闭环`}
         open={closureDrawerOpen}
         onClose={() => setClosureDrawerOpen(false)}
-        title="确认外部往来闭环"
-        width={520}
+        title={`${closureMode === "withdraw" ? "撤回" : "确认"}外部往来闭环`}
+        width={680}
+        footer={!closureCompletion ? (<div className="turnover-ledger-drawer__footer">
+            <Button variant="secondary" size="sm" isDisabled={closureSubmitting || mutatingRelation} onPress={() => setClosureDrawerOpen(false)}>取消</Button>
+            <Button className="turnover-ledger-button" isDisabled={selectedRowsAllCashClosure ? !canWithdrawSelectedCashClosure : !closurePreview.canConfirm || closureSubmitting} isPending={closureSubmitting || mutatingRelation}
+              onPress={() => void (selectedRowsAllCashClosure ? handleWithdrawSelectedCashClosure() : handleConfirmClosure())} size="sm" variant={selectedRowsAllCashClosure ? "danger" : "primary"}>{selectedRowsAllCashClosure ? "确认撤回" : "确认闭环"}</Button>
+          </div>) : undefined}
       >
         <div className="turnover-ledger-drawer__content">
           {closureSelection?.groupLabel ? (
-            <div className="turnover-ledger-drawer__notice" role="status">{closureSelection.groupLabel}</div>
+            <div className="turnover-closure-identity">{closureSelection.groupLabel}</div>
           ) : null}
-          <div className="turnover-ledger-closure-list">
-            {closurePreview.items.map((item) => {
-              const { row } = item;
-              return (
-                <div className="turnover-ledger-closure-card" key={item.bankRowId}>
-                  <div className="turnover-ledger-closure-card__main">
-                    <span>{item.directionLabel}</span>
-                    <span>{formatMoney(String(item.amount.toFixed(2)))}</span>
-                  </div>
-                  <span>{formatDateTimeText(row.transactionAt || row.borrowDate || row.repaymentDate)}</span>
-                  <span className="turnover-ledger-closure-card__muted">{formatNullable(row.repaymentRemark || row.summaryText)}</span>
-                </div>
-              );
-            })}
-            <div className="turnover-ledger-closure-card">
-              <div className="turnover-ledger-closure-card__row">
-                <span>收入合计</span>
-                <span>{formatMoney(closurePreview.incomeAmount.toFixed(2))}</span>
-              </div>
-              <div className="turnover-ledger-closure-card__row">
-                <span>支出合计</span>
-                <span>{formatMoney(closurePreview.expenseAmount.toFixed(2))}</span>
-              </div>
-              <div className="turnover-ledger-closure-card__delta">
-                <span>差额</span>
-                <span data-testid="turnover-closure-delta">{formatMoney(closurePreview.delta.toFixed(2))}</span>
-              </div>
-            </div>
-            {!closurePreview.canConfirm ? (
-              <div className="turnover-ledger-drawer__notice" role="alert">需选择同一往来组内至少一笔收入和一笔支出，且收支合计差额为 0.00。</div>
-            ) : null}
-          </div>
-          <div className="turnover-ledger-drawer__footer">
+          {selectedRowsAllCashClosure ? <p className="turnover-muted">撤回将解除以下整组收支闭环，保留原始流水。不会删除银行流水。</p> : <p className="turnover-muted">核对同一往来对象的收入和支出。确认后，这组流水将标记为已结清。</p>}
+          <table className="turnover-closure-table"><thead><tr><th>日期</th><th>业务摘要</th><th>方向</th><th>金额</th></tr></thead>
+            <tbody>{closurePreview.items.map((item) => <tr key={item.bankRowId}>
+              <td>{formatDateTimeText(item.row.transactionAt || item.row.borrowDate || item.row.repaymentDate)}</td>
+              <td>{formatNullable(item.row.repaymentRemark || item.row.summaryText)}</td><td>{item.directionLabel}</td><td>{formatMoney(item.amount.toFixed(2))}</td>
+            </tr>)}</tbody>
+          </table>
+          <dl className="turnover-closure-totals"><div><dt>收入合计</dt><dd>{formatMoney(closurePreview.incomeAmount.toFixed(2))}</dd></div><div><dt>支出合计</dt><dd>{formatMoney(closurePreview.expenseAmount.toFixed(2))}</dd></div><div><dt>差额</dt><dd data-testid="turnover-closure-delta">{formatMoney(closurePreview.delta.toFixed(2))}</dd></div></dl>
+          {!selectedRowsAllCashClosure && !closurePreview.canConfirm ? <div className="turnover-ledger-drawer__notice" role="alert">需选择同一往来组内至少一笔收入和一笔支出，且收支合计差额为 0.00。</div> : null}
 
-            <Button
-              className="turnover-ledger-button turnover-ledger-button--primary"
-              isDisabled={!closurePreview.canConfirm || closureSubmitting}
-              isPending={closureSubmitting}
-              onPress={() => void handleConfirmClosure()}
-              size="sm"
-              variant="primary"
-            >
-              确定
-            </Button>
-          </div>
         </div>
+      </AppDrawer>
+
+      <AppDrawer className="turnover-ledger-drawer" open={detailGroup !== null} title={detailGroup?.counterpartyName ?? "往来对象详情"} closeLabel="关闭往来对象详情" onClose={() => setDetailGroup(null)} width={680}>
+        {detailGroup ? <div className="turnover-ledger-drawer__content">
+          <dl className="turnover-closure-totals"><div><dt>类别</dt><dd>{detailGroup.familyLabel}</dd></div><div><dt>我方待还</dt><dd>{formatMoney(detailGroup.pendingRepaymentAmount)}</dd></div><div><dt>我方待收</dt><dd>{formatMoney(detailGroup.pendingCollectionAmount)}</dd></div></dl>
+          <p className="turnover-muted">共 {detailGroup.flowRows.length} 笔流水。选择一笔查看所属往来关系、利息和补充信息。</p>
+          <table className="turnover-closure-table"><thead><tr><th>日期</th><th>业务性质</th><th>金额</th><th>操作</th></tr></thead><tbody>{detailGroup.flowRows.map((row) => <tr key={row.sourceBankRowId}>
+            <td>{formatNullable(row.transactionAt?.slice(0, 10))}</td><td>{formatNullable(row.categoryLabel)}</td><td>{row.flowDirection === "income" ? "收入" : "支出"} {formatMoney(row.flowAmount)}</td>
+            <td><Button variant="ghost" size="sm" onPress={() => { setDetailGroup(null); void handleOpenEditor({ ...row, counterpartyName: detailGroup.counterpartyName, familyLabel: detailGroup.familyLabel }); }}>查看流水</Button></td>
+          </tr>)}</tbody></table>
+        </div> : null}
       </AppDrawer>
 
       <TurnoverLedgerExtraDrawer

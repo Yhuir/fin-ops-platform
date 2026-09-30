@@ -84,9 +84,13 @@ class NightlyCITests(unittest.TestCase):
             "production-exception-groups.spec.ts",
             "production-cost-explorer.spec.ts",
             "production-source-details.spec.ts",
+            "production-turnover-ledger.spec.ts",
+            "production-row-actions-status-layout.spec.ts",
         }
         # Real cash writes require their explicit disposable PostgreSQL HTTP fixture.
-        infrastructure_specs = {"cash-real-api-flow.spec.ts"}
+        infrastructure_specs = {"cash-real-api-flow.spec.ts", "frontend-release.spec.ts"}
+        # Release rollover needs an explicit real previous build, and has its own command.
+        self.assertIn("e2e/frontend-release.spec.ts", package_json["scripts"]["e2e:release"])
         self.assertIn("tests.test_cash_http_integration --browser-e2e", package_json["scripts"]["e2e:cash-real"])
 
         expected_specs = {

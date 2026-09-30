@@ -49,8 +49,6 @@ describe("finance table alignment styles", () => {
     const flatSurfaceSelectors = [
       ".oa-pending-payments-table-frame",
       ".batch-accounting-oa-panel",
-      ".turnover-ledger-table-panel",
-      ".turnover-ledger-table-wrap",
       ".turnover-ledger-export-dialog__table-wrap",
       ".bank-flow-rule-batches-transactions",
       ".app-health-section",
@@ -66,6 +64,11 @@ describe("finance table alignment styles", () => {
       ".output-invoice-collection-rules-table-frame",
       ".bank-auto-tag-table-container",
     ];
+
+    const turnoverStyles = readFileSync("src/components/turnoverLedger/turnoverLedger.css", "utf8");
+    expect(turnoverStyles).toMatch(/\.turnover-ledger-table-panel\s*\{[^}]*border-radius:\s*6px/);
+    expect(turnoverStyles).toMatch(/\.turnover-flows\s*\{[^}]*border-radius:\s*0/);
+    expect(source).not.toContain(".turnover-ledger-table-wrap");
 
     flatSurfaceSelectors.forEach((selector) => {
       expectSquareSurface(selector);

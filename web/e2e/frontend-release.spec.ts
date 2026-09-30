@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures/strictTest";
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
 // Explicit two-build test: run with e2e:release and an actual prior build directory.

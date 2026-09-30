@@ -249,6 +249,8 @@ class TurnoverLedgerApiRoutes:
         try:
             payload = self.list_ledger(
                 view=view,
+                query=self._query_value(query, "query", "") or "",
+                settlement_status=self._query_value(query, "settlement_status", "all") or "all",
                 family=family,
                 direction=direction,
                 status=status,
@@ -582,6 +584,8 @@ class TurnoverLedgerApiRoutes:
             payload = self.export_preview(
                 family=self._query_value(query, "family", "all") or "all",
                 limit=self._query_int(query, "limit", 20),
+                query=self._query_value(query, "query", "") or "",
+                settlement_status=self._query_value(query, "settlement_status", "all") or "all",
             )
         except TurnoverLedgerExportLimitError as exc:
             return self._respond(
@@ -597,7 +601,11 @@ class TurnoverLedgerApiRoutes:
 
     def handle_export_route(self, query: dict[str, list[str]]) -> Any:
         try:
-            filename, content = self.export(family=self._query_value(query, "family", "all") or "all")
+            filename, content = self.export(
+                family=self._query_value(query, "family", "all") or "all",
+                query=self._query_value(query, "query", "") or "",
+                settlement_status=self._query_value(query, "settlement_status", "all") or "all",
+            )
         except TurnoverLedgerExportLimitError as exc:
             return self._respond(
                 HTTPStatus.BAD_REQUEST,
@@ -740,12 +748,15 @@ class TurnoverLedgerApiRoutes:
         status: str | None = None,
         page: int = 1,
         page_size: int = 50,
+        query: str = "",
+        settlement_status: str = "all",
+        paginate: bool = True,
     ) -> dict[str, object]:
         if self._query_service is None:
             raise RuntimeError("turnover ledger canonical query service is unavailable.")
         if str(view or "").strip().lower() == "grouped":
             payload = self._query_service.list_ledger(
-                view="grouped",
+                view="grouped", query=query, settlement_status=settlement_status, paginate=paginate,
                 family=family,
                 direction=direction,
                 status=status,
@@ -773,11 +784,14 @@ class TurnoverLedgerApiRoutes:
         status: str | None = None,
         page: int = 1,
         page_size: int = 50,
+        query: str = "",
+        settlement_status: str = "all",
+        paginate: bool = True,
     ) -> dict[str, object]:
         if self._query_service is None:
             raise RuntimeError("turnover ledger canonical query service is unavailable.")
         payload = self._query_service.list_ledger(
-            view="grouped",
+            view="grouped", query=query, settlement_status=settlement_status, paginate=paginate,
             family=family,
             direction=direction,
             status=status,
@@ -836,11 +850,11 @@ class TurnoverLedgerApiRoutes:
             return {"version": 1, "extras": []}
         return snapshot()
 
-    def export_preview(self, *, family: str = "all", limit: int = 20) -> dict[str, object]:
-        return self._export_service.preview(family=family, limit=limit)
+    def export_preview(self, *, family: str = "all", limit: int = 20, query: str = "", settlement_status: str = "all") -> dict[str, object]:
+        return self._export_service.preview(family=family, limit=limit, query=query, settlement_status=settlement_status)
 
-    def export(self, *, family: str = "all", today: date | None = None) -> tuple[str, bytes]:
-        return self._export_service.export(family=family, today=today)
+    def export(self, *, family: str = "all", today: date | None = None, query: str = "", settlement_status: str = "all") -> tuple[str, bytes]:
+        return self._export_service.export(family=family, today=today, query=query, settlement_status=settlement_status)
 
     def confirm_relation(
         self,
@@ -882,12 +896,11 @@ class TurnoverLedgerApiRoutes:
             if not isinstance(group, dict):
                 continue
             normalized_group = dict(group)
-            legacy_rows = [row for row in list(group.get("rows") or []) if isinstance(row, dict)]
             explicit_summary = group.get("summary_row")
             summary_row = dict(explicit_summary) if isinstance(explicit_summary, dict) else None
             explicit_flow_rows = [row for row in list(group.get("flow_rows") or []) if isinstance(row, dict)]
             if summary_row is None:
-                summary_row = cls._summary_row_from_legacy_rows(legacy_rows)
+                raise ValueError("往来分组缺少 summary_row")
             flow_rows = cls._normalized_flow_rows(explicit_flow_rows)
             summary_row = cls._normalized_summary_row(summary_row)
             normalized_group["summary_row"] = summary_row
@@ -916,13 +929,6 @@ class TurnoverLedgerApiRoutes:
             **dict(payload),
             "groups": normalized_groups,
         }
-
-    @classmethod
-    def _summary_row_from_legacy_rows(cls, rows: list[dict[str, object]]) -> dict[str, object]:
-        for row in rows:
-            if str(row.get("row_kind") or "").strip().lower() == "summary":
-                return dict(row)
-        return dict(rows[0]) if rows else {}
 
     @staticmethod
     def _normalized_summary_row(row: dict[str, object]) -> dict[str, object]:

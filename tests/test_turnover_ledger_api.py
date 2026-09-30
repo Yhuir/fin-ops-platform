@@ -2782,7 +2782,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(group["lot_rows"][0]["balance_amount"], "20000.00")
         self.assertNotIn("rows", group)
 
-    def test_grouped_view_converts_legacy_rows_to_summary_with_empty_flow_rows_and_lots(self) -> None:
+    def test_grouped_view_rejects_legacy_rows_without_canonical_summary(self) -> None:
         class FakeLegacyLedgerService:
             def list_grouped_ledger(self, **_: object) -> dict[str, object]:
                 return {
@@ -2828,15 +2828,8 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             ),
         )
 
-        group = routes.list_grouped_ledger(family="company")["groups"][0]
-
-        self.assertEqual(group["summary_row"]["relation_id"], "turnover_rel_001")
-        self.assertEqual(group["summary_row"]["row_kind"], "summary")
-        self.assertEqual(group["flow_rows"], [])
-        self.assertEqual(group["allocation_lots"][0]["row_kind"], "allocation_lot")
-        self.assertEqual(group["lot_rows"][0]["row_kind"], "lot")
-        self.assertEqual(group["row_span"], 1)
-        self.assertNotIn("rows", group)
+        with self.assertRaisesRegex(ValueError, "缺少 summary_row"):
+            routes.list_grouped_ledger(family="company")
 
     def test_grouped_view_does_not_convert_retired_flat_projection_payload(self) -> None:
         class FakeQueryService:
@@ -2875,6 +2868,24 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         payload = routes.list_ledger(view="grouped", family="personal")
 
         self.assertEqual(payload["groups"], [])
+
+    def test_grouped_search_and_settlement_filters_share_export_contract(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._import_bank_rows(app)
+            response = app.handle_request("GET", "/api/turnover-ledger?view=grouped&query=不存在的对象&settlement_status=unsettled")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(json.loads(response.body)["groups"], [])
+            self.assertEqual(json.loads(response.body)["statistics"]["group_count"], 0)
+            self.assertEqual(json.loads(response.body)["summary"]["pending_repayment_amount"], "0.00")
+            preview = app.handle_request("GET", "/api/turnover-ledger/export-preview?query=不存在的对象&settlement_status=unsettled")
+            self.assertEqual(preview.status_code, 200)
+            self.assertEqual(json.loads(preview.body)["rows"], [])
+            self.assertEqual(json.loads(preview.body)["totals"]["row_count"], 0)
+            for path in ("/api/turnover-ledger?view=grouped&", "/api/turnover-ledger/export-preview?", "/api/turnover-ledger/export?"):
+                invalid = app.handle_request("GET", path + "settlement_status=paired")
+                self.assertEqual(invalid.status_code, 400)
+                self.assertIn("结算状态无效", json.loads(invalid.body)["message"])
 
     def test_get_turnover_ledger_grouped_view_applies_family_filter(self) -> None:
         with TemporaryDirectory() as temp_dir:

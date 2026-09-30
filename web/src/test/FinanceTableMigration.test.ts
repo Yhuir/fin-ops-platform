@@ -8,6 +8,11 @@ const legacyWorkbenchTables = new Set([
 ]);
 
 const approvedNativeTableSurfaces = new Set([
+  // Six-column object rows span an independent eight-column HeroUI flow grid.
+  "components/turnoverLedger/TurnoverLedgerGroupedTable.tsx",
+  // Read-only financial breakdown and confirmation rows have no grid selection/sorting.
+  "components/turnoverLedger/TurnoverLedgerSummary.tsx",
+  "pages/TurnoverLedgerPage.tsx",
   // Static source key/value pairs use native row headers, without data-grid selection/sorting.
   "components/common/EntityDetailContent.tsx",
   "features/bankDetails/AutoTagRulesDrawer.tsx",

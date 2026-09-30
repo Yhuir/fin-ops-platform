@@ -6,7 +6,7 @@
 
 ## 边界与 I/O
 
-输入：family、筛选、分页、精确 bank_row_ids/selection_version、命令版本与 actor。输出：groups/summary/statistics、summary_row/flow_rows、关系详情、补充字段和导出；页面每页 50 条。
+输入：family、query（对象名称，最多 200 字）、settlement_status（all/settled/unsettled）、分页、精确 bank_row_ids/selection_version、命令版本与 actor。输出：groups/summary/statistics、summary_row/flow_rows、关系详情、补充字段和导出；页面默认每页 20 个对象，可选 50/100；分类数量随搜索与结算筛选变化，不受当前分类页签影响。
 
 ## 当前业务约定
 
@@ -15,6 +15,8 @@
 - 手工闭环使用当前银行事实和往来语义的 selection_version，在同一 UoW 重检并提交；不能仅以 relation mode 判断结清。
 - 本金借款天数按该笔日期至上海今天，FIFO 计息天数按未结/结清日计算，二者分别展示。
 - 详情一次返回关系、流水、审计和 extra；动态建议可由当前事实重建，不要求先持久化草稿。
+- 主表展示对象、类别、我方待还/待收与结算状态；展开才挂载真实银行流水，利息、备注与关系操作集中在详情抽屉。现金配对只在流水关联状态展示，不作为额外结算状态。撤回前预览同一闭环的全部流水。
+- 导出使用与页面相同的搜索、结算状态和分类，读取全部命中组，不受每页 200 组上限截断；总导出上限仍为 20,000 行。
 - 导出保留归属明细，页面只返回实际消费字段。写成功后当前页 GET 失败应说明写已成功、重载失败，不能重新发送业务写。
 
 ## 依赖方向

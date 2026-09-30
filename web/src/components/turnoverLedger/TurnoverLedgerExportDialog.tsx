@@ -14,7 +14,7 @@ import type {
   TurnoverLedgerExportRow,
   TurnoverLedgerFamily,
 } from "../../features/turnoverLedger/types";
-import { formatMoney, formatNullable } from "./TurnoverLedgerGroupedTable";
+import { formatMoney, formatNullable } from "../../features/turnoverLedger/presentation";
 
 const FAMILY_OPTIONS: Array<{ value: TurnoverLedgerFamily; label: string }> = [
   { value: "all", label: "全部" },

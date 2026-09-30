@@ -73,7 +73,14 @@ for (const path of ["input-invoice-usage", "output-invoice-collections", "pendin
     await page.goto(`/${path}`);
     const controls = page.locator('.app-segments [data-selected="true"], .invoice-count-segments [data-selected="true"]');
     await expect(controls.first()).toBeVisible();
-    for (const control of await controls.all()) await expectSelectedContrast(control);
+    for (const control of await controls.all()) {
+      if (path === "turnover-ledger") {
+        await expect(control).toHaveCSS("color", "rgb(29, 78, 216)");
+        await expect(control).toHaveCSS("border-bottom-color", "rgb(29, 78, 216)");
+        await expect(control).toHaveCSS("border-bottom-width", "2px");
+        await expect(control).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+      } else await expectSelectedContrast(control);
+    }
     const sibling = page.locator('.app-segments [role="radio"]:not([data-selected="true"]), .app-segments [role="tab"]:not([data-selected="true"]), .invoice-count-segments [role="tab"]:not([data-selected="true"])').first();
     await expect(sibling).toHaveCSS("color", "rgb(71, 85, 105)");
     await sibling.hover();

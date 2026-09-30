@@ -6863,6 +6863,7 @@ function turnoverLedgerPayload(
         collected_amount: relationClosed ? "1000.00" : "0.00",
         closed_amount: relationClosed ? "1000.00" : "0.00",
         row_span: 3,
+        cash_closure_linked: relationClosed,
         group_tone: relationClosed ? "success" : "warning",
         rows: [summaryRow, ...flowRows],
         summary_row: summaryRow,

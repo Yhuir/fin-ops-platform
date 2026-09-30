@@ -9,7 +9,7 @@ import type {
   TurnoverLedgerGroupedRow,
   TurnoverRelationDetail,
 } from "../../features/turnoverLedger/types";
-import { formatMoney, formatNullable } from "./TurnoverLedgerGroupedTable";
+import { formatMoney, formatNullable } from "../../features/turnoverLedger/presentation";
 import { formatDateTimeText } from "../../features/dateTime";
 
 function DetailField({ label, value }: { label: string; value: string | number | null | undefined }) {
@@ -32,34 +32,7 @@ function flowDate(row: TurnoverLedgerGroupedRow | null) {
 }
 
 function flowDirectionLabel(row: TurnoverLedgerGroupedRow | null) {
-  const direction = cleanText(row?.flowDirection);
-  if (direction === "income") {
-    return "收";
-  }
-  if (direction === "expense") {
-    return "支";
-  }
-  const borrowAmount = Number(String(row?.borrowAmount ?? "0").replace(/,/g, ""));
-  const repaymentAmount = Number(String(row?.repaymentAmount ?? "0").replace(/,/g, ""));
-  if (borrowAmount > 0 && repaymentAmount <= 0) {
-    return cleanText(row?.borrowDirection) === "expense" ? "支" : "收";
-  }
-  if (repaymentAmount > 0 && borrowAmount <= 0) {
-    return cleanText(row?.repaymentDirection) === "income" ? "收" : "支";
-  }
-  return "流水";
-}
-
-function flowAmount(row: TurnoverLedgerGroupedRow | null) {
-  const amount = cleanText(row?.flowAmount);
-  if (amount && amount !== "0.00") {
-    return amount;
-  }
-  const borrowAmount = Number(String(row?.borrowAmount ?? "0").replace(/,/g, ""));
-  if (borrowAmount > 0) {
-    return row?.borrowAmount ?? "0.00";
-  }
-  return row?.repaymentAmount ?? "0.00";
+  return row?.flowDirection === "income" ? "收入" : row?.flowDirection === "expense" ? "支出" : "流水";
 }
 
 function SectionTitle({ children }: { children: ReactNode }) {
@@ -156,15 +129,10 @@ export default function TurnoverLedgerExtraDrawer({
           {error ? <div className="turnover-ledger-drawer__notice turnover-ledger-drawer__notice--danger" role="alert">{error}</div> : null}
           {row ? (
             <>
-              <div className="turnover-ledger-chip-row turnover-ledger-extra-chip-row">
-                <span className="turnover-ledger-chip turnover-ledger-chip--filled">{relation?.statusLabel || relation?.status || "-"}</span>
-                <span className={`turnover-ledger-chip turnover-ledger-chip--outline ${flowDirectionLabel(row) === "支" ? "turnover-ledger-chip--expense" : "turnover-ledger-chip--income"}`}>
-                  {flowDirectionLabel(row)}
-                </span>
-                <span className="turnover-ledger-chip turnover-ledger-chip--outline turnover-ledger-chip--amount">{formatMoney(flowAmount(row))}</span>
-                {bankAccountLabels.map((label) => (
-                  <span className="turnover-ledger-chip turnover-ledger-chip--outline" key={label}>{label}</span>
-                ))}
+              <div className="turnover-detail-heading">
+                <span>{flowDirectionLabel(row)} <strong>{formatMoney(row.flowAmount)}</strong></span>
+                <span>{relation?.statusLabel || "—"}</span>
+                <span>{bankAccountLabels.join("、")}</span>
               </div>
 
               <section className="turnover-ledger-extra-section">
@@ -231,10 +199,10 @@ export default function TurnoverLedgerExtraDrawer({
 
               <section className="turnover-ledger-extra-section">
                 <SectionTitle>操作记录 / 关系操作</SectionTitle>
-                <div className="turnover-ledger-chip-row turnover-ledger-extra-chip-row">
-                  <span className="turnover-ledger-chip turnover-ledger-chip--outline">{`审计记录 ${detail?.auditHistory.length ?? 0} 条`}</span>
-                  {extra.updatedAt ? <span className="turnover-ledger-chip turnover-ledger-chip--outline">{`更新于 ${formatDateTimeText(extra.updatedAt)}`}</span> : null}
-                  {extra.updatedBy ? <span className="turnover-ledger-chip turnover-ledger-chip--outline">{`更新人 ${extra.updatedBy}`}</span> : null}
+                <div className="turnover-detail-audit">
+                  <span>{`审计记录 ${detail?.auditHistory.length ?? 0} 条`}</span>
+                  {extra.updatedAt ? <span>{`更新于 ${formatDateTimeText(extra.updatedAt)}`}</span> : null}
+                  {extra.updatedBy ? <span>{`更新人 ${extra.updatedBy}`}</span> : null}
                 </div>
               </section>
             </>

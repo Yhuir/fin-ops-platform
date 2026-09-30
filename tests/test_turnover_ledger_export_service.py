@@ -239,8 +239,7 @@ class TurnoverLedgerExportServiceTests(unittest.TestCase):
                     "family_label": "业务往来",
                     "pending_direction": "collection",
                     "pending_amount": "5000.00",
-                    "rows": [
-                        {
+                    "summary_row": {
                             "relation_id": "turnover_rel_002",
                             "status": "suggested",
                             "status_label": "待人工确认",
@@ -258,8 +257,8 @@ class TurnoverLedgerExportServiceTests(unittest.TestCase):
                             "interest_paid_date": None,
                             "interest_payment_method": "",
                             "note": "",
-                        }
-                    ],
+                    },
+                    "flow_rows": [],
                 },
             ],
         }

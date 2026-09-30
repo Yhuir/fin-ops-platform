@@ -1054,6 +1054,46 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["status"], "suggested")
         self.assertEqual(payload["rows"][0]["counterparty_name"], "昆明建设集团")
 
+    def test_object_search_filters_groups_summary_and_family_counts_before_pagination(self) -> None:
+        service = self._grouped_service()
+        payload = service.list_grouped_ledger(query="  云南  ", page_size=1, settlement_status="unsettled")
+        self.assertEqual(payload["pagination"]["total"], 1)
+        self.assertEqual(payload["groups"][0]["counterparty_name"], "云南路桥")
+        self.assertEqual(payload["summary"]["pending_repayment_amount"], "9000.00")
+        self.assertEqual(payload["summary"]["pending_collection_amount"], "8000.00")
+        self.assertEqual(payload["statistics"]["filtered_transaction_count"], 2)
+        self.assertEqual(payload["statistics"]["family_group_counts"], {"all": 1, "personal": 0, "company": 1, "bank": 0, "business": 0, "uncategorized": 0})
+        empty = service.list_grouped_ledger(query="不存在的对象")
+        self.assertEqual(empty["groups"], [])
+        self.assertEqual(empty["summary"]["pending_repayment_amount"], "0.00")
+        self.assertEqual(empty["statistics"]["group_count"], 0)
+        self.assertEqual(service.list_grouped_ledger(settlement_status="settled")["groups"], [])
+        for kwargs in ({"query": "长" * 201}, {"settlement_status": "paired"}):
+            with self.assertRaises(ValueError):
+                service.list_grouped_ledger(**kwargs)
+
+    def test_unpaginated_export_source_does_not_stop_at_200_groups(self) -> None:
+        from dataclasses import replace
+
+        service = self._grouped_service()
+        template = service._import_service._transactions[0]
+        transactions = [replace(template, id=f"export-{index}", counterparty_name_raw=f"往来对象{index:03d}") for index in range(205)]
+        service._import_service._transactions = transactions
+        service._category_service = BankTransactionCategoryService.from_snapshot(None, transaction_exists=lambda _: True)
+        service._category_service.apply_updates([
+            {"transaction_id": row.id, "category_code": "borrow_in_company_pending_repayment", "expected_version": 0}
+            for row in transactions
+        ], actor="test")
+        paged = service.list_grouped_ledger(page_size=10000)
+        complete = service.list_grouped_ledger(paginate=False)
+        self.assertEqual(len(paged["groups"]), 200)
+        self.assertEqual(len(complete["groups"]), 205)
+        self.assertEqual(complete["statistics"]["filtered_transaction_count"], 205)
+        from fin_ops_platform.services.turnover_ledger_export_service import TurnoverLedgerExportService
+
+        preview = TurnoverLedgerExportService(service.list_grouped_ledger).preview(query="往来对象")
+        self.assertEqual(preview["pagination"]["total"], 410)
+
     def test_grouped_ledger_groups_same_counterparty_family_and_summarizes_pending_amounts(self) -> None:
         ledger_service = self._grouped_service()
 

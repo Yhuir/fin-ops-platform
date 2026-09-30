@@ -110,6 +110,9 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
                         "status": None,
                         "page": 2,
                         "page_size": 20,
+                        "query": "",
+                        "settlement_status": "all",
+                        "paginate": True,
                     },
                 )
             ],

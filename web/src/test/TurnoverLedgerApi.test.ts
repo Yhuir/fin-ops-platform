@@ -770,21 +770,10 @@ describe("turnover ledger API", () => {
       borrowAmount: "200000.00",
       balanceAmount: "0.00",
     });
-    expect(ledger.groups[0].rows[0]).toMatchObject({
-      relationId: "turnover_rel_001",
-      borrowAmount: "200000.00",
-      balanceAmount: "200000.00",
-      repaymentAmount: "0.00",
-      interestRateType: "annual",
-      interestRateValue: "0.060000",
-      interestPaidDate: null,
-      interestPaymentMethod: "",
-      note: "",
-      bankRowIds: ["bank_001"],
-    });
+    expect(ledger.groups[0]).not.toHaveProperty("rows");
   });
 
-  test("uses first grouped rows entry as summaryRow when backend has legacy rows only", async () => {
+  test("rejects legacy rows without the canonical summary", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({
@@ -805,17 +794,7 @@ describe("turnover ledger API", () => {
       }), { headers: { "Content-Type": "application/json" } })),
     );
 
-    const ledger = await fetchTurnoverLedgerGrouped();
-
-    expect(ledger.groups[0].summaryRow).toMatchObject({
-      relationId: "legacy-rel-001",
-      rowKind: "summary",
-      borrowAmount: "1000.00",
-      balanceAmount: "800.00",
-    });
-    expect(ledger.groups[0].lotRows).toEqual([]);
-    expect(ledger.groups[0].flowRows).toEqual([]);
-    expect(ledger.groups[0].allocationLots).toEqual([]);
+    await expect(fetchTurnoverLedgerGrouped()).rejects.toThrow("往来分组缺少 summary_row");
   });
 
   test("maps extra PUT payload without a duplicate row readback", async () => {
@@ -878,7 +857,7 @@ describe("turnover ledger API", () => {
         return new Response(JSON.stringify({
           file_name: "往来款台账-业务往来-2026-05-12.xlsx",
           scope_label: "业务往来",
-          summary: {
+          totals: {
             row_count: 1,
             pending_repayment_amount: "0.00",
             pending_collection_amount: "8000.00",

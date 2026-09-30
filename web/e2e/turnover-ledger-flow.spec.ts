@@ -64,8 +64,8 @@ async function clickCheckbox(checkbox: Locator) {
 }
 
 const turnoverFlowLabels = {
-  expense: "云南建设有限公司 2026-05-03 支出 1000.00",
-  income: "云南建设有限公司 2026-05-02 收入 1000.00",
+  expense: "云南建设有限公司 2026-05-03 10:00:00 支出 1000.00",
+  income: "云南建设有限公司 2026-05-02 10:00:00 收入 1000.00",
 } as const;
 
 test.describe("turnover ledger browser flow", () => {
@@ -78,6 +78,9 @@ test.describe("turnover ledger browser flow", () => {
 
     await page.goto("/turnover-ledger");
     await expect(page.getByText("分页往来方 001")).toBeVisible();
+    await expect(page.getByText("显示 1-20 / 121")).toBeVisible();
+    await page.getByRole("button", { name: /每页对象数/ }).click();
+    await page.getByRole("option", { name: "每页 50 个" }).click();
     await expect(page.getByText("显示 1-50 / 121")).toBeVisible();
 
     const secondPageResponse = waitForTurnoverLedger(page);
@@ -134,7 +137,7 @@ test.describe("turnover ledger browser flow", () => {
         const response = await mark("apiLatencyMs", responsePromise);
         recovered = response.status() === 200;
         if (recovered) {
-          await mark("finalSettledLatencyMs", expect(page.getByRole("grid", { name: "往来款左右双栏台账" })).toBeVisible());
+          await mark("finalSettledLatencyMs", expect(page.getByRole("table", { name: "外部往来款台账" })).toBeVisible());
         } else {
           await mark("firstVisibleResponseLatencyMs", expect(page.getByText("往来款台账加载暂时失败，请刷新后重试。")).toBeVisible());
         }
@@ -143,10 +146,10 @@ test.describe("turnover ledger browser flow", () => {
     expect(recovered).toBe(true);
 
     await expect(page.getByText("往来款台账加载暂时失败，请刷新后重试。")).toHaveCount(0);
-    const table = page.getByRole("grid", { name: "往来款左右双栏台账" });
+    const table = page.getByRole("table", { name: "外部往来款台账" });
     await expect(table).toBeVisible();
     await expect(table.getByText("云南建设有限公司")).toBeVisible();
-    await expect(page.getByRole("button", { name: "确认闭环" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "确认闭环" })).toHaveCount(0);
     expect(api.count("GET /api/turnover-ledger")).toBeGreaterThanOrEqual(3);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
@@ -228,9 +231,9 @@ test.describe("turnover ledger browser flow", () => {
 
     await page.goto("/turnover-ledger");
     await expect(page.getByRole("heading", { name: "外部往来款管理" })).toBeVisible();
-    const table = page.getByRole("grid", { name: "往来款左右双栏台账" });
+    const table = page.getByRole("table", { name: "外部往来款台账" });
     await page.getByRole("button", { name: "展开 云南建设有限公司 流水明细" }).click();
-    const expenseRow = table.getByRole("checkbox", { name: `选择流水 ${turnoverFlowLabels.expense}` }).locator("xpath=ancestor::tr");
+    const expenseRow = table.getByRole("checkbox", { name: `选择流水 ${turnoverFlowLabels.expense}` }).locator("xpath=ancestor::tr[1]");
     await expect(expenseRow).toContainText("外部往来款付款");
     await expect(expenseRow).toContainText("归还借款");
 
@@ -354,7 +357,7 @@ test.describe("turnover ledger browser flow", () => {
     });
 
     await page.goto("/turnover-ledger");
-    const table = page.getByRole("grid", { name: "往来款左右双栏台账" });
+    const table = page.getByRole("table", { name: "外部往来款台账" });
     await page.getByRole("button", { name: "展开 云南建设有限公司 流水明细" }).click();
     await table.getByRole("button", { name: `编辑流水 ${turnoverFlowLabels.expense}` }).click();
     const drawer = page.getByRole("dialog", { name: "编辑流水补充信息" });
@@ -403,7 +406,7 @@ test.describe("turnover ledger browser flow", () => {
     });
     await expect(page.getByRole("heading", { name: "外部往来款管理" })).toBeVisible();
 
-    const table = page.getByRole("grid", { name: "往来款左右双栏台账" });
+    const table = page.getByRole("table", { name: "外部往来款台账" });
     await expect(table).toBeVisible();
     await recordLatency({
       operationId: "turnover-ledger.expand-group",
@@ -411,9 +414,10 @@ test.describe("turnover ledger browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       await page.getByRole("button", { name: "展开 云南建设有限公司 流水明细" }).click();
-      const expenseRow = table.getByRole("checkbox", { name: `选择流水 ${turnoverFlowLabels.expense}` }).locator("xpath=ancestor::tr");
+      const expenseRow = table.getByRole("checkbox", { name: `选择流水 ${turnoverFlowLabels.expense}` }).locator("xpath=ancestor::tr[1]");
       await mark("finalSettledLatencyMs", expect(expenseRow).toContainText("外部往来款付款"));
       await expect(expenseRow).toContainText("归还借款");
+      await page.screenshot({ path: "../outputs/turnover-ledger-expanded.png", fullPage: true, animations: "disabled" });
     });
 
     await recordLatency({
@@ -450,6 +454,7 @@ test.describe("turnover ledger browser flow", () => {
     await expect(drawer.getByText("收入", { exact: true })).toBeVisible();
     await expect(drawer.getByText("支出", { exact: true })).toBeVisible();
     await expect(drawer.getByTestId("turnover-closure-delta")).toHaveText("0.00");
+    await page.screenshot({ path: "../outputs/turnover-ledger-confirm.png", fullPage: true, animations: "disabled" });
     await recordLatency({
       operationId: "turnover-ledger.confirm-manual-closure",
       visibleLabel: "确定",
@@ -457,7 +462,7 @@ test.describe("turnover ledger browser flow", () => {
     }, async (mark) => {
       const confirmResponse = page.waitForResponse(responseFor("POST", "/api/turnover-ledger/closures/confirm"));
       const reloadResponse = waitForTurnoverLedger(page);
-      await drawer.getByRole("button", { name: "确定" }).click();
+      await drawer.getByRole("button", { name: "确认闭环" }).click();
       await mark("apiLatencyMs", confirmResponse);
       await mark("firstVisibleResponseLatencyMs", expect(page.getByText("外部往来闭环已确认")).toBeVisible());
       await mark("finalSettledLatencyMs", reloadResponse);
@@ -468,7 +473,7 @@ test.describe("turnover ledger browser flow", () => {
     await expect(page.getByText("银行流水状态已变化，请刷新后重试。")).toHaveCount(0);
     expect(api.count("POST /api/turnover-ledger/closures/confirm")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
-    await expect(page.getByText("收支闭环").first()).toBeVisible();
+    await expect(table.getByText("已结清").first()).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
 
     await expect(drawer).toBeVisible();
@@ -523,7 +528,7 @@ test.describe("turnover ledger browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       await page.getByRole("button", { name: "展开 云南建设有限公司 流水明细" }).click();
-      await mark("finalSettledLatencyMs", expect(page.getByText("收支闭环").first()).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(table.getByText("已结清").first()).toBeVisible());
     });
     const ledgerLoadsBeforeWithdraw = api.count("GET /api/turnover-ledger");
     await recordLatency({
@@ -544,6 +549,9 @@ test.describe("turnover ledger browser flow", () => {
       const withdrawResponse = page.waitForResponse(responseFor("POST", "/api/turnover-ledger/closures/withdraw"));
       const reloadResponse = waitForTurnoverLedger(page);
       await page.getByRole("button", { name: "撤回闭环" }).click();
+      const withdrawDrawer = page.getByRole("dialog", { name: "撤回外部往来闭环" });
+      await expect(withdrawDrawer.getByRole("row")).toHaveCount(3);
+      await withdrawDrawer.getByRole("button", { name: "确认撤回" }).click();
       await mark("apiLatencyMs", withdrawResponse);
       await mark("firstVisibleResponseLatencyMs", expect(page.getByText("外部往来闭环已撤回")).toBeVisible());
       await mark("finalSettledLatencyMs", reloadResponse);
@@ -553,7 +561,7 @@ test.describe("turnover ledger browser flow", () => {
     expect(api.count("POST /api/turnover-ledger/closures/withdraw")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(api.count("GET /api/turnover-ledger")).toBeGreaterThan(ledgerLoadsBeforeWithdraw);
-    await expect(page.getByText("收支闭环")).toHaveCount(0);
+    await expect(table.getByText("已结清")).toHaveCount(0);
     await expect(table.getByText("未闭环")).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);

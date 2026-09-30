@@ -54,6 +54,9 @@ export type TurnoverLedgerSummary = {
 };
 
 export type TurnoverLedgerStatistics = {
+  groupCount?: number;
+  filteredTransactionCount?: number;
+  familyGroupCounts?: Record<string, number>;
   transactionCount?: number;
   expenseTransactionCount?: number;
   incomeTransactionCount?: number;
@@ -192,7 +195,6 @@ export type TurnoverLedgerGroup = {
   cashClosureLinked: boolean;
   rowSpan: number;
   groupTone: TurnoverRowTone;
-  rows: TurnoverLedgerGroupedRow[];
   summaryRow: TurnoverLedgerGroupedRow | null;
   flowRows: TurnoverLedgerFlowRow[];
   allocationLots: TurnoverLedgerAllocationLot[];
@@ -221,6 +223,8 @@ export type TurnoverLedgerGroupedResponse = {
 };
 
 export type FetchTurnoverLedgerRequest = {
+  query?: string;
+  settlementStatus?: "all" | "settled" | "unsettled";
   family?: TurnoverLedgerFamily;
   direction?: TurnoverLedgerDirectionFilter;
   status?: string | null;

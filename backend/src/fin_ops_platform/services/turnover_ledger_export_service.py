@@ -60,10 +60,10 @@ class TurnoverLedgerExportService:
     def __init__(self, grouped_ledger_loader: Callable[..., dict[str, Any]]) -> None:
         self._grouped_ledger_loader = grouped_ledger_loader
 
-    def preview(self, *, family: str = "all", limit: int = 20) -> dict[str, Any]:
+    def preview(self, *, family: str = "all", limit: int = 20, query: str = "", settlement_status: str = "all") -> dict[str, Any]:
         normalized_family = self._normalize_family(family)
         normalized_limit = max(int(limit or 20), 1)
-        grouped_payload = self._grouped_ledger_loader(family=normalized_family, page=1, page_size=max(normalized_limit, 200))
+        grouped_payload = self._grouped_ledger_loader(family=normalized_family, query=query, settlement_status=settlement_status, paginate=False)
         self._ensure_export_group_limit(grouped_payload)
         rows = self._formal_rows(grouped_payload, family=normalized_family)
         self._ensure_export_row_limit(len(rows))
@@ -80,9 +80,9 @@ class TurnoverLedgerExportService:
             "filters": {"family": normalized_family},
         }
 
-    def export(self, *, family: str = "all", today: date | None = None) -> tuple[str, bytes]:
+    def export(self, *, family: str = "all", today: date | None = None, query: str = "", settlement_status: str = "all") -> tuple[str, bytes]:
         normalized_family = self._normalize_family(family)
-        grouped_payload = self._grouped_ledger_loader(family=normalized_family, page=1, page_size=10000)
+        grouped_payload = self._grouped_ledger_loader(family=normalized_family, query=query, settlement_status=settlement_status, paginate=False)
         self._ensure_export_group_limit(grouped_payload)
         rows = self._formal_rows(grouped_payload, family=normalized_family)
         self._ensure_export_row_limit(len(rows))
@@ -154,8 +154,7 @@ class TurnoverLedgerExportService:
         flow_rows = cls._deduplicated_flow_rows(group.get("flow_rows"))
         if isinstance(summary, dict):
             return [("summary", dict(summary)), *(("flow", row) for row in flow_rows)]
-        legacy_rows = [dict(row) for row in list(group.get("rows") or []) if isinstance(row, dict)]
-        return [(cls._row_type_for_legacy_row(index, row), row) for index, row in enumerate(legacy_rows)]
+        raise ValueError("往来导出分组缺少 summary_row")
 
     @staticmethod
     def _ensure_export_group_limit(grouped_payload: dict[str, Any]) -> None:
@@ -171,17 +170,6 @@ class TurnoverLedgerExportService:
     def _ensure_export_row_limit(total: int) -> None:
         if total > TURNOVER_LEDGER_EXPORT_ROW_LIMIT:
             raise TurnoverLedgerExportLimitError(total=total)
-
-    @staticmethod
-    def _row_type_for_legacy_row(index: int, row: dict[str, Any]) -> str:
-        row_kind = str(row.get("row_kind") or "").strip().lower()
-        if row_kind == "lot":
-            return "summary"
-        if row_kind == "flow":
-            return "flow"
-        if row_kind == "summary":
-            return "summary"
-        return "summary" if index == 0 else "summary"
 
     @staticmethod
     def _deduplicated_flow_rows(value: Any) -> list[dict[str, Any]]:

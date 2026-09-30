@@ -139,7 +139,15 @@ class TurnoverLedgerService:
         status: str | None = None,
         page: int = 1,
         page_size: int = 50,
+        query: str = "",
+        settlement_status: str = "all",
+        paginate: bool = True,
     ) -> dict[str, Any]:
+        query = str(query).strip()
+        if len(query) > 200:
+            raise ValueError("搜索内容不能超过 200 个字符")
+        if settlement_status not in {"all", "settled", "unsettled"}:
+            raise ValueError("结算状态无效")
         bank_rows = self._bank_rows()
         relations = self._relation_service.rebuild_from_bank_rows(bank_rows)
         rows_by_id = {str(row.get("id") or ""): row for row in bank_rows}
@@ -198,23 +206,38 @@ class TurnoverLedgerService:
             groups = self._group_items(filtered_items)
             if relation_source_rows:
                 groups = apply_workbench_relation_context(groups, relation_source_rows)
+
+        folded_query = query.casefold()
+
+        def matches(group: dict[str, Any]) -> bool:
+            return (
+                folded_query in str(group["counterparty_name"]).casefold()
+                and (settlement_status == "all" or bool(group["cash_closure_linked"]) == (settlement_status == "settled"))
+            )
+
+        facet_groups = [group for group in all_groups if matches(group)]
+        groups = [group for group in groups if matches(group)]
+        group_keys = {(group["family"], group["counterparty_name"]) for group in groups}
+        filtered_items = [item for item in filtered_items if (item["family"], item["counterparty_name"]) in group_keys]
+        facet_keys = {(group["family"], group["counterparty_name"]) for group in facet_groups}
+        facet_items = [item for item in items if (item["family"], item["counterparty_name"]) in facet_keys]
         normalized_page = max(int(page or 1), 1)
         normalized_page_size = min(max(int(page_size or 50), 1), 200)
         start = (normalized_page - 1) * normalized_page_size
         end = start + normalized_page_size
         legacy_rows = [item["legacy"] for item in filtered_items]
-        all_legacy_rows = [item["legacy"] for item in items]
+        all_legacy_rows = [item["legacy"] for item in facet_items]
         return {
             "summary": self._summary(legacy_rows, groups=groups),
             "family_summaries": [
                 self._family_summary(
                     family_key,
                     [row for row in all_legacy_rows if row.get("family") == family_key],
-                    groups=[group for group in all_groups if group.get("family") == family_key],
+                    groups=[group for group in facet_groups if group.get("family") == family_key],
                 )
                 for family_key in TURNOVER_FAMILY_LABELS
             ],
-            "groups": groups[start:end],
+            "groups": groups[start:end] if paginate else groups,
             "pagination": {
                 "page": normalized_page,
                 "page_size": normalized_page_size,
@@ -225,7 +248,15 @@ class TurnoverLedgerService:
                 "direction": self._normalize_direction_filter(direction),
                 "status": self._normalize_status(status),
             },
-            "statistics": self._page_statistics(all_groups),
+            "statistics": {
+                **self._page_statistics(all_groups),
+                "group_count": len(groups),
+                "filtered_transaction_count": self._page_statistics(groups)["transaction_count"],
+                "family_group_counts": {
+                    "all": len(facet_groups),
+                    **{key: sum(group["family"] == key for group in facet_groups) for key in TURNOVER_FAMILY_LABELS},
+                },
+            },
         }
 
     def _workbench_relation_source_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
