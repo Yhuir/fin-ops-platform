@@ -45,6 +45,12 @@
 .turnover-closure-table th { font-weight: 500; color: var(--fp-text-secondary); text-align: left; }
 .turnover-closure-table th, .turnover-closure-table td { padding: 12px 8px; border-bottom: 1px solid var(--fp-border-subtle); }
 .turnover-closure-table td:last-child, .turnover-closure-table th:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.turnover-closure-table--confirmation { table-layout: fixed; }
+.turnover-closure-table--confirmation th:first-child { width: 26%; }
+.turnover-closure-table--confirmation th:nth-child(3) { width: 54px; }
+.turnover-closure-table--confirmation th:last-child { width: 112px; }
+.turnover-closure-table--confirmation td:nth-child(2) { overflow-wrap: anywhere; }
+.turnover-closure-table--confirmation th:nth-child(3), .turnover-closure-table--confirmation td:nth-child(3), .turnover-closure-table--confirmation td:last-child { white-space: nowrap; }
 .turnover-closure-totals { display: flex; gap: 28px; border-block: 1px solid var(--fp-border-subtle); padding: 18px 0; margin: 0; }
 .turnover-closure-totals dt { color: var(--fp-text-secondary); font-size: 12px; margin-bottom: 7px; }
 .turnover-closure-totals dd { margin: 0; font-size: 17px; font-variant-numeric: tabular-nums; }

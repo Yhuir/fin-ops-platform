@@ -1147,7 +1147,7 @@ export default function TurnoverLedgerPage() {
             <div className="turnover-closure-identity">{closureSelection.groupLabel}</div>
           ) : null}
           {selectedRowsAllCashClosure ? <p className="turnover-muted">撤回将解除以下整组收支闭环，保留原始流水。不会删除银行流水。</p> : <p className="turnover-muted">核对同一往来对象的收入和支出。确认后，这组流水将标记为已结清。</p>}
-          <table className="turnover-closure-table"><thead><tr><th>日期</th><th>业务摘要</th><th>方向</th><th>金额</th></tr></thead>
+          <table className="turnover-closure-table turnover-closure-table--confirmation"><thead><tr><th>日期</th><th>业务摘要</th><th>方向</th><th>金额</th></tr></thead>
             <tbody>{closurePreview.items.map((item) => <tr key={item.bankRowId}>
               <td>{formatDateTimeText(item.row.transactionAt || item.row.borrowDate || item.row.repaymentDate)}</td>
               <td>{formatNullable(item.row.repaymentRemark || item.row.summaryText)}</td><td>{item.directionLabel}</td><td>{formatMoney(item.amount.toFixed(2))}</td>
