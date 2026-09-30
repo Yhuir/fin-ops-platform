@@ -11,6 +11,7 @@ from fin_ops_platform.services.input_invoice_usage_export_service import (
     InputInvoiceUsageExportService,
 )
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageError
+from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError
 
 
 class InputInvoiceUsageApiRoutes:
@@ -192,10 +193,12 @@ class InputInvoiceUsageApiRoutes:
         _session, auth_error = self._read_session(headers)
         if auth_error is not None:
             return auth_error
-        return self._json_response(
-            HTTPStatus.OK,
-            self._query_service.payment_status_rules(),
-        )
+        try:
+            payload = self._query_service.payment_status_rules()
+            payload["applicantOptions"] = self._app_settings_service.get_payment_rule_applicant_options()
+        except OARoleSyncError:
+            return self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "oa_applicant_directory_unavailable", "message": "OA 申请人目录暂时不可用，请重试。"})
+        return self._json_response(HTTPStatus.OK, payload)
 
     def update_payment_status_rules(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
         session, auth_error = self._resolve_read_session(
@@ -219,6 +222,8 @@ class InputInvoiceUsageApiRoutes:
             )
         except AppSettingsValidationError as exc:
             return self._payment_rules_error_response(exc)
+        except OARoleSyncError:
+            return self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "oa_applicant_directory_unavailable", "message": "OA 申请人目录暂时不可用，请重试。"})
         return self._json_response(HTTPStatus.OK, updated)
 
     def export_summary(self, query: dict[str, list[str]], headers: dict[str, str] | None) -> Any:

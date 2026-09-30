@@ -13,6 +13,25 @@ from openpyxl import load_workbook
 
 
 class TurnoverLedgerExportServiceTests(unittest.TestCase):
+    def test_flow_tags_are_identical_in_preview_and_workbook(self):
+        payload = self._grouped_payload()
+        group = payload["groups"][0]
+        group["flow_rows"] = [{"source_bank_row_id": "tag-flow", "flow_amount": "12.34",
+                               "flow_direction": "expense", "category_label_path": ["外部往来款付款", "保证金", "业务往来"],
+                               "turnover_action_label": "待收款"}]
+        service = TurnoverLedgerExportService(lambda **kwargs: payload)
+        preview = service.preview()
+        flow = next(row for row in preview["rows"] if row["source_bank_row_id"] == "tag-flow")
+        self.assertEqual(flow["流水标签"], "外部往来款付款 / 保证金 / 业务往来")
+        self.assertEqual(flow["往来标记"], "待收款")
+        self.assertEqual(preview["rows"][0]["往来标记"], "")
+        _, data = service.export()
+        workbook = load_workbook(BytesIO(data))
+        rows = list(workbook.active.values)
+        self.assertEqual(rows[0][-2:], ("流水标签", "往来标记"))
+        self.assertEqual(rows[2][-2:], (flow["流水标签"], "待收款"))
+        workbook.close()
+
     def _grouped_payload(self) -> dict[str, object]:
         return {
             "summary": {

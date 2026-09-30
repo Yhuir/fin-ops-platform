@@ -417,6 +417,8 @@ test.describe("turnover ledger browser flow", () => {
       const expenseRow = table.getByRole("checkbox", { name: `选择流水 ${turnoverFlowLabels.expense}` }).locator("xpath=ancestor::tr[1]");
       await mark("finalSettledLatencyMs", expect(expenseRow).toContainText("外部往来款付款"));
       await expect(expenseRow).toContainText("归还借款");
+      await expect(expenseRow).toContainText("往来标记：已还款");
+      await expect(table.getByRole("columnheader", { name: "流水标签" })).toBeVisible();
       await page.screenshot({ path: "../outputs/turnover-ledger-expanded.png", fullPage: true, animations: "disabled" });
     });
 

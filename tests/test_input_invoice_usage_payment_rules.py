@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import Mock
 
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
@@ -13,9 +14,11 @@ from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     AppSettingsInputInvoiceUsagePaymentRulesProvider,
     PaymentStatusEvaluationContext,
+    InputInvoiceUsagePaymentRulesValidationError,
 )
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.oa_role_sync_service import OAUserSummary, OARoleSyncExecutionError
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 from tests.app_test_support import build_local_state_application as build_application
@@ -40,6 +43,60 @@ class QueueRecorder:
 
 
 class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
+    def test_directory_merges_whitespace_and_same_name_users_excludes_disabled(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            directory = Mock()
+            directory.list_active_users.return_value = [
+                OAUserSummary("A", "黄  亮", True), OAUserSummary("B", "黄 亮", True),
+                OAUserSummary("C", "刘树刚", True), OAUserSummary("D", "刘树刚", True),
+                OAUserSummary("YNSYLP005", "刘涵静", True), OAUserSummary("X", "停用人员", False),
+            ]
+            app._app_settings_service._oa_role_sync_service = directory
+            response = app.handle_request("GET", "/api/input-invoice-usage/payment-status-rules")
+            self.assertEqual(response.status_code, 200)
+            payload = json.loads(response.body)
+            self.assertEqual(payload["applicantOptions"], ["刘树刚", "刘涵静", "黄亮"])
+            self.assertNotIn("applicantName", payload["rules"][0]["conditions"])
+            directory.list_active_users.side_effect = OARoleSyncExecutionError("unavailable")
+            failure = app.handle_request("GET", "/api/input-invoice-usage/payment-status-rules")
+            self.assertEqual(failure.status_code, 503)
+            self.assertEqual(json.loads(failure.body)["error"], "oa_applicant_directory_unavailable")
+
+    def test_multiple_applicants_match_any_and_invalid_lists_fail(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            provider = AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=app._state_store)
+            rule = {"id": "multi", "statusCode": "offset", "label": "冲", "priority": 1, "enabled": True,
+                    "conditions": {"hasOa": True, "applicantNames": ["黄 亮", "李四", "黄  亮"]}}
+            saved = provider.update_payment_status_rules({"expectedVersion": 1, "idempotencyKey": "multi", "rules": [rule]}, actor_id="tester")
+            self.assertEqual(saved["rules"][0]["conditions"]["applicantNames"], ["李四", "黄亮"])
+            for name in ["李四", "黄  亮", "黄\u3000亮", "黄\u200b亮"]:
+                self.assertEqual(provider.evaluate(PaymentStatusEvaluationContext(True, False, name, False, False))["code"], "offset")
+            self.assertEqual(provider.evaluate(PaymentStatusEvaluationContext(True, False, "王五", False, False))["code"], "pending")
+            for invalid in [[], "李四", [None], ["  "]]:
+                rule["conditions"]["applicantNames"] = invalid
+                with self.assertRaises(InputInvoiceUsagePaymentRulesValidationError):
+                    provider.update_payment_status_rules({"expectedVersion": 2, "idempotencyKey": "bad", "rules": [rule]}, actor_id="tester")
+
+    def test_new_disabled_applicant_rejected_but_existing_condition_preserved(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            service = app._app_settings_service
+            directory = Mock()
+            directory.list_active_users.return_value = []
+            service._oa_role_sync_service = directory
+            current = service.get_input_invoice_usage_payment_status_rules_payload()
+            rules = current["rules"]
+            rules[0]["label"] = "现金往来保留"
+            service.update_input_invoice_usage_payment_status_rules({"expectedVersion": 1, "idempotencyKey": "keep", "rules": rules}, actor_id="tester")
+            directory.list_active_users.assert_not_called()
+            rules[0]["conditions"]["applicantNames"].append("停用人员")
+            with self.assertRaises(AppSettingsValidationError) as caught:
+                service.update_input_invoice_usage_payment_status_rules({"expectedVersion": 2, "idempotencyKey": "bad", "rules": rules}, actor_id="tester")
+            self.assertEqual(caught.exception.error_code, "inactive_payment_rule_applicant")
+            self.assertEqual(service.get_input_invoice_usage_payment_status_rules_payload()["version"], 2)
+
     def test_default_rules_are_editable_versioned_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -265,7 +322,7 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
             rule = {
                 "id": "custom-applicant", "statusCode": "offset", "label": "冲",
                 "priority": 1, "enabled": True,
-                "conditions": {"hasOa": True, "hasBank": False, "applicantName": "李四"},
+                "conditions": {"hasOa": True, "hasBank": False, "applicantNames": ["李四"]},
                 "reason": "must not persist", "description": "must not persist",
             }
             saved = provider.update_payment_status_rules(
@@ -276,7 +333,7 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
             raw = app._state_store.load_app_settings()["input_invoice_usage_payment_status_rules"]["rules"][0]
             self.assertNotIn("reason", raw)
             self.assertNotIn("description", raw)
-            rule["conditions"]["applicantName"] = "王五"
+            rule["conditions"]["applicantNames"] = ["王五"]
             edited = provider.update_payment_status_rules(
                 {"expectedVersion": saved["version"], "idempotencyKey": "edit", "rules": [rule]}, actor_id="tester",
             )

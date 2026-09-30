@@ -11,7 +11,7 @@ from fin_ops_platform.services.bank_transaction_category_service import (
     BANK_TRANSACTION_CATEGORY_LABELS,
     BankTransactionCategoryService,
 )
-from fin_ops_platform.services.bank_turnover_tag_semantics import EXTERNAL_TURNOVER_ROLE
+from fin_ops_platform.services.bank_turnover_tag_semantics import EXTERNAL_TURNOVER_ROLE, TURNOVER_ACTION_TYPE_BY_VALUE
 from fin_ops_platform.services.turnover_bank_row_version import (
     turnover_bank_row_selection_version,
     turnover_bank_row_version,
@@ -833,6 +833,9 @@ class TurnoverLedgerService:
                     "category_sub_label": str(bank_row.get("category_sub_label") or "").strip(),
                     "category_third_label": str(bank_row.get("category_third_label") or "").strip(),
                     "category_label_path": list(bank_row.get("category_label_path") or []),
+                    "turnover_action_type": bank_row.get("turnover_action_type"),
+                    "turnover_action_label": (TURNOVER_ACTION_TYPE_BY_VALUE.get(bank_row.get("turnover_action_type"), {}).get("label")
+                        or ("未设置" if not bank_row.get("turnover_action_type") else "标记无效")),
                     "category_version": self._bank_row_category_version(bank_row),
                     **self._bank_row_version_fields(bank_row),
                     "counterparty_bank_name": self._counterparty_bank_name([bank_row]),
@@ -886,6 +889,9 @@ class TurnoverLedgerService:
             "category_sub_label": str(row.get("category_sub_label") or "").strip(),
             "category_third_label": str(row.get("category_third_label") or "").strip(),
             "category_label_path": list(row.get("category_label_path") or []),
+            "turnover_action_type": row.get("turnover_action_type"),
+            "turnover_action_label": (TURNOVER_ACTION_TYPE_BY_VALUE.get(row.get("turnover_action_type"), {}).get("label")
+                or ("未设置" if not row.get("turnover_action_type") else "标记无效")),
             "category_version": self._bank_row_category_version(row),
             **self._bank_row_version_fields(row),
             "counterparty_bank_name": self._counterparty_bank_name([row]),

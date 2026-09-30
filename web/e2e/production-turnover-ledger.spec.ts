@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures/strictTest";
+import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 
 const enabled = process.env.FIN_OPS_E2E_PRODUCTION_SMOKE === "1";
 const token = process.env.FIN_OPS_E2E_ADMIN_TOKEN;
@@ -26,6 +27,12 @@ test("production turnover register filters, details and exports use canonical fa
   const register = page.getByRole("table", { name: "外部往来款台账" });
   await expect(register).toBeVisible();
   expect(payload.groups.length).toBeGreaterThan(0);
+  for (const group of payload.groups) {
+    for (const row of group.flow_rows) {
+      const labels: Record<string, string> = { pending_collection: "待收款", collected: "已收款", pending_repayment: "待还款", repaid: "已还款" };
+      expect(row.turnover_action_label).toBe(labels[row.turnover_action_type] ?? (row.turnover_action_type ? "标记无效" : "未设置"));
+    }
+  }
   expect(await page.locator("body").evaluate((body) => body.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: "../outputs/production-turnover-collapsed.png", fullPage: true, animations: "disabled" });
   const group = payload.groups.find((item: { flow_rows: unknown[] }) => item.flow_rows.length > 0);
@@ -68,4 +75,60 @@ test("production turnover register filters, details and exports use canonical fa
   expect(report.p95_ms).toBeLessThanOrEqual(1000);
   expect(report.p99_ms).toBeLessThanOrEqual(2000);
   expect(writes).toEqual([]);
+  await expectNoUnexpectedSuccessUiErrors(page);
+});
+
+test("production payment rule applicants match enabled OA users and support multiple selection", async ({ page }, testInfo) => {
+  test.skip(!enabled || !token, "Requires explicit production verification and admin token.");
+  await page.context().addCookies([{ name: "Admin-Token", value: token!, domain: "www.yn-sourcing.com", path: "/", secure: true, sameSite: "Lax" }]);
+  const writes: string[] = [];
+  let ruleReads = 0;
+  await page.route("**/fin-ops-api/**", async (route) => {
+    if (!["GET", "HEAD", "OPTIONS"].includes(route.request().method())) {
+      writes.push(new URL(route.request().url()).pathname);
+      await route.abort("blockedbyclient");
+    } else {
+      if (new URL(route.request().url()).pathname.endsWith("/payment-status-rules")) ruleReads += 1;
+      await route.continue();
+    }
+  });
+  await page.setViewportSize({ width: 1536, height: 1024 });
+  await page.goto("/fin-ops/input-invoice-usage");
+  const opener = page.getByRole("button", { name: "发票与支付状态规则设置" });
+  await expect(opener).toBeEnabled();
+  expect(ruleReads).toBe(0);
+  const rulesResponse = page.waitForResponse((response) => new URL(response.url()).pathname.endsWith("/payment-status-rules"));
+  await opener.click();
+  const response = await rulesResponse;
+  expect(response.status()).toBe(200);
+  const policy = await response.json();
+  const expected = new Set<string>();
+  let total = 1;
+  for (let pageNum = 1; (pageNum - 1) * 100 < total; pageNum += 1) {
+    const oaResponse = await page.request.get(`/oa-api/system/user/list?pageNum=${pageNum}&pageSize=100`, { headers: { Authorization: `Bearer ${token}` } });
+    expect(oaResponse.status()).toBe(200);
+    const directory = await oaResponse.json();
+    expect(directory.code).toBe(200);
+    total = directory.total;
+    for (const user of directory.rows) {
+      if (String(user.status) === "0" && String(user.delFlag) === "0") expected.add(user.nickName.replace(/[\s\u200b\ufeff]+/g, ""));
+    }
+  }
+  expect([...policy.applicantOptions].sort()).toEqual([...expected].sort());
+  expect(new Set(policy.applicantOptions).size).toBe(policy.applicantOptions.length);
+  for (const rule of policy.rules) expect(rule.conditions).not.toHaveProperty("applicantName");
+  const drawer = page.getByRole("dialog", { name: "发票与支付状态规则设置" });
+  await drawer.getByRole("button", { name: /OA 申请人条件/ }).first().click();
+  const selected = policy.rules[0].conditions.applicantNames ?? [];
+  const addition = policy.applicantOptions.find((name: string) => !selected.includes(name));
+  expect(addition).toBeTruthy();
+  await page.getByRole("option", { name: addition, exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(drawer.getByRole("button", { name: "保存", exact: true })).toBeEnabled();
+  await page.screenshot({ path: "../outputs/production-payment-rule-applicants.png", animations: "disabled" });
+  await drawer.getByRole("button", { name: "还原", exact: true }).click();
+  await expect(drawer.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+  expect(writes).toEqual([]);
+  await expectNoUnexpectedSuccessUiErrors(page);
+  await testInfo.attach("production-applicant-directory", { body: JSON.stringify({ version: policy.version, unique_applicants: expected.size, oa_total: total, business_writes: writes.length }), contentType: "application/json" });
 });

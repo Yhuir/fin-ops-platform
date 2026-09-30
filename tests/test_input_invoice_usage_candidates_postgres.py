@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import unittest
+import json
 from uuid import uuid4
 
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -61,6 +62,31 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
             'row_types',%s::text[],'relation_mode','manual_confirmed','status','active','amount_check','{"matched":true}'::jsonb)))""",
             (case,ids,types,case,ids,types))
 
+    def test_multi_applicant_rule_drives_canonical_rows_filters_and_summary(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from fin_ops_platform.services.postgres_state_store import PostgresStateStore
+        self.invoices(3)
+        for index, name in enumerate(["黄  亮", "周洁莹", "其他人"], 1):
+            identity = f"oa-{index}"
+            self.oa(identity, 10)
+            self.connection.execute("update app.oa_applications set applicant=%s, normalized_payload=normalized_payload || %s::jsonb where row_id=%s",
+                                    (name, json.dumps({"applicant": name}), identity))
+            self.relation(f"case-{index}", [f"candidate-{index}", identity], ["invoice", "oa"])
+        with TemporaryDirectory() as directory:
+            store = PostgresStateStore(data_dir=Path(directory), connection=self.connection)
+            provider = AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=store, transaction_factory=self.connection.transaction)
+            provider.update_payment_status_rules({"expectedVersion": 1, "idempotencyKey": "multi-db", "rules": [
+                {"id": "multi", "statusCode": "offset", "label": "冲", "priority": 1, "enabled": True,
+                 "conditions": {"hasOa": True, "hasBank": False, "applicantNames": ["黄 亮", "周洁莹"]}}
+            ]}, actor_id="test")
+            result = self.service.list_rows(filters=[{"field": "payment_status", "operator": "in", "values": ["offset"]}])
+            self.assertEqual(result["pagination"]["total"], 2)
+            self.assertEqual(result["summary"]["totalWithTax"], "20.00")
+            self.assertEqual({r["paymentStatus"]["code"] for r in result["rows"]}, {"offset"})
+            pending = self.service.list_rows(filters=[{"field": "payment_status", "operator": "in", "values": ["pending"]}])
+            self.assertEqual(pending["pagination"]["total"], 1)
+
     def test_full_pool_counts_members_not_groups_and_filters_before_pagination(self):
         self.invoices(213)
         self.bank('bank-only')
@@ -90,7 +116,6 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
         empty=self.service.candidate_rows({'page':['99']})
         self.assertEqual(empty['rows'],[])
         self.assertEqual(empty['pagination']['total'],210)
-        self.assertEqual(self.repository.load_applicant_names(),['真实申请人'])
 
     def test_aggregate_bank_evidence_cannot_be_replaced_by_one_equal_transaction(self):
         self.invoices(1)

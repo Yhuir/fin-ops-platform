@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
@@ -43,7 +44,7 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "label": "现金往来",
         "priority": 1,
         "enabled": True,
-        "conditions": {"hasOa": True, "hasBank": True, "fullyMatched": True, "applicantName": "陈秀云"},
+        "conditions": {"hasOa": True, "hasBank": True, "fullyMatched": True, "applicantNames": ["陈秀云"]},
     },
     {
         "id": "paid_full_match",
@@ -59,7 +60,7 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "label": "冲",
         "priority": 3,
         "enabled": True,
-        "conditions": {"hasOa": True, "hasBank": False, "applicantName": "周洁莹", "invoiceOaAmountMatched": True},
+        "conditions": {"hasOa": True, "hasBank": False, "applicantNames": ["周洁莹"], "invoiceOaAmountMatched": True},
     },
     {
         "id": "offset_liu_shugang_no_pay",
@@ -67,7 +68,7 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "label": "冲",
         "priority": 4,
         "enabled": True,
-        "conditions": {"hasOa": True, "hasBank": False, "applicantName": "刘树刚不付"},
+        "conditions": {"hasOa": True, "hasBank": False, "applicantNames": ["刘树刚"]},
     },
     {
         "id": "offset_wei_dailian",
@@ -75,7 +76,7 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "label": "冲",
         "priority": 5,
         "enabled": True,
-        "conditions": {"hasOa": True, "hasBank": False, "applicantName": "韦代连"},
+        "conditions": {"hasOa": True, "hasBank": False, "applicantNames": ["韦代连"]},
     },
     {
         "id": "waiting_payment",
@@ -380,13 +381,18 @@ def _normalize_rules(value: Any) -> list[dict[str, Any]]:
     return sorted(normalized, key=lambda item: (item["priority"], item["id"]))
 
 
+def normalize_applicant_name(value: str) -> str:
+    """Match OA name text consistently; this is not an account identity."""
+    return re.sub(r"[\s\u200b\ufeff]+", "", value)
+
+
 def _normalize_conditions(rule_id: str, value: Any) -> dict[str, Any]:
     bool_keys = ("hasOa", "hasBank", "fullyMatched", "invoiceOaAmountMatched")
     if not isinstance(value, dict) or not value:
         raise InputInvoiceUsagePaymentRulesValidationError(
             "empty_input_invoice_usage_payment_rule_conditions", "Payment status rule conditions cannot be empty.",
         )
-    if set(value) - {*bool_keys, "applicantName"}:
+    if set(value) - {*bool_keys, "applicantNames"}:
         raise InputInvoiceUsagePaymentRulesValidationError(
             "unsupported_input_invoice_usage_payment_rule_constraint", "Unsupported payment rule condition.",
         )
@@ -399,9 +405,18 @@ def _normalize_conditions(rule_id: str, value: Any) -> dict[str, Any]:
                 )
             normalized[key] = item
         else:
-            normalized[key] = _required_text(item, key, "invalid_input_invoice_usage_payment_rule_applicant")
+            if not isinstance(item, list) or not item or len(item) > 200:
+                raise InputInvoiceUsagePaymentRulesValidationError(
+                    "invalid_input_invoice_usage_payment_rule_applicant", "applicantNames must contain 1–200 names.",
+                )
+            names = [normalize_applicant_name(_required_text(name, key, "invalid_input_invoice_usage_payment_rule_applicant")) for name in item]
+            if not all(names):
+                raise InputInvoiceUsagePaymentRulesValidationError(
+                    "invalid_input_invoice_usage_payment_rule_applicant", "Applicant names cannot be blank.",
+                )
+            normalized[key] = sorted(set(names))
     impossible = (
-        (normalized.get("hasOa") is False and (normalized.get("applicantName") or normalized.get("invoiceOaAmountMatched") is True))
+        (normalized.get("hasOa") is False and (normalized.get("applicantNames") or normalized.get("invoiceOaAmountMatched") is True))
         or (normalized.get("fullyMatched") is True and (
             normalized.get("hasOa") is False or normalized.get("hasBank") is False
             or normalized.get("invoiceOaAmountMatched") is False
@@ -421,7 +436,7 @@ def condition_description(conditions: dict[str, Any]) -> str:
         "fullyMatched": ("完全匹配", "未完全匹配"),
         "invoiceOaAmountMatched": ("发票与 OA 金额匹配", "发票与 OA 金额不匹配"),
     }
-    parts = [f"申请人={conditions['applicantName']}"] if "applicantName" in conditions else []
+    parts = [f"申请人（任一）={'、'.join(conditions['applicantNames'])}"] if "applicantNames" in conditions else []
     parts.extend(pair[0] if conditions[key] else pair[1] for key, pair in labels.items() if key in conditions)
     return "；".join(parts)
 
@@ -436,8 +451,8 @@ def _conditions_match(conditions: dict[str, Any], context: PaymentStatusEvaluati
     for key, current_value in checks.items():
         if key in conditions and bool(conditions[key]) != bool(current_value):
             return False
-    applicant = str(conditions.get("applicantName") or "").strip()
-    if applicant and applicant != context.applicant_name:
+    applicants = conditions.get("applicantNames", [])
+    if applicants and normalize_applicant_name(context.applicant_name) not in applicants:
         return False
     return True
 

@@ -78,3 +78,6 @@
 .turnover-detail-heading strong { color: var(--fp-text-primary); font-size: 23px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .turnover-ledger-drawer .turnover-ledger-extra-field__label, .turnover-ledger-drawer .turnover-ledger-extra-field__value { font-weight: 400; }
 .turnover-flows .finance-table__scroll { max-height: 420px; overflow: auto; }
+
+.turnover-flow-label { display: grid; gap: 4px; padding-block: 3px; line-height: 1.5; white-space: normal; }
+.turnover-flow-label__action { color: var(--fp-text-secondary); font-size: 11px; }

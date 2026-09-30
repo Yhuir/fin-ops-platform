@@ -6788,6 +6788,8 @@ function turnoverFlowRow(
     category_third_label: "",
     category_label_path: isIncome ? ["外部往来款收款", "收回借款"] : ["外部往来款付款", "归还借款"],
     category_version: categoryVersion,
+    turnover_action_type: isIncome ? "collected" : "repaid",
+    turnover_action_label: isIncome ? "已收款" : "已还款",
     selection_version: `selection-${rowId}-${categoryVersion}`,
     counterparty_bank_name: "建设银行",
     bank_account_labels: ["建行 8106"],

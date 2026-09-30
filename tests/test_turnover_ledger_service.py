@@ -1012,6 +1012,15 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(flow_by_id["txn-in-principal"]["repayment_remark"], "")
         self.assertEqual(flow_by_id["txn-out-principal"]["repayment_remark"], "")
         self.assertEqual(flow_by_id["txn-out-collected"]["bank_account_labels"], ["工行 2002"])
+        for row_id, action, label in [
+            ("txn-in-principal", "pending_repayment", "待还款"),
+            ("txn-in-repaid", "repaid", "已还款"),
+            ("txn-out-principal", "pending_collection", "待收款"),
+            ("txn-out-collected", "collected", "已收款"),
+        ]:
+            self.assertEqual(flow_by_id[row_id]["turnover_action_type"], action)
+            self.assertEqual(flow_by_id[row_id]["turnover_action_label"], label)
+
 
     def test_grouped_ledger_reads_repository_backed_all_month_bank_rows(self) -> None:
         transaction = self._transaction(

@@ -38,6 +38,25 @@ class PaymentRulesPostgresTests(unittest.TestCase):
         current = self.provider.payment_status_rules_payload()
         return {"expectedVersion": current["version"], "idempotencyKey": key, "rules": deepcopy(current["rules"])}
 
+    def test_applicant_migration_preserves_other_settings_and_is_repeatable(self):
+        rules = self.request("legacy")["rules"]
+        for rule in rules:
+            names = rule["conditions"].pop("applicantNames", None)
+            if names:
+                rule["conditions"]["applicantName"] = "刘树刚不付" if rule["id"] == "offset_liu_shugang_no_pay" else names[0]
+        self.store.save_app_settings({"unrelated": "keep", SETTINGS_KEY: {"version": 4, "rules": rules, "idempotencyRecords": {"old": {}}}})
+        sql = Path("backend/src/fin_ops_platform/postgres/migrations/0183_payment_rule_applicant_names.sql").read_text()
+        migrate.run_psql(self.database_url, sql=sql)
+        saved = self.store.load_app_settings()
+        self.assertEqual(saved["unrelated"], "keep")
+        self.assertEqual(saved[SETTINGS_KEY]["version"], 5)
+        self.assertEqual(saved[SETTINGS_KEY]["rules"][3]["conditions"]["applicantNames"], ["刘树刚"])
+        self.assertTrue(all("applicantName" not in rule["conditions"] for rule in saved[SETTINGS_KEY]["rules"]))
+        self.assertEqual(saved[SETTINGS_KEY]["idempotencyRecords"], {})
+        migrate.run_psql(self.database_url, sql=sql)
+        self.assertEqual(self.store.load_app_settings(), saved)
+        self.assertEqual(self.provider.payment_status_rules_payload()["version"], 5)
+
     def test_concurrent_cas_idempotency_and_unrelated_settings(self):
         self.store.save_app_settings({"unrelated_test_field": {"value": "keep"}})
         requests = [self.request("a"), self.request("b")]

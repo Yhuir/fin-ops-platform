@@ -47,6 +47,8 @@ const PREVIEW_COLUMNS: Array<{ key: keyof TurnoverLedgerExportRow; label: string
   { key: "interestPaymentMethod", label: "还利息方式" },
   { key: "note", label: "备注" },
   { key: "statusLabel", label: "关系状态" },
+  { key: "flowLabels", label: "流水标签" },
+  { key: "turnoverActionLabel", label: "往来标记" },
 ];
 
 function formatPreviewValue(row: TurnoverLedgerExportRow, column: { key: keyof TurnoverLedgerExportRow; money?: boolean }) {

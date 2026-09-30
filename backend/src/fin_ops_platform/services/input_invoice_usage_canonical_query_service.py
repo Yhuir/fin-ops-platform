@@ -372,10 +372,7 @@ class InputInvoiceUsageCanonicalQueryService:
         )
 
     def payment_status_rules(self) -> dict[str, Any]:
-        payload = self._row_assembler.payment_status_rules()
-        if self._repository is not None:
-            payload["applicantOptions"] = self._repository.load_applicant_names()
-        return payload
+        return self._row_assembler.payment_status_rules()
 
     def _payload(
         self,

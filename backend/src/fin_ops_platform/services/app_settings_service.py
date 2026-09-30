@@ -29,6 +29,8 @@ from fin_ops_platform.services.input_invoice_usage_payment_rules import (
 )
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     AppSettingsInputInvoiceUsagePaymentRulesProvider,
+    normalize_applicant_name,
+    normalize_payment_status_rules_update,
     InputInvoiceUsagePaymentRulesValidationError,
     normalize_payment_status_rules_settings,
 )
@@ -44,8 +46,8 @@ from fin_ops_platform.services.oa_draft_prefill import (
 )
 from fin_ops_platform.services.oa_role_sync_service import (
     OARoleChange,
-    OARoleSyncConfigurationError,
     OARoleSyncError,
+    OARoleSyncConfigurationError,
     OARoleSyncService,
 )
 from fin_ops_platform.services.pending_invoice_rules import (
@@ -1386,6 +1388,12 @@ class AppSettingsService:
         restored_snapshot["turnover_ledger_tag_selection"] = restored_selection
         self._save_snapshot(restored_snapshot)
 
+    def get_payment_rule_applicant_options(self) -> list[str]:
+        if self._oa_role_sync_service is None:
+            raise OARoleSyncConfigurationError("OA user directory is not configured.")
+        users = self._oa_role_sync_service.list_active_users()
+        return sorted({normalize_applicant_name(user.display_name) for user in users if user.active and normalize_applicant_name(user.display_name)})
+
     def get_input_invoice_usage_payment_status_rules_payload(self, *, can_save: bool = True) -> dict[str, Any]:
         provider = AppSettingsInputInvoiceUsagePaymentRulesProvider(
             state_store=self._state_store,
@@ -1399,6 +1407,17 @@ class AppSettingsService:
         *,
         actor_id: str,
     ) -> dict[str, Any]:
+        current = self.get_input_invoice_usage_payment_status_rules_payload()
+        try:
+            desired = normalize_payment_status_rules_update(payload, current_settings=current)
+        except InputInvoiceUsagePaymentRulesValidationError as exc:
+            raise AppSettingsValidationError(exc.error_code, str(exc)) from exc
+        existing_by_id = {rule["id"]: set(rule["conditions"].get("applicantNames", [])) for rule in current["rules"]}
+        additions = set()
+        for rule in desired["rules"]:
+            additions.update(set(rule["conditions"].get("applicantNames", [])) - existing_by_id.get(rule["id"], set()))
+        if additions and not additions <= set(self.get_payment_rule_applicant_options()):
+            raise AppSettingsValidationError("inactive_payment_rule_applicant", "新选择的申请人已停用或不在 OA 启用用户目录中，请重新加载。")
         transaction_factory = None
         if getattr(self._state_store, "storage_backend", "") == "postgres":
             connection = self._state_store._connection

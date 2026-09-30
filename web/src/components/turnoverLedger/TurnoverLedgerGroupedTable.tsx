@@ -7,6 +7,8 @@ import type { TurnoverLedgerGroup, TurnoverLedgerGroupedRow } from "../../featur
 import { formatMoney, formatNullable } from "../../features/turnoverLedger/presentation";
 import { FinanceTable, FinanceTableBody, FinanceTableCell, FinanceTableColumn, FinanceTableHeader, FinanceTableRow } from "../common/FinanceTable";
 
+import TurnoverFlowLabel from "./TurnoverFlowLabel";
+
 export default function TurnoverLedgerGroupedTable({
   groups, loading, showEmptyState = true, onEdit, onDetails,
   selectedFlowRowIds = new Set<string>(), onToggleFlowSelection, tableWrapRef, actionsDisabled = false,
@@ -54,7 +56,7 @@ export default function TurnoverLedgerGroupedTable({
                 <FinanceTable ariaLabel={`${group.counterpartyName}的银行流水`} className="turnover-flows" minWidth={870} scrollMode="contained">
                   <FinanceTableHeader>
                     <FinanceTableColumn columnRole="selection">选择</FinanceTableColumn><FinanceTableColumn columnRole="date" isRowHeader>日期</FinanceTableColumn>
-                    <FinanceTableColumn columnRole="description">业务性质</FinanceTableColumn><FinanceTableColumn columnRole="amount">收入金额</FinanceTableColumn>
+                    <FinanceTableColumn columnRole="description">流水标签</FinanceTableColumn><FinanceTableColumn columnRole="amount">收入金额</FinanceTableColumn>
                     <FinanceTableColumn columnRole="amount">支出金额</FinanceTableColumn><FinanceTableColumn columnRole="account">银行账户</FinanceTableColumn>
                     <FinanceTableColumn columnRole="status">关联状态</FinanceTableColumn><FinanceTableColumn columnRole="action">操作</FinanceTableColumn>
                   </FinanceTableHeader>
@@ -63,7 +65,7 @@ export default function TurnoverLedgerGroupedTable({
                     return <FinanceTableRow key={row.sourceBankRowId} id={row.sourceBankRowId} dataTestId={`turnover-flow-row-${row.relationId}-${index}`}>
                       <FinanceTableCell columnRole="selection"><Checkbox aria-label={`选择流水 ${accessibleName}`} isDisabled={actionsDisabled} isSelected={selectedFlowRowIds.has(row.sourceBankRowId)} onChange={() => onToggleFlowSelection?.(group, row)}><Checkbox.Control className="turnover-ledger-checkbox"><Checkbox.Indicator /></Checkbox.Control></Checkbox></FinanceTableCell>
                       <FinanceTableCell columnRole="date">{formatNullable((row.transactionAt || row.borrowDate || row.repaymentDate)?.slice(0, 10))}</FinanceTableCell>
-                      <FinanceTableCell columnRole="description">{formatNullable(row.categoryLabelPath.join(" / ") || row.categoryLabel)}</FinanceTableCell>
+                      <FinanceTableCell columnRole="description"><TurnoverFlowLabel row={row} /></FinanceTableCell>
                       <FinanceTableCell columnRole="amount">{row.flowDirection === "income" ? formatMoney(row.flowAmount) : "—"}</FinanceTableCell>
                       <FinanceTableCell columnRole="amount">{row.flowDirection === "expense" ? formatMoney(row.flowAmount) : "—"}</FinanceTableCell>
                       <FinanceTableCell columnRole="account">{formatNullable(row.bankAccountLabels.join("、"))}</FinanceTableCell>

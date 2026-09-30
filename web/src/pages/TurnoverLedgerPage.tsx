@@ -1,3 +1,4 @@
+import TurnoverFlowLabel from "../components/turnoverLedger/TurnoverFlowLabel";
 import { Segment, SegmentGroup } from "../components/common/SegmentedControl";
 import { Button, Checkbox } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1163,8 +1164,8 @@ export default function TurnoverLedgerPage() {
         {detailGroup ? <div className="turnover-ledger-drawer__content">
           <dl className="turnover-closure-totals"><div><dt>类别</dt><dd>{detailGroup.familyLabel}</dd></div><div><dt>我方待还</dt><dd>{formatMoney(detailGroup.pendingRepaymentAmount)}</dd></div><div><dt>我方待收</dt><dd>{formatMoney(detailGroup.pendingCollectionAmount)}</dd></div></dl>
           <p className="turnover-muted">共 {detailGroup.flowRows.length} 笔流水。选择一笔查看所属往来关系、利息和补充信息。</p>
-          <table className="turnover-closure-table"><thead><tr><th>日期</th><th>业务性质</th><th>金额</th><th>操作</th></tr></thead><tbody>{detailGroup.flowRows.map((row) => <tr key={row.sourceBankRowId}>
-            <td>{formatNullable(row.transactionAt?.slice(0, 10))}</td><td>{formatNullable(row.categoryLabel)}</td><td>{row.flowDirection === "income" ? "收入" : "支出"} {formatMoney(row.flowAmount)}</td>
+          <table className="turnover-closure-table"><thead><tr><th>日期</th><th>流水标签</th><th>金额</th><th>操作</th></tr></thead><tbody>{detailGroup.flowRows.map((row) => <tr key={row.sourceBankRowId}>
+            <td>{formatNullable(row.transactionAt?.slice(0, 10))}</td><td><TurnoverFlowLabel row={row} /></td><td>{row.flowDirection === "income" ? "收入" : "支出"} {formatMoney(row.flowAmount)}</td>
             <td><Button variant="ghost" size="sm" onPress={() => { setDetailGroup(null); void handleOpenEditor({ ...row, counterpartyName: detailGroup.counterpartyName, familyLabel: detailGroup.familyLabel }); }}>查看流水</Button></td>
           </tr>)}</tbody></table>
         </div> : null}

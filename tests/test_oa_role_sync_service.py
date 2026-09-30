@@ -241,6 +241,16 @@ class OARoleSyncServiceTests(unittest.TestCase):
         self.assertIn("nick_name LIKE", sql)
         self.assertEqual(params, ("%张%", "%张%", 20))
 
+    def test_active_applicant_directory_is_complete_read_only_and_closes_connection(self):
+        connection = ScriptedConnection(ScriptedCursor([[("YNSYLP005", "刘涵静", "0", "0"), ("A", "黄  亮", "0", "0")]]))
+        users, _ = _with_connection(connection, lambda executor: executor.list_active_users())
+        self.assertEqual(len(users), 2)
+        sql, _ = connection.cursor_value.executed[0]
+        self.assertIn("del_flag = '0' AND status = '0'", sql)
+        self.assertNotIn("LIMIT", sql)
+        self.assertTrue(connection.closed)
+        self.assertEqual(len(connection.cursor_value.executed), 1)
+
     def test_connection_failure_is_wrapped(self) -> None:
         with patch.dict(sys.modules, {"pymysql": SimpleNamespace(connect=lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("connect")))}), self.assertRaises(OARoleSyncExecutionError):
             MySQLOARoleSyncExecutor(_settings()).apply([])

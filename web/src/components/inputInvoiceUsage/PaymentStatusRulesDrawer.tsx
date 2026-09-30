@@ -310,10 +310,10 @@ export default function PaymentStatusRulesDrawer({
                           onChange={(key, value) => updateRuleCondition(index, key, value, setDraftRules)}
                           rule={rule}
                           applicantOptions={payload.applicantOptions}
-                          onApplicantChange={(name) => {
+                          onApplicantChange={(names) => {
                             const conditions = { ...rule.conditions };
-                            if (name === "any") delete conditions.applicantName;
-                            else conditions.applicantName = name;
+                            if (!names.length) delete conditions.applicantNames;
+                            else conditions.applicantNames = names;
                             updateRule(index, { conditions }, setDraftRules);
                           }}
                         />
@@ -387,23 +387,24 @@ function RuleConditionEditor({
   onApplicantChange,
 }: {
   applicantOptions: string[];
-  onApplicantChange: (name: string) => void;
+  onApplicantChange: (names: string[]) => void;
   rule: PaymentStatusRule;
   onChange: (key: RuleConditionKey, value: "any" | "true" | "false") => void;
 }) {
   const conditions = rule.conditions ?? {};
-  const applicantName = String(conditions.applicantName ?? "").trim();
+  const applicantNames = (conditions.applicantNames ?? []) as string[];
   return (
     <div className="input-invoice-usage-payment-rule-condition-editor" aria-label={`${rule.label || "规则"}条件编辑`}>
       <div className="input-invoice-usage-payment-rule-condition">
         <span>OA 申请人</span>
-        <Select aria-label={`${rule.label || "规则"} OA 申请人条件`} selectedKey={applicantName || "any"} onSelectionChange={(key) => onApplicantChange(String(key))}>
-          <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+        <Select selectionMode="multiple" aria-label={`${rule.label || "规则"} OA 申请人条件`} placeholder="不限制申请人" value={applicantNames.filter((name) => applicantOptions.includes(name))} onChange={(keys) => onApplicantChange([...keys.map(String), ...applicantNames.filter((name) => !applicantOptions.includes(name))])}>
+          <Select.Trigger><Select.Value>{applicantNames.filter((name) => applicantOptions.includes(name)).join("、") || "不限制申请人"}</Select.Value><Select.Indicator /></Select.Trigger>
           <Select.Popover><ListBox>
-            <ListBox.Item id="any" textValue="不限制">不限制</ListBox.Item>
-            {Array.from(new Set([...applicantOptions, ...(applicantName ? [applicantName] : [])])).map((name) => <ListBox.Item key={name} id={name} textValue={name}>{name}</ListBox.Item>)}
+            {applicantOptions.map((name) => <ListBox.Item key={name} id={name} textValue={name}>{name}<ListBox.ItemIndicator /></ListBox.Item>)}
           </ListBox></Select.Popover>
         </Select>
+        <span className="input-invoice-usage-payment-rule-applicant-hint">可多选，任一命中；清空则不限制</span>
+        {applicantNames.filter((name) => !applicantOptions.includes(name)).map((name) => <span key={name} className="input-invoice-usage-payment-rule-applicant-hint">{name}（已停用或不在 OA 目录）<Button size="sm" variant="ghost" onPress={() => onApplicantChange(applicantNames.filter((item) => item !== name))}>移除</Button></span>)}
       </div>
       {CONDITION_FIELDS.map((field) => (
         <div className="input-invoice-usage-payment-rule-condition" key={field.key}>
@@ -445,9 +446,9 @@ function conditionChips(rule: PaymentStatusRule) {
       chips.push(`无${label.replace(/^有/, "")}`);
     }
   };
-  const applicantName = String(conditions.applicantName ?? "").trim();
-  if (applicantName) {
-    chips.push(`申请人=${applicantName}`);
+  const applicantNames = (conditions.applicantNames ?? []) as string[];
+  if (applicantNames.length) {
+    chips.push(`申请人（任一）=${applicantNames.join("、")}`);
   }
   addBooleanChip("hasOa", "有 OA");
   addBooleanChip("hasBank", "有流水");

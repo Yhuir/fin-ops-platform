@@ -48,15 +48,6 @@ class PostgresInputInvoiceUsageQueryRepository:
             raise ValueError("Input invoice usage query repository requires PostgreSQL.")
         self._connection = connection
 
-    def load_applicant_names(self) -> list[str]:
-        rows = self._connection.fetch_all(
-            "select applicant from app.oa_applications where nullif(trim(applicant), '') is not null "
-            "union select applicant from app.oa_pending_payment_admissions "
-            "where tenant_id = 'default' and workflow_status = 'in_progress' "
-            "and nullif(trim(applicant), '') is not null order by applicant"
-        )
-        return [str(row["applicant"]) for row in rows]
-
     def load_page(
         self,
         *,
@@ -1665,10 +1656,10 @@ def _input_payment_status_case(
         }.items():
             if key in conditions:
                 predicates.append(column if bool(conditions[key]) else f"not ({column})")
-        applicant = str(conditions.get("applicantName") or "").strip()
-        if applicant:
-            predicates.append("facts.oa_applicant = %s")
-            params.append(applicant)
+        applicants = conditions.get("applicantNames", [])
+        if applicants:
+            predicates.append("regexp_replace(facts.oa_applicant, '[[:space:]​﻿]+', '', 'g') = any(%s::text[])")
+            params.append(applicants)
         if predicates:
             fragments.append(
                 f"when {' and '.join(predicates)} then '{_safe_code(code)}'"

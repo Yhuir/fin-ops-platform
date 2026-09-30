@@ -371,7 +371,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         wait = self._invoice("inv-wait", "9104", vendor, total_with_tax="80.00")
         oa_records = [
             self._oa("oa-zhou", "周洁莹", "50.00"),
-            self._oa("oa-liu", "刘树刚不付", "10.00"),
+            self._oa("oa-liu", "刘树刚", "10.00"),
             self._oa("oa-wei", "韦代连", "10.00"),
             self._oa("oa-wait", "赵六", "80.00"),
         ]

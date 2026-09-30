@@ -1421,14 +1421,15 @@ describe("Input invoice usage workflow drawers", () => {
 
   test("rules support applicant editing, adding and deleting without obsolete settings", async () => {
     const user = userEvent.setup();
-    const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: ["陈秀云", "周洁莹"], rules: [{ id: "r1", statusCode: "paid", label: "已付款", description: "", priority: 1, enabled: true, conditions: { applicantName: "陈秀云", hasOa: true } }] };
+    const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: ["陈秀云", "周洁莹"], rules: [{ id: "r1", statusCode: "paid", label: "已付款", description: "", priority: 1, enabled: true, conditions: { applicantNames: ["陈秀云"], hasOa: true } }] };
     const saveRules = vi.fn((request) => Promise.resolve({ ...payload, version: 2, rules: request.rules }));
     render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} saveRules={saveRules} onClose={() => undefined} />);
     expect(screen.queryByText(/按优先级从小到大匹配/)).not.toBeInTheDocument();
     await user.click(await screen.findByLabelText("已付款 OA 申请人条件"));
     await user.click(await screen.findByRole("option", { name: "周洁莹" }));
+    await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "保存" }));
-    await waitFor(() => expect(saveRules).toHaveBeenCalledWith(expect.objectContaining({ rules: [expect.objectContaining({ conditions: { applicantName: "周洁莹", hasOa: true } })] })));
+    await waitFor(() => expect(saveRules).toHaveBeenCalledWith(expect.objectContaining({ rules: [expect.objectContaining({ conditions: { applicantNames: ["陈秀云", "周洁莹"], hasOa: true } })] })));
     expect(saveRules.mock.calls[0][0]).not.toHaveProperty("pendingDirections");
     expect(screen.queryByLabelText("原因文案")).not.toBeInTheDocument();
     await user.click(screen.getByLabelText("已付款 OA 申请人条件"));

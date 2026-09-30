@@ -135,6 +135,8 @@ export type TurnoverLedgerGroupedRow = {
   categorySubLabel: string;
   categoryThirdLabel: string;
   categoryLabelPath: string[];
+  turnoverActionType: string | null;
+  turnoverActionLabel: string;
   categoryVersion: number | null;
   selectionVersion: string;
   counterpartyBankName: string;
@@ -286,6 +288,8 @@ export type SaveTurnoverLedgerExtraResponse = {
 };
 
 export type TurnoverLedgerExportRow = {
+  flowLabels: string;
+  turnoverActionLabel: string;
   sequenceNo: number;
   rowType: "summary" | "lot" | string;
   lotId: string;

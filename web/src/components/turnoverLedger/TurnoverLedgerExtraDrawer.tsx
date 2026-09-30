@@ -141,6 +141,8 @@ export default function TurnoverLedgerExtraDrawer({
                   <DetailField label="对方户名" value={counterpartyName} />
                   <DetailField label="往来类别" value={familyLabel} />
                   <DetailField label="流水日期" value={dateText} />
+                  <DetailField label="流水标签" value={row.categoryLabelPath.join(" / ")} />
+                  <DetailField label="往来标记" value={row.turnoverActionLabel} />
                   <DetailField label="往来发生" value={formatMoney(row.borrowAmount)} />
                   <DetailField label="结清发生" value={formatMoney(row.repaymentAmount)} />
                   <DetailField label="借款天数" value={row.loanDays} />

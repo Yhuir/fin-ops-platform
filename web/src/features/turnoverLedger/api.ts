@@ -124,6 +124,8 @@ type ApiTurnoverLedgerGroupedRow = {
   category_sub_label?: string | null;
   category_third_label?: string | null;
   category_label_path?: string[];
+  turnover_action_type?: string | null;
+  turnover_action_label?: string;
   category_version?: number | string | null;
   manual_category_version?: number | string | null;
   version?: number | string | null;
@@ -241,30 +243,31 @@ type ApiTurnoverLedgerExportSummary = {
 };
 
 type ApiTurnoverLedgerExportRow = {
-  sequence_no?: number | null;
+  "序号"?: number | null;
   row_type?: string | null;
   lot_id?: string | null;
-  family_label?: string | null;
-  counterparty_name?: string | null;
-  pending_repayment_amount?: string | null;
-  pending_collection_amount?: string | null;
-  balance_amount?: string | null;
-  borrow_amount?: string | null;
-  borrow_date?: string | null;
-  repayment_amount?: string | null;
-  repayment_date?: string | null;
-  counterparty_bank_name?: string | null;
-  repayment_remark?: string | null;
-  interest_rate_type?: string | null;
-  interest_rate_value?: string | null;
-  interest_paid_amount?: string | null;
-  loan_days?: number | null;
-  accrued_interest?: string | null;
-  interest_paid_date?: string | null;
-  interest_payment_method?: string | null;
-  note?: string | null;
-  status_label?: string | null;
-  status?: string | null;
+  "往来大类"?: string | null;
+  "对方户名"?: string | null;
+  "待还款金额"?: string | null;
+  "待收款金额"?: string | null;
+  "余额"?: string | null;
+  "借款金额"?: string | null;
+  "借款日"?: string | null;
+  "还款金额"?: string | null;
+  "还款日"?: string | null;
+  "对方开户机构"?: string | null;
+  "还款备注"?: string | null;
+  "利率类型"?: string | null;
+  "利率值"?: string | null;
+  "已还利息额"?: string | null;
+  "借款天数"?: number | null;
+  "应还利息"?: string | null;
+  "还利息日期"?: string | null;
+  "还利息方式"?: string | null;
+  "备注"?: string | null;
+  "关系状态"?: string | null;
+  "流水标签"?: string;
+  "往来标记"?: string;
 };
 
 type ApiTurnoverLedgerExportPreview = {
@@ -627,6 +630,8 @@ function mapGroupedRow(row: ApiTurnoverLedgerGroupedRow, fallbackRowKind = ""): 
     categorySubLabel: text(row.category_sub_label),
     categoryThirdLabel: text(row.category_third_label),
     categoryLabelPath: stringList(row.category_label_path),
+    turnoverActionType: row.turnover_action_type ?? null,
+    turnoverActionLabel: text(row.turnover_action_label),
     categoryVersion: turnoverBankRowVersion(row.category_version, row.manual_category_version, row.version),
     selectionVersion: text(row.selection_version),
     counterpartyBankName: text(row.counterparty_bank_name),
@@ -711,29 +716,31 @@ function mapExtra(extra: ApiTurnoverLedgerExtra, relationId = ""): TurnoverLedge
 
 function mapExportRow(row: ApiTurnoverLedgerExportRow): TurnoverLedgerExportRow {
   return {
-    sequenceNo: numberValue(row.sequence_no),
+    flowLabels: text(row["流水标签"]),
+    turnoverActionLabel: text(row["往来标记"]),
+    sequenceNo: numberValue(row["序号"]),
     rowType: text(row.row_type),
     lotId: text(row.lot_id),
-    familyLabel: text(row.family_label),
-    counterpartyName: text(row.counterparty_name),
-    pendingRepaymentAmount: text(row.pending_repayment_amount, "0.00"),
-    pendingCollectionAmount: text(row.pending_collection_amount, "0.00"),
-    balanceAmount: text(row.balance_amount, "0.00"),
-    borrowAmount: text(row.borrow_amount, "0.00"),
-    borrowDate: row.borrow_date ?? null,
-    repaymentAmount: text(row.repayment_amount, "0.00"),
-    repaymentDate: row.repayment_date ?? null,
-    counterpartyBankName: text(row.counterparty_bank_name),
-    repaymentRemark: text(row.repayment_remark),
-    interestRateType: text(row.interest_rate_type, "none"),
-    interestRateValue: text(row.interest_rate_value, "0.000000"),
-    interestPaidAmount: text(row.interest_paid_amount, "0.00"),
-    loanDays: nullableNumberValue(row.loan_days),
-    accruedInterest: text(row.accrued_interest, "0.00"),
-    interestPaidDate: row.interest_paid_date ?? null,
-    interestPaymentMethod: text(row.interest_payment_method),
-    note: text(row.note),
-    statusLabel: text(row.status_label ?? row.status),
+    familyLabel: text(row["往来大类"]),
+    counterpartyName: text(row["对方户名"]),
+    pendingRepaymentAmount: text(row["待还款金额"], "0.00"),
+    pendingCollectionAmount: text(row["待收款金额"], "0.00"),
+    balanceAmount: text(row["余额"], "0.00"),
+    borrowAmount: text(row["借款金额"], "0.00"),
+    borrowDate: text(row["借款日"]) || null,
+    repaymentAmount: text(row["还款金额"], "0.00"),
+    repaymentDate: text(row["还款日"]) || null,
+    counterpartyBankName: text(row["对方开户机构"]),
+    repaymentRemark: text(row["还款备注"]),
+    interestRateType: text(row["利率类型"], "none"),
+    interestRateValue: text(row["利率值"], "0.000000"),
+    interestPaidAmount: text(row["已还利息额"], "0.00"),
+    loanDays: nullableNumberValue(row["借款天数"]),
+    accruedInterest: text(row["应还利息"], "0.00"),
+    interestPaidDate: text(row["还利息日期"]) || null,
+    interestPaymentMethod: text(row["还利息方式"]),
+    note: text(row["备注"]),
+    statusLabel: text(row["关系状态"]),
   };
 }
 

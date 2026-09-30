@@ -36,6 +36,8 @@ EXPORT_COLUMNS = [
     "还利息方式",
     "备注",
     "关系状态",
+    "流水标签",
+    "往来标记",
 ]
 FAMILY_SCOPE_LABELS = {
     "all": "全部",
@@ -140,6 +142,8 @@ class TurnoverLedgerExportService:
             "还利息方式": str(row.get("interest_payment_method") or ""),
             "备注": str(row.get("note") or ""),
             "关系状态": str(row.get("status_label") or row.get("status") or ""),
+            "流水标签": " / ".join(row.get("category_label_path") or []) if normalized_row_type == "flow" else "",
+            "往来标记": str(row.get("turnover_action_label") or "") if normalized_row_type == "flow" else "",
             "row_type": normalized_row_type,
             "lot_id": "",
             "source_bank_row_id": source_bank_row_id,

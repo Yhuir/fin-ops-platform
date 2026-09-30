@@ -2373,11 +2373,12 @@ textarea {
 
 .input-invoice-usage-payment-rule-condition {
   display: grid;
+  align-content: start;
   min-width: 0;
   gap: 4px;
 }
 
-.input-invoice-usage-payment-rule-condition span {
+.input-invoice-usage-payment-rule-condition > span {
   overflow: hidden;
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
@@ -24104,3 +24105,5 @@ body.column-layout-dragging {
   padding: 24px;
 }
 .page-route-error h1 { margin: 0; font-size: 20px; }
+
+.input-invoice-usage-payment-rule-condition > .input-invoice-usage-payment-rule-applicant-hint { font-weight: 400; white-space: normal; line-height: 1.5; }
