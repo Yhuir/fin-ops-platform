@@ -188,7 +188,11 @@ test("production payment rule applicants match all OA accounts and support disab
   await expect(option.getByRole("img", { name: "账号已停用" })).toBeVisible();
   await option.click();
   await page.screenshot({ path: "../outputs/production-payment-rule-applicants-open.png", animations: "disabled" });
+  // HeroUI SearchField clears a nonempty query before Escape dismisses the popup.
   await page.keyboard.press("Escape");
+  await expect(page.getByRole("searchbox", { name: "搜索申请人姓名或账号" })).toHaveValue("");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox", { name: "OA 申请人账号" })).not.toBeVisible();
   await expect(drawer.getByRole("button", { name: "保存", exact: true })).toBeEnabled();
   await page.screenshot({ path: "../outputs/production-payment-rule-applicants.png", animations: "disabled" });
   await drawer.getByRole("button", { name: "还原", exact: true }).click();
