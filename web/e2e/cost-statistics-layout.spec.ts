@@ -172,3 +172,48 @@ test("embedded OA cost views keep footer and long dates reachable in a compact c
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   }
 });
+
+
+test("project typography preserves side-by-side amounts, full names and other perspectives", async ({ page }, testInfo) => {
+  await installDeterministicApiMocks(page, { sessionMode: "user", costStatisticsLargeDataset: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/cost-statistics");
+  const project = page.getByRole("option", { name: "选择项目名 云南溯源科技", exact: true });
+  await expect(project.locator(".cost-list-amount")).toHaveText("13,360.00");
+  await expect(project.locator("strong")).toHaveCSS("font-size", "14px");
+  await expect(project.locator("strong")).toHaveCSS("font-weight", "500");
+  const widthsBefore = await page.locator(".cost-hierarchy-column").evaluateAll(nodes => nodes.map(n => n.getBoundingClientRect().width));
+  await project.click();
+  await page.getByRole("option", { name: "选择成本主标签 项目开销", exact: true }).click();
+  await page.getByRole("option", { name: "选择成本子标签 设备材料", exact: true }).click();
+  await expect(page.getByRole("grid", { name: "成本明细表" })).toContainText("10,000.00");
+  const widthsAfter = await page.locator(".cost-hierarchy-column").evaluateAll(nodes => nodes.map(n => n.getBoundingClientRect().width));
+  expect(widthsAfter).toEqual(widthsBefore);
+  for (const width of [1440, 1920]) {
+    await page.setViewportSize({ width, height: 900 });
+    const geometry = await page.locator(".cost-hierarchy-column").evaluateAll(lanes => lanes.map(lane => ({
+      width: lane.getBoundingClientRect().width,
+      rows: [...lane.querySelectorAll(".cost-explorer-item-content")].map(row => {
+        const name = row.querySelector(".cost-explorer-item-main")!;
+        const amount = row.querySelector(".cost-explorer-item-meta")!;
+        const n = name.getBoundingClientRect(), a = amount.getBoundingClientRect(), r = row.getBoundingClientRect();
+        return { gap: a.left - n.right, topDifference: Math.abs(a.top - n.top), amountFits: amount.scrollWidth <= a.width + 1, nameFits: name.scrollWidth <= n.width + 1, contained: a.right <= r.right, height: r.height };
+      }),
+    })));
+    expect(geometry[0].width / geometry[1].width).toBeGreaterThan(1.4);
+    for (const lane of geometry) for (const row of lane.rows) {
+      expect(row.gap).toBeGreaterThanOrEqual(11);
+      expect(row.topDifference).toBeLessThanOrEqual(1);
+      expect(row.amountFits).toBe(true);
+      expect(row.nameFits).toBe(true);
+      expect(row.contained).toBe(true);
+      expect(row.height).toBeGreaterThanOrEqual(46);
+    }
+    await page.screenshot({ path: testInfo.outputPath(`project-readable-${width}.png`) });
+  }
+  await page.getByRole("radio", { name: "按银行账户", exact: true }).click();
+  await page.getByRole("option", { name: "选择银行账户 工商银行 账户 0001", exact: true }).click();
+  const bankProject = page.getByRole("option", { name: "选择项目名 云南溯源科技", exact: true });
+  await expect(bankProject.locator("strong")).toHaveCSS("font-size", "12px");
+  await expect(bankProject.locator(".cost-list-amount")).toHaveText("12500.00");
+});

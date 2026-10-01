@@ -9,7 +9,26 @@
 .cost-page .cost-analysis-layout { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .cost-page .cost-section-heading { flex-shrink: 0; }
 .cost-hierarchy { min-height: 0; min-width: 0; flex: 1; display: flex; flex-direction: column; }
-.cost-hierarchy-grid { display: grid; grid-template-columns: repeat(var(--cost-lane-count), minmax(145px, .7fr)) minmax(560px, 2.2fr); gap: 10px; flex: 1; min-height: 0; }
+.cost-hierarchy-grid { display: grid; grid-template-columns: var(--cost-hierarchy-columns, repeat(var(--cost-lane-count), minmax(145px, .7fr)) minmax(560px, 2.2fr)); gap: 10px; flex: 1; min-height: 0; }
+/* Project-view presentation only; other cost perspectives retain their own density. */
+.cost-page [data-cost-view="project"] {
+  --cost-hierarchy-columns: minmax(0, 25fr) minmax(0, 17fr) minmax(0, 17fr) minmax(0, 41fr);
+  --cost-heading-size: .875rem;
+  --cost-heading-weight: 600;
+  --cost-label-size: .875rem;
+  --cost-label-leading: 1.375rem;
+  --cost-label-weight: 500;
+  --cost-amount-size: .875rem;
+  --cost-item-gap: 12px;
+  --cost-item-padding: 12px 10px;
+}
+.cost-page [data-cost-view="project"] .cost-explorer-item-meta { line-height: 1.375rem; text-align: right; }
+.cost-page [data-cost-view="project"] .cost-explorer-lane-header h2 { line-height: 1.375rem; }
+.cost-page [data-cost-view="project"] .cost-finance-table .finance-table__cell { line-height: 1.375rem; padding: 10px; }
+.cost-page [data-cost-view="project"] .cost-finance-table .finance-table__column { font-size: .875rem; font-weight: 600; line-height: 1.375rem; }
+.cost-page [data-cost-view="project"] .cost-hierarchy-column:not(:first-child) .cost-explorer-list { scrollbar-gutter: auto; }
+.cost-page [data-cost-view="project"] .cost-entry-identity { width: 160px; }
+.cost-page [data-cost-view="project"] .cost-entry-amount { width: 150px; }
 .cost-hierarchy-column, .cost-hierarchy-detail { min-width: 0; min-height: 0; display: flex; }
 .cost-hierarchy-column > section, .cost-hierarchy-detail > section { flex: 1; min-width: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .cost-page .cost-explorer-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
@@ -70,7 +89,7 @@
 .cost-time-workspace > section { flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .cost-page .cost-explorer-lane-table .cost-finance-table { min-height: 0; display: flex; }
 .cost-page .cost-surface-skeleton { flex: 1; min-height: 0; }
-.cost-page .cost-list-amount { color: #92400e; font-size: 13px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cost-page .cost-list-amount { color: #92400e; font-size: var(--cost-amount-size, 13px); font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .cost-page .cost-explorer-item-meta .cost-direction-amount { font-weight: 600; }
 .cost-page .cost-explorer-item-main:has(.cost-explorer-item-secondary) { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 6px; }
 .cost-page .cost-list-count { height: auto; min-height: 20px; font-size: 12px; }

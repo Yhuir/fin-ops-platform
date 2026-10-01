@@ -2,7 +2,7 @@ import { Button, Chip } from "@heroui/react";
 import { useEffect, useRef, type ReactNode } from "react";
 
 import BankAccountValue from "../BankAccountValue";
-import { formatCostAmount } from "../../features/cost-statistics/format";
+import { formatCostAmount, formatProjectCostAmount } from "../../features/cost-statistics/format";
 import {
   EmptyValue,
   FinanceDirectionTag,
@@ -22,6 +22,7 @@ export type CostStatisticsAmountCell = {
   direction: string;
   paymentAccountLabel?: string;
   toneByDirection?: boolean;
+  groupThousands?: boolean;
 };
 
 export type CostStatisticsTableColumn<Row> = {
@@ -247,7 +248,8 @@ function renderTableCellContent(content: ReactNode | CostStatisticsAmountCell) {
     "amount" in content &&
     "direction" in content
   ) {
-    const amount = formatCostAmount((content as { amount: string }).amount);
+    const amountCell = content as CostStatisticsAmountCell;
+    const amount = amountCell.groupThousands ? formatProjectCostAmount(amountCell.amount) : formatCostAmount(amountCell.amount);
     const direction = String((content as { direction: string }).direction ?? "");
     const paymentAccountLabel = String((content as { paymentAccountLabel?: string }).paymentAccountLabel ?? "");
     const toneByDirection = Boolean((content as { toneByDirection?: boolean }).toneByDirection);

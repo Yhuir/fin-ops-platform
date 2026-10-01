@@ -41,7 +41,7 @@ import {
   type SummaryCostExportParams,
 } from "../features/cost-statistics/api";
 import { ApiClientError } from "../features/apiClient";
-import { formatCostAmount } from "../features/cost-statistics/format";
+import { formatCostAmount, formatProjectCostAmount } from "../features/cost-statistics/format";
 import { importWorkflowPath } from "../features/imports/importRoutes";
 import type {
   CostBankExplorerRow,
@@ -876,11 +876,12 @@ export default function CostStatisticsPage() {
   const costAncestorsReady = loadedRequest?.projectName === explorerRequest.projectName && loadedRequest?.bankAccountLabel === explorerRequest.bankAccountLabel;
   const costPrimaryRows = costAncestorsReady ? explorerData?.facets.costTagPrimary ?? [] : [];
   const costSubRows = costAncestorsReady && loadedRequest?.bankTagPrimaryKey === explorerRequest.bankTagPrimaryKey ? explorerData?.facets.costTagSub ?? [] : [];
+  const formatLaneAmount = viewMode === "project" ? formatProjectCostAmount : formatCostAmount;
   const costLanes: CostHierarchyLane[] = [];
-  if (viewMode === "bankAccount") costLanes.push({ title: "银行账户", loading: false, emptyLabel: "当前范围暂无数据", selectedKey: selectedBankAccountLabel, items: bankRows.map(row => ({ key: row.bankAccountLabel, label: row.bankAccountLabel, primary: <span className="cost-account-lines"><BankAccountValue value={row.bankAccountLabel} /></span>, meta: <span className="cost-list-amount">{formatCostAmount(row.totalAmount)}</span> })), onSelect: key => { setSelectedBankAccountLabel(key); setSelectedBankProjectName(null); clearCostTags(); } });
-  if (viewMode === "project" || viewMode === "bankAccount") costLanes.push({ title: "项目名", loading: false, emptyLabel: viewMode === "bankAccount" && !selectedBankAccountLabel ? "请先选择银行账户" : "当前范围暂无数据", selectedKey: viewMode === "project" ? selectedProjectName : selectedBankProjectName, items: (viewMode === "project" ? projectRows : bankProjectRows).map(row => ({ key: row.projectName, label: row.projectName, meta: <span className="cost-list-amount">{formatCostAmount(row.totalAmount)}</span> })), onSelect: key => { if (viewMode === "project") setSelectedProjectName(key); else setSelectedBankProjectName(key); clearCostTags(); } });
-  costLanes.push({ title: "成本主标签", loading: false, emptyLabel: viewMode !== "costTag" && !(viewMode === "project" ? selectedProjectName : selectedBankProjectName) ? "请先选择项目名" : "当前范围暂无数据", selectedKey: selectedCostPrimary, items: costPrimaryRows.map(row => ({ key: row.key, label: row.label, meta: <span className="cost-list-amount">{formatCostAmount(row.totalAmount)}</span> })), onSelect: key => { setSelectedCostPrimary(key); setSelectedCostSub(null); resetDetailSelection(); } });
-  costLanes.push({ title: "成本子标签", loading: false, emptyLabel: !selectedCostPrimary ? "请先选择成本主标签" : "当前范围暂无数据", selectedKey: selectedCostSub, items: costSubRows.map(row => ({ key: row.key, label: row.label, meta: <span className="cost-list-amount">{formatCostAmount(row.totalAmount)}</span> })), onSelect: key => { setSelectedCostSub(key); resetDetailSelection(); } });
+  if (viewMode === "bankAccount") costLanes.push({ title: "银行账户", loading: false, emptyLabel: "当前范围暂无数据", selectedKey: selectedBankAccountLabel, items: bankRows.map(row => ({ key: row.bankAccountLabel, label: row.bankAccountLabel, primary: <span className="cost-account-lines"><BankAccountValue value={row.bankAccountLabel} /></span>, meta: <span className="cost-list-amount">{formatLaneAmount(row.totalAmount)}</span> })), onSelect: key => { setSelectedBankAccountLabel(key); setSelectedBankProjectName(null); clearCostTags(); } });
+  if (viewMode === "project" || viewMode === "bankAccount") costLanes.push({ title: "项目名", loading: false, emptyLabel: viewMode === "bankAccount" && !selectedBankAccountLabel ? "请先选择银行账户" : "当前范围暂无数据", selectedKey: viewMode === "project" ? selectedProjectName : selectedBankProjectName, items: (viewMode === "project" ? projectRows : bankProjectRows).map(row => ({ key: row.projectName, label: row.projectName, meta: <span className="cost-list-amount">{formatLaneAmount(row.totalAmount)}</span> })), onSelect: key => { if (viewMode === "project") setSelectedProjectName(key); else setSelectedBankProjectName(key); clearCostTags(); } });
+  costLanes.push({ title: "成本主标签", loading: false, emptyLabel: viewMode !== "costTag" && !(viewMode === "project" ? selectedProjectName : selectedBankProjectName) ? "请先选择项目名" : "当前范围暂无数据", selectedKey: selectedCostPrimary, items: costPrimaryRows.map(row => ({ key: row.key, label: row.label, meta: <span className="cost-list-amount">{formatLaneAmount(row.totalAmount)}</span> })), onSelect: key => { setSelectedCostPrimary(key); setSelectedCostSub(null); resetDetailSelection(); } });
+  costLanes.push({ title: "成本子标签", loading: false, emptyLabel: !selectedCostPrimary ? "请先选择成本主标签" : "当前范围暂无数据", selectedKey: selectedCostSub, items: costSubRows.map(row => ({ key: row.key, label: row.label, meta: <span className="cost-list-amount">{formatLaneAmount(row.totalAmount)}</span> })), onSelect: key => { setSelectedCostSub(key); resetDetailSelection(); } });
   const costPathComplete = costLanes.every(lane => lane.selectedKey !== null);
   const bankTagPrimaryRows = explorerData?.facets.bankTagPrimary ?? [];
   const bankTagSubRows = isChildrenTransition ? [] : explorerData?.facets.bankTagSub ?? [];
@@ -1406,6 +1407,7 @@ export default function CostStatisticsPage() {
             direction: row.direction,
             paymentAccountLabel: row.bankAccountLabel,
             toneByDirection: false,
+            groupThousands: viewMode === "project",
           }),
         },
         { key: "expenseContent", header: "费用内容", flex: 1.1, render: (row) => row.expenseContent },
@@ -1631,7 +1633,7 @@ export default function CostStatisticsPage() {
         {explorerData ? (
           <>
             {!isBankFlowView ? (
-              <div className="cost-analysis-layout explorer-layout grid min-h-0 grid-cols-1 gap-3">
+              <div className="cost-analysis-layout explorer-layout grid min-h-0 grid-cols-1 gap-3" data-cost-view={viewMode}>
                 <div className="cost-section-heading cost-view-scope-heading">
                   <div className="cost-section-heading-copy"><h2>{viewMode === "project" ? "按项目统计" : viewMode === "bankAccount" ? "按银行账户统计" : "按成本标签统计"}</h2><DirectionAmount amount={explorerData.summary.totalAmount} label="成本金额" tone="expense" /></div>
                   <div className="cost-section-heading-actions cost-project-scope-actions"><BusinessPeriodPicker ariaLabel="成本统计时间范围" onChange={selection => updateScopeSelection(viewMode, selection)} selection={{ mode: activeScopeMode, year: activeScopeYear, month: activeScopeMonth }} years={availableScopeYears} />{costViewSearch}</div>

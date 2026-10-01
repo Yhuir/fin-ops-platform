@@ -18338,8 +18338,8 @@ body.column-layout-dragging {
 .cost-section-heading-copy h2 {
   margin: 0;
   color: var(--fp-text);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--cost-heading-size, 13px);
+  font-weight: var(--cost-heading-weight, 700);
 }
 
 .cost-section-heading > span,
@@ -18839,13 +18839,13 @@ body.column-layout-dragging {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 8px;
+  gap: var(--cost-item-gap, 8px);
   width: 100%;
   height: auto;
   min-width: 0;
   max-width: 100%;
   min-height: 42px;
-  padding: 10px;
+  padding: var(--cost-item-padding, 10px);
   border: 0;
   background: transparent;
   color: inherit;
@@ -18888,8 +18888,9 @@ body.column-layout-dragging {
 
 .cost-explorer-item-main strong {
   min-width: 0;
-  font-size: 12px;
-  line-height: 1.45;
+  font-weight: var(--cost-label-weight, 700);
+  font-size: var(--cost-label-size, 12px);
+  line-height: var(--cost-label-leading, 1.45);
   overflow-wrap: anywhere;
   white-space: normal;
 }
