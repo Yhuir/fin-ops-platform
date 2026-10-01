@@ -9,6 +9,8 @@ test("production turnover register filters, details and exports use canonical fa
   test.skip(!enabled || !token, "Requires explicit production verification and admin token.");
   test.setTimeout(180_000);
   await page.context().addCookies([{ name: "Admin-Token", value: token!, domain: "www.yn-sourcing.com", path: "/", secure: true, sameSite: "Lax" }]);
+  let ledgerReads = 0;
+  page.on("request", request => { if (new URL(request.url()).pathname === "/fin-ops-api/api/turnover-ledger") ledgerReads += 1; });
   const writes: string[] = [];
   await page.route("**/fin-ops-api/**", async (route) => {
     if (!["GET", "HEAD", "OPTIONS"].includes(route.request().method())) {
@@ -18,6 +20,7 @@ test("production turnover register filters, details and exports use canonical fa
   });
   await page.setViewportSize({ width: 1536, height: 1024 });
   const initial = page.waitForResponse((response) => new URL(response.url()).pathname === "/fin-ops-api/api/turnover-ledger");
+  const firstVisibleStart = performance.now();
   await page.goto("/fin-ops/turnover-ledger");
   const response = await initial;
   expect(response.status()).toBe(200);
@@ -26,6 +29,7 @@ test("production turnover register filters, details and exports use canonical fa
   expect(payload.statistics.group_count).toBe(payload.pagination.total);
   const register = page.getByRole("table", { name: "外部往来款台账" });
   await expect(register).toBeVisible();
+  const firstVisibleMs = performance.now() - firstVisibleStart;
   expect(payload.groups.length).toBeGreaterThan(0);
   for (const group of payload.groups) {
     for (const row of group.flow_rows) {
@@ -37,9 +41,56 @@ test("production turnover register filters, details and exports use canonical fa
   await page.screenshot({ path: "../outputs/production-turnover-collapsed.png", fullPage: true, animations: "disabled" });
   const group = payload.groups.find((item: { flow_rows: unknown[] }) => item.flow_rows.length > 0);
   expect(group).toBeDefined();
+  const beforeExpandReads = ledgerReads;
+  const expandStart = performance.now();
   await page.getByRole("button", { name: `展开 ${group.counterparty_name} 流水明细`, exact: true }).click();
   const flows = page.getByRole("grid", { name: `${group.counterparty_name}的银行流水`, exact: true });
   await expect(flows.getByRole("checkbox")).toHaveCount(group.flow_rows.length);
+  const expandMs = performance.now() - expandStart;
+  await expect(flows.locator(".turnover-flow-chip")).toHaveCount(group.flow_rows.length);
+  await expect(flows).not.toContainText("往来标记：");
+  const trigger = page.getByRole("button", { name: "查看分类明细" });
+  const popoverSamples: number[] = [];
+  for (const width of [1920, 1440, 960]) {
+    await page.setViewportSize({ width, height: 1080 });
+    const aligned = await flows.evaluate(table => {
+      const row = table.querySelector("tbody tr")!;
+      const roles = ["date", "amount", "status", "action"];
+      return roles.every(role => getComputedStyle(table.querySelector(`thead [data-column-role="${role}"]`)!).textAlign === getComputedStyle(row.querySelector(`[data-column-role="${role}"]`)!).textAlign);
+    });
+    expect(aligned).toBe(true);
+    const inline = await flows.locator(".turnover-flow-label").first().evaluate(label => {
+      const text = label.querySelector(".finance-truncated-text")!.getBoundingClientRect();
+      const chip = label.querySelector(".turnover-flow-chip")!.getBoundingClientRect();
+      return Math.abs(text.y + text.height / 2 - chip.y - chip.height / 2) <= 2;
+    });
+    expect(inline).toBe(true);
+    const metricBox = (await page.getByTestId("turnover-summary-collected").boundingBox())!;
+    const buttonBox = (await trigger.boundingBox())!;
+    expect(buttonBox.x - metricBox.x - metricBox.width).toBeGreaterThanOrEqual(0);
+    expect(buttonBox.x - metricBox.x - metricBox.width).toBeLessThanOrEqual(40);
+    await page.screenshot({ path: testInfo.outputPath(`production-turnover-${width}.png`), fullPage: true, animations: "disabled" });
+    const start = performance.now();
+    await trigger.click();
+    const dialog = page.getByRole("dialog", { name: "往来款分类明细" });
+    await expect(dialog).toBeVisible();
+    popoverSamples.push(performance.now() - start);
+    for (const family of payload.family_summaries) {
+      const row = dialog.getByRole("row").filter({ has: page.getByRole("rowheader", { name: family.label, exact: true }) });
+      for (const key of ["pending_repayment_amount", "pending_collection_amount", "repaid_amount", "collected_amount"]) {
+        const formatted = Number(family[key]).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        await expect(row).toContainText(formatted);
+      }
+    }
+    await page.screenshot({ path: testInfo.outputPath(`production-turnover-breakdown-${width}.png`), fullPage: true, animations: "disabled" });
+    await page.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
+    await expect(trigger).toBeFocused();
+  }
+  expect(ledgerReads).toBe(beforeExpandReads);
+  await testInfo.attach("production-turnover-ui", { body: JSON.stringify({ firstVisibleMs, expandMs, popoverSamples, additionalLedgerReads: ledgerReads - beforeExpandReads }), contentType: "application/json" });
+  await page.setViewportSize({ width: 1536, height: 1024 });
+
   await page.screenshot({ path: "../outputs/production-turnover-expanded.png", fullPage: true, animations: "disabled" });
   await page.getByRole("button", { name: `查看${group.counterparty_name}详情`, exact: true }).click();
   const details = page.getByRole("dialog", { name: group.counterparty_name, exact: true });
@@ -59,6 +110,12 @@ test("production turnover register filters, details and exports use canonical fa
   expect(new URL(preview.url()).searchParams.get("query")).toBe(group.counterparty_name);
   const previewPayload = await preview.json();
   expect(previewPayload.totals.row_count).toBeGreaterThan(0);
+  const downloadEvent = page.waitForEvent("download");
+  await page.getByRole("button", { name: "确认下载", exact: true }).click();
+  const download = await downloadEvent;
+  expect(download.suggestedFilename()).toMatch(/\.xlsx$/);
+  expect(await download.failure()).toBeNull();
+
   const timings: number[] = [];
   for (let index = 0; index < 12; index += 1) {
     const start = performance.now();

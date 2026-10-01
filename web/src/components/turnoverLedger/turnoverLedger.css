@@ -1,11 +1,16 @@
 .turnover-ledger-page .page-title { font-size: 26px; letter-spacing: -.5px; }
-.turnover-overview { display: flex; align-items: center; gap: 42px; padding: 12px 0 24px; }
+.turnover-overview { display: flex; align-items: flex-end; gap: 32px; padding: 12px 0 24px; }
 .turnover-overview-metric { display: grid; gap: 8px; color: var(--fp-text-secondary); font-size: 13px; }
 .turnover-overview-metric strong { font-size: 23px; font-weight: 600; color: var(--fp-text-primary); font-variant-numeric: tabular-nums; letter-spacing: -.5px; }
 .turnover-overview-metric--secondary strong { font-size: 18px; color: var(--fp-text-secondary); font-weight: 500; }
-.turnover-breakdown-trigger { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--fp-text-secondary); cursor: pointer; }
-.turnover-breakdown-popover { padding: 16px; }
-.turnover-breakdown-popover th, .turnover-breakdown-popover td { padding: 10px; font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
+.turnover-breakdown-trigger { display: inline-flex; gap: 6px; align-items: center; margin-bottom: 2px; padding: 0 4px; min-width: 0; height: 28px; background: transparent; white-space: nowrap; font-size: 13px; color: var(--fp-text-secondary); cursor: pointer; }
+.turnover-breakdown-popover { padding: 16px; max-width: calc(100vw - 32px); border: 1px solid var(--fp-border-subtle); border-radius: 8px; background: var(--fp-surface); }
+.turnover-breakdown-popover .popover__dialog { padding: 0; }
+.turnover-breakdown-scroll { overflow-x: auto; }
+.turnover-breakdown-scope { margin: 0 0 12px; color: var(--fp-text-secondary); font-size: 12px; }
+.turnover-breakdown-current { background: var(--fp-primary-soft); }
+.turnover-breakdown-current-label { margin-left: 6px; color: var(--fp-primary); font-size: 12px; font-weight: 400; }
+.turnover-breakdown-popover th, .turnover-breakdown-popover td { padding: 10px; font-size: 13px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .turnover-breakdown-popover th:first-child { text-align: left; }
 .turnover-ledger-table-panel { border: 1px solid var(--fp-border); border-radius: 6px; background: var(--fp-surface); overflow: hidden; }
 .turnover-ledger-table-panel__toolbar { padding: 0 20px; border-bottom: 1px solid var(--fp-border-subtle); }
@@ -23,6 +28,10 @@
 .turnover-register > thead > tr > th { height: 42px; padding: 0 20px; font-size: 12px; font-weight: 500; color: var(--fp-text-secondary); background: #f8f9fb; border-block: 1px solid var(--fp-border-subtle); white-space: nowrap; }
 .turnover-register > tbody > tr > td, .turnover-register > tbody > tr > th { height: 60px; padding: 8px 20px; border-bottom: 1px solid var(--fp-border-subtle); font-weight: 400; }
 .turnover-register > tbody > tr:last-child > td, .turnover-register > tbody > tr:last-child > th { border-bottom: 0; }
+.turnover-register > thead > tr > th:nth-child(5),
+.turnover-register > thead > tr > th:nth-child(6),
+.turnover-register > tbody > tr > td:nth-child(5),
+.turnover-register > tbody > tr > td:nth-child(6) { text-align: center; }
 .turnover-register .turnover-number { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .turnover-register > tbody > .turnover-register-expanded { background: #f0f4f9; }
 .turnover-object-toggle { display: flex; gap: 9px; padding: 0; height: auto; color: var(--fp-text-primary); font-size: 14px; font-weight: 500; background: transparent; text-align: left; }
@@ -30,13 +39,24 @@
 .turnover-muted, .turnover-flow-relations { color: var(--fp-text-secondary); font-weight: 400; }
 .turnover-settled { color: #43715f; }
 .turnover-text-action { color: var(--fp-primary); font-weight: 400; font-size: 13px; padding: 0 4px; min-width: 0; }
-.turnover-register > tbody > tr > .turnover-flow-container { padding: 0 20px 12px 44px; background: #f7f9fc; }
-.turnover-flows { border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.turnover-register > tbody > tr > .turnover-flow-container { padding: 12px 20px 16px 32px; background: #f0f4f9; }
+.turnover-flows { width: 100%; max-width: 1440px; border: 1px solid var(--fp-border-subtle); border-radius: 0; background: var(--fp-surface); box-shadow: none; }
 .turnover-flows.finance-table--contained { max-height: 420px; }
-.turnover-flows .finance-table__content { background: transparent; }
-.turnover-flows .finance-table__column { height: 38px; background: #f7f9fc; font-weight: 400; font-size: 12px; }
-.turnover-flows .finance-table__cell { height: 44px; font-size: 12px; padding-block: 6px; }
-.turnover-flows [data-column-role="date"] { white-space: nowrap; }
+.turnover-flows .finance-table__content { width: 100%; table-layout: fixed; background: var(--fp-surface); }
+.turnover-flows .finance-table__column { height: 40px; padding: 8px 12px; background: #e9eef5; border-bottom: 1px solid #d7dfea; font-weight: 500; font-size: 12px; }
+.turnover-flows .finance-table__cell { height: 48px; font-size: 13px; padding: 8px 12px; border-radius: 0; }
+.turnover-flows [data-column-role="selection"] { width: 56px; text-align: center; }
+.turnover-flows [data-column-role="selection"] .checkbox { justify-content: center; }
+.turnover-flows [data-column-role="date"] { width: 124px; text-align: center; white-space: nowrap; }
+.turnover-flows [data-column-role="amount"] { width: 136px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.turnover-flows [data-column-role="account"] { width: 156px; text-align: left; overflow-wrap: anywhere; }
+.turnover-flows [data-column-role="status"] { width: 132px; text-align: center; }
+.turnover-flows [data-column-role="action"] { width: 72px; text-align: center; }
+.turnover-flows [data-column-role="description"] { text-align: left; }
+.turnover-flows .finance-table__row { background: var(--fp-surface); }
+.turnover-flows .finance-table__row:hover { background: #f6f8fb; }
+.turnover-flows .finance-table__row.turnover-flow-selected { background: var(--fp-primary-soft); }
+.turnover-flows .table__body .finance-table__cell { border-radius: 0; background: transparent; }
 .turnover-flow-relations { white-space: normal; line-height: 1.6; }
 .turnover-register-empty { text-align: center; padding: 48px !important; color: var(--fp-text-secondary); }
 .turnover-register-footer { padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
@@ -69,7 +89,6 @@
 }
 
 .turnover-ledger-page .app-segments.turnover-ledger-tabs.toggle-button-group > [role="radio"]::after { display: none; }
-.turnover-flows .table__body .finance-table__cell { border-radius: 0; background: transparent; }
 .turnover-flows .table__column::after { display: none; }
 .turnover-ledger-page .turnover-select .select__trigger { border-radius: 6px; box-shadow: none; }
 .turnover-ledger-page .turnover-ledger-checkbox { border: 1px solid #c9d2df; border-radius: 4px; box-shadow: none; }
@@ -79,5 +98,6 @@
 .turnover-ledger-drawer .turnover-ledger-extra-field__label, .turnover-ledger-drawer .turnover-ledger-extra-field__value { font-weight: 400; }
 .turnover-flows .finance-table__scroll { max-height: 420px; overflow: auto; }
 
-.turnover-flow-label { display: grid; gap: 4px; padding-block: 3px; line-height: 1.5; white-space: normal; }
-.turnover-flow-label__action { color: var(--fp-text-secondary); font-size: 11px; }
+.turnover-flow-label { display: flex; align-items: center; gap: 8px; min-width: 0; line-height: 1.5; white-space: nowrap; }
+.turnover-flow-label .finance-truncated-text { min-width: 0; text-align: left; }
+.turnover-flow-chip { flex-shrink: 0; font-size: 12px; font-weight: 400; border-radius: 4px; }

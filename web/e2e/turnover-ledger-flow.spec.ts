@@ -69,6 +69,83 @@ const turnoverFlowLabels = {
 } as const;
 
 test.describe("turnover ledger browser flow", () => {
+  test("keeps inline chips, column alignment and the nearby breakdown usable across widths", async ({ page }, testInfo) => {
+    await installDeterministicApiMocks(page, { sessionMode: "user", turnoverCostFanout: true });
+    let reads = 0;
+    page.on("request", request => { if (new URL(request.url()).pathname.endsWith("/api/turnover-ledger")) reads += 1; });
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto("/turnover-ledger");
+    const expand = page.getByRole("button", { name: "展开 云南建设有限公司 流水明细", exact: true });
+    await expect(expand).toBeVisible();
+    const initialReads = reads;
+    const start = performance.now();
+    await expand.click();
+    const flows = page.getByRole("grid", { name: "云南建设有限公司的银行流水" });
+    await expect(flows).toBeVisible();
+    const expandMs = performance.now() - start;
+    const firstRow = flows.locator("tbody tr").first();
+    const trigger = page.getByRole("button", { name: "查看分类明细" });
+    for (const width of [1920, 1440, 960]) {
+      await page.setViewportSize({ width, height: 1080 });
+      const geometry = await firstRow.evaluate(row => {
+        const label = row.querySelector(".finance-truncated-text")!;
+        const chip = row.querySelector(".turnover-flow-chip")!;
+        const a = label.getBoundingClientRect(); const b = chip.getBoundingClientRect();
+        const table = row.closest("table")!;
+        const selection = table.querySelector('thead [data-column-role="selection"]')!.getBoundingClientRect();
+        const checkbox = row.querySelector('[data-slot="checkbox-control"]')!.getBoundingClientRect();
+        return {
+          selectionCenter: selection.x + selection.width / 2, checkboxCenter: checkbox.x + checkbox.width / 2,
+          labelCenter: a.y + a.height / 2, chipCenter: b.y + b.height / 2,
+          chipWidth: b.width,
+          align: ["date", "amount", "status", "action"].map(role => [
+            getComputedStyle(table.querySelector(`thead [data-column-role="${role}"]`)!).textAlign,
+            getComputedStyle(row.querySelector(`[data-column-role="${role}"]`)!).textAlign,
+          ]),
+          headBackground: getComputedStyle(table.querySelector("thead th")!).backgroundColor,
+          rowBackground: getComputedStyle(row).backgroundColor,
+        };
+      });
+      expect(Math.abs(geometry.labelCenter - geometry.chipCenter)).toBeLessThanOrEqual(2);
+      expect(geometry.chipWidth).toBeGreaterThan(35);
+      expect(Math.abs(geometry.selectionCenter - geometry.checkboxCenter)).toBeLessThanOrEqual(2);
+      expect(geometry.align).toEqual([["center", "center"], ["right", "right"], ["center", "center"], ["center", "center"]]);
+      expect(geometry.headBackground).not.toBe(geometry.rowBackground);
+      const metric = (await page.getByTestId("turnover-summary-collected").boundingBox())!;
+      const button = (await trigger.boundingBox())!;
+      expect(button.x - metric.x - metric.width).toBeGreaterThanOrEqual(0);
+      expect(button.x - metric.x - metric.width).toBeLessThanOrEqual(40);
+      expect(await page.locator("body").evaluate(body => body.scrollWidth <= innerWidth)).toBe(true);
+      await page.screenshot({ path: testInfo.outputPath(`turnover-layout-${width}.png`), fullPage: true, animations: "disabled" });
+      await trigger.click();
+      const dialog = page.getByRole("dialog", { name: "往来款分类明细" });
+      await expect(dialog).toContainText("当前搜索及结算条件下的全部分类");
+      const box = (await dialog.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+      await page.screenshot({ path: testInfo.outputPath(`turnover-breakdown-${width}.png`), fullPage: true, animations: "disabled" });
+      await page.keyboard.press("Escape");
+      await expect(dialog).not.toBeVisible();
+      await expect(trigger).toBeFocused();
+    }
+    await page.setViewportSize({ width: 1440, height: 1080 });
+    await firstRow.locator(".finance-truncated-text").focus();
+    await expect(page.getByRole("tooltip")).toContainText("外部往来款");
+    await page.keyboard.press("Escape");
+    await clickCheckbox(firstRow.getByRole("checkbox"));
+    await expect(firstRow).toHaveClass(/turnover-flow-selected/);
+    await clickCheckbox(firstRow.getByRole("checkbox"));
+    await expect(firstRow).not.toHaveClass(/turnover-flow-selected/);
+    await trigger.click();
+    await page.getByRole("heading", { name: "外部往来款管理" }).click();
+    await expect(page.getByRole("dialog", { name: "往来款分类明细" })).not.toBeVisible();
+    await trigger.click();
+    await trigger.click();
+    await expect(page.getByRole("dialog", { name: "往来款分类明细" })).not.toBeVisible();
+    expect(reads).toBe(initialReads);
+    await testInfo.attach("turnover-layout-metrics", { body: JSON.stringify({ expandMs, additionalLedgerReads: reads - initialReads }), contentType: "application/json" });
+  });
+
   test("reaches all turnover groups after the first 100", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     await installDeterministicApiMocks(page, {
@@ -417,7 +494,8 @@ test.describe("turnover ledger browser flow", () => {
       const expenseRow = table.getByRole("checkbox", { name: `选择流水 ${turnoverFlowLabels.expense}` }).locator("xpath=ancestor::tr[1]");
       await mark("finalSettledLatencyMs", expect(expenseRow).toContainText("外部往来款付款"));
       await expect(expenseRow).toContainText("归还借款");
-      await expect(expenseRow).toContainText("往来标记：已还款");
+      await expect(expenseRow.locator(".turnover-flow-chip")).toHaveText("已还款");
+      await expect(expenseRow).not.toContainText("往来标记：");
       await expect(table.getByRole("columnheader", { name: "流水标签" })).toBeVisible();
       await page.screenshot({ path: "../outputs/turnover-ledger-expanded.png", fullPage: true, animations: "disabled" });
     });

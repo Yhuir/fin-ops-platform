@@ -956,7 +956,7 @@ export default function TurnoverLedgerPage() {
             {error}
           </StatePanel>
         ) : null}
-        <TurnoverLedgerSummary ledger={ledger} />
+        <TurnoverLedgerSummary ledger={loading || error ? null : ledger} family={family} />
 
         <section className="turnover-ledger-table-panel">
           <div className="turnover-ledger-table-panel__inner">

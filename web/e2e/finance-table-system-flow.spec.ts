@@ -69,7 +69,7 @@ test.describe("finance table system browser flow", () => {
     await expect(page.getByTestId("app-health-data")).toBeVisible();
     await expect(page.getByTestId("app-health-requests")).toBeVisible();
     await expect(page.getByTestId("app-health-runtime")).toBeVisible();
-    await expectVisibleAndUncovered(page.getByRole("button", { name: "刷新" }), "AppHealth refresh button");
+    await expectVisibleAndUncovered(page.getByRole("button", { name: "刷新", exact: true }), "AppHealth refresh button");
 
     const requestTableScroll = page.getByTestId("app-health-requests").locator(".finance-table__scroll");
     await expectHorizontalScroll(requestTableScroll, "request performance table");

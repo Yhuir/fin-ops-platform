@@ -53,7 +53,7 @@ export default function TurnoverLedgerGroupedTable({
                 <td><Button variant="ghost" size="sm" className="turnover-text-action" onPress={() => onDetails(group)} aria-label={`查看${group.counterpartyName}详情`}>详情</Button></td>
               </tr>
               {expanded ? <tr id={`turnover-details-${group.groupId}`}><td colSpan={6} className="turnover-flow-container">
-                <FinanceTable ariaLabel={`${group.counterpartyName}的银行流水`} className="turnover-flows" minWidth={870} scrollMode="contained">
+                <FinanceTable ariaLabel={`${group.counterpartyName}的银行流水`} className="turnover-flows" minWidth={1120} scrollMode="contained">
                   <FinanceTableHeader>
                     <FinanceTableColumn columnRole="selection">选择</FinanceTableColumn><FinanceTableColumn columnRole="date" isRowHeader>日期</FinanceTableColumn>
                     <FinanceTableColumn columnRole="description">流水标签</FinanceTableColumn><FinanceTableColumn columnRole="amount">收入金额</FinanceTableColumn>
@@ -62,7 +62,7 @@ export default function TurnoverLedgerGroupedTable({
                   </FinanceTableHeader>
                   <FinanceTableBody>{group.flowRows.map((row, index) => {
                     const accessibleName = `${group.counterpartyName} ${row.transactionAt || row.borrowDate || row.repaymentDate || "日期未提供"} ${row.flowDirection === "income" ? "收入" : "支出"} ${formatAccessibleMoney(row.flowAmount)}`;
-                    return <FinanceTableRow key={row.sourceBankRowId} id={row.sourceBankRowId} dataTestId={`turnover-flow-row-${row.relationId}-${index}`}>
+                    return <FinanceTableRow key={row.sourceBankRowId} id={row.sourceBankRowId} className={selectedFlowRowIds.has(row.sourceBankRowId) ? "turnover-flow-selected" : undefined} dataTestId={`turnover-flow-row-${row.relationId}-${index}`}>
                       <FinanceTableCell columnRole="selection"><Checkbox aria-label={`选择流水 ${accessibleName}`} isDisabled={actionsDisabled} isSelected={selectedFlowRowIds.has(row.sourceBankRowId)} onChange={() => onToggleFlowSelection?.(group, row)}><Checkbox.Control className="turnover-ledger-checkbox"><Checkbox.Indicator /></Checkbox.Control></Checkbox></FinanceTableCell>
                       <FinanceTableCell columnRole="date">{formatNullable((row.transactionAt || row.borrowDate || row.repaymentDate)?.slice(0, 10))}</FinanceTableCell>
                       <FinanceTableCell columnRole="description"><TurnoverFlowLabel row={row} /></FinanceTableCell>
