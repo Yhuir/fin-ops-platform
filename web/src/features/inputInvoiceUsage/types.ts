@@ -179,6 +179,14 @@ export type InputInvoiceUsageDetailResponse = {
   sections: EntityDetailSection[];
 };
 
+export type PaymentRuleApplicantOption = {
+  userId: string;
+  name: string;
+  account: string;
+  enabled: boolean;
+  matchName: string;
+};
+
 export type InputInvoiceUsagePaymentStatusRulesResponse = {
   version: number | string | null;
   readOnly: boolean;
@@ -186,7 +194,7 @@ export type InputInvoiceUsagePaymentStatusRulesResponse = {
     canSave: boolean;
   };
   rules: InputInvoiceUsagePaymentStatusRule[];
-  applicantOptions: string[];
+  applicantOptions: PaymentRuleApplicantOption[];
   source?: {
     version?: string;
     updatedAt?: string;

@@ -135,7 +135,7 @@ test("production turnover register filters, details and exports use canonical fa
   await expectNoUnexpectedSuccessUiErrors(page);
 });
 
-test("production payment rule applicants match enabled OA users and support multiple selection", async ({ page }, testInfo) => {
+test("production payment rule applicants match all OA accounts and support disabled selection", async ({ page }, testInfo) => {
   test.skip(!enabled || !token, "Requires explicit production verification and admin token.");
   await page.context().addCookies([{ name: "Admin-Token", value: token!, domain: "www.yn-sourcing.com", path: "/", secure: true, sameSite: "Lax" }]);
   const writes: string[] = [];
@@ -159,7 +159,7 @@ test("production payment rule applicants match enabled OA users and support mult
   const response = await rulesResponse;
   expect(response.status()).toBe(200);
   const policy = await response.json();
-  const expected = new Set<string>();
+  const expected: Array<{ userId: string; name: string; account: string; enabled: boolean; matchName: string }> = [];
   let total = 1;
   for (let pageNum = 1; (pageNum - 1) * 100 < total; pageNum += 1) {
     const oaResponse = await page.request.get(`/oa-api/system/user/list?pageNum=${pageNum}&pageSize=100`, { headers: { Authorization: `Bearer ${token}` } });
@@ -168,18 +168,26 @@ test("production payment rule applicants match enabled OA users and support mult
     expect(directory.code).toBe(200);
     total = directory.total;
     for (const user of directory.rows) {
-      if (String(user.status) === "0" && String(user.delFlag) === "0") expected.add(user.nickName.replace(/[\s\u200b\ufeff]+/g, ""));
+      if (String(user.delFlag) === "0") expected.push({ userId: String(user.userId), name: user.nickName, account: user.userName,
+        enabled: String(user.status) === "0", matchName: user.nickName.replace(/[\s\u200b\ufeff]+/g, "") });
     }
   }
-  expect([...policy.applicantOptions].sort()).toEqual([...expected].sort());
-  expect(new Set(policy.applicantOptions).size).toBe(policy.applicantOptions.length);
+  const byAccount = (a: { account: string }, b: { account: string }) => a.account.localeCompare(b.account);
+  expect([...policy.applicantOptions].sort(byAccount)).toEqual([...expected].sort(byAccount));
+  expect(new Set(policy.applicantOptions.map((option: { userId: string }) => option.userId)).size).toBe(expected.length);
+  const firstDisabled = policy.applicantOptions.findIndex((option: { enabled: boolean }) => !option.enabled);
+  if (firstDisabled >= 0) expect(policy.applicantOptions.slice(firstDisabled).every((option: { enabled: boolean }) => !option.enabled)).toBe(true);
   for (const rule of policy.rules) expect(rule.conditions).not.toHaveProperty("applicantName");
   const drawer = page.getByRole("dialog", { name: "发票与支付状态规则设置" });
   await drawer.getByRole("button", { name: /OA 申请人条件/ }).first().click();
   const selected = policy.rules[0].conditions.applicantNames ?? [];
-  const addition = policy.applicantOptions.find((name: string) => !selected.includes(name));
+  const addition = policy.applicantOptions.find((option: { enabled: boolean; matchName: string }) => !option.enabled && !selected.includes(option.matchName));
   expect(addition).toBeTruthy();
-  await page.getByRole("option", { name: addition, exact: true }).click();
+  await page.getByRole("searchbox", { name: "搜索申请人姓名或账号" }).fill(addition.account);
+  const option = page.getByRole("option", { name: `${addition.name} ${addition.account}`, exact: true });
+  await expect(option.getByRole("img", { name: "账号已停用" })).toBeVisible();
+  await option.click();
+  await page.screenshot({ path: "../outputs/production-payment-rule-applicants-open.png", animations: "disabled" });
   await page.keyboard.press("Escape");
   await expect(drawer.getByRole("button", { name: "保存", exact: true })).toBeEnabled();
   await page.screenshot({ path: "../outputs/production-payment-rule-applicants.png", animations: "disabled" });
@@ -187,5 +195,5 @@ test("production payment rule applicants match enabled OA users and support mult
   await expect(drawer.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
   expect(writes).toEqual([]);
   await expectNoUnexpectedSuccessUiErrors(page);
-  await testInfo.attach("production-applicant-directory", { body: JSON.stringify({ version: policy.version, unique_applicants: expected.size, oa_total: total, business_writes: writes.length }), contentType: "application/json" });
+  await testInfo.attach("production-applicant-directory", { body: JSON.stringify({ version: policy.version, accounts: expected.length, enabled: expected.filter((option) => option.enabled).length, disabled: expected.filter((option) => !option.enabled).length, oa_total: total, business_writes: writes.length }), contentType: "application/json" });
 });

@@ -1316,7 +1316,7 @@ describe("Input invoice usage workflow drawers", () => {
           conditions: { hasOa: true, hasBank: true, fullyMatched: true },
         },
       ],
-      applicantOptions: ["陈秀云", "周洁莹"],
+      applicantOptions: [{ userId: "1", name: "陈秀云", account: "CHEN", enabled: true, matchName: "陈秀云" }, { userId: "2", name: "周洁莹", account: "ZHOU", enabled: false, matchName: "周洁莹" }],
     }));
 
     render(<PaymentStatusRulesDrawer open loadRules={loadRules} onClose={() => undefined} />);
@@ -1354,7 +1354,7 @@ describe("Input invoice usage workflow drawers", () => {
           conditions: { hasOa: true, hasBank: false },
         },
       ],
-      applicantOptions: ["陈秀云", "周洁莹"],
+      applicantOptions: [{ userId: "1", name: "陈秀云", account: "CHEN", enabled: true, matchName: "陈秀云" }, { userId: "2", name: "周洁莹", account: "ZHOU", enabled: false, matchName: "周洁莹" }],
     }));
     const saveRules = vi.fn(() => Promise.resolve({
       version: 8,
@@ -1371,7 +1371,7 @@ describe("Input invoice usage workflow drawers", () => {
           conditions: { hasOa: true, hasBank: false },
         },
       ],
-      applicantOptions: ["陈秀云", "周洁莹"],
+      applicantOptions: [{ userId: "1", name: "陈秀云", account: "CHEN", enabled: true, matchName: "陈秀云" }, { userId: "2", name: "周洁莹", account: "ZHOU", enabled: false, matchName: "周洁莹" }],
     }));
 
     render(<PaymentStatusRulesDrawer open loadRules={loadRules} saveRules={saveRules} onClose={() => undefined} />);
@@ -1421,19 +1421,19 @@ describe("Input invoice usage workflow drawers", () => {
 
   test("rules support applicant editing, adding and deleting without obsolete settings", async () => {
     const user = userEvent.setup();
-    const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: ["陈秀云", "周洁莹"], rules: [{ id: "r1", statusCode: "paid", label: "已付款", description: "", priority: 1, enabled: true, conditions: { applicantNames: ["陈秀云"], hasOa: true } }] };
+    const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: [{ userId: "1", name: "陈秀云", account: "CHEN", enabled: true, matchName: "陈秀云" }, { userId: "2", name: "周洁莹", account: "ZHOU", enabled: false, matchName: "周洁莹" }], rules: [{ id: "r1", statusCode: "paid", label: "已付款", description: "", priority: 1, enabled: true, conditions: { applicantNames: ["陈秀云"], hasOa: true } }] };
     const saveRules = vi.fn((request) => Promise.resolve({ ...payload, version: 2, rules: request.rules }));
     render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} saveRules={saveRules} onClose={() => undefined} />);
     expect(screen.queryByText(/按优先级从小到大匹配/)).not.toBeInTheDocument();
     await user.click(await screen.findByLabelText("已付款 OA 申请人条件"));
-    await user.click(await screen.findByRole("option", { name: "周洁莹" }));
+    await user.click(await screen.findByRole("option", { name: "周洁莹 ZHOU" }));
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(saveRules).toHaveBeenCalledWith(expect.objectContaining({ rules: [expect.objectContaining({ conditions: { applicantNames: ["陈秀云", "周洁莹"], hasOa: true } })] })));
     expect(saveRules.mock.calls[0][0]).not.toHaveProperty("pendingDirections");
     expect(screen.queryByLabelText("原因文案")).not.toBeInTheDocument();
     await user.click(screen.getByLabelText("已付款 OA 申请人条件"));
-    expect(await screen.findByRole("option", { name: "陈秀云" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "陈秀云 CHEN" })).toBeInTheDocument();
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "新增规则" }));
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
@@ -1482,7 +1482,7 @@ describe("Input invoice usage workflow drawers", () => {
     const loadPreview = vi.fn(() => Promise.resolve(previewPayload));
     const loadRules = vi.fn<[], Promise<PaymentStatusRulesPayload>>(() => Promise.resolve({
       rules: [],
-      applicantOptions: ["陈秀云", "周洁莹"],
+      applicantOptions: [{ userId: "1", name: "陈秀云", account: "CHEN", enabled: true, matchName: "陈秀云" }, { userId: "2", name: "周洁莹", account: "ZHOU", enabled: false, matchName: "周洁莹" }],
     }));
 
     function Harness() {

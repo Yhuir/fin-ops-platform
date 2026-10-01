@@ -241,12 +241,15 @@ class OARoleSyncServiceTests(unittest.TestCase):
         self.assertIn("nick_name LIKE", sql)
         self.assertEqual(params, ("%张%", "%张%", 20))
 
-    def test_active_applicant_directory_is_complete_read_only_and_closes_connection(self):
-        connection = ScriptedConnection(ScriptedCursor([[("YNSYLP005", "刘涵静", "0", "0"), ("A", "黄  亮", "0", "0")]]))
-        users, _ = _with_connection(connection, lambda executor: executor.list_active_users())
+    def test_applicant_directory_includes_disabled_is_read_only_and_closes_connection(self):
+        connection = ScriptedConnection(ScriptedCursor([[(5, "YNSYLP005", "刘涵静", "0"), (6, "A", "黄  亮", "1")]]))
+        users, _ = _with_connection(connection, lambda executor: executor.list_users())
         self.assertEqual(len(users), 2)
         sql, _ = connection.cursor_value.executed[0]
-        self.assertIn("del_flag = '0' AND status = '0'", sql)
+        self.assertIn("del_flag = '0'", sql)
+        self.assertNotIn("status = '0'", sql)
+        self.assertFalse(users[1].active)
+        self.assertEqual(users[1].user_id, "6")
         self.assertNotIn("LIMIT", sql)
         self.assertTrue(connection.closed)
         self.assertEqual(len(connection.cursor_value.executed), 1)

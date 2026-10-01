@@ -1,10 +1,12 @@
 import { Button, Checkbox, Input, ListBox, Select } from "@heroui/react";
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 
+import PaymentRuleApplicantSelect from "./PaymentRuleApplicantSelect";
 import AppDrawer from "../common/AppDrawer";
 import AppDialog from "../common/AppDialog";
 import type {
   InputInvoiceUsagePaymentStatusRulesResponse,
+  PaymentRuleApplicantOption,
   SaveInputInvoiceUsagePaymentStatusRulesRequest,
 } from "../../features/inputInvoiceUsage/types";
 
@@ -28,7 +30,7 @@ export type PaymentStatusRulesPayload = {
     can_save?: boolean;
   };
   rules: PaymentStatusRule[];
-  applicantOptions: string[];
+  applicantOptions: PaymentRuleApplicantOption[];
 };
 
 type RuleConditionKey = "hasOa" | "hasBank" | "fullyMatched" | "invoiceOaAmountMatched";
@@ -386,7 +388,7 @@ function RuleConditionEditor({
   applicantOptions,
   onApplicantChange,
 }: {
-  applicantOptions: string[];
+  applicantOptions: PaymentRuleApplicantOption[];
   onApplicantChange: (names: string[]) => void;
   rule: PaymentStatusRule;
   onChange: (key: RuleConditionKey, value: "any" | "true" | "false") => void;
@@ -397,14 +399,7 @@ function RuleConditionEditor({
     <div className="input-invoice-usage-payment-rule-condition-editor" aria-label={`${rule.label || "规则"}条件编辑`}>
       <div className="input-invoice-usage-payment-rule-condition">
         <span>OA 申请人</span>
-        <Select selectionMode="multiple" aria-label={`${rule.label || "规则"} OA 申请人条件`} placeholder="不限制申请人" value={applicantNames.filter((name) => applicantOptions.includes(name))} onChange={(keys) => onApplicantChange([...keys.map(String), ...applicantNames.filter((name) => !applicantOptions.includes(name))])}>
-          <Select.Trigger><Select.Value>{applicantNames.filter((name) => applicantOptions.includes(name)).join("、") || "不限制申请人"}</Select.Value><Select.Indicator /></Select.Trigger>
-          <Select.Popover><ListBox>
-            {applicantOptions.map((name) => <ListBox.Item key={name} id={name} textValue={name}>{name}<ListBox.ItemIndicator /></ListBox.Item>)}
-          </ListBox></Select.Popover>
-        </Select>
-        <span className="input-invoice-usage-payment-rule-applicant-hint">可多选，任一命中；清空则不限制</span>
-        {applicantNames.filter((name) => !applicantOptions.includes(name)).map((name) => <span key={name} className="input-invoice-usage-payment-rule-applicant-hint">{name}（已停用或不在 OA 目录）<Button size="sm" variant="ghost" onPress={() => onApplicantChange(applicantNames.filter((item) => item !== name))}>移除</Button></span>)}
+        <PaymentRuleApplicantSelect label={`${rule.label || "规则"} OA 申请人条件`} options={applicantOptions} names={applicantNames} onChange={onApplicantChange} />
       </div>
       {CONDITION_FIELDS.map((field) => (
         <div className="input-invoice-usage-payment-rule-condition" key={field.key}>

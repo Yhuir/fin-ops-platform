@@ -154,7 +154,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
             row_id = json.loads(rows_response.body)["rows"][0]["id"]
             filter_response = app.handle_request("GET", "/api/input-invoice-usage/filter-options?month=2026-05")
             from unittest.mock import Mock
-            app._app_settings_service._oa_role_sync_service = Mock(list_active_users=Mock(return_value=[]))
+            app._app_settings_service._oa_role_sync_service = Mock(list_users=Mock(return_value=[]))
             rules_response = app.handle_request("GET", "/api/input-invoice-usage/payment-status-rules")
             invoice_response = app.handle_request("GET", "/api/input-invoice-usage/invoices/inv-detail/detail")
             bank_response = app.handle_request("GET", "/api/input-invoice-usage/bank-transactions/bank-detail/detail")

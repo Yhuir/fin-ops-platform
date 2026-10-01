@@ -1388,11 +1388,15 @@ class AppSettingsService:
         restored_snapshot["turnover_ledger_tag_selection"] = restored_selection
         self._save_snapshot(restored_snapshot)
 
-    def get_payment_rule_applicant_options(self) -> list[str]:
+    def get_payment_rule_applicant_options(self) -> list[dict[str, Any]]:
         if self._oa_role_sync_service is None:
             raise OARoleSyncConfigurationError("OA user directory is not configured.")
-        users = self._oa_role_sync_service.list_active_users()
-        return sorted({normalize_applicant_name(user.display_name) for user in users if user.active and normalize_applicant_name(user.display_name)})
+        users = self._oa_role_sync_service.list_users()
+        return [
+            {"userId": user.user_id, "name": user.display_name, "account": user.username,
+             "enabled": user.active, "matchName": normalize_applicant_name(user.display_name)}
+            for user in sorted(users, key=lambda user: (not user.active, user.display_name, user.username))
+        ]
 
     def get_input_invoice_usage_payment_status_rules_payload(self, *, can_save: bool = True) -> dict[str, Any]:
         provider = AppSettingsInputInvoiceUsagePaymentRulesProvider(
@@ -1416,8 +1420,8 @@ class AppSettingsService:
         additions = set()
         for rule in desired["rules"]:
             additions.update(set(rule["conditions"].get("applicantNames", [])) - existing_by_id.get(rule["id"], set()))
-        if additions and not additions <= set(self.get_payment_rule_applicant_options()):
-            raise AppSettingsValidationError("inactive_payment_rule_applicant", "新选择的申请人已停用或不在 OA 启用用户目录中，请重新加载。")
+        if additions and not additions <= {option["matchName"] for option in self.get_payment_rule_applicant_options()}:
+            raise AppSettingsValidationError("unknown_payment_rule_applicant", "新选择的申请人不在 OA 用户目录中，请重新加载。")
         transaction_factory = None
         if getattr(self._state_store, "storage_backend", "") == "postgres":
             connection = self._state_store._connection

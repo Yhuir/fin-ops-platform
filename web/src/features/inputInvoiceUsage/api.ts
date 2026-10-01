@@ -411,7 +411,11 @@ function mapPaymentStatusRulesResponse(payload: unknown): InputInvoiceUsagePayme
         applicantConstraints: arrayValue(camelOrSnake(rule, "applicantConstraints", "applicant_constraints")).map(stringValue),
       };
     }),
-    applicantOptions: arrayValue(raw.applicantOptions).map(stringValue),
+    applicantOptions: arrayValue(raw.applicantOptions).map((item) => {
+      const option = objectValue(item);
+      return { userId: stringValue(option.userId), name: stringValue(option.name), account: stringValue(option.account),
+        enabled: booleanValue(option.enabled), matchName: stringValue(option.matchName) };
+    }),
     source: Object.keys(source).length > 0 ? {
       version: stringValue(source.version),
       updatedAt: stringValue(camelOrSnake(source, "updatedAt", "updated_at")),

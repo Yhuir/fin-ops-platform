@@ -4241,7 +4241,7 @@ function inputInvoiceUsagePaymentStatusRulesPayload(
         priority: 2,
       },
     ],
-    applicantOptions: ["陈秀云", "周洁莹"],
+    applicantOptions: [{ userId: "1", name: "陈秀云", account: "CHEN", enabled: true, matchName: "陈秀云" }, { userId: "2", name: "周洁莹", account: "ZHOU", enabled: false, matchName: "周洁莹" }],
     permissions: { can_save: canSave },
   };
 }

@@ -18,7 +18,7 @@ from fin_ops_platform.services.input_invoice_usage_payment_rules import (
 )
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
-from fin_ops_platform.services.oa_role_sync_service import OAUserSummary, OARoleSyncExecutionError
+from fin_ops_platform.services.oa_role_sync_service import OAUserDirectoryEntry, OARoleSyncExecutionError
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 from tests.app_test_support import build_local_state_application as build_application
@@ -43,22 +43,26 @@ class QueueRecorder:
 
 
 class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
-    def test_directory_merges_whitespace_and_same_name_users_excludes_disabled(self):
+    def test_directory_keeps_accounts_and_disabled_users_with_normalized_match_names(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             directory = Mock()
-            directory.list_active_users.return_value = [
-                OAUserSummary("A", "黄  亮", True), OAUserSummary("B", "黄 亮", True),
-                OAUserSummary("C", "刘树刚", True), OAUserSummary("D", "刘树刚", True),
-                OAUserSummary("YNSYLP005", "刘涵静", True), OAUserSummary("X", "停用人员", False),
+            directory.list_users.return_value = [
+                OAUserDirectoryEntry("A", "黄  亮", True, "A"), OAUserDirectoryEntry("B", "黄 亮", True, "B"),
+                OAUserDirectoryEntry("C", "刘树刚", True, "C"), OAUserDirectoryEntry("D", "刘树刚", True, "D"),
+                OAUserDirectoryEntry("YNSYLP005", "刘涵静", True, "YNSYLP005"), OAUserDirectoryEntry("X", "停用人员", False, "X"),
             ]
             app._app_settings_service._oa_role_sync_service = directory
             response = app.handle_request("GET", "/api/input-invoice-usage/payment-status-rules")
             self.assertEqual(response.status_code, 200)
             payload = json.loads(response.body)
-            self.assertEqual(payload["applicantOptions"], ["刘树刚", "刘涵静", "黄亮"])
+            options = payload["applicantOptions"]
+            self.assertEqual([option["account"] for option in options], ["C", "D", "YNSYLP005", "A", "B", "X"])
+            self.assertEqual([option["matchName"] for option in options], ["刘树刚", "刘树刚", "刘涵静", "黄亮", "黄亮", "停用人员"])
+            self.assertFalse(options[-1]["enabled"])
+            self.assertEqual(set(options[0]), {"userId", "name", "account", "enabled", "matchName"})
             self.assertNotIn("applicantName", payload["rules"][0]["conditions"])
-            directory.list_active_users.side_effect = OARoleSyncExecutionError("unavailable")
+            directory.list_users.side_effect = OARoleSyncExecutionError("unavailable")
             failure = app.handle_request("GET", "/api/input-invoice-usage/payment-status-rules")
             self.assertEqual(failure.status_code, 503)
             self.assertEqual(json.loads(failure.body)["error"], "oa_applicant_directory_unavailable")
@@ -79,23 +83,56 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
                 with self.assertRaises(InputInvoiceUsagePaymentRulesValidationError):
                     provider.update_payment_status_rules({"expectedVersion": 2, "idempotencyKey": "bad", "rules": [rule]}, actor_id="tester")
 
-    def test_new_disabled_applicant_rejected_but_existing_condition_preserved(self):
+    def test_disabled_applicant_saved_and_matched_but_unknown_rejected_without_losing_history(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             service = app._app_settings_service
             directory = Mock()
-            directory.list_active_users.return_value = []
+            directory.list_users.return_value = [OAUserDirectoryEntry("X", "停用人员", False, "6")]
             service._oa_role_sync_service = directory
             current = service.get_input_invoice_usage_payment_status_rules_payload()
             rules = current["rules"]
             rules[0]["label"] = "现金往来保留"
             service.update_input_invoice_usage_payment_status_rules({"expectedVersion": 1, "idempotencyKey": "keep", "rules": rules}, actor_id="tester")
-            directory.list_active_users.assert_not_called()
+            directory.list_users.assert_not_called()
             rules[0]["conditions"]["applicantNames"].append("停用人员")
+            saved = service.update_input_invoice_usage_payment_status_rules({"expectedVersion": 2, "idempotencyKey": "disabled", "rules": rules}, actor_id="tester")
+            self.assertIn("停用人员", saved["rules"][0]["conditions"]["applicantNames"])
+            reread = service.get_input_invoice_usage_payment_status_rules_payload()
+            self.assertEqual(reread["rules"], saved["rules"])
+            provider = AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=app._state_store)
+            self.assertEqual(provider.evaluate(PaymentStatusEvaluationContext(True, True, "停用人员", True, True))["code"], "cash_turnover")
+            rules[0]["conditions"]["applicantNames"].append("不存在")
             with self.assertRaises(AppSettingsValidationError) as caught:
-                service.update_input_invoice_usage_payment_status_rules({"expectedVersion": 2, "idempotencyKey": "bad", "rules": rules}, actor_id="tester")
-            self.assertEqual(caught.exception.error_code, "inactive_payment_rule_applicant")
-            self.assertEqual(service.get_input_invoice_usage_payment_status_rules_payload()["version"], 2)
+                service.update_input_invoice_usage_payment_status_rules({"expectedVersion": 3, "idempotencyKey": "bad", "rules": rules}, actor_id="tester")
+            self.assertEqual(caught.exception.error_code, "unknown_payment_rule_applicant")
+            self.assertEqual(service.get_input_invoice_usage_payment_status_rules_payload(), reread)
+
+    def test_disabled_applicant_http_save_reload_and_directory_failure_are_atomic(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            directory = Mock()
+            directory.list_users.return_value = [OAUserDirectoryEntry("OLD", "停用人员", False, "99")]
+            app._app_settings_service._oa_role_sync_service = directory
+            request = {"expectedVersion": 1, "idempotencyKey": "disabled-http", "rules": [
+                {"id": "disabled", "statusCode": "offset", "label": "冲", "priority": 1, "enabled": True,
+                 "conditions": {"hasOa": True, "applicantNames": ["停用人员"]}}]}
+            saved = app.handle_request("PUT", "/api/input-invoice-usage/payment-status-rules", body=json.dumps(request))
+            self.assertEqual(saved.status_code, 200)
+            self.assertEqual(json.loads(saved.body)["rules"][0]["conditions"]["applicantNames"], ["停用人员"])
+            reread = json.loads(app.handle_request("GET", "/api/input-invoice-usage/payment-status-rules").body)
+            self.assertEqual(reread["version"], 2)
+            self.assertFalse(reread["applicantOptions"][0]["enabled"])
+            self.assertEqual(reread["rules"], json.loads(saved.body)["rules"])
+            directory.list_users.side_effect = OARoleSyncExecutionError("offline")
+            request.update(expectedVersion=2, idempotencyKey="directory-offline")
+            request["rules"][0]["conditions"]["applicantNames"].append("新增姓名")
+            failed = app.handle_request("PUT", "/api/input-invoice-usage/payment-status-rules", body=json.dumps(request))
+            self.assertEqual(failed.status_code, 503)
+            self.assertEqual(json.loads(failed.body)["error"], "oa_applicant_directory_unavailable")
+            persisted = app._app_settings_service.get_input_invoice_usage_payment_status_rules_payload()
+            self.assertEqual(persisted["version"], 2)
+            self.assertEqual(persisted["rules"], reread["rules"])
 
     def test_default_rules_are_editable_versioned_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
