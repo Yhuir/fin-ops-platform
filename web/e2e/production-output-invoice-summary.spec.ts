@@ -59,7 +59,7 @@ test('production output tax filters, totals, details and export remain consisten
   const detail = page.waitForResponse(response=>new URL(response.url()).pathname.includes('/output-invoice-collections/invoices/') && response.url().endsWith('/detail'));
   await page.locator('.output-invoice-collections-table-cell').getByRole('button',{name:/详情/}).first().click();
   expect((await detail).status()).toBe(200);
-  await expect(page.getByRole('dialog').getByText('税额',{exact:true})).toBeVisible();
+  await expect(page.getByRole('dialog').getByLabel('金额与税额详情').getByRole('rowheader',{name:'税额',exact:true})).toBeVisible();
   expect(writes).toEqual([]);
   await info.attach('output-summary-verification',{body:JSON.stringify({firstVisibleMs,filterVisibleMs,total:payload.pagination.total,filtered:filtered.pagination.total,summary:payload.summary,writes}),contentType:'application/json'});
 });
