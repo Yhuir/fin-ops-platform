@@ -73,6 +73,7 @@ function toneToChipColor(tone: FinanceTone) {
 type FinanceTableProps = {
   ariaLabel: string;
   children: ReactNode;
+  header?: ReactNode;
   footer?: ReactNode;
   className?: string;
   minWidth?: number | string;
@@ -87,6 +88,7 @@ export function FinanceTable({
   ariaLabel,
   children,
   footer,
+  header,
   className,
   minWidth = 720,
   selectableText = false,
@@ -108,6 +110,7 @@ export function FinanceTable({
         className,
       )}>
         <Table.ScrollContainer ref={scrollRef} className="finance-table__scroll">
+          {header}
           <Table.Content aria-label={ariaLabel} className="finance-table__content" style={style} sortDescriptor={sortDescriptor} onSortChange={onSortChange}>
             {children}
           </Table.Content>

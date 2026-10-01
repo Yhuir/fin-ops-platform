@@ -30,6 +30,7 @@ from fin_ops_platform.services.object_identity_policy import FinancialObjectIden
 from fin_ops_platform.services.output_invoice_reversal import (
     reversal_target_invoice_nos,
 )
+from fin_ops_platform.services.output_invoice_tax_rate import normalize_output_tax_rate
 from fin_ops_platform.services.source_record_details import bank_source_detail, invoice_source_detail
 from fin_ops_platform.services.workbench_relation_modes import (
     OUTPUT_INVOICE_REVERSAL_RELATION_MODE,
@@ -250,7 +251,7 @@ class OutputInvoiceCollectionQueryService:
             sort_field="invoice_date",
             sort_direction="desc",
         )
-        return self.filter_options_for_rows(
+        payload = self.filter_options_for_rows(
             rows=rows,
             keyword=keyword,
             invoice_date_from=invoice_date_from,
@@ -258,6 +259,18 @@ class OutputInvoiceCollectionQueryService:
             month=month,
             filters=parsed_filters,
         )
+        if any(item["field"] == "tax_rate" for item in parsed_filters):
+            rate_rows = self._filtered_sorted_rows(
+                context=self._query_context(month_hint=month),
+                keyword=keyword, invoice_date_from=invoice_date_from,
+                invoice_date_to=invoice_date_to, month=month,
+                filters=[item for item in parsed_filters if item["field"] != "tax_rate"],
+                sort_field="invoice_date", sort_direction="desc",
+            )
+            for field in payload["fields"]:
+                if field["field"] == "tax_rate":
+                    field["options"] = self._options_for_field(rate_rows, "tax_rate")
+        return payload
 
     def filter_options_for_rows(
         self,
@@ -642,7 +655,7 @@ class OutputInvoiceCollectionQueryService:
             "amountWithoutTax": _money(
                 sum((_decimal(line.amount) for line in line_items), start=ZERO)
             ),
-            "taxRate": primary.tax_rate or "",
+            "taxRate": normalize_output_tax_rate(primary.tax_rate),
             "taxAmount": _money(
                 sum(
                     (_decimal(line.tax_amount) for line in line_items),
@@ -1032,12 +1045,17 @@ class OutputInvoiceCollectionQueryService:
                     f"Unsupported operator for {field}: {operator}",
                     details={"field": field, "operator": operator},
                 )
+            values = item.get("values") or []
+            if field == "tax_rate":
+                if not isinstance(values, list) or not values or any(not isinstance(value, str) for value in values):
+                    raise OutputInvoiceCollectionError("invalid_filter_value", "税率筛选需要非空字符串数组。")
+                values = list(dict.fromkeys(normalize_output_tax_rate(value) for value in values))
             normalized.append(
                 {
                     "field": field,
                     "operator": operator,
                     "value": item.get("value"),
-                    "values": list(item.get("values") or []),
+                    "values": list(values),
                 }
             )
         return normalized
@@ -1207,6 +1225,9 @@ class OutputInvoiceCollectionQueryService:
                     start=ZERO,
                 )
             ),
+            "amountWithoutTax": _money(
+                sum((_decimal(row["invoice"]["amountWithoutTax"]) for row in rows), start=ZERO)
+            ),
             "collectedAmount": _money(
                 sum(
                     (
@@ -1291,7 +1312,7 @@ def _collection_status_for_facts(
     if invoice_sign < 0:
         return _collection_status(
             "unmatched_red",
-            "红票待核对",
+            "红票未关联蓝票",
             "红字发票尚未形成唯一、确定的蓝字发票配对关系。",
             collected_amount=ZERO,
             pending_amount=ZERO,
@@ -1343,7 +1364,7 @@ def _collection_status_from_snapshot(group: dict[str, Any]) -> dict[str, Any]:
             "warning",
         ),
         "unmatched_red": (
-            "红票待核对",
+            "红票未关联蓝票",
             "红字发票备注未形成唯一、确定的蓝字发票号码关系。",
             "danger",
         ),

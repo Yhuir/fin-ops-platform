@@ -9,6 +9,7 @@ import type {
   OutputInvoiceCollectionFilterFieldConfig,
   OutputInvoiceCollectionFilterOption,
   OutputInvoiceCollectionRow,
+  OutputInvoiceCollectionRowsResponse,
   OutputInvoiceCollectionSortDirection,
 } from "../../features/outputInvoiceCollections/types";
 import { formatMoney } from "../../features/money";
@@ -31,6 +32,7 @@ type OutputInvoiceCollectionsTableProps = {
   page: number;
   pageSize: number;
   total: number;
+  summary?: OutputInvoiceCollectionRowsResponse["summary"];
   refreshing?: boolean;
   sortField: string;
   sortDirection: OutputInvoiceCollectionSortDirection | "";
@@ -51,21 +53,19 @@ type OutputInvoiceCollectionsTableProps = {
 type Column = {
   id: string;
   label: string;
-  subLabel?: string;
   align?: "left" | "right";
   field?: string;
   extraFilters?: Array<{ field: string; label: string }>;
   group: "invoice" | "status" | "bank";
-  groupLabel?: string;
 };
 
 const columns: Column[] = [
-  { id: "invoiceNo", label: "发票号码", field: "invoice_no", extraFilters: [{ field: "invoice_date", label: "开票日期" }], group: "invoice", groupLabel: "销项发票" },
+  { id: "invoiceNo", label: "发票号码", field: "invoice_no", extraFilters: [{ field: "invoice_date", label: "开票日期" }], group: "invoice" },
   { id: "buyer", label: "购方", field: "buyer_name", group: "invoice" },
-  { id: "totalWithTax", label: "价税合计", subLabel: "税额/税率", field: "total_with_tax", align: "right", group: "invoice" },
+  { id: "totalWithTax", label: "价税合计", extraFilters: [{ field: "tax_rate", label: "税率" }], field: "total_with_tax", align: "right", group: "invoice" },
   { id: "business", label: "业务/货物劳务", field: "taxable_item_name", group: "invoice" },
-  { id: "collectionStatus", label: "状态", field: "collection_status", group: "status", groupLabel: "收款状态" },
-  { id: "bankCounterparty", label: "付款方/日期", field: "bank_counterparty_name", group: "bank", groupLabel: "收入流水" },
+  { id: "collectionStatus", label: "状态", field: "collection_status", group: "status" },
+  { id: "bankCounterparty", label: "付款方/日期", field: "bank_counterparty_name", group: "bank" },
   { id: "bankAmount", label: "收款金额", field: "bank_amount", align: "right", group: "bank" },
   { id: "bankSummary", label: "摘要", field: "bank_summary", group: "bank" },
 ];
@@ -75,6 +75,7 @@ const defaultFilterConfigs: Record<string, OutputInvoiceCollectionFilterFieldCon
   invoice_date: { field: "invoice_date", label: "开票日期", mode: "date", sortable: true, operators: ["between", "equals"] },
   buyer_name: { field: "buyer_name", label: "购方", mode: "enum_multi", sortable: true, operators: ["in", "contains"] },
   total_with_tax: { field: "total_with_tax", label: "价税合计", mode: "money", sortable: true, operators: ["between", "equals"] },
+  tax_rate: { field: "tax_rate", label: "税率", mode: "enum_multi", sortable: true, operators: ["in"] },
   taxable_item_name: { field: "taxable_item_name", label: "业务/货物劳务", mode: "enum_multi", sortable: true, operators: ["in", "contains"] },
   collection_status: { field: "collection_status", label: "收款状态", mode: "enum_multi", sortable: true, operators: ["in"] },
   bank_counterparty_name: { field: "bank_counterparty_name", label: "付款方/日期", mode: "enum_multi", sortable: true, operators: ["in", "contains"] },
@@ -91,6 +92,7 @@ export default function OutputInvoiceCollectionsTable({
   page,
   pageSize,
   total,
+  summary,
   refreshing = false,
   sortField,
   sortDirection,
@@ -129,12 +131,25 @@ export default function OutputInvoiceCollectionsTable({
             total={total}
           />
         )}
-        minWidth={1240}
+        header={<div className="output-invoice-collections-group-headings" aria-label="当前筛选合计">
+          {(["invoice", "status", "bank"] as const).map(group => (
+            <div key={group} className={`output-invoice-collections-group-header output-invoice-collections-table-sub-header--${group}`}>
+              <span className="output-invoice-collections-group-summary">
+                <strong>{group === "invoice" ? "销项发票" : group === "bank" ? "收入流水" : "收款状态"}</strong>
+                {group === "invoice" ? <>
+                  <span title="当前筛选全部发票的含税金额，红票按负数计入">含税金额合计 <b>{summary ? formatMoney(summary.totalWithTax) : "—"}</b></span>
+                  <span title="当前筛选全部发票的不含税金额，红票按负数计入">不含税金额合计 <b>{summary ? formatMoney(summary.amountWithoutTax) : "—"}</b></span>
+                </> : group === "bank" ? <span title="当前筛选发票可唯一归属的收入用途金额，已去重；不等于父流水原始金额合计">收入合计 <b>{summary ? formatMoney(summary.collectedAmount) : "—"}</b></span> : null}
+              </span>
+            </div>
+          ))}
+        </div>}
+        minWidth={1246}
         selectableText
         scrollMode="contained"
       >
         <FinanceTableHeader>
-          {columns.map((column, columnIndex) => {
+          {columns.map((column) => {
             const config = column.field ? fieldConfig(column.field) : undefined;
             return (
               <FinanceTableColumn
@@ -146,13 +161,10 @@ export default function OutputInvoiceCollectionsTable({
                 )}
                 columnRole={columnRole(column)}
                 id={column.id}
-                isRowHeader={columnIndex === 0}
+                isRowHeader={column.id === "invoiceNo"}
                 key={column.id}
               >
                 <span className="output-invoice-collections-table-column-heading">
-                  <span aria-hidden={!column.groupLabel} className="output-invoice-collections-table-column-group">
-                    {column.groupLabel ?? "\u00a0"}
-                  </span>
                   <span className="output-invoice-collections-table-header-stack">
                     {column.field && column.field !== "collection_status" && config ? (
                       <OutputInvoiceCollectionFilterMenu
@@ -170,18 +182,16 @@ export default function OutputInvoiceCollectionsTable({
                     {column.extraFilters?.map((extra) => {
                       const extraConfig = fieldConfig(extra.field);
                       return extraConfig ? (
-                        <OutputInvoiceCollectionFilterMenu
-                          key={extra.field}
+                        <span key={extra.field} className="output-invoice-collections-table-header-sub-label"><OutputInvoiceCollectionFilterMenu
                           currentFilter={currentFilter(extra.field) as OutputInvoiceCollectionFilterValue | null}
                           fieldConfig={{ ...extraConfig, label: extra.label }}
                           onApply={onFilterApply}
                           onClear={onFilterClear}
                           onSort={(direction) => onSortChange(extra.field, direction)}
                           options={filterOptions[extra.field] ?? []}
-                        />
+                        /></span>
                       ) : null;
                     })}
-                    {column.subLabel ? <span className="output-invoice-collections-table-header-sub-label">{column.subLabel}</span> : null}
                   </span>
                 </span>
               </FinanceTableColumn>
@@ -263,7 +273,7 @@ function DataRow({
       </FinanceTableCell>
       <FinanceTableCell className="output-invoice-collections-table-cell output-invoice-collections-table-cell--amount output-invoice-collections-table-cell--small-border" columnRole="amount" textValue={row.invoice.totalWithTax}>
         <TextLine numeric strong value={formatMoney(row.invoice.totalWithTax)} />
-        <TextLine muted numeric value={taxSummary(row.invoice.taxAmount, row.invoice.taxRate)} />
+        <span className="output-invoice-collections-tax-rate">{row.invoice.taxRate}</span>
       </FinanceTableCell>
       <FinanceTableCell className="output-invoice-collections-table-cell output-invoice-collections-table-cell--small-border" columnRole="description" textValue={businessTextValue}>
         <TextLine strong value={row.invoice.specificBusinessType} />
@@ -466,9 +476,6 @@ function accountLabel(bankName: string, accountLast4: string) {
   return [bankName, accountLast4].filter(Boolean).join(" ").trim();
 }
 
-function taxSummary(taxAmount: string, taxRate: string) {
-  return [formatMoney(taxAmount), taxRate].filter((value) => value && value !== "—").join(" / ");
-}
 
 function displayInvoiceNo(row: OutputInvoiceCollectionRow) {
   const invoice = row.invoice;

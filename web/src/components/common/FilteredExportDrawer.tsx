@@ -7,11 +7,12 @@ import './filtered-export.css';
 
 type Props = {
   title: string; unit: '张' | '笔'; onClose: () => void;
+  initialSelection?: ExportSelection;
   loadSummary: (selection: ExportSelection, signal: AbortSignal) => Promise<ExportSummary>;
   download: (selection: ExportSelection) => Promise<{ blob: Blob; fileName: string }>;
 };
-export default function FilteredExportDrawer({ title, unit, onClose, loadSummary, download }: Props) {
-  const [selection, setSelection] = useState<ExportSelection>({ values: {}, startDate: '', endDate: '' });
+export default function FilteredExportDrawer({ title, unit, onClose, loadSummary, download, initialSelection }: Props) {
+  const [selection, setSelection] = useState<ExportSelection>(() => initialSelection ?? { values: {}, startDate: '', endDate: '' });
   const [result, setResult] = useState<{ selection: ExportSelection; summary: ExportSummary } | null>(null);
   const [error, setError] = useState('');
   const [downloading, setDownloading] = useState(false);

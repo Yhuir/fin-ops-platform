@@ -18,6 +18,9 @@
 - 红票的目标只从原始备注精确的“被红冲蓝字数电发票号码”标记提取，并唯一匹配正票，不用金额猜测。
 - 六类状态为 pending_collection、partial_collected、collected、reversed_by_red、reverses_blue、unmatched_red。
 - 收款状态候选排除自身条件并补齐合法零数量状态；rows 与统计在同一快照，分页不影响发票张数。
+- 列表金额列展示价税合计及灰色税率，原始税额仍可在详情和 Excel 查看。税率按来源文本统一为百分数（`0.13` 与 `13%` 同选项），空值为“未提供”，不从金额反推；`0%`、免税、不征税分别保留，来源为 `mixed` 时明确显示“多税率”。税率勾选为 OR，与其他条件为 AND；候选排除自身筛选，保留搜索、日期及其他列条件。
+- 分组表头显示当前完整筛选范围的含税、不含税金额及收入用途合计，红票金额带负号，不按当前页求和。收入合计只使用可唯一归属的收入用途，按业务身份去重，不能将同额不同流水合并。加载或刷新失败时不展示旧合计为新结果。
+- `unmatched_red` 展示名为“红票未关联蓝票”。导出抽屉继承页面税率、搜索和其他筛选，初始状态与日期也跟随页面；抽屉可调整收款状态和日期，预览与下载共用同一请求口径。
 - 父流水原始金额与用途收款金额分别表达，红蓝票不能重复占用收款。
 - 导出使用同一业务筛选、排序和口径，20,000 行上限；原始详情有界读取，不暴露内部关系或 raw payload。
 
@@ -35,6 +38,7 @@
 - [backend/src/fin_ops_platform/services/output_invoice_collection_canonical_query_service.py](../../../backend/src/fin_ops_platform/services/output_invoice_collection_canonical_query_service.py)
 - [backend/src/fin_ops_platform/services/output_invoice_collection_service.py](../../../backend/src/fin_ops_platform/services/output_invoice_collection_service.py)
 - [backend/src/fin_ops_platform/services/output_invoice_reversal.py](../../../backend/src/fin_ops_platform/services/output_invoice_reversal.py)
+- [backend/src/fin_ops_platform/services/output_invoice_tax_rate.py](../../../backend/src/fin_ops_platform/services/output_invoice_tax_rate.py)
 - [backend/src/fin_ops_platform/services/postgres_repositories/invoice_usage_collection_query.py](../../../backend/src/fin_ops_platform/services/postgres_repositories/invoice_usage_collection_query.py)
 - [backend/src/fin_ops_platform/services/workbench_free_matching_engine.py](../../../backend/src/fin_ops_platform/services/workbench_free_matching_engine.py)
 - [tests/test_invoice_usage_collection_canonical_query.py](../../../tests/test_invoice_usage_collection_canonical_query.py)
@@ -43,5 +47,6 @@
 - [tests/test_bank_split_document_scope_postgres.py](../../../tests/test_bank_split_document_scope_postgres.py)
 - [web/src/test/OutputInvoiceCollectionApi.test.ts](../../../web/src/test/OutputInvoiceCollectionApi.test.ts)
 - [web/e2e/output-invoice-status-tabs.spec.ts](../../../web/e2e/output-invoice-status-tabs.spec.ts)
+- [web/e2e/production-output-invoice-summary.spec.ts](../../../web/e2e/production-output-invoice-summary.spec.ts)：显式生产只读模式下核验筛选、合计、导出和详情。
 
 通用查询、事务、权限与错误边界见[系统架构](../../../ARCHITECTURE.md)；验证方法见[开发说明](../../development.md)。测试文件是可执行证据，本文不保存某一次测试的通过记录。

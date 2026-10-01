@@ -78,6 +78,7 @@ class NightlyCITests(unittest.TestCase):
         production_specs = {
             "production-admin-app-health.spec.ts",
             "production-route-shell.spec.ts",
+            "production-output-invoice-summary.spec.ts",
             "production-cash-readonly.spec.ts",
             "production-date-defaults.spec.ts",
             "production-count-stability.spec.ts",

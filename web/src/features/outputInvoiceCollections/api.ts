@@ -305,6 +305,7 @@ function mapRowsResponse(payload: unknown): OutputInvoiceCollectionRowsResponse 
       return {
         invoiceCount: numberValue(camelOrSnake(summary, "invoiceCount", "invoice_count"), 0),
         totalWithTax: stringValue(camelOrSnake(summary, "totalWithTax", "total_with_tax")),
+        amountWithoutTax: stringValue(camelOrSnake(summary, "amountWithoutTax", "amount_without_tax")),
         collectedAmount: stringValue(camelOrSnake(summary, "collectedAmount", "collected_amount")),
         pendingAmount: stringValue(camelOrSnake(summary, "pendingAmount", "pending_amount")),
         pendingCollectionCount: numberValue(camelOrSnake(summary, "pendingCollectionCount", "pending_collection_count"), 0),
@@ -403,15 +404,21 @@ export async function fetchOutputInvoiceCollectionRows(request: FetchRowsRequest
   return mapRowsResponse(payload);
 }
 
-function exportRequest(selection: ExportSelection) { return { page: 1, pageSize: 1, keyword: '', month: '', invoiceDateFrom: selection.startDate, invoiceDateTo: selection.endDate, filters: selectionFilters(selection), sortField: 'invoice_date', sortDirection: 'desc' as const }; }
-export async function fetchOutputInvoiceCollectionExportSummary(selection: ExportSelection, signal: AbortSignal): Promise<ExportSummary> {
-  const url = `/api/output-invoice-collections/export-summary?${buildRowsQuery(exportRequest(selection))}`;
+function exportRequest(selection: ExportSelection, query: FetchRowsRequest): FetchRowsRequest {
+  return { ...query, page: 1, pageSize: 1,
+    invoiceDateFrom: selection.startDate, invoiceDateTo: selection.endDate,
+    month: selection.startDate || selection.endDate ? '' : query.month,
+    filters: [...query.filters.filter(filter => filter.field !== 'collection_status' && !(filter.field in selection.values)), ...selectionFilters(selection)],
+  };
+}
+export async function fetchOutputInvoiceCollectionExportSummary(selection: ExportSelection, signal: AbortSignal, query: FetchRowsRequest): Promise<ExportSummary> {
+  const url = `/api/output-invoice-collections/export-summary?${buildRowsQuery(exportRequest(selection, query))}`;
   const raw = await apiRequestJson<{ row_count: number; filter_options: { field: string; options: ExportOption[] }[] }>(url, { method: 'GET', signal });
   const status = raw.filter_options.find(item => item.field === 'collection_status');
   if (!status) throw new Error('收款状态统计缺失');
   return { rowCount: raw.row_count, groups: [{ field: 'collection_status', label: '收款状态', options: status.options }] };
 }
-export function downloadOutputInvoiceCollectionSelection(selection: ExportSelection) { return downloadOutputInvoiceCollectionExport(exportRequest(selection)); }
+export function downloadOutputInvoiceCollectionSelection(selection: ExportSelection, query: FetchRowsRequest) { return downloadOutputInvoiceCollectionExport(exportRequest(selection, query)); }
 
 export async function downloadOutputInvoiceCollectionExport(request: FetchRowsRequest): Promise<OutputInvoiceCollectionExportDownload> {
   return requestExportBlob(`/api/output-invoice-collections/export?${buildRowsQuery(request, false)}`, {

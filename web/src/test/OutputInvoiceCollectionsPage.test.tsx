@@ -293,7 +293,7 @@ const rowsPayload = {
       displayNo: "XSFP-UNMATCHED-RED-001",
       totalWithTax: "-10000.00",
       statusCode: "unmatched_red",
-      statusLabel: "红票待核对",
+      statusLabel: "红票未关联蓝票",
       statusReason: "红字发票尚未形成唯一、确定的蓝字发票配对关系。",
       collectedAmount: "0.00",
       pendingAmount: "0.00",
@@ -326,7 +326,7 @@ const rowsPayload = {
       options: [
         { value: "reversed_by_red", label: "蓝票已被红冲", count: 1 },
         { value: "reverses_blue", label: "红票已关联蓝票", count: 1 },
-        { value: "unmatched_red", label: "红票待核对", count: 1 },
+        { value: "unmatched_red", label: "红票未关联蓝票", count: 1 },
         { value: "collected", label: "已收款", count: 1 },
         { value: "partial_collected", label: "部分收款", count: 1 },
         { value: "pending_collection", label: "收款待核对", count: 1 },
@@ -466,9 +466,10 @@ describe("销项发票收款情况", () => {
 
     const table = await screen.findByRole("grid", { name: "销项发票收款情况表" });
     expect(table.closest(".finance-table")).toHaveClass("finance-table--contained");
-    expect(within(table).getByText("销项发票")).toBeVisible();
-    expect(within(table).getByText("收款状态")).toBeVisible();
-    expect(within(table).getByText("收入流水")).toBeVisible();
+    const groups = screen.getByLabelText("当前筛选合计");
+    expect(within(groups).getByText("销项发票")).toBeVisible();
+    expect(within(groups).getByText("收款状态")).toBeVisible();
+    expect(within(groups).getByText("收入流水")).toBeVisible();
     expect(within(table).getByText("蓝票已被红冲")).toBeVisible();
     expect(within(table).getByText("红票已关联蓝票")).toBeVisible();
     expect(within(table).getByRole("button", { name: "红蓝票 · 2" })).toBeVisible();
@@ -490,6 +491,40 @@ describe("销项发票收款情况", () => {
     expect(screen.queryByRole("button", { name: "收款状态规则" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "收据编号设置" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "状态/提醒" })).not.toBeInTheDocument();
+  });
+
+  test("税率勾选保留其它选项、全范围合计，刷新失败不显示旧金额", async () => {
+    const user = userEvent.setup();
+    let fail = false;
+    const requests: URL[] = [];
+    installFetchMock(url => {
+      requests.push(url);
+      if (fail) throw new Error('统计读取失败');
+      return {...rowsPayload,
+        rows: rowsPayload.rows.map(row => ({...row,invoice:{...row.invoice,tax_rate:'13%'}})),
+        summary: {invoiceCount:36,totalWithTax:'5680807.61',amountWithoutTax:'5030000.00',collectedAmount:'1991700.08'},
+        filter_options:[...rowsPayload.filter_options,{field:'tax_rate',label:'税率',mode:'enum_multi',sortable:true,operators:['in'],options:[{value:'13%',label:'13%',count:19},{value:'6%',label:'6%',count:9},{value:'未提供',label:'未提供',count:6}]}],
+      };
+    });
+    renderAuthenticatedAppAt('/output-invoice-collections');
+    const totals = await screen.findByLabelText('当前筛选合计');
+    expect(totals).toHaveTextContent('5680807.61');
+    expect(totals).toHaveTextContent('5030000.00');
+    expect(totals).toHaveTextContent('1991700.08');
+    expect(screen.queryByText('税额/税率')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button',{name:'筛选 税率'}));
+    await user.click(await screen.findByRole('checkbox',{name:/13%/}));
+    await waitFor(() => expect(requests.at(-1)?.searchParams.get('filters')).toContain('13'));
+    expect(screen.getByRole('checkbox',{name:/未提供/})).toBeVisible();
+    await user.click(screen.getByRole('checkbox',{name:/6%/}));
+    await waitFor(() => expect(JSON.parse(decodeURIComponent(requests.at(-1)!.searchParams.get('filters')!))[0].values).toEqual(['13%','6%']));
+    expect(totals).toHaveTextContent('5680807.61');
+    await user.keyboard('{Escape}');
+    fail = true;
+    await user.click(screen.getByRole('button',{name:'刷新',exact:true}));
+    await screen.findByText('统计读取失败');
+    expect(totals).not.toHaveTextContent('5680807.61');
+    expect(totals).toHaveTextContent('含税金额合计 —');
   });
 
   test("收款状态只显示状态与必要金额并保留多流水行的原生表格单元格", async () => {
@@ -519,7 +554,7 @@ describe("销项发票收款情况", () => {
     expect(within(collectedRow).getByRole("button", { name: "收入流水 · 2" })).toBeVisible();
     expect(collectedRow.querySelector(".output-invoice-collections-table-cell--status")).not.toHaveClass("output-invoice-collection-status-cell");
 
-    expect(within(unmatchedRedRow).getByText("红票待核对")).toBeVisible();
+    expect(within(unmatchedRedRow).getByText("红票未关联蓝票")).toBeVisible();
     expect(within(reversedBlueRow).getByText("蓝票已被红冲")).toBeVisible();
     expect(within(reversesBlueRow).getByText("红票已关联蓝票")).toBeVisible();
     for (const redStatusRow of [unmatchedRedRow, reversedBlueRow, reversesBlueRow]) {

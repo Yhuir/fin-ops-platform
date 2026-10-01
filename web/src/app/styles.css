@@ -4102,35 +4102,35 @@ textarea {
 }
 
 .output-invoice-collections-col-invoiceNo {
-  width: 150px;
+  width: calc(100% * 150 / 1246);
 }
 
 .output-invoice-collections-col-buyer {
-  width: 160px;
+  width: calc(100% * 160 / 1246);
 }
 
 .output-invoice-collections-col-totalWithTax {
-  width: 124px;
+  width: calc(100% * 124 / 1246);
 }
 
 .output-invoice-collections-col-business {
-  width: 170px;
+  width: calc(100% * 170 / 1246);
 }
 
 .output-invoice-collections-col-collectionStatus {
-  width: 190px;
+  width: calc(100% * 190 / 1246);
 }
 
 .output-invoice-collections-col-bankCounterparty {
-  width: 160px;
+  width: calc(100% * 160 / 1246);
 }
 
 .output-invoice-collections-col-bankAmount {
-  width: 142px;
+  width: calc(100% * 142 / 1246);
 }
 
 .output-invoice-collections-col-bankSummary {
-  width: 150px;
+  width: calc(100% * 150 / 1246);
 }
 
 .output-invoice-collections-table-sub-header {
@@ -4172,12 +4172,43 @@ textarea {
   gap: 5px;
 }
 
-.output-invoice-collections-table-column-group {
-  min-height: 16px;
+.output-invoice-collections-group-headings {
+  display: grid;
+  grid-template-columns: 604fr 190fr 452fr;
+  min-width: 1246px;
+}
+
+.output-invoice-collections-group-header {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--fp-border);
+}
+
+.output-invoice-collections-group-header + .output-invoice-collections-group-header {
+  border-left: 2px solid var(--fp-border);
+}
+
+.output-invoice-collections-group-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px 18px;
   color: var(--fp-text-primary);
   font-size: 12px;
-  font-weight: 700;
-  line-height: 1.2;
+  line-height: 1.4;
+}
+
+.output-invoice-collections-group-summary > span {
+  color: var(--fp-text-secondary);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.output-invoice-collections-group-summary b {
+  margin-left: 4px;
+  color: var(--fp-text-primary);
+  font-family: var(--fp-table-data-font);
+  font-variant-numeric: tabular-nums;
 }
 
 .output-invoice-collection-status-content {
@@ -4560,6 +4591,19 @@ textarea {
   font-family: var(--fp-table-data-font);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.output-invoice-collections-tax-rate {
+  display: block;
+  margin-top: 2px;
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-caption);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.output-invoice-collections-table-cell--amount > .output-invoice-collections-table-text--strong {
+  font-size: var(--fp-text-data);
 }
 
 .output-invoice-collections-table-tag {

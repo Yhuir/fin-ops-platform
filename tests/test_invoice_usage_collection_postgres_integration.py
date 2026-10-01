@@ -141,6 +141,7 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
             {
                 "invoiceCount": 2,
                 "totalWithTax": "0.00",
+                "amountWithoutTax": "0.00",
                 "collectedAmount": "0.00",
                 "pendingAmount": "0.00",
                 "pendingCollectionCount": 0,
@@ -254,6 +255,7 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
             {
                 "invoiceCount": 1,
                 "totalWithTax": "100.00",
+                "amountWithoutTax": "100.00",
                 "collectedAmount": "120.00",
                 "pendingAmount": "0.00",
                 "pendingCollectionCount": 0,

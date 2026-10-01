@@ -33,9 +33,10 @@ test.describe("销项发票收款情况", () => {
     const table = page.getByRole("grid", { name: "销项发票收款情况表" });
     await expect(table).toBeVisible();
     await expect(table.getByRole("columnheader")).toHaveCount(8);
-    await expect(table.locator(".output-invoice-collections-table-column-group", { hasText: "销项发票" })).toHaveCount(1);
-    await expect(table.locator(".output-invoice-collections-table-column-group", { hasText: "收款状态" })).toHaveCount(1);
-    await expect(table.locator(".output-invoice-collections-table-column-group", { hasText: "收入流水" })).toHaveCount(1);
+    const groups = page.getByLabel("当前筛选合计");
+    await expect(groups.getByText("销项发票", {exact:true})).toHaveCount(1);
+    await expect(groups.getByText("收款状态", {exact:true})).toHaveCount(1);
+    await expect(groups.getByText("收入流水", {exact:true})).toHaveCount(1);
     await expect(table.getByText("蓝票已被红冲")).toBeVisible();
     await expect(table.getByText("红票已关联蓝票")).toBeVisible();
     await expect(table.getByRole("button", { name: "红蓝票 · 2" })).toHaveCount(2);
@@ -90,7 +91,7 @@ test.describe("销项发票收款情况", () => {
     expect((await previewResponse).status()).toBe(200);
     const exportDrawer = page.getByRole("dialog", { name: "导出销项发票" });
     await expect(exportDrawer).toBeVisible();
-    await expect(exportDrawer.getByText('导出 2 张')).toBeVisible();
+    await expect(exportDrawer.getByText('导出 1 张')).toBeVisible();
     await expect(exportDrawer.getByRole('grid')).toHaveCount(0);
 
     let download: Download | undefined;
@@ -100,7 +101,9 @@ test.describe("销项发票收款情况", () => {
     expect(download.suggestedFilename()).toBe("output-invoice-collections.xlsx");
     const savePath = testInfo.outputPath("output-invoice-collections.xlsx");
     await download.saveAs(savePath);
-    expect(await readXlsxText(savePath)).toContain("XSFP-E2E-0001");
+    const exported = await readXlsxText(savePath);
+    expect(exported).toContain("XSFP-E2E-0002");
+    expect(exported).not.toContain("XSFP-E2E-0001");
 
     expect(api.calls.some((call) => /^(POST|PUT|PATCH|DELETE) /.test(call))).toBe(false);
     await expectNoUnexpectedSuccessUiErrors(page);

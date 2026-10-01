@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { fetchOutputInvoiceCollectionRows } from "../features/outputInvoiceCollections/api";
+import { fetchOutputInvoiceCollectionRows, fetchOutputInvoiceCollectionExportSummary, downloadOutputInvoiceCollectionSelection } from "../features/outputInvoiceCollections/api";
+import { normalizeOutputTaxRate } from "../features/outputInvoiceCollections/taxRate";
 import { OUTPUT_COLLECTION_STATUS_CODES } from "../features/outputInvoiceCollections/types";
 
 const request = { page: 1, pageSize: 20, keyword: "", invoiceDateFrom: "", invoiceDateTo: "", month: "", filters: [], sortField: "", sortDirection: "" as const };
@@ -10,6 +11,32 @@ function mockResponse(value: unknown) {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(value), { headers: { "Content-Type": "application/json" } }));
 }
 afterEach(() => vi.restoreAllMocks());
+
+test.each([["0.13", "13%"], ["13.00%", "13%"], ["0", "0%"], ["", "未提供"], ["免税", "免税"], ["不征税", "不征税"], ["mixed", "多税率"]])("restores tax rate %s as %s", (raw, expected) => {
+  expect(normalizeOutputTaxRate(raw)).toBe(expected);
+});
+
+test("maps full-scope signed totals and carries tax/search/status into preview and download", async () => {
+  const totals = { invoiceCount: 3, totalWithTax: "-100.00", amountWithoutTax: "-88.50", collectedAmount: "70.00", pendingAmount: "0.00", pendingCollectionCount: 0, partialCollectionCount: 0 };
+  const calls: URL[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
+    const url = new URL(String(input), "http://localhost"); calls.push(url);
+    if (url.pathname.endsWith('/export')) return new Response('xlsx', {headers:{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}});
+    const result = url.pathname.endsWith('/export-summary') ? {row_count:3,filter_options:[{field:'collection_status',options:options()}]} : {...payload(),summary:totals};
+    return new Response(JSON.stringify(result),{headers:{'Content-Type':'application/json'}});
+  });
+  expect((await fetchOutputInvoiceCollectionRows(request)).summary).toEqual(totals);
+  const query = {...request,keyword:'客户',filters:[{field:'tax_rate',operator:'in' as const,values:['13%','未提供']}],sortField:'total_with_tax',sortDirection:'asc' as const};
+  const selection = {values:{collection_status:['collected']},startDate:'2026-01-01',endDate:'2026-12-31'};
+  expect((await fetchOutputInvoiceCollectionExportSummary(selection,new AbortController().signal,query)).rowCount).toBe(3);
+  await downloadOutputInvoiceCollectionSelection(selection,query);
+  for (const url of calls.slice(1)) {
+    expect(JSON.parse(decodeURIComponent(url.searchParams.get('filters')!))).toEqual([...query.filters,{field:'collection_status',operator:'in',values:['collected']}]);
+    expect(url.searchParams.get('keyword')).toBe('客户');
+    expect(url.searchParams.get('invoice_date_from')).toBe('2026-01-01');
+    expect(url.searchParams.get('sort_field')).toBe('total_with_tax');
+  }
+});
 
 test("uses full-scope counts instead of current page length and retains real zeros", async () => {
   mockResponse(payload());

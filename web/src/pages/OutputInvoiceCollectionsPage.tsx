@@ -1,4 +1,5 @@
 import InvoiceCountSegments from "../components/common/InvoiceCountSegments";
+import { normalizeOutputTaxRate } from "../features/outputInvoiceCollections/taxRate";
 import { Button } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -27,6 +28,7 @@ import type {
   OutputInvoiceCollectionFilterOption,
   OutputInvoiceCollectionQuery,
   OutputInvoiceCollectionRow,
+  OutputInvoiceCollectionRowsResponse,
   OutputInvoiceCollectionSortDirection,
   OutputInvoiceCollectionStatistics,
   OutputInvoiceCollectionWorkflow,
@@ -88,7 +90,10 @@ function validateQuery(value: unknown): value is OutputInvoiceCollectionQuery {
 
 function restoreQuery(raw: unknown): OutputInvoiceCollectionQuery {
   if (!validateQuery(raw)) return initialQuery;
-  const filters = raw.filters.filter((filter) => !["invoice_date", "bank_trade_time"].includes(filter.field)).map(filter => (['collection_status'].includes(filter.field) && filter.values && filter.values.length > 1 ? { ...filter, values: [filter.values[0]] } : filter));
+  const filters = raw.filters.filter((filter) => !["invoice_date", "bank_trade_time"].includes(filter.field)).map(filter => {
+    if (filter.field === "tax_rate" && filter.values) return { ...filter, values: [...new Set(filter.values.map(normalizeOutputTaxRate))] };
+    return filter.field === "collection_status" && filter.values && filter.values.length > 1 ? { ...filter, values: [filter.values[0]] } : filter;
+  });
   const dateScopeChanged = Boolean(raw.month || raw.invoiceDateFrom || raw.invoiceDateTo)
     || filters.length !== raw.filters.length;
   return {
@@ -153,6 +158,7 @@ export default function OutputInvoiceCollectionsPage() {
   const setQuery = querySession.setValue;
   const [rows, setRows] = useState<OutputInvoiceCollectionRow[]>([]);
   const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState<OutputInvoiceCollectionRowsResponse["summary"]>();
   const [statistics, setStatistics] = useState<OutputInvoiceCollectionStatistics | null>(null);
   const [filterConfigs, setFilterConfigs] = useState<OutputInvoiceCollectionFilterFieldConfig[]>([]);
   const [filterOptions, setFilterOptions] = useState<Record<string, OutputInvoiceCollectionFilterOption[]>>({});
@@ -192,12 +198,14 @@ export default function OutputInvoiceCollectionsPage() {
     const requestId = ++requestIdRef.current;
     mode === "reset" ? setLoading(true) : setRefreshing(true);
     setError(null);
+    setSummary(undefined);
     fetchOutputInvoiceCollectionRows({ ...rowsRequest, signal })
       .then((payload) => {
         if (requestId !== requestIdRef.current) return;
         hasLoadedRef.current = true;
         setRows(payload.rows);
         setTotal(payload.pagination.total);
+        setSummary(payload.summary);
         setStatistics(payload.statistics ?? null);
         setFilterConfigs(payload.filterConfig.length ? payload.filterConfig : configsFromOptions(payload.filterOptions));
         setFilterOptions(optionsByField(payload.filterOptions));
@@ -393,6 +401,7 @@ export default function OutputInvoiceCollectionsPage() {
                 sortDirection={query.sortDirection}
                 sortField={query.sortField}
                 total={total}
+                summary={summary}
               />
             )}
           </div>
@@ -405,6 +414,7 @@ export default function OutputInvoiceCollectionsPage() {
         target={query.detailTarget}
       />
       <OutputInvoiceCollectionExportDrawer
+        query={rowsRequest}
         onClose={() => setQuery((current) => ({ ...current, activeWorkflow: null }))}
         open={query.activeWorkflow?.kind === "export"}
       />

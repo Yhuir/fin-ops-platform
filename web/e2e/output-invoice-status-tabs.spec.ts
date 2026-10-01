@@ -3,8 +3,42 @@ import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
 const states = [
   ["pending_collection", "收款待核对"], ["partial_collected", "部分收款"], ["collected", "已收款"],
-  ["reversed_by_red", "蓝票已被红冲"], ["reverses_blue", "红票已关联蓝票"], ["unmatched_red", "红票待核对"],
+  ["reversed_by_red", "蓝票已被红冲"], ["reverses_blue", "红票已关联蓝票"], ["unmatched_red", "红票未关联蓝票"],
 ] as const;
+
+test("tax menu and grouped totals stay aligned with invoice and bank columns", async ({page}, info) => {
+  const api = await installDeterministicApiMocks(page,{sessionMode:"user",outputInvoiceCollectionListInteractions:true});
+  await page.goto('/output-invoice-collections');
+  const totals = page.getByLabel('当前筛选合计');
+  await expect(totals).toContainText('含税金额合计 1020032.00');
+  await expect(totals).toContainText('不含税金额合计 962294.34');
+  await expect(page.getByText('税额/税率',{exact:true})).toHaveCount(0);
+  for (const width of [1920,1440,960]) {
+    await page.setViewportSize({width,height:1000});
+    const statusHeader = await page.locator('.output-invoice-collections-col-collectionStatus').boundingBox();
+    const statusGroup = await page.locator('.output-invoice-collections-group-header').nth(1).boundingBox();
+    const bankHeader = await page.locator('.output-invoice-collections-col-bankCounterparty').boundingBox();
+    const bankGroup = await page.locator('.output-invoice-collections-group-header').nth(2).boundingBox();
+    expect(Math.abs(statusHeader!.x-statusGroup!.x)).toBeLessThan(3);
+    expect(Math.abs(bankHeader!.x-bankGroup!.x)).toBeLessThan(3);
+    for (const label of await totals.locator('span[title]').all()) {
+      expect(await label.evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);
+    }
+    await page.screenshot({path:info.outputPath(`output-totals-${width}.png`),animations:'disabled'});
+  }
+  await page.setViewportSize({width:1440,height:1000});
+  await page.getByRole('button',{name:'筛选 税率',exact:true}).click();
+  const changed = page.waitForResponse(r=>new URL(r.url()).pathname==='/api/output-invoice-collections/rows');
+  await page.locator('label').filter({has:page.getByRole('checkbox',{name:/6%/})}).click();
+  expect(JSON.parse(decodeURIComponent(new URL((await changed).url()).searchParams.get('filters')!))).toEqual([{field:'tax_rate',operator:'in',values:['6%']}]);
+  await expect(page.getByRole('checkbox',{name:/6%/})).toBeChecked();
+  await page.screenshot({path:info.outputPath('output-tax-menu.png'),animations:'disabled'});
+  await page.keyboard.press('Escape');
+  const preview = page.waitForResponse(r=>new URL(r.url()).pathname==='/api/output-invoice-collections/export-summary');
+  await page.getByRole('button',{name:'筛选内容导出'}).click();
+  expect(decodeURIComponent(new URL((await preview).url()).searchParams.get('filters')!)).toContain('tax_rate');
+  expect(api.count('GET /api/output-invoice-collections/filter-options')).toBe(0);
+});
 
 test("all status tabs use invoice counts, one query, and the same export filters", async ({ page }, info) => {
   const api = await installDeterministicApiMocks(page, { sessionMode: "user", outputInvoiceCollectionListInteractions: true });
@@ -46,7 +80,7 @@ test("all status tabs use invoice counts, one query, and the same export filters
   const previewResponse = page.waitForResponse(r => new URL(r.url()).pathname === "/api/output-invoice-collections/export-summary");
   await page.getByRole("button", { name: "筛选内容导出" }).click();
   const previewUrl = new URL((await previewResponse).url());
-  expect(previewUrl.searchParams.has("filters")).toBe(false);
+  expect(JSON.parse(decodeURIComponent(previewUrl.searchParams.get("filters")!))).toEqual([{field:"collection_status",operator:"in",values:["reversed_by_red"]}]);
   expect(api.count("GET /api/output-invoice-collections/filter-options")).toBe(0);
   expect(api.calls.some(call => /^(POST|PUT|PATCH|DELETE) /.test(call))).toBe(false);
   expect(errors).toEqual([]);
@@ -87,7 +121,7 @@ test("all seven statuses fit without scrolling at desktop, narrow and scaled wid
   await page.screenshot({ path: info.outputPath('statuses-125-percent.png'), animations: 'disabled' });
   await tabs.getByRole('tab', { name: /^全部 / }).focus();
   await page.keyboard.press('End');
-  await expect(tabs.getByRole('tab', { name: /^红票待核对 / })).toBeFocused();
+  await expect(tabs.getByRole('tab', { name: /^红票未关联蓝票 / })).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(tabs.getByRole('tab', { name: /^红票待核对 / })).toHaveAttribute('aria-selected', 'true');
+  await expect(tabs.getByRole('tab', { name: /^红票未关联蓝票 / })).toHaveAttribute('aria-selected', 'true');
 });

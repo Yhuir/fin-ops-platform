@@ -6384,11 +6384,18 @@ function outputInvoiceCollectionRowsPayload(
     })),
   });
 
+  const rateScopeUrl = url ? new URL(url) : undefined;
+  rateScopeUrl?.searchParams.set("filters", JSON.stringify(parseOutputInvoiceCollectionFilters(url).filter(filter => filter.field !== "tax_rate")));
+  const rateRows = applyOutputInvoiceCollectionListQuery(rows, rateScopeUrl);
+  const rates = [...new Set(rateRows.map(row => outputInvoiceCollectionFieldValue(row, "tax_rate")))];
+  facets.push({field:"tax_rate",label:"税率",mode:"enum_multi",sortable:true,operators:["in"],options:rates.map(value=>({value,label:value,count:rateRows.filter(row=>outputInvoiceCollectionFieldValue(row,"tax_rate")===value).length}))});
+
   return {
     rows: pageRows,
     summary: {
       invoice_count: filteredRows.length,
-      total_with_tax: "12,345.67",
+      total_with_tax: filteredRows.reduce((sum,row)=>sum+Number(outputInvoiceCollectionNestedString(row,["invoice","total_with_tax"]).replaceAll(",","")),0).toFixed(2),
+      amount_without_tax: filteredRows.reduce((sum,row)=>sum+Number(outputInvoiceCollectionNestedString(row,["invoice","amount_without_tax"]).replaceAll(",","")),0).toFixed(2),
       collected_amount: "0.00",
       pending_amount: "65,540.00",
       pending_collection_count: includeInvoiceImportRows ? 1 : 0,
@@ -6443,6 +6450,7 @@ function outputInvoiceCollectionNestedString(row: Record<string, unknown>, path:
 }
 
 function outputInvoiceCollectionFieldValue(row: Record<string, unknown>, field: string) {
+  if (field === "tax_rate") return outputInvoiceCollectionNestedString(row, ["invoice", "tax_rate"]);
   if (field === "invoice_no") {
     return outputInvoiceCollectionNestedString(row, ["invoice", "display_no"])
       || outputInvoiceCollectionNestedString(row, ["invoice", "invoice_no"]);
@@ -6520,7 +6528,7 @@ function outputInvoiceCollectionFilterOptionsPayload() {
         options: [
           { value: "reversed_by_red", label: "蓝票已被红冲", count: 1 },
           { value: "reverses_blue", label: "红票已关联蓝票", count: 1 },
-          { value: "unmatched_red", label: "红票待核对", count: 0 },
+          { value: "unmatched_red", label: "红票未关联蓝票", count: 0 },
           { value: "collected", label: "已收款", count: 0 },
           { value: "partial_collected", label: "部分收款", count: 0 },
           { value: "pending_collection", label: "收款待核对", count: 1 },
@@ -6538,11 +6546,14 @@ function outputInvoiceCollectionFilterOptionsPayload() {
   };
 }
 
-function outputInvoiceCollectionExportSummaryPayload() {
-  return {row_count:2,filter_options:[{field:'collection_status',options:[{value:'reversed_by_red',label:'蓝票已被红冲',count:1},{value:'reverses_blue',label:'红票已关联蓝票',count:1}]}]};
+function outputInvoiceCollectionExportSummaryPayload(url: URL) {
+  const payload = outputInvoiceCollectionRowsPayload(url);
+  return {row_count:payload.pagination.total,filter_options:payload.filter_options};
 }
-function outputInvoiceCollectionExportBody(_url: URL) {
-  return createMinimalXlsx([['序号','发票号码','购方','价税合计'],['1','XSFP-E2E-0001','浏览器销项客户','12345.67'],['2','XSFP-E2E-0002','浏览器销项客户','-12345.67']]);
+function outputInvoiceCollectionExportBody(url: URL) {
+  const scope = new URL(url); scope.searchParams.set('page_size','20000'); scope.searchParams.set('page','1');
+  const rows = outputInvoiceCollectionRowsPayload(scope).rows;
+  return createMinimalXlsx([['序号','发票号码','购方','价税合计'],...rows.map((row,index)=>[String(index+1),outputInvoiceCollectionFieldValue(row,'invoice_no'),outputInvoiceCollectionFieldValue(row,'buyer_name'),outputInvoiceCollectionNestedString(row,['invoice','total_with_tax'])])]);
 }
 
 function amountSummary() {
@@ -9459,7 +9470,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           },
         }, 400);
       }
-      return json(route, outputInvoiceCollectionExportSummaryPayload());
+      return json(route, outputInvoiceCollectionExportSummaryPayload(url));
     }
 
     if (path === "/api/output-invoice-collections/export") {

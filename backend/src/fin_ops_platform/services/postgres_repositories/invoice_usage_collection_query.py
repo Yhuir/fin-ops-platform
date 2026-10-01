@@ -475,19 +475,26 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                 row_id=row_id,
             )
             status_where_sql, status_where_params = _where_sql(
-                keyword=None,
+                keyword=keyword,
                 invoice_date_from=invoice_date_from,
                 invoice_date_to=invoice_date_to,
-                filters=[],
+                filters=[item for item in filters if item["field"] != "collection_status"],
                 field_sql=_OUTPUT_FIELDS,
                 keyword_extra_columns=("invoice_remarks",),
                 row_id=row_id,
+            )
+            rate_where_sql, rate_where_params = _where_sql(
+                keyword=keyword, invoice_date_from=invoice_date_from,
+                invoice_date_to=invoice_date_to,
+                filters=[item for item in filters if item["field"] != "tax_rate"],
+                field_sql=_OUTPUT_FIELDS, keyword_extra_columns=("invoice_remarks",), row_id=row_id,
             )
             filtered_sql = (
                 f"{cte}, filtered_rows as materialized "
                 f"(select * from final_rows {where_sql}), "
                 f"status_option_rows as materialized "
-                f"(select * from final_rows {status_where_sql})"
+                f"(select * from final_rows {status_where_sql}), "
+                f"rate_option_rows as materialized (select * from final_rows {rate_where_sql})"
             )
             order_sql = _order_sql(
                 sort_field=sort_field,
@@ -541,6 +548,7 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                     select
                         coalesce(sum(invoice_count), 0)::bigint as invoice_count,
                         coalesce(sum(total_with_tax), 0)::numeric as total_with_tax,
+                        coalesce(sum(amount), 0)::numeric as amount_without_tax,
                         coalesce(sum(collected_amount), 0)::numeric as collected_amount,
                         coalesce(sum(pending_amount), 0)::numeric as pending_amount,
                         count(*) filter (
@@ -558,7 +566,6 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                         values
                             ('buyer_name', buyer_name),
                             ('seller_name', seller_name),
-                            ('tax_rate', tax_rate),
                             ('specific_business_type', specific_business_type),
                             ('taxable_item_name', taxable_item_name),
                             ('bank_counterparty_name', bank_counterparty_name),
@@ -574,6 +581,10 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                     from status_option_rows
                     where nullif(status_code, '') is not null
                     group by status_code
+                    union all
+                    select 'tax_rate'::text, tax_rate, count(*)::bigint
+                    from rate_option_rows
+                    group by tax_rate
                 )
                 select
                     coalesce(
@@ -615,6 +626,7 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                     *base_params,
                     *where_params,
                     *status_where_params,
+                    *rate_where_params,
                     page_size,
                     offset,
                 ),
@@ -640,7 +652,7 @@ class PostgresOutputInvoiceCollectionQueryRepository:
         status_labels = {
             "reversed_by_red": "蓝票已被红冲",
             "reverses_blue": "红票已关联蓝票",
-            "unmatched_red": "红票待核对",
+            "unmatched_red": "红票未关联蓝票",
             "collected": "已收款",
             "partial_collected": "部分收款",
             "pending_collection": "收款待核对",
@@ -656,6 +668,7 @@ class PostgresOutputInvoiceCollectionQueryRepository:
             summary={
                 "invoiceCount": invoice_count,
                 "totalWithTax": _money(summary_row.get("total_with_tax")),
+                "amountWithoutTax": _money(summary_row.get("amount_without_tax")),
                 "collectedAmount": _money(summary_row.get("collected_amount")),
                 "pendingAmount": _money(summary_row.get("pending_amount")),
                 "pendingCollectionCount": int(
@@ -1262,7 +1275,7 @@ def _fact_cte(
                 coalesce(invoice.tax_amount, 0)::numeric as tax_amount,
                 coalesce(invoice.total_with_tax, invoice.amount + coalesce(invoice.tax_amount, 0))
                     ::numeric as total_with_tax,
-                coalesce(invoice.tax_rate, '') as tax_rate,
+                {_output_tax_rate_sql("invoice.tax_rate") if invoice_type == "output" else "coalesce(invoice.tax_rate, '')"} as tax_rate,
                 coalesce(
                     invoice.raw_payload->'normalized_payload'->>'specific_business_type',
                     invoice.raw_payload->>'specific_business_type',
@@ -1668,6 +1681,19 @@ def _input_payment_status_case(
         "case " + " ".join(fragments) + " else 'pending' end",
         params,
     )
+
+
+def _output_tax_rate_sql(column: str) -> str:
+    # 与 normalize_output_tax_rate 同一合同，仅用于销项；保留未知来源文本。
+    text = f"btrim(coalesce({column}, ''))"
+    number = f"rtrim({text}, '%%')::numeric"
+    return f"""case
+        when {text} = '' then '未提供'
+        when {text} = 'mixed' then '多税率'
+        when {text} ~ '^[0-9]+([.][0-9]+)?%%?$' then
+            trim_scale(case when right({text}, 1) <> '%%' and {number} <= 1
+                then {number} * 100 else {number} end)::text || '%%'
+        else {text} end"""
 
 
 def _where_sql(

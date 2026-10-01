@@ -145,6 +145,7 @@ export type OutputInvoiceCollectionRowsResponse = {
   summary?: {
     invoiceCount: number;
     totalWithTax: string;
+    amountWithoutTax: string;
     collectedAmount: string;
     pendingAmount: string;
     pendingCollectionCount: number;

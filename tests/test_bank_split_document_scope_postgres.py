@@ -1,6 +1,9 @@
 """Document comparisons share split-purpose scope in SQL and hydrated rows."""
 import unittest
+import json
+from io import BytesIO
 from decimal import Decimal
+from openpyxl import load_workbook
 
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_canonical_query_service import InputInvoiceUsageCanonicalQueryService
@@ -24,6 +27,45 @@ from tests.postgres_test_utils import apply_test_migrations, require_postgres_te
 
 
 class BankSplitDocumentScopePostgresTests(unittest.TestCase):
+    def test_output_tax_filter_summary_pagination_and_export_share_signed_scope(self):
+        rates = ['0.13', '13%', None, '0', '免税', '不征税', 'mixed', '6%']
+        with self.connection.transaction() as tx:
+            for index, rate in enumerate(rates):
+                amount = '-100' if index == 1 else '100'
+                tx.execute("""insert into app.invoices(legacy_mongo_id,invoice_type,invoice_no,invoice_date,invoice_month,
+                    seller_name,buyer_name,amount,signed_amount,tax_rate,tax_amount,total_with_tax,status)
+                    values(%s,'output',%s,'2026-04-29','2026-04-01','提供方','税率客户',%s,%s,%s,0,%s,'pending')""",
+                    (f'rate-{index}', f'RATE-{index}', amount, amount, rate, amount))
+        service = OutputInvoiceCollectionCanonicalQueryService(repository=PostgresOutputInvoiceCollectionQueryRepository(self.connection),
+            row_assembler=OutputInvoiceCollectionQueryService(import_service=ImportNormalizationService()))
+        filters = [{'field':'tax_rate','operator':'in','values':['0.13','13%','未提供']}]
+        query = {'page':['1'],'page_size':['1'],'filters':[json.dumps(filters)]}
+        page = service.rows(query)
+        self.assertEqual(page['pagination']['total'], 3)
+        self.assertEqual(page['summary']['totalWithTax'], '100.00')
+        self.assertEqual(page['summary']['amountWithoutTax'], '100.00')
+        self.assertEqual(page['summary']['collectedAmount'], '0.00')
+        for number in ('2', '3'):
+            self.assertEqual(service.rows({**query,'page':[number]})['summary'],page['summary'])
+        rates_options = next(item['options'] for item in page['filterOptions'] if item['field']=='tax_rate')
+        self.assertEqual({item['value']:item['count'] for item in rates_options},
+            {'13%':2,'未提供':1,'0%':1,'免税':1,'不征税':1,'多税率':1,'6%':1})
+        self.assertEqual(service.export_summary(query)['row_count'],3)
+        _, content = service.export(query)
+        workbook = load_workbook(BytesIO(content),read_only=True)
+        try:
+            exported = list(workbook.active.values)
+            self.assertEqual(len(exported),4)
+            self.assertEqual(sum(Decimal(str(row[8])) for row in exported[1:]),Decimal('100'))
+            self.assertEqual(set(row[6] for row in exported[1:]),{'13%','未提供'})
+            self.assertIn('税额',exported[0])
+        finally:
+            workbook.close()
+        empty = service.list_rows(filters=[*filters,{'field':'buyer_name','operator':'in','values':['不存在']}])
+        self.assertEqual(empty['rows'],[])
+        self.assertEqual(empty['summary']['amountWithoutTax'],'0.00')
+        self.assertEqual(next(item['options'] for item in empty['filterOptions'] if item['field']=='tax_rate'),[])
+
     @classmethod
     def setUpClass(cls):
         cls.database_url = require_postgres_test_database_url()
