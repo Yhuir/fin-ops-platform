@@ -83,6 +83,8 @@ test.describe("turnover ledger browser flow", () => {
     const flows = page.getByRole("grid", { name: "云南建设有限公司的银行流水" });
     await expect(flows).toBeVisible();
     const expandMs = performance.now() - start;
+    expect(await flows.locator("xpath=..").evaluate(el => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+    await expect(flows.locator("thead th").first()).toHaveCSS("position", "static");
     const firstRow = flows.locator("tbody tr").first();
     const trigger = page.getByRole("button", { name: "查看分类明细" });
     for (const width of [1920, 1440, 960]) {
@@ -119,7 +121,7 @@ test.describe("turnover ledger browser flow", () => {
       await page.screenshot({ path: testInfo.outputPath(`turnover-layout-${width}.png`), fullPage: true, animations: "disabled" });
       await trigger.click();
       const dialog = page.getByRole("dialog", { name: "往来款分类明细" });
-      await expect(dialog).toContainText("当前搜索及结算条件下的全部分类");
+      await expect(dialog).toContainText("当前搜索及结算条件下的四类往来统计");
       const box = (await dialog.boundingBox())!;
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(width);
@@ -144,6 +146,80 @@ test.describe("turnover ledger browser flow", () => {
     await expect(page.getByRole("dialog", { name: "往来款分类明细" })).not.toBeVisible();
     expect(reads).toBe(initialReads);
     await testInfo.attach("turnover-layout-metrics", { body: JSON.stringify({ expandMs, additionalLedgerReads: reads - initialReads }), contentType: "application/json" });
+  });
+
+  test("keeps the header and pagination visible while only ledger rows scroll", async ({ page }, testInfo) => {
+    await installDeterministicApiMocks(page, { sessionMode: "user", turnoverLedgerTotal: 121 });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/turnover-ledger");
+    await expect(page.getByText("分页往来方 001")).toBeVisible();
+    const scroller = page.locator(".turnover-register-scroll");
+    const header = page.locator(".turnover-register > thead");
+    const firstRow = page.locator(".turnover-register > tbody > tr").first();
+    const footer = page.locator(".turnover-register-footer");
+    let reads = 0;
+    page.on("request", request => { if (new URL(request.url()).pathname.endsWith("/api/turnover-ledger")) reads += 1; });
+    const measurements = [];
+    for (const size of [20, 50, 100]) {
+      if (size !== 20) {
+        await page.getByRole("button", { name: /每页对象数/ }).click();
+        await page.getByRole("option", { name: `每页 ${size} 个` }).click();
+        await expect(page.getByText(`显示 1-${size} / 121`)).toBeVisible();
+        await expect.poll(() => scroller.evaluate(el => el.scrollTop)).toBe(0);
+      }
+      const readsBeforeScroll = reads;
+      // Measure a sticky cell: the thead's own box still moves in native tables.
+      const cell = header.locator("th").first();
+      const headBefore = (await cell.boundingBox())!;
+      const rowBefore = (await firstRow.boundingBox())!;
+      const footerBefore = (await footer.boundingBox())!;
+      const start = performance.now();
+      await scroller.evaluate(el => { el.scrollTop = 400; });
+      await expect.poll(() => scroller.evaluate(el => el.scrollTop)).toBe(400);
+      const headAfter = (await cell.boundingBox())!;
+      expect(Math.abs(headAfter.y - headBefore.y)).toBeLessThanOrEqual(1);
+      expect(rowBefore.y - (await firstRow.boundingBox())!.y).toBeGreaterThan(390);
+      expect((await footer.boundingBox())!.y).toBe(footerBefore.y);
+      expect(footerBefore.y + footerBefore.height).toBeLessThanOrEqual(900);
+      expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1)).toBe(true);
+      expect(reads).toBe(readsBeforeScroll);
+      measurements.push({ pageSize: size, scrollObservationMs: performance.now() - start });
+    }
+    await page.screenshot({ path: "../outputs/turnover-sticky-local.png", animations: "disabled" });
+    await page.getByRole("button", { name: "下一页" }).click();
+    await expect(page.getByText("分页往来方 101")).toBeVisible();
+    await expect.poll(() => scroller.evaluate(el => el.scrollTop)).toBe(0);
+    await page.setViewportSize({ width: 960, height: 640 });
+    await expect.poll(async () => { const box = (await footer.boundingBox())!; return box.y + box.height; }).toBeLessThanOrEqual(640);
+    await scroller.evaluate(el => { el.scrollLeft = 200; });
+    const align = await page.locator(".turnover-register").evaluate(table => {
+      const th = table.querySelector("thead th")!.getBoundingClientRect();
+      const td = table.querySelector("tbody th")!.getBoundingClientRect();
+      return Math.abs(th.x - td.x) < 1 && Math.abs(th.width - td.width) < 1;
+    });
+    expect(align).toBe(true);
+    await page.evaluate(() => { document.documentElement.style.zoom = "1.25"; });
+    await footer.getByRole("button", { name: /每页对象数/ }).click();
+    await expect(page.getByRole("option", { name: "每页 20 个" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.screenshot({ path: "../outputs/turnover-sticky-zoom.png", fullPage: true, animations: "disabled" });
+    await page.evaluate(() => { document.documentElement.style.zoom = "1"; });
+    await page.setViewportSize({ width: 390, height: 500 });
+    expect(await scroller.evaluate(el => el.clientHeight)).toBeGreaterThanOrEqual(150);
+    await footer.getByRole("button", { name: /每页对象数/ }).click();
+    await expect(page.getByRole("option", { name: "每页 20 个" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/turnover-ledger?embedded=oa");
+    await expect(page.getByText("分页往来方 001")).toBeVisible();
+    await expect(page.locator(".app-shell")).toHaveClass(/embedded-shell/);
+    const embeddedHeader = (await header.locator("th").first().boundingBox())!;
+    await scroller.evaluate(el => { el.scrollTop = 300; });
+    await expect.poll(() => scroller.evaluate(el => el.scrollTop)).toBe(300);
+    expect(Math.abs((await header.locator("th").first().boundingBox())!.y - embeddedHeader.y)).toBeLessThanOrEqual(1);
+    expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1)).toBe(true);
+    await page.screenshot({ path: "../outputs/turnover-sticky-embedded.png", animations: "disabled" });
+    await testInfo.attach("turnover-scroll-measurements", { body: JSON.stringify(measurements), contentType: "application/json" });
   });
 
   test("reaches all turnover groups after the first 100", async ({ page }) => {

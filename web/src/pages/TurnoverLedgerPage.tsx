@@ -242,6 +242,7 @@ export default function TurnoverLedgerPage() {
   const [draftQuery, setDraftQuery] = useState("");
   const [query, setQuery] = useState("");
   const composingQuery = useRef(false);
+  const tableWrapRef = useRef<HTMLDivElement>(null);
   const [settlementStatus, setSettlementStatus] = useState<"all" | "settled" | "unsettled">("all");
   const [detailGroup, setDetailGroup] = useState<TurnoverLedgerGroup | null>(null);
   const [ledger, setLedger] = useState<TurnoverLedgerGroupedResponse | null>(null);
@@ -278,6 +279,10 @@ export default function TurnoverLedgerPage() {
     controller: AbortController;
   } | null>(null);
   const activeExtraEditorRef = useRef<{ relationId: string; controller: AbortController } | null>(null);
+
+  useEffect(() => {
+    if (tableWrapRef.current) tableWrapRef.current.scrollTop = 0;
+  }, [family, page, pageSize, query, settlementStatus]);
 
   const groups = ledger?.groups ?? [];
   const selectedClosureRows = closureSelection?.rows ?? [];
@@ -1009,6 +1014,7 @@ export default function TurnoverLedgerPage() {
               </div>
             </div>
             <TurnoverLedgerGroupedTable
+              tableWrapRef={tableWrapRef}
               groups={groups}
               loading={loading}
               showEmptyState={!error}

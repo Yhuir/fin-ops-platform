@@ -53,7 +53,7 @@ export default function TurnoverLedgerGroupedTable({
                 <td><Button variant="ghost" size="sm" className="turnover-text-action" onPress={() => onDetails(group)} aria-label={`查看${group.counterpartyName}详情`}>详情</Button></td>
               </tr>
               {expanded ? <tr id={`turnover-details-${group.groupId}`}><td colSpan={6} className="turnover-flow-container">
-                <FinanceTable ariaLabel={`${group.counterpartyName}的银行流水`} className="turnover-flows" minWidth={1120} scrollMode="contained">
+                <FinanceTable ariaLabel={`${group.counterpartyName}的银行流水`} className="turnover-flows" minWidth={1120}>
                   <FinanceTableHeader>
                     <FinanceTableColumn columnRole="selection">选择</FinanceTableColumn><FinanceTableColumn columnRole="date" isRowHeader>日期</FinanceTableColumn>
                     <FinanceTableColumn columnRole="description">流水标签</FinanceTableColumn><FinanceTableColumn columnRole="amount">收入金额</FinanceTableColumn>

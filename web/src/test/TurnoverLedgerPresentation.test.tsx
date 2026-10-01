@@ -36,12 +36,33 @@ describe("turnover presentation", () => {
     const trigger = screen.getByRole("button", { name: "查看分类明细" });
     await user.click(trigger);
     const dialog = await screen.findByRole("dialog", { name: "往来款分类明细" });
-    expect(within(dialog).getByText("当前搜索及结算条件下的全部分类")).toBeVisible();
+    expect(within(dialog).getByText("当前搜索及结算条件下的四类往来统计")).toBeVisible();
     expect(within(dialog).getByText("200.00")).toBeVisible();
     expect(within(dialog).getByText("当前").closest("tr")).toHaveTextContent("个人往来");
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  test("shows four ordered categories including zero amounts without removing unclassified facts", async () => {
+    const user = userEvent.setup();
+    const zero = { ...ledger.familySummaries[0], pendingCollectionAmount: "0.00", collectedAmount: "0.00", rowCount: 0 };
+    const source = { ...ledger, familySummaries: [
+      { ...zero, family: "uncategorized", label: "待分类", pendingCollectionAmount: "55.00" },
+      ledger.familySummaries[1],
+      { ...zero, family: "bank", label: "银行往来" },
+      ledger.familySummaries[0],
+      { ...zero, family: "company", label: "公司往来" },
+    ] };
+    const original = JSON.stringify(source);
+    render(<TurnoverLedgerSummary ledger={source} family="all" />);
+    await user.click(screen.getByRole("button", { name: "查看分类明细" }));
+    const dialog = await screen.findByRole("dialog", { name: "往来款分类明细" });
+    expect(within(dialog).getAllByRole("rowheader").map(item => item.textContent)).toEqual(["个人往来", "公司往来", "银行往来", "业务往来"]);
+    expect(within(dialog).queryByText("待分类")).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("rowheader", { name: "公司往来" }).closest("tr")).toHaveTextContent("0.00");
+    expect(screen.getByTestId("turnover-summary-pending-collection")).toHaveTextContent("100.00");
+    expect(JSON.stringify(source)).toBe(original);
   });
 
   test("does not present unavailable statistics as zero or keep an old breakdown", async () => {

@@ -38,6 +38,22 @@ test("production turnover register filters, details and exports use canonical fa
     }
   }
   expect(await page.locator("body").evaluate((body) => body.scrollWidth <= window.innerWidth)).toBe(true);
+  const scroller = page.locator(".turnover-register-scroll");
+  const headerCell = page.locator(".turnover-register > thead th").first();
+  const firstRow = page.locator(".turnover-register > tbody > tr").first();
+  const beforeHeader = (await headerCell.boundingBox())!;
+  const beforeRow = (await firstRow.boundingBox())!;
+  const beforeScrollReads = ledgerReads;
+  await scroller.evaluate(el => { el.scrollTop = 300; });
+  await expect.poll(() => scroller.evaluate(el => el.scrollTop)).toBe(300);
+  expect(Math.abs((await headerCell.boundingBox())!.y - beforeHeader.y)).toBeLessThanOrEqual(1);
+  expect(beforeRow.y - (await firstRow.boundingBox())!.y).toBeGreaterThan(290);
+  const footer = (await page.locator(".turnover-register-footer").boundingBox())!;
+  expect(footer.y + footer.height).toBeLessThanOrEqual(1024);
+  expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1)).toBe(true);
+  expect(ledgerReads).toBe(beforeScrollReads);
+  await page.screenshot({ path: "../outputs/production-turnover-sticky.png", animations: "disabled" });
+  await scroller.evaluate(el => { el.scrollTop = 0; });
   await page.screenshot({ path: "../outputs/production-turnover-collapsed.png", fullPage: true, animations: "disabled" });
   const group = payload.groups.find((item: { flow_rows: unknown[] }) => item.flow_rows.length > 0);
   expect(group).toBeDefined();
@@ -46,6 +62,8 @@ test("production turnover register filters, details and exports use canonical fa
   await page.getByRole("button", { name: `展开 ${group.counterparty_name} 流水明细`, exact: true }).click();
   const flows = page.getByRole("grid", { name: `${group.counterparty_name}的银行流水`, exact: true });
   await expect(flows.getByRole("checkbox")).toHaveCount(group.flow_rows.length);
+  await expect(flows.locator("thead th").first()).toHaveCSS("position", "static");
+  expect(await flows.locator("xpath=..").evaluate(el => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
   const expandMs = performance.now() - expandStart;
   await expect(flows.locator(".turnover-flow-chip")).toHaveCount(group.flow_rows.length);
   await expect(flows).not.toContainText("往来标记：");
@@ -75,7 +93,9 @@ test("production turnover register filters, details and exports use canonical fa
     const dialog = page.getByRole("dialog", { name: "往来款分类明细" });
     await expect(dialog).toBeVisible();
     popoverSamples.push(performance.now() - start);
-    for (const family of payload.family_summaries) {
+    await expect(dialog.getByRole("row")).toHaveCount(5);
+    await expect(dialog).not.toContainText("待分类");
+    for (const family of payload.family_summaries.filter((item: { family: string }) => ["personal", "company", "bank", "business"].includes(item.family))) {
       const row = dialog.getByRole("row").filter({ has: page.getByRole("rowheader", { name: family.label, exact: true }) });
       for (const key of ["pending_repayment_amount", "pending_collection_amount", "repaid_amount", "collected_amount"]) {
         const formatted = Number(family[key]).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });

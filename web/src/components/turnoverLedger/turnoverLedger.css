@@ -1,3 +1,13 @@
+/* Only this route participates in the remaining-height shell layout. */
+.app-shell-content:has(.turnover-ledger-page) { display: flex; flex-direction: column; height: 100dvh; min-height: 0; }
+.app-shell-content:has(.turnover-ledger-page) > .global-header { flex-shrink: 0; }
+.page-body:has(.turnover-ledger-page) { display: flex; flex: 1; min-height: 0; }
+.turnover-ledger-page { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.turnover-ledger-page > .page-stack { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+.turnover-ledger-page > .page-stack > * { flex-shrink: 0; }
+.turnover-ledger-page .turnover-ledger-table-panel { display: flex; flex: 1; min-height: auto; }
+.turnover-ledger-table-panel__inner { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.turnover-ledger-table-panel__inner > * { flex-shrink: 0; }
 .turnover-ledger-page .page-title { font-size: 26px; letter-spacing: -.5px; }
 .turnover-overview { display: flex; align-items: flex-end; gap: 32px; padding: 12px 0 24px; }
 .turnover-overview-metric { display: grid; gap: 8px; color: var(--fp-text-secondary); font-size: 13px; }
@@ -12,7 +22,7 @@
 .turnover-breakdown-current-label { margin-left: 6px; color: var(--fp-primary); font-size: 12px; font-weight: 400; }
 .turnover-breakdown-popover th, .turnover-breakdown-popover td { padding: 10px; font-size: 13px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .turnover-breakdown-popover th:first-child { text-align: left; }
-.turnover-ledger-table-panel { border: 1px solid var(--fp-border); border-radius: 6px; background: var(--fp-surface); overflow: hidden; }
+.turnover-ledger-table-panel { border: 1px solid var(--fp-border); border-radius: 6px; background: var(--fp-surface); }
 .turnover-ledger-table-panel__toolbar { padding: 0 20px; border-bottom: 1px solid var(--fp-border-subtle); }
 .turnover-ledger-page .app-segments.turnover-ledger-tabs.toggle-button-group { display: flex; gap: 30px; background: transparent; border: 0; border-radius: 0; padding: 0; }
 .turnover-ledger-page .app-segments.turnover-ledger-tabs.toggle-button-group > [role="radio"] { padding: 16px 0; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; box-shadow: none; font-size: 14px; color: var(--fp-text-secondary); }
@@ -23,9 +33,9 @@
 .turnover-query-fields .query-search { width: 300px; }
 .turnover-select { width: 150px; flex-shrink: 0; font-size: 13px; }
 .turnover-ledger-selection-summary { color: var(--fp-text-secondary); font-size: 12px; white-space: nowrap; }
-.turnover-register-scroll { overflow-x: auto; }
+.turnover-register-scroll { flex: 1 1 0; min-height: 160px; overflow: auto; scrollbar-gutter: stable; scroll-padding-top: 42px; }
 .turnover-register { border-collapse: collapse; width: 100%; min-width: 880px; font-size: 14px; text-align: left; }
-.turnover-register > thead > tr > th { height: 42px; padding: 0 20px; font-size: 12px; font-weight: 500; color: var(--fp-text-secondary); background: #f8f9fb; border-block: 1px solid var(--fp-border-subtle); white-space: nowrap; }
+.turnover-register > thead > tr > th { position: sticky; top: 0; z-index: 2; box-shadow: inset 0 -1px var(--fp-border-subtle); height: 42px; padding: 0 20px; font-size: 12px; font-weight: 500; color: var(--fp-text-secondary); background: #f8f9fb; border-block: 1px solid var(--fp-border-subtle); white-space: nowrap; }
 .turnover-register > tbody > tr > td, .turnover-register > tbody > tr > th { height: 60px; padding: 8px 20px; border-bottom: 1px solid var(--fp-border-subtle); font-weight: 400; }
 .turnover-register > tbody > tr:last-child > td, .turnover-register > tbody > tr:last-child > th { border-bottom: 0; }
 .turnover-register > thead > tr > th:nth-child(5),
@@ -40,10 +50,9 @@
 .turnover-settled { color: #43715f; }
 .turnover-text-action { color: var(--fp-primary); font-weight: 400; font-size: 13px; padding: 0 4px; min-width: 0; }
 .turnover-register > tbody > tr > .turnover-flow-container { padding: 12px 20px 16px 32px; background: #f0f4f9; }
-.turnover-flows { width: 100%; max-width: 1440px; border: 1px solid var(--fp-border-subtle); border-radius: 0; background: var(--fp-surface); box-shadow: none; }
-.turnover-flows.finance-table--contained { max-height: 420px; }
+.turnover-flows { min-width: 1120px; width: 100%; max-width: 1440px; border: 1px solid var(--fp-border-subtle); border-radius: 0; background: var(--fp-surface); box-shadow: none; }
 .turnover-flows .finance-table__content { width: 100%; table-layout: fixed; background: var(--fp-surface); }
-.turnover-flows .finance-table__column { height: 40px; padding: 8px 12px; background: #e9eef5; border-bottom: 1px solid #d7dfea; font-weight: 500; font-size: 12px; }
+.turnover-flows .finance-table__column { position: static; height: 40px; padding: 8px 12px; background: #e9eef5; border-bottom: 1px solid #d7dfea; font-weight: 500; font-size: 12px; }
 .turnover-flows .finance-table__cell { height: 48px; font-size: 13px; padding: 8px 12px; border-radius: 0; }
 .turnover-flows [data-column-role="selection"] { width: 56px; text-align: center; }
 .turnover-flows [data-column-role="selection"] .checkbox { justify-content: center; }
@@ -96,7 +105,7 @@
 .turnover-detail-heading, .turnover-detail-audit { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px 20px; color: var(--fp-text-secondary); font-size: 13px; }
 .turnover-detail-heading strong { color: var(--fp-text-primary); font-size: 23px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .turnover-ledger-drawer .turnover-ledger-extra-field__label, .turnover-ledger-drawer .turnover-ledger-extra-field__value { font-weight: 400; }
-.turnover-flows .finance-table__scroll { max-height: 420px; overflow: auto; }
+.turnover-flows .finance-table__scroll { overflow: visible; }
 
 .turnover-flow-label { display: flex; align-items: center; gap: 8px; min-width: 0; line-height: 1.5; white-space: nowrap; }
 .turnover-flow-label .finance-truncated-text { min-width: 0; text-align: left; }
