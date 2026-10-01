@@ -650,7 +650,7 @@ describe("BatchAccountingPage", () => {
     })).toBe(true);
   });
 
-  test("shows loading and empty states in the bank and OA regions", async () => {
+  test("keeps the bank region stable while loading and then shows empty states", async () => {
     let resolveFetch: (response: Response) => void = () => undefined;
     const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
       resolveFetch = resolve;
@@ -659,7 +659,9 @@ describe("BatchAccountingPage", () => {
 
     renderPage();
 
-    expect(await screen.findByText("正在加载流水")).toBeInTheDocument();
+    const bankRegion = await screen.findByRole("region", { name: "批量账务流水" });
+    expect(bankRegion).toHaveAttribute("aria-busy", "true");
+    expect(screen.queryByText("正在加载流水")).not.toBeInTheDocument();
     resolveFetch(jsonResponse({
       summary: {
         unsubmitted_count: 0,
@@ -687,7 +689,9 @@ describe("BatchAccountingPage", () => {
 
     renderPage();
 
-    expect(await screen.findByText("正在加载流水")).toBeInTheDocument();
+    const bankRegion = await screen.findByRole("region", { name: "批量账务流水" });
+    expect(bankRegion).toHaveAttribute("aria-busy", "true");
+    expect(screen.queryByText("正在加载流水")).not.toBeInTheDocument();
     await user.type(screen.getByLabelText("搜索OA内容"), "刘");
     await user.click(screen.getByRole("button", { name: "查询" }));
     await waitFor(() => expect(pendingResolvers).toHaveLength(2));
@@ -703,7 +707,7 @@ describe("BatchAccountingPage", () => {
         account_last4: "1111",
       }],
     }));
-    await waitFor(() => expect(screen.getByText("正在加载流水")).toBeInTheDocument());
+    await waitFor(() => expect(bankRegion).toHaveAttribute("aria-busy", "true"));
     expect(screen.queryByText("旧银行 1111")).not.toBeInTheDocument();
 
     pendingResolvers[1]?.(jsonResponse({
@@ -718,6 +722,7 @@ describe("BatchAccountingPage", () => {
     }));
 
     expect(await screen.findByText("新银行 2222")).toBeInTheDocument();
+    expect(bankRegion).toHaveAttribute("aria-busy", "false");
     expect(screen.queryByText("正在加载流水")).not.toBeInTheDocument();
     expect(screen.queryByText("旧银行 1111")).not.toBeInTheDocument();
   });

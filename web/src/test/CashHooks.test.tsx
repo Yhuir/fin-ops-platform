@@ -76,6 +76,30 @@ describe("cash scope lifecycle", () => {
     expect(screen.queryByText("old")).not.toBeInTheDocument();
     expect((fetcher.mock.calls[0][1]?.signal as AbortSignal).aborted).toBe(true);
   });
+  test("keeps the last successful result mounted during a same-query refresh", async () => {
+    let finishRefresh!: (value: Response) => void;
+    fetcher
+      .mockResolvedValueOnce(response({ value: "before refresh" }))
+      .mockImplementationOnce(() => new Promise(resolve => { finishRefresh = resolve; }));
+    render(<CashProvider><Probe /></CashProvider>);
+    await screen.findByText("before refresh");
+    fireEvent.click(screen.getByText("刷新"));
+    expect(screen.getByText("before refresh")).toBeInTheDocument();
+    expect(screen.getByText("读取中")).toBeInTheDocument();
+    await act(async () => finishRefresh(response({ value: "after refresh" })));
+    expect(await screen.findByText("after refresh")).toBeInTheDocument();
+    expect(screen.queryByText("before refresh")).not.toBeInTheDocument();
+  });
+  test("clears the retained result when a same-query refresh fails", async () => {
+    fetcher
+      .mockResolvedValueOnce(response({ value: "successful result" }))
+      .mockResolvedValueOnce(response({ error: "cash_unavailable", message: "现金读取失败" }, 503));
+    render(<CashProvider><Probe /></CashProvider>);
+    await screen.findByText("successful result");
+    fireEvent.click(screen.getByText("刷新"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("现金读取失败");
+    expect(screen.queryByText("successful result")).not.toBeInTheDocument();
+  });
   test("clears all sensitive children and cancels pending requests after permission denial", async () => {
     fetcher.mockResolvedValueOnce(response({ value: "private cash" })).mockResolvedValueOnce(response({ error: "cash_access_denied", message: "denied" }, 403));
     render(<CashProvider><Probe /></CashProvider>);

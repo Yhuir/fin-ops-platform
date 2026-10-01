@@ -3582,6 +3582,10 @@ textarea {
   gap: var(--fp-space-2);
 }
 
+.output-invoice-collections-refresh {
+  min-width: 80px;
+}
+
 .output-invoice-collections-button {
   display: inline-flex;
   min-height: 34px;
@@ -18944,7 +18948,7 @@ body.column-layout-dragging {
 }
 
 .cost-surface-skeleton {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   min-height: 520px;
 }
 
@@ -23562,6 +23566,14 @@ body.column-layout-dragging {
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
+}
+
+.etc-status-segmented.app-segments.toggle-button-group.toggle-button-group--full-width {
+  width: 100%;
+}
+
+.etc-status-segmented.app-segments.toggle-button-group.toggle-button-group--full-width > .toggle-button {
+  flex: 1 1 0;
 }
 
 .etc-batch-scroll {

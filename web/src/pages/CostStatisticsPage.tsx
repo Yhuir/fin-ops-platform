@@ -84,13 +84,12 @@ type LoadedCostStatisticsExplorer = {
 function getExplorerTransitionScope(
   previousRequestKey: string | undefined,
   nextRequestKey: string,
-  loading: boolean,
 ): ExplorerTransitionScope {
   if (!previousRequestKey) {
     return "surface";
   }
   if (previousRequestKey === nextRequestKey) {
-    return loading ? "surface" : null;
+    return null;
   }
 
   const previous = JSON.parse(previousRequestKey) as CostStatisticsExplorerPageRequest;
@@ -198,6 +197,7 @@ function CostSurfaceSkeleton({ loading }: { loading: boolean }) {
       aria-label="正在加载成本统计内容"
       className="cost-surface-skeleton"
     >
+      <span />
       <span />
       <span />
       <span />
@@ -506,7 +506,6 @@ export default function CostStatisticsPage() {
   const explorerTransitionScope = getExplorerTransitionScope(
     loadedExplorer?.requestKey,
     explorerRequestKey,
-    isExplorerLoading,
   );
 
   const invalidateExportReferenceData = useCallback(() => {

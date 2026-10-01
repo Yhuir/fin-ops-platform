@@ -199,38 +199,38 @@ export default function OperationHistoryPage() {
       </form>
 
       {error ? <StatePanel tone="error" title="操作历史加载失败">{error}</StatePanel> : null}
-      {!error && loading ? <StatePanel tone="loading" title="正在加载操作历史" /> : null}
-      {!error && !loading && rows.length === 0 ? <StatePanel tone="empty" title="暂无操作记录" /> : null}
-      {!error && !loading && rows.length > 0 ? (
-        <FinanceTable ariaLabel="操作历史" minWidth={1040}>
-          <FinanceTableHeader>
-            <FinanceTableColumn id="time" columnRole="date" isRowHeader>时间</FinanceTableColumn>
-            <FinanceTableColumn id="actor" columnRole="identity">操作人</FinanceTableColumn>
-            <FinanceTableColumn id="page" columnRole="account">页面</FinanceTableColumn>
-            <FinanceTableColumn id="action" columnRole="description">操作内容</FinanceTableColumn>
-            <FinanceTableColumn id="object" columnRole="identity">对象</FinanceTableColumn>
-            <FinanceTableColumn id="outcome" columnRole="status">结果</FinanceTableColumn>
-            <FinanceTableColumn id="detail" columnRole="action">详情</FinanceTableColumn>
-          </FinanceTableHeader>
-          <FinanceTableBody items={rows}>
-            {(row) => {
-              const outcome = outcomeView(row.outcome);
-              return (
-                <FinanceTableRow id={row.operation_key} textValue={row.action_label}>
-                  <FinanceTableCell columnRole="date">{formatTime(row.started_at)}</FinanceTableCell>
-                  <FinanceTableCell columnRole="identity">{actorLabel(row)}</FinanceTableCell>
-                  <FinanceTableCell columnRole="account">{pageLabelForKey(row.page_key)}</FinanceTableCell>
-                  <FinanceTableCell columnRole="description">{row.action_label}</FinanceTableCell>
-                  <FinanceTableCell columnRole="identity">{row.object_label || "业务记录"}</FinanceTableCell>
-                  <FinanceTableCell columnRole="status"><Chip color={outcome.color} size="sm">{outcome.label}</Chip></FinanceTableCell>
-                  <FinanceTableCell columnRole="action">
-                    <Button aria-label={`查看${row.action_label}详情`} size="sm" variant="tertiary" onPress={() => void openDetail(row)}>详情</Button>
-                  </FinanceTableCell>
-                </FinanceTableRow>
-              );
-            }}
-          </FinanceTableBody>
-        </FinanceTable>
+      {!error ? (
+        <div aria-busy={loading}>
+          <FinanceTable ariaLabel="操作历史" minWidth={1040}>
+            <FinanceTableHeader>
+              <FinanceTableColumn id="time" columnRole="date" isRowHeader>时间</FinanceTableColumn>
+              <FinanceTableColumn id="actor" columnRole="identity">操作人</FinanceTableColumn>
+              <FinanceTableColumn id="page" columnRole="account">页面</FinanceTableColumn>
+              <FinanceTableColumn id="action" columnRole="description">操作内容</FinanceTableColumn>
+              <FinanceTableColumn id="object" columnRole="identity">对象</FinanceTableColumn>
+              <FinanceTableColumn id="outcome" columnRole="status">结果</FinanceTableColumn>
+              <FinanceTableColumn id="detail" columnRole="action">详情</FinanceTableColumn>
+            </FinanceTableHeader>
+            <FinanceTableBody items={rows} renderEmptyState={() => loading ? <span className="sr-only">正在加载操作历史</span> : "暂无操作记录"}>
+              {(row) => {
+                const outcome = outcomeView(row.outcome);
+                return (
+                  <FinanceTableRow id={row.operation_key} textValue={row.action_label}>
+                    <FinanceTableCell columnRole="date">{formatTime(row.started_at)}</FinanceTableCell>
+                    <FinanceTableCell columnRole="identity">{actorLabel(row)}</FinanceTableCell>
+                    <FinanceTableCell columnRole="account">{pageLabelForKey(row.page_key)}</FinanceTableCell>
+                    <FinanceTableCell columnRole="description">{row.action_label}</FinanceTableCell>
+                    <FinanceTableCell columnRole="identity">{row.object_label || "业务记录"}</FinanceTableCell>
+                    <FinanceTableCell columnRole="status"><Chip color={outcome.color} size="sm">{outcome.label}</Chip></FinanceTableCell>
+                    <FinanceTableCell columnRole="action">
+                      <Button aria-label={`查看${row.action_label}详情`} size="sm" variant="tertiary" onPress={() => void openDetail(row)}>详情</Button>
+                    </FinanceTableCell>
+                  </FinanceTableRow>
+                );
+              }}
+            </FinanceTableBody>
+          </FinanceTable>
+        </div>
       ) : null}
 
       {nextCursor ? <div className="operation-history-more"><Button isPending={loadingMore} variant="secondary" onPress={() => void load(nextCursor)}>加载更多</Button></div> : null}

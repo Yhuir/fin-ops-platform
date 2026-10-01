@@ -107,7 +107,7 @@ export default function SettingsAccessAccountsSection({
   };
 
   return (
-    <section aria-labelledby="settings-section-access-accounts-title" className="settings-section-panel settings-access-section" id="settings-section-access-accounts" role="region">
+    <section aria-busy={isLoading} aria-labelledby="settings-section-access-accounts-title" className="settings-section-panel settings-access-section" id="settings-section-access-accounts" role="region">
       <header className="settings-section-header settings-access-header">
         <h3 id="settings-section-access-accounts-title">访问账户</h3>
         <div className="settings-access-admin-inline" aria-label="权限管理员">
@@ -118,8 +118,6 @@ export default function SettingsAccessAccountsSection({
 
       {status ? <div className={`settings-inline-alert settings-inline-alert--${status.tone}`} role={status.tone === "error" ? "alert" : "status"}>{status.message}</div> : null}
       {validationMessage ? <div className="settings-inline-alert settings-inline-alert--error" role="alert">{validationMessage}</div> : null}
-      {isLoading ? <div className="settings-inline-alert settings-inline-alert--info" role="status">正在加载访问账户...</div> : null}
-
       <div className="settings-access-workspace">
         <aside className="settings-access-account-pane" aria-label="账户列表">
           <div className="settings-access-list-heading"><strong>账户 <span>{managedAccessAccounts.length}</span></strong>
@@ -198,7 +196,7 @@ export default function SettingsAccessAccountsSection({
       </div>
 
       <footer className="settings-access-footer">
-        <span role="status">{changedAccountIds.size ? `${changedAccountIds.size} 个账户有未保存修改 · 保存将提交全部修改` : isLoading ? "正在读取访问权限..." : "无未保存修改"}</span>
+        <span role="status">{changedAccountIds.size ? `${changedAccountIds.size} 个账户有未保存修改 · 保存将提交全部修改` : "无未保存修改"}</span>
         <Button variant="ghost" isDisabled={controlsDisabled || isSaving || changedAccountIds.size === 0} onPress={onReset}>取消修改</Button>
         <Button isDisabled={controlsDisabled || isLoading || isSaving || changedAccountIds.size === 0 || validationMessage !== null} isPending={isSaving} variant="primary" onPress={() => void onSave()}>
           {isSaving ? "保存中..." : "保存访问权限"}

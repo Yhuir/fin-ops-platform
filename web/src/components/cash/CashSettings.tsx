@@ -70,7 +70,7 @@ function CashAccounts({ initial, onChange }: { initial: AccountCriteria; onChang
         <FinanceTableColumn id="enabled"><CashColumnHeader label="状态"><CashFilterPopover label="账户状态" column value={enabled ? [enabled] : []} options={[{ value: "true", label: "启用" }, { value: "false", label: "停用" }]} onApply={value => { setEnabled(value.length === 1 ? value[0] : ""); setPage(1); }} /></CashColumnHeader></FinanceTableColumn>
         <FinanceTableColumn id="remark">说明</FinanceTableColumn><FinanceTableColumn id="actions">操作</FinanceTableColumn>
       </FinanceTableHeader>
-      <FinanceTableBody renderEmptyState={() => query.loading ? "正在读取账户…" : query.error ? "账户读取失败，请刷新。" : "尚无匹配账户。新增现金账户并确认期初后，即可逐笔录入。"}>{(query.data?.rows ?? []).map((row) => <FinanceTableRow key={row.id} id={row.id}>
+      <FinanceTableBody renderEmptyState={() => query.error ? "账户读取失败，请刷新。" : query.loading ? null : "尚无匹配账户。新增现金账户并确认期初后，即可逐笔录入。"}>{(query.data?.rows ?? []).map((row) => <FinanceTableRow key={row.id} id={row.id}>
         <FinanceTableCell columnRole="identity">{row.name}</FinanceTableCell>
         <FinanceTableCell columnRole="status">{row.kind === "cash" ? "现金" : "储蓄"}</FinanceTableCell>
         <FinanceTableCell columnRole="date">{row.opening_date}</FinanceTableCell>
@@ -164,7 +164,7 @@ function CashCategoryGroup({ group, criteria, refresh, onPageChange, onOrderChan
         <FinanceTableColumn id="name" isRowHeader allowsSorting>名称</FinanceTableColumn><FinanceTableColumn id="enabled">状态</FinanceTableColumn>
         <FinanceTableColumn id="remark">说明</FinanceTableColumn><FinanceTableColumn id="actions">操作</FinanceTableColumn>
       </FinanceTableHeader>
-      <FinanceTableBody renderEmptyState={() => query.loading ? "正在读取费用类型…" : query.error ? "费用类型读取失败，请刷新。" : "暂无匹配费用类型。请按实际收付或往来用途新增。"}>{(query.data?.rows ?? []).map(row => <FinanceTableRow key={row.id} id={row.id}>
+      <FinanceTableBody renderEmptyState={() => query.error ? "费用类型读取失败，请刷新。" : query.loading ? null : "暂无匹配费用类型。请按实际收付或往来用途新增。"}>{(query.data?.rows ?? []).map(row => <FinanceTableRow key={row.id} id={row.id}>
         <FinanceTableCell columnRole="identity">{row.name}</FinanceTableCell><FinanceTableCell columnRole="status">{row.enabled ? "启用" : "停用"}</FinanceTableCell>
         <FinanceTableCell columnRole="description">{row.remark ?? "—"}</FinanceTableCell><FinanceTableCell columnRole="action"><Button variant="tertiary" size="sm" onPress={() => onEdit(row)}>编辑</Button></FinanceTableCell>
       </FinanceTableRow>)}</FinanceTableBody>
@@ -204,7 +204,7 @@ function CashPersonalOpening() {
   const [openingItem, setOpeningItem] = useState<CashPersonalContext | null>(null);
   const [billLabels, setBillLabels] = useState(false);
   return <section className="cash-section cash-settings-subsection" aria-label="个人账起算">
-    <div className="cash-toolbar"><h3>个人账起算</h3><span>{query.data ? `${query.data.counterparty ?? "归属人未设置"} · ${query.data.opening_date ?? "起算未设置"}` : "正在读取…"}</span><Button variant="tertiary" onPress={() => setEditing(query.data)} isDisabled={!query.data || query.loading}>设置起算日期</Button><Button variant="tertiary" isDisabled={!query.data?.opening_date || !query.data.counterparty || query.loading} onPress={() => { if (query.data?.counterparty && query.data.opening_date) setOpeningItem({ counterparty: query.data.counterparty, opening_date: query.data.opening_date }); }}>登记期初未结</Button><Button variant="tertiary" onPress={() => setBillLabels(true)}>管理账单分组</Button></div>
+    <div className="cash-toolbar"><h3>个人账起算</h3><span>{query.data ? `${query.data.counterparty ?? "归属人未设置"} · ${query.data.opening_date ?? "起算未设置"}` : "—"}</span><Button variant="tertiary" onPress={() => setEditing(query.data)} isDisabled={!query.data || query.loading}>设置起算日期</Button><Button variant="tertiary" isDisabled={!query.data?.opening_date || !query.data.counterparty || query.loading} onPress={() => { if (query.data?.counterparty && query.data.opening_date) setOpeningItem({ counterparty: query.data.counterparty, opening_date: query.data.opening_date }); }}>登记期初未结</Button><Button variant="tertiary" onPress={() => setBillLabels(true)}>管理账单分组</Button></div>
     <CashNotice error={query.error?.message} />
     <p className="cash-hint">声明个人账的记账范围，不改变现金账户期初；旧欠款需逐项登记，不会自动生成现金流水。</p>
     {editing && <CashOpeningDateEditor setting={editing} onClose={() => setEditing(null)} />}
@@ -258,7 +258,7 @@ export function CashProjectSettings({ initial = initialCashSettingsCriteria().pr
     const result = await mutation.run<CashProjectSelection>("/settings/project-selection", { expected_version: draft?.version ?? selection.data.version, allowed_stage_codes: selected }, "PUT");
     if (result !== null) setDraft(null);
   };
-  return <section className="cash-section" aria-label="OA 项目与可选阶段">
+  return <section className="cash-section" aria-busy={projects.loading || selection.loading} aria-label="OA 项目与可选阶段">
     <div className="cash-toolbar"><h3>新增流水可选项目状态</h3><Button variant="tertiary" isDisabled={projects.loading || selection.loading || mutation.busy} onPress={() => { projects.reload(); selection.reload(); }}>刷新 OA 资料</Button></div>
     <p className="cash-hint">仅影响新增流水的项目选择，不修改 OA 状态。</p>
     <CashNotice error={selection.error?.message ?? projects.error?.message ?? mutation.error?.message} />
@@ -289,7 +289,7 @@ export function CashProjectSettings({ initial = initialCashSettingsCriteria().pr
         <FinanceTableColumn id="selectable"><CashColumnHeader label="新增可选"><CashFilterPopover label="新增资格" column value={selectable ? [selectable] : []} options={[{ value: "true", label: "可选" }, { value: "false", label: "不可选" }]} onApply={value => { setSelectable(value.length === 1 ? value[0] : ""); setPage(1); }} /></CashColumnHeader></FinanceTableColumn>
         <FinanceTableColumn id="reason">不可选原因</FinanceTableColumn>
       </FinanceTableHeader>
-      <FinanceTableBody renderEmptyState={() => projects.loading ? "正在读取 OA 项目…" : projects.error ? "OA 项目读取失败，请刷新。" : "没有匹配项目。历史现金记录不受本页选择范围影响。"}>{(projects.data?.rows ?? []).map((row) => <FinanceTableRow key={row.id} id={row.id}>
+      <FinanceTableBody renderEmptyState={() => projects.error ? "OA 项目读取失败，请刷新。" : projects.loading ? null : "没有匹配项目。历史现金记录不受本页选择范围影响。"}>{(projects.data?.rows ?? []).map((row) => <FinanceTableRow key={row.id} id={row.id}>
         <FinanceTableCell columnRole="identity">{row.code ?? "—"}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.name}</FinanceTableCell>
         <FinanceTableCell columnRole="status">{row.stage_name ?? (row.stage_code ? "未知阶段" : "阶段缺失")}</FinanceTableCell><FinanceTableCell columnRole="status">{row.selectable ? "可选" : "不可选"}</FinanceTableCell>
         <FinanceTableCell columnRole="description">{row.unavailable_reason ? cashProjectUnavailableLabels[row.unavailable_reason] : "—"}</FinanceTableCell>
@@ -310,7 +310,7 @@ export function CashBillLabels() {
     <CashNotice error={query.error?.message} />
     <FinanceTable ariaLabel="账单分组" minWidth={480} footer={<FinanceTablePagination page={page} pageSize={50} total={query.data?.pagination.total ?? 0} onPageChange={setPage} isDisabled={query.loading || Boolean(query.error)} />}>
       <FinanceTableHeader>{["银行", "账单别名", "状态", "操作"].map((name, i) => <FinanceTableColumn key={name} id={name} isRowHeader={i === 1}>{name}</FinanceTableColumn>)}</FinanceTableHeader>
-      <FinanceTableBody renderEmptyState={() => query.loading ? "正在读取账单分组…" : query.error ? "账单分组读取失败，请刷新。" : "尚无账单分组。分组只标明用途，不是现金账户。"}>{(query.data?.rows ?? []).map((row) => <FinanceTableRow id={row.id} key={row.id}><FinanceTableCell columnRole="identity">{row.bank_name}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.label}</FinanceTableCell><FinanceTableCell columnRole="status">{row.enabled ? "启用" : "停用"}</FinanceTableCell><FinanceTableCell columnRole="action"><Button variant="tertiary" onPress={() => setEditing(row)}>编辑</Button></FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
+      <FinanceTableBody renderEmptyState={() => query.error ? "账单分组读取失败，请刷新。" : query.loading ? null : "尚无账单分组。分组只标明用途，不是现金账户。"}>{(query.data?.rows ?? []).map((row) => <FinanceTableRow id={row.id} key={row.id}><FinanceTableCell columnRole="identity">{row.bank_name}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.label}</FinanceTableCell><FinanceTableCell columnRole="status">{row.enabled ? "启用" : "停用"}</FinanceTableCell><FinanceTableCell columnRole="action"><Button variant="tertiary" onPress={() => setEditing(row)}>编辑</Button></FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
     </FinanceTable>
     {editing && <CashBillEditor row={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}
   </section>;

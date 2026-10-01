@@ -94,14 +94,13 @@ export default function ImportJobDiagnostics({ refreshToken, onHandled, domain, 
     } finally { submitting.current = false; setBusy(false); }
   }
   const job = detail?.job;
-  return <section aria-label="导入任务诊断" id="import-job-diagnostics">
+  const listRows = list?.rows ?? [];
+  return <section aria-busy={loading} aria-label="导入任务诊断" id="import-job-diagnostics">
     <div className="app-health-section__header"><h3>导入任务诊断</h3><Button variant="secondary" onPress={() => void loadList()} isDisabled={loading}>刷新任务</Button></div>
     {listError && <p role="alert">{success ? "处理已成功，但任务列表刷新失败。" : ""}{listError}</p>}
-    {loading && <p role="status">正在读取任务…</p>}
-    {list && <>
       <FinanceTable ariaLabel="待处理导入任务" minWidth={640}>
         <FinanceTableHeader><FinanceTableColumn isRowHeader>导入类型</FinanceTableColumn><FinanceTableColumn>文件</FinanceTableColumn><FinanceTableColumn>创建人</FinanceTableColumn><FinanceTableColumn>状态</FinanceTableColumn><FinanceTableColumn>更新时间</FinanceTableColumn><FinanceTableColumn>操作</FinanceTableColumn></FinanceTableHeader>
-        <FinanceTableBody>{list.rows.map(row => <FinanceTableRow key={row.job_id} id={row.job_id}>
+        <FinanceTableBody renderEmptyState={() => loading ? <span className="sr-only">正在读取任务</span> : "无待处理导入任务"}>{listRows.map(row => <FinanceTableRow key={row.job_id} id={row.job_id}>
           <FinanceTableCell columnRole="description">{row.affected_domains.map(d => typeLabels[d]).join("、")}</FinanceTableCell>
           <FinanceTableCell columnRole="description">{row.file_name || "无文件摘要"}{row.file_count ? `（${row.file_count} 个）` : ""}</FinanceTableCell>
           <FinanceTableCell columnRole="description">{row.created_by || "未记录"}</FinanceTableCell><FinanceTableCell columnRole="description">{statusLabels[row.status]}</FinanceTableCell>
@@ -109,7 +108,7 @@ export default function ImportJobDiagnostics({ refreshToken, onHandled, domain, 
           <FinanceTableCell columnRole="description"><Button variant="secondary" onPress={() => { setSelected(row.job_id); setDetail(null); setSuccess(""); setNote(""); setReason("not_needed"); setUncertain(false); void loadDetail(row.job_id); }}>查看详情</Button></FinanceTableCell>
         </FinanceTableRow>)}</FinanceTableBody>
       </FinanceTable>
-      {!list.rows.length && <p>无待处理导入任务</p>}
+    {list && <>
       <div className="app-health-section__header"><span>共 {list.pagination.total} 条 · 第 {page} 页</span>
         <Button variant="secondary" isDisabled={page === 1 || loading} onPress={() => setPage(page - 1)}>上一页任务</Button>
         <Button variant="secondary" isDisabled={!list.pagination.has_more || loading} onPress={() => setPage(page + 1)}>下一页任务</Button></div>

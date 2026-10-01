@@ -687,7 +687,7 @@ export default function BatchAccountingPage() {
       ) : null}
 
       <div className="batch-accounting-layout">
-        <section aria-label="批量账务流水" className="batch-accounting-bank-panel" role="region">
+        <section aria-busy={loading} aria-label="批量账务流水" className="batch-accounting-bank-panel" role="region">
           <header className="batch-accounting-bank-panel__header">
             <div>
               <h2 className="batch-accounting-bank-panel__title">批量账务流水</h2>
@@ -710,11 +710,6 @@ export default function BatchAccountingPage() {
               total={bankPagination.total}
             />
           </header>
-          {loading ? (
-            <div className="batch-accounting-bank-panel__state">
-              <StatePanel compact tone="loading" title="正在加载流水" />
-            </div>
-          ) : null}
           {!loading && !error && payload.bankRows.length === 0 ? (
             <div className="batch-accounting-bank-panel__state">
               <StatePanel compact tone="empty" title="当前范围暂无批量账务流水" />

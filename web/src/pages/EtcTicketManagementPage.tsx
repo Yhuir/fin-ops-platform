@@ -2025,7 +2025,6 @@ export default function EtcTicketManagementPage() {
                 <Segment id="submitted"><CountedLabel label="已提交" value={batchListError ? undefined : counts?.submitted} unit="批" /></Segment>
               </SegmentGroup>
               <div className="etc-batch-scroll" aria-busy={loading}>
-                {loading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}
                 {batchListError ? <StatePanel tone="error" compact>{batchListError}</StatePanel> : null}
                 <ul className="etc-batch-list" aria-label="ETC批次列表">
                   {visibleBatches.map((batch) => {
@@ -2231,8 +2230,7 @@ export default function EtcTicketManagementPage() {
                     </div>
                   </div>
 
-                  <div id="etc-reconciliation-task-content">
-                    {taskLoading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}
+                  <div id="etc-reconciliation-task-content" aria-busy={taskLoading}>
                     {taskListError ? <StatePanel tone="error" compact>{taskListError}</StatePanel> : null}
                     {!taskLoading && !taskListError && selectedTask ? (
                       <div className="etc-reconciliation-task-content">
@@ -2625,7 +2623,7 @@ export default function EtcTicketManagementPage() {
                                   {
                                     ariaLabel: "已导入ETC发票明细",
                                     emptyText: "暂无明细。",
-                                    loadingText: detailLoading ? "加载中。" : "",
+                                    loadingText: "",
                                     tableKey: selectedBusinessBatch?.businessBatchId ?? "",
                                   },
                                 )}
@@ -2669,18 +2667,19 @@ export default function EtcTicketManagementPage() {
                         </button>
                       ) : null}
                     >
-                      {detailLoading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}
-                      {batchDetailError ? (
-                        <StatePanel tone="error" compact>{batchDetailError}</StatePanel>
-                      ) : renderEtcInvoiceTable(
-                        invoiceRows,
-                        {
-                          ariaLabel: "ETC发票明细",
-                          emptyText: "暂无明细。",
-                          loadingText: detailLoading ? "加载中。" : "",
-                          tableKey: selectedBatchId,
-                        },
-                      )}
+                      <div aria-busy={detailLoading}>
+                        {batchDetailError ? (
+                          <StatePanel tone="error" compact>{batchDetailError}</StatePanel>
+                        ) : renderEtcInvoiceTable(
+                          invoiceRows,
+                          {
+                            ariaLabel: "ETC发票明细",
+                            emptyText: "暂无明细。",
+                            loadingText: "",
+                            tableKey: selectedBatchId,
+                          },
+                        )}
+                      </div>
                     </EtcDisclosureSection>
 
                     {businessBatchDetail?.importAttempts.length ? (

@@ -121,13 +121,12 @@ export function CashProjectPicker({ onSelect, onClose }: {
 }) {
   const [search, setSearch] = useState(""); const [keyword, setKeyword] = useState(""); const [page, setPage] = useState(1);
   const query = useCashQuery<CashProjectsPage>("/projects", { purpose: "selection", keyword, page, page_size: 20 });
-  return <section className="cash-picker" aria-label="选择现金项目">
+  return <section className="cash-picker" aria-busy={query.loading} aria-label="选择现金项目">
     <form className="cash-toolbar" onSubmit={event => { event.preventDefault(); setKeyword(search); setPage(1); }}>
       <CashInput label="项目名称或编号" value={search} onChange={setSearch} />
       <Button type="submit" variant="secondary" size="sm">查询</Button><Button size="sm" variant="tertiary" onPress={onClose}>取消</Button>
     </form>
     <CashNotice error={query.error?.message} />
-    {query.loading && <p role="status">正在读取 OA 项目…</p>}
     {query.error && <Button size="sm" variant="tertiary" onPress={query.reload}>重新读取</Button>}
     {query.data && <><ul className="cash-choice-list">{query.data.rows.map(row => <li key={row.id}>
       <Button size="sm" variant="tertiary" isDisabled={!row.selectable} onPress={() => onSelect({ id: row.id, name_snapshot: row.name })}>{row.name}</Button>

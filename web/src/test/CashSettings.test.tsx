@@ -77,7 +77,8 @@ describe("现金项目选择设置", () => {
     expect(screen.getByRole("checkbox", { name: "实施阶段" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "保存选择" })).toBeDisabled();
     expect(screen.getByRole("columnheader", { name: /真实阶段/ })).toBeInTheDocument();
-    expect(screen.getByText("正在读取 OA 项目…")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "OA 项目与可选阶段" })).toHaveAttribute("aria-busy", "true");
+    expect(screen.queryByText("正在读取 OA 项目…")).not.toBeInTheDocument();
   });
 
   it("阶段草稿不写入，结束禁选，全空保存后仍显示全部项目", async () => {

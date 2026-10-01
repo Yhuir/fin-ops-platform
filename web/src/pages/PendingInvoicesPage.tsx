@@ -483,11 +483,7 @@ export default function PendingInvoicesPage() {
       });
   }, [applyRowsPayload, canOperateData, clearSelectedTransactions, loadStatistics, query, runOperation, selectedRows, statusFilters]);
 
-  const compactStatusText = error
-    ? error
-    : loading
-      ? "数据加载中"
-      : "";
+  const compactStatusText = error ?? "";
 
   const summaryCounts = {
     all: sourceSummary?.bankTransactionRows,

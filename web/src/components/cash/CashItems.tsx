@@ -37,15 +37,14 @@ export function CashItemPicker({ label, params = {}, onSelect, onCancel }: {
   const [keyword, setKeyword] = useState("");
   const [page, setPage] = useState(1);
   const query = useCashQuery<CashPageRows<CashItem>>("/items", { ...params, keyword: keyword || undefined, page, page_size: 20 });
-  return <section className="cash-picker" aria-label={label}>
+  return <section className="cash-picker" aria-busy={query.loading} aria-label={label}>
     <div className="cash-toolbar" onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); setKeyword(search); setPage(1); } }}>
       <CashInput label={label} value={search} onChange={setSearch} placeholder="搜索对象、项目或事项内容" />
       <Button size="sm" variant="secondary" onPress={() => { setKeyword(search); setPage(1); }}>查询</Button>
       {onCancel && <Button size="sm" variant="tertiary" onPress={onCancel}>收起选择</Button>}
     </div>
     <CashNotice error={query.error?.message} />
-    {query.loading && <p role="status">正在读取事项…</p>}
-    {query.data && !query.loading && <>
+    {query.data && <>
       <FinanceTable ariaLabel={label} minWidth={560}>
         <FinanceTableHeader><FinanceTableColumn isRowHeader>事项 / 对象</FinanceTableColumn><FinanceTableColumn>项目</FinanceTableColumn><FinanceTableColumn>金额</FinanceTableColumn><FinanceTableColumn>操作</FinanceTableColumn></FinanceTableHeader>
         <FinanceTableBody>{query.data.rows.map(item => <FinanceTableRow key={item.id} id={item.id} textValue={item.content}>
@@ -67,14 +66,13 @@ function ItemProjectPicker({ historical, onSelect, onCancel }: {
 }) {
   const [search, setSearch] = useState(""); const [keyword, setKeyword] = useState(""); const [page, setPage] = useState(1);
   const query = useCashQuery<{ rows: { id: string; name: string; stage_name: string | null }[]; total: number; page: number; page_size: number }>("/projects", { purpose: historical ? "all" : "selection", keyword: keyword || undefined, page, page_size: 20 });
-  return <section className="cash-picker">
+  return <section className="cash-picker" aria-busy={query.loading}>
     <div className="cash-toolbar" onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); setKeyword(search); setPage(1); } }}>
       <CashInput label={historical ? "期初历史项目" : "可选项目"} value={search} onChange={setSearch} />
       <Button size="sm" variant="secondary" onPress={() => { setKeyword(search); setPage(1); }}>查询项目</Button><Button size="sm" variant="tertiary" onPress={onCancel}>取消选择</Button>
     </div>
     <CashNotice error={query.error?.message} />
-    {query.loading && <p role="status">正在读取项目…</p>}
-    {query.data && !query.loading && <><ul className="cash-choice-list">{query.data.rows.map(row => <li key={row.id}><Button size="sm" variant="tertiary" onPress={() => onSelect(row)}>{row.name} · {row.stage_name ?? "状态未提供"}</Button></li>)}</ul>{query.data.rows.length === 0 && <p>没有可选项目。可以保留无项目，或在基础设置调整允许阶段。</p>}<FinanceTablePagination page={page} pageSize={20} total={query.data.total} onPageChange={setPage} /></>}
+    {query.data && <><ul className="cash-choice-list">{query.data.rows.map(row => <li key={row.id}><Button size="sm" variant="tertiary" onPress={() => onSelect(row)}>{row.name} · {row.stage_name ?? "状态未提供"}</Button></li>)}</ul>{query.data.rows.length === 0 && <p>没有可选项目。可以保留无项目，或在基础设置调整允许阶段。</p>}<FinanceTablePagination page={page} pageSize={20} total={query.data.total} onPageChange={setPage} /></>}
   </section>;
 }
 
@@ -226,8 +224,8 @@ export function CashSettlementTable({ params, onItem, onFlow }: { params: QueryP
   const [page, setPage] = useState(1); const [editing, setEditing] = useState<CashSettlement | null>(null); const [removing, setRemoving] = useState<CashSettlement | null>(null);
   const query = useCashQuery<CashPageRows<CashSettlement>>("/settlements", { ...params, page, page_size: 20 });
   const action = useItemWrite();
-  return <section className="cash-section"><CashNotice error={query.error?.message ?? action.error} />{query.loading && <p role="status">正在读取处理明细…</p>}
-    {query.data && !query.loading && <><FinanceTable ariaLabel="处理明细" minWidth={780}>
+  return <section aria-busy={query.loading} className="cash-section"><CashNotice error={query.error?.message ?? action.error} />
+    {query.data && <><FinanceTable ariaLabel="处理明细" minWidth={780}>
       <FinanceTableHeader><FinanceTableColumn isRowHeader>日期</FinanceTableColumn><FinanceTableColumn>处理类型</FinanceTableColumn><FinanceTableColumn>目标 / 来源</FinanceTableColumn><FinanceTableColumn>金额</FinanceTableColumn><FinanceTableColumn>说明</FinanceTableColumn><FinanceTableColumn>操作</FinanceTableColumn></FinanceTableHeader>
       <FinanceTableBody>{query.data.rows.map(row => <FinanceTableRow key={row.id} id={row.id} textValue={`${row.occurred_on} ${settlementLabels[row.kind]}`}>
         <FinanceTableCell columnRole="date">{row.occurred_on}</FinanceTableCell><FinanceTableCell columnRole="status">{settlementLabels[row.kind]}<small>{row.flow_id ? "实际现金" : "无现金收付"}</small></FinanceTableCell>
@@ -254,8 +252,8 @@ export function CashItemDetail({ itemId, onClose, onFlow, onActualFlow, onOrigin
   if (companyCreate) return <CashItemEditor initialType="company_receivable" ticketSource={companyCreate} onClose={() => setCompanyCreate(null)} onSaved={openRelated} />;
   const cashKind: CashSettlementKind | null = item?.type === "loan" ? "cash_repayment" : item?.type === "company_receivable" ? "company_collection" : item?.type === "expense" ? "expense_payment" : null;
   return <AppDrawer completion={deleted ? "事项已删除" : undefined} open title="事项详情" width={860} className="cash-module cash-drawer" onClose={onClose} closeDisabled={action.busy}>
-    <CashNotice error={query.error?.message ?? action.error} />{query.loading && <p role="status">正在读取事项…</p>}
-    {item && query.data && !query.loading && <>
+    <CashNotice error={query.error?.message ?? action.error} />
+    {item && query.data && <>
       <div className="cash-detail-heading"><h3>{item.content}</h3><p>{itemTypeLabels[item.type]} · {item.counterparty ?? item.ticket_provider ?? "—"} · {item.project_name_snapshot ?? "无项目"}</p></div>
       <p className="cash-hint">以下为当前事实与可办理额；历史报表截止日余额不能用于直接冲抵。</p>
       <dl className="cash-facts"><div><dt>{item.is_opening ? "起算日期" : "实际日期"}</dt><dd>{item.origin_date}</dd></div>{(item.type === "expense" || item.type === "ticket_source") && <div><dt>费用类型</dt><dd>{item.category === null ? "未分类" : item.category.name}</dd></div>}{Object.entries(query.data.amounts).map(([key, value]) => <div key={key}><dt>{amountLabels[key]}</dt><dd>{cashAmount(value)}</dd></div>)}</dl>
@@ -280,5 +278,5 @@ export function CashItemDetail({ itemId, onClose, onFlow, onActualFlow, onOrigin
 function CashItemFlows({ itemId, onFlow }: { itemId: string; onFlow?: (id: string) => void }) {
   const [page, setPage] = useState(1);
   const query = useCashQuery<CashPageRows<{ id: string; occurred_on: string; kind: string; amount: string; content: string; source_kind: string }>>("/flows", { item_id: itemId, page, page_size: 20 });
-  return <section><CashNotice error={query.error?.message} />{query.loading && <p role="status">正在读取关联现金…</p>}{query.data && !query.loading && <><FinanceTable ariaLabel="事项关联现金" minWidth={620}><FinanceTableHeader><FinanceTableColumn isRowHeader>日期</FinanceTableColumn><FinanceTableColumn>内容</FinanceTableColumn><FinanceTableColumn>方向 / 来源</FinanceTableColumn><FinanceTableColumn>金额</FinanceTableColumn><FinanceTableColumn>操作</FinanceTableColumn></FinanceTableHeader><FinanceTableBody>{query.data.rows.map(row => <FinanceTableRow key={row.id} id={row.id} textValue={row.content}><FinanceTableCell columnRole="date">{row.occurred_on}</FinanceTableCell><FinanceTableCell columnRole="description">{row.content}</FinanceTableCell><FinanceTableCell columnRole="status">{row.kind === "receipt" ? "收入" : row.kind === "payment" ? "支出" : "互转"} · {row.source_kind === "manual" ? "手工" : "每月任务"}</FinanceTableCell><FinanceTableCell columnRole="amount">{cashAmount(row.amount)}</FinanceTableCell><FinanceTableCell columnRole="action">{onFlow && <Button size="sm" variant="tertiary" onPress={() => onFlow(row.id)}>详情</Button>}</FinanceTableCell></FinanceTableRow>)}</FinanceTableBody></FinanceTable>{query.data.rows.length === 0 && <p>暂无关联现金。</p>}<FinanceTablePagination {...query.data.pagination} pageSize={20} onPageChange={setPage} /></>}</section>;
+  return <section aria-busy={query.loading}><CashNotice error={query.error?.message} />{query.data && <><FinanceTable ariaLabel="事项关联现金" minWidth={620}><FinanceTableHeader><FinanceTableColumn isRowHeader>日期</FinanceTableColumn><FinanceTableColumn>内容</FinanceTableColumn><FinanceTableColumn>方向 / 来源</FinanceTableColumn><FinanceTableColumn>金额</FinanceTableColumn><FinanceTableColumn>操作</FinanceTableColumn></FinanceTableHeader><FinanceTableBody>{query.data.rows.map(row => <FinanceTableRow key={row.id} id={row.id} textValue={row.content}><FinanceTableCell columnRole="date">{row.occurred_on}</FinanceTableCell><FinanceTableCell columnRole="description">{row.content}</FinanceTableCell><FinanceTableCell columnRole="status">{row.kind === "receipt" ? "收入" : row.kind === "payment" ? "支出" : "互转"} · {row.source_kind === "manual" ? "手工" : "每月任务"}</FinanceTableCell><FinanceTableCell columnRole="amount">{cashAmount(row.amount)}</FinanceTableCell><FinanceTableCell columnRole="action">{onFlow && <Button size="sm" variant="tertiary" onPress={() => onFlow(row.id)}>详情</Button>}</FinanceTableCell></FinanceTableRow>)}</FinanceTableBody></FinanceTable>{query.data.rows.length === 0 && <p>暂无关联现金。</p>}<FinanceTablePagination {...query.data.pagination} pageSize={20} onPageChange={setPage} /></>}</section>;
 }

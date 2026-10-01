@@ -155,7 +155,7 @@ describe("OperationHistoryPage", () => {
 
     render(<App />);
     const table = await screen.findByRole("grid", { name: "操作历史" });
-    await userEvent.click(within(table).getByRole("button", { name: "查看确认关联详情" }));
+    await userEvent.click(await within(table).findByRole("button", { name: "查看确认关联详情" }));
     const drawer = await screen.findByRole("dialog", { name: "操作详情" });
 
     expect(await within(drawer).findByText("关联关系 CASE-1")).toBeInTheDocument();

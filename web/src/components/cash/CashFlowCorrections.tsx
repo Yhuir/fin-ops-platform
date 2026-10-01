@@ -49,13 +49,13 @@ function CorrectionFlowPicker({ excludeId, onSelect, onClose }: {
   const end = validMonth ? `${month}-${new Date(Date.UTC(year, number, 0)).getUTCDate()}` : "";
   const query = useCashQuery<CashPageRows<FlowChoice>>(rangeMode === "all" || validMonth ? "/flows" : null,
     { time_scope: rangeMode === "all" ? "all" : undefined, date_from: rangeMode === "all" ? undefined : `${month}-01`, date_to: rangeMode === "all" ? undefined : end, keyword, page, page_size: 20 });
-  return <section className="cash-picker" aria-label="选择正确现金流水">
+  return <section className="cash-picker" aria-busy={query.loading} aria-label="选择正确现金流水">
     <div className="cash-toolbar"><CashSelect label="流水时间范围" value={rangeMode} onChange={value => { setRangeMode(value); setPage(1); }} options={[{ value: "all", label: "全部" }, { value: "month", label: "指定月份" }]} />
       {rangeMode === "month" && <CashInput label="流水月份" type="month" value={month} onChange={value => { setMonth(value); setPage(1); }} />}
       <CashInput label="搜索正确流水" value={search} onChange={setSearch} />
       <Button type="button" size="sm" variant="secondary" onPress={() => { setKeyword(search); setPage(1); }}>查询流水</Button>
       <Button type="button" size="sm" variant="tertiary" onPress={onClose}>取消选择</Button></div>
-    <CashNotice error={query.error?.message} />{query.loading && <p role="status">正在读取现金流水…</p>}
+    <CashNotice error={query.error?.message} />
     {query.data && <><ul className="cash-choice-list">{query.data.rows.map(row => <li key={row.id}>
       <Button type="button" size="sm" variant="tertiary" isDisabled={row.id === excludeId || row.kind === "transfer"} onPress={() => onSelect(row)}>
         {row.occurred_on} · {row.content} · {cashAmount(row.amount)}</Button></li>)}</ul>

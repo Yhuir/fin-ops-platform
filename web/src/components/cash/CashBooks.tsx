@@ -51,7 +51,7 @@ function ReportState({ error, reload }: { error: { message: string } | null; rel
   return error && <div className="cash-query-error"><CashNotice error={error.message} /><Button size="sm" variant="secondary" onPress={reload}>重新读取</Button></div>;
 }
 function ReportEmpty({ loading, failed }: { loading: boolean; failed: boolean }) {
-  return <p className="cash-empty" role="status">{loading ? "正在读取账目…" : failed ? "读取失败，请重试。" : "当前条件下暂无记录。"}</p>;
+  return <p className="cash-empty" role="status">{failed ? "读取失败，请重试。" : loading ? null : "当前条件下暂无记录。"}</p>;
 }
 function PeriodFilters({ onApply, onReset, children, initial, initialKeyword, cutoffOnly = false }: {
   onApply: (params: Period & { keyword: string }) => string | null; onReset: () => void;
@@ -97,7 +97,7 @@ function TurnoverBook({ onItem, initial, onChange }: { onItem: (id: string) => v
   useEffect(() => { onChange({ filters, group, page, sort, order, selected }); }, [filters, group, page, sort, order, selected, onChange]);
   const params = { ...filters, ledger_group: group.startsWith("personal_") ? "personal" : group === "all" ? undefined : group, personal_variant: group.startsWith("personal_") ? group.slice(9) : undefined, sort, order, page, page_size: 50 };
   const query = useCashQuery<Report<TurnoverRow, TurnoverSummary>>("/reports/turnover", params);
-  const data = !query.loading && !query.error ? query.data : null;
+  const data = query.error ? null : query.data;
   useEffect(() => { if (query.data && page > 1 && query.data.rows.length === 0) setPage(Math.max(1, Math.ceil(query.data.pagination.total / 50))); }, [query.data, page]);
   const period = { date_from: filters.date_from, date_to: filters.time_scope === "all" ? cashToday() : filters.date_to };
   const applyFilters = (value: Partial<BookFilters>) => {
@@ -170,7 +170,7 @@ function TicketBook({ onItem, initial, onChange, view }: { onItem: (id: string) 
   const pending = view === "pending_collection";
   const params = { ...filters, time_scope: pending ? undefined : filters.time_scope, date_from: pending ? undefined : filters.date_from, states: pending ? undefined : filters.states, view, sort, order, page, page_size: 50 };
   const query = useCashQuery<Report<TicketRow, Record<string, string>>>("/reports/ticket-payments", params);
-  const data = !query.loading && !query.error ? query.data : null;
+  const data = query.error ? null : query.data;
   useEffect(() => { if (query.data && page > 1 && query.data.rows.length === 0) setPage(Math.max(1, Math.ceil(query.data.pagination.total / 50))); }, [query.data, page]);
   const period = { date_from: pending ? undefined : filters.date_from, date_to: filters.time_scope === "all" && !pending ? cashToday() : filters.date_to };
   const applyFilters = (value: Partial<BookFilters>) => {
@@ -226,7 +226,7 @@ function PersonalBook({ onItem, onFlow, initial, onChange }: { onItem: (id: stri
   const noncash = view === "ticket_offsets" || view === "non_ticket_offsets";
   const params = { view, year: appliedYear, keyword: appliedKeyword, bill_label_ids: bills, project_ids: projects, source_project_ids: noncash ? sourceProjects : undefined, category_ids: noncash ? categories : undefined, page, page_size: 50, sort, order };
   const query = useCashQuery<Report<MatrixRow | PersonalRow, PersonalSummary> & { filtered_totals?: { settlement_count: number; amount: string } }>("/reports/personal", params);
-  const data = !query.loading && !query.error ? query.data : null;
+  const data = query.error ? null : query.data;
   useEffect(() => { if (query.data && page > 1 && query.data.rows.length === 0) setPage(Math.max(1, Math.ceil(query.data.pagination.total / 50))); }, [query.data, page]);
   const applySort = (sort: string, order: "asc" | "desc") => {
     const error = cashQueryError({ ...params, sort, order, page: 1 }); setValidation(error);

@@ -1219,7 +1219,6 @@ export default function ImportWorkflowPage({ mode, taskId }: ImportWorkflowPageP
               已阻止确认导入：{conflictingPreviewFiles.map((file) => file.fileName).join("、")} 的识别账户与所选账户不一致。请清空预览并选择正确账户后重新预览。
             </ImportNotice>
           ) : null}
-          {settingsLoading ? <ImportNotice tone="accent">正在加载银行账户映射...</ImportNotice> : null}
           {!settingsLoading && !canUseBankImport ? <ImportNotice tone="warning">设置里还没有银行账户映射，请先在设置中维护银行。</ImportNotice> : null}
           {mode === "etc_invoice" && readyEtcTasksLoading ? <ImportNotice tone="accent">正在加载可导入的 ETC 对账任务...</ImportNotice> : null}
           {mode === "etc_invoice" && !taskId && !readyEtcTasksLoading && readyEtcTasks.length === 0 ? (

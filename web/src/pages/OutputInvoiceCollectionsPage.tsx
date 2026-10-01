@@ -302,8 +302,8 @@ export default function OutputInvoiceCollectionsPage() {
 
   const actions = (
     <div className="output-invoice-collections-actions">
-      <Button isDisabled={loading || refreshing} onPress={() => loadRows("refresh")} size="sm" variant="secondary">
-        {refreshing ? "刷新中" : "刷新"}
+      <Button className="output-invoice-collections-refresh" isDisabled={loading || refreshing} isPending={refreshing} onPress={() => loadRows("refresh")} size="sm" variant="secondary">
+        刷新
       </Button>
       <Button
         isDisabled={loading || refreshing || Boolean(error)}

@@ -28,7 +28,7 @@ export function useCashQuery<T>(path: string | null,
   params?: CashQueryParams, revision?: number) {
   const scope = useCashScope();
   const [localRevision, setLocalRevision] = useState(0);
-  const [state, setState] = useState<{ key: string; data: T | null; loading: boolean; error: CashRequestError | null }>({ key: "", data: null, loading: true, error: null });
+  const [state, setState] = useState<{ key: string; url: string | null; data: T | null; loading: boolean; error: CashRequestError | null }>({ key: "", url: null, data: null, loading: true, error: null });
   let url: string | null = null;
   let inputError: CashRequestError | null = null;
   try {
@@ -41,22 +41,30 @@ export function useCashQuery<T>(path: string | null,
   const errorMessage = inputError?.message;
   const key = `${url}:${errorMessage ?? ""}:${revision ?? scope.revision}:${localRevision}`;
   useEffect(() => {
-    if (errorMessage) { setState({ key, data: null, loading: false, error: new CashRequestError(400, "cash_filter_limit", errorMessage) }); return; }
-    if (url === null) { setState({ key, data: null, loading: false, error: null }); return; }
+    if (errorMessage) { setState({ key, url, data: null, loading: false, error: new CashRequestError(400, "cash_filter_limit", errorMessage) }); return; }
+    if (url === null) { setState({ key, url, data: null, loading: false, error: null }); return; }
     const controller = new AbortController();
-    setState({ key, data: null, loading: true, error: null });
+    setState(current => ({ key, url, data: current.url === url ? current.data : null, loading: true, error: null }));
     void cashRequest<T>(url, { signal: controller.signal }).then(data => {
-      if (!controller.signal.aborted) setState({ key, data, loading: false, error: null });
+      if (!controller.signal.aborted) setState({ key, url, data, loading: false, error: null });
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
       if (!(error instanceof CashRequestError)) throw error;
       if (error.status === 401 || error.status === 403) scope.deny();
-      setState({ key, data: null, loading: false, error });
+      setState({ key, url, data: null, loading: false, error });
     });
     return () => controller.abort();
   }, [url, key, scope.deny, errorMessage]);
   const reload = useCallback(() => setLocalRevision(value => value + 1), []);
-  return { ...(state.key === key ? state : { data: null, loading: url !== null, error: null }), reload };
+  const visibleState = state.key === key
+    ? state
+    : { key, url, data: state.url === url ? state.data : null, loading: url !== null, error: null };
+  return {
+    ...visibleState,
+    initialLoading: visibleState.loading && visibleState.data === null,
+    refreshing: visibleState.loading && visibleState.data !== null,
+    reload,
+  };
 }
 
 export function useCashMutation() {

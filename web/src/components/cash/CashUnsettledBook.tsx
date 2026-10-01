@@ -20,7 +20,7 @@ export function CashUnsettledBook({ initial, onChange, onItem }: { initial: Cash
   const [error, setError] = useState<string | null>(null);
   const params = (value: CashUnsettledCriteria) => ({ view: "unsettled", date_to: value.date_to, keyword: value.keyword, counterparty: value.counterparty, ledger_group: value.group || undefined, project_ids: value.projects, page: value.page, page_size: 50, sort: value.sort, order: value.order });
   const query = useCashQuery<UnsettledReport>("/reports/turnover", params(criteria));
-  const data = !query.loading && !query.error ? query.data : null;
+  const data = query.error ? null : query.data;
   useEffect(() => { onChange(criteria); }, [criteria, onChange]);
   useEffect(() => { if (query.data && criteria.page > 1 && query.data.rows.length === 0) setCriteria(old => ({ ...old, page: Math.max(1, Math.ceil(query.data!.pagination.total / 50)) })); }, [query.data, criteria.page]);
   function apply(patch: Partial<CashUnsettledCriteria>) {
@@ -50,7 +50,7 @@ export function CashUnsettledBook({ initial, onChange, onItem }: { initial: Cash
         <FinanceTableColumn id="original" columnRole="amount">原始金额</FinanceTableColumn><FinanceTableColumn id="settled" columnRole="amount">截至日已结</FinanceTableColumn>
         <FinanceTableColumn id="remaining_amount" columnRole="amount" allowsSorting>截至日未结</FinanceTableColumn><FinanceTableColumn id="actions">操作</FinanceTableColumn>
       </FinanceTableHeader>
-      <FinanceTableBody renderEmptyState={() => <p className="cash-empty" role="status">{query.loading ? "正在读取未结事项…" : query.error ? "读取失败，请重试。" : "该范围没有已登记的未结事项。"}</p>}>{(data?.rows ?? []).map(row => <FinanceTableRow key={row.item_id} id={row.item_id} textValue={row.content} className={row.ledger_group === "company" ? "cash-row--company" : row.ledger_group === "external_person" ? "cash-row--external-person" : "cash-row--personal-principal"}>
+      <FinanceTableBody renderEmptyState={() => <p className="cash-empty" role="status">{query.error ? "读取失败，请重试。" : query.loading ? null : "该范围没有已登记的未结事项。"}</p>}>{(data?.rows ?? []).map(row => <FinanceTableRow key={row.item_id} id={row.item_id} textValue={row.content} className={row.ledger_group === "company" ? "cash-row--company" : row.ledger_group === "external_person" ? "cash-row--external-person" : "cash-row--personal-principal"}>
         <FinanceTableCell columnRole="date">{row.origin_date}</FinanceTableCell><FinanceTableCell columnRole="description">{row.project?.name_snapshot ?? "无项目"}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.counterparty}</FinanceTableCell><FinanceTableCell columnRole="status">{groups.find(group => group.value === row.ledger_group)?.label}</FinanceTableCell><FinanceTableCell columnRole="description">{row.content}</FinanceTableCell><FinanceTableCell columnRole="status">{row.obligation_direction === "receivable" ? "应收 / 对方应还" : "应付 / 我方应还"}</FinanceTableCell>
         <FinanceTableCell columnRole="amount">{cashAmount(row.original_amount)}</FinanceTableCell><FinanceTableCell columnRole="amount">{cashAmount(row.settled_amount)}</FinanceTableCell><FinanceTableCell columnRole="amount">{cashAmount(row.remaining_amount)}</FinanceTableCell><FinanceTableCell columnRole="action"><Button size="sm" variant="tertiary" onPress={() => onItem(row.item_id)}>详情 / 办理</Button></FinanceTableCell>
       </FinanceTableRow>)}</FinanceTableBody>
