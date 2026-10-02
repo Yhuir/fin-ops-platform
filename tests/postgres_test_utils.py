@@ -194,6 +194,7 @@ EXPECTED_MIGRATION_FILES = [
     "0181_cost_statistics_decision_mode.sql",
     "0182_input_invoice_payment_rules_editable.sql",
     "0183_payment_rule_applicant_names.sql",
+    "0184_remove_retired_settings.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "app", "staging", "cash")
 TEST_TABLES = (

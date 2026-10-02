@@ -65,7 +65,6 @@ from fin_ops_platform.services.state_store_protocol import (
 )
 
 DEFAULT_OA_RETENTION_CUTOFF_DATE = "2026-01-01"
-DEFAULT_OA_INVOICE_OFFSET_APPLICANTS = ["周洁莹"]
 DEFAULT_OA_IMPORT_FORM_TYPES = ["payment_request", "expense_claim"]
 DEFAULT_OA_IMPORT_STATUSES = ["completed"]
 OA_ATTACHMENT_INVOICE_PROMOTION_DISABLED = "disabled"
@@ -188,28 +187,6 @@ class AppSettingsService:
 
     def get_settings_payload(self) -> dict[str, Any]:
         self._refresh_snapshot_from_state_store()
-        completed_ids = set(self._snapshot["completed_project_ids"])
-        manual_project_ids = {
-            str(project["id"])
-            for project in self._snapshot["manual_projects"]
-        }
-        active_projects: list[dict[str, Any]] = []
-        completed_projects: list[dict[str, Any]] = []
-        for project in self._list_known_projects():
-            payload = {
-                "id": project.id,
-                "project_code": project.project_code,
-                "project_name": project.project_name,
-                "project_status": "completed" if project.id in completed_ids else "active",
-                "source": "manual" if project.id in manual_project_ids else "oa",
-                "department_name": project.department_name,
-                "owner_name": project.owner_name,
-            }
-            if project.id in completed_ids:
-                completed_projects.append(payload)
-            else:
-                active_projects.append(payload)
-
         mappings = sorted(
             self.get_bank_account_mappings_payload(),
             key=lambda item: (item["bank_name"], item["last4"]),
@@ -217,11 +194,6 @@ class AppSettingsService:
         oa_import_options = self._oa_import_available_options()
         return {
             **({PROJECT_COST_SCOPE_KEY: deepcopy(self._snapshot[PROJECT_COST_SCOPE_KEY])} if PROJECT_COST_SCOPE_KEY in self._snapshot else {}),
-            "projects": {
-                "active": active_projects,
-                "completed": completed_projects,
-                "completed_project_ids": sorted(completed_ids),
-            },
             "bank_account_mappings": mappings,
             "workbench_column_layouts": {
                 pane_id: list(self._snapshot["workbench_column_layouts"][pane_id])
@@ -236,9 +208,6 @@ class AppSettingsService:
                 "attachment_invoice_promotion_mode": self._snapshot["oa_import"]["attachment_invoice_promotion_mode"],
                 "available_form_types": oa_import_options["available_form_types"],
                 "available_statuses": oa_import_options["available_statuses"],
-            },
-            "oa_invoice_offset": {
-                "applicant_names": list(self._snapshot["oa_invoice_offset"]["applicant_names"]),
             },
             "bank_transaction_tags": self._public_bank_transaction_tags(self._snapshot["bank_transaction_tags"]),
             "no_oa_bank_batch_tag_selection": self._public_no_oa_bank_batch_tag_selection(
@@ -518,81 +487,25 @@ class AppSettingsService:
     def update_settings(
         self,
         *,
-        completed_project_ids: list[str],
         bank_account_mappings: list[dict[str, Any]],
         workbench_column_layouts: dict[str, Any] | None = None,
         oa_retention: dict[str, Any] | None = None,
         oa_import: dict[str, Any] | None = None,
-        oa_invoice_offset: dict[str, Any] | None = None,
-        manual_projects: list[dict[str, Any]] | None = None,
-        pending_invoice_tag_groups: dict[str, Any] | None = None,
-        pending_output_invoice_tag_groups: dict[str, Any] | None = None,
-        actor_id: str | None = None,
-        after_bank_transaction_tag_settings_saved: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         self._refresh_snapshot_from_state_store()
-        previous_snapshot = dict(self._snapshot)
         normalized_snapshot = self._normalize_settings(
             {
-                "completed_project_ids": completed_project_ids,
+                **self._snapshot,
                 "bank_account_mappings": bank_account_mappings,
-                "page_access_accounts": self._snapshot["page_access_accounts"],
-                "access_control_version": self._snapshot["access_control_version"],
                 "workbench_column_layouts": workbench_column_layouts or {},
                 "oa_retention": oa_retention or {},
-                "oa_import": (
-                    oa_import
-                    if oa_import is not None
-                    else self._snapshot.get("oa_import", {})
-                ),
-                "oa_invoice_offset": oa_invoice_offset or {},
-                "manual_projects": (
-                    manual_projects
-                    if manual_projects is not None
-                    else self._snapshot.get("manual_projects", [])
-                ),
-                "synced_projects": self._snapshot.get("synced_projects", []),
-                "bank_transaction_tags": self._snapshot.get("bank_transaction_tags", {}),
-                "pending_invoice_tag_groups": (
-                    pending_invoice_tag_groups
-                    if pending_invoice_tag_groups is not None
-                    else self._snapshot.get("pending_invoice_tag_groups", {})
-                ),
-                "pending_output_invoice_tag_groups": (
-                    pending_output_invoice_tag_groups
-                    if pending_output_invoice_tag_groups is not None
-                    else self._snapshot.get("pending_output_invoice_tag_groups", {})
-                ),
-                "no_oa_bank_batch_tag_selection": self._snapshot.get("no_oa_bank_batch_tag_selection", {}),
-                "bank_flow_rule_batch_tag_rules": self._snapshot.get("bank_flow_rule_batch_tag_rules", {}),
-                "turnover_ledger_tag_selection": self._snapshot.get("turnover_ledger_tag_selection", {}),
-                "batch_accounting_tag_selection": self._snapshot.get("batch_accounting_tag_selection", {}),
-                "cost_statistics_no_oa_projects": self._snapshot.get("cost_statistics_no_oa_projects", {}),
-                **({PROJECT_COST_SCOPE_KEY: self._snapshot[PROJECT_COST_SCOPE_KEY]}
-                   if PROJECT_COST_SCOPE_KEY in self._snapshot else {}),
-                INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY: self._snapshot.get(
-                    INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY,
-                    {},
-                ),
+                "oa_import": oa_import if oa_import is not None else self._snapshot["oa_import"],
             },
-            validate_pending_invoice_tag_groups=True,
+            validate_pending_invoice_tag_groups=False,
         )
-        tag_settings_event = self._prepare_tag_settings_event(
-            previous_snapshot,
-            normalized_snapshot,
-            actor_id=actor_id,
-        )
-        if tag_settings_event is not None:
-            self._apply_tag_settings_versions(previous_snapshot, normalized_snapshot, tag_settings_event)
         if self._state_store is not None:
             self._state_store.save_app_settings(normalized_snapshot)
         self._snapshot = normalized_snapshot
-        self._configure_category_service(normalized_snapshot)
-        if tag_settings_event is not None:
-            self._record_tag_settings_audit(tag_settings_event)
-            if after_bank_transaction_tag_settings_saved is not None:
-                after_bank_transaction_tag_settings_saved(dict(tag_settings_event))
-        self._restore_manual_projects()
         return self.get_settings_payload()
 
     def update_pending_invoice_rule_groups(
@@ -1653,60 +1566,6 @@ class AppSettingsService:
             ),
         }
 
-    def sync_oa_projects(self, *, actor_id: str) -> dict[str, Any]:
-        self._refresh_snapshot_from_state_store()
-        self._project_costing_service.sync_projects_from_oa(actor_id=actor_id)
-        next_snapshot = dict(self._snapshot)
-        next_snapshot["synced_projects"] = self._serialize_synced_projects()
-        self._save_snapshot(next_snapshot)
-        return self.get_settings_payload()
-
-    def create_manual_project(
-        self,
-        *,
-        actor_id: str,
-        project_code: str,
-        project_name: str,
-        department_name: str | None = None,
-        owner_name: str | None = None,
-    ) -> dict[str, Any]:
-        self._refresh_snapshot_from_state_store()
-        project = self._project_costing_service.create_project(
-            actor_id=actor_id,
-            project_code=project_code,
-            project_name=project_name,
-            project_status="active",
-            department_name=department_name,
-            owner_name=owner_name,
-        )
-        next_snapshot = dict(self._snapshot)
-        next_snapshot["manual_projects"] = [
-            *self._snapshot["manual_projects"],
-            self._serialize_project(project),
-        ]
-        try:
-            self._save_snapshot(next_snapshot)
-        except Exception:
-            self._project_costing_service.delete_manual_project(project.id)
-            raise
-        return self.get_settings_payload()
-
-    def delete_project(self, project_id: str) -> dict[str, Any]:
-        self._refresh_snapshot_from_state_store()
-        normalized_project_id = str(project_id).strip()
-        next_snapshot = dict(self._snapshot)
-        next_snapshot["completed_project_ids"] = [
-            item
-            for item in self._snapshot["completed_project_ids"]
-            if item != normalized_project_id
-        ]
-        next_snapshot["manual_projects"] = [
-            project
-            for project in self._snapshot["manual_projects"]
-            if project["id"] != normalized_project_id
-        ]
-        self._save_snapshot(next_snapshot)
-        return self.get_settings_payload()
 
     def _save_snapshot(self, snapshot: dict[str, Any]) -> None:
         normalized_snapshot = self._normalize_settings(
@@ -1781,16 +1640,6 @@ class AppSettingsService:
         ]
         return [*live_projects, *snapshot_projects]
 
-    def _serialize_synced_projects(self) -> list[dict[str, Any]]:
-        manual_project_ids = {
-            str(project["id"])
-            for project in self._snapshot["manual_projects"]
-        }
-        return [
-            self._serialize_project(project)
-            for project in self._project_costing_service.list_projects()
-            if project.id not in manual_project_ids
-        ]
 
     @staticmethod
     def _deserialize_project(project: dict[str, Any]) -> ProjectMaster:
@@ -1803,16 +1652,6 @@ class AppSettingsService:
             owner_name=project.get("owner_name"),
         )
 
-    @staticmethod
-    def _serialize_project(project: ProjectMaster) -> dict[str, Any]:
-        return {
-            "id": project.id,
-            "project_code": project.project_code,
-            "project_name": project.project_name,
-            "project_status": project.project_status,
-            "department_name": project.department_name,
-            "owner_name": project.owner_name,
-        }
 
     def get_bank_account_mapping_dict(self) -> dict[str, str]:
         self._refresh_snapshot_from_state_store()
@@ -1848,26 +1687,6 @@ class AppSettingsService:
             ],
         }
 
-    def get_completed_project_ids(self) -> set[str]:
-        self._refresh_snapshot_from_state_store()
-        return set(self._snapshot["completed_project_ids"])
-
-    def is_project_active(self, project_id: str | None, project_name: str) -> bool:
-        normalized_project_id = str(project_id or "").strip()
-        if normalized_project_id and normalized_project_id in self.get_completed_project_ids():
-            return False
-        normalized_project_name = str(project_name or "").strip()
-        if not normalized_project_name:
-            return True
-        payload = self.get_settings_payload()["projects"]
-        completed_names = {
-            str(project.get("project_name", "")).strip()
-            for project in list(payload.get("completed") or [])
-            if str(project.get("project_name", "")).strip()
-        }
-        if normalized_project_name in completed_names:
-            return False
-        return True
 
     def get_oa_retention_cutoff_date(self) -> str:
         self._refresh_snapshot_from_state_store()
@@ -1917,19 +1736,6 @@ class AppSettingsService:
             ),
         }
 
-    def get_oa_invoice_offset_applicant_names(self) -> list[str]:
-        self._refresh_snapshot_from_state_store()
-        return list(self._snapshot["oa_invoice_offset"]["applicant_names"])
-
-    @staticmethod
-    def _normalize_username_list(values: list[Any] | None) -> list[str]:
-        return sorted(
-            {
-                str(username).strip()
-                for username in list(values or [])
-                if str(username).strip()
-            }
-        )
 
     @staticmethod
     def normalize_settings_payload(
@@ -1950,13 +1756,6 @@ class AppSettingsService:
         validate_pending_invoice_tag_groups: bool,
     ) -> dict[str, Any]:
         raw_payload = payload if isinstance(payload, dict) else {}
-        completed_ids = sorted(
-            {
-                str(project_id).strip()
-                for project_id in list(raw_payload.get("completed_project_ids") or [])
-                if str(project_id).strip()
-            }
-        )
         mappings: list[dict[str, str]] = []
         seen_last4: set[str] = set()
         for item in list(raw_payload.get("bank_account_mappings") or []):
@@ -2024,18 +1823,6 @@ class AppSettingsService:
         ).strip()
         if attachment_invoice_promotion_mode not in OA_ATTACHMENT_INVOICE_PROMOTION_MODES:
             attachment_invoice_promotion_mode = DEFAULT_OA_ATTACHMENT_INVOICE_PROMOTION_MODE
-        raw_oa_invoice_offset = raw_payload.get("oa_invoice_offset")
-        oa_invoice_offset = raw_oa_invoice_offset if isinstance(raw_oa_invoice_offset, dict) else {}
-        raw_applicant_names = (
-            oa_invoice_offset.get("applicant_names")
-            if "applicant_names" in oa_invoice_offset
-            else DEFAULT_OA_INVOICE_OFFSET_APPLICANTS
-        )
-        if not isinstance(raw_applicant_names, list):
-            raw_applicant_names = []
-        applicant_names = AppSettingsService._normalize_username_list(
-            raw_applicant_names
-        )
         manual_projects: list[dict[str, Any]] = []
         seen_manual_project_ids: set[str] = set()
         for item in list(raw_payload.get("manual_projects") or []):
@@ -2149,7 +1936,6 @@ class AppSettingsService:
             for family, settings_key in OA_DRAFT_PREFILL_SETTINGS_KEYS.items()
         }
         return {
-            "completed_project_ids": completed_ids,
             "manual_projects": manual_projects,
             "synced_projects": synced_projects,
             "bank_account_mappings": mappings,
@@ -2161,7 +1947,6 @@ class AppSettingsService:
                 "statuses": statuses,
                 "attachment_invoice_promotion_mode": attachment_invoice_promotion_mode,
             },
-            "oa_invoice_offset": {"applicant_names": applicant_names},
             "bank_transaction_tags": bank_transaction_tags,
             "pending_invoice_tag_groups": pending_invoice_tag_groups,
             "pending_output_invoice_tag_groups": pending_output_invoice_tag_groups,
@@ -2988,112 +2773,6 @@ class AppSettingsService:
         if callable(configure_auto):
             configure_auto(tag_dictionary)
 
-    @staticmethod
-    def _tag_settings_comparable(snapshot: dict[str, Any]) -> dict[str, Any]:
-        tags = AppSettingsService._public_bank_transaction_tags(snapshot["bank_transaction_tags"])
-        groups = AppSettingsService._public_pending_invoice_tag_groups(
-            snapshot["pending_invoice_tag_groups"],
-            version=int(tags["version"]),
-            group_labels=PENDING_INVOICE_TAG_GROUP_LABELS,
-        )
-        output_groups = AppSettingsService._public_pending_invoice_tag_groups(
-            snapshot["pending_output_invoice_tag_groups"],
-            version=int(tags["version"]),
-            group_labels=PENDING_OUTPUT_INVOICE_TAG_GROUP_LABELS,
-        )
-        tags_without_version = {key: value for key, value in tags.items() if key != "version"}
-        groups_without_version = {key: value for key, value in groups.items() if key != "version"}
-        output_groups_without_version = {key: value for key, value in output_groups.items() if key != "version"}
-        return {
-            "bank_transaction_tags": tags_without_version,
-            "pending_invoice_tag_groups": groups_without_version,
-            "pending_output_invoice_tag_groups": output_groups_without_version,
-        }
-
-    def _prepare_tag_settings_event(
-        self,
-        previous_snapshot: dict[str, Any],
-        next_snapshot: dict[str, Any],
-        *,
-        actor_id: str | None,
-    ) -> dict[str, Any] | None:
-        previous_comparable = self._tag_settings_comparable(previous_snapshot)
-        next_comparable = self._tag_settings_comparable(next_snapshot)
-        tags_changed = (
-            previous_comparable["bank_transaction_tags"]
-            != next_comparable["bank_transaction_tags"]
-        )
-        groups_changed = (
-            previous_comparable["pending_invoice_tag_groups"]
-            != next_comparable["pending_invoice_tag_groups"]
-            or previous_comparable["pending_output_invoice_tag_groups"]
-            != next_comparable["pending_output_invoice_tag_groups"]
-        )
-        if not tags_changed and not groups_changed:
-            return None
-        affected_groups = self._affected_pending_invoice_groups(
-            previous_snapshot["pending_invoice_tag_groups"],
-            next_snapshot["pending_invoice_tag_groups"],
-            group_labels=PENDING_INVOICE_TAG_GROUP_LABELS,
-        )
-        affected_groups.extend(
-            f"income:{group_id}"
-            for group_id in self._affected_pending_invoice_groups(
-                previous_snapshot["pending_output_invoice_tag_groups"],
-                next_snapshot["pending_output_invoice_tag_groups"],
-                group_labels=PENDING_OUTPUT_INVOICE_TAG_GROUP_LABELS,
-            )
-        )
-        return {
-            "actor_id": str(actor_id or "workbench_settings").strip() or "workbench_settings",
-            "tags_changed": tags_changed,
-            "groups_changed": groups_changed,
-            "affected_groups": affected_groups,
-            "before_summary": self._tag_settings_summary(previous_snapshot),
-            "after_summary": self._tag_settings_summary(next_snapshot),
-            "new_version": int(next_snapshot["bank_transaction_tags"]["version"]),
-        }
-
-    def _apply_tag_settings_versions(
-        self,
-        previous_snapshot: dict[str, Any],
-        normalized_snapshot: dict[str, Any],
-        event: dict[str, Any],
-    ) -> None:
-        if event.get("tags_changed"):
-            normalized_snapshot["bank_transaction_tags"]["version"] = (
-                int(previous_snapshot["bank_transaction_tags"].get("version") or 1) + 1
-            )
-        else:
-            normalized_snapshot["bank_transaction_tags"]["version"] = int(
-                previous_snapshot["bank_transaction_tags"].get("version") or 1
-            )
-        affected_expense_groups = self._affected_pending_invoice_groups(
-            previous_snapshot["pending_invoice_tag_groups"],
-            normalized_snapshot["pending_invoice_tag_groups"],
-            group_labels=PENDING_INVOICE_TAG_GROUP_LABELS,
-        )
-        affected_income_groups = self._affected_pending_invoice_groups(
-            previous_snapshot["pending_output_invoice_tag_groups"],
-            normalized_snapshot["pending_output_invoice_tag_groups"],
-            group_labels=PENDING_OUTPUT_INVOICE_TAG_GROUP_LABELS,
-        )
-        normalized_snapshot["pending_invoice_tag_groups"]["version"] = (
-            int(previous_snapshot["pending_invoice_tag_groups"].get("version") or 1) + 1
-            if affected_expense_groups
-            else int(previous_snapshot["pending_invoice_tag_groups"].get("version") or 1)
-        )
-        normalized_snapshot["pending_output_invoice_tag_groups"]["version"] = (
-            int(previous_snapshot["pending_output_invoice_tag_groups"].get("version") or 1) + 1
-            if affected_income_groups
-            else int(previous_snapshot["pending_output_invoice_tag_groups"].get("version") or 1)
-        )
-        event["new_version"] = int(normalized_snapshot["bank_transaction_tags"]["version"])
-        event["new_versions"] = {
-            "bank_transaction_tags": int(normalized_snapshot["bank_transaction_tags"]["version"]),
-            "pending_invoice_tag_groups": int(normalized_snapshot["pending_invoice_tag_groups"]["version"]),
-            "pending_output_invoice_tag_groups": int(normalized_snapshot["pending_output_invoice_tag_groups"]["version"]),
-        }
 
     @staticmethod
     def _affected_pending_invoice_groups(
@@ -3151,31 +2830,6 @@ class AppSettingsService:
             },
         }
 
-    def _record_tag_settings_audit(self, event: dict[str, Any]) -> None:
-        if self._audit_service is None:
-            return
-        metadata = {
-            "before_summary": event["before_summary"],
-            "after_summary": event["after_summary"],
-            "affected_groups": list(event["affected_groups"]),
-            "new_version": event["new_version"],
-        }
-        if event.get("tags_changed"):
-            self._audit_service.record_action(
-                actor_id=str(event["actor_id"]),
-                action="bank_transaction_tags_updated",
-                entity_type="app_settings",
-                entity_id="bank_transaction_tags",
-                metadata=metadata,
-            )
-        if event.get("groups_changed"):
-            self._audit_service.record_action(
-                actor_id=str(event["actor_id"]),
-                action="pending_invoice_tag_groups_updated",
-                entity_type="app_settings",
-                entity_id="pending_invoice_tag_groups",
-                metadata=metadata,
-            )
 
     def _record_pending_invoice_rules_audit(self, event: dict[str, Any]) -> None:
         if self._audit_service is None:

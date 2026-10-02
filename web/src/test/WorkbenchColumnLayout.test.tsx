@@ -70,7 +70,6 @@ describe("Workbench column layout", () => {
     installMockApiFetch();
     const settings = await fetchWorkbenchSettings();
     await saveWorkbenchSettings({
-      completedProjectIds: settings.projects.completedProjectIds,
       bankAccountMappings: settings.bankAccountMappings,
       oaRetention: settings.oaRetention,
       oaImport: settings.oaImport,
@@ -100,7 +99,6 @@ describe("Workbench column layout", () => {
     const settings = await fetchWorkbenchSettings();
 
     await saveWorkbenchSettings({
-      completedProjectIds: settings.projects.completedProjectIds,
       bankAccountMappings: settings.bankAccountMappings,
       oaRetention: settings.oaRetention,
       oaImport: settings.oaImport,

@@ -121,7 +121,6 @@ class ApplicationStateStore:
 
     def _load_app_settings_unlocked(self) -> dict[str, Any]:
         default_payload = {
-            "completed_project_ids": [],
             "manual_projects": [],
             "synced_projects": [],
             "bank_account_mappings": [],
@@ -130,7 +129,6 @@ class ApplicationStateStore:
             "workbench_column_layouts": {},
             "oa_retention": {},
             "oa_import": {},
-            "oa_invoice_offset": {},
             "bank_transaction_tags": {},
             "pending_invoice_tag_groups": {},
             "pending_output_invoice_tag_groups": {},
@@ -149,7 +147,6 @@ class ApplicationStateStore:
         if not isinstance(loaded, dict):
             return default_payload
         normalized_payload = {
-            "completed_project_ids": list(loaded.get("completed_project_ids") or []),
             "manual_projects": list(loaded.get("manual_projects") or []),
             "synced_projects": list(loaded.get("synced_projects") or []),
             "bank_account_mappings": list(loaded.get("bank_account_mappings") or []),
@@ -157,7 +154,6 @@ class ApplicationStateStore:
             "workbench_column_layouts": dict(loaded.get("workbench_column_layouts") or {}),
             "oa_retention": dict(loaded.get("oa_retention") or {}),
             "oa_import": dict(loaded.get("oa_import") or {}),
-            "oa_invoice_offset": dict(loaded.get("oa_invoice_offset") or {}),
             "bank_transaction_tags": dict(loaded.get("bank_transaction_tags") or {}),
             "pending_invoice_tag_groups": dict(loaded.get("pending_invoice_tag_groups") or {}),
             "pending_output_invoice_tag_groups": dict(loaded.get("pending_output_invoice_tag_groups") or {}),
@@ -203,7 +199,6 @@ class ApplicationStateStore:
 
     def _write_app_settings_unlocked(self, payload: dict[str, Any]) -> None:
         normalized_payload = {
-            "completed_project_ids": list(payload.get("completed_project_ids") or []),
             "manual_projects": list(payload.get("manual_projects") or []),
             "synced_projects": list(payload.get("synced_projects") or []),
             "bank_account_mappings": list(payload.get("bank_account_mappings") or []),
@@ -211,7 +206,6 @@ class ApplicationStateStore:
             "workbench_column_layouts": dict(payload.get("workbench_column_layouts") or {}),
             "oa_retention": dict(payload.get("oa_retention") or {}),
             "oa_import": dict(payload.get("oa_import") or {}),
-            "oa_invoice_offset": dict(payload.get("oa_invoice_offset") or {}),
             "bank_transaction_tags": dict(payload.get("bank_transaction_tags") or {}),
             "pending_invoice_tag_groups": dict(payload.get("pending_invoice_tag_groups") or {}),
             "pending_output_invoice_tag_groups": dict(payload.get("pending_output_invoice_tag_groups") or {}),

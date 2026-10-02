@@ -3301,15 +3301,15 @@ describe("Workbench row selection and detail drawer", () => {
     const settingsTree = within(settingsPage).getByRole("tablist", { name: "设置分类" });
     expect(within(settingsPage).queryByRole("heading", { name: "设置分类" })).not.toBeInTheDocument();
     expect(screen.queryByText("设置项")).not.toBeInTheDocument();
-    expect(within(settingsTree).getByRole("tab", { name: /项目状态/ })).toBeInTheDocument();
+    expect(within(settingsTree).getByRole("tab", { name: /银行账户/ })).toBeInTheDocument();
     expect(within(settingsTree).getByRole("tab", { name: /银行账户/ })).toBeInTheDocument();
     expect(within(settingsTree).queryByRole("tab", { name: /银行明细标签管理/ })).not.toBeInTheDocument();
     expect(within(settingsTree).queryByRole("tab", { name: /银行流水标签/ })).not.toBeInTheDocument();
-    expect(within(settingsTree).getByRole("tab", { name: /待找发票筛选/ })).toBeInTheDocument();
+    expect(within(settingsTree).queryByRole("tab", { name: /待找发票筛选/ })).not.toBeInTheDocument();
     expect(within(settingsTree).getByRole("tab", { name: /OA导入设置/ })).toBeInTheDocument();
-    expect(within(settingsTree).getByRole("tab", { name: /冲账规则/ })).toBeInTheDocument();
+    expect(within(settingsTree).queryByRole("tab", { name: /冲账规则/ })).not.toBeInTheDocument();
     expect(within(settingsTree).getByRole("tab", { name: /访问账户/ })).toBeInTheDocument();
-    expect(within(settingsPage).getByRole("heading", { name: "项目状态管理" })).toBeInTheDocument();
+    expect(within(settingsPage).getByRole("heading", { name: "银行账户映射" })).toBeInTheDocument();
 
     await user.click(within(settingsTree).getByRole("tab", { name: /银行账户/ }));
     expect(within(settingsPage).getByRole("heading", { name: "银行账户映射" })).toBeInTheDocument();
@@ -3328,14 +3328,6 @@ describe("Workbench row selection and detail drawer", () => {
     await user.clear(screen.getByLabelText("OA导入起始日期"));
     await user.type(screen.getByLabelText("OA导入起始日期"), "2026-02-01");
     await user.click(screen.getByRole("checkbox", { name: "进行中" }));
-    await user.click(within(settingsTree).getByRole("tab", { name: /冲账规则/ }));
-    await waitFor(() => {
-      expect(within(settingsPage).getByRole("region", { name: "冲账规则" })).toBeInTheDocument();
-    });
-    const oaInvoiceOffsetSection = within(settingsPage).getByRole("region", { name: "冲账规则" });
-    const applicantInput = within(oaInvoiceOffsetSection).getByRole("textbox");
-    await user.clear(applicantInput);
-    await user.type(applicantInput, "周洁莹、李四");
     await user.click(within(settingsTree).getByRole("tab", { name: /访问账户/ }));
     const accessRegion = within(settingsPage).getByRole("region", { name: "访问账户" });
     expect(within(accessRegion).getByRole("heading", { name: "访问账户" })).toBeInTheDocument();
@@ -3346,7 +3338,7 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(within(accessRegion).getByRole("checkbox", { name: "关联台" }));
     await user.click(within(accessRegion).getByRole("button", { name: "保存访问权限" }));
     expect(await screen.findByText("已保存访问账户。")).toBeInTheDocument();
-    await user.click(within(settingsTree).getByRole("tab", { name: /项目状态/ }));
+    await user.click(within(settingsTree).getByRole("tab", { name: /银行账户/ }));
     await user.click(screen.getByRole("button", { name: "保存全部设置" }));
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -3381,17 +3373,11 @@ describe("Workbench row selection and detail drawer", () => {
         body: expect.stringContaining("\"oa_import\":{\"form_types\":[\"payment_request\",\"expense_claim\"],\"statuses\":[\"completed\",\"in_progress\"],\"attachment_invoice_promotion_mode\":\"link_existing_only\"}"),
       }),
     );
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/settings",
-      expect.objectContaining({
-        method: "POST",
-        body: expect.stringContaining("\"oa_invoice_offset\":{\"applicant_names\":[\"周洁莹\",\"李四\"]}"),
-      }),
-    );
+    expect(globalSettingsBody).not.toHaveProperty("oa_invoice_offset");
     expect(await screen.findByText("已保存关联台设置。")).toBeInTheDocument();
   }, 30_000);
 
-  test("YNSYKJ001 can see OA invoice offset settings without access account management", async () => {
+  test("ordinary users cannot access retired settings or account management", async () => {
     const user = userEvent.setup();
     installMockApiFetch({
       sessionRole: "user",
@@ -3401,10 +3387,9 @@ describe("Workbench row selection and detail drawer", () => {
 
     const settingsPage = await openWorkbenchSettingsPage(user);
     const settingsTree = within(settingsPage).getByRole("tablist", { name: "设置分类" });
-    expect(within(settingsTree).getByRole("tab", { name: /冲账规则/ })).toBeInTheDocument();
+    expect(within(settingsTree).queryByRole("tab", { name: /冲账规则/ })).not.toBeInTheDocument();
     expect(within(settingsTree).queryByRole("tab", { name: /访问账户/ })).not.toBeInTheDocument();
-    await user.click(within(settingsTree).getByRole("tab", { name: /冲账规则/ }));
-    expect(within(settingsPage).getByRole("heading", { name: "冲账规则" })).toBeInTheDocument();
+    expect(within(settingsPage).queryByRole("heading", { name: "冲账规则" })).not.toBeInTheDocument();
   });
 
   test("bank account settings can edit names without blanking the settings page", async () => {
@@ -3441,67 +3426,22 @@ describe("Workbench row selection and detail drawer", () => {
     expect(last4Input).toHaveValue("8826");
   });
 
-  test("project status settings can sync, add, move, and delete local projects", async () => {
+  test("settings exposes only current sections without requesting retired project APIs", async () => {
     const user = userEvent.setup();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     const fetchMock = installMockApiFetch({
       sessionRole: "admin",
       sessionUsername: "YNSYLP005",
       sessionDisplayName: "杨南山",
     });
     renderAppAt("/");
-
     const settingsPage = await openWorkbenchSettingsPage(user);
     const settingsTree = within(settingsPage).getByRole("tablist", { name: "设置分类" });
-    await user.click(within(settingsTree).getByRole("tab", { name: /项目状态/ }));
-
-    expect(within(settingsPage).getByRole("heading", { name: "项目状态管理" })).toBeInTheDocument();
-    expect(within(settingsPage).getByRole("tab", { name: /进行中/ })).toBeInTheDocument();
-    expect(within(settingsPage).getByRole("tab", { name: /已完成/ })).toBeInTheDocument();
-    expect(within(settingsPage).getByRole("grid", { name: "进行中项目" })).toBeInTheDocument();
-    await user.click(within(settingsPage).getByRole("tab", { name: /已完成/ }));
-    expect(within(settingsPage).getByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).toBeInTheDocument();
-    await user.click(within(settingsPage).getByRole("tab", { name: /进行中/ }));
-
-    await user.click(within(settingsPage).getByRole("button", { name: "从 OA 拉取项目" }));
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/settings/projects/sync",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ actor_id: "YNSYLP005" }),
-      }),
-    );
-    expect(await within(settingsPage).findByText("OA 同步新增项目")).toBeInTheDocument();
-
-    await user.type(within(settingsPage).getByLabelText("项目编码"), "LOCAL-001");
-    await user.type(within(settingsPage).getByLabelText("项目名称"), "本地测试项目");
-    await user.click(within(settingsPage).getByRole("button", { name: "新增本地项目" }));
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/settings/projects",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          actor_id: "YNSYLP005",
-          project_code: "LOCAL-001",
-          project_name: "本地测试项目",
-        }),
-      }),
-    );
-    expect(await within(settingsPage).findByText("本地测试项目")).toBeInTheDocument();
-
-    await user.click(within(settingsPage).getByRole("button", { name: /本地测试项目.*标记完成/ }));
-    await user.click(within(settingsPage).getByRole("tab", { name: /已完成/ }));
-    const completedTable = within(settingsPage).getByRole("grid", { name: "已完成项目" });
-    expect(within(completedTable).getByText("本地测试项目")).toBeInTheDocument();
-
-    await user.click(within(completedTable).getByRole("button", { name: /本地测试项目.*删除/ }));
-    expect(confirmSpy).toHaveBeenCalledWith("确认删除“本地测试项目”？");
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/settings/projects/proj_manual_local_001",
-      expect.objectContaining({ method: "DELETE" }),
-    );
-    expect(within(settingsPage).queryByText("本地测试项目")).not.toBeInTheDocument();
-  }, 30_000);
+    expect(within(settingsTree).getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "银行账户", "OA导入设置", "OA申请人凭据", "访问账户", "数据重置",
+    ]);
+    expect(within(settingsPage).getByRole("heading", { name: "银行账户映射" })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/settings/projects"))).toBe(false);
+  });
 
   test("admin data reset requires impact confirmation and current OA password", async () => {
     const user = userEvent.setup();

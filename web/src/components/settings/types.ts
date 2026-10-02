@@ -6,7 +6,6 @@ import type {
   WorkbenchAccessUser,
   WorkbenchSettings,
   WorkbenchOaImportSettings,
-  WorkbenchProjectSetting,
   WorkbenchSettingsDataResetAction,
   WorkbenchSettingsDataResetJob,
 } from "../../features/workbench/types";
@@ -20,11 +19,8 @@ export type ManagedAccessAccount = {
 };
 
 export type SettingsSectionId =
-  | "projects"
   | "bank_accounts"
-  | "pending_invoice_tags"
   | "oa_retention"
-  | "oa_invoice_offset"
   | "oa_applicant_credentials"
   | "access_accounts"
   | "data_reset";
@@ -34,7 +30,7 @@ export type SettingsNavigationItem = {
   label: string;
 };
 
-export type ProjectActionStatus = {
+export type SettingsActionStatus = {
   tone: "success" | "error";
   message: string;
 };
@@ -47,23 +43,6 @@ export type DataResetStatus = {
 export type DataResetActionConfig = {
   action: WorkbenchSettingsDataResetAction;
   label: string;
-};
-
-export type SettingsProjectsSectionProps = {
-  activeProjects: WorkbenchProjectSetting[];
-  completedProjects: WorkbenchProjectSetting[];
-  controlsDisabled: boolean;
-  projectActionStatus: ProjectActionStatus | null;
-  projectCodeDraft: string;
-  projectNameDraft: string;
-  onChangeProjectCodeDraft: (value: string) => void;
-  onChangeProjectNameDraft: (value: string) => void;
-  onSyncProjects: () => Promise<void> | void;
-  onAddProject: () => Promise<void> | void;
-  onToggleCompleted: (projectId: string) => void;
-  onDeleteProject: (project: WorkbenchProjectSetting) => Promise<void> | void;
-  isProjectActionBusy: boolean;
-  canAddProject: boolean;
 };
 
 export type SettingsBankAccountsSectionProps = {
@@ -81,16 +60,6 @@ export type SettingsBankAccountsSectionProps = {
   onDeleteMapping: (mappingId: string) => void;
 };
 
-export type SettingsPendingInvoiceTagsSectionProps = {
-  controlsDisabled: boolean;
-  tags: WorkbenchSettings["bankTransactionTags"]["tags"];
-  groups: WorkbenchSettings["pendingInvoiceTagGroups"];
-  activeGroup: keyof WorkbenchSettings["pendingInvoiceTagGroups"];
-  onSelectGroup: (group: keyof WorkbenchSettings["pendingInvoiceTagGroups"]) => void;
-  onAddExistingTag: (code: string) => void;
-  onRemoveTag: (code: string) => void;
-};
-
 export type SettingsOaRetentionSectionProps = {
   controlsDisabled: boolean;
   cutoffDate: string;
@@ -101,18 +70,12 @@ export type SettingsOaRetentionSectionProps = {
   onToggleStatus: (value: string) => void;
 };
 
-export type SettingsOaInvoiceOffsetSectionProps = {
-  controlsDisabled: boolean;
-  applicantsText: string;
-  onChangeApplicantsText: (value: string) => void;
-};
-
 export type SettingsOaApplicantCredentialsSectionProps = {
   controlsDisabled: boolean;
   credentials: OaApplicantCredentialSummary[];
   isLoading: boolean;
   isSaving: boolean;
-  status: ProjectActionStatus | null;
+  status: SettingsActionStatus | null;
   targetApplicantNameDraft: string;
   targetApplicantCodeDraft: string;
   oaUsernameDraft: string;
@@ -135,7 +98,7 @@ export type SettingsAccessAccountsSectionProps = {
   managedAccessAccounts: ManagedAccessAccount[];
   isLoading: boolean;
   isSaving: boolean;
-  status: ProjectActionStatus | null;
+  status: SettingsActionStatus | null;
   validationMessage: string | null;
   onAddAccessAccount: (user: WorkbenchAccessUser) => void;
   onSearchAccessUsers: (query: string, signal?: AbortSignal) => Promise<WorkbenchAccessUser[]>;

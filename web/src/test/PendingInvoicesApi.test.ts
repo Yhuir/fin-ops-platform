@@ -875,21 +875,14 @@ describe("pending invoices and tag settings API mapping", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  test("maps settings tag dictionary and pending invoice tag groups both directions", async () => {
+  test("reads the shared tag dictionary without writing dedicated pending invoice rules", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if ((init?.method ?? "GET").toUpperCase() === "POST") {
         const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
         expect(body).not.toHaveProperty("bank_transaction_tags");
-        expect(body.pending_invoice_tag_groups).toEqual({
-          groups: {
-            requires_invoice: { tag_codes: ["fee"] },
-            bank_statement_as_invoice: { tag_codes: ["internal_transfer"] },
-            no_invoice_required: { tag_codes: ["salary"] },
-          },
-        });
+        expect(body).not.toHaveProperty("pending_invoice_tag_groups");
       }
       return new Response(JSON.stringify({
-        projects: { active: [], completed: [], completed_project_ids: [] },
         bank_account_mappings: [],
         workbench_column_layouts: { oa: [], bank: [], invoice: [] },
         oa_retention: { cutoff_date: "2026-01-01" },
@@ -898,7 +891,6 @@ describe("pending invoices and tag settings API mapping", () => {
           statuses: [],
           attachment_invoice_promotion_mode: "link_existing_only",
         },
-        oa_invoice_offset: { applicant_names: [] },
         bank_transaction_tags: {
           version: 3,
           tags: [
@@ -940,14 +932,9 @@ describe("pending invoices and tag settings API mapping", () => {
         },
       ]),
     );
-    expect(settings.pendingInvoiceTagGroups).toEqual({
-      requiresInvoice: ["fee"],
-      bankStatementAsInvoice: ["internal_transfer"],
-      noInvoiceRequired: ["salary"],
-    });
+    expect(settings).not.toHaveProperty("pendingInvoiceTagGroups");
 
     await saveWorkbenchSettings({
-      completedProjectIds: [],
       bankAccountMappings: [],
       workbenchColumnLayouts: { oa: [], bank: [], invoice: [] },
       oaRetention: { cutoffDate: "2026-01-01" },
@@ -956,9 +943,6 @@ describe("pending invoices and tag settings API mapping", () => {
         statuses: [],
         attachmentInvoicePromotionMode: "link_existing_only",
       },
-      oaInvoiceOffset: { applicantNames: [] },
-      bankTransactionTags: settings.bankTransactionTags,
-      pendingInvoiceTagGroups: settings.pendingInvoiceTagGroups,
     });
   });
 

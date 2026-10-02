@@ -303,7 +303,7 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
     def test_api_runtime_has_no_in_process_matching_worker(self) -> None:
         self.assertFalse(hasattr(server_module.Application, "start_workbench_matching_dirty_scope_worker"))
 
-    def test_oa_invoice_offset_settings_change_marks_all_available_months_dirty(self) -> None:
+    def test_retired_settings_write_is_rejected_without_scheduling_work(self) -> None:
         app = build_application()
         queue = RecordingDirtyQueue()
         app._workbench_reconciliation_dirty_queue = queue
@@ -333,7 +333,8 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
         ):
             response = app.handle_request("POST", "/api/workbench/settings", body=json.dumps(payload), headers={})
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(json.loads(response.body)["error"], "unsupported_settings_fields")
         self.assertEqual(queue.mark_calls, [])
 
     def test_stale_scan_is_owned_only_by_matching_worker_factory(self) -> None:

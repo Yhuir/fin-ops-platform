@@ -55,12 +55,10 @@ def audit_settings_page(
                     "secret-safe OA applicant credential summaries, and registered settings reset jobs"
                 ),
                 "key_display_fields": [
-                    "projects and completed project membership",
                     "bank account mappings",
                     "access-control role sets",
                     "Workbench column layouts",
-                    "OA retention/import/promotion/offset controls",
-                    "pending invoice and cross-module tag-selection families",
+                    "OA retention/import/promotion controls",
                     "credential target/name/username/status/enabled summary",
                     "settings reset job status/progress/attention state",
                 ],
@@ -75,7 +73,7 @@ def audit_settings_page(
                 "snapshot_consistency": snapshot.consistency,
                 "database_snapshot": snapshot.database_snapshot,
                 "external_source_boundary": (
-                    "OA project completeness, applicant login validity, manual OA search/import results, "
+                    "Applicant login validity, manual OA search/import results, "
                     "and post-reset multi-page smoke require separate external gates"
                 ),
                 "pass_condition": (

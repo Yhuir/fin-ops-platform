@@ -389,7 +389,6 @@ class PendingInvoiceApiTests(unittest.TestCase):
                 "POST",
                 "/api/workbench/settings",
                 body=json.dumps({
-                    "completed_project_ids": [],
                     "bank_account_mappings": [],
                     "allowed_usernames": ["READONLY001"],
                     "readonly_export_usernames": ["READONLY001"],
@@ -397,7 +396,6 @@ class PendingInvoiceApiTests(unittest.TestCase):
                     "workbench_column_layouts": settings["workbench_column_layouts"],
                     "oa_retention": settings["oa_retention"],
                     "oa_import": settings["oa_import"],
-                    "oa_invoice_offset": settings["oa_invoice_offset"],
                     "bank_transaction_tags": settings["bank_transaction_tags"],
                     "pending_invoice_tag_groups": settings["pending_invoice_tag_groups"],
                 }),

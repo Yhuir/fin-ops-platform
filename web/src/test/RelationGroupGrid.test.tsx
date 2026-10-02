@@ -760,7 +760,6 @@ describe("Workbench candidate grouping layout", () => {
       if (url.pathname === "/api/workbench/settings") {
         return new Response(
           JSON.stringify({
-            projects: { active: [], completed: [], completed_project_ids: [] },
             bank_account_mappings: [],
           }),
           { status: 200 },

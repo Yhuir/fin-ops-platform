@@ -1447,19 +1447,14 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
     def test_put_archives_referenced_tag_and_detaches_pending_invoice_rules_atomically(self) -> None:
         app = build_application()
         settings = app._app_settings_service.get_settings_payload()
-        app._app_settings_service.update_settings(
-            completed_project_ids=[],
-            bank_account_mappings=[],
-            pending_invoice_tag_groups={
+        app._app_settings_service.update_pending_invoice_rule_groups(direction="expense", editable_groups={
                 "version": settings["pending_invoice_tag_groups"]["version"],
                 "groups": {
                     "requires_invoice": {"tag_codes": ["salary"]},
                     "bank_statement_as_invoice": {"tag_codes": []},
                     "no_invoice_required": {"tag_codes": []},
                 },
-            },
-            actor_id="settings-owner",
-        )
+            }, expected_version=None, actor_id="settings-owner")["settings"]
         current = app._app_settings_service.get_bank_auto_tag_rules_payload()
         settings_before_archive = app._app_settings_service.get_settings_payload()
         pending_version_before_archive = settings_before_archive["pending_invoice_tag_groups"]["version"]

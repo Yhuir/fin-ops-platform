@@ -9,9 +9,7 @@ import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSession, useSessionPermissions } from "../contexts/SessionContext";
 import { importWorkflowPath } from "../features/imports/importRoutes";
 import {
-  createWorkbenchSettingsProject,
   deleteOaApplicantCredential,
-  deleteWorkbenchSettingsProject,
   fetchActiveWorkbenchSettingsDataResetJob,
   fetchWorkbenchSettingsDataResetPreview,
   fetchWorkbenchAccessControl,
@@ -23,7 +21,6 @@ import {
   saveWorkbenchAccessControl,
   searchWorkbenchAccessUsers,
   saveOaApplicantCredential,
-  syncWorkbenchSettingsProjects,
   type WorkbenchBootstrapProgress,
   WorkbenchApiError,
 } from "../features/workbench/api";
@@ -38,12 +35,6 @@ import type {
   WorkbenchSettingsDataResetPreview,
   WorkbenchSettingsDataResetResult,
 } from "../features/workbench/types";
-
-function settingsActorId(session: ReturnType<typeof useSession>) {
-  return session.status === "authenticated" || session.status === "forbidden"
-    ? session.session.user.username
-    : "web_finance_user";
-}
 
 function normalizeSettingsError(error: unknown, fallback: string) {
   if (error instanceof Error && error.message.trim()) {
@@ -249,14 +240,10 @@ export default function SettingsPage() {
   useEffect(() => () => setWorkbenchStatus(null), [setWorkbenchStatus]);
 
   const handleSaveSettings = async (payload: {
-    completedProjectIds: string[];
     bankAccountMappings: WorkbenchSettings["bankAccountMappings"];
     workbenchColumnLayouts: WorkbenchSettings["workbenchColumnLayouts"];
     oaRetention: WorkbenchSettings["oaRetention"];
     oaImport: WorkbenchSettings["oaImport"];
-    oaInvoiceOffset: WorkbenchSettings["oaInvoiceOffset"];
-    bankTransactionTags: WorkbenchSettings["bankTransactionTags"];
-    pendingInvoiceTagGroups: WorkbenchSettings["pendingInvoiceTagGroups"];
   }) => {
     if (healthStatus.blocksMutations) {
       setPageFeedback({ tone: "error", message: "登录已失效或系统不可用，不能保存设置。" });
@@ -336,43 +323,6 @@ export default function SettingsPage() {
   const handleLoadSettingsDataResetPreview = (
     action: WorkbenchSettingsDataResetAction,
   ): Promise<WorkbenchSettingsDataResetPreview> => fetchWorkbenchSettingsDataResetPreview(action);
-
-  const handleSyncSettingsProjects = async (): Promise<WorkbenchSettings> => {
-    if (healthStatus.blocksMutations) {
-      throw new Error("登录已失效或系统不可用，不能保存设置。");
-    }
-    const saved = await syncWorkbenchSettingsProjects(settingsActorId(session));
-    setSettings(saved);
-    setPageFeedback({ tone: "success", message: "已从 OA 拉取项目。" });
-    return saved;
-  };
-
-  const handleCreateSettingsProject = async (payload: {
-    projectCode: string;
-    projectName: string;
-  }): Promise<WorkbenchSettings> => {
-    if (healthStatus.blocksMutations) {
-      throw new Error("登录已失效或系统不可用，不能保存设置。");
-    }
-    const saved = await createWorkbenchSettingsProject({
-      actorId: settingsActorId(session),
-      projectCode: payload.projectCode,
-      projectName: payload.projectName,
-    });
-    setSettings(saved);
-    setPageFeedback({ tone: "success", message: "已新增本地项目。" });
-    return saved;
-  };
-
-  const handleDeleteSettingsProject = async (projectId: string): Promise<WorkbenchSettings> => {
-    if (healthStatus.blocksMutations) {
-      throw new Error("登录已失效或系统不可用，不能保存设置。");
-    }
-    const saved = await deleteWorkbenchSettingsProject(projectId);
-    setSettings(saved);
-    setPageFeedback({ tone: "success", message: "已删除本地项目或状态覆盖。" });
-    return saved;
-  };
 
   function mergeOaApplicantCredential(credential: OaApplicantCredentialSummary) {
     setOaApplicantCredentials((current) => {
@@ -466,16 +416,13 @@ export default function SettingsPage() {
           oaApplicantCredentials={oaApplicantCredentials}
           settings={settings}
           activeDataResetJob={activeDataResetJob}
-          onCreateProject={handleCreateSettingsProject}
           onDataReset={handleSettingsDataReset}
           onLoadDataResetPreview={handleLoadSettingsDataResetPreview}
-          onDeleteProject={handleDeleteSettingsProject}
           onDeleteOaApplicantCredential={handleDeleteOaApplicantCredential}
           onSave={handleSaveSettings}
           onSaveAccessControl={handleSaveAccessControl}
           onSearchAccessUsers={searchWorkbenchAccessUsers}
           onSaveOaApplicantCredential={handleSaveOaApplicantCredential}
-          onSyncProjects={handleSyncSettingsProjects}
         />
       ) : null}
     </div>

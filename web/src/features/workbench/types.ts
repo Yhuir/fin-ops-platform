@@ -220,16 +220,6 @@ export type WorkbenchRecord = {
   displayOnly?: boolean;
 };
 
-export type WorkbenchProjectSetting = {
-  id: string;
-  projectCode: string;
-  projectName: string;
-  projectStatus: "active" | "completed";
-  source?: "oa" | "manual";
-  departmentName?: string | null;
-  ownerName?: string | null;
-};
-
 export type BankAccountMapping = {
   id: string;
   last4: string;
@@ -257,22 +247,13 @@ export type WorkbenchOaImportSettings = {
 };
 
 export type WorkbenchSettings = {
-  projects: {
-    active: WorkbenchProjectSetting[];
-    completed: WorkbenchProjectSetting[];
-    completedProjectIds: string[];
-  };
   bankAccountMappings: BankAccountMapping[];
   workbenchColumnLayouts: WorkbenchColumnLayouts;
   oaRetention: {
     cutoffDate: string;
   };
   oaImport: WorkbenchOaImportSettings;
-  oaInvoiceOffset: {
-    applicantNames: string[];
-  };
   bankTransactionTags: BankTransactionTagDictionary;
-  pendingInvoiceTagGroups: PendingInvoiceTagGroups;
 };
 
 export type OaApplicantCredentialStatus = "configured" | "unconfigured" | (string & {});

@@ -734,19 +734,14 @@ class AppSettingsServiceTests(unittest.TestCase):
             )
             app = build_application(data_dir=Path(temp_dir))
             current = app._app_settings_service.get_settings_payload()
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                pending_invoice_tag_groups={
+            app._app_settings_service.update_pending_invoice_rule_groups(direction="expense", editable_groups={
                     "version": current["pending_invoice_tag_groups"]["version"],
                     "groups": {
                         "requires_invoice": {"tag_codes": ["salary"]},
                         "bank_statement_as_invoice": {"tag_codes": []},
                         "no_invoice_required": {"tag_codes": []},
                     },
-                },
-                actor_id="settings-owner",
-            )
+                }, expected_version=None, actor_id="settings-owner")["settings"]
             selection = app._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
             app._app_settings_service.update_no_oa_bank_batch_tag_selection(
                 {"expected_version": selection["version"], "selected_tag_codes": ["salary"]},
@@ -1085,9 +1080,9 @@ class AppSettingsServiceTests(unittest.TestCase):
             current = app._app_settings_service.get_settings_payload()
 
             saved_settings = app._app_settings_service.update_settings(
-                completed_project_ids=current["projects"]["completed_project_ids"],
+
                 bank_account_mappings=current["bank_account_mappings"],
-                actor_id="settings-owner",
+
             )
 
         self.assertEqual(
@@ -1156,7 +1151,6 @@ class AppSettingsServiceTests(unittest.TestCase):
                     "/api/workbench/settings",
                     body=json.dumps(
                         {
-                            "completed_project_ids": [],
                             "bank_account_mappings": [],
                             "oa_retention": {"cutoff_date": "2026-01-01"},
                             "oa_import": {
@@ -1209,61 +1203,18 @@ class AppSettingsServiceTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             initial = app._app_settings_service.get_settings_payload()
 
-            mapping_changed = app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                pending_invoice_tag_groups={
+            mapping_changed = app._app_settings_service.update_pending_invoice_rule_groups(direction="expense", editable_groups={
                     "groups": {
                         "requires_invoice": {"tag_codes": ["borrow_in_company_pending_repayment"]},
                         "bank_statement_as_invoice": {"tag_codes": []},
                         "no_invoice_required": {"tag_codes": ["custom_no_invoice_meal"]},
                     }
-                },
-                actor_id="settings-owner",
-            )
+                }, expected_version=None, actor_id="settings-owner")["settings"]
 
         self.assertEqual(mapping_changed["bank_transaction_tags"]["version"], initial["bank_transaction_tags"]["version"])
         self.assertEqual(mapping_changed["pending_invoice_tag_groups"]["version"], initial["pending_invoice_tag_groups"]["version"] + 1)
         self.assertEqual(mapping_changed["pending_output_invoice_tag_groups"]["version"], initial["pending_output_invoice_tag_groups"]["version"])
 
-    def test_workbench_settings_api_pending_invoice_rules_do_not_fan_out_on_write(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            configure_default_test_access(app)
-            queue_repository = RecordingQueueRepository()
-            app._runtime_repositories = SimpleNamespace(queue_repository=queue_repository)
-            current = app._app_settings_service.get_settings_payload()
-            projects = current["projects"]
-
-            response = app.handle_request(
-                "POST",
-                "/api/workbench/settings",
-                body=json.dumps(
-                    {
-                        "completed_project_ids": projects["completed_project_ids"],
-                        "bank_account_mappings": current["bank_account_mappings"],
-                        "workbench_column_layouts": current["workbench_column_layouts"],
-                        "oa_retention": current["oa_retention"],
-                        "oa_import": current["oa_import"],
-                        "oa_invoice_offset": current["oa_invoice_offset"],
-                        "pending_invoice_tag_groups": {
-                            "version": current["pending_invoice_tag_groups"]["version"],
-                            "groups": {
-                                "requires_invoice": {"tag_codes": []},
-                                "bank_statement_as_invoice": {"tag_codes": []},
-                                "no_invoice_required": {"tag_codes": ["fee"]},
-                            },
-                        },
-                        "pending_output_invoice_tag_groups": current["pending_output_invoice_tag_groups"],
-                    },
-                    ensure_ascii=False,
-                ),
-            )
-            saved = app._app_settings_service.get_settings_payload()
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(queue_repository.enqueued, [])
-        self.assertEqual(saved["pending_invoice_tag_groups"]["version"], current["pending_invoice_tag_groups"]["version"] + 1)
 
     def test_income_and_expense_pending_invoice_rule_versions_are_independent(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1310,7 +1261,6 @@ class AppSettingsServiceTests(unittest.TestCase):
                 "/api/workbench/settings",
                 body=json.dumps(
                     {
-                        "completed_project_ids": [],
                         "bank_account_mappings": [],
                         "bank_transaction_tags": {
                             "version": 1,
@@ -1358,49 +1308,31 @@ class AppSettingsServiceTests(unittest.TestCase):
             finalize_calls: list[dict[str, object]] = []
 
             with self.assertRaises(AppSettingsValidationError) as unknown_context:
-                app._app_settings_service.update_settings(
-                    completed_project_ids=[],
-                    bank_account_mappings=[],
-                    pending_invoice_tag_groups={
+                app._app_settings_service.update_pending_invoice_rule_groups(direction="expense", editable_groups={
                         "groups": {
                             "requires_invoice": {"tag_codes": ["not_a_real_tag"]},
                             "bank_statement_as_invoice": {"tag_codes": []},
                             "no_invoice_required": {"tag_codes": []},
                         }
-                    },
-                    actor_id="settings-owner",
-                    after_bank_transaction_tag_settings_saved=finalize_calls.append,
-                )
+                    }, expected_version=None, actor_id="settings-owner")["settings"]
 
             with self.assertRaises(AppSettingsValidationError) as archived_context:
-                app._app_settings_service.update_settings(
-                    completed_project_ids=[],
-                    bank_account_mappings=[],
-                    pending_invoice_tag_groups={
+                app._app_settings_service.update_pending_invoice_rule_groups(direction="expense", editable_groups={
                         "groups": {
                             "requires_invoice": {"tag_codes": ["custom_archived"]},
                             "bank_statement_as_invoice": {"tag_codes": []},
                             "no_invoice_required": {"tag_codes": []},
                         }
-                    },
-                    actor_id="settings-owner",
-                    after_bank_transaction_tag_settings_saved=finalize_calls.append,
-                )
+                    }, expected_version=None, actor_id="settings-owner")["settings"]
 
             with self.assertRaises(AppSettingsValidationError) as duplicate_context:
-                app._app_settings_service.update_settings(
-                    completed_project_ids=[],
-                    bank_account_mappings=[],
-                    pending_invoice_tag_groups={
+                app._app_settings_service.update_pending_invoice_rule_groups(direction="expense", editable_groups={
                         "groups": {
                             "requires_invoice": {"tag_codes": ["fee"]},
                             "bank_statement_as_invoice": {"tag_codes": ["fee"]},
                             "no_invoice_required": {"tag_codes": []},
                         }
-                    },
-                    actor_id="settings-owner",
-                    after_bank_transaction_tag_settings_saved=finalize_calls.append,
-                )
+                    }, expected_version=None, actor_id="settings-owner")["settings"]
 
         self.assertEqual(unknown_context.exception.error_code, "unknown_bank_transaction_tag")
         self.assertEqual(archived_context.exception.error_code, "archived_bank_transaction_tag")
@@ -1417,18 +1349,13 @@ class AppSettingsServiceTests(unittest.TestCase):
                 ],
             )
             app = build_application(data_dir=Path(temp_dir))
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                pending_invoice_tag_groups={
+            app._app_settings_service.update_pending_invoice_rule_groups(direction="expense", editable_groups={
                     "groups": {
                         "requires_invoice": {"tag_codes": ["custom_mapped_pending_invoice"]},
                         "bank_statement_as_invoice": {"tag_codes": []},
                         "no_invoice_required": {"tag_codes": []},
                     }
-                },
-                actor_id="settings-owner",
-            )
+                }, expected_version=None, actor_id="settings-owner")["settings"]
             current_rules = app._app_settings_service.get_bank_auto_tag_rules_payload()
             target = next(
                 rule
@@ -1507,50 +1434,37 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertGreater(saved["version"], current["version"])
         self.assertEqual(after_conflict["bank_transaction_tags"]["version"], saved["version"])
 
-    def test_pending_invoice_mapping_saves_audit_and_finalize_without_tag_version_change(self) -> None:
+    def test_dedicated_pending_invoice_mapping_returns_event_without_tag_version_change(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             initial = app._app_settings_service.get_settings_payload()
-            finalize_calls: list[dict[str, object]] = []
 
-            payload = app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                pending_invoice_tag_groups={
+            result = app._app_settings_service.update_pending_invoice_rule_groups(direction="expense", editable_groups={
                     "groups": {
                         "requires_invoice": {"tag_codes": ["borrow_in_company_pending_repayment"]},
                         "bank_statement_as_invoice": {"tag_codes": ["fee"]},
                         "no_invoice_required": {"tag_codes": []},
                     }
-                },
-                actor_id="settings-owner",
-                after_bank_transaction_tag_settings_saved=finalize_calls.append,
-            )
+                }, expected_version=None, actor_id="settings-owner")
+            payload = result["settings"]
 
         audit_entries = app._audit_service.as_dicts()
         self.assertEqual(payload["bank_transaction_tags"]["version"], initial["bank_transaction_tags"]["version"])
         self.assertEqual([entry["actor_id"] for entry in audit_entries], ["settings-owner"])
         self.assertEqual(
             [entry["action"] for entry in audit_entries],
-            ["pending_invoice_tag_groups_updated"],
+            ["pending_invoice_rule_groups_updated"],
         )
-        self.assertEqual(audit_entries[0]["metadata"]["new_version"], initial["bank_transaction_tags"]["version"])
+        self.assertEqual(audit_entries[0]["metadata"]["new_version"], initial["pending_invoice_tag_groups"]["version"] + 1)
         self.assertIn("before_summary", audit_entries[0]["metadata"])
         self.assertIn("after_summary", audit_entries[0]["metadata"])
         self.assertEqual(
             audit_entries[0]["metadata"]["affected_groups"],
             ["bank_statement_as_invoice", "requires_invoice"],
         )
-        self.assertEqual(len(finalize_calls), 1)
-        self.assertEqual(finalize_calls[0]["actor_id"], "settings-owner")
-        self.assertEqual(
-            finalize_calls[0]["new_versions"]["pending_invoice_tag_groups"],
-            initial["pending_invoice_tag_groups"]["version"] + 1,
-        )
-        self.assertEqual(
-            finalize_calls[0]["affected_groups"],
-            ["bank_statement_as_invoice", "requires_invoice"],
-        )
+        self.assertEqual(result["event"]["actor_id"], "settings-owner")
+        self.assertEqual(result["event"]["new_version"], initial["pending_invoice_tag_groups"]["version"] + 1)
+        self.assertEqual(result["event"]["affected_groups"], ["bank_statement_as_invoice", "requires_invoice"])
 
     def test_pending_invoice_groups_survive_state_store_reload_without_rewriting_bank_tags(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1569,18 +1483,13 @@ class AppSettingsServiceTests(unittest.TestCase):
             )
             app = build_application(data_dir=data_dir)
 
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                pending_invoice_tag_groups={
+            app._app_settings_service.update_pending_invoice_rule_groups(direction="expense", editable_groups={
                     "groups": {
                         "requires_invoice": {"tag_codes": ["borrow_in_company_pending_repayment"]},
                         "bank_statement_as_invoice": {"tag_codes": ["fee"]},
                         "no_invoice_required": {"tag_codes": ["custom_no_invoice_parking"]},
                     }
-                },
-                actor_id="settings-owner",
-            )
+                }, expected_version=None, actor_id="settings-owner")["settings"]
 
             reloaded_payload = build_application(data_dir=data_dir)._app_settings_service.get_settings_payload()
 
@@ -1629,12 +1538,7 @@ class AppSettingsServiceTests(unittest.TestCase):
             payload = app._app_settings_service.get_settings_payload()
 
             with self.assertRaises(AppSettingsValidationError) as context:
-                app._app_settings_service.update_settings(
-                    completed_project_ids=[],
-                    bank_account_mappings=[],
-                    pending_invoice_tag_groups=payload["pending_invoice_tag_groups"],
-                    actor_id="settings-owner",
-                )
+                app._app_settings_service.update_pending_invoice_rule_groups(direction="expense", editable_groups=payload["pending_invoice_tag_groups"], expected_version=None, actor_id="settings-owner")["settings"]
 
         self.assertEqual(
             payload["pending_invoice_tag_groups"]["groups"]["requires_invoice"]["tag_codes"],
@@ -1675,12 +1579,7 @@ class AppSettingsServiceTests(unittest.TestCase):
             payload = app._app_settings_service.get_settings_payload()
 
             with self.assertRaises(AppSettingsValidationError) as context:
-                app._app_settings_service.update_settings(
-                    completed_project_ids=[],
-                    bank_account_mappings=[],
-                    pending_invoice_tag_groups=payload["pending_invoice_tag_groups"],
-                    actor_id="settings-owner",
-                )
+                app._app_settings_service.update_pending_invoice_rule_groups(direction="expense", editable_groups=payload["pending_invoice_tag_groups"], expected_version=None, actor_id="settings-owner")["settings"]
 
         self.assertEqual(
             payload["pending_invoice_tag_groups"]["groups"]["requires_invoice"]["tag_codes"],
@@ -1775,7 +1674,7 @@ class AppSettingsServiceTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             configure_access_control(app, usernames=["FULL001"])
             app._app_settings_service.update_settings(
-                completed_project_ids=[],
+
                 bank_account_mappings=[],
                 oa_retention={"cutoff_date": "2026-01-01"},
                 workbench_column_layouts={"oa": ["projectName", "applicant"]},
@@ -1798,7 +1697,7 @@ class AppSettingsServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._app_settings_service.update_settings(
-                completed_project_ids=[],
+
                 bank_account_mappings=[
                     {
                         "id": "bank_mapping_8826",
@@ -1828,7 +1727,7 @@ class AppSettingsServiceTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
 
             payload = app._app_settings_service.update_settings(
-                completed_project_ids=[],
+
                 bank_account_mappings=[],
                 oa_retention={"cutoff_date": "2026-99-99"},
                 workbench_column_layouts={},
@@ -1842,7 +1741,7 @@ class AppSettingsServiceTests(unittest.TestCase):
 
             default_payload = app._app_settings_service.get_settings_payload()
             updated_payload = app._app_settings_service.update_settings(
-                completed_project_ids=[],
+
                 bank_account_mappings=[],
                 oa_import={
                     "form_types": ["expense_claim", "ticket_type", "payment_request", "payment_request"],
@@ -1892,7 +1791,7 @@ class AppSettingsServiceTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
 
             payload = app._app_settings_service.update_settings(
-                completed_project_ids=[],
+
                 bank_account_mappings=[],
                 oa_import={"attachment_invoice_promotion_mode": "always_create"},
                 workbench_column_layouts={},
@@ -1900,20 +1799,6 @@ class AppSettingsServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["oa_import"]["attachment_invoice_promotion_mode"], "link_existing_only")
 
-    def test_update_settings_persists_oa_invoice_offset_applicants(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-
-            updated_payload = app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                oa_invoice_offset={"applicant_names": [" 周洁莹 ", "周洁莹", "李四"]},
-                workbench_column_layouts={},
-            )
-            reloaded_payload = build_application(data_dir=Path(temp_dir))._app_settings_service.get_settings_payload()
-
-        self.assertEqual(updated_payload["oa_invoice_offset"], {"applicant_names": ["周洁莹", "李四"]})
-        self.assertEqual(reloaded_payload["oa_invoice_offset"], updated_payload["oa_invoice_offset"])
 
     def test_dedicated_access_control_triggers_oa_role_sync_with_normalized_assignments(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2036,7 +1921,6 @@ class AppSettingsServiceTests(unittest.TestCase):
                     "/api/workbench/settings",
                     body=json.dumps(
                         {
-                            "completed_project_ids": [],
                             "bank_account_mappings": [],
                             "allowed_usernames": ["FULL001", "READONLY001"],
                             "readonly_export_usernames": ["READONLY001"],
@@ -2062,94 +1946,6 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(update_response.status_code, 400)
         self.assertEqual(updated_payload["error"], "access_control_write_forbidden")
         self.assertNotIn("access_control", get_payload)
-
-    def test_sync_oa_projects_returns_source_and_status_in_settings_payload(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-
-            payload = app._app_settings_service.sync_oa_projects(actor_id="settings_test")
-            active_projects = payload["projects"]["active"]
-
-        self.assertGreaterEqual(len(active_projects), 2)
-        project = next(item for item in active_projects if item["project_code"] == "PJT-001")
-        self.assertEqual(project["project_name"], "华东改造项目")
-        self.assertEqual(project["project_status"], "active")
-        self.assertEqual(project["source"], "oa")
-        self.assertEqual(project["department_name"], "交付中心")
-        self.assertEqual(project["owner_name"], "张三")
-
-    def test_synced_oa_projects_persist_across_reload(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-
-            synced_payload = app._app_settings_service.sync_oa_projects(actor_id="settings_test")
-            reloaded_payload = build_application(data_dir=Path(temp_dir))._app_settings_service.get_settings_payload()
-
-        self.assertEqual(
-            [project["project_code"] for project in reloaded_payload["projects"]["active"]],
-            [project["project_code"] for project in synced_payload["projects"]["active"]],
-        )
-        self.assertEqual(
-            [project["project_name"] for project in reloaded_payload["projects"]["active"]],
-            [project["project_name"] for project in synced_payload["projects"]["active"]],
-        )
-
-    def test_create_manual_project_persists_and_defaults_to_active(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-
-            created_payload = app._app_settings_service.create_manual_project(
-                actor_id="settings_test",
-                project_code="LOCAL-001",
-                project_name="本地测试项目",
-                department_name="财务部",
-                owner_name="王五",
-            )
-            reloaded_payload = build_application(data_dir=Path(temp_dir))._app_settings_service.get_settings_payload()
-
-        created_project = created_payload["projects"]["active"][0]
-        self.assertEqual(created_project["project_code"], "LOCAL-001")
-        self.assertEqual(created_project["project_name"], "本地测试项目")
-        self.assertEqual(created_project["project_status"], "active")
-        self.assertEqual(created_project["source"], "manual")
-        self.assertEqual(created_project["department_name"], "财务部")
-        self.assertEqual(created_project["owner_name"], "王五")
-        self.assertEqual(reloaded_payload["projects"]["active"][0], created_project)
-
-    def test_delete_manual_project_removes_only_local_project(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            created_payload = app._app_settings_service.create_manual_project(
-                actor_id="settings_test",
-                project_code="LOCAL-001",
-                project_name="本地测试项目",
-            )
-            project_id = created_payload["projects"]["active"][0]["id"]
-
-            deleted_payload = app._app_settings_service.delete_project(project_id)
-            reloaded_payload = build_application(data_dir=Path(temp_dir))._app_settings_service.get_settings_payload()
-
-        self.assertEqual(deleted_payload["projects"]["active"], [])
-        self.assertEqual(reloaded_payload["projects"]["active"], [])
-        self.assertEqual(reloaded_payload["projects"]["completed_project_ids"], [])
-
-    def test_delete_oa_project_local_override_does_not_remove_oa_project(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            synced_payload = app._app_settings_service.sync_oa_projects(actor_id="settings_test")
-            project_id = synced_payload["projects"]["active"][0]["id"]
-            app._app_settings_service.update_settings(
-                completed_project_ids=[project_id],
-                bank_account_mappings=[],
-            )
-
-            deleted_payload = app._app_settings_service.delete_project(project_id)
-
-        self.assertIn(
-            project_id,
-            [project["id"] for project in deleted_payload["projects"]["active"]],
-        )
-        self.assertNotIn(project_id, deleted_payload["projects"]["completed_project_ids"])
 
 
 if __name__ == "__main__":

@@ -4459,40 +4459,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     };
   } | null = null;
   let workbenchSettingsState = {
-    projects: {
-      active: [
-        {
-          id: "proj-001",
-          project_code: "YN-001",
-          project_name: "云南溯源科技",
-          project_status: "active" as const,
-          source: "oa" as const,
-          department_name: "财务部",
-          owner_name: "赵华",
-        },
-        {
-          id: "proj-002",
-          project_code: "KM-002",
-          project_name: "昆明卷烟厂动力设备控制系统升级改造项目",
-          project_status: "active" as const,
-          source: "oa" as const,
-          department_name: "项目部",
-          owner_name: "王青",
-        },
-      ],
-      completed: [
-        {
-          id: "proj-003",
-          project_code: "ZT-003",
-          project_name: "昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目",
-          project_status: "completed" as const,
-          source: "oa" as const,
-          department_name: "项目部",
-          owner_name: "刘宁",
-        },
-      ],
-      completed_project_ids: ["proj-003"],
-    },
     bank_account_mappings: [
       {
         id: "bank_mapping_4080",
@@ -4533,9 +4499,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         { value: "completed", label: "已完成" },
         { value: "in_progress", label: "进行中" },
       ],
-    },
-    oa_invoice_offset: {
-      applicant_names: ["周洁莹"],
     },
   };
   let workbenchAccessControlState = {
@@ -5282,17 +5245,10 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             },
           };
         }
-        const completedProjectIds = Array.isArray(jsonBody.completed_project_ids)
-          ? (jsonBody.completed_project_ids as string[])
-          : workbenchSettingsState.projects.completed_project_ids;
         const bankAccountMappings = Array.isArray(jsonBody.bank_account_mappings)
           ? (jsonBody.bank_account_mappings as Array<{ id?: string; last4?: string; bank_name?: string; bankName?: string; short_name?: string; shortName?: string }>)
           : workbenchSettingsState.bank_account_mappings;
         workbenchSettingsState = {
-          projects: {
-            ...workbenchSettingsState.projects,
-            completed_project_ids: completedProjectIds,
-          },
           bank_account_mappings: bankAccountMappings.map((item) => ({
             id: item.id ?? `bank_mapping_${item.last4 ?? "0000"}`,
             last4: item.last4 ?? "0000",
@@ -5339,16 +5295,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
                     : workbenchSettingsState.oa_import.attachment_invoice_promotion_mode,
               }
               : workbenchSettingsState.oa_import,
-          oa_invoice_offset:
-            jsonBody.oa_invoice_offset && typeof jsonBody.oa_invoice_offset === "object"
-              ? {
-                applicant_names: Array.isArray((jsonBody.oa_invoice_offset as Record<string, unknown>).applicant_names)
-                  ? ((jsonBody.oa_invoice_offset as Record<string, unknown>).applicant_names as unknown[])
-                    .map((item) => String(item).trim())
-                    .filter(Boolean)
-                  : workbenchSettingsState.oa_invoice_offset.applicant_names,
-              }
-              : workbenchSettingsState.oa_invoice_offset,
         };
       }
       return { body: cloneJson(workbenchSettingsState) };
@@ -5434,65 +5380,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         credentials: cloneJson(oaApplicantCredentialsState),
       },
     }),
-    "/api/workbench/settings/projects/sync": () => {
-      if (!workbenchSettingsState.projects.active.some((project) => project.id === "proj-oa-sync-001")) {
-        workbenchSettingsState = {
-          ...workbenchSettingsState,
-          projects: {
-            ...workbenchSettingsState.projects,
-            active: [
-              ...workbenchSettingsState.projects.active,
-              {
-                id: "proj-oa-sync-001",
-                project_code: "OA-SYNC-001",
-                project_name: "OA 同步新增项目",
-                project_status: "active" as const,
-                source: "oa" as const,
-                department_name: "项目部",
-                owner_name: "OA项目经理",
-              },
-            ],
-          },
-        };
-      }
-      return {
-        body: {
-          sync: {
-            id: "mock-project-sync",
-            status: "completed",
-          },
-          settings: cloneJson(workbenchSettingsState),
-        },
-      };
-    },
-    "/api/workbench/settings/projects": ({ jsonBody }) => {
-      const projectCode = String(jsonBody?.project_code ?? "").trim();
-      const projectName = String(jsonBody?.project_name ?? "").trim();
-      const projectId = projectCode === "LOCAL-001" ? "proj_manual_local_001" : `proj_manual_${projectCode || "new"}`;
-      workbenchSettingsState = {
-        ...workbenchSettingsState,
-        projects: {
-          ...workbenchSettingsState.projects,
-          active: [
-            ...workbenchSettingsState.projects.active.filter((project) => project.id !== projectId),
-            {
-              id: projectId,
-              project_code: projectCode,
-              project_name: projectName,
-              project_status: "active" as const,
-              source: "manual" as const,
-              department_name: null,
-              owner_name: null,
-            },
-          ],
-        },
-      };
-      return {
-        body: {
-          settings: cloneJson(workbenchSettingsState),
-        },
-      };
-    },
     "/api/tax-offset": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";
       if (options.taxErrorMonths?.includes(month)) {
@@ -7219,22 +7106,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       }
     }
 
-    if (method === "DELETE" && url.pathname.startsWith("/api/workbench/settings/projects/")) {
-      const projectId = decodeURIComponent(url.pathname.split("/").pop() ?? "");
-      workbenchSettingsState = {
-        ...workbenchSettingsState,
-        projects: {
-          active: workbenchSettingsState.projects.active.filter((project) => project.id !== projectId),
-          completed: workbenchSettingsState.projects.completed.filter((project) => project.id !== projectId),
-          completed_project_ids: workbenchSettingsState.projects.completed_project_ids.filter((id) => id !== projectId),
-        },
-      };
-      return jsonResponse({
-        body: {
-          settings: cloneJson(workbenchSettingsState),
-        },
-      });
-    }
     const turnoverExtraMatch = url.pathname.match(/^\/api\/turnover-ledger\/relations\/([^/]+)\/extra$/);
     if (turnoverExtraMatch) {
       const relationId = decodeURIComponent(turnoverExtraMatch[1] ?? "");

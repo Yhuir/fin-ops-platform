@@ -13,7 +13,6 @@ import type {
   WorkbenchRecordType,
   WorkbenchRelationMode,
   WorkbenchRelationPreview,
-  WorkbenchProjectSetting,
   WorkbenchSettings,
   WorkbenchSettingsDataResetAction,
   WorkbenchSettingsDataResetJob,
@@ -75,7 +74,7 @@ import { apiUrl } from "../../app/runtime";
 import { ApiClientError, apiRequestJson, type ApiRequestJsonOptions } from "../apiClient";
 import { mapBankTransactionTagDictionary } from "../pendingInvoices/api";
 import { readOATokenCookie } from "../session/api";
-import type { BankTransactionTagDictionary, PendingInvoiceTagGroups } from "../pendingInvoices/types";
+import type { BankTransactionTagDictionary } from "../pendingInvoices/types";
 
 export type WorkbenchBootstrapProgress = {
   label: string;
@@ -361,27 +360,6 @@ type ApiWorkbenchOaSyncStatus = {
 };
 
 type ApiWorkbenchSettings = {
-  projects: {
-    active: Array<{
-      id: string;
-      project_code: string;
-      project_name: string;
-      project_status: "active" | "completed";
-      source?: "oa" | "manual" | null;
-      department_name?: string | null;
-      owner_name?: string | null;
-    }>;
-    completed: Array<{
-      id: string;
-      project_code: string;
-      project_name: string;
-      project_status: "active" | "completed";
-      source?: "oa" | "manual" | null;
-      department_name?: string | null;
-      owner_name?: string | null;
-    }>;
-    completed_project_ids: string[];
-  };
   bank_account_mappings: Array<{
     id: string;
     last4: string;
@@ -401,17 +379,7 @@ type ApiWorkbenchSettings = {
     available_form_types?: ApiWorkbenchSettingsOption[];
     available_statuses?: ApiWorkbenchSettingsOption[];
   };
-  oa_invoice_offset?: {
-    applicant_names?: string[];
-  };
   bank_transaction_tags?: Parameters<typeof mapBankTransactionTagDictionary>[0];
-  pending_invoice_tag_groups?: {
-    version?: number | string | null;
-    groups?: Record<string, { tag_codes?: unknown[] | null } | unknown[] | null> | null;
-    requires_invoice?: unknown[];
-    bank_statement_as_invoice?: unknown[];
-    no_invoice_required?: unknown[];
-  };
 };
 
 type ApiWorkbenchAccessControl = {
@@ -687,7 +655,6 @@ type CancelCashSpecialPayload = {
 };
 
 type WorkbenchSettingsUpdatePayload = {
-  completedProjectIds: string[];
   bankAccountMappings: BankAccountMapping[];
   workbenchColumnLayouts: WorkbenchColumnLayouts;
   oaRetention: {
@@ -698,11 +665,6 @@ type WorkbenchSettingsUpdatePayload = {
     statuses: string[];
     attachmentInvoicePromotionMode: string;
   };
-  oaInvoiceOffset?: {
-    applicantNames: string[];
-  };
-  bankTransactionTags?: BankTransactionTagDictionary;
-  pendingInvoiceTagGroups?: PendingInvoiceTagGroups;
 };
 
 type ApiWorkbenchSettingsDataResetResult = {
@@ -753,14 +715,6 @@ type WorkbenchSettingsDataResetPayload = {
   recoveryReceiptId: string;
   onProgress?: (job: WorkbenchSettingsDataResetJob) => void;
   pollIntervalMs?: number;
-};
-
-type ApiWorkbenchSettingsProjectMutationResult = {
-  settings: ApiWorkbenchSettings;
-};
-
-type ApiWorkbenchSettingsProjectSyncResult = {
-  settings: ApiWorkbenchSettings;
 };
 
 type ApiOaManualSearchItem = {
@@ -861,12 +815,6 @@ type ApiOaManualImportList = {
     source?: string | null;
     audit?: Record<string, unknown> | null;
   }> | null;
-};
-
-type WorkbenchSettingsProjectCreatePayload = {
-  actorId: string;
-  projectCode: string;
-  projectName: string;
 };
 
 function toDisplayValue(value: unknown, fallback = "--") {
@@ -2136,18 +2084,6 @@ function mapWorkbenchExceptionCounts(
   };
 }
 
-function mapProjectSetting(project: ApiWorkbenchSettings["projects"]["active"][number]): WorkbenchProjectSetting {
-  return {
-    id: project.id,
-    projectCode: project.project_code,
-    projectName: project.project_name,
-    projectStatus: project.project_status,
-    source: project.source === "manual" ? "manual" : "oa",
-    departmentName: project.department_name,
-    ownerName: project.owner_name,
-  };
-}
-
 function cleanStringList(values: unknown[] | undefined, fallback: string[]) {
   const cleaned = (values ?? [])
     .map((item) => String(item).trim())
@@ -2187,45 +2123,6 @@ function cleanSettingsStringList(value: unknown): string[] {
     : [];
 }
 
-function mapPendingInvoiceTagGroups(value: ApiWorkbenchSettings["pending_invoice_tag_groups"]): PendingInvoiceTagGroups {
-  const groups = value?.groups;
-  if (groups && typeof groups === "object") {
-    const codesFor = (groupId: string) => {
-      const group = groups[groupId];
-      if (Array.isArray(group)) {
-        return cleanSettingsStringList(group);
-      }
-      if (group && typeof group === "object" && "tag_codes" in group) {
-        return cleanSettingsStringList(group.tag_codes);
-      }
-      return [];
-    };
-    return {
-      requiresInvoice: codesFor("requires_invoice"),
-      bankStatementAsInvoice: codesFor("bank_statement_as_invoice"),
-      noInvoiceRequired: codesFor("no_invoice_required"),
-    };
-  }
-  return {
-    requiresInvoice: cleanSettingsStringList(value?.requires_invoice),
-    bankStatementAsInvoice: cleanSettingsStringList(value?.bank_statement_as_invoice),
-    noInvoiceRequired: cleanSettingsStringList(value?.no_invoice_required),
-  };
-}
-
-function serializePendingInvoiceTagGroups(value: PendingInvoiceTagGroups | undefined) {
-  if (!value) {
-    return undefined;
-  }
-  return {
-    groups: {
-      requires_invoice: { tag_codes: value.requiresInvoice },
-      bank_statement_as_invoice: { tag_codes: value.bankStatementAsInvoice },
-      no_invoice_required: { tag_codes: value.noInvoiceRequired },
-    },
-  };
-}
-
 function mapWorkbenchSettings(payload: ApiWorkbenchSettings): WorkbenchSettings {
   const rawLayouts = payload.workbench_column_layouts ?? {};
   const defaultFormTypes = ["payment_request", "expense_claim"];
@@ -2240,11 +2137,6 @@ function mapWorkbenchSettings(payload: ApiWorkbenchSettings): WorkbenchSettings 
   ];
   const oaImport = payload.oa_import ?? {};
   return {
-    projects: {
-      active: payload.projects.active.map(mapProjectSetting),
-      completed: payload.projects.completed.map(mapProjectSetting),
-      completedProjectIds: payload.projects.completed_project_ids,
-    },
     bankAccountMappings: payload.bank_account_mappings.map((mapping) => ({
       id: mapping.id,
       last4: mapping.last4,
@@ -2270,13 +2162,7 @@ function mapWorkbenchSettings(payload: ApiWorkbenchSettings): WorkbenchSettings 
       availableFormTypes: normalizeSettingsOptions(oaImport.available_form_types, defaultAvailableFormTypes),
       availableStatuses: normalizeSettingsOptions(oaImport.available_statuses, defaultAvailableStatuses),
     },
-    oaInvoiceOffset: {
-      applicantNames: (payload.oa_invoice_offset?.applicant_names ?? [])
-        .map((item) => String(item).trim())
-        .filter(Boolean),
-    },
     bankTransactionTags: mapBankTransactionTagDictionary(payload.bank_transaction_tags) ?? { version: 0, tags: [] },
-    pendingInvoiceTagGroups: mapPendingInvoiceTagGroups(payload.pending_invoice_tag_groups),
   };
 }
 
@@ -3246,7 +3132,6 @@ export async function saveWorkbenchSettings(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      completed_project_ids: settings.completedProjectIds,
       bank_account_mappings: settings.bankAccountMappings.map((mapping) => ({
         id: mapping.id,
         last4: mapping.last4,
@@ -3262,10 +3147,6 @@ export async function saveWorkbenchSettings(
         statuses: settings.oaImport.statuses,
         attachment_invoice_promotion_mode: settings.oaImport.attachmentInvoicePromotionMode,
       },
-      oa_invoice_offset: {
-        applicant_names: settings.oaInvoiceOffset?.applicantNames ?? [],
-      },
-      pending_invoice_tag_groups: serializePendingInvoiceTagGroups(settings.pendingInvoiceTagGroups),
     }),
   });
   return mapWorkbenchSettings(payload);
@@ -3623,19 +3504,6 @@ export async function resetWorkbenchSettingsData(
   return waitForWorkbenchSettingsDataResetJob(createdJob, payload);
 }
 
-export async function syncWorkbenchSettingsProjects(actorId: string): Promise<WorkbenchSettings> {
-  const payload = await requestJson<ApiWorkbenchSettingsProjectSyncResult>("/api/workbench/settings/projects/sync", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      actor_id: actorId,
-    }),
-  });
-  return mapWorkbenchSettings(payload.settings);
-}
-
 function mapWorkbenchActionResult(payload: ApiWorkbenchActionResult): WorkbenchActionResult {
   const affectedScopeKeys = cleanScopeList(payload.affectedScopeKeys ?? payload.affected_scope_keys)
     .filter((scopeKey) => scopeKey !== "all");
@@ -3695,33 +3563,6 @@ function requireNonNegativeInteger(value: unknown, label: string) {
     throw new Error(`${label} 必须是非负整数`);
   }
   return value;
-}
-
-export async function createWorkbenchSettingsProject(
-  payload: WorkbenchSettingsProjectCreatePayload,
-): Promise<WorkbenchSettings> {
-  const result = await requestJson<ApiWorkbenchSettingsProjectMutationResult>("/api/workbench/settings/projects", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      actor_id: payload.actorId,
-      project_code: payload.projectCode,
-      project_name: payload.projectName,
-    }),
-  });
-  return mapWorkbenchSettings(result.settings);
-}
-
-export async function deleteWorkbenchSettingsProject(projectId: string): Promise<WorkbenchSettings> {
-  const payload = await requestJson<ApiWorkbenchSettingsProjectMutationResult>(
-    `/api/workbench/settings/projects/${encodeURIComponent(projectId)}`,
-    {
-      method: "DELETE",
-    },
-  );
-  return mapWorkbenchSettings(payload.settings);
 }
 
 export async function fetchWorkbenchRowDetail(

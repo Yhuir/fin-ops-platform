@@ -59,7 +59,6 @@ type ApiMockOptions = {
   bankFlowRuleBatchFailOnce?: boolean;
   bankFlowRuleBatchFailuresBeforeSuccess?: number;
   bankFlowRuleBatchScenario?: BankFlowRuleBatchMockScenario;
-  settingsProjectCostEvidence?: boolean;
   turnoverCostFanout?: boolean;
   turnoverLedgerFailOnce?: boolean;
   turnoverLedgerFailuresBeforeSuccess?: number;
@@ -2097,21 +2096,8 @@ function findWorkbenchRow(
     .find((row) => row.id === rowId) ?? null;
 }
 
-function workbenchSettingsPayload(
-  completedProjectIds: string[] = [],
-  includeCostProject = false,
-) {
-  const settingsProjectCompleted = completedProjectIds.includes(settingsCostProject.id);
-  const activeProjects = includeCostProject && !settingsProjectCompleted ? [settingsCostProject] : [];
-  const completedProjects = includeCostProject && settingsProjectCompleted
-    ? [{ ...settingsCostProject, project_status: "completed" as const }]
-    : [];
+function workbenchSettingsPayload() {
   return {
-    projects: {
-      active: activeProjects,
-      completed: completedProjects,
-      completed_project_ids: completedProjectIds,
-    },
     bank_account_mappings: [
       {
         id: "bank_mapping_8826",
@@ -2138,7 +2124,6 @@ function workbenchSettingsPayload(
         { value: "in_progress", label: "进行中" },
       ],
     },
-    oa_invoice_offset: { applicant_names: [] },
     pending_invoice_tag_groups: {
       groups: {
         requires_invoice: { tag_codes: [] },
@@ -4958,14 +4943,6 @@ function pendingInvoiceExpenseRulesPayload({
     permissions: { can_save: canSave },
   };
 }
-
-const settingsCostProject = {
-  id: "settings-cost-project-e2e",
-  project_code: "SETTINGS-COST-E2E",
-  project_name: "昆明卷烟厂动力设备控制系统升级改造项目",
-  project_status: "active" as const,
-  source: "manual" as const,
-};
 
 const costProjectRows: Record<string, Record<string, CostBrowserProjectRow[]>> = {
   "2026-03": {
@@ -8405,7 +8382,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     options.turnoverLedgerFailuresBeforeSuccess ?? (options.turnoverLedgerFailOnce ? 1 : 0);
   let turnoverSelectedTagCodes = ["external_turnover_payment", "external_turnover_collection"];
   let turnoverTagSelectionVersion = 1;
-  let settingsCompletedProjectIds: string[] = [];
   const oaDraftPrefillVersions = { etc: 1, input_invoice_usage: 1 };
   const oaDraftPrefillConfigurations: Record<"etc" | "input_invoice_usage", Record<string, string>> = {
     etc: {
@@ -8646,14 +8622,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             message: "Access control can only be changed through the administrator access-control API.",
           }, 400);
         }
-        settingsCompletedProjectIds = Array.isArray(body.completed_project_ids)
-          ? body.completed_project_ids.map((item) => String(item))
-          : [];
       }
-      return json(route, workbenchSettingsPayload(
-        settingsCompletedProjectIds,
-        Boolean(options.settingsProjectCostEvidence),
-      ));
+      return json(route, workbenchSettingsPayload());
     }
 
     if (path === "/api/workbench/settings/oa-applicant-credentials") {

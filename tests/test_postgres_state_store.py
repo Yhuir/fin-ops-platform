@@ -1133,7 +1133,8 @@ class PostgresStateStoreTests(unittest.TestCase):
             store = PostgresStateStore(data_dir=Path(temp_dir), connection=connection)
 
             defaults = store.load_app_settings()
-            self.assertIn("completed_project_ids", defaults)
+            self.assertNotIn("completed_project_ids", defaults)
+            self.assertNotIn("oa_invoice_offset", defaults)
             self.assertEqual(defaults["page_access_accounts"], [])
             self.assertEqual(defaults["access_control_version"], 1)
             self.assertEqual(defaults["bank_transaction_tags"], {})

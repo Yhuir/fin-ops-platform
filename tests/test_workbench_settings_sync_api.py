@@ -293,7 +293,6 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
                 "/api/workbench/settings",
                 body=json.dumps(
                     {
-                        "completed_project_ids": [],
                         "bank_account_mappings": [],
                     }
                 ),
@@ -303,130 +302,6 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(payload["error"], "app_settings_persistence_failed")
         self.assertIn("无法写入持久化设置源", payload["message"])
-
-    def test_project_sync_endpoint_syncs_oa_projects_into_settings_payload(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-
-            response = app.handle_request(
-                "POST",
-                "/api/workbench/settings/projects/sync",
-                body=json.dumps({"actor_id": "settings_test"}),
-            )
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["sync"]["scope"], "projects")
-        self.assertEqual(payload["sync"]["status"], "succeeded")
-        self.assertIn(
-            "PJT-001",
-            [project["project_code"] for project in payload["settings"]["projects"]["active"]],
-        )
-        self.assertEqual(payload["settings"]["projects"]["active"][0]["source"], "oa")
-
-    def test_manual_project_create_and_delete_endpoints_persist_settings(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-
-            create_response = app.handle_request(
-                "POST",
-                "/api/workbench/settings/projects",
-                body=json.dumps(
-                    {
-                        "actor_id": "settings_test",
-                        "project_code": "LOCAL-001",
-                        "project_name": "本地测试项目",
-                    }
-                ),
-            )
-            create_payload = json.loads(create_response.body)
-            project_id = create_payload["settings"]["projects"]["active"][0]["id"]
-
-            reloaded_payload = json.loads(
-                build_application(data_dir=Path(temp_dir)).handle_request("GET", "/api/workbench/settings").body
-            )
-            delete_response = app.handle_request(
-                "DELETE",
-                f"/api/workbench/settings/projects/{project_id}",
-            )
-            delete_payload = json.loads(delete_response.body)
-
-        self.assertEqual(create_response.status_code, 200)
-        self.assertEqual(create_payload["settings"]["projects"]["active"][0]["source"], "manual")
-        self.assertEqual(reloaded_payload["projects"]["active"][0]["project_name"], "本地测试项目")
-        self.assertEqual(delete_response.status_code, 200)
-        self.assertEqual(delete_payload["settings"]["projects"]["active"], [])
-
-    def test_project_sync_endpoint_failure_does_not_destroy_existing_settings(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._app_settings_service.create_manual_project(
-                actor_id="settings_test",
-                project_code="LOCAL-001",
-                project_name="本地测试项目",
-            )
-            app._integration_service._adapter = ExplodingProjectAdapter()
-
-            response = app.handle_request(
-                "POST",
-                "/api/workbench/settings/projects/sync",
-                body=json.dumps({"actor_id": "settings_test"}),
-            )
-            payload = json.loads(response.body)
-            settings_payload = json.loads(app.handle_request("GET", "/api/workbench/settings").body)
-
-        self.assertEqual(response.status_code, 502)
-        self.assertEqual(payload["error"], "oa_project_sync_failed")
-        self.assertEqual(settings_payload["projects"]["active"][0]["project_name"], "本地测试项目")
-
-    def test_project_mutation_endpoints_reject_account_without_settings_page(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            configure_access_control(app, page_access={"LIMITED001": ["bank-details"]})
-            created_payload = app._app_settings_service.create_manual_project(
-                actor_id="settings_owner",
-                project_code="LOCAL-001",
-                project_name="本地测试项目",
-            )
-            project_id = created_payload["projects"]["active"][0]["id"]
-            app._oa_identity_service.resolve_identity = lambda _token: self._limited_identity()
-            headers = {"Authorization": "Bearer limited-token"}
-
-            with patch.object(app._project_costing_service, "sync_projects_from_oa") as sync_projects:
-                sync_response = app.handle_request(
-                    "POST",
-                    "/api/workbench/settings/projects/sync",
-                    body=json.dumps({"actor_id": "spoofed-owner"}),
-                    headers=headers,
-                )
-                create_response = app.handle_request(
-                    "POST",
-                    "/api/workbench/settings/projects",
-                    body=json.dumps(
-                        {
-                            "actor_id": "spoofed-owner",
-                            "project_code": "LOCAL-002",
-                            "project_name": "伪造项目",
-                        }
-                    ),
-                    headers=headers,
-                )
-                delete_response = app.handle_request(
-                    "DELETE",
-                    f"/api/workbench/settings/projects/{project_id}",
-                    headers=headers,
-                )
-
-            settings_payload = app._app_settings_service.get_settings_payload()
-
-        self.assertEqual(sync_response.status_code, 403)
-        self.assertEqual(json.loads(sync_response.body)["error"], "page_access_denied")
-        self.assertEqual(create_response.status_code, 403)
-        self.assertEqual(json.loads(create_response.body)["error"], "page_access_denied")
-        self.assertEqual(delete_response.status_code, 403)
-        self.assertEqual(json.loads(delete_response.body)["error"], "page_access_denied")
-        sync_projects.assert_not_called()
-        self.assertEqual([project["project_code"] for project in settings_payload["projects"]["active"]], ["LOCAL-001"])
 
 
 if __name__ == "__main__":

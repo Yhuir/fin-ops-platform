@@ -93,7 +93,6 @@ class FakeStore:
 
     def load_app_settings(self) -> dict:
         return {
-            "completed_project_ids": [],
             "manual_projects": [],
             "synced_projects": [],
             "bank_account_mappings": [],
@@ -105,7 +104,6 @@ class FakeStore:
             "workbench_column_layouts": {},
             "oa_retention": {},
             "oa_import": {},
-            "oa_invoice_offset": {},
         }
 
     def load_tax_certified_imports(self) -> dict:

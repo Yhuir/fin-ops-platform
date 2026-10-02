@@ -111,7 +111,7 @@ class OAManualImportApiTests(unittest.TestCase):
             )
         )
         app._app_settings_service.update_settings(
-            completed_project_ids=[],
+
             bank_account_mappings=[],
             oa_retention={"cutoff_date": "2026-03-01"},
         )

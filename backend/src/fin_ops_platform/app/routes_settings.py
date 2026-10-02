@@ -54,7 +54,6 @@ SessionResolver = Callable[[dict[str, str] | None], tuple[OARequestSession | Non
 SettingsServiceProvider = Callable[[], AppSettingsService]
 SettingsDataResetServiceProvider = Callable[[], SettingsDataResetService | None]
 ServiceProvider = Callable[[], Any]
-FinalizeSettingsEvent = Callable[[dict[str, Any]], None]
 DataResetRequester = Callable[..., tuple[Any, bool]]
 
 
@@ -65,7 +64,6 @@ class SettingsApiRoutes:
         self,
         *,
         app_settings_service_provider: SettingsServiceProvider,
-        project_costing_service_provider: ServiceProvider,
         settings_data_reset_service_provider: SettingsDataResetServiceProvider,
         background_job_service_provider: ServiceProvider,
         oa_applicant_credential_service_provider: Callable[[], OaApplicantCredentialService],
@@ -77,9 +75,7 @@ class SettingsApiRoutes:
         oa_password_verification_failed_response: Callable[[], Any],
         load_json_body: JsonBodyLoader,
         json_response: JsonResponse,
-        finalize_settings_event: FinalizeSettingsEvent,
         request_data_reset: DataResetRequester,
-        serialize_sync_run: Callable[[object], dict[str, object]],
         serialize_data_reset_background_job: Callable[[Any], dict[str, object]],
         enqueue_import_process_job: Callable[..., Any],
         serialize_import_job: Callable[[Any], dict[str, object]],
@@ -87,7 +83,6 @@ class SettingsApiRoutes:
         manual_import_affected_scope_payload: Callable[[list[str]], dict[str, object]],
     ) -> None:
         self._app_settings_service_provider = app_settings_service_provider
-        self._project_costing_service_provider = project_costing_service_provider
         self._settings_data_reset_service_provider = settings_data_reset_service_provider
         self._background_job_service_provider = background_job_service_provider
         self._oa_applicant_credential_service_provider = oa_applicant_credential_service_provider
@@ -101,9 +96,7 @@ class SettingsApiRoutes:
         self._oa_password_verification_failed_response = oa_password_verification_failed_response
         self._load_json_body = load_json_body
         self._json_response = json_response
-        self._finalize_settings_event = finalize_settings_event
         self._request_data_reset = request_data_reset
-        self._serialize_sync_run = serialize_sync_run
         self._serialize_data_reset_background_job = serialize_data_reset_background_job
         self._enqueue_import_process_job = enqueue_import_process_job
         self._serialize_import_job = serialize_import_job
@@ -160,13 +153,6 @@ class SettingsApiRoutes:
         if method == "DELETE" and route_path.startswith("/api/workbench/settings/oa/manual-imports/"):
             row_id = unquote(route_path.rsplit("/", 1)[-1])
             return self.delete_oa_manual_import(row_id, body, headers)
-        if method == "POST" and route_path == "/api/workbench/settings/projects/sync":
-            return self.sync_projects(body, headers)
-        if method == "POST" and route_path == "/api/workbench/settings/projects":
-            return self.create_project(body, headers)
-        if method == "DELETE" and route_path.startswith("/api/workbench/settings/projects/"):
-            project_id = unquote(route_path.rsplit("/", 1)[-1])
-            return self.delete_project(project_id, headers)
         if method == "GET" and route_path == "/api/workbench/settings/data-reset/preview":
             return self.data_reset_preview(query, headers)
         if method == "POST" and route_path == "/api/workbench/settings/data-reset/jobs":
@@ -210,32 +196,25 @@ class SettingsApiRoutes:
                 },
             )
 
-        completed_project_ids = payload.get("completed_project_ids", [])
         bank_account_mappings = payload.get("bank_account_mappings", [])
         workbench_column_layouts = payload.get("workbench_column_layouts", {})
         oa_retention = payload.get("oa_retention", {})
-        oa_invoice_offset = payload.get("oa_invoice_offset", {})
         oa_import = payload.get("oa_import", {})
-        pending_invoice_tag_groups = payload.get("pending_invoice_tag_groups")
-        pending_output_invoice_tag_groups = payload.get("pending_output_invoice_tag_groups")
-        actor_id = actor_id_for_session(session) if session is not None else "workbench_settings"
 
         app_settings_service = self._app_settings_service()
         if (
-            not isinstance(completed_project_ids, list)
-            or not isinstance(bank_account_mappings, list)
+            not isinstance(bank_account_mappings, list)
             or not isinstance(workbench_column_layouts, dict)
             or not isinstance(oa_retention, dict)
             or not isinstance(oa_import, dict)
-            or not isinstance(oa_invoice_offset, dict)
         ):
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": "invalid_workbench_settings_request",
                     "message": (
-                        "completed_project_ids and bank_account_mappings must be arrays, and "
-                        "workbench_column_layouts, oa_retention, oa_import, and oa_invoice_offset must be objects."
+                        "bank_account_mappings must be an array, and "
+                        "workbench_column_layouts, oa_retention, and oa_import must be objects."
                     ),
                 },
             )
@@ -247,34 +226,24 @@ class SettingsApiRoutes:
                     "message": "银行明细自动标签规则只能在银行明细的自动标签规则中保存。",
                 },
             )
-        if pending_invoice_tag_groups is not None and not isinstance(pending_invoice_tag_groups, dict):
+        unsupported_fields = set(payload) - {
+            "bank_account_mappings", "workbench_column_layouts", "oa_retention", "oa_import",
+        }
+        if unsupported_fields:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
-                    "error": "invalid_workbench_settings_request",
-                    "message": "pending_invoice_tag_groups must be an object when provided.",
-                },
-            )
-        if pending_output_invoice_tag_groups is not None and not isinstance(pending_output_invoice_tag_groups, dict):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_workbench_settings_request",
-                    "message": "pending_output_invoice_tag_groups must be an object when provided.",
+                    "error": "unsupported_settings_fields",
+                    "message": "设置字段已失效或不属于此接口，请刷新页面并通过对应功能的设置入口保存。",
+                    "fields": sorted(unsupported_fields),
                 },
             )
         try:
             updated_payload = app_settings_service.update_settings(
-                completed_project_ids=[str(item) for item in completed_project_ids],
                 bank_account_mappings=[item for item in bank_account_mappings if isinstance(item, dict)],
                 workbench_column_layouts=workbench_column_layouts,
                 oa_retention=oa_retention,
                 oa_import=oa_import,
-                oa_invoice_offset=oa_invoice_offset,
-                pending_invoice_tag_groups=pending_invoice_tag_groups,
-                pending_output_invoice_tag_groups=pending_output_invoice_tag_groups,
-                actor_id=actor_id or "workbench_settings",
-                after_bank_transaction_tag_settings_saved=self._finalize_settings_event,
             )
         except AppSettingsValidationError as exc:
             return self._json_response(
@@ -700,75 +669,6 @@ class SettingsApiRoutes:
         self._add_manual_import_affected_scopes(result, row_ids=[normalized_row_id])
         return self._json_response(HTTPStatus.OK, result)
 
-    def sync_projects(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
-        session, auth_error = self._resolve_settings_mutation_session(headers)
-        if auth_error is not None:
-            return auth_error
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        actor_id = actor_id_for_session(session) if session is not None else str(payload.get("actor_id", "")).strip()
-        if not actor_id:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_project_sync_request", "message": "actor_id is required."},
-            )
-        try:
-            run = self._project_costing_service().sync_projects_from_oa(actor_id=actor_id)
-        except Exception as exc:
-            return self._json_response(
-                HTTPStatus.BAD_GATEWAY,
-                {"error": "oa_project_sync_failed", "message": f"OA 项目同步失败：{exc}"},
-            )
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "sync": self._serialize_sync_run(run),
-                "settings": self._app_settings_service().get_settings_payload(),
-            },
-        )
-
-    def create_project(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
-        session, auth_error = self._resolve_settings_mutation_session(headers)
-        if auth_error is not None:
-            return auth_error
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        actor_id = actor_id_for_session(session) if session is not None else str(payload.get("actor_id", "")).strip()
-        if not actor_id:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_project_create_request", "message": "actor_id is required."},
-            )
-        try:
-            settings_payload = self._app_settings_service().create_manual_project(
-                actor_id=actor_id,
-                project_code=str(payload.get("project_code", "")),
-                project_name=str(payload.get("project_name", "")),
-                department_name=payload.get("department_name"),
-                owner_name=payload.get("owner_name"),
-            )
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_project_create_request", "message": str(exc)},
-            )
-        return self._json_response(HTTPStatus.OK, {"settings": settings_payload})
-
-    def delete_project(self, project_id: str, headers: dict[str, str] | None) -> Any:
-        _session, auth_error = self._resolve_settings_mutation_session(headers)
-        if auth_error is not None:
-            return auth_error
-        normalized_project_id = str(project_id).strip()
-        if not normalized_project_id:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_project_delete_request", "message": "project_id is required."},
-            )
-        settings_payload = self._app_settings_service().delete_project(normalized_project_id)
-        return self._json_response(HTTPStatus.OK, {"settings": settings_payload})
-
     def data_reset_preview(
         self,
         query: dict[str, list[str]],
@@ -1123,9 +1023,6 @@ class SettingsApiRoutes:
 
     def _app_settings_service(self) -> AppSettingsService:
         return self._app_settings_service_provider()
-
-    def _project_costing_service(self) -> Any:
-        return self._project_costing_service_provider()
 
     def _settings_data_reset_service(self) -> SettingsDataResetService | None:
         return self._settings_data_reset_service_provider()

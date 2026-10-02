@@ -17300,41 +17300,17 @@ body.column-layout-dragging {
   border-radius: var(--fp-radius-sm);
 }
 
-.settings-field--date,
-.settings-field--project-code {
+.settings-field--date {
   width: 180px;
 }
 
-.settings-field--project-name {
-  width: min(280px, 100%);
-}
-
-.settings-field--tag-select {
-  width: min(320px, 100%);
-}
-
-.settings-project-toolbar,
 .settings-bank-mapping-form,
-.settings-pending-tag-toolbar,
 .oa-manual-import__filters,
 .oa-manual-import__actions {
   display: flex;
   flex-wrap: wrap;
   align-items: end;
   gap: 10px;
-}
-
-.settings-project-toolbar {
-  padding: 0;
-  background: transparent;
-  border: 0;
-}
-
-.settings-project-tabs,
-.settings-pending-tabs {
-  width: fit-content;
-  max-width: 100%;
-  overflow-x: auto;
 }
 
 .settings-bank-mapping-form {
@@ -17394,46 +17370,6 @@ body.column-layout-dragging {
 .settings-inline-alert--info {
   color: var(--fp-info);
   background: var(--fp-primary-soft);
-}
-
-.settings-pending-tag-toolbar {
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--fp-border);
-}
-
-.settings-selected-tags {
-  display: grid;
-  gap: 0;
-}
-
-.settings-selected-tags > p {
-  margin: 0;
-  padding: 14px 0;
-  color: var(--fp-text-muted);
-  font-size: 13px;
-}
-
-.settings-selected-tag-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  min-height: 42px;
-  border-bottom: 1px solid var(--fp-border);
-}
-
-.settings-selected-tag-row:last-child {
-  border-bottom: 0;
-}
-
-.settings-selected-tag-path {
-  color: var(--fp-text-secondary);
-  font-size: 13px;
-  overflow-wrap: anywhere;
-}
-
-.settings-selected-tag-path--error {
-  color: var(--fp-danger);
 }
 
 .settings-oa-config { display: grid; gap: 0; }
@@ -17602,13 +17538,10 @@ body.column-layout-dragging {
   .settings-access-account-pane { border-right: 0; border-bottom: 1px solid var(--fp-border); }
 }
 @container settings (max-width: 640px) {
-  .settings-project-toolbar,
-  .settings-bank-mapping-form,
+    .settings-bank-mapping-form,
   .settings-credentials-form,
   .settings-preference-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
-  .settings-field--date,
-  .settings-field--project-code,
-  .settings-field--project-name { width: 100%; }
+  .settings-field--date { width: 100%; }
   .settings-access-page-list { grid-template-columns: minmax(0, 1fr); }
   .oa-manual-import__header { align-items: flex-start; flex-wrap: wrap; }
 }

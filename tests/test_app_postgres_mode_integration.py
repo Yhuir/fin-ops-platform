@@ -283,28 +283,32 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
 
     def test_workbench_settings_round_trip_survives_app_rebuild(self) -> None:
         app = self._build_app()
-        create_response = app.handle_request(
-            "POST",
-            "/api/workbench/settings/projects",
-            body=json.dumps(
-                {
-                    "actor_id": "test_finops_user",
-                    "project_code": "stage06-project",
-                    "project_name": "阶段06测试项目",
-                }
-            ),
-        )
-        self.assertEqual(create_response.status_code, 200, create_response.body)
+        try:
+            response = app.handle_request(
+                "POST", "/api/workbench/settings",
+                body=json.dumps({"bank_account_mappings": [
+                    {"bank_name": "测试银行", "last4": "5678", "short_name": "测试"},
+                ]}),
+            )
+            self.assertEqual(response.status_code, 200, response.body)
+        finally:
+            app.close()
 
         rebuilt_app = self._build_app()
-        settings_response = rebuilt_app.handle_request("GET", "/api/workbench/settings")
-        settings_payload = json.loads(settings_response.body)
-
-        self.assertEqual(settings_response.status_code, 200)
-        serialized = json.dumps(settings_payload, ensure_ascii=False)
-        self.assertIn("阶段06测试项目", serialized)
-        self.assertNotIn("password", serialized.lower())
-        self.assertNotIn("postgresql://", serialized.lower())
+        try:
+            settings_response = rebuilt_app.handle_request("GET", "/api/workbench/settings")
+            settings_payload = json.loads(settings_response.body)
+            self.assertEqual(settings_response.status_code, 200)
+            self.assertEqual(settings_payload["bank_account_mappings"], [
+                {"id": "bank_mapping_5678", "bank_name": "测试银行", "last4": "5678", "short_name": "测试"},
+            ])
+            self.assertNotIn("projects", settings_payload)
+            self.assertNotIn("oa_invoice_offset", settings_payload)
+            serialized = json.dumps(settings_payload, ensure_ascii=False)
+            self.assertNotIn("password", serialized.lower())
+            self.assertNotIn("postgresql://", serialized.lower())
+        finally:
+            rebuilt_app.close()
 
     def test_import_preview_confirm_persists_to_postgres_formal_tables(self) -> None:
         app = self._build_app()

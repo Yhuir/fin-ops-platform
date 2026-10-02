@@ -56,7 +56,6 @@ FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 def _default_app_settings_payload() -> dict[str, Any]:
     return {
-        "completed_project_ids": [],
         "manual_projects": [],
         "synced_projects": [],
         "bank_account_mappings": [],
@@ -64,7 +63,6 @@ def _default_app_settings_payload() -> dict[str, Any]:
         "workbench_column_layouts": {},
         "oa_retention": {},
         "oa_import": {},
-        "oa_invoice_offset": {},
         "bank_transaction_tags": {},
         "pending_invoice_tag_groups": {},
         "pending_output_invoice_tag_groups": {},

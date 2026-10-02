@@ -5336,7 +5336,6 @@ class Application:
             return routes
         routes = SettingsApiRoutes(
             app_settings_service_provider=lambda: self._app_settings_service,
-            project_costing_service_provider=lambda: self._project_costing_service,
             settings_data_reset_service_provider=lambda: self._settings_data_reset_service,
             background_job_service_provider=lambda: self._background_job_service,
             oa_applicant_credential_service_provider=self._oa_applicant_credential_service,
@@ -5355,9 +5354,7 @@ class Application:
             oa_password_verification_failed_response=self._oa_password_verification_failed_response,
             load_json_body=self._load_json_body,
             json_response=self._json_response,
-            finalize_settings_event=self._finalize_workbench_settings_event,
             request_data_reset=self._request_settings_data_reset_job,
-            serialize_sync_run=self._serialize_sync_run,
             serialize_data_reset_background_job=self._serialize_data_reset_background_job,
             enqueue_import_process_job=self._enqueue_import_process_job,
             serialize_import_job=self._serialize_import_job,
@@ -8831,10 +8828,6 @@ class Application:
             "duplicate_groups": [],
         }
 
-    def _serialize_sync_run(self, run: object) -> dict[str, object]:
-        payload = self._serialize_value(run)
-        payload["issue_count"] = run.issue_count
-        return payload
 
     def _current_oa_attachment_invoice_parser_version(self) -> str:
         return attachment_invoice_cache_parser_version()
@@ -9440,7 +9433,6 @@ class Application:
         if missing:
             raise KeyError(missing[0])
         return [resolved_rows[row_id] for row_id in normalized_row_ids]
-
 
 
     def _pair_relation_display_payload(

@@ -84,7 +84,27 @@ function expectDirectCanonicalPayload(payload: Record<string, unknown>) {
 }
 
 test.describe("settings data reset browser flow", () => {
-  test("centers all eight settings panels with native tabs at four widths", async ({ page }, testInfo) => {
+  test("discards a retired saved tab and keeps rule configuration out of generic saves", async ({ page }) => {
+    await installDeterministicApiMocks(page, { sessionMode: "admin" });
+    await page.addInitScript(() => {
+      sessionStorage.setItem("finops:pageSession:v1:e2e-user:settings:safeDraft", JSON.stringify({
+        version: 2, updatedAt: Date.now(), expiresAt: Date.now() + 3600000,
+        value: { activeSectionId: "projects", bankNameDraft: "", bankShortNameDraft: "", last4Draft: "", projectCodeDraft: "old", projectNameDraft: "old" },
+      }));
+    });
+    await page.goto("/settings");
+    await expect(page.getByRole("tab", { name: "银行账户", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("region", { name: "银行账户映射" })).toBeVisible();
+    for (const name of ["项目状态", "待找发票筛选", "冲账规则"]) {
+      await expect(page.getByRole("tab", { name, exact: true })).toHaveCount(0);
+    }
+    const request = page.waitForRequest(request => request.url().endsWith("/api/workbench/settings") && request.method() === "POST");
+    await page.getByRole("button", { name: "保存全部设置" }).click();
+    expect(Object.keys((await request).postDataJSON()).sort()).toEqual(["bank_account_mappings", "oa_import", "oa_retention", "workbench_column_layouts"]);
+    await expect(page.getByText("已保存关联台设置。")).toBeVisible();
+  });
+
+  test("centers all five settings panels with native tabs at four widths", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     let settingsReads = 0;
     page.on("request", (request) => {
@@ -93,14 +113,11 @@ test.describe("settings data reset browser flow", () => {
     await installDeterministicApiMocks(page, { sessionMode: "admin" });
     await page.goto("/settings");
     const tabs = page.getByRole("tablist", { name: "设置分类" });
-    await expect(tabs.getByRole("tab")).toHaveCount(8);
+    await expect(tabs.getByRole("tab")).toHaveCount(5);
     const initialSettingsReads = settingsReads;
     const sections = [
-      { nav: "项目状态", region: "项目状态管理" },
       { nav: "银行账户", region: "银行账户映射" },
-      { nav: "待找发票筛选", region: "待找发票筛选" },
       { nav: "OA导入设置", region: "OA导入设置" },
-      { nav: "冲账规则", region: "冲账规则" },
       { nav: "OA申请人凭据", region: "OA申请人凭据" },
       { nav: "访问账户", region: "访问账户" },
       { nav: "数据重置", region: "数据重置" },
@@ -126,7 +143,7 @@ test.describe("settings data reset browser flow", () => {
         await expect(region).toBeVisible();
         samples.push({width, section: section.nav, elapsedMs: performance.now() - started});
         const workspace = await page.locator(".settings-workspace").boundingBox();
-        const panel = await region.boundingBox();
+        const panel = await page.getByRole("tabpanel", { name: section.nav, exact: true }).boundingBox();
         expect(Math.abs(panel!.x - workspace!.x)).toBeLessThan(2);
         expect(Math.abs(panel!.width - workspace!.width)).toBeLessThan(2);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -290,17 +307,16 @@ test.describe("settings data reset browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("marks a project completed without removing its historical cost", async ({ page }, testInfo) => {
+  test("saves remaining settings without removing historical project cost", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "admin",
-      settingsProjectCostEvidence: true,
     });
     const recordLatency = createSettingsLatencyRecorder(page, testInfo);
     const projectName = "昆明卷烟厂动力设备控制系统升级改造项目";
 
     await recordLatency({
-      operationId: "settings.open-page-project-status",
+      operationId: "settings.open-page",
       visibleLabel: "设置",
       actionType: "navigate",
     }, async (mark) => {
@@ -310,50 +326,14 @@ test.describe("settings data reset browser flow", () => {
       await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "设置", exact: true })).toBeVisible());
     });
     await expect(page.getByRole("heading", { name: "设置", exact: true })).toBeVisible();
-    const projectsRegion = page.getByRole("region", { name: "项目状态管理" });
-    await recordLatency({
-      operationId: "settings.open-project-status-section",
-      visibleLabel: "项目状态",
-      actionType: "click",
-    }, async (mark) => {
-      await page.getByRole("tab", { name: /项目状态/ }).click();
-      await mark("finalSettledLatencyMs", expect(projectsRegion).toBeVisible());
-    });
-    await expect(projectsRegion).toBeVisible();
-    const activeProjects = page.getByRole("grid", { name: "进行中项目" });
-    const completedProjects = page.getByRole("grid", { name: "已完成项目" });
-    await expect(activeProjects.getByText(projectName)).toBeVisible();
-
-    await recordLatency({
-      operationId: "settings.mark-project-complete",
-      visibleLabel: `${projectName} 标记完成`,
-      actionType: "click",
-    }, async (mark) => {
-      await activeProjects.getByLabel(`${projectName} 标记完成`).click();
-      await projectsRegion.getByRole("tab", { name: /已完成/ }).click();
-      await mark("finalSettledLatencyMs", expect(completedProjects.getByText(projectName)).toBeVisible());
-    });
-    const saveRequest = page.waitForRequest((request) =>
-      request.url().endsWith("/api/workbench/settings")
-      && request.method() === "POST");
-    let saveResponseStatus: number | undefined;
-    await recordLatency({
-      operationId: "settings.save-project-status",
-      visibleLabel: "保存全部设置",
-      actionType: "click",
-    }, async (mark) => {
-      const saveResponse = waitForSettingsSave(page);
-      await page.getByRole("button", { name: "保存全部设置" }).click();
-      saveResponseStatus = (await mark("apiLatencyMs", saveResponse)).status();
-      await mark("finalSettledLatencyMs", expect(page.getByText("已保存关联台设置。")).toBeVisible());
-    });
-    const saveBody = JSON.parse((await saveRequest).postData() ?? "{}") as {
-      completed_project_ids?: string[];
-    };
-    expect(saveBody.completed_project_ids).toEqual(["settings-cost-project-e2e"]);
-    expect(saveResponseStatus).toBe(200);
+    await expect(page.getByRole("tab", { name: "项目状态", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "待找发票筛选", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "冲账规则", exact: true })).toHaveCount(0);
+    const saveRequest = page.waitForRequest(request => request.url().endsWith("/api/workbench/settings") && request.method() === "POST");
+    await page.getByRole("button", { name: "保存全部设置" }).click();
+    const saveBody = (await saveRequest).postDataJSON();
+    expect(Object.keys(saveBody).sort()).toEqual(["bank_account_mappings", "oa_import", "oa_retention", "workbench_column_layouts"]);
     await expect(page.getByText("已保存关联台设置。")).toBeVisible();
-    await expect(completedProjects.getByText(projectName)).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
 
     let costPayload: Record<string, unknown> | undefined;
@@ -361,7 +341,7 @@ test.describe("settings data reset browser flow", () => {
       route: "/cost-statistics",
       pageKey: "cost-statistics",
       module: "cost-statistics",
-      operationId: "cost-statistics.open-after-settings-project-status-save",
+      operationId: "cost-statistics.open-after-settings-save-save",
       visibleLabel: "成本统计",
       actionType: "click",
     }, async (mark) => {
@@ -379,14 +359,14 @@ test.describe("settings data reset browser flow", () => {
     });
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
     if (!costPayload) {
-      throw new Error("missing cost statistics payload after settings project status save");
+      throw new Error("missing cost statistics payload after settings remaining settings save");
     }
     expectDirectCanonicalPayload(costPayload);
     await recordLatency({
       route: "/cost-statistics",
       pageKey: "cost-statistics",
       module: "cost-statistics",
-      operationId: "cost-statistics.switch-project-view-after-settings-project-status-save",
+      operationId: "cost-statistics.switch-project-view-after-settings-save-save",
       visibleLabel: "按项目",
       actionType: "click",
     }, async (mark) => {

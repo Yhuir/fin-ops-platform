@@ -662,12 +662,10 @@ export default function ReconciliationWorkbenchPage() {
 
       const requestId = ++columnLayoutSaveRequestIdRef.current;
       void saveWorkbenchSettings({
-        completedProjectIds: nextSettings.projects.completedProjectIds,
         bankAccountMappings: nextSettings.bankAccountMappings,
         workbenchColumnLayouts: nextLayouts,
         oaRetention: nextSettings.oaRetention,
         oaImport: nextSettings.oaImport,
-        oaInvoiceOffset: nextSettings.oaInvoiceOffset,
       }).then((saved) => {
         if (columnLayoutSaveRequestIdRef.current === requestId) {
           setWorkbenchSettings(saved);
