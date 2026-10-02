@@ -156,3 +156,31 @@ test('plain and single-document sections have no navigation; switches reset only
   expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
   expect(screen.getByText('2440')).toBeVisible();
 });
+
+const invoiceDocuments = [0, 1, 2].map(index => ({
+  title: '发票信息', document_id: `invoice-${index}`, document_kind: 'invoice' as const,
+  document_title: '旧标题不应进入发票导航',
+  invoice_navigation: {polarity: index === 1 ? '红字' : '蓝字', counterpartyName: '相同公司',
+    totalWithTax: index === 1 ? '-0.005' : '0.00', invoiceDate: '2026-10-02', invoiceNo: `123456789${index}`},
+  fields: [{label: '发票号码', value: `123456789${index}`}],
+}));
+
+test('invoice grid uses source summaries, preserves identities and scroll, and honors the switch guard', () => {
+  const guard = vi.fn(() => false);
+  const {rerender, container} = render(<div className="finance-drawer__body"><EntityDetailContent sections={invoiceDocuments} beforeDocumentChange={guard} /></div>);
+  const body = container.firstElementChild!;
+  body.scrollTop = 70;
+  expect(screen.getAllByRole('tab')).toHaveLength(3);
+  expect(screen.queryByText('旧标题不应进入发票导航')).not.toBeInTheDocument();
+  expect(screen.getByText('-0.005')).toBeVisible();
+  fireEvent.click(screen.getAllByRole('tab')[1]);
+  expect(screen.getAllByRole('tab')[0]).toHaveAttribute('aria-selected', 'true');
+  guard.mockReturnValue(true);
+  fireEvent.click(screen.getAllByRole('tab')[1]);
+  expect(body.scrollTop).toBe(70);
+  expect(screen.getByRole('cell', {name: '1234567891'})).toBeVisible();
+  expect(screen.queryByRole('cell', {name: '1234567890'})).not.toBeInTheDocument();
+  expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
+  rerender(<EntityDetailContent sections={invoiceDocuments.slice(0, 1)} />);
+  expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+});

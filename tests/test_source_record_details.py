@@ -18,6 +18,7 @@ from fin_ops_platform.services.pending_invoice_canonical_query import PendingInv
 from fin_ops_platform.services.source_record_details import (
     bank_source_detail,
     invoice_source_detail,
+    query_source_detail,
     source_detail_sections,
     workbench_source_row,
 )
@@ -48,6 +49,26 @@ def _fields(payload: dict[str, object], section: int | None = None) -> dict[str,
 
 
 class SourceRecordProjectionTests(unittest.TestCase):
+    def test_invoice_navigation_preserves_direction_identity_and_source_values(self) -> None:
+        for invoice_type, expected in ((InvoiceType.INPUT, "销方原名"), (InvoiceType.OUTPUT, "购方原名")):
+            for total in (Decimal("0"), Decimal("-2100.005"), None):
+                invoice = _invoice(invoice_type=invoice_type, seller_name="销方原名", buyer_name="购方原名",
+                                   total_with_tax=total, invoice_date="2026-10-02", is_positive_invoice="否")
+                projection = invoice_source_detail(_invoice_group(invoice))
+                summary = projection["sections"][0]["invoice_navigation"]
+                self.assertEqual(summary, {"polarity": "红字", "counterpartyName": expected,
+                    "totalWithTax": "0.00" if total == 0 else "-2100.005" if total is not None else None,
+                    "invoiceDate": "2026-10-02", "invoiceNo": "12345678"})
+                row = {"id": invoice.id, "invoice_type": invoice_type.value, "seller_name": invoice.seller_name,
+                       "buyer_name": invoice.buyer_name, "total_with_tax": total, "invoice_no": invoice.invoice_no,
+                       "issue_date": invoice.invoice_date, "is_positive_invoice": "否"}
+                original = deepcopy(row)
+                self.assertEqual(query_source_detail("invoice", row)["sections"][0]["invoice_navigation"], summary)
+                self.assertEqual(row, original)
+        multi = invoice_source_detail(_invoice_group(_invoice(), _invoice(id="line-2")))
+        self.assertIsNone(multi["sections"][0]["invoice_navigation"]["totalWithTax"])
+        self.assertEqual(len({section["document_id"] for section in multi["sections"]}), 1)
+
     def test_navigation_titles_use_original_names_and_amounts_only(self) -> None:
         cases = [
             ("oa", {"oaId": "oa-1", "applicantName": "张三", "amount": Decimal("8000.00"), "workflowNo": "2440"}, "张三 · 8000.00"),

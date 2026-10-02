@@ -49,6 +49,7 @@ def invoice_source_detail(group: dict[str, Any]) -> dict[str, Any]:
     payload = {
         "id": primary.id,
         "invoiceIdentityKey": group["identity_key"],
+        "invoiceType": primary.invoice_type.value,
         "invoiceNo": primary.invoice_no if primary.invoice_no != primary.id else None,
         "invoiceCode": primary.invoice_code,
         "digitalInvoiceNo": primary.digital_invoice_no,
@@ -143,6 +144,15 @@ def source_detail_sections(kind: str, payload: dict[str, Any]) -> list[dict[str,
     title = " · ".join(format(value, "f") if isinstance(value, Decimal) else str(value)
                        for value in title_values if value is not None and value != "")
     metadata = {"document_id": identifier, "document_kind": kind, "document_title": title}
+    if kind == "invoice":
+        counterparty_key = {"input": "sellerName", "output": "buyerName"}.get(payload.get("invoiceType"))
+        metadata["invoice_navigation"] = {
+            "polarity": polarity,
+            "counterpartyName": payload.get(counterparty_key) if counterparty_key else None,
+            "totalWithTax": source_money(payload["totalWithTax"]) if payload.get("totalWithTax") not in (None, "") else None,
+            "invoiceDate": str(payload["invoiceDate"]) if payload.get("invoiceDate") else None,
+            "invoiceNo": payload.get("digitalInvoiceNo") or payload.get("invoiceNo") or None,
+        }
     if kind == "bank":
         metadata["bank_transaction_id"] = identifier
     sections = []
@@ -293,7 +303,7 @@ def source_relation_sections(kind: str, summaries: list[Any], *, groups: list[di
 # Explicit adapters for the existing canonical SQL query DTOs.
 QUERY_SOURCE_KEYS = {
     "bank": {"id": "id", "transaction_date": "transactionDate", "booked_date": "bookedDate", "txn_direction": "direction", "amount": "amount", "balance": "balance", "summary": "summary", "remark": "remark", "account_name": "accountName", "account_no": "accountNo", "counterparty_name": "counterpartyName", "counterparty_account_no": "counterpartyAccountNo", "counterparty_bank_name": "counterpartyBankName", "statement_serial_no": "bankSerialNo", "enterprise_serial_no": "enterpriseSerialNo", "voucher_type": "voucherKind", "voucher_no": "voucherNo", "account_detail_no": "accountDetailNo"},
-    "invoice": {"id": "id", "invoice_no": "invoiceNo", "digital_invoice_no": "digitalInvoiceNo", "invoice_code": "invoiceCode", "issue_date": "invoiceDate", "seller_name": "sellerName", "seller_tax_no": "sellerTaxNo", "buyer_name": "buyerName", "buyer_tax_no": "buyerTaxNo", "amount_without_tax": "amount", "tax_amount": "taxAmount", "tax_rate": "taxRate", "total_with_tax": "totalWithTax", "tax_classification_code": "taxClassificationCode", "specific_business_type": "specificBusinessType", "taxable_item_name": "taxableItemName", "invoice_source": "invoiceSource", "invoice_kind": "invoiceKind", "invoice_status_from_source": "invoiceStatus", "is_positive_invoice": "isPositiveInvoice", "risk_level": "riskLevel", "issuer": "issuer", "remark": "remark", "model": "specificationModel", "unit": "unit", "quantity": "quantity", "unit_price": "unitPrice"},
+    "invoice": {"id": "id", "invoice_type": "invoiceType", "invoice_no": "invoiceNo", "digital_invoice_no": "digitalInvoiceNo", "invoice_code": "invoiceCode", "issue_date": "invoiceDate", "seller_name": "sellerName", "seller_tax_no": "sellerTaxNo", "buyer_name": "buyerName", "buyer_tax_no": "buyerTaxNo", "amount_without_tax": "amount", "tax_amount": "taxAmount", "tax_rate": "taxRate", "total_with_tax": "totalWithTax", "tax_classification_code": "taxClassificationCode", "specific_business_type": "specificBusinessType", "taxable_item_name": "taxableItemName", "invoice_source": "invoiceSource", "invoice_kind": "invoiceKind", "invoice_status_from_source": "invoiceStatus", "is_positive_invoice": "isPositiveInvoice", "risk_level": "riskLevel", "issuer": "issuer", "remark": "remark", "model": "specificationModel", "unit": "unit", "quantity": "quantity", "unit_price": "unitPrice"},
 }
 
 

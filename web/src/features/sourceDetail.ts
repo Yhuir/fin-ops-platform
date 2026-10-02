@@ -7,11 +7,19 @@ export function sourceDetailSections(value: unknown): EntityDetailSection[] {
     if (!section || typeof section !== 'object' || typeof section.title !== 'string' || !Array.isArray(section.fields)) {
       throw new Error('原始详情字段表格式无效');
     }
+    if (section.document_kind === 'invoice') {
+      const summary = section.invoice_navigation;
+      if (!summary || typeof summary !== 'object' ||
+        ['polarity', 'counterpartyName', 'totalWithTax', 'invoiceDate', 'invoiceNo'].some(key => summary[key] !== null && typeof summary[key] !== 'string')) {
+        throw new Error('发票导航摘要格式无效');
+      }
+    }
     return {
       title: section.title,
       document_id: section.document_id,
       document_title: section.document_title,
       document_kind: section.document_kind,
+      invoice_navigation: section.invoice_navigation,
       bank_transaction_id: section.bank_transaction_id,
       fields: section.fields.map((field: {label: unknown; value: unknown}) => {
         if (typeof field.label !== 'string' || (field.value != null && !['string', 'number', 'boolean'].includes(typeof field.value))) {

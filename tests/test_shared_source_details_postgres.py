@@ -84,6 +84,9 @@ class SharedSourceDetailsPostgresTests(unittest.TestCase):
         documents = source_invoice_groups(core.list_invoice_document_members(['invoice-scope']))
         self.assertEqual(len(documents), 1)
         projected = invoice_source_detail(documents[0])['sections']
+        self.assertEqual(source[0]['invoice_navigation'], projected[0]['invoice_navigation'])
+        self.assertEqual(source[0]['invoice_navigation']['counterpartyName'], '提供方')
+        self.assertIsNone(source[0]['invoice_navigation']['totalWithTax'])
         # Canonical record and direct-query adapters produce the same document data.
         normalize = lambda sections: [(section['title'], section['fields']) for section in sections]
         self.assertEqual(normalize(source), normalize(projected))

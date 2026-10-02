@@ -201,7 +201,7 @@ test.describe("input invoice usage relation browser fan-out", () => {
     });
     const linkedProject = page.getByRole("option", { name: /智能工厂项目/ });
     await expect(linkedProject).toBeVisible();
-    await expect(linkedProject).toContainText("58000.00");
+    await expect(linkedProject).toContainText("58,000.00");
     await recordLatency({
       route: "/cost-statistics",
       pageKey: "cost-statistics",
@@ -215,7 +215,7 @@ test.describe("input invoice usage relation browser fan-out", () => {
     });
     const linkedExpenseType = page.getByRole("option", { name: "选择成本主标签 项目开销" });
     await expect(linkedExpenseType).toBeVisible();
-    await expect(linkedExpenseType).toContainText("58000.00");
+    await expect(linkedExpenseType).toContainText("58,000.00");
     await recordLatency({
       route: "/cost-statistics",
       pageKey: "cost-statistics",

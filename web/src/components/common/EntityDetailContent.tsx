@@ -3,6 +3,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { formatDateTimeText } from "../../features/dateTime";
 import StatePanel from "./StatePanel";
+import InvoiceDocumentOption, { type InvoiceNavigationSummary } from "./InvoiceDocumentOption";
 
 export type EntityDetailField = {
   label: string;
@@ -15,6 +16,7 @@ export type EntityDetailSection = {
   bank_transaction_id?: string;
   document_id?: string;
   document_title?: string;
+  invoice_navigation?: InvoiceNavigationSummary;
   document_kind?: "oa" | "bank" | "invoice";
 };
 
@@ -323,10 +325,11 @@ function DetailDocuments({ sections, extraFields, initialDocumentKey, beforeDocu
     documents.get(key)!.sections.push({ section, index });
   });
   const entries = [...documents.entries()];
+  const invoiceGrid = sections.some(section => section.document_kind === "invoice");
   const [selected, setSelected] = useState(initialDocumentKey ?? entries[0][0]);
   useLayoutEffect(() => {
     const nav = root.current?.querySelector<HTMLElement>('[role="tablist"]');
-    if (!nav) return;
+    if (!nav || invoiceGrid) return;
     const revealSelected = () => {
       const tab = nav.querySelector<HTMLElement>('[aria-selected="true"]');
       if (!tab) return;
@@ -338,7 +341,7 @@ function DetailDocuments({ sections, extraFields, initialDocumentKey, beforeDocu
     const observer = new ResizeObserver(revealSelected);
     observer.observe(nav);
     return () => observer.disconnect();
-  }, [selected]);
+  }, [selected, invoiceGrid]);
   const active = documents.get(selected);
   if (!active) return <StatePanel compact tone="error">所选单据不在当前详情中。</StatePanel>;
   const content = active.sections.map(({section, index: sectionIndex}) => <section className="entity-detail-section" key={sectionIndex}>
@@ -357,11 +360,13 @@ function DetailDocuments({ sections, extraFields, initialDocumentKey, beforeDocu
       if (key === selected || beforeDocumentChange?.() === false) return;
       setSelected(String(key));
       const scroll = root.current?.closest('.finance-drawer__body');
-      if (scroll) scroll.scrollTop = 0;
+      if (scroll && !invoiceGrid) scroll.scrollTop = 0;
     }}>
-      <Tabs.List className="entity-detail-index" aria-label="单据导航">
+      <Tabs.List className={`entity-detail-index ${invoiceGrid ? "entity-detail-index--invoices" : "entity-detail-index--documents"}`} aria-label="单据导航">
         {entries.map(([key, document], index) => <Tabs.Tab id={key} key={key} className="entity-detail-tab">
-          <span className="entity-detail-tab__number">{index + 1}</span><span>{document.title}</span>
+          {document.sections[0].section.document_kind === 'invoice'
+            ? <InvoiceDocumentOption summary={document.sections[0].section.invoice_navigation!} index={index + 1} />
+            : <><span className="entity-detail-tab__number">{index + 1}</span><span>{document.title}</span></>}
         </Tabs.Tab>)}
       </Tabs.List>
       <Tabs.Panel id={selected} key={selected} className="entity-detail-panel">{content}</Tabs.Panel>

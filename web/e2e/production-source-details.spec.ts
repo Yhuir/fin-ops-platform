@@ -36,7 +36,7 @@ test('production shared source drawers preserve complete records across pages wi
     await expect(drawer.getByRole('heading', { name: expectedTitle, exact: true })).toBeVisible();
     await expect(drawer.locator('.entity-detail-table').first()).toBeVisible();
     const firstPaintMs = Date.now() - started;
-    type SourceSection = {document_id: string; document_kind: string; document_title: string; fields: {label: string}[]};
+    type SourceSection = {document_id: string; document_kind: string; document_title: string; invoice_navigation?: {counterpartyName: string | null; totalWithTax: string | null; invoiceNo: string | null}; fields: {label: string}[]};
     const documents = new Map<string, SourceSection[]>();
     for (const section of sections as SourceSection[]) {
       const key = `${section.document_kind}:${section.document_id}`;
@@ -52,7 +52,15 @@ test('production shared source drawers preserve complete records across pages wi
         const nav = drawer.getByRole('tablist', {name: '单据导航'});
         await expect(nav).toBeVisible();
         const tab = nav.getByRole('tab').nth(index);
-        await expect(tab).toHaveText(`${index+1}${documentSections[0].document_title}`);
+        const section = documentSections[0];
+        if (section.document_kind === 'invoice') {
+          expect(section.invoice_navigation).toBeTruthy();
+          const summary = section.invoice_navigation!;
+          if (summary.counterpartyName) await expect(tab).toContainText(summary.counterpartyName);
+          if (summary.totalWithTax) await expect(tab).toContainText(summary.totalWithTax);
+          if (summary.invoiceNo) await expect(tab).toContainText(`尾号 ${summary.invoiceNo.slice(-6)}`);
+          expect(await nav.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+        } else await expect(tab).toHaveText(`${index+1}${section.document_title}`);
         await tab.click();
         await expect(tab).toHaveAttribute('aria-selected', 'true');
         await expect(drawer.getByRole('tabpanel')).toHaveCount(1);

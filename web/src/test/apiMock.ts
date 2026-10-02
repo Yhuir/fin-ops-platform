@@ -3040,6 +3040,7 @@ function buildWorkbenchDetail(rowId: string) {
   const labels = ['支出金额', '账号', '账户名称', '余额', '对方账号', '对方开户机构', '记账日期', '摘要', '备注', '账户明细编号-交易流水号', '企业流水号', '凭证种类', '凭证号', '发票代码', '发票号码', 'OA单号'];
   if (row.type === 'bank') fields['支出金额'] = row.debit_amount;
   row.source_sections = [{title: '基本信息', document_id: row.id, document_kind: row.type,
+    ...(row.type === 'invoice' ? {invoice_navigation: {polarity: null, counterpartyName: null, totalWithTax: null, invoiceDate: null, invoiceNo: null}} : {}),
     fields: labels.filter(label => fields[label] != null).map(label => ({label, value: fields[label]}))}];
   return payload;
 }

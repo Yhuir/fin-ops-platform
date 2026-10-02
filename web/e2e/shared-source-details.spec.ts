@@ -4,7 +4,7 @@ import { installDeterministicApiMocks } from './fixtures/apiMocks';
 const numbers = ['2653400000097888906', '2653400000097888907'];
 function invoiceSections() {
   return numbers.flatMap((number, index) => {
-    const metadata = {document_id: `invoice-${index}`, document_kind: 'invoice', document_title: `${index ? '红字' : '蓝字'} · 测试科技有限公司 · ${index ? '-' : ''}2100.00`};
+    const metadata = {document_id: `invoice-${index}`, document_kind: 'invoice', invoice_navigation: {polarity: index ? '红字' : '蓝字', counterpartyName: '测试科技有限公司', totalWithTax: index ? '-2100.00' : '2100.00', invoiceDate: '2026-07-15', invoiceNo: number}, document_title: `${index ? '红字' : '蓝字'} · 测试科技有限公司 · ${index ? '-' : ''}2100.00`};
     return [
       {title: '发票信息', fields: [{label: '数电发票号码', value: number}, {label: '开票日期', value: '2026-07-15'}, {label: '发票票种', value: '数电发票（普通发票）'}], ...metadata},
       {title: '购销双方', fields: [{label: '销方名称', value: '测试供应商有限公司'}, {label: '销方识别号', value: '915300000000000001'}, {label: '购买方名称', value: '测试科技有限公司'}, {label: '购买方识别号', value: '915300000000000002'}], ...metadata},
@@ -43,11 +43,12 @@ test('full invoice navigation, compact left-aligned values and one reachable scr
     const scroll = drawer.locator('.finance-drawer__body');
     await scroll.evaluate(el => { el.scrollTop = el.scrollHeight; });
     expect(await scroll.evaluate(el => el.scrollTop > 0 && el.scrollTop + el.clientHeight >= el.scrollHeight - 2)).toBe(true);
-    await expect(nav).toBeInViewport();
+    await expect(nav).toHaveCSS("position", "static");
+    expect(await nav.evaluate(el => el.getBoundingClientRect().top < el.closest(".finance-drawer__body")!.getBoundingClientRect().top)).toBe(true);
     expect(await drawer.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     await page.screenshot({animations: "disabled", path: info.outputPath(`invoices-bottom-${width}.png`)});
     await nav.getByRole('tab').first().click();
-    expect(await scroll.evaluate(el => el.scrollTop)).toBe(0);
+    expect(await nav.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
     await page.screenshot({animations: "disabled", path: info.outputPath(`invoices-top-${width}.png`)});
   }
   await page.setViewportSize({width: 1440, height: 900});
@@ -121,5 +122,38 @@ for (const kind of ['oa', 'bank'] as const) {
       expect(await tabs.first().evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
       await page.screenshot({animations: 'disabled', path: info.outputPath(`${kind}-${width}.png`)});
     }
+  });
+}
+
+for (const count of [1, 3, 4, 10]) {
+  test(`invoice grid shows all ${count} choices without horizontal scroll or selection reflow`, async ({page}, info) => {
+    await installDeterministicApiMocks(page, {sessionMode: 'user'});
+    const sections = Array.from({length: count}, (_, index) => ({...invoiceSections()[0], document_id: `grid-${index}`,
+      invoice_navigation: {polarity: index % 2 ? '红字' : '蓝字', counterpartyName: index === 2 ? '成都智领趋势科技有限公司及其他超长项目技术服务供应商名称完整展示' : '成都智领趋势科技有限公司',
+        totalWithTax: index % 2 ? '-182400.005' : '182400.00', invoiceDate: '2026-05-21', invoiceNo: `26532000008093027${index}`},
+      fields: [{label: '发票号码', value: `26532000008093027${index}`}]}));
+    let reads = 0;
+    await page.route('**/api/output-invoice-collections/rows/*/relation-details*', route => {reads++; return route.fulfill({json: {kind: 'invoice', sections}});});
+    await page.goto('/output-invoice-collections');
+    await page.getByRole('button', {name: '红蓝票 · 2'}).first().click();
+    const drawer = page.getByRole('dialog', {name: '发票详情', exact: true});
+    await expect(drawer.getByRole('table')).toBeVisible();
+    if (count === 1) { await expect(drawer.getByRole('tablist')).toHaveCount(0); return; }
+    const nav = drawer.getByRole('tablist');
+    await expect(nav.getByRole('tab')).toHaveCount(count);
+    for (const width of [1440, 1024]) {
+      await page.setViewportSize({width, height: 900});
+      expect(await nav.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      const positions = () => nav.getByRole('tab').evaluateAll(tabs => tabs.map(tab => ({height: tab.getBoundingClientRect().height, top: (tab as HTMLElement).offsetTop, left: (tab as HTMLElement).offsetLeft, width: (tab as HTMLElement).offsetWidth})));
+      const before = await positions();
+      expect(before[0].top).toBe(before[1].top);
+      if (count > 2) expect(before[2].top).toBeGreaterThan(before[0].top);
+      await nav.getByRole('tab').last().click();
+      expect(await positions()).toEqual(before);
+      await expect(drawer.getByRole('cell', {name: `26532000008093027${count-1}`, exact: true})).toBeVisible();
+      await drawer.locator('.finance-drawer__body').evaluate(el => {el.scrollTop = 0;});
+      await page.screenshot({animations: 'disabled', path: info.outputPath(`grid-${count}-${width}.png`)});
+    }
+    expect(reads).toBe(1);
   });
 }
