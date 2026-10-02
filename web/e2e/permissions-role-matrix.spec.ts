@@ -76,7 +76,7 @@ test.describe("page access browser matrix", () => {
 
     await page.goto("/settings");
     await expect(page.getByTestId("settings-page")).toBeVisible();
-    await expect(page.getByRole("button", { name: "保存全部设置" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "保存设置" })).toBeEnabled();
     const tree = page.getByRole("tablist", { name: "设置分类" });
     await expect(tree.getByRole("tab", { name: /访问账户/ })).toHaveCount(0);
     await expect(tree.getByRole("tab", { name: /OA申请人凭据/ })).toHaveCount(0);
@@ -110,7 +110,7 @@ test.describe("page access browser matrix", () => {
 
     const saveRequest = page.waitForRequest((request) =>
       request.url().endsWith("/api/workbench/settings/access-control") && request.method() === "PUT");
-    await region.getByRole("button", { name: "保存访问权限" }).click();
+    await page.getByRole("button", { name: "保存访问权限" }).click();
     expect(JSON.parse((await saveRequest).postData() ?? "{}")).toEqual({
       expected_version: 1,
       accounts: [{
@@ -118,7 +118,7 @@ test.describe("page access browser matrix", () => {
         page_keys: ["bank-details", "reconciliation-workbench"],
       }],
     });
-    await expect(region.getByText("已保存访问账户。")).toBeVisible();
+    await expect(page.getByText("已保存访问账户。")).toBeVisible();
 
     api.startSession("YNSYLP006");
     await page.goto("/");

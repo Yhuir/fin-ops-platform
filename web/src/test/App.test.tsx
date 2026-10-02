@@ -61,7 +61,7 @@ describe("Finance operations shell", () => {
       expect(within(settingsTree).getAllByRole("tab").filter((item) => item.textContent?.includes("访问账户"))).toHaveLength(
         canAdminAccess ? 1 : 0,
       );
-      expect(screen.getByRole("button", { name: "保存全部设置" })).toHaveProperty("disabled", !canSaveSettings);
+      expect(screen.getByRole("button", { name: "保存设置" })).toHaveProperty("disabled", !canSaveSettings);
     },
   );
 

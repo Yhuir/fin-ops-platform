@@ -17052,7 +17052,6 @@ body.column-layout-dragging {
 .settings-access-account-copy span { color: var(--fp-text-secondary); font-size: 12px; }
 .settings-access-account-copy em { color: var(--fp-danger); font-size: 12px; font-style: normal; }
 .settings-access-account-identity { display: flex; flex-direction: column; gap: 4px; }
-.settings-access-footer > span { margin-right: auto; color: var(--fp-text-secondary); font-size: 12px; }
 
 .settings-access-empty,
 .settings-access-page-empty {
@@ -17249,7 +17248,15 @@ body.column-layout-dragging {
   line-height: 1.35;
 }
 
-.settings-save-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 12px; }
+.settings-save-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-height: 44px; }
+.settings-primary-save { width: 132px; min-width: 132px; height: 40px; }
+.settings-save-context { display: grid; align-content: center; min-height: 40px; text-align: right; gap: 2px; }
+.settings-save-context > span { min-height: 18px; }
+.settings-save-context > small { font-size: 12px; color: var(--fp-text-secondary); }
+.settings-save-context > .settings-field-help--error { color: var(--fp-danger); }
+.settings-save-feedback { position: fixed; right: 24px; bottom: 24px; z-index: 60; width: min(480px, calc(100vw - 48px)); display: flex; align-items: start; gap: 8px; padding: 8px; border: 1px solid var(--fp-border); border-radius: 12px; background: var(--fp-surface); box-shadow: 0 6px 24px #18243b1a; }
+.settings-save-feedback > .finance-state-panel { flex: 1; min-width: 0; margin: 0; }
+.settings-route-status:empty { display: none; }
 .settings-draft-status { font-size: 13px; color: var(--fp-text-secondary); }
 .settings-tabs { display: block; width: 100%; min-width: 0; }
 .settings-tab-panel { min-width: 0; padding: 16px; }
@@ -17469,7 +17476,6 @@ body.column-layout-dragging {
   width: 100%;
   align-items: end;
 }
-.settings-credentials-form > button { grid-column: 1 / -1; justify-self: end; }
 
 
 .settings-access-header {
@@ -17481,12 +17487,6 @@ body.column-layout-dragging {
   grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
   min-height: 480px;
   border-bottom: 1px solid var(--fp-border);
-}
-
-.settings-access-footer {
-  display: flex;
-  justify-content: flex-end;
-  padding: 12px 0 0;
 }
 
 .settings-data-reset-list { width: 100%; }
@@ -17533,8 +17533,6 @@ body.column-layout-dragging {
 @container settings (max-width: 900px) {
   .settings-access-workspace { grid-template-columns: minmax(0, 1fr); }
   .settings-access-account-list { max-height: 280px; overflow-y: auto; }
-  .settings-access-footer { flex-wrap: wrap; }
-  .settings-access-footer > span { flex-basis: 100%; }
   .settings-access-account-pane { border-right: 0; border-bottom: 1px solid var(--fp-border); }
 }
 @container settings (max-width: 640px) {

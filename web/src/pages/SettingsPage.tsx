@@ -1,3 +1,5 @@
+import { Button } from "@heroui/react";
+import { X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -78,10 +80,6 @@ export default function SettingsPage() {
   const [accessControl, setAccessControl] = useState<WorkbenchAccessControl | null>(null);
   const [isAccessControlLoading, setIsAccessControlLoading] = useState(false);
   const [isAccessControlSaving, setIsAccessControlSaving] = useState(false);
-  const [accessControlStatus, setAccessControlStatus] = useState<{
-    tone: "success" | "error";
-    message: string;
-  } | null>(null);
 
   const loadSettings = useCallback(async (signal?: AbortSignal) => {
     setIsLoading(true);
@@ -120,13 +118,12 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!active || !canAdminAccess) {
       setAccessControl(null);
-      setAccessControlStatus(null);
       setIsAccessControlLoading(false);
       return undefined;
     }
     const controller = new AbortController();
     setIsAccessControlLoading(true);
-    setAccessControlStatus(null);
+    setPageFeedback(null);
     fetchWorkbenchAccessControl(controller.signal)
       .then((payload) => {
         if (!controller.signal.aborted) {
@@ -135,7 +132,7 @@ export default function SettingsPage() {
       })
       .catch((error) => {
         if (!controller.signal.aborted) {
-          setAccessControlStatus({
+          setPageFeedback({
             tone: "error",
             message: normalizeSettingsError(error, "访问账户加载失败，请稍后重试。"),
           });
@@ -254,9 +251,9 @@ export default function SettingsPage() {
     try {
       const saved = await saveWorkbenchSettings(payload);
       setSettings(saved);
-      setPageFeedback({ tone: "success", message: "已保存关联台设置。" });
+      setPageFeedback({ tone: "success", message: "已保存银行账户与 OA 导入设置。" });
     } catch (error) {
-      setPageFeedback({ tone: "error", message: normalizeSettingsError(error, "保存设置失败，请稍后重试。") });
+      setPageFeedback({ tone: "error", message: `保存设置失败：${normalizeSettingsError(error, "请稍后重试。")}` });
     } finally {
       setIsSaving(false);
     }
@@ -264,24 +261,24 @@ export default function SettingsPage() {
 
   const handleSaveAccessControl = async (accounts: WorkbenchAccessAccount[]): Promise<void> => {
     if (!canAdminAccess || accessControl === null) {
-      setAccessControlStatus({ tone: "error", message: "当前账号没有管理员权限，不能维护访问账户。" });
+      setPageFeedback({ tone: "error", message: "当前账号没有管理员权限，不能维护访问账户。" });
       return;
     }
     if (healthStatus.blocksMutations) {
-      setAccessControlStatus({ tone: "error", message: "登录已失效或系统不可用，不能维护访问账户。" });
+      setPageFeedback({ tone: "error", message: "登录已失效或系统不可用，不能维护访问账户。" });
       return;
     }
     setIsAccessControlSaving(true);
-    setAccessControlStatus(null);
+    setPageFeedback(null);
     try {
       const saved = await saveWorkbenchAccessControl({ version: accessControl.version, accounts });
       setAccessControl(saved);
-      setAccessControlStatus({ tone: "success", message: "已保存访问账户。" });
+      setPageFeedback({ tone: "success", message: "已保存访问账户。" });
     } catch (error) {
       const conflictVersion = error instanceof WorkbenchApiError && error.status === 409
         ? error.currentVersion
         : null;
-      setAccessControlStatus({
+      setPageFeedback({
         tone: "error",
         message: conflictVersion === null
           ? `${normalizeSettingsError(error, "访问账户保存失败，请稍后重试。")}${error instanceof WorkbenchApiError && error.requestId ? `（请求编号：${error.requestId}）` : ""}`
@@ -387,12 +384,13 @@ export default function SettingsPage() {
 
   return (
     <div className="settings-route" data-testid="settings-page">
+      {pageFeedback ? (
+        <div className="settings-save-feedback">
+          <StatePanel compact tone={pageFeedback.tone}>{pageFeedback.message}</StatePanel>
+          <Button aria-label="关闭设置反馈" isIconOnly size="sm" variant="ghost" onPress={() => setPageFeedback(null)}><X size={16} aria-hidden="true" /></Button>
+        </div>
+      ) : null}
       <div className="settings-route-status">
-        {pageFeedback ? (
-          <StatePanel compact tone={pageFeedback.tone}>
-            {pageFeedback.message}
-          </StatePanel>
-        ) : null}
         {loadError ? <StatePanel compact tone="error">{loadError}</StatePanel> : null}
         {isLoading && !loadError ? (
           <StatePanel compact tone="loading">
@@ -406,7 +404,7 @@ export default function SettingsPage() {
         <SettingsPageContent
           canManageAccessControl={canAdminAccess}
           accessControl={accessControl}
-          accessControlStatus={accessControlStatus}
+          onFeedback={setPageFeedback}
           canSave={canMutateWithHealth}
           isSaving={isSaving}
           isAccessControlLoading={isAccessControlLoading}

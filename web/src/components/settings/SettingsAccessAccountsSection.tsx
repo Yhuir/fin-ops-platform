@@ -9,30 +9,21 @@ import type { SettingsAccessAccountsSectionProps } from "./types";
 const OA_SEARCH_DELAY_MS = 250;
 
 export default function SettingsAccessAccountsSection({
-  savedAccounts,
-  onReset,
+  changedAccountIds,
   controlsDisabled,
   administrator,
   managedAccessAccounts,
   isLoading,
   isSaving,
-  status,
-  validationMessage,
   onAddAccessAccount,
   onSearchAccessUsers,
   onUpdateManagedAccessAccount,
   onDeleteManagedAccessAccount,
-  onSave,
 }: SettingsAccessAccountsSectionProps) {
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("");
   const [isAdding, setIsAdding] = useState(false);
-  const changedAccountIds = useMemo(() => {
-    const before = new Map(savedAccounts.map((account) => [account.id, [...account.pageKeys].sort().join(",")]));
-    const after = new Map(managedAccessAccounts.map((account) => [account.id, [...account.pageKeys].sort().join(",")]));
-    return new Set([...before.keys(), ...after.keys()].filter((id) => before.get(id) !== after.get(id)));
-  }, [savedAccounts, managedAccessAccounts]);
   const filteredAccounts = managedAccessAccounts.filter((account) =>
     `${account.username} ${account.displayName}`.toLocaleLowerCase().includes(filter.trim().toLocaleLowerCase()),
   );
@@ -116,8 +107,6 @@ export default function SettingsAccessAccountsSection({
         </div>
       </header>
 
-      {status ? <div className={`settings-inline-alert settings-inline-alert--${status.tone}`} role={status.tone === "error" ? "alert" : "status"}>{status.message}</div> : null}
-      {validationMessage ? <div className="settings-inline-alert settings-inline-alert--error" role="alert">{validationMessage}</div> : null}
       <div className="settings-access-workspace">
         <aside className="settings-access-account-pane" aria-label="账户列表">
           <div className="settings-access-list-heading"><strong>账户 <span>{managedAccessAccounts.length}</span></strong>
@@ -194,14 +183,6 @@ export default function SettingsAccessAccountsSection({
           ) : <div className="settings-access-page-empty">请选择账户</div>}
         </div>
       </div>
-
-      <footer className="settings-access-footer">
-        <span role="status">{changedAccountIds.size ? `${changedAccountIds.size} 个账户有未保存修改 · 保存将提交全部修改` : "无未保存修改"}</span>
-        <Button variant="ghost" isDisabled={controlsDisabled || isSaving || changedAccountIds.size === 0} onPress={onReset}>取消修改</Button>
-        <Button isDisabled={controlsDisabled || isLoading || isSaving || changedAccountIds.size === 0 || validationMessage !== null} isPending={isSaving} variant="primary" onPress={() => void onSave()}>
-          {isSaving ? "保存中..." : "保存访问权限"}
-        </Button>
-      </footer>
     </section>
   );
 }

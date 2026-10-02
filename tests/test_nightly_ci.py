@@ -77,6 +77,7 @@ class NightlyCITests(unittest.TestCase):
         e2e_smoke_script = package_json["scripts"]["e2e:smoke"]
         production_specs = {
             "production-admin-app-health.spec.ts",
+            "production-settings-save-header.spec.ts",
             "production-route-shell.spec.ts",
             "production-output-invoice-summary.spec.ts",
             "production-cash-readonly.spec.ts",

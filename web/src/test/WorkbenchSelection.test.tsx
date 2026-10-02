@@ -3336,10 +3336,10 @@ describe("Workbench row selection and detail drawer", () => {
     await user.type(within(accessRegion).getByRole("searchbox", { name: "搜索 OA 账户" }), "READONLY001");
     await user.click(await within(accessRegion).findByRole("button", { name: "新增账户 READONLY001" }));
     await user.click(within(accessRegion).getByRole("checkbox", { name: "关联台" }));
-    await user.click(within(accessRegion).getByRole("button", { name: "保存访问权限" }));
+    await user.click(within(settingsPage).getByRole("button", { name: "保存访问权限" }));
     expect(await screen.findByText("已保存访问账户。")).toBeInTheDocument();
     await user.click(within(settingsTree).getByRole("tab", { name: /银行账户/ }));
-    await user.click(screen.getByRole("button", { name: "保存全部设置" }));
+    await user.click(screen.getByRole("button", { name: "保存设置" }));
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/workbench/settings/access-control",
@@ -3374,7 +3374,7 @@ describe("Workbench row selection and detail drawer", () => {
       }),
     );
     expect(globalSettingsBody).not.toHaveProperty("oa_invoice_offset");
-    expect(await screen.findByText("已保存关联台设置。")).toBeInTheDocument();
+    expect(await screen.findByText("已保存银行账户与 OA 导入设置。")).toBeInTheDocument();
   }, 30_000);
 
   test("ordinary users cannot access retired settings or account management", async () => {
@@ -4031,7 +4031,7 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
     const settingsPage = await openWorkbenchSettingsPage(user);
-    expect(within(settingsPage).getByRole("button", { name: "保存全部设置" })).toBeEnabled();
+    expect(within(settingsPage).getByRole("button", { name: "保存设置" })).toBeEnabled();
   });
 
   test("paired zone withdraw action enables when one row in a relation is selected", async () => {

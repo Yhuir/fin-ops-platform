@@ -1,7 +1,6 @@
 import type {
   BankAccountMapping,
   OaApplicantCredentialSummary,
-  SaveOaApplicantCredentialRequest,
   WorkbenchAccessControl,
   WorkbenchAccessUser,
   WorkbenchSettings,
@@ -75,31 +74,25 @@ export type SettingsOaApplicantCredentialsSectionProps = {
   credentials: OaApplicantCredentialSummary[];
   isLoading: boolean;
   isSaving: boolean;
-  status: SettingsActionStatus | null;
   targetApplicantNameDraft: string;
   targetApplicantCodeDraft: string;
   oaUsernameDraft: string;
   oaPasswordDraft: string;
-  canSaveCredential: boolean;
   onChangeTargetApplicantNameDraft: (value: string) => void;
   onChangeTargetApplicantCodeDraft: (value: string) => void;
   onChangeOaUsernameDraft: (value: string) => void;
   onChangeOaPasswordDraft: (value: string) => void;
   onSelectCredential: (credential: OaApplicantCredentialSummary) => void;
-  onSaveCredential: (payload: SaveOaApplicantCredentialRequest) => Promise<void> | void;
   onClearCredential: (targetApplicantCode: string) => Promise<void> | void;
 };
 
 export type SettingsAccessAccountsSectionProps = {
-  savedAccounts: ManagedAccessAccount[];
-  onReset: () => void;
+  changedAccountIds: ReadonlySet<string>;
   controlsDisabled: boolean;
   administrator: WorkbenchAccessControl["administrator"] | null;
   managedAccessAccounts: ManagedAccessAccount[];
   isLoading: boolean;
   isSaving: boolean;
-  status: SettingsActionStatus | null;
-  validationMessage: string | null;
   onAddAccessAccount: (user: WorkbenchAccessUser) => void;
   onSearchAccessUsers: (query: string, signal?: AbortSignal) => Promise<WorkbenchAccessUser[]>;
   onUpdateManagedAccessAccount: (
@@ -107,7 +100,6 @@ export type SettingsAccessAccountsSectionProps = {
     updater: (account: ManagedAccessAccount) => ManagedAccessAccount,
   ) => void;
   onDeleteManagedAccessAccount: (accountId: string) => void;
-  onSave: () => Promise<void> | void;
 };
 
 export type SettingsDataResetSectionProps = {

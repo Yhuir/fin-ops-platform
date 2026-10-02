@@ -1,5 +1,5 @@
 import { Button, Chip, Input } from "@heroui/react";
-import { Save, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 
 import type { OaApplicantCredentialSummary } from "../../features/workbench/types";
 import {
@@ -30,18 +30,15 @@ export default function SettingsOaApplicantCredentialsSection({
   credentials,
   isLoading,
   isSaving,
-  status,
   targetApplicantNameDraft,
   targetApplicantCodeDraft,
   oaUsernameDraft,
   oaPasswordDraft,
-  canSaveCredential,
   onChangeTargetApplicantNameDraft,
   onChangeTargetApplicantCodeDraft,
   onChangeOaUsernameDraft,
   onChangeOaPasswordDraft,
   onSelectCredential,
-  onSaveCredential,
   onClearCredential,
 }: SettingsOaApplicantCredentialsSectionProps) {
   const rows = sortedCredentials(credentials);
@@ -96,32 +93,7 @@ export default function SettingsOaApplicantCredentialsSection({
               onChange={(event) => onChangeOaPasswordDraft(event.currentTarget.value)}
             />
           </label>
-          <Button
-            isDisabled={!canSaveCredential || sectionDisabled}
-            isPending={isSaving}
-            variant="primary"
-            onPress={() =>
-              onSaveCredential({
-                targetApplicantCode: targetApplicantCodeDraft.trim(),
-                targetApplicantName: targetApplicantNameDraft.trim(),
-                oaUsername: oaUsernameDraft.trim(),
-                password: oaPasswordDraft,
-              })
-            }
-          >
-            <Save aria-hidden="true" size={16} />
-            保存凭据
-          </Button>
         </div>
-
-        {status ? (
-          <div
-            className={`settings-inline-alert settings-inline-alert--${status.tone}`}
-            role={status.tone === "error" ? "alert" : "status"}
-          >
-            {status.message}
-          </div>
-        ) : null}
 
         {isLoading ? (
           <div className="settings-inline-alert settings-inline-alert--info" role="status">

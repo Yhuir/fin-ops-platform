@@ -117,6 +117,25 @@ describe("Settings page", () => {
     expect(screen.queryByRole("tab", { name: "项目状态" })).not.toBeInTheDocument();
   });
 
+  test("keeps every save in the page header and leaves data reset without a save action", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({ sessionRole: "admin", sessionUsername: "YNSYLP005" });
+    renderAppAt("/settings");
+    const tabs = await screen.findByRole("tablist", { name: "设置分类" });
+    for (const [tab, button] of [
+      ["银行账户", "保存设置"], ["OA导入设置", "保存设置"],
+      ["OA申请人凭据", "保存凭据"], ["访问账户", "保存访问权限"],
+    ]) {
+      await user.click(within(tabs).getByRole("tab", { name: tab, exact: true }));
+      const actions = screen.getByRole("group", { name: "当前设置操作" });
+      expect(within(actions).getByRole("button", { name: button, exact: true })).toBeInTheDocument();
+      expect(within(screen.getByRole("tabpanel")).queryByRole("button", { name: /^保存/ })).not.toBeInTheDocument();
+    }
+    await user.click(within(tabs).getByRole("tab", { name: "数据重置", exact: true }));
+    expect(within(screen.getByRole("group", { name: "当前设置操作" })).queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "清除所有银行流水数据" })).toBeInTheDocument();
+  });
+
   test("keeps ordinary drafts across tabs and clears the unsaved status after saving", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({ sessionRole: "admin", sessionUsername: "YNSYLP005" });
@@ -133,7 +152,7 @@ describe("Settings page", () => {
     const settingsWrites = () => fetchMock.mock.calls.filter(([url, init]) =>
       String(url).endsWith("/api/workbench/settings") && init?.method === "POST");
     expect(settingsWrites()).toHaveLength(0);
-    await user.click(screen.getByRole("button", { name: "保存全部设置" }));
+    await user.click(screen.getByRole("button", { name: "保存设置" }));
     await waitFor(() => expect(screen.queryByText("有未保存修改")).not.toBeInTheDocument());
     expect(settingsWrites()).toHaveLength(1);
     expect(JSON.parse(String(settingsWrites()[0][1]?.body)).oa_retention.cutoff_date).toEqual("2026-02-01");
@@ -155,7 +174,7 @@ describe("Settings page", () => {
     renderAppAt("/settings");
 
     expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "保存全部设置" })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "保存设置" })).toBeEnabled();
   });
 
   test("lets admin maintain OA applicant credentials through dedicated endpoints", async () => {
@@ -183,7 +202,7 @@ describe("Settings page", () => {
     await user.type(within(region).getByRole("textbox", { name: "OA 登录账号" }), "fan_zufang");
     const passwordInput = within(region).getByLabelText("OA 登录密码") as HTMLInputElement;
     await user.type(passwordInput, "target-password");
-    await user.click(within(region).getByRole("button", { name: "保存凭据" }));
+    await user.click(screen.getByRole("button", { name: "保存凭据" }));
 
     await waitFor(() => expect(passwordInput).toHaveValue(""));
     expect(within(region).getByText("樊祖芳")).toBeInTheDocument();
@@ -203,9 +222,9 @@ describe("Settings page", () => {
       password: "target-password",
     });
 
-    expect(within(settingsPage).queryByRole("button", { name: "保存全部设置" })).not.toBeInTheDocument();
+    expect(within(settingsPage).queryByRole("button", { name: "保存设置" })).not.toBeInTheDocument();
     await user.click(within(tree).getByRole("tab", { name: "银行账户" }));
-    await user.click(within(settingsPage).getByRole("button", { name: "保存全部设置" }));
+    await user.click(within(settingsPage).getByRole("button", { name: "保存设置" }));
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([input, init]) => {
         const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -251,8 +270,8 @@ describe("Settings page", () => {
     await user.type(within(region).getByRole("searchbox", { name: "搜索 OA 账户" }), "READONLY001");
     await user.click(await within(region).findByRole("button", { name: "新增账户 READONLY001" }));
     await user.click(within(region).getByRole("checkbox", { name: "关联台" }));
-    await user.click(within(region).getByRole("button", { name: "保存访问权限" }));
-    expect(await within(region).findByText("已保存访问账户。")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "保存访问权限" }));
+    expect(await screen.findByText("已保存访问账户。")).toBeInTheDocument();
 
     const accessSave = fetchMock.mock.calls.find(([input, init]) =>
       String(input) === "/api/workbench/settings/access-control"
@@ -293,9 +312,9 @@ describe("Settings page", () => {
     await user.type(within(region).getByRole("searchbox", { name: "搜索 OA 账户" }), "CONFLICT001");
     await user.click(await within(region).findByRole("button", { name: "新增账户 CONFLICT001" }));
     await user.click(within(region).getByRole("checkbox", { name: "关联台" }));
-    await user.click(within(region).getByRole("button", { name: "保存访问权限" }));
+    await user.click(screen.getByRole("button", { name: "保存访问权限" }));
 
-    expect(await within(region).findByText("访问账户已被其他管理员更新，请保留当前编辑并刷新后重试。")).toBeInTheDocument();
+    expect(await screen.findByText("访问账户已被其他管理员更新，请保留当前编辑并刷新后重试。")).toBeInTheDocument();
     expect(within(region).queryByText(/当前版本 7/)).not.toBeInTheDocument();
     expect(within(region).getAllByText("CONFLICT001").length).toBeGreaterThan(0);
   });
@@ -358,7 +377,7 @@ describe("Settings page", () => {
     const region = within(settingsPage).getByRole("region", { name: "OA导入设置" });
     await user.click(within(region).getByRole("button", { name: /OA附件发票处理/ }));
     await user.click(await screen.findByRole("option", { name: "不处理附件发票" }));
-    await user.click(within(settingsPage).getByRole("button", { name: "保存全部设置" }));
+    await user.click(within(settingsPage).getByRole("button", { name: "保存设置" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(

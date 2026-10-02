@@ -34,7 +34,7 @@ import type {
 type SettingsPageContentProps = {
   settings: WorkbenchSettings;
   accessControl: WorkbenchAccessControl | null;
-  accessControlStatus: SettingsActionStatus | null;
+  onFeedback: (status: SettingsActionStatus | null) => void;
   isSaving: boolean;
   isAccessControlLoading: boolean;
   isAccessControlSaving: boolean;
@@ -170,7 +170,7 @@ export default function SettingsPageContent({
   activeDataResetJob,
   settings,
   accessControl,
-  accessControlStatus,
+  onFeedback,
   isSaving,
   isAccessControlLoading,
   isAccessControlSaving,
@@ -223,7 +223,6 @@ export default function SettingsPageContent({
   const setBankShortNameDraft = (value: string) => setDraftField("bankShortNameDraft", value);
   const last4Draft = draftSession.value.last4Draft;
   const setLast4Draft = (value: string) => setDraftField("last4Draft", value);
-  const [oaApplicantCredentialStatus, setOaApplicantCredentialStatus] = useState<SettingsActionStatus | null>(null);
   const [oaApplicantNameDraft, setOaApplicantNameDraft] = useState("");
   const [oaApplicantCodeDraft, setOaApplicantCodeDraft] = useState("");
   const [oaApplicantUsernameDraft, setOaApplicantUsernameDraft] = useState("");
@@ -247,7 +246,16 @@ export default function SettingsPageContent({
       || oaAttachmentInvoicePromotionMode !== settings.oaImport.attachmentInvoicePromotionMode;
   }, [mappings, oaRetentionCutoffDate, oaImportFormTypes, oaImportStatuses,
     oaAttachmentInvoicePromotionMode, settings]);
+  const changedAccountIds = useMemo(() => {
+    const before = new Map(buildManagedAccessAccounts(accessControl).map((account) => [account.id, [...account.pageKeys].sort().join(",")]));
+    const after = new Map(managedAccessAccounts.map((account) => [account.id, [...account.pageKeys].sort().join(",")]));
+    return new Set([...before.keys(), ...after.keys()].filter((id) => before.get(id) !== after.get(id)));
+  }, [accessControl, managedAccessAccounts]);
+  const credentialControlsDisabled = !canSave || !canManageAccessControl || isDataResetting
+    || isOaApplicantCredentialLoading || isOaApplicantCredentialSaving;
   const accessControlControlsDisabled = !canSave
+    || !canManageAccessControl
+    || isDataResetting
     || isAccessControlLoading
     || isAccessControlSaving
     || accessControl === null;
@@ -365,7 +373,7 @@ export default function SettingsPageContent({
 
   function handleAddAccessAccount(user: WorkbenchAccessUser) {
     const nextUsername = user.username.trim();
-    if (!nextUsername || controlsDisabled || nextUsername === accessControl?.administrator.username) {
+    if (!nextUsername || accessControlControlsDisabled || nextUsername === accessControl?.administrator.username) {
       return;
     }
     setManagedAccessAccounts((current) => {
@@ -387,7 +395,7 @@ export default function SettingsPageContent({
   }
 
   function handleSelectOaApplicantCredential(credential: OaApplicantCredentialSummary) {
-    setOaApplicantCredentialStatus(null);
+    onFeedback(null);
     setOaApplicantNameDraft(credential.targetApplicantName);
     setOaApplicantCodeDraft(credential.targetApplicantCode);
     setOaApplicantUsernameDraft(credential.oaUsername);
@@ -395,33 +403,33 @@ export default function SettingsPageContent({
   }
 
   async function handleSaveOaApplicantCredential(payload: SaveOaApplicantCredentialRequest) {
-    if (!canSaveOaApplicantCredential || controlsDisabled || isOaApplicantCredentialSaving) {
+    if (!canSaveOaApplicantCredential || credentialControlsDisabled) {
       return;
     }
-    setOaApplicantCredentialStatus(null);
+    onFeedback(null);
     try {
       await onSaveOaApplicantCredential(payload);
       setOaApplicantPasswordDraft("");
-      setOaApplicantCredentialStatus({ tone: "success", message: "已保存 OA 申请人凭据。" });
+      onFeedback({ tone: "success", message: "已保存 OA 申请人凭据。" });
     } catch (error) {
-      setOaApplicantCredentialStatus({
+      onFeedback({
         tone: "error",
-        message: error instanceof Error ? parseResetErrorMessage(error.message) : "OA 申请人凭据保存失败，请稍后重试。",
+        message: `OA 申请人凭据保存失败：${error instanceof Error ? parseResetErrorMessage(error.message) : "请稍后重试。"}`,
       });
     }
   }
 
   async function handleClearOaApplicantCredential(targetApplicantCode: string) {
-    if (controlsDisabled || isOaApplicantCredentialSaving || !targetApplicantCode.trim()) {
+    if (credentialControlsDisabled || !targetApplicantCode.trim()) {
       return;
     }
-    setOaApplicantCredentialStatus(null);
+    onFeedback(null);
     try {
       await onDeleteOaApplicantCredential(targetApplicantCode);
       setOaApplicantPasswordDraft("");
-      setOaApplicantCredentialStatus({ tone: "success", message: "已清空 OA 申请人密码。" });
+      onFeedback({ tone: "success", message: "已清空 OA 申请人密码。" });
     } catch (error) {
-      setOaApplicantCredentialStatus({
+      onFeedback({
         tone: "error",
         message: error instanceof Error ? parseResetErrorMessage(error.message) : "OA 申请人凭据更新失败，请稍后重试。",
       });
@@ -429,6 +437,7 @@ export default function SettingsPageContent({
   }
 
   function handleSave() {
+    if (controlsDisabled) return;
     onSave({
       bankAccountMappings: mappings,
       workbenchColumnLayouts: settings.workbenchColumnLayouts,
@@ -445,7 +454,7 @@ export default function SettingsPageContent({
   }
 
   async function handleSaveAccessControl() {
-    if (accessControlControlsDisabled || accessControlValidationMessage) {
+    if (accessControlControlsDisabled || accessControlValidationMessage || changedAccountIds.size === 0) {
       return;
     }
     await onSaveAccessControl(normalizedAccessAccounts);
@@ -537,19 +546,47 @@ export default function SettingsPageContent({
             <div className="settings-content-title">
               <h1>设置</h1>
             </div>
-            {!["access_accounts", "oa_applicant_credentials", "data_reset"].includes(activeSectionId) ? (
-              <div className="settings-save-actions">
-                {hasUnsavedSettings ? <span className="settings-draft-status" role="status">有未保存修改</span> : null}
-                <Button
-                  isDisabled={controlsDisabled}
-                  isPending={isSaving}
-                  variant="primary"
-                  onPress={handleSave}
-                >
-                  {isSaving ? "保存中..." : "保存全部设置"}
+            <div className="settings-save-actions" role="group" aria-label="当前设置操作">
+              {activeSectionId === "bank_accounts" || activeSectionId === "oa_retention" ? (
+                <>
+                  <div className="settings-save-context">
+                    <span className="settings-draft-status" role="status">{hasUnsavedSettings ? "有未保存修改" : ""}</span>
+                    <small>保存银行账户与 OA 导入设置</small>
+                  </div>
+                  <Button className="settings-primary-save" isDisabled={controlsDisabled} isPending={isSaving} variant="primary" onPress={handleSave}>
+                    {isSaving ? "保存中..." : "保存设置"}
+                  </Button>
+                </>
+              ) : null}
+              {activeSectionId === "oa_applicant_credentials" && canManageAccessControl ? (
+                <Button className="settings-primary-save" isDisabled={!canSaveOaApplicantCredential || credentialControlsDisabled}
+                  isPending={isOaApplicantCredentialSaving} variant="primary" onPress={() => void handleSaveOaApplicantCredential({
+                    targetApplicantCode: oaApplicantCodeDraft.trim(),
+                    targetApplicantName: oaApplicantNameDraft.trim(),
+                    oaUsername: oaApplicantUsernameDraft.trim(),
+                    password: oaApplicantPasswordDraft,
+                  })}>
+                  {isOaApplicantCredentialSaving ? "保存中..." : "保存凭据"}
                 </Button>
-              </div>
-            ) : null}
+              ) : null}
+              {activeSectionId === "access_accounts" && canManageAccessControl ? (
+                <>
+                  <div className="settings-save-context">
+                    <span className="settings-draft-status" role="status">{changedAccountIds.size ? `${changedAccountIds.size} 个账户有未保存修改` : "无未保存修改"}</span>
+                    <small className={accessControlValidationMessage ? "settings-field-help--error" : undefined}
+                      role={accessControlValidationMessage ? "alert" : undefined}>
+                      {accessControlValidationMessage ?? "保存将提交全部账户修改"}
+                    </small>
+                  </div>
+                  <Button variant="ghost" isDisabled={accessControlControlsDisabled || changedAccountIds.size === 0}
+                    onPress={() => { setManagedAccessAccounts(buildManagedAccessAccounts(accessControl)); onFeedback(null); }}>取消修改</Button>
+                  <Button className="settings-primary-save" isDisabled={accessControlControlsDisabled || changedAccountIds.size === 0 || accessControlValidationMessage !== null}
+                    isPending={isAccessControlSaving} variant="primary" onPress={() => void handleSaveAccessControl()}>
+                    {isAccessControlSaving ? "保存中..." : "保存访问权限"}
+                  </Button>
+                </>
+              ) : null}
+            </div>
           </header>
           <SettingsTabs items={settingsNavigationItems} activeSectionId={activeSectionId} onSelect={setActiveSectionId}>
             <section aria-label="设置内容" className="settings-content-panel">
@@ -594,37 +631,31 @@ export default function SettingsPageContent({
 
               {activeSectionId === "oa_applicant_credentials" && canManageAccessControl ? (
                 <SettingsOaApplicantCredentialsSection
-                  controlsDisabled={controlsDisabled}
+                  controlsDisabled={credentialControlsDisabled}
                   credentials={oaApplicantCredentials}
                   isLoading={isOaApplicantCredentialLoading}
                   isSaving={isOaApplicantCredentialSaving}
-                  status={oaApplicantCredentialStatus}
                   targetApplicantNameDraft={oaApplicantNameDraft}
                   targetApplicantCodeDraft={oaApplicantCodeDraft}
                   oaUsernameDraft={oaApplicantUsernameDraft}
                   oaPasswordDraft={oaApplicantPasswordDraft}
-                  canSaveCredential={canSaveOaApplicantCredential}
                   onChangeTargetApplicantNameDraft={setOaApplicantNameDraft}
                   onChangeTargetApplicantCodeDraft={setOaApplicantCodeDraft}
                   onChangeOaUsernameDraft={setOaApplicantUsernameDraft}
                   onChangeOaPasswordDraft={setOaApplicantPasswordDraft}
                   onSelectCredential={handleSelectOaApplicantCredential}
-                  onSaveCredential={handleSaveOaApplicantCredential}
                   onClearCredential={handleClearOaApplicantCredential}
                 />
               ) : null}
 
               {activeSectionId === "access_accounts" && canManageAccessControl ? (
                 <SettingsAccessAccountsSection
-                  savedAccounts={buildManagedAccessAccounts(accessControl)}
-                  onReset={() => setManagedAccessAccounts(buildManagedAccessAccounts(accessControl))}
+                  changedAccountIds={changedAccountIds}
                   controlsDisabled={accessControlControlsDisabled}
                   administrator={accessControl?.administrator ?? null}
                   managedAccessAccounts={managedAccessAccounts}
                   isLoading={isAccessControlLoading}
                   isSaving={isAccessControlSaving}
-                  status={accessControlStatus}
-                  validationMessage={accessControlValidationMessage}
                   onAddAccessAccount={handleAddAccessAccount}
                   onSearchAccessUsers={onSearchAccessUsers}
                   onUpdateManagedAccessAccount={(accountId, updater) =>
@@ -633,7 +664,6 @@ export default function SettingsPageContent({
                   onDeleteManagedAccessAccount={(accountId) =>
                     setManagedAccessAccounts((current) => current.filter((item) => item.id !== accountId))
                   }
-                  onSave={handleSaveAccessControl}
                 />
               ) : null}
 

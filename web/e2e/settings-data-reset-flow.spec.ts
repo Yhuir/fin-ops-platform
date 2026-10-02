@@ -99,9 +99,9 @@ test.describe("settings data reset browser flow", () => {
       await expect(page.getByRole("tab", { name, exact: true })).toHaveCount(0);
     }
     const request = page.waitForRequest(request => request.url().endsWith("/api/workbench/settings") && request.method() === "POST");
-    await page.getByRole("button", { name: "保存全部设置" }).click();
+    await page.getByRole("button", { name: "保存设置" }).click();
     expect(Object.keys((await request).postDataJSON()).sort()).toEqual(["bank_account_mappings", "oa_import", "oa_retention", "workbench_column_layouts"]);
-    await expect(page.getByText("已保存关联台设置。")).toBeVisible();
+    await expect(page.getByText("已保存银行账户与 OA 导入设置。")).toBeVisible();
   });
 
   test("centers all five settings panels with native tabs at four widths", async ({ page }, testInfo) => {
@@ -330,10 +330,10 @@ test.describe("settings data reset browser flow", () => {
     await expect(page.getByRole("tab", { name: "待找发票筛选", exact: true })).toHaveCount(0);
     await expect(page.getByRole("tab", { name: "冲账规则", exact: true })).toHaveCount(0);
     const saveRequest = page.waitForRequest(request => request.url().endsWith("/api/workbench/settings") && request.method() === "POST");
-    await page.getByRole("button", { name: "保存全部设置" }).click();
+    await page.getByRole("button", { name: "保存设置" }).click();
     const saveBody = (await saveRequest).postDataJSON();
     expect(Object.keys(saveBody).sort()).toEqual(["bank_account_mappings", "oa_import", "oa_retention", "workbench_column_layouts"]);
-    await expect(page.getByText("已保存关联台设置。")).toBeVisible();
+    await expect(page.getByText("已保存银行账户与 OA 导入设置。")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
 
     let costPayload: Record<string, unknown> | undefined;
