@@ -2,6 +2,7 @@ export type InvoiceNavigationSummary = {
   polarity: string | null;
   counterpartyName: string | null;
   totalWithTax: string | null;
+  totalWithTaxInferred?: boolean;
   invoiceDate: string | null;
   invoiceNo: string | null;
 };
@@ -11,7 +12,7 @@ export default function InvoiceDocumentOption({ summary, index }: { summary: Inv
     <span className="invoice-document-option__heading">
       <span className="entity-detail-tab__number">{index}</span>
       {summary.polarity && <span className={`invoice-document-option__polarity${summary.polarity === '红字' ? ' invoice-document-option__polarity--red' : ''}`}>{summary.polarity}</span>}
-      <span className="invoice-document-option__amount">{summary.totalWithTax ?? '—'}</span>
+      <span className="invoice-document-option__amount">{summary.totalWithTax ?? '—'}{summary.totalWithTaxInferred && <small className="text-default-500">（推算）</small>}</span>
     </span>
     <span className="invoice-document-option__name">{summary.counterpartyName ?? '—'}</span>
     <span className="invoice-document-option__meta">

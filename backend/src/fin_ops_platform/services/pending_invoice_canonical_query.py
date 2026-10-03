@@ -1458,6 +1458,7 @@ select
     coalesce(invoice_code, '') as invoice_code,
     coalesce(invoice_date::text, '') as issue_date,
     amount as amount_without_tax,
+    coalesce(raw_payload->'normalized_payload'->'inferred_fields', '[]'::jsonb) as inferred_fields,
     tax_rate,
     total_with_tax,
     coalesce(seller_name, '') as seller_name,

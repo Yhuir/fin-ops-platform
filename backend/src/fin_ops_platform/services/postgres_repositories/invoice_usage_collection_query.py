@@ -15,6 +15,7 @@ from fin_ops_platform.services.output_invoice_reversal import (
 from fin_ops_platform.services.postgres_repositories.bank_split_relation_scope import bank_split_scope_ctes
 from fin_ops_platform.services.postgres_repositories.common import row_payload
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
+from fin_ops_platform.services.postgres_repositories.invoice_financial_sql import invoice_financial_sql
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAWorkflowRepository,
 )
@@ -1256,6 +1257,7 @@ def _fact_cte(
         if invoice_type == "input"
         else ""
     )
+    financial = invoice_financial_sql("invoice")
     return f"""
         with recursive
         invoice_rows as (
@@ -1271,11 +1273,10 @@ def _fact_cte(
                 coalesce(invoice.seller_tax_no, '') as seller_tax_no,
                 coalesce(invoice.buyer_name, invoice.counterparty_name, '') as buyer_name,
                 coalesce(invoice.buyer_tax_no, '') as buyer_tax_no,
-                invoice.amount,
-                coalesce(invoice.tax_amount, 0)::numeric as tax_amount,
-                coalesce(invoice.total_with_tax, invoice.amount + coalesce(invoice.tax_amount, 0))
-                    ::numeric as total_with_tax,
-                {_output_tax_rate_sql("invoice.tax_rate") if invoice_type == "output" else "coalesce(invoice.tax_rate, '')"} as tax_rate,
+                {financial["amount"]} as amount,
+                {financial["tax_amount"]} as tax_amount,
+                {financial["total_with_tax"]} as total_with_tax,
+                {financial["tax_rate"]} as tax_rate,
                 coalesce(
                     invoice.raw_payload->'normalized_payload'->>'specific_business_type',
                     invoice.raw_payload->>'specific_business_type',
@@ -1436,10 +1437,12 @@ def _fact_cte(
                     as buyer_name,
                 (array_agg(member.buyer_tax_no order by member.primary_rank))[1]
                     as buyer_tax_no,
-                coalesce(sum(member.total_with_tax), 0)::numeric as total_with_tax,
-                coalesce(sum(member.amount), 0)::numeric as amount,
-                coalesce(sum(member.tax_amount), 0)::numeric as tax_amount,
-                (array_agg(member.tax_rate order by member.primary_rank))[1] as tax_rate,
+                case when bool_and(member.total_with_tax is not null) then sum(member.total_with_tax) end::numeric as total_with_tax,
+                case when bool_and(member.amount is not null) then sum(member.amount) end::numeric as amount,
+                case when bool_and(member.tax_amount is not null) then sum(member.tax_amount) end::numeric as tax_amount,
+                case when count(distinct replace(member.tax_rate, '（推算）', '')) = 1
+                    then min(replace(member.tax_rate, '（推算）', '')) || case when bool_or(member.tax_rate like '%%（推算）') then '（推算）' else '' end
+                    else '多税率' end as tax_rate,
                 (array_agg(member.specific_business_type order by member.primary_rank))[1]
                     as specific_business_type,
                 (array_agg(member.taxable_item_name order by member.primary_rank))[1]
@@ -1681,19 +1684,6 @@ def _input_payment_status_case(
         "case " + " ".join(fragments) + " else 'pending' end",
         params,
     )
-
-
-def _output_tax_rate_sql(column: str) -> str:
-    # 与 normalize_output_tax_rate 同一合同，仅用于销项；保留未知来源文本。
-    text = f"btrim(coalesce({column}, ''))"
-    number = f"rtrim({text}, '%%')::numeric"
-    return f"""case
-        when {text} = '' then '未提供'
-        when {text} = 'mixed' then '多税率'
-        when {text} ~ '^[0-9]+([.][0-9]+)?%%?$' then
-            trim_scale(case when right({text}, 1) <> '%%' and {number} <= 1
-                then {number} * 100 else {number} end)::text || '%%'
-        else {text} end"""
 
 
 def _where_sql(

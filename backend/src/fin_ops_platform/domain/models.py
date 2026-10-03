@@ -60,6 +60,7 @@ class Invoice:
     buyer_tax_no: str | None = None
     buyer_name: str | None = None
     tax_rate: str | None = None
+    inferred_fields: list[str] = field(default_factory=list)
     tax_amount: Decimal | None = None
     total_with_tax: Decimal | None = None
     tax_classification_code: str | None = None

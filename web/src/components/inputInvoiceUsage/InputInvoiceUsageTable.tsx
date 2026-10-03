@@ -539,9 +539,9 @@ export default function InputInvoiceUsageTable({
                     <div className="input-invoice-usage-cell-secondary">{row.invoice.sellerTaxNo || "-"}</div>
                   </FinanceTableCell>
                   <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--amount input-invoice-usage-table-cell--separator" columnRole="amount">
-                    <div className="input-invoice-usage-money-primary">{formatMoney(row.invoice.totalWithTax)}</div>
+                    <div className="input-invoice-usage-money-primary">{formatMoney(row.invoice.totalWithTax, "—") + (row.invoice.inferredFields?.includes("totalWithTax") ? "（推算）" : "")}</div>
                     <div className="input-invoice-usage-cell-secondary">
-                      {`${formatMoney(row.invoice.amountWithoutTax)} ${row.invoice.taxRate || "-"} (${formatMoney(row.invoice.taxAmount)})`}
+                      {`${formatMoney(row.invoice.amountWithoutTax, "—")}${row.invoice.inferredFields?.includes("amount") ? "（推算）" : ""} ${row.invoice.taxRate || "-"} (${formatMoney(row.invoice.taxAmount, "—")}${row.invoice.inferredFields?.includes("taxAmount") ? "（推算）" : ""})`}
                     </div>
                   </FinanceTableCell>
                   <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" columnRole="description">

@@ -12,6 +12,7 @@ from typing import Any
 
 from fin_ops_platform.domain.models import Invoice
 from fin_ops_platform.services.bank_transaction_unit import original_bank_summaries, original_bank_transaction
+from fin_ops_platform.services.invoice_financial_values import PUBLIC_FIELDS, resolve_invoice_financial_values
 from fin_ops_platform.services.oa_expense_details import OA_EXPENSE_FIELDS, public_oa_expense_items
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
@@ -35,6 +36,7 @@ def invoice_source_line(invoice: Invoice) -> dict[str, Any]:
         "unitPrice": invoice.unit_price,
         "amount": source_money(invoice.amount),
         "taxRate": invoice.tax_rate,
+        "inferredFields": [PUBLIC_FIELDS[key] for key in invoice.inferred_fields],
         "taxAmount": source_money(invoice.tax_amount),
         "totalWithTax": source_money(invoice.total_with_tax),
         "remark": invoice.remark,
@@ -62,6 +64,7 @@ def invoice_source_detail(group: dict[str, Any]) -> dict[str, Any]:
         "taxAmount": source_money(single.tax_amount) if single else "",
         "totalWithTax": source_money(single.total_with_tax) if single else "",
         "taxRate": primary.tax_rate,
+        "inferredFields": [PUBLIC_FIELDS[key] for key in primary.inferred_fields],
         "taxClassificationCode": primary.tax_classification_code,
         "specificBusinessType": primary.specific_business_type,
         "taxableItemName": primary.taxable_item_name,
@@ -131,6 +134,19 @@ INVOICE_LINE_FIELDS = (("taxableItemName", "货物或应税劳务名称"), ("tax
 
 
 def source_detail_sections(kind: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
+    if kind == "invoice":
+        # Mutate only newly constructed public projections, never canonical/source records.
+        for data in [payload, *payload.get("lineItems", [])]:
+            values = resolve_invoice_financial_values(
+                amount=data.get("amount"), tax_amount=data.get("taxAmount"),
+                total_with_tax=data.get("totalWithTax"), tax_rate=data.get("taxRate"),
+                inferred_fields=[key for key, public in PUBLIC_FIELDS.items() if public in data.get("inferredFields", [])],
+                specific_business_type=data.get("specificBusinessType"),
+            )
+            for key, public in PUBLIC_FIELDS.items():
+                value = getattr(values, key)
+                data[public] = value if key == "tax_rate" else source_money(value)
+            data["inferredFields"] = [PUBLIC_FIELDS[key] for key in values.inferred_fields]
     if kind not in SOURCE_FIELD_GROUPS:
         raise ValueError(f"Unknown source detail kind: {kind}")
     identifier = str(payload.get("oaId") if kind == "oa" else payload.get("id") or "")
@@ -153,12 +169,21 @@ def source_detail_sections(kind: str, payload: dict[str, Any]) -> list[dict[str,
             "invoiceDate": str(payload["invoiceDate"]) if payload.get("invoiceDate") else None,
             "invoiceNo": payload.get("digitalInvoiceNo") or payload.get("invoiceNo") or None,
         }
+        if "totalWithTax" in payload.get("inferredFields", []):
+            metadata["invoice_navigation"]["totalWithTaxInferred"] = True
     if kind == "bank":
         metadata["bank_transaction_id"] = identifier
     sections = []
     def append(title: str, values: Any, fields: Any) -> None:
-        projected = [{"label": label, "value": format(values[key], "f") if isinstance(values[key], Decimal) else values[key]} for key, label in fields
-                     if values.get(key) is not None and values.get(key) != ""]
+        projected = []
+        for key, label in fields:
+            value = values.get(key)
+            if value is None or value == "":
+                continue
+            display = format(value, "f") if isinstance(value, Decimal) else value
+            if key in values.get("inferredFields", []):
+                display = str(display) + "（推算）"
+            projected.append({"label": label, "value": display})
         if projected:
             sections.append({"title": title, "fields": projected, **metadata})
     for section_title, labels in SOURCE_FIELD_GROUPS[kind]:
@@ -303,7 +328,7 @@ def source_relation_sections(kind: str, summaries: list[Any], *, groups: list[di
 # Explicit adapters for the existing canonical SQL query DTOs.
 QUERY_SOURCE_KEYS = {
     "bank": {"id": "id", "transaction_date": "transactionDate", "booked_date": "bookedDate", "txn_direction": "direction", "amount": "amount", "balance": "balance", "summary": "summary", "remark": "remark", "account_name": "accountName", "account_no": "accountNo", "counterparty_name": "counterpartyName", "counterparty_account_no": "counterpartyAccountNo", "counterparty_bank_name": "counterpartyBankName", "statement_serial_no": "bankSerialNo", "enterprise_serial_no": "enterpriseSerialNo", "voucher_type": "voucherKind", "voucher_no": "voucherNo", "account_detail_no": "accountDetailNo"},
-    "invoice": {"id": "id", "invoice_type": "invoiceType", "invoice_no": "invoiceNo", "digital_invoice_no": "digitalInvoiceNo", "invoice_code": "invoiceCode", "issue_date": "invoiceDate", "seller_name": "sellerName", "seller_tax_no": "sellerTaxNo", "buyer_name": "buyerName", "buyer_tax_no": "buyerTaxNo", "amount_without_tax": "amount", "tax_amount": "taxAmount", "tax_rate": "taxRate", "total_with_tax": "totalWithTax", "tax_classification_code": "taxClassificationCode", "specific_business_type": "specificBusinessType", "taxable_item_name": "taxableItemName", "invoice_source": "invoiceSource", "invoice_kind": "invoiceKind", "invoice_status_from_source": "invoiceStatus", "is_positive_invoice": "isPositiveInvoice", "risk_level": "riskLevel", "issuer": "issuer", "remark": "remark", "model": "specificationModel", "unit": "unit", "quantity": "quantity", "unit_price": "unitPrice"},
+    "invoice": {"inferred_fields": "inferredFields", "id": "id", "invoice_type": "invoiceType", "invoice_no": "invoiceNo", "digital_invoice_no": "digitalInvoiceNo", "invoice_code": "invoiceCode", "issue_date": "invoiceDate", "seller_name": "sellerName", "seller_tax_no": "sellerTaxNo", "buyer_name": "buyerName", "buyer_tax_no": "buyerTaxNo", "amount_without_tax": "amount", "tax_amount": "taxAmount", "tax_rate": "taxRate", "total_with_tax": "totalWithTax", "tax_classification_code": "taxClassificationCode", "specific_business_type": "specificBusinessType", "taxable_item_name": "taxableItemName", "invoice_source": "invoiceSource", "invoice_kind": "invoiceKind", "invoice_status_from_source": "invoiceStatus", "is_positive_invoice": "isPositiveInvoice", "risk_level": "riskLevel", "issuer": "issuer", "remark": "remark", "model": "specificationModel", "unit": "unit", "quantity": "quantity", "unit_price": "unitPrice"},
 }
 
 
@@ -329,8 +354,11 @@ def query_source_detail(kind: str, row: dict[str, Any]) -> dict[str, Any]:
             elif row.get("debit_amount") not in (None, "") and row.get("credit_amount") in (None, ""):
                 payload.update(amount=row["debit_amount"], direction="outflow")
         if kind == "invoice":
+            payload["inferredFields"] = [PUBLIC_FIELDS[key] for key in row.get("inferred_fields", [])]
             lines = row.get("line_items") or [row]
             payload["lineItems"] = [{target: line.get(source) for source, target in QUERY_SOURCE_KEYS[kind].items()} for line in lines]
+            for data, source in zip(payload["lineItems"], lines, strict=True):
+                data["inferredFields"] = [PUBLIC_FIELDS[key] for key in source.get("inferred_fields", [])]
             if len(lines) > 1:
                 for key in ("amount", "taxAmount", "totalWithTax"):
                     payload[key] = None

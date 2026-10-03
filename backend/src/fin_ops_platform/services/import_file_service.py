@@ -34,6 +34,7 @@ from fin_ops_platform.services.import_preview_audit import (
     build_import_preview_session_audit,
 )
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.invoice_financial_values import resolve_invoice_financial_values
 
 LOGGER = logging.getLogger(__name__)
 
@@ -2152,27 +2153,30 @@ def aggregate_invoice_line_rows(rows: list[dict[str, Any]]) -> list[dict[str, An
             if len(values) > 1:
                 raise ValueError(f"同一发票的 {field_name} 不一致，无法安全合并明细行。")
         try:
-            amount = sum((_invoice_line_decimal(row.get("amount")) for row in line_rows), Decimal("0"))
-            tax_amount = sum((_invoice_line_decimal(row.get("tax_amount")) for row in line_rows), Decimal("0"))
-            total_with_tax = sum(
-                (_invoice_line_decimal(row.get("total_with_tax")) for row in line_rows),
-                Decimal("0"),
-            )
-        except InvalidOperation:
+            financial_rows = [resolve_invoice_financial_values(
+                amount=clean(row.get("amount")).replace(",", ""), tax_amount=clean(row.get("tax_amount")).replace(",", ""),
+                total_with_tax=clean(row.get("total_with_tax")).replace(",", ""), tax_rate=row.get("tax_rate"),
+                specific_business_type=row.get("specific_business_type"),
+            ) for row in line_rows]
+        except ValueError:
             aggregated.extend(line_rows)
             continue
+        totals = {}
+        for field in ("amount", "tax_amount", "total_with_tax"):
+            parts = [getattr(row, field) for row in financial_rows]
+            totals[field] = _invoice_line_decimal_text(sum(parts, Decimal("0"))) if all(part is not None for part in parts) else None
         merged = dict(line_rows[0])
         merged.update(
             {
-                "amount": _invoice_line_decimal_text(amount),
-                "tax_amount": _invoice_line_decimal_text(tax_amount),
-                "total_with_tax": _invoice_line_decimal_text(total_with_tax),
+                **totals,
+                "inferred_fields": sorted({field for row in financial_rows for field in row.inferred_fields if field != "tax_rate"}),
                 "source_line_count": len(line_rows),
                 "source_line_items": [dict(row) for row in line_rows],
             }
         )
         tax_rates = {clean(row.get("tax_rate")) for row in line_rows if clean(row.get("tax_rate"))}
-        merged["tax_rate"] = next(iter(tax_rates)) if len(tax_rates) == 1 else "mixed"
+        merged["tax_rate"] = (next(iter(tax_rates)) if len(tax_rates) == 1 and all(clean(row.get("tax_rate")) for row in line_rows)
+                              else "mixed" if tax_rates else None)
         aggregated.append(merged)
     return aggregated
 

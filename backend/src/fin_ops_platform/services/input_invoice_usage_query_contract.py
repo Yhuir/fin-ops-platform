@@ -4,6 +4,8 @@ import json
 from typing import Any
 from urllib.parse import unquote
 
+from fin_ops_platform.services.output_invoice_tax_rate import normalize_output_tax_rate
+
 
 class InputInvoiceUsageQueryContractError(ValueError):
     def __init__(
@@ -93,7 +95,12 @@ def parse_input_invoice_usage_filters(filters: str | list[dict[str, Any]] | None
                 f"Unsupported operator for {field}: {operator}",
                 details={"field": field, "operator": operator},
             )
-        normalized.append({"field": field, "operator": operator, "value": item.get("value"), "values": list(item.get("values") or [])})
+        values = item.get("values") or []
+        if field == "tax_rate":
+            if not isinstance(values, list) or not values or any(not isinstance(value, str) for value in values):
+                raise InputInvoiceUsageQueryContractError("invalid_filter_value", "税率筛选需要非空字符串数组。")
+            values = list(dict.fromkeys(normalize_output_tax_rate(value) for value in values))
+        normalized.append({"field": field, "operator": operator, "value": item.get("value"), "values": list(values)})
     return normalized
 
 

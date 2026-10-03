@@ -173,6 +173,7 @@ function mapInvoice(rawValue: unknown): OutputInvoiceCollectionRowsResponse["row
     amountWithoutTax: stringValue(camelOrSnake(raw, "amountWithoutTax", "amount_without_tax") ?? raw.amount),
     taxRate: stringValue(camelOrSnake(raw, "taxRate", "tax_rate")),
     taxAmount: stringValue(camelOrSnake(raw, "taxAmount", "tax_amount")),
+    inferredFields: arrayValue(raw.inferredFields).map(stringValue),
     specificBusinessType: stringValue(camelOrSnake(raw, "specificBusinessType", "specific_business_type")),
     taxableItemName: stringValue(camelOrSnake(raw, "taxableItemName", "taxable_item_name")),
     reversalTargetInvoiceNos,

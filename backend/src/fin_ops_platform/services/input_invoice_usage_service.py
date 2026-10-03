@@ -28,6 +28,7 @@ from fin_ops_platform.services.input_invoice_usage_query_contract import (
     parse_input_invoice_usage_filters,
     parse_input_invoice_usage_sort,
 )
+from fin_ops_platform.services.invoice_financial_values import invoice_financial_summary
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.invoice_relation_query_context import DistributedInvoiceRelationContext
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
@@ -558,9 +559,6 @@ class InputInvoiceUsageQueryService:
         return payload
 
     def _invoice_summary(self, primary: Invoice, line_items: list[Invoice]) -> dict[str, Any]:
-        total_with_tax = sum((_invoice_total(line) for line in line_items), start=ZERO)
-        amount = sum((_decimal(line.amount) for line in line_items), start=ZERO)
-        tax_amount = sum((_decimal(line.tax_amount) for line in line_items), start=ZERO)
         return {
             "invoiceNo": primary.digital_invoice_no or primary.invoice_no,
             "invoiceCode": primary.invoice_code or "",
@@ -568,10 +566,7 @@ class InputInvoiceUsageQueryService:
             "invoiceDate": primary.invoice_date or "",
             "sellerName": primary.seller_name or primary.counterparty.name,
             "sellerTaxNo": primary.seller_tax_no or primary.counterparty.tax_no or "",
-            "totalWithTax": _money(total_with_tax),
-            "amount": _money(amount),
-            "taxRate": primary.tax_rate or "",
-            "taxAmount": _money(tax_amount),
+            **invoice_financial_summary(line_items),
             "specificBusinessType": primary.specific_business_type or "",
             "taxableItemName": primary.taxable_item_name or "",
             "lineItemCount": len(line_items),

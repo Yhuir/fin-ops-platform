@@ -20,6 +20,7 @@ from fin_ops_platform.services.bank_transaction_unit import (
     original_bank_display_totals,
 )
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.invoice_financial_values import invoice_financial_summary
 from fin_ops_platform.services.invoice_relation_query_context import (
     DistributedInvoiceRelationContext,
     relation_is_linked,
@@ -41,7 +42,7 @@ CENT = Decimal("0.01")
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 OUTPUT_INVOICE_COLLECTION_EXPORT_ROW_LIMIT = 20_000
 OUTPUT_INVOICE_COLLECTION_EXPORT_COLUMNS = [
-    "序号", "发票号码", "开票日期", "购方", "购方识别号", "不含税金额", "税率", "税额", "价税合计", "货物或应税劳务名称", "备注",
+    "序号", "发票号码", "开票日期", "购方", "购方识别号", "不含税金额", "税率", "税额", "价税合计", "货物或应税劳务名称", "备注", "不含税金额来源", "税额来源", "价税合计来源",
 ]
 
 FILTER_CONFIG: dict[str, dict[str, Any]] = {
@@ -646,22 +647,7 @@ class OutputInvoiceCollectionQueryService:
             "buyerTaxNo": primary.buyer_tax_no
             or primary.counterparty.tax_no
             or "",
-            "totalWithTax": _money(
-                sum((_invoice_total(line) for line in line_items), start=ZERO)
-            ),
-            "amount": _money(
-                sum((_decimal(line.amount) for line in line_items), start=ZERO)
-            ),
-            "amountWithoutTax": _money(
-                sum((_decimal(line.amount) for line in line_items), start=ZERO)
-            ),
-            "taxRate": normalize_output_tax_rate(primary.tax_rate),
-            "taxAmount": _money(
-                sum(
-                    (_decimal(line.tax_amount) for line in line_items),
-                    start=ZERO,
-                )
-            ),
+            **invoice_financial_summary(line_items),
             "specificBusinessType": primary.specific_business_type or "",
             "taxableItemName": primary.taxable_item_name or "",
             "reversalTargetInvoiceNos": reversal_target_invoice_nos(
@@ -1278,8 +1264,9 @@ class OutputInvoiceCollectionQueryService:
         invoice = row["invoice"]
         return {"序号": index, "发票号码": invoice["digitalInvoiceNo"] or invoice["invoiceNo"], "开票日期": invoice["invoiceDate"],
                 "购方": invoice["buyerName"], "购方识别号": invoice["buyerTaxNo"],
-                "不含税金额": Decimal(invoice["amount"]), "税率": invoice["taxRate"],
-                "税额": Decimal(invoice["taxAmount"]), "价税合计": Decimal(invoice["totalWithTax"]),
+                "不含税金额": Decimal(invoice["amount"]) if invoice["amount"] else None, "税率": invoice["taxRate"],
+                "税额": Decimal(invoice["taxAmount"]) if invoice["taxAmount"] else None, "价税合计": Decimal(invoice["totalWithTax"]) if invoice["totalWithTax"] else None,
+                **{label: "推算" if key in invoice.get("inferredFields", []) else "" for key, label in (("amount", "不含税金额来源"), ("taxAmount", "税额来源"), ("totalWithTax", "价税合计来源"))},
                 "货物或应税劳务名称": invoice["taxableItemName"], "备注": invoice["remark"]}
 
 

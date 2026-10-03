@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from decimal import Decimal
 
+from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_canonical_query_service import (
     InputInvoiceUsageCanonicalQueryService,
@@ -9,6 +11,7 @@ from fin_ops_platform.services.input_invoice_usage_canonical_query_service impor
 from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageQueryService,
 )
+from fin_ops_platform.services.invoice_financial_values import resolve_invoice_financial_values
 from fin_ops_platform.services.output_invoice_collection_canonical_query_service import (
     OutputInvoiceCollectionCanonicalQueryService,
 )
@@ -19,6 +22,8 @@ from fin_ops_platform.services.postgres_connection import (
     PostgresConnection,
     PostgresSettings,
 )
+from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
+from fin_ops_platform.services.postgres_repositories.invoice_financial_sql import invoice_financial_sql
 from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_query import (
     PostgresInputInvoiceUsageQueryRepository,
     PostgresOutputInvoiceCollectionQueryRepository,
@@ -62,6 +67,70 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.connection.close()
         truncate_test_database(self.database_url)
+
+    def test_financial_sql_and_python_agree_on_edge_cases(self):
+        fields = invoice_financial_sql("invoice")
+        cases = [
+            ("1884674.86", "245007.73", "2129682.59", None),
+            ("-1884674.86", "-245007.73", "-2129682.59", None),
+            ("94.34", "5.66", "100", None), ("100", "13", "113", "0.13"),
+            ("100", None, "113", "13%"), (None, "13", "113", "13%"),
+            ("100", "13", None, "13%"), ("100", "13", "120", None),
+            ("100", None, "106", "13%"), (None, "6", "106", "13%"),
+            ("0", "0", "0", None), ("100", "0", "100", None),
+            ("100", None, None, None), ("100", None, "90", None),
+            ("100", "-13", "87", None), ("2000", "190", "2190", None),
+            ("100", "0", "100", "免税"), ("100", "0", "100", "0"),
+            ("100", "13", "113", "mixed"),
+        ]
+        sql = "select " + ", ".join(f"{expr} as {field}" for field, expr in fields.items()) + """
+            from (select %s::numeric as amount, %s::numeric as tax_amount,
+                  %s::numeric as total_with_tax, %s::text as tax_rate, '{}'::jsonb as raw_payload) invoice
+        """
+        for a, t, g, r in cases:
+            with self.subTest(values=(a, t, g, r)):
+                row = self.connection.fetch_one(sql, (a, t, g, r))
+                expected = resolve_invoice_financial_values(amount=a, tax_amount=t, total_with_tax=g, tax_rate=r)
+                for field in ("amount", "tax_amount", "total_with_tax"):
+                    self.assertEqual(row[field], getattr(expected, field))
+                self.assertEqual(row["tax_rate"], expected.rate_label)
+
+    def test_historical_rate_filter_detail_and_export_match_without_writes(self):
+        self.connection.execute("""insert into app.invoices(legacy_mongo_id, invoice_type, invoice_no,
+            invoice_date, invoice_month, buyer_name, amount, signed_amount, tax_amount, total_with_tax, status)
+            values ('derived-output', 'output', 'derived-001', '2026-10-03', '2026-10-01', '公司',
+                    1884674.86, 1884674.86, 245007.73, 2129682.59, 'pending')""")
+        service = OutputInvoiceCollectionCanonicalQueryService(
+            repository=PostgresOutputInvoiceCollectionQueryRepository(self.connection),
+            row_assembler=OutputInvoiceCollectionQueryService(import_service=ImportNormalizationService()),
+        )
+        payload = service.list_rows(filters=[{"field": "tax_rate", "operator": "in", "values": ["13%（推算）"]}])
+        self.assertEqual(payload["pagination"]["total"], 1)
+        [row] = payload["rows"]
+        self.assertEqual(row["invoice"]["taxRate"], "13%（推算）")
+        self.assertEqual(row["invoice"]["inferredFields"], ["taxRate"])
+        self.assertEqual(payload["summary"]["totalWithTax"], "2129682.59")
+        self.assertEqual(service.list_rows(filters=[{"field": "tax_rate", "operator": "in", "values": ["13%"]}])["pagination"]["total"], 0)
+        self.assertIsNone(self.connection.fetch_one("select tax_rate from app.invoices where legacy_mongo_id='derived-output'")["tax_rate"])
+        exported = OutputInvoiceCollectionQueryService._export_row(1, row)
+        self.assertEqual(exported["税率"], "13%（推算）")
+        self.assertEqual(exported["价税合计"], Decimal("2129682.59"))
+
+    def test_import_missing_amount_round_trips_provenance_through_postgres(self):
+        repository = PostgresCoreRepository(self.connection)
+        importer = ImportNormalizationService(fact_repository=repository)
+        raw = {"invoice_no": "12345678901234567891", "counterparty_name": "供应商", "invoice_date": "2026-10-03",
+               "amount": None, "tax_amount": "13", "total_with_tax": "113", "tax_rate": "13%"}
+        normalized, errors = importer._normalize_invoice_row(batch_type=BatchType.INPUT_INVOICE, raw_row=raw)
+        self.assertEqual(errors, [])
+        invoice = importer._build_invoice_from_normalized(BatchType.INPUT_INVOICE, "test-batch", normalized)
+        repository._save_invoice(self.connection, repository._serialize(invoice))
+        loaded = repository.get_invoice(invoice.id)
+        self.assertEqual(loaded.amount, Decimal("100"))
+        self.assertEqual(loaded.inferred_fields, ["amount"])
+        from fin_ops_platform.services.source_record_details import invoice_source_detail
+        detail = invoice_source_detail({"primary": loaded, "line_items": [loaded], "identity_key": "test"})
+        self.assertIn("100.00（推算）", [field["value"] for section in detail["sections"] for field in section["fields"]])
 
     def test_rows_reuse_snapshot_payment_rules_without_row_level_settings_reads(
         self,

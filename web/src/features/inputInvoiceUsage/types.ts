@@ -50,6 +50,7 @@ export type InputInvoiceUsageInvoiceSummary = {
   amountWithoutTax: string;
   taxRate: string;
   taxAmount: string;
+  inferredFields?: string[];
   specificBusinessType: string;
   taxableItemName: string;
 };

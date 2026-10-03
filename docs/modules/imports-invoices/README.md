@@ -22,6 +22,9 @@
 - 与 OA 附件身份桥接使用本批强身份集合和当前来源事实批量处理；不全库扫描或在确认事务中下载/OCR。
 - 补充凭证图库按需分页只读，不创建导入 session 或关联任务。
 
+- 普通发票缺少不含税金额且税额、价税合计有效时，在必填校验前按同票加减关系补齐；来源行保留原值，规范值保存 `inferred_fields`。明细合计不将缺失金额当作零；未提供税率不制造 `mixed`。
+- 发票展示的统一补算由 `invoice_financial_values.py` 提供，历史票按原始值即时计算，不回写推算税率；查询 repository 使用相同合同的 SQL 表达式并通过真实 PostgreSQL 对照测试验证。
+
 ## 依赖方向
 
 [OA 集成](../oa-integration/README.md)、[正式关联关系](../workbench-relations/README.md)、[后台任务](../runtime-workers/README.md)、[权限与审计](../permissions-and-audit/README.md)。依赖表示调用或事实消费，不允许读取其它页面的展示结果作为业务事实。
