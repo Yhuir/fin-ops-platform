@@ -36,21 +36,22 @@ class FakeOutputCanonicalRelationReader:
 
 
 class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
-    def test_tax_rates_separate_source_and_inferred_values_and_facets_ignore_self(self):
+    def test_source_rates_and_unknown_facets_ignore_self_without_broadening_old_filters(self):
         rates = ["0.13", "13%", None, "0", "免税", "不征税", "mixed", "0.06"]
         invoices = [self._invoice(f"rate-{index}", str(index)) for index in range(len(rates))]
         for invoice, rate in zip(invoices, rates, strict=True):
             invoice.tax_rate = rate
         service = self._service(invoices=invoices)
-        filters = [{"field": "tax_rate", "operator": "in", "values": ["0.13", "13%", ""]}]
+        filters = [{"field": "tax_rate", "operator": "in", "values": ["0.13", "13%"]}]
         page = service.list_rows(page_size=1, filters=filters)
         self.assertEqual(page["pagination"]["total"], 2)
         self.assertEqual(page["summary"]["totalWithTax"], "200.00")
         self.assertEqual(page["summary"]["amountWithoutTax"], "188.68")
-        self.assertEqual(page["appliedFilters"]["filters"][0]["values"], ["13%", "未提供"])
+        self.assertEqual(page["appliedFilters"]["filters"][0]["values"], ["13%"])
         options = next(field["options"] for field in service.filter_options(filters=filters)["fields"] if field["field"] == "tax_rate")
         self.assertEqual({option["value"]: option["count"] for option in options},
-                         {"13%": 2, "6%（推算）": 1, "0%": 1, "免税": 1, "不征税": 1, "多税率": 1, "6%": 1})
+                         {"13%": 2, "无法确定": 2, "0%": 1, "免税": 1, "不征税": 1, "6%": 1})
+        self.assertEqual(service.list_rows(filters=[{"field": "tax_rate", "operator": "in", "values": ["6%（推算）"]}])["pagination"]["total"], 0)
         for invalid in ("13%", [13], []):
             with self.subTest(invalid=invalid), self.assertRaises(OutputInvoiceCollectionError):
                 service.list_rows(filters=[{"field": "tax_rate", "operator": "in", "values": invalid}])

@@ -513,7 +513,7 @@ function renderValue(field: EntityDetailField): ReactNode {
     );
   }
   if (value.endsWith("（推算）")) {
-    return <>{value.slice(0, -4)}<small className="text-default-500" title={field.label === "税率" ? "按税额与不含税金额计算的比例，不代表已核实的票面税率" : "由同票其余金额计算"}>（推算）</small></>;
+    return <>{value.slice(0, -4)}<small className="text-default-500" title="由同票其余金额计算">（推算）</small></>;
   }
   return value;
 }

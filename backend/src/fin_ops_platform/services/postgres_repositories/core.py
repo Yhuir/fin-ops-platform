@@ -1059,7 +1059,7 @@ class PostgresCoreRepository:
                     current_value = current.get(field_name)
                     if current_value not in (None, ""):
                         invoice[field_name] = current_value
-                invoice["inferred_fields"] = [field for field in ("amount", "tax_amount", "total_with_tax")
+                invoice["inferred_fields"] = [field for field in ("amount", "tax_amount", "total_with_tax", "tax_rate")
                     if field in ((current_normalized.get("inferred_fields") or [])
                                  if current.get(field) is not None else (invoice.get("inferred_fields") or []))]
                 if current.get("source_unique_key"):
@@ -2394,6 +2394,7 @@ class PostgresCoreRepository:
             buyer_name=self._text(payload.get("buyer_name") or row.get("buyer_name")),
             tax_rate=self._text(row.get("tax_rate")),
             inferred_fields=list(payload.get("inferred_fields") or []),
+            source_line_items=list(payload.get("source_line_items") or []),
             tax_amount=self._decimal_or_none(row.get("tax_amount")),
             total_with_tax=self._decimal_or_none(row.get("total_with_tax")),
             tax_classification_code=self._text(payload.get("tax_classification_code")),

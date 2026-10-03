@@ -31,7 +31,7 @@ from fin_ops_platform.services.object_identity_policy import FinancialObjectIden
 from fin_ops_platform.services.output_invoice_reversal import (
     reversal_target_invoice_nos,
 )
-from fin_ops_platform.services.output_invoice_tax_rate import normalize_output_tax_rate
+from fin_ops_platform.services.output_invoice_tax_rate import normalize_tax_rate_filter_value
 from fin_ops_platform.services.source_record_details import bank_source_detail, invoice_source_detail
 from fin_ops_platform.services.workbench_relation_modes import (
     OUTPUT_INVOICE_REVERSAL_RELATION_MODE,
@@ -1035,7 +1035,7 @@ class OutputInvoiceCollectionQueryService:
             if field == "tax_rate":
                 if not isinstance(values, list) or not values or any(not isinstance(value, str) for value in values):
                     raise OutputInvoiceCollectionError("invalid_filter_value", "税率筛选需要非空字符串数组。")
-                values = list(dict.fromkeys(normalize_output_tax_rate(value) for value in values))
+                values = list(dict.fromkeys(normalize_tax_rate_filter_value(value) for value in values))
             normalized.append(
                 {
                     "field": field,

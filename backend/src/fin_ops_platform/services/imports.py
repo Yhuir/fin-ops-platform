@@ -1426,7 +1426,7 @@ class ImportNormalizationService:
         if raw_row.get("amount") in (None, "") and source_tax is not None and source_total is not None:
             financial = resolve_invoice_financial_values(
                 amount=None, tax_amount=source_tax, total_with_tax=source_total,
-                tax_rate=raw_row.get("tax_rate"), specific_business_type=raw_row.get("specific_business_type"),
+                tax_rate=raw_row.get("tax_rate"),
             )
             if financial.amount is not None:
                 raw_row = {**raw_row, "amount": format(financial.amount, "f")}
@@ -1740,6 +1740,7 @@ class ImportNormalizationService:
             buyer_name=normalized.get("buyer_name"),
             tax_rate=normalized.get("tax_rate"),
             inferred_fields=list(normalized.get("inferred_fields") or []),
+            source_line_items=list(normalized.get("source_line_items") or []),
             tax_amount=Decimal(normalized["tax_amount"]) if normalized.get("tax_amount") else None,
             total_with_tax=Decimal(normalized["total_with_tax"]) if normalized.get("total_with_tax") else None,
             tax_classification_code=normalized.get("tax_classification_code"),
@@ -2039,6 +2040,7 @@ class ImportNormalizationService:
             buyer_name=normalized.get("buyer_name"),
             tax_rate=normalized.get("tax_rate"),
             inferred_fields=list(normalized.get("inferred_fields") or []),
+            source_line_items=list(normalized.get("source_line_items") or []),
             tax_amount=Decimal(normalized["tax_amount"]) if normalized.get("tax_amount") else None,
             total_with_tax=Decimal(normalized["total_with_tax"]) if normalized.get("total_with_tax") else None,
             tax_classification_code=normalized.get("tax_classification_code"),
@@ -2103,6 +2105,8 @@ class ImportNormalizationService:
                 setattr(invoice, field_name, Decimal(incoming))
                 if field_name in normalized.get("inferred_fields", []) and field_name not in invoice.inferred_fields:
                     invoice.inferred_fields.append(field_name)
+        if not invoice.source_line_items and normalized.get("source_line_items"):
+            invoice.source_line_items = list(normalized["source_line_items"])
         if not invoice.source_unique_key:
             invoice.source_unique_key = normalized.get("source_unique_key")
             if invoice.source_unique_key:
@@ -2335,6 +2339,7 @@ class ImportNormalizationService:
                 if incoming not in (None, ""):
                     setattr(invoice, field_name, incoming)
             invoice.inferred_fields = list(normalized.get("inferred_fields") or [])
+            invoice.source_line_items = list(normalized.get("source_line_items") or [])
             invoice.amount = Decimal(normalized["amount"])
             invoice.signed_amount = Decimal(
                 normalized.get("signed_amount") or normalized["amount"]
@@ -2376,6 +2381,8 @@ class ImportNormalizationService:
                 setattr(invoice, field_name, Decimal(incoming))
                 if field_name in normalized.get("inferred_fields", []) and field_name not in invoice.inferred_fields:
                     invoice.inferred_fields.append(field_name)
+        if not invoice.source_line_items and normalized.get("source_line_items"):
+            invoice.source_line_items = list(normalized["source_line_items"])
         if not invoice.source_unique_key:
             invoice.source_unique_key = normalized.get("source_unique_key")
             if invoice.source_unique_key:

@@ -160,11 +160,44 @@ class PendingInvoicePostgresIntegrationTests(unittest.TestCase):
         fields = {field['label']: field['value'] for section in invoice['sections'] for field in section['fields']}
         self.assertEqual(fields['税额'], '0.00')
         self.assertEqual(fields['发票状态'], '正常')
-        self.assertNotIn('价税合计', fields)
+        self.assertEqual(fields['价税合计'], '100.00（推算）')
+        self.assertEqual(fields['税率'], '无法确定')
+        self.assertIsNone(self.connection.fetch_one(
+            "select total_with_tax from app.invoices where legacy_mongo_id='source-invoice'"
+        )['total_with_tax'])
         # A source read must not change the operational lifecycle used by other pages.
         self.assertEqual(self.connection.fetch_one(
             "select status from app.bank_transactions where legacy_mongo_id='source-bank'"
         )['status'], 'pending')
+
+    def test_invoice_detail_preserves_root_source_evidence_and_normalized_payload_precedence(self) -> None:
+        source_lines = [{"amount": "100", "tax_amount": "13", "total_with_tax": "113", "tax_rate": "0.13"}]
+        examples = [
+            ("root-lines", None, {"source_line_items": source_lines}, "13%"),
+            ("root-inferred", "13%", {"inferred_fields": ["tax_rate"]}, "无法确定"),
+            ("normalized-priority", None, {"source_line_items": source_lines, "normalized_payload": {}}, "无法确定"),
+            ("normalized-lines", None, {"normalized_payload": {"source_line_items": source_lines}}, "13%"),
+        ]
+        service = PendingInvoiceCanonicalQueryService(repository=PostgresPendingInvoiceCanonicalRepository(self.connection))
+        for identity, tax_rate, raw_payload, expected in examples:
+            with self.subTest(identity=identity):
+                self.connection.execute("""
+                    insert into app.invoices(legacy_mongo_id, invoice_type, invoice_no, invoice_date,
+                        invoice_month, seller_name, amount, signed_amount, tax_amount, total_with_tax,
+                        tax_rate, status, raw_payload)
+                    values (%s, 'input', %s, '2026-10-04', '2026-10-01', '来源验证供应商',
+                        100, 100, 13, 113, %s, 'pending', %s::jsonb)
+                """, (identity, identity, tax_rate, json.dumps(raw_payload)))
+                detail = service.invoice_detail(identity)
+                rates = [field["value"] for section in detail["sections"] for field in section["fields"]
+                         if field["label"] == "税率"]
+                self.assertTrue(rates)
+                self.assertEqual(set(rates), {expected})
+                self.assertNotIn("_sourceLineItems", json.dumps(detail))
+                persisted = self.connection.fetch_one(
+                    "select tax_rate, raw_payload from app.invoices where legacy_mongo_id=%s", (identity,))
+                self.assertEqual(persisted["tax_rate"], tax_rate)
+                self.assertEqual(persisted["raw_payload"], raw_payload)
 
     def test_page_reuses_compiled_bank_category_rules(self) -> None:
         self.connection.execute(

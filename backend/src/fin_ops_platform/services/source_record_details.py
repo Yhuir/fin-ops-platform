@@ -12,9 +12,14 @@ from typing import Any
 
 from fin_ops_platform.domain.models import Invoice
 from fin_ops_platform.services.bank_transaction_unit import original_bank_summaries, original_bank_transaction
-from fin_ops_platform.services.invoice_financial_values import PUBLIC_FIELDS, resolve_invoice_financial_values
+from fin_ops_platform.services.invoice_financial_values import (
+    PUBLIC_FIELDS,
+    invoice_financial_summary,
+    resolve_invoice_financial_values,
+)
 from fin_ops_platform.services.oa_expense_details import OA_EXPENSE_FIELDS, public_oa_expense_items
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
+from fin_ops_platform.services.output_invoice_tax_rate import combine_invoice_tax_rates
 
 
 def source_money(value: Any) -> str:
@@ -36,6 +41,7 @@ def invoice_source_line(invoice: Invoice) -> dict[str, Any]:
         "unitPrice": invoice.unit_price,
         "amount": source_money(invoice.amount),
         "taxRate": invoice.tax_rate,
+        "_sourceLineItems": invoice.source_line_items,
         "inferredFields": [PUBLIC_FIELDS[key] for key in invoice.inferred_fields],
         "taxAmount": source_money(invoice.tax_amount),
         "totalWithTax": source_money(invoice.total_with_tax),
@@ -63,8 +69,9 @@ def invoice_source_detail(group: dict[str, Any]) -> dict[str, Any]:
         "amount": source_money(single.amount) if single else "",
         "taxAmount": source_money(single.tax_amount) if single else "",
         "totalWithTax": source_money(single.total_with_tax) if single else "",
-        "taxRate": primary.tax_rate,
-        "inferredFields": [PUBLIC_FIELDS[key] for key in primary.inferred_fields],
+        "taxRate": primary.tax_rate if single else invoice_financial_summary(lines)["taxRate"],
+        "_sourceLineItems": primary.source_line_items if single else [],
+        "inferredFields": [PUBLIC_FIELDS[key] for key in primary.inferred_fields] if single else [],
         "taxClassificationCode": primary.tax_classification_code,
         "specificBusinessType": primary.specific_business_type,
         "taxableItemName": primary.taxable_item_name,
@@ -125,12 +132,12 @@ SOURCE_FIELD_GROUPS = {
     "invoice": (
         ("发票信息", (("digitalInvoiceNo", "数电发票号码"), ("invoiceNo", "发票号码"), ("invoiceCode", "发票代码"), ("invoiceDate", "开票日期"), ("invoiceKind", "发票票种"), ("invoiceSource", "发票来源"), ("invoiceStatus", "发票状态"), ("isPositiveInvoice", "是否正数发票"), ("riskLevel", "发票风险等级"), ("issuer", "开票人"))),
         ("购销双方", (("sellerName", "销方名称"), ("sellerTaxNo", "销方识别号"), ("buyerName", "购买方名称"), ("buyerTaxNo", "购买方识别号"))),
-        ("金额与税额", (("amount", "不含税金额"), ("taxRate", "税率"), ("taxAmount", "税额"), ("totalWithTax", "价税合计"))),
+        ("金额与税额", (("amount", "不含税金额"), ("taxRate", "税率"), ("taxAmount", "税额"), ("totalWithTax", "价税合计"), ("financialIssue", "核对说明"))),
         ("业务信息", (("taxClassificationCode", "税收分类编码"), ("specificBusinessType", "特定业务类型"), ("taxableItemName", "货物或应税劳务名称"), ("remark", "备注"))),
     ),
     "oa": (("申请信息", (("applicantName", "申请人"), ("applicationType", "OA类型"), ("projectName", "项目名称"), ("amount", "金额"), ("reason", "申请事由"), ("counterpartyName", "收款方"))),),
 }
-INVOICE_LINE_FIELDS = (("taxableItemName", "货物或应税劳务名称"), ("taxClassificationCode", "税收分类编码"), ("specificBusinessType", "特定业务类型"), ("specificationModel", "规格型号"), ("unit", "单位"), ("quantity", "数量"), ("unitPrice", "单价"), ("amount", "金额"), ("taxRate", "税率"), ("taxAmount", "税额"), ("totalWithTax", "价税合计"), ("remark", "备注"))
+INVOICE_LINE_FIELDS = (("taxableItemName", "货物或应税劳务名称"), ("taxClassificationCode", "税收分类编码"), ("specificBusinessType", "特定业务类型"), ("specificationModel", "规格型号"), ("unit", "单位"), ("quantity", "数量"), ("unitPrice", "单价"), ("amount", "金额"), ("taxRate", "税率"), ("taxAmount", "税额"), ("totalWithTax", "价税合计"), ("financialIssue", "核对说明"), ("remark", "备注"))
 
 
 def source_detail_sections(kind: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -141,12 +148,14 @@ def source_detail_sections(kind: str, payload: dict[str, Any]) -> list[dict[str,
                 amount=data.get("amount"), tax_amount=data.get("taxAmount"),
                 total_with_tax=data.get("totalWithTax"), tax_rate=data.get("taxRate"),
                 inferred_fields=[key for key, public in PUBLIC_FIELDS.items() if public in data.get("inferredFields", [])],
-                specific_business_type=data.get("specificBusinessType"),
+                source_line_items=data.pop("_sourceLineItems", []),
             )
             for key, public in PUBLIC_FIELDS.items():
                 value = getattr(values, key)
-                data[public] = value if key == "tax_rate" else source_money(value)
+                data[public] = values.rate_label if key == "tax_rate" else source_money(value)
             data["inferredFields"] = [PUBLIC_FIELDS[key] for key in values.inferred_fields]
+            if values.issue:
+                data["financialIssue"] = values.issue
     if kind not in SOURCE_FIELD_GROUPS:
         raise ValueError(f"Unknown source detail kind: {kind}")
     identifier = str(payload.get("oaId") if kind == "oa" else payload.get("id") or "")
@@ -355,11 +364,20 @@ def query_source_detail(kind: str, row: dict[str, Any]) -> dict[str, Any]:
                 payload.update(amount=row["debit_amount"], direction="outflow")
         if kind == "invoice":
             payload["inferredFields"] = [PUBLIC_FIELDS[key] for key in row.get("inferred_fields", [])]
+            payload["_sourceLineItems"] = row.get("source_line_items") or []
             lines = row.get("line_items") or [row]
             payload["lineItems"] = [{target: line.get(source) for source, target in QUERY_SOURCE_KEYS[kind].items()} for line in lines]
             for data, source in zip(payload["lineItems"], lines, strict=True):
                 data["inferredFields"] = [PUBLIC_FIELDS[key] for key in source.get("inferred_fields", [])]
+                data["_sourceLineItems"] = source.get("source_line_items") or []
             if len(lines) > 1:
+                payload["taxRate"] = combine_invoice_tax_rates(resolve_invoice_financial_values(
+                    amount=line.get("amount_without_tax"), tax_amount=line.get("tax_amount"),
+                    total_with_tax=line.get("total_with_tax"), tax_rate=line.get("tax_rate"),
+                    inferred_fields=line.get("inferred_fields") or (), source_line_items=line.get("source_line_items") or [],
+                ).tax_rate for line in lines)
+                payload["_sourceLineItems"] = []
+                payload["inferredFields"] = []
                 for key in ("amount", "taxAmount", "totalWithTax"):
                     payload[key] = None
     for data in [payload, *payload.get("lineItems", [])]:

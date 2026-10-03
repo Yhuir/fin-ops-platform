@@ -188,14 +188,14 @@ test('invoice grid uses source summaries, preserves identities and scroll, and h
 
 test('derived invoice values retain their numeric text and a visible subtle provenance suffix', () => {
   const section = {...invoiceDocuments[0], title: '金额与税额', fields: [
-    {label: '税率', value: '13%（推算）'},
+    {label: '税率', value: '无法确定'},
     {label: '不含税金额', value: '1884674.86（推算）'},
     {label: '税额', value: '245007.73'},
   ]};
   render(<EntityDetailContent sections={[section]} />);
-  expect(screen.getByRole('cell', {name: '13% （推算）'})).toBeVisible();
+  expect(screen.getByRole('cell', {name: '无法确定'})).toBeVisible();
   expect(screen.getByRole('cell', {name: '1884674.86 （推算）'})).toBeVisible();
   expect(screen.getByRole('cell', {name: '245007.73'})).toBeVisible();
-  expect(screen.getAllByText('（推算）')).toHaveLength(2);
-  expect(screen.getByTitle('按税额与不含税金额计算的比例，不代表已核实的票面税率')).toBeVisible();
+  expect(screen.getAllByText('（推算）')).toHaveLength(1);
+  expect(screen.getByTitle('由同票其余金额计算')).toBeVisible();
 });

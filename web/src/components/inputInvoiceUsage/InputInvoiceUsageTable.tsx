@@ -446,12 +446,7 @@ export default function InputInvoiceUsageTable({
               <HeaderCell label={filterMenu("seller_name", "销方名称")} separated />
               <HeaderCell
                 align="right"
-                label={(
-                  <>
-                    <span>价税合计</span>
-                    <span>不含税/税率税额</span>
-                  </>
-                )}
+                label="价税合计/税率"
                 separated
               />
               <HeaderCell label="货物或应税劳务名称" separated />
@@ -539,10 +534,8 @@ export default function InputInvoiceUsageTable({
                     <div className="input-invoice-usage-cell-secondary">{row.invoice.sellerTaxNo || "-"}</div>
                   </FinanceTableCell>
                   <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--amount input-invoice-usage-table-cell--separator" columnRole="amount">
-                    <div className="input-invoice-usage-money-primary">{formatMoney(row.invoice.totalWithTax, "—") + (row.invoice.inferredFields?.includes("totalWithTax") ? "（推算）" : "")}</div>
-                    <div className="input-invoice-usage-cell-secondary">
-                      {`${formatMoney(row.invoice.amountWithoutTax, "—")}${row.invoice.inferredFields?.includes("amount") ? "（推算）" : ""} ${row.invoice.taxRate || "-"} (${formatMoney(row.invoice.taxAmount, "—")}${row.invoice.inferredFields?.includes("taxAmount") ? "（推算）" : ""})`}
-                    </div>
+                    <div className="input-invoice-usage-money-primary input-invoice-usage-invoice-total">{formatMoney(row.invoice.totalWithTax, "—") + (row.invoice.inferredFields?.includes("totalWithTax") ? "（推算）" : "")}</div>
+                    <div className="input-invoice-usage-cell-secondary input-invoice-usage-tax-rate">{row.invoice.taxRate}</div>
                   </FinanceTableCell>
                   <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" columnRole="description">
                     <ExpandableCellText

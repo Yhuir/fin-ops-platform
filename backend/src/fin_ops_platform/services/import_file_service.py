@@ -35,6 +35,11 @@ from fin_ops_platform.services.import_preview_audit import (
 )
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.invoice_financial_values import resolve_invoice_financial_values
+from fin_ops_platform.services.output_invoice_tax_rate import (
+    MULTIPLE_TAX_RATES,
+    UNKNOWN_TAX_RATE,
+    combine_invoice_tax_rates,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -2156,7 +2161,6 @@ def aggregate_invoice_line_rows(rows: list[dict[str, Any]]) -> list[dict[str, An
             financial_rows = [resolve_invoice_financial_values(
                 amount=clean(row.get("amount")).replace(",", ""), tax_amount=clean(row.get("tax_amount")).replace(",", ""),
                 total_with_tax=clean(row.get("total_with_tax")).replace(",", ""), tax_rate=row.get("tax_rate"),
-                specific_business_type=row.get("specific_business_type"),
             ) for row in line_rows]
         except ValueError:
             aggregated.extend(line_rows)
@@ -2174,9 +2178,8 @@ def aggregate_invoice_line_rows(rows: list[dict[str, Any]]) -> list[dict[str, An
                 "source_line_items": [dict(row) for row in line_rows],
             }
         )
-        tax_rates = {clean(row.get("tax_rate")) for row in line_rows if clean(row.get("tax_rate"))}
-        merged["tax_rate"] = (next(iter(tax_rates)) if len(tax_rates) == 1 and all(clean(row.get("tax_rate")) for row in line_rows)
-                              else "mixed" if tax_rates else None)
+        rate = combine_invoice_tax_rates(row.tax_rate for row in financial_rows)
+        merged["tax_rate"] = None if rate == UNKNOWN_TAX_RATE else "mixed" if rate == MULTIPLE_TAX_RATES else rate
         aggregated.append(merged)
     return aggregated
 

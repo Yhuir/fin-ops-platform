@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from decimal import Decimal
 
@@ -75,6 +76,7 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
             ("-1884674.86", "-245007.73", "-2129682.59", None),
             ("94.34", "5.66", "100", None), ("100", "13", "113", "0.13"),
             ("100", None, "113", "13%"), (None, "13", "113", "13%"),
+            ("0.004", None, "0.005", "13%"),
             ("100", "13", None, "13%"), ("100", "13", "120", None),
             ("100", None, "106", "13%"), (None, "6", "106", "13%"),
             ("0", "0", "0", None), ("100", "0", "100", None),
@@ -95,7 +97,7 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
                     self.assertEqual(row[field], getattr(expected, field))
                 self.assertEqual(row["tax_rate"], expected.rate_label)
 
-    def test_historical_rate_filter_detail_and_export_match_without_writes(self):
+    def test_historical_missing_rate_filter_and_export_are_unknown_without_writes(self):
         self.connection.execute("""insert into app.invoices(legacy_mongo_id, invoice_type, invoice_no,
             invoice_date, invoice_month, buyer_name, amount, signed_amount, tax_amount, total_with_tax, status)
             values ('derived-output', 'output', 'derived-001', '2026-10-03', '2026-10-01', '公司',
@@ -104,23 +106,91 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
             repository=PostgresOutputInvoiceCollectionQueryRepository(self.connection),
             row_assembler=OutputInvoiceCollectionQueryService(import_service=ImportNormalizationService()),
         )
-        payload = service.list_rows(filters=[{"field": "tax_rate", "operator": "in", "values": ["13%（推算）"]}])
+        payload = service.list_rows(filters=[{"field": "tax_rate", "operator": "in", "values": ["无法确定"]}])
         self.assertEqual(payload["pagination"]["total"], 1)
         [row] = payload["rows"]
-        self.assertEqual(row["invoice"]["taxRate"], "13%（推算）")
-        self.assertEqual(row["invoice"]["inferredFields"], ["taxRate"])
+        self.assertEqual(row["invoice"]["taxRate"], "无法确定")
+        self.assertEqual(row["invoice"]["inferredFields"], [])
         self.assertEqual(payload["summary"]["totalWithTax"], "2129682.59")
         self.assertEqual(service.list_rows(filters=[{"field": "tax_rate", "operator": "in", "values": ["13%"]}])["pagination"]["total"], 0)
+        self.assertEqual(service.list_rows(filters=[{"field": "tax_rate", "operator": "in", "values": ["13%（推算）"]}])["pagination"]["total"], 0)
         self.assertIsNone(self.connection.fetch_one("select tax_rate from app.invoices where legacy_mongo_id='derived-output'")["tax_rate"])
         exported = OutputInvoiceCollectionQueryService._export_row(1, row)
-        self.assertEqual(exported["税率"], "13%（推算）")
+        self.assertEqual(exported["税率"], "无法确定")
         self.assertEqual(exported["价税合计"], Decimal("2129682.59"))
+
+    def test_source_line_rate_evidence_matches_python_and_sql(self):
+        known = {"amount": "100", "tax_amount": "13", "total_with_tax": "113", "tax_rate": "0.13"}
+        missing = {**known, "tax_rate": None}
+        other = {"amount": "100", "tax_amount": "6", "total_with_tax": "106", "tax_rate": "6%"}
+        cases = [
+            ("200", "26", "226", None, [known, {**known, "tax_rate": "13.00%"}], [], "13%"),
+            ("200", "26", "226", "mixed", [known, missing], [], "无法确定"),
+            ("200", "19", "219", "mixed", [known, other], [], "多税率"),
+            ("300", "32", "332", None, [known, other, missing], [], "多税率"),
+            ("200", "26", "226", None, [known], [], "无法确定"),
+            ("100", "13", "113", "6%", [known], [], "无法确定"),
+            ("100", "13", "113", "13%", [missing], [], "13%"),
+            ("100", "13", "113", "13%", [], ["amount", "tax_rate"], "无法确定"),
+            ("100", "13", "113", "13%", [known], ["tax_rate"], "13%"),
+            ("100", "13", "113", None, [{**known, "total_with_tax": "114"}], [], "无法确定"),
+            ("1000", "130", "1130", None, [{**known, "amount": "1,000", "tax_amount": "130", "total_with_tax": "1,130"}], [], "13%"),
+            ("100", "0", "100", None, [{**known, "tax_rate": "免税", "tax_amount": "0", "total_with_tax": "100"}], [], "免税"),
+        ]
+        cases.extend([
+            ("100", None, None, None, [{"amount": "100", "total_with_tax": "90", "tax_rate": "13%"}], [], "无法确定"),
+            ("0.004", "0.004", None, None, [{"amount": "0.001", "tax_amount": "0.001", "total_with_tax": "0.002", "tax_rate": "13%"}], [], "无法确定"),
+        ])
+        fields = invoice_financial_sql("invoice")
+        sql = "select " + ", ".join(f"{expr} as {field}" for field, expr in fields.items()) + """
+            from (select %s::numeric as amount, %s::numeric as tax_amount,
+                %s::numeric as total_with_tax, %s::text as tax_rate, %s::jsonb as raw_payload) invoice
+        """
+        for a, t, g, rate, lines, inferred, expected_rate in cases:
+            with self.subTest(header=rate, lines=lines, inferred=inferred):
+                payload = {"normalized_payload": {"source_line_items": lines, "inferred_fields": inferred}}
+                row = self.connection.fetch_one(sql, (a, t, g, rate, json.dumps(payload)))
+                resolved = resolve_invoice_financial_values(amount=a, tax_amount=t, total_with_tax=g,
+                    tax_rate=rate, inferred_fields=inferred, source_line_items=lines)
+                self.assertEqual(row["tax_rate"], expected_rate)
+                self.assertEqual(resolved.rate_label, expected_rate)
+                self.assertNotIn("tax_rate", resolved.inferred_fields)
+                for field in ("amount", "tax_amount", "total_with_tax"):
+                    self.assertEqual(row[field], getattr(resolved, field))
+
+    def test_rate_filter_uses_whole_input_relation_group(self):
+        self.connection.execute("""insert into app.invoices(legacy_mongo_id, invoice_type, invoice_no,
+            invoice_date, invoice_month, seller_name, amount, signed_amount, tax_amount, total_with_tax, tax_rate, status)
+            values ('rate-known', 'input', 'RATE-1', '2026-10-04', '2026-10-01', '供应商', 100, 100, 13, 113, '13%%', 'pending'),
+                ('rate-unknown', 'input', 'RATE-2', '2026-10-04', '2026-10-01', '供应商', 100, 100, 13, 113, null, 'pending')""")
+        self.connection.execute("""insert into app.workbench_pair_relations(case_id, relation_mode, status,
+            version, month_scope, row_ids, row_types, amount_check, special_metadata, raw_payload)
+            values ('rate-group', 'manual', 'active', 1, '2026-10-01', array['rate-known','rate-unknown'],
+                array['input_invoice','input_invoice'], '{}'::jsonb, '{}'::jsonb, '{}'::jsonb)""")
+        service = InputInvoiceUsageCanonicalQueryService(
+            repository=PostgresInputInvoiceUsageQueryRepository(self.connection),
+            row_assembler=InputInvoiceUsageQueryService(
+                import_service=ImportNormalizationService(),
+                payment_rules_provider=_UnexpectedPaymentRulesProvider(),
+            ),
+        )
+        def filtered(rate):
+            return service.list_rows(filters=[{"field": "tax_rate", "operator": "in", "values": [rate]}], include_statistics=False)
+        unknown = filtered("无法确定")
+        self.assertEqual(unknown["pagination"]["total"], 1)
+        self.assertEqual(unknown["rows"][0]["invoice"]["taxRate"], "无法确定")
+        self.assertEqual(unknown["rows"][0]["invoice"]["totalWithTax"], "226.00")
+        self.assertEqual(filtered("13%")["pagination"]["total"], 0)
+        self.connection.execute("update app.invoices set tax_rate=%s where legacy_mongo_id='rate-unknown'", ("6%",))
+        self.assertEqual(filtered("多税率")["rows"][0]["invoice"]["taxRate"], "多税率")
+        self.assertEqual(filtered("13%")["pagination"]["total"], 0)
 
     def test_import_missing_amount_round_trips_provenance_through_postgres(self):
         repository = PostgresCoreRepository(self.connection)
         importer = ImportNormalizationService(fact_repository=repository)
         raw = {"invoice_no": "12345678901234567891", "counterparty_name": "供应商", "invoice_date": "2026-10-03",
                "amount": None, "tax_amount": "13", "total_with_tax": "113", "tax_rate": "13%"}
+        raw["source_line_items"] = [{"amount": "100", "tax_amount": "13", "total_with_tax": "113", "tax_rate": "13%"}]
         normalized, errors = importer._normalize_invoice_row(batch_type=BatchType.INPUT_INVOICE, raw_row=raw)
         self.assertEqual(errors, [])
         invoice = importer._build_invoice_from_normalized(BatchType.INPUT_INVOICE, "test-batch", normalized)
@@ -128,6 +198,7 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
         loaded = repository.get_invoice(invoice.id)
         self.assertEqual(loaded.amount, Decimal("100"))
         self.assertEqual(loaded.inferred_fields, ["amount"])
+        self.assertEqual(loaded.source_line_items, raw["source_line_items"])
         from fin_ops_platform.services.source_record_details import invoice_source_detail
         detail = invoice_source_detail({"primary": loaded, "line_items": [loaded], "identity_key": "test"})
         self.assertIn("100.00（推算）", [field["value"] for section in detail["sections"] for field in section["fields"]])

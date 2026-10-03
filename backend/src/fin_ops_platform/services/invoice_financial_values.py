@@ -1,12 +1,16 @@
-"""发票四要素的有界补算；保留原值，推算比例不是来源税率。"""
+"""发票金额加减补齐与来源税率判定；不把金额比例当作税率。"""
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
-from fin_ops_platform.services.output_invoice_tax_rate import normalize_output_tax_rate
+from fin_ops_platform.services.output_invoice_tax_rate import (
+    MULTIPLE_TAX_RATES,
+    UNKNOWN_TAX_RATE,
+    combine_invoice_tax_rates,
+    normalize_output_tax_rate,
+)
 
 MONEY_FIELDS = ("amount", "tax_amount", "total_with_tax")
 PUBLIC_FIELDS = {"amount": "amount", "tax_amount": "taxAmount", "total_with_tax": "totalWithTax", "tax_rate": "taxRate"}
@@ -24,15 +28,15 @@ class InvoiceFinancialValues:
 
     @property
     def rate_label(self) -> str:
-        label = normalize_output_tax_rate(self.tax_rate)
-        return label + ("（推算）" if "tax_rate" in self.inferred_fields else "")
+        return normalize_output_tax_rate(self.tax_rate)
 
 
 def resolve_invoice_financial_values(
     *, amount: Any, tax_amount: Any, total_with_tax: Any, tax_rate: Any,
-    inferred_fields: tuple[str, ...] | list[str] = (), specific_business_type: Any = None,
+    inferred_fields: tuple[str, ...] | list[str] = (),
+    source_line_items: list[dict[str, Any]] | None = None,
 ) -> InvoiceFinancialValues:
-    """只用同一粒度的原始金额。缺一项金额时做加减；税率仅用三个原始金额推算。"""
+    """同粒度金额缺一项时做加减；税率只读取来源字段或有覆盖证据的来源明细。"""
     values: dict[str, Decimal | None] = {}
     for key, raw in zip(MONEY_FIELDS, (amount, tax_amount, total_with_tax), strict=True):
         if raw is None or (isinstance(raw, str) and not raw.strip()):
@@ -45,8 +49,7 @@ def resolve_invoice_financial_values(
         if not number.is_finite():
             raise ValueError(f"Invalid invoice {key}")
         values[key] = number
-    rate = str(tax_rate).strip() if tax_rate is not None else ""
-    inferred = set(inferred_fields)
+    inferred = set(inferred_fields) - {"tax_rate"}
     missing = [key for key, value in values.items() if value is None]
     if len(missing) == 1:
         key = missing[0]
@@ -61,31 +64,54 @@ def resolve_invoice_financial_values(
             issue = "金额、税额与价税合计不一致"
         elif a * t < 0 or a * g < 0:
             issue = "发票金额与税额符号不一致"
-        elif (missing and not str(specific_business_type or "").strip()
-              and re.fullmatch(r"[0-9]+(?:\.[0-9]+)?%", normalize_output_tax_rate(rate))
-              and abs(a * Decimal(normalize_output_tax_rate(rate)[:-1]) / 100 - t) > CENT):
-            issue = "来源税率与金额不一致"
-        elif (not rate and not inferred.intersection(MONEY_FIELDS) and a != 0 and t != 0
-              and not str(specific_business_type or "").strip()):
-            # 优先两位小数百分比，必须能按分复算原税额；否则保留六位。
-            percentage = (t / a * 100).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
-            compact = (t / a * 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            if (a * compact / 100).quantize(CENT, rounding=ROUND_HALF_UP) == t.quantize(CENT, rounding=ROUND_HALF_UP):
-                percentage = compact
-            rate = format(percentage, "f").rstrip("0").rstrip(".") + "%"
-            inferred.add("tax_rate")
     if issue and missing:
         values[missing[0]] = None
         inferred.discard(missing[0])
-    return InvoiceFinancialValues(**values, tax_rate=rate or None,
-                                  inferred_fields=tuple(sorted(inferred)), issue=issue)
+    rate, rate_issue = _source_tax_rate(tax_rate, inferred_fields, source_line_items or [], values)
+    return InvoiceFinancialValues(**values, tax_rate=rate,
+                                  inferred_fields=tuple(sorted(inferred)), issue=issue or rate_issue)
+
+
+def _source_tax_rate(
+    raw_rate: Any, inferred_fields: tuple[str, ...] | list[str],
+    source_lines: list[dict[str, Any]], totals: dict[str, Decimal | None],
+) -> tuple[str | None, str | None]:
+    header = normalize_output_tax_rate(None if "tax_rate" in inferred_fields else raw_rate)
+    if not source_lines:
+        return (None if header == UNKNOWN_TAX_RATE else header), None
+    lines = [resolve_invoice_financial_values(
+        **{field: str(line[field]).replace(",", "") if line.get(field) is not None else None for field in MONEY_FIELDS},
+        tax_rate=line.get("tax_rate"),
+        inferred_fields=line.get("inferred_fields") or (),
+    ) for line in source_lines]
+    labels = {line.rate_label for line in lines}
+    known = labels - {UNKNOWN_TAX_RATE}
+    if header not in {UNKNOWN_TAX_RATE, MULTIPLE_TAX_RATES}:
+        if known - {header}:
+            return None, "来源税率与明细税率不一致"
+        return header, None
+    if MULTIPLE_TAX_RATES in known or len(known) > 1:
+        return MULTIPLE_TAX_RATES, None
+    if UNKNOWN_TAX_RATE in labels or not known or any(line.issue for line in lines):
+        return None, None
+    # 原始明细必须覆盖已知整票金额，不能把局部的一种税率当作整票税率。
+    available = [(field, amount) for field, amount in totals.items() if amount is not None]
+    if not available:
+        return None, None
+    for field, amount in available:
+        parts = [getattr(line, field) for line in lines]
+        if any(part is None for part in parts):
+            return None, None
+        if sum(parts, Decimal("0")).quantize(CENT, rounding=ROUND_HALF_UP) != amount.quantize(CENT, rounding=ROUND_HALF_UP):
+            return None, None
+    return next(iter(known)), None
 
 
 def invoice_financial_values(invoice: Any) -> InvoiceFinancialValues:
     return resolve_invoice_financial_values(
         amount=invoice.amount, tax_amount=invoice.tax_amount, total_with_tax=invoice.total_with_tax,
         tax_rate=invoice.tax_rate, inferred_fields=invoice.inferred_fields,
-        specific_business_type=invoice.specific_business_type,
+        source_line_items=invoice.source_line_items,
     )
 
 
@@ -96,10 +122,7 @@ def invoice_financial_summary(lines: list[Any]) -> dict[str, Any]:
         parts = [getattr(value, field) for value in values]
         result[PUBLIC_FIELDS[field]] = (format(sum(parts, Decimal("0")), ".2f")
                                        if all(part is not None for part in parts) else "")
-    labels = {normalize_output_tax_rate(value.tax_rate) for value in values}
-    result["taxRate"] = next(iter(labels)) if len(labels) == 1 else "多税率"
-    if len(labels) == 1 and any("tax_rate" in value.inferred_fields for value in values):
-        result["taxRate"] += "（推算）"
+    result["taxRate"] = combine_invoice_tax_rates(value.tax_rate for value in values)
     result["inferredFields"] = sorted({PUBLIC_FIELDS[field] for value in values for field in value.inferred_fields})
     result["amountWithoutTax"] = result["amount"]
     return result

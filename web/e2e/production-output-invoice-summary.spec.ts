@@ -62,7 +62,8 @@ test('production output tax filters, totals, details and export remain consisten
   await page.setViewportSize({width:1600,height:1000});
   const rates = payload.filterOptions.find((item:{field:string})=>item.field==='tax_rate').options;
   expect(rates.some((item:{value:string})=>/^0\.\d+$/.test(item.value))).toBe(false);
-  const selected = rates.find((item:{value:string})=>item.value==='13%') ?? rates[0];
+  expect(rates.some((item:{value:string})=>item.value.includes('（推算）'))).toBe(false);
+  const selected = rates.find((item:{value:string})=>item.value==='13%');
   expect(selected).toBeTruthy();
   await page.getByRole('button',{name:'筛选 税率',exact:true}).click();
   const filteredResponse = rowsResponse();
@@ -92,7 +93,7 @@ test('production output tax filters, totals, details and export remain consisten
 });
 
 
-test('production inferred rate agrees across rows, filters, source detail and export', async ({page}, info) => {
+test('production missing source rate stays unknown across rows, filters, source detail and export', async ({page}, info) => {
   test.skip(!enabled || !token, 'Requires production read-only verification and local token.');
   test.setTimeout(120_000);
   await page.context().addCookies([{name:'Admin-Token',value:token!,domain:'www.yn-sourcing.com',path:'/',secure:true,sameSite:'Lax'}]);
@@ -105,29 +106,29 @@ test('production inferred rate agrees across rows, filters, source detail and ex
   await page.goto('/fin-ops/output-invoice-collections');
   const payload = await (await first).json();
   const sample = payload.rows.find((r:{invoice:{invoiceNo:string; digitalInvoiceNo:string}})=>[r.invoice.invoiceNo,r.invoice.digitalInvoiceNo].includes('26532000001691977231'));
-  expect(sample.invoice.taxRate).toBe('13%（推算）');
-  expect(sample.invoice.inferredFields).toContain('taxRate');
+  expect(sample.invoice.taxRate).toBe('无法确定');
+  expect(sample.invoice.inferredFields).not.toContain('taxRate');
   expect(sample.invoice.totalWithTax).toBe('2129682.59');
-  await expect(page.getByText('13%（推算）',{exact:true}).first()).toBeVisible();
-  await page.screenshot({path:info.outputPath('production-derived-list.png'),animations:'disabled'});
+  await expect(page.getByText('无法确定',{exact:true}).first()).toBeVisible();
+  await page.screenshot({path:info.outputPath('production-unknown-rate-list.png'),animations:'disabled'});
   await page.getByRole('button',{name:'查看发票 26532000001691977231 详情',exact:true}).click();
   const drawer = page.getByRole('dialog',{name:'发票详情',exact:true});
-  await expect(drawer.getByRole('cell',{name:'13%（推算）',exact:true}).first()).toBeVisible();
+  await expect(drawer.getByRole('cell',{name:'无法确定',exact:true}).first()).toBeVisible();
   await expect(drawer.getByRole('cell',{name:'1884674.86',exact:true}).first()).toBeVisible();
-  await page.screenshot({path:info.outputPath('production-derived-detail.png'),animations:'disabled'});
+  await page.screenshot({path:info.outputPath('production-unknown-rate-detail.png'),animations:'disabled'});
   await drawer.getByRole('button',{name:'关闭详情抽屉'}).click();
-  const option = payload.filterOptions.find((f:{field:string})=>f.field==='tax_rate').options.find((o:{value:string})=>o.value==='13%（推算）');
+  const option = payload.filterOptions.find((f:{field:string})=>f.field==='tax_rate').options.find((o:{value:string})=>o.value==='无法确定');
   await page.getByRole('button',{name:'筛选 税率',exact:true}).click();
   const selected = page.waitForResponse(r=>new URL(r.url()).pathname==='/fin-ops-api/api/output-invoice-collections/rows');
   await page.locator('label').filter({has:page.getByRole('checkbox',{name:`${option.label} ${option.count}`,exact:true})}).click();
   const filtered = await (await selected).json();
   expect(filtered.pagination.total).toBe(option.count);
-  for (const row of filtered.rows) expect(row.invoice.taxRate).toBe('13%（推算）');
-  await page.screenshot({path:info.outputPath('production-derived-filter.png'),animations:'disabled'});
+  for (const row of filtered.rows) expect(row.invoice.taxRate).toBe('无法确定');
+  await page.screenshot({path:info.outputPath('production-unknown-rate-filter.png'),animations:'disabled'});
   await page.keyboard.press('Escape');
   const preview = page.waitForResponse(r=>new URL(r.url()).pathname==='/fin-ops-api/api/output-invoice-collections/export-summary');
   await page.getByRole('button',{name:'筛选内容导出'}).click();
   const response = await preview;
-  expect(decodeURIComponent(new URL(response.url()).searchParams.get('filters')!)).toContain('13%（推算）');
+  expect(decodeURIComponent(new URL(response.url()).searchParams.get('filters')!)).toContain('无法确定');
   expect((await response.json()).row_count).toBe(option.count);
 });

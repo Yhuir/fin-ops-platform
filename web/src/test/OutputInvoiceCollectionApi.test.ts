@@ -69,12 +69,12 @@ test.each(["", "unknown"])("rejects invalid row state %s without a pending fallb
 });
 
 
-test('preserves inferred rate filter identity and field provenance without polluting numeric amounts', async () => {
+test('preserves unknown rate and inferred monetary provenance without polluting numeric amounts', async () => {
   const value = payload();
-  value.rows[0].invoice = {...value.rows[0].invoice, taxRate: '13%（推算）', totalWithTax: '113.00', inferredFields: ['taxRate','totalWithTax']} as typeof value.rows[0]['invoice'];
+  value.rows[0].invoice = {...value.rows[0].invoice, taxRate: '无法确定', totalWithTax: '113.00', inferredFields: ['totalWithTax']} as typeof value.rows[0]['invoice'];
   mockResponse(value);
   const response = await fetchOutputInvoiceCollectionRows(request);
-  expect(response.rows[0].invoice.taxRate).toBe('13%（推算）');
+  expect(response.rows[0].invoice.taxRate).toBe('无法确定');
   expect(response.rows[0].invoice.totalWithTax).toBe('113.00');
-  expect(response.rows[0].invoice.inferredFields).toEqual(['taxRate','totalWithTax']);
+  expect(response.rows[0].invoice.inferredFields).toEqual(['totalWithTax']);
 });

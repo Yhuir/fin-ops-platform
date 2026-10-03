@@ -1440,9 +1440,10 @@ def _fact_cte(
                 case when bool_and(member.total_with_tax is not null) then sum(member.total_with_tax) end::numeric as total_with_tax,
                 case when bool_and(member.amount is not null) then sum(member.amount) end::numeric as amount,
                 case when bool_and(member.tax_amount is not null) then sum(member.tax_amount) end::numeric as tax_amount,
-                case when count(distinct replace(member.tax_rate, '（推算）', '')) = 1
-                    then min(replace(member.tax_rate, '（推算）', '')) || case when bool_or(member.tax_rate like '%%（推算）') then '（推算）' else '' end
-                    else '多税率' end as tax_rate,
+                case when bool_or(member.tax_rate = '多税率')
+                          or count(distinct member.tax_rate) filter (where member.tax_rate <> '无法确定') >= 2 then '多税率'
+                    when bool_or(member.tax_rate = '无法确定') then '无法确定'
+                    else min(member.tax_rate) end as tax_rate,
                 (array_agg(member.specific_business_type order by member.primary_rank))[1]
                     as specific_business_type,
                 (array_agg(member.taxable_item_name order by member.primary_rank))[1]
@@ -1809,6 +1810,8 @@ def _order_sql(
 ) -> str:
     column = field_sql[sort_field]
     direction = "asc" if sort_direction == "asc" else "desc"
+    if sort_field == "tax_rate":
+        return f"order by ({column} = '无法确定') asc, {column} {direction}, group_key asc"
     return f"order by {column} {direction} nulls last, group_key asc"
 
 

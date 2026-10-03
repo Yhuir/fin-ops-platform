@@ -8,7 +8,7 @@ function invoiceSections() {
     return [
       {title: '发票信息', fields: [{label: '数电发票号码', value: number}, {label: '开票日期', value: '2026-07-15'}, {label: '发票票种', value: '数电发票（普通发票）'}], ...metadata},
       {title: '购销双方', fields: [{label: '销方名称', value: '测试供应商有限公司'}, {label: '销方识别号', value: '915300000000000001'}, {label: '购买方名称', value: '测试科技有限公司'}, {label: '购买方识别号', value: '915300000000000002'}], ...metadata},
-      {title: '金额与税额', fields: [{label: '不含税金额', value: index ? '-2079.21' : '2079.21'}, {label: '税率', value: index ? '1%' : '1%（推算）'}, {label: '税额', value: index ? '-20.79' : '20.79'}, {label: '价税合计', value: index ? '-2100.00（推算）' : '2100.00'}], ...metadata},
+      {title: '金额与税额', fields: [{label: '不含税金额', value: index ? '-2079.21' : '2079.21'}, {label: '税率', value: index ? '1%' : '无法确定'}, {label: '税额', value: index ? '-20.79' : '20.79'}, {label: '价税合计', value: index ? '-2100.00（推算）' : '2100.00'}], ...metadata},
       {title: '业务信息', fields: [{label: '备注', value: '完整备注可换行。'.repeat(20)}], ...metadata},
     ];
   });
@@ -37,7 +37,7 @@ test('full invoice navigation, compact left-aligned values and one reachable scr
       await expect(drawer.getByRole('cell', {name: number, exact: true})).toBeVisible();
       await expect(drawer.getByRole('cell', {name: numbers[1-index], exact: true})).toHaveCount(0);
       await expect(drawer.getByRole('tabpanel')).toHaveCount(1);
-      await expect(drawer.getByRole('cell', {name: index ? '-2100.00（推算）' : '1%（推算）', exact: true})).toBeVisible();
+      await expect(drawer.getByRole('cell', {name: index ? '-2100.00（推算）' : '无法确定', exact: true})).toBeVisible();
       expect(await tab.evaluate(el => el.scrollWidth <= el.clientWidth && getComputedStyle(el).textOverflow !== 'ellipsis')).toBe(true);
     }
     await expect(drawer.locator('.entity-detail-row__amount').first()).toHaveCSS('text-align', 'left');

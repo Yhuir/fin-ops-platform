@@ -1664,6 +1664,15 @@ textarea {
   line-height: 1.35;
 }
 
+.input-invoice-usage-invoice-total {
+  font-size: 13px;
+}
+
+.input-invoice-usage-tax-rate {
+  min-height: 1.3em;
+  white-space: nowrap;
+}
+
 .input-invoice-usage-empty-value {
   color: var(--fp-text-muted);
   font-size: var(--fp-text-label);
@@ -3888,6 +3897,14 @@ textarea {
   color: var(--fp-text-primary);
   font-size: var(--fp-text-label);
   font-weight: 700;
+}
+
+.output-invoice-collection-filter-menu__notice {
+  margin: 8px 10px;
+  max-width: 240px;
+  color: var(--fp-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .output-invoice-collection-filter-menu__divider {

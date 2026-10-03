@@ -273,7 +273,7 @@ function DataRow({
       </FinanceTableCell>
       <FinanceTableCell className="output-invoice-collections-table-cell output-invoice-collections-table-cell--amount output-invoice-collections-table-cell--small-border" columnRole="amount" textValue={row.invoice.totalWithTax}>
         <span className="inline-flex items-baseline justify-end"><TextLine numeric strong value={formatMoney(row.invoice.totalWithTax, "—")} />{row.invoice.inferredFields?.includes("totalWithTax") && <small className="text-default-500">（推算）</small>}</span>
-        <span className="output-invoice-collections-tax-rate" title={row.invoice.inferredFields?.includes("taxRate") ? "按税额与不含税金额计算的比例，不代表已核实的票面税率" : undefined}>{row.invoice.taxRate}</span>
+        <span className="output-invoice-collections-tax-rate">{row.invoice.taxRate}</span>
       </FinanceTableCell>
       <FinanceTableCell className="output-invoice-collections-table-cell output-invoice-collections-table-cell--small-border" columnRole="description" textValue={businessTextValue}>
         <TextLine strong value={row.invoice.specificBusinessType} />

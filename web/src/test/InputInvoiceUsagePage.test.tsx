@@ -392,6 +392,21 @@ afterEach(() => {
 });
 
 describe("Input invoice usage page", () => {
+  test.each(["13%", "多税率", "无法确定"])("金额列仅显示价税合计和服务端税率结论：%s", async (taxRate) => {
+    installInputInvoiceUsageFetch({ ...rowsPayload, rows: rowsPayload.rows.map((row) => ({
+      ...row, invoice: { ...row.invoice, taxRate, inferredFields: ["totalWithTax"] },
+    })) });
+    renderAuthenticatedAppAt("/input-invoice-usage");
+    const table = await screen.findByRole("grid", { name: "进项发票使用情况表" });
+    expect(within(table).getByRole("columnheader", { name: "价税合计/税率" })).toBeVisible();
+    const invoiceRow = within(table).getByRole("row", { name: /SD-INV-2026-0001/ });
+    const amountCell = within(invoiceRow).getByRole("gridcell", { name: `12345.67（推算） ${taxRate}` });
+    expect(amountCell).toHaveTextContent(`12345.67（推算）${taxRate}`);
+    expect(within(amountCell).getByText(taxRate)).toHaveClass("input-invoice-usage-cell-secondary");
+    expect(within(amountCell).queryByText(/11646.86|698.81/)).not.toBeInTheDocument();
+    expect(within(table).queryByText("不含税/税率税额")).not.toBeInTheDocument();
+  });
+
   test("targets project primitives for page shell, dense table, and workflow drawers", () => {
     const forbiddenMuiImports = inputInvoiceUsageSourceFiles.flatMap((path) => {
       const source = readWebSource(path);
@@ -592,7 +607,7 @@ describe("Input invoice usage page", () => {
 
     expect(await within(page).findByText("SD-INV-2026-0001")).toBeInTheDocument();
     expect(within(firstRowCells[2] as HTMLElement).getByText("12345.67")).toBeInTheDocument();
-    expect(within(firstRowCells[2] as HTMLElement).getByText("11646.86 6% (698.81)")).toBeInTheDocument();
+    expect(within(firstRowCells[2] as HTMLElement).getByText("6%")).toBeInTheDocument();
     expect(within(firstRowCells[3] as HTMLElement).getByText("很长很长的货物或应税劳务名称用于验证两行截断后出现展开按钮")).toBeInTheDocument();
     expect(within(page).getByText("2026-05-02")).toBeInTheDocument();
     const invoiceDetailButton = within(page).getByRole("button", { name: "查看发票 SD-INV-2026-0001 详情" });

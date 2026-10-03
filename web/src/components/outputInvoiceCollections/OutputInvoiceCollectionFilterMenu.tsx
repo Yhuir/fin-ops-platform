@@ -47,6 +47,9 @@ export default function OutputInvoiceCollectionFilterMenu({
   const [open, setOpen] = useState(false);
   const selectedValues = useMemo(() => resolveSelectedValues(currentFilter), [currentFilter]);
   const selectedSet = useMemo(() => new Set(selectedValues), [selectedValues]);
+  const retiredTaxRates = fieldConfig.field === "tax_rate"
+    ? selectedValues.filter((value) => value.includes("（推算）") || value === "未提供")
+    : [];
   const [operator, setOperator] = useState<"contains" | "equals" | "between">("contains");
   const [singleValue, setSingleValue] = useState("");
   const [minValue, setMinValue] = useState("");
@@ -184,6 +187,17 @@ export default function OutputInvoiceCollectionFilterMenu({
             <MenuAction onClick={() => applyMulti(options.map((option) => option.value))}>全选</MenuAction>
             <MenuAction onClick={() => onClear(fieldConfig.field)}>清空</MenuAction>
             <div className="output-invoice-collection-filter-menu__divider" role="separator" />
+            {retiredTaxRates.length > 0 ? (
+              <>
+                <p className="output-invoice-collection-filter-menu__notice" role="status">旧税率筛选条件已失效，请清除后重新选择。</p>
+                {retiredTaxRates.map((value) => (
+                  <Checkbox key={value} aria-label={`${value} 已失效`} className="output-invoice-collection-filter-menu__item" isSelected onChange={() => toggleMulti(value)} slot={null}>
+                    <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                    <span>{value} · 已失效</span>
+                  </Checkbox>
+                ))}
+              </>
+            ) : null}
             {options.length === 0 ? <DisabledChoice>暂无可选项</DisabledChoice> : null}
             {options.map((option) => (
               <Checkbox

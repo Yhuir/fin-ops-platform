@@ -393,6 +393,34 @@ afterEach(() => {
 });
 
 describe("销项发票收款情况", () => {
+  test.each(["13%（推算）", "未提供"])("恢复旧税率条件 %s 时不自动扩大查询，并提供明确清除入口", async (retiredRate) => {
+    const user = userEvent.setup();
+    const requests: URL[] = [];
+    installFetchMock((url) => {
+      requests.push(url);
+      return { ...rowsPayload, rows: [], pagination: { page: 1, page_size: 20, total: 0 },
+        filter_options: [...rowsPayload.filter_options, { field: "tax_rate", label: "税率", mode: "enum_multi", sortable: true, operators: ["in"], options: [{ value: "13%", label: "13%", count: 2 }] }],
+      };
+    });
+    window.sessionStorage.setItem(buildPageSessionStorageKey({ userScope: "101", pageKey: "output-invoice-collections", stateKey: "query" }),
+      JSON.stringify(createStoredPayload({ version: 2, ttlMs: 60_000, value: {
+        page: 1, pageSize: 20, keyword: "", month: "", invoiceDateFrom: "", invoiceDateTo: "",
+        filters: [{ field: "tax_rate", operator: "in", values: [retiredRate] }],
+        sortField: "", sortDirection: "", activeWorkflow: null, detailTarget: null,
+      } })));
+    renderAuthenticatedAppAt("/output-invoice-collections");
+    await screen.findByRole("grid", { name: "销项发票收款情况表" });
+    const currentFilters = () => JSON.parse(decodeURIComponent(requests.at(-1)?.searchParams.get("filters") ?? "[]"));
+    expect(currentFilters()).toEqual([{ field: "tax_rate", operator: "in", values: [retiredRate] }]);
+    await user.click(screen.getByRole("button", { name: "筛选 税率" }));
+    expect(await screen.findByText("旧税率筛选条件已失效，请清除后重新选择。")).toBeVisible();
+    const oldRate = screen.getByRole("checkbox", { name: `${retiredRate} 已失效` });
+    expect(oldRate).toBeChecked();
+    await user.click(oldRate);
+    await waitFor(() => expect(currentFilters()).toEqual([]));
+    expect(screen.queryByText("旧税率筛选条件已失效，请清除后重新选择。")).not.toBeInTheDocument();
+  });
+
   test("重进先清旧日期及范围关联详情，保留非日期条件，本次刷新不清月份", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();
@@ -503,7 +531,7 @@ describe("销项发票收款情况", () => {
       return {...rowsPayload,
         rows: rowsPayload.rows.map(row => ({...row,invoice:{...row.invoice,tax_rate:'13%'}})),
         summary: {invoiceCount:36,totalWithTax:'5680807.61',amountWithoutTax:'5030000.00',collectedAmount:'1991700.08'},
-        filter_options:[...rowsPayload.filter_options,{field:'tax_rate',label:'税率',mode:'enum_multi',sortable:true,operators:['in'],options:[{value:'13%',label:'13%',count:19},{value:'6%',label:'6%',count:9},{value:'未提供',label:'未提供',count:6}]}],
+        filter_options:[...rowsPayload.filter_options,{field:'tax_rate',label:'税率',mode:'enum_multi',sortable:true,operators:['in'],options:[{value:'13%',label:'13%',count:19},{value:'6%',label:'6%',count:9},{value:'无法确定',label:'无法确定',count:6}]}],
       };
     });
     renderAuthenticatedAppAt('/output-invoice-collections');
@@ -515,7 +543,7 @@ describe("销项发票收款情况", () => {
     await user.click(screen.getByRole('button',{name:'筛选 税率'}));
     await user.click(await screen.findByRole('checkbox',{name:/13%/}));
     await waitFor(() => expect(requests.at(-1)?.searchParams.get('filters')).toContain('13'));
-    expect(screen.getByRole('checkbox',{name:/未提供/})).toBeVisible();
+    expect(screen.getByRole('checkbox',{name:/无法确定/})).toBeVisible();
     await user.click(screen.getByRole('checkbox',{name:/6%/}));
     await waitFor(() => expect(JSON.parse(decodeURIComponent(requests.at(-1)!.searchParams.get('filters')!))[0].values).toEqual(['13%','6%']));
     expect(totals).toHaveTextContent('5680807.61');
