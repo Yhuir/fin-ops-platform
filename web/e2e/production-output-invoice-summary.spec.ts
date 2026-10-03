@@ -31,7 +31,7 @@ test('production output tax filters, totals, details and export remain consisten
   const pendingResponse = rowsResponse();
   await page.getByRole('tab',{name:`待收款 ${pendingOption.count} 张`,exact:true}).click();
   const pendingHttp = await pendingResponse;
-  expect(JSON.parse(new URL(pendingHttp.url()).searchParams.get('filters')!)).toEqual([
+  expect(JSON.parse(decodeURIComponent(new URL(pendingHttp.url()).searchParams.get('filters')!))).toEqual([
     {field:'collection_status',operator:'in',values:['pending_collection']},
   ]);
   const pending = await pendingHttp.json();
