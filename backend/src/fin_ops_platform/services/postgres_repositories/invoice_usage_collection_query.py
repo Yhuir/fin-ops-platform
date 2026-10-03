@@ -655,7 +655,7 @@ class PostgresOutputInvoiceCollectionQueryRepository:
             "unmatched_red": "红票未关联蓝票",
             "collected": "已收款",
             "partial_collected": "部分收款",
-            "pending_collection": "收款待核对",
+            "pending_collection": "待收款",
         }
         return InvoiceUsageCollectionCanonicalSnapshot(
             groups=facts["groups"],

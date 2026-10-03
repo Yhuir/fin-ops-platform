@@ -239,6 +239,10 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         )
 
         self.assertEqual(payload.pagination, {"page": 10, "pageSize": 200, "total": 0})
+        self.assertIn(
+            {"value": "pending_collection", "label": "待收款", "count": 0},
+            payload.facet_counts["collection_status"],
+        )
         self.assertEqual(len(connection.transactions), 1)
         statements = connection.transactions[0].statements
         self.assertEqual(len(statements), 3)
@@ -583,7 +587,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
                 },
             ],
             status_labels={
-                "pending_collection": "收款待核对",
+                "pending_collection": "待收款",
                 "reversed_by_red": "蓝票已被红冲",
                 "collected": "已收款",
             },
@@ -593,7 +597,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertEqual(
             counts["collection_status"],
             [
-                {"value": "pending_collection", "label": "收款待核对", "count": 1},
+                {"value": "pending_collection", "label": "待收款", "count": 1},
                 {"value": "reversed_by_red", "label": "蓝票已被红冲", "count": 2},
                 {"value": "collected", "label": "已收款", "count": 0},
             ],

@@ -1340,7 +1340,7 @@ def _collection_status_for_facts(
         )
     return _collection_status(
         "pending_collection",
-        "收款待核对",
+        "待收款",
         "尚无 canonical 配对的收入流水。",
         collected_amount=ZERO,
         pending_amount=expected,
@@ -1379,7 +1379,7 @@ def _collection_status_from_snapshot(group: dict[str, Any]) -> dict[str, Any]:
             "warning",
         ),
         "pending_collection": (
-            "收款待核对",
+            "待收款",
             "尚无唯一归属到该发票的 canonical 收入流水。",
             "pending",
         ),

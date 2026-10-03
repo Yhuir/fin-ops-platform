@@ -73,6 +73,9 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
             },
         )
         self.assertEqual(row["collectionStatus"]["code"], "pending_collection")
+        self.assertEqual(row["collectionStatus"]["label"], "待收款")
+        self.assertEqual(row["collectionStatus"]["collectedAmount"], "0.00")
+        self.assertEqual(row["collectionStatus"]["pendingAmount"], "100.00")
         self.assertNotIn("oa", row)
         self.assertNotIn("receipt", row)
         self.assertNotIn("redInvoiceRelation", row)

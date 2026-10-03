@@ -2,7 +2,7 @@ import { expect, test } from "./fixtures/strictTest";
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
 const states = [
-  ["pending_collection", "收款待核对"], ["partial_collected", "部分收款"], ["collected", "已收款"],
+  ["pending_collection", "待收款"], ["partial_collected", "部分收款"], ["collected", "已收款"],
   ["reversed_by_red", "蓝票已被红冲"], ["reverses_blue", "红票已关联蓝票"], ["unmatched_red", "红票未关联蓝票"],
 ] as const;
 
@@ -60,6 +60,13 @@ test("all status tabs use invoice counts, one query, and the same export filters
     expect(result.status()).toBe(200);
     expect(payload.pagination.total).toBe(count);
     expect(payload.rows.every((row: {collection_status:{code:string}}) => row.collection_status.code === code)).toBe(true);
+    if (code === 'pending_collection') {
+      // This fixture has no pending invoices; the renamed filter must retain the empty result.
+      expect(count).toBe(0);
+      await expect(page.locator('.output-invoice-collections-table-cell--status')).toHaveCount(0);
+      await expect(page.locator('.output-invoice-collections-group-header').nth(1)).toHaveText('收款状态');
+      await page.screenshot({ path: info.outputPath('pending-collection-label.png'), animations: 'disabled' });
+    }
     await expect(tabs.getByRole("tab", { name: `${label} ${count} 张` })).toHaveAttribute("aria-selected", "true");
     await expect(tabs.getByRole("tab", { name: `全部 ${scopeCount} 张` })).toBeVisible();
     expect(api.count("GET /api/output-invoice-collections/rows") - requestsBefore).toBe(1);

@@ -6326,7 +6326,7 @@ function outputInvoiceCollectionRowsPayload(
       },
       collection_status: {
         code: "pending_collection",
-        label: "收款待核对",
+        label: "待收款",
         reason: "发票导入后等待收入流水关系刷新。",
         collected_amount: "0.00",
         pending_amount: "65,540.00",
@@ -6508,7 +6508,7 @@ function outputInvoiceCollectionFilterOptionsPayload() {
           { value: "unmatched_red", label: "红票未关联蓝票", count: 0 },
           { value: "collected", label: "已收款", count: 0 },
           { value: "partial_collected", label: "部分收款", count: 0 },
-          { value: "pending_collection", label: "收款待核对", count: 1 },
+          { value: "pending_collection", label: "待收款", count: 1 },
         ],
       },
       {

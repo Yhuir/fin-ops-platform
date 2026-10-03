@@ -261,7 +261,7 @@ const rowsPayload = {
       displayNo: "XSFP-PENDING-001",
       totalWithTax: "62160.00",
       statusCode: "pending_collection",
-      statusLabel: "收款待核对",
+      statusLabel: "待收款",
       statusReason: "尚无 canonical 配对的收入流水。",
       collectedAmount: "0.00",
       pendingAmount: "62160.00",
@@ -329,7 +329,7 @@ const rowsPayload = {
         { value: "unmatched_red", label: "红票未关联蓝票", count: 1 },
         { value: "collected", label: "已收款", count: 1 },
         { value: "partial_collected", label: "部分收款", count: 1 },
-        { value: "pending_collection", label: "收款待核对", count: 1 },
+        { value: "pending_collection", label: "待收款", count: 1 },
       ],
     },
   ],
@@ -540,7 +540,7 @@ describe("销项发票收款情况", () => {
     const reversedBlueRow = within(table).getByRole("row", { name: /XSFP-BLUE-001/ });
     const reversesBlueRow = within(table).getByRole("row", { name: /XSFP-RED-001/ });
 
-    expect(within(pendingRow).getByText("收款待核对")).toBeVisible();
+    expect(within(pendingRow).getByText("待收款")).toBeVisible();
     expect(within(pendingRow).getByText("已收 0.00")).toHaveClass("output-invoice-collection-amount--collected");
     expect(within(pendingRow).getByText("待收 62160.00")).toHaveClass("output-invoice-collection-amount--pending");
 
@@ -622,7 +622,7 @@ describe("销项发票收款情况", () => {
     await screen.findByRole('grid', { name: '销项发票收款情况表' });
     expect(screen.queryByRole('button', { name: '筛选 状态' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('tab', { name: '已收款 1 张' }));
-    await user.click(screen.getByRole('tab', { name: '收款待核对 1 张' }));
+    await user.click(screen.getByRole('tab', { name: '待收款 1 张' }));
     await waitFor(() => {
       const url = new URL(String(fetchMock.mock.calls.at(-1)?.[0]), 'http://localhost');
       expect(JSON.parse(decodeURIComponent(url.searchParams.get('filters')!))).toEqual([{field:'collection_status',operator:'in',values:['pending_collection']}]);

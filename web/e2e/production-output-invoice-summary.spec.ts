@@ -25,6 +25,33 @@ test('production output tax filters, totals, details and export remain consisten
   await expect(totals).toContainText(`收入合计 ${payload.summary.collectedAmount}`);
   const firstVisibleMs = Date.now()-started;
   await expect(page.getByRole('tab',{name:/红票未关联蓝票/})).toBeVisible();
+  const statusOptions = payload.filterOptions.find((item:{field:string})=>item.field==='collection_status').options;
+  const pendingOption = statusOptions.find((item:{value:string})=>item.value==='pending_collection');
+  expect(pendingOption.label).toBe('待收款');
+  const pendingResponse = rowsResponse();
+  await page.getByRole('tab',{name:`待收款 ${pendingOption.count} 张`,exact:true}).click();
+  const pendingHttp = await pendingResponse;
+  expect(JSON.parse(new URL(pendingHttp.url()).searchParams.get('filters')!)).toEqual([
+    {field:'collection_status',operator:'in',values:['pending_collection']},
+  ]);
+  const pending = await pendingHttp.json();
+  expect(pending.pagination.total).toBe(pendingOption.count);
+  const statusCells = page.locator('.output-invoice-collections-table-cell--status');
+  await expect(statusCells).toHaveCount(pending.rows.length);
+  for (const [index,row] of pending.rows.entries()) {
+    expect(row.collectionStatus.code).toBe('pending_collection');
+    expect(row.collectionStatus.label).toBe('待收款');
+    expect(Number(row.collectionStatus.collectedAmount)).toBe(0);
+    expect(Number(row.collectionStatus.pendingAmount)).toBe(Math.abs(Number(row.invoice.totalWithTax)));
+    await expect(statusCells.nth(index).getByText('待收款',{exact:true})).toBeVisible();
+    await expect(statusCells.nth(index)).toContainText(`已收 ${row.collectionStatus.collectedAmount}`);
+    await expect(statusCells.nth(index)).toContainText(`待收 ${row.collectionStatus.pendingAmount}`);
+  }
+  await expect(page.locator('.output-invoice-collections-group-header').nth(1)).toHaveText('收款状态');
+  await page.screenshot({path:info.outputPath('production-pending-collection.png'),animations:'disabled'});
+  const allResponse = rowsResponse();
+  await page.getByRole('tab',{name:/^全部 \d+ 张$/}).click();
+  await allResponse;
   for (const width of [1920,1440,960]) {
     await page.setViewportSize({width,height:1000});
     const group = await page.locator('.output-invoice-collections-group-header').nth(1).boundingBox();

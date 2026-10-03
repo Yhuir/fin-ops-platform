@@ -5,7 +5,7 @@ import { OUTPUT_COLLECTION_STATUS_CODES } from "../features/outputInvoiceCollect
 
 const request = { page: 1, pageSize: 20, keyword: "", invoiceDateFrom: "", invoiceDateTo: "", month: "", filters: [], sortField: "", sortDirection: "" as const };
 const options = () => OUTPUT_COLLECTION_STATUS_CODES.map((value, index) => ({ value, label: `状态 ${index}`, count: index === 0 ? 3 : 0 }));
-const payload = () => ({ rows: [{ invoiceId: "invoice-1", collectionStatus: { code: "pending_collection", label: "收款待核对" } }],
+const payload = () => ({ rows: [{ invoiceId: "invoice-1", collectionStatus: { code: "pending_collection", label: "待收款" } }],
   filterOptions: [{ field: "collection_status", options: options() }], pagination: { page: 1, pageSize: 20, total: 3 } });
 function mockResponse(value: unknown) {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(value), { headers: { "Content-Type": "application/json" } }));
