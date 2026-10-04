@@ -105,7 +105,9 @@ def load_original_invoice_attachments(connection: Any, attachment_keys: list[str
     return rows
 
 
-def load_verified_financial_repair_snapshot(connection: Any, invoice_ids: list[str]) -> dict[str, Any]:
+def load_verified_financial_repair_snapshot(
+    connection: Any, invoice_ids: list[str], *, lock: bool = False,
+) -> dict[str, Any]:
     invoices = connection.fetch_all("""
         select coalesce(legacy_mongo_id,id::text) as invoice_id, invoice_type,
             invoice_no, invoice_code, digital_invoice_no, invoice_date::text,
@@ -113,7 +115,7 @@ def load_verified_financial_repair_snapshot(connection: Any, invoice_ids: list[s
             seller_name, seller_tax_no, buyer_name, buyer_tax_no, counterparty_name, source_links
         from app.invoices where coalesce(legacy_mongo_id,id::text)=any(%s::text[])
         order by id
-    """, (invoice_ids,))
+    """ + (" for update" if lock else ""), (invoice_ids,))
     caches = connection.fetch_all("""
         select cache.source_attachment_key, cache.invoices, cache.parser_version
         from app.oa_attachment_invoice_cache cache

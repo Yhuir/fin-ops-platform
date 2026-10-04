@@ -12,6 +12,7 @@ from fin_ops_platform.services.import_preview_audit import (
     build_import_preview_session_audit,
 )
 from fin_ops_platform.services.invoice_expense_item_links import has_oa_attachment_source
+from fin_ops_platform.services.invoice_identity_service import InvoiceIdentityService
 from fin_ops_platform.services.postgres_repositories.audit_report import (
     AuditIssue,
     AuditSnapshot,
@@ -42,6 +43,14 @@ def audit_invoice_import_page(
         batches = snapshot.connection.fetch_all(_BATCH_SQL)
         rows = snapshot.connection.fetch_all(_ROW_SQL)
         invoices = snapshot.connection.fetch_all(_INVOICE_SQL)
+        repaired_ids = [_text(row.get("invoice_id")) for row in invoices
+                        if _text(_payload(row).get("financial_repair_fingerprint"))]
+        if repaired_ids:
+            proofs: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            for proof in snapshot.connection.fetch_all(_SOURCE_REPAIR_PROOF_SQL, (repaired_ids,)):
+                proofs[_text(_dict(proof.get("verified_fact")).get("invoice_id"))].append(proof)
+            invoices = [{**row, "financial_source_proofs": proofs.get(_text(row.get("invoice_id")), [])}
+                        for row in invoices]
         jobs = snapshot.connection.fetch_all(_JOB_SQL, (normalized_tenant,))
         outbox = snapshot.connection.fetch_all(_OUTBOX_SQL, (normalized_tenant,))
         return _audit_snapshot(
@@ -177,6 +186,7 @@ def _audit_snapshot(
                 "app.import_batches",
                 "app.import_batch_rows",
                 "app.invoices",
+                "audit.events",
                 "job.import_jobs",
                 "job.outbox_events",
             ],
@@ -511,6 +521,9 @@ def _canonical_invoice_issues(
     for invoice in invoices:
         invoice_id = _text(invoice.get("invoice_id"))
         issues.extend(_invoice_formal_payload_issues(invoice))
+        if _text(_payload(invoice).get("financial_repair_fingerprint")) and _verified_financial_source_proof(invoice) is None:
+            issues.append(_issue("invoice_import_source_repair_proof_invalid", invoice_id,
+                                 {"reason": "Current source facts lack a matching successful immutable verification."}))
         manual_batch_ids: set[str] = set()
         etc_batch_ids: set[str] = set()
         for link in _list(invoice.get("source_links")):
@@ -644,6 +657,19 @@ def _invoice_field_issues(row: dict[str, Any], invoice: dict[str, Any], *, batch
         )
     )
     issues: list[AuditIssue] = []
+    verified = _verified_financial_source_proof(invoice)
+    if verified is not None:
+        fact = verified["verified_fact"]
+        corrected_fields = {"amount", "tax_amount", "total_with_tax", "tax_rate"} | set(fact["party_after"])
+        replaced = {field: mismatches.pop(field) for field in corrected_fields if field in mismatches}
+        if replaced:
+            issues.append(AuditIssue(
+                "warning", "invoice_import_verified_source_difference",
+                "正式发票已按原件核验修复；历史导入回执保留当时输入，差异由不可变原件核验证据证明。",
+                _text(row.get("row_id")), "invoice_import",
+                {"fields": replaced, "verification_event_id": verified["event_id"],
+                 "source_file_id": fact["source_file_id"], "source_sha256": fact["source_sha256"]},
+            ))
     if repeated_formal_import:
         names = {field: mismatches.pop(field) for field in ("buyer_name", "seller_name", "counterparty_name") if field in mismatches}
         if names:
@@ -655,6 +681,54 @@ def _invoice_field_issues(row: dict[str, Any], invoice: dict[str, Any], *, batch
     if mismatches:
         issues.append(_issue("invoice_import_invoice_field_mismatch", _text(row.get("row_id")), {"fields": mismatches}))
     return issues
+
+
+def _verified_financial_source_proof(invoice: dict[str, Any]) -> dict[str, Any] | None:
+    """A repair marker alone never supersedes a historical import receipt."""
+    payload = _payload(invoice)
+    fingerprint = _text(payload.get("financial_repair_fingerprint"))
+    if not fingerprint:
+        return None
+    proof = next((item for item in _list(invoice.get("financial_source_proofs"))
+                  if _text(_dict(_dict(item).get("verified_fact")).get("repair_fingerprint")) == fingerprint), None)
+    if not isinstance(proof, dict) or not _text(proof.get("event_id")):
+        return None
+    fact = _dict(proof.get("verified_fact"))
+    if (
+        _text(fact.get("invoice_id")) != _text(invoice.get("invoice_id"))
+        or _text(fact.get("invoice_type")) != _text(invoice.get("invoice_type"))
+        or _date_text(fact.get("invoice_date")) != _date_text(invoice.get("invoice_date"))
+        or _text(fact.get("identity_key")) != InvoiceIdentityService().canonical_key_for_mapping(invoice)
+        or not _text(fact.get("source_file_id")) or not _text(fact.get("source_sha256"))
+        or fact["source_file_id"] != payload.get("financial_repair_source_file_id")
+        or fact["source_sha256"] != payload.get("source_workbook_sha256")
+        or not any(_dict(source).get("file_id") == fact["source_file_id"]
+                   and _dict(source).get("sha256") == fact["source_sha256"]
+                   for source in _list(proof.get("sources")))
+    ):
+        return None
+    after = _dict(fact.get("after"))
+    fields = {"amount", "signed_amount", "tax_amount", "total_with_tax", "tax_rate", "tax_amount_text", "source_line_items"}
+    if not fields <= after.keys() or not fields <= payload.keys():
+        return None
+    for field in ("amount", "signed_amount", "tax_amount", "total_with_tax"):
+        if (_decimal_text(after[field]) != _decimal_text(invoice.get(field))
+                or _decimal_text(after[field]) != _decimal_text(payload[field])):
+            return None
+    if (_tax_rate_text(after["tax_rate"]) != _tax_rate_text(invoice.get("tax_rate"))
+            or _tax_rate_text(after["tax_rate"]) != _tax_rate_text(payload["tax_rate"])
+            or after["tax_amount_text"] != payload["tax_amount_text"]
+            or not isinstance(after["source_line_items"], list)
+            or after["source_line_items"] != payload["source_line_items"]
+            or payload.get("source_line_count") != len(after["source_line_items"])):
+        return None
+    party = fact.get("party_after")
+    if not isinstance(party, dict) or party.keys() - {"seller_name", "seller_tax_no", "buyer_name", "buyer_tax_no", "counterparty_name"}:
+        return None
+    if any(_text(value) != _text(invoice.get(field)) or _text(value) != _text(payload.get(field))
+           for field, value in party.items()):
+        return None
+    return proof
 
 
 def _invoice_component_field_issues(
@@ -1043,6 +1117,20 @@ where b.batch_type in ('input_invoice', 'output_invoice')
          and rb.batch_type in ('input_invoice', 'output_invoice')
    )
 order by invoice_id
+"""
+_SOURCE_REPAIR_PROOF_SQL = """
+select event.id::text as event_id,
+       event.payload#>'{metadata,sources}' as sources,
+       fact.value as verified_fact
+from audit.events event
+cross join lateral jsonb_array_elements(
+    coalesce(event.payload#>'{metadata,verified_invoice_facts}', '[]'::jsonb)
+) fact(value)
+where event.action = 'invoice_financial_source_repair'
+  and event.event_type = 'operation.completed'
+  and event.object_type = 'invoice' and event.outcome = 'success'
+  and fact.value->>'invoice_id'=any(%s::text[])
+order by event.occurred_at desc, event.id desc
 """
 _JOB_SQL = """
 select id::text as job_id, import_session_id, source_file_id, status, stage,

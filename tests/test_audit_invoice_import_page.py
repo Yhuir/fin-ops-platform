@@ -223,6 +223,7 @@ class FakeConnection:
             {"event_id": "bank-event", "aggregate_id": "bank-job", "status": "pending", "last_error": None}
         ]
         self.executed: list[str] = []
+        self.source_repair_proofs: list[dict[str, object]] = []
 
     @contextmanager
     def transaction(self):
@@ -239,6 +240,8 @@ class FakeConnection:
         raise AssertionError("Invoice import Audit must be read-only")
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
+        if "from audit.events event" in sql:
+            return deepcopy(self.source_repair_proofs)
         if "from app.import_files" in sql:
             return deepcopy(self.files)
         if "from app.import_batches" in sql and "app.import_batch_rows" not in sql:
@@ -255,6 +258,119 @@ class FakeConnection:
 
 
 class InvoiceImportPageAuditTests(unittest.TestCase):
+    @staticmethod
+    def source_repaired_connection():
+        connection = FakeConnection()
+        invoice = connection.invoices[0]
+        payload = invoice["raw_payload"]["normalized_payload"]
+        lines = [{"amount": "100.00", "tax_amount": "13.00", "tax_rate": "13%", "total_with_tax": None}]
+        invoice["tax_rate"] = None
+        payload.update(tax_rate=None, tax_amount_text=None, source_line_items=deepcopy(lines), source_line_count=1,
+                       financial_repair_fingerprint="b" * 64, financial_repair_source_file_id="file-1",
+                       source_workbook_sha256="a" * 64)
+        fact = {
+            "invoice_id": "invoice-1", "repair_fingerprint": "b" * 64,
+            "source_file_id": "file-1", "source_sha256": "a" * 64,
+            "invoice_type": "input", "identity_key": "25300000000100000001", "invoice_date": "2026-07-01",
+            "after": {field: deepcopy(payload[field]) for field in (
+                "amount", "signed_amount", "tax_amount", "total_with_tax", "tax_rate", "tax_amount_text", "source_line_items")},
+            "party_after": {},
+        }
+        connection.source_repair_proofs = [{"event_id": "verified-event-1", "sources": [{"file_id": "file-1", "sha256": "a" * 64}],
+                                            "verified_fact": fact}]
+        return connection
+
+    def test_verified_original_supersedes_financial_receipt_with_visible_evidence_warning(self):
+        connection = self.source_repaired_connection()
+        receipt_before = deepcopy(connection.rows)
+        report = invoice_import_page_audit.audit_invoice_import_page(connection)
+        self.assertEqual(report["summary"]["blocking_issue_sample_count"], 0)
+        warning = next(issue for issue in report["issues"] if issue["code"] == "invoice_import_verified_source_difference")
+        self.assertEqual(warning["severity"], "warning")
+        self.assertEqual(warning["details"]["fields"]["tax_rate"], {"row": "0.13", "invoice": ""})
+        self.assertEqual(warning["details"]["verification_event_id"], "verified-event-1")
+        self.assertEqual(connection.rows, receipt_before)
+        self.assertTrue(any("read only" in statement for statement in connection.executed))
+
+    def test_repair_marker_or_incomplete_old_operation_alone_does_not_override_receipt(self):
+        for proof in (None, "missing_nullable_field"):
+            with self.subTest(proof=proof):
+                connection = self.source_repaired_connection()
+                if proof is None:
+                    connection.source_repair_proofs = []
+                else:
+                    del connection.source_repair_proofs[0]["verified_fact"]["after"]["tax_amount_text"]
+                report = invoice_import_page_audit.audit_invoice_import_page(connection)
+                codes = {issue["code"] for issue in report["issues"]}
+                self.assertIn("invoice_import_source_repair_proof_invalid", codes)
+                self.assertIn("invoice_import_invoice_field_mismatch", codes)
+                self.assertNotIn("invoice_import_verified_source_difference", codes)
+
+    def test_proof_binds_same_invoice_identity_owner_original_hash_date_and_type(self):
+        changes = {"invoice_id": "other-invoice", "identity_key": "other-identity", "repair_fingerprint": "c" * 64,
+                   "source_file_id": "other-file", "source_sha256": "c" * 64, "invoice_date": "2026-07-02", "invoice_type": "output"}
+        for field, value in changes.items():
+            with self.subTest(field=field):
+                connection = self.source_repaired_connection()
+                connection.source_repair_proofs[0]["verified_fact"][field] = value
+                report = invoice_import_page_audit.audit_invoice_import_page(connection)
+                self.assertIn("invoice_import_source_repair_proof_invalid", {issue["code"] for issue in report["issues"]})
+        connection = self.source_repaired_connection()
+        connection.source_repair_proofs[0]["sources"][0]["sha256"] = "c" * 64
+        report = invoice_import_page_audit.audit_invoice_import_page(connection)
+        self.assertIn("invoice_import_source_repair_proof_invalid", {issue["code"] for issue in report["issues"]})
+
+    def test_proof_rejects_post_repair_amount_rate_text_or_true_line_drift(self):
+        for field, value in (("amount", "101.00"), ("tax_rate", "0"), ("tax_amount_text", "*"),
+                             ("source_line_items", []), ("source_line_count", 2)):
+            with self.subTest(field=field):
+                connection = self.source_repaired_connection()
+                invoice = connection.invoices[0]
+                invoice["raw_payload"]["normalized_payload"][field] = value
+                if field in invoice:
+                    invoice[field] = value
+                report = invoice_import_page_audit.audit_invoice_import_page(connection)
+                self.assertIn("invoice_import_source_repair_proof_invalid", {issue["code"] for issue in report["issues"]})
+                self.assertNotIn("invoice_import_verified_source_difference", {issue["code"] for issue in report["issues"]})
+
+    def test_legitimate_tax_text_does_not_become_numeric_zero(self):
+        connection = self.source_repaired_connection()
+        invoice = connection.invoices[0]
+        payload = invoice["raw_payload"]["normalized_payload"]
+        invoice["tax_amount"] = None
+        payload.update(tax_amount=None, tax_amount_text="*")
+        connection.source_repair_proofs[0]["verified_fact"]["after"].update(tax_amount=None, tax_amount_text="*")
+        report = invoice_import_page_audit.audit_invoice_import_page(connection)
+        self.assertEqual(report["summary"]["blocking_issue_sample_count"], 0)
+        invoice["tax_amount"] = "0"
+        payload["tax_amount"] = "0"
+        report = invoice_import_page_audit.audit_invoice_import_page(connection)
+        self.assertIn("invoice_import_source_repair_proof_invalid", {issue["code"] for issue in report["issues"]})
+
+    def test_source_repair_proof_does_not_hide_identity_or_relationship_errors(self):
+        connection = self.source_repaired_connection()
+        connection.rows[0]["source_unique_key"] = "other-identity"
+        connection.invoices[0]["source_links"] = []
+        report = invoice_import_page_audit.audit_invoice_import_page(connection)
+        codes = {issue["code"] for issue in report["issues"]}
+        self.assertIn("invoice_import_invoice_field_mismatch", codes)
+        self.assertIn("invoice_import_manual_source_link_missing", codes)
+
+    def test_only_explicitly_verified_party_changes_are_superseded(self):
+        connection = self.source_repaired_connection()
+        invoice = connection.invoices[0]
+        invoice["seller_name"] = "原件公司全称"
+        invoice["raw_payload"]["normalized_payload"]["seller_name"] = "原件公司全称"
+        report = invoice_import_page_audit.audit_invoice_import_page(connection)
+        self.assertIn("invoice_import_invoice_field_mismatch", {issue["code"] for issue in report["issues"]})
+        connection.source_repair_proofs[0]["verified_fact"]["party_after"] = {"seller_name": "原件公司全称"}
+        report = invoice_import_page_audit.audit_invoice_import_page(connection)
+        self.assertEqual(report["summary"]["blocking_issue_sample_count"], 0)
+        invoice["seller_name"] = "后来改写"
+        invoice["raw_payload"]["normalized_payload"]["seller_name"] = "后来改写"
+        report = invoice_import_page_audit.audit_invoice_import_page(connection)
+        self.assertIn("invoice_import_source_repair_proof_invalid", {issue["code"] for issue in report["issues"]})
+
     def test_preview_reference_to_existing_oa_invoice_is_not_formal_import_ownership(self):
         for status in ("pending", "failed", "reverted"):
             with self.subTest(status=status):
@@ -751,6 +867,45 @@ class InvoiceImportPageAuditPostgresTests(unittest.TestCase):
 
     def _audit(self) -> dict[str, object]:
         return invoice_import_page_audit.audit_invoice_import_page(self.connection)
+
+    def test_immutable_original_verification_supersedes_receipt_but_not_later_fact_drift(self) -> None:
+        fixture = InvoiceImportPageAuditTests.source_repaired_connection()
+        payload = fixture.invoices[0]["raw_payload"]
+        receipt_before = self.connection.fetch_one("select raw_payload from app.import_batch_rows where legacy_mongo_id = 'row-1'")
+        links_before = self.connection.fetch_one("select source_links from app.invoices where legacy_mongo_id = 'invoice-1'")
+        self.connection.execute(
+            "update app.invoices set tax_rate = null, raw_payload = %s::jsonb where legacy_mongo_id = 'invoice-1'",
+            (json.dumps(payload),),
+        )
+        missing = self._audit()
+        self.assertIn("invoice_import_source_repair_proof_invalid", missing["summary"]["issue_sample_counts_by_code"])
+        proof = fixture.source_repair_proofs[0]
+        repository = PostgresOperationsAuditRepository(self.connection)
+        event = {
+            "event_type": "operation.completed", "action": "invoice_financial_source_repair",
+            "object_type": "invoice", "object_id": "b" * 64, "outcome": "failed",
+            "payload": {"metadata": {"sources": proof["sources"], "verified_invoice_facts": [proof["verified_fact"]]}},
+        }
+        repository.append_operation_event(event)
+        failed = self._audit()
+        self.assertIn("invoice_import_source_repair_proof_invalid", failed["summary"]["issue_sample_counts_by_code"])
+        event["outcome"] = "success"
+        saved = repository.append_operation_event(event)
+        verified = self._audit()
+        self.assertEqual(verified["audit_status"], {"integrity": "pass", "freshness": "fresh", "queue": "drained"})
+        warning = next(issue for issue in verified["issues"] if issue["code"] == "invoice_import_verified_source_difference")
+        self.assertEqual(warning["severity"], "warning")
+        self.assertEqual(warning["details"]["verification_event_id"], saved["id"])
+        self.assertEqual(receipt_before, self.connection.fetch_one("select raw_payload from app.import_batch_rows where legacy_mongo_id = 'row-1'"))
+        self.assertEqual(links_before, self.connection.fetch_one("select source_links from app.invoices where legacy_mongo_id = 'invoice-1'"))
+        payload["normalized_payload"]["tax_rate"] = "13%"
+        self.connection.execute(
+            "update app.invoices set tax_rate = %s, raw_payload = %s::jsonb where legacy_mongo_id = 'invoice-1'",
+            ("13%", json.dumps(payload)),
+        )
+        drifted = self._audit()
+        self.assertIn("invoice_import_source_repair_proof_invalid", drifted["summary"]["issue_sample_counts_by_code"])
+        self.assertEqual(drifted["audit_status"]["integrity"], "issues_found")
 
     def _seed_clean_fixture(self) -> None:
         fixture = FakeConnection()

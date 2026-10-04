@@ -71,6 +71,148 @@ class VerifiedFinancialRepairTests(unittest.TestCase):
         self.assertEqual(again['invalidate_cache_keys'],[])
         self.assertNotEqual(first['source_fingerprint'],again['source_fingerprint'])
 
+    def test_proof_contains_exact_source_values_identity_and_existing_fingerprint_on_recheck(self):
+        invoice, source, _cache = sample()
+        source["rows"][0]["source_line_items"] = [{"amount": "3.67", "tax_amount": "0.33", "tax_rate": "9%"}]
+        first = self.build(invoice, source)
+        proof = first["verified_invoice_facts"][0]
+        self.assertEqual(proof["invoice_id"], "repair-1")
+        self.assertEqual(proof["identity_key"], "053002400111:23195398")
+        self.assertEqual(proof["invoice_type"], "input")
+        self.assertEqual(proof["invoice_date"], "2026-01-13")
+        self.assertEqual((proof["source_file_id"], proof["source_sha256"]), ("source-1", "a" * 64))
+        self.assertEqual(proof["repair_fingerprint"], first["source_fingerprint"])
+        self.assertEqual(proof["party_after"], {})
+        self.assertEqual(proof["after"], {
+            "amount": "3.67", "signed_amount": "3.67", "tax_amount": "0.33",
+            "total_with_tax": "4.00", "tax_rate": "9%", "tax_amount_text": None,
+            "source_line_items": [{"amount": "3.67", "tax_amount": "0.33", "tax_rate": "9%",
+                                   "total_with_tax": None, "tax_amount_text": None}],
+        })
+        invoice.update({key: first["updates"][0][key] for key in
+                        ("amount", "signed_amount", "tax_amount", "total_with_tax", "tax_rate", "raw_payload")})
+        before = deepcopy(invoice)
+        again = build_verified_financial_repair_plan([invoice], invoice_ids=["repair-1"], sources=[source], cache_rows=[])
+        self.assertEqual(again["update_count"], 0)
+        self.assertEqual(again["verified_invoice_facts"], [proof])
+        self.assertNotEqual(again["source_fingerprint"], proof["repair_fingerprint"])
+        self.assertEqual(invoice, before)
+
+    def test_correct_canonical_values_do_not_certify_inconsistent_normalized_payload(self):
+        invoice, source, _cache = sample()
+        first = self.build(invoice, source)
+        update = first["updates"][0]
+        invoice.update({key: update[key] for key in ("amount", "signed_amount", "tax_amount", "total_with_tax", "tax_rate", "raw_payload")})
+        for field, value in (("amount", "0.33"), ("source_line_count", 99), ("tax_rate", "13%")):
+            with self.subTest(field=field):
+                invalid = deepcopy(invoice)
+                invalid["raw_payload"]["normalized_payload"][field] = value
+                plan = self.build(invalid, source)
+                self.assertEqual(plan["update_count"], 1)
+                self.assertEqual(plan["verified_invoice_facts"][0]["repair_fingerprint"], plan["source_fingerprint"])
+                self.assertEqual(plan["updates"][0]["raw_payload"]["normalized_payload"][field],
+                                 invoice["raw_payload"]["normalized_payload"][field])
+
+    def test_recheck_preserves_registered_original_when_duplicate_sources_have_different_positions(self):
+        invoice, source, _cache = sample()
+        source["rows"][0]["source_line_items"] = [{"amount": "3.67", "tax_amount": "0.33", "source_row_number": 2}]
+        first = self.build(invoice, source)
+        invoice.update({key: first["updates"][0][key] for key in
+                        ("amount", "signed_amount", "tax_amount", "total_with_tax", "tax_rate", "raw_payload")})
+        duplicate = deepcopy(source)
+        duplicate.update(file_id="other-source", sha256="b" * 64)
+        duplicate["rows"][0]["source_line_items"][0]["source_row_number"] = 9
+        again = build_verified_financial_repair_plan([invoice], invoice_ids=["repair-1"],
+            sources=[duplicate, source], cache_rows=[])
+        self.assertEqual(again["update_count"], 0)
+        self.assertEqual(again["verified_invoice_facts"], first["verified_invoice_facts"])
+
+    def test_audit_service_preserves_large_verified_fact_batches_and_full_source_lines(self):
+        from datetime import UTC, datetime
+        from unittest.mock import Mock
+
+        from fin_ops_platform.services.audit import AuditTrailService
+
+        proof = self.build()["verified_invoice_facts"][0]
+        proof["after"]["source_line_items"] = [
+            {"taxable_item_name": "真实原件的长明细名称" * 32, "amount": "1.00", "tax_amount": "*",
+             "source_row_number": index, "source_region_key": f"page:1/item:{index}"}
+            for index in range(12)
+        ]
+        facts = [{**proof, "invoice_id": f"invoice-{index}"} for index in range(1500)]
+        metadata = {"event_type": "operation.completed", "outcome": "success", "verified_invoice_facts": facts}
+        repository = Mock()
+        repository.append_operation_event.return_value = {"id": "audit-proof", "occurred_at": datetime.now(UTC)}
+        AuditTrailService(repository).record_action(actor_id="tester", action="invoice_financial_source_repair",
+            entity_type="invoice", entity_id="source-proof", metadata=metadata)
+        recorded = repository.append_operation_event.call_args.args[0]["payload"]["metadata"]
+        self.assertEqual(recorded["verified_invoice_facts"], facts)
+        self.assertEqual(len(recorded["verified_invoice_facts"]), 1500)
+        self.assertEqual(len(recorded["verified_invoice_facts"][-1]["after"]["source_line_items"]), 12)
+
+    def test_zero_update_cli_reverifies_original_and_appends_proof_without_rewriting_facts(self):
+        import hashlib
+        import io
+        import json
+        from contextlib import nullcontext
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+
+        from openpyxl import Workbook
+
+        from fin_ops_platform.services.import_file_service import attach_invoice_line_evidence, parse_invoice_source_rows, read_xlsx_import_rows
+        from fin_ops_platform.services.postgres_repositories import import_audit_repair as repository
+        from fin_ops_platform.tools import import_audit_repair_ops as cli
+
+        workbook = Workbook()
+        workbook.active.title = "发票基础信息"
+        workbook.active.append(["发票代码", "发票号码", "开票日期", "金额", "税额", "价税合计", "销方识别号", "购买方名称", "销方名称", "购方识别号"])
+        workbook.active.append(["053002400111", "23195398", "2026-01-13", "3.67", "0.33", "4.00", "915300002165678829", "正确购方", "正确销方", "915300007194052520"])
+        stream = io.BytesIO()
+        workbook.save(stream)
+        workbook.close()
+        content = stream.getvalue()
+        digest = hashlib.sha256(content).hexdigest()
+        parsed = read_xlsx_import_rows(content)
+        source = {"file_id": "source-1", "filename": "tax.xlsx", "sha256": digest,
+                  "rows": attach_invoice_line_evidence(parse_invoice_source_rows(parsed.rows),
+                      parsed.invoice_detail_rows or [], header_sheet_name=parsed.invoice_header_sheet_name)}
+        invoice = sample()[0]
+        original = build_verified_financial_repair_plan([invoice], invoice_ids=["repair-1"], sources=[source], cache_rows=[])
+        invoice.update({key: original["updates"][0][key] for key in
+                        ("amount", "signed_amount", "tax_amount", "total_with_tax", "tax_rate", "raw_payload")})
+        before = deepcopy(invoice)
+        plan = build_verified_financial_repair_plan([invoice], invoice_ids=["repair-1"], sources=[source], cache_rows=[])
+        connection = Mock()
+        transaction = Mock()
+        connection.transaction.side_effect = lambda: nullcontext(transaction)
+        audit = Mock()
+        output = io.StringIO()
+        with patch.object(cli, "PostgresConnection", return_value=connection), \
+             patch.object(cli.PostgresSettings, "from_env", return_value=SimpleNamespace()), \
+             patch.object(cli, "load_import_source_file", return_value={"sha256": digest, "stored_file_path": "source", "original_filename": "tax.xlsx"}), \
+             patch.object(cli, "_build_bank_repair_state_store", return_value=SimpleNamespace(read_import_file=lambda path: content)), \
+             patch.object(repository, "load_verified_financial_repair_snapshot", return_value={"snapshot": [invoice], "cache_rows": []}) as load, \
+             patch.object(repository, "apply_verified_financial_repair", return_value={"written_invoice_count": 0, "invalidated_cache_count": 0}) as apply, \
+             patch.object(cli, "AuditTrailService", return_value=audit):
+            self.assertEqual(cli.main(["--repair-invoice-financial-source", "source-1", "--invoice-id", "repair-1", "--execute",
+                "--expected-fingerprint", plan["source_fingerprint"], "--operator-id", "tester", "--reason", "verify original proof"], stdout=output), 0)
+        self.assertEqual([call.kwargs["lock"] for call in load.call_args_list], [False, True])
+        self.assertEqual(apply.call_args.args[1]["updates"], [])
+        self.assertEqual(apply.call_args.args[1]["invalidate_cache_keys"], [])
+        audit.record_action.assert_called_once()
+        event = audit.record_action.call_args.kwargs
+        self.assertEqual((event["action"], event["entity_type"]), ("invoice_financial_source_repair", "invoice"))
+        metadata = event["metadata"]
+        self.assertEqual((metadata["event_type"], metadata["outcome"]), ("operation.completed", "success"))
+        self.assertEqual(metadata["verified_invoice_facts"], original["verified_invoice_facts"])
+        self.assertEqual(metadata["corrections"], [])
+        self.assertEqual(metadata["sources"], [{"file_id": "source-1", "sha256": digest, "filename": "tax.xlsx"}])
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["completion"]["written_invoice_count"], 0)
+        self.assertEqual(result["verified_invoice_count"], 1)
+        self.assertEqual(invoice, before)
+
     def test_real_source_lines_and_special_tax_remain_distinct_from_missing_and_zero(self):
         invoice, source, cache = sample()
         source["rows"][0].update(amount="4.00", tax_amount="*", tax_rate="不征税",
@@ -256,6 +398,20 @@ class VerifiedFinancialRepairPostgresTests(unittest.TestCase):
         self.assertEqual(run(['--dry-run'])['update_count'], 0)
         event = self.connection.fetch_one("select payload->'metadata' as metadata from audit.events where action='invoice_financial_source_repair' order by occurred_at desc limit 1")
         self.assertEqual(event['metadata']['corrections'][0]['party_after']['seller_tax_no'], '915300002165678829')
+        proof = event["metadata"]["verified_invoice_facts"][0]
+        self.assertEqual(proof["party_after"]["seller_tax_no"], "915300002165678829")
+        before_recheck = load_verified_financial_repair_snapshot(self.connection, ["repair-1"])
+        verified_plan = run(["--dry-run"])
+        self.assertEqual(verified_plan["update_count"], 0)
+        verified_result = run(["--execute", "--expected-fingerprint", verified_plan["source_fingerprint"],
+                              "--operator-id", "tester", "--reason", "reverify original"])
+        self.assertEqual(verified_result["completion"]["written_invoice_count"], 0)
+        self.assertEqual(verified_result["verified_invoice_count"], 1)
+        self.assertEqual(load_verified_financial_repair_snapshot(self.connection, ["repair-1"]), before_recheck)
+        self.assertEqual(self.connection.fetch_one("select count(*) n from audit.events where action='invoice_financial_source_repair'")["n"], 3)
+        recheck = self.connection.fetch_one("select payload->'metadata' as metadata from audit.events where action='invoice_financial_source_repair' order by occurred_at desc limit 1")
+        self.assertEqual(recheck["metadata"]["verified_invoice_facts"], [proof])
+        self.assertEqual(recheck["metadata"]["corrections"], [])
         source['sha256']='wrong'
         with self.assertRaisesRegex(ValueError,'checksum differs'):
             run(['--dry-run'])

@@ -668,9 +668,9 @@ def _run_verified_financial_repair(args: Any, *, stdout: TextIO) -> int:
                     "filename": attachment["filename"], "source_kind": "oa_attachment",
                     "sha256": hashlib.sha256(content).hexdigest(), "rows": rows})
 
-        def load_plan(tx: Any) -> dict[str, Any]:
+        def load_plan(tx: Any, *, lock: bool = False) -> dict[str, Any]:
             return build_verified_financial_repair_plan(
-                **load_verified_financial_repair_snapshot(tx, args.invoice_id),
+                **load_verified_financial_repair_snapshot(tx, args.invoice_id, lock=lock),
                 invoice_ids=args.invoice_id, sources=sources, repair_party_fields=args.repair_invoice_party_fields)
 
         with connection.transaction() as tx:
@@ -687,28 +687,29 @@ def _run_verified_financial_repair(args: Any, *, stdout: TextIO) -> int:
                 raise RuntimeError("Financial facts changed after dry-run.")
             with connection.transaction() as tx:
                 tx.execute("set transaction isolation level serializable")
-                current = load_plan(tx)
+                current = load_plan(tx, lock=True)
                 if current["source_fingerprint"] != args.expected_fingerprint:
                     raise RuntimeError("Financial facts changed before execution.")
                 completion = apply_verified_financial_repair(tx, current, operator_id=args.operator_id, reason=args.reason)
-                if current["updates"] or current["invalidate_cache_keys"]:
-                    AuditTrailService(PostgresOperationsAuditRepository(tx)).record_action(
-                        actor_id=args.operator_id, action="invoice_financial_source_repair",
-                        entity_type="invoice", entity_id=current["source_fingerprint"],
-                        metadata={"event_type": "operation.completed", "page_key": "imports_invoices",
-                                  "reason": args.reason, "sources": current["sources"],
-                                  "outcome": "success", **completion,
-                                  "invoice_ids": args.invoice_id,
-                                  "invalidated_cache_keys": current["invalidate_cache_keys"],
-                                  "corrections": [{"invoice_id": item["invoice_id"],
-                                      "before": {field: str(item["before"][field]) for field in ("amount", "tax_amount", "total_with_tax")},
-                                      "after": {field: item[field] for field in ("amount", "tax_amount", "total_with_tax")},
-                                      "party_before": {field: item["before"][field] for field in item["party_fields"]},
-                                      "party_after": item["party_fields"]}
-                                      for item in current["updates"]]},
-                    )
-        report = {key: value for key, value in plan.items() if key not in {"updates", "rollback_manifest"}}
+                AuditTrailService(PostgresOperationsAuditRepository(tx)).record_action(
+                    actor_id=args.operator_id, action="invoice_financial_source_repair",
+                    entity_type="invoice", entity_id=current["source_fingerprint"],
+                    metadata={"event_type": "operation.completed", "page_key": "imports_invoices",
+                              "reason": args.reason, "sources": current["sources"],
+                              "outcome": "success", **completion,
+                              "verified_invoice_facts": current["verified_invoice_facts"],
+                              "invoice_ids": args.invoice_id,
+                              "invalidated_cache_keys": current["invalidate_cache_keys"],
+                              "corrections": [{"invoice_id": item["invoice_id"],
+                                  "before": {field: str(item["before"][field]) for field in ("amount", "tax_amount", "total_with_tax")},
+                                  "after": {field: item[field] for field in ("amount", "tax_amount", "total_with_tax")},
+                                  "party_before": {field: item["before"][field] for field in item["party_fields"]},
+                                  "party_after": item["party_fields"]}
+                                  for item in current["updates"]]},
+                )
+        report = {key: value for key, value in plan.items() if key not in {"updates", "rollback_manifest", "verified_invoice_facts"}}
         report.update(mode="execute" if args.execute else "dry_run", completion=completion,
+                      verified_invoice_count=len(plan["verified_invoice_facts"]),
                       updates=[{**{key: value for key, value in item.items() if key not in ("before", "raw_payload")},
                                 "before": {field: str(item["before"][field]) for field in ("amount", "tax_amount", "total_with_tax")},
                                       "party_before": {field: item["before"][field] for field in item["party_fields"]},

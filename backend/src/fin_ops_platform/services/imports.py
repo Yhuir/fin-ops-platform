@@ -1683,7 +1683,6 @@ class ImportNormalizationService:
         if invoice is None:
             return
         invoice.invoice_status_from_source = normalized.get("invoice_status_from_source")
-        invoice.source_batch_id = row_result.batch_id
         self._merge_invoice_from_normalized(invoice, row_result.batch_id, normalized)
         self._link_submitted_etc_metadata_if_present(invoice, normalized)
 
@@ -2313,7 +2312,6 @@ class ImportNormalizationService:
                 "seller_name",
                 "buyer_tax_no",
                 "buyer_name",
-                "tax_rate",
                 "tax_classification_code",
                 "specific_business_type",
                 "taxable_item_name",
@@ -2330,6 +2328,7 @@ class ImportNormalizationService:
                 incoming = normalized.get(field_name)
                 if incoming not in (None, ""):
                     setattr(invoice, field_name, incoming)
+            invoice.tax_rate = normalized.get("tax_rate")
             invoice.tax_amount_text = normalized.get("tax_amount_text")
             invoice.source_line_items = list(normalized.get("source_line_items") or [])
             invoice.amount = self._parse_decimal(normalized.get("amount"))
@@ -2347,8 +2346,6 @@ class ImportNormalizationService:
             "seller_name",
             "buyer_tax_no",
             "buyer_name",
-            "tax_rate",
-            "tax_amount_text",
             "tax_classification_code",
             "specific_business_type",
             "taxable_item_name",
@@ -2366,12 +2363,10 @@ class ImportNormalizationService:
             incoming = normalized.get(field_name)
             if incoming and not getattr(invoice, field_name):
                 setattr(invoice, field_name, incoming)
-        for field_name in ("tax_amount", "total_with_tax", "quantity", "unit_price"):
+        for field_name in ("quantity", "unit_price"):
             incoming = normalized.get(field_name)
             if incoming not in (None, "") and getattr(invoice, field_name) is None:
                 setattr(invoice, field_name, Decimal(incoming))
-        if not invoice.source_line_items and normalized.get("source_line_items"):
-            invoice.source_line_items = list(normalized["source_line_items"])
         if not invoice.source_unique_key:
             invoice.source_unique_key = normalized.get("source_unique_key")
             if invoice.source_unique_key:

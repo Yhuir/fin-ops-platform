@@ -23,9 +23,11 @@
 - 补充凭证图库按需分页只读，不创建导入 session 或关联任务。
 
 - 发票未税金额、税额、价税合计和税率只读取原始文件字段。缺失字段保留空值，不通过加减或比率补齐；零、缺失和 `*` 等非数字税额分别保存。原税额文字存于 `tax_amount_text`，不写入数值列。
+- 正式导入的财务字段、原始明细与财务来源批次保持整组一致；新文件重复导入或更新发票状态时只追加来源关系，不从另一文件逐字段补空或重指向财务来源。非 OA 发票首次取得正式导入来源时整组采用该原件，包括空值；OA 持有发票继续遵守 OA owner 合同。
 - Excel 以“发票基础信息”为整票事实，按强身份关联“信息汇总表”的全部真实明细；逐行保留金额、税率、税额、原件存在的含税值和原始位置。只有整票汇总时不生成虚构明细。
 - `invoice_financial_values.py` 仅规范原始字段和归并真实明细税率，不反推任何金额或税率。同票多种原税率显示多税率，缺失显示 `—`；原表税率与明细冲突时保留原明细并明确提示。SQL 和 Python 读取遵守相同合同。
 - 历史修复通过已登记原件、明确发票身份和现有受控修复入口执行，保留发票 ID、来源关系和业务配对。事务写入原始财务字段与全部明细，同时清理受影响的旧 OA 解析缓存；重复执行不重复改写。
+- 历史导入回执保持原样。原件核验成功后，追加审计证明绑定发票身份、当前修复版本、原件 ID/hash、全部原始财务字段与真实明细；零变更补证仍重新读取原件。发票导入审计一次批量读取证明，只有证明与当前事实完整一致时才将已被原件修正的回执差异报告为可见警告；缺证、字段漂移、身份或来源关系错误继续阻止验收。
 
 ## 依赖方向
 
@@ -46,6 +48,7 @@
 - [web/e2e/imports-invoices-flow.spec.ts](../../../web/e2e/imports-invoices-flow.spec.ts)
 - [tests/test_import_formalization_api.py](../../../tests/test_import_formalization_api.py)
 - [tests/test_import_preview_audit.py](../../../tests/test_import_preview_audit.py)
+- [tests/test_audit_invoice_import_page.py](../../../tests/test_audit_invoice_import_page.py)
 - [tests/test_import_service.py](../../../tests/test_import_service.py)
 - [tests/test_import_processing_service.py](../../../tests/test_import_processing_service.py)
 - [web/src/test/BackgroundJobProgress.test.tsx](../../../web/src/test/BackgroundJobProgress.test.tsx)

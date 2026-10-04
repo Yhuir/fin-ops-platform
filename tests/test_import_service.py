@@ -1,4 +1,5 @@
 import unittest
+from copy import deepcopy
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -1063,6 +1064,72 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual(preview.row_results[1].decision, ImportDecision.STATUS_UPDATED)
         self.assertEqual(preview.row_results[1].linked_object_type, "invoice")
         self.assertEqual(preview.row_results[1].linked_object_id, self.existing_invoice.id)
+
+    def test_new_duplicate_or_status_file_does_not_fill_authoritative_financial_nulls(self) -> None:
+        for status in ("valid", "cancelled"):
+            for tax, tax_rate, gross in (("13.00", "13%", "113.00"), ("*", "不征税", "100.00")):
+                with self.subTest(status=status, tax=tax):
+                    invoice = deepcopy(self.existing_invoice)
+                    invoice.source_batch_id = "original-financial-source"
+                    invoice.source_links = [
+                        {"source_type": "manual_invoice_import", "source_id": invoice.source_unique_key,
+                         "batch_id": invoice.source_batch_id},
+                        {"source_type": "etc_invoice_import", "source_id": "etc-existing", "batch_id": "etc-source"},
+                    ]
+                    protected_fields = ("amount", "signed_amount", "tax_amount", "tax_amount_text",
+                                        "total_with_tax", "tax_rate", "source_line_items", "source_batch_id")
+                    original = {name: deepcopy(getattr(invoice, name)) for name in protected_fields}
+                    original_links = deepcopy(invoice.source_links)
+                    service = ImportNormalizationService(existing_invoices=[invoice])
+                    raw = {"invoice_code": "033001", "invoice_no": "9001", "counterparty_name": "Acme Supplies",
+                           "invoice_date": "2026-03-21", "amount": "100.00", "tax_amount": tax,
+                           "total_with_tax": gross, "tax_rate": tax_rate, "invoice_status_from_source": status,
+                           "source_line_items": [{"amount": "100.00", "tax_amount": tax,
+                               "tax_rate": tax_rate, "source_region_key": "new-file:row:2"}]}
+                    preview = service.preview_import(batch_type=BatchType.OUTPUT_INVOICE,
+                        source_name="new-duplicate-file.xlsx", imported_by="finance", rows=[raw])
+                    self.assertEqual(preview.row_results[0].decision,
+                        ImportDecision.DUPLICATE_SKIPPED if status == "valid" else ImportDecision.STATUS_UPDATED)
+                    service.confirm_import(preview.id)
+                    self.assertEqual({name: getattr(invoice, name) for name in protected_fields}, original)
+                    self.assertEqual(invoice.invoice_status_from_source, status)
+                    self.assertEqual(invoice.source_links[:2], original_links)
+                    self.assertEqual(invoice.source_links[-1]["batch_id"], preview.id)
+                    self.assertEqual(len(invoice.source_links), 3)
+                    self.assertEqual(len(service.list_invoices()), 1)
+                    after_first_confirm = deepcopy(invoice)
+                    service.confirm_import(preview.id)
+                    self.assertEqual(invoice, after_first_confirm)
+
+    def test_first_non_oa_formal_source_replaces_the_whole_financial_group_including_nulls(self) -> None:
+        invoice = deepcopy(self.existing_invoice)
+        invoice.source_links = [{"source_type": "etc_invoice_import", "source_id": "etc-original", "batch_id": "etc-source"}]
+        invoice.source_batch_id = "etc-source"
+        invoice.tax_amount = Decimal("13.00")
+        invoice.total_with_tax = Decimal("113.00")
+        invoice.tax_rate = "13%"
+        invoice.source_line_items = [{"amount": "100.00", "tax_amount": "13.00", "tax_rate": "13%"}]
+        original_link = deepcopy(invoice.source_links[0])
+        service = ImportNormalizationService(existing_invoices=[invoice])
+        preview = service.preview_import(batch_type=BatchType.OUTPUT_INVOICE,
+            source_name="first-formal.xlsx", imported_by="finance", rows=[{
+                "invoice_code": "033001", "invoice_no": "9001", "counterparty_name": "Acme Supplies",
+                "invoice_date": "2026-03-21", "amount": None, "tax_amount": None,
+                "total_with_tax": "113.00", "tax_rate": None, "source_line_items": [],
+                "invoice_status_from_source": "valid",
+            }])
+        self.assertEqual(preview.row_results[0].decision, ImportDecision.DUPLICATE_SKIPPED)
+        service.confirm_import(preview.id)
+        self.assertIsNone(invoice.amount)
+        self.assertIsNone(invoice.signed_amount)
+        self.assertIsNone(invoice.tax_amount)
+        self.assertIsNone(invoice.tax_rate)
+        self.assertIsNone(invoice.tax_amount_text)
+        self.assertEqual(invoice.total_with_tax, Decimal("113.00"))
+        self.assertEqual(invoice.source_line_items, [])
+        self.assertEqual(invoice.source_batch_id, preview.id)
+        self.assertEqual(invoice.source_links[0], original_link)
+        self.assertEqual(invoice.source_links[-1]["source_type"], "manual_invoice_import")
 
     def test_preview_import_preloads_invoice_identity_in_bulk(self) -> None:
         repository = BulkInvoiceIdentityRepository(invoices=[self.existing_invoice])

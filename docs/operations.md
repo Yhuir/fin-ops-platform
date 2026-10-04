@@ -213,6 +213,9 @@ ETC 台账真实明细使用独立 `--repair-etc-source-lines` 模式。无 ID �
 
 执行使用同一来源、目标和私有恢复工件，追加 `--execute --expected-fingerprint <fingerprint> --operator-id <operator> --reason <reason>`。缺失数字保存为空，非数字税额保留原文，不推算金额或税率；正式身份、来源关系和配对不变。修复需验证原件四字段、明细数量、跨页详情和二次零更新，之后按恢复工件清理合同删除本任务工件。
 
+成功执行在 `audit.events` 追加逐票原件验证证明，包含来源文件与哈希、身份、日期、四个金额字段、税率和完整明细；原始导入回执保持不变。已有修复可使用相同原件及目标重新 dry-run/execute 补充证明；零更新时保留每张发票既有修复指纹，`written_invoice_count` 为 0，`verified_invoice_count` 表示本次核验张数。零事实及缓存更新的执行无需恢复工件。需要校正或证明购销双方字段时使用 `--repair-invoice-party-fields`，原件必须完整提供这些字段。发布前可通过固定 helper 指定已准备的 candidate release 运行同一 CLI；它读取候选代码，不切换线上 release。
+
+
 ## 数据与恢复边界
 
 迁移目录和部署代码维护结构兼容性、forward-only 版本集合及恢复条件；它们是可执行系统的一部分，不能按过程文档删除。未执行结构变更时可以使用已验证 previous release；已经发生不兼容结构变更时只能向前修复。不得通过删迁移记录、恢复已失效字段、删除主数据库或业务队列“消除报错”。

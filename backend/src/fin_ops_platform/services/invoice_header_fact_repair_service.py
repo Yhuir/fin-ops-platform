@@ -283,7 +283,7 @@ def build_verified_financial_repair_plan(
         raise ValueError("Every repair invoice must resolve exactly once.")
     identities = InvoiceIdentityService()
     target_keys = {identities.canonical_key_for_mapping(row) for row in snapshot}
-    facts: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+    facts: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = {}
     for source in sources:
         for row in source["rows"]:
             key = identities.canonical_key_for_mapping(row)
@@ -301,7 +301,7 @@ def build_verified_financial_repair_plan(
             if repair_party_fields and any(not _text(fact.get(field)) for field in VERIFIED_PARTY_FIELDS):
                 raise ValueError(f"Tax header {key} lacks explicit party fields.")
             if key in facts:
-                previous = facts[key][0]
+                previous = facts[key][0][0]
                 if repair_party_fields and any(_text(previous.get(field)) != _text(fact.get(field)) for field in VERIFIED_PARTY_FIELDS):
                     raise ValueError(f"Tax originals disagree on party fields for {key}.")
                 compared = ("amount", "tax_amount", "total_with_tax", "tax_rate", "tax_amount_text", "invoice_date")
@@ -312,16 +312,22 @@ def build_verified_financial_repair_plan(
                                  for line in fact["source_line_items"]]
                 if previous_lines != current_lines or any(previous.get(field) != fact.get(field) for field in compared):
                     raise ValueError(f"Tax originals disagree for {key}.")
-            else:
-                facts[key] = fact, source
+            facts.setdefault(key, []).append((fact, source))
     fingerprint = _fingerprint({"snapshot": snapshot, "sources": sources, "caches": cache_rows, "repair_party_fields": repair_party_fields})
     updates = []
+    verified_invoice_facts = []
     changed_keys = set()
     for current in snapshot:
         key = identities.canonical_key_for_mapping(current)
         if not key or key not in facts:
             raise ValueError(f"No tax original proves invoice {current['invoice_id']}.")
-        fact, source = facts[key]
+        raw = dict(current["raw_payload"] or {})
+        normalized = dict(raw["normalized_payload"] if "normalized_payload" in raw else raw)
+        prior_source_id = normalized.get("financial_repair_source_file_id")
+        prior_source_sha256 = normalized.get("source_workbook_sha256")
+        fact, source = next((candidate for candidate in facts[key]
+                             if candidate[1]["file_id"] == prior_source_id
+                             and candidate[1]["sha256"] == prior_source_sha256), facts[key][0])
         if current["invoice_type"] not in {"input", "output"} or str(current["invoice_date"])[:10] != str(fact["invoice_date"])[:10]:
             raise ValueError(f"Invoice date/type differs from tax original: {key}.")
         if fact.get("invoice_type") and fact["invoice_type"] != current["invoice_type"]:
@@ -333,14 +339,30 @@ def build_verified_financial_repair_plan(
         party = {field: _text(fact[field]) for field in VERIFIED_PARTY_FIELDS} if repair_party_fields else {}
         if party:
             party["counterparty_name"] = party["seller_name"] if current["invoice_type"] == "input" else party["buyer_name"]
-        raw = dict(current["raw_payload"] or {})
-        normalized = dict(raw["normalized_payload"] if "normalized_payload" in raw else raw)
         same = all(_source_money(current.get(field)) == values[field] for field in ("amount", "signed_amount", "tax_amount", "total_with_tax"))
         same = same and (_text(current.get("tax_rate")) or None) == values["tax_rate"]
         same = same and normalized.get("tax_amount_text") == values["tax_amount_text"]
-        same = same and normalized.get("source_line_items", []) == fact["source_line_items"]
+        same = same and normalized.get("source_line_items") == fact["source_line_items"]
+        same = same and normalized.get("source_line_count") == len(fact["source_line_items"])
+        same = same and all(field in normalized and _source_money(normalized[field]) == values[field]
+                            for field in ("amount", "signed_amount", "tax_amount", "total_with_tax"))
+        same = same and "tax_rate" in normalized and (_text(normalized["tax_rate"]) or None) == values["tax_rate"]
+        same = same and "tax_amount_text" in normalized
         same = same and "inferred_fields" not in normalized and "inferred_fields" not in raw
-        if same and all(_text(current.get(field)) == value for field, value in party.items()):
+        same = same and all(_text(current.get(field)) == value and _text(normalized.get(field)) == value
+                            for field, value in party.items())
+        same = same and bool(_text(normalized.get("financial_repair_fingerprint")))
+        same = same and prior_source_id == source["file_id"] and prior_source_sha256 == source["sha256"]
+        verified_invoice_facts.append({
+            "invoice_id": current["invoice_id"],
+            "repair_fingerprint": normalized["financial_repair_fingerprint"] if same else fingerprint,
+            "source_file_id": source["file_id"], "source_sha256": source["sha256"],
+            "invoice_type": current["invoice_type"], "identity_key": key,
+            "invoice_date": str(current["invoice_date"])[:10],
+            "after": {**values, "source_line_items": fact["source_line_items"]},
+            "party_after": party,
+        })
+        if same:
             continue
         normalized.pop("inferred_fields", None)
         raw.pop("inferred_fields", None)
@@ -368,6 +390,7 @@ def build_verified_financial_repair_plan(
                 "invoices": [item["before"] for item in updates],
                 "attachment_caches": [row for row in cache_rows if row["source_attachment_key"] in invalidate_keys]}
     return {"source_fingerprint": fingerprint, "updates": updates,
+            "verified_invoice_facts": verified_invoice_facts,
             "target_count": len(snapshot), "update_count": len(updates),
             "invalidate_cache_keys": invalidate_keys, "rollback_manifest": manifest,
             "rollback_manifest_fingerprint": _fingerprint(manifest),
