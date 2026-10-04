@@ -128,6 +128,28 @@ class CrossMonthCanonicalRelationReader:
 
 
 class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
+    def test_missing_source_gross_preserves_relations_without_matching_net_plus_tax(self):
+        invoice = self._invoice("inv-source-missing", "MISSING", self._counterparty("supplier", "供应商"))
+        invoice.total_with_tax = None
+        bank = self._bank_transaction("bank-source", "100")
+        oa = self._oa("oa-source", "申请人", "100")
+        pairs = WorkbenchPairRelationService()
+        self._relation(pairs, "source-case", [invoice.id, bank.id, oa.id], amount_matched=True)
+        service = self._service(invoices=[invoice], transactions=[bank], pair_service=pairs,
+                                oa_projection=StaticOAProjection([oa]))
+        payload = service.list_rows()
+        row = payload["rows"][0]
+        self.assertEqual(row["invoice"]["totalWithTax"], "")
+        self.assertEqual(row["bankTransactions"]["relationCount"], 1)
+        self.assertEqual(row["oa"]["relationCount"], 1)
+        self.assertEqual(row["paymentStatus"]["code"], "pending")
+        self.assertEqual(payload["summary"]["totalWithTax"], "")
+        self.assertEqual(service.list_rows(filters=[{"field": "total_with_tax", "operator": "equals", "value": "0"}])["pagination"]["total"], 0)
+        self.assertEqual(service.list_rows(filters=[{"field": "total_with_tax", "operator": "between", "value": {"min": "0", "max": "100"}}])["pagination"]["total"], 0)
+        invoice.total_with_tax = Decimal("100")
+        invoice.amount = None
+        self.assertEqual(service.list_rows()["rows"][0]["paymentStatus"]["code"], "paid")
+
     def test_default_rows_read_repository_invoice_facts_when_memory_snapshot_is_empty(self) -> None:
         vendor = self._counterparty("vendor", "生产库供应商")
         invoice = self._invoice("inv-postgres", "PG-001", vendor, total_with_tax="118.00")
@@ -216,6 +238,10 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
             tax_amount="1.98",
             total_with_tax="35.00",
         )
+        line_1.source_line_items = [{"taxable_item_name": "招标服务费", "amount": "66.04",
+                                    "tax_amount": "3.96", "total_with_tax": "70.00"}]
+        line_2.source_line_items = [{"taxable_item_name": "平台服务费", "amount": "33.02",
+                                    "tax_amount": "1.98", "total_with_tax": "35.00"}]
         service = self._service(invoices=[line_2, line_1])
 
         payload = service.list_rows()
@@ -228,7 +254,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["invoice"]["lineItemCount"], 2)
         self.assertTrue(row["invoice"]["hasMoreInvoiceLines"])
         self.assertEqual(row["invoice"]["totalWithTax"], "105.00")
-        self.assertEqual([item["id"] for item in detail["lineItems"]], ["invoice-line-1", "invoice-line-2"])
+        self.assertEqual([item["id"] for item in detail["lineItems"]], ["invoice-line-1:source-line:1", "invoice-line-2:source-line:1"])
         self.assertEqual([item["taxableItemName"] for item in detail["lineItems"]], ["招标服务费", "平台服务费"])
 
     def test_invoice_identity_falls_back_to_code_number_then_stable_id(self) -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from contextlib import contextmanager
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from hashlib import sha256
 from typing import Any, Iterator
 
@@ -12,7 +12,6 @@ from fin_ops_platform.services.postgres_repositories.common import month_start, 
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
-ZERO = Decimal("0.00")
 
 
 class PostgresTaxOffsetCanonicalRepository:
@@ -118,7 +117,7 @@ def _apply_saved_plan(
     available_output_ids = {
         str(item.get("id") or "")
         for item in list(payload.get("output_items") or [])
-        if isinstance(item, dict)
+        if isinstance(item, dict) and item.get("is_selectable", True)
     }
     locked_input_ids = {
         str(value) for value in list(payload.get("locked_certified_input_ids") or [])
@@ -126,7 +125,7 @@ def _apply_saved_plan(
     available_input_ids = {
         str(item.get("id") or "")
         for item in list(payload.get("input_plan_items") or [])
-        if isinstance(item, dict) and str(item.get("id") or "") not in locked_input_ids
+        if isinstance(item, dict) and item.get("is_selectable", True) and str(item.get("id") or "") not in locked_input_ids
     }
     selected_output_ids = [
         str(value)
@@ -190,17 +189,17 @@ def _is_output_invoice(invoice_type: Any) -> bool:
 
 
 def _tax_invoice_item(row: dict[str, Any], *, output: bool) -> dict[str, Any]:
+    raw_payload = row_payload(row, "raw_payload")
     common = {
         "id": str(row.get("row_id") or ""),
         "issue_date": str(row.get("invoice_date") or ""),
         "invoice_no": row.get("invoice_no"),
         "invoice_code": row.get("invoice_code"),
         "digital_invoice_no": row.get("digital_invoice_no"),
+        "amount": _money(row.get("amount")),
         "tax_amount": _money(row.get("tax_amount")),
-        "total_with_tax": _money(
-            row.get("total_with_tax")
-            or ((_decimal(row.get("amount")) or ZERO) + (_decimal(row.get("tax_amount")) or ZERO))
-        ),
+        "tax_amount_text": raw_payload.get("tax_amount_text"),
+        "total_with_tax": _money(row.get("total_with_tax")),
         "invoice_type": "销项发票" if output else "进项发票",
         "tax_rate": row.get("tax_rate") or "—",
     }
@@ -210,7 +209,6 @@ def _tax_invoice_item(row: dict[str, Any], *, output: bool) -> dict[str, Any]:
             "buyer_name": row.get("buyer_name") or "",
             "buyer_tax_no": row.get("buyer_tax_no"),
         }
-    raw_payload = row_payload(row, "raw_payload")
     return {
         **common,
         "seller_name": row.get("seller_name") or "",
@@ -247,14 +245,7 @@ def tax_offset_scope_statistics(payload: dict[str, Any]) -> dict[str, int]:
     }
 
 
-def _decimal(value: Any) -> Decimal | None:
-    if value in (None, "", "—", "--"):
+def _money(value: Any) -> str | None:
+    if value in (None, ""):
         return None
-    try:
-        return Decimal(str(value).replace(",", "").strip())
-    except (InvalidOperation, ValueError):
-        return None
-
-
-def _money(value: Any) -> str:
-    return format_decimal(_decimal(value) or ZERO)
+    return format_decimal(Decimal(str(value).replace(",", "").strip()))

@@ -393,7 +393,20 @@ afterEach(() => {
 });
 
 describe("销项发票收款情况", () => {
-  test.each(["13%（推算）", "未提供"])("恢复旧税率条件 %s 时不自动扩大查询，并提供明确清除入口", async (retiredRate) => {
+  test("原件缺少价税合计时待收显示未知并保留已收金额", async () => {
+    const row = collectionStatusRow({ id: "missing-gross", displayNo: "MISSING-GROSS", totalWithTax: "",
+      statusCode: "pending_collection", statusLabel: "待收款", statusReason: "原件未提供价税合计",
+      collectedAmount: "40.00", pendingAmount: "", bankRelationCount: 1 });
+    installFetchMock(() => ({ ...rowsPayload, rows: [row] }));
+    renderAuthenticatedAppAt("/output-invoice-collections");
+    const invoice = await screen.findByRole("button", { name: "查看发票 MISSING-GROSS 详情" });
+    const invoiceRow = invoice.closest("tr")!;
+    expect(within(invoiceRow).getByText("待收 —")).toBeVisible();
+    expect(within(invoiceRow).getByText("已收 40.00")).toBeVisible();
+    expect(within(invoiceRow).queryByText("待收 0.00")).not.toBeInTheDocument();
+  });
+
+  test.each(["已移除的选项", "17%"])("恢复当前不可选税率条件 %s 时不自动扩大查询，并提供明确清除入口", async (retiredRate) => {
     const user = userEvent.setup();
     const requests: URL[] = [];
     installFetchMock((url) => {
@@ -413,12 +426,12 @@ describe("销项发票收款情况", () => {
     const currentFilters = () => JSON.parse(decodeURIComponent(requests.at(-1)?.searchParams.get("filters") ?? "[]"));
     expect(currentFilters()).toEqual([{ field: "tax_rate", operator: "in", values: [retiredRate] }]);
     await user.click(screen.getByRole("button", { name: "筛选 税率" }));
-    expect(await screen.findByText("旧税率筛选条件已失效，请清除后重新选择。")).toBeVisible();
-    const oldRate = screen.getByRole("checkbox", { name: `${retiredRate} 已失效` });
+    expect(await screen.findByText("部分已选条件不在当前可选项中，可取消勾选。")).toBeVisible();
+    const oldRate = screen.getByRole("checkbox", { name: `${retiredRate} 当前无选项` });
     expect(oldRate).toBeChecked();
     await user.click(oldRate);
     await waitFor(() => expect(currentFilters()).toEqual([]));
-    expect(screen.queryByText("旧税率筛选条件已失效，请清除后重新选择。")).not.toBeInTheDocument();
+    expect(screen.queryByText("部分已选条件不在当前可选项中，可取消勾选。")).not.toBeInTheDocument();
   });
 
   test("重进先清旧日期及范围关联详情，保留非日期条件，本次刷新不清月份", async () => {

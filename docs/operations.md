@@ -150,7 +150,7 @@ p50/p95/p99、canonical audit、health、worker、PostgreSQL outbox/dead-letter 
 ## 回滚与恢复
 
 - Migration 尚未执行或 frontend-only 发布：deploy control 可切回已验证 previous immutable release。
-- Forward-only migration 已执行：禁止自动回滚，保持 maintenance 并 forward repair。支付规则申请人数组迁移 `0183` 属于此类，旧版本不能读取新条件格式；激活前必须安装已登记 `0183` 的 exact-release deploy control。
+- Forward-only migration 已执行：禁止自动回滚，保持 maintenance 并 forward repair。支付规则申请人数组迁移 `0183` 和发票原始金额与 ETC 税额可空迁移 `0185` 属于此类；旧版本不能读取新条件或安全处理缺失原金额，激活前必须安装登记对应版本的 exact-release deploy control。
 - 不通过恢复旧 worker/env、重建旧 projection、手写 SQL 或删 queue 行解阻。
 - repair 工具必须先 dry-run，绑定 source fingerprint、精确计数、operator 和 reason；任何漂移在写前失败。银行 Audit terminal suspected link 修复还必须显式提供 `--expected-bank-audit-row-unlink-count`，只允许候选 release 按计划逐行 CAS 清空该引用。
 - OA 附件发票当前子付款项全量审计/修复复用固定 helper：`import-audit-repair <release> --dry-run --repair-all-oa-attachment-invoice-links --rollback-manifest-path /opt/fin-ops/runtime-smoke/import-audit-repair-artifacts/<task>.json`；artifact 路径只能位于硬编码的 root-owned `0700` 目录，helper 明确拒绝通过环境变量重定向该目录，文件以 `O_EXCL/O_NOFOLLOW` 创建且权限固定为 `0600`。为兼容尚未刷新到当前版本的 root-owned helper，CLI 仅在有效 UID 为 root 且未提供配置时自建并使用这一硬编码目录；非 root 直调仍必须显式配置受控 artifact root，缺失时失败关闭。执行必须复用同一 artifact 并追加 dry-run fingerprint、operator 与 reason。报告只输出 artifact 指纹与恢复条数；验证幂等和页面闭环后，优先使用 `import-audit-repair-artifact-delete <task>.json <rollback-manifest-fingerprint>` 校验指纹并精确删除；若 root-owned helper 尚未更新到该命令，则通过同一受控入口执行 `import-audit-repair <release> --delete-rollback-manifest-artifact <task>.json --expected-rollback-manifest-fingerprint <rollback-manifest-fingerprint>`。两条删除路径都只接受安全文件名、root-owned `0700/0600` 工件和精确内容指纹。不得删除平台 PITR、组织级备份或主数据库。
@@ -204,6 +204,14 @@ p50/p95/p99、canonical audit、health、worker、PostgreSQL outbox/dead-letter 
 
 复用固定 helper `import-audit-repair <release> --dry-run --repair-etc-invoice-payload` 发现目标；该独立模式不扫描无关银行历史。限定 `--invoice-id <canonical-id>`（可重复）并附 `--rollback-manifest-path` 生成既有受控私有恢复工件后，以相同目标、工件、`--expected-fingerprint`、`--operator-id`、`--reason` 执行 `--execute`。只允许原导入税率明确为空、正式税率为空、payload 税率等于对应 ETC 来源的记录；缺证据或并发变化明确拒绝，事务内写审计。修复后重跑必须零更新，发票页 Audit 不再有正式列/副本冲突，ETC 票数金额不变。完成验证后按上文 artifact-delete 精确删除本任务工件，不触碰主数据库或平台备份。
 
+ETC 台账真实明细使用独立 `--repair-etc-source-lines` 模式。无 ID 的 `--dry-run` 只发现范围；限定重复 `--invoice-id <etc-invoice-id>` 后生成私有恢复工件，再带相同目标、指纹、工件、操作人和原因执行。工具读取登记 XML 原件并校验已有哈希、身份、日期、金额和税率，只写 `source_line_items` 与 `tax_amount_text`，不重导入票据、不改批次关系。缺明细、原件不一致或并发变化拒绝写入；事务写审计，工件保留每条修改前后 payload 和原版本。验证重复执行零更新后，按同一 artifact-delete 合同删除本任务工件。
+
+
+## 原始发票财务字段修复
+
+复用 `import-audit-repair <release> --repair-invoice-financial-source <import-file-id> --invoice-id <invoice-id> --dry-run` 校验 Excel 原件；OA 原件使用 `--repair-invoice-oa-source <attachment-key>`。目标和原件参数可重复，但必须准确对应。工具直接读取原件并校验身份、日期和原含税总额，完整保留真实明细，不能以旧解析缓存或任意手填 JSON 代替原件。
+
+执行使用同一来源、目标和私有恢复工件，追加 `--execute --expected-fingerprint <fingerprint> --operator-id <operator> --reason <reason>`。缺失数字保存为空，非数字税额保留原文，不推算金额或税率；正式身份、来源关系和配对不变。修复需验证原件四字段、明细数量、跨页详情和二次零更新，之后按恢复工件清理合同删除本任务工件。
 
 ## 数据与恢复边界
 

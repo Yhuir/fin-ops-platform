@@ -38,7 +38,7 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
                     (f'rate-{index}', f'RATE-{index}', amount, amount, rate, amount))
         service = OutputInvoiceCollectionCanonicalQueryService(repository=PostgresOutputInvoiceCollectionQueryRepository(self.connection),
             row_assembler=OutputInvoiceCollectionQueryService(import_service=ImportNormalizationService()))
-        filters = [{'field':'tax_rate','operator':'in','values':['0.13','13%','无法确定']}]
+        filters = [{'field':'tax_rate','operator':'in','values':['0.13','13%','—','多税率']}]
         query = {'page':['1'],'page_size':['1'],'filters':[json.dumps(filters)]}
         page = service.rows(query)
         self.assertEqual(page['pagination']['total'], 4)
@@ -49,7 +49,7 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
             self.assertEqual(service.rows({**query,'page':[number]})['summary'],page['summary'])
         rates_options = next(item['options'] for item in page['filterOptions'] if item['field']=='tax_rate')
         self.assertEqual({item['value']:item['count'] for item in rates_options},
-            {'13%':2,'无法确定':2,'0%':1,'免税':1,'不征税':1,'6%':1})
+            {'13%':2,'—':1,'多税率':1,'0%':1,'免税':1,'不征税':1,'6%':1})
         self.assertEqual(service.export_summary(query)['row_count'],4)
         retired = service.list_rows(filters=[{'field':'tax_rate','operator':'in','values':['未提供']}])
         self.assertEqual(retired['pagination']['total'], 0)
@@ -59,7 +59,7 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
             exported = list(workbook.active.values)
             self.assertEqual(len(exported),5)
             self.assertEqual(sum(Decimal(str(row[8])) for row in exported[1:]),Decimal('200'))
-            self.assertEqual(set(row[6] for row in exported[1:]),{'13%','无法确定'})
+            self.assertEqual(set(row[6] for row in exported[1:]),{'13%','—','多税率'})
             self.assertIn('税额',exported[0])
         finally:
             workbook.close()

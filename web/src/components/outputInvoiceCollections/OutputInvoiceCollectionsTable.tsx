@@ -272,7 +272,7 @@ function DataRow({
         <TextLine muted value={row.invoice.buyerTaxNo} />
       </FinanceTableCell>
       <FinanceTableCell className="output-invoice-collections-table-cell output-invoice-collections-table-cell--amount output-invoice-collections-table-cell--small-border" columnRole="amount" textValue={row.invoice.totalWithTax}>
-        <span className="inline-flex items-baseline justify-end"><TextLine numeric strong value={formatMoney(row.invoice.totalWithTax, "—")} />{row.invoice.inferredFields?.includes("totalWithTax") && <small className="text-default-500">（推算）</small>}</span>
+        <TextLine numeric strong value={formatMoney(row.invoice.totalWithTax, "—")} />
         <span className="output-invoice-collections-tax-rate">{row.invoice.taxRate}</span>
       </FinanceTableCell>
       <FinanceTableCell className="output-invoice-collections-table-cell output-invoice-collections-table-cell--small-border" columnRole="description" textValue={businessTextValue}>
@@ -302,7 +302,7 @@ function DataRow({
                 已收 {formatMoney(row.collectionStatus.collectedAmount)}
               </span>
               <span className="output-invoice-collection-amount output-invoice-collection-amount--pending">
-                待收 {formatMoney(row.collectionStatus.pendingAmount)}
+                待收 {formatMoney(row.collectionStatus.pendingAmount, "—")}
               </span>
             </span>
           ) : null}

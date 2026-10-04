@@ -392,16 +392,16 @@ afterEach(() => {
 });
 
 describe("Input invoice usage page", () => {
-  test.each(["13%", "多税率", "无法确定"])("金额列仅显示价税合计和服务端税率结论：%s", async (taxRate) => {
+  test.each(["13%", "多税率", "—"])("金额列仅显示价税合计和服务端税率结论：%s", async (taxRate) => {
     installInputInvoiceUsageFetch({ ...rowsPayload, rows: rowsPayload.rows.map((row) => ({
-      ...row, invoice: { ...row.invoice, taxRate, inferredFields: ["totalWithTax"] },
+      ...row, invoice: { ...row.invoice, taxRate },
     })) });
     renderAuthenticatedAppAt("/input-invoice-usage");
     const table = await screen.findByRole("grid", { name: "进项发票使用情况表" });
     expect(within(table).getByRole("columnheader", { name: "价税合计/税率" })).toBeVisible();
     const invoiceRow = within(table).getByRole("row", { name: /SD-INV-2026-0001/ });
-    const amountCell = within(invoiceRow).getByRole("gridcell", { name: `12345.67（推算） ${taxRate}` });
-    expect(amountCell).toHaveTextContent(`12345.67（推算）${taxRate}`);
+    const amountCell = within(invoiceRow).getByRole("gridcell", { name: `12345.67 ${taxRate}` });
+    expect(amountCell).toHaveTextContent(`12345.67${taxRate}`);
     expect(within(amountCell).getByText(taxRate)).toHaveClass("input-invoice-usage-cell-secondary");
     expect(within(amountCell).queryByText(/11646.86|698.81/)).not.toBeInTheDocument();
     expect(within(table).queryByText("不含税/税率税额")).not.toBeInTheDocument();

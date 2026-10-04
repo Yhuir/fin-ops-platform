@@ -8130,7 +8130,7 @@ function pendingInvoiceFilterSortOptionsPayload() {
 }
 
 function pendingInvoiceExportSummaryPayload(relationConfirmed: boolean) {
-  return {row_count:1,source_summary:{expense_rows:1,income_rows:0},acquisition_summary:{status_counts:Object.fromEntries(['paid_pending_invoice','paid_invoiced','invoice_not_fully_paid','bank_statement_as_invoice','no_invoice_required','income_pending_invoice','income_invoiced','income_no_invoice_required','cash_income'].map(code=>[code,code===(relationConfirmed?'paid_invoiced':'paid_pending_invoice')?1:0]))}};
+  return {row_count:1,source_summary:{expense_rows:1,income_rows:0},acquisition_summary:{status_counts:Object.fromEntries(['paid_pending_invoice','paid_invoiced','invoice_not_fully_paid','invoice_amount_missing','bank_statement_as_invoice','no_invoice_required','income_pending_invoice','income_invoiced','income_no_invoice_required','cash_income'].map(code=>[code,code===(relationConfirmed?'paid_invoiced':'paid_pending_invoice')?1:0]))}};
 }
 function pendingInvoiceExportBody(relationConfirmed: boolean, _url: URL) {
   const row = pendingInvoiceRow(relationConfirmed);

@@ -1,3 +1,4 @@
+import { formatMoney } from "../money";
 import { waitForImportPreparation, fetchImportTaskResult, type ImportPreparationAccepted } from "../imports/preparation";
 import { mapBackgroundJob, type ApiBackgroundJob } from "../backgroundJobs/api";
 import { apiUrl } from "../../app/runtime";
@@ -55,6 +56,8 @@ type ApiEtcInvoice = {
   amountWithoutTax?: string | number | null;
   tax_amount?: string | number | null;
   taxAmount?: string | number | null;
+  tax_amount_text?: string | null;
+  taxAmountText?: string | null;
   total_amount?: string | number | null;
   totalAmount?: string | number | null;
   status: EtcInvoiceStatus;
@@ -752,6 +755,7 @@ function normalizeMoney(value: string | number | null | undefined) {
 }
 
 function mapInvoice(invoice: ApiEtcInvoice): EtcInvoice {
+  const taxAmount = invoice.taxAmount ?? invoice.tax_amount;
   return {
     id: invoice.id,
     invoiceNumber: invoice.invoiceNumber ?? invoice.invoice_number ?? "",
@@ -761,9 +765,10 @@ function mapInvoice(invoice: ApiEtcInvoice): EtcInvoice {
     plateNumber: invoice.plateNumber ?? invoice.plate_number ?? "",
     sellerName: invoice.sellerName ?? invoice.seller_name ?? "",
     buyerName: invoice.buyerName ?? invoice.buyer_name ?? "",
-    amountWithoutTax: normalizeMoney(invoice.amountWithoutTax ?? invoice.amount_without_tax),
-    taxAmount: normalizeMoney(invoice.taxAmount ?? invoice.tax_amount),
-    totalAmount: normalizeMoney(invoice.totalAmount ?? invoice.total_amount),
+    amountWithoutTax: formatMoney(invoice.amountWithoutTax ?? invoice.amount_without_tax, "—"),
+    taxAmount: taxAmount == null || taxAmount === "" ? null : formatMoney(taxAmount, "—"),
+    taxAmountText: invoice.taxAmountText ?? invoice.tax_amount_text ?? null,
+    totalAmount: formatMoney(invoice.totalAmount ?? invoice.total_amount, "—"),
     status: invoice.status,
     hasPdf: Boolean(invoice.hasPdf ?? invoice.has_pdf),
     hasXml: Boolean(invoice.hasXml ?? invoice.has_xml),

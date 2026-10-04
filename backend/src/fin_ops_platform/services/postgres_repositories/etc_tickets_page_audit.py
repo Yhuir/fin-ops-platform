@@ -460,10 +460,10 @@ def _row_contract_issues(
                 money_fields={"amount", "tax_amount", "total_with_tax"},
             )
         )
-        amount = _decimal(row.get("amount")) or Decimal("0")
-        tax = _decimal(row.get("tax_amount")) or Decimal("0")
+        amount = _decimal(row.get("amount"))
+        tax = _decimal(row.get("tax_amount"))
         total = _decimal(row.get("total_with_tax"))
-        if total is not None and total != amount + tax:
+        if amount is not None and tax is not None and total is not None and total != amount + tax:
             issues.append(
                 _issue(
                     "etc_invoice_arithmetic_mismatch",

@@ -1,7 +1,7 @@
 // Explicit rows used by mocked HTTP tests; production summaries are verified in PostgreSQL.
 export function pendingAcquisitionFixture(rows: Array<Record<string, unknown>>) {
   const status_counts: Record<string, number> = {
-    paid_pending_invoice: 0, paid_invoiced: 0, invoice_not_fully_paid: 0, bank_statement_as_invoice: 0,
+    paid_pending_invoice: 0, paid_invoiced: 0, invoice_not_fully_paid: 0, invoice_amount_missing: 0, bank_statement_as_invoice: 0,
     no_invoice_required: 0, income_pending_invoice: 0, income_invoiced: 0, income_no_invoice_required: 0, cash_income: 0,
   };
   const invoices = new Set<string>();

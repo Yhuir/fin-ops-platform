@@ -585,7 +585,7 @@ class InputInvoiceUsageQueryService:
         candidates = {str(row_id): bank_map[str(row_id)] for relation in relations
                       for row_id in relation.get("row_ids", []) if str(row_id) in bank_map}
         comparison_ids = {bank.id for bank in bank_unit_comparison_rows(list(candidates.values()),
-            target=sum((_invoice_total(line) for line in line_items), ZERO))}
+            target=_source_invoice_total(line_items))}
         summaries = []
         seen: set[str] = set()
         for relation in relations:
@@ -624,8 +624,8 @@ class InputInvoiceUsageQueryService:
         line_items: list[Invoice],
         relation: dict[str, Any],
     ) -> dict[str, Any]:
-        invoice_total = sum((_invoice_total(line) for line in line_items), start=ZERO)
-        diff = abs(_decimal(bank.amount) - invoice_total)
+        invoice_total = _source_invoice_total(line_items)
+        diff = abs(_decimal(bank.amount) - invoice_total) if invoice_total is not None else None
         completeness = (
             0
             if self._relation_is_confirmed(relation)
@@ -650,7 +650,7 @@ class InputInvoiceUsageQueryService:
             "relationCaseId": relation.get("case_id", ""),
             "relationStatus": self._relation_status(relation),
             "relationSource": str(relation.get("relation_source") or ""),
-            "_sort": (completeness, diff, -timestamp, bank.id),
+            "_sort": (completeness, diff is None, diff, -timestamp, bank.id),
         }
 
     def _oa_relation_payload(
@@ -697,9 +697,8 @@ class InputInvoiceUsageQueryService:
         line_items: list[Invoice],
         relation: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        invoice_total = sum((_invoice_total(line) for line in line_items), start=ZERO)
-        oa_amount = _decimal(record.amount) if record is not None else ZERO
-        diff = abs(oa_amount - invoice_total) if record is not None else Decimal("999999999")
+        invoice_total = _source_invoice_total(line_items)
+        diff = abs(_decimal(record.amount) - invoice_total) if record is not None and invoice_total is not None else None
         completeness = (
             0
             if relation
@@ -719,7 +718,7 @@ class InputInvoiceUsageQueryService:
             "relationCaseId": relation.get("case_id", "") if relation else "",
             "relationStatus": self._relation_status(relation),
             "relationSource": str((relation or {}).get("relation_source") or ""),
-            "_sort": (completeness, diff, 0, oa_id),
+            "_sort": (completeness, diff is None, diff, 0, oa_id),
         }
 
     def _invoice_relation_payload(
@@ -766,7 +765,7 @@ class InputInvoiceUsageQueryService:
             "sellerTaxNo": primary.get("sellerTaxNo", ""),
             "invoiceDate": primary.get("invoiceDate", ""),
             "taxableItemName": primary.get("taxableItemName", ""),
-            "totalWithTax": _money(total_with_tax) if public_summaries else "",
+            "totalWithTax": _money(total_with_tax) if public_summaries and all(item["totalWithTax"] != "" for item in public_summaries) else "",
             "relationCount": len(public_summaries),
             "hasMultiple": len(public_summaries) > 1,
             "detailMode": "none" if not public_summaries else "list" if len(public_summaries) > 1 else "single",
@@ -788,7 +787,7 @@ class InputInvoiceUsageQueryService:
             "invoiceDate": invoice.invoice_date or "",
             "sellerName": invoice.seller_name or invoice.counterparty.name,
             "sellerTaxNo": invoice.seller_tax_no or invoice.counterparty.tax_no or "",
-            "totalWithTax": _money(_invoice_total(invoice)),
+            "totalWithTax": _money(invoice.total_with_tax) if invoice.total_with_tax is not None else "",
             "taxableItemName": invoice.taxable_item_name or "",
             "relationCaseId": relation.get("case_id", "") if relation else "",
             "relationStatus": InputInvoiceUsageQueryService._relation_status(relation),
@@ -854,7 +853,9 @@ class InputInvoiceUsageQueryService:
         *,
         context: DistributedInvoiceRelationContext,
     ) -> bool:
-        invoice_total = sum((_invoice_total(line) for line in line_items), start=ZERO)
+        invoice_total = _source_invoice_total(line_items)
+        if invoice_total is None:
+            return False
         totals = self._matched_linked_relation_amount_totals(line_items, relations, context=context)
         if _within_cent(totals["oa"], invoice_total) and _within_cent(totals["bank"], invoice_total):
             return True
@@ -867,7 +868,9 @@ class InputInvoiceUsageQueryService:
         *,
         context: DistributedInvoiceRelationContext,
     ) -> bool:
-        invoice_total = sum((_invoice_total(line) for line in line_items), start=ZERO)
+        invoice_total = _source_invoice_total(line_items)
+        if invoice_total is None:
+            return False
         totals = self._matched_linked_relation_amount_totals(line_items, relations, context=context)
         if _within_cent(totals["oa"], invoice_total):
             return True
@@ -880,7 +883,7 @@ class InputInvoiceUsageQueryService:
         *,
         context: DistributedInvoiceRelationContext,
     ) -> dict[str, Decimal]:
-        invoice_total = sum((_invoice_total(line) for line in line_items), ZERO)
+        invoice_total = _source_invoice_total(line_items)
         bank_map = context.bank_transactions_by_id()
         confirmed = [relation for relation in relations if self._relation_is_confirmed(relation)]
         group_bank_ids = {row_id for relation in confirmed
@@ -945,7 +948,7 @@ class InputInvoiceUsageQueryService:
             elif operator == "equals":
                 expected = filter_item.get("value")
                 if FILTER_CONFIG[field]["mode"] == "money":
-                    if not _within_cent(_decimal(value), _decimal(expected)):
+                    if value in (None, "") or not _within_cent(_decimal(value), _decimal(expected)):
                         return False
                 else:
                     if str(value or "") != str(expected or ""):
@@ -962,6 +965,8 @@ class InputInvoiceUsageQueryService:
                 min_value = bounds.get("min")
                 max_value = bounds.get("max")
                 if FILTER_CONFIG[field]["mode"] == "money":
+                    if value in (None, ""):
+                        return False
                     current_decimal = _decimal(current)
                     if min_value not in (None, "") and current_decimal < _decimal(min_value):
                         return False
@@ -1072,7 +1077,7 @@ class InputInvoiceUsageQueryService:
     def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "invoiceCount": len(rows),
-            "totalWithTax": _money(sum((_decimal(row["invoice"]["totalWithTax"]) for row in rows), start=ZERO)),
+            "totalWithTax": _money(sum((_decimal(row["invoice"]["totalWithTax"]) for row in rows), start=ZERO)) if all(row["invoice"]["totalWithTax"] not in (None, "") for row in rows) else "",
             "pendingCount": sum(1 for row in rows if row["paymentStatus"]["code"] == "pending"),
         }
 
@@ -1231,10 +1236,10 @@ def _payment_status(code: str, label: str, reason: str, matched_rule_id: str) ->
     return {"code": code, "label": label, "reason": reason, "matchedRuleId": matched_rule_id, "severity": "warning" if code == "pending" else "success"}
 
 
-def _invoice_total(invoice: Invoice) -> Decimal:
-    if invoice.total_with_tax is not None:
-        return _decimal(invoice.total_with_tax)
-    return _decimal(invoice.amount) + _decimal(invoice.tax_amount)
+def _source_invoice_total(invoices: list[Invoice]) -> Decimal | None:
+    if any(invoice.total_with_tax is None for invoice in invoices):
+        return None
+    return sum((invoice.total_with_tax for invoice in invoices), ZERO)
 
 
 def _decimal(value: Any) -> Decimal:

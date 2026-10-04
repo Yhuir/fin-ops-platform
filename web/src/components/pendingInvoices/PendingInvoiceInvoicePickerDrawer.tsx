@@ -342,7 +342,7 @@ export default function PendingInvoiceInvoicePickerDrawer({
                     <span>{candidate.sellerTaxNo || "-"}</span>
                   </span>
                 </FinanceTableCell>
-                <FinanceTableCell className="pending-invoice-simple-table__amount" columnRole="amount">{formatMoney(candidate.totalWithTax)}</FinanceTableCell>
+                <FinanceTableCell className="pending-invoice-simple-table__amount" columnRole="amount">{formatMoney(candidate.totalWithTax, "—")}</FinanceTableCell>
                 <FinanceTableCell columnRole="status">
                   <span className="pending-invoice-table-stack">
                     <span className={`pending-invoice-status-tag pending-invoice-status-tag--${bankRelationStatusTone(candidate.bankRelationStatus)}`}>

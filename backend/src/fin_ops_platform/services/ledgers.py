@@ -195,7 +195,7 @@ class LedgerReminderService:
 
         invoices = self._case_invoices(case)
         transactions = self._case_transactions(case)
-        invoice_open_amount = sum((invoice.outstanding_amount for invoice in invoices), start=ZERO)
+        invoice_open_amount = sum((_required_invoice_open_amount(invoice) for invoice in invoices), start=ZERO)
         transaction_open_amount = sum((transaction.outstanding_amount for transaction in transactions), start=ZERO)
         specs: list[dict[str, object]] = []
         if case.biz_side == "receivable":
@@ -306,7 +306,7 @@ class LedgerReminderService:
         return [self._import_service.get_transaction(txn_id) for txn_id in txn_ids]
 
     def _case_open_amount(self, case: ReconciliationCase) -> Decimal:
-        invoice_amount = sum((invoice.outstanding_amount for invoice in self._case_invoices(case)), start=ZERO)
+        invoice_amount = sum((_required_invoice_open_amount(invoice) for invoice in self._case_invoices(case)), start=ZERO)
         transaction_amount = sum((txn.outstanding_amount for txn in self._case_transactions(case)), start=ZERO)
         open_amount = invoice_amount + transaction_amount
         return open_amount if open_amount > ZERO else case.total_amount
@@ -364,3 +364,10 @@ class LedgerReminderService:
             if reminder.ledger_id == ledger_id and reminder.channel == channel and reminder.status != ReminderStatus.CANCELLED:
                 return reminder
         return None
+
+
+def _required_invoice_open_amount(invoice: Invoice) -> Decimal:
+    amount = invoice.outstanding_amount
+    if amount is None:
+        raise ValueError(f"Invoice {invoice.id} has no source amount; its follow-up balance cannot be recalculated.")
+    return amount

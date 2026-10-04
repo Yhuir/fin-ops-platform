@@ -26,9 +26,8 @@ test('production input invoice values agree with API across details, pagination 
       expect(invoice.taxRate).not.toBe('');
       expect(invoice.taxRate).not.toContain('（推算）');
       expect(invoice.taxRate).not.toBe('未提供');
-      expect(invoice.inferredFields).not.toContain('taxRate');
       const cell = cells.nth(index);
-      const gross = formatMoney(invoice.totalWithTax, '—') + (invoice.inferredFields?.includes('totalWithTax') ? '（推算）' : '');
+      const gross = formatMoney(invoice.totalWithTax, '—');
       await expect(cell.locator('.input-invoice-usage-invoice-total')).toHaveText(gross);
       await expect(cell.locator('.input-invoice-usage-tax-rate')).toHaveText(invoice.taxRate);
       // No pretax or tax-amount child is rendered in this list cell.

@@ -107,7 +107,6 @@ test('production missing source rate stays unknown across rows, filters, source 
   const payload = await (await first).json();
   const sample = payload.rows.find((r:{invoice:{invoiceNo:string; digitalInvoiceNo:string}})=>[r.invoice.invoiceNo,r.invoice.digitalInvoiceNo].includes('26532000001691977231'));
   expect(sample.invoice.taxRate).toBe('无法确定');
-  expect(sample.invoice.inferredFields).not.toContain('taxRate');
   expect(sample.invoice.totalWithTax).toBe('2129682.59');
   await expect(page.getByText('无法确定',{exact:true}).first()).toBeVisible();
   await page.screenshot({path:info.outputPath('production-unknown-rate-list.png'),animations:'disabled'});

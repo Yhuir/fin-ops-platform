@@ -49,6 +49,14 @@ def load_invoice_header_fact_repair_snapshot(
     )
 
 
+def load_original_invoice_attachments(connection: Any, attachment_keys: list[str]) -> list[dict[str, Any]]:
+    return connection.fetch_all("""
+        select source_attachment_key, filename, normalized_payload
+        from app.oa_attachments where source_attachment_key=any(%s::text[])
+        order by source_attachment_key
+    """, (attachment_keys,))
+
+
 def load_verified_financial_repair_snapshot(connection: Any, invoice_ids: list[str]) -> dict[str, Any]:
     invoices = connection.fetch_all("""
         select coalesce(legacy_mongo_id,id::text) as invoice_id, invoice_type,

@@ -48,6 +48,29 @@ describe("tax API mappers", () => {
     expect(result.canonicalSnapshotVersion).toBe("tax-offset-v1:test");
   });
 
+  test("uses original amounts across output, planned and certified invoices without subtraction", async () => {
+    const source = {id: "source", invoice_no: "source", tax_rate: null, amount: null,
+      tax_amount: "13.00", total_with_tax: "113.00", is_selectable: true};
+    const zero = {...source, id: "zero", amount: "0.00", tax_amount: "0.00", total_with_tax: "0.00", tax_rate: "0%"};
+    const exempt = {...source, id: "exempt", amount: "100.00", tax_amount: null,
+      tax_amount_text: "*", tax_rate: "免税", is_selectable: false};
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      month: "2026-05", output_items: [source, zero, exempt], input_plan_items: [source, exempt],
+      certified_matched_rows: [source], certified_outside_plan_rows: [zero],
+      default_selected_output_ids: ["source", "zero"], default_selected_input_ids: ["source"],
+      summary: {output_tax: "13.00", input_tax: "13.00", deductible_tax: "13.00", result_label: "本月留抵税额", result_amount: "0.00"},
+      canonical_snapshot_version: "tax-offset-v1:source",
+    }), {headers: {"Content-Type": "application/json"}})));
+    const result = await fetchTaxOffsetMonth("2026-05");
+    for (const rows of [result.outputInvoices, result.inputPlanInvoices, result.certifiedMatchedInvoices]) {
+      expect(rows[0]).toMatchObject({amount: "—", taxAmount: "13.00", taxRate: "—"});
+    }
+    expect(result.outputInvoices[1]).toMatchObject({amount: "0.00", taxAmount: "0.00", taxRate: "0%"});
+    expect(result.outputInvoices[2]).toMatchObject({taxAmount: "*", taxRate: "免税", isSelectable: false});
+    expect(result.inputPlanInvoices[1]).toMatchObject({taxAmount: "*", isSelectable: false});
+    expect(result.summary.resultAmount).toBe("0.00");
+  });
+
   test("maps a completed certified import job batch result", () => {
     const result = taxCertifiedImportConfirmedFromJob(
       importJob({

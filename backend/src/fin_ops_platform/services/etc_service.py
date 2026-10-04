@@ -34,6 +34,7 @@ from fin_ops_platform.services.oa_draft_prefill import (
     normalize_oa_draft_prefill,
     render_oa_draft_reason,
 )
+from fin_ops_platform.services.output_invoice_tax_rate import normalize_output_tax_rate
 from fin_ops_platform.services.search_query import normalize_money_search_query
 
 
@@ -442,7 +443,7 @@ class EtcInvoice:
     buyer_name: str | None
     buyer_tax_no: str | None
     amount_without_tax: Decimal
-    tax_amount: Decimal
+    tax_amount: Decimal | None
     total_amount: Decimal
     tax_rate: str | None
     zip_source_name: str
@@ -450,6 +451,8 @@ class EtcInvoice:
     xml_file_hash: str | None
     pdf_file_path: str | None
     pdf_file_hash: str | None
+    tax_amount_text: str | None = None
+    source_line_items: list[dict[str, object]] = field(default_factory=list)
     status: EtcInvoiceStatus = EtcInvoiceStatus.UNSUBMITTED
     import_batch_id: str | None = None
     import_session_id: str | None = None
@@ -739,9 +742,11 @@ class ParsedEtcXml:
     buyer_name: str | None
     buyer_tax_no: str | None
     amount_without_tax: Decimal
-    tax_amount: Decimal
+    tax_amount: Decimal | None
     total_amount: Decimal
     tax_rate: str | None
+    tax_amount_text: str | None = None
+    source_line_items: list[dict[str, object]] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -2444,10 +2449,12 @@ class EtcService:
                 seller_tax_no=str(record.get("seller_tax_no") or "") or None,
                 buyer_name=str(record.get("buyer_name") or "") or None,
                 buyer_tax_no=str(record.get("buyer_tax_no") or "") or None,
-                amount_without_tax=_decimal_from_amount(record.get("amount_without_tax") or "0"),
-                tax_amount=_decimal_from_amount(record.get("tax_amount") or "0"),
-                total_amount=_decimal_from_amount(record.get("total_amount") or "0"),
+                amount_without_tax=_required_decimal(record, "amount_without_tax"),
+                tax_amount=_decimal_from_amount(record["tax_amount"]) if record.get("tax_amount") is not None else None,
+                total_amount=_required_decimal(record, "total_amount"),
                 tax_rate=str(record.get("tax_rate") or "") or None,
+                tax_amount_text=str(record.get("tax_amount_text") or "") or None,
+                source_line_items=deepcopy(record.get("source_line_items") or []),
                 zip_source_name=str(source_name or "historical_etc_parsed_seed"),
                 xml_file_path=None,
                 xml_file_hash=None,
@@ -3167,7 +3174,7 @@ class EtcService:
         mismatches.extend(
             field_name
             for field_name, current, source in amount_fields
-            if Decimal(str(current)) != Decimal(str(source))
+            if current != source
         )
         if not str(parsed.plate_number or "").strip():
             mismatches.append("plate_number")
@@ -3182,7 +3189,12 @@ class EtcService:
         parsed: ParsedEtcXml,
         source_name: str,
     ) -> dict[str, object]:
-        updates: dict[str, object] = {"zip_source_name": str(source_name or "").strip()}
+        updates: dict[str, object] = {
+            "zip_source_name": str(source_name or "").strip(),
+            "tax_rate": parsed.tax_rate,
+            "tax_amount_text": parsed.tax_amount_text,
+            "source_line_items": deepcopy(parsed.source_line_items),
+        }
         for field_name in ("passage_start_date", "passage_end_date", "plate_number", "vehicle_type"):
             value = getattr(parsed, field_name)
             if value not in (None, ""):
@@ -3695,6 +3707,8 @@ class EtcService:
                 tax_amount=parsed.tax_amount,
                 total_amount=parsed.total_amount,
                 tax_rate=parsed.tax_rate,
+                tax_amount_text=parsed.tax_amount_text,
+                source_line_items=deepcopy(parsed.source_line_items),
                 zip_source_name=zip_source_name,
                 xml_file_path=xml_path,
                 xml_file_hash=xml_hash,
@@ -4327,6 +4341,7 @@ class EtcService:
             "buyer_name": invoice.buyer_name,
             "amount_without_tax": invoice.amount_without_tax,
             "tax_amount": invoice.tax_amount,
+            "tax_amount_text": invoice.tax_amount_text,
             "total_amount": invoice.total_amount,
             "status": invoice.status,
             "has_pdf": self._stored_invoice_file_exists(invoice.pdf_file_path),
@@ -4506,19 +4521,35 @@ def parse_etc_xml(content: bytes) -> ParsedEtcXml:
         root = ET.fromstring(content)
     except ET.ParseError as exc:
         raise ValueError(f"XML 解析失败: {exc}") from exc
+    item_nodes = [element for element in root.iter() if _local_name(element.tag) == "IssuItemInformation"]
+    item_elements = {element for item in item_nodes for element in item.iter()}
     values: dict[str, str] = {}
+    aliases_by_name = {
+        _normalize_field_name(alias): field_name
+        for field_name, aliases in FIELD_ALIASES.items() for alias in aliases
+    }
     for element in root.iter():
-        local_name = _local_name(element.tag)
-        normalized_name = _normalize_field_name(local_name)
+        # Item Amount/TaxRate/Tax-includedAmount are not invoice totals. Retain
+        # every actual item node separately instead of taking the first match.
+        if element in item_elements:
+            continue
+        normalized_name = _normalize_field_name(_local_name(element.tag))
         text = (element.text or "").strip()
         if not text:
             continue
-        if normalized_name in {_normalize_field_name(alias) for alias in ("RequestTime", "IssueTime", "开票时间")}:
+        if normalized_name in {"requesttime", "issuetime", "开票时间"}:
             values.setdefault("issue_datetime", text)
-        for field_name, aliases in FIELD_ALIASES.items():
-            normalized_aliases = {_normalize_field_name(alias) for alias in aliases}
-            if normalized_name in normalized_aliases and field_name not in values:
-                values[field_name] = text
+        if field_name := aliases_by_name.get(normalized_name):
+            values.setdefault(field_name, text)
+    source_line_items = [{**_etc_xml_source_line_item(item), "source_region_key": f"xml:IssuItemInformation:{index}"}
+                         for index, item in enumerate(item_nodes, start=1)]
+    line_rates = {normalize_output_tax_rate(item.get("tax_rate")) for item in source_line_items}
+    if not values.get("tax_rate") and len(line_rates) == 1 and all(item.get("tax_rate") for item in source_line_items):
+        values["tax_rate"] = str(source_line_items[0]["tax_rate"])
+    elif len(line_rates - {"—"}) > 1:
+        values["tax_rate"] = "mixed"
+    tax_source = _required_text(values, "tax_amount")
+    tax_amount_text = tax_source if tax_source in {"*", "**", "***", "免税", "不征税"} else None
     invoice_number = _required_text(values, "invoice_number")
     raw_issue_date = _required_text(values, "issue_date")
     issue_date = _normalize_date(raw_issue_date)
@@ -4539,10 +4570,28 @@ def parse_etc_xml(content: bytes) -> ParsedEtcXml:
         buyer_name=values.get("buyer_name"),
         buyer_tax_no=values.get("buyer_tax_no"),
         amount_without_tax=_required_decimal(values, "amount_without_tax"),
-        tax_amount=_required_decimal(values, "tax_amount"),
+        tax_amount=None if tax_amount_text is not None else _required_decimal(values, "tax_amount"),
         total_amount=_required_decimal(values, "total_amount"),
         tax_rate=values.get("tax_rate"),
+        tax_amount_text=tax_amount_text,
+        source_line_items=source_line_items,
     )
+
+
+def _etc_xml_source_line_item(element: ET.Element) -> dict[str, object]:
+    values = {_local_name(node.tag): (node.text or "").strip() for node in element if (node.text or "").strip()}
+    tax_source = values.get("ComTaxAm")
+    tax_text = tax_source if tax_source in {"*", "**", "***", "免税", "不征税"} else None
+    return {
+        "taxable_item_name": values.get("ItemName"),
+        "tax_classification_code": values.get("TaxClassificationCode"),
+        "amount": str(_decimal_from_amount(values["Amount"])) if values.get("Amount") else None,
+        "tax_rate": values.get("TaxRate"),
+        "tax_amount": str(_decimal_from_amount(tax_source)) if tax_source and tax_text is None else None,
+        "tax_amount_text": tax_text,
+        "total_with_tax": str(_decimal_from_amount(values["TotaltaxIncludedAmount"])) if values.get("TotaltaxIncludedAmount") else None,
+        "unit_price": values.get("UnPrice"),
+    }
 
 
 def _coerce_invoice_status(status: EtcInvoiceStatus | str) -> EtcInvoiceStatus:
@@ -4559,8 +4608,9 @@ def _etc_invoice_from_snapshot(value: object) -> EtcInvoice:
         return value
     raw = _coerce_snapshot_dict(EtcInvoice, value)
     raw["status"] = _coerce_invoice_status(raw.get("status") or EtcInvoiceStatus.UNSUBMITTED.value)
-    for field_name in ("amount_without_tax", "tax_amount", "total_amount"):
-        raw[field_name] = _decimal_from_snapshot(raw.get(field_name), default=Decimal("0.00"))
+    for field_name in ("amount_without_tax", "total_amount"):
+        raw[field_name] = _required_decimal(raw, field_name)
+    raw["tax_amount"] = _decimal_from_amount(raw["tax_amount"]) if raw.get("tax_amount") is not None else None
     for field_name in ("created_at", "updated_at"):
         raw[field_name] = _datetime_from_snapshot(raw.get(field_name))
     return EtcInvoice(**raw)

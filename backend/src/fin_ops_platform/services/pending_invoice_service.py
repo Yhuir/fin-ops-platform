@@ -38,7 +38,7 @@ from fin_ops_platform.services.pending_invoice_status import (
     pending_invoice_available_actions,
     pending_invoice_status_payload,
 )
-from fin_ops_platform.services.source_record_details import oa_source_detail
+from fin_ops_platform.services.source_record_details import INVOICE_SOURCE_KEYS, oa_source_detail, query_source_detail
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
@@ -471,7 +471,7 @@ class PendingInvoiceQueryService:
 
     def _payment_summary_for_relations(self, invoice_relations: list[tuple[dict[str, Any], Invoice]]) -> dict[str, Any]:
         invoice_ids = [invoice.id for _, invoice in invoice_relations]
-        invoice_total = sum((self._invoice_total(invoice) for _, invoice in invoice_relations), start=Decimal("0.00"))
+        invoice_total = _source_invoice_total([invoice.total_with_tax for _, invoice in invoice_relations])
         paid_transaction_ids: set[str] = set()
         for invoice_id in invoice_ids:
             relation_row = self._canonical_relation_context_row(invoice_id)
@@ -487,20 +487,20 @@ class PendingInvoiceQueryService:
                     paid_transaction_ids.add(transaction_id)
         paid_units = bank_unit_comparison_rows(self._bank_units_by_ids(sorted(paid_transaction_ids)), target=invoice_total)
         paid_total = sum((row.amount for row in paid_units), Decimal("0.00"))
-        remaining = invoice_total - paid_total
-        if remaining < Decimal("0.00"):
+        remaining = invoice_total - paid_total if invoice_total is not None else None
+        if remaining is not None and remaining < Decimal("0.00"):
             remaining = Decimal("0.00")
         return {
             "invoice_total": _decimal_to_str(invoice_total),
             "paid_total": _decimal_to_str(paid_total),
             "remaining_amount": _decimal_to_str(remaining),
-            "difference_amount": _decimal_to_str(invoice_total - paid_total),
+            "difference_amount": _decimal_to_str(invoice_total - paid_total if invoice_total is not None else None),
             "payment_transaction_count": len(paid_units),
         }
 
     @staticmethod
     def _empty_payment_summary(invoices: list[dict[str, Any]]) -> dict[str, Any]:
-        invoice_total = sum((_decimal_from_text(invoice.get("total_with_tax")) for invoice in invoices), start=Decimal("0.00"))
+        invoice_total = _source_invoice_total([invoice.get("total_with_tax") for invoice in invoices])
         return {
             "invoice_total": _decimal_to_str(invoice_total),
             "paid_total": "0.00",
@@ -610,7 +610,7 @@ class PendingInvoiceQueryService:
                             "invoice_no": invoice.invoice_no,
                             "digital_invoice_no": invoice.digital_invoice_no,
                             "invoice_date": invoice.invoice_date,
-                            "total_with_tax": _decimal_to_str(_invoice_total(invoice)),
+                            "total_with_tax": _decimal_to_str(invoice.total_with_tax),
                             "seller_name": invoice.seller_name,
                             "buyer_name": invoice.buyer_name,
                         }
@@ -676,7 +676,7 @@ class PendingInvoiceQueryService:
                     "invoice_no": str(item.get("invoice_no") or ""),
                     "digital_invoice_no": str(item.get("digital_invoice_no") or ""),
                     "issue_date": str(item.get("issue_date") or item.get("invoice_date") or ""),
-                    "total_with_tax": _decimal_to_str(_decimal_from_text(item.get("total_with_tax") or item.get("amount"))),
+                    "total_with_tax": _decimal_to_str(Decimal(str(item["total_with_tax"])) if item.get("total_with_tax") not in (None, "") else None),
                     "seller_name": str(item.get("seller_name") or ""),
                     "buyer_name": str(item.get("buyer_name") or ""),
                     "invoice_type": "input" if invoice_type == InvoiceType.INPUT else "output",
@@ -853,21 +853,21 @@ class PendingInvoiceQueryService:
 
     @staticmethod
     def _payment_summary_from_relation_context(row: dict[str, Any], invoices: list[dict[str, Any]]) -> dict[str, Any]:
-        invoice_total = sum((_decimal_from_text(invoice.get("total_with_tax")) for invoice in invoices), start=Decimal("0.00"))
+        invoice_total = _source_invoice_total([invoice.get("total_with_tax") for invoice in invoices])
         linked_banks = {str(item.get("id") or item.get("transaction_id") or ""): item
                         for item in row.get("linked_bank_transactions", [])
                         if isinstance(item, dict) and _distribution_item_is_linked(item)}
         comparison = bank_split_comparison_rows(list(linked_banks.values()), target=invoice_total)
         paid_transaction_ids = {str(item.get("id") or item.get("transaction_id") or "") for item in comparison}
         paid_total = sum((_decimal_from_text(item.get("amount")) for item in comparison), Decimal("0.00"))
-        remaining = invoice_total - paid_total
-        if remaining < Decimal("0.00"):
+        remaining = invoice_total - paid_total if invoice_total is not None else None
+        if remaining is not None and remaining < Decimal("0.00"):
             remaining = Decimal("0.00")
         return {
             "invoice_total": _decimal_to_str(invoice_total),
             "paid_total": _decimal_to_str(paid_total),
             "remaining_amount": _decimal_to_str(remaining),
-            "difference_amount": _decimal_to_str(invoice_total - paid_total),
+            "difference_amount": _decimal_to_str(invoice_total - paid_total if invoice_total is not None else None),
             "payment_transaction_count": len(paid_transaction_ids),
         }
 
@@ -917,16 +917,12 @@ class PendingInvoiceQueryService:
             "invoice_no": invoice.invoice_no,
             "digital_invoice_no": invoice.digital_invoice_no,
             "issue_date": invoice.invoice_date,
-            "total_with_tax": _decimal_to_str(invoice.total_with_tax if invoice.total_with_tax is not None else invoice.amount),
+            "total_with_tax": _decimal_to_str(invoice.total_with_tax) if invoice.total_with_tax is not None else "",
             "seller_name": invoice.seller_name,
             "buyer_name": invoice.buyer_name,
             "invoice_type": "input" if invoice.invoice_type == InvoiceType.INPUT else "output",
             "counterparty_display_name": invoice.seller_name if direction == "expense" else invoice.buyer_name,
         }
-
-    @staticmethod
-    def _invoice_total(invoice: Invoice) -> Decimal:
-        return _invoice_total(invoice)
 
     def _oa_payload_from_relations(self, relations: list[dict[str, Any]]) -> dict[str, Any]:
         summaries: list[dict[str, Any]] = []
@@ -1097,16 +1093,16 @@ class PendingInvoiceQueryService:
         max_amount = _decimal_or_none(amount_max)
         rows: list[dict[str, Any]] = []
         for invoice in self._import_service.list_invoices(invoice_type=InvoiceType.INPUT):
-            invoice_total = self._invoice_total(invoice)
+            invoice_total = invoice.total_with_tax
             if seller_name and str(seller_name).strip().lower() not in str(invoice.seller_name or "").lower():
                 continue
             if issue_date_from and str(invoice.invoice_date or "") < str(issue_date_from):
                 continue
             if issue_date_to and str(invoice.invoice_date or "") > str(issue_date_to):
                 continue
-            if min_amount is not None and invoice_total < min_amount:
+            if min_amount is not None and (invoice_total is None or invoice_total < min_amount):
                 continue
-            if max_amount is not None and invoice_total > max_amount:
+            if max_amount is not None and (invoice_total is None or invoice_total > max_amount):
                 continue
             haystack = " ".join(str(part or "") for part in (invoice.invoice_no, invoice.digital_invoice_no, invoice.seller_name, invoice.remark)).lower()
             if keyword and str(keyword).strip().lower() not in haystack:
@@ -1117,13 +1113,13 @@ class PendingInvoiceQueryService:
                 if relation_row is not None
                 else self._empty_payment_summary([self._invoice_payload(invoice, direction="expense")])
             )
-            candidate_status = self._candidate_status(transaction.id, invoice.id)
+            candidate_status = self._candidate_status(transaction.id, invoice.id) if invoice_total is not None else "conflict"
             bank_relation = self._bank_relation_status_payload(
                 relation_row,
                 selected_transaction_ids=[transaction.id],
                 candidate_status=candidate_status,
             )
-            amount_difference = (invoice_total - transaction.amount).copy_abs()
+            amount_difference = (invoice_total - transaction.amount).copy_abs() if invoice_total is not None else None
             rows.append(
                 {
                     "invoice_id": invoice.id,
@@ -1139,7 +1135,7 @@ class PendingInvoiceQueryService:
                     "remaining_amount": paid_summary["remaining_amount"],
                     "candidate_status": candidate_status,
                     **bank_relation,
-                    "conflict_reason": "已有不兼容关系" if candidate_status == "conflict" else "",
+                    "conflict_reason": ("发票原件未提供价税合计" if invoice_total is None else "已有不兼容关系" if candidate_status == "conflict" else ""),
                     "amount_difference_abs": _decimal_to_str(amount_difference),
                 }
             )
@@ -1183,16 +1179,16 @@ class PendingInvoiceQueryService:
         max_amount = _decimal_or_none(amount_max)
         rows: list[dict[str, Any]] = []
         for invoice in self._import_service.list_invoices(invoice_type=InvoiceType.INPUT):
-            invoice_total = self._invoice_total(invoice)
+            invoice_total = invoice.total_with_tax
             if seller_name and str(seller_name).strip().lower() not in str(invoice.seller_name or "").lower():
                 continue
             if issue_date_from and str(invoice.invoice_date or "") < str(issue_date_from):
                 continue
             if issue_date_to and str(invoice.invoice_date or "") > str(issue_date_to):
                 continue
-            if min_amount is not None and invoice_total < min_amount:
+            if min_amount is not None and (invoice_total is None or invoice_total < min_amount):
                 continue
-            if max_amount is not None and invoice_total > max_amount:
+            if max_amount is not None and (invoice_total is None or invoice_total > max_amount):
                 continue
             haystack = " ".join(str(part or "") for part in (invoice.invoice_no, invoice.digital_invoice_no, invoice.seller_name, invoice.remark)).lower()
             if keyword and str(keyword).strip().lower() not in haystack:
@@ -1203,13 +1199,13 @@ class PendingInvoiceQueryService:
                 if relation_row is not None
                 else self._empty_payment_summary([self._invoice_payload(invoice, direction="expense")])
             )
-            candidate_status = self._batch_candidate_status(normalized_transaction_ids, invoice.id)
+            candidate_status = self._batch_candidate_status(normalized_transaction_ids, invoice.id) if invoice_total is not None else "conflict"
             bank_relation = self._bank_relation_status_payload(
                 relation_row,
                 selected_transaction_ids=normalized_transaction_ids,
                 candidate_status=candidate_status,
             )
-            amount_difference = (invoice_total - selected_bank_total).copy_abs()
+            amount_difference = (invoice_total - selected_bank_total).copy_abs() if invoice_total is not None else None
             rows.append(
                 {
                     "invoice_id": invoice.id,
@@ -1225,7 +1221,7 @@ class PendingInvoiceQueryService:
                     "remaining_amount": paid_summary["remaining_amount"],
                     "candidate_status": candidate_status,
                     **bank_relation,
-                    "conflict_reason": "已有不兼容关系" if candidate_status == "conflict" else "",
+                    "conflict_reason": ("发票原件未提供价税合计" if invoice_total is None else "已有不兼容关系" if candidate_status == "conflict" else ""),
                     "amount_difference_abs": _decimal_to_str(amount_difference),
                 }
             )
@@ -1407,20 +1403,16 @@ class PendingInvoiceQueryService:
             invoice = self._import_service.get_invoice(invoice_id)
         except KeyError as exc:
             raise PendingInvoiceError("invoice_not_found", f"Invoice detail not found: {invoice_id}", status_code=HTTPStatus.NOT_FOUND) from exc
-        detail = {
-            key: getattr(invoice, key) for key in (
-                "id", "invoice_no", "invoice_code", "digital_invoice_no", "seller_name", "seller_tax_no",
-                "buyer_name", "buyer_tax_no", "tax_amount", "tax_rate", "total_with_tax", "remark",
-                "invoice_status_from_source", "invoice_kind", "invoice_source", "is_positive_invoice",
-                "risk_level", "issuer", "specific_business_type", "taxable_item_name", "unit", "quantity", "unit_price",
-            )
-        }
-        detail.update({"issue_date": invoice.invoice_date, "amount_without_tax": invoice.amount})
+        detail = {key: getattr(invoice, key) for key in INVOICE_SOURCE_KEYS}
+        detail.update({
+            "id": invoice.id, "invoice_type": invoice.invoice_type.value,
+            "issue_date": invoice.invoice_date, "amount_without_tax": invoice.amount,
+            "model": invoice.specification_model,
+        })
         return {
-            "title": detail.get("invoice_no") or detail.get("digital_invoice_no") or invoice.id,
-            "subtitle": detail.get("seller_name") or "",
+            "title": "发票详情",
             "detail_available": True,
-            "sections": [{"title": "进项发票", "fields": _detail_fields(detail)}],
+            "sections": query_source_detail("invoice", detail)["sections"],
             "invoice": detail,
         }
 
@@ -1635,6 +1627,7 @@ class PendingInvoiceQueryService:
                 rows,
                 key=lambda row: (
                     status_rank.get(str(row.get("candidate_status")), 99),
+                    row.get("amount_difference_abs") in (None, ""),
                     _decimal_from_text(row.get("amount_difference_abs")),
                     _reverse_date_key(row.get("issue_date")),
                     str(row.get("invoice_id") or ""),
@@ -1642,7 +1635,9 @@ class PendingInvoiceQueryService:
             )
         reverse = sort_direction == "desc"
         if sort_field in {"total_with_tax", "amount_difference_abs"}:
-            return sorted(rows, key=lambda row: _decimal_from_text(row.get(sort_field)), reverse=reverse)
+            known = [row for row in rows if row.get(sort_field) not in (None, "")]
+            missing = [row for row in rows if row.get(sort_field) in (None, "")]
+            return sorted(known, key=lambda row: _decimal_from_text(row[sort_field]), reverse=reverse) + missing
         return sorted(rows, key=lambda row: str(row.get(sort_field) or ""), reverse=reverse)
 
     @staticmethod
@@ -1900,7 +1895,7 @@ class PendingInvoiceApplicationService:
                     "issue_date": invoice.invoice_date,
                     "seller_name": invoice.seller_name,
                     "seller_tax_no": invoice.seller_tax_no,
-                    "total_with_tax": _decimal_to_str(_invoice_total(invoice)),
+                    "total_with_tax": _decimal_to_str(invoice.total_with_tax),
                 }
                 for invoice in invoices
             ],
@@ -2754,7 +2749,9 @@ def _decimal_from_text(value: Any) -> Decimal:
 
 
 def _invoice_total(invoice: Invoice) -> Decimal:
-    return Decimal(invoice.total_with_tax if invoice.total_with_tax is not None else invoice.amount).quantize(Decimal("0.01"))
+    if invoice.total_with_tax is None:
+        raise PendingInvoiceError("invoice_total_missing", f"发票 {invoice.invoice_no or invoice.id} 原件未提供价税合计，无法计算关联金额。")
+    return invoice.total_with_tax.quantize(Decimal("0.01"))
 
 
 def _relation_can_absorb_attach_existing_invoice(relation: dict[str, Any], invoice_id: str) -> bool:
@@ -2804,7 +2801,7 @@ def _row_type_for_relation_row_id(row_id: str) -> str:
 
 def _decimal_to_str(value: Decimal | None) -> str:
     if value is None:
-        return "0.00"
+        return ""
     return str(Decimal(value).quantize(Decimal("0.01")))
 
 
@@ -2827,3 +2824,9 @@ def _detail_fields(payload: dict[str, Any]) -> list[dict[str, str]]:
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _source_invoice_total(values: list[Any]) -> Decimal | None:
+    if any(value in (None, "") for value in values):
+        return None
+    return sum((Decimal(str(value)) for value in values), Decimal("0.00"))

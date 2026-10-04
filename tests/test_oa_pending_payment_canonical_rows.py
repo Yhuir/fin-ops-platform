@@ -11,6 +11,21 @@ from fin_ops_platform.services.oa_pending_payment_canonical_rows import build_oa
 
 
 class OaPendingPaymentProjectionRowsTests(unittest.TestCase):
+    def test_missing_source_gross_is_not_replaced_by_net_or_partial_group_sum(self) -> None:
+        record = self._oa("oa-1", "100.00")
+        missing = self._invoice("invoice-missing", "100.00")
+        missing.total_with_tax = None
+        missing.tax_amount = Decimal("13.00")
+        zero = self._invoice("invoice-zero", "0.00")
+        rows = self._build(
+            records=[record], invoices=[missing, zero],
+            relations=[self._relation("case-1", [record.id, missing.id, zero.id])],
+        )
+        invoice = rows[0]["invoice"]
+        self.assertEqual(invoice["relationCount"], 2)
+        self.assertEqual(invoice["totalWithTax"], "")
+        self.assertEqual([item["totalWithTax"] for item in invoice["summaries"]], ["0.00", ""])
+
     def test_linked_canonical_relation_builds_one_paid_group_without_standalone_duplicates(self) -> None:
         records = [self._oa("oa-1", "40.00"), self._oa("oa-2", "60.00")]
         bank = self._bank("bank-1", "100.00")

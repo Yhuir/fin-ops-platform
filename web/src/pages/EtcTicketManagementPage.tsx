@@ -89,6 +89,9 @@ function moneyDifference(left: string | number, right: string | number) {
 }
 
 function sumInvoiceMoney(items: EtcInvoice[], key: "totalAmount" | "taxAmount") {
+  if (items.some((item) => item[key] == null || item[key] === "" || !Number.isFinite(Number(item[key])))) {
+    return "—";
+  }
   const totalCents = items.reduce((sum, item) => {
     const parsed = Number(item[key]);
     return Number.isFinite(parsed) ? sum + Math.round(parsed * 100) : sum;
@@ -1918,7 +1921,7 @@ export default function EtcTicketManagementPage() {
             ) : (
               rows.map((invoice) => (
                 <FinanceTableRow id={invoice.id} key={invoice.id}>
-                  <FinanceTableCell columnRole="identity">{invoice.invoiceNumber}</FinanceTableCell><FinanceTableCell columnRole="date">{invoice.issueDate}</FinanceTableCell><FinanceTableCell columnRole="date">{formatDateRange(invoice.passageStartDate, invoice.passageEndDate)}</FinanceTableCell><FinanceTableCell columnRole="identity">{invoice.plateNumber || "-"}</FinanceTableCell><FinanceTableCell columnRole="identity">{invoice.sellerName || "-"}</FinanceTableCell><FinanceTableCell className="etc-invoice-money-cell" columnRole="amount">{formatMoney(invoice.totalAmount)}</FinanceTableCell><FinanceTableCell className="etc-invoice-money-cell" columnRole="amount">{formatMoney(invoice.taxAmount)}</FinanceTableCell><FinanceTableCell columnRole="status">{attachmentLabel(invoice)}</FinanceTableCell>
+                  <FinanceTableCell columnRole="identity">{invoice.invoiceNumber}</FinanceTableCell><FinanceTableCell columnRole="date">{invoice.issueDate}</FinanceTableCell><FinanceTableCell columnRole="date">{formatDateRange(invoice.passageStartDate, invoice.passageEndDate)}</FinanceTableCell><FinanceTableCell columnRole="identity">{invoice.plateNumber || "-"}</FinanceTableCell><FinanceTableCell columnRole="identity">{invoice.sellerName || "-"}</FinanceTableCell><FinanceTableCell className="etc-invoice-money-cell" columnRole="amount">{formatMoney(invoice.totalAmount)}</FinanceTableCell><FinanceTableCell className="etc-invoice-money-cell" columnRole="amount">{invoice.taxAmountText ?? formatMoney(invoice.taxAmount, "—")}</FinanceTableCell><FinanceTableCell columnRole="status">{attachmentLabel(invoice)}</FinanceTableCell>
                 </FinanceTableRow>
               ))
             )}

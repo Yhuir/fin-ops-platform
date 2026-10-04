@@ -400,6 +400,43 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertEqual(rows[0]["total_with_tax"], "42.73")
         self.assertEqual(rows[0]["source_line_count"], 2)
 
+    def test_invoice_actual_single_detail_and_missing_values_are_preserved(self) -> None:
+        original = {"digital_invoice_no": "26117000001052654674", "taxable_item_name": "服务",
+                    "amount": None, "tax_amount": None, "total_with_tax": "100.00", "tax_rate": None}
+        rows = aggregate_invoice_line_rows([original])
+        self.assertEqual(rows[0]["source_line_items"], [original])
+        self.assertIsNone(rows[0]["amount"])
+        self.assertIsNone(rows[0]["tax_rate"])
+        summary = dict(original, taxable_item_name=None)
+        self.assertNotIn("source_line_items", aggregate_invoice_line_rows([summary])[0])
+        header_with_name = dict(original, source_sheet_role="invoice_header")
+        self.assertNotIn("source_line_items", aggregate_invoice_line_rows([header_with_name])[0])
+
+    def test_identical_actual_lines_at_distinct_source_rows_are_all_preserved(self) -> None:
+        source = {"digital_invoice_no": "26117000001052654674", "taxable_item_name": "服务",
+                  "amount": "10", "tax_amount": "1.30", "total_with_tax": None, "tax_rate": "13%"}
+        rows = [{**source, "source_sheet_name": "信息汇总表", "source_row_number": row} for row in (2, 3)]
+        [merged] = aggregate_invoice_line_rows(rows)
+        self.assertEqual(merged["source_line_items"], rows)
+        self.assertEqual(merged["source_line_count"], 2)
+        self.assertEqual((merged["amount"], merged["tax_amount"], merged["total_with_tax"]), ("20.00", "2.60", None))
+        # Repeating an invoice header is not evidence of two printed item rows.
+        headers = [{**row, "source_sheet_role": "invoice_header"} for row in rows]
+        self.assertEqual(aggregate_invoice_line_rows(headers), headers)
+        # Reusing one source position is still audited as a duplicate input.
+        self.assertEqual(aggregate_invoice_line_rows([rows[0], dict(rows[0])]), [rows[0], rows[0]])
+
+    def test_invoice_special_tax_is_not_zero_in_detail_aggregation(self) -> None:
+        rows = aggregate_invoice_line_rows([
+            {"digital_invoice_no": "26117000001052654674", "taxable_item_name": "服务一",
+             "amount": "10", "tax_amount": "*", "total_with_tax": "10", "tax_rate": "免税"},
+            {"digital_invoice_no": "26117000001052654674", "taxable_item_name": "服务二",
+             "amount": "20", "tax_amount": "*", "total_with_tax": "20", "tax_rate": "免税"},
+        ])
+        self.assertIsNone(rows[0]["tax_amount"])
+        self.assertEqual(rows[0]["amount"], "30.00")
+        self.assertEqual([item["tax_amount"] for item in rows[0]["source_line_items"]], ["*", "*"])
+
     def test_invoice_export_keeps_identical_repeated_rows_for_duplicate_audit(self) -> None:
         row = {
             "digital_invoice_no": "26117000001052654674",

@@ -33,6 +33,7 @@ class FakeConnection:
                     "invoice_no": "OUT-1",
                     "invoice_date": "2026-05-01",
                     "buyer_name": "客户",
+                    "amount": None,
                     "tax_amount": "13.00",
                     "total_with_tax": "113.00",
                     "tax_rate": "13%",
@@ -55,6 +56,7 @@ class FakeConnection:
                     "invoice_no": "IN-2",
                     "invoice_date": "2026-05-03",
                     "seller_name": "供应商二",
+                    "amount": "100.00",
                     "tax_amount": "3.00",
                     "total_with_tax": "103.00",
                     "tax_rate": "3%",
@@ -115,6 +117,27 @@ class TaxOffsetCanonicalRepositoryTests(unittest.TestCase):
             {"input_invoice_count": 2, "output_invoice_count": 1},
         )
         self.assertRegex(payload["canonical_snapshot_version"], r"^tax-offset-v1:[0-9a-f]{64}$")
+
+    def test_original_values_and_unselectable_missing_tax_survive_the_snapshot(self) -> None:
+        class MissingTaxConnection(FakeConnection):
+            def fetch_all(self, sql: str, params: object = None) -> list[dict[str, object]]:
+                rows = super().fetch_all(sql, params)
+                if "from app.invoices" in sql:
+                    rows[0]["total_with_tax"] = None
+                    rows[2]["tax_amount"] = None
+                    rows[2]["raw_payload"] = {"tax_amount_text": "*"}
+                return rows
+
+        payload = PostgresTaxOffsetCanonicalRepository(MissingTaxConnection()).load_month_payload("2026-05")
+        self.assertIsNone(payload["output_items"][0]["amount"])
+        self.assertIsNone(payload["output_items"][0]["total_with_tax"])
+        self.assertEqual(payload["input_plan_items"][1]["amount"], "100.00")
+        self.assertIsNone(payload["input_plan_items"][1]["tax_amount"])
+        self.assertEqual(payload["input_plan_items"][1]["tax_amount_text"], "*")
+        self.assertFalse(payload["input_plan_items"][1]["is_selectable"])
+        self.assertEqual(payload["default_selected_input_ids"], [])
+        self.assertIsNone(payload["certified_items"][0]["total_with_tax"])
+        self.assertEqual(payload["summary"]["planned_input_tax"], "0.00")
 
     def test_rejects_invalid_month_before_opening_a_snapshot(self) -> None:
         connection = FakeConnection()

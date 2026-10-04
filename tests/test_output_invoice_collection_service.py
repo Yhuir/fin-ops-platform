@@ -36,6 +36,50 @@ class FakeOutputCanonicalRelationReader:
 
 
 class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
+    def test_missing_source_gross_keeps_income_relation_and_unknown_pending_amount(self):
+        invoice = self._invoice("missing-gross", "MISSING")
+        invoice.total_with_tax = None
+        bank = self._bank("source-income", "40", TransactionDirection.INFLOW)
+        service = self._service(invoices=[invoice], transactions=[bank], relations=[
+            self._relation("source-case", [invoice.id, bank.id], ["invoice", "bank"])])
+        payload = service.list_rows()
+        row = payload["rows"][0]
+        self.assertEqual(row["invoice"]["totalWithTax"], "")
+        self.assertEqual(row["bankTransactions"]["relationCount"], 1)
+        self.assertEqual(row["collectionStatus"]["code"], "pending_collection")
+        self.assertEqual(row["collectionStatus"]["collectedAmount"], "40.00")
+        self.assertEqual(row["collectionStatus"]["pendingAmount"], "")
+        self.assertIn("原件未提供价税合计", row["collectionStatus"]["reason"])
+        self.assertEqual(payload["summary"]["pendingAmount"], "")
+        self.assertEqual(payload["summary"]["collectedAmount"], "40.00")
+        for field in ("total_with_tax", "pending_amount"):
+            self.assertEqual(service.list_rows(filters=[{"field": field, "operator": "equals", "value": "0"}])["pagination"]["total"], 0)
+            self.assertEqual(service.list_rows(filters=[{"field": field, "operator": "between", "value": {"min": "0", "max": "100"}}])["pagination"]["total"], 0)
+        invoice.total_with_tax = Decimal("100")
+        invoice.amount = None
+        row = service.list_rows()["rows"][0]
+        self.assertEqual(row["collectionStatus"]["code"], "partial_collected")
+        self.assertEqual(row["collectionStatus"]["pendingAmount"], "60.00")
+
+    def test_missing_gross_keeps_explicit_red_blue_relation_but_not_inferred_amount(self):
+        blue = self._invoice("source-blue", "26532000000809302711")
+        red = self._invoice("source-red", "26532000000809302712", amount="-94.34", tax_amount="-5.66",
+                            total_with_tax="-100", is_positive_invoice="否",
+                            remark="被红冲蓝字数电发票号码：26532000000809302711")
+        blue.total_with_tax = red.total_with_tax = None
+        rows = self._service(invoices=[blue, red]).list_rows()["rows"]
+        self.assertEqual({row["collectionStatus"]["code"] for row in rows}, {"reversed_by_red", "reverses_blue"})
+        for row in rows:
+            self.assertEqual(row["invoiceRelations"]["relationCount"], 2)
+            self.assertTrue(all(item["totalWithTax"] == "" for item in row["invoiceRelations"]["summaries"]))
+
+    def test_source_zero_gross_remains_zero(self):
+        invoice = self._invoice("zero-gross", "ZERO", amount="0", tax_amount="0", total_with_tax="0")
+        payload = self._service(invoices=[invoice]).list_rows()
+        self.assertEqual(payload["rows"][0]["invoice"]["totalWithTax"], "0.00")
+        self.assertEqual(payload["rows"][0]["collectionStatus"]["pendingAmount"], "0.00")
+        self.assertEqual(payload["summary"]["pendingAmount"], "0.00")
+
     def test_source_rates_and_unknown_facets_ignore_self_without_broadening_old_filters(self):
         rates = ["0.13", "13%", None, "0", "免税", "不征税", "mixed", "0.06"]
         invoices = [self._invoice(f"rate-{index}", str(index)) for index in range(len(rates))]
@@ -50,7 +94,7 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         self.assertEqual(page["appliedFilters"]["filters"][0]["values"], ["13%"])
         options = next(field["options"] for field in service.filter_options(filters=filters)["fields"] if field["field"] == "tax_rate")
         self.assertEqual({option["value"]: option["count"] for option in options},
-                         {"13%": 2, "无法确定": 2, "0%": 1, "免税": 1, "不征税": 1, "6%": 1})
+                         {"13%": 2, "—": 1, "多税率": 1, "0%": 1, "免税": 1, "不征税": 1, "6%": 1})
         self.assertEqual(service.list_rows(filters=[{"field": "tax_rate", "operator": "in", "values": ["6%（推算）"]}])["pagination"]["total"], 0)
         for invalid in ("13%", [13], []):
             with self.subTest(invalid=invalid), self.assertRaises(OutputInvoiceCollectionError):

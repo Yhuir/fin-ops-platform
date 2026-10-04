@@ -2,7 +2,7 @@ import { expect, test } from "./fixtures/strictTest";
 import { installDeterministicApiMocks, pendingInvoiceRowsPayload } from "./fixtures/apiMocks";
 import { pendingAcquisitionFixture } from "../src/test/pendingInvoiceFixtures";
 
-const codes = ["paid_pending_invoice", "paid_invoiced", "invoice_not_fully_paid", "bank_statement_as_invoice", "no_invoice_required", "income_pending_invoice", "income_invoiced", "income_no_invoice_required", "cash_income"];
+const codes = ["paid_pending_invoice", "paid_invoiced", "invoice_not_fully_paid", "invoice_amount_missing", "bank_statement_as_invoice", "no_invoice_required", "income_pending_invoice", "income_invoiced", "income_no_invoice_required", "cash_income"];
 
 test("two native segment rows partition bank counts and share status/export query state", async ({ page }, info) => {
   await installDeterministicApiMocks(page, { sessionMode: "user" });
@@ -18,7 +18,7 @@ test("two native segment rows partition bank counts and share status/export quer
     const url = new URL(route.request().url());
     if (url.searchParams.get("include_statistics") !== "true") queries.push(url);
     const direction = url.searchParams.get("direction") ?? "all";
-    const scoped = rows.filter((_, index) => direction === "all" || (direction === "expense" ? index < 5 : index >= 5));
+    const scoped = rows.filter((_, index) => direction === "all" || (direction === "expense" ? index < 6 : index >= 6));
     const filters = JSON.parse(url.searchParams.get("filters") ?? "[]") as {field:string; values:string[]}[];
     const statuses = filters.find(filter => filter.field === "status_code")?.values;
     const selected = scoped.filter(row => !statuses || statuses.includes(row.invoice_acquisition_status.code));
@@ -26,15 +26,15 @@ test("two native segment rows partition bank counts and share status/export quer
     await route.fulfill({ json: { ...pendingInvoiceRowsPayload(false), direction, rows: selected,
       pagination: { page: 1, page_size: 50, total: selected.length },
       acquisition_summary: { ...counts, bank_count: selected.length },
-      summary: { source_summary: {bank_transaction_rows:9,expense_rows:5,income_rows:4,current_direction_rows:scoped.length,excluded_direction_rows:9-scoped.length} },
+      summary: { source_summary: {bank_transaction_rows:10,expense_rows:6,income_rows:4,current_direction_rows:scoped.length,excluded_direction_rows:10-scoped.length} },
     } });
   });
   await page.goto("/pending-invoices");
   const directionTabs = page.getByRole("tablist", { name: "待找发票流水范围" });
   const statusTabs = page.getByRole("tablist", { name: "发票获取状态分类" });
-  await expect(directionTabs.getByRole("tab", { name:"全部 9 笔" })).toHaveAttribute("aria-selected", "true");
+  await expect(directionTabs.getByRole("tab", { name:"全部 10 笔" })).toHaveAttribute("aria-selected", "true");
   expect(queries[0].searchParams.has("filters")).toBe(false);
-  for (const [label, count, statusCount] of [["全部",9,7],["支出",5,6],["收入",4,5]] as const) {
+  for (const [label, count, statusCount] of [["全部",10,7],["支出",6,6],["收入",4,5]] as const) {
     await directionTabs.getByRole("tab", { name:`${label} ${count} 笔` }).click();
     await expect(statusTabs.getByRole("tab", { name:`全部状态 ${count} 笔` })).toHaveAttribute("aria-selected", "true");
     await expect(statusTabs.getByRole("tab")).toHaveCount(statusCount);
@@ -53,8 +53,8 @@ test("two native segment rows partition bank counts and share status/export quer
       await expect(statusTabs.getByRole("tab", { name:`全部状态 ${count} 笔` })).toBeVisible();
     }
   }
-  await directionTabs.getByRole("tab", { name:"全部 9 笔" }).click();
-  await expect(statusTabs.getByRole("tab", { name:"全部状态 9 笔" })).toHaveAttribute("aria-selected", "true");
+  await directionTabs.getByRole("tab", { name:"全部 10 笔" }).click();
+  await expect(statusTabs.getByRole("tab", { name:"全部状态 10 笔" })).toHaveAttribute("aria-selected", "true");
   for (const width of [1600,960]) {
     await page.setViewportSize({width,height:1000});
     await expect(statusTabs.getByRole('tab', { selected: true })).toHaveCount(1);

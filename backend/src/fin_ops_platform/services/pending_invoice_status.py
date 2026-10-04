@@ -13,6 +13,7 @@ EXPENSE_REQUIRES_INVOICE_STATUS_CODES = (
     "paid_pending_invoice",
     "paid_pending_future_invoice",
     "invoice_not_fully_paid",
+    "invoice_amount_missing",
 )
 INCOME_REQUIRES_INVOICE_STATUS_CODES = ("income_pending_invoice", "income_invoiced")
 PENDING_INVOICE_FILTER_STATUS_CODES: dict[str, dict[str, tuple[str, ...]]] = {
@@ -67,6 +68,12 @@ def pending_invoice_status_payload(
             matched_rule,
         )
 
+    if has_invoices and payment_summary.get("invoice_total") in (None, ""):
+        return _status(
+            "invoice_amount_missing", "已开票·金额缺失",
+            "关联发票原件缺少价税合计，无法判断是否付清。",
+            "warning", "view_relation", matched_rule,
+        )
     invoice_total = _decimal_from_text(payment_summary.get("invoice_total"))
     paid_total = _decimal_from_text(payment_summary.get("paid_total"))
     if has_invoices and invoice_total > paid_total:

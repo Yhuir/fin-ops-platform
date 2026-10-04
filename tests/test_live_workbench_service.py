@@ -126,6 +126,22 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
         self.assertEqual(repository.invoice_calls[0]["month"], "2026-03")
         self.assertEqual(repository.transaction_calls[0]["date_from"], "2026-03-01")
 
+    def test_invoice_source_tax_label_stays_separate_from_numeric_tax(self) -> None:
+        invoice = Invoice(
+            id="exempt", invoice_type=InvoiceType.INPUT, invoice_no="EXEMPT-1",
+            counterparty=Counterparty("party", "供应商", "供应商", "supplier"),
+            amount=Decimal("100.00"), signed_amount=Decimal("100.00"),
+            total_with_tax=Decimal("100.00"), tax_amount=None, tax_amount_text="*", tax_rate="免税",
+            invoice_date="2026-03-18",
+        )
+        repository = PagedFactRepository([invoice], [])
+        import_service = ImportNormalizationService(fact_repository=repository)
+        service = LiveWorkbenchService(import_service, MatchingEngineService(import_service))
+        row = service.get_workbench("2026-03")["unpaired"]["invoice"][0]
+        self.assertEqual(row["tax_amount"], "—")
+        self.assertEqual(row["tax_amount_text"], "*")
+        self.assertEqual(row["tax_rate"], "免税")
+
     def test_invoice_rows_expose_invoice_identity_fields_in_workbench_list(self) -> None:
         import_service = ImportNormalizationService()
         preview = import_service.preview_import(

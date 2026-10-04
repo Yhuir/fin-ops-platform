@@ -45,8 +45,8 @@ class Invoice:
     invoice_type: InvoiceType
     invoice_no: str
     counterparty: Counterparty
-    amount: Decimal
-    signed_amount: Decimal
+    amount: Decimal | None
+    signed_amount: Decimal | None
     invoice_code: str | None = None
     digital_invoice_no: str | None = None
     source_unique_key: str | None = None
@@ -60,9 +60,9 @@ class Invoice:
     buyer_tax_no: str | None = None
     buyer_name: str | None = None
     tax_rate: str | None = None
-    inferred_fields: list[str] = field(default_factory=list)
     source_line_items: list[dict[str, Any]] = field(default_factory=list)
     tax_amount: Decimal | None = None
+    tax_amount_text: str | None = None
     total_with_tax: Decimal | None = None
     tax_classification_code: str | None = None
     specific_business_type: str | None = None
@@ -91,8 +91,8 @@ class Invoice:
     status: InvoiceStatus = InvoiceStatus.PENDING
 
     @property
-    def outstanding_amount(self) -> Decimal:
-        return self.amount - self.written_off_amount
+    def outstanding_amount(self) -> Decimal | None:
+        return None if self.amount is None else self.amount - self.written_off_amount
 
 
 @dataclass(slots=True)
@@ -417,8 +417,8 @@ class ProjectSummary:
     project_id: str
     project_code: str
     project_name: str
-    income_amount: Decimal = ZERO
-    expense_amount: Decimal = ZERO
+    income_amount: Decimal | None = ZERO
+    expense_amount: Decimal | None = ZERO
     reconciled_amount: Decimal = ZERO
     open_ledger_amount: Decimal = ZERO
     invoice_count: int = 0

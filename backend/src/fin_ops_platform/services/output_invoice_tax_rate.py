@@ -3,14 +3,16 @@ import re
 from decimal import Decimal
 from typing import Iterable
 
-UNKNOWN_TAX_RATE = "无法确定"
+UNKNOWN_TAX_RATE = "—"
 MULTIPLE_TAX_RATES = "多税率"
 
 
 def normalize_output_tax_rate(value: str | None) -> str:
     text = "" if value is None else str(value).strip()
-    if text in {"", "未提供", UNKNOWN_TAX_RATE, "mixed"} or "（推算）" in text:
+    if text in {"", UNKNOWN_TAX_RATE}:
         return UNKNOWN_TAX_RATE
+    if text == "mixed":
+        return MULTIPLE_TAX_RATES
     if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)?%?", text):
         return text
     number = Decimal(text.removesuffix("%"))
@@ -21,11 +23,7 @@ def normalize_output_tax_rate(value: str | None) -> str:
 
 
 def normalize_tax_rate_filter_value(value: str | None) -> str:
-    """过期筛选保留原值，不能静默扩大为全部未知税率。"""
-    text = "" if value is None else str(value).strip()
-    if "（推算）" in text or text in {"未提供", "mixed"}:
-        return text
-    return normalize_output_tax_rate(text)
+    return normalize_output_tax_rate(value)
 
 
 def combine_invoice_tax_rates(values: Iterable[str | None]) -> str:

@@ -546,7 +546,7 @@ describe("pending invoices and tag settings API mapping", () => {
           file_name: "pending-invoices.xlsx",
           row_count: 128,
           source_summary: { expense_rows: 128, income_rows: 0 },
-          acquisition_summary: { status_counts: Object.fromEntries(['paid_pending_invoice','paid_invoiced','invoice_not_fully_paid','bank_statement_as_invoice','no_invoice_required','income_pending_invoice','income_invoiced','income_no_invoice_required','cash_income'].map(code => [code, code === 'paid_pending_invoice' ? 128 : 0])) },
+          acquisition_summary: { status_counts: Object.fromEntries(['paid_pending_invoice','paid_invoiced','invoice_not_fully_paid','invoice_amount_missing','bank_statement_as_invoice','no_invoice_required','income_pending_invoice','income_invoiced','income_no_invoice_required','cash_income'].map(code => [code, code === 'paid_pending_invoice' ? 128 : 0])) },
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       if (url.pathname === "/api/pending-invoices/export") {

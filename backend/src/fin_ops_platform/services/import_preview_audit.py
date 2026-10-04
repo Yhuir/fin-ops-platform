@@ -102,6 +102,7 @@ class ImportPreviewAuditRow:
     seller_name: str | None = None
     buyer_name: str | None = None
     tax_amount: str | None = None
+    tax_amount_text: str | None = None
     total_with_tax: str | None = None
 
 
@@ -366,6 +367,7 @@ def build_import_preview_session_audit(rows: list[ImportPreviewAuditRow]) -> Imp
                             "seller_name": row.seller_name,
                             "buyer_name": row.buyer_name,
                             "tax_amount": row.tax_amount,
+                            "tax_amount_text": row.tax_amount_text,
                             "total_with_tax": row.total_with_tax,
                         }
                         for row in sorted_rows

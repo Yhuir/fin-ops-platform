@@ -199,6 +199,7 @@ type ApiWorkbenchRow = {
   issue_date?: string | null;
   tax_rate?: string | null;
   tax_amount?: string | null;
+  tax_amount_text?: string | null;
   total_with_tax?: string | null;
   invoice_type?: string | null;
   invoice_bank_relation?: ApiRelation | null;
@@ -1327,10 +1328,10 @@ function mapTableValues(row: ApiWorkbenchRow): Record<string, string> {
       summaryFields["数电发票号码"],
     )),
     issueDate: toWorkbenchDateTimeDisplayValue(row.issue_date),
-    amount: toWorkbenchAmountDisplayValue(row.amount),
-    taxRate: toDisplayValue(firstNonPlaceholderDisplayValue(row.tax_rate, summaryFields["税率"], detailFields["税率"])),
-    taxAmount: toWorkbenchAmountDisplayValue(firstNonPlaceholderDisplayValue(row.tax_amount, summaryFields["税额"], detailFields["税额"])),
-    grossAmount: toWorkbenchAmountDisplayValue(row.total_with_tax),
+    amount: toWorkbenchAmountDisplayValue(row.amount, "—"),
+    taxRate: toDisplayValue(firstNonPlaceholderDisplayValue(row.tax_rate, summaryFields["税率"], detailFields["税率"]), "—"),
+    taxAmount: toWorkbenchAmountDisplayValue(firstNonPlaceholderDisplayValue(row.tax_amount, row.tax_amount_text, summaryFields["税额"], detailFields["税额"]), "—"),
+    grossAmount: toWorkbenchAmountDisplayValue(row.total_with_tax, "—"),
     invoiceType: toDisplayValue(row.invoice_type),
   };
 }

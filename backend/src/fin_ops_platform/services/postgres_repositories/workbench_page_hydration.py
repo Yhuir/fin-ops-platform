@@ -743,7 +743,8 @@ class PostgresWorkbenchPageHydrationRepository:
                         'currency', coalesce(nullif(invoice.currency, ''), 'CNY'),
                         'tax_rate', invoice.tax_rate,
                         'tax_amount', invoice.tax_amount,
-                        'total_with_tax', coalesce(invoice.total_with_tax, invoice.amount)::text,
+                        'tax_amount_text', invoice.raw_payload->>'tax_amount_text',
+                        'total_with_tax', invoice.total_with_tax::text,
                         'tags', coalesce(invoice.tags, array[]::text[]) ||
                             case when link_flags.has_manual_import then array['人工导入']::text[]
                                  else array[]::text[] end ||

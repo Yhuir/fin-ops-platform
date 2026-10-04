@@ -11,6 +11,7 @@ from fin_ops_platform.services.postgres_connection import PostgresConnection, Po
 from fin_ops_platform.services.postgres_repositories.common import jsonb
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 from fin_ops_platform.services.postgres_repositories.import_audit_repair import load_etc_invoice_payload_repair_snapshot
+from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 
 from tests.postgres_test_utils import apply_test_migrations, require_postgres_test_database_url, truncate_test_database
 from tests.test_etc_invoice_metadata import etc_invoice, formal_invoice
@@ -33,6 +34,33 @@ class EtcInvoiceMetadataPostgresTests(unittest.TestCase):
 
     def row(self):
         return self.connection.fetch_one("select * from app.invoices where legacy_mongo_id='formal-1'")
+
+    def test_nullable_etc_tax_and_real_source_lines_survive_postgres_roundtrip(self):
+        before_formal = self.row()
+        payload = vars(etc_invoice()) | {"tax_amount": None, "tax_amount_text": "*", "tax_rate": "不征税",
+            "source_line_items": [
+                {"taxable_item_name": "第一项", "amount": "20.00", "tax_amount": None,
+                 "tax_amount_text": "*", "tax_rate": "不征税", "total_with_tax": None,
+                 "source_region_key": "xml:IssuItemInformation:1"},
+                {"taxable_item_name": "第二项", "amount": "13.55", "tax_amount": None,
+                 "tax_amount_text": "*", "tax_rate": "不征税", "total_with_tax": None,
+                 "source_region_key": "xml:IssuItemInformation:2"},
+            ]}
+        repository = PostgresOpsTaxEtcRepository(self.connection)
+        repository.save_etc_state({"invoices": {"etc-1": payload}})
+        stored = self.connection.fetch_one("select tax_amount, raw_payload from app.etc_invoices where etc_invoice_id='etc-1'")
+        self.assertIsNone(stored["tax_amount"])
+        normalized = stored["raw_payload"]["normalized_payload"]
+        self.assertIsNone(normalized["tax_amount"])
+        self.assertEqual(normalized["tax_amount_text"], "*")
+        self.assertEqual(normalized["source_line_items"], payload["source_line_items"])
+        loaded = repository.load_etc_state()["invoices"]["etc-1"]
+        self.assertEqual(loaded, normalized)
+        self.assertEqual(repository.list_etc_invoice_records_by_ids(["etc-1"]), [normalized])
+        repository.save_etc_state({"invoices": {"etc-1": loaded}})
+        reloaded = self.connection.fetch_one("select tax_amount, raw_payload from app.etc_invoices where etc_invoice_id='etc-1'")
+        self.assertEqual(reloaded, stored)
+        self.assertEqual(self.row(), before_formal)
 
     def test_metadata_preserves_financial_facts_and_concurrent_source_links(self):
         ready, release = Event(), Event()

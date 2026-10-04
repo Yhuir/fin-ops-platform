@@ -29,9 +29,12 @@ type ApiOutputItem = {
   buyer_name: string;
   issue_date: string;
   invoice_no: string;
-  tax_rate?: string;
-  tax_amount: string;
-  total_with_tax: string;
+  tax_rate?: string | null;
+  amount?: string | null;
+  tax_amount: string | null;
+  tax_amount_text?: string | null;
+  total_with_tax: string | null;
+  is_selectable?: boolean;
   invoice_type: string;
 };
 
@@ -40,9 +43,12 @@ type ApiInputItem = {
   seller_name: string;
   issue_date: string;
   invoice_no: string;
-  tax_rate?: string;
-  tax_amount: string;
-  total_with_tax: string;
+  tax_rate?: string | null;
+  amount?: string | null;
+  tax_amount: string | null;
+  tax_amount_text?: string | null;
+  total_with_tax: string | null;
+  is_selectable?: boolean;
   risk_level: string;
   certified_status?: string;
   is_locked_certified?: boolean;
@@ -53,9 +59,12 @@ type ApiCertifiedItem = {
   seller_name: string;
   issue_date: string;
   invoice_no: string;
-  tax_rate?: string;
-  tax_amount: string;
-  total_with_tax: string;
+  tax_rate?: string | null;
+  amount?: string | null;
+  tax_amount: string | null;
+  tax_amount_text?: string | null;
+  total_with_tax: string | null;
+  is_selectable?: boolean;
   status?: string;
   matched_input_id?: string | null;
   matched_invoice_no?: string | null;
@@ -185,10 +194,6 @@ type ApiTaxOffsetPlanSavePayload = {
   };
 };
 
-function parseMoney(value: string) {
-  return Number(value.replace(/,/g, ""));
-}
-
 function optionalCount(value: unknown): number | undefined {
   if (value === null || value === undefined || value === "") {
     return undefined;
@@ -217,10 +222,6 @@ function mapSummary(summary: ApiTaxSummary): TaxSummary {
   };
 }
 
-function deriveAmount(totalWithTax: string, taxAmount: string) {
-  return formatMoney(parseMoney(totalWithTax) - parseMoney(taxAmount));
-}
-
 function mapOutputItem(item: ApiOutputItem): TaxInvoiceRecord {
   return {
     id: item.id,
@@ -229,9 +230,10 @@ function mapOutputItem(item: ApiOutputItem): TaxInvoiceRecord {
     flowType: "output",
     counterparty: item.buyer_name,
     issueDate: item.issue_date,
-    taxRate: item.tax_rate ?? "--",
-    amount: deriveAmount(item.total_with_tax, item.tax_amount),
-    taxAmount: formatMoney(item.tax_amount),
+    taxRate: item.tax_rate?.trim() || "—",
+    amount: formatMoney(item.amount, "—"),
+    taxAmount: formatMoney(item.tax_amount, item.tax_amount_text?.trim() || "—"),
+    isSelectable: item.is_selectable,
   };
 }
 
@@ -243,12 +245,12 @@ function mapInputItem(item: ApiInputItem): TaxInvoiceRecord {
     flowType: "input",
     counterparty: item.seller_name,
     issueDate: item.issue_date,
-    taxRate: item.tax_rate ?? "--",
-    amount: deriveAmount(item.total_with_tax, item.tax_amount),
-    taxAmount: formatMoney(item.tax_amount),
+    taxRate: item.tax_rate?.trim() || "—",
+    amount: formatMoney(item.amount, "—"),
+    taxAmount: formatMoney(item.tax_amount, item.tax_amount_text?.trim() || "—"),
     statusLabel: item.certified_status ?? "待认证",
     isLocked: Boolean(item.is_locked_certified),
-    isSelectable: !item.is_locked_certified,
+    isSelectable: !item.is_locked_certified && item.is_selectable !== false,
   };
 }
 
@@ -260,9 +262,9 @@ function mapCertifiedItem(item: ApiCertifiedItem): TaxCertifiedInvoiceRecord {
     flowType: "input",
     counterparty: item.seller_name,
     issueDate: item.issue_date,
-    taxRate: item.tax_rate ?? "--",
-    amount: deriveAmount(item.total_with_tax, item.tax_amount),
-    taxAmount: formatMoney(item.tax_amount),
+    taxRate: item.tax_rate?.trim() || "—",
+    amount: formatMoney(item.amount, "—"),
+    taxAmount: formatMoney(item.tax_amount, item.tax_amount_text?.trim() || "—"),
     statusLabel: item.status ?? "已认证",
     isLocked: true,
     isSelectable: false,

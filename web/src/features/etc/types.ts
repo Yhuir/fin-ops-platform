@@ -34,7 +34,8 @@ export type EtcInvoice = {
   sellerName: string;
   buyerName: string;
   amountWithoutTax: string;
-  taxAmount: string;
+  taxAmount: string | null;
+  taxAmountText?: string | null;
   totalAmount: string;
   status: EtcInvoiceStatus;
   hasPdf: boolean;

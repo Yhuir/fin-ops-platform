@@ -1551,6 +1551,7 @@ class FileImportService:
             "buyer_name": text(normalized.get("buyer_name")),
             "amount": text(normalized.get("amount")),
             "tax_amount": text(normalized.get("tax_amount")),
+            "tax_amount_text": text(normalized.get("tax_amount_text")),
             "total_with_tax": text(normalized.get("total_with_tax")),
         }
 
@@ -1989,6 +1990,7 @@ def parse_invoice_source_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
             raise ValueError(f"第 {source_row} 行缺少有效发票号码，不能静默跳过。")
         data_rows.append(
             {
+                "source_row_number": source_row,
                 "invoice_code": mapped.get("发票代码"),
                 "invoice_no": mapped.get("发票号码"),
                 "digital_invoice_no": mapped.get("数电发票号码"),
@@ -2063,7 +2065,7 @@ def attach_invoice_line_evidence(
     for index, authoritative in enumerate(authoritative_rows):
         row = dict(authoritative)
         identity = _invoice_identity(row, index=index)
-        line_items = [dict(item) for item in details_by_identity.get(identity, [])]
+        line_items = [{**item, "source_sheet_name": INVOICE_DETAIL_SHEET_NAME} for item in details_by_identity.get(identity, [])]
         for item in line_items:
             _assert_invoice_evidence_headers_match(row, item)
         row.update(
@@ -2135,13 +2137,23 @@ def aggregate_invoice_line_rows(rows: list[dict[str, Any]]) -> list[dict[str, An
     for identity in order:
         line_rows = grouped[identity]
         if len(line_rows) == 1:
-            aggregated.append(line_rows[0])
+            row = dict(line_rows[0])
+            if row.get("source_sheet_role") != "invoice_header" and (row.get("taxable_item_name") or row.get("tax_classification_code")):
+                row.update(source_line_count=1, source_line_items=[dict(row)])
+            aggregated.append(row)
             continue
         line_signatures = [_invoice_line_signature(row) for row in line_rows]
-        if len(set(line_signatures)) == 1:
+        source_positions = [(row.get("source_sheet_name"), row.get("source_row_number")) for row in line_rows]
+        distinct_source_rows = (
+            all(row.get("source_sheet_role") != "invoice_header"
+                and row.get("source_sheet_name") == INVOICE_DETAIL_SHEET_NAME
+                and row.get("source_row_number") is not None for row in line_rows)
+            and len(set(source_positions)) == len(line_rows)
+        )
+        if not distinct_source_rows and len(set(line_signatures)) == 1:
             aggregated.extend(line_rows)
             continue
-        if len(set(line_signatures)) != len(line_signatures):
+        if not distinct_source_rows and len(set(line_signatures)) != len(line_signatures):
             raise ValueError("同一发票同时包含重复行和不同明细行，无法安全判断合计金额。")
         for field_name in (
             "digital_invoice_no",
@@ -2157,14 +2169,12 @@ def aggregate_invoice_line_rows(rows: list[dict[str, Any]]) -> list[dict[str, An
             values = {clean(row.get(field_name)) for row in line_rows if clean(row.get(field_name))}
             if len(values) > 1:
                 raise ValueError(f"同一发票的 {field_name} 不一致，无法安全合并明细行。")
-        try:
-            financial_rows = [resolve_invoice_financial_values(
-                amount=clean(row.get("amount")).replace(",", ""), tax_amount=clean(row.get("tax_amount")).replace(",", ""),
-                total_with_tax=clean(row.get("total_with_tax")).replace(",", ""), tax_rate=row.get("tax_rate"),
-            ) for row in line_rows]
-        except ValueError:
-            aggregated.extend(line_rows)
-            continue
+        financial_rows = [resolve_invoice_financial_values(
+            amount=clean(row.get("amount")).replace(",", ""),
+            tax_amount=None if row.get("tax_amount") in ("*", "免税", "不征税") else clean(row.get("tax_amount")).replace(",", ""),
+            tax_amount_text=row.get("tax_amount") if row.get("tax_amount") in ("*", "免税", "不征税") else row.get("tax_amount_text"),
+            total_with_tax=clean(row.get("total_with_tax")).replace(",", ""), tax_rate=row.get("tax_rate"),
+        ) for row in line_rows]
         totals = {}
         for field in ("amount", "tax_amount", "total_with_tax"):
             parts = [getattr(row, field) for row in financial_rows]
@@ -2173,7 +2183,6 @@ def aggregate_invoice_line_rows(rows: list[dict[str, Any]]) -> list[dict[str, An
         merged.update(
             {
                 **totals,
-                "inferred_fields": sorted({field for row in financial_rows for field in row.inferred_fields if field != "tax_rate"}),
                 "source_line_count": len(line_rows),
                 "source_line_items": [dict(row) for row in line_rows],
             }

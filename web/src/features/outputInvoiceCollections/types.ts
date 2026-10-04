@@ -59,7 +59,7 @@ export type OutputInvoiceCollectionInvoiceSummary = {
   amountWithoutTax: string;
   taxRate: string;
   taxAmount: string;
-  inferredFields?: string[];
+  taxAmountText?: string;
   specificBusinessType: string;
   taxableItemName: string;
   reversalTargetInvoiceNos: string[];

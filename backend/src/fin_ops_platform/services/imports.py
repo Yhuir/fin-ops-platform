@@ -30,7 +30,6 @@ from fin_ops_platform.services.invoice_expense_item_links import (
     effective_invoice_source_tags,
     has_oa_attachment_source,
 )
-from fin_ops_platform.services.invoice_financial_values import resolve_invoice_financial_values
 from fin_ops_platform.services.object_dedup_decision_service import ObjectDedupDecisionService
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
@@ -1398,11 +1397,7 @@ class ImportNormalizationService:
             "source_sheet_name": self._string_or_none(raw_row.get("source_sheet_name")),
             "source_sheet_role": self._string_or_none(raw_row.get("source_sheet_role")),
             "source_line_count": int(raw_row.get("source_line_count") or 0),
-            "source_line_items": [
-                dict(item)
-                for item in raw_row.get("source_line_items") or []
-                if isinstance(item, dict)
-            ],
+            "source_line_items": [],
             "project_id": self._string_or_none(raw_row.get("project_id")),
             "oa_form_id": self._string_or_none(raw_row.get("oa_form_id")),
             "pending_invoice_request_key": self._string_or_none(raw_row.get("pending_invoice_request_key")),
@@ -1410,6 +1405,10 @@ class ImportNormalizationService:
             "tags": self._normalize_tags(raw_row.get("tags")),
         }
         errors: list[str] = []
+        try:
+            normalized["source_line_items"] = self._normalize_source_lines(raw_row.get("source_line_items") or [])
+        except ValueError as exc:
+            errors.append(str(exc))
 
         if not normalized_name:
             errors.append("counterparty_name is required")
@@ -1420,30 +1419,23 @@ class ImportNormalizationService:
         else:
             normalized["invoice_date"] = invoice_date
 
-        inferred_fields = [field for field in raw_row.get("inferred_fields", []) if field in {"amount", "tax_amount", "total_with_tax"}]
-        source_tax = self._parse_decimal(raw_row.get("tax_amount"))
-        source_total = self._parse_decimal(raw_row.get("total_with_tax"))
-        if raw_row.get("amount") in (None, "") and source_tax is not None and source_total is not None:
-            financial = resolve_invoice_financial_values(
-                amount=None, tax_amount=source_tax, total_with_tax=source_total,
-                tax_rate=raw_row.get("tax_rate"),
-            )
-            if financial.amount is not None:
-                raw_row = {**raw_row, "amount": format(financial.amount, "f")}
-                inferred_fields = ["amount"]
-        normalized["inferred_fields"] = inferred_fields
         amount = self._parse_decimal(raw_row.get("amount"))
-        if amount is None:
+        if amount is None and raw_row.get("amount") not in (None, ""):
             errors.append("amount is invalid")
-        else:
-            normalized["amount"] = self._format_decimal(amount)
-            normalized["signed_amount"] = self._format_decimal(amount)
+        if amount is None and self._parse_decimal(raw_row.get("total_with_tax")) is None:
+            errors.append("amount or total_with_tax is required")
+        normalized["amount"] = self._format_decimal(amount) if amount is not None else None
+        normalized["signed_amount"] = normalized["amount"]
+        tax_text = self._string_or_none(raw_row.get("tax_amount_text"))
+        if raw_row.get("tax_amount") in ("*", "免税", "不征税"):
+            tax_text = str(raw_row["tax_amount"])
+        normalized["tax_amount_text"] = tax_text
 
         for source_key in ("tax_amount", "total_with_tax", "quantity", "unit_price"):
             parsed_value = self._parse_decimal(raw_row.get(source_key))
             if parsed_value is not None:
                 normalized[source_key] = self._format_decimal(parsed_value)
-            elif source_key in {"tax_amount", "total_with_tax"} and raw_row.get(source_key) not in (None, ""):
+            elif source_key in {"tax_amount", "total_with_tax"} and raw_row.get(source_key) not in (None, "") and not (source_key == "tax_amount" and tax_text):
                 errors.append(f"{source_key} is invalid")
         tax_amount = self._parse_decimal(raw_row.get("tax_amount"))
         total_with_tax = self._parse_decimal(raw_row.get("total_with_tax"))
@@ -1722,7 +1714,7 @@ class ImportNormalizationService:
         invoice_type = InvoiceType.OUTPUT if batch_type == BatchType.OUTPUT_INVOICE else InvoiceType.INPUT
         counterparty = self._get_or_create_counterparty(normalized["counterparty_name"])
         invoice_id = self._next_invoice_id()
-        amount = Decimal(normalized["amount"])
+        amount = self._parse_decimal(normalized.get("amount"))
         return Invoice(
             id=invoice_id,
             invoice_type=invoice_type,
@@ -1731,7 +1723,7 @@ class ImportNormalizationService:
             digital_invoice_no=normalized.get("digital_invoice_no"),
             counterparty=counterparty,
             amount=amount,
-            signed_amount=Decimal(normalized["signed_amount"]),
+            signed_amount=self._parse_decimal(normalized.get("signed_amount")),
             invoice_date=normalized["invoice_date"],
             invoice_status_from_source=normalized.get("invoice_status_from_source"),
             seller_tax_no=normalized.get("seller_tax_no"),
@@ -1739,7 +1731,7 @@ class ImportNormalizationService:
             buyer_tax_no=normalized.get("buyer_tax_no"),
             buyer_name=normalized.get("buyer_name"),
             tax_rate=normalized.get("tax_rate"),
-            inferred_fields=list(normalized.get("inferred_fields") or []),
+            tax_amount_text=normalized.get("tax_amount_text"),
             source_line_items=list(normalized.get("source_line_items") or []),
             tax_amount=Decimal(normalized["tax_amount"]) if normalized.get("tax_amount") else None,
             total_with_tax=Decimal(normalized["total_with_tax"]) if normalized.get("total_with_tax") else None,
@@ -1880,21 +1872,24 @@ class ImportNormalizationService:
         buyer_name = self._string_or_none(getattr(etc_invoice, "buyer_name", None))
         amount_without_tax = self._parse_decimal(getattr(etc_invoice, "amount_without_tax", None))
         total_amount = self._parse_decimal(getattr(etc_invoice, "total_amount", None))
-        amount = amount_without_tax if amount_without_tax is not None else total_amount or ZERO
+        amount = amount_without_tax
+        tax_amount = self._parse_decimal(getattr(etc_invoice, "tax_amount", None))
         normalized: dict[str, Any] = {
             "counterparty_name": seller_name or invoice_number or "ETC发票",
             "normalized_counterparty_name": normalize_name(seller_name or invoice_number or "ETC发票"),
             "invoice_no": invoice_number,
             "digital_invoice_no": invoice_number,
             "invoice_date": self._string_or_none(getattr(etc_invoice, "issue_date", None)),
-            "amount": self._format_decimal(amount),
-            "signed_amount": self._format_decimal(amount),
+            "amount": self._format_decimal(amount) if amount is not None else None,
+            "signed_amount": self._format_decimal(amount) if amount is not None else None,
             "seller_tax_no": self._string_or_none(getattr(etc_invoice, "seller_tax_no", None)),
             "seller_name": seller_name,
             "buyer_tax_no": self._string_or_none(getattr(etc_invoice, "buyer_tax_no", None)),
             "buyer_name": buyer_name,
-            "tax_amount": self._format_decimal(self._parse_decimal(getattr(etc_invoice, "tax_amount", None)) or ZERO),
-            "total_with_tax": self._format_decimal(total_amount if total_amount is not None else amount),
+            "tax_amount": self._format_decimal(tax_amount) if tax_amount is not None else None,
+            "tax_amount_text": self._string_or_none(getattr(etc_invoice, "tax_amount_text", None)),
+            "source_line_items": self._normalize_source_lines(getattr(etc_invoice, "source_line_items", [])),
+            "total_with_tax": self._format_decimal(total_amount) if total_amount is not None else None,
             "tax_rate": self._string_or_none(getattr(etc_invoice, "tax_rate", None)),
             "invoice_source": "ETC导入",
             "invoice_kind": "ETC发票",
@@ -1936,15 +1931,11 @@ class ImportNormalizationService:
         issue_date = self._parse_date(
             attachment_invoice.get("issue_date") or attachment_invoice.get("invoice_date")
         )
-        amount = self._parse_decimal(
-            attachment_invoice.get("net_amount")
-            or attachment_invoice.get("amount")
-            or attachment_invoice.get("total_with_tax")
-        )
-        if issue_date is None or amount is None:
-            return None
+        amount = self._parse_decimal(attachment_invoice["net_amount"] if "net_amount" in attachment_invoice else attachment_invoice.get("amount"))
         tax_amount = self._parse_decimal(attachment_invoice.get("tax_amount"))
-        total_with_tax = self._parse_decimal(attachment_invoice.get("total_with_tax")) or amount
+        total_with_tax = self._parse_decimal(attachment_invoice.get("total_with_tax"))
+        if issue_date is None or (amount is None and total_with_tax is None):
+            return None
         quantity = self._parse_decimal(attachment_invoice.get("quantity"))
         unit_price = self._parse_decimal(attachment_invoice.get("unit_price"))
         invoice_type = self._normalize_invoice_type_value(attachment_invoice.get("invoice_type"))
@@ -1966,15 +1957,17 @@ class ImportNormalizationService:
             "invoice_no": raw_invoice_no,
             "digital_invoice_no": raw_digital_invoice_no,
             "invoice_date": issue_date,
-            "amount": self._format_decimal(amount),
-            "signed_amount": self._format_decimal(amount),
+            "amount": self._format_decimal(amount) if amount is not None else None,
+            "signed_amount": self._format_decimal(amount) if amount is not None else None,
             "seller_tax_no": self._string_or_none(attachment_invoice.get("seller_tax_no")),
             "seller_name": seller_name,
             "buyer_tax_no": self._string_or_none(attachment_invoice.get("buyer_tax_no")),
             "buyer_name": buyer_name,
             "tax_rate": self._string_or_none(attachment_invoice.get("tax_rate")),
             "tax_amount": self._format_decimal(tax_amount) if tax_amount is not None else None,
-            "total_with_tax": self._format_decimal(total_with_tax),
+            "total_with_tax": self._format_decimal(total_with_tax) if total_with_tax is not None else None,
+            "tax_amount_text": self._string_or_none(attachment_invoice.get("tax_amount_text")),
+            "source_line_items": self._normalize_source_lines(attachment_invoice.get("source_line_items") or []),
             "tax_classification_code": self._string_or_none(attachment_invoice.get("tax_classification_code")),
             "specific_business_type": self._string_or_none(attachment_invoice.get("specific_business_type")),
             "taxable_item_name": self._string_or_none(attachment_invoice.get("taxable_item_name")),
@@ -2023,7 +2016,7 @@ class ImportNormalizationService:
     def _build_oa_attachment_invoice_from_normalized(self, normalized: dict[str, Any]) -> Invoice:
         counterparty = self._get_or_create_counterparty(normalized["counterparty_name"])
         invoice_id = normalized.get("source_workbench_row_id") or self._next_invoice_id()
-        amount = Decimal(normalized["amount"])
+        amount = self._parse_decimal(normalized.get("amount"))
         return Invoice(
             id=invoice_id,
             invoice_type=InvoiceType(normalized.get("invoice_type") or InvoiceType.INPUT.value),
@@ -2032,14 +2025,14 @@ class ImportNormalizationService:
             invoice_code=normalized.get("invoice_code"),
             counterparty=counterparty,
             amount=amount,
-            signed_amount=Decimal(normalized["signed_amount"]),
+            signed_amount=self._parse_decimal(normalized.get("signed_amount")),
             invoice_date=normalized.get("invoice_date"),
             seller_tax_no=normalized.get("seller_tax_no"),
             seller_name=normalized.get("seller_name"),
             buyer_tax_no=normalized.get("buyer_tax_no"),
             buyer_name=normalized.get("buyer_name"),
             tax_rate=normalized.get("tax_rate"),
-            inferred_fields=list(normalized.get("inferred_fields") or []),
+            tax_amount_text=normalized.get("tax_amount_text"),
             source_line_items=list(normalized.get("source_line_items") or []),
             tax_amount=Decimal(normalized["tax_amount"]) if normalized.get("tax_amount") else None,
             total_with_tax=Decimal(normalized["total_with_tax"]) if normalized.get("total_with_tax") else None,
@@ -2083,6 +2076,7 @@ class ImportNormalizationService:
             "buyer_tax_no",
             "buyer_name",
             "tax_rate",
+            "tax_amount_text",
             "tax_classification_code",
             "specific_business_type",
             "taxable_item_name",
@@ -2103,8 +2097,6 @@ class ImportNormalizationService:
             incoming = normalized.get(field_name)
             if incoming not in (None, "") and getattr(invoice, field_name) is None:
                 setattr(invoice, field_name, Decimal(incoming))
-                if field_name in normalized.get("inferred_fields", []) and field_name not in invoice.inferred_fields:
-                    invoice.inferred_fields.append(field_name)
         if not invoice.source_line_items and normalized.get("source_line_items"):
             invoice.source_line_items = list(normalized["source_line_items"])
         if not invoice.source_unique_key:
@@ -2338,12 +2330,10 @@ class ImportNormalizationService:
                 incoming = normalized.get(field_name)
                 if incoming not in (None, ""):
                     setattr(invoice, field_name, incoming)
-            invoice.inferred_fields = list(normalized.get("inferred_fields") or [])
+            invoice.tax_amount_text = normalized.get("tax_amount_text")
             invoice.source_line_items = list(normalized.get("source_line_items") or [])
-            invoice.amount = Decimal(normalized["amount"])
-            invoice.signed_amount = Decimal(
-                normalized.get("signed_amount") or normalized["amount"]
-            )
+            invoice.amount = self._parse_decimal(normalized.get("amount"))
+            invoice.signed_amount = self._parse_decimal(normalized.get("signed_amount"))
             for field_name in ("tax_amount", "total_with_tax", "quantity", "unit_price"):
                 incoming = normalized.get(field_name)
                 setattr(invoice, field_name, Decimal(incoming) if incoming not in (None, "") else None)
@@ -2358,6 +2348,7 @@ class ImportNormalizationService:
             "buyer_tax_no",
             "buyer_name",
             "tax_rate",
+            "tax_amount_text",
             "tax_classification_code",
             "specific_business_type",
             "taxable_item_name",
@@ -2379,8 +2370,6 @@ class ImportNormalizationService:
             incoming = normalized.get(field_name)
             if incoming not in (None, "") and getattr(invoice, field_name) is None:
                 setattr(invoice, field_name, Decimal(incoming))
-                if field_name in normalized.get("inferred_fields", []) and field_name not in invoice.inferred_fields:
-                    invoice.inferred_fields.append(field_name)
         if not invoice.source_line_items and normalized.get("source_line_items"):
             invoice.source_line_items = list(normalized["source_line_items"])
         if not invoice.source_unique_key:
@@ -2506,6 +2495,25 @@ class ImportNormalizationService:
     def _next_transaction_id(self) -> str:
         self._txn_counter += 1
         return f"txn_imported_{uuid4().hex}"
+
+    @classmethod
+    def _normalize_source_lines(cls, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        lines = []
+        for index, row in enumerate(rows, 1):
+            if not isinstance(row, dict):
+                raise ValueError(f"Invoice source line {index} must be an object.")
+            item = dict(row)
+            for field in ("amount", "tax_amount", "total_with_tax"):
+                raw = row.get(field)
+                if field == "tax_amount" and raw in ("*", "免税", "不征税"):
+                    item.update(tax_amount=None, tax_amount_text=raw)
+                    continue
+                number = cls._parse_decimal(raw)
+                if number is None and raw is not None and str(raw).strip() not in PLACEHOLDER_EMPTY_VALUES:
+                    raise ValueError(f"Invoice source line {index} {field} is invalid.")
+                item[field] = cls._format_decimal(number) if number is not None else None
+            lines.append(item)
+        return lines
 
     @staticmethod
     def _parse_date(value: Any) -> str | None:

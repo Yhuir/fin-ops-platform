@@ -33,11 +33,13 @@ class TaxOffsetService:
 
     def get_month_payload(self, month: str) -> dict[str, object]:
         month_snapshot = self._build_month_snapshot(month)
-        default_selected_output_ids = [item["id"] for item in month_snapshot["output_items"]]
+        default_selected_output_ids = [
+            item["id"] for item in month_snapshot["output_items"] if item["is_selectable"]
+        ]
         default_selected_input_ids = [
             item["id"]
             for item in month_snapshot["input_plan_items"]
-            if item["id"] not in month_snapshot["locked_certified_input_ids"]
+            if item["id"] not in month_snapshot["locked_certified_input_ids"] and item["is_selectable"]
         ]
         summary = self._calculate_from_month_snapshot(
             month=month,
@@ -116,6 +118,9 @@ class TaxOffsetService:
             for item in month_snapshot["input_plan_items"]
             if item["id"] in selected_input_ids and item["id"] not in locked_ids
         ]
+        for item in selected_output_items + selected_uncertified_input:
+            if item.get("tax_amount") in (None, ""):
+                raise ValueError(f"Invoice {item['id']} has no source tax amount and cannot be selected.")
         output_tax = sum((self._to_decimal(item["tax_amount"]) for item in selected_output_items), start=ZERO)
         certified_input_tax = sum(
             (self._certified_tax_amount(item) for item in month_snapshot["certified_items"]), start=ZERO
@@ -147,6 +152,8 @@ class TaxOffsetService:
         month_data = self._resolve_month_data(month)
         output_items = [dict(item) for item in month_data["output_items"]]
         input_plan_items = [dict(item) for item in month_data["input_plan_items"]]
+        for item in output_items + input_plan_items:
+            item["is_selectable"] = item.get("tax_amount") not in (None, "")
         certified_items = [self._normalize_certified_item(item) for item in self._certified_records_loader(month)]
 
         input_plan_by_id = {item["id"]: item for item in input_plan_items}
@@ -237,8 +244,6 @@ class TaxOffsetService:
             for invoice in self._import_service.list_invoices():
                 if not invoice.invoice_date or not invoice.invoice_date.startswith(month):
                     continue
-                if invoice.tax_amount is None:
-                    continue
                 found_any = True
                 if invoice.invoice_type == InvoiceType.OUTPUT:
                     output_items.append(self._build_output_item(invoice))
@@ -259,8 +264,10 @@ class TaxOffsetService:
             "issue_date": invoice.invoice_date or "",
             "invoice_no": invoice.invoice_no,
             "tax_rate": invoice.tax_rate or "—",
-            "tax_amount": self._format_money(invoice.tax_amount or ZERO),
-            "total_with_tax": self._format_money(self._resolve_total_with_tax(invoice)),
+            "amount": self._format_money(invoice.amount) if invoice.amount is not None else None,
+            "tax_amount": self._format_money(invoice.tax_amount) if invoice.tax_amount is not None else None,
+            "tax_amount_text": invoice.tax_amount_text,
+            "total_with_tax": self._format_money(invoice.total_with_tax) if invoice.total_with_tax is not None else None,
             "invoice_type": self._resolve_invoice_display_type(invoice),
             "invoice_code": invoice.invoice_code,
             "digital_invoice_no": invoice.digital_invoice_no,
@@ -277,8 +284,10 @@ class TaxOffsetService:
             "invoice_no": invoice.invoice_no,
             "invoice_code": invoice.invoice_code,
             "digital_invoice_no": invoice.digital_invoice_no,
-            "tax_amount": self._format_money(invoice.tax_amount or ZERO),
-            "total_with_tax": self._format_money(self._resolve_total_with_tax(invoice)),
+            "amount": self._format_money(invoice.amount) if invoice.amount is not None else None,
+            "tax_amount": self._format_money(invoice.tax_amount) if invoice.tax_amount is not None else None,
+            "tax_amount_text": invoice.tax_amount_text,
+            "total_with_tax": self._format_money(invoice.total_with_tax) if invoice.total_with_tax is not None else None,
             "risk_level": invoice.risk_level or "待评估",
             "invoice_type": self._resolve_invoice_display_type(invoice),
             "tax_rate": invoice.tax_rate or "—",
@@ -321,13 +330,6 @@ class TaxOffsetService:
         if cleaned in {"", "—", "--", "None"}:
             return None
         return cleaned
-
-    @staticmethod
-    def _resolve_total_with_tax(invoice: Invoice) -> Decimal:
-        if invoice.total_with_tax is not None:
-            return invoice.total_with_tax
-        tax_amount = invoice.tax_amount or ZERO
-        return invoice.amount + tax_amount
 
     @staticmethod
     def _resolve_invoice_display_type(invoice: Invoice) -> str:
@@ -389,8 +391,6 @@ class TaxOffsetService:
         amount = item.get("amount")
         tax_amount = item.get("tax_amount")
         total_with_tax = item.get("total_with_tax")
-        if total_with_tax in (None, "") and amount not in (None, "") and tax_amount not in (None, ""):
-            total_with_tax = self._format_money(self._to_decimal(str(amount)) + self._to_decimal(str(tax_amount)))
         return {
             "id": item.get("id")
             or item.get("unique_key")
@@ -407,7 +407,9 @@ class TaxOffsetService:
             "amount": amount,
             "tax_amount": tax_amount,
             "deductible_tax_amount": item.get("deductible_tax_amount"),
-            "total_with_tax": total_with_tax or tax_amount or "0.00",
+            "total_with_tax": total_with_tax,
+            "tax_rate": item.get("tax_rate") or "—",
+            "tax_amount_text": item.get("tax_amount_text"),
             "status": item.get("status") or item.get("selection_status") or "已认证",
             "selection_status": item.get("selection_status"),
             "invoice_status": item.get("invoice_status"),
@@ -417,7 +419,10 @@ class TaxOffsetService:
         deductible_tax_amount = certified_item.get("deductible_tax_amount")
         if deductible_tax_amount not in (None, ""):
             return self._to_decimal(str(deductible_tax_amount))
-        return self._to_decimal(str(certified_item.get("tax_amount") or "0.00"))
+        tax_amount = certified_item.get("tax_amount")
+        if tax_amount in (None, ""):
+            raise ValueError("Certified invoice is missing both deductible tax and source tax amount.")
+        return self._to_decimal(str(tax_amount))
 
     @staticmethod
     def _serialize_container(value: Any) -> dict[str, Any]:

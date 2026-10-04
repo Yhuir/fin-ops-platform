@@ -194,8 +194,14 @@ class ProjectCostingService:
             "projects": self.list_projects(),
             "summaries": summaries,
             "totals": {
-                "income_amount": sum((item.income_amount for item in summaries), start=ZERO),
-                "expense_amount": sum((item.expense_amount for item in summaries), start=ZERO),
+                "income_amount": (
+                    sum((item.income_amount for item in summaries), start=ZERO)
+                    if all(item.income_amount is not None for item in summaries) else None
+                ),
+                "expense_amount": (
+                    sum((item.expense_amount for item in summaries), start=ZERO)
+                    if all(item.expense_amount is not None for item in summaries) else None
+                ),
                 "reconciled_amount": sum((item.reconciled_amount for item in summaries), start=ZERO),
                 "open_ledger_amount": sum((item.open_ledger_amount for item in summaries), start=ZERO),
             },
@@ -218,9 +224,15 @@ class ProjectCostingService:
             summary = summaries[project.id]
             summary.invoice_count += 1
             if invoice.invoice_type == InvoiceType.OUTPUT:
-                summary.income_amount += invoice.amount
+                summary.income_amount = (
+                    summary.income_amount + invoice.amount
+                    if summary.income_amount is not None and invoice.amount is not None else None
+                )
             else:
-                summary.expense_amount += invoice.amount
+                summary.expense_amount = (
+                    summary.expense_amount + invoice.amount
+                    if summary.expense_amount is not None and invoice.amount is not None else None
+                )
 
         for transaction in self._import_service.list_transactions():
             project = self.resolve_project_for_object("bank_transaction", transaction.id)

@@ -42,8 +42,9 @@ class VerifiedFinancialRepairTests(unittest.TestCase):
     def test_missing_tax_is_not_zero_and_conflicting_originals_are_rejected(self):
         invoice, source, cache = sample()
         source['rows'][0]['tax_amount'] = None
-        with self.assertRaisesRegex(ValueError, 'explicit financial'):
-            self.build(source=source)
+        update = self.build(source=source)["updates"][0]
+        self.assertIsNone(update["tax_amount"])
+        self.assertEqual(update["amount"], "3.67")
         invoice, source, cache = sample()
         other = deepcopy(source)
         other['rows'][0].update(amount='2.00', tax_amount='2.00')
@@ -69,6 +70,59 @@ class VerifiedFinancialRepairTests(unittest.TestCase):
         self.assertEqual(again['updates'],[])
         self.assertEqual(again['invalidate_cache_keys'],[])
         self.assertNotEqual(first['source_fingerprint'],again['source_fingerprint'])
+
+    def test_real_source_lines_and_special_tax_remain_distinct_from_missing_and_zero(self):
+        invoice, source, cache = sample()
+        source["rows"][0].update(amount="4.00", tax_amount="*", tax_rate="不征税",
+            source_line_items=[dict(amount="4.00", tax_amount="*", tax_rate="不征税", total_with_tax=None)])
+        plan = self.build(invoice, source, cache)
+        update = plan["updates"][0]
+        self.assertIsNone(update["tax_amount"])
+        self.assertEqual(update["tax_amount_text"], "*")
+        self.assertEqual(update["tax_rate"], "不征税")
+        lines = update["raw_payload"]["normalized_payload"]["source_line_items"]
+        self.assertEqual(len(lines), 1)
+        self.assertIsNone(lines[0]["total_with_tax"])
+        self.assertEqual(lines[0]["tax_amount_text"], "*")
+        source["rows"][0].update(amount=None, tax_amount=None, tax_rate=None, source_line_items=[])
+        update = self.build(invoice, source, cache)["updates"][0]
+        self.assertIsNone(update["amount"])
+        self.assertIsNone(update["signed_amount"])
+        self.assertEqual(update["raw_payload"]["normalized_payload"]["source_line_items"], [])
+
+    def test_numeric_zero_rate_is_preserved_in_original_header_and_detail(self):
+        invoice, source, cache = sample()
+        source["rows"][0].update(amount="4.00", tax_amount="0", tax_rate=0,
+            source_line_items=[dict(amount="4.00", tax_amount="0", tax_rate=0)])
+        update = self.build(invoice, source, cache)["updates"][0]
+        self.assertEqual(update["tax_rate"], "0")
+        self.assertEqual(update["tax_amount"], "0.00")
+        self.assertEqual(update["raw_payload"]["normalized_payload"]["source_line_items"][0]["tax_rate"], "0")
+
+    def test_explicit_empty_normalized_payload_does_not_copy_root_fields_or_retired_marker(self):
+        invoice, source, cache = sample()
+        invoice["raw_payload"] = {"root_only": "raw source metadata", "inferred_fields": ["amount"], "normalized_payload": {}}
+        update = self.build(invoice, source, cache)["updates"][0]
+        self.assertEqual(update["raw_payload"]["root_only"], "raw source metadata")
+        self.assertNotIn("inferred_fields", update["raw_payload"])
+        self.assertNotIn("root_only", update["raw_payload"]["normalized_payload"])
+        self.assertNotIn("normalized_payload", update["raw_payload"]["normalized_payload"])
+        invoice.update({key: update[key] for key in ("amount", "signed_amount", "tax_amount", "total_with_tax", "tax_rate", "raw_payload")})
+        self.assertEqual(self.build(invoice, source, cache)["update_count"], 0)
+
+    def test_duplicate_originals_compare_business_lines_without_source_position_metadata(self):
+        invoice, source, cache = sample()
+        line = {"amount": "3.67", "tax_amount": "0.33", "tax_rate": "9%", "source_row_number": 2,
+                "source_sheet_name": "信息汇总表", "source_region_key": "page:1/item:1"}
+        source["rows"][0]["source_line_items"] = [line]
+        other = deepcopy(source)
+        other["rows"][0]["source_line_items"][0].update(source_row_number=7, source_sheet_name="另一个原件", source_region_key="page:2/item:1")
+        plan = build_verified_financial_repair_plan([invoice], invoice_ids=["repair-1"], sources=[source, other], cache_rows=[])
+        self.assertEqual(plan["update_count"], 1)
+        self.assertEqual(plan["updates"][0]["raw_payload"]["normalized_payload"]["source_line_items"][0]["source_row_number"], 2)
+        other["rows"][0]["source_line_items"].append(dict(line))
+        with self.assertRaisesRegex(ValueError, "disagree"):
+            build_verified_financial_repair_plan([invoice], invoice_ids=["repair-1"], sources=[source, other], cache_rows=[])
 
     def test_party_repair_is_opt_in_complete_and_preserves_provenance(self):
         invoice, source, cache = sample()
@@ -123,6 +177,22 @@ class VerifiedFinancialRepairPostgresTests(unittest.TestCase):
     def plan(self, tx):
         return build_verified_financial_repair_plan(**load_verified_financial_repair_snapshot(tx,['repair-1']),
             invoice_ids=['repair-1'],sources=[sample()[1]])
+
+    def test_nullable_originals_are_persisted_without_zero_and_repeat_is_idempotent(self):
+        source = sample()[1]
+        source["rows"][0].update(amount=None, tax_amount=None, tax_rate=None)
+        with self.connection.transaction() as tx:
+            plan = build_verified_financial_repair_plan(**load_verified_financial_repair_snapshot(tx, ["repair-1"]),
+                invoice_ids=["repair-1"], sources=[source])
+            apply_verified_financial_repair(tx, plan, operator_id="tester", reason="source only total")
+        current = self.connection.fetch_one("select amount,signed_amount,tax_amount,total_with_tax from app.invoices where legacy_mongo_id='repair-1'")
+        self.assertIsNone(current["amount"])
+        self.assertIsNone(current["signed_amount"])
+        self.assertIsNone(current["tax_amount"])
+        self.assertEqual(current["total_with_tax"], Decimal("4"))
+        again = build_verified_financial_repair_plan(**load_verified_financial_repair_snapshot(self.connection, ["repair-1"]),
+            invoice_ids=["repair-1"], sources=[source])
+        self.assertEqual(again["update_count"], 0)
 
     def test_transaction_rollback_cas_and_second_run_zero(self):
         with self.assertRaisesRegex(RuntimeError,'injected'):
@@ -189,6 +259,42 @@ class VerifiedFinancialRepairPostgresTests(unittest.TestCase):
         source['sha256']='wrong'
         with self.assertRaisesRegex(ValueError,'checksum differs'):
             run(['--dry-run'])
+
+    def test_oa_source_cli_reuses_original_parser_and_persists_source_lines(self):
+        import io
+        import json
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from fin_ops_platform.tools import import_audit_repair_ops as cli
+        from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
+        from fin_ops_platform.services.postgres_repositories import import_audit_repair as repository
+
+        base = ["--repair-invoice-oa-source", "oa-original", "--invoice-id", "repair-1"]
+        attachment = {"source_attachment_key": "oa-original", "filename": "invoice.pdf",
+                      "normalized_payload": {"file_path": "/invoice.pdf"}}
+        evidence = dict(sample()[1]["rows"][0], net_amount="3.67", issue_date="2026-01-13",
+            source_line_items=[{"taxable_item_name": "服务", "amount": "3.67", "tax_amount": "0.33", "tax_rate": "9%"}])
+        def run(args, content=b"original pdf bytes"):
+            output = io.StringIO()
+            with patch.object(cli.PostgresSettings, "from_env", return_value=PostgresSettings(database_url=self.url)), \
+                 patch.object(cli, "_build_bank_repair_state_store", return_value=SimpleNamespace()), \
+                 patch.object(repository, "load_original_invoice_attachments", return_value=[attachment]), \
+                 patch.object(OAAttachmentInvoiceService, "_download_content", return_value=content), \
+                 patch.object(OAAttachmentInvoiceService, "parse_content_result", return_value={"parse_status": "parsed", "evidences": [evidence]}) as parse:
+                self.assertEqual(cli.main(base + args, stdout=output), 0)
+                self.assertEqual(parse.call_args.args[1], content)
+            return json.loads(output.getvalue())
+        plan = run(["--dry-run"])
+        with self.assertRaisesRegex(RuntimeError, "changed after dry-run"):
+            run(["--execute", "--expected-fingerprint", plan["source_fingerprint"], "--operator-id", "tester", "--reason", "original"], content=b"changed original")
+        result = run(["--execute", "--expected-fingerprint", plan["source_fingerprint"], "--operator-id", "tester", "--reason", "original"])
+        self.assertEqual(result["completion"]["written_invoice_count"], 1)
+        self.assertEqual(run(["--dry-run"])["update_count"], 0)
+        row = load_verified_financial_repair_snapshot(self.connection, ["repair-1"])["snapshot"][0]
+        source = row["raw_payload"]["normalized_payload"]
+        self.assertEqual(source["source_line_items"][0]["taxable_item_name"], "服务")
+        self.assertIsNone(source["source_line_items"][0]["total_with_tax"])
+        self.assertEqual(source["financial_repair_source_kind"], "oa_attachment")
 
     def test_party_writer_cas_atomicity_and_canonical_payload(self):
         source = sample()[1]

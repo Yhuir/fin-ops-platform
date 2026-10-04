@@ -1092,6 +1092,30 @@ class PostgresOpsTaxEtcRepository:
             "business_batches": business_batches,
         }
 
+    def load_etc_source_lines_repair_rows(self, invoice_ids: list[str], *, lock: bool = False) -> list[dict[str, Any]]:
+        return self._connection.fetch_all(
+            """select etc_invoice_id, invoice_no, invoice_date::text as invoice_date,
+                      amount, tax_amount, total_with_tax, version, raw_payload
+               from app.etc_invoices
+               where coalesce(legacy_mongo_id, '') !~ '^current_state:'
+                 and (%s::text[] = '{}'::text[] or etc_invoice_id = any(%s::text[]))
+               order by etc_invoice_id""" + (" for update" if lock else ""),
+            (invoice_ids, invoice_ids),
+        )
+
+    def apply_etc_source_lines_repair(self, updates: list[dict[str, Any]]) -> int:
+        for update in updates:
+            row = self._connection.fetch_one(
+                """update app.etc_invoices set raw_payload = %s::jsonb, updated_at = now()
+                   where etc_invoice_id = %s and version = %s and raw_payload = %s::jsonb
+                   returning etc_invoice_id""",
+                (jsonb(update["after_payload"]), update["invoice_id"], update["before_version"],
+                 jsonb(update["before_payload"])),
+            )
+            if row is None:
+                raise RuntimeError("ETC source detail changed after preview; repair was rolled back.")
+        return len(updates)
+
     def list_etc_business_batch_summaries(self, **query: Any) -> dict[str, Any]:
         bucket = str(query.get("bucket") or "unsubmitted").strip()
         if bucket not in {"unsubmitted", "staged", "submitted"}:

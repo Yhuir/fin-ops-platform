@@ -397,7 +397,7 @@ invoice_identity_rows as materialized (
 relation_invoice_facts as materialized (
     select
         member.bank_id,
-        coalesce(sum(coalesce(invoice.total_with_tax, invoice.amount)), 0) as invoice_total,
+        case when count(invoice.total_with_tax) = count(*) then sum(invoice.total_with_tax) end as invoice_total,
         count(*) filter (where invoice.invoice_type = 'input')::integer as input_invoice_count,
         count(*) filter (where invoice.invoice_type = 'output')::integer as output_invoice_count,
         coalesce(
@@ -408,7 +408,7 @@ relation_invoice_facts as materialized (
                     'digital_invoice_no', coalesce(invoice.digital_invoice_no, ''),
                     'invoice_code', coalesce(invoice.invoice_code, ''),
                     'issue_date', coalesce(invoice.invoice_date::text, ''),
-                    'total_with_tax', coalesce(invoice.total_with_tax, invoice.amount)::text,
+                    'total_with_tax', invoice.total_with_tax::text,
                     'seller_name', coalesce(invoice.seller_name, ''),
                     'seller_tax_no', coalesce(invoice.seller_tax_no, ''),
                     'buyer_name', coalesce(invoice.buyer_name, ''),
@@ -752,7 +752,7 @@ enriched as (
         end as filter_group,
         coalesce(invoice.input_invoice_count, 0) as input_invoice_count,
         coalesce(invoice.output_invoice_count, 0) as output_invoice_count,
-        coalesce(invoice.invoice_total, 0) as invoice_total,
+        case when invoice.bank_id is null then 0 else invoice.invoice_total end as invoice_total,
         coalesce(invoice.invoice_summaries, '[]'::jsonb) as invoice_summaries,
         coalesce(bank.paid_total, category.amount) as paid_total,
         coalesce(original.original_amount, category.parent_amount) as original_amount,
@@ -781,6 +781,7 @@ classified_source as (
                 then 'income_no_invoice_required'
             when enriched.direction = 'income' and enriched.filter_group = 'cash_income' then 'cash_income'
             when enriched.direction = 'income' then 'income_pending_invoice'
+            when enriched.input_invoice_count > 0 and enriched.invoice_total is null then 'invoice_amount_missing'
             when enriched.input_invoice_count > 0 and enriched.invoice_total > enriched.paid_total
                 then 'invoice_not_fully_paid'
             when enriched.input_invoice_count > 0 then 'paid_invoiced'
@@ -929,6 +930,7 @@ parent_ranked as materialized (
         partition by parent_row_id
         order by case status_code
             when 'paid_pending_invoice' then 0 when 'income_pending_invoice' then 0
+            when 'invoice_amount_missing' then 1
             when 'invoice_not_fully_paid' then 1
             when 'paid_invoiced' then 2 when 'income_invoiced' then 2
             when 'bank_statement_as_invoice' then 3
@@ -1154,6 +1156,7 @@ select
             'paid_pending_invoice', count(*) filter (where status_code='paid_pending_invoice'),
             'paid_invoiced', count(*) filter (where status_code='paid_invoiced'),
             'invoice_not_fully_paid', count(*) filter (where status_code='invoice_not_fully_paid'),
+            'invoice_amount_missing', count(*) filter (where status_code='invoice_amount_missing'),
             'bank_statement_as_invoice', count(*) filter (where status_code='bank_statement_as_invoice'),
             'no_invoice_required', count(*) filter (where status_code='no_invoice_required'),
             'income_pending_invoice', count(*) filter (where status_code='income_pending_invoice'),
@@ -1296,7 +1299,7 @@ candidate_source as materialized (
         coalesce(invoice.seller_name, '') as seller_name,
         coalesce(invoice.seller_tax_no, '') as seller_tax_no,
         coalesce(invoice.buyer_name, '') as buyer_name,
-        coalesce(invoice.total_with_tax, invoice.amount) as total_with_tax,
+        invoice.total_with_tax as total_with_tax,
         coalesce(bank_relation.paid_total, 0) as paid_total,
         coalesce(bank_relation.linked_bank_ids, array[]::text[]) as linked_bank_ids,
         coalesce(case_relation.relation_count, 0) as relation_count,
@@ -1333,6 +1336,7 @@ classified as materialized (
     select
         filtered.*,
         case
+            when filtered.total_with_tax is null then 'conflict'
             when %s::text[] <@ filtered.linked_bank_ids then 'already_related'
             when cardinality(filtered.linked_bank_ids) = 0
                  and filtered.relation_count > 0
@@ -1340,6 +1344,7 @@ classified as materialized (
             else 'available'
         end as candidate_status,
         case
+            when filtered.total_with_tax is null then 'conflict'
             when cardinality(filtered.linked_bank_ids) = 0
                  and filtered.relation_count > 0
                  and not filtered.has_attach_existing_compatible_relation then 'conflict'
@@ -1371,12 +1376,13 @@ select
                 'total_with_tax', paged.total_with_tax::text,
                 'paid_total', paged.paid_total::text,
                 'related_paid_total', paged.paid_total::text,
-                'remaining_amount', greatest(paged.total_with_tax - paged.paid_total, 0)::text,
+                'remaining_amount', case when paged.total_with_tax is not null then greatest(paged.total_with_tax - paged.paid_total, 0)::text end,
                 'candidate_status', paged.candidate_status,
                 'bank_relation_status', paged.bank_relation_status,
                 'linked_bank_transaction_count', cardinality(paged.linked_bank_ids),
                 'conflict_reason',
-                    case when paged.candidate_status = 'conflict' then '已有不兼容关系' else '' end,
+                    case when paged.total_with_tax is null then '发票原件未提供价税合计'
+                         when paged.candidate_status = 'conflict' then '已有不兼容关系' else '' end,
                 'amount_difference_abs', paged.amount_difference_abs::text
             )
             order by __CANDIDATE_ORDER_SQL__
@@ -1458,7 +1464,7 @@ select
     coalesce(invoice_code, '') as invoice_code,
     coalesce(invoice_date::text, '') as issue_date,
     amount as amount_without_tax,
-    coalesce(coalesce(raw_payload->'normalized_payload', raw_payload)->'inferred_fields', '[]'::jsonb) as inferred_fields,
+    coalesce(raw_payload->'normalized_payload', raw_payload)->>'tax_amount_text' as tax_amount_text,
     coalesce(nullif(coalesce(raw_payload->'normalized_payload', raw_payload)->'source_line_items', 'null'::jsonb), '[]'::jsonb) as source_line_items,
     tax_rate,
     total_with_tax,
@@ -1956,7 +1962,7 @@ class LocalPendingInvoiceCanonicalRepository:
         source_expense = sum(row["_direction"] == "expense" for row in base_rows)
         source_income = sum(row["_direction"] == "income" for row in base_rows)
         status_counts = {code: 0 for code in (
-            "paid_pending_invoice", "paid_invoiced", "invoice_not_fully_paid", "bank_statement_as_invoice",
+            "paid_pending_invoice", "paid_invoiced", "invoice_not_fully_paid", "invoice_amount_missing", "bank_statement_as_invoice",
             "no_invoice_required", "income_pending_invoice", "income_invoiced", "income_no_invoice_required", "cash_income",
         )}
         for row in direction_rows:
@@ -2410,7 +2416,7 @@ def _candidate_request(
 def _candidate_order_sql(sort_field: str, sort_direction: str) -> str:
     if sort_field:
         return (
-            f"{CANDIDATE_SORT_EXPRESSIONS[sort_field]} {sort_direction}, "
+            f"{CANDIDATE_SORT_EXPRESSIONS[sort_field]} {sort_direction} nulls last, "
             "invoice_id asc"
         )
     return (
@@ -2433,7 +2439,7 @@ def _candidate_rows(value: Any) -> list[dict[str, Any]]:
             "remaining_amount",
             "amount_difference_abs",
         ):
-            row[field] = _money(row.get(field))
+            row[field] = _money(row[field]) if row.get(field) not in (None, "") else ""
         result.append(row)
     return result
 
@@ -2651,14 +2657,17 @@ def _row_payload(row: dict[str, Any]) -> dict[str, Any]:
     oa_summaries = [dict(item) for item in list(row.get("oa_summaries") or []) if isinstance(item, dict)]
     bank_summaries = [dict(item) for item in list(row.get("bank_summaries") or []) if isinstance(item, dict)]
     amount = _money(row.get("amount"))
-    invoice_total = _money(sum((_decimal(item.get("total_with_tax")) for item in invoice_summaries), Decimal("0")))
+    invoice_total = (
+        _money(sum((_decimal(item["total_with_tax"]) for item in invoice_summaries), Decimal("0")))
+        if all(item.get("total_with_tax") not in (None, "") for item in invoice_summaries) else ""
+    )
     paid_total = _money(row.get("paid_total"))
-    difference = _decimal(invoice_total) - _decimal(paid_total)
+    difference = _decimal(invoice_total) - _decimal(paid_total) if invoice_total != "" else None
     payment_summary = {
         "invoice_total": invoice_total,
         "paid_total": paid_total,
-        "remaining_amount": _money(max(difference, Decimal("0"))),
-        "difference_amount": _money(difference),
+        "remaining_amount": _money(max(difference, Decimal("0"))) if difference is not None else "",
+        "difference_amount": _money(difference) if difference is not None else "",
         "payment_transaction_count": int(row.get("payment_transaction_count") or len(bank_summaries) or 1),
     }
     category = {
@@ -2859,6 +2868,8 @@ def _local_row_matches(row: dict[str, Any], request: dict[str, Any]) -> bool:
         if operator == "between":
             bounds = item.get("value") if isinstance(item.get("value"), dict) else {}
             if item["field"] in {"amount", "invoice_total"}:
+                if value in (None, ""):
+                    return False
                 number = _decimal(value)
                 if bounds.get("min") not in (None, "") and number < _decimal(bounds["min"]):
                     return False

@@ -89,6 +89,15 @@ class FakeConnection:
 
 
 class EtcTicketsPageAuditTests(unittest.TestCase):
+    def test_unknown_tax_is_not_zero_for_arithmetic_audit(self) -> None:
+        rows = [{"etc_invoice_id": "unknown-tax", "amount": "10.00", "tax_amount": None,
+                 "total_with_tax": "10.20", "raw_payload": {}}]
+        issues = etc_tickets_page_audit._row_contract_issues([], [], [], rows, [], [])
+        self.assertNotIn("etc_invoice_arithmetic_mismatch", [issue.code for issue in issues])
+        rows[0]["tax_amount"] = "0.00"
+        issues = etc_tickets_page_audit._row_contract_issues([], [], [], rows, [], [])
+        self.assertIn("etc_invoice_arithmetic_mismatch", [issue.code for issue in issues])
+
     def test_batch_controls_use_etc_invoice_total_before_oa_reported_amount(self) -> None:
         count, amount = etc_tickets_page_audit._batch_controls(
             {

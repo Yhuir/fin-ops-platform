@@ -47,6 +47,7 @@ class UntrustedDocumentError(ValueError):
 
 _SUFFIX_KIND = {
     ".docx": "docx",
+    ".ofd": "ofd",
     ".jpeg": "jpeg",
     ".jpg": "jpeg",
     ".pdf": "pdf",
@@ -56,6 +57,7 @@ _SUFFIX_KIND = {
 }
 _CONTENT_TYPES = {
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "ofd": "application/ofd",
     "jpeg": "image/jpeg",
     "pdf": "application/pdf",
     "png": "image/png",
@@ -90,8 +92,8 @@ def inspect_untrusted_document(
         ocr_content = normalize_image_for_ocr(content=content, limits=limits)
     elif detected_kind == "pdf":
         pdf_page_count = _validate_pdf(content=content, limits=limits)
-    elif detected_kind == "docx":
-        _validate_docx(content=content, limits=limits)
+    elif detected_kind in {"docx", "ofd"}:
+        _validate_archive_document(content=content, limits=limits, kind=detected_kind)
 
     return ValidatedDocument(
         file_name=file_name,
@@ -183,7 +185,7 @@ def _detect_kind(content: bytes, declared_kind: str) -> str:
     if content.startswith(b"%PDF-"):
         return "pdf"
     if is_zipfile(BytesIO(content)):
-        return "docx"
+        return "ofd" if declared_kind == "ofd" else "docx"
     if declared_kind == "text" and _is_text(content):
         return "text"
     raise UntrustedDocumentError("document_signature_invalid")
@@ -239,7 +241,7 @@ def _validate_pdf(*, content: bytes, limits: DocumentLimits) -> int:
         document.close()
 
 
-def _validate_docx(*, content: bytes, limits: DocumentLimits) -> None:
+def _validate_archive_document(*, content: bytes, limits: DocumentLimits, kind: str) -> None:
     try:
         with ZipFile(BytesIO(content)) as document:
             entries = document.infolist()
@@ -262,9 +264,10 @@ def _validate_docx(*, content: bytes, limits: DocumentLimits) -> None:
                 if total_size > limits.max_archive_uncompressed_bytes:
                     raise UntrustedDocumentError("document_archive_too_large")
                 names.add(entry.filename)
-            if "[Content_Types].xml" not in names or "word/document.xml" not in names:
-                raise UntrustedDocumentError("document_docx_invalid")
+            required = {"[Content_Types].xml", "word/document.xml"} if kind == "docx" else {"OFD.xml"}
+            if not required <= names:
+                raise UntrustedDocumentError(f"document_{kind}_invalid")
     except UntrustedDocumentError:
         raise
     except (BadZipFile, OSError, ValueError):
-        raise UntrustedDocumentError("document_docx_invalid") from None
+        raise UntrustedDocumentError(f"document_{kind}_invalid") from None

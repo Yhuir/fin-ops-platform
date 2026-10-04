@@ -14,6 +14,7 @@ export type PendingInvoiceStatusCode =
   | "paid_pending_invoice"
   | "paid_pending_future_invoice"
   | "invoice_not_fully_paid"
+  | "invoice_amount_missing"
   | "no_invoice_required"
   | "bank_statement_as_invoice"
   | "pending"

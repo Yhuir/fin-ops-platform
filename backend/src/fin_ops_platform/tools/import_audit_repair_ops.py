@@ -394,6 +394,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repair-invoice-header-source-sha256")
     parser.add_argument("--repair-invoice-financial-source", action="append", default=[],
                         help="Stored tax header import file ID; use --invoice-id for exact existing targets.")
+    parser.add_argument("--repair-invoice-oa-source", action="append", default=[],
+                        help="Exact registered OA attachment keys; read financial facts from their originals.")
     parser.add_argument("--repair-invoice-party-fields", action="store_true",
                         help="Also correct explicit seller/buyer names and tax IDs from verified tax headers.")
     parser.add_argument("--expected-invoice-header-repair-count", type=int)
@@ -410,6 +412,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-bank-audit-row-relink-count", type=int)
     parser.add_argument("--expected-bank-audit-row-unlink-count", type=int)
     parser.add_argument("--repair-etc-invoice-payload", action="store_true")
+    parser.add_argument("--repair-etc-source-lines", action="store_true")
     parser.add_argument("--retire-oa-bank-account-invoice")
     parser.add_argument("--replacement-invoice-id")
     parser.add_argument("--source-attachment-key")
@@ -471,6 +474,75 @@ def _run_etc_invoice_payload_repair(args: Any, *, stdout: TextIO) -> int:
                                for item in plan["updates"]])
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, default=str), file=stdout)
         return 0
+    finally:
+        connection.close()
+
+
+def _run_etc_source_lines_repair(args: Any, *, stdout: TextIO) -> int:
+    from fin_ops_platform.services.etc_service import parse_etc_xml
+    from fin_ops_platform.services.historical_etc_repair_service import build_etc_source_lines_repair_plan
+    from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
+
+    allowed = {"repair_etc_source_lines", "invoice_id", "dry_run", "execute",
+               "expected_fingerprint", "rollback_manifest_path", "operator_id", "reason"}
+    if any(_argument_is_set(value) for name, value in vars(args).items() if name not in allowed):
+        raise SystemExit("ETC source detail repair cannot be combined with another mode.")
+    if args.execute and not all((args.invoice_id, args.expected_fingerprint,
+                                args.rollback_manifest_path, args.operator_id, args.reason)):
+        raise SystemExit("Execute requires exact ETC IDs, fingerprint, private artifact, operator and reason.")
+    ids = sorted(set(args.invoice_id))
+    connection = PostgresConnection(PostgresSettings.from_env())
+    try:
+        with connection.transaction() as tx:
+            tx.execute("set transaction isolation level repeatable read read only")
+            rows = PostgresOpsTaxEtcRepository(tx).load_etc_source_lines_repair_rows(ids)
+        if ids and {row["etc_invoice_id"] for row in rows} != set(ids):
+            raise RuntimeError("An explicit ETC target is missing.")
+        store = _build_bank_repair_state_store(connection)
+        sources = {}
+        parsed_files = {}
+        for row in rows:
+            payload = row["raw_payload"].get("normalized_payload", row["raw_payload"])
+            path = payload.get("xml_file_path")
+            if not path:
+                raise RuntimeError(f"ETC original XML is missing: {row['etc_invoice_id']}")
+            if path not in parsed_files:
+                content = store.read_etc_invoice_file(path)
+                parsed_files[path] = (hashlib.sha256(content).hexdigest(), parse_etc_xml(content))
+            sources[row["etc_invoice_id"]] = parsed_files[path]
+        plan = build_etc_source_lines_repair_plan(rows, sources)
+        plan["rollback_manifest"] = {"source_fingerprint": plan["source_fingerprint"],
+            "restore_etc_invoice_payloads": plan["updates"]}
+        plan["rollback_manifest_fingerprint"] = _rollback_manifest_fingerprint(plan["rollback_manifest"])
+        written = 0
+        if args.dry_run and args.rollback_manifest_path:
+            _write_private_rollback_manifest(args.rollback_manifest_path, plan)
+        if args.execute:
+            if plan["unresolved"] or plan["source_fingerprint"] != args.expected_fingerprint:
+                raise RuntimeError("ETC source detail is unresolved or changed after preview.")
+            _verify_private_rollback_manifest(args.rollback_manifest_path, plan)
+            with connection.transaction() as tx:
+                tx.execute("set transaction isolation level serializable")
+                repository = PostgresOpsTaxEtcRepository(tx)
+                current = build_etc_source_lines_repair_plan(
+                    repository.load_etc_source_lines_repair_rows(ids, lock=True), sources)
+                if current["source_fingerprint"] != plan["source_fingerprint"]:
+                    raise RuntimeError("ETC source detail changed before execution.")
+                written = repository.apply_etc_source_lines_repair(current["updates"])
+                if written:
+                    AuditTrailService(PostgresOperationsAuditRepository(tx)).record_action(
+                        actor_id=args.operator_id, action="etc_invoice_source_lines_repair",
+                        entity_type="etc_invoice", entity_id=plan["source_fingerprint"],
+                        metadata={"event_type": "operation.completed", "page_key": "imports_etc_invoices",
+                                  "reason": args.reason, "invoice_count": written,
+                                  "invoice_ids": ids, "outcome": "success"})
+        report = {key: value for key, value in plan.items() if key not in ("updates", "rollback_manifest")}
+        report.update(mode="execute" if args.execute else "dry_run", written=bool(written),
+            updated_invoice_count=written, planned_invoice_count=len(plan["updates"]),
+            invoice_ids=[row["etc_invoice_id"] for row in rows],
+            planned_invoice_ids=[item["invoice_id"] for item in plan["updates"]])
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, default=str), file=stdout)
+        return 0 if not plan["unresolved"] else 2
     finally:
         connection.close()
 
@@ -540,15 +612,16 @@ def _inspect_invoice_source(args: Any, *, stdout: TextIO) -> int:
 
 
 def _run_verified_financial_repair(args: Any, *, stdout: TextIO) -> int:
-    from fin_ops_platform.services.import_file_service import parse_invoice_source_rows, read_xlsx_import_rows
+    from fin_ops_platform.services.import_file_service import attach_invoice_line_evidence, parse_invoice_source_rows, read_xlsx_import_rows
     from fin_ops_platform.services.invoice_header_fact_repair_service import build_verified_financial_repair_plan
     from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
         apply_verified_financial_repair,
         load_verified_financial_repair_snapshot,
+        load_original_invoice_attachments,
     )
 
-    allowed = {"repair_invoice_financial_source", "repair_invoice_party_fields", "invoice_id", "dry_run", "execute",
-               "expected_fingerprint", "operator_id", "reason"}
+    allowed = {"repair_invoice_financial_source", "repair_invoice_oa_source", "repair_invoice_party_fields", "invoice_id", "dry_run", "execute",
+               "expected_fingerprint", "operator_id", "reason", "rollback_manifest_path"}
     if not args.invoice_id or any(_argument_is_set(value) for name, value in vars(args).items() if name not in allowed):
         raise SystemExit("Financial repair requires exact invoice IDs and cannot combine repair modes.")
     if args.execute and not all((args.expected_fingerprint, args.operator_id, args.reason)):
@@ -569,7 +642,32 @@ def _run_verified_financial_repair(args: Any, *, stdout: TextIO) -> int:
             if workbook.invoice_header_sheet_name != "发票基础信息":
                 raise ValueError(f"Source file {file_id} has no authoritative tax header sheet.")
             sources.append({"file_id": file_id, "filename": source["original_filename"],
-                            "sha256": digest, "rows": parse_invoice_source_rows(workbook.rows)})
+                            "sha256": digest, "rows": attach_invoice_line_evidence(
+                                parse_invoice_source_rows(workbook.rows), workbook.invoice_detail_rows or [],
+                                header_sheet_name=workbook.invoice_header_sheet_name)})
+        if args.repair_invoice_oa_source:
+            from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
+            keys = sorted(set(args.repair_invoice_oa_source))
+            attachments = load_original_invoice_attachments(connection, keys)
+            if {row["source_attachment_key"] for row in attachments} != set(keys):
+                raise ValueError("Every OA original must have an exact registered attachment.")
+            parser = OAAttachmentInvoiceService()
+            for attachment in attachments:
+                file_path = attachment["normalized_payload"]["file_path"]
+                content = parser._download_content(parser.build_download_url(file_path))
+                if not content:
+                    raise ValueError("OA original cannot be read.")
+                result = parser.parse_content_result(
+                    {"fileName": attachment["filename"], "filePath": file_path}, content)
+                if result["parse_status"] != "parsed":
+                    raise ValueError(f"OA original could not be parsed: {attachment['source_attachment_key']}.")
+                rows = [{**evidence, "amount": evidence.get("net_amount"),
+                         "invoice_date": evidence.get("issue_date")}
+                        for evidence in result["evidences"]]
+                sources.append({"file_id": attachment["source_attachment_key"],
+                    "filename": attachment["filename"], "source_kind": "oa_attachment",
+                    "sha256": hashlib.sha256(content).hexdigest(), "rows": rows})
+
         def load_plan(tx: Any) -> dict[str, Any]:
             return build_verified_financial_repair_plan(
                 **load_verified_financial_repair_snapshot(tx, args.invoice_id),
@@ -579,6 +677,11 @@ def _run_verified_financial_repair(args: Any, *, stdout: TextIO) -> int:
             tx.execute("set transaction isolation level repeatable read read only")
             plan = load_plan(tx)
         completion = None
+        if args.rollback_manifest_path:
+            if args.execute:
+                _verify_private_rollback_manifest(args.rollback_manifest_path, plan)
+            else:
+                _write_private_rollback_manifest(args.rollback_manifest_path, plan)
         if args.execute:
             if plan["source_fingerprint"] != args.expected_fingerprint:
                 raise RuntimeError("Financial facts changed after dry-run.")
@@ -604,7 +707,7 @@ def _run_verified_financial_repair(args: Any, *, stdout: TextIO) -> int:
                                       "party_after": item["party_fields"]}
                                       for item in current["updates"]]},
                     )
-        report = {key: value for key, value in plan.items() if key != "updates"}
+        report = {key: value for key, value in plan.items() if key not in {"updates", "rollback_manifest"}}
         report.update(mode="execute" if args.execute else "dry_run", completion=completion,
                       updates=[{**{key: value for key, value in item.items() if key not in ("before", "raw_payload")},
                                 "before": {field: str(item["before"][field]) for field in ("amount", "tax_amount", "total_with_tax")},
@@ -747,9 +850,9 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         return _run_oa_bank_account_invoice_repair(args, stdout=stdout)
     if args.export_source_file_id:
         return _export_source_file(args, stdout=stdout)
-    if args.repair_invoice_party_fields and not args.repair_invoice_financial_source:
+    if args.repair_invoice_party_fields and not (args.repair_invoice_financial_source or args.repair_invoice_oa_source):
         raise SystemExit("Party repair requires a verified financial source and exact invoice IDs.")
-    if args.repair_invoice_financial_source:
+    if args.repair_invoice_financial_source or args.repair_invoice_oa_source:
         return _run_verified_financial_repair(args, stdout=stdout)
     if args.inspect_invoice_source:
         return _inspect_invoice_source(args, stdout=stdout)
@@ -784,6 +887,8 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         return 0
     if args.repair_etc_invoice_payload:
         return _run_etc_invoice_payload_repair(args, stdout=stdout)
+    if args.repair_etc_source_lines:
+        return _run_etc_source_lines_repair(args, stdout=stdout)
     if args.invoice_id:
         raise SystemExit("--invoice-id requires --repair-etc-invoice-payload")
     if args.expected_rollback_manifest_fingerprint:

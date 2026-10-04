@@ -63,7 +63,7 @@ def original_bank_display_totals(summaries: list[dict[str, Any]]) -> dict[str, A
     }
 
 
-def bank_unit_comparison_rows(banks: list[BankTransaction], *, target: Decimal) -> list[BankTransaction]:
+def bank_unit_comparison_rows(banks: list[BankTransaction], *, target: Decimal | None) -> list[BankTransaction]:
     """Adapt bank read projections to the shared document comparison rule."""
     by_id = {bank.id: bank for bank in banks}
     rows = [{"id": bank.id, "amount": bank.amount, "txn_direction": bank.txn_direction.value,

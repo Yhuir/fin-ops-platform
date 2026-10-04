@@ -396,30 +396,38 @@ def _invoice_relation_payload(
             invoice = invoices_by_id.get(row_id)
             if row_type == "invoice" and invoice is not None and invoice.id not in seen:
                 seen.add(invoice.id)
-                total = _invoice_total(invoice)
+                total = invoice.total_with_tax
                 summaries.append(
                     {
                         "invoiceId": invoice.id,
                         "digitalInvoiceNo": invoice.digital_invoice_no or invoice.invoice_no or "",
                         "sellerName": invoice.seller_name or invoice.counterparty.name,
                         "invoiceDate": invoice.invoice_date or "",
-                        "totalWithTax": _money(total),
+                        "totalWithTax": _money(total) if total is not None else "",
                         "relationCaseId": relation.get("case_id", ""),
                         "relationStatus": relation_status(relation),
                         "relationSource": str(relation.get("relation_source") or ""),
-                        "_sort": (abs(total - oa_amount), invoice.invoice_date or "", invoice.id),
+                        "_sort": (
+                            total is None,
+                            abs(total - oa_amount) if total is not None else ZERO,
+                            invoice.invoice_date or "",
+                            invoice.id,
+                        ),
                     }
                 )
     summaries.sort(key=lambda item: item["_sort"])
     public = [{key: value for key, value in item.items() if key != "_sort"} for item in summaries]
     primary = public[0] if public else {}
-    invoice_total = sum((_decimal(summary.get("totalWithTax")) for summary in public), start=ZERO)
+    invoice_total = (
+        sum((_decimal(summary["totalWithTax"]) for summary in public), start=ZERO)
+        if public and all(summary["totalWithTax"] != "" for summary in public) else None
+    )
     return {
         "primaryInvoiceId": primary.get("invoiceId"),
         "digitalInvoiceNo": primary.get("digitalInvoiceNo", ""),
         "sellerName": primary.get("sellerName", ""),
         "invoiceDate": primary.get("invoiceDate", ""),
-        "totalWithTax": _money(invoice_total) if public else "",
+        "totalWithTax": _money(invoice_total) if invoice_total is not None else "",
         "relationCount": len(public),
         "hasMultiple": len(public) > 1,
         "detailMode": "none" if not public else "list" if len(public) > 1 else "single",
@@ -534,10 +542,6 @@ def _decimal(value: Any) -> Decimal:
 
 def _money(value: Any) -> str:
     return f"{_decimal(value).quantize(CENT)}"
-
-
-def _invoice_total(invoice: Invoice) -> Decimal:
-    return _decimal(invoice.total_with_tax) if invoice.total_with_tax is not None else _decimal(invoice.amount) + _decimal(invoice.tax_amount)
 
 
 def _bank_direction(transaction: BankTransaction) -> str:

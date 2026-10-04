@@ -49,7 +49,7 @@ export default function ImportReviewTable({ rows, loading, invoiceMode, page, pa
             </FinanceTableCell>
             <FinanceTableCell columnRole="amount">
               <div className="import-review-money">{formatMoney(row.amount, "—")}</div>
-              {invoiceMode ? <><div className="import-review-money">税额 {formatMoney(row.taxAmount, "—")}</div><div className="import-review-money">合计 {formatMoney(row.totalWithTax, "—")}</div></> : null}
+              {invoiceMode ? <><div className="import-review-money">税额 {formatMoney(row.taxAmount, row.taxAmountText || "—")}</div><div className="import-review-money">合计 {formatMoney(row.totalWithTax, "—")}</div></> : null}
             </FinanceTableCell>
             <FinanceTableCell columnRole="description">
               {row.conflicts.length > 0 ? (

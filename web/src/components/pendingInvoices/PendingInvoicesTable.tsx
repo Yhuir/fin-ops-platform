@@ -590,7 +590,9 @@ function PendingInvoiceTableRow({
   const transactionId = row.bankTransaction.id || row.id;
   const transactionSelectable = isTransactionSelectable?.(row) === true;
   const transactionSelected = selectedTransactionIds?.has(transactionId) === true;
-  const invoiceTotal = row.inputInvoices.paymentSummary?.invoiceTotal || primaryInvoice?.totalWithTax || "";
+  const invoiceTotal = row.inputInvoices.paymentSummary
+    ? row.inputInvoices.paymentSummary.invoiceTotal
+    : primaryInvoice?.totalWithTax ?? "";
   const bankTotal = bankHasMultiple ? row.bankTransactions.originalAmount : row.bankTransaction.originalAmount;
   const counterpartyLabel = bankHasMultiple ? uniqueCounterpartyLabel(row) : row.bankTransaction.counterpartyName;
 
@@ -709,12 +711,12 @@ function PendingInvoiceTableRow({
         {primaryInvoice || invoiceHasMultiple ? (
           <span className="pending-invoices-money-stack">
             <span className="pending-invoices-money-primary">
-              {formatMoney(invoiceTotal)}
+              {formatMoney(invoiceTotal, "—")}
             </span>
             {row.inputInvoices.paymentSummary ? (
               <>
                 <span className="pending-invoices-cell-secondary">已付 {formatMoney(row.inputInvoices.paymentSummary.paidTotal)}</span>
-                <span className="pending-invoices-cell-secondary">待付 {formatMoney(row.inputInvoices.paymentSummary.remainingAmount)}</span>
+                <span className="pending-invoices-cell-secondary">待付 {formatMoney(row.inputInvoices.paymentSummary.remainingAmount, "—")}</span>
               </>
             ) : null}
           </span>

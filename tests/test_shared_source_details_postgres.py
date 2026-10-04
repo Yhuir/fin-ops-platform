@@ -69,11 +69,11 @@ class SharedSourceDetailsPostgresTests(unittest.TestCase):
     def test_invoice_detail_expands_all_source_lines_not_only_selected_relation_member(self):
         with self.connection.transaction() as tx:
             tx.execute("set local fin_ops.correction_reason='isolated source detail fixture'")
-            tx.execute("update app.invoices set digital_invoice_no='26532000000000000001', raw_payload='{\"normalized_payload\":{\"taxable_item_name\":\"第一项\",\"quantity\":\"2\"}}'::jsonb")
+            tx.execute("update app.invoices set digital_invoice_no='26532000000000000001', raw_payload='{\"normalized_payload\":{\"source_line_items\":[{\"taxable_item_name\":\"第一项\",\"quantity\":\"2\",\"amount\":\"100\",\"tax_amount\":\"0\",\"total_with_tax\":\"100\"}]}}'::jsonb")
             tx.execute("""insert into app.invoices(legacy_mongo_id,invoice_type,invoice_no,digital_invoice_no,invoice_date,
                 invoice_month,seller_name,buyer_name,amount,signed_amount,tax_amount,total_with_tax,status,raw_payload)
                 values('invoice-line-2','input','SCOPE-001','26532000000000000001','2026-04-29','2026-04-01',
-                '提供方','购买方',10,10,0,10,'pending','{"normalized_payload":{"taxable_item_name":"第二项","quantity":"0"}}'::jsonb)""")
+                '提供方','购买方',10,10,0,10,'pending','{"normalized_payload":{"source_line_items":[{"taxable_item_name":"第二项","quantity":"0","amount":"10","tax_amount":"0","total_with_tax":"10"}]}}'::jsonb)""")
         source = self.pending.invoice_detail('invoice-scope')['sections']
         relation = self.pending.relation_detail(self.interest, direction='expense', kind='invoice')['sections']
         self.assertEqual(relation, source)

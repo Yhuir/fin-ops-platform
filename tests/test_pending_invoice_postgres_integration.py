@@ -37,6 +37,49 @@ class PendingInvoicePostgresIntegrationTests(unittest.TestCase):
         self.connection.close()
         truncate_test_database(self.database_url)
 
+    def test_missing_gross_stays_unknown_through_page_status_filters_and_candidates(self) -> None:
+        self.connection.execute("""
+            insert into app.bank_transactions(legacy_mongo_id, account_no, txn_direction,
+                counterparty_name_raw, amount, signed_amount, txn_date, txn_month, status)
+            values ('bank-missing-gross', '8106', 'outflow', '原值供应商', 60, -60,
+                '2026-09-28', '2026-09-01', 'active')
+        """)
+        self.connection.execute("""
+            insert into app.invoices(legacy_mongo_id, invoice_type, invoice_no, invoice_date,
+                invoice_month, seller_name, amount, signed_amount, tax_amount, total_with_tax, status)
+            values ('invoice-missing-gross', 'input', 'MISSING-GROSS', '2026-09-28',
+                '2026-09-01', '原值供应商', 100, 100, 13, null, 'active')
+        """)
+        self.connection.execute("""
+            insert into app.workbench_pair_relations(case_id, relation_mode, status, month_scope, row_ids, row_types)
+            values ('missing-gross-case', 'manual_confirmed', 'active', '2026-09-01',
+                array['bank-missing-gross','invoice-missing-gross'], array['bank','invoice'])
+        """)
+        query = PendingInvoiceCanonicalQueryService(repository=PostgresPendingInvoiceCanonicalRepository(self.connection))
+        request = {"direction": ["expense"], "filter": ["all"], "include_statistics": ["false"]}
+        page = query.rows(request)
+        row = page["rows"][0]
+        self.assertEqual(row["invoice_acquisition_status"]["code"], "invoice_amount_missing")
+        self.assertEqual(row["input_invoices"]["payment_summary"]["invoice_total"], "")
+        self.assertEqual(row["input_invoices"]["payment_summary"]["paid_total"], "60.00")
+        self.assertEqual(row["input_invoices"]["payment_summary"]["remaining_amount"], "")
+        self.assertEqual(page["acquisition_summary"]["status_counts"]["invoice_amount_missing"], 1)
+        filtered = query.rows({**request, "filters": [json.dumps([
+            {"field": "status_code", "operator": "in", "values": ["invoice_amount_missing"]}])]})
+        self.assertEqual(filtered["pagination"]["total"], 1)
+        candidates = query.invoice_candidates_batch({"transaction_ids": ["bank-missing-gross"]})["rows"]
+        self.assertEqual(candidates[0]["candidate_status"], "conflict")
+        self.assertEqual(candidates[0]["total_with_tax"], "")
+        self.assertEqual(candidates[0]["remaining_amount"], "")
+        self.assertEqual(candidates[0]["conflict_reason"], "发票原件未提供价税合计")
+        with self.connection.transaction() as tx:
+            tx.execute("select set_config('fin_ops.correction_reason', 'isolated nullable source fixture', true)")
+            tx.execute("update app.invoices set total_with_tax=113, amount=null, signed_amount=null where legacy_mongo_id='invoice-missing-gross'")
+        restored = query.rows(request)["rows"][0]
+        self.assertEqual(restored["invoice_acquisition_status"]["code"], "invoice_not_fully_paid")
+        self.assertEqual(restored["input_invoices"]["payment_summary"]["invoice_total"], "113.00")
+        self.assertEqual(restored["input_invoices"]["payment_summary"]["remaining_amount"], "53.00")
+
     def test_parent_counts_invoice_dedup_self_excluding_facets_and_relation_withdrawal(self) -> None:
         for identity, direction in (("expense-a", "outflow"), ("expense-b", "outflow"),
                                     ("expense-c", "outflow"), ("income-a", "inflow")):
@@ -160,8 +203,9 @@ class PendingInvoicePostgresIntegrationTests(unittest.TestCase):
         fields = {field['label']: field['value'] for section in invoice['sections'] for field in section['fields']}
         self.assertEqual(fields['税额'], '0.00')
         self.assertEqual(fields['发票状态'], '正常')
-        self.assertEqual(fields['价税合计'], '100.00（推算）')
-        self.assertEqual(fields['税率'], '无法确定')
+        self.assertEqual(fields['价税合计'], '—')
+        self.assertEqual(fields['税率'], '—')
+        self.assertFalse(any(section['title'].startswith('货物或应税劳务明细') for section in invoice['sections']))
         self.assertIsNone(self.connection.fetch_one(
             "select total_with_tax from app.invoices where legacy_mongo_id='source-invoice'"
         )['total_with_tax'])
@@ -174,8 +218,8 @@ class PendingInvoicePostgresIntegrationTests(unittest.TestCase):
         source_lines = [{"amount": "100", "tax_amount": "13", "total_with_tax": "113", "tax_rate": "0.13"}]
         examples = [
             ("root-lines", None, {"source_line_items": source_lines}, "13%"),
-            ("root-inferred", "13%", {"inferred_fields": ["tax_rate"]}, "无法确定"),
-            ("normalized-priority", None, {"source_line_items": source_lines, "normalized_payload": {}}, "无法确定"),
+            ("root-source-rate", "13%", {}, "13%"),
+            ("normalized-priority", None, {"source_line_items": source_lines, "normalized_payload": {}}, "—"),
             ("normalized-lines", None, {"normalized_payload": {"source_line_items": source_lines}}, "13%"),
         ]
         service = PendingInvoiceCanonicalQueryService(repository=PostgresPendingInvoiceCanonicalRepository(self.connection))

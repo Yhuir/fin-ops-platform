@@ -12,7 +12,7 @@ function mockResponse(value: unknown) {
 }
 afterEach(() => vi.restoreAllMocks());
 
-test.each([["0.13", "13%"], ["13.00%", "13%"], ["0", "0%"], ["", "未提供"], ["免税", "免税"], ["不征税", "不征税"], ["mixed", "多税率"]])("restores tax rate %s as %s", (raw, expected) => {
+test.each([["0.13", "13%"], ["13.00%", "13%"], ["0", "0%"], ["", "—"], ["免税", "免税"], ["不征税", "不征税"], ["mixed", "多税率"]])("restores tax rate %s as %s", (raw, expected) => {
   expect(normalizeOutputTaxRate(raw)).toBe(expected);
 });
 
@@ -26,7 +26,7 @@ test("maps full-scope signed totals and carries tax/search/status into preview a
     return new Response(JSON.stringify(result),{headers:{'Content-Type':'application/json'}});
   });
   expect((await fetchOutputInvoiceCollectionRows(request)).summary).toEqual(totals);
-  const query = {...request,keyword:'客户',filters:[{field:'tax_rate',operator:'in' as const,values:['13%','未提供']}],sortField:'total_with_tax',sortDirection:'asc' as const};
+  const query = {...request,keyword:'客户',filters:[{field:'tax_rate',operator:'in' as const,values:['13%','—']}],sortField:'total_with_tax',sortDirection:'asc' as const};
   const selection = {values:{collection_status:['collected']},startDate:'2026-01-01',endDate:'2026-12-31'};
   expect((await fetchOutputInvoiceCollectionExportSummary(selection,new AbortController().signal,query)).rowCount).toBe(3);
   await downloadOutputInvoiceCollectionSelection(selection,query);
@@ -69,12 +69,14 @@ test.each(["", "unknown"])("rejects invalid row state %s without a pending fallb
 });
 
 
-test('preserves unknown rate and inferred monetary provenance without polluting numeric amounts', async () => {
-  const value = payload();
-  value.rows[0].invoice = {...value.rows[0].invoice, taxRate: '无法确定', totalWithTax: '113.00', inferredFields: ['totalWithTax']} as typeof value.rows[0]['invoice'];
-  mockResponse(value);
+test.each([
+  {totalWithTax: null, amountWithoutTax: '100.00', taxAmount: '13.00', taxRate: null, taxAmountText: null},
+  {totalWithTax: '0.00', amountWithoutTax: '0.00', taxAmount: null, taxRate: '免税', taxAmountText: '*'},
+])('preserves source financial fields without filling missing values: %j', async invoice => {
+  mockResponse({...payload(), rows: [{...payload().rows[0], invoice}]});
   const response = await fetchOutputInvoiceCollectionRows(request);
-  expect(response.rows[0].invoice.taxRate).toBe('无法确定');
-  expect(response.rows[0].invoice.totalWithTax).toBe('113.00');
-  expect(response.rows[0].invoice.inferredFields).toEqual(['totalWithTax']);
+  expect(response.rows[0].invoice).toMatchObject({
+    totalWithTax: invoice.totalWithTax ?? '', amountWithoutTax: invoice.amountWithoutTax,
+    taxAmount: invoice.taxAmount ?? '', taxRate: invoice.taxRate ?? '—', taxAmountText: invoice.taxAmountText ?? '',
+  });
 });

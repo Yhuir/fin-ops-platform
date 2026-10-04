@@ -195,6 +195,7 @@ EXPECTED_MIGRATION_FILES = [
     "0182_input_invoice_payment_rules_editable.sql",
     "0183_payment_rule_applicant_names.sql",
     "0184_remove_retired_settings.sql",
+    "0185_invoice_source_values_nullable.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "app", "staging", "cash")
 TEST_TABLES = (

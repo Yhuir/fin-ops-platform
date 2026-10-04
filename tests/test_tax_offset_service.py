@@ -54,6 +54,45 @@ class TaxOffsetServiceTests(unittest.TestCase):
         )
         import_service.confirm_import(preview.id)
 
+    def test_source_values_are_not_completed_and_missing_tax_cannot_be_selected(self) -> None:
+        rows = [
+            {"id": "missing-total", "invoice_no": "1", "amount": "100.00", "tax_amount": "13.00", "total_with_tax": None},
+            {"id": "missing-tax", "invoice_no": "2", "amount": "100.00", "tax_amount": None, "tax_amount_text": "*", "total_with_tax": "100.00"},
+            {"id": "zero", "invoice_no": "3", "amount": "0.00", "tax_amount": "0.00", "total_with_tax": "0.00"},
+        ]
+        service = TaxOffsetService(month_data={"2026-05": {"output_items": rows, "input_plan_items": []}})
+        payload = service.get_month_payload("2026-05")
+        self.assertIsNone(payload["output_items"][0]["total_with_tax"])
+        self.assertIsNone(payload["output_items"][1]["tax_amount"])
+        self.assertEqual(payload["output_items"][1]["tax_amount_text"], "*")
+        self.assertFalse(payload["output_items"][1]["is_selectable"])
+        self.assertEqual(payload["default_selected_output_ids"], ["missing-total", "zero"])
+        self.assertEqual(payload["summary"]["output_tax"], "13.00")
+        with self.assertRaisesRegex(ValueError, "no source tax amount"):
+            service.calculate(month="2026-05", selected_output_ids=["missing-tax"], selected_input_ids=[])
+
+    def test_certified_source_total_is_not_calculated_from_net_and_tax(self) -> None:
+        service = TaxOffsetService(certified_records_loader=lambda month: [
+            {"id": "certified", "amount": "100.00", "tax_amount": "13.00", "tax_rate": "13%"},
+        ])
+        payload = service.get_month_payload("2026-05")
+        row = payload["certified_items"][0]
+        self.assertEqual(row["amount"], "100.00")
+        self.assertEqual(row["tax_rate"], "13%")
+        self.assertIsNone(row["total_with_tax"])
+        self.assertEqual(payload["summary"]["certified_input_tax"], "13.00")
+
+    def test_certified_missing_tax_requires_a_real_deductible_amount(self) -> None:
+        service = TaxOffsetService(certified_records_loader=lambda month: [{"id": "missing", "tax_amount": None}])
+        with self.assertRaisesRegex(ValueError, "missing both deductible tax and source tax amount"):
+            service.get_month_payload("2026-05")
+        service = TaxOffsetService(certified_records_loader=lambda month: [
+            {"id": "deductible", "tax_amount": None, "deductible_tax_amount": "0.00"},
+        ])
+        payload = service.get_month_payload("2026-05")
+        self.assertIsNone(payload["certified_items"][0]["tax_amount"])
+        self.assertEqual(payload["summary"]["certified_input_tax"], "0.00")
+
     def test_month_payload_reuses_imported_invoice_month_cache(self) -> None:
         import_service = CountingImportNormalizationService()
         self._import_input_invoice(

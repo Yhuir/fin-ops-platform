@@ -96,8 +96,7 @@ class SourceRecordProjectionTests(unittest.TestCase):
         self.assertNotIn("status", result)
         self.assertEqual(result["taxAmount"], "")
         self.assertEqual(result["totalWithTax"], "")
-        self.assertEqual(result["lineItems"][0]["taxAmount"], "")
-        self.assertEqual(result["lineItems"][0]["totalWithTax"], "")
+        self.assertEqual(result["lineItems"], [])
         self.assertEqual(result["amount"], "100.00")
 
     def test_invoice_source_status_zero_and_false_are_preserved(self) -> None:
@@ -105,6 +104,8 @@ class SourceRecordProjectionTests(unittest.TestCase):
             amount=Decimal("0"), tax_amount=Decimal("0"), total_with_tax=Decimal("0"),
             invoice_status_from_source="已作废", seller_name="文件销方", is_positive_invoice=False,
             quantity=Decimal("0"), unit_price=Decimal("0"),
+            source_line_items=[{"amount": "0", "tax_amount": "0", "total_with_tax": "0",
+                                "quantity": 0, "unit_price": 0}],
         )
         result = invoice_source_detail(_invoice_group(invoice))
 
@@ -117,8 +118,10 @@ class SourceRecordProjectionTests(unittest.TestCase):
         self.assertEqual(result["lineItems"][0]["unitPrice"], Decimal("0"))
 
     def test_invoice_group_keeps_source_lines_without_inventing_printed_totals(self) -> None:
-        first = _invoice(tax_amount=Decimal("6"), total_with_tax=Decimal("106"))
-        second = _invoice(id="invoice-2", amount=Decimal("50"), tax_amount=Decimal("3"), total_with_tax=Decimal("53"))
+        first = _invoice(tax_amount=Decimal("6"), total_with_tax=Decimal("106"),
+                         source_line_items=[{"amount": "100", "tax_amount": "6", "total_with_tax": "106"}])
+        second = _invoice(id="invoice-2", amount=Decimal("50"), tax_amount=Decimal("3"), total_with_tax=Decimal("53"),
+                          source_line_items=[{"amount": "50", "tax_amount": "3", "total_with_tax": "53"}])
         result = invoice_source_detail(_invoice_group(first, second))
 
         for key in ("amount", "taxAmount", "totalWithTax"):
@@ -128,7 +131,9 @@ class SourceRecordProjectionTests(unittest.TestCase):
 
     def test_invoice_preserves_source_fractional_precision_in_amount_quantity_and_unit_price(self) -> None:
         invoice = _invoice(amount=Decimal("0.005"), tax_amount=Decimal("0.001"), total_with_tax=Decimal("0.006"),
-                           quantity=Decimal("0.12345"), unit_price=Decimal("0.040502227"))
+                           quantity=Decimal("0.12345"), unit_price=Decimal("0.040502227"),
+                           source_line_items=[{"amount": "0.005", "tax_amount": "0.001", "total_with_tax": "0.006",
+                                               "quantity": Decimal("0.12345"), "unit_price": Decimal("0.040502227")}])
         result = invoice_source_detail(_invoice_group(invoice))
         self.assertEqual(result["amount"], "0.005")
         self.assertEqual(result["taxAmount"], "0.001")
@@ -137,10 +142,48 @@ class SourceRecordProjectionTests(unittest.TestCase):
         self.assertEqual(result["lineItems"][0]["quantity"], Decimal("0.12345"))
         self.assertEqual(result["lineItems"][0]["unitPrice"], Decimal("0.040502227"))
 
+    def test_formal_and_query_details_preserve_actual_lines_and_text_tax_without_gross(self) -> None:
+        lines = [
+            {"source_sheet_role": "invoice_header", "amount": "100", "tax_rate": "6%"},
+            {"source_sheet_role": "line", "taxable_item_name": "商品", "amount": "110", "tax_amount": "14.3", "tax_rate": "13%"},
+            {"source_sheet_role": "line", "taxable_item_name": "折扣", "amount": "-10", "tax_amount": "-1.3", "tax_rate": "13%"},
+            {"source_sheet_role": "line", "taxable_item_name": "免税商品", "amount": "20", "tax_amount": None, "tax_amount_text": "*", "tax_rate": "免税"},
+        ]
+        original = deepcopy(lines)
+        invoice = _invoice(amount=Decimal("120"), tax_amount=None, tax_amount_text="*",
+                           source_line_items=lines, total_with_tax=Decimal("133"))
+        formal = invoice_source_detail(_invoice_group(invoice))
+        query = query_source_detail("invoice", {"id": invoice.id, "amount_without_tax": "120",
+            "tax_amount": None, "tax_amount_text": "*", "total_with_tax": "133", "source_line_items": lines})
+        self.assertEqual(formal["lineItems"], query["lineItems"])
+        self.assertEqual(lines, original)
+        self.assertEqual(formal["taxRate"], "多税率")
+        self.assertEqual(formal["taxAmount"], "")
+        self.assertEqual(formal["taxAmountText"], "*")
+        self.assertEqual([line["amount"] for line in formal["lineItems"]], ["110.00", "-10.00", "20.00"])
+        self.assertEqual([line["totalWithTax"] for line in formal["lineItems"]], ["", "", ""])
+        self.assertEqual([line["taxRate"] for line in formal["lineItems"]], ["13%", "13%", "免税"])
+        self.assertEqual(_fields(formal)["税额"], "*")
+        last_line = next(section for section in formal["sections"] if section["title"] == "货物或应税劳务明细 3")
+        self.assertEqual({item["label"]: item["value"] for item in last_line["fields"]}["税额"], "*")
+
     def test_generated_invoice_identifier_is_not_a_source_invoice_number(self) -> None:
         result = invoice_source_detail(_invoice_group(_invoice(invoice_no="invoice-1")))
         self.assertIsNone(result["invoiceNo"])
         self.assertEqual(result["id"], "invoice-1")
+
+    def test_unstructured_source_line_is_visible_without_guessed_item_columns(self) -> None:
+        text = "*汽油*95号车用汽油 95#汽油 25.75 6.87339806 176.99 13% 23.01"
+        source = {"source_line_text": text, "amount": "176.99", "tax_amount": "23.01", "tax_rate": "13%"}
+        result = invoice_source_detail(_invoice_group(_invoice(source_line_items=[source])))
+        [line] = result["lineItems"]
+        self.assertEqual(line["sourceLineText"], text)
+        fields = _fields(result, section=-1)
+        self.assertEqual(fields["原文"], text)
+        for label in ("货物或应税劳务名称", "规格型号", "单位", "数量", "单价"):
+            self.assertNotIn(label, fields)
+        without = invoice_source_detail(_invoice_group(_invoice(source_line_items=[{"amount": "100"}])))
+        self.assertNotIn("原文", _fields(without, section=-1))
 
     def test_bank_preserves_dates_without_synthesized_timestamp_or_booked_date(self) -> None:
         transaction = BankTransaction(
@@ -268,8 +311,9 @@ class SourceDetailApiTests(unittest.TestCase):
         }
         fields = _fields(self.service.invoice_detail("invoice-1"))
         self.assertEqual(fields["不含税金额"], "100.00")
-        for label in ("税额", "价税合计", "发票状态"):
-            self.assertNotIn(label, fields)
+        for label in ("税额", "价税合计", "税率"):
+            self.assertEqual(fields[label], "—")
+        self.assertNotIn("发票状态", fields)
 
     def test_canonical_bank_without_amount_or_direction_does_not_invent_zero_expense(self) -> None:
         self.repository.bank_transaction_detail.return_value = {"id": "bank-1", "account_no": "001234"}
@@ -310,6 +354,7 @@ class SourceDetailApiTests(unittest.TestCase):
             "id": "invoice-1", "invoice_no": "12345678", "tax_amount": 0,
             "total_with_tax": 0, "amount_without_tax": 0, "quantity": 0,
             "is_positive_invoice": False, "invoice_status_from_source": "已作废",
+            "source_line_items": [{"quantity": 0, "amount": 0, "tax_amount": 0, "total_with_tax": 0}],
         }
         fields = _fields(self.service.invoice_detail("invoice-1"))
         self.assertEqual(fields["税额"], "0.00")

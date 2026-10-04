@@ -3734,6 +3734,27 @@ describe("ETC ticket management page", () => {
     });
   });
 
+  test("shows source tax text or a dash without treating unknown tax as zero", async () => {
+    installMockApiFetch();
+    const fetchDetail = etcApi.fetchEtcBusinessBatchDetail;
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockImplementation(async (...args) => {
+      const batch = await fetchDetail(...args);
+      return { ...batch, invoiceItems: batch.invoiceItems.map((invoice, index) => ({
+        ...invoice, taxAmount: null, taxAmountText: index === 0 ? "*" : null,
+      })) };
+    });
+    renderAppAt("/etc-tickets");
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const table = await within(page).findByRole("grid", { name: "ETC发票明细" });
+    const original = await within(table).findByRole("row", { name: /ETC-2026-001/ });
+    const missing = await within(table).findByRole("row", { name: /ETC-2026-002/ });
+    expect(within(original).getByRole("gridcell", { name: "*" })).toBeInTheDocument();
+    expect(within(missing).getByRole("gridcell", { name: "—" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "税额 —" })).toBeInTheDocument();
+    expect(within(original).queryByText("0.00")).not.toBeInTheDocument();
+    expect(within(missing).queryByText("0.00")).not.toBeInTheDocument();
+  });
+
   test("removes basket wording and old partial-selection actions", async () => {
     installMockApiFetch();
     renderAppAt("/etc-tickets");

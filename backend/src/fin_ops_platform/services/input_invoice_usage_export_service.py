@@ -12,7 +12,6 @@ INPUT_INVOICE_USAGE_EXPORT_ROW_LIMIT = 20000
 INPUT_INVOICE_USAGE_EXPORT_COLUMNS = [
     "序号", "发票号码", "发票代码", "销方识别号", "销方名称", "开票日期",
     "特定业务类型", "货物或应税劳务名称", "不含税金额", "税率", "税额", "价税合计",
-    "不含税金额来源", "税额来源", "价税合计来源",
 ]
 
 
@@ -59,5 +58,5 @@ class InputInvoiceUsageExportService:
         return [index, invoice["invoiceNo"], invoice["invoiceCode"], invoice["sellerTaxNo"],
                 invoice["sellerName"], invoice["invoiceDate"], invoice["specificBusinessType"],
                 invoice["taxableItemName"], Decimal(invoice["amount"]) if invoice["amount"] else None, invoice["taxRate"],
-                Decimal(invoice["taxAmount"]) if invoice["taxAmount"] else None, Decimal(invoice["totalWithTax"]) if invoice["totalWithTax"] else None,
-                *["推算" if key in invoice.get("inferredFields", []) else "" for key in ("amount", "taxAmount", "totalWithTax")]]
+                Decimal(invoice["taxAmount"]) if invoice["taxAmount"] else invoice.get("taxAmountText"),
+                Decimal(invoice["totalWithTax"]) if invoice["totalWithTax"] else None]

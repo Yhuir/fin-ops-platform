@@ -450,6 +450,20 @@ describe("etc api", () => {
     });
   });
 
+  test("keeps source invoice missing money distinct from true zero and tax labels", async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      counts: {unsubmitted: 2, submitted: 0}, items: [
+        {id: "missing", amount_without_tax: null, tax_amount: null, tax_amount_text: "*", total_amount: "100.00"},
+        {id: "zero", amount_without_tax: 0, tax_amount: 0, total_amount: 0},
+        {id: "unknown", tax_amount: null},
+      ], pagination: {page: 1, page_size: 100, total: 2},
+    }), {headers: {"Content-Type": "application/json"}}));
+    const result = await fetchEtcInvoices();
+    expect(result.items[0]).toMatchObject({amountWithoutTax: "—", taxAmount: null, taxAmountText: "*", totalAmount: "100.00"});
+    expect(result.items[1]).toMatchObject({amountWithoutTax: "0.00", taxAmount: "0.00", totalAmount: "0.00"});
+    expect(result.items[2]).toMatchObject({taxAmount: null, taxAmountText: null});
+  });
+
   test("sends Authorization header for state-changing actions", async () => {
     document.cookie = "Admin-Token=mock-cookie-token";
     const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {

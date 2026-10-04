@@ -10,12 +10,12 @@ test('input amount column has two aligned lines and retains its geometry while r
   await page.route('**/api/input-invoice-usage/rows*', async route => {
     if (holdRefresh) await new Promise<void>(resolve => { releaseRefresh = resolve; });
     await route.fulfill({json: {
-      rows: ['13%', '无法确定', '多税率'].map((taxRate, index) => ({
+      rows: ['13%', '—', '免税'].map((taxRate, index) => ({
         id: `tax-rate-row-${index}`, invoice: {
           id: `tax-rate-invoice-${index}`, displayNo: `TAX-RATE-${index}`, invoiceNo: `TAX-RATE-${index}`,
           issueDate: '2026-09-22', sellerName: '桌面排版测试供应商', sellerTaxNo: '915300000000000001',
-          totalWithTax: index === 0 ? '2129682.59' : '1130.00', amountWithoutTax: index === 0 ? '1884674.86' : '1000.00', taxAmount: index === 0 ? '245007.73' : '130.00', taxRate,
-          inferredFields: index === 2 ? ['totalWithTax'] : [], taxableItemName: '设备服务',
+          totalWithTax: index === 0 ? '2129682.59' : index === 1 ? null : '0.00', amountWithoutTax: index === 0 ? '1884674.86' : '1000.00', taxAmount: index === 0 ? '245007.73' : '130.00', taxRate,
+          taxableItemName: '设备服务',
         }, paymentStatus: {code: 'waiting_payment', label: '待核对', reason: ''},
         oa: {primary: null, relationCount: 0, summaries: []}, bank: {primary: null, relationCount: 0, summaries: []},
       })), pagination: {page: 1, pageSize: 20, total: 3}, summary: {invoiceCount: 3}, statistics: {invoice_count: 3}, filterOptions: [],
@@ -31,9 +31,9 @@ test('input amount column has two aligned lines and retains its geometry while r
   for (const [width, zoom] of [[1440, 1], [1920, 1], [1440, 1.25]]) {
     await page.setViewportSize({width, height: 1000});
     await page.locator('body').evaluate((el, scale) => { el.style.zoom = String(scale); }, zoom);
-    for (const [index, rate] of ['13%', '无法确定', '多税率'].entries()) {
+    for (const [index, rate] of ['13%', '—', '免税'].entries()) {
       const cell = cells.nth(index);
-      await expect(cell.locator('.input-invoice-usage-money-primary')).toHaveText(index === 0 ? '2129682.59' : index === 2 ? '1130.00（推算）' : '1130.00');
+      await expect(cell.locator('.input-invoice-usage-money-primary')).toHaveText(index === 0 ? '2129682.59' : index === 1 ? '—' : '0.00');
       await expect(cell.locator('.input-invoice-usage-tax-rate')).toHaveText(rate);
       await expect(cell).not.toContainText('1000.00');
       await expect(cell).not.toContainText('(130.00)');

@@ -234,7 +234,7 @@ def _money(value: Any) -> str:
 
 
 def _text(value: Any) -> str:
-    return str(value or "").strip()
+    return "" if value is None else str(value).strip()
 
 
 def _fingerprint(value: Any) -> str:
@@ -245,12 +245,38 @@ def _fingerprint(value: Any) -> str:
 VERIFIED_PARTY_FIELDS = ("seller_name", "seller_tax_no", "buyer_name", "buyer_tax_no")
 
 
+def _source_money(value: Any) -> str | None:
+    if value is None or value == "":
+        return None
+    number = Decimal(str(value).replace(",", ""))
+    if not number.is_finite():
+        raise ValueError("Original financial values must be finite.")
+    return format(number.quantize(Decimal("0.01")), "f")
+
+
+def _source_financial_fact(row: dict[str, Any]) -> dict[str, Any]:
+    """Normalize explicit source fields; absence is never replaced with arithmetic."""
+    tax = row.get("tax_amount")
+    text = row.get("tax_amount_text")
+    if tax in ("*", "免税", "不征税"):
+        text, tax = tax, None
+    result = {field: _source_money(row.get(field)) for field in ("amount", "total_with_tax")}
+    result.update(tax_amount=_source_money(tax), tax_amount_text=text or None,
+                  tax_rate=_text(row.get("tax_rate")) or None)
+    values = [result[field] for field in ("amount", "tax_amount", "total_with_tax")]
+    if all(value is not None for value in values) and Decimal(values[0]) + Decimal(values[1]) != Decimal(values[2]):
+        raise ValueError("Tax original has inconsistent amounts.")
+    if all(value is None for value in values):
+        raise ValueError("Tax original lacks explicit financial fields.")
+    return result
+
+
 def build_verified_financial_repair_plan(
     snapshot: list[dict[str, Any]], *, invoice_ids: list[str],
     sources: list[dict[str, Any]], cache_rows: list[dict[str, Any]],
     repair_party_fields: bool = False,
 ) -> dict[str, Any]:
-    """Correct only explicit existing facts using verified tax header originals."""
+    """Repair original invoice values and detail rows without changing business identity."""
     if not invoice_ids or len(invoice_ids) != len(set(invoice_ids)):
         raise ValueError("Explicit unique invoice IDs are required.")
     if {row["invoice_id"] for row in snapshot} != set(invoice_ids) or len(snapshot) != len(invoice_ids):
@@ -263,64 +289,87 @@ def build_verified_financial_repair_plan(
             key = identities.canonical_key_for_mapping(row)
             if key not in target_keys:
                 continue
-            if any(row.get(field) in (None, "") for field in ("amount", "tax_amount", "total_with_tax", "invoice_date")):
-                raise ValueError(f"Tax header {key} lacks explicit financial fields.")
-            if repair_party_fields and any(not _text(row.get(field)) for field in VERIFIED_PARTY_FIELDS):
+            if not row.get("invoice_date"):
+                raise ValueError(f"Tax original {key} lacks an explicit date.")
+            fact = {**row, **_source_financial_fact(row)}
+            lines = []
+            for line in row.get("source_line_items") or []:
+                item = {**line, **_source_financial_fact(line)}
+                item.pop("inferred_fields", None)
+                lines.append(item)
+            fact["source_line_items"] = lines
+            if repair_party_fields and any(not _text(fact.get(field)) for field in VERIFIED_PARTY_FIELDS):
                 raise ValueError(f"Tax header {key} lacks explicit party fields.")
-            values = tuple(_money(row[field]) for field in ("amount", "tax_amount", "total_with_tax"))
-            if Decimal(values[0]) + Decimal(values[1]) != Decimal(values[2]):
-                raise ValueError(f"Tax header {key} has inconsistent amounts.")
             if key in facts:
-                old = facts[key][0]
-                if repair_party_fields and any(_text(old.get(field)) != _text(row.get(field)) for field in VERIFIED_PARTY_FIELDS):
+                previous = facts[key][0]
+                if repair_party_fields and any(_text(previous.get(field)) != _text(fact.get(field)) for field in VERIFIED_PARTY_FIELDS):
                     raise ValueError(f"Tax originals disagree on party fields for {key}.")
-                if values != tuple(_money(old[field]) for field in ("amount", "tax_amount", "total_with_tax")) or str(old["invoice_date"]) != str(row["invoice_date"]):
+                compared = ("amount", "tax_amount", "total_with_tax", "tax_rate", "tax_amount_text", "invoice_date")
+                positions = {"source_row_number", "source_sheet_name", "source_region_key"}
+                previous_lines = [{field: value for field, value in line.items() if field not in positions}
+                                  for line in previous["source_line_items"]]
+                current_lines = [{field: value for field, value in line.items() if field not in positions}
+                                 for line in fact["source_line_items"]]
+                if previous_lines != current_lines or any(previous.get(field) != fact.get(field) for field in compared):
                     raise ValueError(f"Tax originals disagree for {key}.")
             else:
-                facts[key] = row, source
+                facts[key] = fact, source
     fingerprint = _fingerprint({"snapshot": snapshot, "sources": sources, "caches": cache_rows, "repair_party_fields": repair_party_fields})
     updates = []
-    target_keys = set()
+    changed_keys = set()
     for current in snapshot:
         key = identities.canonical_key_for_mapping(current)
         if not key or key not in facts:
             raise ValueError(f"No tax original proves invoice {current['invoice_id']}.")
-        target_keys.add(key)
         fact, source = facts[key]
-        if current["invoice_type"] != "input" or str(current["invoice_date"])[:10] != str(fact["invoice_date"])[:10]:
+        if current["invoice_type"] not in {"input", "output"} or str(current["invoice_date"])[:10] != str(fact["invoice_date"])[:10]:
             raise ValueError(f"Invoice date/type differs from tax original: {key}.")
-        if _money(current["total_with_tax"]) != _money(fact["total_with_tax"]):
+        if fact.get("invoice_type") and fact["invoice_type"] != current["invoice_type"]:
+            raise ValueError(f"Invoice date/type differs from tax original: {key}.")
+        if _source_money(current["total_with_tax"]) != fact["total_with_tax"]:
             raise ValueError(f"Repair may not change the invoice total: {key}.")
-        amounts = {field: _money(fact[field]) for field in ("amount", "tax_amount", "total_with_tax")}
-        amounts["signed_amount"] = amounts["amount"]
+        values = {field: fact[field] for field in ("amount", "tax_amount", "total_with_tax", "tax_rate", "tax_amount_text")}
+        values["signed_amount"] = values["amount"]
         party = {field: _text(fact[field]) for field in VERIFIED_PARTY_FIELDS} if repair_party_fields else {}
         if party:
-            party["counterparty_name"] = party["seller_name"]
-        if all(_money(current[field]) == value for field, value in amounts.items()) and all(
-            _text(current[field]) == value for field, value in party.items()
-        ):
-            continue
+            party["counterparty_name"] = party["seller_name"] if current["invoice_type"] == "input" else party["buyer_name"]
         raw = dict(current["raw_payload"] or {})
-        normalized = dict(raw.get("normalized_payload") or raw)
-        normalized.update(amounts)
+        normalized = dict(raw["normalized_payload"] if "normalized_payload" in raw else raw)
+        same = all(_source_money(current.get(field)) == values[field] for field in ("amount", "signed_amount", "tax_amount", "total_with_tax"))
+        same = same and (_text(current.get("tax_rate")) or None) == values["tax_rate"]
+        same = same and normalized.get("tax_amount_text") == values["tax_amount_text"]
+        same = same and normalized.get("source_line_items", []) == fact["source_line_items"]
+        same = same and "inferred_fields" not in normalized and "inferred_fields" not in raw
+        if same and all(_text(current.get(field)) == value for field, value in party.items()):
+            continue
+        normalized.pop("inferred_fields", None)
+        raw.pop("inferred_fields", None)
+        normalized.update(values)
         normalized.update(party)
+        normalized["source_line_items"] = fact["source_line_items"]
+        normalized["source_line_count"] = len(fact["source_line_items"])
         if party:
             counterparty = dict(normalized.get("counterparty") or {})
-            counterparty.update(name=party["seller_name"], normalized_name=normalize_name(party["seller_name"]),
-                                tax_no=party["seller_tax_no"])
+            counterparty.update(name=party["counterparty_name"], normalized_name=normalize_name(party["counterparty_name"]))
+            counterparty["tax_no"] = party["seller_tax_no"] if current["invoice_type"] == "input" else party["buyer_tax_no"]
             normalized["counterparty"] = counterparty
-        normalized.update(source_sheet_name="发票基础信息", source_sheet_role="invoice_header",
-                          source_workbook_sha256=source["sha256"],
-                          financial_repair_source_file_id=source["file_id"],
+        normalized.update(source_sheet_name=fact.get("source_sheet_name"), source_sheet_role="invoice_header",
+                          financial_repair_source_kind=source.get("source_kind", "invoice_export"),
+                          source_workbook_sha256=source["sha256"], financial_repair_source_file_id=source["file_id"],
                           financial_repair_fingerprint=fingerprint)
         raw["normalized_payload"] = normalized
         updates.append({"invoice_id": current["invoice_id"], "identity_key": key,
-                        "before": current, "raw_payload": raw, **amounts, "party_fields": party})
+                        "before": current, "raw_payload": raw, **values, "party_fields": party})
+        changed_keys.add(key)
     invalidate_keys = sorted({row["source_attachment_key"] for row in cache_rows
-        if any(identities.canonical_key_for_mapping(item) in target_keys
+        if any(identities.canonical_key_for_mapping(item) in changed_keys
                for item in row["invoices"] if isinstance(item, dict))})
+    manifest = {"version": 1, "repair_type": "invoice_source_values", "source_fingerprint": fingerprint,
+                "invoices": [item["before"] for item in updates],
+                "attachment_caches": [row for row in cache_rows if row["source_attachment_key"] in invalidate_keys]}
     return {"source_fingerprint": fingerprint, "updates": updates,
             "target_count": len(snapshot), "update_count": len(updates),
-            "invalidate_cache_keys": invalidate_keys,
+            "invalidate_cache_keys": invalidate_keys, "rollback_manifest": manifest,
+            "rollback_manifest_fingerprint": _fingerprint(manifest),
             "affected_months": sorted({str(row["invoice_date"])[:7] for row in snapshot}),
             "sources": [{key: source[key] for key in ("file_id", "sha256", "filename")} for source in sources]}

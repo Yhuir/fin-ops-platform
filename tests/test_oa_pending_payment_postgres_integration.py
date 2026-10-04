@@ -610,6 +610,19 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(active["rows"][0]["invoice"]["relationCount"], 1)
         self.assertEqual([row["id"] for row in active_candidates["rows"]], ["bank-direct-query"])
+        with self.connection.transaction() as transaction:
+            transaction.execute("set local fin_ops.actor_id='test-suite'")
+            transaction.execute("set local fin_ops.correction_reason='isolated missing source gross regression'")
+            transaction.execute("update app.invoices set total_with_tax=null where legacy_mongo_id='invoice-direct-query'")
+        missing_gross = service.rows(query, tenant_id="default")["rows"][0]
+        self.assertEqual(missing_gross["invoice"]["totalWithTax"], "")
+        self.assertEqual(missing_gross["invoice"]["summaries"][0]["totalWithTax"], "")
+        self.assertEqual(missing_gross["invoice"]["relationCount"], 1)
+        self.assertEqual(missing_gross["paymentStatus"]["code"], "paid")
+        with self.connection.transaction() as transaction:
+            transaction.execute("set local fin_ops.actor_id='test-suite'")
+            transaction.execute("set local fin_ops.correction_reason='restore isolated source gross fixture'")
+            transaction.execute("update app.invoices set total_with_tax=%s where legacy_mongo_id='invoice-direct-query'", (active["rows"][0]["invoice"]["totalWithTax"],))
         self.assertNotIn("read_model_status", active)
         self.assertEqual(
             self.connection.fetch_one(

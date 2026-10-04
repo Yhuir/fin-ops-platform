@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections import OrderedDict
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -14,9 +16,56 @@ from fin_ops_platform.services.etc_service import (
     parse_etc_xml,
 )
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
+from fin_ops_platform.services.output_invoice_tax_rate import normalize_output_tax_rate
 
 HISTORICAL_ETC_REPAIR_RELATION_MODE = "etc_batch_invoice_link"
-HISTORICAL_ETC_PARSED_SEED_SCHEMA_VERSION = 1
+HISTORICAL_ETC_PARSED_SEED_SCHEMA_VERSION = 2
+
+
+def build_etc_source_lines_repair_plan(
+    rows: list[dict[str, Any]], sources: dict[str, tuple[str, Any]],
+) -> dict[str, Any]:
+    """Restore XML source detail only after the saved invoice identity and totals agree."""
+    updates: list[dict[str, Any]] = []
+    unresolved: list[dict[str, str]] = []
+    for row in rows:
+        invoice_id = row["etc_invoice_id"]
+        before = row["raw_payload"]
+        payload = before.get("normalized_payload", before)
+        digest, parsed = sources[invoice_id]
+        problems = []
+        for name, expected, actual in (
+            ("invoice_number", row["invoice_no"], parsed.invoice_number),
+            ("issue_date", row["invoice_date"], parsed.issue_date),
+            ("amount", row["amount"], parsed.amount_without_tax),
+            ("tax_amount", row["tax_amount"], parsed.tax_amount),
+            ("total_with_tax", row["total_with_tax"], parsed.total_amount),
+            ("tax_rate", normalize_output_tax_rate(payload.get("tax_rate")), normalize_output_tax_rate(parsed.tax_rate)),
+        ):
+            if expected != actual:
+                problems.append(name)
+        for name in ("seller_name", "buyer_name", "seller_tax_no", "buyer_tax_no"):
+            if payload.get(name) and payload[name] != getattr(parsed, name):
+                problems.append(name)
+        if digest != payload.get("xml_file_hash"):
+            problems.append("xml_file_hash")
+        if not parsed.source_line_items:
+            problems.append("source_line_items_missing")
+        if problems:
+            unresolved.append({"invoice_id": invoice_id, "reason": ",".join(problems)})
+            continue
+        fields = {"tax_amount_text": parsed.tax_amount_text, "source_line_items": deepcopy(parsed.source_line_items)}
+        if all(payload.get(key) == value for key, value in fields.items()):
+            continue
+        after = deepcopy(before)
+        after.get("normalized_payload", after).update(fields)
+        updates.append({"invoice_id": invoice_id, "invoice_no": row["invoice_no"],
+                        "before_payload": before, "after_payload": after,
+                        "before_version": row["version"], "source_sha256": digest})
+    fingerprint = hashlib.sha256(json.dumps({"rows": rows, "updates": updates},
+        ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
+    return {"source_fingerprint": fingerprint, "audited_invoice_count": len(rows),
+            "updates": updates, "unresolved": unresolved}
 
 
 @dataclass(frozen=True, slots=True)
@@ -533,7 +582,9 @@ class HistoricalEtcRepairService:
             "buyer_name": invoice.buyer_name,
             "buyer_tax_no": invoice.buyer_tax_no,
             "amount_without_tax": f"{invoice.amount_without_tax:.2f}",
-            "tax_amount": f"{invoice.tax_amount:.2f}",
+            "tax_amount": f"{invoice.tax_amount:.2f}" if invoice.tax_amount is not None else None,
+            "tax_amount_text": invoice.tax_amount_text,
+            "source_line_items": deepcopy(invoice.source_line_items),
             "total_amount": f"{invoice.total_amount:.2f}",
             "tax_rate": invoice.tax_rate,
         }

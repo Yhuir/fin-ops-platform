@@ -60,6 +60,7 @@ export type ImportPreviewDetailRow = {
   sellerName?: string | null;
   buyerName?: string | null;
   taxAmount?: string | null;
+  taxAmountText?: string | null;
   totalWithTax?: string | null;
 };
 

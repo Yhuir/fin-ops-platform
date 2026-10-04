@@ -186,16 +186,31 @@ test('invoice grid uses source summaries, preserves identities and scroll, and h
 });
 
 
-test('derived invoice values retain their numeric text and a visible subtle provenance suffix', () => {
+test('invoice details preserve source tax text, true zero and missing values', () => {
   const section = {...invoiceDocuments[0], title: '金额与税额', fields: [
-    {label: '税率', value: '无法确定'},
-    {label: '不含税金额', value: '1884674.86（推算）'},
-    {label: '税额', value: '245007.73'},
+    {label: '税率', value: '免税'},
+    {label: '不含税金额', value: '0.00'},
+    {label: '税额', value: '*'},
+    {label: '价税合计', value: '—'},
   ]};
   render(<EntityDetailContent sections={[section]} />);
-  expect(screen.getByRole('cell', {name: '无法确定'})).toBeVisible();
-  expect(screen.getByRole('cell', {name: '1884674.86 （推算）'})).toBeVisible();
-  expect(screen.getByRole('cell', {name: '245007.73'})).toBeVisible();
-  expect(screen.getAllByText('（推算）')).toHaveLength(1);
-  expect(screen.getByTitle('由同票其余金额计算')).toBeVisible();
+  for (const value of ['免税', '0.00', '*', '—']) {
+    expect(screen.getByRole('cell', {name: value, exact: true})).toBeVisible();
+  }
+});
+
+test('all source line items stay with their invoice and remain numbered after switching', () => {
+  const lineSections = Array.from({length: 5}, (_, index) => ({
+    ...invoiceDocuments[0], title: `货物或应税劳务明细 ${index + 1}`,
+    fields: [{label: '货物或应税劳务名称', value: `真实商品 ${index + 1}`}],
+  }));
+  render(<EntityDetailContent sections={[invoiceDocuments[0], ...lineSections, invoiceDocuments[1]]} />);
+  expect(screen.getAllByRole('heading', {name: /货物或应税劳务明细/})).toHaveLength(5);
+  fireEvent.click(screen.getAllByRole('tab')[1]);
+  expect(screen.queryByRole('heading', {name: /货物或应税劳务明细/})).not.toBeInTheDocument();
+  fireEvent.click(screen.getAllByRole('tab')[0]);
+  for (let index = 1; index <= 5; index++) {
+    expect(screen.getByRole('heading', {name: `货物或应税劳务明细 ${index}`})).toBeVisible();
+    expect(screen.getByRole('cell', {name: `真实商品 ${index}`})).toBeVisible();
+  }
 });

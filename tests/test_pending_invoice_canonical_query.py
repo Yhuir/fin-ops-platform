@@ -400,6 +400,24 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
 
 
 class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):
+    def test_missing_candidate_money_is_preserved_and_zero_stays_numeric(self) -> None:
+        repository = _PageRepository()
+        repository.candidate_payload = {
+            "rows": [
+                {"invoice_id": "missing", "total_with_tax": None, "paid_total": "0", "remaining_amount": None,
+                 "amount_difference_abs": None, "candidate_status": "conflict", "conflict_reason": "发票原件未提供价税合计"},
+                {"invoice_id": "zero", "total_with_tax": "0", "remaining_amount": "0"},
+            ], "total": 2, "selected_total": "100",
+        }
+        payload = PendingInvoiceCanonicalQueryService(repository=repository).invoice_candidates_batch(
+            {"transaction_ids": ["bank-1"]},
+        )
+        self.assertEqual(payload["rows"][0]["total_with_tax"], "")
+        self.assertEqual(payload["rows"][0]["remaining_amount"], "")
+        self.assertEqual(payload["rows"][0]["paid_total"], "0.00")
+        self.assertEqual(payload["rows"][0]["candidate_status"], "conflict")
+        self.assertEqual(payload["rows"][1]["total_with_tax"], "0.00")
+
     def test_empty_set_keeps_summary_statistics_facets_and_canonical_contract(self) -> None:
         repository = _PageRepository(
             {

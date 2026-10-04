@@ -54,3 +54,9 @@ test("name differences remain existing and do not become blocking conflicts", as
   expect(screen.getByText("App 内已存在")).toBeVisible();
   expect(screen.queryByText("需检查")).not.toBeInTheDocument();
 });
+
+
+test("source missing amounts are not filled from totals and a tax asterisk is preserved", () => {
+  render(<ImportReviewTable rows={[{...rows()[0], amount: null, taxAmount: null, taxAmountText: "*", totalWithTax: "0.00"}]} loading={false} invoiceMode page={1} pageSize={100} total={1} onPageChange={vi.fn()} />);
+  expect(screen.getByRole("gridcell", {name: "— 税额 * 合计 0.00"})).toBeVisible();
+});

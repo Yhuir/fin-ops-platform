@@ -534,7 +534,7 @@ export default function InputInvoiceUsageTable({
                     <div className="input-invoice-usage-cell-secondary">{row.invoice.sellerTaxNo || "-"}</div>
                   </FinanceTableCell>
                   <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--amount input-invoice-usage-table-cell--separator" columnRole="amount">
-                    <div className="input-invoice-usage-money-primary input-invoice-usage-invoice-total">{formatMoney(row.invoice.totalWithTax, "—") + (row.invoice.inferredFields?.includes("totalWithTax") ? "（推算）" : "")}</div>
+                    <div className="input-invoice-usage-money-primary input-invoice-usage-invoice-total">{formatMoney(row.invoice.totalWithTax, "—")}</div>
                     <div className="input-invoice-usage-cell-secondary input-invoice-usage-tax-rate">{row.invoice.taxRate}</div>
                   </FinanceTableCell>
                   <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" columnRole="description">

@@ -48,7 +48,7 @@ class MatchingEngineService:
         invoices = [
             invoice
             for invoice in self._import_service.list_invoices()
-            if invoice.outstanding_amount > ZERO
+            if invoice.outstanding_amount is not None and invoice.outstanding_amount > ZERO
             and getattr(invoice, "workbench_visibility", "visible") != "hidden_after_etc_submission"
         ]
         transactions = [txn for txn in self._import_service.list_transactions() if txn.outstanding_amount > ZERO]

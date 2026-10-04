@@ -534,6 +534,7 @@ function statusLabel(code: string) {
     paid_pending_invoice: "已支付待开票",
     paid_pending_future_invoice: "已支付待后期集中开票",
     invoice_not_fully_paid: "未支付完已开票",
+    invoice_amount_missing: "已开票·金额缺失",
     no_invoice_required: "无需开票",
     bank_statement_as_invoice: "流水代替发票",
     pending: "待处理",
@@ -1160,7 +1161,7 @@ function exportRequest(selection: ExportSelection): FetchPendingInvoiceRowsReque
 export async function fetchPendingInvoiceExportSummary(selection: ExportSelection, signal: AbortSignal): Promise<ExportSummary> {
   const url = `/api/pending-invoices/export-summary?${buildRowsQuery(exportRequest(selection))}`;
   const raw = await requestJson<{ row_count: number; source_summary: { expense_rows: number; income_rows: number }; acquisition_summary: { status_counts: Record<string, number> } }>(url, { method: 'GET', signal });
-  const labels: Record<string,string> = { paid_pending_invoice: '已支付待开票', paid_invoiced: '已支付已开票', invoice_not_fully_paid: '金额待核对', bank_statement_as_invoice: '流水代替发票', no_invoice_required: '支出无需发票', income_pending_invoice: '已收款待开票', income_invoiced: '已收款已开票', income_no_invoice_required: '收入无需发票', cash_income: '现金收入' };
+  const labels: Record<string,string> = { paid_pending_invoice: '已支付待开票', paid_invoiced: '已支付已开票', invoice_not_fully_paid: '金额待核对', invoice_amount_missing: '已开票·金额缺失', bank_statement_as_invoice: '流水代替发票', no_invoice_required: '支出无需发票', income_pending_invoice: '已收款待开票', income_invoiced: '已收款已开票', income_no_invoice_required: '收入无需发票', cash_income: '现金收入' };
   const options: ExportOption[] = Object.entries(labels).map(([value,label]) => ({ value,label,count: raw.acquisition_summary.status_counts[value] }));
   return { rowCount: raw.row_count, groups: [{ field: 'direction', label: '收支方向', options: [{ value:'expense', label:'支出',count:raw.source_summary.expense_rows },{ value:'income',label:'收入',count:raw.source_summary.income_rows }] }, { field:'status_code',label:'发票获取状态',options }] };
 }

@@ -95,7 +95,7 @@ class ManualReconciliationService:
         biz_side = self._resolve_biz_side(invoices)
         invoice_sign = self._resolve_invoice_sign(invoices)
         self._validate_transaction_direction(transactions, biz_side=biz_side, invoice_sign=invoice_sign)
-        invoice_total = sum((abs(invoice.outstanding_amount) for invoice in invoices), start=ZERO)
+        invoice_total = sum((abs(_required_invoice_outstanding_amount(invoice)) for invoice in invoices), start=ZERO)
         transaction_total = sum((transaction.outstanding_amount for transaction in transactions), start=ZERO)
         applied_amount = requested_amount if requested_amount is not None else min(invoice_total, transaction_total)
         if applied_amount <= ZERO:
@@ -162,7 +162,7 @@ class ManualReconciliationService:
         biz_side = self._resolve_biz_side(invoices)
         invoice_sign = self._resolve_invoice_sign(invoices)
         self._validate_transaction_direction(transactions, biz_side=biz_side, invoice_sign=invoice_sign)
-        invoice_total = sum((abs(invoice.outstanding_amount) for invoice in invoices), start=ZERO)
+        invoice_total = sum((abs(_required_invoice_outstanding_amount(invoice)) for invoice in invoices), start=ZERO)
         transaction_total = sum((transaction.outstanding_amount for transaction in transactions), start=ZERO)
         difference_amount = abs(invoice_total - transaction_total)
         if difference_amount <= ZERO:
@@ -230,7 +230,7 @@ class ManualReconciliationService:
         if not invoices and not transactions:
             raise ValueError("at least one invoice or transaction is required for exception handling.")
 
-        issue_amount = sum((invoice.outstanding_amount for invoice in invoices), start=ZERO) + sum(
+        issue_amount = sum((_required_invoice_outstanding_amount(invoice) for invoice in invoices), start=ZERO) + sum(
             (transaction.outstanding_amount for transaction in transactions),
             start=ZERO,
         )
@@ -394,8 +394,8 @@ class ManualReconciliationService:
         if any(invoice.counterparty.id != counterparty_id for invoice in [*receivable_invoices, *payable_invoices]):
             raise ValueError("offset reconciliation requires the same counterparty on both sides.")
 
-        receivable_total = sum((abs(invoice.outstanding_amount) for invoice in receivable_invoices), start=ZERO)
-        payable_total = sum((abs(invoice.outstanding_amount) for invoice in payable_invoices), start=ZERO)
+        receivable_total = sum((abs(_required_invoice_outstanding_amount(invoice)) for invoice in receivable_invoices), start=ZERO)
+        payable_total = sum((abs(_required_invoice_outstanding_amount(invoice)) for invoice in payable_invoices), start=ZERO)
         offset_amount = self._coerce_decimal(amount) if amount is not None else min(receivable_total, payable_total)
         if offset_amount <= ZERO:
             raise ValueError("offset amount must be positive.")
@@ -565,7 +565,8 @@ class ManualReconciliationService:
             "amount": invoice.amount,
             "taxRate": invoice.tax_rate or "—",
             "taxAmount": invoice.tax_amount,
-            "totalWithTax": invoice.total_with_tax or invoice.amount,
+            "taxAmountText": invoice.tax_amount_text,
+            "totalWithTax": invoice.total_with_tax,
             "invoiceType": "销项发票" if invoice.invoice_type == InvoiceType.OUTPUT else "进项发票",
             "relation": relation,
             "candidateInvoiceIds": result.invoice_ids if result else [],
@@ -687,12 +688,14 @@ class ManualReconciliationService:
         return Decimal(str(value)).quantize(CENT)
 
     def _allocate_invoice_amounts(self, items: list[Invoice], target_amount: Decimal) -> list[tuple[str, Decimal]]:
+        for item in items:
+            _required_invoice_outstanding_amount(item)
         remaining = target_amount
         allocations: list[tuple[str, Decimal]] = []
         for item in items:
             if remaining <= ZERO:
                 break
-            outstanding = item.outstanding_amount
+            outstanding = _required_invoice_outstanding_amount(item)
             available = abs(outstanding)
             if available <= ZERO:
                 continue
@@ -783,7 +786,8 @@ class ManualReconciliationService:
 
     @staticmethod
     def _resolve_invoice_sign(invoices: list[Invoice]) -> int:
-        signs = {1 if invoice.outstanding_amount >= ZERO else -1 for invoice in invoices if invoice.outstanding_amount != ZERO}
+        amounts = [_required_invoice_outstanding_amount(invoice) for invoice in invoices]
+        signs = {1 if amount >= ZERO else -1 for amount in amounts if amount != ZERO}
         if not signs:
             raise ValueError("selected invoices must have outstanding amount.")
         if len(signs) != 1:
@@ -894,3 +898,10 @@ class ManualReconciliationService:
 
     def _next_line_id(self) -> str:
         return f"rc_line_{next(self._line_sequence):05d}"
+
+
+def _required_invoice_outstanding_amount(invoice: Invoice) -> Decimal:
+    amount = invoice.outstanding_amount
+    if amount is None:
+        raise ValueError(f"Invoice {invoice.id} has no source amount and cannot be reconciled.")
+    return amount

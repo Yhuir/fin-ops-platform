@@ -1035,6 +1035,7 @@ class PostgresCoreRepository:
                             "invoice_status_from_source",
                         }
                         and value not in (None, "")
+                        and not (field_name == "source_line_items" and not value)
                     ):
                         invoice[field_name] = value
                 for field_name in (
@@ -1059,9 +1060,6 @@ class PostgresCoreRepository:
                     current_value = current.get(field_name)
                     if current_value not in (None, ""):
                         invoice[field_name] = current_value
-                invoice["inferred_fields"] = [field for field in ("amount", "tax_amount", "total_with_tax", "tax_rate")
-                    if field in ((current_normalized.get("inferred_fields") or [])
-                                 if current.get(field) is not None else (invoice.get("inferred_fields") or []))]
                 if current.get("source_unique_key"):
                     invoice["data_fingerprint"] = None
                 if current.get("legacy_source_batch_id"):
@@ -1471,16 +1469,16 @@ class PostgresCoreRepository:
                 party_before = [before[field] for field in fields]
             affected = connection.execute(f"""
                 update app.invoices set amount=%s, signed_amount=%s, tax_amount=%s,
-                    total_with_tax=%s, raw_payload=%s::jsonb, updated_at=now(){party_set}
-                where coalesce(legacy_mongo_id,id::text)=%s and amount=%s::numeric
-                    and signed_amount=%s::numeric and tax_amount is not distinct from %s::numeric
+                    total_with_tax=%s, tax_rate=%s, raw_payload=%s::jsonb, updated_at=now(){party_set}
+                where coalesce(legacy_mongo_id,id::text)=%s and amount is not distinct from %s::numeric
+                    and signed_amount is not distinct from %s::numeric and tax_amount is not distinct from %s::numeric
                     and total_with_tax is not distinct from %s::numeric
-                    and raw_payload=%s::jsonb{party_where}
+                    and tax_rate is not distinct from %s and raw_payload=%s::jsonb{party_where}
             """, (update["amount"], update["signed_amount"], update["tax_amount"],
-                  update["total_with_tax"], _jsonb(update["raw_payload"]), *party_values,
+                  update["total_with_tax"], update["tax_rate"], _jsonb(update["raw_payload"]), *party_values,
                   update["invoice_id"], before["amount"], before["signed_amount"],
                   before["tax_amount"], before["total_with_tax"],
-                  _jsonb(before["raw_payload"]), *party_before))
+                  before["tax_rate"], _jsonb(before["raw_payload"]), *party_before))
             if affected != 1:
                 raise RuntimeError("Financial repair target changed; rerun dry-run.")
 
@@ -2096,8 +2094,8 @@ class PostgresCoreRepository:
                 self._text(invoice.get("seller_tax_no")),
                 self._text(invoice.get("buyer_name")),
                 self._text(invoice.get("buyer_tax_no")),
-                self._decimal_text(invoice.get("amount")) or "0",
-                self._decimal_text(invoice.get("signed_amount")) or self._decimal_text(invoice.get("amount")) or "0",
+                self._decimal_text(invoice.get("amount")),
+                self._decimal_text(invoice.get("signed_amount")) or self._decimal_text(invoice.get("amount")),
                 self._decimal_text(invoice.get("written_off_amount")) or "0",
                 self._text(invoice.get("tax_rate")),
                 self._decimal_text(invoice.get("tax_amount")),
@@ -2376,8 +2374,8 @@ class PostgresCoreRepository:
             invoice_type=InvoiceType(self._text(payload.get("invoice_type") or row.get("invoice_type")) or InvoiceType.INPUT.value),
             invoice_no=self._text(payload.get("invoice_no") or row.get("invoice_no")) or str(row.get("legacy_id")),
             counterparty=counterparty,
-            amount=Decimal(str(payload.get("amount") or row.get("amount") or "0")),
-            signed_amount=Decimal(str(payload.get("signed_amount") or row.get("signed_amount") or payload.get("amount") or row.get("amount") or "0")),
+            amount=self._decimal_or_none(row.get("amount")),
+            signed_amount=self._decimal_or_none(row.get("signed_amount")),
             invoice_code=self._text(payload.get("invoice_code") or row.get("invoice_code")),
             digital_invoice_no=self._text(payload.get("digital_invoice_no") or row.get("digital_invoice_no")),
             source_unique_key=source_unique_key,
@@ -2393,7 +2391,7 @@ class PostgresCoreRepository:
             buyer_tax_no=self._text(payload.get("buyer_tax_no") or row.get("buyer_tax_no")),
             buyer_name=self._text(payload.get("buyer_name") or row.get("buyer_name")),
             tax_rate=self._text(row.get("tax_rate")),
-            inferred_fields=list(payload.get("inferred_fields") or []),
+            tax_amount_text=self._text(payload.get("tax_amount_text")),
             source_line_items=list(payload.get("source_line_items") or []),
             tax_amount=self._decimal_or_none(row.get("tax_amount")),
             total_with_tax=self._decimal_or_none(row.get("total_with_tax")),
@@ -2432,8 +2430,8 @@ class PostgresCoreRepository:
             account_no=self._text(payload.get("account_no") or row.get("account_no")) or "unknown",
             txn_direction=TransactionDirection(self._text(payload.get("txn_direction") or row.get("txn_direction")) or TransactionDirection.OUTFLOW.value),
             counterparty_name_raw=self._text(payload.get("counterparty_name_raw") or row.get("counterparty_name_raw")) or "unknown",
-            amount=Decimal(str(payload.get("amount") or row.get("amount") or "0")),
-            signed_amount=Decimal(str(payload.get("signed_amount") or row.get("signed_amount") or payload.get("amount") or row.get("amount") or "0")),
+            amount=self._decimal_or_none(row.get("amount")),
+            signed_amount=self._decimal_or_none(row.get("signed_amount")),
             bank_serial_no=self._text(payload.get("bank_serial_no") or row.get("bank_serial_no")),
             account_detail_no=self._text(payload.get("account_detail_no") or row.get("account_detail_no")),
             enterprise_serial_no=self._text(payload.get("enterprise_serial_no") or row.get("enterprise_serial_no")),

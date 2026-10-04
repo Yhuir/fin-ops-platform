@@ -82,6 +82,7 @@ type ApiImportFile = {
     seller_name?: string | null;
     buyer_name?: string | null;
     tax_amount?: string | number | null;
+  tax_amount_text?: string | null;
     total_with_tax?: string | number | null;
   }>;
 };
@@ -242,6 +243,7 @@ function mapPreviewDetailFields(row: {
   seller_name?: string | null;
   buyer_name?: string | null;
   tax_amount?: string | number | null;
+  tax_amount_text?: string | null;
   total_with_tax?: string | number | null;
 }) {
   return {
@@ -260,6 +262,7 @@ function mapPreviewDetailFields(row: {
     sellerName: row.seller_name ?? null,
     buyerName: row.buyer_name ?? null,
     taxAmount: row.tax_amount === null || row.tax_amount === undefined ? null : stringOrEmpty(row.tax_amount),
+    taxAmountText: row.tax_amount_text ?? null,
     totalWithTax: row.total_with_tax === null || row.total_with_tax === undefined
       ? null
       : stringOrEmpty(row.total_with_tax),

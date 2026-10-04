@@ -87,6 +87,17 @@ test("normalizes Workbench amount directions at the API boundary", async () => {
   expect(rows.invoice.map((record) => record.amountDirection)).toEqual(["payment", "receipt", undefined]);
 });
 
+test("keeps workbench invoice missing values and source tax labels separate", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+    month: "all", zone: "unpaired", page_size: 10, total: 1, row_counts: {oa: 0, bank: 0, invoice: 1}, has_more: false, next_cursor: null,
+    groups: [{group_id: "original", group_type: "unpaired", oa_rows: [], bank_rows: [], invoice_rows: [{
+      id: "original", type: "invoice", amount: null, tax_rate: null, tax_amount: null, tax_amount_text: "*", total_with_tax: "0.00",
+    }]}],
+  }), {headers: {"Content-Type": "application/json"}}));
+  const result = await fetchWorkbenchGroupsPage("all", "unpaired", null, 10);
+  expect(result.groups[0].rows.invoice[0].tableValues).toMatchObject({amount: "—", taxRate: "—", taxAmount: "*", grossAmount: "0"});
+});
+
 test("publishes invoice details without the legacy raw status", async () => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response(JSON.stringify({

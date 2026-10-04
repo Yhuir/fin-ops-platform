@@ -42,7 +42,7 @@ CENT = Decimal("0.01")
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 OUTPUT_INVOICE_COLLECTION_EXPORT_ROW_LIMIT = 20_000
 OUTPUT_INVOICE_COLLECTION_EXPORT_COLUMNS = [
-    "序号", "发票号码", "开票日期", "购方", "购方识别号", "不含税金额", "税率", "税额", "价税合计", "货物或应税劳务名称", "备注", "不含税金额来源", "税额来源", "价税合计来源",
+    "序号", "发票号码", "开票日期", "购方", "购方识别号", "不含税金额", "税率", "税额", "价税合计", "货物或应税劳务名称", "备注",
 ]
 
 FILTER_CONFIG: dict[str, dict[str, Any]] = {
@@ -587,10 +587,7 @@ class OutputInvoiceCollectionQueryService:
             relations,
             context=context,
         )
-        invoice_total = sum(
-            (_invoice_total(line) for line in line_items),
-            start=ZERO,
-        )
+        invoice_total = _source_invoice_total(line_items)
         collected_total = self._bank_total(
             list(bank_payload["summaries"]),
             direction="inflow",
@@ -680,8 +677,9 @@ class OutputInvoiceCollectionQueryService:
         candidates = {row_id: bank_map[row_id] for relation in relations
                       for row_id, row_type in context.typed_relation_rows(relation)
                       if row_type in {"bank", "bank_transaction"} and row_id in bank_map}
+        invoice_total = _source_invoice_total(line_items)
         comparison_ids = {bank.id for bank in bank_unit_comparison_rows(list(candidates.values()),
-            target=abs(sum((_invoice_total(line) for line in line_items), ZERO)))}
+            target=abs(invoice_total) if invoice_total is not None else None)}
         summaries: list[dict[str, Any]] = []
         seen: set[str] = set()
         for relation in relations:
@@ -740,9 +738,8 @@ class OutputInvoiceCollectionQueryService:
         line_items: list[Invoice],
         relation: dict[str, Any],
     ) -> dict[str, Any]:
-        invoice_total = abs(
-            sum((_invoice_total(line) for line in line_items), start=ZERO)
-        )
+        invoice_total = _source_invoice_total(line_items)
+        diff = abs(_decimal(bank.amount) - abs(invoice_total)) if invoice_total is not None else None
         direction = _bank_direction(bank)
         amount_check = relation.get("amount_check")
         matched = (
@@ -769,7 +766,8 @@ class OutputInvoiceCollectionQueryService:
             "_sort": (
                 0 if direction == "inflow" else 1,
                 0 if matched else 1,
-                abs(_decimal(bank.amount) - invoice_total),
+                diff is None,
+                diff,
                 -_sortable_time(bank.trade_time or bank.txn_date),
                 bank.id,
             ),
@@ -859,11 +857,8 @@ class OutputInvoiceCollectionQueryService:
                 if row_type != "invoice" or group is None:
                     continue
                 group_key = str(group.get("group_key") or "")
-                group_total = sum(
-                    (_invoice_total(item) for item in list(group["line_items"])),
-                    start=ZERO,
-                )
-                if group_total > ZERO and group_key not in reversal_links:
+                group_total = _source_invoice_total(list(group["line_items"]))
+                if _invoice_sign(group["primary"], group_total) >= 0 and group_total != ZERO and group_key not in reversal_links:
                     candidate_group_keys.add(group_key)
         return candidate_group_keys == {current_group_key}
 
@@ -882,14 +877,8 @@ class OutputInvoiceCollectionQueryService:
 
         links: dict[str, set[str]] = {}
         for red_group in groups:
-            red_total = sum(
-                (
-                    _invoice_total(item)
-                    for item in list(red_group["line_items"])
-                ),
-                start=ZERO,
-            )
-            if red_total >= ZERO:
+            red_total = _source_invoice_total(list(red_group["line_items"]))
+            if _invoice_sign(red_group["primary"], red_total) >= 0:
                 continue
             targets = reversal_target_invoice_nos(
                 item.remark for item in list(red_group["line_items"])
@@ -899,14 +888,8 @@ class OutputInvoiceCollectionQueryService:
             candidates = [
                 group
                 for group in groups_by_invoice_no.get(targets[0], [])
-                if sum(
-                    (
-                        _invoice_total(item)
-                        for item in list(group["line_items"])
-                    ),
-                    start=ZERO,
-                )
-                > ZERO
+                if _invoice_sign(group["primary"], _source_invoice_total(list(group["line_items"]))) > 0
+                and _source_invoice_total(list(group["line_items"])) != ZERO
             ]
             if len(candidates) != 1:
                 continue
@@ -926,6 +909,7 @@ class OutputInvoiceCollectionQueryService:
     ) -> dict[str, Any]:
         primary: Invoice = group["primary"]
         line_items: list[Invoice] = list(group["line_items"])
+        invoice_total = _source_invoice_total(line_items)
         return {
             "groupKey": str(group.get("group_key") or ""),
             "invoiceId": primary.id,
@@ -946,9 +930,7 @@ class OutputInvoiceCollectionQueryService:
             "buyerTaxNo": primary.buyer_tax_no
             or primary.counterparty.tax_no
             or "",
-            "totalWithTax": _money(
-                sum((_invoice_total(item) for item in line_items), start=ZERO)
-            ),
+            "totalWithTax": _money(invoice_total) if invoice_total is not None else "",
             "relationCaseId": str(relation.get("case_id") or ""),
             "relationMode": str(relation.get("relation_mode") or ""),
             "relationStatus": relation_status(relation),
@@ -1083,7 +1065,7 @@ class OutputInvoiceCollectionQueryService:
             elif operator == "equals":
                 expected = filter_item.get("value")
                 if FILTER_CONFIG[field]["mode"] == "money":
-                    if not _within_cent(_decimal(value), _decimal(expected)):
+                    if value in (None, "") or not _within_cent(_decimal(value), _decimal(expected)):
                         return False
                 elif str(value or "") != str(expected or ""):
                     return False
@@ -1104,6 +1086,8 @@ class OutputInvoiceCollectionQueryService:
                 minimum = bounds.get("min")
                 maximum = bounds.get("max")
                 if FILTER_CONFIG[field]["mode"] == "money":
+                    if value in (None, ""):
+                        return False
                     current = _decimal(value)
                     if minimum not in (None, "") and current < _decimal(minimum):
                         return False
@@ -1210,10 +1194,10 @@ class OutputInvoiceCollectionQueryService:
                     (_decimal(row["invoice"]["totalWithTax"]) for row in rows),
                     start=ZERO,
                 )
-            ),
+            ) if all(row["invoice"]["totalWithTax"] not in (None, "") for row in rows) else "",
             "amountWithoutTax": _money(
                 sum((_decimal(row["invoice"]["amountWithoutTax"]) for row in rows), start=ZERO)
-            ),
+            ) if all(row["invoice"]["amountWithoutTax"] not in (None, "") for row in rows) else "",
             "collectedAmount": _money(
                 sum(
                     (
@@ -1231,7 +1215,7 @@ class OutputInvoiceCollectionQueryService:
                     ),
                     start=ZERO,
                 )
-            ),
+            ) if all(row["collectionStatus"]["pendingAmount"] not in (None, "") for row in rows) else "",
             "pendingCollectionCount": sum(
                 row["collectionStatus"]["code"] == "pending_collection"
                 for row in rows
@@ -1265,19 +1249,17 @@ class OutputInvoiceCollectionQueryService:
         return {"序号": index, "发票号码": invoice["digitalInvoiceNo"] or invoice["invoiceNo"], "开票日期": invoice["invoiceDate"],
                 "购方": invoice["buyerName"], "购方识别号": invoice["buyerTaxNo"],
                 "不含税金额": Decimal(invoice["amount"]) if invoice["amount"] else None, "税率": invoice["taxRate"],
-                "税额": Decimal(invoice["taxAmount"]) if invoice["taxAmount"] else None, "价税合计": Decimal(invoice["totalWithTax"]) if invoice["totalWithTax"] else None,
-                **{label: "推算" if key in invoice.get("inferredFields", []) else "" for key, label in (("amount", "不含税金额来源"), ("taxAmount", "税额来源"), ("totalWithTax", "价税合计来源"))},
+                "税额": Decimal(invoice["taxAmount"]) if invoice["taxAmount"] else invoice.get("taxAmountText"), "价税合计": Decimal(invoice["totalWithTax"]) if invoice["totalWithTax"] else None,
                 "货物或应税劳务名称": invoice["taxableItemName"], "备注": invoice["remark"]}
 
 
 def _collection_status_for_facts(
     *,
-    invoice_total: Decimal,
+    invoice_total: Decimal | None,
     invoice_sign: int,
     collected_total: Decimal,
     has_reversal: bool,
 ) -> dict[str, Any]:
-    expected = abs(invoice_total)
     if has_reversal and invoice_sign > 0:
         return _collection_status(
             "reversed_by_red",
@@ -1305,6 +1287,16 @@ def _collection_status_for_facts(
             pending_amount=ZERO,
             severity="danger",
         )
+    if invoice_total is None:
+        return _collection_status(
+            "pending_collection",
+            "待收款",
+            "原件未提供价税合计，无法确定待收金额和收款完成情况。",
+            collected_amount=collected_total,
+            pending_amount=None,
+            severity="pending",
+        )
+    expected = abs(invoice_total)
     if collected_total > ZERO and (
         _within_cent(collected_total, expected) or collected_total > expected
     ):
@@ -1338,7 +1330,7 @@ def _collection_status_for_facts(
 def _collection_status_from_snapshot(group: dict[str, Any]) -> dict[str, Any]:
     code = str(group.get("status_code") or "")
     collected = _decimal(group.get("collected_amount"))
-    pending = _decimal(group.get("pending_amount"))
+    pending = _decimal(group["pending_amount"]) if group.get("pending_amount") not in (None, "") else None
     definitions = {
         "reversed_by_red": (
             "蓝票已被红冲",
@@ -1372,6 +1364,8 @@ def _collection_status_from_snapshot(group: dict[str, Any]) -> dict[str, Any]:
         ),
     }
     label, reason, severity = definitions[code]
+    if code == "pending_collection" and pending is None:
+        reason = "原件未提供价税合计，无法确定待收金额和收款完成情况。"
     return _collection_status(
         code,
         label,
@@ -1388,7 +1382,7 @@ def _collection_status(
     reason: str,
     *,
     collected_amount: Decimal,
-    pending_amount: Decimal,
+    pending_amount: Decimal | None,
     severity: str,
 ) -> dict[str, Any]:
     return {
@@ -1398,7 +1392,7 @@ def _collection_status(
         "matchedRuleId": f"canonical:{code}",
         "severity": severity,
         "collectedAmount": _money(collected_amount),
-        "pendingAmount": _money(pending_amount),
+        "pendingAmount": _money(pending_amount) if pending_amount is not None else "",
     }
 
 
@@ -1424,16 +1418,18 @@ def _parse_positive_int(
     return number
 
 
-def _invoice_total(invoice: Invoice) -> Decimal:
-    if invoice.total_with_tax is not None:
-        return _decimal(invoice.total_with_tax)
-    return _decimal(invoice.amount) + _decimal(invoice.tax_amount)
+def _source_invoice_total(invoices: list[Invoice]) -> Decimal | None:
+    if any(invoice.total_with_tax is None for invoice in invoices):
+        return None
+    return sum((invoice.total_with_tax for invoice in invoices), ZERO)
 
 
-def _invoice_sign(invoice: Invoice, total: Decimal) -> int:
+def _invoice_sign(invoice: Invoice, total: Decimal | None) -> int:
     source = str(invoice.is_positive_invoice or "").strip().lower()
-    if source in {"否", "false", "negative", "负数", "红字"} or total < ZERO:
+    if source in {"否", "false", "negative", "负数", "红字"} or (total is not None and total < ZERO):
         return -1
+    if total is None and source not in {"是", "true", "positive", "正数", "蓝字"}:
+        return 0
     return 1
 
 

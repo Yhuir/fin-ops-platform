@@ -939,7 +939,7 @@ function installPendingInvoiceFetch(options: {
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
     if (url.pathname === "/api/pending-invoices/export-summary") {
-      return new Response(JSON.stringify({ row_count: 1, source_summary: { expense_rows: 1, income_rows: 0 }, acquisition_summary: { status_counts: Object.fromEntries(['paid_pending_invoice','paid_invoiced','invoice_not_fully_paid','bank_statement_as_invoice','no_invoice_required','income_pending_invoice','income_invoiced','income_no_invoice_required','cash_income'].map(code => [code, code === 'paid_pending_invoice' ? 1 : 0])) } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ row_count: 1, source_summary: { expense_rows: 1, income_rows: 0 }, acquisition_summary: { status_counts: Object.fromEntries(['paid_pending_invoice','paid_invoiced','invoice_not_fully_paid','invoice_amount_missing','bank_statement_as_invoice','no_invoice_required','income_pending_invoice','income_invoiced','income_no_invoice_required','cash_income'].map(code => [code, code === 'paid_pending_invoice' ? 1 : 0])) } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
     if (url.pathname === "/api/pending-invoices/export") {
       if (options.exportDownloadResponse) {
@@ -999,6 +999,25 @@ afterEach(() => {
 });
 
 describe("Pending invoices page", () => {
+  it("shows missing invoice totals without displaying the primary invoice as a complete group total", async () => {
+    const base = upgradedRows()[1];
+    const row = {
+      ...base,
+      invoice_acquisition_status: { code: "invoice_amount_missing", label: "已开票·金额缺失", severity: "warning", primary_action: "view_relation" },
+      input_invoices: {
+        ...base.input_invoices,
+        payment_summary: { invoice_total: "", paid_total: "1500.00", remaining_amount: "" },
+      },
+    };
+    installPendingInvoiceFetch({ rowsPayload: () => [row] });
+    renderAppAt("/pending-invoices");
+    expect(await screen.findByText("已开票·金额缺失")).toBeVisible();
+    expect(screen.getByText("待付 —")).toBeVisible();
+    const moneyCell = document.querySelector("tbody .pending-invoices-col-invoice-amount") as HTMLElement;
+    expect(within(moneyCell).getByText("—", { exact: true })).toBeVisible();
+    expect(within(moneyCell).queryByText("2000.00", { exact: true })).not.toBeInTheDocument();
+  });
+
   test("targets project primitives for page shell, tables, drawers, and dialogs", () => {
     const forbiddenMuiImports = pendingInvoicesSourceFiles.flatMap((path) => {
       const source = readWebSource(path);
@@ -1204,7 +1223,7 @@ describe("Pending invoices page", () => {
     await user.click(within(menu).getByRole("menuitemcheckbox", { name: "金额待核对" }));
     expect(within(page).getByRole("tab", { name: "多状态筛选" })).toHaveAttribute("aria-selected", "true");
     await waitFor(() => expect(JSON.parse(pendingInvoiceRowsRequests(fetchMock).at(-1)!.searchParams.get("filters")!)).toEqual([
-      { field: "status_code", operator: "in", values: ["paid_pending_invoice", "invoice_not_fully_paid"] },
+      { field: "status_code", operator: "in", values: ["paid_pending_invoice", "invoice_not_fully_paid", "invoice_amount_missing"] },
     ]));
     await user.click(within(menu).getByRole("menuitem", { name: "清空" }));
     expect(within(page).getByRole("tab", { name: /全部状态/ })).toHaveAttribute("aria-selected", "true");

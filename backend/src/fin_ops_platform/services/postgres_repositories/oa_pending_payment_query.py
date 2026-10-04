@@ -1080,13 +1080,13 @@ invoice_edges as materialized (
         coalesce(invoice.digital_invoice_no, invoice.invoice_no, '') as invoice_no,
         invoice.invoice_date,
         coalesce(invoice.seller_name, invoice.counterparty_name, '') as seller_name,
-        coalesce(invoice.total_with_tax, invoice.amount + coalesce(invoice.tax_amount, 0)) as invoice_total,
+        invoice.total_with_tax as invoice_total,
         coalesce(invoice.raw_payload->'normalized_payload', invoice.raw_payload) as searchable_payload,
         row_number() over (
             partition by members.row_id
             order by
                 abs(
-                    coalesce(invoice.total_with_tax, invoice.amount + coalesce(invoice.tax_amount, 0))
+                    invoice.total_with_tax
                     - coalesce(group_oa.oa_amount, 0)
                 ),
                 invoice.invoice_date,
@@ -1112,7 +1112,9 @@ invoice_aggregates as materialized (
         max(invoice_edges.invoice_date) filter (where invoice_edges.primary_rank = 1) as invoice_date,
         max(invoice_edges.seller_name) filter (where invoice_edges.primary_rank = 1) as seller_name,
         case
-            when count(invoice_edges.member_id) > 0 then sum(invoice_edges.invoice_total)
+            when count(invoice_edges.member_id) > 0
+                and count(invoice_edges.invoice_total) = count(invoice_edges.member_id)
+            then sum(invoice_edges.invoice_total)
             else null
         end as invoice_total_with_tax,
         coalesce(jsonb_agg(invoice_edges.searchable_payload) filter (where invoice_edges.member_id is not null), '[]'::jsonb)

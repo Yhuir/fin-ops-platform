@@ -250,7 +250,7 @@ class PostgresInputInvoiceUsageQueryRepository:
                 summary as (
                     select
                         count(*)::bigint as row_count,
-                        coalesce(sum(total_with_tax), 0)::numeric as total_with_tax,
+                        case when count(*) = 0 then 0 when count(total_with_tax) = count(*) then sum(total_with_tax) end::numeric as total_with_tax,
                         coalesce(sum(cardinality(invoice_ids)) filter (where status_code = 'pending'), 0)::bigint as pending_count,
                         (select count(*) from selected_members)::bigint as invoice_count
                     from filtered_rows
@@ -363,7 +363,7 @@ class PostgresInputInvoiceUsageQueryRepository:
             pagination={"page": page, "pageSize": page_size, "total": filtered_total},
             summary={
                 "invoiceCount": invoice_count,
-                "totalWithTax": _money(summary_row.get("total_with_tax")),
+                "totalWithTax": _money(summary_row["total_with_tax"]) if summary_row.get("total_with_tax") is not None else "",
                 "pendingCount": int(summary_row.get("pending_count") or 0),
             },
             statistics={
@@ -548,10 +548,10 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                 summary as (
                     select
                         coalesce(sum(invoice_count), 0)::bigint as invoice_count,
-                        coalesce(sum(total_with_tax), 0)::numeric as total_with_tax,
-                        coalesce(sum(amount), 0)::numeric as amount_without_tax,
+                        case when count(*) = 0 then 0 when count(total_with_tax) = count(*) then sum(total_with_tax) end::numeric as total_with_tax,
+                        case when count(*) = 0 then 0 when count(amount) = count(*) then sum(amount) end::numeric as amount_without_tax,
                         coalesce(sum(collected_amount), 0)::numeric as collected_amount,
-                        coalesce(sum(pending_amount), 0)::numeric as pending_amount,
+                        case when count(*) = 0 then 0 when count(pending_amount) = count(*) then sum(pending_amount) end::numeric as pending_amount,
                         count(*) filter (
                             where status_code = 'pending_collection'
                         )::bigint as pending_collection_count,
@@ -668,10 +668,10 @@ class PostgresOutputInvoiceCollectionQueryRepository:
             pagination={"page": page, "pageSize": page_size, "total": filtered_total},
             summary={
                 "invoiceCount": invoice_count,
-                "totalWithTax": _money(summary_row.get("total_with_tax")),
-                "amountWithoutTax": _money(summary_row.get("amount_without_tax")),
+                "totalWithTax": _money(summary_row["total_with_tax"]) if summary_row.get("total_with_tax") is not None else "",
+                "amountWithoutTax": _money(summary_row["amount_without_tax"]) if summary_row.get("amount_without_tax") is not None else "",
                 "collectedAmount": _money(summary_row.get("collected_amount")),
-                "pendingAmount": _money(summary_row.get("pending_amount")),
+                "pendingAmount": _money(summary_row["pending_amount"]) if summary_row.get("pending_amount") is not None else "",
                 "pendingCollectionCount": int(
                     summary_row.get("pending_collection_count") or 0
                 ),
@@ -711,13 +711,21 @@ def _canonical_header_statistics(
                     as output_invoice_count,
                 count(*) filter (
                     where invoice_type = 'output'
-                      and coalesce(total_with_tax, amount + coalesce(tax_amount, 0), 0) < 0
+                      and (total_with_tax < 0 or (total_with_tax is null
+                           and source_positive in ('否', 'false', 'negative', '负数', '红字')))
                 )::bigint as red_invoice_count,
                 count(*) filter (
                     where invoice_type = 'output'
-                      and coalesce(total_with_tax, amount + coalesce(tax_amount, 0), 0) >= 0
+                      and (total_with_tax >= 0 or (total_with_tax is null
+                           and source_positive in ('是', 'true', 'positive', '正数', '蓝字')))
                 )::bigint as blue_invoice_count
-            from app.invoices
+            from (
+                select invoice.*, lower(trim(coalesce(
+                    raw_payload->'normalized_payload'->>'is_positive_invoice',
+                    raw_payload->>'is_positive_invoice', ''
+                ))) as source_positive
+                from app.invoices invoice
+            ) invoice
             where status <> 'deleted'
         ),
         oa_statistics as (
@@ -885,7 +893,8 @@ def _fact_cte(
                     '{REVERSED_BLUE_INVOICE_NO_SQL_PATTERN}',
                     'g'
             ) matched(value)
-            where red.total_with_tax < 0
+            where red.total_with_tax < 0 or (red.total_with_tax is null
+                  and lower(trim(red.is_positive_invoice)) in ('否', 'false', 'negative', '负数', '红字'))
         ),
         output_reversal_candidates as (
             select
@@ -905,7 +914,8 @@ def _fact_cte(
                     nullif(trim(blue.digital_invoice_no), ''),
                     trim(blue.invoice_no)
                  ) = candidate.target_invoice_no
-             and blue.total_with_tax > 0
+             and (blue.total_with_tax > 0 or (blue.total_with_tax is null
+                  and lower(trim(blue.is_positive_invoice)) in ('是', 'true', 'positive', '正数', '蓝字')))
             group by candidate.red_invoice_id, candidate.target_invoice_no
             having count(distinct blue.invoice_id) = 1
         )
@@ -1019,7 +1029,10 @@ def _fact_cte(
                 mapped.invoice_id
             from relation_invoice_members mapped
             join invoice_rows invoice on invoice.invoice_id = mapped.invoice_id
-            where invoice.total_with_tax > 0
+            where (invoice.total_with_tax > 0 or (
+                    invoice.total_with_tax is null
+                    and lower(trim(invoice.is_positive_invoice)) not in ('否', 'false', 'negative', '负数', '红字')
+                ))
               and not exists (
                     select 1
                     from output_reversal_pairs pair
@@ -1070,10 +1083,10 @@ def _fact_cte(
                 facts.*,
                 case
                     when cardinality(facts.red_related_group_keys) > 0
-                     and facts.total_with_tax > 0 then 'reversed_by_red'
+                     and not facts.has_negative_invoice then 'reversed_by_red'
                     when cardinality(facts.red_related_group_keys) > 0
-                     and facts.total_with_tax < 0 then 'reverses_blue'
-                    when facts.total_with_tax < 0 then 'unmatched_red'
+                     and facts.has_negative_invoice then 'reverses_blue'
+                    when facts.has_negative_invoice then 'unmatched_red'
                     when facts.bank_inflow_total + 0.01 >= abs(facts.total_with_tax)
                      and abs(facts.total_with_tax) > 0 then 'collected'
                     when facts.bank_inflow_total > 0
@@ -1084,12 +1097,10 @@ def _fact_cte(
                 facts.bank_inflow_total::numeric as collected_amount,
                 case
                     when cardinality(facts.red_related_group_keys) > 0
-                      or facts.total_with_tax < 0
-                      or (
-                          facts.bank_inflow_total + 0.01 >= abs(facts.total_with_tax)
-                          and abs(facts.total_with_tax) > 0
-                      )
-                        then 0
+                      or facts.has_negative_invoice then 0
+                    when facts.total_with_tax is null then null
+                    when facts.bank_inflow_total + 0.01 >= abs(facts.total_with_tax)
+                      and abs(facts.total_with_tax) > 0 then 0
                     else greatest(
                         0,
                         abs(facts.total_with_tax) - facts.bank_inflow_total
@@ -1441,8 +1452,8 @@ def _fact_cte(
                 case when bool_and(member.amount is not null) then sum(member.amount) end::numeric as amount,
                 case when bool_and(member.tax_amount is not null) then sum(member.tax_amount) end::numeric as tax_amount,
                 case when bool_or(member.tax_rate = '多税率')
-                          or count(distinct member.tax_rate) filter (where member.tax_rate <> '无法确定') >= 2 then '多税率'
-                    when bool_or(member.tax_rate = '无法确定') then '无法确定'
+                          or count(distinct member.tax_rate) filter (where member.tax_rate <> '—') >= 2 then '多税率'
+                    when bool_or(member.tax_rate = '—') then '—'
                     else min(member.tax_rate) end as tax_rate,
                 (array_agg(member.specific_business_type order by member.primary_rank))[1]
                     as specific_business_type,
@@ -1459,7 +1470,10 @@ def _fact_cte(
                     member.seller_name, member.seller_tax_no, member.buyer_name, member.buyer_tax_no,
                     member.taxable_item_name, member.total_with_tax::text), ' ') as invoice_member_search_text,
                 count(*)::bigint as invoice_count,
-                bool_or(member.total_with_tax < 0) as has_negative_invoice,
+                bool_or(coalesce(member.total_with_tax < 0, false) or (
+                    member.total_with_tax is null
+                    and lower(trim(member.is_positive_invoice)) in ('否', 'false', 'negative', '负数', '红字')
+                )) as has_negative_invoice,
                 bool_or(member.in_scope) as in_scope
             from ranked_members member
             group by member.group_key
@@ -1811,7 +1825,7 @@ def _order_sql(
     column = field_sql[sort_field]
     direction = "asc" if sort_direction == "asc" else "desc"
     if sort_field == "tax_rate":
-        return f"order by ({column} = '无法确定') asc, {column} {direction}, group_key asc"
+        return f"order by ({column} = '—') asc, {column} {direction}, group_key asc"
     return f"order by {column} {direction} nulls last, group_key asc"
 
 
@@ -1963,7 +1977,7 @@ def _group_payload(
     else:
         payload["status_code"] = str(row.get("status_code") or "")
         payload["collected_amount"] = _money(row.get("collected_amount"))
-        payload["pending_amount"] = _money(row.get("pending_amount"))
+        payload["pending_amount"] = _money(row["pending_amount"]) if row.get("pending_amount") is not None else ""
         payload["bank_attributed"] = bool(row.get("bank_attributed"))
         payload["supporting_group_keys"] = [
             str(value)

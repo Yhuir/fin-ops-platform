@@ -29,23 +29,24 @@ def source_money(value: Any) -> str:
     return f"{integer}.{fraction.rstrip('0').ljust(2, '0')}"
 
 
-def invoice_source_line(invoice: Invoice) -> dict[str, Any]:
+def invoice_source_line(source: dict[str, Any], *, invoice_id: str, index: int) -> dict[str, Any]:
+    """Project an actual source detail row, never invoice header values."""
     return {
-        "id": invoice.id,
-        "taxClassificationCode": invoice.tax_classification_code,
-        "specificBusinessType": invoice.specific_business_type,
-        "taxableItemName": invoice.taxable_item_name,
-        "specificationModel": invoice.specification_model,
-        "unit": invoice.unit,
-        "quantity": invoice.quantity,
-        "unitPrice": invoice.unit_price,
-        "amount": source_money(invoice.amount),
-        "taxRate": invoice.tax_rate,
-        "_sourceLineItems": invoice.source_line_items,
-        "inferredFields": [PUBLIC_FIELDS[key] for key in invoice.inferred_fields],
-        "taxAmount": source_money(invoice.tax_amount),
-        "totalWithTax": source_money(invoice.total_with_tax),
-        "remark": invoice.remark,
+        "id": f"{invoice_id}:source-line:{index}",
+        "taxClassificationCode": source.get("tax_classification_code"),
+        "specificBusinessType": source.get("specific_business_type"),
+        "taxableItemName": source.get("taxable_item_name"),
+        "sourceLineText": source.get("source_line_text"),
+        "specificationModel": source.get("specification_model"),
+        "unit": source.get("unit"),
+        "quantity": source.get("quantity"),
+        "unitPrice": source.get("unit_price"),
+        "amount": source.get("amount"),
+        "taxRate": source.get("tax_rate"),
+        "taxAmount": source.get("tax_amount"),
+        "taxAmountText": source.get("tax_amount_text"),
+        "totalWithTax": source.get("total_with_tax"),
+        "remark": source.get("remark"),
     }
 
 
@@ -68,10 +69,10 @@ def invoice_source_detail(group: dict[str, Any]) -> dict[str, Any]:
         "buyerTaxNo": primary.buyer_tax_no,
         "amount": source_money(single.amount) if single else "",
         "taxAmount": source_money(single.tax_amount) if single else "",
+        "taxAmountText": single.tax_amount_text if single else None,
         "totalWithTax": source_money(single.total_with_tax) if single else "",
         "taxRate": primary.tax_rate if single else invoice_financial_summary(lines)["taxRate"],
         "_sourceLineItems": primary.source_line_items if single else [],
-        "inferredFields": [PUBLIC_FIELDS[key] for key in primary.inferred_fields] if single else [],
         "taxClassificationCode": primary.tax_classification_code,
         "specificBusinessType": primary.specific_business_type,
         "taxableItemName": primary.taxable_item_name,
@@ -82,7 +83,9 @@ def invoice_source_detail(group: dict[str, Any]) -> dict[str, Any]:
         "riskLevel": primary.risk_level,
         "issuer": primary.issuer,
         "remark": primary.remark,
-        "lineItems": [invoice_source_line(line) for line in lines],
+        "lineItems": [invoice_source_line(source, invoice_id=line.id, index=index)
+                      for line in lines for index, source in enumerate(line.source_line_items, 1)
+                      if source.get("source_sheet_role") != "invoice_header"],
     }
     payload["sections"] = source_detail_sections("invoice", payload)
     return payload
@@ -137,7 +140,7 @@ SOURCE_FIELD_GROUPS = {
     ),
     "oa": (("申请信息", (("applicantName", "申请人"), ("applicationType", "OA类型"), ("projectName", "项目名称"), ("amount", "金额"), ("reason", "申请事由"), ("counterpartyName", "收款方"))),),
 }
-INVOICE_LINE_FIELDS = (("taxableItemName", "货物或应税劳务名称"), ("taxClassificationCode", "税收分类编码"), ("specificBusinessType", "特定业务类型"), ("specificationModel", "规格型号"), ("unit", "单位"), ("quantity", "数量"), ("unitPrice", "单价"), ("amount", "金额"), ("taxRate", "税率"), ("taxAmount", "税额"), ("totalWithTax", "价税合计"), ("financialIssue", "核对说明"), ("remark", "备注"))
+INVOICE_LINE_FIELDS = (("taxableItemName", "货物或应税劳务名称"), ("sourceLineText", "原文"), ("taxClassificationCode", "税收分类编码"), ("specificBusinessType", "特定业务类型"), ("specificationModel", "规格型号"), ("unit", "单位"), ("quantity", "数量"), ("unitPrice", "单价"), ("amount", "金额"), ("taxRate", "税率"), ("taxAmount", "税额"), ("totalWithTax", "价税合计"), ("financialIssue", "核对说明"), ("remark", "备注"))
 
 
 def source_detail_sections(kind: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -147,13 +150,13 @@ def source_detail_sections(kind: str, payload: dict[str, Any]) -> list[dict[str,
             values = resolve_invoice_financial_values(
                 amount=data.get("amount"), tax_amount=data.get("taxAmount"),
                 total_with_tax=data.get("totalWithTax"), tax_rate=data.get("taxRate"),
-                inferred_fields=[key for key, public in PUBLIC_FIELDS.items() if public in data.get("inferredFields", [])],
+                tax_amount_text=data.get("taxAmountText"),
                 source_line_items=data.pop("_sourceLineItems", []),
             )
             for key, public in PUBLIC_FIELDS.items():
                 value = getattr(values, key)
                 data[public] = values.rate_label if key == "tax_rate" else source_money(value)
-            data["inferredFields"] = [PUBLIC_FIELDS[key] for key in values.inferred_fields]
+            data["taxAmountText"] = values.tax_amount_text
             if values.issue:
                 data["financialIssue"] = values.issue
     if kind not in SOURCE_FIELD_GROUPS:
@@ -178,8 +181,6 @@ def source_detail_sections(kind: str, payload: dict[str, Any]) -> list[dict[str,
             "invoiceDate": str(payload["invoiceDate"]) if payload.get("invoiceDate") else None,
             "invoiceNo": payload.get("digitalInvoiceNo") or payload.get("invoiceNo") or None,
         }
-        if "totalWithTax" in payload.get("inferredFields", []):
-            metadata["invoice_navigation"]["totalWithTaxInferred"] = True
     if kind == "bank":
         metadata["bank_transaction_id"] = identifier
     sections = []
@@ -187,11 +188,14 @@ def source_detail_sections(kind: str, payload: dict[str, Any]) -> list[dict[str,
         projected = []
         for key, label in fields:
             value = values.get(key)
+            if kind == "invoice" and key == "taxAmount" and value in (None, ""):
+                value = values.get("taxAmountText")
             if value is None or value == "":
-                continue
+                if kind == "invoice" and key in PUBLIC_FIELDS.values():
+                    value = "—"
+                else:
+                    continue
             display = format(value, "f") if isinstance(value, Decimal) else value
-            if key in values.get("inferredFields", []):
-                display = str(display) + "（推算）"
             projected.append({"label": label, "value": display})
         if projected:
             sections.append({"title": title, "fields": projected, **metadata})
@@ -253,11 +257,11 @@ BANK_SOURCE_KEYS = frozenset({
 INVOICE_SOURCE_KEYS = frozenset({
     "invoice_no", "invoice_code", "digital_invoice_no", "invoice_date",
     "seller_name", "seller_tax_no", "buyer_name", "buyer_tax_no", "amount",
-    "tax_amount", "tax_rate", "total_with_tax", "invoice_status_from_source",
+    "tax_amount", "tax_amount_text", "tax_rate", "total_with_tax", "invoice_status_from_source",
     "invoice_kind", "is_positive_invoice", "risk_level", "issuer", "remark",
     "tax_classification_code", "specific_business_type", "taxable_item_name",
     "specification_model", "unit", "quantity", "unit_price",
-    "invoice_source",
+    "invoice_source", "source_line_items",
 })
 
 
@@ -337,7 +341,7 @@ def source_relation_sections(kind: str, summaries: list[Any], *, groups: list[di
 # Explicit adapters for the existing canonical SQL query DTOs.
 QUERY_SOURCE_KEYS = {
     "bank": {"id": "id", "transaction_date": "transactionDate", "booked_date": "bookedDate", "txn_direction": "direction", "amount": "amount", "balance": "balance", "summary": "summary", "remark": "remark", "account_name": "accountName", "account_no": "accountNo", "counterparty_name": "counterpartyName", "counterparty_account_no": "counterpartyAccountNo", "counterparty_bank_name": "counterpartyBankName", "statement_serial_no": "bankSerialNo", "enterprise_serial_no": "enterpriseSerialNo", "voucher_type": "voucherKind", "voucher_no": "voucherNo", "account_detail_no": "accountDetailNo"},
-    "invoice": {"inferred_fields": "inferredFields", "id": "id", "invoice_type": "invoiceType", "invoice_no": "invoiceNo", "digital_invoice_no": "digitalInvoiceNo", "invoice_code": "invoiceCode", "issue_date": "invoiceDate", "seller_name": "sellerName", "seller_tax_no": "sellerTaxNo", "buyer_name": "buyerName", "buyer_tax_no": "buyerTaxNo", "amount_without_tax": "amount", "tax_amount": "taxAmount", "tax_rate": "taxRate", "total_with_tax": "totalWithTax", "tax_classification_code": "taxClassificationCode", "specific_business_type": "specificBusinessType", "taxable_item_name": "taxableItemName", "invoice_source": "invoiceSource", "invoice_kind": "invoiceKind", "invoice_status_from_source": "invoiceStatus", "is_positive_invoice": "isPositiveInvoice", "risk_level": "riskLevel", "issuer": "issuer", "remark": "remark", "model": "specificationModel", "unit": "unit", "quantity": "quantity", "unit_price": "unitPrice"},
+    "invoice": {"id": "id", "invoice_type": "invoiceType", "invoice_no": "invoiceNo", "digital_invoice_no": "digitalInvoiceNo", "invoice_code": "invoiceCode", "issue_date": "invoiceDate", "seller_name": "sellerName", "seller_tax_no": "sellerTaxNo", "buyer_name": "buyerName", "buyer_tax_no": "buyerTaxNo", "amount_without_tax": "amount", "tax_amount": "taxAmount", "tax_amount_text": "taxAmountText", "tax_rate": "taxRate", "total_with_tax": "totalWithTax", "tax_classification_code": "taxClassificationCode", "specific_business_type": "specificBusinessType", "taxable_item_name": "taxableItemName", "invoice_source": "invoiceSource", "invoice_kind": "invoiceKind", "invoice_status_from_source": "invoiceStatus", "is_positive_invoice": "isPositiveInvoice", "risk_level": "riskLevel", "issuer": "issuer", "remark": "remark", "model": "specificationModel", "unit": "unit", "quantity": "quantity", "unit_price": "unitPrice"},
 }
 
 
@@ -363,21 +367,21 @@ def query_source_detail(kind: str, row: dict[str, Any]) -> dict[str, Any]:
             elif row.get("debit_amount") not in (None, "") and row.get("credit_amount") in (None, ""):
                 payload.update(amount=row["debit_amount"], direction="outflow")
         if kind == "invoice":
-            payload["inferredFields"] = [PUBLIC_FIELDS[key] for key in row.get("inferred_fields", [])]
             payload["_sourceLineItems"] = row.get("source_line_items") or []
             lines = row.get("line_items") or [row]
-            payload["lineItems"] = [{target: line.get(source) for source, target in QUERY_SOURCE_KEYS[kind].items()} for line in lines]
-            for data, source in zip(payload["lineItems"], lines, strict=True):
-                data["inferredFields"] = [PUBLIC_FIELDS[key] for key in source.get("inferred_fields", [])]
-                data["_sourceLineItems"] = source.get("source_line_items") or []
+            payload["lineItems"] = [
+                invoice_source_line(source, invoice_id=line["id"], index=index)
+                for line in lines for index, source in enumerate(line.get("source_line_items") or [], 1)
+                if source.get("source_sheet_role") != "invoice_header"
+            ]
             if len(lines) > 1:
                 payload["taxRate"] = combine_invoice_tax_rates(resolve_invoice_financial_values(
                     amount=line.get("amount_without_tax"), tax_amount=line.get("tax_amount"),
                     total_with_tax=line.get("total_with_tax"), tax_rate=line.get("tax_rate"),
-                    inferred_fields=line.get("inferred_fields") or (), source_line_items=line.get("source_line_items") or [],
+                    tax_amount_text=line.get("tax_amount_text"), source_line_items=line.get("source_line_items") or [],
                 ).tax_rate for line in lines)
                 payload["_sourceLineItems"] = []
-                payload["inferredFields"] = []
+                payload["taxAmountText"] = None
                 for key in ("amount", "taxAmount", "totalWithTax"):
                     payload[key] = None
     for data in [payload, *payload.get("lineItems", [])]:

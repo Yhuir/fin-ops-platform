@@ -1572,6 +1572,80 @@ class EtcServiceTests(unittest.TestCase):
         self.assertEqual(parsed.tax_amount, Decimal("0.56"))
         self.assertEqual(parsed.total_amount, Decimal("19.19"))
 
+    def test_etc_xml_keeps_each_item_and_never_uses_first_item_as_header(self) -> None:
+        original = real_etc_xml().decode().replace("<TotalTaxAm>0.56</TotalTaxAm>", "<TotalTaxAm>1.08</TotalTaxAm>").replace("19.19", "19.71")
+        rows = (
+            "<IssuItemInformation><ItemName>通行费一</ItemName><Amount>10.00</Amount><TaxRate>0.03</TaxRate>"
+            "<ComTaxAm>0.30</ComTaxAm><TotaltaxIncludedAmount>10.30</TotaltaxIncludedAmount></IssuItemInformation>"
+            "<IssuItemInformation><ItemName>通行费二</ItemName><Amount>8.63</Amount><TaxRate>0.09</TaxRate>"
+            "<ComTaxAm>0.78</ComTaxAm></IssuItemInformation>"
+        )
+        xml = original.replace("<IssuItemInformation><TaxRate>0.03</TaxRate></IssuItemInformation>", "")
+        xml = xml.replace("<BasicInformation>", rows + "<BasicInformation>")
+        parsed = parse_etc_xml(xml.encode())
+        self.assertEqual(parsed.total_amount, Decimal("19.71"))
+        self.assertEqual(parsed.amount_without_tax, Decimal("18.63"))
+        self.assertEqual(parsed.tax_rate, "mixed")
+        self.assertEqual(len(parsed.source_line_items), 2)
+        self.assertEqual(parsed.source_line_items[0]["taxable_item_name"], "通行费一")
+        self.assertEqual(parsed.source_line_items[0]["total_with_tax"], "10.30")
+        self.assertIsNone(parsed.source_line_items[1]["total_with_tax"])
+        self.assertEqual([item["tax_rate"] for item in parsed.source_line_items], ["0.03", "0.09"])
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir), oa_client=FakeEtcOAClient())
+            preview = service.preview_import_zips([UploadedEtcZipFile("source.zip", zip_bytes({"invoice.xml": xml.encode()}))])
+            service.confirm_import_session(preview["sessionId"])
+            saved = service.list_invoices()[0][0]
+            self.assertEqual(saved.source_line_items, parsed.source_line_items)
+            self.assertEqual(saved.tax_rate, "mixed")
+
+    def test_etc_xml_non_numeric_tax_is_preserved_and_flat_summary_does_not_forge_item(self) -> None:
+        xml = real_etc_xml().decode().replace("<TotalTaxAm>0.56</TotalTaxAm>", "<TotalTaxAm>*</TotalTaxAm>")
+        xml = xml.replace("<IssuItemInformation><TaxRate>0.03</TaxRate></IssuItemInformation>",
+            "<IssuItemInformation><ItemName>通行费</ItemName><Amount>18.63</Amount><TaxRate>不征税</TaxRate><ComTaxAm>*</ComTaxAm></IssuItemInformation>")
+        parsed = parse_etc_xml(xml.encode())
+        self.assertIsNone(parsed.tax_amount)
+        self.assertEqual(parsed.tax_amount_text, "*")
+        self.assertEqual(parsed.tax_rate, "不征税")
+        self.assertIsNone(parsed.source_line_items[0]["tax_amount"])
+        self.assertEqual(parsed.source_line_items[0]["tax_amount_text"], "*")
+        historical_record = HistoricalEtcRepairService._parsed_invoice_record(parsed)
+        self.assertIsNone(historical_record["tax_amount"])
+        self.assertEqual(historical_record["tax_amount_text"], "*")
+        self.assertEqual(historical_record["source_line_items"], parsed.source_line_items)
+        flat = parse_etc_xml(etc_xml("ETC-SUMMARY"))
+        self.assertEqual(flat.source_line_items, [])
+
+    def test_postgres_etc_source_values_roundtrip_preserves_null_tax_and_detail(self) -> None:
+        payload = {"id": "etc-source-1", "invoice_number": "ETC-SOURCE", "issue_date": "2026-10-04",
+            "amount_without_tax": "10.00", "total_amount": "10.00", "tax_amount": None,
+            "tax_amount_text": "*", "tax_rate": "不征税", "status": "unsubmitted",
+            "source_line_items": [{"amount": "10.00", "tax_amount": None, "tax_amount_text": "*"}]}
+        payload.update({key: None for key in ("passage_start_date", "passage_end_date", "plate_number",
+            "vehicle_type", "seller_name", "seller_tax_no", "buyer_name", "buyer_tax_no", "xml_file_path",
+            "xml_file_hash", "pdf_file_path", "pdf_file_hash")})
+        payload["zip_source_name"] = "source.zip"
+        writes = []
+        def execute(sql, params=()):
+            writes.append((sql, params))
+        def fetch_all(sql, params=()):
+            if "from app.etc_invoices" in sql:
+                return [{"key": payload["id"], "etc_invoice_id": payload["id"],
+                    "raw_payload": {"normalized_payload": deepcopy(payload)}}]
+            return []
+        repository = PostgresOpsTaxEtcRepository(SimpleNamespace(execute=execute, fetch_all=fetch_all))
+        repository.save_etc_state({"invoices": {payload["id"]: payload}})
+        params = next(params for sql, params in writes if "insert into app.etc_invoices" in sql)
+        self.assertIsNone(params[9])
+        self.assertEqual(params[-1].obj["normalized_payload"], payload)
+        loaded = repository.load_etc_state()["invoices"][payload["id"]]
+        self.assertEqual(loaded, payload)
+        self.assertEqual(repository.list_etc_invoice_records_by_ids([payload["id"]]), [payload])
+        restored = etc_service_module._etc_invoice_from_snapshot(loaded)
+        self.assertIsNone(restored.tax_amount)
+        self.assertEqual(restored.tax_amount_text, "*")
+        self.assertEqual(restored.source_line_items, payload["source_line_items"])
+
     def test_http_oa_client_uploads_file_and_creates_form_draft(self) -> None:
         calls: list[object] = []
 
