@@ -80,6 +80,7 @@ function collectionStatusRow({
         direction: "inflow",
         direction_label: "收入",
         bank_name: "建设银行",
+        bank_short_name: "建行",
         account_last4: "8106",
         summary: "客户回款",
         remark: "销项收款",
@@ -593,6 +594,13 @@ describe("销项发票收款情况", () => {
     expect(within(collectedRow).getByText("已收 1020032.00")).toHaveClass("output-invoice-collection-amount--collected");
     expect(within(collectedRow).getByText("待收 0.00")).toHaveClass("output-invoice-collection-amount--pending");
     expect(within(collectedRow).getByRole("button", { name: "收入流水 · 2" })).toBeVisible();
+    const bankAmountCell = collectedRow.querySelectorAll("td")[6] as HTMLElement;
+    const bankMetadata = bankAmountCell.querySelector(".output-invoice-collections-tag-row--right") as HTMLElement;
+    expect(bankAmountCell.querySelector(".output-invoice-collections-table-text--numeric")).toHaveTextContent("1020032.00");
+    expect(within(bankMetadata).getByText("收入")).toBeVisible();
+    expect(bankMetadata.querySelector(".bank-account-value")).toHaveTextContent("建行");
+    expect(bankMetadata.querySelector(".bank-account-value")).not.toHaveTextContent("建设银行");
+    expect(bankMetadata.querySelector(".bank-account-value")).not.toHaveClass("output-invoice-collections-table-tag");
     expect(collectedRow.querySelector(".output-invoice-collections-table-cell--status")).not.toHaveClass("output-invoice-collection-status-cell");
 
     expect(within(unmatchedRedRow).getByText("红票未关联蓝票")).toBeVisible();

@@ -1,0 +1,108 @@
+/* The route opts in. Portal content follows its owning page; the workbench
+   keeps the shared components' existing presentation. */
+:where(body:has(.page-body[data-finance-presentation])) .finance-table :is(.finance-table__column, .finance-table__cell)[data-column-role] {
+  text-align: var(--finance-column-align, left);
+}
+
+:where(body:has(.page-body[data-finance-presentation])) .finance-table [data-column-role] {
+  --finance-column-align: left;
+  --finance-column-justify: flex-start;
+}
+
+:where(body:has(.page-body[data-finance-presentation])) .finance-table :is([data-column-role="amount"], [data-column-role="quantity"]) {
+  --finance-column-align: right;
+  --finance-column-justify: flex-end;
+  font-variant-numeric: tabular-nums;
+}
+
+:where(body:has(.page-body[data-finance-presentation])) .finance-table :is([data-column-role="date"], [data-column-role="status"], [data-column-role="direction"], [data-column-role="selection"], [data-column-role="action"]) {
+  --finance-column-align: center;
+  --finance-column-justify: center;
+}
+
+:where(body:has(.page-body[data-finance-presentation])) .input-invoice-usage-table-header-stack {
+  align-items: var(--finance-column-justify);
+  text-align: inherit;
+}
+
+:where(body:has(.page-body[data-finance-presentation])) .output-invoice-collections-table-header-stack,
+:where(body:has(.page-body[data-finance-presentation])) .pending-invoices-header-control {
+  justify-content: var(--finance-column-justify);
+  text-align: inherit;
+}
+
+:where(body:has(.page-body[data-finance-presentation])) :is(.page-body, .finance-drawer, .finance-dialog, .cash-filter-popover) .button--secondary,
+:where(body:has(.page-body[data-finance-presentation])) .bank-grid-toolbar-actions .bank-export-button {
+  border: 1px solid var(--fp-border-strong);
+  background: var(--fp-surface);
+  color: var(--fp-primary-hover);
+  box-shadow: none;
+}
+
+:where(body:has(.page-body[data-finance-presentation])) :is(.page-body, .finance-drawer, .finance-dialog, .cash-filter-popover) .button--secondary:not(:disabled):not([aria-disabled="true"]):hover,
+:where(body:has(.page-body[data-finance-presentation])) .bank-grid-toolbar-actions .bank-export-button:hover {
+  border-color: var(--fp-primary);
+  background: var(--fp-primary-soft);
+}
+
+:where(body:has(.page-body[data-finance-presentation])) :is(.page-body, .finance-drawer, .finance-dialog, .cash-filter-popover) .button--secondary:focus-visible {
+  outline: 2px solid var(--fp-primary);
+  outline-offset: 2px;
+}
+
+:where(body:has(.page-body[data-finance-presentation])) :is(.input-invoice-usage-bank-amount-line .input-invoice-usage-money-primary, .output-invoice-collections-table-cell--amount > .output-invoice-collections-table-text--numeric, .oa-pending-payments-bank-amount-line .oa-pending-payments-table-text--numeric) {
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.45;
+}
+
+:where(body:has(.page-body[data-finance-presentation])) :is(.input-invoice-usage-bank-tag-row, .output-invoice-collections-tag-row--right, .oa-pending-payments-bank-metadata) {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-top: 3px;
+  color: var(--fp-text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+:where(body:has(.page-body[data-finance-presentation])) :is(.input-invoice-usage-bank-tag-row, .output-invoice-collections-tag-row--right, .oa-pending-payments-bank-metadata) :is(.bank-account-primary, .bank-account-secondary) {
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+:where(body:has(.page-body[data-finance-presentation])) :is(.input-invoice-usage-bank-tag-row, .output-invoice-collections-tag-row--right, .oa-pending-payments-bank-metadata) :is(.input-invoice-usage-tag, .output-invoice-collections-table-tag, .finance-direction-tag) {
+  font-weight: 500;
+}
+
+:where(body:has(.page-body[data-finance-presentation])) .finance-amount-cell__value {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+:where(body:has(.page-body[data-finance-presentation])) .finance-amount-cell__meta {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+:where(body:has(.page-body[data-finance-presentation])) .finance-amount-cell__account {
+  white-space: normal;
+  overflow: visible;
+}
+
+:where(body:has(.page-body[data-finance-presentation])) :is(.input-invoice-usage-bank-tag-row, .output-invoice-collections-tag-row--right, .oa-pending-payments-bank-metadata) .bank-account-value {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 4px;
+}
+
+:where(body:has(.page-body[data-finance-presentation])) .bank-export-button:focus-visible {
+  outline: 2px solid var(--fp-primary);
+  outline-offset: 2px;
+}

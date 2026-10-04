@@ -89,6 +89,19 @@ class CostStatisticsApiTests(unittest.TestCase):
         response = self._get(path)
         return response.status_code, json.loads(response.body)
 
+    def test_bank_short_display_keeps_raw_page_and_export_account_labels(self) -> None:
+        self.app._app_settings_service._snapshot["bank_account_mappings"] = [
+            {"bank_name": "工商银行", "last4": "8888", "short_name": "工行"}
+        ]
+        status, payload = self._json("/api/cost-statistics/explorer?scope=2026-03&view=time")
+        self.assertEqual(status, 200)
+        row = payload["rows"][0]
+        self.assertEqual(row["bank_account_display_label"], "工行 8888")
+        self.assertEqual(row["payment_account_label"], "工商银行 账户 8888")
+        status, summary = self._json("/api/cost-statistics/export-summary?month=2026-03&view=time")
+        self.assertEqual(status, 200)
+        self.assertNotIn("bank_account_display_label", json.dumps(summary, ensure_ascii=False))
+
     def test_bank_tag_primary_order_preserves_amounts_filters_and_drilldown(self) -> None:
         repository = self.app._cost_statistics_canonical_repository  # noqa: SLF001
         snapshot = repository.load_snapshot()
@@ -178,6 +191,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             bank_account_payload["facets"]["bank_accounts"][0],
             {
                 "bank_account_label": account_label,
+                "bank_account_display_label": account_label,
                 "total_amount": "1250.00",
                 "project_count": 1,
             },
@@ -380,6 +394,8 @@ class CostStatisticsApiTests(unittest.TestCase):
             ),
         )
         self.assertEqual(saved.status_code, 200)
+        for event in json.loads(saved.body)["bank_events"]:
+            self.assertEqual(event["bank_account_display_label"], event["bank_account_label"])
 
         status, project = self._json(
             "/api/cost-statistics/explorer?scope=2026-03&view=project"
@@ -633,6 +649,8 @@ class CostStatisticsApiTests(unittest.TestCase):
             ),
         )
         self.assertEqual(saved.status_code, 200)
+        for event in json.loads(saved.body)["bank_events"]:
+            self.assertEqual(event["bank_account_display_label"], event["bank_account_label"])
         saved_task = json.loads(saved.body)
         self.assertEqual(saved_task["status"], "pending")
         self.assertEqual(saved_task["pending_reasons"], ["bank_tag_missing"])

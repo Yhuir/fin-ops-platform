@@ -45,6 +45,10 @@ describe("每月任务实际操作", () => {
     request.mockResolvedValue(result([task()]));
     render(<CashProvider><CashTasks /></CashProvider>);
     await screen.findByText("合成付款任务");
+    const paymentTable = screen.getByRole("grid", { name: "支出任务" });
+    for (const [name, role] of [["执行日期", "date"], ["实际累计", "amount"], ["处理状态", "status"], ["关联流水", "quantity"], ["操作", "action"]]) {
+      expect(within(paymentTable).getByRole("columnheader", { name })).toHaveAttribute("data-column-role", role);
+    }
     const initialRequest = request.mock.calls.at(-1)![0];
     const originalMonth = new URL(initialRequest, "http://test").searchParams.get("month");
     fireEvent.change(screen.getByLabelText("归属月份"), { target: { value: "2026-06" } });

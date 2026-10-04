@@ -90,6 +90,7 @@ export type OaPendingPaymentBankTransaction = {
   voucherKind: string;
   voucherNo: string;
   bankName: string;
+  bankShortName?: string;
   accountNo?: string;
   accountLast4?: string;
   bankAccount?: string;
@@ -121,6 +122,7 @@ export type OaPendingPaymentBankTransactionSummary = {
   original_amount: string;
   bankTransactionId?: string | null;
   bankName?: string;
+  bankShortName?: string;
   accountNo?: string;
   accountLast4?: string;
   bankAccount?: string;

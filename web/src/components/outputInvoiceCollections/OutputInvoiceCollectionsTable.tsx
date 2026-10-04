@@ -25,6 +25,7 @@ import {
   type FinanceTableColumnRole,
 } from "../common/FinanceTable";
 import ExpandableCellText from "./ExpandableCellText";
+import BankAccountValue from "../BankAccountValue";
 import OutputInvoiceCollectionFilterMenu, { type OutputInvoiceCollectionFilterValue } from "./OutputInvoiceCollectionFilterMenu";
 
 type OutputInvoiceCollectionsTableProps = {
@@ -342,7 +343,7 @@ function DataRow({
             <TextLine numeric strong value={formatMoney(row.bank.originalAmount, "—")} />
             <span className="output-invoice-collections-tag-row output-invoice-collections-tag-row--right">
               <FinanceTag tone={bank.directionLabel === "收入" ? "success" : "neutral"}>{bank.directionLabel || "收入"}</FinanceTag>
-              {accountLabel(bank.bankName, bank.accountLast4) ? <FinanceTag>{accountLabel(bank.bankName, bank.accountLast4)}</FinanceTag> : null}
+              <BankAccountValue value={[bank.bankShortName || bank.bankName, bank.accountLast4].filter(Boolean).join(" ") || "—"} />
             </span>
             {row.bank.bankSplitParts?.length ? <BankSplitChips parts={row.bank.bankSplitParts} /> : null}
           </>
@@ -471,11 +472,6 @@ function columnRole(column: Column): FinanceTableColumnRole {
   if (column.id === "invoiceNo" || column.id === "buyer" || column.id === "bankCounterparty") return "identity";
   return "description";
 }
-
-function accountLabel(bankName: string, accountLast4: string) {
-  return [bankName, accountLast4].filter(Boolean).join(" ").trim();
-}
-
 
 function displayInvoiceNo(row: OutputInvoiceCollectionRow) {
   const invoice = row.invoice;

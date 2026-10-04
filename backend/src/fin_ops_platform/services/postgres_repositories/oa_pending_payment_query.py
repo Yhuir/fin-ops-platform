@@ -422,7 +422,9 @@ class PostgresOaPendingPaymentQueryRepository:
                 status_counts.payload as status_counts,
                 filter_options.payload as filter_options,
                 descriptors.payload as descriptors,
-                inventory.*
+                inventory.*,
+                (select settings_payload->'bank_account_mappings' from app.app_settings
+                 where settings_key = 'app_settings') as bank_account_mappings
             from summary
             cross join view_counts
             cross join status_counts
@@ -451,6 +453,7 @@ class PostgresOaPendingPaymentQueryRepository:
             value = text(option.get("value")) or ""
             option["label"] = "支出" if value == "outflow" else "收入" if value == "inflow" else value
         return {
+            "bank_account_mappings": result.get("bank_account_mappings") or [],
             "descriptors": [
                 dict(descriptor)
                 for descriptor in list(result.get("descriptors") or [])

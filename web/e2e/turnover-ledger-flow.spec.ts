@@ -483,6 +483,8 @@ test.describe("turnover ledger browser flow", () => {
               relation_id: relationId,
               status: "confirmed",
               status_label: "流水",
+              bank_account_labels: [],
+              bank_account_display_labels: [],
             },
             bank_rows: [],
             extra: {

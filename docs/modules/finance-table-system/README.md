@@ -13,6 +13,7 @@
 - 普通页面复用 HeroUI FinanceTable，关联台专用分组表由关联台负责。
 - 共享表格不解释金额或权限，不自行排序服务端数据，不保存业务 rows。
 - 表头、横向滚动和 contained 容器适配窄屏；需要复制文本的消费者显式启用 selectableText。
+- 普通页面通过应用壳的 `data-finance-presentation` 开启表头与正文的列语义对齐、金额主辅层级和次级按钮样式；关联台不启用此范围，来源详情键值表保持左对齐。
 - 页面用业务总数而非当前页长度显示统计；金额、抽屉、搜索和分段展示遵循统一 UI 说明。
 - 现金可复用纯 UI，不复用普通页面的持久 session。
 
@@ -26,6 +27,8 @@
 
 - [web/src/components/common/FinanceTable.tsx](../../../web/src/components/common/FinanceTable.tsx)
 - [web/src/hooks/useFinanceTableSession.ts](../../../web/src/hooks/useFinanceTableSession.ts)
+- [web/src/app/financePresentation.css](../../../web/src/app/financePresentation.css)
+- [web/e2e/finance-table-presentation.spec.ts](../../../web/e2e/finance-table-presentation.spec.ts)
 - [web/src/app/styles.css](../../../web/src/app/styles.css)
 - [web/src/test/FinanceTable.test.tsx](../../../web/src/test/FinanceTable.test.tsx)
 - [web/src/test/TableLayoutTokens.test.ts](../../../web/src/test/TableLayoutTokens.test.ts)

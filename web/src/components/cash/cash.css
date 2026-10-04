@@ -84,6 +84,10 @@
 .cash-page .finance-table__column[data-column-role="action"] { position: sticky; right: 0; z-index: 2; }
 .cash-page [class*="cash-row--"] > .finance-table__cell[data-column-role="action"] { background: var(--cash-row-fill); }
 .cash-page .finance-table__cell[data-column-role="action"] > .button { white-space: nowrap; }
+.cash-page .finance-table__cell[data-column-role="action"] > .cash-actions,
+.cash-page .finance-table__cell[data-column-role="action"] > .cash-row-actions,
+.cash-drawer .finance-table__cell[data-column-role="action"] > .cash-actions,
+.cash-drawer .finance-table__cell[data-column-role="action"] > .cash-row-actions { justify-content: center; }
 .cash-summary, .cash-summary-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 20px; padding: 8px 0; margin: 0; font-size: 12px; color: #667085; }
 .cash-summary-line > div { display: flex; gap: 8px; }
 .cash-summary-line dd { margin: 0; color: #344054; font-variant-numeric: tabular-nums; font-weight: 600; }

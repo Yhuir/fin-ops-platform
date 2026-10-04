@@ -154,6 +154,7 @@ const rowsPayload = {
           amount: "12345.67",
           directionLabel: "outflow",
           bankName: "交通银行",
+          bankShortName: "交行",
           accountLast4: "3847",
           summary: "项目付款摘要内容很长很长用于验证折叠展示",
           remark: "备注内容很长很长用于验证摘要备注列的展开控制",
@@ -392,6 +393,44 @@ afterEach(() => {
 });
 
 describe("Input invoice usage page", () => {
+  test.each([
+    [{ bankShortName: "平安", bankName: "平安银行", accountLast4: "0093", bankAccount: "平安银行 0093" }, "平安0093"],
+    [{ bankShortName: "", bankName: "平安银行", accountLast4: "0093", bankAccount: "平安银行 0093" }, "平安银行0093"],
+    [{ bankShortName: "", bankName: "", accountLast4: "", bankAccount: "" }, "—"],
+  ])("账户展示使用真实简称、保留前导零且不猜缺失信息：%j", async (account, expected) => {
+    installInputInvoiceUsageFetch({ ...rowsPayload, rows: rowsPayload.rows.map((row) => ({
+      ...row, bank: { ...row.bank, primary: { ...row.bank.primary, ...account } },
+    })) });
+    renderAuthenticatedAppAt("/input-invoice-usage");
+    const table = await screen.findByRole("grid", { name: "进项发票使用情况表" });
+    const invoiceRow = within(table).getByRole("row", { name: /SD-INV-2026-0001/ });
+    const accountValue = invoiceRow.querySelector(".input-invoice-usage-bank-tag-row .bank-account-value");
+    expect(accountValue?.textContent?.replace(/\s/g, "")).toBe(expected);
+  });
+
+  test.each([
+    ["0.00", "0.00"],
+    ["-123.45", "-123.45"],
+    ["", "—"],
+  ])("流水主金额保留原值和缺失语义：%s", async (originalAmount, displayedAmount) => {
+    installInputInvoiceUsageFetch({ ...rowsPayload, rows: rowsPayload.rows.map((row) => ({
+      ...row,
+      bank: {
+        ...row.bank,
+        original_amount: originalAmount,
+        primary: { ...row.bank.primary, original_amount: originalAmount },
+      },
+    })) });
+    renderAuthenticatedAppAt("/input-invoice-usage");
+    const table = await screen.findByRole("grid", { name: "进项发票使用情况表" });
+    const invoiceRow = within(table).getByRole("row", { name: /SD-INV-2026-0001/ });
+    const amountCell = invoiceRow.querySelectorAll("td")[8] as HTMLElement;
+    expect(amountCell.querySelector(".input-invoice-usage-bank-amount-line")?.textContent).toBe(displayedAmount);
+    const metadata = amountCell.querySelector(".input-invoice-usage-bank-tag-row") as HTMLElement;
+    expect(within(metadata).getByText("支出")).toBeVisible();
+    expect(metadata.querySelector(".bank-account-value")).toHaveTextContent("3847");
+  });
+
   test.each(["13%", "多税率", "—"])("金额列仅显示价税合计和服务端税率结论：%s", async (taxRate) => {
     installInputInvoiceUsageFetch({ ...rowsPayload, rows: rowsPayload.rows.map((row) => ({
       ...row, invoice: { ...row.invoice, taxRate },
@@ -626,7 +665,14 @@ describe("Input invoice usage page", () => {
     expect(within(page).getByRole("button", { name: "查看流水 云南银行交易对方户名很长很长需要换行显示 详情" })).toBeInTheDocument();
     expect(within(page).queryByText(/outflow/)).not.toBeInTheDocument();
     expect(within(page).getByText("支出")).toBeInTheDocument();
-    expect(within(page).getByText("交通银行 3847")).toBeInTheDocument();
+    const bankAmountCell = firstRowCells[8] as HTMLElement;
+    expect(bankAmountCell.querySelector(".input-invoice-usage-bank-amount-line")).toHaveTextContent(/^12345\.67$/);
+    const bankMetadata = bankAmountCell.querySelector(".input-invoice-usage-bank-tag-row") as HTMLElement;
+    expect(within(bankMetadata).getByText("支出")).toBeInTheDocument();
+    expect(bankMetadata.querySelector(".bank-account-value")).toHaveTextContent("交行");
+    expect(bankMetadata.querySelector(".bank-account-value")).not.toHaveTextContent("交通银行");
+    expect(bankMetadata.querySelector(".bank-account-value")).toHaveTextContent("3847");
+    expect(bankMetadata.querySelector(".input-invoice-usage-bank-tag")).toBeNull();
     expect(within(within(page).getByRole("grid")).getByText("待处理").closest(".input-invoice-usage-payment-cell")).toBeInTheDocument();
 
     await user.click(within(page).getByRole("button", { name: "按开票日期排序" }));

@@ -66,6 +66,7 @@
 .cost-source-table .cost-source-project-cell { color:#56657d; font-size:12px; overflow-wrap:anywhere; }
 .cost-source-table td:nth-last-child(2) input { text-align:right; font-variant-numeric:tabular-nums; }
 .cost-source-table th:nth-last-child(2) { text-align:right; }
+.cost-source-table th:last-child,.cost-source-table td:last-child { text-align:center; }
 .cost-source-table td:last-child { padding:4px; }
 .cost-source-body input:focus { border-color:#2454df; }
 .cost-source-body input::placeholder { color:#64748b; }
@@ -103,7 +104,7 @@
 .cost-source-option .cost-source-money { flex-shrink:0; }
 .cost-source-option[data-focused],.cost-source-option[data-selected] { background:#eaf2ff; }
 .cost-source-option[data-disabled] { opacity:.5; }
-.cost-source-actions { display:flex; justify-content:flex-end; gap:2px; }
+.cost-source-table .cost-source-actions { display:flex; justify-content:center; gap:2px; }
 .cost-source-icon { width:30px; height:32px; justify-content:center; flex-shrink:0; }
 .cost-source-add { color:#1d4ed8; }
 .cost-source-add:hover { color:#1e40af; }

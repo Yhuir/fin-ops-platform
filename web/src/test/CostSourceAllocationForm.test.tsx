@@ -13,7 +13,7 @@ function fixture(): CostStatisticsManualAllocationTask {
       { unitId: 'unit-a', oaId: 'internal-oa', oaApplyType: '支付申请', expenseItemId: '', projectId: 'project', projectName: '项目甲', expenseType: '材料', expenseContent: '材料采购', oaApplicant: '张先生', lockOaAmount: false, outsideCostAmount: "0.00", oaOriginalAmount: '500.00' },
       { unitId: 'unit-b', oaId: 'internal-oa', oaApplyType: '支付申请', expenseItemId: '', projectId: 'project', projectName: '项目甲', expenseType: '运费', expenseContent: '设备运输', oaApplicant: '张先生', lockOaAmount: false, outsideCostAmount: "0.00", oaOriginalAmount: '200.00' },
     ],
-    bankEvents: [{ transactionId: 'internal-bank', eventKind: 'outflow', inProjectCostScope: true, amount: '600.00', tradeTime: '2026-08-15', counterpartyName: '材料公司', bankAccountLabel: '建行 8106', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款', tags: ['采购', '材料款'] }],
+    bankEvents: [{ transactionId: 'internal-bank', eventKind: 'outflow', inProjectCostScope: true, amount: '600.00', tradeTime: '2026-08-15', counterpartyName: '材料公司', bankAccountLabel: '建行 8106', bankAccountDisplayLabel: '建行 8106', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款', tags: ['采购', '材料款'] }],
     allocations: [], oaCostTagOverrides: [], manualItems: [], manualOptions: {projects: [], tags: []}, suggestedSourceAllocations: null, relationDisplayGroups: [], sourceAllocations: null, nonCostAmount: '0.00', nonCostReason: '', version: 0, updatedBy: '', updatedAt: '', canSave: true,
   };
 }
@@ -146,7 +146,7 @@ it('keeps source and amount issues in their own cells without showing instructio
 
 it('preserves money when selecting another real source and derives readonly chips from that source', async () => {
   const user = userEvent.setup(); const task = fixture();
-  task.bankEvents.push({ ...task.bankEvents[0], transactionId: 'bank-two', bankAccountLabel: '民生银行 账户 9486', bankTagPrimaryLabel: '项目开销', bankTagSubLabel: '差旅费', tradeTime: '2026-09-03' });
+  task.bankEvents.push({ ...task.bankEvents[0], transactionId: 'bank-two', bankAccountLabel: '民生银行 账户 9486', bankAccountDisplayLabel: '民生银行 9486', bankTagPrimaryLabel: '项目开销', bankTagSubLabel: '差旅费', tradeTime: '2026-09-03' });
   render(<Editor task={task} />);
   const table = screen.getByRole('table', { name: '成本分配明细' });
   await user.click(within(table).getAllByRole('button', { name: '新增来源' })[0]);
@@ -248,7 +248,7 @@ it('shows balance only for complete allocations without changing formal correspo
   const task = fixture(); const user = userEvent.setup();
   task.units.forEach(unit => { unit.lockOaAmount = true; }); task.oaTotal = '600.00'; task.units[0].oaOriginalAmount = '400.00';
   task.bankEvents[0].amount = '400.00';
-  task.bankEvents.push({...task.bankEvents[0],transactionId:'bank-b',amount:'200.00',bankAccountLabel:'民生银行 9486'});
+  task.bankEvents.push({...task.bankEvents[0],transactionId:'bank-b',amount:'200.00',bankAccountLabel:'民生银行 9486', bankAccountDisplayLabel: '民生银行 9486'});
   task.sourceAllocations = {costLines:[{unitId:'unit-a',bankTransactionId:'internal-bank',amount:'400.00'},{unitId:'unit-b',bankTransactionId:'bank-b',amount:'200.00'}],refundLinks:[],nonCostLines:[]};
   const {container} = render(<Editor task={task} />);
   const evidence = screen.getByRole('table', {name:'OA 与流水对照'});
@@ -343,4 +343,18 @@ it('manually selects OA cost tags with two columns and restores the source witho
   await user.click(screen.getByRole('button',{name:'恢复来源标签'}));
   expect(picker).toHaveTextContent('采购 / 材料款');
   expect(screen.getByRole('checkbox',{name:'按 OA 原额'})).toBeChecked();
+});
+
+
+it('uses explicit account display names and preserves full source labels when none is configured', () => {
+  const task = fixture();
+  task.bankEvents[0].bankAccountLabel = '建设银行 账户 0012';
+  task.bankEvents[0].bankAccountDisplayLabel = '建行 0012';
+  task.bankEvents.push({...task.bankEvents[0], transactionId: 'unmapped', bankAccountLabel: '完整银行名称 账户 0001', bankAccountDisplayLabel: '完整银行名称 账户 0001'});
+  render(<Editor task={task} />);
+  const evidence = screen.getByRole('table', {name: 'OA 与流水对照'});
+  expect(evidence).toHaveTextContent('建行 0012');
+  expect(evidence).toHaveTextContent('完整银行名称 账户 0001');
+  expect(evidence).not.toHaveTextContent('建设银行 账户 0012');
+  expect(task.bankEvents[0].bankAccountLabel).toBe('建设银行 账户 0012');
 });

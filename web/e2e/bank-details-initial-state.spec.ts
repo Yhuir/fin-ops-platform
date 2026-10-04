@@ -106,7 +106,12 @@ test.describe("bank details initial browser state", () => {
     await expect(bankRow.getByText("无发票")).toBeVisible();
     await expect(bankRow.getByText("设备款")).toBeVisible();
     await expect(bankRow.getByText("58000.00")).toBeVisible();
-    await expect(bankRow.getByText("建设银行 1138")).toBeVisible();
+    const amountLine = bankRow.locator(".bank-amount-line");
+    const amountMetadata = bankRow.locator(".bank-amount-metadata");
+    await expect(amountLine).toHaveText("58000.00");
+    await expect(amountMetadata.getByText("支", { exact: true })).toBeVisible();
+    await expect(amountMetadata.locator(".bank-account-primary")).toHaveText("建设银行");
+    await expect(amountMetadata.locator(".bank-account-secondary")).toHaveText("1138");
     await expect(bankRow.getByText("130500.50")).toBeVisible();
     await expect(bankRow.getByText("设备尾款", { exact: true })).toBeVisible();
     await expect(bankRow.getByText("设备尾款待进项票")).toBeVisible();

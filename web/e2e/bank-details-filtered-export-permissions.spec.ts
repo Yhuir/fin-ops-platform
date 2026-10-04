@@ -92,7 +92,7 @@ test.describe("bank details filtered export and non-admin permissions", () => {
 
     await page.getByRole("button", { name: "银行明细时间范围：年月" }).click();
     const datePicker = page.getByRole("dialog", { name: "银行明细时间范围选择器" });
-    await datePicker.getByRole("button", { name: "按月" }).click();
+    await datePicker.getByRole("radio", { name: "按月" }).click();
     const monthRowsRequest = page.waitForRequest((request) => {
       const url = new URL(request.url());
       return request.method() === "GET"

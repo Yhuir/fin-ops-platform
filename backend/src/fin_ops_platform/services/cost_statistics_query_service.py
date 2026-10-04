@@ -11,6 +11,7 @@ from typing import Any
 from openpyxl import Workbook
 from openpyxl.cell import WriteOnlyCell
 
+from fin_ops_platform.services.bank_settings import bank_account_display_labels_from_settings
 from fin_ops_platform.services.cost_statistics_policy import CostStatisticsPolicy
 from fin_ops_platform.services.search_query import normalize_money_search_query
 
@@ -64,14 +65,14 @@ class CostStatisticsQueryService:
             filters,
         )
         normalized_page_size = self._normalize_page_size(page_size)
-        policy = CostStatisticsPolicy(
-            self._canonical_repository.load_snapshot(
-                scope_kind=scope_kind,
-                scope_value=scope_value,
-                view=normalized_view,
-                include_statistics=include_statistics,
-            ),
+        snapshot = self._canonical_repository.load_snapshot(
+            scope_kind=scope_kind,
+            scope_value=scope_value,
+            view=normalized_view,
+            include_statistics=include_statistics,
         )
+        policy = CostStatisticsPolicy(snapshot)
+        display_labels = bank_account_display_labels_from_settings(snapshot.get("settings") or {})
         query_binding = self._page_query_binding(
             scope=normalized_scope,
             view=normalized_view,
@@ -151,6 +152,9 @@ class CostStatisticsQueryService:
                 else None
             ),
         }
+        for row in [*payload["rows"], *facets["bank_accounts"]]:
+            label = str(row.get("bank_account_label") or row.get("payment_account_label") or "")
+            row["bank_account_display_label"] = display_labels.get(label, label)
         if normalized_view in {"project", "cost_tag", "bank_account"}:
             payload["project_cost_scope_version"] = policy.project_cost_scope["version"]
         return payload
@@ -169,14 +173,14 @@ class CostStatisticsQueryService:
         normalized_transaction_id = str(transaction_id or "").strip()
         if not normalized_transaction_id:
             raise KeyError(transaction_id)
-        row = CostStatisticsPolicy(
-            self._canonical_repository.load_snapshot(
-                scope_kind=scope_kind,
-                scope_value=scope_value,
-                view=normalized_view,
-                include_statistics=False,
-            ),
-        ).bank_transaction(
+        snapshot = self._canonical_repository.load_snapshot(
+            scope_kind=scope_kind,
+            scope_value=scope_value,
+            view=normalized_view,
+            include_statistics=False,
+        )
+        display_labels = bank_account_display_labels_from_settings(snapshot.get("settings") or {})
+        row = CostStatisticsPolicy(snapshot).bank_transaction(
             transaction_id=normalized_transaction_id,
             scope_kind=scope_kind,
             scope_value=scope_value,
@@ -203,6 +207,9 @@ class CostStatisticsQueryService:
                 ),
                 "payment_account_label": str(
                     row.get("payment_account_label") or ""
+                ),
+                "bank_account_display_label": display_labels.get(
+                    str(row.get("payment_account_label") or ""), str(row.get("payment_account_label") or ""),
                 ),
                 "remark": str(row.get("remark") or ""),
                 "bank_tag_code": str(row.get("bank_tag_code") or ""),
@@ -238,16 +245,16 @@ class CostStatisticsQueryService:
         relation_prefix, separator, _unit_source = normalized_allocation_id.partition(":unit:")
         if not separator or not relation_prefix.startswith("relation:"):
             raise KeyError(allocation_id)
-        row = CostStatisticsPolicy(
-            self._canonical_repository.load_relation_snapshot(relation_prefix.removeprefix("relation:")),
-        ).allocation(
+        snapshot = self._canonical_repository.load_relation_snapshot(relation_prefix.removeprefix("relation:"))
+        display_labels = bank_account_display_labels_from_settings(snapshot.get("settings") or {})
+        row = CostStatisticsPolicy(snapshot).allocation(
             allocation_id=normalized_allocation_id,
             scope_kind=scope_kind,
             scope_value=scope_value,
         )
         if not isinstance(row, dict):
             raise KeyError(allocation_id)
-        return {
+        payload = {
             "month": str(row.get("month") or "")[:7] or "all",
             "kind": row["row_kind"],
             "allocation": {
@@ -280,6 +287,10 @@ class CostStatisticsQueryService:
             ],
             "reconciliation": dict(row.get("reconciliation") or {}),
         }
+        for item in [payload["allocation"], *payload["payment_evidence"]]:
+            label = str(item.get("bank_account_label") or item.get("payment_account_label") or "")
+            item["bank_account_display_label"] = display_labels.get(label, label)
+        return payload
 
     def get_no_oa_tag_candidates(self) -> list[dict[str, Any]]:
         policy = CostStatisticsPolicy(

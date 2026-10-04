@@ -164,7 +164,10 @@ test.describe("OA pending payments browser flow", () => {
     await expect(row).toContainText("已支付");
     await expect(row).toContainText("浏览器待付款供应商");
     await expect(row).toContainText("INV-PAY-E2E-001");
-    await expect(row).toContainText("建设银行 1234");
+    const bankMetadata = row.locator(".oa-pending-payments-bank-metadata");
+    await expect(bankMetadata.locator(".bank-account-primary")).toHaveText("建设银行");
+    await expect(bankMetadata.locator(".bank-account-secondary")).toHaveText("1234");
+    await expect(row.locator(".oa-pending-payments-bank-amount-line")).toHaveText("8000.00");
     await expect(row).toContainText("8000.00");
     await expect(row).toContainText("12000.00");
     expect(api.count("GET /api/oa-pending-payments/rows")).toBeGreaterThanOrEqual(1);

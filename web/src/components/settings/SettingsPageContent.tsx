@@ -578,7 +578,7 @@ export default function SettingsPageContent({
                       {accessControlValidationMessage ?? "保存将提交全部账户修改"}
                     </small>
                   </div>
-                  <Button variant="ghost" isDisabled={accessControlControlsDisabled || changedAccountIds.size === 0}
+                  <Button variant="secondary" isDisabled={accessControlControlsDisabled || changedAccountIds.size === 0}
                     onPress={() => { setManagedAccessAccounts(buildManagedAccessAccounts(accessControl)); onFeedback(null); }}>取消修改</Button>
                   <Button className="settings-primary-save" isDisabled={accessControlControlsDisabled || changedAccountIds.size === 0 || accessControlValidationMessage !== null}
                     isPending={isAccessControlSaving} variant="primary" onPress={() => void handleSaveAccessControl()}>

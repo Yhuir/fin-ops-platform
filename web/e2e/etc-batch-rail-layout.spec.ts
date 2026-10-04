@@ -28,10 +28,13 @@ for (const width of [1600, 1280, 960, 390]) {
     await expect(rail.getByText('无匹配批次。')).toHaveCount(0);
     const baseline = await geometry(page);
     await status.getByRole('radio', { name: '已提交 9批' }).click();
-    await expect(rail.getByText('加载中。')).toBeVisible();
+    await expect(rail.locator('.etc-batch-scroll')).toHaveAttribute('aria-busy', 'true');
+    await expect(rail.locator('.etc-batch-row')).toHaveCount(0);
+    await expect(rail.getByText('加载中。')).toHaveCount(0);
     expectStable(await geometry(page), baseline);
     await expect.poll(() => Boolean(release)).toBe(true); hold = false; release!();
     await expect(rail.locator('.etc-batch-row')).toHaveCount(9);
+    await expect(rail.locator('.etc-batch-scroll')).toHaveAttribute('aria-busy', 'false');
     await expect(status.getByRole('radio', { name: '已提交 9批' })).toBeEnabled();
     expectStable(await geometry(page), baseline);
     // Exercise wrapping with realistic cross-year titles and large summary text without changing business state.

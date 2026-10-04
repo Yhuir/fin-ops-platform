@@ -16,6 +16,7 @@ import { formatMoney } from "../../features/money";
 import { formatDateTimeText } from "../../features/dateTime";
 import ExpandableCellText from "./ExpandableCellText";
 import InputInvoiceUsageFilterMenu from "./InputInvoiceUsageFilterMenu";
+import BankAccountValue from "../BankAccountValue";
 import type { InputInvoiceUsageFilterValue } from "./InputInvoiceUsageFilterMenu";
 import {
   EmptyValue,
@@ -115,12 +116,15 @@ function bankAccountLabel(bank: InputInvoiceUsageRow["bank"]["primary"]) {
   if (!bank) {
     return "";
   }
+  if (bank.bankShortName) {
+    return [bank.bankShortName, bank.accountLast4].filter(Boolean).join(" ");
+  }
   return bank.bankAccount || [bank.bankName, bank.accountLast4].filter(Boolean).join(" ");
 }
 
 function HeaderCell({
   label,
-  align,
+  align = "left",
   separated,
   strongSeparated,
   emphasized,
@@ -288,14 +292,12 @@ function EmptyCell() {
 function Tag({
   children,
   tone = "neutral",
-  className,
 }: {
   children: ReactNode;
   tone?: TagTone;
-  className?: string;
 }) {
   return (
-    <span className={classNames("input-invoice-usage-tag", `input-invoice-usage-tag--${tone}`, className)}>
+    <span className={classNames("input-invoice-usage-tag", `input-invoice-usage-tag--${tone}`)}>
       {children}
     </span>
   );
@@ -450,7 +452,7 @@ export default function InputInvoiceUsageTable({
                 separated
               />
               <HeaderCell label="货物或应税劳务名称" separated />
-              <HeaderCell label={<span className="input-invoice-usage-table-column-heading"><span>支付状态</span></span>} strongSeparated emphasized />
+              <HeaderCell align="center" label={<span className="input-invoice-usage-table-column-heading"><span>支付状态</span></span>} strongSeparated emphasized />
               <HeaderCell
                 label={(
                   <CompositeFilterMenu
@@ -622,9 +624,7 @@ export default function InputInvoiceUsageTable({
                         </div>
                         <div className="input-invoice-usage-bank-tag-row">
                           <Tag tone="info">{directionLabel(bank.directionLabel || bank.direction)}</Tag>
-                          <Tag className="input-invoice-usage-bank-tag">
-                            {bankAccountLabel(bank) || "银行账户为空"}
-                          </Tag>
+                          <BankAccountValue value={bankAccountLabel(bank) || "—"} />
                         </div>
                         {row.bank.bankSplitParts?.length ? <BankSplitChips parts={row.bank.bankSplitParts} /> : null}
                       </>

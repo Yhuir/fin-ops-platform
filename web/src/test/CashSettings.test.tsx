@@ -88,6 +88,8 @@ describe("现金项目选择设置", () => {
     expect(implementation).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "已结束（不允许新增）" })).toBeDisabled();
     expect(screen.getByRole("checkbox", { name: "未中标" })).not.toBeDisabled();
+    expect(screen.getByRole("columnheader", { name: /真实阶段/ })).toHaveAttribute("data-column-role", "status");
+    expect(screen.getByRole("columnheader", { name: /新增可选/ })).toHaveAttribute("data-column-role", "status");
     await user.click(implementation);
     expect(request.mock.calls.filter(([, options]) => options?.method === "PUT")).toHaveLength(0);
     expect(screen.getByText("未保存")).toBeInTheDocument();

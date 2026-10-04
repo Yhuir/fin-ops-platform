@@ -131,6 +131,9 @@ describe("cash books", () => {
     await userEvent.click(screen.getByRole("button", { name: /往来账视图$/ }));
     await userEvent.click(screen.getByRole("option", { name: "截至期末未结事项" }));
     expect(screen.getByRole("grid", { name: "截至期末未结事项" })).toHaveTextContent("去年无新动作欠款");
+    for (const [name, role] of [["事项日期", "date"], ["方向", "status"], ["截至日未结", "amount"], ["操作", "action"]]) {
+      expect(screen.getByRole("columnheader", { name })).toHaveAttribute("data-column-role", role);
+    }
     expect(lastParams("/reports/turnover")).toMatchObject({ view: "unsettled", sort: "origin_date" });
     for (const key of ["date_from", "category_ids", "states", "personal_variant"]) expect(lastParams("/reports/turnover")).not.toHaveProperty(key);
     expect(screen.queryByRole("button", { name: "筛选费用类型" })).not.toBeInTheDocument();

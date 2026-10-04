@@ -84,6 +84,7 @@ export type OutputInvoiceCollectionBankSummary = {
   direction: string;
   directionLabel: string;
   bankName: string;
+  bankShortName?: string;
   accountLast4: string;
   summary: string;
   remark: string;

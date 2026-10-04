@@ -68,7 +68,7 @@ export default function TurnoverLedgerGroupedTable({
                       <FinanceTableCell columnRole="description"><TurnoverFlowLabel row={row} /></FinanceTableCell>
                       <FinanceTableCell columnRole="amount">{row.flowDirection === "income" ? formatMoney(row.flowAmount) : "—"}</FinanceTableCell>
                       <FinanceTableCell columnRole="amount">{row.flowDirection === "expense" ? formatMoney(row.flowAmount) : "—"}</FinanceTableCell>
-                      <FinanceTableCell columnRole="account">{formatNullable(row.bankAccountLabels.join("、"))}</FinanceTableCell>
+                      <FinanceTableCell columnRole="account">{formatNullable(row.bankAccountDisplayLabels.join("、"))}</FinanceTableCell>
                       <FinanceTableCell columnRole="status"><span className="turnover-flow-relations">{[row.cashClosureLinked ? "已结清" : row.cashPairLinked ? "已配对" : "", row.linkedOa ? "已关联 OA" : "", row.linkedInvoice ? "已关联发票" : ""].filter(Boolean).join(" · ") || "—"}</span></FinanceTableCell>
                       <FinanceTableCell columnRole="action"><Button className="turnover-text-action" variant="ghost" size="sm" aria-label={`${actionsDisabled ? "查看" : "编辑"}流水 ${accessibleName}`} onPress={() => onEdit({ ...row, counterpartyName: group.counterpartyName, familyLabel: group.familyLabel })}>{actionsDisabled ? "查看" : "编辑"}</Button></FinanceTableCell>
                     </FinanceTableRow>;

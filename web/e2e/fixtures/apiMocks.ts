@@ -3680,15 +3680,19 @@ function inputInvoiceUsageRowsPayload(
           counterparty_name: "浏览器进项供应商",
           trade_time: "2026-05-03 10:30:00",
           amount: "88.00",
+          original_amount: "88.00",
           direction: "outflow",
           direction_label: "支出",
           bank_name: "建设银行",
+          bank_short_name: "建行",
           account_last4: "1138",
           summary: "浏览器 e2e 进项付款",
           remark: "进项使用 e2e",
           detail_available: true,
         },
         relation_count: paymentRulesSaveFlow ? 0 : 1,
+        original_amount: paymentRulesSaveFlow ? "0.00" : "88.00",
+        original_transaction_count: paymentRulesSaveFlow ? 0 : 1,
         has_multiple: false,
         detail_mode: paymentRulesSaveFlow ? "none" : "single",
         summaries: [],
@@ -4330,7 +4334,7 @@ function inputInvoiceOaReverseSubmittedHistoryPayload(submitted: boolean) {
   };
 }
 
-function oaPendingPaymentRowsPayload(includeInvoiceImportEvidence = false) {
+export function oaPendingPaymentRowsPayload(includeInvoiceImportEvidence = false) {
   return {
     rows: [
       {
@@ -5151,7 +5155,7 @@ function costTimeRows(
         expense_content: row.expense_content,
         amount: row.amount,
         counterparty_name: row.counterparty_name,
-        payment_account_label: row.payment_account_label,
+        payment_account_label: row.payment_account_label, bank_account_display_label: row.payment_account_label,
         oa_applicant: row.oa_applicant ?? "浏览器成本申请人",
         remark: "浏览器成本统计明细",
       })),
@@ -5173,7 +5177,7 @@ function costAttributedRows(
   ).map((row) => ({
     ...row,
     payment_account_label: "",
-    bank_account_label: row.payment_account_label || "银行账户未确定",
+    bank_account_label: row.payment_account_label || "银行账户未确定", bank_account_display_label: row.payment_account_label || "银行账户未确定",
   }));
 }
 
@@ -5210,7 +5214,7 @@ function costBankFlowRows(
   ).map((row) => ({
     ...row,
     direction: row.transaction_id === "cost-txn-e2e-002" ? "收入" : "支出",
-    bank_account_label: row.payment_account_label,
+    bank_account_label: row.payment_account_label, bank_account_display_label: row.payment_account_label,
     ...costBankTagForRow(row),
   }));
 }
@@ -5289,7 +5293,7 @@ function costStatisticsExplorerPagePayload(
   const bankFlowRows = costRows.map((row) => ({
     ...row,
     direction: row.transaction_id === "cost-txn-e2e-002" ? "收入" : "支出",
-    bank_account_label: row.payment_account_label,
+    bank_account_label: row.payment_account_label, bank_account_display_label: row.payment_account_label,
     ...costBankTagForRow(row),
   }));
   const amount = (value: string) => Number(value.replace(/,/g, "")) || 0;
@@ -5324,7 +5328,7 @@ function costStatisticsExplorerPagePayload(
     primary_tag_count: group.expenseTypes.size,
   })).sort((left, right) => amount(right.total_amount) - amount(left.total_amount));
   const bankAccounts = Array.from(bankGroups.entries()).map(([label, group]) => ({
-    bank_account_label: label,
+    bank_account_label: label, bank_account_display_label: label,
     total_amount: formatAmount(group.total),
     project_count: group.projects.size,
   })).sort((left, right) => amount(right.total_amount) - amount(left.total_amount));
@@ -5481,7 +5485,7 @@ function costBankTransactionPayload(
       direction: row?.direction ?? "支出",
       amount: row?.amount ?? "10,000.00",
       counterparty_name: row?.counterparty_name ?? "浏览器设备供应商",
-      payment_account_label: row?.payment_account_label ?? "工商银行 账户 0001",
+      payment_account_label: row?.payment_account_label ?? "工商银行 账户 0001", bank_account_display_label: row?.payment_account_label ?? "工商银行 账户 0001",
       remark: "浏览器成本统计明细",
     },
   };
@@ -5514,7 +5518,7 @@ function costAllocationPayload(
       amount,
       counterparty_name: row?.counterparty_name ?? "浏览器设备供应商",
       payment_account_label: row?.payment_account_label ?? "工商银行 账户 0001",
-      bank_account_label: row?.payment_account_label ?? "银行账户未确定",
+      bank_account_label: row?.payment_account_label ?? "银行账户未确定", bank_account_display_label: row?.payment_account_label ?? "银行账户未确定",
       oa_applicant: "浏览器成本申请人",
       oa_original_amount: amount,
       oa_allocation_weight: "100.00%",
@@ -5526,7 +5530,7 @@ function costAllocationPayload(
       amount,
       direction: "支出",
       counterparty_name: row?.counterparty_name ?? "浏览器设备供应商",
-      payment_account_label: row?.payment_account_label ?? "工商银行 账户 0001",
+      payment_account_label: row?.payment_account_label ?? "工商银行 账户 0001", bank_account_display_label: row?.payment_account_label ?? "工商银行 账户 0001",
       remark: "浏览器成本统计明细",
       bank_tag_code: "project_cost",
       bank_tag_label: "项目开销",
@@ -6113,7 +6117,7 @@ function outputInvoiceReversalRelationSummaries() {
   ];
 }
 
-function outputInvoiceCollectionRowsPayload(
+export function outputInvoiceCollectionRowsPayload(
   url?: URL,
   includeInvoiceImportRows = false,
 ) {
@@ -6717,7 +6721,7 @@ function turnoverSummaryRow(relationClosed: boolean) {
     category_label_path: ["外部往来款收款", "收回借款"],
     category_version: 1,
     counterparty_bank_name: "建设银行",
-    bank_account_labels: ["建行 8106"],
+    bank_account_labels: ["建行 8106"], bank_account_display_labels: ["建行 8106"],
     summary_text: relationClosed ? "浏览器 e2e 闭环完成" : "浏览器 e2e 往来款待闭环",
     allocation_status: "unallocated",
     allocated_lot_ids: [],
@@ -6780,7 +6784,7 @@ function turnoverFlowRow(
     turnover_action_label: isIncome ? "已收款" : "已还款",
     selection_version: `selection-${rowId}-${categoryVersion}`,
     counterparty_bank_name: "建设银行",
-    bank_account_labels: ["建行 8106"],
+    bank_account_labels: ["建行 8106"], bank_account_display_labels: ["建行 8106"],
     summary_text: isIncome ? "浏览器 e2e 收回借款" : "浏览器 e2e 归还借款",
     allocation_status: "unallocated",
     allocated_lot_ids: [],
@@ -6948,7 +6952,7 @@ function bankAccountsPayload() {
   };
 }
 
-function bankTransactionsPayload(
+export function bankTransactionsPayload(
   relationConfirmed: boolean,
   bankImportConfirmed = false,
   options: {
@@ -9250,7 +9254,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         }],
         bank_events: [{
           transaction_id: "bank-cost-1",
-          bank_account_label: "建设银行 8106", bank_tag_code: "material", bank_tag_primary_label: "项目开销", bank_tag_sub_label: "材料费",
+          bank_account_label: "建设银行 8106", bank_account_display_label: "建设银行 8106", bank_tag_code: "material", bank_tag_primary_label: "项目开销", bank_tag_sub_label: "材料费",
           event_kind: "outflow", in_project_cost_scope: true,
           amount: "100.00",
           trade_time: "2026-08-28T10:00:00+08:00",
@@ -9850,7 +9854,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             counterparty_name: "云南建设有限公司",
             direction_label: "支",
             amount: "1000.00",
-            bank_account_label: "建行 8106",
+            bank_account_label: "建行 8106", bank_account_display_label: "建行 8106",
             summary: "浏览器 e2e 归还借款",
           },
         ],

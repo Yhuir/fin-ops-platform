@@ -8,8 +8,8 @@ export function sourceTask(): CostStatisticsManualAllocationTask {
     decisionMode: 'automatic', status: 'pending', pendingReasons: ['source_required'], oaTotal: '600.00', grossOutflowTotal: '600.00', wrongPaymentRefundTotal: '0.00', netOutflowTotal: '600.00',
     units: [{ unitId: 'oa-1:parent', oaId: 'oa-1', oaApplyType: '支付申请', expenseItemId: '', projectId: 'p-1', projectName: '项目 A', expenseType: '原 OA 分类', expenseContent: '材料采购', oaApplicant: '申请人', lockOaAmount: true, outsideCostAmount: "0.00", oaOriginalAmount: '600.00' }],
     bankEvents: [
-      { transactionId: 'bank-a', eventKind: 'outflow', amount: '350.00', counterpartyName: '供应商', tradeTime: '2026-08-15', tags: ['采购', '材料款'], bankAccountLabel: '建行 8106', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款' },
-      { transactionId: 'bank-b', eventKind: 'outflow', amount: '250.00', counterpartyName: '供应商', tradeTime: '2026-09-03', tags: ['采购', '材料款'], bankAccountLabel: '民生 9486', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款' },
+      { transactionId: 'bank-a', eventKind: 'outflow', amount: '350.00', counterpartyName: '供应商', tradeTime: '2026-08-15', tags: ['采购', '材料款'], bankAccountLabel: '建行 8106', bankAccountDisplayLabel: '建行 8106', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款' },
+      { transactionId: 'bank-b', eventKind: 'outflow', amount: '250.00', counterpartyName: '供应商', tradeTime: '2026-09-03', tags: ['采购', '材料款'], bankAccountLabel: '民生 9486', bankAccountDisplayLabel: '民生 9486', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款' },
     ],
     allocations: [{ unitId: 'oa-1:parent', amount: '600.00' }], oaCostTagOverrides: [], manualItems: [], manualOptions: {projects: [], tags: []}, suggestedSourceAllocations: null, relationDisplayGroups: [], sourceAllocations: null,
     nonCostAmount: '0.00', nonCostReason: '', version: 0, updatedAt: '', updatedBy: '', canSave: true,

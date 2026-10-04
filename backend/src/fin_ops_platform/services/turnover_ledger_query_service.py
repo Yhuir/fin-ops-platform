@@ -8,6 +8,7 @@ from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.bank_details_canonical_query import (
     PostgresBankDetailsCanonicalQueryRepository,
 )
+from fin_ops_platform.services.bank_settings import bank_account_display_labels_from_settings
 from fin_ops_platform.services.bank_transaction_category_service import (
     BankTransactionCategoryService,
 )
@@ -150,6 +151,7 @@ class TurnoverLedgerQueryService:
                 ),
                 selected_tag_codes_provider=lambda: selected_tag_codes,
                 workbench_relation_source_provider=relation_source_rows,
+                bank_account_display_labels=bank_account_display_labels_from_settings(settings_snapshot),
             )
 
 

@@ -3944,7 +3944,7 @@ function buildCostStatisticsExplorerPayload(
       oa_applicant: row.oa_applicant ?? "",
       counterparty_name: row.counterparty_name,
       payment_account_label: "",
-      bank_account_label: row.payment_account_label || "银行账户未确定",
+      bank_account_label: row.payment_account_label || "银行账户未确定", bank_account_display_label: row.payment_account_label || "银行账户未确定",
       remark: costStatisticsEntryFixtures[row.transaction_id]?.transaction.remark ?? "",
       ...mockBankTagForCostRow(row),
     })))
@@ -4022,7 +4022,7 @@ function buildCostStatisticsExplorerPagePayload(
     account.amount += amountNumber(row.amount); account.rows.push(row); account.projects.add(row.project_name); accountGroups.set(row.bank_account_label, account);
   }
   const bankAccountFacets = Array.from(accountGroups.entries()).map(([label, group]) => ({
-    bank_account_label: label,
+    bank_account_label: label, bank_account_display_label: label,
     total_amount: formatAmount(group.amount),
     project_count: group.projects.size,
   })).sort((left, right) => amountNumber(right.total_amount) - amountNumber(left.total_amount));
@@ -4181,7 +4181,7 @@ function buildCostStatisticsBankTransactionPayload(transactionId: string) {
         direction: transaction.direction ?? "支出",
         amount: transaction.amount,
         counterparty_name: transaction.counterparty_name,
-        payment_account_label: transaction.payment_account_label,
+        payment_account_label: transaction.payment_account_label, bank_account_display_label: transaction.payment_account_label,
         remark: transaction.remark,
         project_name: transaction.project_name,
         expense_type: transaction.expense_type,
@@ -4231,7 +4231,7 @@ function buildCostStatisticsAllocationPayload(allocationId: string) {
         amount: sourceRow.amount,
         counterparty_name: sourceRow.counterparty_name,
         payment_account_label: sourceRow.payment_account_label,
-        bank_account_label: sourceRow.payment_account_label || "银行账户未确定",
+        bank_account_label: sourceRow.payment_account_label || "银行账户未确定", bank_account_display_label: sourceRow.payment_account_label || "银行账户未确定",
         oa_applicant: transaction.oa_applicant ?? "",
         oa_original_amount: sourceRow.amount,
         oa_allocation_weight: "100.00%",
@@ -4243,7 +4243,7 @@ function buildCostStatisticsAllocationPayload(allocationId: string) {
         amount: transaction.amount,
         direction: "支出",
         counterparty_name: transaction.counterparty_name,
-        payment_account_label: transaction.payment_account_label,
+        payment_account_label: transaction.payment_account_label, bank_account_display_label: transaction.payment_account_label,
         remark: transaction.remark,
         bank_tag_code: "project_cost",
         bank_tag_label: "项目开销",
@@ -4412,7 +4412,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         trade_time: "2026-08-27T09:30:00+08:00",
         counterparty_name: "昆明设备供应商",
         tags: ["项目开销", "设备材料", "设备采购"],
-        bank_account_label: "建设银行 8106", bank_tag_code: "material", bank_tag_primary_label: "项目开销", bank_tag_sub_label: "设备材料",
+        bank_account_label: "建设银行 8106", bank_account_display_label: "建设银行 8106", bank_tag_code: "material", bank_tag_primary_label: "项目开销", bank_tag_sub_label: "设备材料",
       },
       {
         transaction_id: "bank-manual-002",
@@ -4421,7 +4421,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         trade_time: "2026-08-27T10:30:00+08:00",
         counterparty_name: "昆明设备供应商",
         tags: ["项目开销", "设备材料", "设备采购"],
-        bank_account_label: "建设银行 8106", bank_tag_code: "material", bank_tag_primary_label: "项目开销", bank_tag_sub_label: "设备材料",
+        bank_account_label: "建设银行 8106", bank_account_display_label: "建设银行 8106", bank_tag_code: "material", bank_tag_primary_label: "项目开销", bank_tag_sub_label: "设备材料",
       },
     ],
     allocations,
@@ -6432,7 +6432,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           balance_amount: "800.00",
           first_transaction_at: "2026-05-01 10:00:00",
           last_settlement_at: "2026-05-03 10:00:00",
-          bank_account_labels: ["建行 8106"],
+          bank_account_labels: ["建行 8106"], bank_account_display_labels: ["建行 8106"],
           summary_text: "暂借款 / 还款",
           annual_interest_rate: "3.50%",
           loan_days: 2,
@@ -6459,7 +6459,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           balance_amount: "0.00",
           first_transaction_at: "2026-04-01 10:00:00",
           last_settlement_at: "2026-04-20 10:00:00",
-          bank_account_labels: ["工行 6386"],
+          bank_account_labels: ["工行 6386"], bank_account_display_labels: ["工行 6386"],
           summary_text: "银行往来闭合",
           annual_interest_rate: null,
           loan_days: 19,
@@ -6486,7 +6486,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           balance_amount: "2000.00",
           first_transaction_at: "2026-05-02 09:00:00",
           last_settlement_at: "2026-05-04 09:00:00",
-          bank_account_labels: ["建行 8106"],
+          bank_account_labels: ["建行 8106"], bank_account_display_labels: ["建行 8106"],
           summary_text: "公司暂借款",
           annual_interest_rate: null,
           loan_days: 2,
@@ -6511,7 +6511,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             row_span: 1,
             group_tone: "warning",
             rows: [
-              {
+              { bank_account_display_labels: [],
                 relation_id: "rel-suggested-personal",
                 status: "suggested",
                 status_label: "待人工确认",
@@ -6547,7 +6547,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             row_span: 1,
             group_tone: "success",
             rows: [
-              {
+              { bank_account_display_labels: [],
                 relation_id: "rel-deterministic-bank",
                 status: "deterministic",
                 status_label: "已闭合",
@@ -6583,7 +6583,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             row_span: 1,
             group_tone: "success",
             rows: [
-              {
+              { bank_account_display_labels: [],
                 relation_id: "rel-company-001",
                 status: "confirmed",
                 status_label: "人工确认",
@@ -6637,7 +6637,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               allocated_lot_ids: [`${row.relation_id}-lot-${index + 1}`],
             };
             return [
-              {
+              { bank_account_display_labels: [],
                 ...baseFlow,
                 row_kind: "flow",
                 flow_id: `bank:${row.bank_row_ids[0] ?? row.relation_id}`,
@@ -6654,7 +6654,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
                 category_label: `${group.family_label}：${group.pending_direction_label}`,
                 bank_row_ids: row.bank_row_ids[0] ? [row.bank_row_ids[0]] : [],
               },
-              {
+              { bank_account_display_labels: [],
                 ...baseFlow,
                 row_kind: "flow",
                 flow_id: `bank:${row.bank_row_ids[1] ?? `${row.relation_id}:settlement`}`,
@@ -7137,7 +7137,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         return jsonResponse({
           body: {
             extra: nextExtra,
-            row: {
+            row: { bank_account_display_labels: [],
               relation_id: relationId,
               status: "suggested",
               status_label: "待人工确认",
@@ -7188,7 +7188,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             balance_amount: "800.00",
             first_transaction_at: "2026-05-01 10:00:00",
             last_settlement_at: "2026-05-03 10:00:00",
-            bank_account_labels: ["建行 8106"],
+            bank_account_labels: ["建行 8106"], bank_account_display_labels: ["建行 8106"],
             summary_text: "暂借款",
             annual_interest_rate: "3.50%",
             loan_days: 2,
@@ -7205,7 +7205,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               counterparty_name: "张三",
               direction_label: "收",
               amount: "1000.00",
-              bank_account_label: "建行 8106",
+              bank_account_label: "建行 8106", bank_account_display_label: "建行 8106",
               summary: "暂借款",
               purpose: "借款",
               category_label: "个人暂借款：待还款",
@@ -7216,7 +7216,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               counterparty_name: "张三",
               direction_label: "支",
               amount: "200.00",
-              bank_account_label: "建行 8106",
+              bank_account_label: "建行 8106", bank_account_display_label: "建行 8106",
               summary: "归还暂借款",
               purpose: "还款",
               category_label: "个人暂借款：已还款",

@@ -1,4 +1,5 @@
 import CountLabel from "../components/common/CountLabel";
+import BankAccountValue from "../components/BankAccountValue";
 import BankSplitChips from "../features/bankSplits/BankSplitChips";
 import BankTransactionDrawer from "../features/bankSplits/BankTransactionDrawer";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type RefObject } from "react";
@@ -2429,6 +2430,11 @@ export default function BankDetailsPage() {
                         <FinanceTableCell className="bank-col-amount" columnRole="amount" textValue={formatMoney(row.amount)}>
                           <div className="bank-amount-cell">
                             <div className="bank-amount-line">
+                              <span className="bank-amount-value">
+                                {formatMoney(row.amount)}
+                              </span>
+                            </div>
+                            <div className="bank-amount-metadata">
                               <Chip
                                 className={`direction-tag bank-direction-tag-centered bank-chip-auto-size ${row.direction}`}
                                 color={directionTagColor(row.direction)}
@@ -2437,13 +2443,8 @@ export default function BankDetailsPage() {
                               >
                                 <Chip.Label className="bank-chip-label">{row.directionLabel}</Chip.Label>
                               </Chip>
-                              <span className="bank-amount-value">
-                                {formatMoney(row.amount)}
-                              </span>
+                              <BankAccountValue value={[row.bankShortName || row.bankName, row.accountLast4].filter(Boolean).join(" ") || "—"} />
                             </div>
-                            <span className="bank-source-chip bank-chip-auto-size">
-                              <span className="bank-chip-label">{`${row.bankName} ${row.accountLast4}`}</span>
-                            </span>
                             {row.bankSplitParts?.length ? <BankSplitChips parts={row.bankSplitParts} /> : null}
                           </div>
                         </FinanceTableCell>

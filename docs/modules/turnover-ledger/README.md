@@ -10,6 +10,8 @@
 
 ## 当前业务约定
 
+- 流水与关系详情通过同一快照账户映射追加 `bank_account_display_labels` / `bank_account_display_label` 展示简称；原账户标签、关系身份、金额及导出保持不变，无映射或冲突保留原标签。
+
 - 流水用途、有效分类、规则、active relations 与 extras 来自同一个只读快照，分类算法复用银行 owner。
 - 现金配对不等于业务结清；只有成员完整唯一、现金差额和本金结算余额都为零才认定闭环。
 - 手工闭环使用当前银行事实和往来语义的 selection_version，在同一 UoW 重检并提交；不能仅以 relation mode 判断结清。

@@ -34,7 +34,7 @@ export function CashUnsettledBook({ initial, onChange, onItem }: { initial: Cash
       <CashInput label="事项关键词" value={keyword} onChange={setKeyword} placeholder="搜索已登记的未结事项" />
       <Button type="submit" size="sm" variant="secondary">查询</Button>
       <Button size="sm" variant="tertiary" onPress={() => { const initial = initialUnsettledCriteria(); setCriteria(initial); setDate(initial.date_to); setKeyword(""); setError(null); }}>重置</Button>
-      <Button size="sm" variant="tertiary" onPress={query.reload}>刷新</Button>
+      <Button size="sm" variant="secondary" onPress={query.reload}>刷新</Button>
     </form>
     <p className="cash-hint">截至 {criteria.date_to} 的已登记未结事项，包含本期没有处理的旧欠款。详情显示当前可办理额。</p>
     <CashNotice error={error ?? query.error?.message} />{query.error && <Button size="sm" variant="secondary" onPress={query.reload}>重新读取</Button>}
@@ -42,13 +42,13 @@ export function CashUnsettledBook({ initial, onChange, onItem }: { initial: Cash
       sortDescriptor={{ column: criteria.sort, direction: criteria.order === "asc" ? "ascending" : "descending" }} onSortChange={value => setError(apply({ sort: String(value.column), order: value.direction === "ascending" ? "asc" : "desc" }))}
       footer={data && <><dl className="cash-summary-line"><div><dt>未结事项</dt><dd>{data.summary.item_count}</dd></div><div><dt>截至期末应收未结</dt><dd>{cashAmount(data.summary.remaining_obligation_amount.receivable)}</dd></div><div><dt>截至期末应付未结</dt><dd>{cashAmount(data.summary.remaining_obligation_amount.payable)}</dd></div></dl><FinanceTablePagination {...data.pagination} pageSize={50} onPageChange={page => setError(apply({ page }))} /></>}>
       <FinanceTableHeader>
-        <FinanceTableColumn id="origin_date" isRowHeader allowsSorting>事项日期</FinanceTableColumn>
-        <FinanceTableColumn id="project"><CashColumnHeader label="项目"><CashHistoricalProjectFilter column label="项目" scope={{ date_to: criteria.date_to }} value={criteria.projects} selected={criteria.selected} onApply={(projects, selected) => apply({ projects, selected })} /></CashColumnHeader></FinanceTableColumn>
-        <FinanceTableColumn id="counterparty" allowsSorting><CashColumnHeader label="往来对象"><CashTextFilter label="往来对象" value={criteria.counterparty} onApply={counterparty => apply({ counterparty })} /></CashColumnHeader></FinanceTableColumn>
-        <FinanceTableColumn id="group"><CashColumnHeader label="类别"><CashFilterPopover column label="往来类别" options={groups} value={criteria.group ? [criteria.group] : []} onApply={value => value.length > 1 ? "本视图请选择一个往来类别；清空可查看全部。" : apply({ group: value[0] ?? "" })} /></CashColumnHeader></FinanceTableColumn>
-        <FinanceTableColumn id="content">事项内容</FinanceTableColumn><FinanceTableColumn id="direction">方向</FinanceTableColumn>
+        <FinanceTableColumn id="origin_date" isRowHeader allowsSorting columnRole="date">事项日期</FinanceTableColumn>
+        <FinanceTableColumn id="project" columnRole="description"><CashColumnHeader label="项目"><CashHistoricalProjectFilter column label="项目" scope={{ date_to: criteria.date_to }} value={criteria.projects} selected={criteria.selected} onApply={(projects, selected) => apply({ projects, selected })} /></CashColumnHeader></FinanceTableColumn>
+        <FinanceTableColumn id="counterparty" allowsSorting columnRole="identity"><CashColumnHeader label="往来对象"><CashTextFilter label="往来对象" value={criteria.counterparty} onApply={counterparty => apply({ counterparty })} /></CashColumnHeader></FinanceTableColumn>
+        <FinanceTableColumn id="group" columnRole="status"><CashColumnHeader label="类别"><CashFilterPopover column label="往来类别" options={groups} value={criteria.group ? [criteria.group] : []} onApply={value => value.length > 1 ? "本视图请选择一个往来类别；清空可查看全部。" : apply({ group: value[0] ?? "" })} /></CashColumnHeader></FinanceTableColumn>
+        <FinanceTableColumn id="content" columnRole="description">事项内容</FinanceTableColumn><FinanceTableColumn id="direction" columnRole="status">方向</FinanceTableColumn>
         <FinanceTableColumn id="original" columnRole="amount">原始金额</FinanceTableColumn><FinanceTableColumn id="settled" columnRole="amount">截至日已结</FinanceTableColumn>
-        <FinanceTableColumn id="remaining_amount" columnRole="amount" allowsSorting>截至日未结</FinanceTableColumn><FinanceTableColumn id="actions">操作</FinanceTableColumn>
+        <FinanceTableColumn id="remaining_amount" columnRole="amount" allowsSorting>截至日未结</FinanceTableColumn><FinanceTableColumn id="actions" columnRole="action">操作</FinanceTableColumn>
       </FinanceTableHeader>
       <FinanceTableBody renderEmptyState={() => <p className="cash-empty" role="status">{query.error ? "读取失败，请重试。" : query.loading ? null : "该范围没有已登记的未结事项。"}</p>}>{(data?.rows ?? []).map(row => <FinanceTableRow key={row.item_id} id={row.item_id} textValue={row.content} className={row.ledger_group === "company" ? "cash-row--company" : row.ledger_group === "external_person" ? "cash-row--external-person" : "cash-row--personal-principal"}>
         <FinanceTableCell columnRole="date">{row.origin_date}</FinanceTableCell><FinanceTableCell columnRole="description">{row.project?.name_snapshot ?? "无项目"}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.counterparty}</FinanceTableCell><FinanceTableCell columnRole="status">{groups.find(group => group.value === row.ledger_group)?.label}</FinanceTableCell><FinanceTableCell columnRole="description">{row.content}</FinanceTableCell><FinanceTableCell columnRole="status">{row.obligation_direction === "receivable" ? "应收 / 对方应还" : "应付 / 我方应还"}</FinanceTableCell>

@@ -85,17 +85,17 @@ export default function CashFlowTable({ itemId, taskOccurrenceId, initialCriteri
       <CashInput label="截止日期" type="date" value={dateTo} onChange={setDateTo} /></>}
       <CashInput label="搜索流水" value={search} onChange={setSearch} placeholder="内容说明、人员或项目" />
       <Button type="submit" size="sm" variant="secondary">查询</Button>
-      <Button size="sm" variant="tertiary" onPress={reset}>重置</Button><Button size="sm" variant="tertiary" onPress={query.reload}>刷新</Button>
+      <Button size="sm" variant="tertiary" onPress={reset}>重置</Button><Button size="sm" variant="secondary" onPress={query.reload}>刷新</Button>
       <CashFilterPopover label="方向" value={criteria.kinds} onApply={kinds => applyCriteria({ kinds, page: 1 })} options={[{ value: "receipt", label: "收入" }, { value: "payment", label: "支出" }, { value: "transfer", label: "内部转账" }]} />
       <CashSortMenu sort={sort} order={order} onChange={applySort} options={[{ value: "amount", label: "流水金额" }]} /><div className="cash-toolbar-actions">{actions}</div>
     </form>
     <CashNotice error={validation || query.error?.message} />
 
     {data && <>
-      <div className="cash-summary"><span>筛选合计：收入 {cashAmount(data.summary.filtered_totals.income_amount)}</span><span>支出 {cashAmount(data.summary.filtered_totals.expense_amount)}</span><span>内部转账 {cashAmount(data.summary.filtered_totals.transfer_amount)}</span><Button size="sm" variant="tertiary" aria-expanded={showBalances} onPress={() => setShowBalances(!showBalances)}>账户期间余额</Button></div>
+      <div className="cash-summary"><span>筛选合计：收入 {cashAmount(data.summary.filtered_totals.income_amount)}</span><span>支出 {cashAmount(data.summary.filtered_totals.expense_amount)}</span><span>内部转账 {cashAmount(data.summary.filtered_totals.transfer_amount)}</span><Button size="sm" variant="secondary" aria-expanded={showBalances} onPress={() => setShowBalances(!showBalances)}>账户期间余额</Button></div>
       {data.summary.account_balances.some(row => row.ending_balance?.startsWith("-")) && <p className="cash-hint">部分账户账面为负，请核对或补录。</p>}
       {showBalances && <AppDrawer open title="账户期间余额" width={960} className="cash-module cash-drawer" onClose={() => setShowBalances(false)}><FinanceTable ariaLabel="账户期间余额" minWidth={900}>
-        <FinanceTableHeader>{["账户", "记账范围", "期间期初", "已知起算余额", "期间转入", "期间转出", "期末余额"].map((label, index) => <FinanceTableColumn key={label} isRowHeader={index === 0}>{label}</FinanceTableColumn>)}</FinanceTableHeader>
+        <FinanceTableHeader>{["账户", "记账范围", "期间期初", "已知起算余额", "期间转入", "期间转出", "期末余额"].map((label, index) => <FinanceTableColumn key={label} isRowHeader={index === 0} columnRole={index === 0 ? "identity" : index === 1 ? "description" : "amount"}>{label}</FinanceTableColumn>)}</FinanceTableHeader>
         <FinanceTableBody>{data.summary.account_balances.map(row => <FinanceTableRow key={row.account_id} id={row.account_id}>
           <FinanceTableCell columnRole="identity">{row.account_name}</FinanceTableCell>
           <FinanceTableCell columnRole="description">{row.coverage_state === "complete" ? "完整期间" : row.coverage_state === "not_started" ? "尚未起算，余额未知" : `自 ${row.coverage_start} 起`}</FinanceTableCell>
@@ -108,7 +108,7 @@ export default function CashFlowTable({ itemId, taskOccurrenceId, initialCriteri
         onSortChange={value => applySort(String(value.column), value.direction === "ascending" ? "asc" : "desc")} footer={
         data && <FinanceTablePagination page={page} pageSize={50} total={data.pagination.total} onPageChange={setPage} />
       }>
-        <FinanceTableHeader>{["日期", "账户", "项目", "人员", "分类", "内容说明", "收入", "支出", "互转金额", "来源 / 任务", "账户余额", "操作"].map((label, index) => <FinanceTableColumn key={label} id={index === 0 ? "occurred_on" : `flow-${index}`} allowsSorting={index === 0} isRowHeader={index === 0} columnRole={index >= 6 && index <= 8 || index === 10 ? "amount" : index === 11 ? "action" : index === 0 ? "date" : index === 1 ? "account" : "description"}>
+        <FinanceTableHeader>{["日期", "账户", "项目", "人员", "分类", "内容说明", "收入", "支出", "互转金额", "来源 / 任务", "账户余额", "操作"].map((label, index) => <FinanceTableColumn key={label} id={index === 0 ? "occurred_on" : `flow-${index}`} allowsSorting={index === 0} isRowHeader={index === 0} columnRole={index >= 6 && index <= 8 || index === 10 ? "amount" : index === 11 ? "action" : index === 0 ? "date" : index === 1 ? "account" : index === 3 ? "identity" : index === 4 ? "status" : "description"}>
           <CashColumnHeader label={label}>
             {index === 1 && <CashConfigurationFilter column name="accounts" label="账户" value={criteria.account_ids} selected={selected.account_ids} onApply={(value, labels) => applyResource("account_ids", value, labels)} />}
             {index === 2 && <CashHistoricalProjectFilter column label="项目" value={criteria.project_ids} selected={selected.project_ids} scope={{ date_from: criteria.date_from, date_to: criteria.time_scope === "all" ? cashToday() : criteria.date_to, item_id: itemId, task_occurrence_id: taskOccurrenceId }} onApply={(value, labels) => applyResource("project_ids", value, labels)} />}

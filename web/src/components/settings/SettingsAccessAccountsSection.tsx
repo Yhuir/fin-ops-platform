@@ -110,7 +110,7 @@ export default function SettingsAccessAccountsSection({
       <div className="settings-access-workspace">
         <aside className="settings-access-account-pane" aria-label="账户列表">
           <div className="settings-access-list-heading"><strong>账户 <span>{managedAccessAccounts.length}</span></strong>
-            <Button variant="ghost" size="sm" isDisabled={controlsDisabled} onPress={() => { setIsAdding(!isAdding); setQuery(""); }}><UserPlus size={15} />{isAdding ? "收起" : "新增账户"}</Button>
+            <Button variant="secondary" size="sm" isDisabled={controlsDisabled} onPress={() => { setIsAdding(!isAdding); setQuery(""); }}><UserPlus size={15} />{isAdding ? "收起" : "新增账户"}</Button>
           </div>
           <Input aria-label="筛选已有账户" placeholder="搜索已有账户或姓名" type="search" value={filter} onChange={(event) => setFilter(event.target.value)} />
           {isAdding ? <div className="settings-access-add-panel"><div className="settings-access-search">

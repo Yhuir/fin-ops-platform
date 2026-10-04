@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import ImportJobDiagnostics from "../components/imports/ImportJobDiagnostics";
@@ -15,6 +15,10 @@ function mount() { const onHandled = vi.fn().mockResolvedValue(undefined); rende
 beforeEach(() => { vi.resetAllMocks(); vi.mocked(api.fetchImportJobs).mockResolvedValue(list); vi.mocked(api.fetchImportJobDetail).mockResolvedValue(detail); });
 test("reads another owner's details with shared preview and closes with exact version then refreshes", async () => {
   const user = userEvent.setup(); const refreshed = mount();
+  const table = await screen.findByRole("grid", { name: "待处理导入任务" });
+  for (const [name, role] of [["创建人", "identity"], ["状态", "status"], ["更新时间", "date"], ["操作", "action"]]) {
+    expect(within(table).getByRole("columnheader", { name })).toHaveAttribute("data-column-role", role);
+  }
   await user.click(await screen.findByRole("button", { name: "查看详情" }));
   expect(await screen.findByText(/没有可读取的文件明细/)).toBeVisible();
   expect(screen.getByRole("button", { name: "查看发票导入预览" })).toBeEnabled();

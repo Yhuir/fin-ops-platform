@@ -70,6 +70,7 @@ class TurnoverLedgerService:
         selected_tag_codes_provider: Callable[[], list[str]] | None = None,
         workbench_relation_source_provider: Callable[[list[str]], list[dict[str, Any]]] | None = None,
         today_provider: Callable[[], date] | None = None,
+        bank_account_display_labels: dict[str, str] | None = None,
     ) -> None:
         self._import_service = import_service
         self._category_service = category_service
@@ -79,6 +80,7 @@ class TurnoverLedgerService:
         self._selected_tag_codes_provider = selected_tag_codes_provider
         self._workbench_relation_source_provider = workbench_relation_source_provider
         self._today_provider = today_provider or self._business_today
+        self._bank_account_display_labels = dict(bank_account_display_labels or {})
 
     def list_ledger(
         self,
@@ -118,7 +120,7 @@ class TurnoverLedgerService:
                 )
                 for family_key in TURNOVER_FAMILY_LABELS
             ],
-            "rows": filtered_rows[start:end],
+            "rows": [self._with_bank_display_labels(row) for row in filtered_rows[start:end]],
             "pagination": {
                 "page": normalized_page,
                 "page_size": normalized_page_size,
@@ -225,6 +227,12 @@ class TurnoverLedgerService:
         normalized_page_size = min(max(int(page_size or 50), 1), 200)
         start = (normalized_page - 1) * normalized_page_size
         end = start + normalized_page_size
+        for group in groups:
+            group["flow_rows"] = [self._with_bank_display_labels(row) for row in group["flow_rows"]]
+            group["allocation_lots"] = [self._with_bank_display_labels(row) for row in group["allocation_lots"]]
+            group["lot_rows"] = group["allocation_lots"]
+            group["summary_row"] = self._with_bank_display_labels(group["summary_row"])
+            group["rows"] = [group["summary_row"]]
         legacy_rows = [item["legacy"] for item in filtered_items]
         all_legacy_rows = [item["legacy"] for item in facet_items]
         return {
@@ -310,6 +318,7 @@ class TurnoverLedgerService:
             row_payload = self._row_payload(relation, rows_by_id)
             if row_payload is None:
                 break
+            row_payload = self._with_bank_display_labels(row_payload)
             relation_payload = {
                 **row_payload,
                 "source": str(relation.get("source") or ""),
@@ -362,12 +371,22 @@ class TurnoverLedgerService:
             "debit_amount": self._format_money(amount if direction == "outflow" else ZERO),
             "credit_amount": self._format_money(amount if direction == "inflow" else ZERO),
             "bank_account_label": bank_account_label,
+            "bank_account_display_label": self._bank_account_display_labels.get(bank_account_label, bank_account_label),
             "imported_bank_name": imported_bank_name,
             "imported_bank_last4": imported_bank_last4,
             "summary": str(row.get("summary") or "").strip(),
             "remark": str(row.get("remark") or "").strip(),
             "purpose": str(row.get("purpose") or "").strip(),
             "category_label": str(row.get("category_label") or "").strip(),
+        }
+
+    def _with_bank_display_labels(self, row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            **row,
+            "bank_account_display_labels": [
+                self._bank_account_display_labels.get(label, label)
+                for label in row.get("bank_account_labels", [])
+            ],
         }
 
     def selected_bank_rows(self) -> list[dict[str, Any]]:

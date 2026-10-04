@@ -25,7 +25,7 @@ function costDetailSections(detail: CostAllocationDetail) {
       { label: "OA类型", value: allocation.oaApplyType },
       { label: "申请人", value: allocation.oaApplicant },
       { label: "对方户名", value: allocation.counterpartyName },
-      { label: "银行账户", value: allocation.paymentAccountLabel },
+      { label: "银行账户", value: allocation.bankAccountDisplayLabel },
     ],
   }, {
     title: "金额核对",
@@ -54,7 +54,7 @@ function costDetailSections(detail: CostAllocationDetail) {
             : formatCostAmount(evidence.amount),
         },
         { label: "流水标签", value: evidence.bankTagLabel },
-        { label: "银行账户", value: evidence.paymentAccountLabel },
+        { label: "银行账户", value: evidence.bankAccountDisplayLabel },
         { label: "备注", value: evidence.remark },
       ],
     });

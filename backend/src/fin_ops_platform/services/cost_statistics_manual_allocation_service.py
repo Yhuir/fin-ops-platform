@@ -5,6 +5,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from fin_ops_platform.services.app_settings_service import AppSettingsService
+from fin_ops_platform.services.bank_settings import bank_account_display_labels_from_settings
 from fin_ops_platform.services.cost_statistics_allocation_scope import merge_source_decision
 from fin_ops_platform.services.cost_statistics_canonical_repository import (
     PostgresCostStatisticsCanonicalRepository,
@@ -138,7 +139,8 @@ class CostStatisticsManualAllocationService:
             raise KeyError(relation_case_id)
         group = next(group for group in snapshot["cost_groups"]
                      if group["group_id"] == relation_case_id)
-        return {**task, "can_save": can_save,
+        bank_events = _bank_events_with_display_labels(task, snapshot["settings"])
+        return {**task, "bank_events": bank_events, "can_save": can_save,
                 "manual_options": AppSettingsService.cost_manual_options_from_settings(snapshot["settings"], snapshot["manual_projects"]),
                 "suggested_source_allocations": suggest_source_allocations(task, group["bank_rows"], group["source_relation_groups"]),
                 "relation_display_groups": _relation_display_groups(task, group)}
@@ -384,7 +386,8 @@ class CostStatisticsManualAllocationService:
         if decision_mode == "automatic" and previous is None:
             unchanged = next(t for t in CostStatisticsPolicy(snapshot).allocation_tasks if t["relation_case_id"] == relation_case_id)
             group = next(g for g in snapshot["cost_groups"] if g["group_id"] == relation_case_id)
-            return {**unchanged, "manual_options": options, "can_save": True,
+            return {**unchanged, "bank_events": _bank_events_with_display_labels(unchanged, snapshot["settings"]),
+                    "manual_options": options, "can_save": True,
                     "relation_display_groups": _relation_display_groups(unchanged, group)}
         saved = allocation_repository.save(**stored_fields, decision_mode=decision_mode,
                                            expected_version=expected_version, actor_id=actor_id)
@@ -428,9 +431,18 @@ class CostStatisticsManualAllocationService:
         group = next(g for g in snapshot["cost_groups"] if g["group_id"] == relation_case_id)
         updated_snapshot = {**snapshot, "manual_allocations": {**snapshot["manual_allocations"], relation_case_id: saved}}
         updated = next(t for t in CostStatisticsPolicy(updated_snapshot).allocation_tasks if t["relation_case_id"] == relation_case_id)
-        return {**updated, "manual_options": options, "can_save": True,
+        return {**updated, "bank_events": _bank_events_with_display_labels(updated, snapshot["settings"]),
+                "manual_options": options, "can_save": True,
                 "relation_display_groups": _relation_display_groups(updated, group)}
 
+
+
+def _bank_events_with_display_labels(task: dict[str, Any], settings: dict[str, Any]) -> list[dict[str, Any]]:
+    display_labels = bank_account_display_labels_from_settings(settings)
+    return [
+        {**event, "bank_account_display_label": display_labels.get(event["bank_account_label"], event["bank_account_label"])}
+        for event in task["bank_events"]
+    ]
 
 
 def _required_version(value: Any) -> int:

@@ -78,6 +78,7 @@ type ApiBankDetailTransaction = {
   summary_text?: string | null;
   note_text?: string | null;
   bank_name: string;
+  bank_short_name?: string;
   account_last4: string;
   category_code?: BankTransactionCategoryCode | null;
   category_label?: string | null;
@@ -506,6 +507,7 @@ function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
     summaryText: row.summary_text ?? "",
     noteText: row.note_text ?? "",
     bankName: row.bank_name,
+    bankShortName: row.bank_short_name ?? "",
     accountLast4: row.account_last4,
     categoryCode: row.category_code ?? null,
     categoryLabel: row.category_label ?? null,

@@ -37,6 +37,7 @@ import type {
 import { formatMoney } from "../../features/money";
 import { formatDateTimeText } from "../../features/dateTime";
 import OaWorkflowStatusChip from "../common/OaWorkflowStatusChip";
+import BankAccountValue from "../BankAccountValue";
 
 type OaColumnFilterValue = InputInvoiceUsageFilterValue;
 
@@ -319,10 +320,12 @@ export default function OaPendingPaymentsTable({
                         <div className="oa-pending-payments-bank-grid__amount">
                           <span className="oa-pending-payments-bank-amount-line">
                             <TextLine numeric strong value={bankAmount(row)} />
-                            <TableTag>{bankAccountLabel(row)}</TableTag>
+                          </span>
+                          <span className="oa-pending-payments-bank-metadata">
                             <FinanceDirectionTag direction={row.bankTransaction.directionLabel || "支出"}>
                               {row.bankTransaction.directionLabel || "支出"}
                             </FinanceDirectionTag>
+                            <BankAccountValue value={bankAccountLabel(row)} />
                           </span>
                           {row.bankTransaction.bank_split_parts?.length ? <BankSplitChips parts={row.bankTransaction.bank_split_parts} /> : null}
                         </div>
@@ -379,13 +382,11 @@ function InvoiceCell({
         />
       </span>
       {row.invoice.sellerName ? <TextLine value={row.invoice.sellerName} /> : null}
-      {row.invoice.invoiceDate ? (
-        <span className="oa-pending-payments-tag-row">
-          <TableTag>{row.invoice.invoiceDate}</TableTag>
+      <span className="oa-pending-payments-invoice-metadata">
+        {row.invoice.invoiceDate ? <TableTag>{row.invoice.invoiceDate}</TableTag> : null}
+        <span className="oa-pending-payments-invoice-amount-line">
+          <TextLine numeric strong value={invoiceAmount(row)} />
         </span>
-      ) : null}
-      <span className="oa-pending-payments-invoice-amount-line">
-        <TextLine numeric strong value={invoiceAmount(row)} />
       </span>
     </div>
   );
@@ -474,7 +475,7 @@ function GroupedSubHeader({
           sortField: "bank_trade_time",
           sortLabel: "交易时间",
         })}</span>
-        <span>{control({
+        <span className="oa-pending-payments-subheader-grid__amount">{control({
           label: "金额",
           filterFields: [
             { field: "bank_account", label: "银行账户" },
@@ -489,13 +490,12 @@ function GroupedSubHeader({
 
   return (
     <span className="oa-pending-payments-subheader-grid oa-pending-payments-subheader-grid--invoice">
-      <span>{control({ label: "发票号" })}</span>
-      <span>{control({
+      <span className="oa-pending-payments-subheader-grid__invoice-number">{control({ label: "发票号" })}</span>
+      <span className="oa-pending-payments-subheader-grid__invoice-details">{control({
         label: "发票方",
         filterFields: [{ field: "seller_name", label: "发票方" }],
         filterLabel: "发票方",
-      })}</span>
-      <span>{control({
+      })}{control({
         label: "日期",
         sortField: "invoice_date",
         sortLabel: "开票日期",
@@ -927,12 +927,15 @@ function invoiceDisplayNo(row: OaPendingPaymentRow): string {
 }
 
 function bankAccountLabel(row: OaPendingPaymentRow): string {
+  const last4 = row.bankTransaction.accountLast4 || accountLast4(row.bankTransaction.accountNo);
+  if (row.bankTransaction.bankShortName) {
+    return [row.bankTransaction.bankShortName, last4].filter(Boolean).join(" ");
+  }
   if (row.bankTransaction.bankAccount) {
     return row.bankTransaction.bankAccount;
   }
-  const bankName = row.bankTransaction.bankName || "银行";
-  const last4 = row.bankTransaction.accountLast4 || accountLast4(row.bankTransaction.accountNo);
-  return [bankName, last4].filter(Boolean).join(" ") || "-";
+  const bankName = row.bankTransaction.bankName;
+  return [bankName, last4].filter(Boolean).join(" ") || "—";
 }
 
 function accountLast4(value: string | undefined): string {

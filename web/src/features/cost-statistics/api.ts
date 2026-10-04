@@ -49,6 +49,7 @@ type ApiCostExplorerEntryRow = {
   oa_applicant: string;
   payment_account_label: string;
   bank_account_label?: string | null;
+  bank_account_display_label: string;
   remark: string;
   bank_tag_code?: string | null;
   bank_tag_label?: string | null;
@@ -69,6 +70,7 @@ type ApiCostTagExplorerRow = {
 
 type ApiCostBankExplorerRow = {
   bank_account_label: string;
+  bank_account_display_label: string;
   total_amount: string;
   project_count: number;
 };
@@ -181,6 +183,7 @@ type ApiCostStatisticsManualAllocationTask = {
     counterparty_name: string;
     tags: string[];
     bank_account_label: string;
+    bank_account_display_label: string;
     bank_tag_code: string;
     bank_tag_primary_label: string;
     bank_tag_sub_label: string;
@@ -226,6 +229,7 @@ type ApiCostBankTransactionDetail = {
     counterparty_name: string;
     payment_account_label: string;
     bank_account_label: string;
+    bank_account_display_label: string;
     remark: string;
     bank_tag_code?: string | null;
     bank_tag_label?: string | null;
@@ -261,6 +265,7 @@ type ApiCostAllocationDetail = {
     counterparty_name: string;
     payment_account_label: string;
     bank_account_label: string;
+    bank_account_display_label: string;
     oa_applicant: string;
     oa_original_amount: string | null;
     oa_allocation_weight: string;
@@ -273,6 +278,7 @@ type ApiCostAllocationDetail = {
     direction: string;
     counterparty_name: string;
     payment_account_label: string;
+    bank_account_display_label: string;
     remark: string;
     bank_tag_code: string;
     bank_tag_label: string;
@@ -390,6 +396,7 @@ function mapCostExplorerEntryRow(row: ApiCostExplorerEntryRow): CostExplorerEntr
     oaApplicant: row.oa_applicant,
     paymentAccountLabel: row.payment_account_label,
     bankAccountLabel: optionalString(row.bank_account_label) ?? "",
+    bankAccountDisplayLabel: row.bank_account_display_label,
     remark: row.remark,
     ...bankTagFields(row),
   };
@@ -471,6 +478,7 @@ function mapManualAllocationTask(
       counterpartyName: event.counterparty_name,
       tags: event.tags,
       bankAccountLabel: event.bank_account_label,
+      bankAccountDisplayLabel: event.bank_account_display_label,
       bankTagCode: event.bank_tag_code,
       bankTagPrimaryLabel: event.bank_tag_primary_label,
       bankTagSubLabel: event.bank_tag_sub_label,
@@ -580,6 +588,7 @@ export async function fetchCostStatisticsExplorerPage(
       costTagSub: (facets.cost_tag_sub ?? []).map(mapCostTagFacet),
       bankAccounts: (facets.bank_accounts ?? []).map<CostBankExplorerRow>((row) => ({
         bankAccountLabel: row.bank_account_label,
+        bankAccountDisplayLabel: row.bank_account_display_label,
         totalAmount: row.total_amount,
         projectCount: row.project_count,
       })),
@@ -739,6 +748,7 @@ export async function fetchCostEntryDetail(
         amount: payload.bank_transaction.amount,
         counterpartyName: payload.bank_transaction.counterparty_name,
         paymentAccountLabel: payload.bank_transaction.payment_account_label,
+        bankAccountDisplayLabel: payload.bank_transaction.bank_account_display_label,
         remark: payload.bank_transaction.remark,
         projectName: optionalString(payload.bank_transaction.project_name),
         expenseType: optionalString(payload.bank_transaction.expense_type),
@@ -768,6 +778,7 @@ export async function fetchCostEntryDetail(
       counterpartyName: allocation.counterparty_name,
       paymentAccountLabel: allocation.payment_account_label,
       bankAccountLabel: allocation.bank_account_label,
+      bankAccountDisplayLabel: allocation.bank_account_display_label,
       oaApplicant: allocation.oa_applicant,
       oaOriginalAmount: allocation.oa_original_amount,
       oaAllocationWeight: allocation.oa_allocation_weight,
@@ -780,6 +791,7 @@ export async function fetchCostEntryDetail(
       direction: item.direction,
       counterpartyName: item.counterparty_name,
       paymentAccountLabel: item.payment_account_label,
+      bankAccountDisplayLabel: item.bank_account_display_label,
       remark: item.remark,
       bankTagCode: item.bank_tag_code,
       bankTagLabel: item.bank_tag_label,

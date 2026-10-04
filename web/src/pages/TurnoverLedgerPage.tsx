@@ -1004,7 +1004,7 @@ export default function TurnoverLedgerPage() {
                   </span>
                 ) : null}
                 {selectedClosureRows.length > 0 ? <>
-                  <Button variant="ghost" size="sm" onPress={() => setClosureSelection(null)}>清除选择</Button>
+                  <Button variant="secondary" size="sm" onPress={() => setClosureSelection(null)}>清除选择</Button>
                   <Button className="turnover-ledger-button" isDisabled={!canRunClosurePrimaryAction} onPress={() => { setClosureCompletion(undefined); setClosureMode(selectedRowsAllCashClosure ? "withdraw" : "confirm"); setClosureDrawerOpen(true); }} size="sm" variant={selectedRowsAllCashClosure ? "danger" : "primary"}>{closureActionLabel}</Button>
                 </> : null}
                 <Button className="turnover-ledger-button turnover-ledger-button--primary" onPress={handleOpenExport} size="sm" variant="primary">
@@ -1170,7 +1170,7 @@ export default function TurnoverLedgerPage() {
         {detailGroup ? <div className="turnover-ledger-drawer__content">
           <dl className="turnover-closure-totals"><div><dt>类别</dt><dd>{detailGroup.familyLabel}</dd></div><div><dt>我方待还</dt><dd>{formatMoney(detailGroup.pendingRepaymentAmount)}</dd></div><div><dt>我方待收</dt><dd>{formatMoney(detailGroup.pendingCollectionAmount)}</dd></div></dl>
           <p className="turnover-muted">共 {detailGroup.flowRows.length} 笔流水。选择一笔查看所属往来关系、利息和补充信息。</p>
-          <table className="turnover-closure-table"><thead><tr><th>日期</th><th>流水标签</th><th>金额</th><th>操作</th></tr></thead><tbody>{detailGroup.flowRows.map((row) => <tr key={row.sourceBankRowId}>
+          <table className="turnover-closure-table turnover-closure-table--details"><thead><tr><th>日期</th><th>流水标签</th><th>金额</th><th>操作</th></tr></thead><tbody>{detailGroup.flowRows.map((row) => <tr key={row.sourceBankRowId}>
             <td>{formatNullable(row.transactionAt?.slice(0, 10))}</td><td><TurnoverFlowLabel row={row} /></td><td>{row.flowDirection === "income" ? "收入" : "支出"} {formatMoney(row.flowAmount)}</td>
             <td><Button variant="ghost" size="sm" onPress={() => { setDetailGroup(null); void handleOpenEditor({ ...row, counterpartyName: detailGroup.counterpartyName, familyLabel: detailGroup.familyLabel }); }}>查看流水</Button></td>
           </tr>)}</tbody></table>

@@ -42,6 +42,7 @@ const rowsPayload = {
         voucherKind: "电子转账凭证",
         voucherNo: "108102947921",
         bankName: "建设银行",
+        bankShortName: "建行",
         accountNo: "622200001234",
         accountLast4: "1234",
         directionLabel: "支出",
@@ -936,7 +937,7 @@ describe("OA pending payments page", () => {
     expect(tableSource).not.toContain("addEventListener(\"resize\"");
   });
 
-  test("keeps bank amount and direction chip in a non-overlapping layout slot", async () => {
+  test("流水金额独占主行，方向与真实银行账户位于辅助行", async () => {
     installOaPendingPaymentsFetch();
 
     renderAuthenticatedAppAt("/oa-pending-payments");
@@ -946,24 +947,18 @@ describe("OA pending payments page", () => {
     const row = within(page).getByRole("row", { name: /张三/ });
     const bankCell = row.querySelector(".oa-pending-payments-table-cell--bank") as HTMLElement;
     const amountLine = bankCell.querySelector(".oa-pending-payments-bank-amount-line");
+    const metadata = bankCell.querySelector(".oa-pending-payments-bank-metadata") as HTMLElement;
 
     expect(bankCell).not.toBeNull();
     expect(amountLine).not.toBeNull();
     expect(amountLine).toContainElement(within(row).getAllByText("10000.00")[1]);
-    expect(within(amountLine as HTMLElement).getByText("支出").closest(".finance-direction-tag")).not.toBeNull();
-    expect(amountLine).toContainElement(within(row).getByText("建设银行 1234"));
-
-    const styles = readWebSource("src/app/styles.css");
-    const amountLineStyles = cssRule(styles, ".oa-pending-payments-bank-amount-line");
-    const nonShrinkingChildren = cssRule(
-      styles,
-      ".oa-pending-payments-bank-amount-line > *",
-    );
-
-    expect(amountLineStyles).toContain("display: flex");
-    expect(amountLineStyles).toContain("flex-wrap: wrap");
-    expect(amountLineStyles).toContain("justify-content: flex-start");
-    expect(nonShrinkingChildren).toContain("flex: 0 0 auto");
+    expect(amountLine).toHaveTextContent(/^10000\.00$/);
+    expect(within(metadata).getByText("支出").closest(".finance-direction-tag")).not.toBeNull();
+    expect(metadata.querySelector(".bank-account-value")).toHaveTextContent("建行");
+    expect(metadata.querySelector(".bank-account-value")).not.toHaveTextContent("建设银行");
+    expect(metadata.querySelector(".bank-account-value")).toHaveTextContent("1234");
+    expect(metadata.querySelector(".oa-pending-payments-table-tag")).toBeNull();
+    expect(bankCell).toContainElement(within(row).getByRole("button", { name: "查看流水 张三 详情" }));
   });
 
   test("shows OA application time under project and renders missing bank transaction as dash only", async () => {
@@ -1048,7 +1043,7 @@ describe("OA pending payments page", () => {
     const invoiceSeller = within(page).getByText("云南恒昆机电设备有限公司");
     expect(invoiceSeller.closest(".oa-pending-payments-table-tag")).toBeNull();
     expect(within(page).queryByText("进项发票方名称")).not.toBeInTheDocument();
-    expect(within(page).getByText("建设银行 1234")).toBeInTheDocument();
+    expect(within(page).getByText("1234").closest(".bank-account-value")).toHaveTextContent("建行");
     const paidRow = within(page).getByRole("row", { name: /张三/ });
     const paidCells = paidRow.querySelectorAll(".oa-pending-payments-table-cell");
     const oaGrid = paidCells[0]?.querySelector(".oa-pending-payments-oa-grid") as HTMLElement;
@@ -1065,7 +1060,8 @@ describe("OA pending payments page", () => {
     expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__counterparty")).not.toHaveTextContent("对方户名：");
     expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__counterparty")).toHaveTextContent("2026-01-05 09:50:25");
     expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__amount")).toHaveTextContent("10000.00");
-    expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__amount")).toHaveTextContent("建设银行 1234");
+    expect(bankGrid.querySelector(".oa-pending-payments-bank-metadata")).toHaveTextContent("建行");
+    expect(bankGrid.querySelector(".oa-pending-payments-bank-metadata")).toHaveTextContent("1234");
     expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__summary")).toHaveTextContent("电子转账");
     expect(within(paidRow).queryByRole("button", { name: "写回 OA 张三" })).not.toBeInTheDocument();
     const groupedRow = within(page).getByRole("row", { name: /刘际涛/ });

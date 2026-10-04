@@ -73,6 +73,7 @@ type ApiTurnoverLedgerRow = {
   first_transaction_at?: string | null;
   last_settlement_at?: string | null;
   bank_account_labels?: string[];
+  bank_account_display_labels: string[];
   summary_text?: string | null;
   annual_interest_rate?: string | null;
   loan_days?: number | null;
@@ -132,6 +133,7 @@ type ApiTurnoverLedgerGroupedRow = {
   selection_version?: string | null;
   counterparty_bank_name?: string | null;
   bank_account_labels?: string[];
+  bank_account_display_labels: string[];
   summary_text?: string | null;
   allocation_status?: string | null;
   allocated_lot_ids?: string[];
@@ -290,6 +292,7 @@ type ApiTurnoverBankRow = {
   debit_amount?: string | null;
   credit_amount?: string | null;
   bank_account_label?: string | null;
+  bank_account_display_label: string;
   imported_bank_name?: string | null;
   imported_bank_last4?: string | null;
   bank_name?: string | null;
@@ -588,6 +591,7 @@ function mapRow(row: ApiTurnoverLedgerRow): TurnoverLedgerRow {
     firstTransactionAt: row.first_transaction_at ?? null,
     lastSettlementAt: row.last_settlement_at ?? null,
     bankAccountLabels: stringList(row.bank_account_labels),
+    bankAccountDisplayLabels: row.bank_account_display_labels.map(String),
     summaryText: text(row.summary_text),
     annualInterestRate: row.annual_interest_rate ?? null,
     loanDays: row.loan_days ?? null,
@@ -636,6 +640,7 @@ function mapGroupedRow(row: ApiTurnoverLedgerGroupedRow, fallbackRowKind = ""): 
     selectionVersion: text(row.selection_version),
     counterpartyBankName: text(row.counterparty_bank_name),
     bankAccountLabels: stringList(row.bank_account_labels),
+    bankAccountDisplayLabels: row.bank_account_display_labels.map(String),
     summaryText: text(row.summary_text),
     allocationStatus: text(row.allocation_status),
     allocatedLotIds: stringList(row.allocated_lot_ids),
@@ -771,6 +776,7 @@ function mapBankRow(row: ApiTurnoverBankRow): TurnoverBankRow {
     directionLabel,
     amount: text(row.amount, debitNumber > 0 ? debitAmount : creditNumber > 0 ? creditAmount : "0.00"),
     bankAccountLabel: text(row.bank_account_label, [bankName, last4].filter(Boolean).join(" ")),
+    bankAccountDisplayLabel: row.bank_account_display_label,
     summary: [row.summary, row.purpose, row.remark].map((value) => text(value)).filter(Boolean).join(" / "),
     purpose: row.purpose ?? null,
     categoryLabel: row.category_label ?? null,
@@ -935,8 +941,10 @@ export async function fetchTurnoverRelationDetail(
     `/api/turnover-ledger/relations/${encodeURIComponent(relationId)}`,
     { method: "GET", signal },
   );
+  const relation = payload.row ?? payload.relation;
+  if (!relation) throw new Error("往来关系详情缺少关系数据，请刷新后重试。");
   return {
-    relation: mapRow(payload.row ?? payload.relation ?? { relation_id: relationId }),
+    relation: mapRow(relation),
     bankRows: (payload.bank_rows ?? []).map(mapBankRow),
     extra: mapExtra(payload.extra ?? { relation_id: relationId }, relationId),
     auditHistory: payload.audit_history ?? [],

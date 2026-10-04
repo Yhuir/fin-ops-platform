@@ -89,7 +89,7 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
       row_span: 3,
       group_tone: "warning",
       rows: [
-        {
+        { bank_account_display_labels: [],
           relation_id: "rel-personal-1",
           status: "suggested",
           status_label: "待人工确认",
@@ -112,7 +112,7 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
           note: "页面内维护备注",
           bank_row_ids: ["bank-personal-001", "bank-personal-002"],
         },
-        {
+        { bank_account_display_labels: [],
           relation_id: "rel-personal-1",
           status: "confirmed",
           status_label: "批次明细",
@@ -135,7 +135,7 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
           note: "批次一待还",
           bank_row_ids: ["bank-personal-003"],
         },
-        {
+        { bank_account_display_labels: [],
           relation_id: "rel-personal-1",
           status: "confirmed",
           status_label: "批次明细",
@@ -171,7 +171,7 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
       closed_amount: "0.00",
       row_span: 4,
       group_tone: "success",
-      summary_row: {
+      summary_row: { bank_account_display_labels: [],
         row_kind: "summary",
         relation_id: "rel-jiaxiaohua",
         status: "confirmed",
@@ -196,7 +196,7 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
         bank_row_ids: ["bank-jia-income-200000", "bank-jia-income-100000", "bank-jia-expense-300000"],
       },
       rows: [
-        {
+        { bank_account_display_labels: [],
           row_kind: "summary",
           relation_id: "rel-jiaxiaohua",
           status: "confirmed",
@@ -241,7 +241,8 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
           repayment_date: null,
           repayment_direction: "expense",
           counterparty_bank_name: "建行通海支行",
-          bank_account_labels: ["建行 8106"],
+          bank_account_labels: ["建设银行 8106"],
+          bank_account_display_labels: ["建行 8106"],
           repayment_remark: "个人暂借款：待还款",
           interest_rate_type: "none",
           interest_rate_value: "0.000000",
@@ -272,7 +273,7 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
           repayment_date: null,
           repayment_direction: "expense",
           counterparty_bank_name: "建行通海支行",
-          bank_account_labels: ["建行 8106"],
+          bank_account_labels: ["建行 8106"], bank_account_display_labels: ["建行 8106"],
           repayment_remark: "个人暂借款：待还款",
           interest_rate_type: "none",
           interest_rate_value: "0.000000",
@@ -303,7 +304,7 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
           repayment_date: "2026-03-04 15:24:58",
           repayment_direction: "expense",
           counterparty_bank_name: "建行通海支行",
-          bank_account_labels: ["建行 8106"],
+          bank_account_labels: ["建行 8106"], bank_account_display_labels: ["建行 8106"],
           repayment_remark: "个人暂借款：已还款",
           interest_rate_type: "none",
           interest_rate_value: "0.000000",
@@ -317,7 +318,7 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
         },
       ],
       lot_rows: [
-        {
+        { bank_account_display_labels: [],
           row_kind: "lot",
           relation_id: "rel-jiaxiaohua",
           lot_id: "lot-jia-200000",
@@ -342,7 +343,7 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
           note: "批次 200000",
           bank_row_ids: ["bank-jia-income-200000", "bank-jia-expense-300000"],
         },
-        {
+        { bank_account_display_labels: [],
           row_kind: "lot",
           relation_id: "rel-jiaxiaohua",
           lot_id: "lot-jia-100000",
@@ -380,7 +381,7 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
       row_span: 5,
       group_tone: "success",
       rows: [
-        {
+        { bank_account_display_labels: [],
           relation_id: "rel-company-1",
           status: "confirmed",
           status_label: "人工确认",
@@ -424,7 +425,7 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
           repayment_date: "2026-05-02 10:00:00",
           repayment_direction: "expense",
           counterparty_bank_name: "中国银行",
-          bank_account_labels: ["中行 0001"],
+          bank_account_labels: ["中行 0001"], bank_account_display_labels: ["中行 0001"],
           repayment_remark: "借出保证金",
           interest_rate_type: "none",
           interest_rate_value: "0.000000",
@@ -455,7 +456,7 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
           repayment_date: null,
           repayment_direction: "expense",
           counterparty_bank_name: "中国银行",
-          bank_account_labels: ["中行 0001"],
+          bank_account_labels: ["中行 0001"], bank_account_display_labels: ["中行 0001"],
           repayment_remark: "收回保证金",
           interest_rate_type: "none",
           interest_rate_value: "0.000000",
@@ -486,7 +487,7 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
           repayment_date: null,
           repayment_direction: "income",
           counterparty_bank_name: "建设银行 8106",
-          bank_account_labels: ["建设银行 8106"],
+          bank_account_labels: ["建设银行 8106"], bank_account_display_labels: ["建设银行 8106"],
           repayment_remark: "电子转账 / 投标保证金",
           interest_rate_type: "none",
           interest_rate_value: "0.000000",
@@ -517,7 +518,7 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
           repayment_date: "2026-04-03 18:00:16",
           repayment_direction: "income",
           counterparty_bank_name: "建设银行 8106",
-          bank_account_labels: ["建设银行 8106"],
+          bank_account_labels: ["建设银行 8106"], bank_account_display_labels: ["建设银行 8106"],
           repayment_remark: "电子汇入 / 退保证金",
           interest_rate_type: "none",
           interest_rate_value: "0.000000",
@@ -843,7 +844,7 @@ function installTurnoverLedgerFetch(options: {
             counterparty_name: "张三",
             direction_label: "收",
             amount: "1000.00",
-            bank_account_label: "建行 8106",
+            bank_account_label: "建行 8106", bank_account_display_label: "建行 8106",
             summary: "暂借款",
           },
         ],
@@ -882,7 +883,7 @@ function installTurnoverLedgerFetch(options: {
             counterparty_name: "贾小花",
             direction_label: "收",
             amount: "200000.00",
-            bank_account_label: "建行 8106",
+            bank_account_label: "建行 8106", bank_account_display_label: "建行 8106",
             summary: "个人暂借款：待还款",
           },
         ],
@@ -1986,6 +1987,7 @@ describe("Turnover ledger page", () => {
     expect(within(flowRows[0]).getByText(/借入款/)).toBeInTheDocument();
     expect(within(flowRows[0]).getByText(/个人往来/)).toBeInTheDocument();
     expect(within(flowRows[0]).getByText("建行 8106")).toBeInTheDocument();
+    expect(within(flowRows[0]).queryByText("建设银行 8106")).not.toBeInTheDocument();
     expect(within(flowRows[2]).getByText(/外部往来款付款/)).toBeInTheDocument();
     expect(within(flowRows[2]).getByText(/归还借款/)).toBeInTheDocument();
     expect(within(flowRows[2]).getByText(/个人往来/)).toBeInTheDocument();

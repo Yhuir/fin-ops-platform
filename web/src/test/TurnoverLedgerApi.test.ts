@@ -186,7 +186,7 @@ describe("turnover ledger API", () => {
               balance_amount: "800.00",
               first_transaction_at: "2026-05-01 10:00:00",
               last_settlement_at: "2026-05-03 10:00:00",
-              bank_account_labels: ["建行 8106"],
+              bank_account_labels: ["建行 8106"], bank_account_display_labels: ["建行 8106"],
               summary_text: "暂借款 / 还款",
               annual_interest_rate: "3.50%",
               loan_days: 2,
@@ -206,7 +206,7 @@ describe("turnover ledger API", () => {
       }
       if (url.pathname === "/api/turnover-ledger/relations/rel-001") {
         return new Response(JSON.stringify({
-          relation: {
+          relation: { bank_account_display_labels: [],
             relation_id: "rel-001",
             status: "suggested",
             status_label: "",
@@ -228,7 +228,7 @@ describe("turnover ledger API", () => {
             balance_amount: "800.00",
             first_transaction_at: "2026-05-01 10:00:00",
             last_settlement_at: null,
-            bank_account_labels: ["建行 8106"],
+            bank_account_labels: ["建行 8106"], bank_account_display_labels: ["建行 8106"],
             summary_text: "暂借款",
             annual_interest_rate: null,
             loan_days: null,
@@ -247,6 +247,7 @@ describe("turnover ledger API", () => {
               credit_amount: "1000.00",
               imported_bank_name: "建行",
               imported_bank_last4: "8106",
+              bank_account_display_label: "建行 8106",
               summary: "暂借款",
               remark: "借入",
             },
@@ -322,7 +323,7 @@ describe("turnover ledger API", () => {
       counterpartyName: "张三",
       directionLabel: "收",
       amount: "1000.00",
-      bankAccountLabel: "建行 8106",
+      bankAccountLabel: "建行 8106", bankAccountDisplayLabel: "建行 8106",
       summary: "暂借款 / 借入",
     });
     expect(detail.auditHistory[0]).toEqual({ action: "generated", note: "system" });
@@ -467,7 +468,7 @@ describe("turnover ledger API", () => {
               collected_amount: "0.00",
               row_span: 3,
               group_tone: "warning",
-              summary_row: {
+              summary_row: { bank_account_display_labels: [],
                 row_kind: "summary",
                 relation_id: "turnover_rel_001",
                 status: "suggested",
@@ -508,7 +509,7 @@ describe("turnover ledger API", () => {
                   category_label: "个人暂借款：待还款",
                   category_label_path: ["外部往来款收款", "借入款", "个人往来"],
                   counterparty_bank_name: "中国建设银行",
-                  bank_account_labels: ["建行 8106"],
+                  bank_account_labels: ["建行 8106"], bank_account_display_labels: ["建行 8106"],
                   summary_text: "电子转账 / 暂借款",
                   allocation_status: "allocated",
                   allocated_lot_ids: ["lot-001"],
@@ -532,7 +533,7 @@ describe("turnover ledger API", () => {
                   category_label: "个人暂借款：待还款",
                   category_label_path: ["外部往来款收款", "借入款", "个人往来"],
                   counterparty_bank_name: "中国建设银行",
-                  bank_account_labels: ["建行 8106"],
+                  bank_account_labels: ["建行 8106"], bank_account_display_labels: ["建行 8106"],
                   summary_text: "电子转账 / 暂借款",
                   allocation_status: "allocated",
                   allocated_lot_ids: ["lot-002"],
@@ -560,7 +561,7 @@ describe("turnover ledger API", () => {
                 turnover_action_type: "repaid",
                 turnover_action_label: "已还款",
                   counterparty_bank_name: "中国建设银行",
-                  bank_account_labels: ["建行 8106"],
+                  bank_account_labels: ["建行 8106"], bank_account_display_labels: ["建行 8106"],
                   summary_text: "电子转账 / 还暂借款",
                   allocation_status: "allocated",
                   allocated_lot_ids: ["lot-001", "lot-002"],
@@ -582,7 +583,7 @@ describe("turnover ledger API", () => {
                 },
               ],
               allocation_lots: [
-                {
+                { bank_account_display_labels: [],
                   row_kind: "allocation_lot",
                   relation_id: "turnover_rel_001",
                   lot_id: "lot-001",
@@ -598,7 +599,7 @@ describe("turnover ledger API", () => {
                 },
               ],
               lot_rows: [
-                {
+                { bank_account_display_labels: [],
                   row_kind: "lot",
                   relation_id: "turnover_rel_001",
                   lot_id: "lot-001",
@@ -624,7 +625,7 @@ describe("turnover ledger API", () => {
                   accrued_interest: "920.55",
                   bank_row_ids: ["bank_001", "bank_003"],
                 },
-                {
+                { bank_account_display_labels: [],
                   row_kind: "lot",
                   relation_id: "turnover_rel_001",
                   lot_id: "lot-002",
@@ -652,7 +653,7 @@ describe("turnover ledger API", () => {
                 },
               ],
               rows: [
-                {
+                { bank_account_display_labels: [],
                   relation_id: "turnover_rel_001",
                   status: "suggested",
                   status_label: "待人工确认",
@@ -740,7 +741,7 @@ describe("turnover ledger API", () => {
       categoryLabelPath: ["外部往来款付款", "归还借款", "个人往来"],
       turnoverActionType: "repaid",
       turnoverActionLabel: "已还款",
-      bankAccountLabels: ["建行 8106"],
+      bankAccountLabels: ["建行 8106"], bankAccountDisplayLabels: ["建行 8106"],
       summaryText: "电子转账 / 还暂借款",
       allocationStatus: "allocated",
       allocatedLotIds: ["lot-001", "lot-002"],
@@ -786,7 +787,7 @@ describe("turnover ledger API", () => {
             group_id: "counterparty:personal:张三",
             row_span: 1,
             rows: [
-              {
+              { bank_account_display_labels: [],
                 relation_id: "legacy-rel-001",
                 borrow_amount: "1000.00",
                 balance_amount: "800.00",

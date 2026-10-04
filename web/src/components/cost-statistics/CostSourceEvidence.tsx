@@ -5,9 +5,6 @@ import type { CostStatisticsManualAllocationTask } from '../../features/cost-sta
 import { formatDateTimeText } from '../../features/dateTime';
 import { FinanceStatusTag } from '../common/FinanceTable';
 
-export function shortBankAccount(label: string) {
-  return label.replace(/\s*账户\s*(\d{4})$/, ' $1');
-}
 export const CostChips = memo(function CostChips({ values }: { values: string[] }) {
   return <span className="cost-source-chips">{values.filter(Boolean).map((value, index) => <FinanceStatusTag key={index}>{value}</FinanceStatusTag>)}</span>;
 }, (previous, next) => previous.values.length === next.values.length && previous.values.every((value, index) => value === next.values[index]));
@@ -33,7 +30,7 @@ export const CostSourceEvidence = memo(function CostSourceEvidence({ task, sourc
   const bankContent = (index: number) => {
     const bank = task.bankEvents[index];
     return [
-      <><span className="cost-source-evidence-identity">{index + 1}. <CostChips values={[shortBankAccount(bank.bankAccountLabel)]} /></span><CostChips values={[bank.tradeTime ? formatDateTimeText(bank.tradeTime) : '日期待完善']} /></>,
+      <><span className="cost-source-evidence-identity">{index + 1}. <CostChips values={[bank.bankAccountDisplayLabel]} /></span><CostChips values={[bank.tradeTime ? formatDateTimeText(bank.tradeTime) : '日期待完善']} /></>,
       <><span className="cost-source-counterparty">{bank.counterpartyName}</span><CostChips values={[bank.bankTagPrimaryLabel, bank.bankTagSubLabel]} />{bank.eventKind === 'wrong_payment_refund' ? <FinanceStatusTag tone="success">退款</FinanceStatusTag> : null}</>,
       <><span className="cost-source-money">{bank.eventKind === 'wrong_payment_refund' ? '−' : ''}¥{bank.amount}</span>{sourceError(bank.transactionId)}</>,
     ];

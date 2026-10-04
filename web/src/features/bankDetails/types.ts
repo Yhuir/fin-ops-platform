@@ -97,6 +97,7 @@ export type BankDetailTransaction = {
   summaryText: string;
   noteText: string;
   bankName: string;
+  bankShortName?: string;
   accountLast4: string;
   categoryCode: BankTransactionCategoryCode | null;
   categoryLabel: string | null;

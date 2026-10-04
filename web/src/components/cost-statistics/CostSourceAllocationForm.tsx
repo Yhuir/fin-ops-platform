@@ -4,7 +4,7 @@ import { Fragment, useCallback, useLayoutEffect, useMemo, useRef, useState } fro
 import type { CostManualItem, CostStatisticsManualAllocationTask } from '../../features/cost-statistics/types';
 import { cents, money, usedBySource, validateSourceDraft, type SourceDraft, type SourceDraftLine } from '../../features/cost-statistics/sourceAllocation';
 import { formatDateTimeText } from '../../features/dateTime';
-import { CostChips, CostSourceEvidence, CostText, shortBankAccount } from './CostSourceEvidence';
+import { CostChips, CostSourceEvidence, CostText } from './CostSourceEvidence';
 import CostSourcePicker from './CostSourcePicker';
 import CostManualTagPicker from './CostManualTagPicker';
 
@@ -34,7 +34,7 @@ export default function CostSourceAllocationForm({ tagLoading, tagError, onLoadT
   const used = useMemo(() => usedBySource(draft), [draft]);
   const sources = useMemo(() => task.bankEvents.filter(event => event.eventKind === 'outflow'), [task.bankEvents]);
   const sourceOptions = useMemo(() => task.bankEvents.flatMap((event, index) => event.eventKind === 'outflow' ? [{
-    id: event.transactionId, label: `${index + 1}. ${shortBankAccount(event.bankAccountLabel)}`, amount: event.amount, amountCents: cents(event.amount)!,
+    id: event.transactionId, label: `${index + 1}. ${event.bankAccountDisplayLabel}`, amount: event.amount, amountCents: cents(event.amount)!,
     date: event.tradeTime ? formatDateTimeText(event.tradeTime) : '日期待完善', counterparty: event.counterpartyName,
     tags: [event.bankTagPrimaryLabel, event.bankTagSubLabel], allowedUnitIds: event.allowedUnitIds,
   }] : []), [task.bankEvents]);
@@ -164,7 +164,7 @@ export default function CostSourceAllocationForm({ tagLoading, tagError, onLoadT
           {draft.costLines.filter(line => line.ownerId === item.unitId).map(line => <Fragment key={line.id}>{lineCells('costLines', line, task.units.length + index, true)}</Fragment>)}
         </tr></tbody>)}
       </table></div>
-      {refunds.length ? <details className="cost-source-extra" open><summary>退款归属</summary>{refunds.map(refund => <Fragment key={refund.transactionId}><div className="cost-source-extra-heading"><CostChips values={[shortBankAccount(refund.bankAccountLabel), refund.tradeTime ? formatDateTimeText(refund.tradeTime) : '日期待完善']} /><span className="cost-source-money">¥{refund.amount}</span>{showError(`refund.${refund.transactionId}`)}</div>{auxiliaryLines('refundLinks', refund.transactionId)}</Fragment>)}</details> : null}
+      {refunds.length ? <details className="cost-source-extra" open><summary>退款归属</summary>{refunds.map(refund => <Fragment key={refund.transactionId}><div className="cost-source-extra-heading"><CostChips values={[refund.bankAccountDisplayLabel, refund.tradeTime ? formatDateTimeText(refund.tradeTime) : '日期待完善']} /><span className="cost-source-money">¥{refund.amount}</span>{showError(`refund.${refund.transactionId}`)}</div>{auxiliaryLines('refundLinks', refund.transactionId)}</Fragment>)}</details> : null}
       <details className="cost-source-extra" open={cents(draft.nonCostAmount) !== 0n || undefined}><summary>不计成本 {showError('nonCost')}</summary><div className="cost-source-non-cost"><input aria-label="不计入成本金额" inputMode="decimal" value={draft.nonCostAmount} disabled={disabled} onChange={event => onChange({ ...draft, nonCostAmount: event.target.value })} /><input aria-label="不计入成本原因" placeholder="原因" value={draft.nonCostReason} disabled={disabled} onChange={event => onChange({ ...draft, nonCostReason: event.target.value })} /></div>{auxiliaryLines('nonCostLines', '')}</details>
     </section>
     <footer><div><span className="cost-source-muted">项目成本 {money(draft.costLines.reduce((total, line) => total + (cents(line.amount) ?? 0n), 0n))} · {(() => { const remaining = (cents(task.netOutflowTotal) ?? 0n) - draft.costLines.reduce((total, line) => total + (cents(line.amount) ?? 0n), 0n) - (cents(draft.nonCostAmount) ?? 0n); return `${remaining < 0n ? '超出' : '剩余'} ${money(remaining < 0n ? -remaining : remaining)}`; })()}</span>{submitted > 0 && errors.total ? <p className="cost-source-error" role="alert" tabIndex={-1}>{errors.total}</p> : null}{error ? <p className="cost-source-error" role="alert">{error}</p> : null}{notice ? <p className="cost-source-notice" role="status">{notice}</p> : null}</div><div className="cost-source-save-actions"><span className="cost-source-balanced" role="status">{(!task.allowsPartial || draft.costLines.reduce((sum, line) => sum + (cents(line.amount) ?? 0n), 0n) + (cents(draft.nonCostAmount) ?? 0n) === cents(task.netOutflowTotal)) && !task.waitingOaIds?.length && !Object.keys(errors).length && !saving && !error && (!notice || task.status === "allocated") ? '分配金额一致' : ''}</span><button type="button" className="cost-source-save" disabled={disabled || saveDisabled} onClick={() => { focusErrors.current = !!Object.keys(errors).length; setSubmitted(value => value + 1); if (!Object.keys(errors).length) onSave(); }}>{saving ? '保存中…' : '保存'}</button></div></footer>

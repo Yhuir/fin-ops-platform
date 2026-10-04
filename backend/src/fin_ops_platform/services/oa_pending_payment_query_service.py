@@ -4,6 +4,7 @@ from datetime import date
 from http import HTTPStatus
 from typing import Any, Callable
 
+from fin_ops_platform.services.bank_settings import bank_short_names_from_mappings, bank_summary_with_short_names
 from fin_ops_platform.services.oa_pending_payment_canonical_rows import (
     build_oa_pending_payment_rows,
 )
@@ -78,6 +79,9 @@ class OaPendingPaymentQueryService:
                 )
                 descriptors = list(selected.get("descriptors") or [])
                 rows = self._hydrate_rows(snapshot, descriptors, tenant_id=tenant_id)
+                names = bank_short_names_from_mappings(selected.get("bank_account_mappings") or [])
+                for row in rows:
+                    row["bankTransaction"] = bank_summary_with_short_names(row["bankTransaction"], names)
         except OaPendingPaymentError:
             raise
         except ValueError as exc:

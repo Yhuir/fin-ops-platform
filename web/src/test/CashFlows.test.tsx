@@ -485,10 +485,17 @@ describe("现金读取、更正、删除", () => {
     render(<CashProvider><CashFlowTable /></CashProvider>);
     expect(await screen.findByText("筛选合计：收入 125.50")).toBeInTheDocument();
     expect(screen.getByText("内部转账 42.35")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "刷新", exact: true })).toHaveClass("button--secondary");
+    expect(screen.getByRole("button", { name: "账户期间余额" })).toHaveClass("button--secondary");
+    const flowsTable = screen.getByRole("grid", { name: "现金流水明细" });
+    for (const [name, role] of [["日期", "date"], ["分类", "status"], ["收入", "amount"], ["支出", "amount"], ["账户余额", "amount"], ["操作", "action"]]) {
+      expect(within(flowsTable).getByRole("columnheader", { name })).toHaveAttribute("data-column-role", role);
+    }
     const before = http.mock.calls.length;
     await user.click(screen.getByRole("button", { name: "账户期间余额" }));
     expect(screen.getByRole("dialog", { name: "账户期间余额" })).toBeInTheDocument();
     const table = screen.getByRole("grid", { name: "账户期间余额" });
+    expect(within(table).getByRole("columnheader", { name: "期末余额" })).toHaveAttribute("data-column-role", "amount");
     expect(within(table).getByText("133.15")).toBeInTheDocument();
     const unknown = within(table).getByRole("row", { name: /尚未起算合成账户/ });
     expect(within(unknown).getByText("尚未起算，余额未知")).toBeInTheDocument();

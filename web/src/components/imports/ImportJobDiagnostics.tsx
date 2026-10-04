@@ -99,13 +99,13 @@ export default function ImportJobDiagnostics({ refreshToken, onHandled, domain, 
     <div className="app-health-section__header"><h3>导入任务诊断</h3><Button variant="secondary" onPress={() => void loadList()} isDisabled={loading}>刷新任务</Button></div>
     {listError && <p role="alert">{success ? "处理已成功，但任务列表刷新失败。" : ""}{listError}</p>}
       <FinanceTable ariaLabel="待处理导入任务" minWidth={640}>
-        <FinanceTableHeader><FinanceTableColumn isRowHeader>导入类型</FinanceTableColumn><FinanceTableColumn>文件</FinanceTableColumn><FinanceTableColumn>创建人</FinanceTableColumn><FinanceTableColumn>状态</FinanceTableColumn><FinanceTableColumn>更新时间</FinanceTableColumn><FinanceTableColumn>操作</FinanceTableColumn></FinanceTableHeader>
+        <FinanceTableHeader><FinanceTableColumn columnRole="description" isRowHeader>导入类型</FinanceTableColumn><FinanceTableColumn columnRole="description">文件</FinanceTableColumn><FinanceTableColumn columnRole="identity">创建人</FinanceTableColumn><FinanceTableColumn columnRole="status">状态</FinanceTableColumn><FinanceTableColumn columnRole="date">更新时间</FinanceTableColumn><FinanceTableColumn columnRole="action">操作</FinanceTableColumn></FinanceTableHeader>
         <FinanceTableBody renderEmptyState={() => loading ? <span className="sr-only">正在读取任务</span> : "无待处理导入任务"}>{listRows.map(row => <FinanceTableRow key={row.job_id} id={row.job_id}>
           <FinanceTableCell columnRole="description">{row.affected_domains.map(d => typeLabels[d]).join("、")}</FinanceTableCell>
           <FinanceTableCell columnRole="description">{row.file_name || "无文件摘要"}{row.file_count ? `（${row.file_count} 个）` : ""}</FinanceTableCell>
-          <FinanceTableCell columnRole="description">{row.created_by || "未记录"}</FinanceTableCell><FinanceTableCell columnRole="description">{statusLabels[row.status]}</FinanceTableCell>
-          <FinanceTableCell columnRole="description">{new Date(row.updated_at).toLocaleString("zh-CN")}</FinanceTableCell>
-          <FinanceTableCell columnRole="description"><Button variant="secondary" onPress={() => { setSelected(row.job_id); setDetail(null); setSuccess(""); setNote(""); setReason("not_needed"); setUncertain(false); void loadDetail(row.job_id); }}>查看详情</Button></FinanceTableCell>
+          <FinanceTableCell columnRole="identity">{row.created_by || "未记录"}</FinanceTableCell><FinanceTableCell columnRole="status">{statusLabels[row.status]}</FinanceTableCell>
+          <FinanceTableCell columnRole="date">{new Date(row.updated_at).toLocaleString("zh-CN")}</FinanceTableCell>
+          <FinanceTableCell columnRole="action"><Button variant="secondary" onPress={() => { setSelected(row.job_id); setDetail(null); setSuccess(""); setNote(""); setReason("not_needed"); setUncertain(false); void loadDetail(row.job_id); }}>查看详情</Button></FinanceTableCell>
         </FinanceTableRow>)}</FinanceTableBody>
       </FinanceTable>
     {list && <>

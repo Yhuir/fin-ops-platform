@@ -89,6 +89,7 @@ export type TurnoverLedgerRow = {
   firstTransactionAt: string | null;
   lastSettlementAt: string | null;
   bankAccountLabels: string[];
+  bankAccountDisplayLabels: string[];
   summaryText: string;
   annualInterestRate: string | null;
   loanDays: number | null;
@@ -141,6 +142,7 @@ export type TurnoverLedgerGroupedRow = {
   selectionVersion: string;
   counterpartyBankName: string;
   bankAccountLabels: string[];
+  bankAccountDisplayLabels: string[];
   summaryText: string;
   allocationStatus: "allocated" | "partial" | "unallocated" | "not_applicable" | string;
   allocatedLotIds: string[];
@@ -340,6 +342,7 @@ export type TurnoverBankRow = {
   directionLabel: string;
   amount: string;
   bankAccountLabel: string;
+  bankAccountDisplayLabel: string;
   summary: string;
   purpose?: string | null;
   categoryLabel?: string | null;

@@ -193,14 +193,18 @@ test('unselected boundaries and compact count geometry survive digit changes', a
   for (const item of geometry) { expect(item.gap).toBe(6); expect(item.centreError).toBeLessThanOrEqual(1); }
 });
 
-test('settings scope styling does not leak into nested project tabs', async ({ page }) => {
+test('settings scope tabs retain consistent styling and show only active settings', async ({ page }) => {
   await installDeterministicApiMocks(page, { sessionMode: 'admin' });
   await page.goto('/settings');
   const scope = page.getByRole('tablist', { name: '设置分类' });
-  await scope.getByRole('tab', { name: '项目状态', exact: true }).click();
+  await expect(scope.getByRole('tab')).toHaveText(['银行账户', 'OA导入设置', 'OA申请人凭据', '访问账户', '数据重置']);
+  await expect(scope.getByRole('tab', { selected: true })).toHaveText('银行账户');
   await expect(scope.getByRole('tab', { selected: true })).toHaveCSS('height', '40px');
-  const nested = page.getByRole('tablist', { name: '项目状态' });
-  await expect(nested.getByRole('tab', { selected: true })).toHaveCSS('height', '36px');
-  await nested.getByRole('tab', { name: /已完成/ }).click();
-  await expect(scope.getByRole('tab', { selected: true })).toHaveText('项目状态');
+  await expect(page.getByRole('region', { name: '银行账户映射', exact: true })).toBeVisible();
+  await scope.getByRole('tab', { name: 'OA导入设置', exact: true }).click();
+  await expect(scope.getByRole('tab', { selected: true })).toHaveText('OA导入设置');
+  await expect(scope.getByRole('tab', { selected: true })).toHaveCSS('height', '40px');
+  await expect(page.getByRole('region', { name: 'OA导入设置', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: '银行账户映射', exact: true })).toHaveCount(0);
+  await expect(scope.getByRole('tab', { name: /项目状态|待找发票筛选|冲账规则/ })).toHaveCount(0);
 });

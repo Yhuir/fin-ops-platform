@@ -6,6 +6,53 @@ import json
 from hashlib import sha256
 from typing import Any
 
+from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
+
+
+def bank_short_names_from_mappings(mappings: list[dict[str, Any]]) -> dict[tuple[str, str], str]:
+    """Use only an unambiguous configured name for the exact bank and account suffix."""
+    names: dict[tuple[str, str], set[str]] = {}
+    for mapping in mappings:
+        if not isinstance(mapping, dict):
+            continue
+        bank_name = str(mapping.get("bank_name") or "").strip()
+        last4 = mapping.get("last4")
+        if not bank_name or not isinstance(last4, str) or len(last4) != 4 or not last4.isdigit():
+            continue
+        names.setdefault((bank_name, last4), set()).add(str(mapping.get("short_name") or "").strip())
+    return {key: next(iter(values)) for key, values in names.items() if len(values) == 1}
+
+
+def bank_summary_with_short_names(
+    bank: dict[str, Any], names: dict[tuple[str, str], str],
+) -> dict[str, Any]:
+    """Add display names without changing source names, suffixes, or account labels."""
+    result = {
+        **bank,
+        "bankShortName": names.get((str(bank.get("bankName") or "").strip(), bank.get("accountLast4")), ""),
+    }
+    if "summaries" in bank:
+        result["summaries"] = [bank_summary_with_short_names(item, names) for item in bank["summaries"]]
+    return result
+
+
+def bank_account_display_labels_from_settings(settings: dict[str, Any]) -> dict[str, str]:
+    """Map the existing account-label formats to explicitly configured short names."""
+    names = bank_short_names_from_mappings(settings.get("bank_account_mappings") or [])
+    labels: dict[str, str] = {}
+    resolver = BankAccountResolver()
+    for (bank_name, last4), short_name in names.items():
+        if not short_name:
+            continue
+        display_label = f"{short_name} {last4}"
+        labels[f"{bank_name} {last4}"] = display_label
+        for account_name in (None, "基本", "一般", "专户"):
+            label = resolver.resolve_label(
+                None, account_name, preferred_bank_name=bank_name, preferred_last4=last4,
+            )
+            labels[label] = display_label
+    return labels
+
 
 def bank_accounts_from_settings_payload(settings_payload: dict[str, Any]) -> list[dict[str, str]]:
     accounts: list[dict[str, str]] = []

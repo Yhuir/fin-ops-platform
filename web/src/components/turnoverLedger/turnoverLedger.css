@@ -13,7 +13,7 @@
 .turnover-overview-metric { display: grid; gap: 8px; color: var(--fp-text-secondary); font-size: 13px; }
 .turnover-overview-metric strong { font-size: 23px; font-weight: 600; color: var(--fp-text-primary); font-variant-numeric: tabular-nums; letter-spacing: -.5px; }
 .turnover-overview-metric--secondary strong { font-size: 18px; color: var(--fp-text-secondary); font-weight: 500; }
-.turnover-breakdown-trigger { display: inline-flex; gap: 6px; align-items: center; margin-bottom: 2px; padding: 0 4px; min-width: 0; height: 28px; background: transparent; white-space: nowrap; font-size: 13px; color: var(--fp-text-secondary); cursor: pointer; }
+.turnover-breakdown-trigger { display: inline-flex; gap: 6px; align-items: center; margin-bottom: 2px; padding: 0 10px; min-width: 0; height: 30px; border: 1px solid var(--fp-border-strong); border-radius: 6px; background: var(--fp-surface); white-space: nowrap; font-size: 13px; color: var(--fp-primary-hover); cursor: pointer; }
 .turnover-breakdown-popover { padding: 16px; max-width: calc(100vw - 32px); border: 1px solid var(--fp-border-subtle); border-radius: 8px; background: var(--fp-surface); }
 .turnover-breakdown-popover .popover__dialog { padding: 0; }
 .turnover-breakdown-scroll { overflow-x: auto; }
@@ -38,8 +38,10 @@
 .turnover-register > thead > tr > th { position: sticky; top: 0; z-index: 2; box-shadow: inset 0 -1px var(--fp-border-subtle); height: 42px; padding: 0 20px; font-size: 12px; font-weight: 500; color: var(--fp-text-secondary); background: #f8f9fb; border-block: 1px solid var(--fp-border-subtle); white-space: nowrap; }
 .turnover-register > tbody > tr > td, .turnover-register > tbody > tr > th { height: 60px; padding: 8px 20px; border-bottom: 1px solid var(--fp-border-subtle); font-weight: 400; }
 .turnover-register > tbody > tr:last-child > td, .turnover-register > tbody > tr:last-child > th { border-bottom: 0; }
+.turnover-register > thead > tr > th:nth-child(2),
 .turnover-register > thead > tr > th:nth-child(5),
 .turnover-register > thead > tr > th:nth-child(6),
+.turnover-register > tbody > tr > td:nth-child(2),
 .turnover-register > tbody > tr > td:nth-child(5),
 .turnover-register > tbody > tr > td:nth-child(6) { text-align: center; }
 .turnover-register .turnover-number { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -71,9 +73,13 @@
 .turnover-register-footer { padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .turnover-register-footer .finance-table-pagination { flex: 1; }
 .turnover-ledger-drawer .turnover-closure-table { border-collapse: collapse; width: 100%; font-size: 13px; }
-.turnover-closure-table th { font-weight: 500; color: var(--fp-text-secondary); text-align: left; }
-.turnover-closure-table th, .turnover-closure-table td { padding: 12px 8px; border-bottom: 1px solid var(--fp-border-subtle); }
-.turnover-closure-table td:last-child, .turnover-closure-table th:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.turnover-closure-table th { font-weight: 500; color: var(--fp-text-secondary); }
+.turnover-closure-table th, .turnover-closure-table td { padding: 12px 8px; border-bottom: 1px solid var(--fp-border-subtle); text-align: left; }
+.turnover-closure-table--confirmation :is(th, td):last-child,
+.turnover-closure-table--details :is(th, td):nth-child(3) { text-align: right; font-variant-numeric: tabular-nums; }
+.turnover-closure-table :is(th, td):first-child,
+.turnover-closure-table--confirmation :is(th, td):nth-child(3),
+.turnover-closure-table--details :is(th, td):last-child { text-align: center; }
 .turnover-closure-table--confirmation { table-layout: fixed; }
 .turnover-closure-table--confirmation th:first-child { width: 26%; }
 .turnover-closure-table--confirmation th:nth-child(3) { width: 54px; }

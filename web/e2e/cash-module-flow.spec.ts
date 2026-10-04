@@ -390,14 +390,18 @@ test.describe("cash module deterministic browser flow", () => {
       if (measures.length === 0) {
         await expect(page.locator(".cash-filter-popover[data-entering]")).toHaveCount(0);
         await page.screenshot({ path: testInfo.outputPath("cash-anchored-project-filter.png") });
-        const styles = await page.evaluate(() => {
-          const read = (selector: string) => {
-            const node = document.querySelector<HTMLElement>(selector)!; const style = getComputedStyle(node);
-            return { selector, label: node.textContent?.trim(), hovered: node.hasAttribute("data-hovered"), height: style.height, background: style.backgroundColor, color: style.color,
-              border: style.border, radius: style.borderRadius, padding: style.padding, shadow: style.boxShadow };
-          };
-          return [".cash-filter-popover .button--primary", ".cash-page .cash-toolbar .button--secondary", ".cash-page .cash-toolbar .button--tertiary", ".cash-page .cash-column-filter", ".cash-filter-popover"].map(read);
-        });
+        const styledControls = [
+          ["应用", dialog.getByRole("button", { name: "应用", exact: true })],
+          ["查询", page.locator(".cash-toolbar").getByRole("button", { name: "查询", exact: true })],
+          ["重置", page.locator(".cash-toolbar").getByRole("button", { name: "重置", exact: true })],
+          ["列筛选", trigger],
+          ["筛选浮层", page.locator(".cash-filter-popover")],
+        ] as const;
+        const styles = await Promise.all(styledControls.map(([control, locator]) => locator.evaluate((node, control) => {
+          const style = getComputedStyle(node);
+          return { control, label: node.textContent?.trim(), hovered: node.hasAttribute("data-hovered"), height: style.height, background: style.backgroundColor, color: style.color,
+            border: style.border, radius: style.borderRadius, padding: style.padding, shadow: style.boxShadow };
+        }, control)));
         console.log("cash computed styles", JSON.stringify(styles));
         await testInfo.attach("cash-computed-styles", { body: JSON.stringify(styles, null, 2), contentType: "application/json" });
       }

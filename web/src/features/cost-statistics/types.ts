@@ -36,6 +36,7 @@ export type CostExplorerEntryRow = {
   oaApplicant: string;
   paymentAccountLabel: string;
   bankAccountLabel: string;
+  bankAccountDisplayLabel: string;
   remark: string;
   bankTagCode: string;
   bankTagLabel: string;
@@ -46,6 +47,7 @@ export type CostExplorerEntryRow = {
 
 export type CostBankExplorerRow = {
   bankAccountLabel: string;
+  bankAccountDisplayLabel: string;
   totalAmount: string;
   projectCount: number;
 };
@@ -147,6 +149,7 @@ export type CostStatisticsManualAllocationBankEvent = {
   counterpartyName: string;
   tags: string[];
   bankAccountLabel: string;
+  bankAccountDisplayLabel: string;
   bankTagCode: string;
   bankTagPrimaryLabel: string;
   bankTagSubLabel: string;
@@ -266,6 +269,7 @@ export type CostBankTransactionDetail = {
     amount: string;
     counterpartyName: string;
     paymentAccountLabel: string;
+    bankAccountDisplayLabel: string;
     remark: string;
     bankTagCode?: string;
     bankTagLabel?: string;
@@ -301,6 +305,7 @@ export type CostAllocationDetail = {
     counterpartyName: string;
     paymentAccountLabel: string;
     bankAccountLabel: string;
+    bankAccountDisplayLabel: string;
     oaApplicant: string;
     oaOriginalAmount: string | null;
     oaAllocationWeight: string;
@@ -313,6 +318,7 @@ export type CostAllocationDetail = {
     direction: string;
     counterpartyName: string;
     paymentAccountLabel: string;
+    bankAccountDisplayLabel: string;
     remark: string;
     bankTagCode: string;
     bankTagLabel: string;

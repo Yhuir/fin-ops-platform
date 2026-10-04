@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from fin_ops_platform.services.bank_settings import bank_short_names_from_mappings, bank_summary_with_short_names
 from fin_ops_platform.services.bank_transaction_unit import original_bank_transaction
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
@@ -410,7 +411,7 @@ class InputInvoiceUsageCanonicalQueryService:
                 snapshot.payment_status_rules
             )
         )
-        return [
+        rows = [
             self._row_assembler._row_payload(
                 group,
                 context=context,
@@ -418,6 +419,11 @@ class InputInvoiceUsageCanonicalQueryService:
             )
             for group in snapshot.groups
         ]
+        names = bank_short_names_from_mappings(snapshot.bank_account_mappings)
+        for row in rows:
+            if "bankTransactions" in row:
+                row["bankTransactions"] = bank_summary_with_short_names(row["bankTransactions"], names)
+        return rows
 
 
 class _SnapshotPaymentRulesProvider:

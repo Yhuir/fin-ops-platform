@@ -86,8 +86,8 @@ export default function TurnoverLedgerExtraDrawer({
     || "-";
   const familyLabel = cleanText(row?.familyLabel) || cleanText(relation?.familyLabel) || "-";
   const dateText = flowDate(row);
-  const bankAccountLabels = row?.bankAccountLabels?.length ? row.bankAccountLabels : (
-    detail?.bankRows.map((bankRow) => bankRow.bankAccountLabel).filter(Boolean) ?? []
+  const bankAccountLabels = row?.bankAccountDisplayLabels.length ? row.bankAccountDisplayLabels : (
+    detail?.bankRows.map((bankRow) => bankRow.bankAccountDisplayLabel).filter(Boolean) ?? []
   );
   const handleTextChange = (field: keyof TurnoverLedgerExtra) => (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     onExtraChange({ ...extra, [field]: event.target.value });
@@ -154,7 +154,7 @@ export default function TurnoverLedgerExtraDrawer({
                       sections={(detail?.bankRows ?? []).map((bankRow, index) => ({
                         title: `银行流水 ${index + 1}`, bank_transaction_id: bankRow.id,
                         fields: [{ label: "金额", value: bankRow.amount }, { label: "收支方向", value: bankRow.directionLabel },
-                          { label: "银行账户", value: bankRow.bankAccountLabel }, { label: "摘要", value: bankRow.summary }],
+                          { label: "银行账户", value: bankRow.bankAccountDisplayLabel }, { label: "摘要", value: bankRow.summary }],
                       }))} />
                   </div>
                 ) : null}

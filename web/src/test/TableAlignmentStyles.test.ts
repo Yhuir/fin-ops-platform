@@ -80,8 +80,10 @@ describe("finance table alignment styles", () => {
 
   test("aligns cells by column role instead of globally centering every table cell", () => {
     expectDeclaration(".output-invoice-collections-table-column-heading", /width:\s*100%/);
-    expectDeclaration(".output-invoice-collections-table-header-stack", /justify-content:\s*center/);
-    expectDeclaration(".output-invoice-collections-table-header-stack", /text-align:\s*center/);
+    const presentation = readFileSync("src/app/financePresentation.css", "utf8");
+    expect(presentation).toContain(".page-body[data-finance-presentation]");
+    expect(presentation).toContain("justify-content: var(--finance-column-justify)");
+    expect(presentation).toContain("text-align: var(--finance-column-align, left)");
 
     expectDeclaration(".finance-table__cell[data-column-role=\"identity\"]", /text-align:\s*left/);
     expectDeclaration(".finance-table__cell[data-column-role=\"account\"]", /text-align:\s*left/);

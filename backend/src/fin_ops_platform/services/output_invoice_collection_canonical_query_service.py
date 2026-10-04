@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from fin_ops_platform.services.bank_settings import bank_short_names_from_mappings, bank_summary_with_short_names
 from fin_ops_platform.services.bank_transaction_unit import original_bank_transaction
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_canonical_query_service import (
@@ -385,7 +386,7 @@ class OutputInvoiceCollectionCanonicalQueryService:
             str(group.get("group_key") or ""): group
             for group in all_groups
         }
-        return [
+        rows = [
             self._row_assembler._row_payload(
                 group,
                 [
@@ -400,6 +401,11 @@ class OutputInvoiceCollectionCanonicalQueryService:
             )
             for group in snapshot.groups
         ]
+        names = bank_short_names_from_mappings(snapshot.bank_account_mappings)
+        for row in rows:
+            if "bankTransactions" in row:
+                row["bankTransactions"] = bank_summary_with_short_names(row["bankTransactions"], names)
+        return rows
 
 
 def _context(

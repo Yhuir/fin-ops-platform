@@ -40,6 +40,21 @@ describe("现金录入配置选择", () => {
   });
 });
 describe("现金原生筛选浮层", () => {
+  test("cancel discards draft choices and returns focus to the filter without applying", async () => {
+    const apply = vi.fn(); const user = userEvent.setup();
+    render(<CashFilterPopover label="账户" value={["a"]} options={options} onApply={apply} />);
+    const trigger = screen.getByRole("button", { name: "筛选账户" });
+    await user.click(trigger);
+    await user.click(screen.getByRole("button", { name: "全选" }));
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    expect(apply).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(trigger).toHaveFocus());
+    await user.click(trigger);
+    expect(screen.getByRole("checkbox", { name: "账户甲" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "账户乙" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "无账户" })).not.toBeChecked();
+  });
   test.each(["categories", "bill-labels", "projects"] as const)("%s reserves one slot for null so select-all on a full candidate page can apply", async kind => {
     const apply = vi.fn(); const user = userEvent.setup();
     render(kind === "projects"

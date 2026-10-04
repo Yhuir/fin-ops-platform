@@ -1495,15 +1495,21 @@ textarea {
   width: 11%;
 }
 
-.input-invoice-usage-table .finance-table__column:nth-child(2),
+.input-invoice-usage-table .finance-table__column:nth-child(2) {
+  width: 12%;
+}
+
 .input-invoice-usage-table .finance-table__column:nth-child(3) {
   width: 10%;
 }
 
 .input-invoice-usage-table .finance-table__column:nth-child(4),
-.input-invoice-usage-table .finance-table__column:nth-child(5),
 .input-invoice-usage-table .finance-table__column:nth-child(8) {
   width: 11%;
+}
+
+.input-invoice-usage-table .finance-table__column:nth-child(5) {
+  width: 148px;
 }
 
 .input-invoice-usage-table .finance-table__column:nth-child(6) {
@@ -1515,7 +1521,7 @@ textarea {
 }
 
 .input-invoice-usage-table .finance-table__column:nth-child(9) {
-  width: 7%;
+  width: 10%;
 }
 
 .input-invoice-usage-table .finance-table__column:nth-child(10) {
@@ -1528,7 +1534,6 @@ textarea {
   font-weight: 700;
   line-height: 1.25;
   padding: 9px var(--fp-table-cell-padding-x);
-  text-align: center;
   vertical-align: middle;
   white-space: nowrap;
 }
@@ -1536,7 +1541,6 @@ textarea {
 .input-invoice-usage-table-sub-header {
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
-  text-align: center;
 }
 
 .input-invoice-usage-table-sub-header--right {
@@ -1556,7 +1560,6 @@ textarea {
   justify-content: center;
   flex-direction: column;
   gap: 1px;
-  text-align: center;
 }
 
 .input-invoice-usage-table-cell--payment {
@@ -1726,11 +1729,6 @@ textarea {
   align-items: center;
   justify-content: flex-end;
   gap: var(--fp-space-1);
-}
-
-.input-invoice-usage-bank-tag {
-  font-family: var(--fp-font-data);
-  font-variant-numeric: tabular-nums;
 }
 
 .input-invoice-usage-table-action,
@@ -3033,7 +3031,6 @@ textarea {
   color: var(--fp-text-primary);
   font-size: var(--fp-text-label);
   line-height: 1.2;
-  text-align: center;
 }
 
 .oa-pending-payments-table-column-heading {
@@ -3089,14 +3086,39 @@ textarea {
 
 .oa-pending-payments-subheader-grid--status {
   grid-template-columns: minmax(0, 1fr);
-  justify-items: start;
+  justify-items: center;
   gap: 3px;
-  text-align: left;
+  text-align: center;
 }
 
 .oa-pending-payments-subheader-grid--invoice {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   row-gap: 4px;
+}
+
+.oa-pending-payments-subheader-grid__invoice-number {
+  grid-column: 1 / -1;
+  text-align: left;
+}
+
+.oa-pending-payments-subheader-grid__invoice-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  text-align: left;
+}
+
+.oa-pending-payments-invoice-metadata {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.oa-pending-payments-invoice-metadata .oa-pending-payments-invoice-amount-line {
+  margin-left: auto;
+  text-align: right;
 }
 
 .oa-pending-payments-subheader-grid > span {
@@ -3130,7 +3152,7 @@ textarea {
 
 .oa-pending-payments-table-cell--status,
 .oa-pending-payments-table-cell[data-column-role="status"] {
-  text-align: left;
+  text-align: center;
 }
 
 .oa-pending-payments-table-cell[data-column-role="date"] {
@@ -3213,7 +3235,8 @@ textarea {
 }
 
 .oa-pending-payments-bank-grid__amount {
-  justify-self: start;
+  justify-self: stretch;
+  text-align: right;
 }
 
 .oa-pending-payments-bank-amount-line {
@@ -3221,7 +3244,7 @@ textarea {
   max-width: 100%;
   min-width: 0;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: flex-end;
   flex-wrap: wrap;
   gap: 3px;
 }
@@ -4159,7 +4182,6 @@ textarea {
   color: var(--fp-text-primary);
   font-size: var(--fp-text-label);
   line-height: 1.2;
-  text-align: center;
 }
 
 .output-invoice-collections-table-cell--status {
@@ -4321,7 +4343,6 @@ textarea {
   justify-content: center;
   gap: 4px;
   flex-wrap: wrap;
-  text-align: center;
 }
 
 .output-invoice-collections-table-header-sub-label {
@@ -19644,9 +19665,9 @@ body.column-layout-dragging {
   tab-size: 4;
 }
 
-.bank-auto-tag-actions-column,
-.bank-auto-tag-actions-cell {
-  text-align: right;
+.bank-auto-tag-rule-table .bank-auto-tag-actions-column,
+.bank-auto-tag-rule-table .bank-auto-tag-actions-cell {
+  text-align: center;
 }
 
 .bank-auto-tag-action-button,
@@ -20957,10 +20978,8 @@ body.column-layout-dragging {
   cursor: pointer;
 }
 
-.bank-grid-toolbar-actions .bank-export-button:hover,
-.bank-grid-toolbar-actions .bank-export-button:focus-visible {
+.bank-grid-toolbar-actions .bank-export-button:hover {
   background: var(--bank-hover);
-  outline: none;
 }
 
 .bank-export-menu {
@@ -21021,14 +21040,7 @@ body.column-layout-dragging {
   font-size: 12px;
   font-weight: 700;
   line-height: 1.2;
-  text-align: left;
   white-space: nowrap;
-}
-
-.bank-transaction-table .finance-table__column.bank-col-type,
-.bank-transaction-table .finance-table__column.bank-col-amount,
-.bank-transaction-table .finance-table__column.bank-col-balance {
-  text-align: center;
 }
 
 .bank-transaction-table .finance-table__cell {
@@ -21039,7 +21051,6 @@ body.column-layout-dragging {
   font-size: 12.5px;
   line-height: 1.25;
   overflow-wrap: anywhere;
-  text-align: center;
   vertical-align: middle;
   white-space: normal;
 }
@@ -21084,13 +21095,13 @@ body.column-layout-dragging {
 .bank-counterparty-name {
   display: -webkit-box;
   align-self: center;
-  justify-self: center;
+  justify-self: start;
   max-width: 100%;
   overflow: hidden;
   color: var(--bank-text);
   line-height: 1.15;
   overflow-wrap: anywhere;
-  text-align: center;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: normal;
   -webkit-box-orient: vertical;
@@ -21236,12 +21247,31 @@ body.column-layout-dragging {
 }
 
 .bank-amount-line {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  align-items: center;
-  justify-content: stretch;
-  gap: 8px;
+  display: flex;
+  justify-content: flex-end;
   width: 100%;
+}
+
+.bank-amount-metadata {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  color: var(--fp-text-secondary);
+  font-size: 12px;
+}
+
+.bank-amount-metadata .bank-account-value {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.bank-amount-metadata :is(.bank-account-primary, .bank-account-secondary) {
+  color: inherit;
+  font-size: inherit;
+  font-weight: 400;
 }
 
 .bank-direction-tag-centered {
@@ -21258,11 +21288,8 @@ body.column-layout-dragging {
 }
 
 .bank-amount-value {
-  color: #1f2937;
-}
-
-.bank-amount-cell .bank-source-chip {
-  justify-self: end;
+  color: var(--fp-text-primary);
+  font-weight: 600;
 }
 
 .bank-counterparty-meta-row {
@@ -21340,25 +21367,11 @@ body.column-layout-dragging {
   color: #6b4618;
 }
 
-.bank-details-page .bank-source-chip .bank-chip-label,
 .bank-details-page .direction-tag .bank-chip-label {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.bank-details-page .bank-source-chip {
-  display: inline-flex;
-  align-items: center;
-  align-self: center;
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 100%;
-  min-height: 22px;
-  height: auto;
-  border-color: var(--bank-border-subtle);
-  color: var(--bank-text-secondary);
-  font-size: 12px;
-}
 
 .bank-details-page .direction-tag.expense,
 .bank-details-page .direction-tag.outflow {
@@ -22645,7 +22658,6 @@ body.column-layout-dragging {
 .etc-invoice-table th {
   color: #172033;
   font-weight: 700;
-  text-align: left;
   background: #f4f7fb;
 }
 

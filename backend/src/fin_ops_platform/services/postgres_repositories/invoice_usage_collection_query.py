@@ -39,6 +39,7 @@ class InvoiceUsageCollectionCanonicalSnapshot:
     facet_counts: dict[str, list[dict[str, Any]]]
     payment_status_labels: dict[str, str]
     payment_status_rules: dict[str, Any] = field(default_factory=dict)
+    bank_account_mappings: list[dict[str, Any]] = field(default_factory=list)
 
 
 class PostgresInputInvoiceUsageQueryRepository:
@@ -384,6 +385,7 @@ class PostgresInputInvoiceUsageQueryRepository:
             ),
             payment_status_labels=labels,
             payment_status_rules=payment_settings,
+            bank_account_mappings=_dict_rows(settings_payload.get("bank_account_mappings")),
         )
 
 
@@ -621,7 +623,9 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                             from supporting_group_rows
                         ),
                         '[]'::jsonb
-                    ) as supporting_group_rows
+                    ) as supporting_group_rows,
+                    (select settings_payload->'bank_account_mappings' from app.app_settings
+                     where settings_key = 'app_settings') as bank_account_mappings
                 """,
                 (
                     *base_params,
@@ -693,6 +697,7 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                 status_field="collection_status",
             ),
             payment_status_labels={},
+            bank_account_mappings=_dict_rows(page_result.get("bank_account_mappings")),
         )
 
 

@@ -15,6 +15,7 @@ import { BackgroundJobProgressProvider } from "../features/backgroundJobs/Backgr
 import AppRouter from "./router";
 import { APP_BASE_PATH, isOaEmbeddedMode } from "./runtime";
 import "./styles.css";
+import "./financePresentation.css";
 
 const DEFAULT_SIDEBAR_STORAGE_KEY = "finOps.sidebar.expanded.default";
 const EMBEDDED_OA_SIDEBAR_STORAGE_KEY = "finOps.sidebar.expanded.embeddedOa";
@@ -135,7 +136,7 @@ function AppShell() {
           isCompact={isCompact}
           onOpenMobileSidebar={() => setMobileOpen(true)}
         />
-        <main className={`page-body${embedded ? " embedded" : ""}`} id="main-content" tabIndex={-1}>
+        <main className={`page-body${embedded ? " embedded" : ""}`} data-finance-presentation={location.pathname !== "/" ? "standard" : undefined} id="main-content" tabIndex={-1}>
           <SessionGate>
             <AppRouter />
           </SessionGate>

@@ -215,6 +215,7 @@ function mapBank(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"]
     direction: stringValue(raw.direction),
     directionLabel: stringValue(camelOrSnake(raw, "directionLabel", "direction_label") ?? raw.direction),
     bankName: stringValue(camelOrSnake(raw, "bankName", "bank_name")),
+    bankShortName: stringValue(camelOrSnake(raw, "bankShortName", "bank_short_name")),
     accountLast4: stringValue(camelOrSnake(raw, "accountLast4", "account_last4")),
     summary: stringValue(raw.summary),
     remark: stringValue(raw.remark),

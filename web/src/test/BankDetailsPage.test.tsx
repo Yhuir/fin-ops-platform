@@ -448,7 +448,12 @@ describe("Bank details page", () => {
     expect(within(table).getByText("无oa").closest(".bank-counterparty-meta-row")?.querySelector(".bank-trade-time-text")).not.toBeNull();
     expect(within(table).getByText("收").closest(".direction-tag")).toHaveClass("bank-direction-tag-centered");
     expect(within(table).getByText("收").closest(".direction-tag")).toHaveClass("bank-chip-auto-size");
-    expect(within(table).getByText("工商银行 6386").closest(".bank-source-chip")).toHaveClass("bank-chip-auto-size");
+    const amountRow = within(table).getByText("收").closest("tr");
+    expect(amountRow?.querySelector(".bank-amount-line")).toHaveTextContent("20000.00");
+    expect(amountRow?.querySelector(".bank-amount-line")).not.toHaveTextContent("收");
+    expect(amountRow?.querySelector(".bank-amount-metadata")).toContainElement(within(table).getByText("收"));
+    expect(amountRow?.querySelector(".bank-amount-metadata .bank-account-primary")).toHaveTextContent("工商银行");
+    expect(amountRow?.querySelector(".bank-amount-metadata .bank-account-secondary")).toHaveTextContent("6386");
     expect(within(table).getByText("货款")).toBeInTheDocument();
     expect(within(table).getByText("项目回款")).toBeInTheDocument();
     expect(within(page).queryByText(exactTextContent("公司暂借款：待还款 2"))).not.toBeInTheDocument();
@@ -458,6 +463,28 @@ describe("Bank details page", () => {
     await user.keyboard("{Escape}");
     expect(within(page).queryByText("未保存 0")).not.toBeInTheDocument();
     expect(within(page).getByText("每页行数")).toBeInTheDocument();
+  });
+
+  test.each([
+    { bankShortName: "平安", bankName: "平安银行", accountLast4: "0093", expectedName: "平安", expectedLast4: "0093", amount: "0.00" },
+    { bankShortName: "", bankName: "银行真实全称", accountLast4: "0012", expectedName: "银行真实全称", expectedLast4: "0012", amount: "-123.45" },
+    { bankShortName: "", bankName: "", accountLast4: "", expectedName: "—", expectedLast4: "", amount: "12.34" },
+  ])("uses source bank labels and preserves amount $amount with account $accountLast4", async ({ bankShortName, bankName, accountLast4, expectedName, expectedLast4, amount }) => {
+    const fetchMock = installMockApiFetch();
+    const original = await bankDetailsApi.fetchBankDetailTransactions({});
+    vi.spyOn(bankDetailsApi, "fetchBankDetailTransactions").mockResolvedValue({
+      ...original,
+      rows: [{ ...original.rows[0], bankShortName, bankName, accountLast4, amount }],
+    });
+    renderBankDetailsPage();
+    const page = await screen.findByTestId("bank-details-page");
+    const row = await within(page).findByRole("row", { name: /云南溯源科技有限公司/ });
+    expect(row.querySelector(".bank-amount-line")).toHaveTextContent(amount);
+    const metadata = row.querySelector(".bank-amount-metadata");
+    expect(metadata?.querySelector(".bank-account-value")).toHaveTextContent(`${expectedName}${expectedLast4}`);
+    expect(metadata).not.toHaveTextContent(amount);
+    if (bankShortName) expect(metadata).not.toHaveTextContent(bankName);
+    expect(requestUrls(fetchMock, "/api/workbench/settings")).toHaveLength(0);
   });
 
   test("renders sidebar balances with the positive balance treatment", async () => {

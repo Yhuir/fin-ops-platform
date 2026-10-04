@@ -16,7 +16,10 @@ from fin_ops_platform.services.bank_details_export_service import (
     BANK_DETAIL_EXPORT_ROW_LIMIT,
 )
 from fin_ops_platform.services.bank_details_service import BankDetailsService
-from fin_ops_platform.services.bank_settings import bank_accounts_from_settings_payload
+from fin_ops_platform.services.bank_settings import (
+    bank_accounts_from_settings_payload,
+    bank_short_names_from_mappings,
+)
 from fin_ops_platform.services.bank_transaction_auto_category_service import (
     BankTransactionAutoCategoryService,
 )
@@ -938,8 +941,10 @@ class BankDetailsCanonicalQueryService:
     def _ordered_transactions_payload(cls, snapshot: dict[str, Any], **scope: Any) -> dict[str, Any]:
         # Workbench also uses the category mapper, but does not own bank order I/O.
         payload = cls._transactions_payload(snapshot, **scope)
+        names = bank_short_names_from_mappings((snapshot.get("settings") or {}).get("bank_account_mappings") or [])
         for mapped, source in zip(payload["rows"], snapshot["rows"], strict=True):
             mapped["same_time_order_status"] = source["same_time_order_status"]
+            mapped["bank_short_name"] = names.get((mapped["bank_name"], mapped["account_last4"]), "")
         return payload
 
     @staticmethod

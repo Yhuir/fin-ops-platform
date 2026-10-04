@@ -60,15 +60,15 @@ function CashAccounts({ initial, onChange }: { initial: AccountCriteria; onChang
       <CashInput label="账户名称" value={search} onChange={setSearch} placeholder="搜索账户" />
       <Button type="submit" variant="secondary">查询</Button>
       <Button variant="tertiary" onPress={() => { setKeyword(""); setSearch(""); setEnabled(""); setOrder("asc"); setPage(1); }}>重置</Button>
-      <Button variant="tertiary" onPress={query.reload} isDisabled={query.loading}>刷新</Button>
+      <Button variant="secondary" onPress={query.reload} isDisabled={query.loading}>刷新</Button>
       <Button onPress={() => setEditing("new")}>新增账户</Button>
     </form>
     <CashNotice error={query.error?.message} />
     <FinanceTable ariaLabel="现金账户" minWidth={900} sortDescriptor={{ column: "name", direction: order === "asc" ? "ascending" : "descending" }} onSortChange={value => { setOrder(value.direction === "ascending" ? "asc" : "desc"); setPage(1); }} footer={<FinanceTablePagination page={page} pageSize={50} total={query.data?.pagination.total ?? 0} onPageChange={setPage} isDisabled={query.loading || Boolean(query.error)} />}>
       <FinanceTableHeader>
-        <FinanceTableColumn id="name" isRowHeader allowsSorting>账户名称</FinanceTableColumn><FinanceTableColumn id="kind">类型</FinanceTableColumn><FinanceTableColumn id="opening_date">起算日期</FinanceTableColumn><FinanceTableColumn id="opening_amount">确认期初</FinanceTableColumn>
-        <FinanceTableColumn id="enabled"><CashColumnHeader label="状态"><CashFilterPopover label="账户状态" column value={enabled ? [enabled] : []} options={[{ value: "true", label: "启用" }, { value: "false", label: "停用" }]} onApply={value => { setEnabled(value.length === 1 ? value[0] : ""); setPage(1); }} /></CashColumnHeader></FinanceTableColumn>
-        <FinanceTableColumn id="remark">说明</FinanceTableColumn><FinanceTableColumn id="actions">操作</FinanceTableColumn>
+        <FinanceTableColumn id="name" isRowHeader allowsSorting columnRole="identity">账户名称</FinanceTableColumn><FinanceTableColumn id="kind" columnRole="status">类型</FinanceTableColumn><FinanceTableColumn id="opening_date" columnRole="date">起算日期</FinanceTableColumn><FinanceTableColumn id="opening_amount" columnRole="amount">确认期初</FinanceTableColumn>
+        <FinanceTableColumn id="enabled" columnRole="status"><CashColumnHeader label="状态"><CashFilterPopover label="账户状态" column value={enabled ? [enabled] : []} options={[{ value: "true", label: "启用" }, { value: "false", label: "停用" }]} onApply={value => { setEnabled(value.length === 1 ? value[0] : ""); setPage(1); }} /></CashColumnHeader></FinanceTableColumn>
+        <FinanceTableColumn id="remark" columnRole="description">说明</FinanceTableColumn><FinanceTableColumn id="actions" columnRole="action">操作</FinanceTableColumn>
       </FinanceTableHeader>
       <FinanceTableBody renderEmptyState={() => query.error ? "账户读取失败，请刷新。" : query.loading ? null : "尚无匹配账户。新增现金账户并确认期初后，即可逐笔录入。"}>{(query.data?.rows ?? []).map((row) => <FinanceTableRow key={row.id} id={row.id}>
         <FinanceTableCell columnRole="identity">{row.name}</FinanceTableCell>
@@ -131,7 +131,7 @@ function CashCategories({ initial, onChange }: { initial: CategoryCriteria; onCh
       <CashInput label="费用类型名称" value={search} onChange={setSearch} placeholder="搜索费用类型" />
       <Button type="submit" variant="secondary">查询</Button>
       <Button variant="tertiary" onPress={() => { setSearch(""); change({ keyword: "", enabled: "", order: "asc" }); }}>重置</Button>
-      <Button variant="tertiary" onPress={() => setRefresh(value => value + 1)}>刷新</Button>
+      <Button variant="secondary" onPress={() => setRefresh(value => value + 1)}>刷新</Button>
       <CashFilterPopover label="费用类型状态" value={criteria.enabled ? [criteria.enabled] : []} options={[{ value: "true", label: "启用" }, { value: "false", label: "停用" }]} onApply={value => change({ enabled: value.length === 1 ? value[0] : "" })} />
     </form>
     {(Object.keys(cashCategoryGroupLabels) as CategoryGroup[]).map(group => <CashCategoryGroup key={group} group={group} criteria={criteria} refresh={refresh}
@@ -161,8 +161,8 @@ function CashCategoryGroup({ group, criteria, refresh, onPageChange, onOrderChan
     {query.error && <Button variant="tertiary" onPress={query.reload}>重新读取{label}费用类型</Button>}
     <FinanceTable ariaLabel={`${label}费用类型`} minWidth={760} sortDescriptor={{ column: "name", direction: criteria.order === "asc" ? "ascending" : "descending" }} onSortChange={value => onOrderChange(value.direction === "ascending" ? "asc" : "desc")} footer={<FinanceTablePagination page={page} pageSize={50} total={query.data?.pagination.total ?? 0} onPageChange={onPageChange} isDisabled={query.loading || Boolean(query.error)} />}>
       <FinanceTableHeader>
-        <FinanceTableColumn id="name" isRowHeader allowsSorting>名称</FinanceTableColumn><FinanceTableColumn id="enabled">状态</FinanceTableColumn>
-        <FinanceTableColumn id="remark">说明</FinanceTableColumn><FinanceTableColumn id="actions">操作</FinanceTableColumn>
+        <FinanceTableColumn id="name" isRowHeader allowsSorting columnRole="identity">名称</FinanceTableColumn><FinanceTableColumn id="enabled" columnRole="status">状态</FinanceTableColumn>
+        <FinanceTableColumn id="remark" columnRole="description">说明</FinanceTableColumn><FinanceTableColumn id="actions" columnRole="action">操作</FinanceTableColumn>
       </FinanceTableHeader>
       <FinanceTableBody renderEmptyState={() => query.error ? "费用类型读取失败，请刷新。" : query.loading ? null : "暂无匹配费用类型。请按实际收付或往来用途新增。"}>{(query.data?.rows ?? []).map(row => <FinanceTableRow key={row.id} id={row.id}>
         <FinanceTableCell columnRole="identity">{row.name}</FinanceTableCell><FinanceTableCell columnRole="status">{row.enabled ? "启用" : "停用"}</FinanceTableCell>
@@ -284,10 +284,10 @@ export function CashProjectSettings({ initial = initialCashSettingsCriteria().pr
     </form>
     <FinanceTable ariaLabel="OA 项目列表" minWidth={900} footer={<FinanceTablePagination page={page} pageSize={50} total={projects.data?.total ?? 0} onPageChange={setPage} isDisabled={projects.loading || Boolean(projects.error) || mutation.busy} />}>
       <FinanceTableHeader>
-        <FinanceTableColumn id="code">项目编号</FinanceTableColumn><FinanceTableColumn id="name" isRowHeader>项目名称</FinanceTableColumn>
-        <FinanceTableColumn id="stage"><CashColumnHeader label="真实阶段"><CashFilterPopover<string | null> label="项目阶段" column value={stages} options={[...(stageOptions?.map(item => ({ value: item.code, label: item.name })) ?? []), { value: null, label: "阶段缺失" }]} loading={projects.loading} error={projects.error?.message} onReload={projects.reload} onApply={value => { setStages(value); setPage(1); }} /></CashColumnHeader></FinanceTableColumn>
-        <FinanceTableColumn id="selectable"><CashColumnHeader label="新增可选"><CashFilterPopover label="新增资格" column value={selectable ? [selectable] : []} options={[{ value: "true", label: "可选" }, { value: "false", label: "不可选" }]} onApply={value => { setSelectable(value.length === 1 ? value[0] : ""); setPage(1); }} /></CashColumnHeader></FinanceTableColumn>
-        <FinanceTableColumn id="reason">不可选原因</FinanceTableColumn>
+        <FinanceTableColumn id="code" columnRole="identity">项目编号</FinanceTableColumn><FinanceTableColumn id="name" isRowHeader columnRole="identity">项目名称</FinanceTableColumn>
+        <FinanceTableColumn id="stage" columnRole="status"><CashColumnHeader label="真实阶段"><CashFilterPopover<string | null> label="项目阶段" column value={stages} options={[...(stageOptions?.map(item => ({ value: item.code, label: item.name })) ?? []), { value: null, label: "阶段缺失" }]} loading={projects.loading} error={projects.error?.message} onReload={projects.reload} onApply={value => { setStages(value); setPage(1); }} /></CashColumnHeader></FinanceTableColumn>
+        <FinanceTableColumn id="selectable" columnRole="status"><CashColumnHeader label="新增可选"><CashFilterPopover label="新增资格" column value={selectable ? [selectable] : []} options={[{ value: "true", label: "可选" }, { value: "false", label: "不可选" }]} onApply={value => { setSelectable(value.length === 1 ? value[0] : ""); setPage(1); }} /></CashColumnHeader></FinanceTableColumn>
+        <FinanceTableColumn id="reason" columnRole="description">不可选原因</FinanceTableColumn>
       </FinanceTableHeader>
       <FinanceTableBody renderEmptyState={() => projects.error ? "OA 项目读取失败，请刷新。" : projects.loading ? null : "没有匹配项目。历史现金记录不受本页选择范围影响。"}>{(projects.data?.rows ?? []).map((row) => <FinanceTableRow key={row.id} id={row.id}>
         <FinanceTableCell columnRole="identity">{row.code ?? "—"}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.name}</FinanceTableCell>
@@ -309,7 +309,7 @@ export function CashBillLabels() {
     <form className="cash-toolbar" onSubmit={(event) => { event.preventDefault(); setKeyword(search.trim()); setPage(1); }}><CashInput label="账单分组关键词" value={search} onChange={setSearch} /><Button type="submit" variant="secondary">查询分组</Button><Button onPress={() => setEditing("new")}>新增账单分组</Button></form>
     <CashNotice error={query.error?.message} />
     <FinanceTable ariaLabel="账单分组" minWidth={480} footer={<FinanceTablePagination page={page} pageSize={50} total={query.data?.pagination.total ?? 0} onPageChange={setPage} isDisabled={query.loading || Boolean(query.error)} />}>
-      <FinanceTableHeader>{["银行", "账单别名", "状态", "操作"].map((name, i) => <FinanceTableColumn key={name} id={name} isRowHeader={i === 1}>{name}</FinanceTableColumn>)}</FinanceTableHeader>
+      <FinanceTableHeader>{["银行", "账单别名", "状态", "操作"].map((name, i) => <FinanceTableColumn key={name} id={name} isRowHeader={i === 1} columnRole={i < 2 ? "identity" : i === 2 ? "status" : "action"}>{name}</FinanceTableColumn>)}</FinanceTableHeader>
       <FinanceTableBody renderEmptyState={() => query.error ? "账单分组读取失败，请刷新。" : query.loading ? null : "尚无账单分组。分组只标明用途，不是现金账户。"}>{(query.data?.rows ?? []).map((row) => <FinanceTableRow id={row.id} key={row.id}><FinanceTableCell columnRole="identity">{row.bank_name}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.label}</FinanceTableCell><FinanceTableCell columnRole="status">{row.enabled ? "启用" : "停用"}</FinanceTableCell><FinanceTableCell columnRole="action"><Button variant="tertiary" onPress={() => setEditing(row)}>编辑</Button></FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
     </FinanceTable>
     {editing && <CashBillEditor row={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}
@@ -354,7 +354,7 @@ function CashPaymentGuide({ keyword, onChange }: { keyword: string; onChange: (v
     <p className="cash-hint">仅作记录，不提交 OA、不执行付款或生成任务。</p>
     <div className="cash-toolbar"><CashInput label="办理说明关键词" value={keyword} onChange={onChange} placeholder="类别、申请人或所需单据" /></div>
     <FinanceTable ariaLabel="支付办理参考" minWidth={1050}>
-      <FinanceTableHeader>{["类别", "概要", "申请人", "所需单据", "收款方", "办理说明"].map((name, index) => <FinanceTableColumn key={name} id={name} isRowHeader={index === 0}>{name}</FinanceTableColumn>)}</FinanceTableHeader>
+      <FinanceTableHeader>{["类别", "概要", "申请人", "所需单据", "收款方", "办理说明"].map((name, index) => <FinanceTableColumn key={name} id={name} isRowHeader={index === 0} columnRole={index === 5 ? "action" : index === 1 || index === 3 ? "description" : "identity"}>{name}</FinanceTableColumn>)}</FinanceTableHeader>
       <FinanceTableBody renderEmptyState={() => "没有匹配的办理说明。"}>{rows.map((row) => <FinanceTableRow key={row.category} id={row.category}><FinanceTableCell columnRole="identity">{row.category}</FinanceTableCell><FinanceTableCell columnRole="description">{row.summary}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.applicant}</FinanceTableCell><FinanceTableCell columnRole="description">{row.document}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.recipient}</FinanceTableCell><FinanceTableCell columnRole="action"><Button variant="tertiary" size="sm" onPress={() => setDetail(row)}>查看说明</Button></FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
     </FinanceTable>
     {detail && <AppDrawer open title={detail.category} width={520} className="cash-drawer" onClose={() => setDetail(null)}><div className="cash-form"><p>{detail.summary}</p><p>申请人：{detail.applicant}</p><p>所需单据：{detail.document}</p><p>收款方：{detail.recipient}</p><p>现行参考：{detail.current}</p><p>调整参考：{detail.proposed}</p></div></AppDrawer>}

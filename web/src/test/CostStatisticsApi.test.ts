@@ -50,7 +50,7 @@ describe("Cost statistics export API", () => {
         amount: "5.00",
         counterparty_name: "供应商",
         trade_time: "2026-08-27T10:00:00+08:00",
-        tags: ["退款"], bank_account_label: "建行", bank_tag_code: "refund", bank_tag_primary_label: "退款", bank_tag_sub_label: "",
+        tags: ["退款"], bank_account_label: "建设银行 账户 0012", bank_account_display_label: "建行 0012", bank_tag_code: "refund", bank_tag_primary_label: "退款", bank_tag_sub_label: "",
       }],
       allocations: [],
       non_cost_amount: "0.00",
@@ -90,7 +90,7 @@ describe("Cost statistics export API", () => {
         transactionId: "bank-1",
         eventKind: "wrong_payment_refund",
         inProjectCostScope: false,
-        tags: ["退款"],
+        tags: ["退款"], bankAccountLabel: "建设银行 账户 0012", bankAccountDisplayLabel: "建行 0012",
       }],
     });
     expect(detail.bankEvents[0]).not.toHaveProperty("summary");
@@ -289,7 +289,7 @@ describe("Cost statistics export API", () => {
           counterparty_name: "陈佳玉",
           oa_applicant: "报销成员甲",
           payment_account_label: "建行 8106",
-          bank_account_label: "建行 8106",
+          bank_account_label: "建行 8106", bank_account_display_label: "建行 8106",
           remark: "报销",
         }],
         row_count: 1,
@@ -316,7 +316,7 @@ describe("Cost statistics export API", () => {
     }));
     expect(payload.rows[0]).toMatchObject({
       oaApplicant: "报销成员甲",
-      bankAccountLabel: "建行 8106",
+      bankAccountLabel: "建行 8106", bankAccountDisplayLabel: "建行 8106",
     });
   });
 
@@ -373,7 +373,7 @@ describe("Cost statistics export API", () => {
           direction: "支出",
           amount: "2100.00",
           counterparty_name: "张丽芬",
-          bank_account_label: "建行 8106",
+          bank_account_label: "建行 8106", bank_account_display_label: "建行 8106",
           bank_tag_code: "lodging",
           bank_tag_label: "住宿费",
           bank_tag_primary_label: "住宿费",
@@ -435,6 +435,7 @@ describe("Cost statistics export API", () => {
           }],
           bank_accounts: [{
             bank_account_label: "建设银行 8106",
+            bank_account_display_label: "建行 8106",
             total_amount: "90.00",
             project_count: 1,
           }],
@@ -459,6 +460,7 @@ describe("Cost statistics export API", () => {
     expect(payload.facets.projects[0].projectName).toBe("云南溯源科技");
     expect(payload.facets.bankAccounts[0]).toEqual({
       bankAccountLabel: "建设银行 8106",
+      bankAccountDisplayLabel: "建行 8106",
       totalAmount: "90.00",
       projectCount: 1,
     });
