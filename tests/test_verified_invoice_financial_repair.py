@@ -127,6 +127,74 @@ class VerifiedFinancialRepairTests(unittest.TestCase):
         self.assertEqual(again["update_count"], 0)
         self.assertEqual(again["verified_invoice_facts"], first["verified_invoice_facts"])
 
+    def test_real_oa_pdf_parser_to_repair_cli_normalizes_type_and_rejects_direction_mismatch(self):
+        import io
+        import json
+        from contextlib import nullcontext
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+
+        import fitz
+
+        from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
+        from fin_ops_platform.services.postgres_repositories import import_audit_repair as repository
+        from fin_ops_platform.tools import import_audit_repair_ops as cli
+
+        with fitz.open() as document:
+            page = document.new_page(width=620, height=800)
+            for point, text in [
+                ((20, 30), "电子发票（普通发票）"),
+                ((350, 60), "发票号码："), ((350, 90), "开票日期："),
+                ((20, 130), "名称："), ((320, 130), "名称："),
+                ((20, 160), "纳税人识别号："), ((320, 160), "纳税人识别号："),
+                ((20, 230), "合计 ¥175.47 ¥10.53"),
+                ((20, 260), "价税合计（小写）¥186.00"),
+                ((420, 60), "26317000002920092512"), ((420, 90), "2026年08月10日"),
+                ((55, 130), "测试购买有限公司"), ((355, 130), "测试销售有限公司"),
+                ((110, 160), "915300007194052520"), ((410, 160), "91310110350849784X"),
+            ]:
+                page.insert_text(point, text, fontname="china-s", fontsize=10)
+            content = document.tobytes()
+        original = OAAttachmentInvoiceService().parse_content_result(
+            {"fileName": "invoice.pdf", "filePath": "/invoice.pdf"}, content)
+        self.assertEqual(original["parse_status"], "parsed")
+        self.assertEqual(original["evidences"][0]["invoice_type"], "进项发票")
+        invoice = dict(sample()[0], invoice_code=None, invoice_no="26317000002920092512",
+            digital_invoice_no="26317000002920092512", invoice_date="2026-08-10",
+            amount="175.47", signed_amount="175.47", tax_amount="10.53", total_with_tax="186.00")
+        connection = Mock()
+        transaction = Mock()
+        connection.transaction.side_effect = lambda: nullcontext(transaction)
+        base = ["--repair-invoice-oa-source", "oa-original", "--invoice-id", "repair-1", "--dry-run"]
+        attachment = {"source_attachment_key": "oa-original", "filename": "invoice.pdf",
+                      "normalized_payload": {"file_path": "/invoice.pdf"}}
+        with patch.object(cli, "PostgresConnection", return_value=connection), \
+             patch.object(cli.PostgresSettings, "from_env", return_value=SimpleNamespace()), \
+             patch.object(cli, "_build_bank_repair_state_store", return_value=SimpleNamespace()), \
+             patch.object(repository, "load_original_invoice_attachments", return_value=[attachment]), \
+             patch.object(repository, "load_verified_financial_repair_snapshot", return_value={"snapshot": [invoice], "cache_rows": []}), \
+             patch.object(OAAttachmentInvoiceService, "_download_content", return_value=content), \
+             patch.object(OAAttachmentInvoiceService, "_run_image_ocr") as ocr:
+            output = io.StringIO()
+            self.assertEqual(cli.main(base, stdout=output), 0)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["verified_invoice_count"], 1)
+            self.assertEqual(result["updates"][0]["amount"], "175.47")
+            self.assertEqual(result["updates"][0]["tax_amount"], "10.53")
+            self.assertEqual(result["updates"][0]["total_with_tax"], "186.00")
+            ocr.assert_not_called()
+            invoice["invoice_type"] = "output"
+            with self.assertRaisesRegex(ValueError, "date/type differs"):
+                cli.main(base, stdout=io.StringIO())
+            invoice["invoice_type"] = "input"
+            for bad_type in (None, "unknown"):
+                evidence = deepcopy(original)
+                evidence["evidences"][0]["invoice_type"] = bad_type
+                with self.subTest(invoice_type=bad_type), \
+                     patch.object(OAAttachmentInvoiceService, "parse_content_result", return_value=evidence), \
+                     self.assertRaisesRegex(ValueError, "unsupported or missing invoice type"):
+                    cli.main(base, stdout=io.StringIO())
+
     def test_audit_service_preserves_large_verified_fact_batches_and_full_source_lines(self):
         from datetime import UTC, datetime
         from unittest.mock import Mock

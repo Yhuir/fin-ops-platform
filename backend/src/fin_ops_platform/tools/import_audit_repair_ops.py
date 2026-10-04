@@ -661,9 +661,16 @@ def _run_verified_financial_repair(args: Any, *, stdout: TextIO) -> int:
                     {"fileName": attachment["filename"], "filePath": file_path}, content)
                 if result["parse_status"] != "parsed":
                     raise ValueError(f"OA original could not be parsed: {attachment['source_attachment_key']}.")
-                rows = [{**evidence, "amount": evidence.get("net_amount"),
-                         "invoice_date": evidence.get("issue_date")}
-                        for evidence in result["evidences"]]
+                rows = []
+                invoice_types = {"进项发票": "input", "销项发票": "output", "input": "input", "output": "output"}
+                for evidence in result["evidences"]:
+                    if evidence.get("evidence_type") == "payment_receipt":
+                        continue
+                    source_type = str(evidence.get("invoice_type") or "").strip()
+                    if source_type not in invoice_types:
+                        raise ValueError(f"OA original has an unsupported or missing invoice type: {source_type!r}.")
+                    rows.append({**evidence, "invoice_type": invoice_types[source_type],
+                                 "amount": evidence.get("net_amount"), "invoice_date": evidence.get("issue_date")})
                 sources.append({"file_id": attachment["source_attachment_key"],
                     "filename": attachment["filename"], "source_kind": "oa_attachment",
                     "sha256": hashlib.sha256(content).hexdigest(), "rows": rows})
