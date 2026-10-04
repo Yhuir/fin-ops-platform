@@ -3,6 +3,7 @@ from datetime import datetime
 from unittest.mock import patch
 
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, MongoOASettings
+from fin_ops_platform.services.oa_attachment_invoice_cache import ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION
 from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentOCRRuntimeError
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from pymongo.errors import ServerSelectionTimeoutError
@@ -2084,7 +2085,7 @@ class MongoOAAdapterTests(unittest.TestCase):
             cache_key,
             {
                 "parser_version": adapter._attachment_invoice_cache_parser_version(),
-                "cache_schema_version": "2026-05-11-evidence-v1",
+                "cache_schema_version": ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION,
                 "evidences": [
                     {
                         "evidence_type": "tax_invoice",
@@ -2494,7 +2495,7 @@ class MongoOAAdapterTests(unittest.TestCase):
             cache_key,
             {
                 "parser_version": adapter._attachment_invoice_cache_parser_version(),
-                "cache_schema_version": "2026-05-11-evidence-v1",
+                "cache_schema_version": ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION,
                 "evidences": [
                     {
                         "evidence_type": "tax_invoice",
@@ -2667,7 +2668,7 @@ class MongoOAAdapterTests(unittest.TestCase):
             self.assertTrue(invoices[0].get(field), field)
             self.assertTrue(cache.entries[cache_key]["invoices"][0].get(field), field)
         self.assertEqual(cache.entries[cache_key]["parser_version"], adapter._attachment_invoice_cache_parser_version())
-        self.assertEqual(cache.entries[cache_key]["cache_schema_version"], "2026-05-11-evidence-v1")
+        self.assertEqual(cache.entries[cache_key]["cache_schema_version"], ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION)
 
     def test_cold_attachment_batch_resumes_cached_progress_without_reparsing(self) -> None:
         from fin_ops_platform.services.oa_adapter import OAAttachmentPreparationPending

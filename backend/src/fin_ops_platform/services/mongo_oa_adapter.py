@@ -2198,7 +2198,7 @@ class MongoOAAdapter(OAAdapter):
         invoice: dict[str, object],
         *,
         file_entry: dict[str, object],
-    ) -> dict[str, str]:
+    ) -> dict[str, object]:
         normalized_invoice = cls._normalize_parsed_attachment_evidence(invoice, file_entry=file_entry)
         if not clean_string(normalized_invoice.get("evidence_type") or ""):
             normalized_invoice["evidence_type"] = "tax_invoice"
@@ -2210,9 +2210,9 @@ class MongoOAAdapter(OAAdapter):
         evidence: dict[str, object],
         *,
         file_entry: dict[str, object],
-    ) -> dict[str, str]:
+    ) -> dict[str, object]:
         normalized_evidence = {
-            str(key): clean_string(value) if value is not None else ""
+            str(key): value.strip() if isinstance(value, str) else deepcopy(value)
             for key, value in dict(evidence).items()
         }
         source_fields = cls._attachment_invoice_source_fields(file_entry)

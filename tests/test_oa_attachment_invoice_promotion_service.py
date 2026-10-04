@@ -33,10 +33,75 @@ from tests.postgres_test_utils import (
     require_postgres_test_database_url,
     truncate_test_database,
 )
-from tests.test_oa_attachment_invoice_service import PARTIAL_HOTEL_TEXT, VALID_PNG, _build_docx_with_media
+from tests.test_mongo_oa_adapter import MemoryAttachmentInvoiceCache, StubMongoOAAdapter
+from tests.test_oa_attachment_invoice_service import (
+    PARTIAL_HOTEL_TEXT,
+    VALID_PNG,
+    _build_docx_with_media,
+    _digital_invoice_text,
+)
 
 
 class OAAttachmentInvoicePromotionServiceTests(unittest.TestCase):
+    def test_real_parser_nested_lines_survive_mongo_cache_and_formal_promotion(self):
+        source_totals = "合计¥25.49¥3.31\n价税合计（小写）¥28.80\n13%"
+        cases = (
+            ("项目名称 金额 税率 税额\n*技术服务*服务费 100.00 6% 6.00\n"
+             "*设备*电气柜 200.00 13% 26.00\n*设备*折扣 -10.00 13% -1.30\n"
+             "合计¥290.00¥30.70\n价税合计（小写）¥320.70", 3, Decimal("290.00"), Decimal("30.70"), None, "mixed"),
+            ("项目名称 金额 税率 税额\n*生活服务*服务费 100.00 不征税 *\n"
+             "合计¥100.00¥*\n价税合计（小写）¥100.00", 1, Decimal("100.00"), None, "*", "不征税"),
+        )
+        for text, line_count, net, tax, tax_text, rate in cases:
+            with self.subTest(rate=rate):
+                cache = MemoryAttachmentInvoiceCache()
+                adapter = StubMongoOAAdapter(form_documents={}, project_documents=[], attachment_invoice_cache=cache)
+                file_entry = {"fileName": "source.png", "filePath": "/source.png", "suffix": "png",
+                              "_attachment_invoice_source_context": {"oa_external_id": "source-owner",
+                                  "source_expense_item_id": "source-owner:item:1", "source_expense_row_index": "1"}}
+                cache_key = adapter._attachment_invoice_cache_key(file_entry)
+                cache.entries[cache_key] = {
+                    "parser_version": f"{OAAttachmentInvoiceService.PARSER_VERSION}:2026-05-11-evidence-v1",
+                    "cache_schema_version": "2026-05-11-evidence-v1",
+                    "evidences": [{"source_line_items": "[{'amount': '100.00'}]"}],
+                    "invoices": [{"source_line_items": "[{'amount': '100.00'}]"}],
+                    "artifacts": [],
+                }
+                source_text = _digital_invoice_text("26539150014000355216").replace(source_totals, text)
+                with (
+                    patch.object(adapter._attachment_invoice_service, "_download_content", return_value=VALID_PNG),
+                    patch.object(adapter._attachment_invoice_service, "_run_image_ocr", return_value=source_text.splitlines()) as ocr,
+                    adapter.force_attachment_invoice_sync_parse(),
+                ):
+                    first = adapter._parse_attachment_evidence_pool([file_entry])
+                    # Exercise the serialized cache boundary, not a shared in-memory dict.
+                    cache.entries = json.loads(json.dumps(cache.entries))
+                    second = adapter._parse_attachment_evidence_pool([file_entry])
+                self.assertEqual(ocr.call_count, 1)
+                self.assertEqual(first, second)
+                evidence = second["invoices"][0]
+                lines = evidence["source_line_items"]
+                self.assertIsInstance(lines, list)
+                self.assertEqual(len(lines), line_count)
+                self.assertTrue(all(isinstance(line, dict) for line in lines))
+                self.assertTrue(all(line["total_with_tax"] is None for line in lines))
+                self.assertEqual(evidence["tax_amount_text"], tax_text)
+                if tax is None:
+                    self.assertIsNone(evidence["tax_amount"])
+                    self.assertIsNone(lines[0]["tax_amount"])
+                    self.assertEqual(lines[0]["tax_amount_text"], "*")
+                repository = FakeAtomicInvoiceRepository([])
+                service = OAAttachmentInvoicePromotionService(invoice_repository=repository,
+                    promotion_mode_provider=lambda: OA_ATTACHMENT_INVOICE_PROMOTION_CREATE_MISSING)
+                record = SimpleNamespace(id="oa-exp-source-owner", month="2026-06", attachment_invoices=[evidence])
+                report = service.promote_records([record])
+                self.assertEqual(report["summary"]["affected_invoice_count"], 1)
+                invoice = repository.invoices[0]
+                self.assertEqual((invoice.amount, invoice.tax_amount, invoice.tax_amount_text, invoice.tax_rate),
+                                 (net, tax, tax_text, rate))
+                self.assertEqual(invoice.source_line_items, lines)
+                self.assertEqual(service.promote_records([record])["summary"]["affected_invoice_count"], 0)
+
     def test_real_partial_parser_output_links_existing_only_without_financial_overwrite(self):
         evidence = OAAttachmentInvoiceService()._parse_evidences_from_text(PARTIAL_HOTEL_TEXT)[0]
         evidence.update(source_attachment_key="hotel", source_expense_item_id="oa-hotel:item:2")
