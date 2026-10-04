@@ -26,6 +26,7 @@
 - 进销项共用原件财务字段：金额、税额、价税合计、税率均不补算，缺失显示 `—`。真实零、负数、非数字税额、免税、不征税分别保留；真实明细全部显示，未提供明细时不把整票汇总伪装成一条明细。
 - 关联组先用完整成员判定税率，再筛选；一种已知税率与未知成员并存时为 `—`，两个已知不同税率足以判定多税率。原始税率格式统一，不再存在的筛选值保持精确过滤并允许清除，不静默扩大范围。
 - 列表“价税合计/税率”列第一行显示价税合计，第二行只显示灰色税率；不含税金额和税额保留在共享详情与 Excel。Excel 金额保持数值，金额来源单独列示。
+- 列表使用本页原生语义表格，一级表头按进项发票 4 列、支付状态 1 列、OA 2 列、流水 3 列分组；支付状态纵跨两层表头。colgroup 统一列宽，两层表头整体吸顶、分页在滚动区外，筛选/排序/详情仍使用原有回调。正文统一底色，组边界贯穿表头和正文；完整约定见 [UI 说明](../../ui.md#普通页面的表格与操作层级)。
 
 ## 依赖方向
 
@@ -45,6 +46,7 @@
 - [web/src/components/common/OaDraftPrefillDrawer.tsx](../../../web/src/components/common/OaDraftPrefillDrawer.tsx)
 - [tests/test_invoice_usage_collection_canonical_query.py](../../../tests/test_invoice_usage_collection_canonical_query.py)
 - [web/e2e/input-invoice-usage-flow.spec.ts](../../../web/e2e/input-invoice-usage-flow.spec.ts)
+- [web/e2e/input-invoice-grouped-header.spec.ts](../../../web/e2e/input-invoice-grouped-header.spec.ts)
 - [tests/test_etc_relation_page_reads_postgres.py](../../../tests/test_etc_relation_page_reads_postgres.py)
 - [tests/test_bank_split_document_scope_postgres.py](../../../tests/test_bank_split_document_scope_postgres.py)
 - [tests/test_oa_reverse_occupancy_postgres.py](../../../tests/test_oa_reverse_occupancy_postgres.py)

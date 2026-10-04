@@ -402,7 +402,7 @@ describe("Input invoice usage page", () => {
       ...row, bank: { ...row.bank, primary: { ...row.bank.primary, ...account } },
     })) });
     renderAuthenticatedAppAt("/input-invoice-usage");
-    const table = await screen.findByRole("grid", { name: "进项发票使用情况表" });
+    const table = await screen.findByRole("table", { name: "进项发票使用情况表" });
     const invoiceRow = within(table).getByRole("row", { name: /SD-INV-2026-0001/ });
     const accountValue = invoiceRow.querySelector(".input-invoice-usage-bank-tag-row .bank-account-value");
     expect(accountValue?.textContent?.replace(/\s/g, "")).toBe(expected);
@@ -422,9 +422,9 @@ describe("Input invoice usage page", () => {
       },
     })) });
     renderAuthenticatedAppAt("/input-invoice-usage");
-    const table = await screen.findByRole("grid", { name: "进项发票使用情况表" });
+    const table = await screen.findByRole("table", { name: "进项发票使用情况表" });
     const invoiceRow = within(table).getByRole("row", { name: /SD-INV-2026-0001/ });
-    const amountCell = invoiceRow.querySelectorAll("td")[8] as HTMLElement;
+    const amountCell = invoiceRow.querySelectorAll("th, td")[8] as HTMLElement;
     expect(amountCell.querySelector(".input-invoice-usage-bank-amount-line")?.textContent).toBe(displayedAmount);
     const metadata = amountCell.querySelector(".input-invoice-usage-bank-tag-row") as HTMLElement;
     expect(within(metadata).getByText("支出")).toBeVisible();
@@ -436,10 +436,10 @@ describe("Input invoice usage page", () => {
       ...row, invoice: { ...row.invoice, taxRate },
     })) });
     renderAuthenticatedAppAt("/input-invoice-usage");
-    const table = await screen.findByRole("grid", { name: "进项发票使用情况表" });
+    const table = await screen.findByRole("table", { name: "进项发票使用情况表" });
     expect(within(table).getByRole("columnheader", { name: "价税合计/税率" })).toBeVisible();
     const invoiceRow = within(table).getByRole("row", { name: /SD-INV-2026-0001/ });
-    const amountCell = within(invoiceRow).getByRole("gridcell", { name: `12345.67 ${taxRate}` });
+    const amountCell = within(invoiceRow).getByRole("cell", { name: `12345.67 ${taxRate}` });
     expect(amountCell).toHaveTextContent(`12345.67${taxRate}`);
     expect(within(amountCell).getByText(taxRate)).toHaveClass("input-invoice-usage-cell-secondary");
     expect(within(amountCell).queryByText(/11646.86|698.81/)).not.toBeInTheDocument();
@@ -501,8 +501,8 @@ describe("Input invoice usage page", () => {
     const drawerBody = cssRule(styles, ".input-invoice-usage-drawer-body");
     const detailSection = cssRule(styles, ".entity-detail-section");
     const filterTrigger = cssRule(styles, ".input-invoice-usage-filter-menu__trigger");
-    const paymentCell = cssRule(styles, ".input-invoice-usage-table-cell--payment");
-    const stickyHeader = cssRule(styles, ".finance-table__column");
+    const dataCell = cssRule(styles, ".input-invoice-usage-table-cell");
+    const stickyHeader = cssRule(styles, ".input-invoice-usage-table-head");
     const strongSeparator = cssRule(styles, ".input-invoice-usage-table-cell--strong-separator");
     const compositeFilter = cssRule(styles, ".input-invoice-usage-filter-menu__panel--composite");
 
@@ -521,7 +521,8 @@ describe("Input invoice usage page", () => {
     expect(detailSection).toContain("padding: 0");
     expect(styles).toMatch(/\.entity-detail-section \+ \.entity-detail-section\s*{[^}]*margin-top:\s*16px/s);
     expect(filterTrigger).toContain("var(--motion-fast)");
-    expect(paymentCell).toContain("color-mix(in srgb, var(--fp-warning-soft)");
+    expect(dataCell).toContain("background: var(--fp-surface)");
+    expect(styles).not.toMatch(/\.input-invoice-usage-table-cell--payment\s*\{[^}]*background:/s);
     expect(stickyHeader).toContain("position: sticky");
     expect(stickyHeader).toContain("top: 0");
     expect(strongSeparator).toContain("border-left: 2px solid");
@@ -554,6 +555,11 @@ describe("Input invoice usage page", () => {
 
     const page = await screen.findByTestId("input-invoice-usage-page");
     expect(await within(page).findByText("当前条件下没有进项发票使用记录。")).toBeInTheDocument();
+    const emptyTable = within(page).getByRole("table", { name: "进项发票使用情况表" });
+    const emptyCells = emptyTable.querySelectorAll("tbody td");
+    expect(emptyCells).toHaveLength(1);
+    expect(emptyCells[0]).toHaveAttribute("colspan", "10");
+    expect(emptyCells[0]).toHaveTextContent("当前条件下没有进项发票使用记录。");
     expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
     expect(rowsRequests(fetchMock)).toHaveLength(1);
     expect(
@@ -616,7 +622,7 @@ describe("Input invoice usage page", () => {
     expect(within(page).getByLabelText("进项发票使用情况数据统计")).toHaveTextContent("进项发票787张");
     expect(within(page).queryByText("以进项发票为主对象反查支付状态、OA 和银行流水。")).not.toBeInTheDocument();
     expect(within(page).queryByText("关键字")).not.toBeInTheDocument();
-    expect(await within(page).findByRole("grid", { name: "进项发票使用情况表" })).toBeInTheDocument();
+    expect(await within(page).findByRole("table", { name: "进项发票使用情况表" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "OA 草稿预填管理" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "以发票反提 OA" })).toHaveClass("button--primary");
@@ -628,21 +634,37 @@ describe("Input invoice usage page", () => {
     await user.click(refreshButton);
     await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsBeforeRefresh));
 
-    const headerRow = within(page).getAllByRole("row")[0];
-    expect(within(headerRow).getAllByRole("columnheader")).toHaveLength(10);
+    const table = within(page).getByRole("table", { name: "进项发票使用情况表" });
+    const headerRows = table.querySelectorAll("thead > tr");
+    expect(headerRows).toHaveLength(2);
+    const groupHeaders = Array.from(headerRows[0].querySelectorAll("th"));
+    expect(groupHeaders.map((header) => header.textContent)).toEqual(["进项发票", "支付状态", "OA", "流水"]);
+    expect(groupHeaders.map((header) => header.colSpan)).toEqual([4, 1, 2, 3]);
+    expect(groupHeaders[1]).toHaveAttribute("rowspan", "2");
+    expect(groupHeaders[1]).toHaveAttribute("scope", "col");
+    for (const header of [groupHeaders[0], groupHeaders[2], groupHeaders[3]]) {
+      expect(header).toHaveAttribute("scope", "colgroup");
+    }
+    const headerRow = headerRows[1] as HTMLElement;
+    expect(within(headerRow).getAllByRole("columnheader")).toHaveLength(9);
+    expect(table.querySelectorAll("colgroup > col")).toHaveLength(10);
+    expect(Array.from(table.querySelectorAll("colgroup"), group => group.children.length)).toEqual([4, 1, 2, 3]);
     expect(within(headerRow).getByRole("button", { name: "按开票日期排序" })).toBeInTheDocument();
     expect(within(headerRow).getByRole("button", { name: "筛选 销方名称" })).toBeInTheDocument();
     expect(within(headerRow).queryByRole("button", { name: "筛选 支付状态" })).not.toBeInTheDocument();
     expect(screen.getByRole("tablist", { name: "进项发票支付状态" })).toBeInTheDocument();
-    expect(within(headerRow).getByRole("button", { name: "筛选 OA / OA申请人" })).toBeInTheDocument();
+    expect(within(headerRow).getByRole("button", { name: "筛选 申请人/类型" })).toBeInTheDocument();
     expect(within(headerRow).getByRole("button", { name: "筛选 项目名称" })).toBeInTheDocument();
     expect(within(headerRow).getByRole("button", { name: "筛选 对方户名" })).toBeInTheDocument();
     expect(within(headerRow).getByRole("button", { name: "筛选 金额" })).toBeInTheDocument();
-    const bodyRows = within(page).getAllByRole("row").slice(1);
+    const bodyRows = Array.from(table.querySelectorAll("tbody > tr")) as HTMLElement[];
     expect(bodyRows.some((row) => within(row).queryByText("发票号码"))).toBe(false);
     expect(bodyRows.some((row) => within(row).queryByText("对方户名"))).toBe(false);
     const firstBodyRow = bodyRows[0];
-    const firstRowCells = firstBodyRow.querySelectorAll("td");
+    const firstRowCells = firstBodyRow.querySelectorAll("th, td");
+    expect(firstRowCells).toHaveLength(10);
+    expect(within(firstBodyRow).getAllByRole("rowheader")).toHaveLength(1);
+    expect(firstRowCells[0]).toHaveAttribute("scope", "row");
 
     expect(await within(page).findByText("SD-INV-2026-0001")).toBeInTheDocument();
     expect(within(firstRowCells[2] as HTMLElement).getByText("12345.67")).toBeInTheDocument();
@@ -673,7 +695,7 @@ describe("Input invoice usage page", () => {
     expect(bankMetadata.querySelector(".bank-account-value")).not.toHaveTextContent("交通银行");
     expect(bankMetadata.querySelector(".bank-account-value")).toHaveTextContent("3847");
     expect(bankMetadata.querySelector(".input-invoice-usage-bank-tag")).toBeNull();
-    expect(within(within(page).getByRole("grid")).getByText("待处理").closest(".input-invoice-usage-payment-cell")).toBeInTheDocument();
+    expect(within(table).getByText("待处理").closest(".input-invoice-usage-payment-cell")).toBeInTheDocument();
 
     await user.click(within(page).getByRole("button", { name: "按开票日期排序" }));
     await waitFor(() => {
@@ -691,7 +713,7 @@ describe("Input invoice usage page", () => {
     });
     await user.keyboard("{Escape}");
 
-    await user.click(within(page).getByRole("button", { name: "筛选 OA / OA申请人" }));
+    await user.click(within(page).getByRole("button", { name: "筛选 申请人/类型" }));
     await user.click(await screen.findByRole("checkbox", { name: /樊祖芳/ }));
     await user.click(await screen.findByRole("checkbox", { name: /支付申请/ }));
     await waitFor(() => {
@@ -923,9 +945,9 @@ describe("Input invoice usage page", () => {
     renderAuthenticatedAppAt("/input-invoice-usage");
 
     const page = await screen.findByTestId("input-invoice-usage-page");
-    await within(page).findByRole("grid", { name: "进项发票使用情况表" });
-    const firstBodyRow = within(page).getAllByRole("row").slice(1)[0];
-    const firstRowCells = firstBodyRow.querySelectorAll("td");
+    await within(page).findByRole("table", { name: "进项发票使用情况表" });
+    const firstBodyRow = page.querySelector(".input-invoice-usage-table tbody > tr") as HTMLElement;
+    const firstRowCells = firstBodyRow.querySelectorAll("th, td");
     expect(within(firstRowCells[2] as HTMLElement).getByText("100.00")).toBeInTheDocument();
     expect(within(firstRowCells[5] as HTMLElement).getByText("合计 100.00")).toBeInTheDocument();
     expect(within(firstRowCells[8] as HTMLElement).getByText("100.00")).toBeInTheDocument();
@@ -974,7 +996,7 @@ describe("Input invoice usage page", () => {
     renderAuthenticatedAppAt("/input-invoice-usage");
 
     const page = await screen.findByTestId("input-invoice-usage-page");
-    await within(page).findByRole("grid", { name: "进项发票使用情况表" });
+    await within(page).findByRole("table", { name: "进项发票使用情况表" });
     await user.click(within(page).getByRole("button", { name: "以发票反提 OA" }));
 
     expect(await screen.findByRole("tab", { name: "待处理" })).toHaveAttribute("aria-selected", "true");
@@ -1006,7 +1028,7 @@ describe("Input invoice usage page", () => {
     renderAuthenticatedAppAt("/input-invoice-usage");
 
     const page = await screen.findByTestId("input-invoice-usage-page");
-    await within(page).findByRole("grid", { name: "进项发票使用情况表" });
+    await within(page).findByRole("table", { name: "进项发票使用情况表" });
     const initialRowsRequests = rowsRequests(fetchMock).length;
 
     await user.click(within(page).getByRole("button", { name: "以发票反提 OA" }));

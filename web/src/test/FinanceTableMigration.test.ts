@@ -8,6 +8,8 @@ const legacyWorkbenchTables = new Set([
 ]);
 
 const approvedNativeTableSurfaces = new Set([
+  // This grouped invoice table needs colgroup spans and a payment header spanning both rows.
+  "components/inputInvoiceUsage/InputInvoiceUsageTable.tsx",
   // Six-column object rows span an independent eight-column HeroUI flow grid.
   "components/turnoverLedger/TurnoverLedgerGroupedTable.tsx",
   // Read-only financial breakdown and confirmation rows have no grid selection/sorting.

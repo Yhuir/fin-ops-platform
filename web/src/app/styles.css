@@ -1487,60 +1487,73 @@ textarea {
 }
 
 .input-invoice-usage-table .finance-table__content {
+  width: max(100%, 1480px);
   table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: var(--fp-text-label);
 }
 
-.input-invoice-usage-table .finance-table__column:nth-child(1) {
+.input-invoice-usage-col--invoice {
   width: 11%;
 }
 
-.input-invoice-usage-table .finance-table__column:nth-child(2) {
+.input-invoice-usage-col--seller {
   width: 12%;
 }
 
-.input-invoice-usage-table .finance-table__column:nth-child(3) {
-  width: 10%;
-}
-
-.input-invoice-usage-table .finance-table__column:nth-child(4),
-.input-invoice-usage-table .finance-table__column:nth-child(8) {
-  width: 11%;
-}
-
-.input-invoice-usage-table .finance-table__column:nth-child(5) {
-  width: 148px;
-}
-
-.input-invoice-usage-table .finance-table__column:nth-child(6) {
-  width: 8%;
-}
-
-.input-invoice-usage-table .finance-table__column:nth-child(7) {
+.input-invoice-usage-col--invoice-amount,
+.input-invoice-usage-col--project,
+.input-invoice-usage-col--bank-amount {
   width: 9%;
 }
 
-.input-invoice-usage-table .finance-table__column:nth-child(9) {
+.input-invoice-usage-col--business,
+.input-invoice-usage-col--counterparty {
   width: 10%;
 }
 
-.input-invoice-usage-table .finance-table__column:nth-child(10) {
-  width: 12%;
+.input-invoice-usage-col--payment {
+  width: 148px;
 }
 
+.input-invoice-usage-col--oa {
+  width: 8%;
+}
+
+.input-invoice-usage-table-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--fp-table-header-bg);
+}
+
+.input-invoice-usage-table .finance-table__column {
+  position: static;
+}
+
+.input-invoice-usage-table-group-header,
 .input-invoice-usage-table-sub-header {
   border-bottom: 1px solid var(--fp-border);
-  color: var(--fp-text-primary);
+  background: var(--fp-table-header-bg);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-label);
   font-weight: 700;
   line-height: 1.25;
-  padding: 9px var(--fp-table-cell-padding-x);
   vertical-align: middle;
   white-space: nowrap;
 }
 
+.input-invoice-usage-table-group-header {
+  height: 28px;
+  padding: 4px var(--fp-table-cell-padding-x);
+  text-align: center;
+}
+
 .input-invoice-usage-table-sub-header {
-  color: var(--fp-text-secondary);
-  font-size: var(--fp-text-label);
+  height: 44px;
+  padding: 4px var(--fp-table-cell-padding-x);
+  text-align: left;
 }
 
 .input-invoice-usage-table-sub-header--right {
@@ -1555,51 +1568,40 @@ textarea {
   display: inline-flex;
   max-width: 100%;
   min-width: 0;
-  min-height: 32px;
   align-items: center;
   justify-content: center;
   flex-direction: column;
   gap: 1px;
 }
 
-.input-invoice-usage-table-cell--payment {
-  background: color-mix(in srgb, var(--fp-warning-soft) 72%, var(--fp-surface));
-}
-
 .input-invoice-usage-table-column-heading {
   display: grid;
-  gap: 3px;
+  gap: 0;
+}
+
+.input-invoice-usage-table-column-heading .input-invoice-usage-sort-button {
+  min-height: 20px;
+  padding: 0 3px;
 }
 
 .input-invoice-usage-table-cell {
   min-width: 0;
   border-bottom: 1px solid var(--fp-border);
+  background: var(--fp-surface);
   font-size: var(--fp-text-label);
+  font-weight: inherit;
   line-height: 1.35;
   overflow-wrap: anywhere;
   padding: 10px var(--fp-table-cell-padding-x);
   vertical-align: middle;
 }
 
-.input-invoice-usage-table-row .input-invoice-usage-table-cell:nth-child(-n + 4) {
-  background: color-mix(in srgb, var(--fp-success-soft) 20%, var(--fp-surface));
-}
-
-.input-invoice-usage-table-row .input-invoice-usage-table-cell:nth-child(6),
-.input-invoice-usage-table-row .input-invoice-usage-table-cell:nth-child(7) {
-  background: color-mix(in srgb, var(--fp-info-soft) 28%, var(--fp-surface));
-}
-
-.input-invoice-usage-table-row .input-invoice-usage-table-cell:nth-child(n + 8) {
-  background: color-mix(in srgb, var(--fp-primary-soft) 22%, var(--fp-surface));
-}
-
 .input-invoice-usage-table-row {
   transition: background var(--motion-fast) var(--ease-standard);
 }
 
-.input-invoice-usage-table-row:hover .input-invoice-usage-table-cell {
-  background: color-mix(in srgb, var(--fp-primary-soft) 45%, transparent);
+.input-invoice-usage-table-row:is(:hover, :focus-within) .input-invoice-usage-table-cell {
+  background: var(--fp-primary-soft);
 }
 
 .input-invoice-usage-table-cell--separator {

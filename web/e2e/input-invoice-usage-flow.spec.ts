@@ -69,7 +69,7 @@ test("search keeps a single focus frame and usable controls at desktop and narro
   const form = page.getByRole("search");
   const group = form.locator(".search-field__group");
   await expect(search).toBeVisible();
-  await expect(page.getByRole("grid", { name: "进项发票使用情况表" })).toBeVisible();
+  await expect(page.getByRole("table", { name: "进项发票使用情况表" })).toBeVisible();
 
   for (const width of [1440, 1280, 768]) {
     await page.setViewportSize({ width, height: 900 });
@@ -309,7 +309,7 @@ test.describe("input invoice usage browser flow", () => {
     }
     const initialRowsUrl = new URL(initialRowsResponse.url());
     await expect(page.getByTestId("input-invoice-usage-page")).toBeVisible();
-    await expect(page.getByRole("grid", { name: "进项发票使用情况表" })).toBeVisible();
+    await expect(page.getByRole("table", { name: "进项发票使用情况表" })).toBeVisible();
     await expect(page.getByText("第 1 / 2 页")).toBeVisible();
     await expect(page.getByText("SD-INV-E2E-0001")).toBeVisible();
     await expect(page.getByText("SD-INV-E2E-0099")).toHaveCount(0);
@@ -318,8 +318,8 @@ test.describe("input invoice usage browser flow", () => {
     expect(initialRowsUrl.searchParams.has("filters")).toBe(false);
     expect(initialRowsUrl.searchParams.has("sort_field")).toBe(false);
 
-    const compositeMenu = page.getByRole("menu", { name: "OA / OA申请人组合筛选" });
-    await page.getByRole("button", { name: "筛选 OA / OA申请人" }).click();
+    const compositeMenu = page.getByRole("menu", { name: "申请人/类型组合筛选" });
+    await page.getByRole("button", { name: "筛选 申请人/类型" }).click();
     const applicantOption = compositeMenu
       .locator("label.input-invoice-usage-filter-menu__item")
       .filter({ hasText: /陈秀云 \d+/ });
@@ -461,7 +461,7 @@ test.describe("input invoice usage browser flow", () => {
       await mark("finalSettledLatencyMs", expect(page.getByTestId("input-invoice-usage-page")).toBeVisible());
     });
     await expect(page.getByTestId("input-invoice-usage-page")).toBeVisible();
-    await expect(page.getByRole("grid", { name: "进项发票使用情况表" })).toBeVisible();
+    await expect(page.getByRole("table", { name: "进项发票使用情况表" })).toBeVisible();
     const row = page.getByRole("row", { name: /SD-INV-E2E-0001/ });
     await expect(row).toContainText("待付款（自动识别有oa无流水）");
 
@@ -540,7 +540,7 @@ test.describe("input invoice usage browser flow", () => {
       expect((await mark("apiLatencyMs", rowsResponse)).status()).toBe(200);
       await mark("finalSettledLatencyMs", expect(page.getByTestId("input-invoice-usage-page")).toBeVisible());
     });
-    await expect(page.getByRole("grid", { name: "进项发票使用情况表" })).toBeVisible();
+    await expect(page.getByRole("table", { name: "进项发票使用情况表" })).toBeVisible();
     const row = page.getByRole("row", { name: /SD-INV-E2E-0001/ });
     await expect(row).toBeVisible();
     await expect(row.getByText("合计 188.00")).toBeVisible();
@@ -595,7 +595,7 @@ test.describe("input invoice usage browser flow", () => {
       await mark("finalSettledLatencyMs", expect(page.getByTestId("input-invoice-usage-page")).toBeVisible());
     });
     await expect(page.getByTestId("input-invoice-usage-page")).toBeVisible();
-    await expect(page.getByRole("grid", { name: "进项发票使用情况表" })).toBeVisible();
+    await expect(page.getByRole("table", { name: "进项发票使用情况表" })).toBeVisible();
     await recordLatency({
       operationId: "input-invoice-usage.search-before-export",
       visibleLabel: "查询",
@@ -728,7 +728,7 @@ test.describe("input invoice usage browser flow", () => {
     });
     await expect(page.getByTestId("input-invoice-usage-page")).toBeVisible();
     await expect(page.getByRole("heading", { name: "进项发票使用情况" })).toBeVisible();
-    await expect(page.getByRole("grid", { name: "进项发票使用情况表" })).toBeVisible();
+    await expect(page.getByRole("table", { name: "进项发票使用情况表" })).toBeVisible();
 
     const row = page.getByRole("row", { name: /SD-INV-E2E-0001/ });
     await expect(row).toBeVisible();

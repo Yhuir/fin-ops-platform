@@ -43,7 +43,7 @@ test('production input invoice values agree with API across details, pagination 
   const initialHttp = await initialResponse;
   expect(initialHttp.status()).toBe(200);
   const initial: InputInvoiceUsageRowsResponse = await initialHttp.json();
-  const grid = page.getByRole('grid', {name: '进项发票使用情况表'});
+  const grid = page.getByRole('table', {name: '进项发票使用情况表'});
   await expect(grid.getByRole('columnheader', {name: '价税合计/税率', exact: true})).toBeVisible();
   await expect(grid.getByText('不含税/税率税额', {exact: true})).toHaveCount(0);
   await verifyValues(initial);

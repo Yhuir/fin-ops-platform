@@ -18,16 +18,7 @@ import ExpandableCellText from "./ExpandableCellText";
 import InputInvoiceUsageFilterMenu from "./InputInvoiceUsageFilterMenu";
 import BankAccountValue from "../BankAccountValue";
 import type { InputInvoiceUsageFilterValue } from "./InputInvoiceUsageFilterMenu";
-import {
-  EmptyValue,
-  FinanceStatusTag,
-  FinanceTable,
-  FinanceTableBody,
-  FinanceTableCell,
-  FinanceTableColumn,
-  FinanceTableHeader,
-  FinanceTableRow,
-} from "../common/FinanceTable";
+import { FinanceStatusTag } from "../common/FinanceTable";
 
 type InputInvoiceUsageTableProps = {
   rows: InputInvoiceUsageRow[];
@@ -128,41 +119,40 @@ function HeaderCell({
   separated,
   strongSeparated,
   emphasized,
-  isRowHeader,
+  rowSpan,
 }: {
   label: ReactNode;
   align?: "left" | "right" | "center";
   separated?: boolean;
   strongSeparated?: boolean;
   emphasized?: boolean;
-  isRowHeader?: boolean;
+  rowSpan?: number;
 }) {
   return (
-    <FinanceTableColumn
+    <th
       className={classNames(
+        "finance-table__column",
         "input-invoice-usage-table-sub-header",
         align && `input-invoice-usage-table-sub-header--${align}`,
         separated && "input-invoice-usage-table-cell--separator",
         strongSeparated && "input-invoice-usage-table-cell--strong-separator",
-        emphasized && "input-invoice-usage-table-cell--payment",
       )}
-      columnRole={align === "right" ? "amount" : emphasized ? "status" : "description"}
-      isRowHeader={isRowHeader}
+      data-column-role={align === "right" ? "amount" : emphasized ? "status" : "description"}
+      rowSpan={rowSpan}
+      scope="col"
     >
       <span className="input-invoice-usage-table-header-stack">{label}</span>
-    </FinanceTableColumn>
+    </th>
   );
 }
 
 function SortHeaderButton({
   label,
-  sortLabel = label,
   active,
   direction,
   onClick,
 }: {
   label: string;
-  sortLabel?: string;
   active: boolean;
   direction: InputInvoiceUsageSortDirection | "";
   onClick: () => void;
@@ -170,10 +160,10 @@ function SortHeaderButton({
   const stateLabel = active && direction ? (direction === "asc" ? "升序" : "降序") : "未排序";
   return (
     <button
-      aria-label={`按${sortLabel}排序`}
+      aria-label={`按${label}排序`}
       className={classNames("input-invoice-usage-sort-button", active && "input-invoice-usage-sort-button--active")}
       onClick={onClick}
-      title={`${sortLabel}${stateLabel}`}
+      title={`${label}${stateLabel}`}
       type="button"
     >
       <span>{label}</span>
@@ -419,10 +409,243 @@ export default function InputInvoiceUsageTable({
 
   return (
     <div className="finance-page-table-frame input-invoice-usage-table-frame">
-      <FinanceTable
-        ariaLabel="进项发票使用情况表"
-        className="input-invoice-usage-table input-invoice-usage-table-shell"
-        footer={(
+      <div className="finance-table finance-table--contained finance-table--selectable-text input-invoice-usage-table input-invoice-usage-table-shell">
+        <div className="finance-table__scroll" ref={tableWrapRef}>
+          <table aria-label="进项发票使用情况表" className="finance-table__content">
+            <colgroup>
+              <col className="input-invoice-usage-col--invoice" />
+              <col className="input-invoice-usage-col--seller" />
+              <col className="input-invoice-usage-col--invoice-amount" />
+              <col className="input-invoice-usage-col--business" />
+            </colgroup>
+            <colgroup>
+              <col className="input-invoice-usage-col--payment" />
+            </colgroup>
+            <colgroup>
+              <col className="input-invoice-usage-col--oa" />
+              <col className="input-invoice-usage-col--project" />
+            </colgroup>
+            <colgroup>
+              <col className="input-invoice-usage-col--counterparty" />
+              <col className="input-invoice-usage-col--bank-amount" />
+              <col className="input-invoice-usage-col--remark" />
+            </colgroup>
+            <thead className="input-invoice-usage-table-head">
+              <tr>
+                <th className="input-invoice-usage-table-group-header" colSpan={4} scope="colgroup">进项发票</th>
+                <HeaderCell align="center" label="支付状态" rowSpan={2} strongSeparated emphasized />
+                <th className="input-invoice-usage-table-group-header input-invoice-usage-table-cell--strong-separator" colSpan={2} scope="colgroup">OA</th>
+                <th className="input-invoice-usage-table-group-header input-invoice-usage-table-cell--strong-separator" colSpan={3} scope="colgroup">流水</th>
+              </tr>
+              <tr>
+                <HeaderCell
+                  label={(
+                    <span className="input-invoice-usage-table-column-heading"><span>发票号码</span><SortHeaderButton active={sortField === "invoice_date"} direction={sortField === "invoice_date" ? sortDirection : ""} label="开票日期" onClick={() => onSortChange("invoice_date")} /></span>
+                  )}
+                />
+                <HeaderCell label={filterMenu("seller_name", "销方名称")} separated />
+                <HeaderCell
+                  align="right"
+                  label="价税合计/税率"
+                  separated
+                />
+                <HeaderCell label="货物或应税劳务名称" separated />
+                <HeaderCell
+                  label={(
+                    <CompositeFilterMenu
+                      columns={[
+                        { field: "oa_applicant", label: "OA申请人", options: filterOptions.oa_applicant ?? [] },
+                        { field: "oa_application_type", label: "类型", options: filterOptions.oa_application_type ?? [] },
+                      ]}
+                      currentFilters={filters}
+                      label="申请人/类型"
+                      onApply={onFilterApply}
+                      onClear={onFilterClear}
+                    />
+                  )}
+                  strongSeparated
+                />
+                <HeaderCell label={filterMenu("oa_project_name", "项目名称")} separated />
+                <HeaderCell label={filterMenu("bank_counterparty_name", "对方户名")} strongSeparated />
+                <HeaderCell
+                  align="right"
+                  label={(
+                    <CompositeFilterMenu
+                      columns={[
+                        { field: "bank_account", label: "银行账户", options: filterOptions.bank_account ?? [] },
+                        { field: "bank_direction", label: "收支", options: filterOptions.bank_direction ?? [] },
+                      ]}
+                      currentFilters={filters}
+                      label="金额"
+                      onApply={onFilterApply}
+                      onClear={onFilterClear}
+                    />
+                  )}
+                  separated
+                />
+                <HeaderCell label="摘要/备注" separated />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr className="finance-table__row" id="input-invoice-usage-empty">
+                  <td className="finance-table__cell input-invoice-usage-table-state-cell" colSpan={10}>{emptyStateMessage}</td>
+                </tr>
+              ) : rows.map((row) => {
+                const invoiceNo = displayInvoiceNo(row);
+                const invoiceCellExpanded = expandedCells.has(`${row.id}:invoice-business`);
+                const projectCellExpanded = expandedCells.has(`${row.id}:oa-project`);
+                const bankNameCellExpanded = expandedCells.has(`${row.id}:bank-name`);
+                const bankRemarkCellExpanded = expandedCells.has(`${row.id}:bank-remark`);
+                const oa = row.oa.primary;
+                const bank = row.bank.primary;
+                const oaRelationTarget = relationListTarget(row, "oa");
+                const bankRelationTarget = relationListTarget(row, "bank");
+                const invoiceRelationTarget = relationListTarget(row, "invoice");
+                const oaExtraCount = extraRelationCount(row.oa.relationCount);
+                const bankExtraCount = extraRelationCount(row.bank.originalTransactionCount);
+                const invoiceExtraCount = extraRelationCount(row.invoiceRelations.relationCount);
+
+                return (
+                  <tr className="finance-table__row input-invoice-usage-table-row" id={row.id} key={row.id}>
+                    <th className="finance-table__cell input-invoice-usage-table-cell" data-column-role="identity" scope="row">
+                      <div className="input-invoice-usage-inline-row">
+                        <span className="input-invoice-usage-cell-primary" title={invoiceNo}>{invoiceNo}</span>
+                        <DetailButton
+                          iconOnly
+                          label={`查看发票 ${invoiceNo} 详情`}
+                          onClick={() => onOpenDetail({ kind: "invoice", id: row.invoice.id, rowId: row.id })}
+                        />
+                        {invoiceRelationTarget ? (
+                          <RelationCountButton
+                            extraCount={invoiceExtraCount}
+                            label={`查看发票 ${invoiceNo} 关联发票 ${row.invoiceRelations.relationCount} 张`}
+                            onClick={() => onOpenDetail(invoiceRelationTarget)}
+                          />
+                        ) : null}
+                      </div>
+                      <div className="input-invoice-usage-tag-row">
+                        <Tag>{dateOnly(row.invoice.issueDate)}</Tag>
+                      </div>
+                    </th>
+                    <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" data-column-role="identity">
+                      <div className="input-invoice-usage-cell-primary">{row.invoice.sellerName || "-"}</div>
+                      <div className="input-invoice-usage-cell-secondary">{row.invoice.sellerTaxNo || "-"}</div>
+                    </td>
+                    <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--amount input-invoice-usage-table-cell--separator" data-column-role="amount">
+                      <div className="input-invoice-usage-money-primary input-invoice-usage-invoice-total">{formatMoney(row.invoice.totalWithTax, "—")}</div>
+                      <div className="input-invoice-usage-cell-secondary input-invoice-usage-tax-rate">{row.invoice.taxRate}</div>
+                    </td>
+                    <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" data-column-role="description">
+                      <ExpandableCellText
+                        text={row.invoice.taxableItemName}
+                        expanded={invoiceCellExpanded}
+                        onToggle={() => onToggleCellExpand(row.id, "invoice-business")}
+                      />
+                    </td>
+                    <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--strong-separator input-invoice-usage-payment-cell" data-column-role="status">
+                      <Tag tone={paymentStatusTone(row.paymentStatus.code)}>{row.paymentStatus.label || "待处理"}</Tag>
+                    </td>
+                    <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--strong-separator" data-column-role="identity">
+                      {oa ? (
+                        <>
+                          <div className="input-invoice-usage-inline-row">
+                            <span className="input-invoice-usage-cell-primary">{oa.applicant || "-"}</span>
+                            {oa.detailAvailable && !oaRelationTarget ? (
+                              <DetailButton
+                                iconOnly
+                                label={`查看OA ${oa.applicant || oa.id} 详情`}
+                                onClick={() => onOpenDetail({ kind: "oa", id: oa.id, rowId: row.id })}
+                              />
+                            ) : null}
+                            {oaRelationTarget ? (
+                              <RelationCountButton
+                                extraCount={oaExtraCount}
+                                label={`查看${oa.applicant || "该发票"}关联OA ${row.oa.relationCount} 条`}
+                                onClick={() => onOpenDetail(oaRelationTarget)}
+                              />
+                            ) : null}
+                          </div>
+                          <div className="input-invoice-usage-tag-row">
+                            <FinanceStatusTag>{oa.applicationType || "类型为空"}</FinanceStatusTag>
+                            {row.oa.hasMultiple && oa.amount ? (
+                              <Tag tone="info">{`合计 ${formatMoney(oa.amount)}`}</Tag>
+                            ) : null}
+                          </div>
+                        </>
+                      ) : <EmptyCell />}
+                    </td>
+                    <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" data-column-role="description">
+                      {oa ? (
+                        <ExpandableCellText
+                          text={oa.projectName}
+                          expanded={projectCellExpanded}
+                          onToggle={() => onToggleCellExpand(row.id, "oa-project")}
+                        />
+                      ) : <EmptyCell />}
+                    </td>
+                    <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--strong-separator" data-column-role="identity">
+                      {bank ? (
+                        <>
+                          <ExpandableCellText
+                            text={bank.counterpartyName}
+                            expanded={bankNameCellExpanded}
+                            onToggle={() => onToggleCellExpand(row.id, "bank-name")}
+                          />
+                          <div className="input-invoice-usage-tag-row">
+                            <Tag>{bank.tradeTime ? formatDateTimeText(bank.tradeTime) : "交易日期为空"}</Tag>
+                            {bank.detailAvailable && !bankRelationTarget ? (
+                              <DetailButton
+                                label={`查看流水 ${bank.counterpartyName || bank.id} 详情`}
+                                onClick={() => onOpenDetail({ kind: "bank", id: bank.id, rowId: row.id })}
+                              >
+                                详情
+                              </DetailButton>
+                            ) : null}
+                          </div>
+                        </>
+                      ) : <EmptyCell />}
+                    </td>
+                    <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--amount input-invoice-usage-table-cell--separator" data-column-role="amount">
+                      {bank ? (
+                        <>
+                          <div className="input-invoice-usage-bank-amount-line">
+                            <span className="input-invoice-usage-money-primary">{formatMoney(row.bank.originalAmount, "—")}</span>
+                            {bankRelationTarget ? (
+                              <RelationCountButton
+                                extraCount={bankExtraCount}
+                                label={`查看${bank.counterpartyName || "该发票"}关联流水 ${row.bank.originalTransactionCount} 条`}
+                                onClick={() => onOpenDetail(bankRelationTarget)}
+                              />
+                            ) : null}
+                          </div>
+                          <div className="input-invoice-usage-bank-tag-row">
+                            <Tag tone="info">{directionLabel(bank.directionLabel || bank.direction)}</Tag>
+                            <BankAccountValue value={bankAccountLabel(bank) || "—"} />
+                          </div>
+                          {row.bank.bankSplitParts?.length ? <BankSplitChips parts={row.bank.bankSplitParts} /> : null}
+                        </>
+                      ) : <EmptyCell />}
+                    </td>
+                    <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" data-column-role="description">
+                      {bank ? (
+                        <>
+                          <div className="input-invoice-usage-cell-primary">{bank.summary || "-"}</div>
+                          <ExpandableCellText
+                            text={bank.remark}
+                            expanded={bankRemarkCellExpanded}
+                            onToggle={() => onToggleCellExpand(row.id, "bank-remark")}
+                          />
+                        </>
+                      ) : <EmptyCell />}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div className="finance-table__footer">
           <div className="input-invoice-usage-pagination">
             <Select aria-label="每页行数" className="input-invoice-usage-pagination-size" onChange={(key) => onPageSizeChange(Number(key))} value={String(pageSize)}>
               <Select.Trigger><Select.Value /></Select.Trigger>
@@ -432,221 +655,8 @@ export default function InputInvoiceUsageTable({
             <span>第 {page} / {Math.max(1, Math.ceil(total / pageSize))} 页</span>
             <Button size="sm" variant="secondary" isDisabled={page * pageSize >= total} onPress={() => onPageChange(page + 1)}>下一页</Button>
           </div>
-        )}
-        minWidth={1480}
-        selectableText
-        scrollMode="contained"
-        scrollRef={tableWrapRef}
-      >
-          <FinanceTableHeader>
-              <HeaderCell
-                isRowHeader
-                label={(
-                  <span className="input-invoice-usage-table-column-heading"><span>进项发票</span><SortHeaderButton active={sortField === "invoice_date"} direction={sortField === "invoice_date" ? sortDirection : ""} label="发票号码" sortLabel="开票日期" onClick={() => onSortChange("invoice_date")} /></span>
-                )}
-              />
-              <HeaderCell label={filterMenu("seller_name", "销方名称")} separated />
-              <HeaderCell
-                align="right"
-                label="价税合计/税率"
-                separated
-              />
-              <HeaderCell label="货物或应税劳务名称" separated />
-              <HeaderCell align="center" label={<span className="input-invoice-usage-table-column-heading"><span>支付状态</span></span>} strongSeparated emphasized />
-              <HeaderCell
-                label={(
-                  <CompositeFilterMenu
-                    columns={[
-                      { field: "oa_applicant", label: "OA申请人", options: filterOptions.oa_applicant ?? [] },
-                      { field: "oa_application_type", label: "类型", options: filterOptions.oa_application_type ?? [] },
-                    ]}
-                    currentFilters={filters}
-                    label="OA / OA申请人"
-                    onApply={onFilterApply}
-                    onClear={onFilterClear}
-                  />
-                )}
-                strongSeparated
-              />
-              <HeaderCell label={filterMenu("oa_project_name", "项目名称")} separated />
-              <HeaderCell label={<span className="input-invoice-usage-table-column-heading"><span>流水</span>{filterMenu("bank_counterparty_name", "对方户名")}</span>} strongSeparated />
-              <HeaderCell
-                align="right"
-                label={(
-                  <CompositeFilterMenu
-                    columns={[
-                      { field: "bank_account", label: "银行账户", options: filterOptions.bank_account ?? [] },
-                      { field: "bank_direction", label: "收支", options: filterOptions.bank_direction ?? [] },
-                    ]}
-                    currentFilters={filters}
-                    label="金额"
-                    onApply={onFilterApply}
-                    onClear={onFilterClear}
-                  />
-                )}
-                separated
-              />
-              <HeaderCell label="摘要/备注" separated />
-          </FinanceTableHeader>
-          <FinanceTableBody>
-            {rows.length === 0 ? (
-              <FinanceTableRow id="input-invoice-usage-empty">
-                <FinanceTableCell className="input-invoice-usage-table-state-cell" columnRole="identity">{emptyStateMessage}</FinanceTableCell>
-                {Array.from({ length: 9 }, (_, index) => <FinanceTableCell columnRole="description" key={index}><EmptyValue /></FinanceTableCell>)}
-              </FinanceTableRow>
-            ) : rows.map((row) => {
-              const invoiceNo = displayInvoiceNo(row);
-              const invoiceCellExpanded = expandedCells.has(`${row.id}:invoice-business`);
-              const projectCellExpanded = expandedCells.has(`${row.id}:oa-project`);
-              const bankNameCellExpanded = expandedCells.has(`${row.id}:bank-name`);
-              const bankRemarkCellExpanded = expandedCells.has(`${row.id}:bank-remark`);
-              const oa = row.oa.primary;
-              const bank = row.bank.primary;
-              const oaRelationTarget = relationListTarget(row, "oa");
-              const bankRelationTarget = relationListTarget(row, "bank");
-              const invoiceRelationTarget = relationListTarget(row, "invoice");
-              const oaExtraCount = extraRelationCount(row.oa.relationCount);
-              const bankExtraCount = extraRelationCount(row.bank.originalTransactionCount);
-              const invoiceExtraCount = extraRelationCount(row.invoiceRelations.relationCount);
-
-              return (
-                <FinanceTableRow className="input-invoice-usage-table-row" id={row.id} key={row.id}>
-                  <FinanceTableCell className="input-invoice-usage-table-cell" columnRole="identity">
-                    <div className="input-invoice-usage-inline-row">
-                      <span className="input-invoice-usage-cell-primary" title={invoiceNo}>{invoiceNo}</span>
-                      <DetailButton
-                        iconOnly
-                        label={`查看发票 ${invoiceNo} 详情`}
-                        onClick={() => onOpenDetail({ kind: "invoice", id: row.invoice.id, rowId: row.id })}
-                      />
-                      {invoiceRelationTarget ? (
-                        <RelationCountButton
-                          extraCount={invoiceExtraCount}
-                          label={`查看发票 ${invoiceNo} 关联发票 ${row.invoiceRelations.relationCount} 张`}
-                          onClick={() => onOpenDetail(invoiceRelationTarget)}
-                        />
-                      ) : null}
-                    </div>
-                    <div className="input-invoice-usage-tag-row">
-                      <Tag>{dateOnly(row.invoice.issueDate)}</Tag>
-                    </div>
-                  </FinanceTableCell>
-                  <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" columnRole="identity">
-                    <div className="input-invoice-usage-cell-primary">{row.invoice.sellerName || "-"}</div>
-                    <div className="input-invoice-usage-cell-secondary">{row.invoice.sellerTaxNo || "-"}</div>
-                  </FinanceTableCell>
-                  <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--amount input-invoice-usage-table-cell--separator" columnRole="amount">
-                    <div className="input-invoice-usage-money-primary input-invoice-usage-invoice-total">{formatMoney(row.invoice.totalWithTax, "—")}</div>
-                    <div className="input-invoice-usage-cell-secondary input-invoice-usage-tax-rate">{row.invoice.taxRate}</div>
-                  </FinanceTableCell>
-                  <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" columnRole="description">
-                    <ExpandableCellText
-                      text={row.invoice.taxableItemName}
-                      expanded={invoiceCellExpanded}
-                      onToggle={() => onToggleCellExpand(row.id, "invoice-business")}
-                    />
-                  </FinanceTableCell>
-                  <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--payment input-invoice-usage-table-cell--strong-separator input-invoice-usage-payment-cell" columnRole="status">
-                    <Tag tone={paymentStatusTone(row.paymentStatus.code)}>{row.paymentStatus.label || "待处理"}</Tag>
-                  </FinanceTableCell>
-                  <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--strong-separator" columnRole="identity">
-                    {oa ? (
-                      <>
-                        <div className="input-invoice-usage-inline-row">
-                          <span className="input-invoice-usage-cell-primary">{oa.applicant || "-"}</span>
-                          {oa.detailAvailable && !oaRelationTarget ? (
-                            <DetailButton
-                              iconOnly
-                              label={`查看OA ${oa.applicant || oa.id} 详情`}
-                              onClick={() => onOpenDetail({ kind: "oa", id: oa.id, rowId: row.id })}
-                            />
-                          ) : null}
-                          {oaRelationTarget ? (
-                            <RelationCountButton
-                              extraCount={oaExtraCount}
-                              label={`查看${oa.applicant || "该发票"}关联OA ${row.oa.relationCount} 条`}
-                              onClick={() => onOpenDetail(oaRelationTarget)}
-                            />
-                          ) : null}
-                        </div>
-                        <div className="input-invoice-usage-tag-row">
-                          <FinanceStatusTag>{oa.applicationType || "类型为空"}</FinanceStatusTag>
-                          {row.oa.hasMultiple && oa.amount ? (
-                            <Tag tone="info">{`合计 ${formatMoney(oa.amount)}`}</Tag>
-                          ) : null}
-                        </div>
-                      </>
-                    ) : <EmptyCell />}
-                  </FinanceTableCell>
-                  <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" columnRole="description">
-                    {oa ? (
-                      <ExpandableCellText
-                        text={oa.projectName}
-                        expanded={projectCellExpanded}
-                        onToggle={() => onToggleCellExpand(row.id, "oa-project")}
-                      />
-                    ) : <EmptyCell />}
-                  </FinanceTableCell>
-                  <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--strong-separator" columnRole="identity">
-                    {bank ? (
-                      <>
-                        <ExpandableCellText
-                          text={bank.counterpartyName}
-                          expanded={bankNameCellExpanded}
-                          onToggle={() => onToggleCellExpand(row.id, "bank-name")}
-                        />
-                        <div className="input-invoice-usage-tag-row">
-                          <Tag>{bank.tradeTime ? formatDateTimeText(bank.tradeTime) : "交易日期为空"}</Tag>
-                          {bank.detailAvailable && !bankRelationTarget ? (
-                            <DetailButton
-                              label={`查看流水 ${bank.counterpartyName || bank.id} 详情`}
-                              onClick={() => onOpenDetail({ kind: "bank", id: bank.id, rowId: row.id })}
-                            >
-                              详情
-                            </DetailButton>
-                          ) : null}
-                        </div>
-                      </>
-                    ) : <EmptyCell />}
-                  </FinanceTableCell>
-                  <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--amount input-invoice-usage-table-cell--separator" columnRole="amount">
-                    {bank ? (
-                      <>
-                        <div className="input-invoice-usage-bank-amount-line">
-                          <span className="input-invoice-usage-money-primary">{formatMoney(row.bank.originalAmount, "—")}</span>
-                          {bankRelationTarget ? (
-                            <RelationCountButton
-                              extraCount={bankExtraCount}
-                              label={`查看${bank.counterpartyName || "该发票"}关联流水 ${row.bank.originalTransactionCount} 条`}
-                              onClick={() => onOpenDetail(bankRelationTarget)}
-                            />
-                          ) : null}
-                        </div>
-                        <div className="input-invoice-usage-bank-tag-row">
-                          <Tag tone="info">{directionLabel(bank.directionLabel || bank.direction)}</Tag>
-                          <BankAccountValue value={bankAccountLabel(bank) || "—"} />
-                        </div>
-                        {row.bank.bankSplitParts?.length ? <BankSplitChips parts={row.bank.bankSplitParts} /> : null}
-                      </>
-                    ) : <EmptyCell />}
-                  </FinanceTableCell>
-                  <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" columnRole="description">
-                    {bank ? (
-                      <>
-                        <div className="input-invoice-usage-cell-primary">{bank.summary || "-"}</div>
-                        <ExpandableCellText
-                          text={bank.remark}
-                          expanded={bankRemarkCellExpanded}
-                          onToggle={() => onToggleCellExpand(row.id, "bank-remark")}
-                        />
-                      </>
-                    ) : <EmptyCell />}
-                  </FinanceTableCell>
-                </FinanceTableRow>
-              );
-            })}
-          </FinanceTableBody>
-      </FinanceTable>
+        </div>
+      </div>
     </div>
   );
 }

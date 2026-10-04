@@ -45,7 +45,7 @@ test("待找发票业务文本可用鼠标选择并复制", async ({ page }) => 
 test("进项发票业务文本可用鼠标选择并复制", async ({ page }) => {
   const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
   await page.goto("/input-invoice-usage");
-  const grid = page.getByRole("grid", { name: "进项发票使用情况表" });
+  const grid = page.getByRole("table", { name: "进项发票使用情况表" });
   await expect(grid).toBeVisible();
   await expectSelectableGrid(grid);
   const row = grid.getByRole("row", { name: /SD-INV-E2E-0001/ });

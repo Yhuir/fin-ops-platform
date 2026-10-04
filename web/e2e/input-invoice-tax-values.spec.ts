@@ -22,7 +22,7 @@ test('input amount column has two aligned lines and retains its geometry while r
     }});
   });
   await page.goto('/input-invoice-usage');
-  const grid = page.getByRole('grid', {name: '进项发票使用情况表'});
+  const grid = page.getByRole('table', {name: '进项发票使用情况表'});
   await expect(grid.getByRole('columnheader', {name: '价税合计/税率', exact: true})).toBeVisible();
   const cells = page.locator('.input-invoice-usage-table-cell--amount').filter({has: page.locator('.input-invoice-usage-tax-rate')});
   await expect(cells).toHaveCount(3);

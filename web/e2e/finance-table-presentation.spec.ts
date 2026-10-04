@@ -87,12 +87,12 @@ test.describe("ordinary page finance presentation", () => {
     await installDeterministicApiMocks(page, { sessionMode: "admin" });
     await page.setViewportSize({ width: 1920, height: 1080 });
     await page.goto("/input-invoice-usage");
-    const table = page.getByRole("grid", { name: "进项发票使用情况表" });
+    const table = page.getByRole("table", { name: "进项发票使用情况表" });
     await expect(table.getByText("浏览器进项供应商").first()).toBeVisible();
     await expectColumnAlignment(table, "amount", "right");
     await expectColumnAlignment(table, "description", "left");
     for (const index of [0, 1, 5, 6, 7]) {
-      await expect(table.locator("thead th").nth(index)).toHaveCSS("text-align", "left");
+      await expect(table.locator("thead tr").last().locator("th").nth(index < 4 ? index : index - 1)).toHaveCSS("text-align", "left");
       await expect(table.locator("tbody tr").first().locator("td, th").nth(index)).toHaveCSS("text-align", "left");
     }
     await expectColumnAlignment(table, "status", "center");
