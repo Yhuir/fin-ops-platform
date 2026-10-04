@@ -14,6 +14,7 @@
 - 仅完整 all 权威快照能证明源消失；清理 active 成员与本地快照后，通过精确事件复核并删除对应外部支付状态，month/retention 不证明源删除。
 - 支付状态由当前 active outflow 收敛；MySQL 写回由专用 adapter 执行，不向 Mongo 写业务。
 - 附件解析以当前强身份和来源桥接统一发票池，避免重复发票及跨 OA 弱指纹猜测；API 不运行全量同步/OCR。
+- 原件修复同时读取已完成 OA 的附件登记和当前在途准入付款项的 `attachment_artifacts`。在途登记必须与同一付款项的 `attachment_files` 精确匹配文件名、路径与唯一 owner；重复或冲突拒绝，不以识别缓存替代登记。
 - 发票财务字段只读取原件标签、版式表格或真实明细行；PDF/OFD 文字层优先，图片经现有 OCR 按坐标还原行。税率不读取手机电量、备注中的首个百分比，不用金额比例补算或调换金额/税额。
 - `source_line_items` 逐条保存真实明细及各条税率、金额、税额；折扣/红字保留负号，未打印的逐行价税合计保持空。无明细来源不生成整票汇总明细。`*`、免税、不征税保持来源文字，非数字税额用 `tax_amount_text`，数值 `tax_amount` 为空。
 - 铁路客票、机打通行费票和非税缴款书只提供票价/缴款额时，只记来源总额；不生成未税金额、税额零或推算税率。解析器版本变更隔离旧附件识别缓存。OFD 与 DOCX 共用受限 ZIP 验证，按声明页及模板读取文字。
@@ -43,5 +44,6 @@
 - [tests/test_oa_attachment_invoice_service.py](../../../tests/test_oa_attachment_invoice_service.py)
 - [tests/test_oa_attachment_invoice_promotion_service.py](../../../tests/test_oa_attachment_invoice_promotion_service.py)
 - [tests/test_oa_attachment_invoice_promotion_tool.py](../../../tests/test_oa_attachment_invoice_promotion_tool.py)
+- [tests/test_original_invoice_attachment_sources.py](../../../tests/test_original_invoice_attachment_sources.py)
 
 通用查询、事务、权限与错误边界见[系统架构](../../../ARCHITECTURE.md)；验证方法见[开发说明](../../development.md)。测试文件是可执行证据，本文不保存某一次测试的通过记录。

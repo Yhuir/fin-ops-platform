@@ -544,7 +544,7 @@ describe("销项发票收款情况", () => {
       return {...rowsPayload,
         rows: rowsPayload.rows.map(row => ({...row,invoice:{...row.invoice,tax_rate:'13%'}})),
         summary: {invoiceCount:36,totalWithTax:'5680807.61',amountWithoutTax:'5030000.00',collectedAmount:'1991700.08'},
-        filter_options:[...rowsPayload.filter_options,{field:'tax_rate',label:'税率',mode:'enum_multi',sortable:true,operators:['in'],options:[{value:'13%',label:'13%',count:19},{value:'6%',label:'6%',count:9},{value:'无法确定',label:'无法确定',count:6}]}],
+        filter_options:[...rowsPayload.filter_options,{field:'tax_rate',label:'税率',mode:'enum_multi',sortable:true,operators:['in'],options:[{value:'13%',label:'13%',count:19},{value:'6%',label:'6%',count:9},{value:'—',label:'—',count:6}]}],
       };
     });
     renderAuthenticatedAppAt('/output-invoice-collections');
@@ -556,7 +556,7 @@ describe("销项发票收款情况", () => {
     await user.click(screen.getByRole('button',{name:'筛选 税率'}));
     await user.click(await screen.findByRole('checkbox',{name:/13%/}));
     await waitFor(() => expect(requests.at(-1)?.searchParams.get('filters')).toContain('13'));
-    expect(screen.getByRole('checkbox',{name:/无法确定/})).toBeVisible();
+    expect(screen.getByRole('checkbox',{name:/—/})).toBeVisible();
     await user.click(screen.getByRole('checkbox',{name:/6%/}));
     await waitFor(() => expect(JSON.parse(decodeURIComponent(requests.at(-1)!.searchParams.get('filters')!))[0].values).toEqual(['13%','6%']));
     expect(totals).toHaveTextContent('5680807.61');

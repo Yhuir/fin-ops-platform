@@ -50,11 +50,59 @@ def load_invoice_header_fact_repair_snapshot(
 
 
 def load_original_invoice_attachments(connection: Any, attachment_keys: list[str]) -> list[dict[str, Any]]:
-    return connection.fetch_all("""
-        select source_attachment_key, filename, normalized_payload
+    """Read original file registrations from completed and pending OA owners."""
+    if not attachment_keys:
+        return []
+    rows = connection.fetch_all("""
+        select source_attachment_key, filename, normalized_payload,
+               'oa_attachment'::text as source_owner_type,
+               oa_source_id as source_oa_id,
+               normalized_payload->>'source_expense_item_id' as source_expense_item_id,
+               1::bigint as registered_file_count
         from app.oa_attachments where source_attachment_key=any(%s::text[])
+        union all
+        select artifact.value->>'source_attachment_key',
+               artifact.value->>'attachment_name', artifact.value,
+               'pending_expense_item', admission.oa_id,
+               item.value->>'expense_item_id', files.registered_file_count
+        from app.oa_pending_payment_admissions admission
+        cross join lateral jsonb_array_elements(
+            coalesce(admission.source_payload->'expense_items', '[]'::jsonb)
+        ) item(value)
+        cross join lateral jsonb_array_elements(
+            coalesce(item.value->'attachment_artifacts', '[]'::jsonb)
+        ) artifact(value)
+        cross join lateral (
+            select count(*) as registered_file_count
+            from jsonb_array_elements(coalesce(item.value->'attachment_files', '[]'::jsonb)) file(value)
+            where file.value->>'fileName' = artifact.value->>'attachment_name'
+              and file.value->>'filePath' = artifact.value->>'file_path'
+        ) files
+        where admission.tenant_id='default' and admission.workflow_status='in_progress'
+          and artifact.value->>'source_attachment_key'=any(%s::text[])
         order by source_attachment_key
-    """, (attachment_keys,))
+    """, (attachment_keys, attachment_keys))
+    seen: set[str] = set()
+    for row in rows:
+        key = row["source_attachment_key"]
+        if key in seen:
+            raise ValueError(f"OA original has ambiguous registered owners: {key}.")
+        seen.add(key)
+        payload = row["normalized_payload"]
+        if not row["filename"] or not payload.get("file_path") or not row["source_oa_id"]:
+            raise ValueError(f"OA original registration lacks file or owner fields: {key}.")
+        if payload.get("source_attachment_key") not in (None, key):
+            raise ValueError(f"OA original registration key is inconsistent: {key}.")
+        if any(payload.get(field) not in (None, row["filename"])
+               for field in ("attachment_name", "source_attachment_name")):
+            raise ValueError(f"OA original registration filename is inconsistent: {key}.")
+        if row["source_owner_type"] == "pending_expense_item" and (
+            not row["source_expense_item_id"]
+            or payload.get("source_expense_item_id") != row["source_expense_item_id"]
+            or row["registered_file_count"] != 1
+        ):
+            raise ValueError(f"OA original pending item/file registration is inconsistent: {key}.")
+    return rows
 
 
 def load_verified_financial_repair_snapshot(connection: Any, invoice_ids: list[str]) -> dict[str, Any]:

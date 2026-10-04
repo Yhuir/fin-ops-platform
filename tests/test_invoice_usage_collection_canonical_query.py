@@ -252,7 +252,13 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         )
         sql = "\n".join(statements)
         self.assertIn("sum(member.total_with_tax)", sql)
-        self.assertIn("bool_or(member.total_with_tax < 0)", sql)
+        self.assertIn(
+            "bool_or(coalesce(member.total_with_tax < 0, false) or ( "
+            "member.total_with_tax is null "
+            "and lower(trim(member.is_positive_invoice)) in ('否', 'false', 'negative', '负数', '红字') "
+            ")) as has_negative_invoice",
+            " ".join(sql.split()),
+        )
         self.assertIn("from app.workbench_pair_relations relation", sql)
         self.assertIn("where relation.status = 'active'", sql)
         self.assertIn("then 'reversed_by_red'", sql)
