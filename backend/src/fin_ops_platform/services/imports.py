@@ -1732,6 +1732,9 @@ class ImportNormalizationService:
             tax_rate=normalized.get("tax_rate"),
             tax_amount_text=normalized.get("tax_amount_text"),
             source_line_items=list(normalized.get("source_line_items") or []),
+            source_line_count=normalized.get("source_line_count"),
+            source_sheet_name=normalized.get("source_sheet_name"),
+            source_sheet_role=normalized.get("source_sheet_role"),
             tax_amount=Decimal(normalized["tax_amount"]) if normalized.get("tax_amount") else None,
             total_with_tax=Decimal(normalized["total_with_tax"]) if normalized.get("total_with_tax") else None,
             tax_classification_code=normalized.get("tax_classification_code"),
@@ -2033,6 +2036,7 @@ class ImportNormalizationService:
             tax_rate=normalized.get("tax_rate"),
             tax_amount_text=normalized.get("tax_amount_text"),
             source_line_items=list(normalized.get("source_line_items") or []),
+            source_line_count=len(normalized.get("source_line_items") or []),
             tax_amount=Decimal(normalized["tax_amount"]) if normalized.get("tax_amount") else None,
             total_with_tax=Decimal(normalized["total_with_tax"]) if normalized.get("total_with_tax") else None,
             tax_classification_code=normalized.get("tax_classification_code"),
@@ -2066,38 +2070,6 @@ class ImportNormalizationService:
         invoice.tags = effective_invoice_source_tags(invoice.tags, invoice.source_links)
         if normalized.get("oa_form_id"):
             invoice.oa_form_id = normalized.get("oa_form_id")
-        for field_name in (
-            "invoice_code",
-            "digital_invoice_no",
-            "invoice_date",
-            "seller_tax_no",
-            "seller_name",
-            "buyer_tax_no",
-            "buyer_name",
-            "tax_rate",
-            "tax_amount_text",
-            "tax_classification_code",
-            "specific_business_type",
-            "taxable_item_name",
-            "specification_model",
-            "unit",
-            "invoice_source",
-            "invoice_kind",
-            "is_positive_invoice",
-            "risk_level",
-            "issuer",
-            "remark",
-            "project_id",
-        ):
-            incoming = normalized.get(field_name)
-            if incoming and not getattr(invoice, field_name):
-                setattr(invoice, field_name, incoming)
-        for field_name in ("tax_amount", "total_with_tax", "quantity", "unit_price"):
-            incoming = normalized.get(field_name)
-            if incoming not in (None, "") and getattr(invoice, field_name) is None:
-                setattr(invoice, field_name, Decimal(incoming))
-        if not invoice.source_line_items and normalized.get("source_line_items"):
-            invoice.source_line_items = list(normalized["source_line_items"])
         if not invoice.source_unique_key:
             invoice.source_unique_key = normalized.get("source_unique_key")
             if invoice.source_unique_key:
@@ -2331,6 +2303,14 @@ class ImportNormalizationService:
             invoice.tax_rate = normalized.get("tax_rate")
             invoice.tax_amount_text = normalized.get("tax_amount_text")
             invoice.source_line_items = list(normalized.get("source_line_items") or [])
+            invoice.source_line_count = normalized.get("source_line_count")
+            invoice.source_sheet_name = normalized.get("source_sheet_name")
+            invoice.source_sheet_role = normalized.get("source_sheet_role")
+            invoice.source_workbook_sha256 = None
+            invoice.financial_repair_source_file_id = None
+            invoice.financial_repair_source_kind = None
+            invoice.financial_repair_fingerprint = None
+            invoice.invoice_header_repair_fingerprint = None
             invoice.amount = self._parse_decimal(normalized.get("amount"))
             invoice.signed_amount = self._parse_decimal(normalized.get("signed_amount"))
             for field_name in ("tax_amount", "total_with_tax", "quantity", "unit_price"):

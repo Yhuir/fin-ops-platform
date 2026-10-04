@@ -8,6 +8,10 @@ from typing import Any
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.services.imports import normalize_name
 from fin_ops_platform.services.invoice_identity_service import InvoiceIdentityService
+from fin_ops_platform.services.oa_attachment_invoice_cache import (
+    ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION,
+    attachment_invoice_cache_parser_version,
+)
 
 INVOICE_HEADER_REPAIR_SOURCE_SHA256 = (
     "c1080bb92a64553956ea76a363022cc4034e9673cbfaa1f55528a208411abb00"
@@ -383,8 +387,14 @@ def build_verified_financial_repair_plan(
         updates.append({"invoice_id": current["invoice_id"], "identity_key": key,
                         "before": current, "raw_payload": raw, **values, "party_fields": party})
         changed_keys.add(key)
+    # Only retired parsers can reintroduce inferred or stringified evidence.
+    # Current source-only caches are independent original-file evidence; a
+    # canonical provenance repair must not force the same originals through OCR.
+    current_parser_version = attachment_invoice_cache_parser_version()
     invalidate_keys = sorted({row["source_attachment_key"] for row in cache_rows
-        if any(identities.canonical_key_for_mapping(item) in changed_keys
+        if (row.get("parser_version") != current_parser_version
+            or row.get("cache_schema_version") != ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION)
+        and any(identities.canonical_key_for_mapping(item) in changed_keys
                for item in row["invoices"] if isinstance(item, dict))})
     manifest = {"version": 1, "repair_type": "invoice_source_values", "source_fingerprint": fingerprint,
                 "invoices": [item["before"] for item in updates],

@@ -5,6 +5,10 @@ from copy import deepcopy
 from decimal import Decimal
 
 from fin_ops_platform.services.invoice_header_fact_repair_service import build_verified_financial_repair_plan
+from fin_ops_platform.services.oa_attachment_invoice_cache import (
+    ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION,
+    attachment_invoice_cache_parser_version,
+)
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
     apply_verified_financial_repair,
@@ -50,6 +54,17 @@ class VerifiedFinancialRepairTests(unittest.TestCase):
         other['rows'][0].update(amount='2.00', tax_amount='2.00')
         with self.assertRaisesRegex(ValueError, 'disagree'):
             build_verified_financial_repair_plan([invoice], invoice_ids=['repair-1'], sources=[source,other],cache_rows=[])
+
+    def test_current_source_cache_survives_repair_but_retired_schema_does_not(self):
+        _invoice, _source, cache = sample()
+        cache.update(parser_version=attachment_invoice_cache_parser_version(),
+                     cache_schema_version=ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION)
+        plan = self.build(cache=cache)
+        self.assertEqual(plan['update_count'], 1)
+        self.assertEqual(plan['invalidate_cache_keys'], [])
+        self.assertEqual(plan['rollback_manifest']['attachment_caches'], [])
+        cache['cache_schema_version'] = 'old'
+        self.assertEqual(self.build(cache=cache)['invalidate_cache_keys'], ['cache-1'])
 
     def test_missing_target_date_or_total_changes_fail(self):
         invoice, source, cache = sample()
@@ -403,6 +418,17 @@ class VerifiedFinancialRepairPostgresTests(unittest.TestCase):
         again = build_verified_financial_repair_plan(**load_verified_financial_repair_snapshot(self.connection, ["repair-1"]),
             invoice_ids=["repair-1"], sources=[source])
         self.assertEqual(again["update_count"], 0)
+
+    def test_current_source_cache_is_preserved_in_actual_repair_transaction(self):
+        self.connection.execute('''update app.oa_attachment_invoice_cache
+            set parser_version=%s, cache_schema_version=%s where source_attachment_key='cache-1' ''',
+            (attachment_invoice_cache_parser_version(), ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION))
+        before = self.connection.fetch_one("select * from app.oa_attachment_invoice_cache where source_attachment_key='cache-1'")
+        with self.connection.transaction() as tx:
+            result = apply_verified_financial_repair(tx, self.plan(tx), operator_id='tester', reason='preserve current parsed originals')
+        self.assertEqual(result, {'written_invoice_count': 1, 'invalidated_cache_count': 0})
+        self.assertEqual(self.connection.fetch_one("select * from app.oa_attachment_invoice_cache where source_attachment_key='cache-1'"), before)
+        self.assertEqual(self.plan(self.connection)['update_count'], 0)
 
     def test_transaction_rollback_cas_and_second_run_zero(self):
         with self.assertRaisesRegex(RuntimeError,'injected'):

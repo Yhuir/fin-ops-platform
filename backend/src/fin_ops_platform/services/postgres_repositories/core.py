@@ -1272,37 +1272,6 @@ class PostgresCoreRepository:
             current.tags = effective_invoice_source_tags(current.tags, current.source_links)
             if incoming_invoice.get("oa_form_id"):
                 current.oa_form_id = self._text(incoming_invoice.get("oa_form_id"))
-            for field_name in (
-                "invoice_code",
-                "digital_invoice_no",
-                "invoice_date",
-                "seller_tax_no",
-                "seller_name",
-                "buyer_tax_no",
-                "buyer_name",
-                "tax_rate",
-                "tax_classification_code",
-                "specific_business_type",
-                "taxable_item_name",
-                "specification_model",
-                "unit",
-                "invoice_source",
-                "invoice_kind",
-                "is_positive_invoice",
-                "risk_level",
-                "issuer",
-                "remark",
-                "project_id",
-            ):
-                if getattr(current, field_name, None) in (None, ""):
-                    incoming_value = incoming_invoice.get(field_name)
-                    if incoming_value not in (None, ""):
-                        setattr(current, field_name, incoming_value)
-            for field_name in ("tax_amount", "total_with_tax", "quantity", "unit_price"):
-                if getattr(current, field_name, None) is None:
-                    incoming_value = incoming_invoice.get(field_name)
-                    if incoming_value not in (None, ""):
-                        setattr(current, field_name, Decimal(str(incoming_value)))
             if not current.source_unique_key:
                 current.source_unique_key = self._text(
                     incoming_invoice.get("source_unique_key")
@@ -2393,6 +2362,14 @@ class PostgresCoreRepository:
             tax_rate=self._text(row.get("tax_rate")),
             tax_amount_text=self._text(payload.get("tax_amount_text")),
             source_line_items=list(payload.get("source_line_items") or []),
+            source_line_count=payload.get("source_line_count"),
+            source_sheet_name=self._text(payload.get("source_sheet_name")),
+            source_sheet_role=self._text(payload.get("source_sheet_role")),
+            source_workbook_sha256=self._text(payload.get("source_workbook_sha256")),
+            financial_repair_source_file_id=self._text(payload.get("financial_repair_source_file_id")),
+            financial_repair_source_kind=self._text(payload.get("financial_repair_source_kind")),
+            financial_repair_fingerprint=self._text(payload.get("financial_repair_fingerprint")),
+            invoice_header_repair_fingerprint=self._text(payload.get("invoice_header_repair_fingerprint")),
             tax_amount=self._decimal_or_none(row.get("tax_amount")),
             total_with_tax=self._decimal_or_none(row.get("total_with_tax")),
             tax_classification_code=self._text(payload.get("tax_classification_code")),

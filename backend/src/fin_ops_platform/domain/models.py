@@ -61,6 +61,14 @@ class Invoice:
     buyer_name: str | None = None
     tax_rate: str | None = None
     source_line_items: list[dict[str, Any]] = field(default_factory=list)
+    source_line_count: int | None = None
+    source_sheet_name: str | None = None
+    source_sheet_role: str | None = None
+    source_workbook_sha256: str | None = None
+    financial_repair_source_file_id: str | None = None
+    financial_repair_source_kind: str | None = None
+    financial_repair_fingerprint: str | None = None
+    invoice_header_repair_fingerprint: str | None = None
     tax_amount: Decimal | None = None
     tax_amount_text: str | None = None
     total_with_tax: Decimal | None = None

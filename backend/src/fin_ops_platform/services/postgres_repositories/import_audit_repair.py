@@ -117,7 +117,7 @@ def load_verified_financial_repair_snapshot(
         order by id
     """ + (" for update" if lock else ""), (invoice_ids,))
     caches = connection.fetch_all("""
-        select cache.source_attachment_key, cache.invoices, cache.parser_version
+        select cache.source_attachment_key, cache.invoices, cache.parser_version, cache.cache_schema_version
         from app.oa_attachment_invoice_cache cache
         where exists (
             select 1 from jsonb_array_elements(cache.invoices) item
