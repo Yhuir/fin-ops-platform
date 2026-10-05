@@ -206,8 +206,8 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(records[0].source_aliases, ["oa-exp-payload-alias"])
         self.assertEqual(len(connection.executed), 1)
         executed_sql = connection.executed[0][0]
-        self.assertIn("from app.oa_application_items item", executed_sql)
-        self.assertIn("from app.oa_attachments attachment", executed_sql)
+        self.assertNotIn("from app.oa_application_items item", executed_sql)
+        self.assertNotIn("from app.oa_attachments attachment", executed_sql)
         self.assertIn("from app.oa_source_aliases alias_row", executed_sql)
         self.assertIn("alias_row.status = 'active'", executed_sql)
 

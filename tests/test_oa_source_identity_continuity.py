@@ -229,3 +229,14 @@ class OASourceIdentityPostgresTests(unittest.TestCase):
             'oa-pay-source-document', 'oa-pay-original-process', 'oa-pay-unknown',
         ]), ['oa-pay-original-process', 'oa-pay-unknown'])
         self.assertEqual(repo.resolve_canonical_oa_row_ids([]), [])
+
+    def test_read_identity_uses_declared_aliases_without_attachment_inference(self):
+        from fin_ops_platform.services.postgres_repositories.oa_source_alias_sql import oa_source_aliases_sql
+
+        self.doc['data'].update(processStatus=2, status='COMPLETED', flowRequestId=2496)
+        self.commit()
+        sql = oa_source_aliases_sql('oa', 'oa.normalized_payload')
+        row = self.connection.fetch_one('select ' + sql + ' as aliases from app.oa_applications oa')
+        self.assertEqual(set(row['aliases']), {'oa-pay-original-process', 'oa-pay-source-document', 'oa-pay-2496'})
+        self.assertNotIn('app.oa_application_items', sql)
+        self.assertNotIn('app.oa_attachments', sql)

@@ -10,6 +10,7 @@
 
 ## 当前业务约定
 
+- 页面及配对的历史身份读取只使用当前 OA ID、已声明别名和 indexed active alias，不从附件/子项字段反向推测身份或重复扫描附件。
 - 同一份源文档的 App OA 身份不随 `processId`、`flowRequestId` 或审批状态变化。已入库 OA 保留当前 canonical ID；新 OA 使用表单类型与 Mongo `_id` 建立身份，流程编号仅登记为可查找别名。来源别名与 OA/准入事实在同一事务提交，冲突明确失败。
 - 附件缓存、报销子项和来源证据在确定 canonical OA 身份后生成；完成审批只迁移 pending/completed 归属，不撤销配对，也不重建附件身份。投影写入不按 ID 后缀猜测或直接改写其他模块的关系。
 - OA Mongo 财务源只读；worker 一次读取范围内来源，输出 completed 与 admission 视图。任何必需来源读取失败不提交部分权威集合。
