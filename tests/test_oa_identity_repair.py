@@ -84,6 +84,8 @@ class OAIdentityRepairTests(unittest.TestCase):
 
     def test_preserves_grouped_attachment_binding_contract(self):
         evidence = self.evidence()
+        evidence['history'][0]['before_payload'][0]['special_metadata'] = copy.deepcopy(
+            evidence['history'][0]['before_payload'][0]['special_metadata'])
         evidence['history'][0]['before_payload'][0]['special_metadata']['oa_attachment_bindings'] = [
             {'parent_oa_row_id': 'oa-pay-old', 'invoice_row_ids': ['invoice-1']},
         ]
