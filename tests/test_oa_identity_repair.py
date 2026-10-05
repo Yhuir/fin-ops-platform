@@ -56,3 +56,28 @@ class OAIdentityRepairTests(unittest.TestCase):
         before = build_identity_relation_repair(evidence, ['case'])['fingerprint']
         evidence['aliases']['oa-pay-old'] = 'oa-pay-another'
         self.assertNotEqual(before, build_identity_relation_repair(evidence, ['case'])['fingerprint'])
+
+    def test_preserves_later_requirement_recalculation_without_member_changes(self):
+        evidence = self.evidence()
+        after = evidence['current']['case']
+        changed = copy.deepcopy(after)
+        changed['special_metadata'] = {'requires_invoice': False, 'paired_requirement_version': 18}
+        evidence['current']['case'] = changed
+        evidence['history'].append({'case_id': 'case', 'actor_id': 'system:bank_relation_requirement_recalculation',
+                                    'event_type': 'bank_relation_requirement_recalculated',
+                                    'before_payload': [after], 'after_payload': [changed]})
+        _, metadata = formal_repair_plans(build_identity_relation_repair(evidence, ['case']))
+        self.assertFalse(metadata['case']['requires_invoice'])
+        self.assertEqual(metadata['case']['paired_requirement_version'], 18)
+        evidence['history'][-1]['after_payload'][0]['row_ids'].append('new-bank')
+        evidence['history'][-1]['after_payload'][0]['row_types'].append('bank')
+        with self.assertRaisesRegex(ValueError, 'later_members_changed'):
+            build_identity_relation_repair(evidence, ['case'])
+
+    def test_real_cancellation_history_can_have_empty_after_payload(self):
+        evidence = self.evidence()
+        evidence['history'][0]['event_type'] = 'cancel_relation_for_unavailable_oa_fact'
+        evidence['history'][0]['after_payload'] = []
+        evidence['current']['case'] = {**evidence['history'][0]['before_payload'][0], 'status': 'cancelled'}
+        preview = build_identity_relation_repair(evidence, ['case'])
+        self.assertIsNone(formal_repair_plans(preview)[0][0].target_case_id)

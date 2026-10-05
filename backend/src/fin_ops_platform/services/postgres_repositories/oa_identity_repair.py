@@ -18,11 +18,17 @@ class PostgresOAIdentityRepairRepository:
         )
         current = {row['case_id']: row_payload(row, 'raw_payload') for row in rows}
         history = self._connection.fetch_all(
-            """select distinct on (case_id) case_id, id::text, event_type, actor_id,
-                      before_payload, after_payload
-               from app.workbench_pair_relation_history
-               where case_id = any(%s::text[])
-               order by case_id, occurred_at desc, id desc""", (case_ids,),
+            """with cleanup as (
+                   select case_id, max(occurred_at) as occurred_at
+                   from app.workbench_pair_relation_history
+                   where case_id = any(%s::text[])
+                     and actor_id = 'system:oa_pending_payment_source_sync'
+                     and event_type in ('remove_unavailable_oa_fact', 'cancel_relation_for_unavailable_oa_fact')
+                   group by case_id)
+               select h.case_id, h.id::text, h.event_type, h.actor_id, h.before_payload, h.after_payload
+               from app.workbench_pair_relation_history h join cleanup c using(case_id)
+               where h.occurred_at >= c.occurred_at
+               order by h.case_id, h.occurred_at, h.id""", (case_ids,),
         )
         aliases = self._connection.fetch_all(
             """select alias_row_id, canonical_row_id from app.oa_source_aliases
