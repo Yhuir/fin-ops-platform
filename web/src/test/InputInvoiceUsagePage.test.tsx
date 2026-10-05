@@ -393,6 +393,33 @@ afterEach(() => {
 });
 
 describe("Input invoice usage page", () => {
+  test.each([false, true])("流水金额区不显示用途标签，保留原始金额和账户：拆分=%s", async (split) => {
+    const parts = split ? [
+      { id: "principal", category_code: "repayment", category_label: "归还借款", category_path: ["外部往来款付款", "归还借款", "银行往来"], amount: "1000000.00" },
+      { id: "interest", category_code: "interest", category_label: "利息", category_path: ["费用", "利息"], amount: "1497.22" },
+    ] : [];
+    installInputInvoiceUsageFetch({ ...rowsPayload, rows: rowsPayload.rows.map((row) => ({
+      ...row,
+      bank: {
+        ...row.bank,
+        original_amount: "1001497.22",
+        bank_split_parts: parts,
+        primary: { ...row.bank.primary, amount: "1497.22", bank_split_parts: parts },
+      },
+    })) });
+    renderAuthenticatedAppAt("/input-invoice-usage");
+    const table = await screen.findByRole("table", { name: "进项发票使用情况表" });
+    const invoiceRow = within(table).getByRole("row", { name: /SD-INV-2026-0001/ });
+    const amountCell = invoiceRow.querySelectorAll("th, td")[8] as HTMLElement;
+    expect(within(amountCell).getByText("1001497.22")).toBeVisible();
+    expect(within(amountCell).getByText("支出")).toBeVisible();
+    expect(amountCell).toHaveTextContent("交行");
+    expect(amountCell).toHaveTextContent("3847");
+    expect(within(amountCell).queryByText("1497.22")).not.toBeInTheDocument();
+    expect(within(amountCell).queryByText(/归还借款|费用|利息/)).not.toBeInTheDocument();
+    expect(within(amountCell).queryByRole("button", { name: /拆分金额/ })).not.toBeInTheDocument();
+  });
+
   test.each([
     [{ bankShortName: "平安", bankName: "平安银行", accountLast4: "0093", bankAccount: "平安银行 0093" }, "平安0093"],
     [{ bankShortName: "", bankName: "平安银行", accountLast4: "0093", bankAccount: "平安银行 0093" }, "平安银行0093"],

@@ -1,4 +1,3 @@
-import BankSplitChips from "../../features/bankSplits/BankSplitChips";
 import { ArrowUpDown, Filter, Info } from "lucide-react";
 import { Button, Checkbox, ListBox, PopoverContent, PopoverDialog, PopoverRoot, PopoverTrigger, Select } from "@heroui/react";
 import type { MutableRefObject, ReactNode } from "react";
@@ -623,7 +622,6 @@ export default function InputInvoiceUsageTable({
                             <Tag tone="info">{directionLabel(bank.directionLabel || bank.direction)}</Tag>
                             <BankAccountValue value={bankAccountLabel(bank) || "—"} />
                           </div>
-                          {row.bank.bankSplitParts?.length ? <BankSplitChips parts={row.bank.bankSplitParts} /> : null}
                         </>
                       ) : <EmptyCell />}
                     </td>
