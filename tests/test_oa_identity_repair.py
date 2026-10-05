@@ -81,3 +81,14 @@ class OAIdentityRepairTests(unittest.TestCase):
         evidence['current']['case'] = {**evidence['history'][0]['before_payload'][0], 'status': 'cancelled'}
         preview = build_identity_relation_repair(evidence, ['case'])
         self.assertIsNone(formal_repair_plans(preview)[0][0].target_case_id)
+
+    def test_preserves_grouped_attachment_binding_contract(self):
+        evidence = self.evidence()
+        evidence['history'][0]['before_payload'][0]['special_metadata']['oa_attachment_bindings'] = [
+            {'parent_oa_row_id': 'oa-pay-old', 'invoice_row_ids': ['invoice-1']},
+        ]
+        plans, metadata = formal_repair_plans(build_identity_relation_repair(evidence, ['case']))
+        self.assertEqual(plans[0].oa_attachment_bindings, (('oa-pay-current', 'invoice-1'),))
+        self.assertEqual(metadata['case']['oa_attachment_bindings'], [
+            {'parent_oa_row_id': 'oa-pay-current', 'invoice_row_ids': ['invoice-1']},
+        ])

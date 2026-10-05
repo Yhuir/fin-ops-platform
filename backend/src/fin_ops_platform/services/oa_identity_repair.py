@@ -106,8 +106,9 @@ def formal_repair_plans(preview: dict[str, Any]):
             evidence_summary=(('source_identity_repair', preview['fingerprint']),), batch_hash=preview['fingerprint'],
             target_case_id=entry['target_case_id'], relation_mode=before['relation_mode'],
             oa_attachment_bindings=tuple(
-                (item['parent_oa_row_id'], item['invoice_row_id'])
+                (item['parent_oa_row_id'], invoice_row_id)
                 for item in entry['metadata'].get('oa_attachment_bindings', [])
+                for invoice_row_id in item['invoice_row_ids']
             ),
         ))
         metadata[entry['case_id']] = entry['metadata']

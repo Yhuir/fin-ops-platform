@@ -29,10 +29,10 @@ def main(argv=None) -> int:
             preview = build_identity_relation_repair(
                 PostgresOAIdentityRepairRepository(transaction).load_evidence(args.case_id), args.case_id,
             )
+            plans, metadata = formal_repair_plans(preview)
             if args.execute:
                 if preview['fingerprint'] != args.expected_fingerprint or preview['count'] != args.expected_count:
                     raise ValueError('oa_identity_repair_preview_changed')
-                plans, metadata = formal_repair_plans(preview)
                 for item in metadata.values():
                     item['oa_identity_repair_reason'] = args.reason
                 result = WorkbenchRelationCommandService(
