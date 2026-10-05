@@ -219,3 +219,13 @@ class OASourceIdentityPostgresTests(unittest.TestCase):
         targeted = queue.enqueue(event_type='oa.sync', scope_key='all', dedupe_key='oa.attachments:test',
                                  payload={'operation': 'refresh_attachments'})
         self.assertNotEqual(targeted.event_id, full.event_id)
+
+    def test_payment_reconcile_resolves_only_verified_aliases_and_deduplicates(self):
+        from fin_ops_platform.services.postgres_repositories.oa_payment_status_reconcile import PostgresOAPaymentStatusReconcileRepository
+
+        self.commit()
+        repo = PostgresOAPaymentStatusReconcileRepository(self.connection)
+        self.assertEqual(repo.resolve_canonical_oa_row_ids([
+            'oa-pay-source-document', 'oa-pay-original-process', 'oa-pay-unknown',
+        ]), ['oa-pay-original-process', 'oa-pay-unknown'])
+        self.assertEqual(repo.resolve_canonical_oa_row_ids([]), [])

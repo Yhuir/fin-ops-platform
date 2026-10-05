@@ -14,6 +14,7 @@
 - 附件缓存、报销子项和来源证据在确定 canonical OA 身份后生成；完成审批只迁移 pending/completed 归属，不撤销配对，也不重建附件身份。投影写入不按 ID 后缀猜测或直接改写其他模块的关系。
 - OA Mongo 财务源只读；worker 一次读取范围内来源，输出 completed 与 admission 视图。任何必需来源读取失败不提交部分权威集合。
 - 仅完整 all 权威快照能证明源消失；清理 active 成员与本地快照后，通过精确事件复核并删除对应外部支付状态，month/retention 不证明源删除。
+- 付款状态复核先将历史事件中的 active 来源别名解析为当前 OA 并去重，未知身份仍明确失败；不按旧 ID 重复写回同一流程。
 - 支付状态由当前 active outflow 收敛；MySQL 写回由专用 adapter 执行，不向 Mongo 写业务。
 - 附件解析以当前强身份和来源桥接统一发票池，避免重复发票及跨 OA 弱指纹猜测；API 不运行全量同步/OCR。
 - 原件修复同时读取已完成 OA 的附件登记和当前在途准入付款项的 `attachment_artifacts`。在途登记必须与同一付款项的 `attachment_files` 精确匹配文件名、路径与唯一 owner；重复或冲突拒绝，不以识别缓存替代登记。

@@ -86,6 +86,10 @@ class MemoryReconcileRepository:
     ) -> None:
         self.active_outflow = dict(active_outflow or {})
         self.pending_flow_ids = set(pending_flow_ids or set())
+        self.aliases: dict[str, str] = {}
+
+    def resolve_canonical_oa_row_ids(self, row_ids: list[str]) -> list[str]:
+        return sorted({self.aliases.get(row_id, row_id) for row_id in row_ids})
 
     def active_outflow_by_oa_row_id(self, row_ids: list[str]) -> dict[str, bool]:
         return {row_id: self.active_outflow.get(row_id, False) for row_id in row_ids}
@@ -118,6 +122,18 @@ class OAPaymentStatusReconcileServiceTests(unittest.TestCase):
         self.assertEqual(payment.marked_pending, [])
         self.assertEqual(snapshot.calls[0]["pay_statuses_by_flow_id"], {"flow-1": PAY_STATUS_PAID})
         self.assertEqual(result["status"], "reconciled")
+
+    def test_repaired_historical_alias_and_current_id_reconcile_once(self):
+        service, payment, reconcile, snapshot = _service(
+            records=[_record("oa-current", "flow-1")],
+            statuses={"flow-1": PAY_STATUS_PENDING}, active_outflow={"oa-current": True},
+        )
+        reconcile.aliases["oa-old"] = "oa-current"
+        result = service.handle_runtime_event(_event(["oa-old", "oa-current"]))
+        self.assertEqual(result["oa_row_ids"], ["oa-current"])
+        self.assertEqual(result["flow_count"], 1)
+        self.assertEqual(payment.marked_paid, ["flow-1"])
+        self.assertEqual([record.id for record in snapshot.calls[0]["records"]], ["oa-current"])
 
     def test_withdrawn_outflow_relation_reverts_paid_status_without_ownership_gate(self) -> None:
         service, payment, _, snapshot = _service(

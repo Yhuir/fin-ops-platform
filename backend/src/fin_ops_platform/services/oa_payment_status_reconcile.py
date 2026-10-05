@@ -46,6 +46,7 @@ class OAPaymentStatusReconcileService:
         oa_row_ids = _text_list(event.payload.get("oa_row_ids"))
         if not oa_row_ids:
             raise OAPaymentStatusReconcileError("oa_row_ids are required for payment-status reconciliation.")
+        oa_row_ids = self._reconcile_repository.resolve_canonical_oa_row_ids(oa_row_ids)
         records = list(self._oa_projection.list_application_records_by_row_ids(oa_row_ids) or [])
         records_by_id = {
             record.id: record

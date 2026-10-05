@@ -12,6 +12,19 @@ class PostgresOAPaymentStatusReconcileRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
+    def resolve_canonical_oa_row_ids(self, oa_row_ids: list[str]) -> list[str]:
+        normalized = text_list(oa_row_ids)
+        if not normalized:
+            return []
+        rows = self._connection.fetch_all(
+            """select distinct coalesce(alias.canonical_row_id, requested.row_id) as row_id
+               from unnest(%s::text[]) requested(row_id)
+               left join app.oa_source_aliases alias
+                 on alias.alias_row_id = requested.row_id and alias.status = 'active'
+               order by row_id""", (normalized,),
+        )
+        return [row["row_id"] for row in rows]
+
     def active_outflow_by_oa_row_id(
         self,
         oa_row_ids: list[str],
