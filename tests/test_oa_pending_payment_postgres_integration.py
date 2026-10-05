@@ -701,12 +701,15 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         first = replace(_record(), applicant="甲", project_name="项目甲", detail_fields={})
         second = replace(first, id="oa-cross-june", month="2026-06", applicant="乙", project_name="项目乙")
         pending = replace(_in_progress_record(), month="2026-07", amount="100.00")
-        unrelated = replace(pending, id="oa-unrelated")
+        unrelated = replace(pending, id="oa-unrelated", detail_fields={
+            "Mongo文档ID": "flow-unrelated", "paymentFlowId": "flow-unrelated",
+        })
         self._source_snapshot().commit_authoritative_snapshot(
             scope_key="all", tenant_id="default", projection_records=[first, second],
-            authoritative_payment_flow_ids=["flow-in-progress-1"],
+            authoritative_payment_flow_ids=["flow-in-progress-1", "flow-unrelated"],
             admission_records=[pending, unrelated], payment_statuses={
                 "flow-in-progress-1": OAPaymentStatusRecord(flow_id="flow-in-progress-1", pay_status=0),
+                "flow-unrelated": OAPaymentStatusRecord(flow_id="flow-unrelated", pay_status=0),
             },
         )
         self.connection.execute("""

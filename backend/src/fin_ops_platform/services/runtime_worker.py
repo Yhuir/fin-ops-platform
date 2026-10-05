@@ -10,6 +10,7 @@ from enum import Enum
 from time import monotonic, sleep
 from typing import Any, Iterator
 
+from fin_ops_platform.services.oa_source_identity import OASourceIdentityConflict
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 RuntimeEventHandler = Callable[[RuntimeQueueEvent], dict[str, Any] | None]
@@ -139,10 +140,11 @@ class RuntimeWorker:
             raise
         except (Exception, RuntimeWorkerTaskTimeout) as exc:
             error = str(exc) or exc.__class__.__name__
-            self._fail_event(event, error)
-            self._record_heartbeat("failed", {"event_id": event.event_id, "retry": True, "error": error})
-            self._log("runtime_worker.event_failed", event=event, retry=True, error=error)
-            return RuntimeWorkerResult.FAILED_RETRYABLE
+            retryable = not isinstance(exc, OASourceIdentityConflict)
+            self._fail_event(event, error, retryable=retryable)
+            self._record_heartbeat("failed", {"event_id": event.event_id, "retry": retryable, "error": error})
+            self._log("runtime_worker.event_failed", event=event, retry=retryable, error=error)
+            return RuntimeWorkerResult.FAILED_RETRYABLE if retryable else RuntimeWorkerResult.FAILED_PERMANENT
         finally:
             self._set_statement_timeout(None)
 
@@ -236,7 +238,7 @@ class RuntimeWorker:
         if not self._queue.complete(event.event_id, self._config.worker_id, result_payload=result_payload):
             raise RuntimeError(f"PostgreSQL complete update did not match event {event.event_id}.")
 
-    def _fail_event(self, event: RuntimeQueueEvent, error: str) -> None:
+    def _fail_event(self, event: RuntimeQueueEvent, error: str, *, retryable: bool = True) -> None:
         retry_delay = self._retry_delay_for_attempt(event.attempts)
         fail_event = getattr(self._queue, "fail_event", None)
         if callable(fail_event):
@@ -244,7 +246,7 @@ class RuntimeWorker:
                 event.event_id,
                 self._config.worker_id,
                 error,
-                retryable=True,
+                retryable=retryable,
                 retry_delay_seconds=retry_delay,
                 max_attempts=self._config.max_attempts,
             ):
@@ -254,7 +256,7 @@ class RuntimeWorker:
             event.event_id,
             self._config.worker_id,
             error,
-            retry=True,
+            retry=retryable,
             retry_delay_seconds=retry_delay,
         ):
             raise RuntimeError(f"PostgreSQL retry update did not match event {event.event_id}.")

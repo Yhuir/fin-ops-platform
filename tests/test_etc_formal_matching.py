@@ -119,7 +119,7 @@ class EtcFormalMatchingTests(unittest.TestCase):
         record = adapter._build_payment_request_record(document, {}, respect_status_settings=False)
         self.assertEqual(record.source_attachment_paths, ['/fileManager/exact.pdf'])
         self.assertEqual(record.attachment_invoices, [])
-        self.assertEqual(record.id, 'oa-pay-process-1')
+        self.assertEqual(record.id, 'oa-pay-formal-document-not-draft')
 
     def test_etc_withdraw_preserves_source_and_blocks_pure_source_withdrawal(self):
         from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService

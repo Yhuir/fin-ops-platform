@@ -24,6 +24,7 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionRepository,
     is_completed_workflow_status,
 )
+from fin_ops_platform.services.postgres_repositories.oa_source_identity import PostgresOASourceIdentityRepository
 from fin_ops_platform.services.postgres_repositories.workbench_matching_queue import (
     PostgresWorkbenchMatchingQueueRepository,
 )
@@ -220,6 +221,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 )
 
             projection_repository = PostgresOAProjectionRepository(transaction)
+            PostgresOASourceIdentityRepository(transaction).record_identities(normalized_records)
             upserted_completed_count = 0
             completed_projection_changed_scopes: set[str] = set()
             for scope_key in sorted(
@@ -697,6 +699,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 tenant_id=text(tenant_id) or "default",
             )
             projection_repository = PostgresOAProjectionRepository(transaction)
+            PostgresOASourceIdentityRepository(transaction).record_identities(normalized_admission_records)
             upserted_count = projection_repository.upsert_application_records(completed_records, scope_key=scope_key)
             removed_stale_row_ids = (
                 projection_repository.delete_stale_completed_application_records(

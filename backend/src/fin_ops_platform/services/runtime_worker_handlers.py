@@ -112,7 +112,8 @@ class ImportRuntimeProcessorFactory:
                     if settings is None:
                         raise RuntimeError("OA manual import requires OA source configuration.")
                     self._oa_source_adapter = build_oa_sync_source_adapter(settings=settings,
-                        attachment_invoice_cache=PostgresOpsTaxEtcRepository(self._connection))
+                        attachment_invoice_cache=PostgresOpsTaxEtcRepository(self._connection),
+                        connection=self._connection)
                 return SharedImportProcessor(self._connection, oa_source_adapter=self._oa_source_adapter).oa_manual(job)
             processor = self._build_processors_from_durable_state(job=job).get(import_type)
             if not callable(processor):

@@ -6,6 +6,7 @@ from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, MongoOASe
 from fin_ops_platform.services.oa_attachment_invoice_cache import ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION
 from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentOCRRuntimeError
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
+from fin_ops_platform.services.oa_source_identity import OASourceIdentities
 from pymongo.errors import ServerSelectionTimeoutError
 
 
@@ -34,6 +35,16 @@ class StubMongoOAAdapter(MongoOAAdapter):
             settings=settings or MongoOASettings(host="127.0.0.1", database="form_data_db"),
             attachment_invoice_cache=attachment_invoice_cache,
         )
+        # These fixtures describe existing imported OA identities. New-source and
+        # lifecycle behavior is exercised separately without a seeded owner map.
+        existing = OASourceIdentities()
+        for form_id, documents in form_documents.items():
+            prefix = "oa-pay-" if str(form_id) == str(self._settings.payment_request_form_id) else "oa-exp-"
+            for document in documents:
+                data = self._document_data(document)
+                external_id = self._first_text(data, "flowRequestId", "processId") or self._document_id(document)
+                existing.add_owner(prefix + self._document_id(document), prefix + external_id)
+        self._identity_loader = lambda: existing
         self._form_documents = form_documents
         self._project_documents = project_documents
 
@@ -60,7 +71,8 @@ class StubMongoOAAdapter(MongoOAAdapter):
         return [
             document
             for document in documents
-            if self._document_external_id(form_id, document) in set(external_ids)
+            if {self._document_id(document), self._first_text(self._document_data(document), "processId"),
+                self._first_text(self._document_data(document), "flowRequestId")} & set(external_ids)
         ]
 
     @staticmethod

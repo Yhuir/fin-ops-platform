@@ -1279,6 +1279,16 @@ class WorkbenchPairRelationService:
         return preserved
 
     @classmethod
+    def source_binding_parent_ids(cls, relation: dict[str, Any]) -> set[str]:
+        """Use the same binding interpretation for cleanup and immutable protection."""
+        return {
+            row_id
+            for binding in cls._oa_source_binding_relations(relation)
+            for row_id, row_type in zip(binding["row_ids"], binding["row_types"], strict=True)
+            if row_type == "oa"
+        }
+
+    @classmethod
     def _oa_source_binding_relations(
         cls,
         relation: dict[str, Any],

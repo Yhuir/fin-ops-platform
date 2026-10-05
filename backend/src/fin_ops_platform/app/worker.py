@@ -159,6 +159,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         adapter = build_oa_sync_source_adapter(
             settings=oa_settings,
             attachment_invoice_cache=ops_tax_etc_repository,
+            connection=connection,
         )
         oa_runtime_settings = _load_oa_runtime_settings(connection)
         adapter.set_import_settings_provider(lambda: dict(oa_runtime_settings["oa_import"]))
@@ -174,6 +175,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         source_adapter = build_oa_sync_source_adapter(
             settings=oa_settings,
             attachment_invoice_cache=ops_tax_etc_repository,
+            connection=connection,
         )
         oa_payment_source_adapter = source_adapter
         oa_runtime_settings = _load_oa_runtime_settings(connection)

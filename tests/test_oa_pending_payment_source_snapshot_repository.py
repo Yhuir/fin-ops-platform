@@ -340,7 +340,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
             connection,
             relation_command_service_for_transaction=lambda _transaction: relation_commands,
         )
-        retained = _oa("oa-completed-retained", "2026-06", workflow_status="completed", flow_id="flow-1")
+        retained = _oa("oa-pay-completed-retained", "2026-06", workflow_status="completed", flow_id="flow-1")
 
         result = repository.commit_authoritative_snapshot(
             scope_key="2026-06",
@@ -745,6 +745,10 @@ class FakeTransaction:
         raise AssertionError(f"Unexpected query: {sql}")
 
     def fetch_all(self, sql: str, _params: tuple[object, ...]) -> list[dict[str, object]]:
+        if "insert into app.oa_source_aliases" in sql:
+            return [{"alias_row_id": item["alias"]} for item in _params[0].obj]
+        if "from app.oa_source_aliases" in sql or "as document_id" in sql:
+            return []
         if "from app.oa_pending_payment_status_snapshots" in sql:
             return list(self.status_rows)
         if "from app.oa_pending_payment_admissions" in sql:

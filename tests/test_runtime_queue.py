@@ -165,6 +165,26 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertEqual(params[:8], ("tenant-a", "invoice.imported", "invoice", "invoice-1", "month", "2026-05", "invoice-1", {"invoice_id": "invoice-1"}))
         self.assertEqual(params[8], available_at)
 
+    def test_periodic_oa_sync_coalesces_existing_retry_identity(self):
+        transaction = FakeTransaction(rows=[event_row(
+            event_type="oa.sync", event_id="retry-event", dedupe_key="runtime.retry:retry-event",
+        )])
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+        result = repository.enqueue(event_type="oa.sync", scope_key="all", dedupe_key="oa.sync:all", payload={})
+        self.assertEqual(result.event_id, "retry-event")
+        sql = " ".join(call[1] for call in transaction.calls)
+        self.assertIn("pg_advisory_xact_lock", sql)
+        self.assertIn("oa_source_identity", sql)
+        self.assertNotIn("insert into", sql.lower())
+
+    def test_targeted_oa_refresh_does_not_coalesce_full_sync(self):
+        transaction = FakeTransaction(rows=[event_row(event_type="oa.sync")])
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+        repository.enqueue(event_type="oa.sync", scope_key="all", dedupe_key="oa.attachments:row",
+                           payload={"operation": "refresh_attachments"})
+        self.assertIn("insert into", transaction.calls[0][1].lower())
+        self.assertNotIn("pg_advisory", transaction.calls[0][1])
+
     def test_enqueue_dedupe_returns_existing_active_event_on_conflict(self) -> None:
         transaction = FakeTransaction(rows=[event_row(event_id="existing-event", attempts=2, status="processing")])
         repository = RuntimeQueueRepository(FakeConnection(transaction))

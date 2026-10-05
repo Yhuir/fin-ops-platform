@@ -385,7 +385,7 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         from unittest.mock import Mock
         snapshot = SimpleNamespace(
             groups=assembler._invoice_groups(month=None, context=assembler._query_context()),
-            supporting_groups=[], transactions=[bank], oa_records=[],
+            supporting_groups=[], transactions=[bank], oa_records=[], bank_account_mappings=[],
             relations=[{**self._relation("case", ["invoice", "bank"], ["invoice", "bank"]), "status": "active"}],
         )
         canonical = OutputInvoiceCollectionCanonicalQueryService(

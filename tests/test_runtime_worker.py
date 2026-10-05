@@ -221,6 +221,19 @@ class RuntimeWorkerTests(unittest.TestCase):
         self.assertEqual(queue.completed, [])
         self.assertEqual(queue.failed_events, [("event-1", "worker-1", "transient failure", True, 75, 5)])
 
+    def test_identity_conflict_is_permanent_and_does_not_retry(self):
+        from fin_ops_platform.services.oa_source_identity import OASourceIdentityConflict
+
+        queue = FakeQueue(event("oa.sync"))
+        worker = RuntimeWorker(
+            queue_repository=queue,
+            config=RuntimeWorkerConfig(worker_id="worker-1", event_types=["oa.sync"]),
+            handlers={"oa.sync": Mock(side_effect=OASourceIdentityConflict("oa_source_identity_conflict: test"))},
+        )
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.FAILED_PERMANENT)
+        self.assertFalse(queue.failed_events[0][3])
+        self.assertFalse(queue.acked)
+
     def test_run_once_uses_exponential_retry_delay_and_max_attempts(self) -> None:
         claimed = event()
         claimed = RuntimeQueueEvent(**{**claimed.__dict__, "attempts": 3})

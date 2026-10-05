@@ -435,7 +435,7 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(attachment_inserts[0][7], None)
         self.assertEqual(attachment_inserts[0][9].obj["source_expense_item_id"], "oa-exp-files:item:1")
 
-    def test_postgres_oa_projection_repository_migrates_legacy_expense_relations_without_scope_cleanup(self) -> None:
+    def test_postgres_oa_projection_repository_never_guesses_legacy_relation_aliases(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
 
         connection = OAProjectionWriteConnection()
@@ -457,21 +457,8 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
             for sql, params in connection.executed
             if "update app.workbench_pair_relations relation" in sql
         ]
-        self.assertEqual(len(relation_update), 1)
-        self.assertEqual(
-            relation_update[0][1],
-            (["oa-exp-2007-1", "oa-exp-2007-2"], ["oa-exp-2007", "oa-exp-2007"], ["oa-exp-2007-1", "oa-exp-2007-2"]),
-        )
-        self.assertIn("raw_payload = jsonb_set", relation_update[0][0])
-        self.assertIn("normalized_payload,row_ids", relation_update[0][0])
-        override_update = [
-            (sql, params)
-            for sql, params in connection.executed
-            if "update app.workbench_row_overrides override" in sql
-        ]
-        self.assertEqual(len(override_update), 1)
-        self.assertIn("override_payload = jsonb_set", override_update[0][0])
-        self.assertIn("normalized_payload,row_id", override_update[0][0])
+        self.assertEqual(relation_update, [])
+        self.assertFalse(any("update app.workbench_row_overrides" in sql for sql, _ in connection.executed))
         stale_delete = [
             (sql, params)
             for sql, params in connection.executed

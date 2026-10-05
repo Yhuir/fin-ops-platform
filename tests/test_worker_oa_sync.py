@@ -13,6 +13,7 @@ class OASyncWorkerWiringTests(unittest.TestCase):
         adapter = build_oa_sync_source_adapter(
             settings=settings,
             attachment_invoice_cache=cache,
+            connection=object(),
         )
 
         self.assertIs(adapter._attachment_invoice_cache, cache)

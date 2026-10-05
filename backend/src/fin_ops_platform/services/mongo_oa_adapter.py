@@ -35,6 +35,7 @@ from fin_ops_platform.services.oa_attachment_invoice_cache import (
 from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
 from fin_ops_platform.services.oa_draft_prefill import OA_APPLICATION_TYPE_OPTIONS
 from fin_ops_platform.services.oa_expense_details import oa_expense_source_metadata
+from fin_ops_platform.services.oa_source_identity import OASourceIdentities, OASourceIdentityConflict
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from fin_ops_platform.services.search_query import normalize_money_search_query
 
@@ -196,9 +197,12 @@ class MongoOAAdapter(OAAdapter):
         *,
         settings: MongoOASettings,
         attachment_invoice_cache: OAAttachmentInvoiceCache | None = None,
+        identity_loader: Callable[[], OASourceIdentities] = OASourceIdentities,
     ) -> None:
         self._settings = settings
         self._attachment_invoice_cache = attachment_invoice_cache
+        self._identity_loader = identity_loader
+        self._source_identities: OASourceIdentities | None = None
         self._attachment_parse_limit: int | None = None
         self._attachment_parse_count = 0
         self._attachment_parse_started = 0.0
@@ -573,6 +577,8 @@ class MongoOAAdapter(OAAdapter):
                 )
                 if record is not None:
                     records_by_id[record.id] = record
+                    for alias in record.source_aliases:
+                        records_by_id[alias] = record
 
         if expense_external_ids:
             expense_documents = self._select_authoritative_documents(
@@ -593,6 +599,8 @@ class MongoOAAdapter(OAAdapter):
                     respect_status_settings=False,
                 ):
                     records_by_id[record.id] = record
+                    for alias in record.source_aliases:
+                        records_by_id[alias] = record
                     external_id = record.id.removeprefix("oa-exp-")
                     records_by_expense_external_id[external_id] = record
             for requested_row_id, candidates in expense_row_aliases.items():
@@ -1016,7 +1024,7 @@ class MongoOAAdapter(OAAdapter):
         project_id = self._first_text(data, "projectName")
         project_name = project_names.get(project_id, project_id or "--")
         real_project_names = self._unique_real_project_names([project_name])
-        external_id = self._payment_external_id(data, document)
+        external_id = self._canonical_external_id("oa-pay-", document)
         expense_type = self._resolve_expense_type(
             data,
             reason,
@@ -1034,6 +1042,7 @@ class MongoOAAdapter(OAAdapter):
         })
         return OAApplicationRecord(
             id=f"oa-pay-{external_id}",
+            source_aliases=self._source_row_aliases("oa-pay-", document, external_id),
             month=self._derive_month(data, document),
             section="unpaired",
             case_id=None,
@@ -1097,7 +1106,7 @@ class MongoOAAdapter(OAAdapter):
         items = data.get("schedule")
         if not isinstance(items, list) or not items:
             items = [data]
-        external_id = self._expense_external_id(data, document)
+        external_id = self._canonical_external_id("oa-exp-", document)
         expense_items: list[dict[str, Any]] = []
         project_names_summary: list[str] = []
         expense_types_summary: list[str] = []
@@ -1299,6 +1308,7 @@ class MongoOAAdapter(OAAdapter):
         return [
             OAApplicationRecord(
                 id=f"oa-exp-{external_id}",
+                source_aliases=self._source_row_aliases("oa-exp-", document, external_id),
                 month=record_month,
                 section="unpaired",
                 case_id=None,
@@ -1364,7 +1374,7 @@ class MongoOAAdapter(OAAdapter):
         amount = self._first_text(data, "amount")
         if not applicant or not reason or not amount:
             return None
-        external_id = self._payment_external_id(data, document)
+        external_id = self._canonical_external_id("oa-pay-", document)
         project_id = self._first_text(data, "projectName")
         project_name = project_names.get(project_id, project_id or "--")
         return self._search_row(
@@ -1397,7 +1407,7 @@ class MongoOAAdapter(OAAdapter):
         items = data.get("schedule")
         if not isinstance(items, list) or not items:
             items = [data]
-        external_id = self._expense_external_id(data, document)
+        external_id = self._canonical_external_id("oa-exp-", document)
         record_month = self._derive_month(data, document)
         project_names_summary: list[str] = []
         expense_contents_summary: list[str] = []
@@ -2433,7 +2443,11 @@ class MongoOAAdapter(OAAdapter):
         return [
             document
             for document in documents
-            if self._document_external_id(form_id, document) in normalized_external_ids
+            if {
+                self._document_id(document),
+                self._first_text(self._document_data(document), "processId"),
+                self._first_text(self._document_data(document), "flowRequestId"),
+            } & normalized_external_ids
         ]
 
     def _select_authoritative_documents(
@@ -3118,6 +3132,7 @@ class MongoOAAdapter(OAAdapter):
         return OBJECT_IDENTITY_POLICY.oa_attachment_invoice_dedupe_keys(invoice)
 
     def _sync_import_settings_cache(self) -> None:
+        self._source_identities = None
         settings = self._current_import_settings()
         signature = json.dumps(settings, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         if self._import_settings_signature == signature:
@@ -3371,6 +3386,23 @@ class MongoOAAdapter(OAAdapter):
 
     def _payment_external_id(self, data: dict[str, Any], document: dict[str, Any]) -> str:
         return self._first_text(data, "flowRequestId", "processId") or self._document_id(document)
+
+    def _canonical_external_id(self, prefix: str, document: dict[str, Any]) -> str:
+        document_id = self._document_id(document)
+        if not document_id:
+            raise OASourceIdentityConflict("oa_source_identity_document_missing")
+        if self._source_identities is None:
+            self._source_identities = self._identity_loader()
+        return self._source_identities.canonical_id(prefix + document_id).removeprefix(prefix)
+
+    def _source_row_aliases(self, prefix: str, document: dict[str, Any], external_id: str) -> list[str]:
+        data = self._document_data(document)
+        values = {
+            self._document_id(document),
+            self._first_text(data, "processId"),
+            self._first_text(data, "flowRequestId"),
+        } - {"", external_id}
+        return sorted(prefix + value for value in values)
 
     def _payment_form_no(self, data: dict[str, Any], document: dict[str, Any]) -> str:
         return self._payment_external_id(data, document)

@@ -12,6 +12,7 @@
 
 - registry 精确登记四个实例：oa-sync 消费 oa.sync/oa.payment_status.reconcile；workbench-matching 消费 matching dirty scopes；import 直接领取 job.import_jobs；settings-maintenance 消费 reset 与银行要求重算事件。
 - 事实源是 PostgreSQL 队列/任务表，不使用第二 broker。worker 不依赖 HTTP、Application 或请求 cookie。
+- 定时 OA 同步按 tenant/scope 合并正在排队或运行的同步（包括已改 transport key 的重试）；定向附件任务保持独立。已确认的来源身份冲突直接进入待处理失败，定时器不重复堆积同一冲突；修正来源后显式重试。
 - 任务有租约、有限重试、幂等与领取版本；失去 owner 的执行者不能提交。退出释放本次领取，强制退出通过 lease 到期恢复。
 - 导入正式事务锁定 job 和当前权限，业务事实/审计/成功状态原子提交；取消与提交互锁。
 - OA 附件准备可分批 deferred，保留已完成解析但不提交部分权威快照；真实解析错误明确失败。

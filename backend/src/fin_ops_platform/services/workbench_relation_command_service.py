@@ -1395,11 +1395,7 @@ class WorkbenchRelationCommandService:
         for before in before_relations:
             case_id = str(before.get("case_id") or "").strip()
             metadata = before.get("special_metadata")
-            binding_parents = {
-                str(binding.get("parent_oa_row_id") or "").strip()
-                for binding in list((metadata or {}).get("oa_attachment_bindings") or [])
-                if isinstance(binding, dict)
-            }
+            binding_parents = pair_service.source_binding_parent_ids(before)
             members = [
                 (str(row_id).strip(), str(row_type).strip())
                 for row_id, row_type in zip(

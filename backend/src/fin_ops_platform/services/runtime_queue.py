@@ -130,6 +130,31 @@ class RuntimeQueueRepository:
         normalized_source_version = _optional_int(source_version)
         normalized_priority = _normalize_priority(priority)
         normalized_trace_id = str(trace_id or "").strip() or None
+        if event_type == "oa.sync" and dedupe_key == f"oa.sync:{scope_key}":
+            # Retries have a different transport key. Coalesce scheduled full/month
+            # sync by its business scope, without merging targeted attachment jobs.
+            transaction.execute(
+                "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"oa_sync_enqueue:{tenant_id}:{scope_key}",),
+            )
+            existing = transaction.fetch_one(
+                """
+                select id::text as event_id, tenant_id, event_type, aggregate_type,
+                       aggregate_id, scope_type, scope_key, dedupe_key, payload,
+                       attempts, status, schema_version, source_version, priority, trace_id
+                from job.outbox_events
+                where tenant_id = %s and event_type = 'oa.sync' and scope_key = %s
+                  and coalesce(payload->>'operation', '') = ''
+                  and (status in ('pending', 'processing') or (
+                      status in ('failed', 'dead_lettered')
+                      and last_error like 'oa_source_identity%%'
+                  ))
+                order by created_at, id
+                limit 1
+                """, (tenant_id, scope_key),
+            )
+            if existing is not None:
+                return _event_from_row(existing)
         row = transaction.fetch_one(
             """
             insert into job.outbox_events (
