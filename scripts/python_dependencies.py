@@ -9,6 +9,8 @@ import argparse
 import hashlib
 import importlib.metadata
 import json
+import os
+import shlex
 import subprocess
 import sys
 import tarfile
@@ -59,7 +61,11 @@ def build(wheels: Path) -> Path:
         # The upstream sdist caches static metadata. Regenerate it from the
         # patched version, otherwise hatch reuses the original public version.
         (source_root / "PKG-INFO").unlink()
-        run(python, "-m", "pip", "wheel", "--no-build-isolation", "--no-deps", "--wheel-dir", str(work / "wheels"), str(source_root))
+        # The parent App venv may own its development headers independently of
+        # the system Python. Preserve that include path in the isolated build.
+        include = Path(sys.prefix) / "include" / f"python{sys.version_info.major}.{sys.version_info.minor}"
+        flags = f"{os.environ.get('CFLAGS', '')} -I{shlex.quote(str(include))}".strip()
+        run(python, "-m", "pip", "wheel", "--no-build-isolation", "--no-deps", "--wheel-dir", str(work / "wheels"), str(source_root), env={**os.environ, "CFLAGS": flags, "PYMONGO_C_EXT_MUST_BUILD": "1"})
         candidates = list((work / "wheels").glob(f"pymongo-{VERSION}-*.whl"))
         if len(candidates) != 1:
             raise ValueError("expected exactly one patched PyMongo wheel")

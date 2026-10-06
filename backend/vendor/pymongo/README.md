@@ -21,6 +21,10 @@ python3 scripts/python_dependencies.py audit
 
 构建通过主机已有 pip 包索引下载固定版本，在执行源码元数据前校验固定摘要；
 固定构建后端，精确应用补丁后重新生成发行元数据和 C 扩展。
+构建主机需要 GCC/Clang、`patch` 和与当前 Python 匹配的开发头文件；
+明确要求 C 扩展构建成功，缺失依赖时显示编译错误，不生成纯 Python 替代包。
+开发头文件可以独立置于 App venv 的 `include/pythonX.Y/`；隔离构建保留该编译
+搜索路径，不要求升级系统 Python 或 OA 的运行环境。
 安装包与来源信息存于 ignored `.runtime/python-wheels/`。摘要仅验证构建与安装边界，
 不是业务数据身份。修改补丁后使用新的构建目录，不复用旧构建记录。
 
