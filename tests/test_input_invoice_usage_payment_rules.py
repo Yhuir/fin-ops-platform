@@ -9,7 +9,7 @@ from unittest.mock import Mock
 
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
-from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
+from fin_ops_platform.services.app_settings_service import AppSettingsService, AppSettingsValidationError
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     AppSettingsInputInvoiceUsagePaymentRulesProvider,
@@ -17,6 +17,7 @@ from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     PaymentStatusEvaluationContext,
     _fingerprint,
     normalize_payment_status_rules_settings,
+    public_payment_status_rules_payload,
 )
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
@@ -45,6 +46,23 @@ class QueueRecorder:
 
 
 class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
+    def test_existing_canonical_settings_pass_audit_without_persisting_derived_builtin_parents(self):
+        from fin_ops_platform.services.postgres_repositories.settings_page_audit import _settings_issues
+        persisted = AppSettingsService._normalize_settings(
+            AppSettingsService._normalize_settings({}, validate_pending_invoice_tag_groups=False),
+            validate_pending_invoice_tag_groups=False,
+        )
+        settings = persisted["input_invoice_usage_payment_status_rules"]
+        for rule in settings["rules"]:
+            rule.pop("parentStatus", None)
+        before = json.dumps(persisted, sort_keys=True)
+        self.assertEqual(_settings_issues([{"version": 1, "settings_payload": persisted,
+                                           "raw_payload": {"normalized_payload": persisted}}]), [])
+        public = public_payment_status_rules_payload(settings, read_only=False, can_save=True)
+        self.assertTrue(all(rule["parentStatus"] in {"paid", "unpaid"} for rule in public["rules"]))
+        self.assertEqual(normalize_payment_status_rules_settings({**settings, "rules": public["rules"]}), settings)
+        self.assertEqual(json.dumps(persisted, sort_keys=True), before)
+
     def test_builtin_parent_metadata_preserves_existing_idempotency_identity(self):
         from hashlib import sha256
         rules = normalize_payment_status_rules_settings(None)["rules"]
@@ -414,6 +432,7 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
         from fin_ops_platform.services.input_invoice_usage_payment_rules import (
             InputInvoiceUsagePaymentRulesValidationError,
             normalize_payment_status_rules_settings,
+    public_payment_status_rules_payload,
         )
         for invalid in ({"version": 1}, {"version": 1, "rules": None}, "bad"):
             with self.subTest(invalid=invalid), self.assertRaises(InputInvoiceUsagePaymentRulesValidationError):

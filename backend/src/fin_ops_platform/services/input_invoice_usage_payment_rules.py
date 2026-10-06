@@ -95,12 +95,17 @@ OUTPUT_STATUS_CODES = frozenset(OUTPUT_PARENTS)
 AMOUNT_CATEGORIES = {"paid": "发票＝付款", "invoice_less_payment": "发票＜付款", "invoice_greater_payment": "发票＞付款"}
 
 
+def payment_category_parent(rule: dict[str, Any]) -> str:
+    code = rule["statusCode"]
+    return OUTPUT_PARENTS[code] if code in OUTPUT_PARENTS else rule["parentStatus"]
+
+
 def payment_categories(settings: dict[str, Any]) -> list[dict[str, str]]:
     categories = {code: {"id": code, "label": label, "parent": "paid"} for code, label in AMOUNT_CATEGORIES.items()}
     for rule in settings["rules"]:
         code = rule["statusCode"]
         label = "发票＝付款" if code == "paid" and rule["label"] == "已付款" else rule["label"]
-        categories[code] = {"id": code, "label": label, "parent": rule["parentStatus"]}
+        categories[code] = {"id": code, "label": label, "parent": payment_category_parent(rule)}
     return list(categories.values())
 
 
@@ -334,7 +339,7 @@ def public_payment_status_rules_payload(
         "version": int(normalized["version"]),
         "readOnly": bool(read_only),
         "rules": [
-            {**deepcopy(rule), "description": condition_description(rule["conditions"]),
+            {**deepcopy(rule), "parentStatus": payment_category_parent(rule), "description": condition_description(rule["conditions"]),
              "reason": condition_description(rule["conditions"])}
             for rule in normalized["rules"]
         ],
@@ -350,7 +355,7 @@ def public_payment_status_rules_payload(
 def evaluate_payment_status(settings: dict[str, Any], context: PaymentStatusEvaluationContext) -> dict[str, str]:
     normalized = normalize_payment_status_rules_settings(settings)
     for rule in normalized["rules"]:
-        if rule["parentStatus"] == "paid" and context.payment_comparison == "invalid":
+        if payment_category_parent(rule) == "paid" and context.payment_comparison == "invalid":
             continue
         expected = {"paid": "equal", "invoice_less_payment": "less", "invoice_greater_payment": "greater"}.get(rule["statusCode"])
         if expected and context.payment_comparison != expected:
@@ -418,10 +423,13 @@ def _normalize_rules(value: Any) -> list[dict[str, Any]]:
                 "conflicting_input_invoice_usage_payment_rule_labels", "Rules with the same output class must use the same display label.",
             )
         labels_by_code[code] = label
-        normalized.append({
-            "id": rule_id, "statusCode": code, "parentStatus": parent, "label": label, "priority": priority,
+        normalized_rule = {
+            "id": rule_id, "statusCode": code, "label": label, "priority": priority,
             "enabled": enabled, "conditions": _normalize_conditions(rule_id, item.get("conditions")),
-        })
+        }
+        if code not in OUTPUT_PARENTS:
+            normalized_rule["parentStatus"] = parent
+        normalized.append(normalized_rule)
     return sorted(normalized, key=lambda item: (item["priority"], item["id"]))
 
 
@@ -542,13 +550,7 @@ def _required_int(value: Any, field: str, error_code: str) -> int:
 
 
 def _fingerprint(payload: dict[str, Any]) -> str:
-    # Built-in parent membership is implicit, so adding it to the public contract
-    # does not change an existing request's idempotency identity.
-    canonical = deepcopy(payload)
-    for rule in canonical.get("rules", []):
-        if rule["statusCode"] in OUTPUT_PARENTS:
-            rule.pop("parentStatus", None)
-    return sha256(json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    return sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def _normalize_idempotency_records(value: Any) -> dict[str, dict[str, Any]]:

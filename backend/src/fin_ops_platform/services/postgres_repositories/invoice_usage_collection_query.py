@@ -10,6 +10,7 @@ from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     classification_tree,
     normalize_payment_status_rules_settings,
     payment_categories,
+    payment_category_parent,
 )
 from fin_ops_platform.services.output_invoice_reversal import (
     REVERSED_BLUE_INVOICE_NO_SQL_PATTERN,
@@ -1721,7 +1722,7 @@ def _input_payment_status_case(
             else {}
         )
         predicates: list[str] = []
-        if rule["parentStatus"] == "paid":
+        if payment_category_parent(rule) == "paid":
             predicates.append("facts.payment_comparison <> 'invalid'")
         expected = {"paid": "equal", "invoice_less_payment": "less", "invoice_greater_payment": "greater"}.get(code)
         if expected:
