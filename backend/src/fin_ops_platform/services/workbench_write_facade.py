@@ -14,7 +14,8 @@ from fin_ops_platform.services.turnover_relation_service import (
     TurnoverRelationService,
     TurnoverRelationValidationError,
 )
-from fin_ops_platform.services.workbench_display_subgroups import apply_invoice_display_scopes
+from fin_ops_platform.services.workbench_bank_folds import apply_bank_folds
+from fin_ops_platform.services.workbench_display_subgroups import apply_display_subgroups, apply_invoice_display_scopes
 from fin_ops_platform.services.workbench_idempotency import (
     WorkbenchIdempotencyFailed,
     WorkbenchIdempotencyInProgress,
@@ -422,6 +423,8 @@ class WorkbenchWriteFacade:
         }
         after_groups = self._relation_groups([after_relation], selected_rows=rows)
         history = self._relation_read_snapshot_port.display_history(row_ids)
+        apply_display_subgroups(before_groups, history)
+        apply_display_subgroups(after_groups, history)
         apply_invoice_display_scopes(before_groups, history)
         display_before_relations = self._merge_relation_snapshots(
             before_relations,
@@ -430,6 +433,8 @@ class WorkbenchWriteFacade:
             ),
         )
         apply_invoice_display_scopes(after_groups, history, before_relations=display_before_relations)
+        apply_bank_folds(before_groups)
+        apply_bank_folds(after_groups)
         requires_note = bool(amount_check.get("requires_note"))
         return WorkbenchWriteResult(
             HTTPStatus.OK,
@@ -2068,8 +2073,12 @@ class WorkbenchWriteFacade:
             ungrouped_selected_rows="individual",
         )
         history = self._relation_read_snapshot_port.display_history([str(row["id"]) for row in rows])
+        apply_display_subgroups(before_groups, history)
+        apply_display_subgroups(after_groups, history)
         apply_invoice_display_scopes(before_groups, history)
         apply_invoice_display_scopes(after_groups, history)
+        apply_bank_folds(before_groups)
+        apply_bank_folds(after_groups)
         amount_check = self._amount_check_for_withdraw_preview(
             active_relation=active_relation,
             rows=rows,

@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import { Chip } from "@heroui/react";
 import BankAccountValue from "../BankAccountValue";
 import PreviewRecordDetails from "./PreviewRecordDetails";
@@ -189,7 +189,7 @@ const PreviewGroup = memo(function PreviewGroup({
               data-segment={segment.id}
               style={{ gridColumn: column + 1, gridRow: segment.rowSpans?.[pane.id] ? `${index + 1} / span ${segment.rowSpans[pane.id]}` : index + 1 }}
             >
-              <PreviewRecords records={segment.rows[pane.id]} />
+              <PreviewRecords records={segment.rows[pane.id]} folds={pane.id === "bank" ? group.bankFolds : undefined} />
             </div>
           ]));
         }
@@ -203,7 +203,7 @@ const PreviewGroup = memo(function PreviewGroup({
               gridRow: `1 / span ${segmentCount}`,
             }}
           >
-            <PreviewRecords records={group.rows[pane.id]} />
+            <PreviewRecords records={group.rows[pane.id]} folds={pane.id === "bank" ? group.bankFolds : undefined} />
           </div>
         );
       })}
@@ -211,11 +211,13 @@ const PreviewGroup = memo(function PreviewGroup({
   );
 });
 
-function PreviewRecords({ records }: { records: WorkbenchRecord[] }) {
+function PreviewRecords({ records, folds }: { records: WorkbenchRecord[]; folds?: WorkbenchRelationGroup["bankFolds"] }) {
+  const byMember = new Map((folds ?? []).flatMap(fold => fold.memberIds.map(id => [id, fold] as const)));
   const byIdentity = new Map<string, WorkbenchRecord[]>();
   for (const row of records) {
-    const key =
-      row.recordType === "bank" && row.isSplit ? row.parentRowId! : row.id;
+    const key = byMember.get(row.id)?.foldId ?? (
+      row.recordType === "bank" && row.isSplit ? row.parentRowId! : row.id
+    );
     const members = byIdentity.get(key);
     if (members) members.push(row);
     else byIdentity.set(key, [row]);
@@ -225,10 +227,25 @@ function PreviewRecords({ records }: { records: WorkbenchRecord[] }) {
   return (
     <>
       {Array.from(byIdentity, ([identity, members]) => (
-        <PreviewRecord key={identity} row={members[0]} members={members} />
+        byMember.has(members[0].id)
+          ? <PreviewBankFold key={identity} fold={byMember.get(members[0].id)!} members={members} />
+          : <PreviewRecord key={identity} row={members[0]} members={members} />
       ))}
     </>
   );
+}
+
+function PreviewBankFold({ fold, members }: {
+  fold: NonNullable<WorkbenchRelationGroup["bankFolds"]>[number]; members: WorkbenchRecord[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return <div>
+    <button type="button" className="row-action-btn" aria-expanded={expanded}
+      onClick={() => setExpanded(value => !value)}>
+      {expanded ? "收起明细" : `展开 ${fold.memberIds.length} 条明细`}
+    </button>
+    {expanded ? <PreviewRecords records={members} /> : <PreviewRecord row={fold.summaryRow} members={[fold.summaryRow]} />}
+  </div>;
 }
 
 function PreviewRecord({

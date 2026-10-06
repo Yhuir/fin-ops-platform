@@ -55,6 +55,29 @@ class BankFlowRuleBatchCanonicalQueryRepository:
             raise ValueError("Bank flow rule batch canonical queries require a PostgreSQL connection.")
         self._connection = connection
 
+    @staticmethod
+    def workbench_batch_sources(connection: Any, row_ids: list[str]) -> dict[str, str]:
+        """One page-local read of successful submission provenance, never ownership."""
+        if not row_ids:
+            return {}
+        rows = connection.fetch_all("""
+            select distinct on (member.row_id) member.row_id, batch.batch_id
+            from app.bank_flow_rule_batches batch
+            left join lateral (
+                select max(event.occurred_at) as occurred_at
+                from app.bank_flow_rule_batch_events event
+                where event.batch_id = batch.batch_id and event.event_type = 'submit'
+            ) submission on true
+            cross join lateral unnest(batch.bank_transaction_ids) member(row_id)
+            where batch.bank_transaction_ids && %s::text[]
+              and member.row_id = any(%s::text[])
+              and (batch.status = 'submitted' or
+                   (batch.status in ('withdrawn', 'stale') and greatest(batch.submitted_at, submission.occurred_at) is not null))
+            order by member.row_id, (batch.status = 'submitted') desc,
+                     greatest(batch.submitted_at, submission.occurred_at) desc nulls last, batch.batch_id
+        """, (row_ids, row_ids))
+        return {row["row_id"]: row["batch_id"] for row in rows}
+
     def read_page(
         self,
         filters: dict[str, object] | None = None,

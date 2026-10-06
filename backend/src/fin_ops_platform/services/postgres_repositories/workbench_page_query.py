@@ -5662,7 +5662,7 @@ class PostgresWorkbenchPageQueryRepository:
                   and (scope.scope_key = 'all' or relation.month_scope = scope.scope_month
                        or {self._relation_has_scoped_member_sql('relation')})
                 group by relation.case_id, relation.row_types, relation.row_ids
-                having count(*) >= 4
+                having count(*) >= 3
                    and round(sum(abs(bank.amount)), 2) >= %s
                    -- Direct member hits already select this complete relation.
                    -- Only hydrate folds when they can add a new search hit.
@@ -5676,6 +5676,21 @@ class PostgresWorkbenchPageQueryRepository:
                             where pending.oa_id=any(relation.row_ids)
                               and jsonb_array_length(case when jsonb_typeof(pending.source_payload->'expense_items')='array'
                                   then pending.source_payload->'expense_items' else '[]'::jsonb end)>0)
+                        or exists (select 1 from app.bank_flow_rule_batches batch
+                            where batch.bank_transaction_ids && relation.row_ids
+                              and (batch.status = 'submitted' or
+                                   (batch.status in ('withdrawn', 'stale') and (batch.submitted_at is not null or exists (
+                                       select 1 from app.bank_flow_rule_batch_events event
+                                       where event.batch_id = batch.batch_id and event.event_type = 'submit'
+                                   ))))
+                              and exists (
+                                  select 1 from app.bank_transaction_units batch_bank
+                                  where coalesce(batch_bank.legacy_mongo_id, batch_bank.id::text) = any(batch.bank_transaction_ids)
+                                    and coalesce(batch_bank.legacy_mongo_id, batch_bank.id::text) = any(relation.row_ids)
+                                    and batch_bank.status <> 'deleted'
+                                  group by batch_bank.txn_direction, batch_bank.currency
+                                  having round(sum(abs(batch_bank.amount)), 2)::text ilike %s
+                              ))
                         or round(sum(abs(bank.amount)), 2)::text ilike %s)
             )
             select 'case:' || relation.case_id as internal_key,
@@ -5688,10 +5703,11 @@ class PostgresWorkbenchPageQueryRepository:
             join eligible using (case_id)
             order by relation.case_id
         """, (scope_key, None if scope_key == 'all' else month_start(scope_key), self._tenant_id,
-              minimum, _literal_ilike_pattern(fragment), _literal_ilike_pattern(fragment)))
+              minimum, _literal_ilike_pattern(fragment), _literal_ilike_pattern(fragment), _literal_ilike_pattern(fragment)))
         groups = self._hydrate_groups(month=scope_key, descriptors=descriptors, detail_level="summary")
         result = sorted({member for group in groups for fold in group.get("bank_folds", [])
-                         if fragment in format(Decimal(fold["summary_row"]["amount"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f")
+                         if any(fragment in format(Decimal(total["amount"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f")
+                                for total in fold["amount_totals"])
                          for member in fold["member_ids"]})
         self._fold_search_results[key] = result
         return result

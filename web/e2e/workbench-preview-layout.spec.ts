@@ -427,3 +427,52 @@ test("merged invoice scopes keep 1711 on one row and 16000 across only two insta
   await page.getByRole("button", { name: "关闭关联预览" }).click();
   expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(0);
 });
+
+test("shared interest invoice spans two OAs while both eight-payment batches fold", async ({ page }, info) => {
+  await installDeterministicApiMocks(page, { sessionMode: "user" });
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  const initial = page.waitForResponse(response => new URL(response.url()).pathname === "/api/workbench");
+  await page.goto("/");
+  const payload = await (await initial).json();
+  const preview = await openConfirm(page);
+  await page.getByRole("button", { name: "关闭关联预览" }).click();
+  const seed = preview.after.groups[0];
+  const amounts = [["47.33", "268.33", "828.33", "427.78", "38.89", "236.44", "202.22", "280.00"],
+    ["917.08", "61.14", "916.22", "361.67", "602.78", "120.56", "482.22", "964.44"]];
+  const totals = ["2329.32", "4426.11"];
+  const oa = totals.map((amount, i) => ({ ...seed.oa_rows[0], id: `interest-oa-${i}`, amount, expense_items: [], applicant: `${i + 5}月申请人` }));
+  const batches = amounts.map((values, month) => values.map((amount, index) => ({ ...seed.bank_rows[0],
+    id: `interest-bank-${month}-${index}`, amount, debit_amount: amount, txn_direction: "outflow",
+    source_oa_id: "", counterparty_name: `利息明细${month}-${index}`, detail_fields: {}, bank_text_fields: [] })));
+  const invoice = { ...seed.invoice_rows[0], id: "interest-invoice", source_oa_id: "", amount: "6755.43", total_with_tax: "6755.43", invoice_no: "INTEREST-SHARED", seller_name: "共同贷款利息发票" };
+  const rows = [...oa, ...batches.flat(), invoice];
+  const group = { ...seed, group_id: "case:interest", case_id: "interest", relation_mode: "manual_confirmed",
+    oa_rows: oa, bank_rows: batches.flat(), invoice_rows: [invoice],
+    formal_member_ids: rows.map(row => row.id), formal_member_types: rows.map(row => row.type),
+    display_subgroups: [{ resolved: false, oa_row_ids: oa.map(row => row.id), bank_row_ids: batches.flat().map(row => row.id) }],
+    invoice_display_scopes: [],
+    amount_check: { status: "matched", direction: "payment", oa_total: "6755.43", bank_total: "6755.43", invoice_total: "6755.43", requires_note: false },
+    bank_folds: batches.map((banks, i) => ({ fold_id: `interest-${i}`, member_ids: banks.map(row => row.id),
+      summary_row: { ...banks[0], id: `interest-summary-${i}`, source_kind: "bank_fold_summary", amount: totals[i], debit_amount: totals[i], counterparty_name: `${i + 5}月利息汇总`, available_actions: [], special_metadata: {} } })),
+  };
+  payload.paired.groups = [group]; payload.unpaired.groups = [];
+  await page.route("**/api/workbench?*", route => route.fulfill({ json: payload }));
+  await page.reload();
+  const zone = page.getByTestId("zone-paired");
+  await expect(zone.getByRole("button", { name: "展开流水明细，8 条" })).toHaveCount(2);
+  await expect(zone.getByText("共同贷款利息发票", { exact: true })).toHaveCount(1);
+  await expect(zone.getByText("6755.43", { exact: true }).first()).toBeVisible();
+  await expect(zone.getByText("OA 合计 6755.43", { exact: true })).toBeVisible();
+  const firstOa = zone.getByText("5月申请人", { exact: true });
+  const lastOa = zone.getByText("6月申请人", { exact: true });
+  const invoiceCell = zone.locator('[data-pane-id="invoice"]').filter({ hasText: "共同贷款利息发票" });
+  const [a, b, i] = await Promise.all([firstOa.boundingBox(), lastOa.boundingBox(), invoiceCell.boundingBox()]);
+  expect(i!.y).toBeLessThanOrEqual(a!.y);
+  expect(i!.y + i!.height).toBeGreaterThanOrEqual(b!.y + b!.height);
+  await zone.getByRole("button", { name: "展开流水明细，8 条" }).first().click();
+  for (let index = 0; index < 8; index++) await expect(zone.getByText(`利息明细0-${index}`, { exact: true })).toBeVisible();
+  await expect(zone.getByRole("button", { name: "展开流水明细，8 条" })).toHaveCount(1);
+  await zone.getByRole("button", { name: "收起流水明细，8 条" }).click();
+  await expect(zone.getByRole("button", { name: "展开流水明细，8 条" })).toHaveCount(2);
+  await zone.screenshot({ path: info.outputPath("shared-interest-folds.png") });
+});

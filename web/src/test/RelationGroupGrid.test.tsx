@@ -1676,18 +1676,15 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.queryByRole("button", { name: /免OA批次明细/ })).not.toBeInTheDocument();
   });
 
-  test("keeps a bank-flow batch closed when search matches collapsed detail", () => {
+  test("reveals a matching bank-flow detail and allows an explicit collapse", () => {
     const state = createEmptyWorkbenchZoneDisplayState();
     state.searchQuery = "建设银行手续费";
     renderNoOaGrid(createBankFlowCollapsedGroup(), state);
-
-    expect(screen.queryByText("建设银行手续费")).not.toBeInTheDocument();
+    expect(screen.getByText("建设银行手续费")).toBeInTheDocument();
+    expect(screen.queryByText("流水规则手续费批次")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "收起流水明细，15 条" }));
+    expect(screen.getByRole("button", { name: "展开流水明细，15 条" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByText("流水规则手续费批次")).toBeInTheDocument();
-    expect(screen.queryByText("隐藏内容命中")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "展开流水明细，15 条" })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
   });
 
   test("expands and collapses ETC detail normally while search is active", () => {
@@ -2574,4 +2571,25 @@ describe("Workbench candidate grouping layout", () => {
       );
     });
   });
+  test("keeps a three-member batch in the shared bank pane across OA subrows", () => {
+    const group = createBankFlowCollapsedGroup();
+    group.rows.bank = group.rows.bank.slice(0, 3);
+    group.rows.oa = [createOaRecord("may", "甲", "8.30"), createOaRecord("june", "乙", "16.60")];
+    group.rows.invoice = [createInvoiceRecord("shared", "SHARED-24.90")];
+    group.bankFolds![0].memberIds = group.rows.bank.map(row => row.id);
+    group.bankFolds![0].summaryRow.amount = "24.90";
+    group.displaySubgroups = [
+      { oaRowIds: ["may"], bankRowIds: [group.rows.bank[0].id] },
+      { oaRowIds: ["june"], bankRowIds: group.rows.bank.slice(1).map(row => row.id) },
+    ];
+    renderNoOaGrid(group);
+    const summary = screen.getByText("流水规则手续费批次");
+    expect(summary.closest('[data-pane-id="bank"]')).toHaveStyle({ gridRow: "1 / span 2" });
+    expect(screen.getAllByText("SHARED-24.90")).toHaveLength(1);
+    expect(screen.getByText("SHARED-24.90").closest('[data-pane-id="invoice"]')).toHaveStyle({ gridRow: "1 / span 2" });
+    fireEvent.click(screen.getByRole("button", { name: "展开流水明细，3 条" }));
+    expect(screen.getByText("建设银行手续费")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "收起流水明细，3 条" })).toBeInTheDocument();
+  });
+
 });

@@ -521,3 +521,24 @@ def test_stale_split_submitted_batch_remains_visible_and_withdrawable_without_or
     assert payload["can_submit"] is False
     never_submitted = BankFlowRuleBatchCanonicalQueryRepository._batch_payload({"status": "stale", "scope_month": "2026-09", "has_active_relation": False})
     assert never_submitted["can_withdraw"] is False
+
+
+def test_workbench_batch_provenance_is_one_member_bounded_read():
+    class Connection:
+        calls = []
+
+        def fetch_all(self, sql, params):
+            self.calls.append((sql, params))
+            assert "batch.bank_transaction_ids && %s::text[]" in sql
+            assert "batch.status = 'submitted'" in sql
+            assert "batch.status in ('withdrawn', 'stale')" in sql
+            assert "greatest(batch.submitted_at, submission.occurred_at) is not null" in sql
+            assert "event.event_type = 'submit'" in sql
+            return [{'row_id': 'bank-1', 'batch_id': 'batch-1'}]
+
+    connection = Connection()
+    assert BankFlowRuleBatchCanonicalQueryRepository.workbench_batch_sources(connection, []) == {}
+    assert connection.calls == []
+    assert BankFlowRuleBatchCanonicalQueryRepository.workbench_batch_sources(connection, ['bank-1', 'bank-2']) == {'bank-1': 'batch-1'}
+    assert len(connection.calls) == 1
+    assert connection.calls[0][1] == (['bank-1', 'bank-2'], ['bank-1', 'bank-2'])

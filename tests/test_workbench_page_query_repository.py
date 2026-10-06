@@ -1106,8 +1106,8 @@ def test_compact_hydration_exposes_the_same_external_oa_identity_aliases() -> No
     assert "'source_identity_aliases'" in connection.sql
     assert "'Mongo文档ID'" in connection.sql
     assert "oa.normalized_payload->'detail_fields'->>'Mongo文档ID'" in connection.sql
-    assert "from app.oa_application_items item" in connection.sql
-    assert "from app.oa_attachments attachment" in connection.sql
+    assert "from app.oa_application_items item" not in connection.sql
+    assert "from app.oa_attachments attachment" not in connection.sql
     assert "from app.oa_source_aliases alias_row" in connection.sql
     assert "oa.normalized_payload->>'expense_type'" in connection.sql
     assert "admission.source_payload->>'expense_type'" in connection.sql

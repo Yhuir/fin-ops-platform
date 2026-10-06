@@ -26,6 +26,7 @@ def members(relation: dict[str, Any]) -> frozenset[tuple[str, str]]:
 def relation_history_partitions(
     relations: list[dict[str, Any]], history: list[dict[str, Any]],
     *, accept_partition: Callable[[list[frozenset[tuple[str, str]]]], bool] | None = None,
+    shared_new_members: frozenset[tuple[str, str]] = frozenset(),
 ) -> list[list[frozenset[tuple[str, str]]]]:
     """Partition exact active snapshots by their merge history, without amount inference."""
     # Histories are ordered oldest to newest by the repository. Index exact
@@ -50,6 +51,10 @@ def relation_history_partitions(
             return [current]
         result = [part for child in children for part in partition(child, position)]
         remainder = current - set(usage)
+        # A newly attached shared invoice covers the merged relation, not the
+        # other records that happened to be added in the same command.
+        if remainder & shared_new_members:
+            return [current]
         if remainder:
             result.append(frozenset(remainder))
         if accept_partition is not None and not accept_partition(result):
@@ -167,6 +172,10 @@ def apply_invoice_display_scopes(
         if not available <= rows.keys():
             continue
         aliases = oa_row_source_alias_map(group["oa_rows"])
+        shared_invoices = frozenset(
+            ("invoice", row["id"]) for row in group["invoice_rows"]
+            if not WorkbenchRelationAlignmentService._source_oa_id(row, aliases)
+        )
         aligned = [
             {*(('oa', k) for k in p["oa_row_ids"]), *(('bank', k) for k in p["bank_row_ids"])}
             for p in group.get("display_subgroups", []) if p.get("resolved")
@@ -198,11 +207,17 @@ def apply_invoice_display_scopes(
             return True
 
         if before_relations is None:
-            parts = relation_history_partitions([current], history, accept_partition=valid_partition)[0]
+            parts = relation_history_partitions(
+                [current], history, accept_partition=valid_partition, shared_new_members=shared_invoices,
+            )[0]
         else:
             previous = [r for r in before_relations if members(r) and members(r) <= available]
-            parts = [part for partitions in relation_history_partitions(previous, history, accept_partition=valid_partition) for part in partitions]
+            parts = [part for partitions in relation_history_partitions(
+                previous, history, accept_partition=valid_partition, shared_new_members=shared_invoices,
+            ) for part in partitions]
             remainder = available - set().union(*parts) if parts else available
+            if remainder & shared_invoices:
+                continue
             if remainder:
                 parts.append(frozenset(remainder))
         usage = Counter(member for part in parts for member in part)

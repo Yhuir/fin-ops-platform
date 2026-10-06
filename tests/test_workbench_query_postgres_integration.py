@@ -1018,7 +1018,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.raw_connection.execute("update app.bank_flow_rule_batches set status='withdrawn' where batch_id='audit-batch'")
         self.assertEqual(issues(), ["non_submitted_batch_has_active_relation"])
 
-    def test_fold_search_uses_same_relation_area_and_ignores_batch_provenance(self) -> None:
+    def test_fold_search_preserves_batch_provenance_after_withdrawal_and_merge(self) -> None:
         ids = [f"batch-search-{index}" for index in range(5)]
         amounts = ["97.52", "157.29", "1087.20", "660.63", "213.92"]
         for row_id, amount in zip(ids, amounts, strict=True):
@@ -1037,8 +1037,8 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 '{"requires_oa":true,"requires_invoice":true,"total_amount":"2216.56"}'::jsonb, '{}'::jsonb)
         """, (ids, ["bank"] * 5))
         self.raw_connection.execute("""
-            insert into app.bank_flow_rule_batches(batch_id, status, version, total_amount, bank_transaction_ids)
-            values ('batch-search', 'submitted', 1, 2216.56, %s::text[])
+            insert into app.bank_flow_rule_batches(batch_id, status, version, total_amount, bank_transaction_ids, submitted_at)
+            values ('batch-search', 'submitted', 1, 2216.56, %s::text[], now())
         """, (ids,))
         self.raw_connection.execute("update app.bank_transactions set summary='材料款' where legacy_mongo_id=any(%s::text[])", (ids,))
         self.connection.statements.clear()
@@ -1079,11 +1079,11 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.raw_connection.execute("update app.oa_applications set normalized_payload=normalized_payload - 'expense_items' where row_id='oa-direct-1'")
         for detail_level in ("summary", "full"):
             merged_page = self.repository.get_workbench_groups_page(
-                scope_key="all", zone="unpaired", search="2316.56", detail_level=detail_level)
+                scope_key="all", zone="unpaired", search="2216.56", detail_level=detail_level)
             merged = next(group for group in merged_page["groups"] if group["detail_key"] == "CASE-DIRECT-1")
             self.assertEqual(merged["relation_mode"], "manual_confirmed")
-            self.assertEqual(set(merged["bank_folds"][0]["member_ids"]), set(["bank-direct-1", *ids]))
-            self.assertEqual(Decimal(merged["bank_folds"][0]["summary_row"]["amount"]), Decimal("2316.56"))
+            self.assertEqual(set(merged["bank_folds"][0]["member_ids"]), set(ids))
+            self.assertEqual(Decimal(merged["bank_folds"][0]["summary_row"]["amount"]), Decimal("2216.56"))
             self.assertEqual(merged["row_counts"]["bank"], 6)
             self.assertEqual(len(merged["oa_rows"]), 1)
             self.assertEqual(len(merged["invoice_rows"]), 1)
@@ -1091,7 +1091,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             update app.bank_flow_rule_batches set status='withdrawn' where batch_id='batch-search'
         """)
         withdrawn = self.repository.get_workbench_groups_page(scope_key="all", zone="unpaired", search="97.52")
-        self.assertEqual(len(withdrawn["groups"][0]["bank_folds"][0]["member_ids"]), 6)
+        self.assertEqual(len(withdrawn["groups"][0]["bank_folds"][0]["member_ids"]), 5)
         self.connection.statements.clear()
         small = self.repository.get_workbench_groups_page(scope_key="all", zone="unpaired", search="1.00")
         self.assertFalse(any(g.get("detail_key") == "CASE-DIRECT-1" for g in small["groups"]))
@@ -1107,6 +1107,40 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(len(selection["rows"]), 5)
         self.assertEqual(selection["context_rows"], [])
         self.assertEqual({row["id"] for row in selection["rows"]}, set(ids))
+
+    def test_three_withdrawn_batch_members_remain_searchable_and_previewable(self) -> None:
+        ids = ['three-bank-1', 'three-bank-2', 'three-bank-3']
+        for row_id, amount in zip(ids, ['10.01', '20.02', '30.03'], strict=True):
+            self.raw_connection.execute("""
+                insert into app.bank_transactions(legacy_mongo_id, account_no, txn_direction,
+                    amount, signed_amount, txn_date, txn_month, summary, raw_payload, status, counterparty_name_raw)
+                values (%s, '8106', 'outflow', %s, -%s::numeric, '2026-07-15', '2026-07-01',
+                        '材料款', '{}'::jsonb, 'active', '批次测试')
+            """, (row_id, amount, amount))
+        self.raw_connection.execute("""
+            insert into app.workbench_pair_relations(case_id, relation_mode, status, month_scope,
+                row_ids, row_types, special_metadata, raw_payload)
+            values ('three-batch', 'manual_confirmed', 'active', '2026-07-01', %s, %s,
+                    '{"requires_oa":false,"requires_invoice":false}'::jsonb, '{}'::jsonb)
+        """, (ids, ['bank'] * 3))
+        self.raw_connection.execute("""
+            insert into app.bank_flow_rule_batches(batch_id, status, total_amount, bank_transaction_ids, submitted_at)
+            values ('three-source', 'withdrawn', 60.06, %s, null)
+        """, (ids,))
+        self.raw_connection.execute("""
+            insert into app.bank_flow_rule_batch_events(batch_id, event_type, occurred_at)
+            values ('three-source', 'submit', now())
+        """)
+        for detail in ('summary', 'full'):
+            result = self.repository.get_workbench_groups_page(scope_key='all', zone='paired', search='60.06', detail_level=detail)
+            current = next(g for g in result['groups'] if g['case_id'] == 'three-batch')
+            self.assertEqual(current['formal_member_ids'], ids)
+            self.assertEqual(current['row_counts']['bank'], 3)
+            self.assertEqual(current['bank_folds'][0]['member_ids'], ids)
+            self.assertEqual(Decimal(current['bank_folds'][0]['summary_row']['amount']), Decimal('60.06'))
+        selected = self.selection_repository.get_workbench_relation_preview_selection(
+            scope_key='all', row_ids=ids, row_types=['bank'] * 3)
+        self.assertEqual({r['display_batch_id'] for r in selected['rows']}, {'three-source'})
 
     def test_bank_only_total_search_prunes_nonmatching_micro_fee_relations(self) -> None:
         ids = [f"micro-fee-{i}" for i in range(8)]

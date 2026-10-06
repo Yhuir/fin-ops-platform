@@ -125,6 +125,21 @@ export function buildWorkbenchGroupDisplayLayout(
   group: WorkbenchRelationGroup,
   sourceGroup: WorkbenchRelationGroup = group,
 ): WorkbenchGroupDisplayLayout | null {
+  const layout = buildWorkbenchGroupUnfoldedLayout(group, sourceGroup);
+  if (!layout?.segmentedPaneIds.includes("bank") || !group.bankFolds?.length) return layout;
+  const segmentByMember = new Map(layout.segments.flatMap((segment) => segment.rows.bank.map((row) => [row.id, segment.id] as const)));
+  const crossesSegments = group.bankFolds.some((fold) => (
+    new Set(fold.memberIds.map((id) => segmentByMember.get(id)).filter(Boolean)).size > 1
+  ));
+  // A batch spanning OA/invoice subrows belongs in their shared bank pane.
+  // Placing its summary at its first member would invent exclusive ownership.
+  return crossesSegments ? { ...layout, segmentedPaneIds: layout.segmentedPaneIds.filter((pane) => pane !== "bank") } : layout;
+}
+
+function buildWorkbenchGroupUnfoldedLayout(
+  group: WorkbenchRelationGroup,
+  sourceGroup: WorkbenchRelationGroup,
+): WorkbenchGroupDisplayLayout | null {
   if (sourceGroup.invoiceDisplayScopes?.length) {
     return buildInvoiceScopedLayout(group, sourceGroup);
   }

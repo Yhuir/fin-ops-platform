@@ -278,3 +278,36 @@ def test_invoice_scope_keeps_complete_parent_when_older_history_overallocated_on
     published = group(equipment + etc)
     apply_invoice_display_scopes([published], history + [event(relation("merged", equipment + etc), previous)])
     assert published["invoice_display_scopes"] == preview["invoice_display_scopes"]
+
+
+def test_late_shared_invoice_does_not_belong_to_other_newly_added_oa():
+    from fin_ops_platform.services.workbench_display_subgroups import apply_invoice_display_scopes
+
+    may = row('oa', 'may', '2329.32')
+    june = row('oa', 'june', '4426.11')
+    banks = [row('bank', 'may-bank', '2329.32'), row('bank', 'june-bank', '4426.11')]
+    invoice = row('invoice', 'shared', '6755.43')
+    rows = [may, june, *banks, invoice]
+    previous = [relation('may-batch', [banks[0]]), relation('june-linked', [june, banks[1]])]
+    history = [event(relation('merged', rows), previous)]
+    published = group(rows)
+    apply_invoice_display_scopes([published], history)
+    assert 'invoice_display_scopes' not in published
+    preview = group(rows)
+    apply_invoice_display_scopes([preview], [], before_relations=previous)
+    assert preview == published
+
+
+def test_late_shared_invoice_remains_shared_inside_subsequent_unrelated_merge():
+    from fin_ops_platform.services.workbench_display_subgroups import apply_invoice_display_scopes
+
+    a = [row('oa', 'may', 20), row('oa', 'june', 40), row('bank', 'b', 60), row('invoice', 'i', 60)]
+    other = [row('oa', 'other', 90), row('bank', 'other-bank', 90), row('invoice', 'other-invoice', 90)]
+    inner = relation('inner', a)
+    history = [event(inner, [relation('old', a[:3])]), event(relation('merged', a + other), [inner, relation('other', other)])]
+    g = group(a + other)
+    apply_invoice_display_scopes([g], history)
+    assert g['invoice_display_scopes'] == [
+        {'oa_row_ids': ['may', 'june'], 'bank_row_ids': ['b'], 'invoice_row_ids': ['i']},
+        {'oa_row_ids': ['other'], 'bank_row_ids': ['other-bank'], 'invoice_row_ids': ['other-invoice']},
+    ]

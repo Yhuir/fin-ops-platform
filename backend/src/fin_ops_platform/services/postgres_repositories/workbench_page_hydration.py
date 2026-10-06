@@ -13,6 +13,9 @@ from fin_ops_platform.services.oa_attachment_invoice_linking import (
     OA_EXTERNAL_SOURCE_ID_FIELD_NAMES,
     normalize_oa_attachment_expense_item_ids,
 )
+from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
+    BankFlowRuleBatchCanonicalQueryRepository,
+)
 from fin_ops_platform.services.postgres_repositories.common import (
     row_payload,
     serialize_value,
@@ -43,7 +46,7 @@ from fin_ops_platform.services.workbench_etc_batch_link import etc_source_links,
 # Full pages also attach OA supporting documents; folding itself performs no I/O.
 # The budget is independent of page/member count; a higher count is a regression.
 WORKBENCH_PAGE_HYDRATION_STATEMENT_BUDGET = 10
-WORKBENCH_SUMMARY_HYDRATION_STATEMENT_BUDGET = 4
+WORKBENCH_SUMMARY_HYDRATION_STATEMENT_BUDGET = 5
 
 
 def oa_source_identity_aliases_sql(source_payload: str) -> str:
@@ -1403,11 +1406,14 @@ class PostgresWorkbenchPageHydrationRepository:
                 tenant_id=self._tenant_id,
             )
         )
+        batch_sources = BankFlowRuleBatchCanonicalQueryRepository.workbench_batch_sources(connection, transaction_ids)
         for transaction_id in transaction_ids:
             projection = projections.get(transaction_id) or {
                 "category_resolution_status": "unmatched"
             }
             rows_by_typed_id[("bank", transaction_id)].update(projection)
+            if transaction_id in batch_sources:
+                rows_by_typed_id[("bank", transaction_id)]["display_batch_id"] = batch_sources[transaction_id]
 
     @staticmethod
     def _compact_etc_summary_row(

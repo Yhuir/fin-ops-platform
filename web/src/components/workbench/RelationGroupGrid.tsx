@@ -37,6 +37,17 @@ import RelationGroupCell from "./RelationGroupCell";
 import WorkbenchAnomalyIndicator from "./WorkbenchAnomalyIndicator";
 import WorkbenchColumnFilterMenu from "./WorkbenchColumnFilterMenu";
 import type { WorkbenchColumnDropPosition } from "../../features/workbench/columnLayout";
+import { formatMoney } from "../../features/money";
+
+function GroupAmountSummary({ group, gridRow }: { group: WorkbenchRelationGroup; gridRow?: number }) {
+  const check = group.amountCheck;
+  if (group.rows.oa.length < 2 || !group.bankFolds?.length || !check) return null;
+  return <div className="candidate-group-amount-summary" style={{ gridColumn: "1 / -1", gridRow }}>
+    <span>OA 合计 {formatMoney(check.oaTotal, "—")}</span>
+    <span>流水合计 {formatMoney(check.bankTotal, "—")}</span>
+    <span>发票核对金额 {formatMoney(check.invoiceTotal, "—")}</span>
+  </div>;
+}
 
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
@@ -502,9 +513,13 @@ function RelationGroupGrid({
           emittedFolds.add(batch.foldId);
           const key = `bank-fold:${batch.foldId}`;
           const members = bankRowsByFold.get(batch.foldId)!;
-          const searchAmount = normalizedSearchQuery.replace(/,/g, "");
-          const memberHit = searchAmount !== "" && Number.isFinite(Number(searchAmount))
-            && members.some((member) => Number(member.amount.replace(/,/g, "")) === Number(searchAmount));
+          const searchTerms = normalizedSearchQuery.toLocaleLowerCase("zh-CN").split(/\s+/).filter(Boolean);
+          const memberHit = members.some((member) => searchTerms.some((term) => {
+            const amountTerm = term.replace(/^[￥¥]/, "").replace(/,/g, "");
+            const text = [member.counterparty, ...Object.values(member.tableValues),
+              ...(member.bankTextFields ?? []).map(field => field.value)].join(" ").toLocaleLowerCase("zh-CN");
+            return text.includes(term) || (/^[\d.]+$/.test(amountTerm) && member.amount.replace(/,/g, "").includes(amountTerm));
+          }));
           const expanded = searchFoldOverrides.get(key) ?? (expandedPaneGroups.has(key) || memberHit);
           const visible = expanded ? members : [batch.summaryRow];
           bankRowControls.set(visible[0].id, (
@@ -771,6 +786,7 @@ function RelationGroupGrid({
                   {column.renderGroup(group)}
                 </div>
               ))}
+              <GroupAmountSummary group={group} gridRow={segmentCount + 1} />
               {groupLevelAnomalies.length > 0 ? (
                 <WorkbenchAnomalyIndicator
                   anomalies={groupLevelAnomalies}
@@ -843,6 +859,7 @@ function RelationGroupGrid({
                 {column.renderGroup(group)}
               </div>
             ))}
+            <GroupAmountSummary group={group} />
             {groupLevelAnomalies.length > 0 ? (
               <WorkbenchAnomalyIndicator
                 anomalies={groupLevelAnomalies}

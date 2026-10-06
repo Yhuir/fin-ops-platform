@@ -151,6 +151,9 @@ test('saving splits clears only that bank selection and reloads the saved versio
   await drawer.getByLabel('子项 2 金额').fill('1001.00');
   await expect(drawer.getByRole('button', { name: /选中子项/ })).toHaveCount(0);
   await drawer.getByRole('button', { name: '保存', exact: true }).click();
+  // Saving reloads the source drawer; reopen the editor to inspect persisted values.
+  await expect(drawer.getByRole('button', { name: '流水子项拆分', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  await drawer.getByRole('button', { name: '流水子项拆分', exact: true }).click();
   await expect(drawer.getByLabel('子项 2 金额')).toHaveValue('1001.00');
   await expect(drawer.getByRole('button', { name: /选中子项/ })).toHaveCount(0);
   expect(writes).toBe(1);

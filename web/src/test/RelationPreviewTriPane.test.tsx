@@ -270,4 +270,19 @@ describe("compact relation preview", () => {
         .querySelectorAll("[data-member-ids]"),
     ).toHaveLength(500);
   });
+  test("previews a three-member fold without duplicating shared invoice or members", () => {
+    const banks = [row("b1", "bank"), row("b2", "bank"), row("b3", "bank")];
+    const g = group("folded", [row("oa1", "oa"), row("oa2", "oa"), ...banks, row("invoice", "invoice")]);
+    g.bankFolds = [{ foldId: "batch", memberIds: banks.map(r => r.id), summaryRow: row("summary", "bank", { amount: "300.00" }) }];
+    g.displaySubgroups = [{ oaRowIds: ["oa1"], bankRowIds: ["b1"] }, { oaRowIds: ["oa2"], bankRowIds: ["b2", "b3"] }];
+    render(<RelationPreviewTriPane title="预览" side="after" groups={[g]} totals={{ oaTotal: "200", bankTotal: "300", invoiceTotal: "100" }} mismatchFields={[]} />);
+    const pane = screen.getByTestId("candidate-group-folded").querySelector('[data-pane="bank"]')!;
+    expect(pane).toHaveStyle({ gridRow: "1 / span 2" });
+    expect(pane.querySelectorAll('[data-member-ids]')).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "展开 3 条明细" }));
+    expect(pane.querySelectorAll('[data-member-ids]')).toHaveLength(3);
+    fireEvent.click(screen.getByRole("button", { name: "收起明细" }));
+    expect(pane.querySelectorAll('[data-member-ids]')).toHaveLength(1);
+  });
+
 });
