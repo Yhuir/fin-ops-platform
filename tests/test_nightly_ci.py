@@ -84,6 +84,7 @@ class NightlyCITests(unittest.TestCase):
             "production-cash-readonly.spec.ts",
             "production-date-defaults.spec.ts",
             "production-count-stability.spec.ts",
+            "production-table-classification.spec.ts",
             "production-exception-groups.spec.ts",
             "production-cost-explorer.spec.ts",
             "production-source-details.spec.ts",
