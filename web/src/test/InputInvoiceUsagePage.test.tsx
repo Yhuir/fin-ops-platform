@@ -1089,7 +1089,7 @@ describe("Input invoice usage page", () => {
     expect(rowsRequests(fetchMock)).toHaveLength(initialRowsRequests);
   });
 
-  test("restores column filters and sort from table session state", async () => {
+  test("restores payment filters inside used scope and preserves sort", async () => {
     const fetchMock = installInputInvoiceUsageFetch();
     const storageKey = buildPageSessionStorageKey({
       userScope: "101",
@@ -1122,9 +1122,10 @@ describe("Input invoice usage page", () => {
       expect(rowsRequests(fetchMock).length).toBeGreaterThan(0);
     });
     const request = rowsRequests(fetchMock)[0];
-    expect(request.searchParams.get("page")).toBe("3");
+    expect(request.searchParams.get("page")).toBe("1");
     expect(JSON.parse(decodeURIComponent(request.searchParams.get("filters") ?? "[]"))).toEqual([
       { field: "payment_status", operator: "in", values: ["pending"] },
+      { field: "usage_status", operator: "in", values: ["used"] },
     ]);
     expect(request.searchParams.get("sort_field")).toBe("invoice_no");
     expect(request.searchParams.get("sort_direction")).toBe("asc");
@@ -1155,7 +1156,7 @@ describe("Input invoice usage page", () => {
       expect(request.searchParams.get("page")).toBe("1");
       expect(request.searchParams.get("page_size")).toBe("50");
       expect(request.searchParams.get("keyword")).toBe("供应商");
-      expect(JSON.parse(decodeURIComponent(request.searchParams.get("filters") ?? "[]"))).toEqual([stored.filters[0]]);
+      expect(JSON.parse(decodeURIComponent(request.searchParams.get("filters") ?? "[]"))).toEqual([stored.filters[0], { field: "usage_status", operator: "in", values: ["used"] }]);
       expect(request.searchParams.get("sort_direction")).toBe("asc");
     }
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

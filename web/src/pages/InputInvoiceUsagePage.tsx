@@ -103,7 +103,11 @@ function restoreQuery(raw: unknown): InputInvoiceUsageQuery {
   if (!validateQuery(raw)) {
     return initialQuery;
   }
-  const filters = raw.filters.filter((filter) => !["invoice_date", "bank_trade_time", "relation_status"].includes(filter.field)).map(filter => (['relation_status', 'payment_status'].includes(filter.field) && filter.values && filter.values.length > 1 ? { ...filter, values: [filter.values[0]] } : filter));
+  const filters = raw.filters.filter((filter) => !["invoice_date", "bank_trade_time", "relation_status"].includes(filter.field)).map(filter => (filter.field === "payment_status" && filter.values && filter.values.length > 1 ? { ...filter, values: [filter.values[0]] } : filter));
+  const hasPaymentFilter = filters.some(filter => ["payment_status", "payment_group"].includes(filter.field));
+  if (hasPaymentFilter && !filters.some(filter => filter.field === "usage_status")) {
+    filters.push({ field: "usage_status", operator: "in", values: ["used"] });
+  }
   const dateScopeChanged = Boolean(raw.month || raw.invoiceDateFrom || raw.invoiceDateTo)
     || filters.length !== raw.filters.length;
   return {
