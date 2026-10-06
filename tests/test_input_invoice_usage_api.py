@@ -988,6 +988,18 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertNotIn("readModelStatus", json.loads(preview_response.body))
         self.assertEqual(export_response.status_code, 200)
 
+    def test_hierarchy_filters_reject_invalid_values_before_query(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._install_service(app, invoices=[])
+            for field in ("usage_status", "payment_group", "oa_relation"):
+                for values in (["unknown"], [], "used", [None]):
+                    with self.subTest(field=field, values=values):
+                        filters = quote(json.dumps([{"field": field, "operator": "in", "values": values}]))
+                        response = app.handle_request("GET", f"/api/input-invoice-usage/rows?filters={filters}")
+                        self.assertEqual(response.status_code, 400)
+                        self.assertEqual(json.loads(response.body)["error"]["code"], "invalid_filter_value")
+
     def test_routes_return_structured_validation_and_not_found_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

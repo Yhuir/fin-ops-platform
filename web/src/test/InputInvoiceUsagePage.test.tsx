@@ -102,6 +102,12 @@ function cssRule(source: string, selector: string) {
 }
 
 const rowsPayload = {
+  classification: {
+    all: { id: "all", label: "全部发票", count: 1 }, used: { id: "used", label: "已使用", count: 1 }, unused: { id: "unused", label: "待使用", count: 0 },
+    groups: [{ id: "paid", label: "已付款", tone: "paid", count: 0, children: [{ id: "category:paid", label: "发票＝付款", count: 0 }] },
+      { id: "unpaid", label: "未付款", tone: "unpaid", count: 0, children: [] },
+      { id: "pending", label: "待核对", tone: "pending", count: 1, children: [] }],
+  },
   rows: [
     {
       id: "usage-row-001",
@@ -679,7 +685,7 @@ describe("Input invoice usage page", () => {
     expect(within(headerRow).getByRole("button", { name: "按开票日期排序" })).toBeInTheDocument();
     expect(within(headerRow).getByRole("button", { name: "筛选 销方名称" })).toBeInTheDocument();
     expect(within(headerRow).queryByRole("button", { name: "筛选 支付状态" })).not.toBeInTheDocument();
-    expect(screen.getByRole("tablist", { name: "进项发票支付状态" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "进项发票使用分类" })).toBeInTheDocument();
     expect(within(headerRow).getByRole("button", { name: "筛选 申请人/类型" })).toBeInTheDocument();
     expect(within(headerRow).getByRole("button", { name: "筛选 项目名称" })).toBeInTheDocument();
     expect(within(headerRow).getByRole("button", { name: "筛选 对方户名" })).toBeInTheDocument();
@@ -1001,18 +1007,26 @@ describe("Input invoice usage page", () => {
     expect(relationRequests.map((url) => url.searchParams.get("month"))).toEqual(["2026-05", "2026-05", "2026-05"]);
   });
 
-  test("relation tabs count invoices and send an exclusive server filter", async () => {
+  test("hierarchy and OA header filter combine without changing other query fields", async () => {
     const user = userEvent.setup();
-    const payload = { ...rowsPayload, filterOptions: [...inputFilterOptions, { field: "relation_status", label: "关联情况", type: "enum", operators: ["in"], options: [{ value: "no_oa", label: "未关联 OA", count: 3 }, { value: "oa_bank", label: "均已关联", count: 2 }] }] };
-    const fetchMock = installInputInvoiceUsageFetch(payload);
+    const fetchMock = installInputInvoiceUsageFetch();
     renderAuthenticatedAppAt("/input-invoice-usage");
-    expect(await screen.findByRole("tab", { name: "全部 5 张" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "有 OA／无流水 0 张" })).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "未关联 OA 3 张" }));
+    await user.click(await screen.findByRole("button", { name: "已使用 1 张" }));
+    await user.click(screen.getByRole("button", { name: "OA 关联筛选" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "未关联 OA" }));
     await waitFor(() => {
       const query = rowsRequests(fetchMock).at(-1)!;
-      expect(JSON.parse(decodeURIComponent(query.searchParams.get("filters")!))).toEqual(expect.arrayContaining([{ field: "relation_status", operator: "in", values: ["no_oa"] }]));
+      expect(JSON.parse(decodeURIComponent(query.searchParams.get("filters")!))).toEqual(expect.arrayContaining([
+        { field: "usage_status", operator: "in", values: ["used"] },
+        { field: "oa_relation", operator: "in", values: ["unlinked"] },
+      ]));
       expect(query.searchParams.get("page")).toBe("1");
+    });
+    await user.click(screen.getByRole("button", { name: "发票＝付款 0 张" }));
+    await waitFor(() => {
+      const filters = JSON.parse(decodeURIComponent(rowsRequests(fetchMock).at(-1)!.searchParams.get("filters")!));
+      expect(filters).toContainEqual({ field: "payment_status", operator: "in", values: ["paid"] });
+      expect(filters).toContainEqual({ field: "oa_relation", operator: "in", values: ["unlinked"] });
     });
   });
 

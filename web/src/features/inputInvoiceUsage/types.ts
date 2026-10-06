@@ -135,6 +135,7 @@ export type InputInvoiceUsageStatistics = {
 };
 
 export type InputInvoiceUsageRowsResponse = {
+  classification?: InvoiceUsageClassificationData;
   rows: InputInvoiceUsageRow[];
   summary?: {
     invoiceCount: number;
@@ -208,6 +209,7 @@ export type InputInvoiceUsagePaymentStatusRule = {
   id?: string;
   code?: string;
   statusCode?: string;
+  parentStatus?: "paid" | "unpaid";
   label: string;
   description: string;
   reason?: string;
@@ -220,7 +222,7 @@ export type InputInvoiceUsagePaymentStatusRule = {
 export type SaveInputInvoiceUsagePaymentStatusRulesRequest = {
   expectedVersion: number | string | null;
   idempotencyKey: string;
-  rules: Array<Pick<InputInvoiceUsagePaymentStatusRule, "id" | "statusCode" | "label" | "priority" | "enabled" | "conditions">>;
+  rules: Array<Pick<InputInvoiceUsagePaymentStatusRule, "id" | "statusCode" | "parentStatus" | "label" | "priority" | "enabled" | "conditions">>;
 };
 
 export type InputInvoiceUsageOaReversePreviewRequest = {
@@ -408,4 +410,22 @@ export type InputInvoiceUsageOaReverseStagedDraftsResponse = {
 export type InputInvoiceUsageExportDownload = {
   blob: Blob;
   fileName: string;
+};
+
+export type InvoiceUsageClassificationItem = {
+  id: string;
+  label: string;
+  count: number;
+};
+
+export type InvoiceUsageClassificationGroup = InvoiceUsageClassificationItem & {
+  tone: "paid" | "unpaid" | "pending";
+  children: InvoiceUsageClassificationItem[];
+};
+
+export type InvoiceUsageClassificationData = {
+  all: InvoiceUsageClassificationItem;
+  used: InvoiceUsageClassificationItem;
+  unused: InvoiceUsageClassificationItem;
+  groups: InvoiceUsageClassificationGroup[];
 };

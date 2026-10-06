@@ -1464,6 +1464,31 @@ describe("Input invoice usage workflow drawers", () => {
     expect(saveRules.mock.calls[0][0].rules.filter((rule) => rule.statusCode === "offset").map((rule) => rule.label)).toEqual(["抵账", "抵账"]);
   });
 
+  test("custom category creation and rename preserve its parent and stable identity", async () => {
+    const user = userEvent.setup();
+    const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: [], rules: [
+      { id: "r1", statusCode: "paid", parentStatus: "paid", label: "已付款", description: "", priority: 1, enabled: true, conditions: { hasBank: true } },
+    ] };
+    const saveRules = vi.fn(request => Promise.resolve({ ...payload, version: 2, rules: request.rules }));
+    const onSaved = vi.fn();
+    render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} saveRules={saveRules} onSaved={onSaved} onClose={() => undefined} />);
+    await user.click(await screen.findByLabelText("已付款 输出分类"));
+    await user.click(await screen.findByRole("option", { name: "新增已付款分类", exact: true }));
+    const label = screen.getByLabelText("支付状态");
+    await user.clear(label);
+    await user.type(label, "规则一");
+    await user.selectOptions(screen.getByLabelText("规则一 金额比较条件"), "less");
+    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    const category = saveRules.mock.calls[0][0].rules[0];
+    expect(category).toMatchObject({ statusCode: expect.stringMatching(/^custom_/), parentStatus: "paid", label: "规则一", conditions: { hasBank: true, paymentComparison: "less" } });
+    await user.clear(screen.getByLabelText("支付状态"));
+    await user.type(screen.getByLabelText("支付状态"), "规则一改名");
+    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(2));
+    expect(saveRules.mock.calls[1][0].rules[0]).toMatchObject({ statusCode: category.statusCode, parentStatus: "paid", label: "规则一改名" });
+  });
+
   test("rules retain edits after close is cancelled and display save failures", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();

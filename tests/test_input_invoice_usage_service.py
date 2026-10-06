@@ -329,7 +329,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(field_context.exception.error_code, "invalid_filter_field")
         self.assertEqual(operator_context.exception.error_code, "invalid_filter_operator")
 
-    def test_payment_status_uses_priority_and_requires_provable_full_match(self) -> None:
+    def test_payment_status_uses_priority_and_current_payment_amounts(self) -> None:
         vendor = self._counterparty("vendor", "供应商")
         chen_invoice = self._invoice("inv-chen", "9001", vendor, total_with_tax="70.00")
         paid_invoice = self._invoice("inv-paid", "9002", vendor, total_with_tax="80.00")
@@ -359,8 +359,8 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
 
         self.assertEqual(rows["inv-chen"]["paymentStatus"]["code"], "cash_turnover")
         self.assertEqual(rows["inv-paid"]["paymentStatus"]["code"], "paid")
-        self.assertEqual(rows["inv-fallback"]["paymentStatus"]["code"], "pending")
-        self.assertEqual("待核对", rows["inv-fallback"]["paymentStatus"]["label"])
+        self.assertEqual(rows["inv-fallback"]["paymentStatus"]["code"], "paid")
+        self.assertEqual("发票＝付款", rows["inv-fallback"]["paymentStatus"]["label"])
 
     def test_payment_status_uses_linked_oa_and_bank_totals_for_multi_relation(self) -> None:
         vendor = self._counterparty("vendor", "昭通市昭阳区豪然精品酒店")
@@ -387,7 +387,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["oa"]["amount"], "4450.00")
         self.assertEqual(row["bankTransactions"]["relationCount"], 1)
         self.assertEqual(row["paymentStatus"]["code"], "paid")
-        self.assertEqual(row["paymentStatus"]["label"], "已付款")
+        self.assertEqual(row["paymentStatus"]["label"], "发票＝付款")
 
     def test_no_bank_oa_rules_prioritize_offset_applicants_before_waiting_payment(self) -> None:
         vendor = self._counterparty("vendor", "供应商")

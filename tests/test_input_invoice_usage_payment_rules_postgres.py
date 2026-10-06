@@ -13,8 +13,12 @@ from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     SETTINGS_KEY,
     AppSettingsInputInvoiceUsagePaymentRulesProvider,
     InputInvoiceUsagePaymentRulesValidationError,
+    PaymentStatusEvaluationContext,
+    evaluate_payment_status,
+    normalize_payment_status_rules_settings,
 )
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_query import _input_payment_status_case
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from postgres_test_utils import apply_test_migrations, require_postgres_test_database_url, truncate_test_database
 
@@ -37,6 +41,48 @@ class PaymentRulesPostgresTests(unittest.TestCase):
     def request(self, key):
         current = self.provider.payment_status_rules_payload()
         return {"expectedVersion": current["version"], "idempotencyKey": key, "rules": deepcopy(current["rules"])}
+
+    def test_sql_and_python_classification_agree_for_custom_rules_and_amount_states(self):
+        custom = {"version": 1, "rules": [
+            {"id": "custom", "statusCode": "custom_paid", "parentStatus": "paid", "label": "自定义付款", "priority": 1,
+             "enabled": True, "conditions": {"hasBank": True, "paymentComparison": "less"}},
+            {"id": "offset", "statusCode": "custom_offset", "parentStatus": "unpaid", "label": "自定义冲账", "priority": 2,
+             "enabled": True, "conditions": {"hasOa": True, "hasBank": False}},
+        ]}
+        for raw in (None, custom):
+            settings = normalize_payment_status_rules_settings(raw)
+            expression, params = _input_payment_status_case(settings)
+            for has_oa, has_bank in ((False, False), (True, False), (False, True), (True, True)):
+                for comparison in (("equal", "less", "greater", "invalid") if has_bank else ("invalid",)):
+                    context = PaymentStatusEvaluationContext(has_oa, has_bank, "陈秀云", comparison == "equal", True, comparison)
+                    with self.subTest(custom=raw is not None, context=context):
+                        row = self.connection.fetch_one(
+                            "with facts as (select %s::boolean has_oa_relation, %s::boolean has_bank_relation, "
+                            "%s::text oa_applicant, %s::boolean fully_matched, %s::boolean invoice_oa_amount_matched, "
+                            "%s::text payment_comparison) select " + expression + " code from facts",
+                            (has_oa, has_bank, context.applicant_name, context.fully_matched, True, comparison, *params),
+                        )
+                        self.assertEqual(row["code"], evaluate_payment_status(settings, context)["code"])
+
+    def test_custom_category_save_rename_delete_and_failed_parent_are_atomic(self):
+        request = self.request("custom-category")
+        request["rules"] = [{"id": "rule-one", "statusCode": "custom_supplier", "parentStatus": "paid",
+                             "label": "供应商付款", "priority": 1, "enabled": True,
+                             "conditions": {"hasBank": True, "paymentComparison": "less"}}]
+        saved = self.provider.update_payment_status_rules(request, actor_id="tester")
+        self.assertEqual(saved["rules"][0]["parentStatus"], "paid")
+        invalid = self.request("invalid-parent")
+        invalid["rules"][0]["parentStatus"] = "unknown"
+        with self.assertRaises(InputInvoiceUsagePaymentRulesValidationError):
+            self.provider.update_payment_status_rules(invalid, actor_id="tester")
+        self.assertEqual(self.provider.payment_status_rules_payload(), saved)
+        rename = self.request("rename-category")
+        rename["rules"][0]["label"] = "供应商付款新名称"
+        renamed = self.provider.update_payment_status_rules(rename, actor_id="tester")
+        self.assertEqual(renamed["rules"][0]["statusCode"], "custom_supplier")
+        delete = self.request("delete-category")
+        delete["rules"] = []
+        self.assertEqual(self.provider.update_payment_status_rules(delete, actor_id="tester")["rules"], [])
 
     def test_applicant_migration_preserves_other_settings_and_is_repeatable(self):
         rules = self.request("legacy")["rules"]

@@ -32,10 +32,11 @@ class InvoiceLifecyclePolicyTests(unittest.TestCase):
             applicant_name="田孟维",
             fully_matched=True,
             invoice_oa_amount_matched=True,
+            payment_comparison="equal",
         )
 
         self.assertEqual(status["code"], "paid")
-        self.assertEqual(status["label"], "已付款")
+        self.assertEqual(status["label"], "发票＝付款")
 
     def test_input_invoice_payment_requires_explicit_rules_provider(self) -> None:
         policy = InvoiceLifecyclePolicy()
@@ -50,6 +51,7 @@ class InvoiceLifecyclePolicyTests(unittest.TestCase):
                 applicant_name="田孟维",
                 fully_matched=True,
                 invoice_oa_amount_matched=True,
+            payment_comparison="equal",
             )
 
     def test_unifies_tax_certification_status(self) -> None:

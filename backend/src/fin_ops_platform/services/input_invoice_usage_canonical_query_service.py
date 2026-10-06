@@ -389,6 +389,7 @@ class InputInvoiceUsageCanonicalQueryService:
             counts=snapshot.facet_counts,
         )
         payload: dict[str, Any] = {
+            "classification": snapshot.classification,
             "rows": self._rows_from_snapshot(snapshot),
             "pagination": dict(snapshot.pagination),
             "summary": dict(snapshot.summary),

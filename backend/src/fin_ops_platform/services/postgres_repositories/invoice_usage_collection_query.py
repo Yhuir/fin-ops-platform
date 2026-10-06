@@ -7,7 +7,9 @@ from decimal import Decimal
 from typing import Any
 
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
+    classification_tree,
     normalize_payment_status_rules_settings,
+    payment_categories,
 )
 from fin_ops_platform.services.output_invoice_reversal import (
     REVERSED_BLUE_INVOICE_NO_SQL_PATTERN,
@@ -40,6 +42,7 @@ class InvoiceUsageCollectionCanonicalSnapshot:
     payment_status_labels: dict[str, str]
     payment_status_rules: dict[str, Any] = field(default_factory=dict)
     bank_account_mappings: list[dict[str, Any]] = field(default_factory=list)
+    classification: dict[str, Any] = field(default_factory=dict)
 
 
 class PostgresInputInvoiceUsageQueryRepository:
@@ -185,6 +188,9 @@ class PostgresInputInvoiceUsageQueryRepository:
                 status_case=status_case,
                 invoice_level=invoice_level,
             )
+            category_parents = {item["id"]: item["parent"] for item in payment_categories(payment_settings)}
+            parent_case = "case " + " ".join(f"when status_code = '{_safe_code(code)}' then '{parent}'" for code, parent in category_parents.items()) + " else 'pending' end"
+            cte = cte.replace("'__payment_group__'", parent_case)
             base_params: list[Any] = [tenant_id, *status_params]
             where_sql, where_params = _where_sql(
                 keyword=keyword,
@@ -196,18 +202,18 @@ class PostgresInputInvoiceUsageQueryRepository:
                 row_id=row_id,
             )
             status_where_sql, status_where_params = _where_sql(
-                keyword=None,
+                keyword=keyword,
                 invoice_date_from=invoice_date_from,
                 invoice_date_to=invoice_date_to,
-                filters=[item for item in filters if item["field"] == "relation_status"],
+                filters=[item for item in filters if item["field"] not in {"payment_status", "payment_group", "usage_status"}],
                 field_sql=_INPUT_FIELDS,
                 invoice_ids=invoice_ids,
                 row_id=row_id,
             )
             relation_where_sql, relation_where_params = _where_sql(
-                keyword=None, invoice_date_from=invoice_date_from,
+                keyword=keyword, invoice_date_from=invoice_date_from,
                 invoice_date_to=invoice_date_to,
-                filters=[],
+                filters=[item for item in filters if item["field"] not in {"relation_status", "oa_relation", "bank_relation"}],
                 field_sql=_INPUT_FIELDS, invoice_ids=invoice_ids, row_id=row_id,
             )
             filtered_sql = (
@@ -234,7 +240,8 @@ class PostgresInputInvoiceUsageQueryRepository:
                         identity_key,
                         primary_invoice_id,
                         invoice_ids,
-                        status_code, fully_matched, invoice_oa_amount_matched,
+                        status_code, fully_matched, invoice_oa_amount_matched, payment_comparison,
+                        has_oa_relation, has_bank_relation,
                         oa_count, bank_count, oa_applicant,
                         array[]::text[] as supporting_group_keys,
                         count(*) over()::bigint as filtered_total,
@@ -285,6 +292,15 @@ class PostgresInputInvoiceUsageQueryRepository:
                     cross join lateral unnest(invoice_ids) member(invoice_id)
                     where nullif(status_code, '') is not null
                     group by status_code
+                    union all
+                    select 'classification', case when usage_status = 'unused' then 'unused' else status_code end,
+                           count(distinct member.invoice_id)::bigint
+                    from status_option_rows cross join lateral unnest(invoice_ids) member(invoice_id)
+                    group by case when usage_status = 'unused' then 'unused' else status_code end
+                    union all
+                    select 'oa_relation', oa_relation, count(distinct member.invoice_id)::bigint
+                    from relation_option_rows cross join lateral unnest(invoice_ids) member(invoice_id)
+                    group by oa_relation
                     union all
                     select 'relation_status', relation_status, count(distinct member.invoice_id)::bigint
                     from relation_option_rows
@@ -348,11 +364,7 @@ class PostgresInputInvoiceUsageQueryRepository:
             )
         filtered_total = int(summary_row.get("row_count") or 0)
         invoice_count = int(summary_row.get("invoice_count") or 0)
-        labels = {
-            str(rule.get("statusCode") or ""): str(rule.get("label") or "")
-            for rule in list(payment_settings.get("rules") or [])
-            if str(rule.get("statusCode") or "").strip()
-        }
+        labels = {item["id"]: item["label"] for item in payment_categories(payment_settings)}
         labels["pending"] = "待核对"
         return InvoiceUsageCollectionCanonicalSnapshot(
             groups=facts["groups"],
@@ -385,6 +397,7 @@ class PostgresInputInvoiceUsageQueryRepository:
             ),
             payment_status_labels=labels,
             payment_status_rules=payment_settings,
+            classification=classification_tree(payment_settings, {item["value"]: int(item["option_count"]) for item in facet_rows if item["field"] == "classification"}),
             bank_account_mappings=_dict_rows(settings_payload.get("bank_account_mappings")),
         )
 
@@ -793,6 +806,9 @@ _INPUT_FIELDS = {
     "specific_business_type": "specific_business_type",
     "taxable_item_name": "taxable_item_name",
     "payment_status": "status_code",
+    "usage_status": "usage_status",
+    "payment_group": "payment_group",
+    "oa_relation": "oa_relation",
     "relation_status": "relation_status",
     "bank_relation": "bank_relation",
     "oa_applicant": "oa_applicant",
@@ -1068,17 +1084,30 @@ def _fact_cte(
     )
     final_status_sql = (
         f"""
-        , final_rows as (
+        , payment_facts as (
+            select facts.*, case
+                when facts.bank_count > 0 and facts.total_with_tax > 0 and facts.bank_outflow_total > 0
+                     and facts.bank_inflow_total = 0 and facts.bank_all_outflow
+                     and facts.bank_comparison_resolved and facts.bank_evidence_complete and not facts.has_negative_invoice
+                then case when abs(facts.total_with_tax - facts.bank_outflow_total) <= 0.01 then 'equal'
+                          when facts.total_with_tax < facts.bank_outflow_total then 'less' else 'greater' end
+                else 'invalid' end as payment_comparison
+            from group_facts facts
+        ), classified_rows as (
+            select facts.*, {status_case} as status_code from payment_facts facts
+        ), final_rows as (
             select
                 facts.*,
-                {status_case} as status_code,
+                case when facts.has_oa_relation or facts.has_bank_relation then 'used' else 'unused' end as usage_status,
+                case when facts.has_oa_relation then 'linked' else 'unlinked' end as oa_relation,
+                '__payment_group__' as payment_group,
                 case when not facts.has_oa_relation then 'no_oa'
                      when not facts.has_bank_relation then 'oa_no_bank'
                      else 'oa_bank' end as relation_status,
                 case when facts.has_bank_relation then 'linked' else 'unlinked' end as bank_relation,
                 0::numeric as collected_amount,
                 abs(facts.total_with_tax)::numeric as pending_amount
-            from group_facts facts
+            from classified_rows facts
         )
         """
         if invoice_type == "input"
@@ -1126,9 +1155,13 @@ def _fact_cte(
         group_relation_presence as (
             select relation.group_key,
                    bool_or(member.row_type = 'oa') as has_oa_relation,
-                   bool_or(member.row_type in ('bank', 'bank_transaction')) as has_bank_relation
+                   bool_or(member.row_type in ('bank', 'bank_transaction')) as has_bank_relation,
+                   bool_and(member.row_type not in ('bank', 'bank_transaction') or bank.bank_id is not null) as bank_evidence_complete
             from group_relation_ids relation
             join relation_members member using (relation_id)
+            left join raw_group_bank_rows bank on bank.group_key = relation.group_key
+              and member.row_type in ('bank', 'bank_transaction')
+              and member.row_id in (bank.bank_id, bank.bank_canonical_id)
             group by relation.group_key
         ),
         workflow_oa as materialized (
@@ -1231,6 +1264,7 @@ def _fact_cte(
         """
                 coalesce(presence.has_oa_relation, false) as has_oa_relation,
                 coalesce(presence.has_bank_relation, false) as has_bank_relation,
+                coalesce(presence.bank_evidence_complete, false) as bank_evidence_complete,
                 coalesce(oa.oa_count, 0)::bigint as oa_count,
                 coalesce(oa.matched_oa_total, 0)::numeric as matched_oa_total,
                 coalesce(oa.oa_applicant, '') as oa_applicant,
@@ -1511,6 +1545,7 @@ def _fact_cte(
             select
                 relation.group_key,
                 coalesce(bank.legacy_mongo_id, bank.id::text) as bank_id,
+                bank.id::text as bank_canonical_id,
                 bank.txn_direction,
                 bank.is_split,
                 bank.parent_row_id,
@@ -1549,6 +1584,7 @@ def _fact_cte(
             group by
                 relation.group_key,
                 coalesce(bank.legacy_mongo_id, bank.id::text),
+                bank.id,
                 bank.txn_direction,
                 bank.is_split,
                 bank.parent_row_id,
@@ -1593,6 +1629,8 @@ def _fact_cte(
         group_banks as (
             select
                 grouped.group_key,
+                bool_and(not bank.is_split or bank.current_amount_matched) as bank_comparison_resolved,
+                bool_and(bank.txn_direction = 'outflow' and bank.amount is not null and bank.amount >= 0) as bank_all_outflow,
                 count(distinct bank.bank_id)::bigint as bank_count,
                 count(distinct bank.bank_id) filter (where bank.current_amount_matched)::bigint as matched_bank_count,
                 coalesce(sum(bank.amount) filter (
@@ -1640,6 +1678,8 @@ def _fact_cte(
                     array[]::text[]
                 ) as red_related_group_keys,
                 {oa_facts_sql}
+                coalesce(banks.bank_comparison_resolved, false) as bank_comparison_resolved,
+                coalesce(banks.bank_all_outflow, false) as bank_all_outflow,
                 coalesce(banks.bank_count, 0)::bigint as bank_count,
                 coalesce(banks.bank_inflow_total, 0)::numeric as bank_inflow_total,
                 coalesce(banks.bank_outflow_total, 0)::numeric as bank_outflow_total,
@@ -1666,10 +1706,7 @@ def _fact_cte(
 def _input_payment_status_case(
     settings: dict[str, Any],
 ) -> tuple[str, list[Any]]:
-    fragments = [
-        "when facts.oa_count > 0 and facts.bank_count > 0 and not facts.fully_matched "
-        "then 'pending'"
-    ]
+    fragments: list[str] = []
     params: list[Any] = []
     for rule in sorted(
         list(settings.get("rules") or []),
@@ -1684,9 +1721,18 @@ def _input_payment_status_case(
             else {}
         )
         predicates: list[str] = []
+        if rule["parentStatus"] == "paid":
+            predicates.append("facts.payment_comparison <> 'invalid'")
+        expected = {"paid": "equal", "invoice_less_payment": "less", "invoice_greater_payment": "greater"}.get(code)
+        if expected:
+            predicates.append("facts.payment_comparison = %s")
+            params.append(expected)
+        if "paymentComparison" in conditions:
+            predicates.append("facts.payment_comparison = %s")
+            params.append(conditions["paymentComparison"])
         for key, column in {
-            "hasOa": "facts.oa_count > 0",
-            "hasBank": "facts.bank_count > 0",
+            "hasOa": "facts.has_oa_relation",
+            "hasBank": "facts.has_bank_relation",
             "fullyMatched": "facts.fully_matched",
             "invoiceOaAmountMatched": "facts.invoice_oa_amount_matched",
         }.items():
@@ -1700,10 +1746,10 @@ def _input_payment_status_case(
             fragments.append(
                 f"when {' and '.join(predicates)} then '{_safe_code(code)}'"
             )
-    return (
-        "case " + " ".join(fragments) + " else 'pending' end",
-        params,
-    )
+    fragments.extend(["when facts.payment_comparison = 'equal' then 'paid'",
+                      "when facts.payment_comparison = 'less' then 'invoice_less_payment'",
+                      "when facts.payment_comparison = 'greater' then 'invoice_greater_payment'"])
+    return ("case " + " ".join(fragments) + " else 'pending' end", params)
 
 
 def _where_sql(
@@ -1966,11 +2012,12 @@ def _group_payload(
     relation_case_id = str(row.get("relation_case_id") or "").strip()
     if invoice_type == "input":
         payload["payment_facts"] = {
-            "has_oa": int(row.get("oa_count") or 0) > 0,
-            "has_bank": int(row.get("bank_count") or 0) > 0,
+            "has_oa": bool(row.get("has_oa_relation")),
+            "has_bank": bool(row.get("has_bank_relation")),
             "applicant_name": str(row.get("oa_applicant") or ""),
             "fully_matched": bool(row.get("fully_matched")),
             "invoice_oa_amount_matched": bool(row.get("invoice_oa_amount_matched")),
+            "payment_comparison": row["payment_comparison"],
         }
         payload["row_key"] = (
             f"relation:{relation_case_id}"

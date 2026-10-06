@@ -38,7 +38,7 @@ test("OA applicant multiselect saves and reloads without fetching on the list pa
   await expect(account("刘树刚 LIU_OLD")).toHaveAttribute("aria-selected", "true");
   const search = page.getByRole("searchbox", { name: "搜索申请人姓名或账号" });
   await search.fill("LIU_OLD");
-  await expect(page.getByRole("option")).toHaveCount(1);
+  await expect(page.getByRole("listbox", { name: "OA 申请人账号" }).getByRole("option")).toHaveCount(1);
   await account("刘树刚 LIU_OLD").click();
   await search.fill("");
   await expect(account("刘树刚 LIU")).toHaveAttribute("aria-selected", "false");

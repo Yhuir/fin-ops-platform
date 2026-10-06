@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 
 import App from "../app/App";
+import { appPageRoutes } from "../app/pageRegistry";
 import { installMockApiFetch } from "./apiMock";
 
 describe("OperationHistoryPage", () => {
@@ -70,6 +71,8 @@ describe("OperationHistoryPage", () => {
   });
 
   test("redirects a non-admin away before loading audit data", async () => {
+    // This checks access redirection, independently of cold Vite module compilation.
+    await appPageRoutes.find(route => route.path === "/")!.preload();
     window.history.pushState({}, "", "/operations/history");
     const fetchMock = installMockApiFetch({
       sessionRole: "user",

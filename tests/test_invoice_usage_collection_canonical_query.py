@@ -126,6 +126,7 @@ class RecordingInputRowAssembler:
             applicant_name="",
             fully_matched=False,
             invoice_oa_amount_matched=False,
+            payment_comparison="invalid",
         )
 
 
@@ -282,7 +283,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertNotIn("read_model.workbench_relation", sql)
         self.assertNotIn("read_model.invoice_lifecycle", sql)
 
-    def test_input_overview_ignores_table_filters(self) -> None:
+    def test_input_classification_facets_keep_other_table_filters(self) -> None:
         connection = RecordingConnection()
         repository = PostgresInputInvoiceUsageQueryRepository(connection)
 
@@ -303,8 +304,8 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         )
 
         sql = "\n".join(connection.transactions[0].statements)
-        self.assertEqual(sql.count("seller_name = any(%s::text[])"), 1)
-        self.assertEqual(sql.count("status_code = any(%s::text[])"), 1)
+        self.assertEqual(sql.count("seller_name = any(%s::text[])"), 3)
+        self.assertEqual(sql.count("status_code = any(%s::text[])"), 2)
 
     def test_output_facets_keep_other_filters_and_overview_is_separate(self) -> None:
         connection = RecordingConnection()

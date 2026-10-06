@@ -275,6 +275,7 @@ function mapRowsResponse(payload: unknown): InputInvoiceUsageRowsResponse {
   const raw = objectValue(payload);
   const pagination = objectValue(raw.pagination);
   return {
+    classification: raw.classification as InputInvoiceUsageRowsResponse["classification"],
     rows: arrayValue(raw.rows).map((item) => {
       const row = objectValue(item);
       const invoiceRelationsRaw = camelOrSnake(row, "invoiceRelations", "invoice_relations");
@@ -404,6 +405,7 @@ function mapPaymentStatusRulesResponse(payload: unknown): InputInvoiceUsagePayme
         id: stringValue(rule.id),
         code: stringValue(rule.code),
         statusCode: stringValue(camelOrSnake(rule, "statusCode", "status_code")),
+        parentStatus: rule.parentStatus as "paid" | "unpaid" | undefined,
         label: stringValue(rule.label),
         description: stringValue(rule.description),
         reason: stringValue(rule.reason),

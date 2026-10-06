@@ -123,12 +123,21 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
         self.bank('bank-a',10)
         self.bank('bank-b',10)
         self.relation('mismatch',['candidate-1','oa','bank-a','bank-b'],['invoice','oa','bank','bank'])
-        result=self.service.list_rows(filters=[{'field':'payment_status','operator':'in','values':['pending']}])
+        result=self.service.list_rows(filters=[{'field':'payment_status','operator':'in','values':['invoice_less_payment']}])
         self.assertEqual(result['summary']['invoiceCount'],1)
-        self.assertEqual(result['rows'][0]['paymentStatus']['code'],'pending')
+        self.assertEqual(result['rows'][0]['paymentStatus']['code'],'invoice_less_payment')
+        self.assertEqual(result['rows'][0]['bankTransactions']['amount'],'20.00')
         paid=self.service.list_rows(filters=[{'field':'payment_status','operator':'in','values':['paid']}])
         self.assertEqual(paid['rows'],[])
         self.assertEqual(paid['summary']['invoiceCount'],0)
+
+    def test_missing_bank_member_prevents_partial_evidence_being_classified_as_paid(self):
+        self.invoices(1)
+        self.bank('known-bank', 10)
+        self.relation('incomplete', ['candidate-1', 'known-bank', 'missing-bank'], ['invoice', 'bank', 'bank'])
+        result = self.service.list_rows()
+        self.assertEqual(result['classification']['used']['count'], 1)
+        self.assertEqual(result['rows'][0]['paymentStatus']['code'], 'pending')
 
     def test_missing_oa_detail_does_not_turn_an_existing_relation_into_a_candidate(self):
         self.invoices(1)

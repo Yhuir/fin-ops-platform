@@ -3558,6 +3558,30 @@ function inputInvoiceUsageWorkbenchRelationRow(relationConfirmed: boolean) {
   };
 }
 
+function inputInvoiceUsageClassification(rows: Array<{ payment_status: { code: string }; oa: { relation_count: number }; bank: { relation_count: number } }>) {
+  const used = rows.filter(row => row.oa.relation_count > 0 || row.bank.relation_count > 0);
+  const categories = [
+    { id: "paid", label: "发票＝付款", parent: "paid" },
+    { id: "invoice_less_payment", label: "发票＜付款", parent: "paid" },
+    { id: "invoice_greater_payment", label: "发票＞付款", parent: "paid" },
+    { id: "cash_turnover", label: "现金往来", parent: "paid" },
+    { id: "offset", label: "冲", parent: "unpaid" },
+    { id: "waiting_payment", label: "未关联流水", parent: "unpaid" },
+  ];
+  const groups = (["paid", "unpaid"] as const).map(parent => {
+    const children = categories.filter(item => item.parent === parent).map(item => ({
+      id: `category:${item.id}`, label: item.label, count: used.filter(row => row.payment_status.code === item.id).length,
+    }));
+    return { id: parent, label: parent === "paid" ? "已付款" : "未付款", tone: parent,
+      count: children.reduce((total, child) => total + child.count, 0), children };
+  });
+  return { all: { id: "all", label: "全部发票", count: rows.length },
+    used: { id: "used", label: "已使用", count: used.length },
+    unused: { id: "unused", label: "待使用", count: rows.length - used.length }, version: 1,
+    groups: [...groups, { id: "pending", label: "待核对", tone: "pending",
+      count: used.length - groups.reduce((total, group) => total + group.count, 0), children: [] }] };
+}
+
 function inputInvoiceUsageRowsPayload(
   relationConfirmed = false,
   includeWorkbenchRelationEvidence = false,
@@ -3709,6 +3733,7 @@ function inputInvoiceUsageRowsPayload(
   ];
   return {
     rows,
+    classification: inputInvoiceUsageClassification(rows),
     pagination: { page: 1, page_size: 20, total: rows.length },
     filter_config: [
       { field: "seller_name", label: "销方名称", mode: "enum_multi", sortable: true, operators: ["in", "contains"] },
@@ -4088,6 +4113,7 @@ function inputInvoiceUsageFilterSortRowsPayload(url?: URL) {
   const offset = (page - 1) * pageSize;
   return {
     rows: filteredRows.slice(offset, offset + pageSize),
+    classification: inputInvoiceUsageClassification(rows),
     pagination: { page, page_size: pageSize, total: filteredRows.length },
     filter_config: inputInvoiceUsageFilterConfig(),
     filter_options: inputInvoiceUsageFilterSortOptionsPayload().fields,

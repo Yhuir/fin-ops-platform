@@ -1,4 +1,4 @@
-import InvoiceCountSegments from "../components/common/InvoiceCountSegments";
+import InvoiceUsageClassification from "../components/inputInvoiceUsage/InvoiceUsageClassification";
 import { Button } from "@heroui/react";
 import { Download } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -32,6 +32,7 @@ import {
   nextSortDirection,
 } from "../features/inputInvoiceUsage/api";
 import type {
+  InvoiceUsageClassificationData,
   InputInvoiceUsageDetailTarget,
   InputInvoiceUsageFilter,
   InputInvoiceUsageFilterFieldConfig,
@@ -102,7 +103,7 @@ function restoreQuery(raw: unknown): InputInvoiceUsageQuery {
   if (!validateQuery(raw)) {
     return initialQuery;
   }
-  const filters = raw.filters.filter((filter) => !["invoice_date", "bank_trade_time"].includes(filter.field)).map(filter => (['relation_status', 'payment_status'].includes(filter.field) && filter.values && filter.values.length > 1 ? { ...filter, values: [filter.values[0]] } : filter));
+  const filters = raw.filters.filter((filter) => !["invoice_date", "bank_trade_time", "relation_status"].includes(filter.field)).map(filter => (['relation_status', 'payment_status'].includes(filter.field) && filter.values && filter.values.length > 1 ? { ...filter, values: [filter.values[0]] } : filter));
   const dateScopeChanged = Boolean(raw.month || raw.invoiceDateFrom || raw.invoiceDateTo)
     || filters.length !== raw.filters.length;
   return {
@@ -167,6 +168,7 @@ export default function InputInvoiceUsagePage() {
   });
   const query = querySession.value;
   const setQuery = querySession.setValue;
+  const [classification, setClassification] = useState<InvoiceUsageClassificationData | null>(null);
   const [rows, setRows] = useState<InputInvoiceUsageRow[]>([]);
   const [total, setTotal] = useState(0);
   const [statistics, setStatistics] = useState<InputInvoiceUsageStatistics | null>(null);
@@ -206,11 +208,12 @@ export default function InputInvoiceUsagePage() {
       sortDirection: query.sortDirection,
       signal,
     };
-    fetchInputInvoiceUsageRows(request)
+    return fetchInputInvoiceUsageRows(request)
       .then((payload) => {
         if (requestId !== requestIdRef.current) {
           return;
         }
+        setClassification(payload.classification ?? null);
         setRows(payload.rows);
         setTotal(payload.pagination.total);
         setStatistics(payload.statistics ?? null);
@@ -219,6 +222,7 @@ export default function InputInvoiceUsagePage() {
           : filterConfigsFromOptions(payload.filterOptions ?? []));
         setFilterOptions(filterOptionsByField(payload.filterOptions ?? []));
         hasLoadedRef.current = true;
+        return true;
       })
       .catch((caught: unknown) => {
         if (signal?.aborted || requestId !== requestIdRef.current) {
@@ -228,6 +232,7 @@ export default function InputInvoiceUsagePage() {
         setTotal(0);
         setStatistics(null);
         setError(caught instanceof Error ? caught.message : "进项发票使用情况加载失败，请稍后重试。");
+        return false;
       })
       .finally(() => {
         if (requestId === requestIdRef.current) {
@@ -332,8 +337,30 @@ export default function InputInvoiceUsagePage() {
     setQuery((current) => ({ ...current, activeWorkflow: null }));
   }, [setQuery]);
 
+  const selectedCategory = query.filters.find(item => item.field === "payment_status")?.values?.[0];
+  const selectedClassification = selectedCategory ? (selectedCategory === "pending" ? "pending" : `category:${selectedCategory}`)
+    : query.filters.find(item => item.field === "payment_group")?.values?.[0]
+      ?? query.filters.find(item => item.field === "usage_status")?.values?.[0] ?? "all";
+  const handleClassificationSelect = useCallback((id: string) => {
+    setQuery(current => {
+      const filters = current.filters.filter(item => !["usage_status", "payment_group", "payment_status"].includes(item.field));
+      if (id === "used" || id === "unused") filters.push({ field: "usage_status", operator: "in", values: [id] });
+      else if (id !== "all") {
+        filters.push({ field: "usage_status", operator: "in", values: ["used"] });
+        filters.push({ field: id.startsWith("category:") ? "payment_status" : "payment_group", operator: "in", values: [id.replace(/^category:/, "")] });
+      }
+      return { ...current, page: 1, filters };
+    });
+  }, [setQuery]);
+  useEffect(() => {
+    if (!classification || !selectedCategory) return;
+    const present = classification.groups.some(group => group.children.some(child => child.id === `category:${selectedCategory}`));
+    if (!present && selectedCategory !== "pending") handleClassificationSelect("used");
+  }, [classification, selectedCategory, handleClassificationSelect]);
+
   const handlePaymentStatusRulesSaved = useCallback(async () => {
-    loadRows("refresh");
+    const refreshed = await loadRows("refresh");
+    if (refreshed === false) throw new Error("规则已保存，列表刷新失败，请使用页面刷新重试。");
   }, [loadRows]);
 
   const loadDetail = useCallback((target: InputInvoiceUsageDetailTarget, signal?: AbortSignal) => {
@@ -423,23 +450,12 @@ export default function InputInvoiceUsagePage() {
           actions={actions}
         >
           <div className="input-invoice-usage-content switch-surface">
-            <InvoiceCountSegments className="switch-surface__scope" label="进项发票关联分类" unit="张" pending={loading || refreshing} invalid={Boolean(error)}
-                  selectedKey={query.filters.find((filter) => filter.field === "relation_status")?.values?.[0] ?? "all"}
-                  onChange={(key) => setQuery((current) => ({ ...current, page: 1, filters: [...current.filters.filter((filter) => filter.field !== "relation_status"), ...(key === "all" ? [] : [{ field: "relation_status", operator: "in" as const, values: [key] }])] }))}
-                  options={[{id:"all",label:"全部"},{id:"no_oa",label:"未关联 OA"},{id:"oa_no_bank",label:"有 OA／无流水"},{id:"oa_bank",label:"OA／流水均已关联"}].map(item => {
-                    const options = filterOptions.relation_status;
-                    const count = item.id === "all" ? options?.reduce((sum, option) => sum + (option.count ?? 0), 0) : (options ? options.find(option => option.value === item.id)?.count ?? 0 : undefined);
-                    return { key: item.id, label: item.label, count };
-                  })} />
+            {classification ? <InvoiceUsageClassification data={classification} selectedId={selectedClassification}
+              pending={loading || refreshing} invalid={Boolean(error)} onSelect={handleClassificationSelect} /> : null}
+            {!classification && !loading && !error ? <StatePanel tone="error" compact>分类数据缺失，请刷新页面。</StatePanel> : null}
             <div className="switch-surface__body">
             <PageToolbar
               className="input-invoice-usage-query-toolbar"
-              left={(
-                <InvoiceCountSegments label="进项发票支付状态" unit="张" pending={loading || refreshing} invalid={Boolean(error)}
-              selectedKey={query.filters.find(filter => filter.field === 'payment_status')?.values?.[0] ?? 'all'}
-              onChange={key => setQuery(current => ({ ...current, page: 1, filters: [...current.filters.filter(filter => filter.field !== 'payment_status'), ...(key === 'all' ? [] : [{ field: 'payment_status', operator: 'in' as const, values: [key] }])] }))}
-              options={[{ key: 'all', label: '全部', count: filterOptions.payment_status?.reduce((total, option) => total + (option.count ?? 0), 0) }, ...(filterOptions.payment_status ?? []).map(option => ({ key: option.value, label: option.label, count: option.count }))]} />
-              )}
               right={(
                 <div className="input-invoice-usage-query-actions">
                   <Button
@@ -502,7 +518,7 @@ export default function InputInvoiceUsagePage() {
           </div>
         </PageScaffold>
       </div>
-      <InputInvoiceUsageDetailDrawer onBankSplitSaved={() => loadRows("refresh")}
+      <InputInvoiceUsageDetailDrawer onBankSplitSaved={async () => { await loadRows("refresh"); }}
         open={Boolean(query.detailTarget)}
         target={query.detailTarget}
         loadDetail={loadDetail}
@@ -512,7 +528,7 @@ export default function InputInvoiceUsagePage() {
         open={query.activeWorkflow === "oaReverse"}
         loadPreview={loadOaReversePreview}
         createDraftFromSelection={createInputInvoiceUsageOaReverseDraftFromSelection}
-        onChanged={() => loadRows("refresh")}
+        onChanged={async () => { await loadRows("refresh"); }}
         loadStagedDrafts={fetchInputInvoiceUsageOaReverseStagedDrafts}
         loadSubmittedHistory={fetchInputInvoiceUsageOaReverseSubmittedHistory}
         manualStatus={manualInputInvoiceUsageOaReverseStatus}

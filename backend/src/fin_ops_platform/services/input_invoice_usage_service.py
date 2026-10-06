@@ -8,9 +8,10 @@ from hashlib import sha1
 from http import HTTPStatus
 from typing import Any
 
-from fin_ops_platform.domain.enums import InvoiceType
+from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.bank_transaction_unit import (
+    BankTransactionUnit,
     bank_unit_comparison_rows,
     bank_unit_display,
     original_bank_display_totals,
@@ -819,12 +820,26 @@ class InputInvoiceUsageQueryService:
         )
         applicant = self._first_confirmed_oa_applicant(confirmed_relations, context=context)
         fully_matched = self._has_fully_matched_relation(line_items, confirmed_relations, context=context)
+        invoice_total = _source_invoice_total(line_items)
+        bank_map = context.bank_transactions_by_id()
+        bank_ids = {row_id for relation in confirmed_relations for row_id, kind in self._typed_relation_rows(relation)
+                    if kind in {"bank", "bank_transaction"}}
+        comparison_banks = bank_unit_comparison_rows([bank_map[row_id] for row_id in bank_ids if row_id in bank_map], target=invoice_total)
+        payment_comparison = "invalid"
+        if invoice_total is not None and invoice_total > 0 and all(invoice.total_with_tax >= 0 for invoice in line_items) and bank_ids <= bank_map.keys() and comparison_banks and all(
+            bank.txn_direction == TransactionDirection.OUTFLOW and bank.amount is not None and bank.amount >= 0
+            for bank in comparison_banks
+        ):
+            paid_total = sum((bank.amount for bank in comparison_banks), ZERO)
+            if paid_total > 0 and (not any(isinstance(bank, BankTransactionUnit) for bank in comparison_banks) or paid_total == invoice_total):
+                payment_comparison = "equal" if _within_cent(invoice_total, paid_total) else "less" if invoice_total < paid_total else "greater"
         return (lifecycle_policy or self._lifecycle_policy).evaluate_input_invoice_payment(
             has_oa=has_oa,
             has_bank=has_bank,
             applicant_name=applicant,
             fully_matched=fully_matched,
             invoice_oa_amount_matched=self._has_invoice_oa_amount_match(line_items, confirmed_relations, context=context),
+            payment_comparison=payment_comparison,
         )
 
     def _first_confirmed_oa_applicant(
@@ -888,7 +903,7 @@ class InputInvoiceUsageQueryService:
         confirmed = [relation for relation in relations if self._relation_is_confirmed(relation)]
         group_bank_ids = {row_id for relation in confirmed
                           for row_id, kind in self._typed_relation_rows(relation)
-                          if kind in {"bank", "bank_transaction"} and row_id in bank_map}
+                          if kind in {"bank", "bank_transaction"}}
         group_banks = [bank_map[row_id] for row_id in group_bank_ids]
         comparison = bank_unit_comparison_rows(group_banks, target=invoice_total)
         has_split = any(getattr(bank, "is_split", False) for bank in group_banks)

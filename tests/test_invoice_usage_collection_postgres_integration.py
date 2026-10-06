@@ -69,6 +69,44 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
         self.connection.close()
         truncate_test_database(self.database_url)
 
+    def test_input_hierarchy_usage_amounts_filters_and_withdrawal(self):
+        for key, amount in [("unused", 100), ("equal", 100), ("less", 80), ("greater", 130), ("income", 100)]:
+            self.connection.execute("""insert into app.invoices(legacy_mongo_id, invoice_type, invoice_no,
+                invoice_date, invoice_month, seller_name, amount, signed_amount, total_with_tax, status)
+                values (%s, 'input', %s, '2026-10-03', '2026-10-01', '分类测试供应商', %s, %s, %s, 'pending')""",
+                (key, key, amount, amount, amount))
+            if key == "unused":
+                continue
+            self.connection.execute("""insert into app.bank_transactions(legacy_mongo_id, account_no,
+                txn_direction, counterparty_name_raw, amount, signed_amount, txn_date, txn_month, status)
+                values (%s, 'test-account', %s, '分类测试供应商', 100, %s, '2026-10-03', '2026-10-01', 'pending')""",
+                ("bank-" + key, "inflow" if key == "income" else "outflow", 100 if key == "income" else -100))
+            self.connection.execute("""insert into app.workbench_pair_relations(case_id, relation_mode, status,
+                version, month_scope, row_ids, row_types, amount_check, special_metadata, raw_payload)
+                values (%s, 'manual', 'active', 1, '2026-10-01', %s, array['input_invoice','bank_transaction'],
+                        '{}'::jsonb, '{}'::jsonb, '{}'::jsonb)""", ("case-" + key, [key, "bank-" + key]))
+        service = InputInvoiceUsageCanonicalQueryService(
+            repository=PostgresInputInvoiceUsageQueryRepository(self.connection),
+            row_assembler=InputInvoiceUsageQueryService(import_service=ImportNormalizationService(), payment_rules_provider=_UnexpectedPaymentRulesProvider()))
+        payload = service.list_rows()
+        tree = payload["classification"]
+        self.assertEqual([tree[key]["count"] for key in ("all", "used", "unused")], [5, 4, 1])
+        self.assertEqual([group["count"] for group in tree["groups"]], [3, 0, 1])
+        self.assertEqual({row["invoiceId"]: row["paymentStatus"]["code"] for row in payload["rows"]},
+                         {"unused": "pending", "equal": "paid", "less": "invoice_less_payment", "greater": "invoice_greater_payment", "income": "pending"})
+        filters = [{"field": "usage_status", "operator": "in", "values": ["used"]},
+                   {"field": "oa_relation", "operator": "in", "values": ["unlinked"]},
+                   {"field": "payment_group", "operator": "in", "values": ["paid"]}]
+        filtered = service.list_rows(filters=filters)
+        self.assertEqual(filtered["summary"]["invoiceCount"], 3)
+        self.assertEqual(filtered["classification"], tree)
+        self.assertEqual(service.export_page(filters=filters)["rows"], filtered["rows"])
+        linked = service.list_rows(filters=[{"field": "oa_relation", "operator": "in", "values": ["linked"]}])
+        self.assertEqual(linked["classification"]["all"]["count"], 0)
+        self.connection.execute("update app.workbench_pair_relations set status='withdrawn' where case_id='case-equal'")
+        after = service.list_rows()["classification"]
+        self.assertEqual([after[key]["count"] for key in ("all", "used", "unused")], [5, 3, 2])
+
     def test_financial_sql_and_python_agree_on_edge_cases(self):
         fields = invoice_financial_sql("invoice")
         cases = [

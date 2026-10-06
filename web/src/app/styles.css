@@ -1880,6 +1880,11 @@ textarea {
   transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-out-quart);
 }
 
+.input-invoice-usage-table-group-header .input-invoice-usage-filter-menu__trigger {
+  min-height: 20px;
+  vertical-align: middle;
+}
+
 .input-invoice-usage-filter-menu__trigger span {
   min-width: 0;
   overflow: hidden;

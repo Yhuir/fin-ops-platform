@@ -31,6 +31,9 @@ FILTER_CONFIG: dict[str, dict[str, Any]] = {
     "tax_amount": {"label": "税额", "mode": "money", "operators": {"between", "equals"}, "sortable": True},
     "specific_business_type": {"label": "特定业务类型", "mode": "enum_multi", "operators": {"in"}, "sortable": False},
     "taxable_item_name": {"label": "货物或应税劳务名称", "mode": "enum_multi", "operators": {"in", "contains"}, "sortable": True},
+    "usage_status": {"label": "使用情况", "mode": "enum_multi", "operators": {"in"}, "sortable": False},
+    "payment_group": {"label": "付款分类", "mode": "enum_multi", "operators": {"in"}, "sortable": False},
+    "oa_relation": {"label": "OA", "mode": "enum_multi", "operators": {"in"}, "sortable": False},
     "relation_status": {"label": "关联情况", "mode": "enum_multi", "operators": {"in"}, "sortable": False},
     "bank_relation": {"label": "流水关联", "mode": "enum_multi", "operators": {"in"}, "sortable": False},
     "payment_status": {"label": "支付状态", "mode": "enum_multi", "operators": {"in"}, "sortable": True},
@@ -96,6 +99,9 @@ def parse_input_invoice_usage_filters(filters: str | list[dict[str, Any]] | None
                 details={"field": field, "operator": operator},
             )
         values = item.get("values") or []
+        choices = {"usage_status": {"used", "unused"}, "payment_group": {"paid", "unpaid", "pending"}, "oa_relation": {"linked", "unlinked"}}
+        if field in choices and (not isinstance(values, list) or not values or any(not isinstance(value, str) or value not in choices[field] for value in values)):
+            raise InputInvoiceUsageQueryContractError("invalid_filter_value", "分类筛选值无效。")
         if field == "tax_rate":
             if not isinstance(values, list) or not values or any(not isinstance(value, str) for value in values):
                 raise InputInvoiceUsageQueryContractError("invalid_filter_value", "税率筛选需要非空字符串数组。")

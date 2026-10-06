@@ -41,6 +41,25 @@ type InputInvoiceUsageTableProps = {
   tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
 };
 
+function OaRelationFilter({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const [open, setOpen] = useState(false);
+  return <PopoverRoot isOpen={open} onOpenChange={setOpen}>
+    <PopoverTrigger aria-label="OA 关联筛选" aria-expanded={open}
+      className={`input-invoice-usage-filter-menu__trigger${value !== "all" ? " input-invoice-usage-filter-menu__trigger--active" : ""}`}>
+      <span>OA</span><Filter aria-hidden="true" size={14} />
+    </PopoverTrigger>
+    {open ? <PopoverContent placement="bottom start" className="input-invoice-usage-filter-menu__popover">
+      <PopoverDialog aria-label="OA 关联筛选" className="input-invoice-usage-filter-menu__dialog">
+        <div role="menu" aria-label="OA 关联">
+          {[{ id: "all", label: "全部" }, { id: "linked", label: "已关联 OA" }, { id: "unlinked", label: "未关联 OA" }].map(option =>
+            <button key={option.id} type="button" role="menuitemradio" aria-checked={value === option.id}
+              className="input-invoice-usage-filter-menu__item" onClick={() => { onChange(option.id); setOpen(false); }}>{option.label}</button>)}
+        </div>
+      </PopoverDialog>
+    </PopoverContent> : null}
+  </PopoverRoot>;
+}
+
 const PAGE_SIZE_OPTIONS = [20, 50, 100];
 
 type TagTone = "neutral" | "warning" | "info" | "success";
@@ -433,7 +452,10 @@ export default function InputInvoiceUsageTable({
               <tr>
                 <th className="input-invoice-usage-table-group-header" colSpan={4} scope="colgroup">进项发票</th>
                 <HeaderCell align="center" label="支付状态" rowSpan={2} strongSeparated emphasized />
-                <th className="input-invoice-usage-table-group-header input-invoice-usage-table-cell--strong-separator" colSpan={2} scope="colgroup">OA</th>
+                <th className="input-invoice-usage-table-group-header input-invoice-usage-table-cell--strong-separator" colSpan={2} scope="colgroup">
+                  <OaRelationFilter value={selectedValues(filters.find(item => item.field === "oa_relation"))[0] ?? "all"}
+                    onChange={key => key === "all" ? onFilterClear("oa_relation") : onFilterApply({ field: "oa_relation", operator: "in", values: [key] })} />
+                </th>
                 <th className="input-invoice-usage-table-group-header input-invoice-usage-table-cell--strong-separator" colSpan={3} scope="colgroup">流水</th>
               </tr>
               <tr>
