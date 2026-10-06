@@ -2004,7 +2004,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 statement["operation"] == "fetch_all"
                 for statement in self.connection.statements
             ),
-            4,  # Folding no longer queries submitted batches.
+            5,  # One page-local batch provenance read, including submitted history.
         )
         exception_sql = next(
             str(statement.get("raw_sql") or "")
@@ -3370,7 +3370,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 statement["operation"] == "fetch_all"
                 for statement in self.connection.statements
             ),
-            4,  # Folding no longer queries submitted batches.
+            5,  # One page-local batch provenance read, including submitted history.
         )
 
     def test_page_etc_hydration_is_one_statement_and_matches_legacy_dto(self) -> None:
@@ -4258,11 +4258,15 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                     for statement in self.connection.statements
                 )
             )
+            self.assertEqual(sum(
+                "select distinct on (member.row_id)" in str(statement.get("raw_sql") or "").lower()
+                for statement in self.connection.statements
+            ), 1)
             self.assertTrue(
                 all(float(statement["duration_ms"]) >= 0 for statement in self.connection.statements)
             )
         self.assertEqual(statement_counts[0], statement_counts[1])
-        self.assertEqual(statement_counts, [4, 4])  # No submitted-batch lookup in display.
+        self.assertEqual(statement_counts, [5, 5])  # One bounded batch lookup per page.
         if os.environ.get("FIN_OPS_PRINT_QUERY_TIMINGS") == "1":
             print(json.dumps(self.connection.statements, ensure_ascii=False, indent=2))
 

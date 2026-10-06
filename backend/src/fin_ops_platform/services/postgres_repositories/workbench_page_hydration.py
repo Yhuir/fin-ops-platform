@@ -45,7 +45,7 @@ from fin_ops_platform.services.workbench_etc_batch_link import etc_source_links,
 # lookup, set-based ETC/history reads, overrides, and anomaly decisions.
 # Full pages also attach OA supporting documents; folding itself performs no I/O.
 # The budget is independent of page/member count; a higher count is a regression.
-WORKBENCH_PAGE_HYDRATION_STATEMENT_BUDGET = 10
+WORKBENCH_PAGE_HYDRATION_STATEMENT_BUDGET = 11
 WORKBENCH_SUMMARY_HYDRATION_STATEMENT_BUDGET = 5
 
 
