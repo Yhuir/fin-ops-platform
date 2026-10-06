@@ -13,7 +13,6 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -21,7 +20,6 @@ ROOT = Path(__file__).resolve().parents[1]
 VENDOR = ROOT / "backend/vendor/pymongo"
 VERSION = "4.17.0+finops.1"
 UPSTREAM_VERSION = "4.17.0"
-SOURCE_URL = "https://files.pythonhosted.org/packages/ca/64/50be6fbac9c79fe2e4c17401a467da2d8764d82833d83cec325afe5cab32/pymongo-4.17.0.tar.gz"
 SOURCE_SHA256 = "70ffa08ba641468cc068cf46c06b34f01a8ce3489f6411309fcb5ceabe6b2fc0"
 FIXED_CVES = frozenset({"CVE-2026-88029", "CVE-2026-96747", "CVE-2026-96748", "CVE-2026-96749"})
 
@@ -43,9 +41,15 @@ def build(wheels: Path) -> Path:
         raise ValueError("unverified PyMongo wheel already exists; use a new build directory")
     with tempfile.TemporaryDirectory(prefix="finops-pymongo-build-") as directory:
         work = Path(directory)
-        archive = work / "source.tar.gz"
-        with urllib.request.urlopen(SOURCE_URL, timeout=60) as response:
-            archive.write_bytes(response.read())
+        run(sys.executable, "-m", "venv", str(work / "build-env"))
+        python = str(work / "build-env/bin/python")
+        run(python, "-m", "pip", "install", "--disable-pip-version-check", "-r", str(VENDOR / "build-requirements.txt"))
+        source_requirement = work / "source.txt"
+        source_requirement.write_text(f"pymongo=={UPSTREAM_VERSION} --hash=sha256:{SOURCE_SHA256}\n")
+        # Honor the host's configured package index. pip verifies the source
+        # hash before running its metadata hook; there is no alternate source.
+        run(python, "-m", "pip", "download", "--require-hashes", "--no-deps", "--no-binary=:all:", "--no-build-isolation", "--dest", str(work), "-r", str(source_requirement))
+        archive = work / f"pymongo-{UPSTREAM_VERSION}.tar.gz"
         if digest(archive.read_bytes()) != SOURCE_SHA256:
             raise ValueError("PyMongo upstream source digest mismatch")
         with tarfile.open(archive) as source:
@@ -55,10 +59,6 @@ def build(wheels: Path) -> Path:
         # The upstream sdist caches static metadata. Regenerate it from the
         # patched version, otherwise hatch reuses the original public version.
         (source_root / "PKG-INFO").unlink()
-        # Pin the build backend as well as the source; do not modify site-packages.
-        run(sys.executable, "-m", "venv", str(work / "build-env"))
-        python = str(work / "build-env/bin/python")
-        run(python, "-m", "pip", "install", "--disable-pip-version-check", "-r", str(VENDOR / "build-requirements.txt"))
         run(python, "-m", "pip", "wheel", "--no-build-isolation", "--no-deps", "--wheel-dir", str(work / "wheels"), str(source_root))
         candidates = list((work / "wheels").glob(f"pymongo-{VERSION}-*.whl"))
         if len(candidates) != 1:

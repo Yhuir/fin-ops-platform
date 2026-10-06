@@ -31,6 +31,23 @@ DriverSecurityTests = probe.DriverSecurityTests
 
 
 class DependencyAuditTests(unittest.TestCase):
+    def test_source_download_requires_hash_and_rejects_different_archive(self):
+        calls = []
+        def execute(*args, **kwargs):
+            calls.append(args)
+            if "download" in args:
+                self.assertIn("--require-hashes", args)
+                self.assertIn("--no-build-isolation", args)
+                self.assertNotIn("--index-url", args)
+                requirement = Path(args[args.index("-r") + 1]).read_text()
+                self.assertIn(dependencies.SOURCE_SHA256, requirement)
+                directory = Path(args[args.index("--dest") + 1])
+                (directory / f"pymongo-{dependencies.UPSTREAM_VERSION}.tar.gz").write_bytes(b"wrong source")
+        with tempfile.TemporaryDirectory() as directory, patch.object(dependencies, "run", side_effect=execute):
+            with self.assertRaisesRegex(ValueError, "source digest mismatch"):
+                dependencies.build(Path(directory))
+        self.assertFalse(any("wheel" in call for call in calls))
+
     def test_prepare_preserves_existing_versions_except_explicit_changes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

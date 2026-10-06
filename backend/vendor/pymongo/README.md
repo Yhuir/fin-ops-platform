@@ -19,7 +19,8 @@ python3 scripts/python_dependencies.py install
 python3 scripts/python_dependencies.py audit
 ```
 
-构建固定上游源码摘要及构建后端，精确应用补丁后重新生成发行元数据和 C 扩展。
+构建通过主机已有 pip 包索引下载固定版本，在执行源码元数据前校验固定摘要；
+固定构建后端，精确应用补丁后重新生成发行元数据和 C 扩展。
 安装包与来源信息存于 ignored `.runtime/python-wheels/`。摘要仅验证构建与安装边界，
 不是业务数据身份。修改补丁后使用新的构建目录，不复用旧构建记录。
 
