@@ -47,6 +47,24 @@ class ImportWorkflowApiTests(unittest.TestCase):
         result = self.app.handle_request("GET", f"/api/background-jobs/import:{job.import_job_id}/result")
         self.assertEqual(json.loads(result.body)["result"]["session"], {"private": "preview"})
 
+    def test_completed_import_leaves_activity_but_result_survives_and_partial_success_stays(self):
+        job = self.make_job()
+        for result, expected_count in [({"created": 1}, 0), ({"outcome": "no_changes"}, 0),
+                                       ({"outcome": "partial_success", "failed": ["file-1"]}, 1)]:
+            with self.subTest(result=result):
+                self.queue.update(job.import_job_id, status="succeeded", result_payload=result)
+                response = self.app.handle_request("GET", "/api/background-jobs/active")
+                self.assertEqual(response.status_code, 200)
+                payload = json.loads(response.body)
+                self.assertEqual(len(payload["jobs"]), expected_count)
+                self.assertEqual(len(payload["attention_jobs"]), expected_count)
+                if expected_count:
+                    self.assertEqual(payload["jobs"][0]["status"], "partial_success")
+                detail = self.app.handle_request("GET", f"/api/background-jobs/import:{job.import_job_id}")
+                self.assertEqual(detail.status_code, 200)
+                self.assertEqual(json.loads(detail.body)["job"]["result_summary"], result)
+                self.assertIsNone(self.queue.get_job(job.import_job_id).acknowledged_at)
+
     def test_shared_task_is_visible_but_unrelated_jobs_stay_private(self):
         job = self.make_job(owner="another-user")
         for suffix in ["", "/result"]:

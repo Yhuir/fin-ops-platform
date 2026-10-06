@@ -718,7 +718,7 @@ export default function EtcTicketManagementPage() {
   const [oaActionDecision, setOaActionDecision] = useState<"submitted" | "not_submitted" | null>(null);
   const oaActionLoading = oaActionDecision !== null;
   const [oaPrefillOpen, setOaPrefillOpen] = useState(false);
-  const refreshedImportJobIdsRef = useRef<Set<string>>(new Set());
+  const importJobStatesRef = useRef<Map<string, string>>(new Map());
   const oaDraftIntentRef = useRef<{ businessBatchId: string; idempotencyKey: string } | null>(null);
   const activeStatusRef = useRef(activeStatus);
   const batchPageRef = useRef(batchPage);
@@ -921,16 +921,15 @@ export default function EtcTicketManagementPage() {
     if (!active) {
       return;
     }
-    const completedImportJobs = jobs.filter(
-      (job) =>
-        job.type === "etc_invoice_import"
-        && (job.status === "succeeded" || job.status === "partial_success")
-        && !refreshedImportJobIdsRef.current.has(job.jobId),
-    );
-    if (completedImportJobs.length === 0) {
-      return;
-    }
-    completedImportJobs.forEach((job) => refreshedImportJobIdsRef.current.add(job.jobId));
+    const current = new Map(jobs.filter(job => job.type === "etc_invoice_import").map(job => [job.jobId, job.status]));
+    const previous = importJobStatesRef.current;
+    importJobStatesRef.current = current;
+    // Successful imports leave the active feed. Re-read canonical facts when an
+    // observed task settles or disappears; absence itself does not prove success.
+    const changed = [...previous].some(([id, status]) =>
+      (status === "queued" || status === "running") && !["queued", "running"].includes(current.get(id) ?? ""))
+      || [...current].some(([id, status]) => status === "partial_success" && previous.get(id) !== status);
+    if (!changed) return;
     void (async () => {
       await loadBatches();
       setDetailReloadKey((current) => current + 1);

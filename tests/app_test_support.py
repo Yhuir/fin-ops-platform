@@ -471,9 +471,11 @@ class DurableImportQueueHarness:
     def list_by_session(self, session_id):
         return [job for job in reversed(self.jobs) if job.import_session_id == session_id]
 
-    def list_jobs(self, *, created_by, limit=100, statuses=None, include_shared=False):
+    def list_jobs(self, *, created_by, limit=100, statuses=None, include_shared=False, include_completed=True):
         return [job for job in reversed(self.jobs) if (job.created_by == created_by or include_shared and job.import_type in {"file_import.confirm", "etc_invoice_import.confirm"})
-                and (statuses is None or job.status in statuses)][:limit]
+                and not job.acknowledged_at and (statuses is None or job.status in statuses)
+                and (include_completed or job.status in {"pending", "processing", "awaiting_confirmation", "needs_review", "failed"}
+                     or job.status == "succeeded" and job.result_payload.get("outcome") == "partial_success")][:limit]
 
     def confirm_job(self, job_id, *, expected_version, payload):
         job = self.get_job(job_id)

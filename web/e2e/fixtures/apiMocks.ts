@@ -2711,7 +2711,7 @@ function importSessionPayload(
 ) {
   const sessionId = importSessionIds[scenario];
   return {
-    job: { ...preparationJob(scenario), status: imported ? "succeeded" : "awaiting_confirmation" },
+    job: { ...preparationJob(scenario), status: imported ? "succeeded" : "awaiting_confirmation", message: imported ? "导入完成。" : "导入预览已准备好" },
     session: {
       id: sessionId,
       imported_by: "web_finance_user",
@@ -8481,6 +8481,9 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
 
     if (path === "/api/background-jobs/active") {
       return json(route, { jobs: [] });
+    }
+    if (path === "/api/background-jobs/job_etc_import_e2e_001") {
+      return json(route, { job: etcImportPayload(true).job });
     }
 
     if (path === "/api/app-health") {

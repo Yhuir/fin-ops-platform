@@ -592,7 +592,7 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
             {("oa", "oa-exp-2206")},
         )
 
-    def test_owned_attachment_item_alias_is_canonicalized_when_oa_payload_lacks_source_id(self) -> None:
+    def test_registered_attachment_item_alias_is_canonicalized_without_scanning_attachments(self) -> None:
         source_alias = "6a0ee8613bb8164165d8c61a"
         oa = oa_row("oa-exp-2206", amount=Decimal("413.00"), payload={"apply_type": "日常报销"})
         oa["source_aliases"] = [f"oa-exp-{source_alias}:item:2:9ca59ea6e4ab"]
@@ -625,8 +625,9 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
             },
             {("oa", "oa-exp-2206")},
         )
-        self.assertIn("from app.oa_attachments attachment", connection.queries[0][0])
+        self.assertNotIn("from app.oa_attachments attachment", connection.queries[0][0])
         self.assertIn("from app.oa_source_aliases alias_row", connection.queries[0][0])
+        self.assertIn("alias_row.status = 'active'", connection.queries[0][0])
 
     def test_historical_oa_source_alias_lookup_is_exact_and_canonicalized(self) -> None:
         source_alias = "6a0ee8613bb8164165d8c61a"

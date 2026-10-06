@@ -232,10 +232,10 @@ test.describe("bank transaction import browser flow", () => {
       const confirmResponse = waitForImportConfirm(page);
       await page.getByRole("button", { name: "确认导入" }).click();
       await mark("apiLatencyMs", confirmResponse);
-      await mark("finalSettledLatencyMs", expect(page.getByText("已确认导入")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("status").filter({ hasText: "导入完成。" })).toBeVisible());
     });
 
-    await expect(page.getByText("已确认导入")).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "导入完成。" })).toBeVisible();
     expect(api.count("POST /imports/files/confirm")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
 
@@ -287,10 +287,10 @@ test.describe("bank transaction import browser flow", () => {
       const confirmResponse = waitForImportConfirm(page);
       await page.getByRole("button", { name: "确认导入" }).click();
       await mark("apiLatencyMs", confirmResponse);
-      await mark("finalSettledLatencyMs", expect(page.getByText("已确认导入")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("status").filter({ hasText: "导入完成。" })).toBeVisible());
     });
 
-    await expect(page.getByText("已确认导入")).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "导入完成。" })).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(api.count("POST /imports/files/confirm")).toBe(1);
 
@@ -340,7 +340,7 @@ test.describe("bank transaction import browser flow", () => {
     await expect(page.getByText(/已阻止确认导入/)).toContainText("识别账户与所选账户不一致");
     await expect(page.getByRole("button", { name: "确认导入" })).toBeDisabled();
     await expect(page.getByRole("dialog", { name: "银行账户冲突确认" })).toHaveCount(0);
-    await expect(page.getByText("已确认导入")).toHaveCount(0);
+    await expect(page.getByRole("status").filter({ hasText: "导入完成。" })).toHaveCount(0);
     await expect(page.getByRole("grid", { name: "导入预览结果" })).toHaveCount(0);
     expect(api.count("POST /imports/files/confirm")).toBe(0);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
@@ -380,10 +380,10 @@ test.describe("bank transaction import browser flow", () => {
       const confirmResponse = waitForImportConfirm(page);
       await page.getByRole("button", { name: "确认导入" }).click();
       await mark("apiLatencyMs", confirmResponse);
-      await mark("finalSettledLatencyMs", expect(page.getByText("已确认导入")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("status").filter({ hasText: "导入完成。" })).toBeVisible());
     });
 
-    await expect(page.getByText("已确认导入")).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "导入完成。" })).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(api.count("POST /imports/files/confirm")).toBe(1);
     expect(api.lastBody("POST /imports/files/confirm")).toMatchObject({
@@ -452,7 +452,7 @@ test.describe("bank transaction import browser flow", () => {
     });
 
     await expect(page.getByText("预览后数据已变化，请重新预览后再确认。")).toBeVisible();
-    await expect(page.getByText("已确认导入")).toHaveCount(0);
+    await expect(page.getByRole("status").filter({ hasText: "导入完成。" })).toHaveCount(0);
     expect(api.count("POST /imports/files/confirm")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(unexpectedRuntimeErrors(browserErrors, [/409/])).toEqual([]);
@@ -480,7 +480,7 @@ test.describe("bank transaction import browser flow", () => {
     });
 
     await expect(page.getByText("导入任务创建失败，请稍后重试。")).toBeVisible();
-    await expect(page.getByText("已确认导入")).toHaveCount(0);
+    await expect(page.getByRole("status").filter({ hasText: "导入完成。" })).toHaveCount(0);
     expect(api.count("POST /imports/files/confirm")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(unexpectedRuntimeErrors(browserErrors, [/500/])).toEqual([]);

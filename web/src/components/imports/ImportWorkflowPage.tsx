@@ -5,6 +5,8 @@ import { Link as RouterLink, useSearchParams } from "react-router-dom";
 import { fetchImportBankMappings } from "../../features/imports/jobOperations";
 import { SharedImportTasksButton } from "./ImportJobDiagnostics";
 import { fetchBackgroundJob } from "../../features/backgroundJobs/api";
+import type { BackgroundJob } from "../../features/backgroundJobs/types";
+import ImportTaskResult from "./ImportTaskResult";
 
 import {
   EmptyValue,
@@ -69,6 +71,7 @@ import type { ImportWorkflowMode } from "../../features/imports/importRoutes";
 type ImportWorkflowPageProps = {
   mode: ImportWorkflowMode;
   taskId?: string;
+  onBusyChange?: (busy: boolean) => void;
 };
 
 type EtcPreviewRow = EtcImportItem & {
@@ -453,7 +456,7 @@ function EtcPreviewTable({ rows, loading }: { rows: EtcPreviewRow[]; loading: bo
   );
 }
 
-export default function ImportWorkflowPage({ mode, taskId }: ImportWorkflowPageProps) {
+export default function ImportWorkflowPage({ mode, taskId, onBusyChange }: ImportWorkflowPageProps) {
   const { active: pageActive, activationGeneration } = useOptionalPageActivation();
   const inputId = useId();
   const { setProgress, clearProgress } = useImportProgress();
@@ -474,6 +477,7 @@ export default function ImportWorkflowPage({ mode, taskId }: ImportWorkflowPageP
   } = useImportWorkflowDraft();
   const [searchParams, setSearchParams] = useSearchParams();
   const [contextRefreshToken, setContextRefreshToken] = useState(0);
+  const [submittedJob, setSubmittedJob] = useState<BackgroundJob | null>(null);
   const requestedJobId = taskId ?? searchParams.get("import_job");
   useEffect(() => {
     if (!requestedJobId || !pageActive) return;
@@ -538,6 +542,10 @@ export default function ImportWorkflowPage({ mode, taskId }: ImportWorkflowPageP
   const [manualInvoiceEntryOpen, setManualInvoiceEntryOpen] = useState(false);
   const [supportingDocumentGalleryOpen, setSupportingDocumentGalleryOpen] = useState(false);
   const [reviewDrawerOpen, setReviewDrawerOpen] = useState(false);
+  useEffect(() => {
+    onBusyChange?.(isPreviewing || isConfirming || isDiscarding || mappingRetryingFileId !== null);
+    return () => onBusyChange?.(false);
+  }, [isPreviewing, isConfirming, isDiscarding, mappingRetryingFileId, onBusyChange]);
   const mountedRef = useRef(false);
   const pageActiveRef = useRef(pageActive);
   const activationGenerationRef = useRef(activationGeneration);
@@ -568,6 +576,7 @@ export default function ImportWorkflowPage({ mode, taskId }: ImportWorkflowPageP
     }
     lastFreshGenerationRef.current = activationGeneration;
     resetDraft();
+    setSubmittedJob(null);
     setIsDragActive(false);
     setMappingDrafts({});
     setMappingRetryingFileId(null);
@@ -769,6 +778,7 @@ export default function ImportWorkflowPage({ mode, taskId }: ImportWorkflowPageP
   ), [etcPreviewPayload]);
 
   function resetPreviewState() {
+    setSubmittedJob(null);
     setPreviewPayload(null);
     setEtcPreviewPayload(null);
     setEtcImported(false);
@@ -875,6 +885,7 @@ export default function ImportWorkflowPage({ mode, taskId }: ImportWorkflowPageP
   async function handleClearFiles() {
     if (mode === "etc_invoice" && etcImported) {
       resetDraft();
+      setSubmittedJob(null);
       return;
     }
     const sessionId = mode === "etc_invoice" ? etcPreviewPayload?.sessionId : previewPayload?.session.id;
@@ -888,6 +899,7 @@ export default function ImportWorkflowPage({ mode, taskId }: ImportWorkflowPageP
           await discardImportSession(sessionId);
         }
         resetDraft();
+        setSubmittedJob(null);
       } catch (error) {
         setErrorMessage(resolveImportApiErrorMessage(error, "放弃导入预览失败，预览内容已保留。"));
       } finally {
@@ -896,6 +908,7 @@ export default function ImportWorkflowPage({ mode, taskId }: ImportWorkflowPageP
       return;
     }
     resetDraft();
+    setSubmittedJob(null);
   }
 
   async function handleRefresh() {
@@ -1055,6 +1068,7 @@ export default function ImportWorkflowPage({ mode, taskId }: ImportWorkflowPageP
   }
 
   function handleManualImportAccepted(payload: ImportSessionPayload, recordLabel: "发票" | "流水") {
+    setSubmittedJob(payload.job ?? null);
     if (payload.job && payload.job.status !== "succeeded" && payload.job.status !== "partial_success") {
       setFeedbackMessage("已开始后台导入");
       setProgress({ tone: "loading", label: `${recordLabel}录入任务已创建。` });
@@ -1083,6 +1097,7 @@ export default function ImportWorkflowPage({ mode, taskId }: ImportWorkflowPageP
       setErrorMessage(null);
       try {
         const payload = await confirmEtcImportSession(etcPreviewPayload.sessionId, selectedEtcTaskId, etcPreviewPayload.job?.version);
+        setSubmittedJob(payload.job ?? null);
         setEtcImported(true);
         setFeedbackMessage(payload.job ? "已开始后台导入" : "已导入 ETC票据管理");
       } catch (error) {
@@ -1105,6 +1120,7 @@ export default function ImportWorkflowPage({ mode, taskId }: ImportWorkflowPageP
     setErrorMessage(null);
     try {
       const payload = await confirmImportFiles(previewPayload.session.id, confirmableFileIds, previewPayload.job?.version);
+      setSubmittedJob(payload.job ?? null);
       if (payload.job) {
         resetDraft();
         if (payload.job.status === "succeeded" || payload.job.status === "partial_success") {
@@ -1212,7 +1228,8 @@ export default function ImportWorkflowPage({ mode, taskId }: ImportWorkflowPageP
         }
       >
         <div className="import-workflow-content">
-          {feedbackMessage ? <ImportNotice tone="success">{feedbackMessage}</ImportNotice> : null}
+          {submittedJob && <ImportTaskResult key={submittedJob.jobId} accepted={submittedJob} embedded={Boolean(taskId)} />}
+          {feedbackMessage && !submittedJob ? <ImportNotice tone="success">{feedbackMessage}</ImportNotice> : null}
           {errorMessage ? <ImportNotice tone="danger">{errorMessage}</ImportNotice> : null}
           {conflictingPreviewFiles.length > 0 ? (
             <ImportNotice tone="warning">

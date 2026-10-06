@@ -14,6 +14,51 @@ test.describe("production admin AppHealth smoke", () => {
   test.skip(!productionAdminSmokeEnabled, "Set FIN_OPS_E2E_PRODUCTION_ADMIN_SMOKE=1 to run the production admin AppHealth smoke.");
   test.skip(!adminToken, "Set FIN_OPS_E2E_ADMIN_TOKEN to a real admin OA Admin-Token value.");
 
+  test("shared task drawer repeatedly dismisses without writes or unrelated page reads", async ({ page, baseURL }, testInfo) => {
+    const writes: string[] = [];
+    const reads: string[] = [];
+    page.on("request", request => {
+      const path = new URL(request.url()).pathname;
+      if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method())) writes.push(path);
+      if (request.method() === "GET") reads.push(path);
+    });
+    await page.context().addCookies([{ name: "Admin-Token", value: adminToken,
+      domain: cookieDomain(baseURL ?? "https://www.yn-sourcing.com"), path: "/", secure: true, sameSite: "Lax" }]);
+    await page.goto("/fin-ops/imports/invoices", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: "发票导入", exact: true })).toBeVisible();
+    const jobsResponse = await page.request.get("/fin-ops-api/background-jobs/active");
+    expect(jobsResponse.status()).toBe(200);
+    const payload = await jobsResponse.json();
+    expect(payload.jobs.filter((job: { job_id: string; status: string }) => job.job_id.startsWith("import:") && job.status === "succeeded")).toEqual([]);
+    const samples: Array<{ openMs: number; closeMs: number }> = [];
+    for (let index = 0; index < 10; index++) {
+      await page.locator(".app-sidebar-brand-mark").click();
+      await expect(page.getByRole("dialog", { name: "全局运行状态" })).toBeVisible();
+      const readOffset = reads.length;
+      const opened = Date.now();
+      await page.getByRole("button", { name: "查看待处理任务", exact: true }).click();
+      const drawer = page.getByRole("dialog", { name: "共享导入任务", exact: true });
+      await expect(drawer.getByRole("button", { name: "刷新任务", exact: true })).toBeEnabled();
+      await expect(page.getByRole("dialog")).toHaveCount(1);
+      const openMs = Date.now() - opened;
+      const closed = Date.now();
+      if (index % 3 === 0) await drawer.getByRole("button", { name: "关闭抽屉", exact: true }).click();
+      else if (index % 3 === 1) await page.keyboard.press("Escape");
+      else await page.locator(".finance-drawer__backdrop").click({ position: { x: 4, y: 4 } });
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(page.locator(".app-sidebar-brand-mark")).toBeFocused();
+      samples.push({ openMs, closeMs: Date.now() - closed });
+      const taskReads = reads.slice(readOffset).filter(path => /\/imports\/jobs$/.test(path));
+      expect(taskReads).toHaveLength(1);
+      expect(reads.slice(readOffset).filter(path => /\/(workbench|bank-details|cost-statistics|pending-invoices)\//.test(path))).toEqual([]);
+    }
+    await page.reload();
+    await page.locator(".app-sidebar-brand-mark").click();
+    await expect(page.getByRole("button", { name: "导入完成。", exact: true })).toHaveCount(0);
+    expect(writes).toEqual([]);
+    await testInfo.attach("production-import-drawer-latency", { body: JSON.stringify({ samples, mutatingRequests: writes.length }), contentType: "application/json" });
+  });
+
   test("opens the admin-only AppHealth dashboard without browser errors or mutating requests", async ({ page, baseURL }) => {
     const mutatingRequests: string[] = [];
     const dashboardStatuses: number[] = [];

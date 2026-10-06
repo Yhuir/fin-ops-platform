@@ -10,6 +10,7 @@ import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import type { SessionPayload } from "../features/session/api";
 import AppRouter from "../app/router";
+import { BackgroundJobProgressProvider } from "../features/backgroundJobs/BackgroundJobProgressProvider";
 
 const defaultSession: SessionPayload = {
   allowed: true,
@@ -70,7 +71,7 @@ function createAuthenticatedSession(override: AuthenticatedAppSessionOverride = 
 
 export function renderAuthenticatedAppAt(
   pathname: string,
-  options: { session?: AuthenticatedAppSessionOverride } = {},
+  options: { session?: AuthenticatedAppSessionOverride; backgroundTasks?: boolean } = {},
 ) {
   const session = createAuthenticatedSession(options.session);
   const sessionContext: SessionContextValue = {
@@ -100,7 +101,7 @@ export function renderAuthenticatedAppAt(
                     <Link to="/bank-flow-rule-batches">流水规则批量处理</Link>
                   </nav>
                   <main>
-                    <AppRouter />
+                    {options.backgroundTasks ? <BackgroundJobProgressProvider><AppRouter /></BackgroundJobProgressProvider> : <AppRouter />}
                   </main>
                 </GlobalOperationOverlayProvider>
               </AppChromeProvider>

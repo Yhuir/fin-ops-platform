@@ -2,6 +2,58 @@ import { expect, test } from "./fixtures/strictTest";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
+test("task notification opens one interactive detail and survives removal from the status feed", async ({ page }) => {
+  await installDeterministicApiMocks(page, { sessionMode: "admin", sessionUsername: "YNSYLP005" });
+  const id = "30445642-a86f-4c66-aff2-e24c7a7edbf0";
+  let visible = true;
+  let listReads = 0;
+  await page.route("**/api/background-jobs/active", route => route.fulfill({ json: { jobs: visible ? [{
+    job_id: `import:${id}`, type: "file_import", status: "failed", short_label: "测试导入需要处理",
+    source: { route: "/imports/invoices" }, affected_domains: ["imports_invoices"],
+  }] : [] } }));
+  await page.route("**/api/imports/jobs**", route => {
+    if (new URL(route.request().url()).pathname.endsWith(id)) return route.fulfill({ json: {
+      job: { job_id: id, import_type: "file_import.confirm", created_by: "another-owner", status: "failed", version: 1,
+        affected_domains: ["imports_invoices"], updated_at: "2026-10-06", disposition: null, allowed_actions: [] },
+      files: [], file_pagination: { page: 1, page_size: 20, total: 0, has_more: false },
+    } });
+    listReads++;
+    return route.fulfill({ json: { rows: [], pagination: { page: 1, page_size: 20, total: 0, has_more: false } } });
+  });
+  await page.goto("/");
+  await page.locator(".app-sidebar-brand-mark").click();
+  await page.getByRole("button", { name: "测试导入需要处理", exact: true }).click();
+  const detail = page.getByRole("dialog", { name: "导入任务详情", exact: true });
+  await expect(detail).toContainText("another-owner");
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  await expect(detail).not.toHaveAttribute("inert", "");
+  expect(listReads).toBe(0);
+  visible = false;
+  const refreshed = page.waitForResponse("**/api/background-jobs/active");
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await refreshed;
+  await expect(detail).toBeVisible();
+  await detail.getByRole("button", { name: "关闭抽屉", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator(".app-sidebar-brand-mark")).toBeFocused();
+  await page.locator(".app-sidebar-brand-mark").click();
+  await expect(page.getByRole("dialog", { name: "全局运行状态" })).toBeVisible();
+  await page.getByRole("button", { name: "查看待处理任务", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "共享导入任务" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.locator(".app-sidebar-brand-mark").click();
+  await page.getByRole("button", { name: "查看待处理任务", exact: true }).click();
+  await page.locator(".finance-drawer__backdrop").click({ position: { x: 4, y: 4 } });
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  // Development StrictMode replays mount effects; closing must stop reads in either build.
+  const readsAfterClose = listReads;
+  const closedRefresh = page.waitForResponse("**/api/background-jobs/active");
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await closedRefresh;
+  expect(listReads).toBe(readsAfterClose);
+});
+
 test("administrator inspects another owner's failure, ends handling once and sees refreshed state", async ({ page }) => {
   await installDeterministicApiMocks(page, { sessionMode: "admin", sessionUsername: "YNSYLP005" });
   let closed = false;
@@ -37,10 +89,12 @@ test("platform user handles another creator's preview from the global shared dra
   await installDeterministicApiMocks(page, { sessionMode: "user", sessionUsername: "E2EUSER001", allowedPageKeys: ["cost-statistics"] });
   const id = "30445642-a86f-4c66-aff2-e24c7a7edbf0";
   const job = { job_id: id, import_type: "file_import.confirm", created_by: "another-creator", status: "awaiting_confirmation", stage: "prepare", version: 2, affected_domains: ["imports_invoices"], updated_at: "2026-09-22T04:00:00Z", error_code: null, disposition: null, allowed_actions: [] };
+  let confirmed = 0;
+  let completed = false;
   await page.route("**/api/imports/jobs**", route => route.fulfill({ json: new URL(route.request().url()).pathname.endsWith(id)
     ? { job, files: [], file_pagination: { page: 1, page_size: 20, total: 0, has_more: false } }
     : { rows: [job], pagination: { page: 1, page_size: 20, total: 1, has_more: false } } }));
-  await page.route("**/api/background-jobs/import*", route => route.fulfill({ json: { job: { job_id: `import:${id}`, type: "file_import", status: "awaiting_confirmation", phase: "prepare", version: 2, source: { session_id: "import_session_e2e_invoice", route: "/imports/invoices" } } } }));
+  await page.route("**/api/background-jobs/import*", route => route.fulfill({ json: { job: { job_id: `import:${id}`, type: "file_import", status: completed ? "succeeded" : confirmed ? "queued" : "awaiting_confirmation", message: completed ? "导入完成。" : "已受理", phase: confirmed ? "commit" : "prepare", version: 2, source: { session_id: "import_session_e2e_invoice", route: "/imports/invoices" } } } }));
   await page.goto("/cost-statistics");
   await page.locator(".app-sidebar-brand-mark").click();
   await page.getByRole("button", { name: "查看待处理任务", exact: true }).click();
@@ -49,16 +103,53 @@ test("platform user handles another creator's preview from the global shared dra
   const preview = page.getByRole("dialog", { name: "处理导入任务", exact: true });
   await expect(preview.getByText("已恢复指定导入任务，请核对预览。")).toBeVisible();
   await expect(preview.getByRole("button", { name: "确认导入", exact: true })).toBeEnabled();
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(preview).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/cost-statistics");
   const payload = await page.evaluate(async () => (await fetch("/imports/files/sessions/import_session_e2e_invoice")).json());
-  let confirmed = 0;
+  let releaseConfirm!: () => void;
+  const confirmGate = new Promise<void>(resolve => { releaseConfirm = resolve; });
   await page.route("**/imports/files/confirm", async route => {
     expect(route.request().postDataJSON().session_id).toBe("import_session_e2e_invoice");
     confirmed++;
+    await confirmGate;
     await route.fulfill({ json: { ...payload, job: { ...payload.job, job_id: `import:${id}`, status: "queued", phase: "commit" } } });
   });
   await preview.getByRole("button", { name: "确认导入", exact: true }).click();
+  await expect(preview.getByRole("button", { name: "关闭抽屉" })).toBeDisabled();
+  await expect(preview.getByRole("button", { name: "返回任务详情" })).toBeDisabled();
+  releaseConfirm();
   await expect(preview).toContainText("已开始后台导入");
   expect(confirmed).toBe(1);
+  completed = true;
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(preview.getByRole("region", { name: "本次导入结果" })).toContainText("导入完成。");
+  await preview.getByRole("button", { name: "返回任务详情" }).click();
+  await expect(page.getByRole("dialog", { name: "导入任务详情" })).toBeVisible();
+  await page.getByRole("button", { name: "返回任务列表" }).click();
+  await page.getByRole("button", { name: "关闭抽屉", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expectNoUnexpectedSuccessUiErrors(page, { allowText: /历史失败原因|未记录失败原因。/g });
+});
+
+test("shared preview preserves the import page's unsubmitted file selection", async ({ page }) => {
+  await installDeterministicApiMocks(page, { sessionMode: "admin", sessionUsername: "YNSYLP005" });
+  const id = "30445642-a86f-4c66-aff2-e24c7a7edbf0";
+  const job = { job_id: id, import_type: "file_import.confirm", created_by: "another-creator", status: "awaiting_confirmation",
+    version: 2, affected_domains: ["imports_invoices"], updated_at: "2026-09-22T04:00:00Z", disposition: null, allowed_actions: [] };
+  await page.route("**/api/imports/jobs**", route => route.fulfill({ json: new URL(route.request().url()).pathname.endsWith(id)
+    ? { job, files: [], file_pagination: { page: 1, page_size: 20, total: 0, has_more: false } }
+    : { rows: [job], pagination: { page: 1, page_size: 20, total: 1, has_more: false } } }));
+  await page.route("**/api/background-jobs/import*", route => route.fulfill({ json: { job: { job_id: `import:${id}`, status: "awaiting_confirmation",
+    source: { session_id: "import_session_e2e_invoice" } } } }));
+  await page.goto("/imports/invoices");
+  await page.locator('input[type="file"]').first().setInputFiles({ name: "private-draft.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: Buffer.from("unsubmitted draft") });
+  await page.getByRole("button", { name: "查看待处理任务", exact: true }).click();
+  await page.getByRole("button", { name: "查看详情", exact: true }).click();
+  await page.getByRole("button", { name: "查看发票导入预览" }).click();
+  await expect(page.getByText("已恢复指定导入任务，请核对预览。")).toBeVisible();
+  await page.getByRole("dialog", { name: "处理导入任务" }).getByRole("button", { name: "关闭抽屉" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByText("private-draft.xlsx", { exact: true })).toBeVisible();
 });

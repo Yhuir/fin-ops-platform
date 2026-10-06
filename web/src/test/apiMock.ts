@@ -5224,6 +5224,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         jobs: cloneJson(backgroundJobs),
       },
     }),
+    "/api/background-jobs/job_etc_import_0001": () => ({ body: { job: etcInvoiceStore.confirmImport().job } }),
     "/api/workbench/settings": ({ init, jsonBody }) => {
       if ((init?.method ?? "GET").toUpperCase() === "POST" && jsonBody) {
         const forbiddenAclKeys = [

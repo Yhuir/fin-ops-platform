@@ -297,5 +297,5 @@ class ImportWorkflowService:
         return self.repository.retry_job(job.import_job_id, expected_version=job.version, command_context=self.command_context(owner))
 
     def active_payloads(self, owner: str) -> list[dict[str, Any]]:
-        return [import_job_payload(job) for job in self.repository.list_jobs(created_by=owner, limit=100, include_shared=True)
-                if not job.acknowledged_at and job.status != "canceled"]
+        return [import_job_payload(job) for job in self.repository.list_jobs(
+            created_by=owner, limit=100, include_shared=True, include_completed=False)]

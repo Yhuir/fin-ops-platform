@@ -10,6 +10,7 @@ type AppDrawerProps = {
   children: ReactNode;
   completion?: ReactNode;
   closeDisabled?: boolean;
+  isDismissable?: boolean;
   closeLabel?: string;
   footer?: ReactNode;
   headerActions?: ReactNode;
@@ -33,6 +34,7 @@ export default function AppDrawer({
   children,
   completion,
   closeDisabled = false,
+  isDismissable = false,
   closeLabel,
   footer,
   headerActions,
@@ -192,8 +194,9 @@ export default function AppDrawer({
   return (
     <Drawer.Backdrop
       className="finance-drawer__backdrop"
-      isDismissable={false}
-      isKeyboardDismissDisabled
+      isDismissable={isDismissable && !closeDisabled}
+      isKeyboardDismissDisabled={!isDismissable || closeDisabled}
+      onOpenChange={nextOpen => { if (!nextOpen && !closeDisabled) onClose(); }}
       isOpen={open}
     >
       <Drawer.Content className="finance-drawer__content" data-placement="right" placement="right">

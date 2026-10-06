@@ -8,17 +8,27 @@ import AppDrawer from "../common/AppDrawer";
 import { FinanceTable, FinanceTableBody, FinanceTableCell, FinanceTableColumn, FinanceTableHeader, FinanceTableRow } from "../common/FinanceTable";
 import { disposeImportJob, fetchImportJobDetail, fetchImportJobs, type ImportJobDetail, type ImportJobPage } from "../../features/imports/jobOperations";
 
-const statusLabels: Record<string, string> = { failed: "失败待处理", needs_review: "需要复核", pending: "排队中", processing: "执行中", awaiting_confirmation: "待确认", canceled: "已放弃", succeeded: "已完成" };
+const statusLabels: Record<string, string> = { failed: "失败待处理", needs_review: "需要复核", pending: "排队中", processing: "执行中", awaiting_confirmation: "待确认", canceled: "已放弃", succeeded: "已完成", partial_success: "部分完成" };
 const typeLabels: Record<string, string> = { imports_invoices: "发票导入", imports_bank_transactions: "银行流水导入", imports_etc_invoices: "ETC 发票导入", etc_tickets: "ETC 票据", tax_offset: "已认证发票导入", settings: "OA 导入", import_unknown: "归属待核实" };
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : "请求失败，请刷新核实。";
 
-export default function ImportJobDiagnostics({ refreshToken, onHandled, domain, initialJobId }: { refreshToken: unknown; onHandled: () => Promise<void>; domain?: string; initialJobId?: string }) {
-  const [previewMode, setPreviewMode] = useState<ImportWorkflowMode | null>(null);
+type TaskView = { kind: "list" } | { kind: "detail"; jobId: string } | { kind: "preview"; jobId: string; mode: ImportWorkflowMode };
+type TaskTarget = { domain?: string; jobId?: string };
+
+export default function ImportJobDiagnostics({ refreshToken, onHandled, domain, initialJobId, drawer }: {
+  refreshToken: unknown; onHandled: () => Promise<void>; domain?: string; initialJobId?: string;
+  drawer?: { open: boolean; onClose: () => void };
+}) {
+  const [view, setView] = useState<TaskView>(() => initialJobId
+    ? { kind: "detail", jobId: initialJobId.replace(/^import:/, "") } : { kind: "list" });
+  const selected = view.kind === "list" ? null : view.jobId;
+  const active = !drawer || drawer.open;
+  const listVisible = active && (!drawer || view.kind === "list");
+  const [previewBusy, setPreviewBusy] = useState(false);
   const [page, setPage] = useState(1);
   const [list, setList] = useState<ImportJobPage | null>(null);
   const [listError, setListError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState<string | null>(initialJobId?.replace(/^import:/, "") ?? null);
   const [detail, setDetail] = useState<ImportJobDetail | null>(null);
   const [detailError, setDetailError] = useState("");
   const [detailLoading, setDetailLoading] = useState(false);
@@ -43,9 +53,11 @@ export default function ImportJobDiagnostics({ refreshToken, onHandled, domain, 
     } catch (error) { if (!request.signal.aborted) setListError(errorMessage(error)); }
     finally { if (listRequest.current === request) setLoading(false); }
   }, [page, domain]);
-  useEffect(() => { void loadList(); return () => listRequest.current?.abort(); }, [loadList, refreshToken]);
-  useEffect(() => () => detailRequest.current?.abort(), []);
-  useEffect(() => { if (selected) void loadDetail(selected); }, [refreshToken]);
+  useEffect(() => { if (listVisible) void loadList(); return () => listRequest.current?.abort(); }, [loadList, refreshToken, listVisible]);
+  useEffect(() => {
+    if (active && selected && view.kind === "detail") void loadDetail(selected);
+    return () => detailRequest.current?.abort();
+  }, [refreshToken, active, selected, view.kind]);
 
   async function loadDetail(id: string, filePage = 1) {
     detailRequest.current?.abort();
@@ -71,12 +83,12 @@ export default function ImportJobDiagnostics({ refreshToken, onHandled, domain, 
       setDetail({ ...detail, job: { ...detail.job, status: result.status, version: result.version,
         disposition: result.disposition, allowed_actions: [] } });
       setSuccess("本次任务已结束处理；原执行结果和历史记录保留。");
-      await Promise.all([loadList(), onHandled()]);
+      await Promise.all([listVisible ? loadList() : Promise.resolve(), onHandled()]);
     } catch (error) {
       // A lost HTTP response is not proof of a failed transaction. Read before allowing another command.
       setUncertain(true);
       const result = await loadDetail(detail.job.job_id);
-      if (result?.job.disposition) await Promise.all([loadList(), onHandled()]);
+      if (result?.job.disposition) await Promise.all([listVisible ? loadList() : Promise.resolve(), onHandled()]);
       else setDetailError(`${errorMessage(error)}${result ? " 当前结果已重新核实。" : " 结果尚未核实，请先刷新详情。"}`);
     } finally { submitting.current = false; setBusy(false); }
   }
@@ -86,7 +98,7 @@ export default function ImportJobDiagnostics({ refreshToken, onHandled, domain, 
     try {
       await retryBackgroundJobById(`import:${detail.job.job_id}`);
       setSuccess("已提交后台处理，请刷新详情查看结果；准备完成后仍需核对并确认。");
-      await Promise.all([loadDetail(detail.job.job_id), loadList(), onHandled()]);
+      await Promise.all([loadDetail(detail.job.job_id), listVisible ? loadList() : Promise.resolve(), onHandled()]);
     } catch (error) {
       setUncertain(true);
       await loadDetail(detail.job.job_id);
@@ -95,7 +107,7 @@ export default function ImportJobDiagnostics({ refreshToken, onHandled, domain, 
   }
   const job = detail?.job;
   const listRows = list?.rows ?? [];
-  return <section aria-busy={loading} aria-label="导入任务诊断" id="import-job-diagnostics">
+  const listContent = <section aria-busy={loading} aria-label="导入任务诊断" id="import-job-diagnostics">
     <div className="app-health-section__header"><h3>导入任务诊断</h3><Button variant="secondary" onPress={() => void loadList()} isDisabled={loading}>刷新任务</Button></div>
     {listError && <p role="alert">{success ? "处理已成功，但任务列表刷新失败。" : ""}{listError}</p>}
       <FinanceTable ariaLabel="待处理导入任务" minWidth={640}>
@@ -105,7 +117,7 @@ export default function ImportJobDiagnostics({ refreshToken, onHandled, domain, 
           <FinanceTableCell columnRole="description">{row.file_name || "无文件摘要"}{row.file_count ? `（${row.file_count} 个）` : ""}</FinanceTableCell>
           <FinanceTableCell columnRole="identity">{row.created_by || "未记录"}</FinanceTableCell><FinanceTableCell columnRole="status">{statusLabels[row.status]}</FinanceTableCell>
           <FinanceTableCell columnRole="date">{new Date(row.updated_at).toLocaleString("zh-CN")}</FinanceTableCell>
-          <FinanceTableCell columnRole="action"><Button variant="secondary" onPress={() => { setSelected(row.job_id); setDetail(null); setSuccess(""); setNote(""); setReason("not_needed"); setUncertain(false); void loadDetail(row.job_id); }}>查看详情</Button></FinanceTableCell>
+          <FinanceTableCell columnRole="action"><Button variant="secondary" onPress={() => { setView({ kind: "detail", jobId: row.job_id }); setDetail(null); setSuccess(""); setNote(""); setReason("not_needed"); setUncertain(false); }}>查看详情</Button></FinanceTableCell>
         </FinanceTableRow>)}</FinanceTableBody>
       </FinanceTable>
     {list && <>
@@ -113,7 +125,8 @@ export default function ImportJobDiagnostics({ refreshToken, onHandled, domain, 
         <Button variant="secondary" isDisabled={page === 1 || loading} onPress={() => setPage(page - 1)}>上一页任务</Button>
         <Button variant="secondary" isDisabled={!list.pagination.has_more || loading} onPress={() => setPage(page + 1)}>下一页任务</Button></div>
     </>}
-    <AppDrawer open={selected !== null} title="导入任务详情" width={680} closeDisabled={busy} onClose={() => { detailRequest.current?.abort(); setSelected(null); setDetail(null); }}>
+  </section>;
+  const detailContent = <>
       {detailLoading && <p role="status">正在读取详情…</p>}
       {detailError && <p role="alert">{detailError}</p>}
       {success && <p role="status">{success}</p>}
@@ -135,7 +148,7 @@ export default function ImportJobDiagnostics({ refreshToken, onHandled, domain, 
           <Button variant="secondary" isDisabled={detailLoading || busy || !detail.file_pagination.has_more} onPress={() => void loadDetail(job.job_id, detail.file_pagination.page + 1)}>下一页文件</Button></div>
         {job.disposition ? <p>处理人：{job.disposition.actor_name}（{job.disposition.actor_account}）；原因：{job.disposition.reason === "completed_elsewhere" ? "已另行完成" : "不再继续导入"}；说明：{job.disposition.note || "无"}</p> : <>
           {!job.disposition && !["succeeded", "canceled"].includes(job.status) && <>
-            {job.affected_domains.filter(d => d.startsWith("imports_")).map(d => <Button key={d} variant="secondary" onPress={() => setPreviewMode(d === "imports_etc_invoices" ? "etc_invoice" : d === "imports_bank_transactions" ? "bank_transaction" : "invoice")}>查看{typeLabels[d]}预览</Button>)}
+            {job.affected_domains.filter(d => d.startsWith("imports_")).map(d => <Button key={d} variant="secondary" onPress={() => setView({ kind: "preview", jobId: job.job_id, mode: d === "imports_etc_invoices" ? "etc_invoice" : d === "imports_bank_transactions" ? "bank_transaction" : "invoice" })}>查看{typeLabels[d]}预览</Button>)}
             {["failed", "needs_review"].includes(job.status) && <Button isDisabled={busy || uncertain || detailLoading} onPress={() => void handleRetry()}>{job.error_code === "review_required" || job.status === "needs_review" || job.stage === "prepare" ? "重新预览" : "重试任务"}</Button>}
           </>}
           {!!job.allowed_actions?.length && <>
@@ -146,22 +159,50 @@ export default function ImportJobDiagnostics({ refreshToken, onHandled, domain, 
           </>}
         </>}
       </div>}
-    </AppDrawer>
-    <AppDrawer open={previewMode !== null} title="处理导入任务" width={1200} onClose={() => { setPreviewMode(null); if (selected) void loadDetail(selected); void loadList(); void onHandled(); }}>
-      {previewMode && selected && <Suspense fallback={<p role="status">正在加载预览…</p>}><ImportWorkflowPage key={`${selected}:${previewMode}`} mode={previewMode} taskId={`import:${selected}`} /></Suspense>}
-    </AppDrawer>
-  </section>;
+  </>;
+  const goBack = () => {
+    if (view.kind === "preview") setView({ kind: "detail", jobId: view.jobId });
+    else { setView({ kind: "list" }); setDetail(null); }
+  };
+  const close = () => {
+    listRequest.current?.abort(); detailRequest.current?.abort();
+    if (drawer) drawer.onClose();
+    else goBack();
+  };
+  const closeDisabled = busy || previewBusy;
+  const overlay = <AppDrawer
+    open={drawer ? drawer.open : view.kind !== "list"}
+    title={view.kind === "list" ? "共享导入任务" : view.kind === "detail" ? "导入任务详情" : "处理导入任务"}
+    width={view.kind === "preview" ? 1200 : view.kind === "list" ? 1000 : 680}
+    closeDisabled={closeDisabled} isDismissable={view.kind !== "preview" && !note.trim()}
+    onClose={close}
+    headerActions={view.kind !== "list" && (view.kind === "preview" || !initialJobId)
+      ? <Button variant="secondary" isDisabled={closeDisabled} onPress={goBack}>{view.kind === "preview" ? "返回任务详情" : "返回任务列表"}</Button> : undefined}
+  >
+    {active && (view.kind === "list" ? listContent : view.kind === "detail" ? detailContent :
+      <Suspense fallback={<p role="status">正在加载预览…</p>}>
+        <ImportWorkflowPage key={`${view.jobId}:${view.mode}`} mode={view.mode} taskId={`import:${view.jobId}`} onBusyChange={setPreviewBusy} />
+      </Suspense>)}
+  </AppDrawer>;
+  return <>{!drawer && listContent}{overlay}</>;
 }
 
 const refreshNothing = async () => {};
-export function SharedImportTasksButton({ domain, label = "查看待处理任务", jobId }: { domain?: string; label?: ReactNode; jobId?: string }) {
+
+// The caller mounts this host outside its transient popover/task rows.
+export function useSharedImportTasks() {
   const overview = useAppStatusOverview();
   const revision = JSON.stringify([overview?.runtimeSummary?.queue, overview?.backgroundTasks.map(task => [task.jobId, task.status, task.updatedAt])]);
-  const [open, setOpen] = useState(false);
-  return <>
-    <Button variant="secondary" onPress={() => setOpen(true)}>{label}</Button>
-    <AppDrawer open={open} title="共享导入任务" width={1000} onClose={() => setOpen(false)}>
-      {open && <ImportJobDiagnostics domain={domain} initialJobId={jobId} refreshToken={revision} onHandled={refreshNothing} />}
-    </AppDrawer>
-  </>;
+  const [session, setSession] = useState<{ target: TaskTarget; sequence: number; open: boolean } | null>(null);
+  const openTasks = (target: TaskTarget = {}) => setSession(current => ({ target, sequence: (current?.sequence ?? 0) + 1, open: true }));
+  const closeTasks = () => setSession(current => current && ({ ...current, open: false }));
+  const taskDrawer = session && <ImportJobDiagnostics key={session.sequence} domain={session.target.domain}
+    initialJobId={session.target.jobId} refreshToken={revision} onHandled={refreshNothing}
+    drawer={{ open: session.open, onClose: closeTasks }} />;
+  return { openTasks, taskDrawer };
+}
+
+export function SharedImportTasksButton({ domain, label = "查看待处理任务", jobId }: { domain?: string; label?: ReactNode; jobId?: string }) {
+  const { openTasks, taskDrawer } = useSharedImportTasks();
+  return <><Button variant="secondary" onPress={() => openTasks({ domain, jobId })}>{label}</Button>{taskDrawer}</>;
 }

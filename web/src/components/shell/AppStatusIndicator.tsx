@@ -8,6 +8,7 @@ import {
   ProgressBar,
   Separator,
 } from "@heroui/react";
+import { useRef } from "react";
 import { Link as RouterLink } from "react-router-dom";
 
 import { useAppHealthStatus, useAppStatusOverview } from "../../contexts/AppHealthStatusContext";
@@ -15,7 +16,7 @@ import { useOptionalSessionPermissions } from "../../contexts/SessionContext";
 import type { AppStatusDomain, AppStatusQueueSummary, AppStatusRuntimeSummaryGroup, AppStatusTask } from "../../features/appStatus/types";
 import { useBackgroundJobProgress } from "../../features/backgroundJobs/BackgroundJobProgressProvider";
 import type { BackgroundJob } from "../../features/backgroundJobs/types";
-import { SharedImportTasksButton } from "../imports/ImportJobDiagnostics";
+import { useSharedImportTasks } from "../imports/ImportJobDiagnostics";
 import financePlatformMark from "./finance-platform-mark.svg";
 
 function toneFromLevel(level: string) {
@@ -176,6 +177,13 @@ type AppStatusIndicatorProps = {
 };
 
 export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIndicatorProps) {
+  const { openTasks, taskDrawer } = useSharedImportTasks();
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const openImportTasks = (target: { domain?: string; jobId?: string } = {}) => {
+    triggerRef.current?.focus();
+    onOpenChange(false);
+    openTasks(target);
+  };
   const healthStatus = useAppHealthStatus();
   const appStatus = useAppStatusOverview();
   const { canAdminAccess, canOperateData } = useOptionalSessionPermissions();
@@ -206,8 +214,10 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
   const queueIssues = runtimeSummary ? runtimeSummary.queue.failed + runtimeSummary.queue.backlog + (runtimeSummary.queue.needsReview ?? 0) + (runtimeSummary.queue.awaitingConfirmation ?? 0) : 0;
 
   return (
+    <>
     <PopoverRoot isOpen={isOpen} onOpenChange={onOpenChange}>
       <PopoverTrigger
+        ref={triggerRef}
         aria-label={reason}
         aria-live="polite"
         className={`app-sidebar-brand-mark ${tone}`}
@@ -245,11 +255,11 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
                         ) : null}
                       </>;
                       return task.jobId.startsWith("import:") && task.route.startsWith("/imports/")
-                        ? <SharedImportTasksButton key={task.jobId} jobId={task.jobId} label={content} />
+                        ? <Button key={task.jobId} variant="secondary" onPress={() => openImportTasks({ jobId: task.jobId })}>{content}</Button>
                         : <div key={task.jobId}><RouterLink to={task.route} className="app-status-task-link">{content}</RouterLink>{jobActions(jobsById.get(task.jobId))}</div>;
                     })}
                     {additionalJobs.map(job => job.jobId.startsWith("import:")
-                      ? <SharedImportTasksButton key={job.jobId} jobId={job.jobId} label={job.shortLabel} />
+                      ? <Button key={job.jobId} variant="secondary" onPress={() => openImportTasks({ jobId: job.jobId })}>{job.shortLabel}</Button>
                       : <div key={job.jobId} className="app-status-task-link">
                           <span className="app-status-task-label">{job.shortLabel}</span>
                           {jobActions(job)}
@@ -297,7 +307,7 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
                 <div className="app-status-domain-grid">
                   {domains.map((domain) => {
                     if (["imports_invoices", "imports_bank_transactions", "imports_etc_invoices"].includes(domain.key) && domain.status !== "ready") {
-                      return <SharedImportTasksButton key={domain.key} domain={domain.key} label={`${domain.label} ${domainStatusLabel(domain.status)} ${Object.entries(domain.counts ?? {}).filter(([, count]) => count > 0).map(([state, count]) => `${domainStatusLabel(state)} ${count}`).join(" / ")}`} />;
+                      return <Button key={domain.key} variant="secondary" onPress={() => openImportTasks({ domain: domain.key })}>{`${domain.label} ${domainStatusLabel(domain.status)} ${Object.entries(domain.counts ?? {}).filter(([, count]) => count > 0).map(([state, count]) => `${domainStatusLabel(state)} ${count}`).join(" / ")}`}</Button>;
                     }
                     return (
                       <RouterLink
@@ -323,7 +333,7 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
                 </div>
               </section>
 
-              <SharedImportTasksButton />
+              <Button variant="secondary" onPress={() => openImportTasks()}>查看待处理任务</Button>
               {canAdminAccess ? (
                 <>
                   <Separator />
@@ -337,5 +347,7 @@ export default function AppStatusIndicator({ isOpen, onOpenChange }: AppStatusIn
         </PopoverDialog>
       </PopoverContent>
     </PopoverRoot>
+    {taskDrawer}
+    </>
   );
 }

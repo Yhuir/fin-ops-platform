@@ -243,7 +243,7 @@ describe("ETC ticket management page", () => {
     expect(deriveEtcBatchProgress(batch as never, task).map((step) => step.state)).toEqual(expectedStates);
   });
 
-  test("refreshes batch list when ETC import background job completes", async () => {
+  test("refreshes batch list when ETC import partially completes", async () => {
     const fetchMock = installMockApiFetch({
       backgroundJobs: [
         {
@@ -251,12 +251,12 @@ describe("ETC ticket management page", () => {
           type: "etc_invoice_import",
           label: "导入 ETC发票",
           short_label: "导入 ETC发票完成 4/4",
-          status: "succeeded",
+          status: "partial_success",
           phase: "complete",
           current: 4,
           total: 4,
           percent: 100,
-          message: "ETC发票导入完成。",
+          message: "ETC发票部分导入完成。",
           result_summary: {
             created: 1,
             imported: 1,
@@ -288,6 +288,26 @@ describe("ETC ticket management page", () => {
       String(url) === "/api/etc/reconciliation-tasks" && init?.method === "POST"
     );
     expect(taskCreateCalls).toHaveLength(0);
+  });
+
+  test.each(["removed", "failed"])("refreshes canonical batches when an observed import is %s without claiming success", async terminal => {
+    const job = { job_id: "import:etc-active", type: "etc_invoice_import", status: "running", message: "正在导入。" };
+    const fetchMock = installMockApiFetch({ backgroundJobs: [job] });
+    renderAppAt("/etc-tickets");
+    await screen.findByTestId("etc-ticket-management-page", {}, { timeout: 5000 });
+    await screen.findByTestId("etc-batch-row-etc-batch-unsubmitted-01");
+    const listReads = () => fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/etc/business-batches?")).length;
+    const before = listReads();
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url, init) => String(url).includes("/background-jobs/active")
+      ? new Response(JSON.stringify({ jobs: terminal === "removed" ? [] : [{ ...job, status: "failed" }] }), { status: 200, headers: { "Content-Type": "application/json" } })
+      : original(url, init));
+    act(() => window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(listReads()).toBe(before + 1));
+    expect(screen.queryByText("ETC发票导入完成。")).not.toBeInTheDocument();
+    act(() => window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/background-jobs/active")).length).toBeGreaterThanOrEqual(3));
+    expect(listReads()).toBe(before + 1);
   });
 
   test("unsubmitted mode keeps the selected batch stable when the same row is clicked again", async () => {

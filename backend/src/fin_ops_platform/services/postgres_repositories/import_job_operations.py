@@ -8,13 +8,14 @@ from fin_ops_platform.services.postgres_repositories.common import jsonb
 from fin_ops_platform.services.postgres_repositories.import_job_status import scoped_import_jobs
 
 _JOB_COLUMNS = """id::text as job_id, import_type, import_session_id as session_id,
-    created_by, status, stage, version, attempt_count, max_attempts,
+    created_by, case when status='succeeded' and result_payload->>'outcome'='partial_success'
+      then 'partial_success' else status end as status, stage, version, attempt_count, max_attempts,
     created_at::text, updated_at::text, finished_at::text, acknowledged_at::text,
     result_payload->'disposition' as disposition, affected_domains,
     case when position('selected files require review before confirmation: ' in last_error)=1
       then 'review_required' else result_payload->>'error_code' end as error_code"""
 _SHARED = "import_type in ('file_import.confirm','etc_invoice_import.confirm')"
-_ACTIVE = "acknowledged_at is null and status in ('pending','processing','failed','awaiting_confirmation','needs_review')"
+_ACTIVE = "acknowledged_at is null and (status in ('pending','processing','failed','awaiting_confirmation','needs_review') or (status='succeeded' and result_payload->>'outcome'='partial_success'))"
 
 
 class ImportJobOperationsRepository:

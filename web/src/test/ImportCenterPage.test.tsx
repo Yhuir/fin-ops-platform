@@ -5,11 +5,12 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 
 import { installMockApiFetch } from "./apiMock";
-import { renderAuthenticatedAppAt as renderAppAt } from "./renderHelpers";
+import { renderAuthenticatedAppAt } from "./renderHelpers";
 import * as etcApi from "../features/etc/api";
 
 const INVOICE_DRAFT_STORAGE_KEY = "finops:pageSession:v1:101:imports.invoice:previewSession";
 const ROUTE_RENDER_TIMEOUT = 5000;
+const renderAppAt = (pathname: string) => renderAuthenticatedAppAt(pathname, { backgroundTasks: true });
 
 function seedInvoicePreviewSession() {
   const now = Date.now();

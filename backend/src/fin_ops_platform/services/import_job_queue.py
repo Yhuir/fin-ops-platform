@@ -318,10 +318,12 @@ class ImportJobRepository:
                 and status in ('succeeded','failed','canceled')
         """, (import_job_id, created_by)))
 
-    def list_jobs(self, *, created_by: str, limit: int = 100, statuses: list[str] | None = None, include_shared: bool = False) -> list[ImportJob]:
+    def list_jobs(self, *, created_by: str, limit: int = 100, statuses: list[str] | None = None, include_shared: bool = False, include_completed: bool = True) -> list[ImportJob]:
         rows = self._connection.fetch_all(scoped_import_jobs("""
             select * from job.import_jobs
             where (created_by=%s or (%s and import_type in ('file_import.confirm','etc_invoice_import.confirm'))) and acknowledged_at is null and (%s::text[] is null or status=any(%s))
+                and (%s or status in ('pending','processing','awaiting_confirmation','needs_review','failed')
+                     or (status='succeeded' and result_payload->>'outcome'='partial_success'))
             order by case when status in ('pending','processing','awaiting_confirmation','needs_review','failed') then 0 else 1 end,
                 created_at desc limit %s
         """) + """
@@ -334,7 +336,7 @@ class ImportJobRepository:
             from scoped_jobs
             order by case when status in ('pending','processing','awaiting_confirmation','needs_review','failed') then 0 else 1 end,
                 created_at desc
-        """, (created_by, include_shared, statuses, statuses, min(200, max(1, int(limit)))))
+        """, (created_by, include_shared, statuses, statuses, include_completed, min(200, max(1, int(limit)))))
         return [_job_from_row(row) for row in rows]
 
     def get_by_idempotency_key(self, idempotency_key: str, *, created_by: str) -> ImportJob | None:

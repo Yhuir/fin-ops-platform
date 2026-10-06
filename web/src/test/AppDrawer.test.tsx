@@ -5,6 +5,16 @@ import { useState } from "react";
 import AppDrawer from "../components/common/AppDrawer";
 
 describe("AppDrawer explicit dismissal", () => {
+  it("allows opt-in Escape dismissal but blocks it while submitting", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const { rerender } = render(<AppDrawer open isDismissable closeDisabled title="只读任务" onClose={onClose}>任务</AppDrawer>);
+    await user.keyboard("{Escape}");
+    expect(onClose).not.toHaveBeenCalled();
+    rerender(<AppDrawer open isDismissable title="只读任务" onClose={onClose}>任务</AppDrawer>);
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
   it("keeps edits after outside pointer interaction and Escape, and closes only from X", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();

@@ -13,6 +13,39 @@ const detail: api.ImportJobDetail = { job, files: [], file_pagination: { page: 1
 const disposition: api.ImportDisposition = { action: "close", reason: "not_needed", note: "", actor_account: "005", actor_name: "管理员", handled_at: "2026-09-22" };
 function mount() { const onHandled = vi.fn().mockResolvedValue(undefined); render(<MemoryRouter><ImportJobDiagnostics refreshToken={1} onHandled={onHandled} /></MemoryRouter>); return onHandled; }
 beforeEach(() => { vi.resetAllMocks(); vi.mocked(api.fetchImportJobs).mockResolvedValue(list); vi.mocked(api.fetchImportJobDetail).mockResolvedValue(detail); });
+test("direct task opens only detail, remains closable on read failure and aborts its request", async () => {
+  const user = userEvent.setup();
+  const onClose = vi.fn();
+  vi.mocked(api.fetchImportJobDetail).mockRejectedValue(new Error("详情读取失败"));
+  const { rerender } = render(<MemoryRouter><ImportJobDiagnostics initialJobId="import:job-1" refreshToken={1}
+    onHandled={async () => {}} drawer={{ open: true, onClose }} /></MemoryRouter>);
+  expect(await screen.findByRole("alert")).toHaveTextContent("详情读取失败");
+  expect(api.fetchImportJobs).not.toHaveBeenCalled();
+  expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  await user.click(screen.getByRole("button", { name: "关闭抽屉" }));
+  expect(onClose).toHaveBeenCalledOnce();
+  const request = vi.mocked(api.fetchImportJobDetail).mock.calls[0][2];
+  expect(request?.aborted).toBe(true);
+  rerender(<MemoryRouter><ImportJobDiagnostics initialJobId="import:job-1" refreshToken={2}
+    onHandled={async () => {}} drawer={{ open: false, onClose }} /></MemoryRouter>);
+  expect(api.fetchImportJobDetail).toHaveBeenCalledTimes(1);
+});
+
+test("shared list and detail replace each other and preserve server pagination on return", async () => {
+  const user = userEvent.setup();
+  vi.mocked(api.fetchImportJobs).mockResolvedValue({ ...list, pagination: { ...list.pagination, total: 21, has_more: true } });
+  render(<MemoryRouter><ImportJobDiagnostics refreshToken={1} onHandled={async () => {}}
+    drawer={{ open: true, onClose: vi.fn() }} /></MemoryRouter>);
+  await user.click(await screen.findByRole("button", { name: "下一页任务" }));
+  await waitFor(() => expect(api.fetchImportJobs).toHaveBeenLastCalledWith(2, expect.any(AbortSignal), undefined));
+  await user.click(screen.getByRole("button", { name: "查看详情" }));
+  await screen.findByText(/没有可读取的文件明细/);
+  expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  expect(screen.queryByRole("grid", { name: "待处理导入任务" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "返回任务列表" }));
+  await screen.findByRole("grid", { name: "待处理导入任务" });
+  expect(api.fetchImportJobs).toHaveBeenLastCalledWith(2, expect.any(AbortSignal), undefined);
+});
 test("reads another owner's details with shared preview and closes with exact version then refreshes", async () => {
   const user = userEvent.setup(); const refreshed = mount();
   const table = await screen.findByRole("grid", { name: "待处理导入任务" });

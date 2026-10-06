@@ -84,6 +84,22 @@ class ImportJobOperationsTests(unittest.TestCase):
         self.assertEqual(audit[0]['request_id'],'test-dispose')
         self.assertEqual(self.service.detail(self.job.import_job_id,actor_account='owner')['job']['allowed_actions'],[])
 
+    def test_partial_success_stays_in_shared_list_and_detail_without_rewriting_execution_status(self):
+        from psycopg.types.json import Jsonb
+        self.connection.execute("update job.import_jobs set status='succeeded', result_payload=%s where id=%s",
+            (Jsonb({'outcome': 'partial_success', 'failed': ['file-1']}), self.job.import_job_id))
+        rows = self.service.list_jobs(page=1, page_size=20)['rows']
+        self.assertEqual([row['status'] for row in rows], ['partial_success'])
+        detail = self.service.detail(self.job.import_job_id, actor_account='YNSYLP005')
+        self.assertEqual(detail['job']['status'], 'partial_success')
+        self.assertEqual(detail['job']['allowed_actions'], [])
+        stored = self.jobs.get_job(self.job.import_job_id)
+        self.assertEqual(stored.status, 'succeeded')
+        self.assertIsNone(stored.acknowledged_at)
+        self.connection.execute("update job.import_jobs set result_payload='{}'::jsonb where id=%s", (self.job.import_job_id,))
+        self.assertEqual(self.service.list_jobs(page=1, page_size=20)['rows'], [])
+        self.assertEqual(self.service.detail(self.job.import_job_id, actor_account='YNSYLP005')['job']['status'], 'succeeded')
+
     def test_disposed_job_rejects_all_resume_paths_but_acknowledged_can_retry(self):
         self.jobs.acknowledge_job(self.job.import_job_id,created_by='owner')
         self.jobs.retry_job(self.job.import_job_id,expected_version=self.job.version)

@@ -41,6 +41,27 @@ class ImportDirectQueuePostgresTests(unittest.TestCase):
         kwargs.setdefault('payload', {'route':'/imports/invoices'})
         return self.repository.create_or_get_job(import_type='file_import.confirm', created_by='owner', **kwargs)
 
+    def test_activity_filters_before_limit_and_keeps_partial_results_without_mutating_history(self):
+        from fin_ops_platform.services.import_workflow_service import ImportWorkflowService
+        from psycopg.types.json import Jsonb
+
+        partial = self.create(import_session_id='partial')
+        self.connection.execute("update job.import_jobs set status='succeeded', result_payload=%s where id=%s",
+            (Jsonb({'outcome': 'partial_success', 'failed': ['file-1']}), partial.import_job_id))
+        complete = self.create(import_session_id='complete')
+        self.connection.execute("update job.import_jobs set status='succeeded', result_payload=%s where id=%s",
+            (Jsonb({'created': 2}), complete.import_job_id))
+        private = self.repository.create_or_get_job(import_type='oa_manual_import.create', created_by='private-owner')
+        rows = self.repository.list_jobs(created_by='viewer', include_shared=True, include_completed=False, limit=1)
+        self.assertEqual([row.import_job_id for row in rows], [partial.import_job_id])
+        payloads = ImportWorkflowService(self.repository).active_payloads('viewer')
+        self.assertEqual([row['status'] for row in payloads], ['partial_success'])
+        self.assertNotIn(private.import_job_id, [row['import_job_id'] for row in payloads])
+        stored = self.repository.get_job(complete.import_job_id)
+        self.assertEqual(stored.status, 'succeeded')
+        self.assertEqual(stored.result_payload, {'created': 2})
+        self.assertIsNone(stored.acknowledged_at)
+
     def test_status_counts_use_file_facts_not_shared_type_or_wrong_route(self):
         from fin_ops_platform.services.import_workflow_service import import_job_payload
         from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
