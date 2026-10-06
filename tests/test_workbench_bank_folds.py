@@ -132,3 +132,29 @@ def test_batch_with_mixed_currencies_and_directions_has_separate_totals():
         {'direction': 'inflow', 'currency': 'CNY', 'amount': '10.01'},
     ]
     assert fold['summary_row']['bank_text_fields'][0]['value'] == '支出 CNY 10.01；支出 USD 10.01；收入 CNY 10.01'
+
+
+@pytest.mark.parametrize('field,value', [('currency', ''), ('currency', None), ('txn_direction', 'unknown')])
+def test_batch_fold_rejects_missing_canonical_money_contract(field, value):
+    g = fixture(3)
+    for bank in g['bank_rows']:
+        bank['display_batch_id'] = 'batch'
+    g['bank_rows'][1][field] = value
+    original = deepcopy(g)
+    with pytest.raises(ValueError, match='canonical currency and direction'):
+        apply_bank_folds([g])
+    assert g == original
+
+
+def test_batch_fold_with_mixed_categories_does_not_copy_first_category():
+    g = fixture(3)
+    for bank in g['bank_rows']:
+        bank['display_batch_id'] = 'batch'
+        bank['category_label'] = '利息'
+        bank['tags'] = ['利息']
+    g['bank_rows'][1]['category_code'] = 'service_fee'
+    apply_bank_folds([g])
+    summary = g['bank_folds'][0]['summary_row']
+    assert summary['amount'] == '30.03'
+    assert not any(key.startswith('category_') for key in summary)
+    assert summary['tags'] == []
