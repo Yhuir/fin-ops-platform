@@ -301,6 +301,19 @@ class PostgresOaPendingPaymentQueryRepository:
                 from base_rows
                 cross join lateral unnest(oa_ids) as expanded(oa_id)
             ),
+            classification_counts as (
+                select jsonb_object_agg(view_mode, counts) as payload
+                from (
+                    select views.view_mode, jsonb_build_object(
+                        'paid', count(distinct oa_id) filter (where payment_status = 'paid'),
+                        'unpaid', count(distinct oa_id) filter (where payment_status = 'unpaid')
+                    ) as counts
+                    from (values ('completed'), ('in_progress')) views(view_mode)
+                    left join base_rows on oa_workflow_status = views.view_mode
+                    left join lateral unnest(oa_ids) as member(oa_id) on true
+                    group by views.view_mode
+                ) counted
+            ),
             status_counts as (
                 select jsonb_build_object(
                     'paid', count(distinct oa_id) filter (where payment_status = 'paid'),
@@ -420,6 +433,7 @@ class PostgresOaPendingPaymentQueryRepository:
                 view_counts.completed_count,
                 view_counts.in_progress_count,
                 status_counts.payload as status_counts,
+                classification_counts.payload as classification_counts,
                 filter_options.payload as filter_options,
                 descriptors.payload as descriptors,
                 inventory.*,
@@ -427,6 +441,7 @@ class PostgresOaPendingPaymentQueryRepository:
                  where settings_key = 'app_settings') as bank_account_mappings
             from summary
             cross join view_counts
+            cross join classification_counts
             cross join status_counts
             cross join filter_options
             cross join descriptors
@@ -466,6 +481,7 @@ class PostgresOaPendingPaymentQueryRepository:
                 "oaAmountTotal": decimal_text(result.get("oa_amount_total")) or "0.00",
                 "bankPaidTotal": decimal_text(result.get("bank_paid_total")) or "0.00",
                 "statusCounts": dict(result.get("status_counts") or {}),
+                "classificationCounts": dict(result["classification_counts"]),
                 "viewCounts": {
                     "completed": int_value(result.get("completed_count"), 0),
                     "in_progress": int_value(result.get("in_progress_count"), 0),

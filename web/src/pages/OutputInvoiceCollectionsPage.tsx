@@ -1,4 +1,4 @@
-import InvoiceCountSegments from "../components/common/InvoiceCountSegments";
+import TableClassificationHeader from "../components/common/TableClassificationHeader";
 import { normalizeOutputTaxRate } from "../features/outputInvoiceCollections/taxRate";
 import { Button } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -92,7 +92,7 @@ function restoreQuery(raw: unknown): OutputInvoiceCollectionQuery {
   if (!validateQuery(raw)) return initialQuery;
   const filters = raw.filters.filter((filter) => !["invoice_date", "bank_trade_time"].includes(filter.field)).map(filter => {
     if (filter.field === "tax_rate" && filter.values) return { ...filter, values: [...new Set(filter.values.map(normalizeOutputTaxRate))] };
-    return filter.field === "collection_status" && filter.values && filter.values.length > 1 ? { ...filter, values: [filter.values[0]] } : filter;
+    return filter;
   });
   const dateScopeChanged = Boolean(raw.month || raw.invoiceDateFrom || raw.invoiceDateTo)
     || filters.length !== raw.filters.length;
@@ -295,7 +295,11 @@ export default function OutputInvoiceCollectionsPage() {
 
   const statusOptions = filterOptions.collection_status;
   const statusFilter = query.filters.find(filter => filter.field === "collection_status");
-  const selectedStatus = statusFilter?.values?.[0] ?? "all";
+  const selectedStatuses = statusFilter?.values ?? [];
+  const selectStatuses = (values: string[]) => setQuery(current => ({ ...current, page: 1,
+    filters: [...current.filters.filter(filter => filter.field !== "collection_status"),
+      ...(values.length ? [{ field: "collection_status", operator: "in" as const, values }] : [])],
+  }));
   // Counts are validated once at the API boundary and cover the full query scope.
   const statusTotal = statusOptions?.reduce((sum, option) => sum + option.count!, 0);
   const countsPending = loading || refreshing;
@@ -326,20 +330,24 @@ export default function OutputInvoiceCollectionsPage() {
           titleAccessory={titleAccessory}
         >
           <div className="output-invoice-collections-content">
+            <TableClassificationHeader label="销项发票分类" unit="张" pending={countsPending} invalid={Boolean(error)}
+              root={{ id: "all", label: "全部销项发票", count: statusTotal,
+                selected: selectedStatuses.length === 0, onSelect: () => selectStatuses([]) }}
+              groups={[
+                { id: "collection", label: "收款核对", tone: "blue" as const, codes: ["pending_collection", "partial_collected", "collected"] },
+                { id: "reversal", label: "红冲处理", tone: "rose" as const, codes: ["reversed_by_red", "reverses_blue", "unmatched_red"] },
+              ].map(group => ({ ...group,
+                count: statusOptions ? group.codes.reduce((sum, code) => sum + statusOptions.find(option => option.value === code)!.count!, 0) : undefined,
+                selected: group.codes.every(code => selectedStatuses.includes(code)) && selectedStatuses.length === group.codes.length,
+                onSelect: () => selectStatuses(group.codes),
+                children: group.codes.map(code => { const option = statusOptions?.find(item => item.value === code);
+                  const labels: Record<string, string> = { pending_collection: "待收款", partial_collected: "部分收款", collected: "已收款",
+                    reversed_by_red: "蓝票已被红冲", reverses_blue: "红票已关联蓝票", unmatched_red: "红票未关联蓝票" };
+                  return { id: code, label: labels[code], count: option?.count,
+                    selected: selectedStatuses.includes(code), onSelect: () => selectStatuses([code]) };
+                }),
+              }))} />
             <PageToolbar className="output-invoice-collections-query"
-              left={<div className="output-invoice-collections-status-section">
-                <InvoiceCountSegments className="output-invoice-status-segments" label="销项发票状态分类" selectedKey={selectedStatus} unit="张" pending={countsPending} invalid={Boolean(error)}
-                  options={[
-                    { key: "all", label: "全部", count: statusTotal },
-                    ...(statusOptions?.map(option => ({ key: option.value, label: option.label, count: option.count })) ?? []),
-                  ]}
-                  onChange={key => {
-                    setQuery(current => ({ ...current, page: 1,
-                      filters: [...current.filters.filter(filter => filter.field !== "collection_status"),
-                        ...(key === "all" ? [] : [{ field: "collection_status", operator: "in" as const, values: [key] }])],
-                    }));
-                  }} />
-              </div>}
               right={<div className="output-invoice-collections-query__grid">
                 <BusinessPeriodPicker
                   allowedModes={["month"]}

@@ -53,7 +53,10 @@ export async function fetchOaPendingPaymentRows(request: FetchRowsRequest): Prom
   });
   const counts = [payload.pagination?.total, payload.summary?.rowCount, payload.summary?.oaCount,
     payload.summary?.statusCounts?.paid, payload.summary?.statusCounts?.unpaid,
-    payload.summary?.viewCounts?.completed, payload.summary?.viewCounts?.in_progress];
+    payload.summary?.viewCounts?.completed, payload.summary?.viewCounts?.in_progress,
+    ...(["completed", "in_progress"] as const).flatMap(view => [
+      payload.summary?.classificationCounts?.[view]?.paid, payload.summary?.classificationCounts?.[view]?.unpaid,
+    ])];
   if (counts.some(value => !Number.isSafeInteger(value) || (value as number) < 0)) {
     throw new Error("OA 数量统计不完整，请刷新重试。");
   }

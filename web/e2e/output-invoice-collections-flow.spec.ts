@@ -142,15 +142,15 @@ test.describe("销项发票收款情况", () => {
 
     await page.goto("/output-invoice-collections");
     await expect(page.getByRole('button', { name: '筛选 状态' })).toHaveCount(0);
-    const tabs=page.getByRole('tablist',{name:'销项发票状态分类'});
-    const reversedOption=tabs.getByRole('tab',{name:'蓝票已被红冲 1 张'});
+    const tabs=page.getByRole('region',{name:'销项发票分类'});
+    const reversedOption=tabs.getByRole('button',{name:'蓝票已被红冲 1 张'});
     const filteredRowsPromise = page.waitForResponse(response => rowsResponse(response) && new URL(response.url()).searchParams.has("filters"));
     await reversedOption.click();
     const filteredRowsUrl = new URL((await filteredRowsPromise).url());
     expect(JSON.parse(decodeURIComponent(filteredRowsUrl.searchParams.get("filters") ?? "[]"))).toEqual([
       { field: "collection_status", operator: "in", values: ["reversed_by_red"] },
     ]);
-    await expect(tabs.getByRole("tab")).toHaveCount(7);
+    await expect(tabs.getByRole("button")).toHaveCount(9);
     await page.keyboard.press("Escape");
     await expect(page.getByRole("row", { name: /XSFP-E2E-0001/ })).toBeVisible();
     await expect(page.getByRole("row", { name: /XSFP-E2E-0002/ })).toHaveCount(0);

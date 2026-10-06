@@ -19,6 +19,7 @@ import type {
   PendingInvoiceBankTransaction,
   PendingInvoiceBankTransactionSummary,
   PendingInvoiceCandidate,
+  PendingInvoiceColumnFilter,
   PendingInvoiceCandidatesResponse,
   PendingInvoiceDirection,
   PendingInvoiceExportDownload,
@@ -195,7 +196,7 @@ type ApiPendingInvoiceRow = {
 };
 
 type ApiPendingInvoiceRowsResponse = {
-  acquisition_summary: { bank_count: number; invoice_count: number; status_counts: Record<string, number> };
+  acquisition_summary: { bank_count: number; invoice_count: number; status_counts: Record<string, number>; scope_status_counts: Record<string, number> };
   direction?: string | null;
   filter?: string | null;
   rows?: ApiPendingInvoiceRow[] | null;
@@ -647,9 +648,10 @@ function requiredCount(value: unknown): number {
 }
 
 function mapAcquisitionSummary(payload: ApiPendingInvoiceRowsResponse["acquisition_summary"]): AcquisitionSummary {
-  if (!payload || !payload.status_counts) throw new Error("待找发票统计数据不完整，请刷新重试。");
+  if (!payload || !payload.status_counts || !payload.scope_status_counts) throw new Error("待找发票统计数据不完整，请刷新重试。");
   return {
     bankCount: requiredCount(payload.bank_count), invoiceCount: requiredCount(payload.invoice_count),
+    scopeStatusCounts: Object.fromEntries(ACQUISITION_STATUS_CODES.map(code => [code, requiredCount(payload.scope_status_counts[code])])) as AcquisitionSummary["scopeStatusCounts"],
     statusCounts: Object.fromEntries(ACQUISITION_STATUS_CODES.map(code => [code, requiredCount(payload.status_counts[code])])) as AcquisitionSummary["statusCounts"],
   };
 }
@@ -1157,15 +1159,24 @@ export async function confirmAttachExistingInvoices(request: AttachExistingInvoi
   };
 }
 
-function exportRequest(selection: ExportSelection): FetchPendingInvoiceRowsRequest { return { direction: 'all' as const, filter: 'all' as const, dateFrom: selection.startDate, dateTo: selection.endDate, filters: selectionFilters(selection).map(filter => { if (filter.field !== 'direction' && filter.field !== 'status_code') throw new Error('无效的导出筛选'); return { ...filter, field: filter.field }; }) }; }
-export async function fetchPendingInvoiceExportSummary(selection: ExportSelection, signal: AbortSignal): Promise<ExportSummary> {
-  const url = `/api/pending-invoices/export-summary?${buildRowsQuery(exportRequest(selection))}`;
+function exportRequest(selection: ExportSelection, query: FetchPendingInvoiceRowsRequest): FetchPendingInvoiceRowsRequest {
+  return { ...query, direction: 'all', filter: 'all', page: undefined, pageSize: undefined,
+    dateFrom: selection.startDate, dateTo: selection.endDate,
+    filters: [...(query.filters ?? []).filter(filter => !['direction', 'status_code', 'trade_date'].includes(filter.field)),
+      ...selectionFilters(selection).map<PendingInvoiceColumnFilter>(filter => {
+        if (filter.field !== 'direction' && filter.field !== 'status_code') throw new Error('无效的导出筛选');
+        return { ...filter, field: filter.field };
+      })],
+  };
+}
+export async function fetchPendingInvoiceExportSummary(selection: ExportSelection, signal: AbortSignal, query: FetchPendingInvoiceRowsRequest): Promise<ExportSummary> {
+  const url = `/api/pending-invoices/export-summary?${buildRowsQuery(exportRequest(selection, query))}`;
   const raw = await requestJson<{ row_count: number; source_summary: { expense_rows: number; income_rows: number }; acquisition_summary: { status_counts: Record<string, number> } }>(url, { method: 'GET', signal });
   const labels: Record<string,string> = { paid_pending_invoice: '已支付待开票', paid_invoiced: '已支付已开票', invoice_not_fully_paid: '金额待核对', invoice_amount_missing: '已开票·金额缺失', bank_statement_as_invoice: '流水代替发票', no_invoice_required: '支出无需发票', income_pending_invoice: '已收款待开票', income_invoiced: '已收款已开票', income_no_invoice_required: '收入无需发票', cash_income: '现金收入' };
   const options: ExportOption[] = Object.entries(labels).map(([value,label]) => ({ value,label,count: raw.acquisition_summary.status_counts[value] }));
   return { rowCount: raw.row_count, groups: [{ field: 'direction', label: '收支方向', options: [{ value:'expense', label:'支出',count:raw.source_summary.expense_rows },{ value:'income',label:'收入',count:raw.source_summary.income_rows }] }, { field:'status_code',label:'发票获取状态',options }] };
 }
-export function downloadPendingInvoiceSelection(selection: ExportSelection) { return downloadPendingInvoiceExport(exportRequest(selection)); }
+export function downloadPendingInvoiceSelection(selection: ExportSelection, query: FetchPendingInvoiceRowsRequest) { return downloadPendingInvoiceExport(exportRequest(selection, query)); }
 
 function parseContentDispositionFileName(contentDisposition: string | null): string | null {
   if (!contentDisposition) {

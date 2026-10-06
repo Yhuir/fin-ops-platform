@@ -1,4 +1,4 @@
-import InvoiceCountSegments from "../components/common/InvoiceCountSegments";
+import TableClassificationHeader, { type ClassificationGroup } from "../components/common/TableClassificationHeader";
 import { acquisitionOptions, type AcquisitionStatusCode, type AcquisitionSummary } from "../features/pendingInvoices/statusOptions";
 import { Button } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -483,8 +483,6 @@ export default function PendingInvoicesPage() {
       });
   }, [applyRowsPayload, canOperateData, clearSelectedTransactions, loadStatistics, query, runOperation, selectedRows, statusFilters]);
 
-  const compactStatusText = error ?? "";
-
   const summaryCounts = {
     all: sourceSummary?.bankTransactionRows,
     expense: sourceSummary?.expenseRows,
@@ -493,12 +491,28 @@ export default function PendingInvoicesPage() {
   const selectedStatus = statusFilters.length === 0 || setsEqual(new Set(statusFilters), new Set(filterOptions.flatMap(option => option.codes))) ? "all" : filterOptions.find(option =>
     setsEqual(new Set(option.codes), new Set(statusFilters)))?.key ?? "multiple";
   const statusFilterSummary = selectedStatus === "all" ? "全部" : selectedStatus === "multiple" ? "多状态筛选" : filterOptions.find(option => option.key === selectedStatus)!.label;
-  const statusSegments = [
-    { key: "all", label: "全部状态", count: acquisitionSummary ? Object.values(acquisitionSummary.statusCounts).reduce((sum, count) => sum + count, 0) : undefined },
-    ...filterOptions.map(option => ({ key: option.key, label: option.label,
-      count: acquisitionSummary ? option.codes.reduce((sum, code) => sum + acquisitionSummary.statusCounts[code], 0) : undefined })),
-    ...(selectedStatus === "multiple" ? [{ key: "multiple", label: "多状态筛选" }] : []),
-  ];
+  const directionFilter = columnFilters.find(filter => filter.field === "direction");
+  const visibleDirections = (["expense", "income"] as const).filter(scope =>
+    (direction === "all" || direction === scope)
+    && (!directionFilter || !("values" in directionFilter) || directionFilter.values.includes(scope)));
+  const classificationGroups: ClassificationGroup[] = (["expense", "income"] as const).map(scope => ({
+    id: scope, label: scope === "expense" ? "支出流水" : "收入流水",
+    tone: scope === "expense" ? "blue" : "green", count: summaryCounts[scope],
+    selected: visibleDirections.length === 1 && visibleDirections[0] === scope && statusFilters.length === 0,
+    onSelect: () => handleDirectionChange(scope),
+    children: acquisitionOptions(scope).map(option => {
+      const selectedCount = option.codes.filter(code => statusFilters.includes(code)).length;
+      const matchesDirection = visibleDirections.includes(scope);
+      const labels: Record<string, string> = scope === "expense"
+        ? { pending: "待取得发票", linked: "有票·付款已覆盖", review: "有票·金额待核对" }
+        : { pending: "待开票", linked: "已关联发票" };
+      return { id: `${scope}:${option.key}`, label: labels[option.key] ?? option.label,
+        count: acquisitionSummary ? option.codes.reduce((sum, code) => sum + acquisitionSummary.scopeStatusCounts[code], 0) : undefined,
+        selected: matchesDirection && selectedCount > 0 ? selectedCount === option.codes.length ? true : "mixed" : false,
+        onSelect: () => { handleDirectionChange(scope); setStatusFilters(option.codes); },
+      };
+    }),
+  }));
 
   const statusFilterControl = (
     <div
@@ -602,30 +616,14 @@ export default function PendingInvoicesPage() {
         title="待找发票"
         titleAccessory={titleAccessory}
       >
-        <div className="switch-surface">
-        <InvoiceCountSegments className="switch-surface__scope" label="待找发票流水范围" selectedKey={direction} unit="笔" pending={loading} invalid={Boolean(error)}
-                options={[{ key: "all", label: "全部", count: summaryCounts.all }, { key: "expense", label: "支出", count: summaryCounts.expense }, { key: "income", label: "收入", count: summaryCounts.income }]}
-                onChange={key => { if (key === "all" || key === "expense" || key === "income") handleDirectionChange(key); }} />
-        <div className="switch-surface__body">
+        <div className="pending-invoices-content">
+        <TableClassificationHeader label="待找发票分类" unit="笔" pending={loading} invalid={Boolean(error)}
+          root={{ id: "all", label: "全部流水", count: summaryCounts.all,
+            selected: visibleDirections.length === 2 && statusFilters.length === 0, onSelect: () => handleDirectionChange("all") }}
+          groups={classificationGroups} />
         <PageToolbar
           className="pending-invoices-toolbar"
-          left={(
-            <div className="pending-invoices-toolbar-left">
-
-              <InvoiceCountSegments label="发票获取状态分类" selectedKey={selectedStatus} unit="笔" pending={loading} invalid={Boolean(error)} options={statusSegments}
-                onChange={key => {
-                  if (key === "multiple") return;
-                  setStatusFilters(key === "all" ? [] : filterOptions.find(option => option.key === key)!.codes);
-                  clearSelectedTransactions(); setPage(1);
-                }} />
-              <div
-                className={`pending-invoices-status-text${error ? " pending-invoices-status-text--error" : ""}`}
-                role={error ? "alert" : "status"}
-              >
-                {compactStatusText}
-              </div>
-            </div>
-          )}
+          left={error ? <div className="pending-invoices-status-text pending-invoices-status-text--error" role="alert">{error}</div> : null}
           right={(
             <div className="pending-invoices-toolbar-actions">
               {selectedRows.length > 0 ? (
@@ -720,7 +718,6 @@ export default function PendingInvoicesPage() {
           }}
         />
         </div>
-        </div>
       </PageScaffold>
       <PendingInvoiceRulesDrawer
         open={activeDrawer === "rules"}
@@ -754,6 +751,7 @@ export default function PendingInvoicesPage() {
         onClose={closeDrawer}
       />
       <PendingInvoiceExportDrawer
+        query={query}
         open={activeDrawer === "export"}
         onClose={closeDrawer}
       />

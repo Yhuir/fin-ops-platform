@@ -626,8 +626,8 @@ describe("销项发票收款情况", () => {
     const tableBefore = await screen.findByRole("grid", { name: "销项发票收款情况表" });
     expect(screen.queryByText("当前筛选范围 · 按发票张数")).not.toBeInTheDocument();
     expect(within(tableBefore).queryByRole('button', { name: '筛选 状态' })).not.toBeInTheDocument();
-    const tabs = screen.getByRole('tablist', { name: '销项发票状态分类' });
-    await user.click(within(tabs).getByRole('tab', { name: '已收款 1 张' }));
+    const tabs = screen.getByRole('region', { name: '销项发票分类' });
+    await user.click(within(tabs).getByRole('button', { name: '已收款 1 张' }));
     await waitFor(() => {
       const rowRequests = fetchMock.mock.calls
         .map(([input]) => new URL(String(input), "http://localhost"))
@@ -637,7 +637,7 @@ describe("销项发票收款情况", () => {
     });
 
     expect(document.querySelector('[aria-label="销项发票收款情况表"]')).toBe(tableBefore);
-    expect(within(tabs).getAllByRole('tab')).toHaveLength(7);
+    expect(within(tabs).getAllByRole('button')).toHaveLength(9);
     expect(screen.queryByText('更新中…')).not.toBeInTheDocument();
   });
 
@@ -645,19 +645,19 @@ describe("销项发票收款情况", () => {
     const fetchMock = installFetchMock(() => ({ ...rowsPayload, rows: rowsPayload.rows.slice(0, 1) }));
     const user = userEvent.setup();
     renderAuthenticatedAppAt("/output-invoice-collections");
-    const tabs = await screen.findByRole("tablist", { name: "销项发票状态分类" });
-    await within(tabs).findByRole("tab", { name: "全部 6 张" });
-    expect(within(tabs).getAllByRole("tab")).toHaveLength(7);
+    const tabs = await screen.findByRole("region", { name: "销项发票分类" });
+    await within(tabs).findByRole("button", { name: "全部销项发票 6 张" });
+    expect(within(tabs).getAllByRole("button")).toHaveLength(9);
     await user.type(screen.getByRole("searchbox", { name: "搜索销项发票收款情况" }), "客户");
     await user.click(screen.getByRole("button", { name: "查询", exact: true }));
-    await user.click(await within(tabs).findByRole("tab", { name: "已收款 1 张" }));
+    await user.click(await within(tabs).findByRole("button", { name: "已收款 1 张" }));
     await waitFor(() => {
       const url = new URL(String(fetchMock.mock.calls.at(-1)?.[0]), "http://localhost");
       expect(url.searchParams.get("keyword")).toBe("客户");
       expect(url.searchParams.get("page")).toBe("1");
       expect(JSON.parse(decodeURIComponent(url.searchParams.get("filters")!))).toEqual([{ field: "collection_status", operator: "in", values: ["collected"] }]);
     });
-    await user.click(await within(tabs).findByRole("tab", { name: "全部 6 张" }));
+    await user.click(await within(tabs).findByRole("button", { name: "全部销项发票 6 张" }));
     await waitFor(() => {
       const url = new URL(String(fetchMock.mock.calls.at(-1)?.[0]), "http://localhost");
       expect(url.searchParams.get("keyword")).toBe("客户");
@@ -665,13 +665,36 @@ describe("销项发票收款情况", () => {
     });
   });
 
+  test("父分类选择完整并集，恢复会话不截断，切换子分类保留搜索", async () => {
+    const values = ["reversed_by_red", "reverses_blue", "unmatched_red"];
+    window.sessionStorage.setItem(buildPageSessionStorageKey({ userScope: "101", pageKey: "output-invoice-collections", stateKey: "query" }),
+      JSON.stringify(createStoredPayload({ version: 2, ttlMs: 60_000, value: {
+        page: 1, pageSize: 20, keyword: "客户", month: "", invoiceDateFrom: "", invoiceDateTo: "",
+        filters: [{ field: "collection_status", operator: "in", values }],
+        sortField: "", sortDirection: "", activeWorkflow: null, detailTarget: null,
+      } })));
+    const fetchMock = installFetchMock();
+    const user = userEvent.setup();
+    renderAuthenticatedAppAt('/output-invoice-collections');
+    const header = await screen.findByRole('region', { name: '销项发票分类' });
+    expect(await within(header).findByRole('button', { name: '红冲处理 3 张' })).toHaveAttribute('aria-pressed', 'true');
+    const request = () => new URL(String(fetchMock.mock.calls.filter(([input]) => String(input).includes('/rows?')).at(-1)?.[0]), 'http://localhost');
+    expect(JSON.parse(decodeURIComponent(request().searchParams.get('filters')!))[0].values).toEqual(values);
+    await user.click(within(header).getByRole('button', { name: '收款核对 3 张' }));
+    await waitFor(() => expect(JSON.parse(decodeURIComponent(request().searchParams.get('filters')!))[0].values).toEqual(['pending_collection','partial_collected','collected']));
+    expect(request().searchParams.get('keyword')).toBe('客户');
+    await user.click(within(header).getByRole('button', { name: '部分收款 1 张' }));
+    await waitFor(() => expect(JSON.parse(decodeURIComponent(request().searchParams.get('filters')!))[0].values).toEqual(['partial_collected']));
+    expect(within(header).getByRole('button', { name: '收款核对 3 张' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
   test("顶部单选替换状态且表头不再提供重复筛选", async () => {
     const fetchMock = installFetchMock(); const user = userEvent.setup();
     renderAuthenticatedAppAt('/output-invoice-collections');
     await screen.findByRole('grid', { name: '销项发票收款情况表' });
     expect(screen.queryByRole('button', { name: '筛选 状态' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('tab', { name: '已收款 1 张' }));
-    await user.click(screen.getByRole('tab', { name: '待收款 1 张' }));
+    await user.click(screen.getByRole('button', { name: '已收款 1 张' }));
+    await user.click(screen.getByRole('button', { name: '待收款 1 张' }));
     await waitFor(() => {
       const url = new URL(String(fetchMock.mock.calls.at(-1)?.[0]), 'http://localhost');
       expect(JSON.parse(decodeURIComponent(url.searchParams.get('filters')!))).toEqual([{field:'collection_status',operator:'in',values:['pending_collection']}]);
@@ -683,12 +706,12 @@ describe("销项发票收款情况", () => {
     installFetchMock(() => invalid ? { ...rowsPayload, filter_options: [] } : rowsPayload);
     const user = userEvent.setup();
     renderAuthenticatedAppAt("/output-invoice-collections");
-    await screen.findByRole("tab", { name: "全部 6 张" });
+    await screen.findByRole("button", { name: "全部销项发票 6 张" });
     const table = screen.getByRole("grid", { name: "销项发票收款情况表" });
     invalid = true;
     await user.click(screen.getByRole("button", { name: "刷新", exact: true }));
     expect(await screen.findByRole("alert")).toHaveTextContent("分类统计不完整或无效");
-    expect(screen.getByRole("tab", { name: "全部 — 张" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "全部销项发票 — 张" })).toBeInTheDocument();
     expect(screen.getByRole("grid", { name: "销项发票收款情况表" })).toBe(table);
     expect(screen.getByRole("button", { name: "筛选内容导出" })).toBeDisabled();
   });

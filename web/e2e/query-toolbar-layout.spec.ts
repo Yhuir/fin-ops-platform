@@ -7,8 +7,8 @@ for (const route of ['oa-pending-payments', 'output-invoice-collections', 'pendi
     await page.goto(`/${route}`);
     await expect(page.locator('.finance-table__scroll').first()).toBeVisible();
     if (route === 'oa-pending-payments') {
-      await expect(page.getByRole('radio', { name: /^已关联流水/ })).toBeVisible();
-      await expect(page.getByRole('radio', { name: /^未关联流水/ })).toBeVisible();
+      await expect(page.getByRole('group', { name: '已完成 OA', exact: true }).getByRole('button', { name: /^已关联流水/ })).toBeVisible();
+      await expect(page.getByRole('group', { name: '已完成 OA', exact: true }).getByRole('button', { name: /^未关联流水/ })).toBeVisible();
       await expect(page.getByTestId('oa-pending-payments-table-frame').getByRole('search')).toHaveCount(0);
     }
     if (route === 'pending-invoices') await expect(page.getByText(/^当前范围 .*笔流水/)).toHaveCount(0);
@@ -16,8 +16,8 @@ for (const route of ['oa-pending-payments', 'output-invoice-collections', 'pendi
       await page.setViewportSize({ width, height: 1000 });
       if (route === 'oa-pending-payments') {
         // Stress count-label width without changing query or business state.
-        await page.getByRole('radiogroup', { name: '支付流水' }).locator('.app-segments__label').evaluateAll(labels => labels.forEach(label => {
-          label.textContent = label.textContent!.replace(/\d+条/, '99999条');
+        await page.getByRole('region', { name: 'OA 核对分类' }).locator('.stable-count').evaluateAll(labels => labels.forEach(label => {
+          label.textContent = label.textContent!.replace(/\d+ 条/, '99999 条');
         }));
       }
       const toolbar = page.locator(route === 'pending-invoices' ? '.pending-invoices-toolbar' : `.${route}-query`);
@@ -39,12 +39,9 @@ for (const route of ['oa-pending-payments', 'output-invoice-collections', 'pendi
         if (width === 1800) {
           expect(Math.abs(boxes[0].y - boxes[1].y)).toBeLessThanOrEqual(1);
           expect(boxes[0].right).toBeLessThanOrEqual(boxes[1].x);
-          if (route === 'oa-pending-payments') {
-            const segments = toolbar.getByRole('radiogroup');
-            const segmentBox = await segments.boundingBox();
-            expect(Math.abs(segmentBox!.y - boxes[0].y)).toBeLessThanOrEqual(1);
-            expect(Math.abs(segmentBox!.height - boxes[0].height)).toBeLessThanOrEqual(1);
-          }
+          const header = page.locator('.table-classification');
+          const headerBox = await header.boundingBox();
+          expect(headerBox!.y + headerBox!.height).toBeLessThanOrEqual(boxes[0].y);
         }
       }
       await page.screenshot({ path: info.outputPath(`${route}-${width}.png`), animations: 'disabled' });
@@ -58,7 +55,7 @@ test('OA toolbar preserves payment and month filters when searching and clearing
   await expect(page.locator('.finance-table__scroll')).toBeVisible();
   const nextRows = () => page.waitForResponse(r => new URL(r.url()).pathname === '/api/oa-pending-payments/rows');
   let response = nextRows();
-  await page.getByRole('radio', { name: /^已关联流水/ }).click();
+  await page.getByRole('group', { name: '已完成 OA', exact: true }).getByRole('button', { name: /^已关联流水/ }).click();
   await (await response).finished();
   await page.getByRole('button', { name: 'OA月份筛选：年月' }).click();
   response = nextRows();

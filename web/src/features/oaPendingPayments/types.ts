@@ -179,6 +179,7 @@ export type OaPendingPaymentSummary = {
   bankPaidTotal?: string;
   statusCounts: { paid: number; unpaid: number };
   viewCounts: Record<OaPendingPaymentViewMode, number>;
+  classificationCounts: Record<OaPendingPaymentViewMode, { paid: number; unpaid: number }>;
 };
 
 export type OaPendingPaymentStatistics = Partial<{

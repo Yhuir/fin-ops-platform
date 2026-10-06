@@ -114,9 +114,13 @@ class PendingInvoicePostgresIntegrationTests(unittest.TestCase):
             result = query.rows({**request, "direction": [direction]})
             self.assertEqual(result["summary"]["source_summary"]["bank_transaction_rows"], 4)
             self.assertEqual(sum(result["acquisition_summary"]["status_counts"].values()), expected)
+            self.assertEqual(result["acquisition_summary"]["scope_status_counts"],
+                             linked["acquisition_summary"]["status_counts"])
         filtered_request = {**request, "direction": ["expense"], "filters": [json.dumps([
             {"field": "status_code", "operator": "in", "values": ["paid_invoiced"]}])]}
         filtered = query.rows(filtered_request)
+        self.assertEqual(filtered["acquisition_summary"]["scope_status_counts"],
+                         linked["acquisition_summary"]["status_counts"])
         self.assertEqual(filtered["acquisition_summary"]["bank_count"], 2)
         self.assertEqual(filtered["acquisition_summary"]["invoice_count"], 3)
         self.assertEqual(sum(filtered["acquisition_summary"]["status_counts"].values()), 3)
@@ -125,6 +129,7 @@ class PendingInvoicePostgresIntegrationTests(unittest.TestCase):
         empty = query.rows({**request, "keyword": ["不存在的客户"]})
         self.assertEqual(empty["acquisition_summary"]["bank_count"], 0)
         self.assertEqual(empty["acquisition_summary"]["invoice_count"], 0)
+        self.assertTrue(all(value == 0 for value in empty["acquisition_summary"]["scope_status_counts"].values()))
         self.assertTrue(all(value == 0 for value in empty["acquisition_summary"]["status_counts"].values()))
         self.connection.execute("update app.workbench_pair_relations set status='withdrawn' where case_id='counts-case'")
         restored = query.rows(request)

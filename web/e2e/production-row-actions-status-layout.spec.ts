@@ -20,26 +20,26 @@ test('production bank actions and all invoice statuses remain usable without wri
   });
   await page.setViewportSize({ width: 1920, height: 1000 });
   await page.goto('/fin-ops/output-invoice-collections');
-  const tabs = page.getByRole('tablist', { name: '销项发票状态分类' });
-  await expect(tabs.getByRole('tab')).toHaveCount(7, { timeout: 25_000 });
+  const tabs = page.getByRole('region', { name: '销项发票分类' });
+  await expect(tabs.getByRole('button')).toHaveCount(9, { timeout: 25_000 });
   for (const width of [1920, 1440, 960, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     expect(await tabs.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-    for (const tab of await tabs.getByRole('tab').all()) {
+    for (const tab of await tabs.getByRole('button').all()) {
       await expect(tab).toBeInViewport({ ratio: 1 });
-      await expect(tab).toHaveCSS('height', '34px');
+      expect((await tab.boundingBox())!.height).toBeGreaterThanOrEqual(32);
       expect(await tab.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     }
     await expect(page.getByRole('search').getByRole('button', { name: '查询', exact: true })).toBeInViewport();
     await page.screenshot({ path: info.outputPath(`production-statuses-${width}.png`), animations: 'disabled' });
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
-  for (const tab of await tabs.getByRole('tab').all()) {
-    if (await tab.getAttribute('aria-selected') === 'true') continue;
+  for (const tab of await tabs.getByRole('button').all()) {
+    if (await tab.getAttribute('aria-pressed') === 'true') continue;
     const response = page.waitForResponse(r => new URL(r.url()).pathname === '/fin-ops-api/api/output-invoice-collections/rows');
     await tab.click();
     expect((await response).status()).toBe(200);
-    await expect(tab).toHaveAttribute('aria-selected', 'true');
+    await expect(tab).toHaveAttribute('aria-pressed', 'true');
   }
   await page.goto('/fin-ops/');
   const bank = page.locator('.record-card-bank');

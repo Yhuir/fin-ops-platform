@@ -679,10 +679,16 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(all_rows["pagination"]["total"], 2)
         self.assertEqual(len(all_rows["rows"]), 1)
         self.assertEqual(all_rows["summary"]["statusCounts"], {"paid": 2, "unpaid": 1})
+        self.assertEqual(all_rows["summary"]["classificationCounts"], {
+            "completed": {"paid": 2, "unpaid": 1}, "in_progress": {"paid": 0, "unpaid": 0},
+        })
+        other_view = service.rows({**query, "view_mode": ["in_progress"]}, tenant_id="default")
+        self.assertEqual(other_view["summary"]["classificationCounts"], all_rows["summary"]["classificationCounts"])
         for status, count in (("paid", 2), ("unpaid", 1)):
             filtered = service.rows({**query, "filters": [json.dumps([
                 {"field": "payment_status", "operator": "in", "values": [status]}
             ])]}, tenant_id="default")
+            self.assertEqual(filtered["summary"]["classificationCounts"], all_rows["summary"]["classificationCounts"])
             self.assertEqual(filtered["summary"]["oaCount"], count)
             self.assertEqual(filtered["summary"]["viewCounts"]["completed"], 3)
             self.assertEqual(filtered["summary"]["statusCounts"], {"paid": 2, "unpaid": 1})
@@ -693,6 +699,9 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(withdrawn["summary"]["statusCounts"], {"paid": 0, "unpaid": 3})
         self.assertEqual(withdrawn["summary"]["oaCount"], 3)
         empty = service.rows({**query, "keyword": ["never-match-entity-count"]}, tenant_id="default")
+        self.assertEqual(empty["summary"]["classificationCounts"], {
+            "completed": {"paid": 0, "unpaid": 0}, "in_progress": {"paid": 0, "unpaid": 0},
+        })
         self.assertEqual(empty["summary"]["oaCount"], 0)
         self.assertEqual(empty["summary"]["statusCounts"], {"paid": 0, "unpaid": 0})
 

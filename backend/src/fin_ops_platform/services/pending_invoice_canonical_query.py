@@ -1163,7 +1163,19 @@ select
             'income_invoiced', count(*) filter (where status_code='income_invoiced'),
             'income_no_invoice_required', count(*) filter (where status_code='income_no_invoice_required'),
             'cash_income', count(*) filter (where status_code='cash_income')
-        ) from direction_scope)
+        ) from direction_scope),
+        'scope_status_counts', (select jsonb_build_object(
+            'paid_pending_invoice', count(*) filter (where status_code='paid_pending_invoice'),
+            'paid_invoiced', count(*) filter (where status_code='paid_invoiced'),
+            'invoice_not_fully_paid', count(*) filter (where status_code='invoice_not_fully_paid'),
+            'invoice_amount_missing', count(*) filter (where status_code='invoice_amount_missing'),
+            'bank_statement_as_invoice', count(*) filter (where status_code='bank_statement_as_invoice'),
+            'no_invoice_required', count(*) filter (where status_code='no_invoice_required'),
+            'income_pending_invoice', count(*) filter (where status_code='income_pending_invoice'),
+            'income_invoiced', count(*) filter (where status_code='income_invoiced'),
+            'income_no_invoice_required', count(*) filter (where status_code='income_no_invoice_required'),
+            'cash_income', count(*) filter (where status_code='cash_income')
+        ) from scope_base)
     ) as acquisition_summary,
     (select total from scope_summary) as total,
     (select missing_invoice_rows from scope_summary) as missing_invoice_rows,
@@ -1965,6 +1977,9 @@ class LocalPendingInvoiceCanonicalRepository:
             "paid_pending_invoice", "paid_invoiced", "invoice_not_fully_paid", "invoice_amount_missing", "bank_statement_as_invoice",
             "no_invoice_required", "income_pending_invoice", "income_invoiced", "income_no_invoice_required", "cash_income",
         )}
+        scope_status_counts = dict(status_counts)
+        for row in base_rows:
+            scope_status_counts[_status_code(row)] += 1
         for row in direction_rows:
             status_counts[_status_code(row)] += 1
         invoice_ids = {invoice["id"] for row in rows
@@ -1982,7 +1997,8 @@ class LocalPendingInvoiceCanonicalRepository:
                     for value, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:FILTER_OPTION_LIMIT]
                 )
         return {
-            "acquisition_summary": {"bank_count": len(rows), "invoice_count": len(invoice_ids), "status_counts": status_counts},
+            "acquisition_summary": {"bank_count": len(rows), "invoice_count": len(invoice_ids), "status_counts": status_counts,
+                                    "scope_status_counts": scope_status_counts},
             "rows": selected,
             "total": len(rows),
             "missing_invoice_rows": sum(

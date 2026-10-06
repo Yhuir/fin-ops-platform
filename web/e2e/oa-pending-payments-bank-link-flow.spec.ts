@@ -53,7 +53,7 @@ async function openInProgressView(page: Page, recordLatency?: OperationLatencyRe
       return url.pathname.endsWith("/api/oa-pending-payments/rows")
         && url.searchParams.get("view_mode") === "in_progress";
     });
-    await page.getByRole("radio", { name: /进行中 OA/ }).click();
+    await page.getByRole("button", { name: /进行中 OA/ }).click();
     await mark("apiLatencyMs", inProgressRequest);
     await mark("firstVisibleResponseLatencyMs", expect(page.getByLabel("OA流程状态：进行中").first()).toBeVisible());
     await mark("finalSettledLatencyMs", expect(page.getByLabel("OA流程状态：进行中").first()).toBeVisible());
@@ -64,7 +64,7 @@ async function openInProgressView(page: Page, recordLatency?: OperationLatencyRe
       return url.pathname.endsWith("/api/oa-pending-payments/rows")
         && url.searchParams.get("view_mode") === "in_progress";
     });
-    await page.getByRole("radio", { name: /进行中 OA/ }).click();
+    await page.getByRole("button", { name: /进行中 OA/ }).click();
     await inProgressRequest;
   }
 }

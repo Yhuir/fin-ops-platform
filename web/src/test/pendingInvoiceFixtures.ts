@@ -12,5 +12,5 @@ export function pendingAcquisitionFixture(rows: Array<Record<string, unknown>>) 
     const zone = row.input_invoices as { summaries: { id: string }[] };
     for (const invoice of zone.summaries) invoices.add(invoice.id);
   }
-  return { bank_count: rows.length, invoice_count: invoices.size, status_counts };
+  return { bank_count: rows.length, invoice_count: invoices.size, scope_status_counts: { ...status_counts }, status_counts };
 }

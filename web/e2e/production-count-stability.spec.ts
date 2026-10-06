@@ -14,7 +14,7 @@ for (const path of ['oa-pending-payments','input-invoice-usage','output-invoice-
     page.on('request',r=>{if(['POST','PUT','PATCH','DELETE'].includes(r.method()))writes.push(`${r.method()} ${new URL(r.url()).pathname}`);});
     page.on('response',r=>{if(r.url().includes('/fin-ops-api/') && r.status()>=400)failures.push(`${r.status()} ${new URL(r.url()).pathname}`);});
     await page.goto(`/fin-ops/${path}`);
-    const selector = '.app-segments [role="radio"], .invoice-count-segments [role="tab"]';
+    const selector = '.app-segments [role="radio"], .invoice-count-segments [role="tab"], .table-classification button';
     const controls=page.locator(selector);
     await expect(controls.first().locator('.stable-count')).toContainText(/\d/, { timeout: 30_000 });
     const records=[];
@@ -22,7 +22,7 @@ for (const path of ['oa-pending-payments','input-invoice-usage','output-invoice-
       const target=controls.nth(index);
       await target.scrollIntoViewIfNeeded();
       await target.focus();
-      const activeSelector=path==='oa-pending-payments' ? selector : '.app-segments:first-of-type [role="radio"], .invoice-count-segments:first-of-type [role="tab"]';
+      const activeSelector=path==='oa-pending-payments' ? selector : '.app-segments:first-of-type [role="radio"], .invoice-count-segments:first-of-type [role="tab"], .table-classification button';
       // Sample the actual controls each animation frame while the real network request runs.
       const since=await page.evaluate(()=>performance.now());
       const sampling=page.evaluate(async (selector)=>{
@@ -66,16 +66,15 @@ for (const path of ['oa-pending-payments', 'input-invoice-usage', 'pending-invoi
     });
     page.on('response', response => { if (response.url().includes('/fin-ops-api/') && response.status() >= 400) failures.push(`${response.status()} ${new URL(response.url()).pathname}`); });
     await page.goto(`/fin-ops/${path}`);
-    // The same scope exists before and after the layout change, so measurements are comparable.
-    const scope = page.getByRole(path === 'oa-pending-payments' ? 'radiogroup' : 'tablist', {
-      name: path === 'oa-pending-payments' ? 'OA流程状态视图' : path === 'input-invoice-usage' ? '进项发票关联分类' : '待找发票流水范围', exact: true,
-    });
-    const controls = scope.getByRole(path === 'oa-pending-payments' ? 'radio' : 'tab');
+    const scope = path === 'input-invoice-usage'
+      ? page.getByRole('tablist', { name: '进项发票关联分类', exact: true })
+      : page.getByRole('region', { name: path === 'oa-pending-payments' ? 'OA 核对分类' : '待找发票分类', exact: true });
+    const controls = path === 'input-invoice-usage' ? scope.getByRole('tab') : scope.locator('button.table-classification__parent');
     await expect(controls.first().locator('.stable-count')).toContainText(/\d/, { timeout: 30_000 });
     const samples: { feedbackMs: number; completeMs: number; requests: number }[] = [];
     for (let sample = 0; sample < 100; sample++) {
       await expect(page.locator('[data-count-pending="true"]')).toHaveCount(0);
-      const selected = await controls.nth(0).getAttribute(path === 'oa-pending-payments' ? 'aria-checked' : 'aria-selected');
+      const selected = await controls.nth(0).getAttribute(path === 'input-invoice-usage' ? 'aria-selected' : 'aria-pressed');
       const target = controls.nth(selected === 'true' ? 1 : 0);
       const before = reads.length;
       await target.evaluate(element => {
@@ -83,7 +82,7 @@ for (const path of ['oa-pending-payments', 'input-invoice-usage', 'pending-invoi
           const start = performance.now();
           element.setAttribute('data-latency-start', String(start));
           const painted = () => {
-            if (element.getAttribute('aria-checked') === 'true' || element.getAttribute('aria-selected') === 'true') {
+            if (element.getAttribute('aria-pressed') === 'true' || element.getAttribute('aria-checked') === 'true' || element.getAttribute('aria-selected') === 'true') {
               requestAnimationFrame(() => element.setAttribute('data-latency-ms', String(performance.now() - start)));
             } else requestAnimationFrame(painted);
           };

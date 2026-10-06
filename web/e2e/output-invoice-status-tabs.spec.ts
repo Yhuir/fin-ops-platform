@@ -48,13 +48,13 @@ test("all status tabs use invoice counts, one query, and the same export filters
   await page.goto("/output-invoice-collections");
   const initial = await (await response).json();
   const scopeCount = initial.pagination.total;
-  const tabs = page.getByRole("tablist", { name: "销项发票状态分类" });
-  await expect(tabs.getByRole("tab", { name: `全部 ${scopeCount} 张` })).toBeVisible();
+  const tabs = page.getByRole("region", { name: "销项发票分类" });
+  await expect(tabs.getByRole("button", { name: `全部销项发票 ${scopeCount} 张` })).toBeVisible();
   for (const [code, label] of states) {
     const count = initial.filter_options.find((f: {field:string}) => f.field === "collection_status").options.find((o: {value:string}) => o.value === code).count;
     const requestsBefore = api.count("GET /api/output-invoice-collections/rows");
     const next = page.waitForResponse(r => new URL(r.url()).pathname === "/api/output-invoice-collections/rows");
-    await tabs.getByRole("tab", { name: `${label} ${count} 张` }).click();
+    await tabs.getByRole("button", { name: `${label} ${count} 张` }).click();
     const result = await next;
     const payload = await result.json();
     expect(result.status()).toBe(200);
@@ -67,23 +67,23 @@ test("all status tabs use invoice counts, one query, and the same export filters
       await expect(page.locator('.output-invoice-collections-group-header').nth(1)).toHaveText('收款状态');
       await page.screenshot({ path: info.outputPath('pending-collection-label.png'), animations: 'disabled' });
     }
-    await expect(tabs.getByRole("tab", { name: `${label} ${count} 张` })).toHaveAttribute("aria-selected", "true");
-    await expect(tabs.getByRole("tab", { name: `全部 ${scopeCount} 张` })).toBeVisible();
+    await expect(tabs.getByRole("button", { name: `${label} ${count} 张` })).toHaveAttribute("aria-pressed", "true");
+    await expect(tabs.getByRole("button", { name: `全部销项发票 ${scopeCount} 张` })).toBeVisible();
     expect(api.count("GET /api/output-invoice-collections/rows") - requestsBefore).toBe(1);
   }
-  await tabs.getByRole("tab", { name: /全部/ }).click();
-  await expect(tabs.getByRole("tab", { name: `全部 ${scopeCount} 张` })).toHaveAttribute("aria-selected", "true");
+  await tabs.getByRole("button", { name: /全部/ }).click();
+  await expect(tabs.getByRole("button", { name: `全部销项发票 ${scopeCount} 张` })).toHaveAttribute("aria-pressed", "true");
   await page.setViewportSize({ width: 1600, height: 1000 });
   expect(await tabs.evaluate(el => el.scrollWidth <= el.parentElement!.clientWidth + 1)).toBe(true);
-  await expect(tabs.getByRole('tab', { selected: true })).toHaveCount(1);
-  await expect(tabs.getByRole('tab', { selected: true })).toHaveCSS('background-color', 'rgb(29, 78, 216)');
+  await expect(tabs.getByRole('button', { pressed: true })).toHaveCount(1);
+  await expect(tabs.getByRole('button', { pressed: true })).toHaveCSS('background-color', 'rgb(41, 63, 93)');
   await page.screenshot({ path: info.outputPath("output-status-tabs-wide.png"), animations: "disabled" });
   await page.setViewportSize({ width: 960, height: 900 });
   await page.screenshot({ path: info.outputPath("output-status-tabs-narrow.png"), animations: "disabled" });
   const toolbar = page.locator(".output-invoice-collections-query");
   expect(await toolbar.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-  await tabs.getByRole("tab", { name: /蓝票已被红冲/ }).click();
-  await expect(tabs.getByRole("tab", { name: /蓝票已被红冲/ })).toHaveAttribute("aria-selected", "true");
+  await tabs.getByRole("button", { name: /蓝票已被红冲/ }).click();
+  await expect(tabs.getByRole("button", { name: /蓝票已被红冲/ })).toHaveAttribute("aria-pressed", "true");
   const previewResponse = page.waitForResponse(r => new URL(r.url()).pathname === "/api/output-invoice-collections/export-summary");
   await page.getByRole("button", { name: "筛选内容导出" }).click();
   const previewUrl = new URL((await previewResponse).url());
@@ -96,8 +96,8 @@ test("all status tabs use invoice counts, one query, and the same export filters
 test("all seven statuses fit without scrolling at desktop, narrow and scaled widths", async ({ page }, info) => {
   await installDeterministicApiMocks(page, { sessionMode: "user", outputInvoiceCollectionListInteractions: true });
   await page.goto('/output-invoice-collections');
-  const tabs = page.getByRole('tablist', { name: '销项发票状态分类' });
-  await expect(tabs.getByRole('tab')).toHaveCount(7);
+  const tabs = page.getByRole('region', { name: '销项发票分类' });
+  await expect(tabs.getByRole('button')).toHaveCount(9);
   for (const width of [1920, 1440, 1280, 960]) {
     await page.setViewportSize({ width, height: 1000 });
     for (const collapsed of [false, true]) {
@@ -106,10 +106,10 @@ test("all seven statuses fit without scrolling at desktop, narrow and scaled wid
         width: el.clientWidth, scroll: el.scrollWidth, wrap: getComputedStyle(el).flexWrap,
       }));
       expect(geometry.scroll, JSON.stringify(geometry)).toBeLessThanOrEqual(geometry.width + 1);
-      for (const tab of await tabs.getByRole('tab').all()) {
+      for (const tab of await tabs.getByRole('button').all()) {
         await expect(tab).toBeInViewport({ ratio: 1 });
         expect(await tab.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-        await expect(tab).toHaveCSS('height', '34px');
+        expect((await tab.boundingBox())!.height).toBeGreaterThanOrEqual(32);
       }
       await expect(page.getByRole('search').getByRole('button', { name: '查询', exact: true })).toBeInViewport();
       const tabBox = (await tabs.boundingBox())!;
@@ -124,11 +124,11 @@ test("all seven statuses fit without scrolling at desktop, narrow and scaled wid
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.locator('body').evaluate(el => { el.style.zoom = '1.25'; });
   expect(await tabs.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-  for (const tab of await tabs.getByRole('tab').all()) await expect(tab).toBeInViewport({ ratio: 1 });
+  for (const tab of await tabs.getByRole('button').all()) await expect(tab).toBeInViewport({ ratio: 1 });
   await page.screenshot({ path: info.outputPath('statuses-125-percent.png'), animations: 'disabled' });
-  await tabs.getByRole('tab', { name: /^全部 / }).focus();
-  await page.keyboard.press('End');
-  await expect(tabs.getByRole('tab', { name: /^红票未关联蓝票 / })).toBeFocused();
+  await tabs.getByRole('button', { name: /^全部销项发票 / }).focus();
+  for (let index = 0; index < 8; index++) await page.keyboard.press('Tab');
+  await expect(tabs.getByRole('button', { name: /^红票未关联蓝票 / })).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(tabs.getByRole('tab', { name: /^红票未关联蓝票 / })).toHaveAttribute('aria-selected', 'true');
+  await expect(tabs.getByRole('button', { name: /^红票未关联蓝票 / })).toHaveAttribute('aria-pressed', 'true');
 });

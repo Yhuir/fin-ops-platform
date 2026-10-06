@@ -333,7 +333,7 @@ describe("pending invoices and tag settings API mapping", () => {
   });
 
   test.each([undefined, { bank_count: 1 }, { ...pendingAcquisitionFixture([]), invoice_count: -1 },
-    { ...pendingAcquisitionFixture([]), status_counts: { paid_invoiced: 0 } }])("rejects incomplete acquisition counts without inventing zeroes: %s", async acquisition_summary => {
+    { ...pendingAcquisitionFixture([]), status_counts: { paid_invoiced: 0 } }, { ...pendingAcquisitionFixture([]), scope_status_counts: {} }])("rejects incomplete acquisition counts without inventing zeroes: %s", async acquisition_summary => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ acquisition_summary,
       summary: { source_summary: { bank_transaction_rows: 0, expense_rows: 0, income_rows: 0, current_direction_rows: 0, excluded_direction_rows: 0 } }, rows: [],
     }), { status: 200, headers: { "Content-Type": "application/json" } })));
@@ -628,7 +628,7 @@ describe("pending invoices and tag settings API mapping", () => {
     });
     expect(confirm).toMatchObject({ status: "completed", relationCaseId: "case_001", affectedMonths: ["2026-05"] });
 
-    const summary = await api().fetchPendingInvoiceExportSummary({ values: {}, startDate: '', endDate: '' }, new AbortController().signal);
+    const summary = await api().fetchPendingInvoiceExportSummary({ values: {}, startDate: '', endDate: '' }, new AbortController().signal, { direction: 'all', filter: 'all' });
     expect(summary).toMatchObject({ rowCount: 128 });
     expect(summary).not.toHaveProperty('sampleRows');
 

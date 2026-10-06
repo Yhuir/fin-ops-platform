@@ -1,5 +1,5 @@
-import { CountedLabel } from "../components/common/CountLabel";
-import SegmentedControl, { Segment, SegmentGroup } from "../components/common/SegmentedControl";
+import TableClassificationHeader from "../components/common/TableClassificationHeader";
+import SegmentedControl from "../components/common/SegmentedControl";
 import { Button, Checkbox, Input } from "@heroui/react";
 import { ChevronLeft, ChevronRight, Download, PanelRightOpen, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -40,7 +40,6 @@ import type {
   OaPendingPaymentSortDirection,
   OaPendingPaymentSummary,
   OaPendingPaymentStatistics,
-  OaPendingPaymentViewMode,
   LinkOaPendingPaymentBankTransactionsResponse,
 } from "../features/oaPendingPayments/types";
 import { formatMoney } from "../features/money";
@@ -194,11 +193,6 @@ export default function OaPendingPaymentsPage() {
     setQuery((current) => ({ ...current, page: 1, filters: current.filters.filter((filter) => filter.field !== field) }));
   }, []);
 
-  const handleViewModeChange = useCallback((viewMode: OaPendingPaymentViewMode) => {
-    setQuery((current) => ({ ...current, page: 1, viewMode }));
-    setSelectedOaRowIds(new Set());
-  }, []);
-
   const handleToggleOaSelection = useCallback((row: OaPendingPaymentRow) => {
     const ids = selectableOaRowIds(row);
     if (ids.length === 0) {
@@ -285,10 +279,6 @@ export default function OaPendingPaymentsPage() {
   const visibleError = error ?? actionError;
   const isEmpty = !loading && !refreshing && !visibleError && rows.length === 0;
   const paymentValues = query.filters.find(filter => filter.field === "payment_status")?.values ?? [];
-  const paymentSelection = paymentValues.length === 1 ? paymentValues[0] : "all";
-  const statusCount = (key: "all" | "paid" | "unpaid") => summary
-    ? key === "all" ? summary.statusCounts.paid + summary.statusCounts.unpaid : summary.statusCounts[key]
-    : undefined;
   const titleAccessory = (
     <div className="page-title-accessory-group">
       <PageStatisticsPopover
@@ -308,51 +298,25 @@ export default function OaPendingPaymentsPage() {
     <>
       <div className="oa-pending-payments-page" data-testid="oa-pending-payments-page">
         <PageScaffold title="OA 待付款核对" titleAccessory={titleAccessory} actions={actions}>
-          <div className="oa-pending-payments-content switch-surface">
-            <SegmentGroup
-              aria-label="OA流程状态视图"
-              aria-busy={(loading || refreshing) && !error}
-              className="switch-surface__scope"
-              disallowEmptySelection
-              onSelectionChange={(keys) => {
-                const [next] = Array.from(keys);
-                if (next === "completed" || next === "in_progress") handleViewModeChange(next);
-              }}
-              selectedKeys={new Set([query.viewMode])}
-              selectionMode="single"
-              size="sm"
-            >
-              <Segment id="completed">
-                <CountedLabel label="已完成 OA" value={summary?.viewCounts?.completed} unit="条" />
-              </Segment>
-              <Segment id="in_progress">
-                <CountedLabel label="进行中 OA" value={summary?.viewCounts?.in_progress} unit="条" />
-              </Segment>
-            </SegmentGroup>
-            <div className="switch-surface__body">
+          <div className="oa-pending-payments-content">
+            <TableClassificationHeader label="OA 核对分类" unit="条" pending={loading || refreshing} invalid={Boolean(error)}
+              root={{ id: "all", label: "OA 核对范围", count: summary ? summary.viewCounts.completed + summary.viewCounts.in_progress : undefined }}
+              groups={(["completed", "in_progress"] as const).map(view => {
+                const select = (values: string[]) => setQuery(current => ({ ...current, page: 1, viewMode: view,
+                  filters: [...current.filters.filter(filter => filter.field !== "payment_status"),
+                    ...(values.length ? [{ field: "payment_status", operator: "in" as const, values }] : [])] }));
+                return { id: view, label: view === "completed" ? "已完成 OA" : "进行中 OA",
+                  count: summary?.viewCounts[view], tone: view === "completed" ? "green" : "purple",
+                  selected: query.viewMode === view && paymentValues.length === 0, onSelect: () => select([]),
+                  children: (["paid", "unpaid"] as const).map(status => ({
+                    id: `${view}:${status}`, label: status === "paid" ? "已关联流水" : "未关联流水",
+                    count: summary?.classificationCounts[view][status],
+                    selected: query.viewMode === view && paymentValues.includes(status), onSelect: () => select([status]),
+                  })),
+                };
+              })} />
             <PageToolbar
               className="oa-pending-payments-query"
-              left={(
-                <SegmentGroup
-                  aria-label="支付流水"
-                  aria-busy={(loading || refreshing) && !error}
-                  disallowEmptySelection
-                  selectedKeys={new Set([paymentSelection])}
-                  selectionMode="single"
-                  size="sm"
-                  onSelectionChange={(keys) => {
-                    const [key] = Array.from(keys);
-                    if (key === "all") handleFilterClear("payment_status");
-                    else if (key === "paid" || key === "unpaid") {
-                      handleFilterApply({ field: "payment_status", operator: "in", values: [key] });
-                    }
-                  }}
-                >
-                  <Segment id="all"><CountedLabel label="全部" value={statusCount("all")} unit="条" /></Segment>
-                  <Segment id="paid"><CountedLabel label="已关联流水" value={statusCount("paid")} unit="条" /></Segment>
-                  <Segment id="unpaid"><CountedLabel label="未关联流水" value={statusCount("unpaid")} unit="条" /></Segment>
-                </SegmentGroup>
-              )}
               right={(
                 <div className="oa-pending-payments-query-controls">
                   <BusinessPeriodPicker
@@ -432,7 +396,6 @@ export default function OaPendingPaymentsPage() {
                 />
               </>
             )}
-            </div>
           </div>
         </PageScaffold>
       </div>

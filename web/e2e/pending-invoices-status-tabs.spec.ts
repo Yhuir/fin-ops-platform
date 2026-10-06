@@ -4,7 +4,7 @@ import { pendingAcquisitionFixture } from "../src/test/pendingInvoiceFixtures";
 
 const codes = ["paid_pending_invoice", "paid_invoiced", "invoice_not_fully_paid", "invoice_amount_missing", "bank_statement_as_invoice", "no_invoice_required", "income_pending_invoice", "income_invoiced", "income_no_invoice_required", "cash_income"];
 
-test("two native segment rows partition bank counts and share status/export query state", async ({ page }, info) => {
+test("continuous hierarchy partitions bank counts and share status/export query state", async ({ page }, info) => {
   await installDeterministicApiMocks(page, { sessionMode: "user" });
   const errors: string[] = [];
   const queries: URL[] = [];
@@ -25,47 +25,50 @@ test("two native segment rows partition bank counts and share status/export quer
     const counts = pendingAcquisitionFixture(scoped);
     await route.fulfill({ json: { ...pendingInvoiceRowsPayload(false), direction, rows: selected,
       pagination: { page: 1, page_size: 50, total: selected.length },
-      acquisition_summary: { ...counts, bank_count: selected.length },
+      acquisition_summary: { ...counts, scope_status_counts: pendingAcquisitionFixture(rows).status_counts, bank_count: selected.length },
       summary: { source_summary: {bank_transaction_rows:10,expense_rows:6,income_rows:4,current_direction_rows:scoped.length,excluded_direction_rows:10-scoped.length} },
     } });
   });
   await page.goto("/pending-invoices");
-  const directionTabs = page.getByRole("tablist", { name: "待找发票流水范围" });
-  const statusTabs = page.getByRole("tablist", { name: "发票获取状态分类" });
-  await expect(directionTabs.getByRole("tab", { name:"全部 10 笔" })).toHaveAttribute("aria-selected", "true");
+  const header = page.getByRole("region", { name: "待找发票分类" });
+  await expect(header.getByRole("button", { name:"全部流水 10 笔" })).toHaveAttribute("aria-pressed", "true");
   expect(queries[0].searchParams.has("filters")).toBe(false);
-  for (const [label, count, statusCount] of [["全部",10,7],["支出",6,6],["收入",4,5]] as const) {
-    await directionTabs.getByRole("tab", { name:`${label} ${count} 笔` }).click();
-    await expect(statusTabs.getByRole("tab", { name:`全部状态 ${count} 笔` })).toHaveAttribute("aria-selected", "true");
-    await expect(statusTabs.getByRole("tab")).toHaveCount(statusCount);
-    const names = await statusTabs.getByRole("tab").allTextContents();
-    for (let index=1; index<names.length; index++) {
-      const tab = statusTabs.getByRole("tab").nth(index);
-      const expected = Number(names[index].match(/(\d+) 笔/)![1]);
+  for (const [scope, label, count, children] of [["expense","支出流水",6,5],["income","收入流水",4,4]] as const) {
+    const group = header.getByRole("group", { name: label, exact: true });
+    await group.getByRole("button", { name: `${label} ${count} 笔` }).click();
+    await expect(group.getByRole("button", { name: `${label} ${count} 笔` })).toHaveAttribute("aria-pressed", "true");
+    await expect(group.locator('.table-classification__leaf')).toHaveCount(children);
+    for (const button of await group.locator('.table-classification__leaf').all()) {
+      const expected = Number((await button.textContent())!.match(/(\d+) 笔/)![1]);
       const before = queries.length;
       const response = page.waitForResponse(r => r.url().includes("/api/pending-invoices/rows?") && !r.url().includes("include_statistics=true"));
-      await tab.click();
+      await button.click();
       const payload = await (await response).json();
       expect(payload.acquisition_summary.bank_count).toBe(expected);
       expect(payload.rows).toHaveLength(expected);
-      await expect(tab).toHaveAttribute("aria-selected", "true");
+      expect(queries.at(-1)!.searchParams.get('direction')).toBe(scope);
+      await expect(button).toHaveAttribute("aria-pressed", "true");
       expect(queries.length-before).toBe(1);
-      await expect(statusTabs.getByRole("tab", { name:`全部状态 ${count} 笔` })).toBeVisible();
+      await expect(header.getByRole("button", { name:"全部流水 10 笔" })).toBeVisible();
     }
   }
-  await directionTabs.getByRole("tab", { name:"全部 10 笔" }).click();
-  await expect(statusTabs.getByRole("tab", { name:"全部状态 10 笔" })).toHaveAttribute("aria-selected", "true");
-  for (const width of [1600,960]) {
-    await page.setViewportSize({width,height:1000});
-    await expect(statusTabs.getByRole('tab', { selected: true })).toHaveCount(1);
-  await expect(statusTabs.getByRole('tab', { selected: true })).toHaveCSS('background-color', 'rgb(29, 78, 216)');
-    expect(await page.locator('.pending-invoices-toolbar').evaluate(el => el.scrollWidth <= el.clientWidth+1)).toBe(true);
-    await page.screenshot({path:info.outputPath(`pending-segments-${width}.png`),animations:"disabled"});
+  for (const width of [1920,1440,1366,1024]) {
+    await page.setViewportSize({width,height:900});
+    expect(await header.evaluate(el => el.scrollWidth <= el.clientWidth+1)).toBe(true);
+    await expect(header).toHaveCSS('border-width', '0px');
+    for (const button of await header.getByRole('button').all()) {
+      expect(await button.evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);
+      await expect(button).toHaveCSS('border-radius','0px');
+    }
+    await page.screenshot({path:info.outputPath(`pending-classification-${width}.png`),animations:"disabled"});
   }
-  await statusTabs.getByRole("tab", { name:/^金额待核对 / }).click();
+  await header.getByRole("button", { name:/^有票·金额待核对 / }).click();
   const preview = page.waitForResponse(r => r.url().includes("/api/pending-invoices/export-summary"));
   await page.getByRole("button", { name:"筛选内容导出" }).click();
   const url = new URL((await preview).url());
-  expect(url.searchParams.has("filters")).toBe(false);
+  expect(JSON.parse(url.searchParams.get("filters")!)).toEqual([
+    { field: "direction", operator: "in", values: ["expense"] },
+    { field: "status_code", operator: "in", values: ["invoice_not_fully_paid", "invoice_amount_missing"] },
+  ]);
   expect(errors).toEqual([]);
 });

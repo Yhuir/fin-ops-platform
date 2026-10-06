@@ -2846,7 +2846,7 @@ textarea {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   min-width: 0;
-  gap: var(--fp-space-3);
+  gap: var(--fp-space-2);
 }
 
 .oa-pending-payments-query {
@@ -3686,7 +3686,7 @@ textarea {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   min-width: 0;
-  gap: var(--fp-space-3);
+  gap: var(--fp-space-2);
 }
 
 .output-invoice-collections-page .output-invoice-collections-query {
@@ -3695,19 +3695,11 @@ textarea {
   flex-wrap: wrap;
 }
 
-.output-invoice-collections-query .page-toolbar__group--left {
-  flex: 1 1 1200px;
-  min-width: 0;
-  max-width: 100%;
-}
+.output-invoice-collections-query .page-toolbar__group--left:empty,
+.oa-pending-payments-query .page-toolbar__group--left:empty { display: none; }
 
 .output-invoice-collections-query .page-toolbar__group--right {
   flex: 1 1 480px;
-  min-width: 0;
-}
-
-.output-invoice-collections-status-section {
-  width: 100%;
   min-width: 0;
 }
 
@@ -7411,18 +7403,17 @@ textarea {
   background: var(--fp-page);
 }
 
-.pending-invoices-toolbar {
+.pending-invoices-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
+  gap: var(--fp-space-2);
 }
 
-.pending-invoices-toolbar-left {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  max-width: 100%;
-  gap: var(--fp-space-3);
+.pending-invoices-toolbar {
   min-width: 0;
-  flex-wrap: wrap;
+  margin-block: 0;
+  padding-block: 0;
 }
 
 .pending-invoices-status-text {
@@ -24110,9 +24101,6 @@ body.column-layout-dragging {
 .pending-invoices-toolbar .page-toolbar__group {
   min-width: 0;
   max-width: 100%;
-}
-.pending-invoices-toolbar-left {
-  width: 100%;
 }
 @media (max-width: 1200px) {
   .pending-invoices-toolbar { grid-template-columns: minmax(0, 1fr); }

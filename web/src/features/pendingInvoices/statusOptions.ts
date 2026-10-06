@@ -5,7 +5,7 @@ export const ACQUISITION_STATUS_CODES = [
   "income_pending_invoice", "income_invoiced", "income_no_invoice_required", "cash_income",
 ] as const;
 export type AcquisitionStatusCode = typeof ACQUISITION_STATUS_CODES[number];
-export type AcquisitionSummary = { bankCount: number; invoiceCount: number; statusCounts: Record<AcquisitionStatusCode, number> };
+export type AcquisitionSummary = { bankCount: number; invoiceCount: number; statusCounts: Record<AcquisitionStatusCode, number>; scopeStatusCounts: Record<AcquisitionStatusCode, number> };
 
 export function acquisitionOptions(direction: PendingInvoiceDirection) {
   const expense = direction !== "income";

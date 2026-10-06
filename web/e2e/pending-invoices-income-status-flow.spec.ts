@@ -53,7 +53,7 @@ function startBrowserRuntimeErrorCapture(
 }
 
 async function openIncomeDirection(page: Page) {
-  await page.getByRole("tab", { name: /^收入 / }).click();
+  await page.getByRole("button", { name: /^收入流水 / }).click();
   await expect(page.getByRole("row", { name: /收入批量客户A/ })).toBeVisible();
   await expect(page.getByRole("row", { name: /收入批量客户B/ })).toBeVisible();
 }

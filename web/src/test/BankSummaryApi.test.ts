@@ -47,7 +47,7 @@ test("OA bank display receives snapshot short names in its existing rows respons
   const bank = { bankName: "建设银行", bankShortName: "建行", accountLast4: "0012" };
   const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
     rows: [{ bankTransaction: { ...bank, summaries: [bank] } }], pagination: { total: 1 },
-    summary: { rowCount: 1, oaCount: 1, statusCounts: { paid: 1, unpaid: 0 }, viewCounts: { completed: 1, in_progress: 0 } },
+    summary: { rowCount: 1, oaCount: 1, statusCounts: { paid: 1, unpaid: 0 }, viewCounts: { completed: 1, in_progress: 0 }, classificationCounts: { completed: { paid: 1, unpaid: 0 }, in_progress: { paid: 0, unpaid: 0 } } },
   }), { headers: { "Content-Type": "application/json" } }));
   const result = await fetchOaPendingPaymentRows({ ...request, sortDirection: "desc", tradeDateFrom: "", tradeDateTo: "", viewMode: "completed" });
   expect(result.rows[0].bankTransaction).toMatchObject({ ...bank, summaries: [bank] });
