@@ -13009,17 +13009,6 @@ body.column-layout-dragging {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
 }
 
-.candidate-group-amount-summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 24px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--candidate-group-divider);
-  font-size: 12px;
-  font-weight: 600;
-}
-
 .candidate-group-row-segmented {
   grid-auto-rows: minmax(56px, auto);
 }

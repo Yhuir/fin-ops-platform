@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable
+from dataclasses import replace
+from decimal import Decimal
 from typing import Any
 
 from fin_ops_platform.services.oa_attachment_invoice_linking import oa_row_source_alias_map
@@ -64,15 +66,22 @@ def relation_history_partitions(
     return [partition(relation, len(history)) for relation in relations]
 
 
-def apply_display_subgroups(groups: list[dict[str, Any]], history: list[dict[str, Any]]) -> None:
+def apply_display_subgroups(
+    groups: list[dict[str, Any]], history: list[dict[str, Any]],
+    *, before_relations: list[dict[str, Any]] | None = None,
+) -> None:
     service = WorkbenchRelationAlignmentService()
     eligible = [group for group in groups
                 if len(group.get("oa_rows", [])) >= 2 and group.get("bank_rows")
                 and not any(row.get("expense_items") for row in group["oa_rows"])]
-    partitions = relation_history_partitions([
+    relations = [
         {"case_id": group.get("case_id"), "row_ids": group["formal_member_ids"],
          "row_types": group["formal_member_types"]} for group in eligible
-    ], history)
+    ]
+    display_history = history if before_relations is None else [*history, {
+        "operation_type": "confirm_link", "before_relations": before_relations, "after_relations": relations,
+    }]
+    partitions = relation_history_partitions(relations, display_history)
     for group, parts in zip(eligible, partitions, strict=True):
         oa_rows, bank_rows = group["oa_rows"], group["bank_rows"]
         oa_by_id = {r["id"]: r for r in oa_rows}
@@ -86,23 +95,74 @@ def apply_display_subgroups(groups: list[dict[str, Any]], history: list[dict[str
             bid: source for bid, row in bank_by_id.items()
             if (source := service.bank_source_oa_id(row, aliases))
         }
+        batch_members: dict[str, set[tuple[str, str]]] = {}
+        for bid, row in bank_by_id.items():
+            if batch_id := row.get("display_batch_id"):
+                batch_members.setdefault(batch_id, set()).add(("bank", bid))
+        batch_sets = {frozenset(ids) for ids in batch_members.values()}
+        proven_owner = {bid: oid for oid, bid in proven_pairs.items()}
+        required_by_oa: dict[str, set[tuple[str, str]]] = {}
+        for bid, oid in [*proven_owner.items(), *explicit_pairs.items()]:
+            required_by_oa.setdefault(oid, set()).add(("bank", bid))
         resolved: list[frozenset[tuple[str, str]]] = []
         for part in parts:
             part = part & available
             po = [oa_evidence[k] for t, k in part if t == "oa"]
             pb = [bank_evidence[k] for t, k in part if t == "bank"]
+            # An exact confirmed historical OA/batch is stronger than display
+            # name spelling. Account, currency, direction and phase still veto it.
+            historical_batch = len(po) == 1 and frozenset((t, k) for t, k in part if t == "bank") in batch_sets
+            checked_po = [replace(o, payee="") for o in po] if historical_batch else po
             crossing_pair = any((("oa", oid) in part) != (("bank", bid) in part) for oid, bid in proven_pairs.items())
             crossing_pair = crossing_pair or any((("oa", oid) in part) != (("bank", bid) in part) for bid, oid in explicit_pairs.items())
             if (
                 po and pb and part != available and not crossing_pair
                 and all(item.amount > 0 for item in [*po, *pb])
                 and sum(item.amount for item in po) == sum(item.amount for item in pb)
-                and all(any(not payment_conflicts(o, b) for o in po) for b in pb)
-                and all(any(not payment_conflicts(o, b) for b in pb) for o in po)
+                and all(any(not payment_conflicts(o, b) for o in checked_po) for b in pb)
+                and all(any(not payment_conflicts(o, b) for b in pb) for o in checked_po)
             ):
                 resolved.append(part)
         used = set().union(*resolved) if resolved else set()
         remaining = available - used
+        # Match intact submitted batches before considering individual payments.
+        # Never re-use part of an already resolved batch or search bank subsets.
+        batch_by_amount: dict[Decimal, list[frozenset[tuple[str, str]]]] = {}
+        for batch in batch_sets:
+            if not batch <= remaining:
+                continue
+            evidence = [bank_evidence[k] for _, k in batch]
+            if any(b.amount <= 0 for b in evidence) or len({(b.currency, b.direction) for b in evidence}) != 1:
+                continue
+            batch_by_amount.setdefault(sum(b.amount for b in evidence), []).append(batch)
+        remaining_oids = [k for t, k in remaining if t == "oa"]
+        candidates: dict[str, frozenset[tuple[str, str]]] = {}
+        for oid in remaining_oids:
+            matches = []
+            for batch in batch_by_amount.get(oa_evidence[oid].amount, []):
+                if not required_by_oa.get(oid, set()) <= batch:
+                    continue
+                # A single closed remainder of proven historical partitions has
+                # no alternative owner. This does not generalize to many-to-many.
+                closed_remainder = bool(resolved) and remaining == batch | {("oa", oid)}
+                owner = replace(oa_evidence[oid], payee="") if closed_remainder else oa_evidence[oid]
+                if all(
+                    not payment_conflicts(owner, bank_evidence[bid])
+                    and (bid not in explicit_pairs or explicit_pairs[bid] == oid)
+                    and (bid not in proven_owner or proven_owner[bid] == oid)
+                    for _, bid in batch
+                ):
+                    matches.append(batch)
+                    if len(matches) == 2:
+                        break
+            if len(matches) == 1:
+                candidates[oid] = matches[0]
+        usage = Counter(candidates.values())
+        for oid, batch in candidates.items():
+            if usage[batch] == 1:
+                part = batch | {("oa", oid)}
+                resolved.append(part)
+                remaining -= part
         # Only singleton-sided remainder closes by total; a generic many-to-many
         # remainder remains a shared block rather than invented row ownership.
         remaining_oa = [oa_by_id[k] for t, k in remaining if t == "oa"]
@@ -131,6 +191,7 @@ def apply_display_subgroups(groups: list[dict[str, Any]], history: list[dict[str
                 and all(a is not None and a > 0 for a in [*oa_amounts, *bank_amounts])
                 and len(directions) == 1
                 and sum(oa_amounts) == sum(bank_amounts)
+                and all(b["id"] not in explicit_pairs or ("oa", explicit_pairs[b["id"]]) in remaining for b in rb)
                 and all(any(not payment_conflicts(oa_evidence[o["id"]], bank_evidence[b["id"]]) for o in ro) for b in rb)
                 and all(any(not payment_conflicts(oa_evidence[o["id"]], bank_evidence[b["id"]]) for b in rb) for o in ro)
             ):

@@ -447,9 +447,9 @@ test("shared interest invoice spans two OAs while both eight-payment batches fol
   const invoice = { ...seed.invoice_rows[0], id: "interest-invoice", source_oa_id: "", amount: "6755.43", total_with_tax: "6755.43", invoice_no: "INTEREST-SHARED", seller_name: "共同贷款利息发票" };
   const rows = [...oa, ...batches.flat(), invoice];
   const group = { ...seed, group_id: "case:interest", case_id: "interest", relation_mode: "manual_confirmed",
-    oa_rows: oa, bank_rows: batches.flat(), invoice_rows: [invoice],
+    oa_rows: oa, bank_rows: [...batches[1], ...batches[0]], invoice_rows: [invoice],
     formal_member_ids: rows.map(row => row.id), formal_member_types: rows.map(row => row.type),
-    display_subgroups: [{ resolved: false, oa_row_ids: oa.map(row => row.id), bank_row_ids: batches.flat().map(row => row.id) }],
+    display_subgroups: oa.map((row, index) => ({ resolved: true, oa_row_ids: [row.id], bank_row_ids: batches[index].map(bank => bank.id) })),
     invoice_display_scopes: [],
     amount_check: { status: "matched", direction: "payment", oa_total: "6755.43", bank_total: "6755.43", invoice_total: "6755.43", requires_note: false },
     bank_folds: batches.map((banks, i) => ({ fold_id: `interest-${i}`, member_ids: banks.map(row => row.id),
@@ -462,7 +462,24 @@ test("shared interest invoice spans two OAs while both eight-payment batches fol
   await expect(zone.getByRole("button", { name: "展开流水明细，8 条" })).toHaveCount(2);
   await expect(zone.getByText("共同贷款利息发票", { exact: true })).toHaveCount(1);
   await expect(zone.getByText("6755.43", { exact: true }).first()).toBeVisible();
-  await expect(zone.getByText("OA 合计 6755.43", { exact: true })).toBeVisible();
+  await expect(zone.locator(".candidate-group-amount-summary")).toHaveCount(0);
+  await expect(zone.getByText(/OA 合计|流水合计|发票核对金额/)).toHaveCount(0);
+  const assertAlignment = async () => {
+    const parts = zone.locator('.candidate-group-segment-row');
+    await expect(parts).toHaveCount(2);
+    for (let index = 0; index < 2; index++) {
+      const oaPane = parts.nth(index).locator('[data-pane-id="oa"]');
+      const bankPane = parts.nth(index).locator('[data-pane-id="bank"]');
+      await expect(oaPane).toContainText(totals[index]);
+      const [oaBox, bankBox] = await Promise.all([oaPane.boundingBox(), bankPane.boundingBox()]);
+      expect(Math.abs(oaBox!.y - bankBox!.y)).toBeLessThanOrEqual(1);
+      expect(Math.abs(oaBox!.height - bankBox!.height)).toBeLessThanOrEqual(1);
+      const expanded = await bankPane.getByRole('button', { name: /收起流水明细/ }).count();
+      if (!expanded) await expect(bankPane).toContainText(totals[index]);
+      else for (let n = 0; n < 8; n++) await expect(bankPane.getByText(`利息明细${index}-${n}`, { exact: true })).toBeVisible();
+    }
+  };
+  await assertAlignment();
   const firstOa = zone.getByText("5月申请人", { exact: true });
   const lastOa = zone.getByText("6月申请人", { exact: true });
   const invoiceCell = zone.locator('[data-pane-id="invoice"]').filter({ hasText: "共同贷款利息发票" });
@@ -472,7 +489,15 @@ test("shared interest invoice spans two OAs while both eight-payment batches fol
   await zone.getByRole("button", { name: "展开流水明细，8 条" }).first().click();
   for (let index = 0; index < 8; index++) await expect(zone.getByText(`利息明细0-${index}`, { exact: true })).toBeVisible();
   await expect(zone.getByRole("button", { name: "展开流水明细，8 条" })).toHaveCount(1);
+  await assertAlignment();
   await zone.getByRole("button", { name: "收起流水明细，8 条" }).click();
   await expect(zone.getByRole("button", { name: "展开流水明细，8 条" })).toHaveCount(2);
+  await assertAlignment();
+  await zone.getByRole("button", { name: "展开流水明细，8 条" }).nth(1).click();
+  await assertAlignment();
+  await zone.getByRole("button", { name: "展开流水明细，8 条" }).click();
+  await assertAlignment();
+  await page.reload();
+  await assertAlignment();
   await zone.screenshot({ path: info.outputPath("shared-interest-folds.png") });
 });

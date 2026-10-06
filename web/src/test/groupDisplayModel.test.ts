@@ -1237,3 +1237,25 @@ describe("invoice coverage across merged relations", () => {
     expect(buildWorkbenchGroupDisplayLayout(filtered, g)!.segments.flatMap(s => s.rows.invoice.map(r => r.id))).toEqual(["etc-invoice"]);
   });
 });
+
+describe("submitted batch row alignment", () => {
+  test.each([false, true])("keeps batch members in their OA segment with reversed input=%s", reverse => {
+    const group = buildGroup("interest", "2026-06-25");
+    group.rows = {
+      oa: [buildOaRow("may", "2329.32"), buildOaRow("june", "4426.11")],
+      bank: [buildBankRow("june-bank", "2026-06-22"), buildBankRow("may-bank", "2026-05-21")],
+      invoice: [buildInvoiceRow("shared", "6755.43")],
+    };
+    group.displaySubgroups = [
+      { oaRowIds: ["may"], bankRowIds: ["may-bank"], resolved: true },
+      { oaRowIds: ["june"], bankRowIds: ["june-bank"], resolved: true },
+    ];
+    group.bankFolds = group.rows.bank.map(row => ({ foldId: row.id, memberIds: [row.id], summaryRow: { ...row, id: `summary-${row.id}` } }));
+    if (reverse) { group.rows.oa.reverse(); group.rows.bank.reverse(); group.displaySubgroups.reverse(); }
+    const original = structuredClone(group);
+    const layout = buildWorkbenchGroupDisplayLayout(group)!;
+    expect(layout.segmentedPaneIds).toEqual(["oa", "bank"]);
+    for (const segment of layout.segments) expect(segment.rows.bank[0].id).toBe(`${segment.rows.oa[0].id}-bank`);
+    expect(group).toEqual(original);
+  });
+});

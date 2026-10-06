@@ -311,3 +311,129 @@ def test_late_shared_invoice_remains_shared_inside_subsequent_unrelated_merge():
         {'oa_row_ids': ['may', 'june'], 'bank_row_ids': ['b'], 'invoice_row_ids': ['i']},
         {'oa_row_ids': ['other'], 'bank_row_ids': ['other-bank'], 'invoice_row_ids': ['other-invoice']},
     ]
+
+
+def interest_batches():
+    amounts = [
+        ['47.33', '268.33', '828.33', '427.78', '38.89', '236.44', '202.22', '280.00'],
+        ['917.08', '61.14', '916.22', '361.67', '602.78', '120.56', '482.22', '964.44'],
+    ]
+    oa = [row('oa', 'may', '2329.32'), row('oa', 'june', '4426.11')]
+    banks = [[{**row('bank', f'b{month}-{i}', value), 'display_batch_id': f'batch-{month}',
+               'currency': 'CNY', 'counterparty_name': '贷款账户'} for i, value in enumerate(values)]
+             for month, values in enumerate(amounts)]
+    rows = [*oa, *banks[1], *banks[0], row('invoice', 'shared', '6755.43')]
+    previous = [relation('old-june', [oa[1], *banks[1]]), relation('may-batch', banks[0])]
+    return rows, previous
+
+
+@pytest.mark.parametrize('reverse', [False, True])
+def test_confirmed_eight_payment_batches_align_despite_display_name_variants(reverse):
+    from fin_ops_platform.services.workbench_bank_folds import apply_bank_folds
+    from fin_ops_platform.services.workbench_display_subgroups import apply_invoice_display_scopes
+
+    rows, previous = interest_batches()
+    rows[0]['counterparty_name'] = '贷款帐户'
+    rows[1]['counterparty_name'] = '银行'
+    if reverse:
+        rows.reverse()
+    g = group(rows)
+    g['group_id'] = 'case:merged'
+    original = deepcopy(g)
+    history = [event(relation('merged', rows), previous)]
+    for _ in range(2):
+        apply_display_subgroups([g], history)
+        apply_invoice_display_scopes([g], history)
+        apply_bank_folds([g])
+        assert {tuple(p['oa_row_ids']): set(p['bank_row_ids']) for p in g['display_subgroups']} == {
+            ('may',): {f'b0-{i}' for i in range(8)}, ('june',): {f'b1-{i}' for i in range(8)},
+        }
+        assert all(p['resolved'] for p in g['display_subgroups'])
+        assert len(g['bank_folds']) == 2
+        assert 'invoice_display_scopes' not in g
+        assert {k: v for k, v in g.items() if k not in {'display_subgroups', 'bank_folds'}} == original
+    preview = deepcopy(original)
+    apply_display_subgroups([preview], [], before_relations=previous)
+    assert preview['display_subgroups'] == g['display_subgroups']
+
+
+def test_unique_whole_batches_align_without_subset_search_or_history(monkeypatch):
+    rows, _ = interest_batches()
+    for r in rows:
+        r.pop('counterparty_name', None)
+    def reject_subset(**kwargs):
+        raise AssertionError('Intact matching batches must not run bank subset search')
+    monkeypatch.setattr(WorkbenchRelationAlignmentService, '_unique_subset_matches', reject_subset)
+    g = group(rows)
+    apply_display_subgroups([g], [])
+    assert [p['resolved'] for p in g['display_subgroups']] == [True, True]
+
+
+@pytest.mark.parametrize('conflict', ['currency', 'direction', 'account', 'owner', 'payee', 'duplicate'])
+def test_batch_alignment_does_not_override_conflicts_or_ambiguity(conflict):
+    rows, _ = interest_batches()
+    for r in rows:
+        r.pop('counterparty_name', None)
+    banks = [r for r in rows if r['type'] == 'bank' and r['display_batch_id'] == 'batch-1']
+    if conflict == 'currency':
+        banks[0]['currency'] = 'USD'
+    elif conflict == 'direction':
+        banks[0]['txn_direction'] = 'inflow'
+    elif conflict == 'account':
+        rows[1]['detail_fields'] = {'收款账号': '111'}
+        banks[0]['detail_fields'] = {'counterparty_account_no': '222'}
+    elif conflict == 'owner':
+        banks[0]['detail_fields'] = {'source_oa_row_id': 'may'}
+    elif conflict == 'payee':
+        rows[1]['counterparty_name'] = '另一家公司'
+        banks[0]['counterparty_name'] = '实际收款方'
+    else:
+        rows.append(row('oa', 'duplicate-june', '4426.11'))
+    g = group(rows)
+    apply_display_subgroups([g], [])
+    assert not any(p['resolved'] and p['oa_row_ids'] == ['june'] and len(p['bank_row_ids']) == 8
+                   for p in g['display_subgroups'])
+
+
+def test_historical_batch_still_rejects_account_conflict():
+    rows, previous = interest_batches()
+    rows[1]['detail_fields'] = {'收款账号': '111'}
+    rows[2]['detail_fields'] = {'counterparty_account_no': '222'}
+    g = group(rows)
+    apply_display_subgroups([g], [event(relation('merged', rows), previous)])
+    assert not any(p['resolved'] and p['oa_row_ids'] == ['june'] for p in g['display_subgroups'])
+
+
+def test_partial_batch_never_imports_members_from_another_relation():
+    rows, _ = interest_batches()
+    # Only current relation members are available, even if provenance is shared.
+    removed = rows.pop(2)
+    g = group(rows)
+    original = deepcopy(g)
+    apply_display_subgroups([g], [])
+    assert all(removed['id'] not in p['bank_row_ids'] for p in g['display_subgroups'])
+    assert not any(p['resolved'] and p['oa_row_ids'] == ['june'] for p in g['display_subgroups'])
+    assert {k: v for k, v in g.items() if k != 'display_subgroups'} == original
+
+
+def test_same_total_batches_do_not_pick_first_candidate():
+    oa = [row('oa', 'a', 100), row('oa', 'b', 200)]
+    banks = [{**row('bank', f'{batch}-{i}', value), 'display_batch_id': batch}
+             for batch in ['first', 'second'] for i, value in enumerate([10, 20, 70])]
+    g = group([*oa, *banks])
+    apply_display_subgroups([g], [])
+    assert not any(p['resolved'] and p['oa_row_ids'] == ['a'] for p in g['display_subgroups'])
+
+
+def test_large_batches_use_whole_totals_without_combinatorial_search(monkeypatch):
+    oa = [row('oa', 'a', 500), row('oa', 'b', 1000)]
+    banks = [{**row('bank', f'{batch}-{i}', value), 'display_batch_id': batch}
+             for batch, value in [('first', 1), ('second', 2)] for i in range(500)]
+    def reject_subset(**kwargs):
+        raise AssertionError('Whole batch lookup must not enumerate subsets')
+    monkeypatch.setattr(WorkbenchRelationAlignmentService, '_unique_subset_matches', reject_subset)
+    g = group([*oa, *banks])
+    apply_display_subgroups([g], [])
+    assert [(p['oa_row_ids'], len(p['bank_row_ids']), p['resolved']) for p in g['display_subgroups']] == [
+        (['a'], 500, True), (['b'], 500, True),
+    ]

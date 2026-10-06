@@ -424,7 +424,6 @@ class WorkbenchWriteFacade:
         after_groups = self._relation_groups([after_relation], selected_rows=rows)
         history = self._relation_read_snapshot_port.display_history(row_ids)
         apply_display_subgroups(before_groups, history)
-        apply_display_subgroups(after_groups, history)
         apply_invoice_display_scopes(before_groups, history)
         display_before_relations = self._merge_relation_snapshots(
             before_relations,
@@ -432,6 +431,7 @@ class WorkbenchWriteFacade:
                 selected_rows, existing_relations=before_relations, month_scope=relation_scope(selected_rows),
             ),
         )
+        apply_display_subgroups(after_groups, history, before_relations=display_before_relations)
         apply_invoice_display_scopes(after_groups, history, before_relations=display_before_relations)
         apply_bank_folds(before_groups)
         apply_bank_folds(after_groups)

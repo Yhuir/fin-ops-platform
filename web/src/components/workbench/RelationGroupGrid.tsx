@@ -37,18 +37,6 @@ import RelationGroupCell from "./RelationGroupCell";
 import WorkbenchAnomalyIndicator from "./WorkbenchAnomalyIndicator";
 import WorkbenchColumnFilterMenu from "./WorkbenchColumnFilterMenu";
 import type { WorkbenchColumnDropPosition } from "../../features/workbench/columnLayout";
-import { formatMoney } from "../../features/money";
-
-function GroupAmountSummary({ group, gridRow }: { group: WorkbenchRelationGroup; gridRow?: number }) {
-  const check = group.amountCheck;
-  if (group.rows.oa.length < 2 || !group.bankFolds?.length || !check) return null;
-  return <div className="candidate-group-amount-summary" style={{ gridColumn: "1 / -1", gridRow }}>
-    <span>OA 合计 {formatMoney(check.oaTotal, "—")}</span>
-    <span>流水合计 {formatMoney(check.bankTotal, "—")}</span>
-    <span>发票核对金额 {formatMoney(check.invoiceTotal, "—")}</span>
-  </div>;
-}
-
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
 }
@@ -786,7 +774,6 @@ function RelationGroupGrid({
                   {column.renderGroup(group)}
                 </div>
               ))}
-              <GroupAmountSummary group={group} gridRow={segmentCount + 1} />
               {groupLevelAnomalies.length > 0 ? (
                 <WorkbenchAnomalyIndicator
                   anomalies={groupLevelAnomalies}
@@ -859,7 +846,6 @@ function RelationGroupGrid({
                 {column.renderGroup(group)}
               </div>
             ))}
-            <GroupAmountSummary group={group} />
             {groupLevelAnomalies.length > 0 ? (
               <WorkbenchAnomalyIndicator
                 anomalies={groupLevelAnomalies}
