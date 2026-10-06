@@ -5,7 +5,7 @@
 Python 依赖来自 [requirements.txt](../backend/requirements.txt)，前端依赖和命令来自 [package.json](../web/package.json)。CI 使用 Python 3.11、Node 20。安装：
 
 ```bash
-python3 -m pip install -r backend/requirements.txt
+python3 scripts/python_dependencies.py install
 cd web && npm ci
 ```
 
@@ -21,6 +21,9 @@ cd web && npm ci
 ```
 
 后端默认 `127.0.0.1:18001`，由 Gunicorn + WSGI adapter 启动。迁移凭据与 runtime 分离，本地迁移文件为 `.runtime/fin_ops_platform/local-postgres-migrator.env`。设置专用 `FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL` 后运行 `PYTHONPATH=backend/src python3 -m fin_ops_platform.postgres apply`；先确认 DSN 与命令实际选用同一个目标库，不向终端打印凭据。
+
+PyMongo 使用 App 内安全补丁构建，见[驱动说明](../backend/vendor/pymongo/README.md)。
+安装需要 C 编译器和 `patch`；安装包在 `.runtime/python-wheels/`，不提交二进制文件。
 
 ## 验证入口
 

@@ -91,7 +91,7 @@ run_lint() {
 
 run_dependency_audit() {
   cd "$ROOT_DIR"
-  python3 -m pip_audit -r backend/requirements.txt --progress-spinner off
+  python3 scripts/python_dependencies.py audit
 }
 
 run_frontend() {

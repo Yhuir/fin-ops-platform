@@ -1,0 +1,3 @@
+hatchling==1.32.4
+hatch-requirements-txt==0.4.1
+setuptools==84.0.0

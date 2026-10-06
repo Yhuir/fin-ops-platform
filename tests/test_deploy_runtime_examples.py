@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -16,6 +17,29 @@ QUEUE_PRUNE = REPO_ROOT / "deploy/oa/bin/finops-prune-runtime-queue-history.sh"
 
 
 class DeployRuntimeExampleTests(unittest.TestCase):
+    def test_dependency_install_failure_stops_before_worker_even_in_conditional_activation(self) -> None:
+        script = DEPLOY_CONTROL.read_text(encoding="utf-8")
+        function = script[script.index("sync_python_envs() {"):script.index("audit_python_dependencies() {")]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api, worker, marker = root / "api", root / "worker", root / "worker-called"
+            api.write_text("#!/bin/sh\nexit 23\n")
+            worker.write_text(f"#!/bin/sh\ntouch '{marker}'\n")
+            api.chmod(0o700)
+            worker.chmod(0o700)
+            result = subprocess.run(["bash", "-c", function + '\nAPI_PYTHON="$1"; WORKER_PYTHON="$2"; if sync_python_envs "$3"; then exit 0; else exit $?; fi', "test", str(api), str(worker), str(root)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 23, result.stderr)
+            self.assertFalse(marker.exists())
+
+    def test_release_prepares_previous_dependencies_before_activation_and_installs_offline(self) -> None:
+        script = DEPLOY_CONTROL.read_text(encoding="utf-8")
+        gate = script[script.index("release_gate_activate() {"):script.index('cmd="${1:-}"')]
+        self.assertLess(gate.index('"$dependency_tool" prepare'), gate.index('if ! (activate_release'))
+        installer = script[script.index("sync_python_envs() {"):script.index("audit_python_dependencies() {")]
+        self.assertIn("--no-index", installer)
+        self.assertIn("resolved.txt", installer)
+        self.assertIn('sync_python_envs "$src" || die', script)
+
     def test_cash_proxy_log_exclusion_covers_all_three_paths_without_hiding_neighbors(self) -> None:
         config = (REPO_ROOT / "deploy/oa/nginx.fin-ops.conf.example").read_text(encoding="utf-8")
         pattern = r"^/(api/cash|fin-ops/api/cash|fin-ops-api/api/cash)(/|$)"

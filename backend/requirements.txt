@@ -1,12 +1,14 @@
 boto3==1.42.88
+dnspython==2.8.0
 gunicorn==26.0.0
 openpyxl==3.1.5
 pillow==12.3.0
 pdfplumber==0.11.10
 pymupdf==1.26.4
-pymongo==4.14.1
+pymongo==4.17.0+finops.1
 psycopg[binary,pool]==3.3.3
 PyMySQL==1.1.1
 rapidocr_onnxruntime==1.2.3
 redis==7.4.0
+urllib3==2.8.0
 xlrd==2.0.2

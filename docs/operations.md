@@ -97,6 +97,12 @@ scripts/with-production-admin-token.sh ./scripts/deploy-oa.sh --activate-existin
 
 ## 激活顺序
 
+候选检查通过 `scripts/python_dependencies.py` 构建 App 的 PyMongo 补丁包，准备完整
+wheel 目录并在独立环境审计实际依赖。原始漏洞结果和已验证补丁分开报告，细节见
+[驱动说明](../backend/vendor/pymongo/README.md)。激活前也准备上一版本的依赖，切换和
+恢复时只从各自 `.runtime/python-wheels/` 离线安装，不在停服窗口下载或编译依赖。
+恢复旧发布只代表恢复服务；若恢复版本仍含已知漏洞，安全修复仍未完成。
+
 Runtime/ACL profile 的激活顺序固定为：
 
 1. 校验 candidate、active release、env/ACL、storage 和 migration plan；

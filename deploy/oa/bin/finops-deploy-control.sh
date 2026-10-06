@@ -1214,24 +1214,17 @@ sync_python_envs() {
   local src="$1"
   [[ -x "$API_PYTHON" ]] || die "API python not executable: $API_PYTHON"
   [[ -x "$WORKER_PYTHON" ]] || die "worker python not executable: $WORKER_PYTHON"
-  "$API_PYTHON" -m pip install -r "$src/backend/requirements.txt" >/dev/null
+  "$API_PYTHON" -m pip install --no-index --find-links "$src/.runtime/python-wheels" -r "$src/.runtime/python-wheels/resolved.txt" >/dev/null || return
   if [[ "$WORKER_PYTHON" != "$API_PYTHON" ]]; then
-    "$WORKER_PYTHON" -m pip install -r "$src/backend/requirements.txt" >/dev/null
+    "$WORKER_PYTHON" -m pip install --no-index --find-links "$src/.runtime/python-wheels" -r "$src/.runtime/python-wheels/resolved.txt" >/dev/null || return
   fi
 }
 
 audit_python_dependencies() {
   local src="$1"
-  local audit_env
-  audit_env="$(mktemp -d /tmp/fin-ops-dependency-audit.XXXXXX)"
-  trap "$(printf 'rm -rf -- %q' "$audit_env")" RETURN
-  "$API_PYTHON" -m venv "$audit_env"
-  "$audit_env/bin/python" -m pip install -q -r "$src/backend/requirements-audit.txt"
-  "$audit_env/bin/python" -m pip_audit \
-    -r "$src/backend/requirements.txt" \
-    --progress-spinner off
-  rm -rf "$audit_env"
-  trap - RETURN
+  # One owner builds the wheel and runs pip_audit in an isolated environment
+  # with requirements-audit.txt; verified backports remain visible in its report.
+  "$API_PYTHON" "$src/scripts/python_dependencies.py" audit
 }
 
 run_schema_migrations() {
@@ -2339,7 +2332,7 @@ activate_release() {
   fi
   run_schema_migrations "$src" || die "schema migration failed; candidate was not activated"
   assert_settings_access_control_database_guard "$src"
-  sync_python_envs "$src"
+  sync_python_envs "$src" || die "dependency installation failed; candidate was not activated"
   run_workbench_direct_compatibility_preflight \
     "$src" "$RELEASE_GATE_EVIDENCE_ROOT/$release"
   install_runtime_worker_helper "$src"
@@ -3118,6 +3111,13 @@ release_gate_activate() {
   [[ "$active_count" == "1" ]] \
     || die "release gate requires exactly one active release, found $active_count"
   [[ "$previous_release" != "$release" ]] || die "candidate release is already active"
+  # Prepare both exact dependency sets before maintenance. Rollback must not
+  # depend on downloading packages after a failed activation.
+  local dependency_tool
+  dependency_tool="$(release_src "$release")/scripts/python_dependencies.py"
+  "$API_PYTHON" "$dependency_tool" prepare \
+    --requirements "$(release_src "$previous_release")/backend/requirements.txt" \
+    --wheels "$(release_src "$previous_release")/.runtime/python-wheels"
   profile_report="$(mktemp /run/finops-release-profile.XXXXXX)"
   schema_plan_path="$(mktemp /run/finops-schema-plan.XXXXXX)"
   trap "$(printf 'rm -f -- %q %q' "$profile_report" "$schema_plan_path")" EXIT

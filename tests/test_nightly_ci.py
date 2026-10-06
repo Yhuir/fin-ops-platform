@@ -29,7 +29,7 @@ class NightlyCITests(unittest.TestCase):
         self.assertIn("python-version: \"3.11\"", workflow)
         self.assertIn("uses: actions/setup-node@v4", workflow)
         self.assertIn("node-version: \"20\"", workflow)
-        self.assertIn("python -m pip install -r backend/requirements.txt", workflow)
+        self.assertIn("python scripts/python_dependencies.py install", workflow)
         self.assertIn("python -m pip install -r backend/requirements-audit.txt", workflow)
         self.assertIn("npm ci", workflow)
         self.assertIn("npx playwright install --with-deps chromium", workflow)
@@ -40,7 +40,7 @@ class NightlyCITests(unittest.TestCase):
         script = VERIFY_SCRIPT_PATH.read_text(encoding="utf-8")
 
         self.assertIn("run_clean_app_check", script)
-        self.assertIn("python3 -m pip_audit -r backend/requirements.txt", script)
+        self.assertIn("python3 scripts/python_dependencies.py audit", script)
         self.assertIn("PYTHONPATH=backend/src python3 -m unittest discover -s tests -v", script)
         self.assertIn("npm test -- --run", script)
         self.assertIn("npm run build", script)

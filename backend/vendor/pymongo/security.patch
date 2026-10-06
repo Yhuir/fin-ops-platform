@@ -1,0 +1,407 @@
+--- a/bson/buffer.c
++++ b/bson/buffer.c
+@@ -18,6 +18,7 @@
+ #define PY_SSIZE_T_CLEAN
+ #include "Python.h"
+ 
++#include <limits.h>
+ #include <stdlib.h>
+ #include <string.h>
+ 
+@@ -105,18 +106,25 @@
+  * Return non-zero and sets MemoryError on allocation failure.
+  * Return non-zero and sets ValueError if `size` would exceed 2GiB. */
+ static int buffer_assure_space(buffer_t buffer, int size) {
+-    int new_size = buffer->position + size;
+-    /* Check for overflow. */
+-    if (new_size < buffer->position) {
++    long long new_size;
++    if (size < 0) {
+         PyErr_SetString(PyExc_ValueError,
+                         "Document would overflow BSON size limit");
+         return 1;
+     }
+ 
+-    if (new_size <= buffer->size) {
++    /* Compute in a wider type so the addition cannot overflow `int`. */
++    new_size = (long long)buffer->position + (long long)size;
++    if (new_size > INT_MAX) {
++        PyErr_SetString(PyExc_ValueError,
++                        "Document would overflow BSON size limit");
++        return 1;
++    }
++
++    if ((int)new_size <= buffer->size) {
+         return 0;
+     }
+-    return buffer_grow(buffer, new_size);
++    return buffer_grow(buffer, (int)new_size);
+ }
+ 
+ /* Save `size` bytes from the current position in `buffer` (and grow if needed).
+--- a/gridfs/asynchronous/grid_file.py
++++ b/gridfs/asynchronous/grid_file.py
+@@ -282,8 +282,8 @@
+            ``delete`` no longer ensures indexes.
+         """
+         _disallow_transactions(session)
+-        await self._files.delete_one({"_id": file_id}, session=session)
+-        await self._chunks.delete_many({"files_id": file_id}, session=session)
++        await self._files.delete_one({"_id": {"$eq": file_id}}, session=session)
++        await self._chunks.delete_many({"files_id": {"$eq": file_id}}, session=session)
+ 
+     async def list(self, session: Optional[AsyncClientSession] = None) -> list[str]:
+         """List the names of all files stored in this instance of
+@@ -339,7 +339,7 @@
+            Added ``session`` parameter.
+         """
+         if filter is not None and not isinstance(filter, abc.Mapping):
+-            filter = {"_id": filter}
++            filter = {"_id": {"$eq": filter}}
+ 
+         _disallow_transactions(session)
+         async for f in self.find(filter, *args, session=session, **kwargs):
+@@ -453,6 +453,8 @@
+         if kwargs:
+             f = await self._files.find_one(kwargs, ["_id"], session=session)
+         else:
++            if document_or_id is not None and not isinstance(document_or_id, abc.Mapping):
++                document_or_id = {"_id": {"$eq": document_or_id}}
+             f = await self._files.find_one(document_or_id, ["_id"], session=session)
+ 
+         return f is not None
+@@ -829,8 +831,8 @@
+            Added ``session`` parameter.
+         """
+         _disallow_transactions(session)
+-        res = await self._files.delete_one({"_id": file_id}, session=session)
+-        await self._chunks.delete_many({"files_id": file_id}, session=session)
++        res = await self._files.delete_one({"_id": {"$eq": file_id}}, session=session)
++        await self._chunks.delete_many({"files_id": {"$eq": file_id}}, session=session)
+         if not res.deleted_count:
+             raise NoFile("no file could be deleted because none matched %s" % file_id)
+ 
+@@ -1042,7 +1044,7 @@
+         """
+         _disallow_transactions(session)
+         result = await self._files.update_one(
+-            {"_id": file_id}, {"$set": {"filename": new_filename}}, session=session
++            {"_id": {"$eq": file_id}}, {"$set": {"filename": new_filename}}, session=session
+         )
+         if not result.matched_count:
+             raise NoFile(
+@@ -1197,8 +1199,12 @@
+ 
+     async def abort(self) -> None:
+         """Remove all chunks/files that may have been uploaded and close."""
+-        await self._coll.chunks.delete_many({"files_id": self._file["_id"]}, session=self._session)
+-        await self._coll.files.delete_one({"_id": self._file["_id"]}, session=self._session)
++        await self._coll.chunks.delete_many(
++            {"files_id": {"$eq": self._file["_id"]}}, session=self._session
++        )
++        await self._coll.files.delete_one(
++            {"_id": {"$eq": self._file["_id"]}}, session=self._session
++        )
+         object.__setattr__(self, "_closed", True)
+ 
+     @property
+@@ -1247,7 +1253,9 @@
+             self._file[name] = value
+             if self._closed:
+                 if _IS_SYNC:
+-                    self._coll.files.update_one({"_id": self._file["_id"]}, {"$set": {name: value}})
++                    self._coll.files.update_one(
++                        {"_id": {"$eq": self._file["_id"]}}, {"$set": {name: value}}
++                    )
+                 else:
+                     raise AttributeError(
+                         "AsyncGridIn does not support __setattr__ after being closed(). Set the attribute before closing the file or use AsyncGridIn.set() instead"
+@@ -1256,7 +1264,9 @@
+     async def set(self, name: str, value: Any) -> None:
+         self._file[name] = value
+         if self._closed:
+-            await self._coll.files.update_one({"_id": self._file["_id"]}, {"$set": {name: value}})
++            await self._coll.files.update_one(
++                {"_id": {"$eq": self._file["_id"]}}, {"$set": {name: value}}
++            )
+ 
+     async def _flush_data(self, data: Any, force: bool = False) -> None:
+         """Flush `data` to a chunk."""
+@@ -1582,7 +1592,9 @@
+     async def open(self) -> None:
+         if not self._file:
+             _disallow_transactions(self._session)
+-            self._file = await self._files.find_one({"_id": self._file_id}, session=self._session)
++            self._file = await self._files.find_one(
++                {"_id": {"$eq": self._file_id}}, session=self._session
++            )
+             if not self._file:
+                 raise NoFile(
+                     f"no file in gridfs collection {self._files!r} with _id {self._file_id!r}"
+@@ -1853,7 +1865,7 @@
+         return self
+ 
+     def _create_cursor(self) -> None:
+-        filter = {"files_id": self._id}
++        filter = {"files_id": {"$eq": self._id}}
+         if self._next_chunk > 0:
+             filter["n"] = {"$gte": self._next_chunk}
+         _disallow_transactions(self._session)
+--- a/gridfs/grid_file_shared.py
++++ b/gridfs/grid_file_shared.py
+@@ -122,7 +122,9 @@
+         if warn_str:
+             warnings.warn(warn_str, stacklevel=2, category=DeprecationWarning)
+         if self._closed:
+-            self._coll.files.update_one({"_id": self._file["_id"]}, {"$set": {field_name: value}})
++            self._coll.files.update_one(
++                {"_id": {"$eq": self._file["_id"]}}, {"$set": {field_name: value}}
++            )
+         self._file[field_name] = value
+ 
+     if read_only:
+--- a/gridfs/synchronous/grid_file.py
++++ b/gridfs/synchronous/grid_file.py
+@@ -282,8 +282,8 @@
+            ``delete`` no longer ensures indexes.
+         """
+         _disallow_transactions(session)
+-        self._files.delete_one({"_id": file_id}, session=session)
+-        self._chunks.delete_many({"files_id": file_id}, session=session)
++        self._files.delete_one({"_id": {"$eq": file_id}}, session=session)
++        self._chunks.delete_many({"files_id": {"$eq": file_id}}, session=session)
+ 
+     def list(self, session: Optional[ClientSession] = None) -> list[str]:
+         """List the names of all files stored in this instance of
+@@ -337,7 +337,7 @@
+            Added ``session`` parameter.
+         """
+         if filter is not None and not isinstance(filter, abc.Mapping):
+-            filter = {"_id": filter}
++            filter = {"_id": {"$eq": filter}}
+ 
+         _disallow_transactions(session)
+         for f in self.find(filter, *args, session=session, **kwargs):
+@@ -451,6 +451,8 @@
+         if kwargs:
+             f = self._files.find_one(kwargs, ["_id"], session=session)
+         else:
++            if document_or_id is not None and not isinstance(document_or_id, abc.Mapping):
++                document_or_id = {"_id": {"$eq": document_or_id}}
+             f = self._files.find_one(document_or_id, ["_id"], session=session)
+ 
+         return f is not None
+@@ -825,8 +827,8 @@
+            Added ``session`` parameter.
+         """
+         _disallow_transactions(session)
+-        res = self._files.delete_one({"_id": file_id}, session=session)
+-        self._chunks.delete_many({"files_id": file_id}, session=session)
++        res = self._files.delete_one({"_id": {"$eq": file_id}}, session=session)
++        self._chunks.delete_many({"files_id": {"$eq": file_id}}, session=session)
+         if not res.deleted_count:
+             raise NoFile("no file could be deleted because none matched %s" % file_id)
+ 
+@@ -1034,7 +1036,7 @@
+         """
+         _disallow_transactions(session)
+         result = self._files.update_one(
+-            {"_id": file_id}, {"$set": {"filename": new_filename}}, session=session
++            {"_id": {"$eq": file_id}}, {"$set": {"filename": new_filename}}, session=session
+         )
+         if not result.matched_count:
+             raise NoFile(
+@@ -1185,8 +1187,10 @@
+ 
+     def abort(self) -> None:
+         """Remove all chunks/files that may have been uploaded and close."""
+-        self._coll.chunks.delete_many({"files_id": self._file["_id"]}, session=self._session)
+-        self._coll.files.delete_one({"_id": self._file["_id"]}, session=self._session)
++        self._coll.chunks.delete_many(
++            {"files_id": {"$eq": self._file["_id"]}}, session=self._session
++        )
++        self._coll.files.delete_one({"_id": {"$eq": self._file["_id"]}}, session=self._session)
+         object.__setattr__(self, "_closed", True)
+ 
+     @property
+@@ -1235,7 +1239,9 @@
+             self._file[name] = value
+             if self._closed:
+                 if _IS_SYNC:
+-                    self._coll.files.update_one({"_id": self._file["_id"]}, {"$set": {name: value}})
++                    self._coll.files.update_one(
++                        {"_id": {"$eq": self._file["_id"]}}, {"$set": {name: value}}
++                    )
+                 else:
+                     raise AttributeError(
+                         "GridIn does not support __setattr__ after being closed(). Set the attribute before closing the file or use GridIn.set() instead"
+@@ -1244,7 +1250,9 @@
+     def set(self, name: str, value: Any) -> None:
+         self._file[name] = value
+         if self._closed:
+-            self._coll.files.update_one({"_id": self._file["_id"]}, {"$set": {name: value}})
++            self._coll.files.update_one(
++                {"_id": {"$eq": self._file["_id"]}}, {"$set": {name: value}}
++            )
+ 
+     def _flush_data(self, data: Any, force: bool = False) -> None:
+         """Flush `data` to a chunk."""
+@@ -1570,7 +1578,9 @@
+     def open(self) -> None:
+         if not self._file:
+             _disallow_transactions(self._session)
+-            self._file = self._files.find_one({"_id": self._file_id}, session=self._session)
++            self._file = self._files.find_one(
++                {"_id": {"$eq": self._file_id}}, session=self._session
++            )
+             if not self._file:
+                 raise NoFile(
+                     f"no file in gridfs collection {self._files!r} with _id {self._file_id!r}"
+@@ -1841,7 +1851,7 @@
+         return self
+ 
+     def _create_cursor(self) -> None:
+-        filter = {"files_id": self._id}
++        filter = {"files_id": {"$eq": self._id}}
+         if self._next_chunk > 0:
+             filter["n"] = {"$gte": self._next_chunk}
+         _disallow_transactions(self._session)
+--- a/pymongo/asynchronous/encryption.py
++++ b/pymongo/asynchronous/encryption.py
+@@ -196,6 +196,8 @@
+             ssl_context=ctx,
+         )
+         address = parse_host(endpoint, _HTTPS_PORT)
++        if address[0].endswith(".sock"):
++            raise ConfigurationError(f"Invalid KMS endpoint {endpoint!r}")
+         sleep_u = kms_context.usleep
+         if sleep_u:
+             sleep_sec = float(sleep_u) / 1e6
+--- a/pymongo/asynchronous/uri_parser.py
++++ b/pymongo/asynchronous/uri_parser.py
+@@ -17,7 +17,6 @@
+ from __future__ import annotations
+ 
+ from typing import Any, Optional
+-from urllib.parse import unquote_plus
+ 
+ from pymongo.asynchronous.srv_resolver import _SrvResolver
+ from pymongo.common import SRV_SERVICE_NAME, _CaseInsensitiveDictionary
+@@ -155,7 +154,6 @@
+     else:
+         hosts = host_part
+ 
+-    hosts = unquote_plus(hosts)
+     srv_max_hosts = srv_max_hosts or options.get("srvMaxHosts")
+     if is_srv:
+         nodes = split_hosts(hosts, default_port=None)
+--- a/pymongo/synchronous/encryption.py
++++ b/pymongo/synchronous/encryption.py
+@@ -195,6 +195,8 @@
+             ssl_context=ctx,
+         )
+         address = parse_host(endpoint, _HTTPS_PORT)
++        if address[0].endswith(".sock"):
++            raise ConfigurationError(f"Invalid KMS endpoint {endpoint!r}")
+         sleep_u = kms_context.usleep
+         if sleep_u:
+             sleep_sec = float(sleep_u) / 1e6
+--- a/pymongo/synchronous/uri_parser.py
++++ b/pymongo/synchronous/uri_parser.py
+@@ -17,7 +17,6 @@
+ from __future__ import annotations
+ 
+ from typing import Any, Optional
+-from urllib.parse import unquote_plus
+ 
+ from pymongo.common import SRV_SERVICE_NAME, _CaseInsensitiveDictionary
+ from pymongo.errors import ConfigurationError, InvalidURI
+@@ -155,7 +154,6 @@
+     else:
+         hosts = host_part
+ 
+-    hosts = unquote_plus(hosts)
+     srv_max_hosts = srv_max_hosts or options.get("srvMaxHosts")
+     if is_srv:
+         nodes = split_hosts(hosts, default_port=None)
+--- a/pymongo/uri_parser_shared.py
++++ b/pymongo/uri_parser_shared.py
+@@ -441,10 +441,23 @@
+         if not entity:
+             raise ConfigurationError("Empty host (or extra comma in host list)")
+         port = default_port
+-        # Unix socket entities don't have ports
++        node = entity
++        # Decoding happens per entity, after splitting on ",".
+         if entity.endswith(".sock"):
++            # Unix socket entities don't have ports. Socket paths are the
++            # only host identifiers permitted to contain reserved
++            # characters (e.g. "/") that require escaping.
++            node = unquote_plus(entity)
+             port = None
+-        nodes.append(parse_host(entity, port))
++        elif entity.startswith("["):
++            # An IPv6 zone index is escaped as "%25" (RFC 6874).
++            node = entity.replace("%25", "%")
++        elif "%" in entity:
++            raise InvalidURI(
++                "Percent-encoding is only allowed in Unix domain socket paths "
++                f"and IPv6 zone indexes, not in hostnames: {entity}"
++            )
++        nodes.append(parse_host(node, port))
+     return nodes
+ 
+ 
+@@ -567,7 +580,6 @@
+     if "/" in hosts:
+         raise InvalidURI("Any '/' in a unix domain socket must be percent-encoded: %s" % host_part)
+ 
+-    hosts = unquote_plus(hosts)
+     fqdn = None
+     srv_max_hosts = srv_max_hosts or options.get("srvMaxHosts")
+     if is_srv:
+--- a/bson/_cbsonmodule.c
++++ b/bson/_cbsonmodule.c
+@@ -3165,6 +3165,15 @@
+             goto fail;
+          }
+ 
++        if (value_length >= (uint32_t)(size - position)) {
++            PyObject* InvalidBSON = _error("InvalidBSON");
++            if (InvalidBSON) {
++                PyErr_SetString(InvalidBSON, "invalid array content");
++                Py_DECREF(InvalidBSON);
++            }
++            goto fail;
++        }
++
+         if (pymongo_buffer_write(buffer, string + position, value_length) == 1) {
+             goto fail;
+         }
+--- a/bson/json_util.py
++++ b/bson/json_util.py
+@@ -798,7 +798,13 @@
+ 
+ 
+ def _parse_timestamp(doc: Any, dummy0: Any) -> Timestamp:
++    if len(doc) != 1:
++        raise TypeError(f"Bad $timestamp, extra field(s): {doc}")
+     tsp = doc["$timestamp"]
++    if not isinstance(tsp, Mapping):
++        raise TypeError(f'$timestamp value must be a document with "t" and "i" components: {doc}')
++    if set(tsp) != {"t", "i"}:
++        raise TypeError(f'$timestamp must include exactly "t" and "i" components: {doc}')
+     return Timestamp(tsp["t"], tsp["i"])
+ 
+ 
+--- a/pymongo/_version.py
++++ b/pymongo/_version.py
+@@ -18,7 +18,7 @@
+ import re
+ from typing import List, Tuple, Union
+ 
+-__version__ = "4.17.0"
++__version__ = "4.17.0+finops.1"
+ 
+ 
+ def get_version_tuple(version: str) -> Tuple[Union[int, str], ...]:

@@ -16,7 +16,7 @@
 ## 本地启动
 
 ```bash
-python3 -m pip install -r backend/requirements.txt
+python3 scripts/python_dependencies.py install
 cd web && npm ci
 ```
 
