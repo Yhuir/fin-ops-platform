@@ -24,12 +24,12 @@ test('production output tax filters, totals, details and export remain consisten
   await expect(totals).toContainText(`不含税金额合计 ${payload.summary.amountWithoutTax}`);
   await expect(totals).toContainText(`收入合计 ${payload.summary.collectedAmount}`);
   const firstVisibleMs = Date.now()-started;
-  await expect(page.getByRole('tab',{name:/红票未关联蓝票/})).toBeVisible();
+  await expect(page.getByRole('button',{name:/红票未关联蓝票/})).toBeVisible();
   const statusOptions = payload.filterOptions.find((item:{field:string})=>item.field==='collection_status').options;
   const pendingOption = statusOptions.find((item:{value:string})=>item.value==='pending_collection');
   expect(pendingOption.label).toBe('待收款');
   const pendingResponse = rowsResponse();
-  await page.getByRole('tab',{name:`待收款 ${pendingOption.count} 张`,exact:true}).click();
+  await page.getByRole('button',{name:`待收款 ${pendingOption.count} 张`,exact:true}).click();
   const pendingHttp = await pendingResponse;
   expect(JSON.parse(decodeURIComponent(new URL(pendingHttp.url()).searchParams.get('filters')!))).toEqual([
     {field:'collection_status',operator:'in',values:['pending_collection']},
@@ -50,7 +50,7 @@ test('production output tax filters, totals, details and export remain consisten
   await expect(page.locator('.output-invoice-collections-group-header').nth(1)).toHaveText('收款状态');
   await page.screenshot({path:info.outputPath('production-pending-collection.png'),animations:'disabled'});
   const allResponse = rowsResponse();
-  await page.getByRole('tab',{name:/^全部 \d+ 张$/}).click();
+  await page.getByRole('button',{name:/^全部销项发票 \d+ 张$/}).click();
   await allResponse;
   for (const width of [1920,1440,960]) {
     await page.setViewportSize({width,height:1000});
@@ -93,7 +93,7 @@ test('production output tax filters, totals, details and export remain consisten
 });
 
 
-test('production missing source rate stays unknown across rows, filters, source detail and export', async ({page}, info) => {
+test('production source tax rate remains consistent across rows, filters, source detail and export', async ({page}, info) => {
   test.skip(!enabled || !token, 'Requires production read-only verification and local token.');
   test.setTimeout(120_000);
   await page.context().addCookies([{name:'Admin-Token',value:token!,domain:'www.yn-sourcing.com',path:'/',secure:true,sameSite:'Lax'}]);
@@ -106,28 +106,28 @@ test('production missing source rate stays unknown across rows, filters, source 
   await page.goto('/fin-ops/output-invoice-collections');
   const payload = await (await first).json();
   const sample = payload.rows.find((r:{invoice:{invoiceNo:string; digitalInvoiceNo:string}})=>[r.invoice.invoiceNo,r.invoice.digitalInvoiceNo].includes('26532000001691977231'));
-  expect(sample.invoice.taxRate).toBe('无法确定');
+  expect(sample.invoice.taxRate).toBe('13%');
   expect(sample.invoice.totalWithTax).toBe('2129682.59');
-  await expect(page.getByText('无法确定',{exact:true}).first()).toBeVisible();
-  await page.screenshot({path:info.outputPath('production-unknown-rate-list.png'),animations:'disabled'});
+  await expect(page.getByText('13%',{exact:true}).first()).toBeVisible();
+  await page.screenshot({path:info.outputPath('production-source-rate-list.png'),animations:'disabled'});
   await page.getByRole('button',{name:'查看发票 26532000001691977231 详情',exact:true}).click();
   const drawer = page.getByRole('dialog',{name:'发票详情',exact:true});
-  await expect(drawer.getByRole('cell',{name:'无法确定',exact:true}).first()).toBeVisible();
+  await expect(drawer.getByRole('cell',{name:'13%',exact:true}).first()).toBeVisible();
   await expect(drawer.getByRole('cell',{name:'1884674.86',exact:true}).first()).toBeVisible();
-  await page.screenshot({path:info.outputPath('production-unknown-rate-detail.png'),animations:'disabled'});
+  await page.screenshot({path:info.outputPath('production-source-rate-detail.png'),animations:'disabled'});
   await drawer.getByRole('button',{name:'关闭详情抽屉'}).click();
-  const option = payload.filterOptions.find((f:{field:string})=>f.field==='tax_rate').options.find((o:{value:string})=>o.value==='无法确定');
+  const option = payload.filterOptions.find((f:{field:string})=>f.field==='tax_rate').options.find((o:{value:string})=>o.value==='13%');
   await page.getByRole('button',{name:'筛选 税率',exact:true}).click();
   const selected = page.waitForResponse(r=>new URL(r.url()).pathname==='/fin-ops-api/api/output-invoice-collections/rows');
   await page.locator('label').filter({has:page.getByRole('checkbox',{name:`${option.label} ${option.count}`,exact:true})}).click();
   const filtered = await (await selected).json();
   expect(filtered.pagination.total).toBe(option.count);
-  for (const row of filtered.rows) expect(row.invoice.taxRate).toBe('无法确定');
-  await page.screenshot({path:info.outputPath('production-unknown-rate-filter.png'),animations:'disabled'});
+  for (const row of filtered.rows) expect(row.invoice.taxRate).toBe('13%');
+  await page.screenshot({path:info.outputPath('production-source-rate-filter.png'),animations:'disabled'});
   await page.keyboard.press('Escape');
   const preview = page.waitForResponse(r=>new URL(r.url()).pathname==='/fin-ops-api/api/output-invoice-collections/export-summary');
   await page.getByRole('button',{name:'筛选内容导出'}).click();
   const response = await preview;
-  expect(decodeURIComponent(new URL(response.url()).searchParams.get('filters')!)).toContain('无法确定');
+  expect(decodeURIComponent(new URL(response.url()).searchParams.get('filters')!)).toContain('13%');
   expect((await response.json()).row_count).toBe(option.count);
 });
