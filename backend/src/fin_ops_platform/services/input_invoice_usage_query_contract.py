@@ -99,7 +99,7 @@ def parse_input_invoice_usage_filters(filters: str | list[dict[str, Any]] | None
                 details={"field": field, "operator": operator},
             )
         values = item.get("values") or []
-        choices = {"usage_status": {"used", "unused"}, "payment_group": {"paid", "unpaid", "pending"}, "oa_relation": {"linked", "unlinked"}}
+        choices = {"usage_status": {"used", "unused"}, "payment_group": {"paid", "unpaid"}, "oa_relation": {"linked", "unlinked"}}
         if field in choices and (not isinstance(values, list) or not values or any(not isinstance(value, str) or value not in choices[field] for value in values)):
             raise InputInvoiceUsageQueryContractError("invalid_filter_value", "分类筛选值无效。")
         if field == "tax_rate":

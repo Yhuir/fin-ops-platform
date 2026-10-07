@@ -14,7 +14,6 @@ export type PaymentStatusRule = {
   id?: string;
   code?: string;
   statusCode?: string;
-  parentStatus?: "paid" | "unpaid";
   label: string;
   description: string;
   reason?: string;
@@ -49,12 +48,12 @@ const CONDITION_FIELDS: Array<{
 ];
 
 const OUTPUT_CLASSES = [
-  { id: "paid", label: "发票＝付款", parentStatus: "paid" as const },
-  { id: "cash_turnover", label: "现金往来", parentStatus: "paid" as const },
-  { id: "offset", label: "冲", parentStatus: "unpaid" as const },
-  { id: "waiting_payment", label: "未关联流水", parentStatus: "unpaid" as const },
-  { id: "invoice_less_payment", label: "发票＜付款", parentStatus: "paid" as const },
-  { id: "invoice_greater_payment", label: "发票＞付款", parentStatus: "paid" as const },
+  { id: "paid", label: "发票＝付款" },
+  { id: "cash_turnover", label: "现金往来" },
+  { id: "offset", label: "冲" },
+  { id: "waiting_payment", label: "未关联流水" },
+  { id: "invoice_less_payment", label: "发票＜付款" },
+  { id: "invoice_greater_payment", label: "发票＞付款" },
 ];
 
 type PaymentStatusRulesDrawerProps = {
@@ -130,7 +129,7 @@ export default function PaymentStatusRulesDrawer({
       !== JSON.stringify(payload.rules)
     : false;
 
-  const outputClasses = [...OUTPUT_CLASSES, ...Array.from(new Map(draftRules.filter(rule => rule.statusCode?.startsWith("custom_")).map(rule => [rule.statusCode!, { id: rule.statusCode!, label: rule.label, parentStatus: rule.parentStatus! }])).values())];
+  const outputClasses = [...OUTPUT_CLASSES, ...Array.from(new Map(draftRules.filter(rule => rule.statusCode?.startsWith("custom_")).map(rule => [rule.statusCode!, { id: rule.statusCode!, label: rule.label }])).values())];
   const handleSave = () => {
     if (!payload || !saveRules || !canSave) {
       return;
@@ -144,7 +143,6 @@ export default function PaymentStatusRulesDrawer({
       rules: draftRules.map((rule) => ({
         id: rule.id,
         statusCode: rule.statusCode,
-        parentStatus: rule.parentStatus,
         conditions: rule.conditions,
         label: rule.label.trim(),
         priority: Number(rule.priority),
@@ -295,22 +293,22 @@ export default function PaymentStatusRulesDrawer({
                         </div>
                       )}
                       {canSave ? <Select aria-label={`${rule.label || "规则"} 输出分类`} selectedKey={rule.statusCode} onSelectionChange={(key) => {
-                        if (key === "new-paid" || key === "new-unpaid") {
-                          updateRule(index, { statusCode: `custom_${crypto.randomUUID().replace(/-/g, "")}`, parentStatus: key === "new-paid" ? "paid" : "unpaid", label: "新分类" }, setDraftRules);
+                        if (key === "new-category") {
+                          updateRule(index, { statusCode: `custom_${crypto.randomUUID().replace(/-/g, "")}`, label: "新分类" }, setDraftRules);
                           return;
                         }
                         const output = outputClasses.find((item) => item.id === key);
                         if (!output) return;
                         const existing = draftRules.find((item) => item.statusCode === key);
-                        updateRule(index, { statusCode: output.id, parentStatus: output.parentStatus, label: existing ? existing.label : output.label }, setDraftRules);
+                        updateRule(index, { statusCode: output.id, label: existing ? existing.label : output.label }, setDraftRules);
                       }}>
                         <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
                         <Select.Popover><ListBox>
                           {outputClasses.map((option) => <ListBox.Item id={option.id} key={option.id} textValue={option.label}>{option.label}</ListBox.Item>)}
-                          <ListBox.Item id="new-paid" textValue="新增已付款分类">新增已付款分类</ListBox.Item>
-                          <ListBox.Item id="new-unpaid" textValue="新增未付款分类">新增未付款分类</ListBox.Item>
+                          <ListBox.Item id="new-category" textValue="新增分类">新增分类</ListBox.Item>
                         </ListBox></Select.Popover>
                       </Select> : null}
+                      <span className="input-invoice-usage-rules-tag">分类按实际流水关联自动归入已付款或未付款</span>
                       {canSave ? <label className="input-invoice-usage-rules-field"><span>发票／付款金额</span>
                         <select aria-label={`${rule.label} 金额比较条件`} value={String(rule.conditions?.paymentComparison ?? "any")}
                           onChange={event => { const conditions = { ...rule.conditions }; if (event.target.value === "any") delete conditions.paymentComparison; else conditions.paymentComparison = event.target.value; updateRule(index, { conditions }, setDraftRules); }}>

@@ -84,8 +84,11 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
             self.assertEqual(result["pagination"]["total"], 2)
             self.assertEqual(result["summary"]["totalWithTax"], "20.00")
             self.assertEqual({r["paymentStatus"]["code"] for r in result["rows"]}, {"offset"})
-            pending = self.service.list_rows(filters=[{"field": "payment_status", "operator": "in", "values": ["pending"]}])
-            self.assertEqual(pending["pagination"]["total"], 1)
+            unpaid = self.service.list_rows(filters=[{"field": "payment_group", "operator": "in", "values": ["unpaid"]},
+                                                   {"field": "payment_status", "operator": "in", "values": ["waiting_payment"]}])
+            self.assertEqual(unpaid["pagination"]["total"], 1)
+            self.assertEqual(unpaid["summary"]["totalWithTax"], "10.00")
+            self.assertEqual(unpaid["rows"][0]["paymentStatus"]["code"], "waiting_payment")
 
     def test_full_pool_counts_members_not_groups_and_filters_before_pagination(self):
         self.invoices(213)

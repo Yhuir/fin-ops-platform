@@ -35,11 +35,6 @@ class DistributedInvoiceRelationContext:
         self._invoice_maps_by_scope: dict[tuple[str, str], dict[str, Invoice]] = {}
         self._bank_transactions_by_id: dict[str, BankTransaction] | None = None
         self._distributed_relations_by_row_id: dict[str, list[dict[str, Any]]] = {}
-        self._distributed_component_by_row_id: dict[str, str] = {}
-        self._distributed_relations_by_component: dict[
-            str,
-            list[dict[str, Any]],
-        ] = {}
         self._distributed_row_lookup_attempted: set[str] = set()
         self._oa_records_by_id: dict[str, OAApplicationRecord] = {}
         self._oa_loaded_all = False
@@ -94,11 +89,17 @@ class DistributedInvoiceRelationContext:
         self._load_bank_transactions_from_loaded_relations()
         return self._bank_transactions_by_id
 
-    def distributed_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
+    def distributed_relations_for_row_ids(
+        self, row_ids: list[str], *, case_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         resolved_row_ids = {str(row_id).strip() for row_id in row_ids if str(row_id).strip()}
         if not resolved_row_ids:
             return []
-        return self._distributed_active_relations_for_row_ids(sorted(resolved_row_ids))
+        relations = self._distributed_active_relations_for_row_ids(sorted(resolved_row_ids))
+        if case_ids is not None:
+            allowed = set(case_ids)
+            relations = [relation for relation in relations if relation.get("case_id") in allowed]
+        return relations
 
     def relation_summaries_for_row(self, row_id: str) -> list[dict[str, Any]]:
         return [
@@ -162,66 +163,16 @@ class DistributedInvoiceRelationContext:
             if case_id:
                 relations_by_case_id[case_id] = deepcopy(relation)
 
-        parent: dict[str, str] = {}
-
-        def find(row_id: str) -> str:
-            parent.setdefault(row_id, row_id)
-            while parent[row_id] != row_id:
-                parent[row_id] = parent[parent[row_id]]
-                row_id = parent[row_id]
-            return row_id
-
-        def union(left: str, right: str) -> None:
-            left_root = find(left)
-            right_root = find(right)
-            if left_root != right_root:
-                parent[right_root] = left_root
-
-        typed_rows_by_case: dict[str, list[tuple[str, str]]] = {}
-        for case_id, relation in relations_by_case_id.items():
-            typed_rows = [
-                item
-                for item in self.typed_relation_rows(relation)
-                if item[0]
-            ]
-            typed_rows_by_case[case_id] = typed_rows
-            if not typed_rows:
-                continue
-            first_row_id = typed_rows[0][0]
-            for row_id, _row_type in typed_rows[1:]:
-                union(first_row_id, row_id)
-
         self._distributed_relations_by_row_id = {}
-        self._distributed_component_by_row_id = {}
-        component_relations: dict[str, dict[str, dict[str, Any]]] = {}
-        for case_id, relation in relations_by_case_id.items():
-            typed_rows = typed_rows_by_case[case_id]
-            if not typed_rows:
-                continue
-            component_id = find(typed_rows[0][0])
-            component_relations.setdefault(component_id, {})[case_id] = relation
-            for row_id, _row_type in typed_rows:
-                self._distributed_relations_by_row_id.setdefault(row_id, []).append(
-                    relation
-                )
-                self._distributed_component_by_row_id[row_id] = component_id
-        self._distributed_relations_by_component = {
-            component_id: list(component.values())
-            for component_id, component in component_relations.items()
-        }
+        for relation in relations_by_case_id.values():
+            for row_id, _row_type in self.typed_relation_rows(relation):
+                self._distributed_relations_by_row_id.setdefault(row_id, []).append(relation)
 
     def _distributed_active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
         self._load_distributed_relations(row_ids)
         relations_by_case_id: dict[str, dict[str, Any]] = {}
         for row_id in row_ids:
             for relation in self._distributed_relations_by_row_id.get(row_id, []):
-                case_id = str(relation.get("case_id") or "")
-                relations_by_case_id[case_id] = relation
-            component_id = self._distributed_component_by_row_id.get(row_id)
-            for relation in self._distributed_relations_by_component.get(
-                str(component_id or ""),
-                [],
-            ):
                 case_id = str(relation.get("case_id") or "")
                 relations_by_case_id[case_id] = relation
         return [deepcopy(relation) for relation in relations_by_case_id.values()]

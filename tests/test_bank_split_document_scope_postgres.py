@@ -222,7 +222,7 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
         self.assertEqual(invoice['rows'][0]['bankTransactions']['amount'],'1001498.22')
         self.assertEqual(invoice['rows'][0]['paymentStatus']['code'],'pending')
 
-    def test_distinct_invoice_lines_in_disjoint_cases_share_group_comparison(self):
+    def test_distinct_invoice_lines_in_disjoint_cases_keep_separate_comparisons(self):
         self.document('1497.22')
         with self.connection.transaction() as tx:
             tx.execute("set local fin_ops.correction_reason='isolated distinct invoice line fixture'")
@@ -249,15 +249,15 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
         self.assertEqual(self.connection.fetch_all("""select member from app.workbench_pair_relations,
             unnest(row_ids) member group by member having count(*)>1"""),[])
         invoice = self.invoice_page()
-        self.assertEqual(invoice['pagination']['total'],1)
-        self.assertEqual(invoice['rows'][0]['invoice']['lineItemCount'],2)
-        self.assertEqual(invoice['rows'][0]['bankTransactions']['amount'],'1597.22')
-        bank = invoice['rows'][0]['bankTransactions']
-        self.assertEqual(bank['original_amount'], '1002597.22')
-        self.assertEqual(bank['original_transaction_count'], 2)
-        self.assertEqual(len(bank['bank_split_parts']), 4)
-        self.assertEqual(len({part['id'] for part in bank['bank_split_parts']}), 4)
-        self.assertEqual(invoice['rows'][0]['paymentStatus']['code'],'paid')
+        self.assertEqual(invoice['pagination']['total'],2)
+        self.assertEqual({row['bankTransactions']['amount'] for row in invoice['rows']}, {'1497.22', '100.00'})
+        for row in invoice['rows']:
+            self.assertEqual(row['invoice']['lineItemCount'],1)
+            bank = row['bankTransactions']
+            self.assertEqual(bank['original_transaction_count'], 1)
+            self.assertEqual(len(bank['bank_split_parts']), 2)
+            self.assertEqual(len({part['id'] for part in bank['bank_split_parts']}), 2)
+            self.assertEqual(row['paymentStatus']['code'],'paid')
         # A separate unsplit case matching the group total must not conceal the split case's evidence.
         with self.connection.transaction() as tx:
             tx.execute("set local fin_ops.correction_reason='isolated mixed group fixture'")
@@ -266,7 +266,9 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
             tx.execute("update app.oa_applications set amount=1597.22,normalized_payload=jsonb_set(normalized_payload,'{amount}','\"1597.22\"'::jsonb) where oa_source_id='oa-second'")
             tx.execute("""update app.workbench_pair_relations set row_ids=array['oa-second','invoice-scope-line-2','bank-second'],
                 row_types=array['oa','invoice','bank'],amount_check='{"matched":true}'::jsonb where case_id='second-case'""")
-        self.assertEqual(self.invoice_page()['rows'][0]['paymentStatus']['code'],'pending')
+        after = {row['relationGroupId']: row for row in self.invoice_page()['rows']}
+        self.assertEqual(after['second-case']['paymentStatus']['code'], 'invoice_less_payment')
+        self.assertEqual(next(row for case, row in after.items() if case != 'second-case')['paymentStatus']['code'], 'paid')
 
     def test_pending_invoice_candidate_query_and_write_preview_share_document_scope(self):
         from types import SimpleNamespace

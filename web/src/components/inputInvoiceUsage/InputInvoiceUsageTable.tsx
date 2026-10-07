@@ -337,14 +337,14 @@ function DetailButton({
 
 function RelationCountButton({
   label,
-  extraCount,
+  totalCount,
   onClick,
 }: {
   label: string;
-  extraCount: number;
+  totalCount: number;
   onClick: () => void;
 }) {
-  if (extraCount <= 0) {
+  if (totalCount <= 1) {
     return null;
   }
   return (
@@ -355,13 +355,13 @@ function RelationCountButton({
       title={label}
       type="button"
     >
-      {`+${extraCount}`}
+      {`+${totalCount}`}
     </button>
   );
 }
 
-function extraRelationCount(relationCount: number | undefined): number {
-  return Math.max(0, Number(relationCount ?? 0) - 1);
+function relationCount(relationCount: number | undefined): number {
+  return Math.max(0, Number(relationCount ?? 0));
 }
 
 function relationListTarget(
@@ -523,9 +523,9 @@ export default function InputInvoiceUsageTable({
                 const oaRelationTarget = relationListTarget(row, "oa");
                 const bankRelationTarget = relationListTarget(row, "bank");
                 const invoiceRelationTarget = relationListTarget(row, "invoice");
-                const oaExtraCount = extraRelationCount(row.oa.relationCount);
-                const bankExtraCount = extraRelationCount(row.bank.originalTransactionCount);
-                const invoiceExtraCount = extraRelationCount(row.invoiceRelations.relationCount);
+                const oaTotalCount = relationCount(row.oa.relationCount);
+                const bankTotalCount = relationCount(row.bank.originalTransactionCount);
+                const invoiceTotalCount = relationCount(row.invoiceRelations.relationCount);
 
                 return (
                   <tr className="finance-table__row input-invoice-usage-table-row" id={row.id} key={row.id}>
@@ -539,7 +539,7 @@ export default function InputInvoiceUsageTable({
                         />
                         {invoiceRelationTarget ? (
                           <RelationCountButton
-                            extraCount={invoiceExtraCount}
+                            totalCount={invoiceTotalCount}
                             label={`查看发票 ${invoiceNo} 关联发票 ${row.invoiceRelations.relationCount} 张`}
                             onClick={() => onOpenDetail(invoiceRelationTarget)}
                           />
@@ -581,7 +581,7 @@ export default function InputInvoiceUsageTable({
                             ) : null}
                             {oaRelationTarget ? (
                               <RelationCountButton
-                                extraCount={oaExtraCount}
+                                totalCount={oaTotalCount}
                                 label={`查看${oa.applicant || "该发票"}关联OA ${row.oa.relationCount} 条`}
                                 onClick={() => onOpenDetail(oaRelationTarget)}
                               />
@@ -634,7 +634,7 @@ export default function InputInvoiceUsageTable({
                             <span className="input-invoice-usage-money-primary">{formatMoney(row.bank.originalAmount, "—")}</span>
                             {bankRelationTarget ? (
                               <RelationCountButton
-                                extraCount={bankExtraCount}
+                                totalCount={bankTotalCount}
                                 label={`查看${bank.counterpartyName || "该发票"}关联流水 ${row.bank.originalTransactionCount} 条`}
                                 onClick={() => onOpenDetail(bankRelationTarget)}
                               />

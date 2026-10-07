@@ -547,6 +547,7 @@ test.describe("input invoice usage browser flow", () => {
     await expect(row).toBeVisible();
     await expect(row.getByText("合计 188.00")).toBeVisible();
 
+    await expect(row.getByRole("button", { name: "查看陈秀云关联OA 2 条" })).toHaveText("+2");
     const detailDrawer = page.getByRole("dialog", { name: "OA详情" });
     await recordLatency({
       operationId: "input-invoice-usage.open-relation-detail-fresh",

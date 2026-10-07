@@ -96,6 +96,84 @@ class EtcRelationPageReadsTests(unittest.TestCase):
         self.connection.execute("update app.workbench_pair_relations set status='withdrawn' where case_id='CASE-ETC'")
         self.assertEqual(oa.rows({'view_mode':['in_progress']},tenant_id='default')['rows'][0]['invoice']['relationCount'],0)
 
+    def test_independent_batches_sharing_invoice_keep_their_own_rows_details_and_totals(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        from fin_ops_platform.services.input_invoice_usage_payment_rules import AppSettingsInputInvoiceUsagePaymentRulesProvider
+        from fin_ops_platform.services.postgres_state_store import PostgresStateStore
+
+        self.connection.execute("update app.invoices set status='deleted' where legacy_mongo_id in (select 'inv-'||n from generate_series(37,47) n)")
+        with self.connection.transaction() as tx:
+            tx.execute("set local fin_ops.correction_reason='isolated shared invoice fixture'")
+            tx.execute("update app.bank_transactions set amount=36, signed_amount=-36 where legacy_mongo_id='etc-bank'")
+        self.connection.execute("""insert into app.bank_transactions(legacy_mongo_id,account_no,txn_direction,
+            counterparty_name_raw,amount,signed_amount,txn_date,txn_month,status)
+            values ('second-bank','8106','outflow','第二批',34,-34,'2026-05-21','2026-05-01','pending')""")
+        self.connection.execute("""insert into app.oa_applications(row_id,applicant,amount,workflow_status,oa_source_id,form_id,status)
+            values ('second-oa','第二申请人',34,'completed','test','second','completed')""")
+        self.connection.execute("""insert into app.etc_business_batches(business_batch_id,status,scope_month,
+            invoice_count,total_amount,raw_payload) values ('business-second','oa_submitted','2026-05-01',34,34,
+            '{"normalized_payload":{"external_etc_batch_id":"external-second"}}')""")
+        self.connection.execute("""insert into app.etc_invoices(etc_invoice_id,business_batch_id,status,invoice_no,
+            invoice_date,seller_name,amount,total_with_tax)
+            select 'etc-'||n,'business-second','submitted','NO-'||n,'2026-05-02','高速公路',1,1 from generate_series(48,80) n""")
+        self.connection.execute("""insert into app.invoices(legacy_mongo_id,invoice_type,invoice_no,invoice_date,
+            invoice_month,seller_name,buyer_name,amount,signed_amount,total_with_tax,status,etc_invoice_id)
+            select 'inv-'||n,'input','NO-'||n,'2026-05-02','2026-05-01','高速公路','测试公司',1,1,1,'pending','etc-'||n
+            from generate_series(48,80) n""")
+        self.connection.execute("""insert into app.workbench_pair_relations(case_id,relation_mode,status,row_ids,row_types)
+            values ('CASE-SECOND','batch_accounting','active',array['second-oa','second-bank','etc-summary-external-second','inv-1'],
+                array['oa','bank','invoice','invoice'])""")
+        usage = InputInvoiceUsageCanonicalQueryService(repository=PostgresInputInvoiceUsageQueryRepository(self.connection),
+            row_assembler=InputInvoiceUsageQueryService(import_service=ImportNormalizationService(), payment_rules_provider=_UnexpectedPaymentRulesProvider()))
+        payload = usage.rows({})
+        self.assertEqual(payload['pagination']['total'], 2)
+        self.assertEqual(payload['summary']['invoiceCount'], 69)
+        self.assertEqual(payload['summary']['totalWithTax'], '69.00')
+        self.assertEqual(payload['classification']['all']['count'], 69)
+        self.assertEqual(payload['classification']['groups'][0]['count'], 69)
+        rows = {row['relationGroupId']: row for row in payload['rows']}
+        for case, count in [('CASE-ETC', 36), ('CASE-SECOND', 34)]:
+            row = rows[case]
+            self.assertEqual(row['invoiceRelations']['relationCount'], count)
+            self.assertEqual(row['oa']['relationCount'], 1)
+            self.assertEqual(row['bankTransactions']['relationCount'], 1)
+            self.assertEqual(row['paymentStatus']['code'], 'paid')
+            for kind, expected in [('invoice', count), ('oa', 1), ('bank', 1)]:
+                detail = usage.relation_details(row['id'], {'kind': [kind]})
+                self.assertEqual(detail['relationCount'], expected)
+        self.assertEqual(usage.rows({'keyword': ['NO-80']})['rows'][0]['relationGroupId'], 'CASE-SECOND')
+        self.assertEqual(len(usage.export_rows(keyword='NO-80', limit=20000)['rows']), 34)
+        self.assertEqual(len(usage.export_rows(limit=20000)['rows']), 69)
+        self.connection.execute("""update app.workbench_pair_relations
+            set row_ids=array['second-oa','etc-summary-external-second','inv-1'], row_types=array['oa','invoice','invoice']
+            where case_id='CASE-SECOND'""")
+        with TemporaryDirectory() as directory:
+            store = PostgresStateStore(data_dir=Path(directory), connection=self.connection)
+            provider = AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=store, transaction_factory=self.connection.transaction)
+            provider.update_payment_status_rules({"expectedVersion": 1, "idempotencyKey": "shared-category", "rules": [
+                {"id": "any-bank", "statusCode": "custom_shared", "label": "规则一", "priority": 1,
+                 "enabled": True, "conditions": {"hasOa": True}}
+            ]}, actor_id="test")
+        shared = usage.rows({})['classification']
+        self.assertEqual(shared['used']['count'], 69)
+        self.assertEqual([group['count'] for group in shared['groups']], [36, 34])
+        for parent, count, case in [('paid', 36, 'CASE-ETC'), ('unpaid', 34, 'CASE-SECOND')]:
+            selected = usage.list_rows(filters=[
+                {'field': 'usage_status', 'operator': 'in', 'values': ['used']},
+                {'field': 'payment_group', 'operator': 'in', 'values': [parent]},
+                {'field': 'payment_status', 'operator': 'in', 'values': ['custom_shared']},
+            ])
+            self.assertEqual(selected['summary']['invoiceCount'], count)
+            self.assertEqual([row['relationGroupId'] for row in selected['rows']], [case])
+            self.assertEqual(selected['classification'], shared)
+        self.connection.execute("update app.workbench_pair_relations set status='withdrawn' where case_id='CASE-SECOND'")
+        after = usage.rows({})
+        self.assertEqual(after['classification']['used']['count'], 36)
+        self.assertEqual(after['classification']['unused']['count'], 33)
+        self.assertEqual(next(row for row in after['rows'] if row.get('relationGroupId') == 'CASE-ETC')['invoiceRelations']['relationCount'], 36)
+
     def test_export_expands_real_invoice_members_and_count_does_not_hydrate_preview(self):
         from io import BytesIO
 

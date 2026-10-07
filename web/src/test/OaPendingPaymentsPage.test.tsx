@@ -854,7 +854,7 @@ describe("OA pending payments page", () => {
     });
     const missingPrimitiveTargets = [
       sourceByPath["src/pages/OaPendingPaymentsPage.tsx"].includes("PageScaffold") ? null : "OaPendingPaymentsPage.tsx should keep PageScaffold",
-      sourceByPath["src/pages/OaPendingPaymentsPage.tsx"].includes("page-feedback-slot") ? null : "OaPendingPaymentsPage.tsx should keep feedback inside the stable toolbar",
+      sourceByPath["src/pages/OaPendingPaymentsPage.tsx"].includes("page-feedback-floating") ? null : "OaPendingPaymentsPage.tsx should keep feedback outside the table layout",
       ["PopoverRoot", "PopoverTrigger", "PopoverContent", "PopoverDialog"].every((symbol) =>
         sourceByPath["src/components/oaPendingPayments/OaPendingPaymentsTable.tsx"].includes(symbol))
         ? null
@@ -1068,13 +1068,13 @@ describe("OA pending payments page", () => {
     const groupedRow = within(page).getByRole("row", { name: /刘际涛/ });
     const groupedCells = groupedRow.querySelectorAll(".oa-pending-payments-table-cell");
     expect(groupedCells[0]).toHaveTextContent("4450.00");
-    expect(groupedCells[0]).toHaveTextContent("+2");
+    expect(groupedCells[0]).toHaveTextContent("+3");
     expect(groupedCells[1]).toHaveTextContent("已支付");
     expect(within(page).queryByText("同步状态异常")).not.toBeInTheDocument();
     expect(groupedCells[1]).not.toHaveTextContent("OA写回状态");
     expect(groupedCells[1]).not.toHaveTextContent("写回失败");
     expect(groupedCells[2]).toHaveTextContent("4450.00");
-    expect(groupedCells[2]).toHaveTextContent("+1");
+    expect(groupedCells[2]).toHaveTextContent("+2");
     expect(groupedCells[2]).not.toHaveTextContent("3000.00");
     expect(within(page).getByText(/补充住宿费/)).toBeInTheDocument();
     expect(within(page).getByText(/补充流水备注/)).toBeInTheDocument();

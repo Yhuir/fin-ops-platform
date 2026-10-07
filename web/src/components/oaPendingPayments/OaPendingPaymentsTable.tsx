@@ -281,7 +281,7 @@ export default function OaPendingPaymentsTable({
                                   onOpenDetail(target);
                                 }
                               }}
-                              text={`+${extraRelationCount(row.oa.relationCount)}`}
+                              text={`+${relationCount(row.oa.relationCount)}`}
                             />
                           ) : null}
                         </span>
@@ -1026,8 +1026,8 @@ function oaRelationDetailTarget(row: OaPendingPaymentRow): OaPendingPaymentDetai
   return null;
 }
 
-function extraRelationCount(relationCount: number | undefined): number {
-  return Math.max(0, Number(relationCount ?? 0) - 1);
+function relationCount(relationCount: number | undefined): number {
+  return Math.max(0, Number(relationCount ?? 0));
 }
 
 function bankDetailLabel(row: OaPendingPaymentRow): string {
@@ -1039,13 +1039,13 @@ function bankDetailLabel(row: OaPendingPaymentRow): string {
 }
 
 function bankRelationButtonText(row: OaPendingPaymentRow): string | undefined {
-  const extraCount = extraRelationCount(row.bankTransaction.original_transaction_count);
-  return row.bankTransaction.detailMode === "list" && extraCount > 0 ? `+${extraCount}` : undefined;
+  const totalCount = relationCount(row.bankTransaction.original_transaction_count);
+  return row.bankTransaction.detailMode === "list" && totalCount > 1 ? `+${totalCount}` : undefined;
 }
 
 function invoiceRelationButtonText(row: OaPendingPaymentRow): string | undefined {
-  const extraCount = extraRelationCount(row.invoice.relationCount);
-  return row.invoice.detailMode === "list" && extraCount > 0 ? `+${extraCount}` : undefined;
+  const totalCount = relationCount(row.invoice.relationCount);
+  return row.invoice.detailMode === "list" && totalCount > 1 ? `+${totalCount}` : undefined;
 }
 
 function oaRelationDetailLabel(row: OaPendingPaymentRow): string {

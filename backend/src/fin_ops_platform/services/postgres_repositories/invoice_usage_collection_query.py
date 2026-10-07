@@ -7,10 +7,10 @@ from decimal import Decimal
 from typing import Any
 
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
+    OUTPUT_PARENTS,
     classification_tree,
     normalize_payment_status_rules_settings,
     payment_categories,
-    payment_category_parent,
 )
 from fin_ops_platform.services.output_invoice_reversal import (
     REVERSED_BLUE_INVOICE_NO_SQL_PATTERN,
@@ -189,9 +189,6 @@ class PostgresInputInvoiceUsageQueryRepository:
                 status_case=status_case,
                 invoice_level=invoice_level,
             )
-            category_parents = {item["id"]: item["parent"] for item in payment_categories(payment_settings)}
-            parent_case = "case " + " ".join(f"when status_code = '{_safe_code(code)}' then '{parent}'" for code, parent in category_parents.items()) + " else 'pending' end"
-            cte = cte.replace("'__payment_group__'", parent_case)
             base_params: list[Any] = [tenant_id, *status_params]
             where_sql, where_params = _where_sql(
                 keyword=keyword,
@@ -241,6 +238,9 @@ class PostgresInputInvoiceUsageQueryRepository:
                         identity_key,
                         primary_invoice_id,
                         invoice_ids,
+                        array(select distinct relation.case_id from group_relation_ids scope
+                              join active_relations relation on relation.id = scope.relation_id
+                              where scope.group_key = filtered_rows.group_key) as relation_case_ids,
                         status_code, fully_matched, invoice_oa_amount_matched, payment_comparison,
                         has_oa_relation, has_bank_relation,
                         oa_count, bank_count, oa_applicant,
@@ -259,8 +259,8 @@ class PostgresInputInvoiceUsageQueryRepository:
                 summary as (
                     select
                         count(*)::bigint as row_count,
-                        case when count(*) = 0 then 0 when count(total_with_tax) = count(*) then sum(total_with_tax) end::numeric as total_with_tax,
-                        coalesce(sum(cardinality(invoice_ids)) filter (where status_code = 'pending'), 0)::bigint as pending_count,
+                        (select case when count(*) = 0 then 0 when count(invoice.total_with_tax) = count(*) then sum(invoice.total_with_tax) end from invoice_rows invoice join selected_members member using (invoice_id))::numeric as total_with_tax,
+                        (select count(distinct member.invoice_id) from filtered_rows pending cross join lateral unnest(pending.invoice_ids) member(invoice_id) where pending.status_code = 'pending')::bigint as pending_count,
                         (select count(*) from selected_members)::bigint as invoice_count
                     from filtered_rows
                 ),
@@ -294,10 +294,15 @@ class PostgresInputInvoiceUsageQueryRepository:
                     where nullif(status_code, '') is not null
                     group by status_code
                     union all
-                    select 'classification', case when usage_status = 'unused' then 'unused' else status_code end,
-                           count(distinct member.invoice_id)::bigint
-                    from status_option_rows cross join lateral unnest(invoice_ids) member(invoice_id)
-                    group by case when usage_status = 'unused' then 'unused' else status_code end
+                    select 'classification', category.value, count(distinct member.invoice_id)::bigint
+                    from status_option_rows
+                    cross join lateral unnest(invoice_ids) member(invoice_id)
+                    cross join lateral (values ('all'), (usage_status),
+                        (case when usage_status = 'used' then payment_group end),
+                        (case when usage_status = 'used' then payment_group || ':' || status_code end)
+                    ) category(value)
+                    where category.value is not null
+                    group by category.value
                     union all
                     select 'oa_relation', oa_relation, count(distinct member.invoice_id)::bigint
                     from relation_option_rows cross join lateral unnest(invoice_ids) member(invoice_id)
@@ -366,7 +371,7 @@ class PostgresInputInvoiceUsageQueryRepository:
         filtered_total = int(summary_row.get("row_count") or 0)
         invoice_count = int(summary_row.get("invoice_count") or 0)
         labels = {item["id"]: item["label"] for item in payment_categories(payment_settings)}
-        labels["pending"] = "待核对"
+        labels["pending"] = "金额待核对"
         return InvoiceUsageCollectionCanonicalSnapshot(
             groups=facts["groups"],
             supporting_groups=[],
@@ -529,6 +534,9 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                         identity_key,
                         primary_invoice_id,
                         invoice_ids,
+                        array(select distinct relation.case_id from group_relation_ids scope
+                              join active_relations relation on relation.id = scope.relation_id
+                              where scope.group_key = filtered_rows.group_key) as relation_case_ids,
                         status_code,
                         collected_amount,
                         pending_amount,
@@ -553,6 +561,9 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                         final.identity_key,
                         final.primary_invoice_id,
                         final.invoice_ids,
+                        array(select distinct relation.case_id from group_relation_ids scope
+                              join active_relations relation on relation.id = scope.relation_id
+                              where scope.group_key = final.group_key) as relation_case_ids,
                         final.status_code,
                         final.collected_amount,
                         final.pending_amount,
@@ -947,28 +958,28 @@ def _fact_cte(
     )
     relation_grouping_sql = (
         """
-        eligible_relation_components as (
+        eligible_relation_scopes as (
             select
-                mapped.component_id,
+                mapped.scope_id,
                 min(mapped.case_id) as case_id
             from relation_invoice_members mapped
             join invoice_rows invoice on invoice.invoice_id = mapped.invoice_id
-            group by mapped.component_id
-            having count(distinct mapped.invoice_id) > 1
+            group by mapped.scope_id
+            having count(distinct mapped.invoice_id) > 0
                and bool_or(invoice.in_scope)
         ),
         assigned_relation as (
-            select distinct on (mapped.invoice_id)
+            select distinct
                 mapped.invoice_id,
-                eligible.component_id,
+                eligible.scope_id,
                 eligible.case_id
             from relation_invoice_members mapped
-            join eligible_relation_components eligible using (component_id)
-            order by mapped.invoice_id, eligible.component_id
+            join eligible_relation_scopes eligible using (scope_id)
+            order by mapped.invoice_id, eligible.scope_id
         ),
         group_members as (
             select
-                'relation-component:' || assigned.component_id as group_key,
+                'relation:' || assigned.scope_id as group_key,
                 assigned.case_id as relation_case_id,
                 assigned.invoice_id
             from assigned_relation assigned
@@ -1045,9 +1056,9 @@ def _fact_cte(
     )
     bank_owner_ctes_sql = (
         """
-        , output_component_bank_candidates as (
+        , output_relation_bank_candidates as (
             select distinct
-                mapped.component_id,
+                mapped.scope_id,
                 mapped.invoice_id
             from relation_invoice_members mapped
             join invoice_rows invoice on invoice.invoice_id = mapped.invoice_id
@@ -1062,12 +1073,12 @@ def _fact_cte(
                        or pair.blue_invoice_id = mapped.invoice_id
               )
         ),
-        output_component_bank_owner as (
+        output_relation_bank_owner as (
             select
-                component_id,
+                scope_id,
                 min(invoice_id) as invoice_id
-            from output_component_bank_candidates
-            group by component_id
+            from output_relation_bank_candidates
+            group by scope_id
             having count(distinct invoice_id) = 1
         )
         """
@@ -1076,8 +1087,8 @@ def _fact_cte(
     )
     bank_owner_join_sql = (
         """
-            join output_component_bank_owner owner
-              on owner.component_id = component.component_id
+            join output_relation_bank_owner owner
+              on owner.scope_id = scope.scope_id
              and owner.invoice_id = invoice_member.invoice_id
         """
         if invoice_type == "output"
@@ -1101,7 +1112,7 @@ def _fact_cte(
                 facts.*,
                 case when facts.has_oa_relation or facts.has_bank_relation then 'used' else 'unused' end as usage_status,
                 case when facts.has_oa_relation then 'linked' else 'unlinked' end as oa_relation,
-                '__payment_group__' as payment_group,
+                case when facts.has_bank_relation then 'paid' else 'unpaid' end as payment_group,
                 case when not facts.has_oa_relation then 'no_oa'
                      when not facts.has_bank_relation then 'oa_no_bank'
                      else 'oa_bank' end as relation_status,
@@ -1310,7 +1321,7 @@ def _fact_cte(
     )
     financial = invoice_financial_sql("invoice")
     return f"""
-        with recursive
+        with
         invoice_rows as (
             select
                 coalesce(invoice.legacy_mongo_id, invoice.id::text) as invoice_id,
@@ -1403,44 +1414,20 @@ def _fact_cte(
             cross join lateral unnest(relation.row_ids)
                 with ordinality member(row_id, ordinality)
         ),
-        relation_reach(root_relation_id, relation_id) as (
-            select relation.id, relation.id
-            from active_relations relation
-            where coalesce(relation.relation_mode, '') <> 'output_invoice_reversal'
-              and exists (
-                select 1
-                from relation_members seed
-                join invoice_aliases alias on alias.row_id = seed.row_id
-                where seed.relation_id = relation.id
-                  and seed.row_type in (
-                      'invoice', 'input_invoice', 'output_invoice'
-                  )
-            )
-            union
-            select reach.root_relation_id, neighbour.relation_id
-            from relation_reach reach
-            join relation_members current_member
-              on current_member.relation_id = reach.relation_id
-            join relation_members neighbour
-              on neighbour.row_id = current_member.row_id
-             and coalesce(neighbour.relation_mode, '') <> 'output_invoice_reversal'
-        ),
-        relation_component_ids as (
-            select
-                relation_id,
-                min(root_relation_id::text) as component_id
-            from relation_reach
-            group by relation_id
+        relation_scopes as (
+            select id as relation_id, id::text as scope_id
+            from active_relations
+            where coalesce(relation_mode, '') <> 'output_invoice_reversal'
         ),
         relation_invoice_members as (
             select distinct
                 member.relation_id,
-                component.component_id,
+                scope.scope_id,
                 member.case_id,
                 alias.invoice_id
             from relation_members member
-            join relation_component_ids component
-              on component.relation_id = member.relation_id
+            join relation_scopes scope
+              on scope.relation_id = member.relation_id
             join invoice_aliases alias on alias.row_id = member.row_id
             where member.row_type in (
                 'invoice', 'input_invoice', 'output_invoice'
@@ -1522,25 +1509,27 @@ def _fact_cte(
             {group_reversal_links_sql}
         )
         {bank_owner_ctes_sql},
-        group_relation_components as (
+        group_relation_scopes as (
             select distinct
                 grouped.group_key,
-                component.component_id
+                scope.scope_id
             from grouped_invoices grouped
             cross join lateral unnest(grouped.invoice_ids) invoice_member(invoice_id)
             join invoice_aliases alias on alias.invoice_id = invoice_member.invoice_id
             join relation_members member on member.row_id = alias.row_id
-            join relation_component_ids component
-              on component.relation_id = member.relation_id
+             and member.row_type in ('invoice', 'input_invoice', 'output_invoice')
+             and (grouped.relation_case_id is null or member.case_id = grouped.relation_case_id)
+            join relation_scopes scope
+              on scope.relation_id = member.relation_id
             {bank_owner_join_sql}
         ),
         group_relation_ids as (
             select distinct
                 grouped.group_key,
-                component.relation_id
-            from group_relation_components grouped
-            join relation_component_ids component
-              on component.component_id = grouped.component_id
+                scope.relation_id
+            from group_relation_scopes grouped
+            join relation_scopes scope
+              on scope.scope_id = grouped.scope_id
         ),
         raw_group_bank_rows as (
             select
@@ -1722,8 +1711,8 @@ def _input_payment_status_case(
             else {}
         )
         predicates: list[str] = []
-        if payment_category_parent(rule) == "paid":
-            predicates.append("facts.payment_comparison <> 'invalid'")
+        if code in OUTPUT_PARENTS:
+            predicates.append("facts.has_bank_relation" if OUTPUT_PARENTS[code] == "paid" else "not facts.has_bank_relation")
         expected = {"paid": "equal", "invoice_less_payment": "less", "invoice_greater_payment": "greater"}.get(code)
         if expected:
             predicates.append("facts.payment_comparison = %s")
@@ -1747,7 +1736,8 @@ def _input_payment_status_case(
             fragments.append(
                 f"when {' and '.join(predicates)} then '{_safe_code(code)}'"
             )
-    fragments.extend(["when facts.payment_comparison = 'equal' then 'paid'",
+    fragments.extend(["when not facts.has_bank_relation then 'waiting_payment'",
+                      "when facts.payment_comparison = 'equal' then 'paid'",
                       "when facts.payment_comparison = 'less' then 'invoice_less_payment'",
                       "when facts.payment_comparison = 'greater' then 'invoice_greater_payment'"])
     return ("case " + " ".join(fragments) + " else 'pending' end", params)
@@ -1898,59 +1888,21 @@ def _load_facts(
     core = PostgresCoreRepository(transaction)
     invoices = core.list_invoices_by_ids(invoice_ids)
     invoices_by_id = {str(invoice.id): invoice for invoice in invoices}
-    aliases = _texts(
-        alias
-        for invoice in invoices
-        for alias in _invoice_aliases(invoice)
-    )
+    case_ids = _texts(case_id for row in all_group_rows for case_id in row["relation_case_ids"])
     relation_rows = (
         transaction.fetch_all(
             f"""
-            with recursive active_relations as (
-                select
-                    id,
-                    case_id,
-                    relation_mode,
-                    row_ids,
-                    row_types,
-                    amount_check,
-                    special_metadata,
-                    raw_payload
-                from {RELATION_INVOICE_READ_SQL}
-                where status = 'active'
-            ),
-            relation_members as (
-                select relation.id as relation_id, member.row_id
-                from active_relations relation
-                cross join lateral unnest(relation.row_ids) member(row_id)
-            ),
-            relation_reach(relation_id) as (
-                select distinct member.relation_id
-                from relation_members member
-                where member.row_id = any(%s::text[])
-                union
-                select neighbour.relation_id
-                from relation_reach reach
-                join relation_members current_member
-                  on current_member.relation_id = reach.relation_id
-                join relation_members neighbour
-                  on neighbour.row_id = current_member.row_id
-            )
-            select
-                relation.case_id,
-                relation.relation_mode,
-                relation.row_ids,
-                relation.row_types,
-                relation.amount_check,
-                relation.special_metadata,
-                relation.raw_payload
-            from active_relations relation
-            join relation_reach reach on reach.relation_id = relation.id
+            select relation.case_id, relation.relation_mode, relation.row_ids,
+                   relation.row_types, relation.amount_check, relation.special_metadata,
+                   relation.raw_payload
+            from {RELATION_INVOICE_READ_SQL} relation
+            where relation.status = 'active'
+              and relation.case_id = any(%s::text[])
             order by relation.case_id
             """,
-            (aliases,),
+            (case_ids,),
         )
-        if aliases
+        if case_ids
         else []
     )
     relations = [_relation_payload(row) for row in relation_rows]
@@ -2006,6 +1958,7 @@ def _group_payload(
     primary = invoices_by_id[primary_id]
     payload = {
         "group_key": str(row.get("group_key") or ""),
+        "relation_case_ids": list(row["relation_case_ids"]),
         "identity_key": str(row.get("identity_key") or ""),
         "primary": primary,
         "line_items": line_items,
@@ -2086,17 +2039,6 @@ def _relation_payload(row: dict[str, Any]) -> dict[str, Any]:
         }
     )
     return payload
-
-
-def _invoice_aliases(invoice: Any) -> list[str]:
-    aliases = [str(getattr(invoice, "id", "") or "").strip()]
-    for link in list(getattr(invoice, "source_links", []) or []):
-        if not isinstance(link, dict):
-            continue
-        if str(link.get("source_type") or "") != "oa_attachment_invoice":
-            continue
-        aliases.append(str(link.get("source_workbench_row_id") or "").strip())
-    return [value for value in aliases if value]
 
 
 def _typed_relation_rows(relation: dict[str, Any]) -> list[tuple[str, str]]:

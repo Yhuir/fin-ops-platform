@@ -363,9 +363,9 @@ class InputInvoiceUsageCanonicalQueryService:
         return input_invoice_usage_relation_details_from_row(
             row,
             kind=kind,
-            relations=_context(snapshot).relation_summaries_for_row(
+            relations=[relation for relation in _context(snapshot).relation_summaries_for_row(
                 str(row.get("invoiceId") or "")
-            ),
+            ) if not row.get("relationGroupId") or relation["caseId"] == row["relationGroupId"]],
             relation_payload=relation_payload,
             sections=source_relation_sections(kind, relation_payload["summaries"],
                 groups=[*snapshot.groups, *snapshot.supporting_groups],

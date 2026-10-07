@@ -95,35 +95,43 @@ OUTPUT_STATUS_CODES = frozenset(OUTPUT_PARENTS)
 AMOUNT_CATEGORIES = {"paid": "发票＝付款", "invoice_less_payment": "发票＜付款", "invoice_greater_payment": "发票＞付款"}
 
 
-def payment_category_parent(rule: dict[str, Any]) -> str:
+def payment_category_parents(rule: dict[str, Any]) -> tuple[str, ...]:
+    """Possible destinations; actual relation presence always decides a row's parent."""
     code = rule["statusCode"]
-    return OUTPUT_PARENTS[code] if code in OUTPUT_PARENTS else rule["parentStatus"]
+    if code in OUTPUT_PARENTS:
+        return (OUTPUT_PARENTS[code],)
+    conditions = rule["conditions"]
+    if conditions.get("hasBank") is True or conditions.get("fullyMatched") is True or "paymentComparison" in conditions:
+        return ("paid",)
+    if conditions.get("hasBank") is False:
+        return ("unpaid",)
+    return ("paid", "unpaid")
 
 
 def payment_categories(settings: dict[str, Any]) -> list[dict[str, str]]:
-    categories = {code: {"id": code, "label": label, "parent": "paid"} for code, label in AMOUNT_CATEGORIES.items()}
+    categories = {(code, "paid"): {"id": code, "label": label, "parent": "paid"}
+                  for code, label in AMOUNT_CATEGORIES.items()}
+    categories[("pending", "paid")] = {"id": "pending", "label": "金额待核对", "parent": "paid"}
+    categories[("waiting_payment", "unpaid")] = {"id": "waiting_payment", "label": "未关联流水", "parent": "unpaid"}
     for rule in settings["rules"]:
         code = rule["statusCode"]
         label = "发票＝付款" if code == "paid" and rule["label"] == "已付款" else rule["label"]
-        categories[code] = {"id": code, "label": label, "parent": payment_category_parent(rule)}
+        for parent in payment_category_parents(rule):
+            categories[(code, parent)] = {"id": code, "label": label, "parent": parent}
     return list(categories.values())
 
 
 def classification_tree(settings: dict[str, Any], counts: dict[str, int]) -> dict[str, Any]:
     groups = []
     for parent, label in (("paid", "已付款"), ("unpaid", "未付款")):
-        children = [{"id": "category:" + item["id"], "label": item["label"], "count": counts.get(item["id"], 0)}
+        children = [{"id": f"category:{item['id']}", "label": item["label"],
+                     "count": counts.get(f"{parent}:{item['id']}", 0)}
                     for item in payment_categories(settings) if item["parent"] == parent]
         groups.append({"id": parent, "label": label, "tone": parent,
-                       "count": sum(item["count"] for item in children), "children": children})
-    groups.append({"id": "pending", "label": "待核对", "tone": "pending", "count": counts.get("pending", 0), "children": []})
-    used = sum(item["count"] for item in groups)
-    unused = counts.get("unused", 0)
-    return {"all": {"id": "all", "label": "全部发票", "count": used + unused},
-            "used": {"id": "used", "label": "已使用", "count": used},
-            "unused": {"id": "unused", "label": "待使用", "count": unused}, "groups": groups,
-            "version": settings["version"]}
-
+                       "count": counts.get(parent, 0), "children": children})
+    return {key: {"id": key, "label": label, "count": counts.get(key, 0)}
+            for key, label in (("all", "全部发票"), ("used", "已使用"), ("unused", "待使用"))} | {
+                "groups": groups, "version": settings["version"]}
 
 
 class AppSettingsInputInvoiceUsagePaymentRulesProvider:
@@ -339,7 +347,7 @@ def public_payment_status_rules_payload(
         "version": int(normalized["version"]),
         "readOnly": bool(read_only),
         "rules": [
-            {**deepcopy(rule), "parentStatus": payment_category_parent(rule), "description": condition_description(rule["conditions"]),
+            {**deepcopy(rule), "description": condition_description(rule["conditions"]),
              "reason": condition_description(rule["conditions"])}
             for rule in normalized["rules"]
         ],
@@ -355,7 +363,7 @@ def public_payment_status_rules_payload(
 def evaluate_payment_status(settings: dict[str, Any], context: PaymentStatusEvaluationContext) -> dict[str, str]:
     normalized = normalize_payment_status_rules_settings(settings)
     for rule in normalized["rules"]:
-        if payment_category_parent(rule) == "paid" and context.payment_comparison == "invalid":
+        if ("paid" if context.has_bank else "unpaid") not in payment_category_parents(rule):
             continue
         expected = {"paid": "equal", "invoice_less_payment": "less", "invoice_greater_payment": "greater"}.get(rule["statusCode"])
         if expected and context.payment_comparison != expected:
@@ -366,11 +374,10 @@ def evaluate_payment_status(settings: dict[str, Any], context: PaymentStatusEval
     if comparison_code:
         return {"code": comparison_code, "label": next(item["label"] for item in payment_categories(normalized) if item["id"] == comparison_code),
                 "reason": "正式关联组发票与支出流水金额比较", "matchedRuleId": "", "severity": "success"}
-    if not context.has_oa:
-        reason = "缺少 OA 关联；已有流水" if context.has_bank else "缺少 OA 和流水关联"
-    else:
-        reason = "缺少流水关联" if not context.has_bank else "付款金额或支付条件待核对"
-    return {"code": "pending", "label": "待核对", "reason": reason,
+    if not context.has_bank:
+        return {"code": "waiting_payment", "label": next(item["label"] for item in payment_categories(normalized) if item["id"] == "waiting_payment"),
+                "reason": "未关联银行流水", "matchedRuleId": "", "severity": "warning"}
+    return {"code": "pending", "label": "金额待核对", "reason": "已有银行流水关联，付款金额或方向待核对",
             "matchedRuleId": "", "severity": "warning"}
 
 
@@ -383,7 +390,6 @@ def _normalize_rules(value: Any) -> list[dict[str, Any]]:
     seen_ids: set[str] = set()
     seen_priorities: set[int] = set()
     labels_by_code: dict[str, str] = {}
-    parents_by_code: dict[str, str] = {}
     for item in value:
         if not isinstance(item, dict):
             raise InputInvoiceUsagePaymentRulesValidationError(
@@ -406,12 +412,6 @@ def _normalize_rules(value: Any) -> list[dict[str, Any]]:
             raise InputInvoiceUsagePaymentRulesValidationError(
                 "invalid_input_invoice_usage_payment_rule_status", "Unsupported payment status output.",
             )
-        parent = item.get("parentStatus", OUTPUT_PARENTS.get(code))
-        if not isinstance(parent, str) or parent not in {"paid", "unpaid"} or (code in OUTPUT_PARENTS and parent != OUTPUT_PARENTS[code]):
-            raise InputInvoiceUsagePaymentRulesValidationError("invalid_payment_category_parent", "分类父级无效。")
-        if code in parents_by_code and parents_by_code[code] != parent:
-            raise InputInvoiceUsagePaymentRulesValidationError("conflicting_payment_category_parent", "同一分类必须属于同一父级。")
-        parents_by_code[code] = parent
         enabled = item.get("enabled")
         if type(enabled) is not bool:
             raise InputInvoiceUsagePaymentRulesValidationError(
@@ -427,8 +427,6 @@ def _normalize_rules(value: Any) -> list[dict[str, Any]]:
             "id": rule_id, "statusCode": code, "label": label, "priority": priority,
             "enabled": enabled, "conditions": _normalize_conditions(rule_id, item.get("conditions")),
         }
-        if code not in OUTPUT_PARENTS:
-            normalized_rule["parentStatus"] = parent
         normalized.append(normalized_rule)
     return sorted(normalized, key=lambda item: (item["priority"], item["id"]))
 

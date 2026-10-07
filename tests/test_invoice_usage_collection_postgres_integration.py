@@ -91,14 +91,14 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
         payload = service.list_rows()
         tree = payload["classification"]
         self.assertEqual([tree[key]["count"] for key in ("all", "used", "unused")], [5, 4, 1])
-        self.assertEqual([group["count"] for group in tree["groups"]], [3, 0, 1])
+        self.assertEqual([group["count"] for group in tree["groups"]], [4, 0])
         self.assertEqual({row["invoiceId"]: row["paymentStatus"]["code"] for row in payload["rows"]},
-                         {"unused": "pending", "equal": "paid", "less": "invoice_less_payment", "greater": "invoice_greater_payment", "income": "pending"})
+                         {"unused": "waiting_payment", "equal": "paid", "less": "invoice_less_payment", "greater": "invoice_greater_payment", "income": "pending"})
         filters = [{"field": "usage_status", "operator": "in", "values": ["used"]},
                    {"field": "oa_relation", "operator": "in", "values": ["unlinked"]},
                    {"field": "payment_group", "operator": "in", "values": ["paid"]}]
         filtered = service.list_rows(filters=filters)
-        self.assertEqual(filtered["summary"]["invoiceCount"], 3)
+        self.assertEqual(filtered["summary"]["invoiceCount"], 4)
         self.assertEqual(filtered["classification"], tree)
         self.assertEqual(service.export_page(filters=filters)["rows"], filtered["rows"])
         linked = service.list_rows(filters=[{"field": "oa_relation", "operator": "in", "values": ["linked"]}])
@@ -106,6 +106,30 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
         self.connection.execute("update app.workbench_pair_relations set status='withdrawn' where case_id='case-equal'")
         after = service.list_rows()["classification"]
         self.assertEqual([after[key]["count"] for key in ("all", "used", "unused")], [5, 3, 2])
+
+    def test_output_relations_sharing_oa_do_not_lose_or_mix_bank_ownership(self):
+        for key, amount in [('first', 100), ('second', 200)]:
+            self.connection.execute("""insert into app.invoices(legacy_mongo_id,invoice_type,invoice_no,
+                invoice_date,invoice_month,amount,signed_amount,total_with_tax,status)
+                values(%s,'output',%s,'2026-10-03','2026-10-01',%s,%s,%s,'pending')""",
+                (key,key,amount,amount,amount))
+            self.connection.execute("""insert into app.bank_transactions(legacy_mongo_id,account_no,
+                txn_direction,counterparty_name_raw,amount,signed_amount,txn_date,txn_month,status)
+                values(%s,'test','inflow','客户',%s,%s,'2026-10-03','2026-10-01','pending')""",
+                ('bank-'+key,amount,amount))
+            self.connection.execute("""insert into app.workbench_pair_relations(case_id,relation_mode,status,row_ids,row_types)
+                values(%s,'manual','active',%s,array['invoice','bank','oa'])""",
+                ('case-'+key,[key,'bank-'+key,'shared-oa']))
+        query = OutputInvoiceCollectionCanonicalQueryService(
+            repository=PostgresOutputInvoiceCollectionQueryRepository(self.connection),
+            row_assembler=OutputInvoiceCollectionQueryService(import_service=ImportNormalizationService()))
+        payload = query.list_rows()
+        self.assertEqual(payload['summary']['collectedAmount'], '300.00')
+        self.assertEqual(payload['pagination']['total'], 2)
+        for row in payload['rows']:
+            self.assertEqual(row['collectionStatus']['code'], 'collected')
+            self.assertEqual(row['bankTransactions']['relationCount'], 1)
+            self.assertEqual(row['bankTransactions']['summaries'][0]['bankTransactionId'], 'bank-'+row['invoiceId'])
 
     def test_financial_sql_and_python_agree_on_edge_cases(self):
         fields = invoice_financial_sql("invoice")
@@ -341,7 +365,7 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["pagination"]["total"], 1)
         [row] = payload["rows"]
         self.assertEqual(row["invoiceId"], "input-snapshot-rule-1")
-        self.assertEqual(row["paymentStatus"]["code"], "pending")
+        self.assertEqual(row["paymentStatus"]["code"], "waiting_payment")
         self.assertEqual(legacy_provider.evaluate_count, 0)
 
     def test_output_reversal_remark_keeps_exact_summary_order_and_supporting_group(self) -> None:

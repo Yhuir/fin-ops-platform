@@ -64,15 +64,15 @@ class PaymentRulesPostgresTests(unittest.TestCase):
                         )
                         self.assertEqual(row["code"], evaluate_payment_status(settings, context)["code"])
 
-    def test_custom_category_save_rename_delete_and_failed_parent_are_atomic(self):
+    def test_custom_category_save_rename_delete_and_invalid_conditions_are_atomic(self):
         request = self.request("custom-category")
         request["rules"] = [{"id": "rule-one", "statusCode": "custom_supplier", "parentStatus": "paid",
                              "label": "供应商付款", "priority": 1, "enabled": True,
                              "conditions": {"hasBank": True, "paymentComparison": "less"}}]
         saved = self.provider.update_payment_status_rules(request, actor_id="tester")
-        self.assertEqual(saved["rules"][0]["parentStatus"], "paid")
+        self.assertNotIn("parentStatus", saved["rules"][0])
         invalid = self.request("invalid-parent")
-        invalid["rules"][0]["parentStatus"] = "unknown"
+        invalid["rules"][0]["conditions"]["hasBank"] = "unknown"
         with self.assertRaises(InputInvoiceUsagePaymentRulesValidationError):
             self.provider.update_payment_status_rules(invalid, actor_id="tester")
         self.assertEqual(self.provider.payment_status_rules_payload(), saved)

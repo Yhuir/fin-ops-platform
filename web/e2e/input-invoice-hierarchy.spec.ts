@@ -17,11 +17,16 @@ test("hierarchy wraps ten categories and combines selection with the OA header f
     expect(await panel.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
     const parent = panel.getByRole("group", { name: "已付款", exact: true });
     const parentBox = await parent.boundingBox();
-    for (const child of await parent.getByRole("button").all()) {
+    const rowPositions = new Set<number>();
+    for (const child of await parent.locator(".invoice-usage-classification__child").all()) {
       const box = await child.boundingBox();
+      rowPositions.add(Math.round(box!.y));
+      expect(await child.evaluate(node => node.scrollWidth <= node.clientWidth && node.scrollHeight <= node.clientHeight)).toBe(true);
+      expect(await child.evaluate(node => getComputedStyle(node).borderRadius)).toBe("0px");
       expect(box!.x).toBeGreaterThanOrEqual(parentBox!.x - 1);
       expect(box!.x + box!.width).toBeLessThanOrEqual(parentBox!.x + parentBox!.width + 1);
     }
+    expect(rowPositions.size).toBeGreaterThanOrEqual(width === 1024 ? 3 : 2);
     await page.screenshot({ path: testInfo.outputPath(`invoice-hierarchy-${width}.png`), animations: "disabled" });
   }
   await page.setViewportSize({ width: 1920, height: 1100 });
@@ -33,12 +38,13 @@ test("hierarchy wraps ten categories and combines selection with the OA header f
   const filters = JSON.parse(decodeURIComponent(new URL((await requested).url()).searchParams.get("filters")!));
   expect(filters).toEqual(expect.arrayContaining([
     { field: "usage_status", operator: "in", values: ["used"] },
+    { field: "payment_group", operator: "in", values: ["paid"] },
     { field: "payment_status", operator: "in", values: ["custom_9"] },
     { field: "oa_relation", operator: "in", values: ["unlinked"] },
   ]));
   await expect(page.getByRole("menuitemradio", { name: "未关联 OA", exact: true })).toHaveCount(0);
   payload.classification.groups[0].children = payload.classification.groups[0].children.filter((item: { id: string }) => item.id !== "category:custom_9");
-  await page.getByRole("button", { name: "刷新", exact: true }).click();
+  await page.reload();
   await expect(panel.getByRole("button", { name: "规则分类 10 0 张", exact: true })).toHaveCount(0);
   await expect(panel.getByRole("button", { name: /^已使用/ })).toHaveAttribute("aria-pressed", "true");
 });

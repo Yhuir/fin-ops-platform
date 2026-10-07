@@ -442,7 +442,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["oa"]["amount"], "800.00")
         self.assertEqual(row["paymentStatus"]["code"], "offset")
 
-    def test_confirmed_relation_component_with_shared_oa_collapses_to_one_payment_row(self) -> None:
+    def test_independent_formal_relations_sharing_oa_remain_separate(self) -> None:
         vendor = self._counterparty("vendor", "云南城建物业运营集团")
         first = self._invoice("inv-zhou-1", "26532000000021026521", vendor, total_with_tax="600.00")
         second = self._invoice("inv-zhou-2", "15312761", vendor, total_with_tax="200.00")
@@ -498,14 +498,13 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
 
         payload = service.list_rows(page_size=20)
 
-        self.assertEqual(payload["pagination"]["total"], 1)
-        row = payload["rows"][0]
-        self.assertEqual(row["invoice"]["totalWithTax"], "800.00")
-        self.assertEqual(row["invoiceRelations"]["relationCount"], 2)
-        self.assertEqual(row["oa"]["relationCount"], 1)
-        self.assertEqual(row["oa"]["amount"], "800.00")
-        self.assertEqual(row["paymentStatus"]["label"], "冲")
-        self.assertEqual(row["paymentStatus"]["code"], "offset")
+        self.assertEqual(payload["pagination"]["total"], 2)
+        self.assertEqual({row["invoice"]["totalWithTax"] for row in payload["rows"]}, {"600.00", "200.00"})
+        for row in payload["rows"]:
+            self.assertEqual(row["invoiceRelations"]["relationCount"], 1)
+            self.assertEqual(row["oa"]["relationCount"], 1)
+            self.assertEqual(row["oa"]["amount"], "800.00")
+            self.assertEqual(row["paymentStatus"]["code"], "waiting_payment")
 
     def test_payment_status_accepts_status_matched_amount_check_for_oa_invoice_offset(self) -> None:
         vendor = self._counterparty("vendor", "云南城建物业运营集团")
@@ -654,7 +653,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["bankTransactions"]["relationCount"], 0)
         self.assertEqual(row["oa"]["summaries"], [])
         self.assertEqual(row["bankTransactions"]["summaries"], [])
-        self.assertEqual(row["paymentStatus"]["code"], "pending")
+        self.assertEqual(row["paymentStatus"]["code"], "waiting_payment")
 
     def test_month_scope_unlinked_row_does_not_hide_cross_month_linked_relation(self) -> None:
         vendor = self._counterparty("vendor-lg", "良固阀门集团股份有限公司")
@@ -807,7 +806,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["bankTransactions"]["relationCount"], 0)
         self.assertIsNone(row["bankTransactions"]["primaryBankTransactionId"])
         self.assertEqual(row["bankTransactions"]["summaries"], [])
-        self.assertEqual(row["paymentStatus"]["code"], "pending")
+        self.assertEqual(row["paymentStatus"]["code"], "waiting_payment")
 
     def test_details_and_filter_options_have_complete_contract_shape(self) -> None:
         vendor = self._counterparty("vendor", "云南中招招标有限公司")

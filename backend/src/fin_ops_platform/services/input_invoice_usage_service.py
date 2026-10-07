@@ -301,7 +301,8 @@ class InputInvoiceUsageQueryService:
         return input_invoice_usage_relation_details_from_row(
             row,
             kind=normalized_kind,
-            relations=context.relation_summaries_for_row(row["invoiceId"]),
+            relations=[relation for relation in context.relation_summaries_for_row(row["invoiceId"])
+                       if not row.get("relationGroupId") or relation["caseId"] == row["relationGroupId"]],
             relation_payload=relation_payload,
             sections=source_relation_sections(normalized_kind, relation_payload["summaries"],
                 groups=source_invoice_groups(context.list_invoices(month="all", invoice_type=InvoiceType.INPUT)),
@@ -355,8 +356,6 @@ class InputInvoiceUsageQueryService:
         groups: list[dict[str, Any]] = []
         assigned_invoice_ids: set[str] = set()
         for group in sorted(relation_groups.values(), key=lambda item: str(item["row_key"])):
-            if any(invoice.id in assigned_invoice_ids for invoice in group["line_items"]):
-                continue
             groups.append(group)
             assigned_invoice_ids.update(invoice.id for invoice in group["line_items"])
 
@@ -390,14 +389,12 @@ class InputInvoiceUsageQueryService:
             source_lookup=source_lookup,
         )
         relation_groups: dict[str, dict[str, Any]] = {}
-        for component in self._relation_entry_components(relation_entries):
-            relation_line_items = self._component_line_items(component)
-            if len(relation_line_items) < 2:
-                continue
+        for entry in relation_entries:
+            relation_line_items = entry["line_items"]
             source_members = [invoice for invoice in relation_line_items if invoice.id in source_invoice_ids]
             if not source_members:
                 continue
-            group_key = self._relation_component_group_key(component)
+            group_key = entry["group_key"]
             if not group_key:
                 continue
             sorted_source_members = sorted(source_members, key=lambda item: str(item.id))
@@ -434,68 +431,13 @@ class InputInvoiceUsageQueryService:
             group_key = self._relation_group_key(relation)
             if not group_key:
                 continue
-            row_ids = {
-                row_id
-                for row_id, _row_type in self._typed_relation_rows(relation)
-                if str(row_id or "").strip()
-            }
-            component_keys = {
-                *row_ids,
-                *(f"invoice:{invoice.id}" for invoice in relation_line_items if str(invoice.id or "").strip()),
-            }
             relation_entries.append(
                 {
                     "group_key": group_key,
                     "line_items": relation_line_items,
-                    "component_keys": component_keys,
                 }
             )
         return relation_entries
-
-    @staticmethod
-    def _relation_entry_components(relation_entries: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
-        remaining = list(relation_entries)
-        components: list[list[dict[str, Any]]] = []
-        while remaining:
-            component = [remaining.pop(0)]
-            component_keys = set(component[0].get("component_keys") or set())
-            changed = True
-            while changed:
-                changed = False
-                for entry in list(remaining):
-                    entry_keys = set(entry.get("component_keys") or set())
-                    if not component_keys.intersection(entry_keys):
-                        continue
-                    remaining.remove(entry)
-                    component.append(entry)
-                    component_keys.update(entry_keys)
-                    changed = True
-            components.append(component)
-        return components
-
-    @staticmethod
-    def _component_line_items(component: list[dict[str, Any]]) -> list[Invoice]:
-        invoices: dict[str, Invoice] = {}
-        for entry in component:
-            for invoice in list(entry.get("line_items") or []):
-                if isinstance(invoice, Invoice):
-                    invoices.setdefault(str(invoice.id), invoice)
-        return list(invoices.values())
-
-    @staticmethod
-    def _relation_component_group_key(component: list[dict[str, Any]]) -> str:
-        group_keys = sorted(
-            {
-                str(entry.get("group_key") or "").strip()
-                for entry in component
-                if str(entry.get("group_key") or "").strip()
-            }
-        )
-        if not group_keys:
-            return ""
-        if len(group_keys) == 1:
-            return group_keys[0]
-        return "component:" + sha1("|".join(group_keys).encode("utf-8")).hexdigest()[:16]
 
     def _invoice_group_for_invoice_id(
         self,
@@ -526,7 +468,9 @@ class InputInvoiceUsageQueryService:
         primary: Invoice = group["primary"]
         line_items: list[Invoice] = group["line_items"]
         relation_lookup_ids = self._invoice_relation_lookup_ids(line_items)
-        relations = context.distributed_relations_for_row_ids(relation_lookup_ids)
+        relations = context.distributed_relations_for_row_ids(relation_lookup_ids, case_ids=group.get("relation_case_ids"))
+        if group.get("relation_group_id"):
+            relations = [relation for relation in relations if relation.get("case_id") == group["relation_group_id"]]
         bank_payload = self._bank_relation_payload(primary, line_items, relations, context=context)
         oa_payload = self._oa_relation_payload(primary, line_items, relations, context=context)
         invoice_relation_payload = self._invoice_relation_payload(primary, line_items, relations, context=context)

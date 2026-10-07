@@ -104,9 +104,8 @@ function cssRule(source: string, selector: string) {
 const rowsPayload = {
   classification: {
     all: { id: "all", label: "全部发票", count: 1 }, used: { id: "used", label: "已使用", count: 1 }, unused: { id: "unused", label: "待使用", count: 0 },
-    groups: [{ id: "paid", label: "已付款", tone: "paid", count: 0, children: [{ id: "category:paid", label: "发票＝付款", count: 0 }] },
-      { id: "unpaid", label: "未付款", tone: "unpaid", count: 0, children: [] },
-      { id: "pending", label: "待核对", tone: "pending", count: 1, children: [] }],
+    groups: [{ id: "paid", label: "已付款", tone: "paid", count: 0, children: [{ id: "category:paid", label: "发票＝付款", count: 0 }, { id: "category:pending", label: "金额待核对", count: 0 }] },
+      { id: "unpaid", label: "未付款", tone: "unpaid", count: 0, children: [] }],
   },
   rows: [
     {

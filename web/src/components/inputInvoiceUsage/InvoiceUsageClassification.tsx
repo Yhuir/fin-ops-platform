@@ -19,14 +19,14 @@ export default function InvoiceUsageClassification({
   invalid?: boolean;
   onSelect: (id: string) => void;
 }) {
-  const renderButton = (item: InvoiceUsageClassificationItem, className: string) => (
+  const renderButton = (item: InvoiceUsageClassificationItem, className: string, selectionId = item.id) => (
     <button
       type="button"
-      key={item.id}
+      key={selectionId}
       className={`invoice-usage-classification__button classification-choice ${className}`}
-      aria-pressed={selectedId === item.id}
+      aria-pressed={selectedId === selectionId}
       disabled={invalid}
-      onClick={() => onSelect(item.id)}
+      onClick={() => onSelect(selectionId)}
     >
       <span className="invoice-usage-classification__label">{item.label}</span>
       <CountLabel value={invalid ? undefined : item.count} unit="张" spaced />
@@ -50,7 +50,7 @@ export default function InvoiceUsageClassification({
               >
                 {renderButton(group, "invoice-usage-classification__group-title")}
                 <div className="invoice-usage-classification__children">
-                  {group.children.map(child => renderButton(child, "invoice-usage-classification__child"))}
+                  {group.children.map(child => renderButton(child, "invoice-usage-classification__child", `category:${group.id}:${child.id.slice("category:".length)}`))}
                 </div>
               </div>
             ))}

@@ -81,26 +81,21 @@
   --classification-ink: #63472f;
   --classification-border: #bfa389;
 }
-.invoice-usage-classification__group--pending {
-  --classification-header: #c8cdd3;
-  --classification-region: #e2e6eb;
-  --classification-child: #f0f2f5;
-  --classification-ink: #465363;
-  --classification-border: #aeb8c5;
-}
 .invoice-usage-classification__group-title {
   background: var(--classification-header);
   border-bottom: 1px solid var(--classification-border);
 }
 .invoice-usage-classification__children {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
-  gap: 7px;
-  padding: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 0;
 }
 .invoice-usage-classification__child {
-  border: 1px solid var(--classification-border);
-  border-radius: 4px;
+  border: 0;
+  border-right: 1px solid var(--classification-border);
+  border-bottom: 1px solid var(--classification-border);
+  border-radius: 0;
+  min-height: 46px;
   background: var(--classification-child);
 }
 

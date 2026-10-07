@@ -572,7 +572,7 @@ class OutputInvoiceCollectionQueryService:
         primary: Invoice = group["primary"]
         line_items: list[Invoice] = list(group["line_items"])
         invoice_ids = [line.id for line in line_items]
-        relations = context.distributed_relations_for_row_ids(invoice_ids)
+        relations = context.distributed_relations_for_row_ids(invoice_ids, case_ids=group.get("relation_case_ids"))
         bank_payload = self._bank_relation_payload(
             primary,
             line_items,

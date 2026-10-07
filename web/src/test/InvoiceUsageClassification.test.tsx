@@ -10,16 +10,30 @@ const data: InvoiceUsageClassificationData = {
   unused: { id: "unused", label: "待使用", count: 10 },
   groups: [{
     id: "paid", label: "已付款", count: 20, tone: "paid",
-    children: Array.from({ length: 10 }, (_, index) => ({ id: `category-${index}`, label: `分类 ${index + 1}`, count: 2 })),
+    children: Array.from({ length: 10 }, (_, index) => ({ id: `category:custom_${index}`, label: `分类 ${index + 1}`, count: 2 })),
   }, {
     id: "unpaid", label: "未付款", count: 0, tone: "unpaid", children: [],
   }],
 };
 
 describe("invoice usage classification", () => {
+  test("qualifies the same rule category with its actual payment parent", async () => {
+    const onSelect = vi.fn();
+    const shared = { ...data, groups: data.groups.map(group => ({ ...group,
+      children: [{ id: "category:custom_shared", label: "规则一", count: 2 }],
+    })) };
+    render(<InvoiceUsageClassification data={shared} selectedId="category:paid:custom_shared" onSelect={onSelect} />);
+    const paid = within(screen.getByRole("group", { name: "已付款" })).getByRole("button", { name: "规则一 2 张" });
+    const unpaid = within(screen.getByRole("group", { name: "未付款" })).getByRole("button", { name: "规则一 2 张" });
+    expect(paid).toHaveAttribute("aria-pressed", "true");
+    expect(unpaid).toHaveAttribute("aria-pressed", "false");
+    await userEvent.click(unpaid);
+    expect(onSelect).toHaveBeenCalledWith("category:unpaid:custom_shared");
+  });
+
   test("keeps all dynamic categories inside their parent and selects by stable identity", async () => {
     const onSelect = vi.fn();
-    render(<InvoiceUsageClassification data={data} selectedId="category-9" onSelect={onSelect} />);
+    render(<InvoiceUsageClassification data={data} selectedId="category:paid:custom_9" onSelect={onSelect} />);
     const paid = screen.getByRole("group", { name: "已付款" });
     expect(within(paid).getAllByRole("button")).toHaveLength(11);
     expect(within(paid).getByRole("button", { name: "分类 10 2 张" })).toHaveAttribute("aria-pressed", "true");
@@ -38,9 +52,9 @@ describe("invoice usage classification", () => {
   });
 
   test("rename and removal follow the new configuration without keeping stale buttons", () => {
-    const { rerender } = render(<InvoiceUsageClassification data={data} selectedId="category-0" onSelect={vi.fn()} />);
-    const renamed = { ...data, groups: [{ ...data.groups[0], children: [{ id: "category-0", label: "现金往来", count: 20 }] }] };
-    rerender(<InvoiceUsageClassification data={renamed} selectedId="category-0" onSelect={vi.fn()} />);
+    const { rerender } = render(<InvoiceUsageClassification data={data} selectedId="category:paid:custom_0" onSelect={vi.fn()} />);
+    const renamed = { ...data, groups: [{ ...data.groups[0], children: [{ id: "category:custom_0", label: "现金往来", count: 20 }] }] };
+    rerender(<InvoiceUsageClassification data={renamed} selectedId="category:paid:custom_0" onSelect={vi.fn()} />);
     expect(screen.getByRole("button", { name: "现金往来 20 张" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByRole("button", { name: "分类 10 2 张" })).not.toBeInTheDocument();
   });

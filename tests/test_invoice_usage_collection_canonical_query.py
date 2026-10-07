@@ -211,9 +211,9 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertIn("from app.oa_pending_payment_admissions admission", sql)
         self.assertIn("join workflow_oa oa", sql)
         self.assertIn("join app.bank_transaction_units bank", sql)
-        self.assertIn("with recursive", sql)
-        self.assertIn("relation_reach(root_relation_id, relation_id)", sql)
-        self.assertIn("join relation_members neighbour", sql)
+        self.assertNotIn("with recursive", sql)
+        self.assertIn("relation_scopes as", sql)
+        self.assertNotIn("join relation_members neighbour", sql)
         self.assertIn("bool_or(", sql)
         self.assertIn("filtered_rows as materialized", sql)
         self.assertIn("status_option_rows as materialized", sql)
@@ -273,7 +273,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertIn("status_option_rows as materialized", sql)
         self.assertIn("page_supporting_keys as", sql)
         self.assertIn("supporting_group_rows as", sql)
-        self.assertEqual(sql.count("with recursive"), 1)
+        self.assertEqual(sql.count("with recursive"), 0)
         self.assertNotIn("where group_key = any(%s::text[])", sql)
         self.assertIn("jsonb_agg(", sql)
         self.assertIn("as blue_invoice_count", sql)
@@ -506,7 +506,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertEqual([row["label"] for row in rows], ["快照待处理"] * 2)
         self.assertIs(assembler.lifecycle_policies[0], assembler.lifecycle_policies[1])
 
-    def test_relation_context_returns_the_full_active_connected_component(
+    def test_relation_context_returns_only_direct_formal_relations(
         self,
     ) -> None:
         context = DistributedInvoiceRelationContext(
@@ -532,7 +532,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
 
         self.assertEqual(
             {relation["case_id"] for relation in relations},
-            {"invoice-oa", "oa-bank"},
+            {"invoice-oa"},
         )
 
     def test_output_row_assembly_only_scans_sql_selected_red_pair_candidates(

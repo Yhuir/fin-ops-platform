@@ -405,7 +405,6 @@ function mapPaymentStatusRulesResponse(payload: unknown): InputInvoiceUsagePayme
         id: stringValue(rule.id),
         code: stringValue(rule.code),
         statusCode: stringValue(camelOrSnake(rule, "statusCode", "status_code")),
-        parentStatus: rule.parentStatus as "paid" | "unpaid" | undefined,
         label: stringValue(rule.label),
         description: stringValue(rule.description),
         reason: stringValue(rule.reason),
