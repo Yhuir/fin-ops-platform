@@ -736,7 +736,7 @@ afterEach(() => {
 });
 
 describe("OA pending payments page", () => {
-  test("starts each visit at all and preserves its chosen month on explicit refresh", async () => {
+  test("starts each visit at all and preserves its chosen month on search submission", async () => {
     const user = userEvent.setup();
     const fetchMock = installOaPendingPaymentsFetch();
     const mounted = renderAuthenticatedAppAt("/oa-pending-payments");
@@ -747,7 +747,7 @@ describe("OA pending payments page", () => {
     await user.click(within(await screen.findByRole("dialog", { name: "OA月份筛选选择器" })).getByRole("button", { name: "四月" }));
     await waitFor(() => expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("month")).toBe("2026-04"));
     const count = rowsRequests(fetchMock).length;
-    await user.click(screen.getByRole("button", { name: "刷新 OA 待付款核对" }));
+    await user.click(screen.getByRole("button", { name: "查询", exact: true }));
     await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(count));
     expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("month")).toBe("2026-04");
     const beforeReentry = rowsRequests(fetchMock).length;
@@ -1026,8 +1026,8 @@ describe("OA pending payments page", () => {
     expect(within(page).queryByText("交易开始")).not.toBeInTheDocument();
     expect(within(page).queryByText("交易结束")).not.toBeInTheDocument();
     expect(within(page).queryByText("全页面检索")).not.toBeInTheDocument();
-    const refreshButton = within(page).getByRole("button", { name: "刷新 OA 待付款核对" });
-    expect(refreshButton).toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "刷新 OA 待付款核对" })).not.toBeInTheDocument();
+    const refreshButton = within(page).getByRole("button", { name: "查询", exact: true });
     const rowsBeforeRefresh = rowsRequests(fetchMock).length;
     await user.click(refreshButton);
     await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsBeforeRefresh));
@@ -1623,7 +1623,7 @@ describe("OA pending payments page", () => {
     renderAuthenticatedAppAt("/oa-pending-payments");
     const page = await screen.findByTestId("oa-pending-payments-page");
     await within(page).findByText("张三");
-    await user.click(within(page).getByRole("button", { name: "刷新 OA 待付款核对" }));
+    await user.click(within(page).getByRole("button", { name: "查询", exact: true }));
     await waitFor(() => expect(rowsRequests(fetchMock)).toHaveLength(2));
     await user.click(within(page).getByRole("button", { name: "支出流水无需开票规则设置" }));
     await screen.findByRole("heading", { name: "支出流水无需开票规则设置" });
@@ -1651,7 +1651,7 @@ describe("OA pending payments page", () => {
     expect(rowsRequests(fetchMock)).toHaveLength(1);
   });
 
-  test("manual refresh issues one normal GET without conditional headers", async () => {
+  test("search submission issues one normal GET without conditional headers", async () => {
     const fetchMock = installOaPendingPaymentsFetch();
     const user = userEvent.setup();
 
@@ -1659,7 +1659,7 @@ describe("OA pending payments page", () => {
 
     const page = await screen.findByTestId("oa-pending-payments-page");
     expect(await within(page).findByText("张三")).toBeInTheDocument();
-    await user.click(within(page).getByRole("button", { name: "刷新 OA 待付款核对" }));
+    await user.click(within(page).getByRole("button", { name: "查询", exact: true }));
     await waitFor(() => expect(rowsRequests(fetchMock)).toHaveLength(2));
     const rowCalls = fetchMock.mock.calls.filter(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -1734,20 +1734,18 @@ describe("OA pending payments page", () => {
     expect(await screen.findByRole("button", { name: "已关联流水 20 条" })).toBeInTheDocument();
   });
 
-  test("rereads the last valid page when a refresh removes the current page", async () => {
+  test("rereads the last valid page when pagination encounters a removed page", async () => {
     const smaller = { ...rowsPayload, pagination: { page: 2, pageSize: 20, total: 1 },
       summary: { rowCount: 1, oaCount: 1, statusCounts: { paid: 1, unpaid: 0 }, viewCounts: { completed: 1, in_progress: 0 }, classificationCounts: { completed: { paid: 1, unpaid: 0 }, in_progress: { paid: 0, unpaid: 0 } } } };
     const fetchMock = installOaPendingPaymentsFetch({ rowsResponses: [
-      { status: 200, payload: rowsPayload }, { status: 200, payload: rowsPayload },
+      { status: 200, payload: rowsPayload },
       { status: 200, payload: { ...smaller, rows: [] } }, { status: 200, payload: smaller },
     ] });
     renderAuthenticatedAppAt("/oa-pending-payments");
     await screen.findByRole("button", { name: "已完成 OA 60 条" });
     await userEvent.click(screen.getByRole("button", { name: "下一页" }));
-    await waitFor(() => expect(rowsRequests(fetchMock).at(-1)!.searchParams.get("page")).toBe("2"));
-    await screen.findByRole("button", { name: "已完成 OA 60 条" });
-    await userEvent.click(screen.getByRole("button", { name: "刷新 OA 待付款核对" }));
-    await waitFor(() => expect(rowsRequests(fetchMock)).toHaveLength(4));
+    await waitFor(() => expect(rowsRequests(fetchMock)).toHaveLength(3));
+    expect(rowsRequests(fetchMock)[1].searchParams.get("page")).toBe("2");
     expect(rowsRequests(fetchMock).at(-1)!.searchParams.get("page")).toBe("1");
     expect(await screen.findByText("符合条件 1 条 OA · 第 1/1 页")).toBeInTheDocument();
   });

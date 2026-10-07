@@ -69,7 +69,7 @@ test.describe("pending invoices filter and sort browser flow", () => {
       await mark("firstVisibleResponseLatencyMs", expect(page.getByTestId("pending-invoices-page")).toBeVisible());
       await mark("finalSettledLatencyMs", expect(page.getByRole("alert")).toContainText("待找发票加载暂时失败，请刷新后重试。"));
     });
-    await expect(page.getByText("待找发票加载失败，请点击刷新重试。")).toBeVisible();
+    await expect(page.getByText("待找发票加载失败，请使用错误提示中的重试按钮。")).toBeVisible();
     await expect(page.getByText("当前条件下没有待找发票流水。")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "筛选内容导出" })).toBeDisabled();
     const failedRowsRequests = api.count("GET /api/pending-invoices/rows");
@@ -84,13 +84,13 @@ test.describe("pending invoices filter and sort browser flow", () => {
       const recoveryResponse = page.waitForResponse((response) =>
         pendingInvoiceRowsRequest(response.request()) && response.status() === 200,
       );
-      await page.getByRole("button", { name: "刷新" }).click();
+      await page.getByRole("button", { name: "重试" }).click();
       expect((await mark("apiLatencyMs", recoveryResponse)).status()).toBe(200);
       await mark("finalSettledLatencyMs", expect(page.getByRole("row", { name: /智能工厂设备商/ })).toBeVisible());
     });
 
     await expect(page.getByText("待找发票加载暂时失败，请刷新后重试。")).toHaveCount(0);
-    await expect(page.getByText("待找发票加载失败，请点击刷新重试。")).toHaveCount(0);
+    await expect(page.getByText("待找发票加载失败，请使用错误提示中的重试按钮。")).toHaveCount(0);
     const recoveredRow = page.getByRole("row", { name: /智能工厂设备商/ });
     await expect(recoveredRow).toBeVisible();
     await expect(recoveredRow.getByText("已支付待开票")).toBeVisible();

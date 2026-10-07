@@ -76,7 +76,7 @@ test('ETC list errors remain visible inside the scroll area without moving contr
   await expect(rail.getByText('批次列表暂不可用，请刷新重试。')).toBeVisible();
   const baseline = await geometry(page);
   fail = false;
-  await page.getByRole('button', { name: '刷新', exact: true }).click();
+  await page.getByRole('button', { name: '重试读取', exact: true }).click();
   await expect(rail.locator('.etc-batch-row')).toHaveCount(1);
   await expect(rail.getByText('批次列表暂不可用，请刷新重试。')).toHaveCount(0);
   expectStable(await geometry(page), baseline);

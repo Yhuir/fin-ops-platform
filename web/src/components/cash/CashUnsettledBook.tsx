@@ -34,7 +34,7 @@ export function CashUnsettledBook({ initial, onChange, onItem }: { initial: Cash
       <CashInput label="事项关键词" value={keyword} onChange={setKeyword} placeholder="搜索已登记的未结事项" />
       <Button type="submit" size="sm" variant="secondary">查询</Button>
       <Button size="sm" variant="tertiary" onPress={() => { const initial = initialUnsettledCriteria(); setCriteria(initial); setDate(initial.date_to); setKeyword(""); setError(null); }}>重置</Button>
-      <Button size="sm" variant="secondary" onPress={query.reload}>刷新</Button>
+      {query.error && <Button size="sm" variant="secondary" onPress={query.reload}>重试读取</Button>}
     </form>
     <p className="cash-hint">截至 {criteria.date_to} 的已登记未结事项，包含本期没有处理的旧欠款。详情显示当前可办理额。</p>
     <CashNotice error={error ?? query.error?.message} />{query.error && <Button size="sm" variant="secondary" onPress={query.reload}>重新读取</Button>}

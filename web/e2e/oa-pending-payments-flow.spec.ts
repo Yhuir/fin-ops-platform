@@ -97,7 +97,7 @@ test.describe("OA pending payments browser flow", () => {
     await page.goto("/oa-pending-payments");
     await expect(page.getByTestId("oa-pending-payments-page")).toBeVisible();
     await expect(page.getByText("OA 待付款核对加载暂时失败，请刷新后重试。")).toBeVisible();
-    await expect(page.getByText("OA 待付款核对加载失败，请点击刷新重试。")).toBeVisible();
+    await expect(page.getByText("OA 待付款核对加载失败，请使用错误提示中的重试按钮。")).toBeVisible();
     await expect(page.getByText("当前条件下暂无记录。")).toHaveCount(0);
     await expect(page.getByText("暂无 OA 待付款核对数据")).toHaveCount(0);
     expect(api.count("GET /api/oa-pending-payments/rows")).toBeGreaterThanOrEqual(1);
@@ -110,7 +110,7 @@ test.describe("OA pending payments browser flow", () => {
         actionType: "click",
       }, async (mark) => {
         const responsePromise = waitForOaPendingPaymentRows(page);
-        await page.getByRole("button", { name: "刷新 OA 待付款核对" }).click();
+        await page.getByRole("button", { name: "重试" }).click();
         const response = await mark("apiLatencyMs", responsePromise);
         recovered = response.status() === 200;
         if (recovered) {
@@ -121,7 +121,7 @@ test.describe("OA pending payments browser flow", () => {
         } else {
           await mark(
             "firstVisibleResponseLatencyMs",
-            expect(page.getByText("OA 待付款核对加载失败，请点击刷新重试。")).toBeVisible(),
+            expect(page.getByText("OA 待付款核对加载失败，请使用错误提示中的重试按钮。")).toBeVisible(),
           );
         }
       });
@@ -129,7 +129,7 @@ test.describe("OA pending payments browser flow", () => {
     expect(recovered).toBe(true);
 
     await expect(page.getByText("OA 待付款核对加载暂时失败，请刷新后重试。")).toHaveCount(0);
-    await expect(page.getByText("OA 待付款核对加载失败，请点击刷新重试。")).toHaveCount(0);
+    await expect(page.getByText("OA 待付款核对加载失败，请使用错误提示中的重试按钮。")).toHaveCount(0);
     const recoveredRow = page.getByRole("row", { name: /浏览器付款申请人/ });
     await expect(recoveredRow).toBeVisible();
     await expect(recoveredRow).toContainText("浏览器待付款项目");
@@ -385,6 +385,7 @@ test.describe("OA pending payments browser flow", () => {
         response.request().method() === "GET"
         && new URL(response.url()).pathname.endsWith("/api/pending-invoices/rules"),
       );
+      if (await page.getByRole("button", { name: "更多页面操作" }).isVisible()) await page.getByRole("button", { name: "更多页面操作" }).click();
       await page.getByRole("button", { name: "支出流水无需开票规则设置" }).click();
       await mark("apiLatencyMs", rulesResponse);
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "支出流水无需开票规则设置" })).toBeVisible());

@@ -239,7 +239,7 @@ test.describe("cash module deterministic browser flow", () => {
     await expect(page.locator("body")).not.toContainText("合成个人借出"); expect(api.calls.length).toBe(cashCalls);
     expect(api.ordinary.count("GET /api/bank-details/transactions")).toBeGreaterThan(0);
     await page.getByRole("link", { name: "现金账目", exact: true }).click(); await expect(page.getByRole("grid", { name: "往来账总表" })).toBeVisible();
-    api.forbid(); await page.getByRole("button", { name: "刷新", exact: true }).click();
+    api.forbid(); await page.getByRole("textbox").first().fill("权限核对"); await page.getByRole("button", { name: "查询", exact: true }).click();
     await expect(page.getByRole("alert")).toContainText("现金账权限已失效"); await expect(page.getByRole("grid", { name: "往来账总表" })).toHaveCount(0); await expect(page.locator("body")).not.toContainText("合成个人借出");
   });
 
@@ -398,7 +398,8 @@ test.describe("cash module deterministic browser flow", () => {
     } finally { release(); }
     await expect(table).toContainText("当前范围无现金流水。"); await check();
     failed = true;
-    await page.getByRole("button", { name: "刷新", exact: true }).click();
+    await page.getByRole("textbox", { name: "搜索流水", exact: true }).fill("失败查询");
+    await page.getByRole("button", { name: "查询", exact: true }).click();
     await expect(page.getByRole("alert")).toContainText("现金读取失败"); await check();
   });
 
@@ -412,7 +413,8 @@ test.describe("cash module deterministic browser flow", () => {
     const held = new Promise<void>(resolve => { release = resolve; });
     await page.route("**/api/cash/task-occurrences?*", async route => { await held; await route.fallback(); });
     try {
-      await page.getByRole("button", { name: "刷新", exact: true }).click();
+      await page.getByRole("textbox", { name: "任务关键词", exact: true }).fill("空任务");
+      await page.getByRole("button", { name: "查询任务", exact: true }).click();
       await expect(page.getByRole("region", { name: "本月任务处理" })).toHaveAttribute("aria-busy", "true");
       expect(await boxes()).toEqual(before);
     } finally { release(); }

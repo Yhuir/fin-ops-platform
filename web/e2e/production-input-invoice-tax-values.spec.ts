@@ -34,7 +34,7 @@ test('production input invoice values agree with API across details, pagination 
       await expect(cell.locator(':scope > div')).toHaveCount(2);
       await expect(cell).toHaveText(gross + invoice.taxRate);
     }
-    await expect(page.getByRole('button', {name: '刷新', exact: true})).toBeEnabled();
+    await expect(page.locator('.invoice-usage-classification')).toHaveAttribute('aria-busy', 'false');
   };
 
   const initialResponse = nextRows();

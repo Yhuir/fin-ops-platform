@@ -8,7 +8,6 @@ import AppDrawer from "../components/common/AppDrawer";
 import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
 import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
-import PageToolbar from "../components/common/PageToolbar";
 import QuerySearch from "../components/common/QuerySearch";
 import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer";
 import OaPendingPaymentExportDrawer from "../components/oaPendingPayments/OaPendingPaymentExportDrawer";
@@ -159,7 +158,7 @@ export default function OaPendingPaymentsPage() {
   useEffect(() => {
     setSelectedOaRowIds(new Set());
     setDetailTarget(null);
-  }, [query.keyword, query.filters, query.viewMode, query.tradeDateFrom, query.tradeDateTo]);
+  }, [query.keyword, query.filters, query.viewMode, query.tradeDateFrom, query.tradeDateTo, query.month]);
 
   const handleKeywordSubmit = useCallback(() => {
     setQuery((current) => ({ ...current, page: 1, keyword: keywordDraft.trim() }));
@@ -235,17 +234,35 @@ export default function OaPendingPaymentsPage() {
     setFeedback("规则已保存。");
   }, []);
 
+  const secondaryActions = <>
+    <button
+      aria-label="支出流水无需开票规则设置"
+      onClick={() => setRulesOpen(true)}
+      className="oa-pending-payments-button"
+      type="button"
+    >
+      <SlidersHorizontal aria-hidden="true" size={16} />
+      支出流水无需开票规则设置
+    </button>
+  </>;
   const actions = useMemo(() => (
     <div className="oa-pending-payments-actions">
-      <button
-        aria-label="刷新 OA 待付款核对"
-        className="oa-pending-payments-button"
-        disabled={loading || refreshing}
-        onClick={() => loadRows("refresh")}
-        type="button"
-      >
-        刷新
-      </button>
+      <BusinessPeriodPicker
+        allowedModes={["month"]}
+        ariaLabel="OA月份筛选"
+        onChange={(selection) => setQuery((current) => ({
+          ...current,
+          page: 1,
+          month: selection.mode === "all" ? "" : selection.month,
+        }))}
+        selection={{
+          mode: query.month ? "month" : "all",
+          year: (query.month || DEFAULT_MONTH).slice(0, 4),
+          month: query.month || DEFAULT_MONTH,
+        }}
+        years={nearbyBusinessYears(query.month || DEFAULT_MONTH)}
+      />
+
       {query.viewMode === "in_progress" ? (
         <button
           aria-label="关联支出流水"
@@ -259,15 +276,7 @@ export default function OaPendingPaymentsPage() {
           {selectedOaRowIds.size > 0 ? <span>{selectedOaRowIds.size}</span> : null}
         </button>
       ) : null}
-      <button
-        aria-label="支出流水无需开票规则设置"
-        onClick={() => setRulesOpen(true)}
-        className="oa-pending-payments-button"
-        type="button"
-      >
-        <SlidersHorizontal aria-hidden="true" size={16} />
-        支出流水无需开票规则设置
-      </button>
+
       <button
         aria-label="导出 OA"
         className="oa-pending-payments-button"
@@ -278,7 +287,7 @@ export default function OaPendingPaymentsPage() {
         导出 OA
       </button>
     </div>
-  ), [canOperateData, loadRows, loading, query.viewMode, refreshing, selectedOaRowIds.size]);
+  ), [canOperateData, loading, query.viewMode, query.month, refreshing, selectedOaRowIds.size]);
   const paymentValues = query.filters.find(filter => filter.field === "payment_status")?.values ?? [];
   const titleAccessory = (
     <div className="page-title-accessory-group">
@@ -298,15 +307,25 @@ export default function OaPendingPaymentsPage() {
   return (
     <>
       <div className="oa-pending-payments-page" data-testid="oa-pending-payments-page">
-        <PageScaffold fillViewport title="OA 待付款核对" titleAccessory={titleAccessory} actions={actions}>
+        <PageScaffold secondaryActions={secondaryActions} query={(<QuerySearch
+          ariaLabel="搜索OA待付款核对"
+          onChange={setKeywordDraft}
+          onClear={handleKeywordClear}
+          onSubmit={handleKeywordSubmit}
+          placeholder="搜索 OA / 流水 / 发票"
+          value={keywordDraft}
+        />)} fillViewport title="OA 待付款核对" titleAccessory={titleAccessory} actions={actions}>
           <div className="oa-pending-payments-content finance-table-layout">
             <TableClassificationHeader label="OA 核对分类" unit="条" pending={loading || refreshing} invalid={Boolean(error)}
               root={{ id: "all", label: "OA 核对范围", count: summary ? summary.viewCounts.completed + summary.viewCounts.in_progress : undefined }}
               groups={(["completed", "in_progress"] as const).map(view => {
-                const select = (values: string[]) => setQuery(current => ({ ...current, page: 1, viewMode: view,
+                const select = (values: string[]) => setQuery(current => ({
+                  ...current, page: 1, viewMode: view,
                   filters: [...current.filters.filter(filter => filter.field !== "payment_status"),
-                    ...(values.length ? [{ field: "payment_status", operator: "in" as const, values }] : [])] }));
-                return { id: view, label: view === "completed" ? "已完成 OA" : "进行中 OA",
+                  ...(values.length ? [{ field: "payment_status", operator: "in" as const, values }] : [])]
+                }));
+                return {
+                  id: view, label: view === "completed" ? "已完成 OA" : "进行中 OA",
                   count: summary?.viewCounts[view], tone: view === "completed" ? "green" : "purple",
                   selected: query.viewMode === view && (paymentValues.length === 0 || (paymentValues.length === 2 && paymentValues.includes("paid") && paymentValues.includes("unpaid"))), onSelect: () => select([]),
                   children: (["paid", "unpaid"] as const).map(status => ({
@@ -316,44 +335,10 @@ export default function OaPendingPaymentsPage() {
                   })),
                 };
               })} />
-            <PageToolbar
-              className="oa-pending-payments-query"
-              left={(
-                <div className="page-feedback-slot">
-                  {error ? <div className="oa-pending-payments-alert" role="alert">{error}</div>
-                    : feedback ? <div className="oa-pending-payments-alert oa-pending-payments-alert--success" role="status">{feedback}</div>
-                    : !canOperateData ? <span>当前页面暂不可关联支出流水。</span>
-                    : loading || refreshing ? <span role="status">OA 待付款核对数据正在加载，请稍候。</span> : null}
-                </div>
-              )}
-              right={(
-                <div className="oa-pending-payments-query-controls">
-                  <BusinessPeriodPicker
-                    allowedModes={["month"]}
-                    ariaLabel="OA月份筛选"
-                    onChange={(selection) => setQuery((current) => ({
-                      ...current,
-                      page: 1,
-                      month: selection.mode === "all" ? "" : selection.month,
-                    }))}
-                    selection={{
-                      mode: query.month ? "month" : "all",
-                      year: (query.month || DEFAULT_MONTH).slice(0, 4),
-                      month: query.month || DEFAULT_MONTH,
-                    }}
-                    years={nearbyBusinessYears(query.month || DEFAULT_MONTH)}
-                  />
-                  <QuerySearch
-                    ariaLabel="搜索OA待付款核对"
-                    onChange={setKeywordDraft}
-                    onClear={handleKeywordClear}
-                    onSubmit={handleKeywordSubmit}
-                    placeholder="搜索 OA / 流水 / 发票"
-                    value={keywordDraft}
-                  />
-                </div>
-              )}
-            />
+            {(error || feedback || !canOperateData) && <div className="page-feedback-floating">
+              {error ? <div role="alert">{error}<button className="oa-pending-payments-button" type="button" onClick={() => void loadRows("refresh")}>重试</button></div>
+                : <div role="status">{feedback || "当前页面暂不可关联支出流水。"}</div>}
+            </div>}
             <OaPendingPaymentsTable
               rows={rows}
               loading={loading || refreshing}
@@ -375,7 +360,7 @@ export default function OaPendingPaymentsPage() {
               onToggleOaSelection={canOperateData && query.viewMode === "in_progress" ? handleToggleOaSelection : undefined}
               emptyStateMessage={
                 error
-                  ? "OA 待付款核对加载失败，请点击刷新重试。"
+                  ? "OA 待付款核对加载失败，请使用错误提示中的重试按钮。"
                   : loading || refreshing
                     ? "OA 待付款核对数据正在刷新，请稍候。"
                     : "当前条件下暂无记录。"

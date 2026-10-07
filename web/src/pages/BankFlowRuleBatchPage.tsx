@@ -3,7 +3,7 @@ import { Segment, SegmentGroup } from "../components/common/SegmentedControl";
 import BankTransactionDrawer from "../features/bankSplits/BankTransactionDrawer";
 import { Button, Checkbox } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Eye, RefreshCw } from "lucide-react";
+import { Eye } from "lucide-react";
 
 import AppDialog from "../components/common/AppDialog";
 import AppDrawer from "../components/common/AppDrawer";
@@ -755,7 +755,7 @@ export default function BankFlowRuleBatchPage() {
           >
             流水规则标签管理
           </Button>
-          <Button
+          {(error) && <Button
             className="bank-flow-rule-batches-button"
             isDisabled={loading}
             onPress={() => {
@@ -765,9 +765,8 @@ export default function BankFlowRuleBatchPage() {
             size="sm"
             variant="secondary"
           >
-            <RefreshCw aria-hidden="true" size={16} strokeWidth={2.2} />
-            刷新
-          </Button>
+            重试读取
+          </Button>}
         </div>
       )}
     >

@@ -88,7 +88,7 @@ describe("Cost statistics page", () => {
     await user.click(within(picker).getByRole("radio", { name: "按月", exact: true }));
     await user.click(within(picker).getByRole("button", { name: "三月", exact: true }));
     await waitUntilReady();
-    await user.click(screen.getByRole("button", { name: "刷新成本统计" }));
+    expect(screen.queryByRole("button", { name: "刷新成本统计" })).not.toBeInTheDocument();
     await waitUntilReady();
     expect(screen.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "false");
     await user.click(screen.getByRole("button", { name: "导出中心" }));
@@ -463,7 +463,7 @@ describe("Cost statistics page", () => {
     installMockApiFetch({ costExplorerFailuresBeforeSuccess: 1 });
     renderPage();
     expect(await screen.findByText("成本统计数据加载暂时失败，请刷新后重试。")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "刷新成本统计" }));
+    await user.click(screen.getByRole("button", { name: "重新检查" }));
     await waitUntilReady();
     expect(screen.getByRole("heading", { name: "按项目统计" })).toBeInTheDocument();
   });

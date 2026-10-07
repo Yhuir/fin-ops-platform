@@ -16,7 +16,7 @@ import {
   PopoverTrigger,
   Tooltip,
 } from "@heroui/react";
-import { Eye, Filter, RefreshCw, Tags } from "lucide-react";
+import { Eye, Filter, Tags } from "lucide-react";
 
 import {
   FinanceTable,
@@ -2166,8 +2166,8 @@ export default function BankDetailsPage() {
           {titleAccessory ? <div className="page-title-accessory">{titleAccessory}</div> : null}
         </div>
         <div className="page-header-actions">
-          <Button
-            aria-label="刷新银行明细"
+          {(error || accountsError || transactionsError || categoryCountsError || rulesError) && <Button
+            aria-label="重试读取"
             isDisabled={loading || rowLoading}
             onPress={() => {
               setError(null);
@@ -2176,9 +2176,8 @@ export default function BankDetailsPage() {
             size="sm"
             variant="secondary"
           >
-            <RefreshCw aria-hidden="true" size={16} />
-            刷新
-          </Button>
+            重试读取
+          </Button>}
         </div>
       </header>
       <div className="bank-details-workbench">

@@ -22,7 +22,7 @@ describe("OperationHistoryPage", () => {
     await user.click(screen.getByRole("button", { name: "查看确认关联详情" }));
     await user.click(within(await screen.findByRole("dialog", { name: "操作详情" })).getByRole("button", { name: "关闭抽屉" }));
     const count = requests().length;
-    await user.click(screen.getByRole("button", { name: "刷新", exact: true }));
+    await user.click(screen.getByRole("button", { name: "查询", exact: true }));
     await waitFor(() => expect(requests().length).toBeGreaterThan(count));
     expect(requests().at(-1)?.searchParams.get("date_to")).toBe("2025-12-31");
     mounted.unmount();

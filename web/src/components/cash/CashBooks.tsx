@@ -133,7 +133,7 @@ function TurnoverBook({ onItem, initial, onChange }: { onItem: (id: string) => v
     <PeriodFilters initial={filters} initialKeyword={initial.filters.keyword ?? ""} onReset={() => {
       setFilters(allPeriod()); setGroup("all"); setSelected({}); setSort("occurred_on"); setOrder("desc"); setPage(1); setValidation(null);
     }} onApply={applyFilters}>
-      <Button size="sm" variant="secondary" onPress={query.reload}>刷新</Button>
+      {query.error && <Button size="sm" variant="secondary" onPress={query.reload}>重试读取</Button>}
       <CashFilterPopover label="处理状态" value={filters.states ?? []} onApply={states => applyFilters({ states })} options={[{ value: "open", label: "未结" }, { value: "partial", label: "部分结算" }, { value: "settled", label: "结清" }]} />
       <CashSortMenu sort={sort} order={order} onChange={applySort} options={[{ value: "original_amount", label: "原始金额" }]} />
     </PeriodFilters>
@@ -186,7 +186,7 @@ function TicketBook({ onItem, initial, onChange, view }: { onItem: (id: string) 
   return <><PeriodFilters cutoffOnly={pending} initial={filters} initialKeyword={initial.filters.keyword ?? ""} onReset={() => {
       setFilters(pending ? { date_from: "", date_to: cashToday() } : allPeriod()); setSelected({}); setSort("ticket_provided_on"); setOrder("desc"); setPage(1); setValidation(null);
     }} onApply={applyFilters}>
-      <Button size="sm" variant="secondary" onPress={query.reload}>刷新</Button>
+      {query.error && <Button size="sm" variant="secondary" onPress={query.reload}>重试读取</Button>}
     </PeriodFilters>
     <CashNotice error={validation} />
     <ReportState error={query.error} reload={query.reload} />
@@ -259,7 +259,7 @@ function PersonalBook({ onItem, onFlow, initial, onChange }: { onItem: (id: stri
       <CashInput label="年份" type="number" value={year} onChange={setYear} required /><CashInput label="关键词" value={keyword} onChange={setKeyword} />
       <Button size="sm" variant="secondary" type="submit">查询</Button>
       <Button size="sm" variant="tertiary" onPress={() => { setYear(currentYear()); setAppliedYear(currentYear()); setKeyword(""); setAppliedKeyword(""); setBills([]); setProjects([]); setSourceProjects([]); setCategories([]); setSelected({}); setSort(view === "matrix" ? "bank_name" : "occurred_on"); setOrder(view === "matrix" ? "asc" : "desc"); setPage(1); setValidation(null); }}>重置</Button>
-      <Button size="sm" variant="secondary" onPress={query.reload}>刷新</Button>
+      {query.error && <Button size="sm" variant="secondary" onPress={query.reload}>重试读取</Button>}
       {view === "matrix" && <>{projectFilter(false)}<CashSortMenu sort={sort} order={order} onChange={applySort} options={[{ value: "label", label: "账单名称" }]} /></>}
     </form>
     <CashNotice error={validation} />

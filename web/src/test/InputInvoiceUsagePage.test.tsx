@@ -493,7 +493,7 @@ describe("Input invoice usage page", () => {
     const sourceByPath = Object.fromEntries(inputInvoiceUsageSourceFiles.map((path) => [path, readWebSource(path)]));
     const missingPrimitiveTargets = [
       sourceByPath["src/pages/InputInvoiceUsagePage.tsx"].includes("PageScaffold") ? null : "InputInvoiceUsagePage.tsx should keep PageScaffold or equivalent project shell",
-      sourceByPath["src/pages/InputInvoiceUsagePage.tsx"].includes("PageToolbar") ? null : "InputInvoiceUsagePage.tsx should use PageToolbar or equivalent project toolbar",
+      sourceByPath["src/pages/InputInvoiceUsagePage.tsx"].includes("QuerySearch") ? null : "InputInvoiceUsagePage.tsx should use project QuerySearch",
       sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageTable.tsx"].includes("FinanceTable")
         || sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageTable.tsx"].includes("input-invoice-usage-table-shell")
         ? null
@@ -660,11 +660,12 @@ describe("Input invoice usage page", () => {
     expect(within(page).getByRole("button", { name: "OA 草稿预填管理" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "以发票反提 OA" })).toHaveClass("button--primary");
-    const refreshButton = within(page).getByRole("button", { name: "刷新" });
-    expect(refreshButton).toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "刷新", exact: true })).not.toBeInTheDocument();
+    const refreshButton = within(page).getByRole("button", { name: "查询", exact: true });
     expect(within(page).getByLabelText("每页行数")).toHaveTextContent("20");
 
     const rowsBeforeRefresh = rowsRequests(fetchMock).length;
+    await user.type(within(page).getByRole("searchbox"), "核对");
     await user.click(refreshButton);
     await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsBeforeRefresh));
 

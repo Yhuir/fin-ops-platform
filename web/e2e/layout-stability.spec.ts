@@ -54,11 +54,11 @@ test('OA retains its frame, horizontal position and errors through delayed class
   await expect(frame).toHaveAttribute('aria-busy', 'false');
   stable(before, await geometry(page, table));
   fail = true;
-  await page.getByRole('button', { name: '刷新 OA 待付款核对' }).click();
+  await page.getByRole('button', { name: '查询', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('布局测试读取失败');
   stable(before, await geometry(page, table));
   fail = false;
-  await page.getByRole('button', { name: '刷新 OA 待付款核对' }).click();
+  await page.getByRole('button', { name: '重试', exact: true }).click();
   await expect(frame).toHaveAttribute('aria-busy', 'false');
   await expect(page.getByRole('alert')).toHaveCount(0);
   stable(before, await geometry(page, table));
@@ -79,7 +79,8 @@ test('turnover register column edges survive loading without depending on row co
   const release = latch();
   await page.route('**/api/turnover-ledger?*', async route => { await release.promise; await route.fallback(); });
   try {
-    await page.getByRole('button', { name: '刷新台账', exact: true }).click();
+    await page.getByRole('searchbox').fill('核对');
+    await page.getByRole('button', { name: '查询', exact: true }).click();
     await expect(table).toHaveAttribute('aria-busy', 'true');
     stable(before, await geometry(page, table));
   } finally { release.resolve(); }

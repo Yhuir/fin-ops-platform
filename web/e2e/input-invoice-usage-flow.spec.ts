@@ -206,6 +206,7 @@ test.describe("input invoice usage browser flow", () => {
       response.request().method() === "GET"
       && new URL(response.url()).pathname === "/api/workbench/settings/oa-draft-prefill/input-invoice-usage",
     );
+    if (await page.getByRole("button", { name: "更多页面操作" }).isVisible()) await page.getByRole("button", { name: "更多页面操作" }).click();
     await page.getByRole("button", { name: "OA 草稿预填管理" }).click();
     await loadResponse;
 
@@ -249,7 +250,7 @@ test.describe("input invoice usage browser flow", () => {
       await mark("firstVisibleResponseLatencyMs", expect(page.getByTestId("input-invoice-usage-page")).toBeVisible());
       await mark("finalSettledLatencyMs", expect(page.getByText("进项发票使用情况加载暂时失败，请刷新后重试。")).toBeVisible());
     });
-    await expect(page.getByText("进项发票使用情况加载失败，请点击刷新重试。")).toBeVisible();
+    await expect(page.getByText("进项发票使用情况加载失败，请使用错误提示中的重试按钮。")).toBeVisible();
     await expect(page.getByText("当前条件下暂无记录。")).toHaveCount(0);
     await expect(page.getByText("当前条件下没有进项发票使用记录。")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "筛选内容导出" })).toBeDisabled();
@@ -263,7 +264,7 @@ test.describe("input invoice usage browser flow", () => {
         actionType: "click",
       }, async (mark) => {
         const responsePromise = waitForInputInvoiceUsageRows(page);
-        await page.getByRole("button", { name: "刷新" }).click();
+        await page.getByRole("button", { name: "重试" }).click();
         recovered = (await mark("apiLatencyMs", responsePromise)).status() === 200;
         if (recovered) {
           await mark("finalSettledLatencyMs", expect(page.getByRole("row", { name: /SD-INV-E2E-0001/ })).toBeVisible());
@@ -275,7 +276,7 @@ test.describe("input invoice usage browser flow", () => {
     expect(recovered).toBe(true);
 
     await expect(page.getByText("进项发票使用情况加载暂时失败，请刷新后重试。")).toHaveCount(0);
-    await expect(page.getByText("进项发票使用情况加载失败，请点击刷新重试。")).toHaveCount(0);
+    await expect(page.getByText("进项发票使用情况加载失败，请使用错误提示中的重试按钮。")).toHaveCount(0);
     const recoveredRow = page.getByRole("row", { name: /SD-INV-E2E-0001/ });
     await expect(recoveredRow).toBeVisible();
     await expect(recoveredRow.getByText("待处理")).toBeVisible();
@@ -472,6 +473,7 @@ test.describe("input invoice usage browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       const rulesResponse = waitForInputInvoiceUsagePaymentRules(page);
+      if (await page.getByRole("button", { name: "更多页面操作" }).isVisible()) await page.getByRole("button", { name: "更多页面操作" }).click();
       await page.getByRole("button", { name: "发票与支付状态规则设置" }).click();
       expect((await mark("apiLatencyMs", rulesResponse)).status()).toBe(200);
       await mark("firstVisibleResponseLatencyMs", expect(rulesDrawer).toBeVisible());
@@ -626,7 +628,7 @@ test.describe("input invoice usage browser flow", () => {
     }
     const previewUrl = new URL(previewResponse.url());
     expect(previewResponse.status()).toBe(200);
-    expect(previewUrl.searchParams.get("keyword")).toBeNull();
+    expect(previewUrl.searchParams.get("keyword")).toBe("浏览器进项供应商");
     expect(previewUrl.searchParams.has("page")).toBe(false);
     expect(previewUrl.searchParams.has("page_size")).toBe(false);
 
@@ -652,7 +654,7 @@ test.describe("input invoice usage browser flow", () => {
     }
     const exportUrl = new URL(exportResponse.url());
     expect(exportResponse.status()).toBe(200);
-    expect(exportUrl.searchParams.get("keyword")).toBeNull();
+    expect(exportUrl.searchParams.get("keyword")).toBe("浏览器进项供应商");
     expect(exportUrl.searchParams.has("page")).toBe(false);
     expect(exportUrl.searchParams.has("page_size")).toBe(false);
     expect(download.suggestedFilename()).toBe("input-invoice-usage.xlsx");

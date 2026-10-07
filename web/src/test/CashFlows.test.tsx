@@ -485,7 +485,7 @@ describe("现金读取、更正、删除", () => {
     render(<CashProvider><CashFlowTable /></CashProvider>);
     expect(await screen.findByText("筛选合计：收入 125.50")).toBeInTheDocument();
     expect(screen.getByText("内部转账 42.35")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "刷新", exact: true })).toHaveClass("button--secondary");
+    expect(screen.queryByRole("button", { name: "刷新", exact: true })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "账户期间余额" })).toHaveClass("button--secondary");
     const flowsTable = screen.getByRole("grid", { name: "现金流水明细" });
     for (const [name, role] of [["日期", "date"], ["分类", "status"], ["收入", "amount"], ["支出", "amount"], ["账户余额", "amount"], ["操作", "action"]]) {
@@ -543,7 +543,7 @@ describe("现金读取、更正、删除", () => {
     await user.click(screen.getByRole("button", { name: "查询", exact: true }));
     await waitFor(() => expect(listParams().at(-1)!.get("date_from")).toBe("2020-01-01"));
     expect(listParams().at(-1)!.has("time_scope")).toBe(false);
-    await user.click(screen.getByRole("button", { name: "刷新", exact: true }));
+    expect(screen.queryByRole("button", { name: "刷新", exact: true })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "新增流水" }));
     await user.click(screen.getByRole("button", { name: "关闭抽屉", exact: true }));
     expect(listParams().at(-1)!.get("date_from")).toBe("2020-01-01");

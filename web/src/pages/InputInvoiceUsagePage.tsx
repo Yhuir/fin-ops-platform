@@ -1,3 +1,5 @@
+import { DEFAULT_MONTH } from "../contexts/MonthContext";
+import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
 import InvoiceUsageClassification from "../components/inputInvoiceUsage/InvoiceUsageClassification";
 import { Button } from "@heroui/react";
 import { Download } from "lucide-react";
@@ -5,7 +7,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
-import PageToolbar from "../components/common/PageToolbar";
 import QuerySearch from "../components/common/QuerySearch";
 import OaDraftPrefillDrawer from "../components/common/OaDraftPrefillDrawer";
 import StatePanel from "../components/common/StatePanel";
@@ -308,7 +309,7 @@ export default function InputInvoiceUsagePage() {
     const normalized = normalizeFilterValue(filter);
     setQuery((current) => {
       const filters = current.filters.filter((item) => item.field !== filter.field);
-      return { ...current, page: 1, filters: normalized ? [...filters, normalized] : filters };
+      return { ...current, ...(filter.field === "invoice_date" ? { month: "", invoiceDateFrom: "", invoiceDateTo: "" } : {}), page: 1, filters: normalized ? [...filters, normalized] : filters };
     });
   }, [setQuery]);
 
@@ -390,31 +391,39 @@ export default function InputInvoiceUsagePage() {
   ), []);
 
   const exportDisabled = Boolean(error);
+  const secondaryActions = <>
+    <Button
+      isDisabled={query.activeWorkflow !== null}
+      onPress={() => setQuery((current) => ({ ...current, activeWorkflow: "paymentRules" }))}
+      size="sm"
+      variant="secondary"
+    >
+      发票与支付状态规则设置
+    </Button>
+    <Button
+      onPress={() => setOaPrefillOpen(true)}
+      size="sm"
+      variant="secondary"
+    >
+      OA 草稿预填管理
+    </Button>
+  </>;
   const actions = useMemo(() => (
-    <PageToolbar className="input-invoice-usage-actions">
-      <Button
-        isDisabled={loading || refreshing}
-        onPress={() => loadRows("refresh")}
+    <div className="input-invoice-usage-actions"><BusinessPeriodPicker ariaLabel="进项发票月份" allowedModes={["month"]}
+      selection={{ mode: query.month ? "month" : "all", month: query.month || DEFAULT_MONTH, year: (query.month || DEFAULT_MONTH).slice(0, 4) }}
+      years={nearbyBusinessYears(query.month || DEFAULT_MONTH)}
+      onChange={selection => setQuery(current => ({
+        ...current, page: 1, month: selection.mode === "all" ? "" : selection.month,
+        invoiceDateFrom: "", invoiceDateTo: "", filters: current.filters.filter(filter => filter.field !== "invoice_date")
+      }))} /><Button
+        isDisabled={query.activeWorkflow !== null && query.activeWorkflow !== "oaReverse"}
+        onPress={() => setQuery((current) => current.activeWorkflow === "oaReverse" ? current : ({ ...current, activeWorkflow: "oaReverse" }))}
         size="sm"
-        variant="secondary"
+        variant="primary"
       >
-        刷新
+        以发票反提 OA
       </Button>
-      <Button
-        isDisabled={query.activeWorkflow !== null}
-        onPress={() => setQuery((current) => ({ ...current, activeWorkflow: "paymentRules" }))}
-        size="sm"
-        variant="secondary"
-      >
-        发票与支付状态规则设置
-      </Button>
-      <Button
-        onPress={() => setOaPrefillOpen(true)}
-        size="sm"
-        variant="secondary"
-      >
-        OA 草稿预填管理
-      </Button>
+
       <Button
         isDisabled={exportDisabled || query.activeWorkflow !== null}
         onPress={() => setQuery((current) => ({ ...current, activeWorkflow: "export" }))}
@@ -424,8 +433,8 @@ export default function InputInvoiceUsagePage() {
         <Download aria-hidden="true" size={16} />
         筛选内容导出
       </Button>
-    </PageToolbar>
-  ), [exportDisabled, loadRows, loading, query.activeWorkflow, refreshing, setQuery]);
+    </div>
+  ), [exportDisabled, query.activeWorkflow, query.month, setQuery]);
   const visibleStatistics = statistics;
   const titleAccessory = useMemo(() => (
     <div className="page-title-accessory-group">
@@ -447,7 +456,15 @@ export default function InputInvoiceUsagePage() {
   return (
     <>
       <div className="input-invoice-usage-page" data-testid="input-invoice-usage-page">
-        <PageScaffold fillViewport
+        <PageScaffold secondaryActions={secondaryActions} query={(<QuerySearch
+          ariaLabel="进项发票使用情况搜索"
+          className="input-invoice-usage-search"
+          onChange={setKeywordDraft}
+          onClear={handleKeywordClear}
+          onSubmit={handleKeywordSubmit}
+          placeholder="搜索发票、销方、OA、流水"
+          value={keywordDraft}
+        />)} fillViewport
           className="invoice-count-page-scaffold"
           title="进项发票使用情况"
           titleAccessory={titleAccessory}
@@ -458,40 +475,16 @@ export default function InputInvoiceUsagePage() {
               pending={loading || refreshing} invalid={Boolean(error)} onSelect={handleClassificationSelect} /> : null}
             {!classification && !loading && !error ? <StatePanel tone="error" compact>分类数据缺失，请刷新页面。</StatePanel> : null}
             <div className="switch-surface__body finance-table-layout">
-            <PageToolbar
-              className="input-invoice-usage-query-toolbar"
-              right={(
-                <div className="input-invoice-usage-query-actions">
-                  <Button
-                    isDisabled={query.activeWorkflow !== null && query.activeWorkflow !== "oaReverse"}
-                    onPress={() => setQuery((current) => current.activeWorkflow === "oaReverse" ? current : ({ ...current, activeWorkflow: "oaReverse" }))}
-                    size="sm"
-                    variant="primary"
-                  >
-                    以发票反提 OA
-                  </Button>
-                  <QuerySearch
-                    ariaLabel="进项发票使用情况搜索"
-                    className="input-invoice-usage-search"
-                    onChange={setKeywordDraft}
-                    onClear={handleKeywordClear}
-                    onSubmit={handleKeywordSubmit}
-                    placeholder="搜索发票、销方、OA、流水"
-                    value={keywordDraft}
-                  />
-                </div>
-              )}
-            />
 
-            {error ? <StatePanel tone="error" compact>{error}</StatePanel> : null}
-            {loading ? (
-              <div aria-label="进项发票使用情况加载中" className="input-invoice-usage-loading" role="status">
-                <span className="input-invoice-usage-loading__bar input-invoice-usage-loading__bar--sm" />
-                <span className="input-invoice-usage-loading__bar" />
-                <span className="input-invoice-usage-loading__bar" />
-              </div>
-            ) : (
-              <InputInvoiceUsageTable
+              {error ? <div className="page-feedback-floating"><StatePanel tone="error" compact>{error}<Button size="sm" variant="secondary" onPress={() => void loadRows("refresh")}>重试</Button></StatePanel></div> : null}
+              {loading ? (
+                <div aria-label="进项发票使用情况加载中" className="input-invoice-usage-loading" role="status">
+                  <span className="input-invoice-usage-loading__bar input-invoice-usage-loading__bar--sm" />
+                  <span className="input-invoice-usage-loading__bar" />
+                  <span className="input-invoice-usage-loading__bar" />
+                </div>
+              ) : (
+                <InputInvoiceUsageTable
                   rows={rows}
                   page={query.page}
                   pageSize={query.pageSize}
@@ -511,13 +504,13 @@ export default function InputInvoiceUsagePage() {
                   onPageSizeChange={handlePageSizeChange}
                   emptyStateMessage={
                     error
-                      ? "进项发票使用情况加载失败，请点击刷新重试。"
+                      ? "进项发票使用情况加载失败，请使用错误提示中的重试按钮。"
                       : refreshing
                         ? "进项发票使用情况正在刷新，请稍候。"
                         : undefined
                   }
-              />
-            )}
+                />
+              )}
             </div>
           </div>
         </PageScaffold>
@@ -545,7 +538,7 @@ export default function InputInvoiceUsagePage() {
         onSaved={handlePaymentStatusRulesSaved}
         onClose={handleCloseWorkflow}
       />
-      <InputInvoiceUsageExportDrawer
+      <InputInvoiceUsageExportDrawer query={query}
         open={query.activeWorkflow === "export"}
         onClose={handleCloseWorkflow}
       />

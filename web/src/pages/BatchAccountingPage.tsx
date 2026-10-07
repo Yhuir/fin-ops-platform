@@ -3,7 +3,7 @@ import { Segment, SegmentGroup } from "../components/common/SegmentedControl";
 import BankTransactionDrawer from "../features/bankSplits/BankTransactionDrawer";
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type MouseEvent } from "react";
 import { Button, Checkbox, Chip } from "@heroui/react";
-import { AlertTriangle, ChevronLeft, ChevronRight, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, X } from "lucide-react";
 
 import BatchAccountingTagRulesDrawer from "../components/batchAccounting/BatchAccountingTagRulesDrawer";
 import AppDialog from "../components/common/AppDialog";
@@ -647,16 +647,15 @@ export default function BatchAccountingPage() {
           <Button className="batch-accounting-page-action" onPress={handleOpenTagRules} size="sm" variant="outline">
             批量账务标签规则
           </Button>
-          <Button
+          {(error) && <Button
             className="batch-accounting-page-action"
             isDisabled={loading}
             onPress={() => loadData()}
             size="sm"
             variant="outline"
           >
-            <RefreshCw aria-hidden="true" size={16} strokeWidth={2.2} />
-            刷新
-          </Button>
+            重试读取
+          </Button>}
         </div>
       )}
     >

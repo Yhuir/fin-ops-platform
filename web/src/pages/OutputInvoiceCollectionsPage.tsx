@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
 import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
-import PageToolbar from "../components/common/PageToolbar";
 import QuerySearch from "../components/common/QuerySearch";
 import OutputInvoiceCollectionDetailDrawer from "../components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer";
 import OutputInvoiceCollectionExportDrawer from "../components/outputInvoiceCollections/OutputInvoiceCollectionExportDrawer";
@@ -276,7 +275,6 @@ export default function OutputInvoiceCollectionsPage() {
     return fetchOutputInvoiceCollectionRowRelationDetail(target, signal);
   }, []);
 
-
   const titleAccessory = useMemo(() => (
     <div className="page-title-accessory-group">
       <PageStatisticsPopover
@@ -306,9 +304,22 @@ export default function OutputInvoiceCollectionsPage() {
 
   const actions = (
     <div className="output-invoice-collections-actions">
-      <Button className="output-invoice-collections-refresh" isDisabled={loading || refreshing} isPending={refreshing} onPress={() => loadRows("refresh")} size="sm" variant="secondary">
-        刷新
-      </Button>
+      <BusinessPeriodPicker
+        allowedModes={["month"]}
+        ariaLabel="销项发票月份"
+        onChange={(selection) => setQuery((current) => ({
+          ...current,
+          month: selection.mode === "all" ? "" : selection.month,
+          page: 1,
+        }))}
+        selection={{
+          mode: query.month ? "month" : "all",
+          year: (query.month || DEFAULT_MONTH).slice(0, 4),
+          month: query.month || DEFAULT_MONTH,
+        }}
+        years={nearbyBusinessYears(query.month || DEFAULT_MONTH)}
+      />
+
       <Button
         isDisabled={loading || refreshing || Boolean(error)}
         onPress={() => setQuery((current) => ({ ...current, activeWorkflow: { kind: "export" } }))}
@@ -323,7 +334,17 @@ export default function OutputInvoiceCollectionsPage() {
   return (
     <>
       <div className="output-invoice-collections-page" data-testid="output-invoice-collections-page">
-        <PageScaffold fillViewport
+        <PageScaffold query={(<QuerySearch
+          ariaLabel="搜索销项发票收款情况"
+          onChange={setKeywordDraft}
+          onClear={() => {
+            setKeywordDraft("");
+            setQuery((current) => ({ ...current, keyword: "", page: 1 }));
+          }}
+          onSubmit={() => setQuery((current) => ({ ...current, keyword: keywordDraft.trim(), page: 1 }))}
+          placeholder="发票号、购方、业务或流水"
+          value={keywordDraft}
+        />)} fillViewport
           actions={actions}
           className="invoice-count-page-scaffold"
           title="销项发票收款情况"
@@ -331,53 +352,32 @@ export default function OutputInvoiceCollectionsPage() {
         >
           <div className="output-invoice-collections-content finance-table-layout">
             <TableClassificationHeader label="销项发票分类" unit="张" pending={countsPending} invalid={Boolean(error)}
-              root={{ id: "all", label: "全部销项发票", count: statusTotal,
-                selected: selectedStatuses.length === 0, onSelect: () => selectStatuses([]) }}
+              root={{
+                id: "all", label: "全部销项发票", count: statusTotal,
+                selected: selectedStatuses.length === 0, onSelect: () => selectStatuses([])
+              }}
               groups={[
                 { id: "collection", label: "收款核对", tone: "blue" as const, codes: ["pending_collection", "partial_collected", "collected"] },
                 { id: "reversal", label: "红冲处理", tone: "rose" as const, codes: ["reversed_by_red", "reverses_blue", "unmatched_red"] },
-              ].map(group => ({ ...group,
+              ].map(group => ({
+                ...group,
                 count: statusOptions ? group.codes.reduce((sum, code) => sum + statusOptions.find(option => option.value === code)!.count!, 0) : undefined,
                 selected: group.codes.every(code => selectedStatuses.includes(code)) && selectedStatuses.length === group.codes.length,
                 onSelect: () => selectStatuses(group.codes),
-                children: group.codes.map(code => { const option = statusOptions?.find(item => item.value === code);
-                  const labels: Record<string, string> = { pending_collection: "待收款", partial_collected: "部分收款", collected: "已收款",
-                    reversed_by_red: "蓝票已被红冲", reverses_blue: "红票已关联蓝票", unmatched_red: "红票未关联蓝票" };
-                  return { id: code, label: labels[code], count: option?.count,
-                    selected: selectedStatuses.length === 1 && selectedStatuses[0] === code, onSelect: () => selectStatuses([code]) };
+                children: group.codes.map(code => {
+                  const option = statusOptions?.find(item => item.value === code);
+                  const labels: Record<string, string> = {
+                    pending_collection: "待收款", partial_collected: "部分收款", collected: "已收款",
+                    reversed_by_red: "蓝票已被红冲", reverses_blue: "红票已关联蓝票", unmatched_red: "红票未关联蓝票"
+                  };
+                  return {
+                    id: code, label: labels[code], count: option?.count,
+                    selected: selectedStatuses.length === 1 && selectedStatuses[0] === code, onSelect: () => selectStatuses([code])
+                  };
                 }),
               }))} />
-            <PageToolbar className="output-invoice-collections-query"
-              right={<div className="output-invoice-collections-query__grid">
-                <BusinessPeriodPicker
-                  allowedModes={["month"]}
-                  ariaLabel="销项发票月份"
-                  onChange={(selection) => setQuery((current) => ({
-                    ...current,
-                    month: selection.mode === "all" ? "" : selection.month,
-                    page: 1,
-                  }))}
-                  selection={{
-                    mode: query.month ? "month" : "all",
-                    year: (query.month || DEFAULT_MONTH).slice(0, 4),
-                    month: query.month || DEFAULT_MONTH,
-                  }}
-                  years={nearbyBusinessYears(query.month || DEFAULT_MONTH)}
-                />
-                <QuerySearch
-                  ariaLabel="搜索销项发票收款情况"
-                  onChange={setKeywordDraft}
-                  onClear={() => {
-                    setKeywordDraft("");
-                    setQuery((current) => ({ ...current, keyword: "", page: 1 }));
-                  }}
-                  onSubmit={() => setQuery((current) => ({ ...current, keyword: keywordDraft.trim(), page: 1 }))}
-                  placeholder="发票号、购方、业务或流水"
-                  value={keywordDraft}
-                />
-              </div>}
-            />
-            {error ? <div className="output-invoice-collections-alert" role="alert">{error}</div> : null}
+
+            {error ? <div className="page-feedback-floating output-invoice-collections-alert" role="alert">{error}<Button size="sm" variant="secondary" onPress={() => void loadRows("refresh")}>重试</Button></div> : null}
             {loading ? (
               <div aria-label="销项发票收款情况加载中" className="output-invoice-collections-loading">
                 <span className="output-invoice-collections-loading__bar" />

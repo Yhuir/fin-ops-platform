@@ -693,15 +693,21 @@ export async function fetchInputInvoiceUsageRows(request: FetchRowsRequest): Pro
   return mapRowsResponse(payload);
 }
 
-function exportRequest(selection: ExportSelection) { return { page: 1, pageSize: 1, keyword: '', month: '', invoiceDateFrom: selection.startDate, invoiceDateTo: selection.endDate, filters: selectionFilters(selection), sortField: 'invoice_date', sortDirection: 'desc' as const }; }
-export async function fetchInputInvoiceUsageExportSummary(selection: ExportSelection, signal: AbortSignal): Promise<ExportSummary> {
-  const url = `/api/input-invoice-usage/export-summary?${buildRowsQuery(exportRequest(selection))}`;
+function exportRequest(selection: ExportSelection, query: FetchRowsRequest): FetchRowsRequest {
+  return { ...query, page: 1, pageSize: 1, month: '',
+    invoiceDateFrom: selection.startDate, invoiceDateTo: selection.endDate,
+    filters: [...query.filters.filter(filter => !['relation_status', 'payment_status'].includes(filter.field)
+      && !(filter.field in selection.values)), ...selectionFilters(selection)],
+  };
+}
+export async function fetchInputInvoiceUsageExportSummary(selection: ExportSelection, signal: AbortSignal, query: FetchRowsRequest): Promise<ExportSummary> {
+  const url = `/api/input-invoice-usage/export-summary?${buildRowsQuery(exportRequest(selection, query))}`;
   const raw = await apiRequestJson<{ row_count: number; filter_options: Record<string, ExportOption[]> }>(url, { method: 'GET', signal });
   const relationLabels: Record<string,string> = { no_oa: '未关联 OA', oa_no_bank: '有 OA / 无流水', oa_bank: 'OA / 流水均已关联' };
   const relations = Object.entries(relationLabels).map(([value, label]) => ({ value, label, count: raw.filter_options.relation_status.find(item => item.value === value)?.count ?? 0 }));
   return { rowCount: raw.row_count, groups: [{ field: 'relation_status', label: '关联情况', options: relations }, { field: 'payment_status', label: '支付状态', options: raw.filter_options.payment_status }] };
 }
-export function downloadInputInvoiceUsageSelection(selection: ExportSelection) { return downloadInputInvoiceUsageExport(exportRequest(selection)); }
+export function downloadInputInvoiceUsageSelection(selection: ExportSelection, query: FetchRowsRequest) { return downloadInputInvoiceUsageExport(exportRequest(selection, query)); }
 
 export async function downloadInputInvoiceUsageExport(request: FetchRowsRequest): Promise<InputInvoiceUsageExportDownload> {
   return requestExportBlob(`/api/input-invoice-usage/export?${buildRowsQuery(request)}`, {

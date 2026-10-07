@@ -206,6 +206,7 @@ test.describe("ETC ticket management browser flow", () => {
       response.request().method() === "GET"
       && new URL(response.url()).pathname === "/api/workbench/settings/oa-draft-prefill/etc",
     );
+    if (await page.getByRole("button", { name: "更多页面操作" }).isVisible()) await page.getByRole("button", { name: "更多页面操作" }).click();
     await page.getByRole("button", { name: "OA 草稿预填管理" }).click();
     await loadResponse;
 
@@ -346,7 +347,7 @@ test.describe("ETC ticket management browser flow", () => {
         actionType: "click",
       }, async (mark) => {
         const responsePromise = waitForEtcBusinessBatches(page);
-        await page.getByRole("button", { name: /^刷新$/ }).click();
+        await page.getByRole("button", { name: "重试读取" }).click();
         const response = await mark("apiLatencyMs", responsePromise);
         recovered = response.status() === 200;
         if (recovered) {

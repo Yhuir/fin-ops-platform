@@ -63,7 +63,7 @@ test.describe("OA pending payments canonical page states", () => {
 
     await gotoAndExpectPageReady(page, "/oa-pending-payments", "oa-pending-payments-page", { diagnostics });
     await expect(page.getByText("OA 待付款核对加载暂时失败，请刷新后重试。")).toBeVisible();
-    await expect(page.getByText("OA 待付款核对加载失败，请点击刷新重试。")).toBeVisible();
+    await expect(page.getByText("OA 待付款核对加载失败，请使用错误提示中的重试按钮。")).toBeVisible();
     await expect(page.getByText("当前条件下暂无记录。")).toHaveCount(0);
     const failedRowsCount = api.count(ROWS_PATH);
     await page.waitForTimeout(650);
@@ -81,7 +81,7 @@ test.describe("OA pending payments canonical page states", () => {
       ));
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const rowsResponse = waitForRows(page);
-        await page.getByRole("button", { name: "刷新 OA 待付款核对" }).click();
+        await page.getByRole("button", { name: "重试" }).click();
         if ((await rowsResponse).status() === 200) break;
       }
       const response = await mark("apiLatencyMs", successfulRowsResponse);

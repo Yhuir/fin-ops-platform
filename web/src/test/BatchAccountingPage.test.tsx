@@ -555,9 +555,8 @@ describe("BatchAccountingPage", () => {
     expect(screen.getByRole("button", { name: "流水年份：年月" })).toBeInTheDocument();
     expect(screen.queryByLabelText("OA年份")).not.toBeInTheDocument();
     const tagRulesButton = screen.getByRole("button", { name: "批量账务标签规则" });
-    const refreshButton = screen.getByRole("button", { name: "刷新" });
+    expect(screen.queryByRole("button", { name: "刷新", exact: true })).not.toBeInTheDocument();
     expect(tagRulesButton).toHaveClass("batch-accounting-page-action", "button--outline", "button--sm");
-    expect(refreshButton).toHaveClass("batch-accounting-page-action", "button--outline", "button--sm");
 
     const bankList = screen.getByRole("region", { name: "批量账务流水" });
     expect(within(bankList).getAllByRole("button", { name: /批量账务集中处理/ })).toHaveLength(2);
@@ -760,7 +759,7 @@ describe("BatchAccountingPage", () => {
     expect(await screen.findByText("批量账务数据加载暂时失败，请刷新后重试。")).toBeInTheDocument();
     expect(screen.queryByText("当前范围暂无批量账务流水")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "刷新" }));
+    await user.click(screen.getByRole("button", { name: "重试读取" }));
 
     expect(await screen.findByRole("button", { name: /批量账务集中处理.*1200.00.*2026-01-07 15:54:00.*支出.*建行 8106/ })).toBeInTheDocument();
     expect(screen.queryByText("批量账务数据加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
@@ -924,7 +923,8 @@ describe("BatchAccountingPage", () => {
     await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
     expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeEnabled();
 
-    await user.click(screen.getByRole("button", { name: "刷新" }));
+    await user.click(screen.getByRole("button", { name: "流水年份：年月" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "流水年份选择器" })).getByRole("button", { name: "2026年", exact: true }));
 
     expect(await screen.findByText("当前范围暂无批量账务流水")).toBeInTheDocument();
     expect(await screen.findByText("银行流水金额 0.00")).toBeInTheDocument();

@@ -1961,7 +1961,7 @@ describe("Turnover ledger page", () => {
     expect(await within(page).findByText("往来款台账加载暂时失败，请刷新后重试。")).toBeInTheDocument();
     expect(within(page).queryByText("暂无往来款台账")).not.toBeInTheDocument();
 
-    await user.click(within(page).getByRole("button", { name: "刷新台账" }));
+    await user.click(within(page).getByRole("button", { name: "重试读取" }));
 
     const table = await within(page).findByRole("table", { name: "外部往来款台账" });
     expect(await within(table).findByText("贾小花")).toBeInTheDocument();

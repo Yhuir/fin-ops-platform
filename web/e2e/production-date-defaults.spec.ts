@@ -61,9 +61,7 @@ test("ordinary date filters start in all time and preserve only same-visit selec
   await picker.getByRole("button", { name: "一月", exact: true }).click();
   const monthResponse = await chosen;
   const selectedMonth = new URL(monthResponse.url()).searchParams.get("date_from");
-  const refresh = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/api/bank-details/transactions")
-    && new URL(response.url()).searchParams.get("date_from") === selectedMonth);
-  await page.getByRole("button", { name: "刷新银行明细" }).click(); await refresh;
+  await expect(page.getByRole("button", { name: "刷新银行明细" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "false");
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: "成本统计", exact: true }).click();
   await expect(page.getByRole("heading", { name: "成本统计", exact: true })).toBeVisible();

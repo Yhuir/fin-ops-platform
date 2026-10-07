@@ -1356,31 +1356,6 @@ textarea {
   overflow-x: hidden;
 }
 
-.input-invoice-usage-query-toolbar.page-toolbar {
-  justify-content: space-between;
-  flex-wrap: wrap;
-}
-
-.input-invoice-usage-query-toolbar .page-toolbar__group {
-  align-items: flex-end;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.input-invoice-usage-query-toolbar .page-toolbar__group--left {
-  justify-content: flex-start;
-  max-width: 100%;
-  overflow-x: auto;
-}
-
-.input-invoice-usage-query-actions {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--fp-space-2);
-}
-
 .input-invoice-usage-search {
   width: min(360px, 100%);
 }
@@ -2864,34 +2839,6 @@ textarea {
   max-width: 100%;
 }
 
-.oa-pending-payments-query .page-toolbar__group--right {
-  flex: 0 1 580px;
-  min-width: 0;
-  max-width: 100%;
-  margin-left: auto;
-}
-
-.oa-pending-payments-query-controls {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  align-items: center;
-  gap: var(--fp-space-2);
-  width: 100%;
-  min-width: 0;
-}
-
-.oa-pending-payments-query-controls .query-search {
-  width: 100%;
-  min-width: 0;
-}
-
-/* Only these page toolbars use the 46px segmented-control outer height. */
-:is(.oa-pending-payments-query, .output-invoice-collections-query, .cost-section-heading-actions) .query-search__field,
-:is(.oa-pending-payments-query, .output-invoice-collections-query, .cost-section-heading-actions) .query-search > button {
-  height: 46px;
-  min-height: 46px;
-}
-
 .oa-pending-payments-field {
   display: flex;
   align-items: center;
@@ -3672,32 +3619,8 @@ textarea {
   gap: var(--fp-space-2);
 }
 
-.output-invoice-collections-page .output-invoice-collections-query {
-  flex-direction: row;
-  align-items: flex-end;
-  flex-wrap: wrap;
-}
-
-.output-invoice-collections-query .page-toolbar__group--left:empty,
-.oa-pending-payments-query .page-toolbar__group--left:empty { display: none; }
-
-.output-invoice-collections-query .page-toolbar__group--right {
-  flex: 1 1 480px;
-  min-width: 0;
-}
-
 .output-invoice-collections-table-frame { position: relative; }
 .output-invoice-collections-busy { position: absolute; inset: 0 0 auto; height: 3px; z-index: 3; background: #2451d5; pointer-events: none; }
-
-
-.output-invoice-collections-query__grid {
-  display: grid;
-  width: 100%;
-  grid-template-columns: max-content minmax(300px, 420px);
-  align-items: end;
-  justify-content: end;
-  gap: var(--fp-space-2);
-}
 
 .output-invoice-collections-field {
   display: flex;
@@ -5206,26 +5129,6 @@ textarea {
 @media (max-width: 1100px) {
   .operation-history-filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 960px) {
-  .output-invoice-collections-query__grid {
-    grid-template-columns: max-content minmax(260px, 1fr);
-    justify-content: stretch;
-  }
-}
-
-@media (max-width: 640px) {
-  .output-invoice-collections-query__grid,
-  .oa-pending-payments-query-controls {
-    grid-template-columns: 1fr;
-  }
-
-  .output-invoice-collections-query .page-toolbar__group--right,
-  .oa-pending-payments-query .page-toolbar__group--right {
-    flex: none;
-    width: 100%;
   }
 }
 
@@ -9739,7 +9642,6 @@ textarea {
   border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
 }
-
 
 .import-workflow-issue-row {
   min-width: 0;
@@ -14275,7 +14177,6 @@ body.column-layout-dragging {
   min-width: 286px;
 }
 
-
 .workbench-anomaly-drawer__filters {
   display: flex;
   min-width: 0;
@@ -14565,7 +14466,6 @@ body.column-layout-dragging {
   .workbench-anomaly-drawer__view-row {
     flex-wrap: wrap;
   }
-
 
 }
 
@@ -17524,7 +17424,6 @@ body.column-layout-dragging {
   width: 100%;
   align-items: end;
 }
-
 
 .settings-access-header {
   padding-right: 4px;
@@ -21382,7 +21281,6 @@ body.column-layout-dragging {
   text-overflow: ellipsis;
 }
 
-
 .bank-details-page .direction-tag.expense,
 .bank-details-page .direction-tag.outflow {
   background: #fbeceb;
@@ -24173,3 +24071,8 @@ body.column-layout-dragging {
 .operation-history-table-frame th:nth-child(6) { width: 10%; }
 .operation-history-table-frame th:nth-child(7) { width: 8%; }
 .operation-history-more { min-height: 40px; align-items: center; }
+
+.cost-section-heading-actions .query-search__field,
+.cost-section-heading-actions .query-search > button { height: 46px; min-height: 46px; }
+.cost-view-scope-heading .cost-view-search-form,
+.cost-view-scope-heading .cost-view-search-form > [data-slot="search-field"] { min-width: 0; }

@@ -464,8 +464,8 @@ describe("销项发票收款情况", () => {
     await user.click(screen.getByRole("button", { name: "销项发票月份：年月" }));
     await user.click(within(await screen.findByRole("dialog", { name: "销项发票月份选择器" })).getByRole("button", { name: "四月" }));
     await waitFor(() => expect(requests().at(-1)?.searchParams.get("month")).toBe("2026-04"));
-    await user.click(screen.getByRole("button", { name: "刷新", exact: true }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "刷新", exact: true })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "查询", exact: true }));
+    await waitFor(() => expect(screen.getByRole("region", { name: "销项发票分类" })).toHaveAttribute("aria-busy", "false"));
     expect(requests().at(-1)?.searchParams.get("month")).toBe("2026-04");
     await waitFor(() => expect(window.sessionStorage.getItem(buildPageSessionStorageKey({ userScope: "101", pageKey: "output-invoice-collections", stateKey: "query" }))).toContain('"month":"2026-04"'));
     const count = requests().length;
@@ -492,7 +492,7 @@ describe("销项发票收款情况", () => {
     await user.click(within(await screen.findByRole("dialog", { name: "销项发票月份选择器" })).getByRole("button", { name: "四月" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => new URL(String(input), "http://localhost").searchParams.get("month") === "2026-04")).toBe(true));
     await user.click(screen.getByRole("button", { name: "全部", exact: true }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "刷新", exact: true })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("region", { name: "销项发票分类" })).toHaveAttribute("aria-busy", "false"));
     await act(async () => {
       resolveMonth(jsonResponse({ ...rowsPayload, rows: [], pagination: { ...rowsPayload.pagination, total: 0 } }));
       await monthResponse;
@@ -563,7 +563,8 @@ describe("销项发票收款情况", () => {
     expect(totals).toHaveTextContent('5680807.61');
     await user.keyboard('{Escape}');
     fail = true;
-    await user.click(screen.getByRole('button',{name:'刷新',exact:true}));
+    await user.type(screen.getByRole('searchbox'), '核对');
+    await user.click(screen.getByRole('button',{name:'查询',exact:true}));
     await screen.findByText('统计读取失败');
     expect(totals).not.toHaveTextContent('5680807.61');
     expect(totals).toHaveTextContent('含税金额合计 —');
@@ -711,7 +712,8 @@ describe("销项发票收款情况", () => {
     await screen.findByRole("button", { name: "全部销项发票 6 张" });
     const table = screen.getByRole("grid", { name: "销项发票收款情况表" });
     invalid = true;
-    await user.click(screen.getByRole("button", { name: "刷新", exact: true }));
+    await user.type(screen.getByRole("searchbox"), "核对");
+    await user.click(screen.getByRole("button", { name: "查询", exact: true }));
     expect(await screen.findByRole("alert")).toHaveTextContent("分类统计不完整或无效");
     expect(screen.getByRole("button", { name: "全部销项发票 — 张" })).toBeInTheDocument();
     expect(screen.getByRole("grid", { name: "销项发票收款情况表" })).toBe(table);

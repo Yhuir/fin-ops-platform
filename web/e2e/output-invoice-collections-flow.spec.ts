@@ -123,7 +123,7 @@ test.describe("销项发票收款情况", () => {
     let recovered = false;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const response = page.waitForResponse(rowsResponse);
-      await page.getByRole("button", { name: "刷新" }).click();
+      await page.getByRole("button", { name: "重试" }).click();
       if ((await response).status() === 200) {
         recovered = true;
         break;

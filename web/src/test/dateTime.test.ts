@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { currentBusinessMonth, currentBusinessYear, formatDateTimeText } from "../features/dateTime";
+import { calendarMonthRange, currentBusinessMonth, currentBusinessYear, formatDateTimeText } from "../features/dateTime";
 
 describe("business period", () => {
   it("uses the Asia/Shanghai calendar at the UTC year boundary", () => {
@@ -18,5 +18,15 @@ describe("business period", () => {
     expect(formatDateTimeText("2026-08-01 03:58")).toBe("2026-08-01 03:58:00");
     expect(formatDateTimeText("2026-08-01")).toBe("2026-08-01");
     expect(formatDateTimeText("not-a-date")).toBe("—");
+  });
+});
+
+
+describe("calendarMonthRange", () => {
+  it.each([["", "", ""], ["2024-02", "2024-02-01", "2024-02-29"], ["2026-02", "2026-02-01", "2026-02-28"], ["2026-12", "2026-12-01", "2026-12-31"]])("maps %s to inclusive calendar boundaries", (month, from, to) => {
+    expect(calendarMonthRange(month)).toEqual({ from, to });
+  });
+  it.each(["2026-00", "2026-13", "2026-1", "invalid"])("rejects invalid month %s", month => {
+    expect(() => calendarMonthRange(month)).toThrow("月份必须为 YYYY-MM");
   });
 });

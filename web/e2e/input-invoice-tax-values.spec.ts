@@ -10,6 +10,15 @@ test('input amount column has two aligned lines and retains its geometry while r
   await page.route('**/api/input-invoice-usage/rows*', async route => {
     if (holdRefresh) await new Promise<void>(resolve => { releaseRefresh = resolve; });
     await route.fulfill({json: {
+      classification: {
+        version: 1, all: { id: 'all', label: '全部发票', count: 3 },
+        used: { id: 'used', label: '已使用', count: 0 }, unused: { id: 'unused', label: '待使用', count: 3 },
+        groups: [
+          { id: 'paid', label: '已付款', tone: 'paid', count: 0, children: [] },
+          { id: 'unpaid', label: '未付款', tone: 'unpaid', count: 0, children: [] },
+          { id: 'pending', label: '待核对', tone: 'pending', count: 0, children: [] },
+        ],
+      },
       rows: ['13%', '—', '免税'].map((taxRate, index) => ({
         id: `tax-rate-row-${index}`, invoice: {
           id: `tax-rate-invoice-${index}`, displayNo: `TAX-RATE-${index}`, invoiceNo: `TAX-RATE-${index}`,
@@ -59,12 +68,13 @@ test('input amount column has two aligned lines and retains its geometry while r
   }));
   const before = await geometry();
   holdRefresh = true;
-  await page.getByRole('button', {name: '刷新', exact: true}).click();
+  await page.getByRole('searchbox').fill('核对');
+  await page.getByRole('button', { name: '查询', exact: true }).click();
   await expect.poll(() => Boolean(releaseRefresh)).toBe(true);
   expect(await geometry()).toEqual(before);
   const refreshed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/input-invoice-usage/rows');
   releaseRefresh!();
   await refreshed;
-  await expect(page.getByRole('button', {name: '刷新', exact: true})).toBeEnabled();
+  await expect(page.locator('.invoice-usage-classification')).toHaveAttribute('aria-busy', 'false');
   expect(await geometry()).toEqual(before);
 });

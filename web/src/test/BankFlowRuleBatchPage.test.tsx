@@ -797,9 +797,7 @@ describe("BankFlowRuleBatchPage", () => {
     await user.click(screen.getByRole("button", { name: "批次月份：年月" }));
     await user.click(within(await screen.findByRole("dialog", { name: "批次月份选择器" })).getByRole("button", { name: "四月" }));
     await waitFor(() => expect(requests().at(-1)?.searchParams.get("month")).toBe("2026-04"));
-    const beforeRefresh = requests().length;
-    await user.click(screen.getByRole("button", { name: "刷新", exact: true }));
-    await waitFor(() => expect(requests().length).toBeGreaterThan(beforeRefresh));
+    expect(screen.queryByRole("button", { name: "重试读取", exact: true })).not.toBeInTheDocument();
     expect(requests().at(-1)?.searchParams.get("month")).toBe("2026-04");
     const beforeReentry = requests().length;
     mounted.unmount();
@@ -871,7 +869,7 @@ describe("BankFlowRuleBatchPage", () => {
     expect(await screen.findByText("流水规则批次加载暂时失败，请刷新后重试。")).toBeInTheDocument();
     expect(screen.queryByText("当前标签下暂无流水")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "刷新" }));
+    await user.click(screen.getByRole("button", { name: "重试读取" }));
 
     await waitFor(() => {
       expect(screen.queryByText("流水规则批次加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
@@ -1396,7 +1394,8 @@ describe("BankFlowRuleBatchPage", () => {
     renderPage();
     expect((await screen.findAllByText("候选版本1")).length).toBeGreaterThan(0);
     version = 4;
-    await user.click(screen.getByRole("button", { name: "刷新" }));
+    await user.click(screen.getByRole("button", { name: "批次月份：年月" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "批次月份选择器" })).getByRole("button", { name: "四月" }));
     expect((await screen.findAllByText("候选版本4")).length).toBeGreaterThan(0);
     expect(screen.queryByText("候选版本1")).not.toBeInTheDocument();
     expect(detailCalls).toBe(2);

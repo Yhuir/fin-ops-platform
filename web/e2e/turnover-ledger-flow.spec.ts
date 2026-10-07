@@ -286,7 +286,7 @@ test.describe("turnover ledger browser flow", () => {
         actionType: "click",
       }, async (mark) => {
         const responsePromise = waitForTurnoverLedger(page);
-        await page.getByRole("button", { name: "刷新台账" }).click();
+        await page.getByRole("button", { name: "重试读取" }).click();
         const response = await mark("apiLatencyMs", responsePromise);
         recovered = response.status() === 200;
         if (recovered) {

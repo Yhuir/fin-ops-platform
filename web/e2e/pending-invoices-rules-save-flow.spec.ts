@@ -79,6 +79,7 @@ test.describe("pending invoices rules save browser flow", () => {
       visibleLabel: "支出待找发票规则设置",
       actionType: "click",
     }, async (mark) => {
+      if (await page.getByRole("button", { name: "更多页面操作" }).isVisible()) await page.getByRole("button", { name: "更多页面操作" }).click();
       await page.getByRole("button", { name: "支出待找发票规则设置" }).click();
       await mark("finalSettledLatencyMs", expect(page.getByTestId("pending-invoice-rules-grid")).toBeVisible());
     });
@@ -150,6 +151,7 @@ test.describe("pending invoices rules save browser flow", () => {
       visibleLabel: "支出待找发票规则设置",
       actionType: "click",
     }, async (mark) => {
+      if (await page.getByRole("button", { name: "更多页面操作" }).isVisible()) await page.getByRole("button", { name: "更多页面操作" }).click();
       await page.getByRole("button", { name: "支出待找发票规则设置" }).click();
       await mark("finalSettledLatencyMs", expect(page.getByTestId("pending-invoice-rules-grid")).toBeVisible());
     });

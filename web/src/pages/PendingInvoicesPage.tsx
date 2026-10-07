@@ -1,3 +1,6 @@
+import { DEFAULT_MONTH } from "../contexts/MonthContext";
+import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
+import { calendarMonthRange } from "../features/dateTime";
 import TableClassificationHeader, { type ClassificationGroup } from "../components/common/TableClassificationHeader";
 import { acquisitionOptions, type AcquisitionStatusCode, type AcquisitionSummary } from "../features/pendingInvoices/statusOptions";
 import { Button } from "@heroui/react";
@@ -115,6 +118,7 @@ export default function PendingInvoicesPage() {
   const [statistics, setStatistics] = useState<PendingInvoiceStatistics | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [month, setMonth] = useState("");
   const [keyword, setKeyword] = useState("");
   const [keywordDraft, setKeywordDraft] = useState("");
   const [columnFilters, setColumnFilters] = useState<PendingInvoiceColumnFilter[]>([]);
@@ -147,6 +151,8 @@ export default function PendingInvoicesPage() {
 
   const query = useMemo<FetchPendingInvoiceRowsRequest>(() => ({
     direction,
+    dateFrom: calendarMonthRange(month).from,
+    dateTo: calendarMonthRange(month).to,
     filter: "all",
     keyword,
     page,
@@ -155,7 +161,7 @@ export default function PendingInvoicesPage() {
     sortField,
     sortDirection,
     includeStatistics: false,
-  }), [direction, keyword, page, pageSize, queryFilters, sortDirection, sortField, statusFilters]);
+  }), [direction, month, keyword, page, pageSize, queryFilters, sortDirection, sortField, statusFilters]);
 
   const applyRowsPayload = useCallback((payload: PendingInvoiceRowsResponse) => {
     setRows(payload.rows);
@@ -407,6 +413,7 @@ export default function PendingInvoicesPage() {
   }, [clearSelectedTransactions]);
 
   const handleApplyColumnFilters = useCallback((nextFilters: PendingInvoiceColumnFilter[]) => {
+    if (nextFilters.some(filter => filter.field === "trade_date")) setMonth("");
     clearSelectedTransactions();
     setColumnFilters((current) => {
       const fields = new Set(nextFilters.map((item) => item.field));
@@ -592,20 +599,41 @@ export default function PendingInvoicesPage() {
     </div>
   );
 
+  const secondaryActions = <>
+    <Button onPress={() => handleOpenRules("expense")} size="sm" variant="secondary">
+      支出待找发票规则设置
+    </Button>
+    <Button onPress={() => handleOpenRules("income")} size="sm" variant="secondary">
+      收入待找发票规则设置
+    </Button>
+  </>;
   return (
     <div className="pending-invoices-page" data-testid="pending-invoices-page">
-      <PageScaffold fillViewport
+      <PageScaffold secondaryActions={secondaryActions} query={(<QuerySearch
+        ariaLabel="搜索流水"
+        className="pending-invoices-search"
+        onChange={setKeywordDraft}
+        onClear={() => {
+          setKeywordDraft("");
+          setKeyword("");
+          clearSelectedTransactions();
+          setPage(1);
+        }}
+        onSubmit={() => {
+          setKeyword(keywordDraft.trim());
+          clearSelectedTransactions();
+          setPage(1);
+        }}
+        placeholder="搜索流水"
+        value={keywordDraft}
+      />)} fillViewport
         actions={(
           <div className="pending-invoices-toolbar-actions pending-invoices-toolbar-actions--primary">
-            <Button onPress={() => setRefreshToken((current) => current + 1)} isDisabled={loading} size="sm" variant="secondary">
-              刷新
-            </Button>
-            <Button onPress={() => handleOpenRules("expense")} size="sm" variant="secondary">
-              支出待找发票规则设置
-            </Button>
-            <Button onPress={() => handleOpenRules("income")} size="sm" variant="secondary">
-              收入待找发票规则设置
-            </Button>
+            <BusinessPeriodPicker ariaLabel="流水月份筛选" allowedModes={["month"]}
+              selection={{ mode: month ? "month" : "all", month: month || DEFAULT_MONTH, year: (month || DEFAULT_MONTH).slice(0, 4) }}
+              years={nearbyBusinessYears(month || DEFAULT_MONTH)}
+              onChange={selection => { setMonth(selection.mode === "all" ? "" : selection.month); setColumnFilters(current => current.filter(filter => filter.field !== "trade_date")); clearSelectedTransactions(); setPage(1); }} />
+
             <Button isDisabled={exportDisabled} onPress={() => setActiveDrawer("export")} size="sm" variant="primary">
               筛选内容导出
             </Button>
@@ -616,106 +644,91 @@ export default function PendingInvoicesPage() {
         titleAccessory={titleAccessory}
       >
         <div className="pending-invoices-content finance-table-layout">
-        <TableClassificationHeader label="待找发票分类" unit="笔" pending={loading} invalid={Boolean(error)}
-          root={{ id: "all", label: "全部流水", count: summaryCounts.all,
-            selected: visibleDirections.length === 2 && statusFilters.length === 0, onSelect: () => handleDirectionChange("all") }}
-          groups={classificationGroups} />
-        <PageToolbar
-          className="pending-invoices-toolbar"
-          left={error ? <div className="pending-invoices-status-text pending-invoices-status-text--error" role="alert">{error}</div> : null}
-          right={(
-            <div className="pending-invoices-toolbar-actions">
-              {selectedRows.length > 0 ? (
-                <div className="pending-invoices-selection-toolbar" role="status">
-                  <span>已选 {selectedRows.length} 条流水</span>
-                  <span>流水合计 {formatMoney(selectedBankTotal)}</span>
-                  {direction === "income" ? (
-                    <>
-                      <Button
-                        isDisabled={!canOperateData || pendingIncomeStatusRows.size > 0}
-                        onPress={() => handleMarkSelectedIncomeStatus("income_no_invoice_required")}
-                        size="sm"
-                        variant="primary"
-                      >
-                        标记无需开票
+          <TableClassificationHeader label="待找发票分类" unit="笔" pending={loading} invalid={Boolean(error)}
+            root={{
+              id: "all", label: "全部流水", count: summaryCounts.all,
+              selected: visibleDirections.length === 2 && statusFilters.length === 0, onSelect: () => handleDirectionChange("all")
+            }}
+            groups={classificationGroups} />
+          {error ? <div className="page-feedback-floating" role="alert">{error}<Button size="sm" variant="secondary" onPress={() => setRefreshToken(value => value + 1)}>重试</Button></div> : null}
+          {selectedRows.length > 0 && <PageToolbar
+            className="pending-invoices-toolbar"
+            right={(
+              <div className="pending-invoices-toolbar-actions">
+                {selectedRows.length > 0 ? (
+                  <div className="pending-invoices-selection-toolbar" role="status">
+                    <span>已选 {selectedRows.length} 条流水</span>
+                    <span>流水合计 {formatMoney(selectedBankTotal)}</span>
+                    {direction === "income" ? (
+                      <>
+                        <Button
+                          isDisabled={!canOperateData || pendingIncomeStatusRows.size > 0}
+                          onPress={() => handleMarkSelectedIncomeStatus("income_no_invoice_required")}
+                          size="sm"
+                          variant="primary"
+                        >
+                          标记无需开票
+                        </Button>
+                        <Button
+                          isDisabled={!canOperateData || pendingIncomeStatusRows.size > 0}
+                          onPress={() => handleMarkSelectedIncomeStatus("cash_income")}
+                          size="sm"
+                          variant="primary"
+                        >
+                          标记现金收入
+                        </Button>
+                      </>
+                    ) : (
+                      <Button isDisabled={!canOperateData} onPress={handleOpenSelectedInvoicePicker} size="sm" variant="primary">
+                        选择发票
                       </Button>
-                      <Button
-                        isDisabled={!canOperateData || pendingIncomeStatusRows.size > 0}
-                        onPress={() => handleMarkSelectedIncomeStatus("cash_income")}
-                        size="sm"
-                        variant="primary"
-                      >
-                        标记现金收入
-                      </Button>
-                    </>
-                  ) : (
-                    <Button isDisabled={!canOperateData} onPress={handleOpenSelectedInvoicePicker} size="sm" variant="primary">
-                      选择发票
+                    )}
+                    <Button onPress={clearSelectedTransactions} size="sm" variant="secondary">
+                      清除选择
                     </Button>
-                  )}
-                  <Button onPress={clearSelectedTransactions} size="sm" variant="secondary">
-                    清除选择
-                  </Button>
-                </div>
-              ) : null}
-              <QuerySearch
-                ariaLabel="搜索流水"
-                className="pending-invoices-search"
-                onChange={setKeywordDraft}
-                onClear={() => {
-                  setKeywordDraft("");
-                  setKeyword("");
-                  clearSelectedTransactions();
-                  setPage(1);
-                }}
-                onSubmit={() => {
-                  setKeyword(keywordDraft.trim());
-                  clearSelectedTransactions();
-                  setPage(1);
-                }}
-                placeholder="搜索流水"
-                value={keywordDraft}
-              />
-            </div>
-          )}
-        />
-        <div className="pending-invoices-loading-slot">
-          {loading ? <div aria-label="待找发票加载中" className="pending-invoices-loading-bar" role="progressbar" /> : null}
-        </div>
-        {!canOperateData ? (
-          <div className="pending-invoices-status-text pending-invoices-status-text--warning" role="status">
-            当前页面暂不可选择发票、修改收入状态或保存规则。
+                  </div>
+                ) : null}
+
+              </div>
+            )}
+          />}
+          <div className="pending-invoices-loading-slot">
+            {loading ? <div aria-label="待找发票加载中" className="pending-invoices-loading-bar" role="progressbar" /> : null}
           </div>
-        ) : null}
-        <PendingInvoicesTable
-          rows={rows}
-          config={tableConfig}
-          onSortChange={handleSortChange}
-          filterFields={columnFilterFields}
-          columnFilters={columnFilters}
-          onApplyColumnFilters={handleApplyColumnFilters}
-          onClearColumnFilters={handleClearColumnFilters}
-          onOpenRelation={handleOpenRelation}
-          onOpenObjectDetail={handleOpenDetail}
-          direction={direction}
-          statusFilterControl={statusFilterControl}
-          selectedTransactionIds={selectedTransactionIds}
-          onToggleTransactionSelection={handleToggleTransactionSelection}
-          isTransactionSelectable={isTransactionSelectable}
-          emptyStateMessage={error ? "待找发票加载失败，请点击刷新重试。" : undefined}
-          page={page}
-          pageSize={pageSize}
-          total={total}
-          onPageChange={(nextPage) => {
-            clearSelectedTransactions();
-            setPage(nextPage);
-          }}
-          onPageSizeChange={(nextPageSize) => {
-            setPageSize(nextPageSize);
-            clearSelectedTransactions();
-            setPage(1);
-          }}
-        />
+          {!canOperateData ? (
+            <div className="pending-invoices-status-text pending-invoices-status-text--warning" role="status">
+              当前页面暂不可选择发票、修改收入状态或保存规则。
+            </div>
+          ) : null}
+          <PendingInvoicesTable
+            rows={rows}
+            config={tableConfig}
+            onSortChange={handleSortChange}
+            filterFields={columnFilterFields}
+            columnFilters={columnFilters}
+            onApplyColumnFilters={handleApplyColumnFilters}
+            onClearColumnFilters={handleClearColumnFilters}
+            onOpenRelation={handleOpenRelation}
+            onOpenObjectDetail={handleOpenDetail}
+            direction={direction}
+            statusFilterControl={statusFilterControl}
+            selectedTransactionIds={selectedTransactionIds}
+            onToggleTransactionSelection={handleToggleTransactionSelection}
+            isTransactionSelectable={isTransactionSelectable}
+            emptyStateMessage={error ? "待找发票加载失败，请使用错误提示中的重试按钮。" : undefined}
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            onPageChange={(nextPage) => {
+              clearSelectedTransactions();
+              setPage(nextPage);
+            }}
+            onPageSizeChange={(nextPageSize) => {
+              setPageSize(nextPageSize);
+              clearSelectedTransactions();
+              setPage(1);
+            }}
+          />
         </div>
       </PageScaffold>
       <PendingInvoiceRulesDrawer

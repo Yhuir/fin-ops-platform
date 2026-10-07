@@ -96,7 +96,7 @@ test.describe("ordinary page finance presentation", () => {
       await expect(table.locator("tbody tr").first().locator("td, th").nth(index)).toHaveCSS("text-align", "left");
     }
     await expectColumnAlignment(table, "status", "center");
-    await expectStableButton(page, page.getByRole("button", { name: "刷新", exact: true }));
+    await expectStableButton(page, page.getByRole("button", { name: "查询", exact: true }));
 
     for (const width of [1920, 1440]) {
       await page.setViewportSize({ width, height: 1000 });

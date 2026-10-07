@@ -9,6 +9,7 @@ import { buildPageSessionStorageKey, createStoredPayload } from "../contexts/pag
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import { GlobalOperationOverlayProvider } from "../contexts/GlobalOperationOverlayContext";
 import type { SessionPayload } from "../features/session/api";
+import { PageRuntimeProvider } from "../contexts/PageRuntimeContext";
 import BankDetailsPage from "../pages/BankDetailsPage";
 import * as bankDetailsApi from "../features/bankDetails/api";
 import { installMockApiFetch } from "./apiMock";
@@ -38,16 +39,21 @@ const staticSession: SessionContextValue = {
   refresh: () => undefined,
 };
 
+let reactivateBankPage: () => void;
 function renderBankDetailsPage() {
-  return render(
+  let generation = 0;
+  const tree = () => (
     <SessionContext.Provider value={staticSession}>
       <GlobalOperationOverlayProvider>
         <PageSessionStateProvider>
-          <BankDetailsPage />
+          <PageRuntimeProvider value={{ pageKey: "bank-details", active: true, activationGeneration: generation }}><BankDetailsPage /></PageRuntimeProvider>
         </PageSessionStateProvider>
       </GlobalOperationOverlayProvider>
-    </SessionContext.Provider>,
+    </SessionContext.Provider>
   );
+  const mounted = render(tree());
+  reactivateBankPage = () => { generation++; mounted.rerender(tree()); };
+  return mounted;
 }
 
 function requestUrls(fetchMock: ReturnType<typeof installMockApiFetch>, pathname: string) {
@@ -167,18 +173,19 @@ describe("Bank details page", () => {
     expect(transactionRequest?.searchParams.get("account_key")).toBeNull();
   });
 
-  test("refreshes accounts, rules, and transactions from their page APIs", async () => {
+  test("reactivation reloads accounts, rules, and transactions without a manual refresh control", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderBankDetailsPage();
 
     const page = await screen.findByTestId("bank-details-page");
     await within(page).findByText("云南溯源科技有限公司");
+    expect(within(page).queryByRole("button", { name: "刷新银行明细" })).not.toBeInTheDocument();
     const initialAccountRequests = requestUrls(fetchMock, "/api/bank-details/accounts").length;
     const initialRuleRequests = requestUrls(fetchMock, "/api/bank-details/auto-tag-rules").length;
     const initialTransactionRequests = requestUrls(fetchMock, "/api/bank-details/transactions").length;
 
-    await user.click(within(page).getByRole("button", { name: "刷新银行明细" }));
+    await act(async () => reactivateBankPage());
 
     await waitFor(() => {
       expect(requestUrls(fetchMock, "/api/bank-details/accounts").length).toBeGreaterThan(initialAccountRequests);
@@ -219,12 +226,16 @@ describe("Bank details page", () => {
     renderBankDetailsPage();
     const page = await screen.findByTestId("bank-details-page");
     await within(page).findByText("云南溯源科技有限公司");
-    vi.spyOn(bankDetailsApi, "fetchBankDetailAccounts").mockRejectedValue(new Error("账户查询失败"));
-    await user.click(within(page).getByRole("button", { name: "刷新银行明细" }));
+    const accountsSpy = vi.spyOn(bankDetailsApi, "fetchBankDetailAccounts").mockRejectedValue(new Error("账户查询失败"));
+    await act(async () => reactivateBankPage());
     await within(page).findByText(/账户查询失败/);
     await user.click(within(page).getByRole("button", { name: /交通银行 3847 余额/ }));
     await within(page).findByText("当前时间范围内没有流水。");
     expect(within(page).getByRole("alert")).toHaveTextContent("账户未更新：账户查询失败");
+    accountsSpy.mockRestore();
+    await user.click(within(page).getByRole("button", { name: "重试读取" }));
+    await waitFor(() => expect(within(page).queryByText(/账户查询失败/)).not.toBeInTheDocument());
+    expect(within(page).queryByRole("button", { name: "重试读取" })).not.toBeInTheDocument();
   });
 
   test("shows unresolved, missing and last-known balances without inventing a total", async () => {
@@ -305,8 +316,8 @@ describe("Bank details page", () => {
     renderBankDetailsPage();
     const page = await screen.findByTestId("bank-details-page");
     await within(page).findByText("云南溯源科技有限公司");
-    await user.click(within(page).getByRole("button", { name: "刷新银行明细" }));
-    await user.click(within(page).getByRole("button", { name: "刷新银行明细" }));
+    await act(async () => reactivateBankPage());
+    await act(async () => reactivateBankPage());
     await within(page).findByRole("button", { name: /工商银行 6386 余额 40512.82/ });
     await act(async () => { finishOldRequest(original); });
     expect(within(page).getByRole("button", { name: /工商银行 6386 余额/ })).toHaveTextContent("40512.82");
@@ -323,7 +334,7 @@ describe("Bank details page", () => {
     let finishAccounts!: (payload: typeof accounts) => void;
     vi.spyOn(bankDetailsApi, "fetchBankDetailAccounts").mockReturnValue(new Promise((resolve) => { finishAccounts = resolve; }));
     vi.spyOn(bankDetailsApi, "fetchBankDetailTransactions").mockRejectedValue(new Error("流水查询失败"));
-    await user.click(within(page).getByRole("button", { name: "刷新银行明细" }));
+    await act(async () => reactivateBankPage());
     await within(page).findByText("流水未更新：流水查询失败");
     await act(async () => { finishAccounts(accounts); });
     expect(within(page).getByRole("alert")).toHaveTextContent("流水未更新：流水查询失败");
@@ -343,7 +354,7 @@ describe("Bank details page", () => {
     renderBankDetailsPage();
     const page = await screen.findByTestId("bank-details-page");
     await within(page).findByText("云南溯源科技有限公司");
-    await user.click(within(page).getByRole("button", { name: "刷新银行明细" }));
+    await act(async () => reactivateBankPage());
     await user.click(within(page).getByRole("button", { name: "自动标签规则" }));
     const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
     await user.click(within(drawer).getByRole("button", { name: "重新应用规则" }));
@@ -392,8 +403,8 @@ describe("Bank details page", () => {
     await user.click(within(picker).getByRole("radio", { name: "按月" }));
     await user.click(within(picker).getByRole("button", { name: "四月" }));
     await waitFor(() => expect(requestUrls(fetchMock, "/api/bank-details/transactions").at(-1)?.searchParams.get("date_from")).toBe("2026-04-01"));
-    await user.click(within(page).getByRole("button", { name: "刷新银行明细" }));
-    await waitFor(() => expect(within(page).getByRole("button", { name: "刷新银行明细" })).toBeEnabled());
+    await act(async () => reactivateBankPage());
+    await within(page).findByText("云南溯源科技有限公司");
     expect(requestUrls(fetchMock, "/api/bank-details/transactions").at(-1)?.searchParams.get("date_from")).toBe("2026-04-01");
     const beforeReentry = requestUrls(fetchMock, "/api/bank-details/transactions").length;
     mounted.unmount();

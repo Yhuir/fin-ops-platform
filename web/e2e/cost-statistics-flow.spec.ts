@@ -54,9 +54,7 @@ test.describe("cost statistics browser flow", () => {
     const month = waitForExplorer(page, url => url.searchParams.get("scope") === "2026-03");
     await picker.getByRole("button", { name: "三月", exact: true }).click();
     await month;
-    const refreshed = waitForExplorer(page, url => url.searchParams.get("scope") === "2026-03");
-    await page.getByRole("button", { name: "刷新成本统计" }).click();
-    await refreshed;
+    await expect(page.getByRole("button", { name: "刷新成本统计" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "false");
     await page.getByRole("button", { name: "导出中心" }).click();
     const dialog = page.getByRole("dialog", { name: "导出中心" });

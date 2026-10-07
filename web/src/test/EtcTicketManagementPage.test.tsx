@@ -5,10 +5,24 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 
 import { installMockApiFetch } from "./apiMock";
+import App from "../app/App";
+import * as pageRuntime from "../contexts/PageRuntimeContext";
 import { renderAppAt } from "./renderHelpers";
 import * as etcApi from "../features/etc/api";
 import { deriveEtcBatchProgress } from "../features/etc/EtcBatchProgress";
 import type { EtcReconciliationTask } from "../features/etc/types";
+
+
+function renderReactivatableEtcPage() {
+  let generation = 0;
+  const original = pageRuntime.useOptionalPageActivation;
+  vi.spyOn(pageRuntime, "useOptionalPageActivation").mockImplementation(key => {
+    const value = original(key);
+    return key === "etc-tickets" ? { ...value, activationGeneration: generation } : value;
+  });
+  const mounted = renderAppAt("/etc-tickets");
+  return () => { generation++; mounted.rerender(<App />); };
+}
 
 const etcTicketSourceFiles = [
   "src/pages/EtcTicketManagementPage.tsx",
@@ -432,7 +446,7 @@ describe("ETC ticket management page", () => {
     expect(await within(page).findByText("ETC业务批次加载暂时失败，请刷新后重试。")).toBeInTheDocument();
     expect(within(page).queryByText("无匹配批次。")).not.toBeInTheDocument();
 
-    await user.click(within(page).getByRole("button", { name: /^刷新$/ }));
+    await user.click(within(page).getByRole("button", { name: "重试读取" }));
 
     await waitFor(() => {
       expect(within(page).queryByText("ETC业务批次加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
@@ -925,11 +939,11 @@ describe("ETC ticket management page", () => {
     ) as never);
     const upload = vi.spyOn(etcApi, "uploadEtcCreditCardStatement");
 
-    renderAppAt("/etc-tickets");
+    const reactivate = renderReactivatableEtcPage();
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     expect(await within(page).findByLabelText("上传信用卡账单")).toBeInTheDocument();
-    await user.click(within(page).getByRole("button", { name: /^刷新$/ }));
+    await act(async () => reactivate());
     await act(async () => {
       resolveRefreshedList({
         counts: { unsubmitted: 1, staged: 0, submitted: 0 },
@@ -3617,7 +3631,7 @@ describe("ETC ticket management page", () => {
   test("keeps manual reconciliation context while the current batch refreshes", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
-    renderAppAt("/etc-tickets");
+    const reactivate = renderReactivatableEtcPage();
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     await openEtcDisclosure(page, user, /人工处理/);
@@ -3626,7 +3640,7 @@ describe("ETC ticket management page", () => {
     await user.type(reviewNote, "继续处理当前明细");
     const batchLoadsBeforeRefresh = fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/etc/business-batches?")).length;
 
-    await user.click(within(page).getByRole("button", { name: /^刷新$/ }));
+    await act(async () => reactivate());
 
     await waitFor(() => {
       expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/etc/business-batches?")).length).toBeGreaterThan(batchLoadsBeforeRefresh);

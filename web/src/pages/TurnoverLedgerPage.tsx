@@ -2,7 +2,7 @@ import TurnoverFlowLabel from "../components/turnoverLedger/TurnoverFlowLabel";
 import { Segment, SegmentGroup } from "../components/common/SegmentedControl";
 import { Button, Checkbox } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, RefreshCw } from "lucide-react";
+import { Download } from "lucide-react";
 
 import AppDrawer from "../components/common/AppDrawer";
 import { FinanceTablePagination } from "../components/common/FinanceTable";
@@ -928,16 +928,15 @@ export default function TurnoverLedgerPage() {
         titleAccessory={titleAccessory}
         actions={(
           <>
-            <Button
+            {(error) && <Button
               className="turnover-ledger-button"
               isDisabled={ledgerNavigationDisabled}
               onPress={() => { setClosureSelection(null); loadLedger(); }}
               size="sm"
               variant="secondary"
             >
-              <RefreshCw aria-hidden="true" size={16} strokeWidth={2.2} />
-              刷新台账
-            </Button>
+              重试读取
+            </Button>}
             <Button
               className="turnover-ledger-button"
               isDisabled={tagLoading}

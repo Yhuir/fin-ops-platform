@@ -88,7 +88,8 @@ describe("每月任务实际操作", () => {
     await user.click(within(popup).getByRole("button", { name: "取消" }));
     expect(request.mock.calls.length).toBe(before);
     request.mockRejectedValue(new CashRequestError(503, "cash_dependency_unavailable", "任务服务暂不可用"));
-    await user.click(screen.getByRole("button", { name: "刷新", exact: true }));
+    await user.type(screen.getByRole("textbox", { name: "任务关键词" }), "失败查询");
+    await user.click(screen.getByRole("button", { name: "查询任务", exact: true }));
     expect(await screen.findByRole("alert")).toHaveTextContent("任务服务暂不可用");
     expect(screen.getAllByRole("columnheader", { name: /执行日期/ })).toHaveLength(3);
     expect(screen.queryByText(/没有匹配任务/)).not.toBeInTheDocument();

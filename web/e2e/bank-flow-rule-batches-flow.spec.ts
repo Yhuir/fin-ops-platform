@@ -301,7 +301,7 @@ test.describe("bank flow rule batches browser flow", () => {
     let recovered = false;
     for (let attempt = 0; attempt < 4 && !recovered; attempt += 1) {
       const responsePromise = waitForBankFlowRuleBatches(page);
-      await page.getByRole("button", { name: "刷新" }).click();
+      await page.getByRole("button", { name: "重试读取" }).click();
       const response = await responsePromise;
       recovered = response.status() === 200;
     }

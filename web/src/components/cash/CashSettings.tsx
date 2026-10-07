@@ -60,7 +60,7 @@ function CashAccounts({ initial, onChange }: { initial: AccountCriteria; onChang
       <CashInput label="账户名称" value={search} onChange={setSearch} placeholder="搜索账户" />
       <Button type="submit" variant="secondary">查询</Button>
       <Button variant="tertiary" onPress={() => { setKeyword(""); setSearch(""); setEnabled(""); setOrder("asc"); setPage(1); }}>重置</Button>
-      <Button variant="secondary" onPress={query.reload} isDisabled={query.loading}>刷新</Button>
+      {query.error && <Button variant="secondary" onPress={query.reload} isDisabled={query.loading}>重试读取</Button>}
       <Button onPress={() => setEditing("new")}>新增账户</Button>
     </form>
     <CashNotice error={query.error?.message} />
@@ -122,7 +122,6 @@ function CashAccountEditor({ account, onClose }: { account: CashAccountSetting |
 function CashCategories({ initial, onChange }: { initial: CategoryCriteria; onChange: (value: CategoryCriteria) => void }) {
   const [criteria, setCriteria] = useState(initial);
   const [search, setSearch] = useState(initial.keyword);
-  const [refresh, setRefresh] = useState(0);
   const [editing, setEditing] = useState<{ category: CashCategorySetting | null; group: CategoryGroup } | null>(null);
   useEffect(() => { onChange(criteria); }, [criteria, onChange]);
   const change = (next: Partial<Omit<CategoryCriteria, "pages">>) => setCriteria(current => ({ ...current, ...next, pages: firstCategoryPages() }));
@@ -131,25 +130,24 @@ function CashCategories({ initial, onChange }: { initial: CategoryCriteria; onCh
       <CashInput label="费用类型名称" value={search} onChange={setSearch} placeholder="搜索费用类型" />
       <Button type="submit" variant="secondary">查询</Button>
       <Button variant="tertiary" onPress={() => { setSearch(""); change({ keyword: "", enabled: "", order: "asc" }); }}>重置</Button>
-      <Button variant="secondary" onPress={() => setRefresh(value => value + 1)}>刷新</Button>
       <CashFilterPopover label="费用类型状态" value={criteria.enabled ? [criteria.enabled] : []} options={[{ value: "true", label: "启用" }, { value: "false", label: "停用" }]} onApply={value => change({ enabled: value.length === 1 ? value[0] : "" })} />
     </form>
-    {(Object.keys(cashCategoryGroupLabels) as CategoryGroup[]).map(group => <CashCategoryGroup key={group} group={group} criteria={criteria} refresh={refresh}
+    {(Object.keys(cashCategoryGroupLabels) as CategoryGroup[]).map(group => <CashCategoryGroup key={group} group={group} criteria={criteria}
       onPageChange={page => setCriteria(current => ({ ...current, pages: { ...current.pages, [group]: page } }))}
       onOrderChange={order => change({ order })} onEdit={category => setEditing({ category, group })} />)}
     {editing && <CashCategoryEditor category={editing.category} initialGroup={editing.group} onClose={() => setEditing(null)} />}
   </section>;
 }
 
-function CashCategoryGroup({ group, criteria, refresh, onPageChange, onOrderChange, onEdit }: {
-  group: CategoryGroup; criteria: CategoryCriteria; refresh: number; onPageChange: (page: number) => void;
+function CashCategoryGroup({ group, criteria, onPageChange, onOrderChange, onEdit }: {
+  group: CategoryGroup; criteria: CategoryCriteria; onPageChange: (page: number) => void;
   onOrderChange: (order: "asc" | "desc") => void; onEdit: (category: CashCategorySetting | null) => void;
 }) {
   const { revision } = useCashScope();
   const page = criteria.pages[group];
   const query = useCashQuery<CashTasksPage<CashCategorySetting>>("/settings/categories", {
     group, page, page_size: 50, sort: "name", order: criteria.order, keyword: criteria.keyword, enabled: criteria.enabled || undefined,
-  }, revision + refresh);
+  }, revision);
   const total = query.data?.pagination.total;
   useEffect(() => {
     if (total !== undefined && page > Math.max(1, Math.ceil(total / 50))) onPageChange(Math.max(1, Math.ceil(total / 50)));

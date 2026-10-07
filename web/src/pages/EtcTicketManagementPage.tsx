@@ -1955,7 +1955,7 @@ export default function EtcTicketManagementPage() {
             >
               OA 草稿预填管理
             </Button>
-            <Button
+            {(batchListError || batchDetailError || taskListError) && <Button
               className="etc-secondary-action"
               isDisabled={batchNavigationDisabled || taskLoading}
               isPending={loading}
@@ -1966,9 +1966,8 @@ export default function EtcTicketManagementPage() {
               size="sm"
               variant="secondary"
             >
-              <RefreshCw aria-hidden="true" size={16} />
-              刷新
-            </Button>
+              重试读取
+            </Button>}
             <RouterLink className="button button--sm button--outline etc-page-action-link" to="/imports/etc-invoices">
               导入发票
               <ArrowRight aria-hidden="true" size={16} />

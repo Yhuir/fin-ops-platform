@@ -250,7 +250,7 @@ function getCostStatisticsLoadErrorMessage(error: unknown) {
       return message;
     }
   }
-  return "成本统计数据加载失败，请点击刷新重试。";
+  return "成本统计数据加载失败，请使用错误提示中的重试按钮。";
 }
 
 function getCostStatisticsActionErrorMessage(error: unknown) {
@@ -1492,16 +1492,7 @@ export default function CostStatisticsPage() {
           inert={interactionLocked ? true : undefined}
           ref={headerActionsRef}
         >
-          <Button
-            aria-label="刷新成本统计"
-            className="cost-page-action cost-refresh-button"
-            isDisabled={isExplorerLoading}
-            onPress={handleManualRefresh}
-            size="sm"
-            variant="secondary"
-          >
-            刷新
-          </Button>
+
           {!isBankFlowView ? (
             <>
               <Button className="cost-page-action" size="sm" variant="secondary" onPress={() => setScopeOpen(true)}>项目成本范围</Button>
@@ -1625,7 +1616,7 @@ export default function CostStatisticsPage() {
                 <span />
               </div>
             ) : null}
-            {loadError && explorerData ? <div className="state-panel error">{loadError}</div> : null}
+            {loadError && explorerData ? <div className="state-panel error">{loadError}<button type="button" onClick={handleManualRefresh}>重试读取</button></div> : null}
             {exportFeedback && !isExportCenterOpen ? (
               <div className={`action-feedback ${exportFeedback.tone}`}>{exportFeedback.message}</div>
             ) : null}

@@ -85,7 +85,7 @@ export default function CashFlowTable({ itemId, taskOccurrenceId, initialCriteri
       <CashInput label="截止日期" type="date" value={dateTo} onChange={setDateTo} /></>}
       <CashInput label="搜索流水" value={search} onChange={setSearch} placeholder="内容说明、人员或项目" />
       <Button type="submit" size="sm" variant="secondary">查询</Button>
-      <Button size="sm" variant="tertiary" onPress={reset}>重置</Button><Button size="sm" variant="secondary" onPress={query.reload}>刷新</Button>
+      <Button size="sm" variant="tertiary" onPress={reset}>重置</Button>{query.error && <Button size="sm" variant="secondary" onPress={query.reload}>重试读取</Button>}
       <CashFilterPopover label="方向" value={criteria.kinds} onApply={kinds => applyCriteria({ kinds, page: 1 })} options={[{ value: "receipt", label: "收入" }, { value: "payment", label: "支出" }, { value: "transfer", label: "内部转账" }]} />
       <CashSortMenu sort={sort} order={order} onChange={applySort} options={[{ value: "amount", label: "流水金额" }]} /><div className="cash-toolbar-actions">{actions}</div>
     </form>

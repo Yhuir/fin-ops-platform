@@ -1,50 +1,56 @@
 import { expect, test } from './fixtures/strictTest';
 import { installDeterministicApiMocks } from './fixtures/apiMocks';
 
-for (const route of ['oa-pending-payments', 'output-invoice-collections', 'pending-invoices']) {
-  test(`${route} query controls align and remain usable at desktop and narrow widths`, async ({ page }, info) => {
-    await installDeterministicApiMocks(page, { sessionMode: 'user' });
-    await page.goto(`/${route}`);
+const production = process.env.FIN_OPS_E2E_PRODUCTION_SMOKE === '1';
+if (production) test.use({ trace: 'off', video: 'off', screenshot: 'off' });
+for (const route of ['oa-pending-payments', 'output-invoice-collections', 'pending-invoices', 'input-invoice-usage']) {
+  test(`${route} compact header preserves controls at desktop and narrow widths`, async ({ page }, info) => {
+    if (production) {
+      const token = process.env.FIN_OPS_E2E_ADMIN_TOKEN;
+      expect(token).toBeTruthy();
+      await page.context().addCookies([{ name: 'Admin-Token', value: token!, domain: 'www.yn-sourcing.com', path: '/', secure: true, sameSite: 'Lax' }]);
+      await page.route('**/fin-ops-api/**', async route => {
+        if (!['GET', 'HEAD', 'OPTIONS'].includes(route.request().method())) await route.abort();
+        else await route.continue();
+      });
+    } else await installDeterministicApiMocks(page, { sessionMode: 'user' });
+    await page.goto(`${production ? '/fin-ops' : ''}/${route}`);
     await expect(page.locator('.finance-table__scroll').first()).toBeVisible();
-    if (route === 'oa-pending-payments') {
-      await expect(page.getByRole('group', { name: '已完成 OA', exact: true }).getByRole('button', { name: /^已关联流水/ })).toBeVisible();
-      await expect(page.getByRole('group', { name: '已完成 OA', exact: true }).getByRole('button', { name: /^未关联流水/ })).toBeVisible();
-      await expect(page.getByTestId('oa-pending-payments-table-frame').getByRole('search')).toHaveCount(0);
-    }
-    if (route === 'pending-invoices') await expect(page.getByText(/^当前范围 .*笔流水/)).toHaveCount(0);
-    for (const width of [1800, 1280, 390]) {
+    const header = page.locator('.page-header');
+    await expect(header.getByRole('button', { name: '刷新', exact: true })).toHaveCount(0);
+    for (const width of [1920, 1440, 1280, 390]) {
       await page.setViewportSize({ width, height: 1000 });
-      if (route === 'oa-pending-payments') {
-        // Stress count-label width without changing query or business state.
-        await page.getByRole('region', { name: 'OA 核对分类' }).locator('.stable-count').evaluateAll(labels => labels.forEach(label => {
-          label.textContent = label.textContent!.replace(/\d+ 条/, '99999 条');
-        }));
-      }
-      const toolbar = page.locator(route === 'pending-invoices' ? '.pending-invoices-toolbar' : `.${route}-query`);
-      const toolbarBox = await toolbar.boundingBox();
-      expect(toolbarBox!.x).toBeGreaterThanOrEqual(0);
-      expect(toolbarBox!.x + toolbarBox!.width).toBeLessThanOrEqual(width);
-      expect(await toolbar.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-      const search = toolbar.getByRole('search');
+      await expect(header.getByRole('search')).toBeVisible();
+      await expect.poll(() => header.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+      const search = header.getByRole('search');
       await expect(search.getByRole('button', { name: '查询' })).toBeInViewport();
-      const searchBox = await search.boundingBox();
-      expect(searchBox!.x + searchBox!.width).toBeLessThanOrEqual(width);
-      expect(searchBox!.x).toBeGreaterThanOrEqual(0);
-      if (route !== 'pending-invoices') {
-        const boxes = await toolbar.locator('.business-period-picker, .query-search__field, .query-search > button').evaluateAll(elements => elements.map(el => {
-          const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, height: r.height, right: r.right };
-        }));
-        for (const box of boxes) expect(Math.abs(box.height - 46)).toBeLessThanOrEqual(1);
-        expect(Math.abs(boxes[1].y - boxes[2].y)).toBeLessThanOrEqual(1);
-        if (width === 1800) {
-          expect(Math.abs(boxes[0].y - boxes[1].y)).toBeLessThanOrEqual(1);
-          expect(boxes[0].right).toBeLessThanOrEqual(boxes[1].x);
-          const header = page.locator('.table-classification');
-          const headerBox = await header.boundingBox();
-          expect(headerBox!.y + headerBox!.height).toBeLessThanOrEqual(boxes[0].y);
-        }
+      const boxes = await header.locator('.business-period-picker, .query-search__field, .query-search > button').evaluateAll(elements => elements.map(el => {
+        const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, height: r.height, right: r.right };
+      }));
+      expect(boxes).toHaveLength(3);
+      for (const box of boxes) {
+        expect(Math.abs(box.height - 32)).toBeLessThanOrEqual(1);
+        expect(box.x).toBeGreaterThanOrEqual(0);
+        expect(box.right).toBeLessThanOrEqual(width);
+      }
+      if (width >= 1440) {
+        const title = (await header.locator('.page-title-row').boundingBox())!;
+        expect(Math.abs(boxes[0].y - boxes[2].y)).toBeLessThanOrEqual(1);
+        expect(boxes[0].x).toBeGreaterThanOrEqual(title.x + title.width);
       }
       await page.screenshot({ path: info.outputPath(`${route}-${width}.png`), animations: 'disabled' });
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    if (route !== 'output-invoice-collections') {
+      await header.getByRole('button', { name: '更多页面操作' }).click();
+      const menu = page.getByRole('dialog', { name: '更多页面操作' });
+      await expect(menu).toBeVisible();
+      await menu.getByRole('button').first().click();
+      await expect(menu).toHaveCount(0);
+      const drawer = page.getByRole('dialog');
+      await expect(drawer).toBeVisible();
+      await drawer.getByRole('button', { name: /关闭/ }).first().click();
+      await expect(drawer).toHaveCount(0);
     }
   });
 }
@@ -133,6 +139,7 @@ for (const [route, scope, peers, endpoint] of [
 test('redundant copy is absent while payment rules remain editable', async ({ page }) => {
   await installDeterministicApiMocks(page, { sessionMode: 'user' });
   await page.goto('/input-invoice-usage');
+  await page.getByRole('button', { name: '更多页面操作' }).click();
   await page.getByRole('button', { name: '发票与支付状态规则设置' }).click();
   const drawer = page.getByRole('dialog');
   await expect(drawer.getByText(/按优先级从小到大匹配/)).toHaveCount(0);
@@ -141,3 +148,45 @@ test('redundant copy is absent while payment rules remain editable', async ({ pa
   await drawer.getByRole('button', { name: '新增规则' }).click();
   await expect(drawer.getByRole('listitem')).toHaveCount(before + 1);
 });
+
+for (const name of ['pending-invoices', 'input-invoice-usage']) {
+  test(`${name} month search and export use the same scope`, async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, { sessionMode: 'user' });
+    await page.goto(`/${name}`);
+    const header = page.locator('.page-header');
+    await expect(page.locator('.finance-table__scroll').first()).toBeVisible();
+    await header.locator('.business-period-trigger').click();
+    const response = page.waitForResponse(r => new URL(r.url()).pathname === `/api/${name}/rows`);
+    await page.getByRole('dialog').getByRole('button', { name: '四月', exact: true }).click();
+    const monthUrl = new URL((await response).url());
+    const input = name === 'input-invoice-usage';
+    const month = input ? monthUrl.searchParams.get('month')! : monthUrl.searchParams.get('date_from')!.slice(0, 7);
+    expect(month).toMatch(/-04$/);
+    if (!input) expect(monthUrl.searchParams.get('date_to')).toBe(`${month}-30`);
+    const before = api.count(`GET /api/${name}/rows`);
+    await header.getByRole('searchbox').fill('测试');
+    expect(api.count(`GET /api/${name}/rows`)).toBe(before);
+    const search = page.waitForResponse(r => new URL(r.url()).pathname === `/api/${name}/rows`);
+    await header.getByRole('button', { name: '查询', exact: true }).click();
+    const searchUrl = new URL((await search).url());
+    expect(searchUrl.searchParams.get('keyword')).toBe('测试');
+    expect(searchUrl.searchParams.get(input ? 'month' : 'date_from')).toBe(input ? month : `${month}-01`);
+    await expect(header.locator('.business-period-trigger')).toContainText('4月');
+    const preview = page.waitForResponse(r => new URL(r.url()).pathname === `/api/${name}/export-summary`);
+    await header.getByRole('button', { name: '筛选内容导出' }).click();
+    const url = new URL((await preview).url());
+    expect(url.searchParams.get('keyword')).toBe('测试');
+    expect(url.searchParams.get(input ? 'invoice_date_from' : 'date_from')).toBe(`${month}-01`);
+    expect(url.searchParams.get(input ? 'invoice_date_to' : 'date_to')).toBe(`${month}-30`);
+    const drawer = page.getByRole('dialog');
+    await expect(drawer.getByLabel('导出开始日期')).toHaveValue(`${month}-01`);
+    await drawer.getByRole('button', { name: /关闭/ }).first().click();
+    const clear = page.waitForResponse(r => new URL(r.url()).pathname === `/api/${name}/rows`);
+    await header.getByRole('button', { name: '清除查询' }).click();
+    expect(new URL((await clear).url()).searchParams.has('keyword')).toBe(false);
+    const all = page.waitForResponse(r => new URL(r.url()).pathname === `/api/${name}/rows`);
+    await header.locator('.business-period-picker').getByRole('button', { name: '全部', exact: true }).click();
+    const allUrl = new URL((await all).url());
+    expect(allUrl.searchParams.has(input ? 'month' : 'date_from')).toBe(false);
+  });
+}

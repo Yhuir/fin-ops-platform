@@ -1,5 +1,5 @@
 import { Button, Chip, Input, ListBox, SearchField, Select } from "@heroui/react";
-import { RefreshCw, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -147,12 +147,6 @@ export default function OperationHistoryPage() {
     <PageScaffold fillViewport
       className="operation-history-page"
       title="操作历史"
-      actions={(
-        <Button variant="secondary" onPress={() => void load()}>
-          <RefreshCw aria-hidden="true" size={16} />
-          刷新
-        </Button>
-      )}
     >
       <form className="operation-history-filters" onSubmit={submitFilters}>
         <SearchField
@@ -212,7 +206,7 @@ export default function OperationHistoryPage() {
               <FinanceTableColumn id="outcome" columnRole="status">结果</FinanceTableColumn>
               <FinanceTableColumn id="detail" columnRole="action">详情</FinanceTableColumn>
             </FinanceTableHeader>
-            <FinanceTableBody items={rows} renderEmptyState={() => error ? <StatePanel tone="error" title="操作历史加载失败">{error}</StatePanel> : loading ? <span role="status">正在加载操作历史</span> : "暂无操作记录"}>
+            <FinanceTableBody items={rows} renderEmptyState={() => error ? <StatePanel tone="error" title="操作历史加载失败">{error}<Button variant="secondary" onPress={() => void load()}>重试读取</Button></StatePanel> : loading ? <span role="status">正在加载操作历史</span> : "暂无操作记录"}>
               {(row) => {
                 const outcome = outcomeView(row.outcome);
                 return (
@@ -232,7 +226,7 @@ export default function OperationHistoryPage() {
             </FinanceTableBody>
           </FinanceTable>
       </div>
-      {error && rows.length > 0 ? <div className="page-feedback-floating" role="alert">{error}</div> : null}
+      {error && rows.length > 0 ? <div className="page-feedback-floating" role="alert">{error}<Button variant="secondary" onPress={() => void load()}>重试读取</Button></div> : null}
 
       <OperationHistoryDetailDrawer
         error={detailError}

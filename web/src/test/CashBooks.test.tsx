@@ -98,8 +98,7 @@ describe("cash books", () => {
     expect(mocks.query.mock.calls.find(([path]) => path === "/reports/ticket-payments")![1]).toMatchObject({ time_scope: "all", date_from: "", date_to: "", keyword: "history", page: 1 });
     await user.click(screen.getByRole("tab", { name: "往来账总表" }));
     expect(lastParams("/reports/turnover")).toMatchObject({ date_from: "2020-02-01", date_to: "2020-02-29" });
-    await user.click(screen.getByRole("button", { name: "刷新", exact: true }));
-    expect(mocks.reload).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "刷新", exact: true })).not.toBeInTheDocument();
     expect(screen.getByLabelText("开始日期")).toHaveValue("2020-02-01");
     const saved = onCriteriaChange.mock.calls.at(-1)![0]; view.unmount(); mocks.query.mockClear(); onCriteriaChange.mockClear();
     render(<CashBooks initialCriteria={saved} onCriteriaChange={onCriteriaChange} />);

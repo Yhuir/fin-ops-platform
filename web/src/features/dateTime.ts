@@ -60,3 +60,12 @@ export function currentBusinessYear(now = new Date()) {
 export function currentBusinessMonth(now = new Date()) {
   return `${currentBusinessYear(now)}-${businessDatePart(now, "month")}`;
 }
+
+/** Inclusive calendar dates for a validated YYYY-MM selection. Empty means all dates. */
+export function calendarMonthRange(month: string): { from: string; to: string } {
+  if (!month) return { from: "", to: "" };
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("月份必须为 YYYY-MM");
+  const [year, number] = month.split("-").map(Number);
+  const end = new Date(Date.UTC(year, number, 0)).getUTCDate();
+  return { from: `${month}-01`, to: `${month}-${String(end).padStart(2, "0")}` };
+}

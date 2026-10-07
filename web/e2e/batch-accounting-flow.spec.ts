@@ -84,7 +84,7 @@ test.describe("batch accounting browser flow", () => {
         actionType: "click",
       }, async (mark) => {
         const responsePromise = waitForBatchAccountingList(page);
-        await page.getByRole("button", { name: "刷新" }).click();
+        await page.getByRole("button", { name: "重试读取" }).click();
         const response = await mark("apiLatencyMs", responsePromise);
         recovered = response.status() === 200;
         if (recovered) {
@@ -130,7 +130,7 @@ test.describe("batch accounting browser flow", () => {
     const yearInput = page.getByRole("button", { name: "流水年份：年月" });
     const pagination = page.getByRole("group", { name: "批量账务流水分页" });
     const tagRulesButton = page.getByRole("button", { name: "批量账务标签规则" });
-    const refreshButton = page.getByRole("button", { name: "刷新" });
+    await expect(page.getByRole("button", { name: "刷新", exact: true })).toHaveCount(0);
 
     await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*建行 8106/ })).toBeVisible();
 
@@ -147,7 +147,6 @@ test.describe("batch accounting browser flow", () => {
       };
     });
     const tagRulesButtonStyle = await actionButtonStyle(tagRulesButton);
-    expect(tagRulesButtonStyle).toEqual(await actionButtonStyle(refreshButton));
     expect(tagRulesButtonStyle).toMatchObject({
       backgroundColor: "rgb(255, 255, 255)",
       borderRadius: "6px",
