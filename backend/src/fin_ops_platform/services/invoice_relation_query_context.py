@@ -86,7 +86,7 @@ class DistributedInvoiceRelationContext:
                 transaction.id: transaction
                 for transaction in self._import_service.list_transactions(month=month)
             }
-        self._load_bank_transactions_from_loaded_relations()
+            self._load_bank_transactions_from_loaded_relations()
         return self._bank_transactions_by_id
 
     def distributed_relations_for_row_ids(
@@ -167,6 +167,7 @@ class DistributedInvoiceRelationContext:
         for relation in relations_by_case_id.values():
             for row_id, _row_type in self.typed_relation_rows(relation):
                 self._distributed_relations_by_row_id.setdefault(row_id, []).append(relation)
+        self._load_bank_transactions_from_loaded_relations()
 
     def _distributed_active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
         self._load_distributed_relations(row_ids)

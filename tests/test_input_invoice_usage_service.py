@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from decimal import Decimal
+from unittest.mock import Mock
 
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
@@ -11,6 +12,7 @@ from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageError,
     InputInvoiceUsageQueryService,
 )
+from fin_ops_platform.services.invoice_relation_query_context import DistributedInvoiceRelationContext
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
@@ -128,6 +130,35 @@ class CrossMonthCanonicalRelationReader:
 
 
 class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
+    def test_bank_index_reuses_loaded_facts_and_updates_after_new_relations(self):
+        banks = {
+            name: self._bank_transaction(transaction_id=name, amount="10.00")
+            for name in ("bank-first", "bank-second")
+        }
+        imports = Mock(spec=ImportNormalizationService)
+        imports.list_transactions.return_value = []
+        imports.get_transaction.side_effect = banks.__getitem__
+        context = DistributedInvoiceRelationContext(import_service=imports)
+        context.add_distributed_relations([{"case_id": "first", "row_ids": ["bank-first"], "row_types": ["bank"]}])
+        for _ in range(200):
+            self.assertEqual(set(context.bank_transactions_by_id()), {"bank-first"})
+        imports.list_transactions.assert_called_once()
+        imports.get_transaction.assert_called_once_with("bank-first")
+        context.add_distributed_relations([{"case_id": "second", "row_ids": ["bank-second"], "row_types": ["bank"]}])
+        self.assertEqual(set(context.bank_transactions_by_id()), set(banks))
+        self.assertEqual(imports.get_transaction.call_count, 2)
+
+    def test_missing_bank_fact_is_not_reloaded_for_each_invoice_row(self):
+        imports = Mock(spec=ImportNormalizationService)
+        imports.list_transactions.return_value = []
+        imports.get_transaction.side_effect = KeyError("bank-unavailable")
+        context = DistributedInvoiceRelationContext(import_service=imports)
+        context.add_distributed_relations([{"case_id": "missing", "row_ids": ["bank-unavailable"], "row_types": ["bank"]}])
+        for _ in range(200):
+            self.assertEqual(context.bank_transactions_by_id(), {})
+        imports.get_transaction.assert_called_once_with("bank-unavailable")
+        self.assertEqual(context.distributed_relations_for_row_ids(["bank-unavailable"])[0]["case_id"], "missing")
+
     def test_missing_source_gross_preserves_relations_without_matching_net_plus_tax(self):
         invoice = self._invoice("inv-source-missing", "MISSING", self._counterparty("supplier", "供应商"))
         invoice.total_with_tax = None
