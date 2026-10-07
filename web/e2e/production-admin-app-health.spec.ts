@@ -26,7 +26,7 @@ test.describe("production admin AppHealth smoke", () => {
       domain: cookieDomain(baseURL ?? "https://www.yn-sourcing.com"), path: "/", secure: true, sameSite: "Lax" }]);
     await page.goto("/fin-ops/imports/invoices", { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: "发票导入", exact: true })).toBeVisible();
-    const jobsResponse = await page.request.get("/fin-ops-api/background-jobs/active");
+    const jobsResponse = await page.request.get("/fin-ops-api/api/background-jobs/active");
     expect(jobsResponse.status()).toBe(200);
     const payload = await jobsResponse.json();
     expect(payload.jobs.filter((job: { job_id: string; status: string }) => job.job_id.startsWith("import:") && job.status === "succeeded")).toEqual([]);
@@ -36,7 +36,7 @@ test.describe("production admin AppHealth smoke", () => {
       await expect(page.getByRole("dialog", { name: "全局运行状态" })).toBeVisible();
       const readOffset = reads.length;
       const opened = Date.now();
-      await page.getByRole("button", { name: "查看待处理任务", exact: true }).click();
+      await page.getByRole("dialog", { name: "全局运行状态" }).getByRole("button", { name: "查看待处理任务", exact: true }).click();
       const drawer = page.getByRole("dialog", { name: "共享导入任务", exact: true });
       await expect(drawer.getByRole("button", { name: "刷新任务", exact: true })).toBeEnabled();
       await expect(page.getByRole("dialog")).toHaveCount(1);
