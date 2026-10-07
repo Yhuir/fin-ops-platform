@@ -106,3 +106,10 @@
   outline: 2px solid var(--fp-primary);
   outline-offset: 2px;
 }
+
+/* This page intentionally presents invoice totals centrally; bank amounts remain right-aligned. */
+:where(body:has(.page-body[data-finance-presentation])) .finance-table .pending-invoices-col-invoice-amount[data-column-role="amount"] {
+  --finance-column-align: center;
+  --finance-column-justify: center;
+}
+.pending-invoices-col-invoice-amount .pending-invoices-money-stack { align-items: center; }

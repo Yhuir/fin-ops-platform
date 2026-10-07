@@ -344,7 +344,7 @@ export default function OutputInvoiceCollectionsPage() {
                   const labels: Record<string, string> = { pending_collection: "待收款", partial_collected: "部分收款", collected: "已收款",
                     reversed_by_red: "蓝票已被红冲", reverses_blue: "红票已关联蓝票", unmatched_red: "红票未关联蓝票" };
                   return { id: code, label: labels[code], count: option?.count,
-                    selected: selectedStatuses.includes(code), onSelect: () => selectStatuses([code]) };
+                    selected: selectedStatuses.length === 1 && selectedStatuses[0] === code, onSelect: () => selectStatuses([code]) };
                 }),
               }))} />
             <PageToolbar className="output-invoice-collections-query"

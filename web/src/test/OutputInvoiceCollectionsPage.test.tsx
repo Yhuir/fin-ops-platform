@@ -683,6 +683,8 @@ describe("销项发票收款情况", () => {
     await user.click(within(header).getByRole('button', { name: '收款核对 3 张' }));
     await waitFor(() => expect(JSON.parse(decodeURIComponent(request().searchParams.get('filters')!))[0].values).toEqual(['pending_collection','partial_collected','collected']));
     expect(request().searchParams.get('keyword')).toBe('客户');
+    expect(header.querySelectorAll('[aria-pressed="true"]')).toHaveLength(1);
+    expect(within(header).getByRole('button', { name: '收款核对 3 张' })).toHaveAttribute('aria-pressed', 'true');
     await user.click(within(header).getByRole('button', { name: '部分收款 1 张' }));
     await waitFor(() => expect(JSON.parse(decodeURIComponent(request().searchParams.get('filters')!))[0].values).toEqual(['partial_collected']));
     expect(within(header).getByRole('button', { name: '收款核对 3 张' })).toHaveAttribute('aria-pressed', 'false');

@@ -26,19 +26,16 @@
   background: var(--classification-light, #3f526c);
 }
 button.table-classification__cell { cursor: pointer; }
-.table-classification__cell:focus-visible { outline: 3px solid #172b4d; outline-offset: -3px; }
 .table-classification__root { min-height: 32px; background: #3f526c; color: #fff; }
 .table-classification__groups { display: flex; gap: 1px; background: #fff; }
 .table-classification__group { display: grid; grid-template-rows: auto 1fr; flex: var(--classification-columns) 1 0; min-width: 0; }
-.table-classification__group--blue { --classification-light: #dce8f4; --classification-medium: #b9cee4; --classification-dark: #3b648a; --classification-ink: #243f5d; }
-.table-classification__group--green { --classification-light: #dcebe4; --classification-medium: #b8d3c5; --classification-dark: #3d6e58; --classification-ink: #264e3c; }
-.table-classification__group--purple { --classification-light: #e8e2f1; --classification-medium: #cfc1df; --classification-dark: #6b5486; --classification-ink: #514064; }
-.table-classification__group--rose { --classification-light: #f0e1e3; --classification-medium: #dfbec5; --classification-dark: #8a5361; --classification-ink: #683d48; }
+.table-classification__group--blue { --classification-light: #dce8f4; --classification-medium: #b9cee4; --classification-ink: #243f5d; }
+.table-classification__group--green { --classification-light: #dcebe4; --classification-medium: #b8d3c5; --classification-ink: #264e3c; }
+.table-classification__group--purple { --classification-light: #e8e2f1; --classification-medium: #cfc1df; --classification-ink: #514064; }
+.table-classification__group--rose { --classification-light: #f0e1e3; --classification-medium: #dfbec5; --classification-ink: #683d48; }
 .table-classification__parent { min-height: 32px; background: var(--classification-medium); }
 .table-classification__children { display: grid; grid-template-columns: repeat(var(--classification-columns), minmax(0, 1fr)); gap: 1px; }
 .table-classification__leaf { min-height: 48px; padding: 8px; }
-.table-classification__cell[aria-pressed="true"] { background: var(--classification-dark, #293f5d); color: #fff; }
-.table-classification__cell[aria-pressed="mixed"] { box-shadow: inset 0 -3px var(--classification-dark); }
 @media (hover: hover) { button.table-classification__cell:hover { filter: brightness(.96); } }
 @container (max-width: 1050px) {
   .table-classification__groups { flex-direction: column; }

@@ -76,7 +76,7 @@ test("all status tabs use invoice counts, one query, and the same export filters
   await page.setViewportSize({ width: 1600, height: 1000 });
   expect(await tabs.evaluate(el => el.scrollWidth <= el.parentElement!.clientWidth + 1)).toBe(true);
   await expect(tabs.getByRole('button', { pressed: true })).toHaveCount(1);
-  await expect(tabs.getByRole('button', { pressed: true })).toHaveCSS('background-color', 'rgb(41, 63, 93)');
+  await expect(tabs.getByRole('button', { pressed: true })).toHaveCSS('background-color', 'rgb(63, 82, 108)');
   await page.screenshot({ path: info.outputPath("output-status-tabs-wide.png"), animations: "disabled" });
   await page.setViewportSize({ width: 960, height: 900 });
   await page.screenshot({ path: info.outputPath("output-status-tabs-narrow.png"), animations: "disabled" });

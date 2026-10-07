@@ -1,5 +1,6 @@
 import CountLabel from "../common/CountLabel";
 import "./invoiceUsageClassification.css";
+import "../common/classificationSelection.css";
 
 import type { InvoiceUsageClassificationData, InvoiceUsageClassificationItem } from "../../features/inputInvoiceUsage/types";
 export type { InvoiceUsageClassificationData } from "../../features/inputInvoiceUsage/types";
@@ -22,13 +23,14 @@ export default function InvoiceUsageClassification({
     <button
       type="button"
       key={item.id}
-      className={`invoice-usage-classification__button ${className}`}
+      className={`invoice-usage-classification__button classification-choice ${className}`}
       aria-pressed={selectedId === item.id}
       disabled={invalid}
       onClick={() => onSelect(item.id)}
     >
       <span className="invoice-usage-classification__label">{item.label}</span>
       <CountLabel value={invalid ? undefined : item.count} unit="张" spaced />
+      <span className="classification-choice__check" aria-hidden="true">✓</span>
     </button>
   );
 

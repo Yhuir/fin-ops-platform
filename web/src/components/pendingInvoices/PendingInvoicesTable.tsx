@@ -478,6 +478,12 @@ export default function PendingInvoicesTable({
             <FinanceTablePagination className="finance-table-pagination--fit" compact onPageChange={onPageChange} page={page} pageSize={pageSize} total={total} />
           </div>
         )}
+        header={<div className="pending-invoices-group-headings" aria-label="表格分组">
+          <div className="pending-invoices-group-heading pending-invoices-group-heading--bank">{bankGroupLabel}</div>
+          <div className="pending-invoices-group-heading pending-invoices-group-heading--status">发票获取状态</div>
+          <div className="pending-invoices-group-heading pending-invoices-group-heading--invoice">{invoiceGroupLabel}</div>
+          <div className="pending-invoices-group-heading pending-invoices-group-heading--oa">OA</div>
+        </div>}
         minWidth={1380}
         selectableText
         scrollMode="contained"
@@ -485,26 +491,26 @@ export default function PendingInvoicesTable({
       >
             <FinanceTableHeader>
                 <FinanceTableColumn className="pending-invoices-table-sub-header pending-invoices-table-sub-header--bank pending-invoices-col-counterparty" columnRole="identity" id="counterparty_name" isRowHeader>
-                  <span className="pending-invoices-table-column-heading"><span>{bankGroupLabel}</span>{renderSortableHeader("counterparty_name", "对方户名", <ColumnFilterMenu columnFilters={columnFilters} filterFields={filterFields} group={counterpartyFilter} onApply={onApplyColumnFilters} onClear={onClearColumnFilters} />)}</span>
+                  {renderSortableHeader("counterparty_name", "对方户名", <ColumnFilterMenu columnFilters={columnFilters} filterFields={filterFields} group={counterpartyFilter} onApply={onApplyColumnFilters} onClear={onClearColumnFilters} />)}
                 </FinanceTableColumn>
                 <FinanceTableColumn className="pending-invoices-table-sub-header pending-invoices-table-sub-header--bank pending-invoices-table-cell--amount pending-invoices-col-amount" columnRole="amount" id="amount">
                   {renderSortableHeader("amount", "金额 / 银行账户", <ColumnFilterMenu columnFilters={columnFilters} filterFields={filterFields} group={amountFilter} onApply={onApplyColumnFilters} onClear={onClearColumnFilters} />)}
                 </FinanceTableColumn>
                 <FinanceTableColumn className="pending-invoices-table-sub-header pending-invoices-table-sub-header--bank pending-invoices-col-summary" columnRole="description" id="summary">摘要 / 凭证</FinanceTableColumn>
                 <FinanceTableColumn className="pending-invoices-table-sub-header pending-invoices-table-sub-header--status pending-invoices-table-cell--left-border pending-invoices-col-status" columnRole="status" id="invoice_status">
-                  <span className="pending-invoices-table-column-heading"><span>发票获取状态</span><span className="pending-invoices-status-filter-cell">{statusFilterControl}</span></span>
+                  <span className="pending-invoices-status-filter-cell">{statusFilterControl}</span>
                 </FinanceTableColumn>
                 <FinanceTableColumn className="pending-invoices-table-sub-header pending-invoices-table-sub-header--invoice pending-invoices-table-cell--left-border pending-invoices-col-invoice-no" columnRole="identity" id="trade_date">
-                  <span className="pending-invoices-table-column-heading"><span>{invoiceGroupLabel}</span>{renderSortableHeader("trade_date", "发票号码 / 开票日期")}</span>
+                  {renderSortableHeader("trade_date", "发票号码 / 开票日期")}
                 </FinanceTableColumn>
                 <FinanceTableColumn className="pending-invoices-table-sub-header pending-invoices-table-sub-header--invoice pending-invoices-col-seller" columnRole="identity" id="seller_name">
                   {renderSortableHeader("seller_name", invoicePartyLabel, <ColumnFilterMenu columnFilters={columnFilters} filterFields={filterFields} group={invoicePartyFilter} onApply={onApplyColumnFilters} onClear={onClearColumnFilters} />)}
                 </FinanceTableColumn>
                 <FinanceTableColumn className="pending-invoices-table-sub-header pending-invoices-table-sub-header--invoice pending-invoices-table-cell--amount pending-invoices-col-invoice-amount" columnRole="amount" id="invoice_total">
-                  {renderSortableHeader("invoice_total", "金额 / 支付差额")}
+                  {renderSortableHeader("invoice_total", "金额")}
                 </FinanceTableColumn>
                 <FinanceTableColumn className="pending-invoices-table-sub-header pending-invoices-table-sub-header--oa pending-invoices-table-cell--left-border pending-invoices-col-oa-applicant" columnRole="identity" id="oa_applicant">
-                  <span className="pending-invoices-table-column-heading"><span>OA</span>{renderSortableHeader("oa_applicant", "申请人 / 类型", <ColumnFilterMenu columnFilters={columnFilters} filterFields={filterFields} group={oaFilter} onApply={onApplyColumnFilters} onClear={onClearColumnFilters} />)}</span>
+                  {renderSortableHeader("oa_applicant", "申请人 / 类型", <ColumnFilterMenu columnFilters={columnFilters} filterFields={filterFields} group={oaFilter} onApply={onApplyColumnFilters} onClear={onClearColumnFilters} />)}
                 </FinanceTableColumn>
                 <FinanceTableColumn className="pending-invoices-table-sub-header pending-invoices-table-sub-header--oa pending-invoices-col-oa-project" columnRole="description" id="project_name">
                   {renderSortableHeader("project_name", "项目", <ColumnFilterMenu columnFilters={columnFilters} filterFields={filterFields} group={projectFilter} onApply={onApplyColumnFilters} onClear={onClearColumnFilters} />)}
@@ -713,12 +719,6 @@ function PendingInvoiceTableRow({
             <span className="pending-invoices-money-primary">
               {formatMoney(invoiceTotal, "—")}
             </span>
-            {row.inputInvoices.paymentSummary ? (
-              <>
-                <span className="pending-invoices-cell-secondary">已付 {formatMoney(row.inputInvoices.paymentSummary.paidTotal)}</span>
-                <span className="pending-invoices-cell-secondary">待付 {formatMoney(row.inputInvoices.paymentSummary.remainingAmount, "—")}</span>
-              </>
-            ) : null}
           </span>
         ) : <EmptyValue />}
       </FinanceTableCell>

@@ -501,14 +501,13 @@ export default function PendingInvoicesPage() {
     selected: visibleDirections.length === 1 && visibleDirections[0] === scope && statusFilters.length === 0,
     onSelect: () => handleDirectionChange(scope),
     children: acquisitionOptions(scope).map(option => {
-      const selectedCount = option.codes.filter(code => statusFilters.includes(code)).length;
-      const matchesDirection = visibleDirections.includes(scope);
+      const matchesDirection = visibleDirections.length === 1 && visibleDirections[0] === scope;
       const labels: Record<string, string> = scope === "expense"
         ? { pending: "待取得发票", linked: "有票·付款已覆盖", review: "有票·金额待核对" }
         : { pending: "待开票", linked: "已关联发票" };
       return { id: `${scope}:${option.key}`, label: labels[option.key] ?? option.label,
         count: acquisitionSummary ? option.codes.reduce((sum, code) => sum + acquisitionSummary.scopeStatusCounts[code], 0) : undefined,
-        selected: matchesDirection && selectedCount > 0 ? selectedCount === option.codes.length ? true : "mixed" : false,
+        selected: matchesDirection && setsEqual(new Set(statusFilters), new Set(option.codes)),
         onSelect: () => { handleDirectionChange(scope); setStatusFilters(option.codes); },
       };
     }),

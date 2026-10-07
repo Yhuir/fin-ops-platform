@@ -1013,7 +1013,7 @@ describe("Pending invoices page", () => {
     renderAppAt("/pending-invoices");
     await findPendingInvoicesPage();
     expect(await screen.findByText("已开票·金额缺失")).toBeVisible();
-    expect(screen.getByText("待付 —")).toBeVisible();
+    expect(screen.queryByText("待付 —")).not.toBeInTheDocument();
     const moneyCell = document.querySelector("tbody .pending-invoices-col-invoice-amount") as HTMLElement;
     expect(within(moneyCell).getByText("—", { exact: true })).toBeVisible();
     expect(within(moneyCell).queryByText("2000.00", { exact: true })).not.toBeInTheDocument();
@@ -1067,7 +1067,7 @@ describe("Pending invoices page", () => {
     expect(css).not.toMatch(/\.pending-invoices-sort-button\s*{[^}]*pointer-events:\s*none/s);
     expect(css).toMatch(/\.pending-invoices-selection-toolbar\s*{[^}]*display:\s*inline-flex;[^}]*min-height:\s*30px/s);
     expect(css).toMatch(/\.pending-invoices-table-frame\s*{[^}]*--pending-invoices-table-columns:/s);
-    expect(css).toMatch(/\.pending-invoices-table-column-heading\s*{[^}]*display:\s*grid/s);
+    expect(css).toMatch(/\.pending-invoices-group-headings\s*{[^}]*display:\s*grid/s);
     expect(css).toMatch(/\.finance-table__column\s*{[^}]*position:\s*sticky;[^}]*top:\s*0/s);
     expect(css).toMatch(/\.pending-invoices-icon-button,\s*\.pending-invoices-inline-action\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.pending-invoice-drawer\s+\.finance-drawer__header\s*{[^}]*padding:\s*var\(--fp-space-2\) var\(--fp-space-4\)/s);
@@ -1143,8 +1143,8 @@ describe("Pending invoices page", () => {
     expect(within(page).getByRole("button", { name: "筛选发票获取状态：全部" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: /发票号码 \/ 开票日期/ })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "供应商 / 识别号" })).toBeInTheDocument();
-    expect(within(page).getByRole("columnheader", { name: "金额 / 支付差额" })).toBeInTheDocument();
-    expect(within(page).getByRole("columnheader", { name: "OA 申请人 / 类型" })).toBeInTheDocument();
+    expect(within(page).getByRole("columnheader", { name: "金额" })).toBeInTheDocument();
+    expect(within(page).getByRole("columnheader", { name: "申请人 / 类型" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "项目" })).toBeInTheDocument();
 
     expect(await within(page).findByText("云南开票供应商")).toBeInTheDocument();
@@ -1183,8 +1183,8 @@ describe("Pending invoices page", () => {
     expect(within(page).getByText(/分期供应商二号/)).toBeInTheDocument();
     expect(within(page).getAllByText("+2")).toHaveLength(2);
     expect(within(page).getByText("2800.00")).toBeInTheDocument();
-    expect(within(page).getByText("已付 1500.00")).toBeInTheDocument();
-    expect(within(page).getByText("待付 1300.00")).toBeInTheDocument();
+    expect(within(page).queryByText("已付 1500.00")).not.toBeInTheDocument();
+    expect(within(page).queryByText("待付 1300.00")).not.toBeInTheDocument();
     const invoicedRow = within(page).getByRole("row", { name: /分期供应商/ });
     expect(within(invoicedRow).getByRole("button", { name: "查看全部发票关系" })).toBeInTheDocument();
     expect(within(invoicedRow).queryByText("已配对")).not.toBeInTheDocument();
@@ -1222,7 +1222,8 @@ describe("Pending invoices page", () => {
     const menu = screen.getByRole("menu");
     expect(within(menu).getAllByRole("menuitemcheckbox")).toHaveLength(5);
     await user.click(within(menu).getByRole("menuitemcheckbox", { name: "金额待核对" }));
-    expect(within(page).getByRole("button", { name: /^待取得发票/ })).toHaveAttribute("aria-pressed", "true");
+    expect(within(page).getByRole("button", { name: /^待取得发票/ })).toHaveAttribute("aria-pressed", "false");
+    expect(within(page).getByRole("region", { name: "待找发票分类" }).querySelectorAll('[aria-pressed="true"]')).toHaveLength(0);
     await waitFor(() => expect(JSON.parse(pendingInvoiceRowsRequests(fetchMock).at(-1)!.searchParams.get("filters")!)).toEqual([
       { field: "status_code", operator: "in", values: ["paid_pending_invoice", "invoice_not_fully_paid", "invoice_amount_missing"] },
     ]));

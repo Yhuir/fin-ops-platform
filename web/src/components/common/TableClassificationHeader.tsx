@@ -1,12 +1,13 @@
 import type { CSSProperties } from "react";
 import CountLabel from "./CountLabel";
 import "./tableClassificationHeader.css";
+import "./classificationSelection.css";
 
 export type ClassificationCell = {
   id: string;
   label: string;
   count?: number;
-  selected?: boolean | "mixed";
+  selected?: boolean;
   onSelect?: () => void;
 };
 export type ClassificationGroup = ClassificationCell & {
@@ -27,8 +28,8 @@ export default function TableClassificationHeader({ label, unit, root, groups, p
     const content = <><span>{item.label}</span><CountLabel value={invalid ? undefined : item.count} unit={unit} spaced /></>;
     const className = `table-classification__cell table-classification__${level}`;
     return item.onSelect
-      ? <button key={item.id} type="button" className={className} data-classification-id={item.id}
-          aria-pressed={item.selected ?? false} onClick={item.onSelect}>{content}</button>
+      ? <button key={item.id} type="button" className={`${className} classification-choice`} data-classification-id={item.id}
+          aria-pressed={item.selected ?? false} onClick={item.onSelect}>{content}<span className="classification-choice__check" aria-hidden="true">✓</span></button>
       : <div key={item.id} className={className} data-classification-id={item.id}>{content}</div>;
   }
   return <section className="table-classification" aria-label={label} aria-busy={pending && !invalid} data-count-pending={pending && !invalid ? "true" : "false"}>

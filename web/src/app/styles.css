@@ -3027,6 +3027,7 @@ textarea {
 }
 
 .oa-pending-payments-table-column-group {
+  text-align: center;
   color: var(--fp-text-primary);
   font-weight: 700;
 }
@@ -3069,6 +3070,7 @@ textarea {
 }
 
 .oa-pending-payments-subheader-grid--bank {
+  column-gap: 24px;
   grid-template-columns: minmax(0, 1.2fr) minmax(78px, 0.85fr) minmax(0, 1fr);
 }
 
@@ -3202,7 +3204,7 @@ textarea {
   display: grid;
   min-width: 0;
   align-items: start;
-  gap: 5px;
+  gap: 5px 24px;
   grid-template-columns: minmax(0, 1.2fr) minmax(78px, 0.85fr) minmax(0, 1fr);
 }
 
@@ -7662,6 +7664,7 @@ textarea {
 }
 
 .pending-invoices-table-frame {
+  --pending-invoices-group-height: 32px;
   --pending-invoices-col-counterparty: 14%;
   --pending-invoices-col-amount: 10%;
   --pending-invoices-col-summary: 11%;
@@ -7693,10 +7696,29 @@ textarea {
   table-layout: fixed;
 }
 
-.pending-invoices-table-column-heading {
+.pending-invoices-group-headings {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: var(--pending-invoices-group-height);
   display: grid;
-  gap: 4px;
+  grid-template-columns: var(--pending-invoices-table-columns);
+  min-width: 1380px;
 }
+.pending-invoices-table .finance-table__column { top: var(--pending-invoices-group-height); }
+.pending-invoices-group-heading {
+  padding: 7px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--fp-surface-muted);
+  border-bottom: 1px solid var(--fp-border);
+}
+.pending-invoices-group-heading + .pending-invoices-group-heading { border-left: 2px solid var(--fp-border); }
+.pending-invoices-group-heading--bank { grid-column: 1 / 4; }
+.pending-invoices-group-heading--status { grid-column: 4 / 5; }
+.pending-invoices-group-heading--invoice { grid-column: 5 / 8; }
+.pending-invoices-group-heading--oa { grid-column: 8 / 10; }
 
 .pending-invoices-col-counterparty {
   width: var(--pending-invoices-col-counterparty);

@@ -1,0 +1,36 @@
+/* Shared selection only; each classification owns its region colours and layout. */
+.classification-choice {
+  position: relative;
+  padding-inline: 30px;
+}
+.classification-choice:is(.table-classification__leaf, .invoice-usage-classification__child) {
+  padding-inline: 8px 28px;
+}
+.classification-choice[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 2px #305e83;
+}
+.classification-choice__check {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #305e83;
+  color: #fff;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+  visibility: hidden;
+  pointer-events: none;
+}
+.classification-choice[aria-pressed="true"] > .classification-choice__check { visibility: visible; }
+.classification-choice:is(.table-classification__root, .invoice-usage-classification__all)[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 2px #a8c9e8;
+}
+.classification-choice:is(.table-classification__root, .invoice-usage-classification__all) > .classification-choice__check {
+  background: #e0ebf6;
+  color: #294b6b;
+}
+.classification-choice:focus-visible { outline: 2px dashed #172b4d; outline-offset: -4px; }

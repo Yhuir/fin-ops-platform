@@ -308,11 +308,11 @@ export default function OaPendingPaymentsPage() {
                     ...(values.length ? [{ field: "payment_status", operator: "in" as const, values }] : [])] }));
                 return { id: view, label: view === "completed" ? "已完成 OA" : "进行中 OA",
                   count: summary?.viewCounts[view], tone: view === "completed" ? "green" : "purple",
-                  selected: query.viewMode === view && paymentValues.length === 0, onSelect: () => select([]),
+                  selected: query.viewMode === view && (paymentValues.length === 0 || (paymentValues.length === 2 && paymentValues.includes("paid") && paymentValues.includes("unpaid"))), onSelect: () => select([]),
                   children: (["paid", "unpaid"] as const).map(status => ({
                     id: `${view}:${status}`, label: status === "paid" ? "已关联流水" : "未关联流水",
                     count: summary?.classificationCounts[view][status],
-                    selected: query.viewMode === view && paymentValues.includes(status), onSelect: () => select([status]),
+                    selected: query.viewMode === view && paymentValues.length === 1 && paymentValues[0] === status, onSelect: () => select([status]),
                   })),
                 };
               })} />
