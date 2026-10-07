@@ -2506,47 +2506,48 @@ export default function ReconciliationWorkbenchPage() {
             </div>
           </div>
         </header>
-        {loadError ? (
-          <div className="state-panel error">
-            <span>{loadError}</span>
-            <Button isDisabled={isLoading} onPress={retryWorkbenchDirectRead} size="sm" variant="secondary">
-              重新读取
-            </Button>
-          </div>
-        ) : null}
-        {!loadError && backgroundLoadError ? (
-          <div className="state-panel error">
-            <span>{backgroundLoadError}</span>
-            <Button isDisabled={isRefreshing} onPress={retryWorkbenchDirectRead} size="sm" variant="secondary">
-              重新读取
-            </Button>
-          </div>
-        ) : null}
-        {!loadError && oaSyncStatusError ? (
-          <div className="state-panel error">
-            <span>{oaSyncStatusError}</span>
-            <Button onPress={() => void pollOaSyncStatus()} size="sm" variant="secondary">
-              重试 OA 状态
-            </Button>
-          </div>
-        ) : null}
-        {!loadError && !oaSyncStatusError && oaStatusPanelMessage ? (
-          <div className={`state-panel${oaSyncStatus?.status === "error" ? " error" : ""}`}>{oaStatusPanelMessage}</div>
-        ) : null}
-        {!isLoading && !loadError && isEmpty && isOaReady ? (
-          <div className="state-panel">当前没有可展示的 OA / 银行流水 / 发票记录。</div>
-        ) : null}
+        <div className="workbench-feedback-slot">
+          {loadError ? (
+            <div className="state-panel error">
+              <span>{loadError}</span>
+              <Button isDisabled={isLoading} onPress={retryWorkbenchDirectRead} size="sm" variant="secondary">
+                重新读取
+              </Button>
+            </div>
+          ) : null}
+          {!loadError && backgroundLoadError ? (
+            <div className="state-panel error">
+              <span>{backgroundLoadError}</span>
+              <Button isDisabled={isRefreshing} onPress={retryWorkbenchDirectRead} size="sm" variant="secondary">
+                重新读取
+              </Button>
+            </div>
+          ) : null}
+          {!loadError && oaSyncStatusError ? (
+            <div className="state-panel error">
+              <span>{oaSyncStatusError}</span>
+              <Button onPress={() => void pollOaSyncStatus()} size="sm" variant="secondary">
+                重试 OA 状态
+              </Button>
+            </div>
+          ) : null}
+          {!loadError && !oaSyncStatusError && oaStatusPanelMessage ? (
+            <div className={`state-panel${oaSyncStatus?.status === "error" ? " error" : ""}`}>{oaStatusPanelMessage}</div>
+          ) : null}
+          {!isLoading && !loadError && isEmpty && isOaReady ? (
+            <div className="state-panel">当前没有可展示的 OA / 银行流水 / 发票记录。</div>
+          ) : null}
 
-        {!loadError ? (
-          <div className="workbench-zone-stack">
-            <div className="workbench-zone-slot workbench-zone-slot-top">
-              {pairedZoneElement}
-            </div>
-            <div className="workbench-zone-slot workbench-zone-slot-bottom">
-              {unpairedZoneElement}
-            </div>
+        </div>
+
+        <div className="workbench-zone-stack" style={loadError ? { visibility: "hidden" } : undefined} inert={Boolean(loadError)}>
+          <div className="workbench-zone-slot workbench-zone-slot-top">
+            {pairedZoneElement}
           </div>
-        ) : null}
+          <div className="workbench-zone-slot workbench-zone-slot-bottom">
+            {unpairedZoneElement}
+          </div>
+        </div>
       </div>
 
       <DetailDrawer

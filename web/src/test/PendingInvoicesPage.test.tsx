@@ -1011,6 +1011,7 @@ describe("Pending invoices page", () => {
     };
     installPendingInvoiceFetch({ rowsPayload: () => [row] });
     renderAppAt("/pending-invoices");
+    await findPendingInvoicesPage();
     expect(await screen.findByText("已开票·金额缺失")).toBeVisible();
     expect(screen.getByText("待付 —")).toBeVisible();
     const moneyCell = document.querySelector("tbody .pending-invoices-col-invoice-amount") as HTMLElement;
@@ -1056,7 +1057,7 @@ describe("Pending invoices page", () => {
     expect(css).not.toMatch(/\.pending-invoices-page\s*{[^}]*padding:/s);
     expect(css).not.toContain(".pending-invoices-page__scaffold");
     expect(css).toMatch(/\.pending-invoices-button,\s*\.pending-invoice-status-filter-button\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
-    expect(css).toMatch(/\.finance-page-table-frame\s*{[^}]*height:\s*clamp\(600px, calc\(100dvh - 132px\), 1080px\)/s);
+    expect(css).toMatch(/\.finance-page-table-frame\s*{[^}]*flex:\s*1 1 0;[^}]*height:\s*auto;[^}]*min-height:\s*240px/s);
     expect(css).not.toMatch(/\.pending-invoices-table-frame\s*{[^}]*border-radius:/s);
     expect(css).toMatch(/\.pending-invoices-table-shell\s*{[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden/s);
     expect(css).toMatch(/\.finance-table--contained \.finance-table__scroll\s*{[^}]*overflow:\s*auto;[^}]*overscroll-behavior:\s*contain/s);

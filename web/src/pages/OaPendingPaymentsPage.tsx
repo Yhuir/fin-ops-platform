@@ -10,7 +10,6 @@ import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import PageToolbar from "../components/common/PageToolbar";
 import QuerySearch from "../components/common/QuerySearch";
-import StatePanel from "../components/common/StatePanel";
 import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer";
 import OaPendingPaymentExportDrawer from "../components/oaPendingPayments/OaPendingPaymentExportDrawer";
 import OaPendingPaymentsTable from "../components/oaPendingPayments/OaPendingPaymentsTable";
@@ -78,7 +77,6 @@ export default function OaPendingPaymentsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [selectedOaRowIds, setSelectedOaRowIds] = useState<Set<string>>(() => new Set());
   const [detailTarget, setDetailTarget] = useState<OaPendingPaymentDetailTarget | null>(null);
@@ -86,6 +84,7 @@ export default function OaPendingPaymentsPage() {
   const [exportOpen, setExportOpen] = useState(false);
   const [bankLinkDrawerOpen, setBankLinkDrawerOpen] = useState(false);
   const requestIdRef = useRef(0);
+  const tableWrapRef = useRef<HTMLDivElement | null>(null);
   const selectedOaRowIdList = useMemo(() => [...selectedOaRowIds], [selectedOaRowIds]);
 
   const clearVisibleRows = useCallback(() => {
@@ -115,10 +114,14 @@ export default function OaPendingPaymentsPage() {
     requestIdRef.current = requestId;
     if (mode === "reset") {
       setLoading(true);
+      setRows([]);
+      setSelectedOaRowIds(new Set());
+      if (tableWrapRef.current) tableWrapRef.current.scrollTop = 0;
     } else if (mode === "refresh") {
       setRefreshing(true);
     }
     setError(null);
+    if (mode === "reset") setFeedback(null);
     try {
       const payload = await fetchOaPendingPaymentRows({ ...query, signal });
       if (signal?.aborted || requestId !== requestIdRef.current) {
@@ -248,7 +251,7 @@ export default function OaPendingPaymentsPage() {
           aria-label="关联支出流水"
           onClick={() => setBankLinkDrawerOpen(true)}
           className="oa-pending-payments-button oa-pending-payments-button--primary"
-          disabled={!canOperateData || selectedOaRowIds.size === 0}
+          disabled={!canOperateData || loading || refreshing || selectedOaRowIds.size === 0}
           type="button"
         >
           <PanelRightOpen aria-hidden="true" size={16} />
@@ -276,8 +279,6 @@ export default function OaPendingPaymentsPage() {
       </button>
     </div>
   ), [canOperateData, loadRows, loading, query.viewMode, refreshing, selectedOaRowIds.size]);
-  const visibleError = error ?? actionError;
-  const isEmpty = !loading && !refreshing && !visibleError && rows.length === 0;
   const paymentValues = query.filters.find(filter => filter.field === "payment_status")?.values ?? [];
   const titleAccessory = (
     <div className="page-title-accessory-group">
@@ -297,8 +298,8 @@ export default function OaPendingPaymentsPage() {
   return (
     <>
       <div className="oa-pending-payments-page" data-testid="oa-pending-payments-page">
-        <PageScaffold title="OA 待付款核对" titleAccessory={titleAccessory} actions={actions}>
-          <div className="oa-pending-payments-content">
+        <PageScaffold fillViewport title="OA 待付款核对" titleAccessory={titleAccessory} actions={actions}>
+          <div className="oa-pending-payments-content finance-table-layout">
             <TableClassificationHeader label="OA 核对分类" unit="条" pending={loading || refreshing} invalid={Boolean(error)}
               root={{ id: "all", label: "OA 核对范围", count: summary ? summary.viewCounts.completed + summary.viewCounts.in_progress : undefined }}
               groups={(["completed", "in_progress"] as const).map(view => {
@@ -317,6 +318,14 @@ export default function OaPendingPaymentsPage() {
               })} />
             <PageToolbar
               className="oa-pending-payments-query"
+              left={(
+                <div className="page-feedback-slot">
+                  {error ? <div className="oa-pending-payments-alert" role="alert">{error}</div>
+                    : feedback ? <div className="oa-pending-payments-alert oa-pending-payments-alert--success" role="status">{feedback}</div>
+                    : !canOperateData ? <span>当前页面暂不可关联支出流水。</span>
+                    : loading || refreshing ? <span role="status">OA 待付款核对数据正在加载，请稍候。</span> : null}
+                </div>
+              )}
               right={(
                 <div className="oa-pending-payments-query-controls">
                   <BusinessPeriodPicker
@@ -345,57 +354,33 @@ export default function OaPendingPaymentsPage() {
                 </div>
               )}
             />
-            {visibleError ? (
-              <div className="oa-pending-payments-alert" role="alert">
-                {visibleError}
-              </div>
-            ) : null}
-            {feedback ? (
-              <div className="oa-pending-payments-alert oa-pending-payments-alert--success" role="status">
-                {feedback}
-              </div>
-            ) : null}
-            {loading ? (
-              <div className="oa-pending-payments-loading" aria-label="OA待付款核对加载中">
-                <span className="oa-pending-payments-loading__bar" />
-                <span className="oa-pending-payments-loading__panel" />
-                <span className="oa-pending-payments-loading__panel" />
-              </div>
-            ) : (
-              <>
-                {!canOperateData ? (
-                  <StatePanel compact tone="warning">
-                    当前页面暂不可关联支出流水。
-                  </StatePanel>
-                ) : null}
-                {isEmpty ? <StatePanel tone="empty" compact>当前条件下暂无记录。</StatePanel> : null}
-                <OaPendingPaymentsTable
-                  rows={rows}
-                  page={query.page}
-                  pageSize={query.pageSize}
-                  total={total}
-                  oaCount={summary?.oaCount}
-                  filterConfigs={filterConfigs}
-                  filterOptions={filterOptions}
-                  filters={query.filters}
-                  onFilterApply={handleFilterApply}
-                  onFilterClear={handleFilterClear}
-                  onSortChange={handleSortChange}
-                  onPageChange={(page) => setQuery((current) => ({ ...current, page }))}
-                  onPageSizeChange={(pageSize) => setQuery((current) => ({ ...current, page: 1, pageSize }))}
-                  onOpenDetail={setDetailTarget}
-                  selectedOaRowIds={selectedOaRowIds}
-                  onToggleOaSelection={canOperateData && query.viewMode === "in_progress" ? handleToggleOaSelection : undefined}
-                  emptyStateMessage={
-                    error
-                      ? "OA 待付款核对加载失败，请点击刷新重试。"
-                      : refreshing
-                        ? "OA 待付款核对数据正在刷新，请稍候。"
-                        : undefined
-                  }
-                />
-              </>
-            )}
+            <OaPendingPaymentsTable
+              rows={rows}
+              loading={loading || refreshing}
+              tableWrapRef={tableWrapRef}
+              page={query.page}
+              pageSize={query.pageSize}
+              total={total}
+              oaCount={summary?.oaCount}
+              filterConfigs={filterConfigs}
+              filterOptions={filterOptions}
+              filters={query.filters}
+              onFilterApply={handleFilterApply}
+              onFilterClear={handleFilterClear}
+              onSortChange={handleSortChange}
+              onPageChange={(page) => setQuery((current) => ({ ...current, page }))}
+              onPageSizeChange={(pageSize) => setQuery((current) => ({ ...current, page: 1, pageSize }))}
+              onOpenDetail={setDetailTarget}
+              selectedOaRowIds={selectedOaRowIds}
+              onToggleOaSelection={canOperateData && query.viewMode === "in_progress" ? handleToggleOaSelection : undefined}
+              emptyStateMessage={
+                error
+                  ? "OA 待付款核对加载失败，请点击刷新重试。"
+                  : loading || refreshing
+                    ? "OA 待付款核对数据正在刷新，请稍候。"
+                    : "当前条件下暂无记录。"
+              }
+            />
           </div>
         </PageScaffold>
       </div>

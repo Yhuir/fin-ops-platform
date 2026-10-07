@@ -540,7 +540,8 @@ describe("Input invoice usage page", () => {
     const compositeFilter = cssRule(styles, ".input-invoice-usage-filter-menu__panel--composite");
 
     expect(tableFrame).not.toContain("border-radius");
-    expect(tableFrame).toContain("height: clamp(600px, calc(100dvh - 132px), 1080px)");
+    expect(tableFrame).toContain("flex: 1 1 0");
+    expect(tableFrame).toContain("min-height: 240px");
     expect(tableFrame).toContain("overflow: hidden");
     expect(tableShell).toContain("height: 100%");
     expect(tableShell).toContain("min-height: 0");

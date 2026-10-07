@@ -854,7 +854,7 @@ describe("OA pending payments page", () => {
     });
     const missingPrimitiveTargets = [
       sourceByPath["src/pages/OaPendingPaymentsPage.tsx"].includes("PageScaffold") ? null : "OaPendingPaymentsPage.tsx should keep PageScaffold",
-      sourceByPath["src/pages/OaPendingPaymentsPage.tsx"].includes("StatePanel") ? null : "OaPendingPaymentsPage.tsx should keep project empty/error state primitives",
+      sourceByPath["src/pages/OaPendingPaymentsPage.tsx"].includes("page-feedback-slot") ? null : "OaPendingPaymentsPage.tsx should keep feedback inside the stable toolbar",
       ["PopoverRoot", "PopoverTrigger", "PopoverContent", "PopoverDialog"].every((symbol) =>
         sourceByPath["src/components/oaPendingPayments/OaPendingPaymentsTable.tsx"].includes(symbol))
         ? null
@@ -885,7 +885,7 @@ describe("OA pending payments page", () => {
     const fieldControls = cssRule(styles, ".oa-pending-payments-field input,\\n.oa-pending-payments-field select");
     const tableShell = cssRule(styles, ".oa-pending-payments-table-shell");
     const table = cssRule(styles, ".oa-pending-payments-table .finance-table__content");
-    const loading = cssRule(styles, ".oa-pending-payments-loading__bar,\\n.oa-pending-payments-loading__panel");
+    const loading = cssRule(styles, ".page-feedback-slot, .workbench-feedback-slot");
     const detailButton = cssRule(styles, ".oa-pending-payments-detail-button");
     const sortButton = cssRule(styles, ".oa-pending-payments-sort-button");
     const tableCell = cssRule(styles, ".oa-pending-payments-table-cell");
@@ -912,7 +912,8 @@ describe("OA pending payments page", () => {
     expect(tableShell).toContain("overflow: hidden");
     expect(tableSource).toContain('scrollMode="contained"');
     expect(table).toContain("table-layout: fixed");
-    expect(loading).toContain("border-radius: var(--fp-radius-sm)");
+    expect(loading).toContain("height: 36px");
+    expect(styles).not.toContain(".oa-pending-payments-loading__panel");
     expect(detailButton).toContain("var(--motion-fast)");
     expect(sortButton).toContain("var(--motion-fast)");
     expect(tableCell).toContain("font-size: 12px");

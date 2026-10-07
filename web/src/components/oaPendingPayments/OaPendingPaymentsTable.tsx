@@ -43,6 +43,7 @@ type OaColumnFilterValue = InputInvoiceUsageFilterValue;
 
 type OaPendingPaymentsTableProps = {
   rows: OaPendingPaymentRow[];
+  loading?: boolean;
   page: number;
   pageSize: number;
   total: number;
@@ -135,6 +136,7 @@ function cx(...values: Array<string | false | undefined>) {
 
 export default function OaPendingPaymentsTable({
   rows,
+  loading = false,
   page,
   pageSize,
   total,
@@ -159,6 +161,7 @@ export default function OaPendingPaymentsTable({
     <div
       className="finance-page-table-frame oa-pending-payments-table-frame"
       data-testid="oa-pending-payments-table-frame"
+      aria-busy={loading}
     >
       <FinanceTable
         ariaLabel="OA待付款核对表格"
@@ -231,6 +234,7 @@ export default function OaPendingPaymentsTable({
                             <Checkbox
                               aria-label={`选择 OA ${row.oa.applicantName || "未填写申请人"}`}
                               className="oa-pending-payments-row-checkbox"
+                              isDisabled={loading}
                               isSelected={selected}
                               onChange={() => onToggleOaSelection?.(row)}
                             />

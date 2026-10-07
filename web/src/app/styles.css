@@ -168,6 +168,10 @@
   box-sizing: border-box;
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 html,
 body,
 #root {
@@ -2855,6 +2859,7 @@ textarea {
 }
 
 .oa-pending-payments-query .page-toolbar__group--left {
+  flex: 1 1 220px;
   min-width: 0;
   max-width: 100%;
 }
@@ -2972,30 +2977,6 @@ textarea {
   display: flex;
   justify-content: flex-end;
   gap: var(--fp-space-2);
-}
-
-.oa-pending-payments-loading {
-  display: grid;
-  gap: var(--fp-space-3);
-}
-
-.oa-pending-payments-loading__bar,
-.oa-pending-payments-loading__panel {
-  display: block;
-  overflow: hidden;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
-  background: linear-gradient(90deg, var(--fp-surface-muted), var(--fp-surface), var(--fp-surface-muted));
-  background-size: 240% 100%;
-  animation: input-invoice-usage-loading 1.2s ease-in-out infinite;
-}
-
-.oa-pending-payments-loading__bar {
-  height: 44px;
-}
-
-.oa-pending-payments-loading__panel {
-  height: 96px;
 }
 
 .oa-pending-payments-table-frame {
@@ -9853,6 +9834,7 @@ textarea {
 }
 
 .finance-dialog__body {
+  scrollbar-gutter: stable;
   min-height: 0;
   overflow: auto;
   padding: var(--fp-space-5);
@@ -9880,6 +9862,12 @@ textarea {
 
 .finance-drawer__content {
   max-width: 100vw;
+}
+
+/* Portals cover the visual viewport, including the reserved document gutter. */
+.finance-drawer__content:not(.finance-drawer__content--persistent),
+.finance-drawer__backdrop {
+  width: 100vw;
 }
 
 .finance-drawer__content[data-exiting] {
@@ -9922,7 +9910,7 @@ textarea {
   position: fixed;
   z-index: 40;
   top: 0;
-  right: 0;
+  right: calc(100% - 100vw);
   bottom: 0;
   display: flex;
   justify-content: flex-end;
@@ -9996,6 +9984,7 @@ textarea {
 }
 
 .finance-drawer__body {
+  scrollbar-gutter: stable;
   min-height: 0;
   flex: 1;
   overflow: auto;
@@ -10041,9 +10030,10 @@ textarea {
 
 .finance-page-table-frame {
   width: 100%;
-  height: clamp(600px, calc(100dvh - 132px), 1080px);
+  flex: 1 1 0;
+  height: auto;
+  min-height: 240px;
   min-width: 0;
-  min-height: 0;
   overflow: hidden;
 }
 
@@ -24138,3 +24128,26 @@ body.column-layout-dragging {
 .payment-rule-applicant-status::after { content: ""; position: absolute; width: 11px; height: 11px; border-radius: 50%; top: 2px; left: 2px; background: white; }
 .payment-rule-applicant-status[data-enabled="true"] { background: #2563eb; }
 .payment-rule-applicant-status[data-enabled="true"]::after { left: 13px; }
+
+/* List routes opt into remaining viewport space; natural document pages keep scrolling. */
+.app-shell-content:has(.page-stack--table) { display: flex; flex-direction: column; height: 100dvh; min-height: 0; }
+.app-shell-content:has(.page-stack--table) > .global-header { flex-shrink: 0; }
+.page-body:has(.page-stack--table) { display: flex; flex: 1; min-height: 0; }
+.page-body > :has(> .page-stack--table) { display: flex; flex: 1; min-width: 0; min-height: 0; }
+.page-stack.page-stack--table { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.page-stack--table > *, .finance-table-layout > * { flex-shrink: 0; }
+.page-stack--table .finance-table-layout { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.page-stack--table .finance-page-table-frame { flex: 1 1 0; }
+.page-feedback-slot, .workbench-feedback-slot { width: 100%; height: 36px; flex-shrink: 0; overflow: auto; scrollbar-gutter: stable; font-size: var(--fp-text-label); }
+.page-feedback-slot > *, .workbench-feedback-slot > * { margin: 0; padding: 4px 8px; }
+.workbench-feedback-slot { height: 40px; }
+.page-feedback-floating { position: fixed; bottom: 16px; right: 24px; z-index: 30; max-width: min(560px, calc(100vw - 48px)); padding: 12px; background: var(--fp-surface); border: 1px solid var(--fp-border); }
+.operation-history-table-frame .finance-table__content { table-layout: fixed; }
+.operation-history-table-frame th:nth-child(1) { width: 17%; }
+.operation-history-table-frame th:nth-child(2) { width: 16%; }
+.operation-history-table-frame th:nth-child(3) { width: 13%; }
+.operation-history-table-frame th:nth-child(4) { width: 18%; }
+.operation-history-table-frame th:nth-child(5) { width: 18%; }
+.operation-history-table-frame th:nth-child(6) { width: 10%; }
+.operation-history-table-frame th:nth-child(7) { width: 8%; }
+.operation-history-more { min-height: 40px; align-items: center; }

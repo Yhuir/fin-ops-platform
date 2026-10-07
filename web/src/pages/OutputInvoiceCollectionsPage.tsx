@@ -323,13 +323,13 @@ export default function OutputInvoiceCollectionsPage() {
   return (
     <>
       <div className="output-invoice-collections-page" data-testid="output-invoice-collections-page">
-        <PageScaffold
+        <PageScaffold fillViewport
           actions={actions}
           className="invoice-count-page-scaffold"
           title="销项发票收款情况"
           titleAccessory={titleAccessory}
         >
-          <div className="output-invoice-collections-content">
+          <div className="output-invoice-collections-content finance-table-layout">
             <TableClassificationHeader label="销项发票分类" unit="张" pending={countsPending} invalid={Boolean(error)}
               root={{ id: "all", label: "全部销项发票", count: statusTotal,
                 selected: selectedStatuses.length === 0, onSelect: () => selectStatuses([]) }}

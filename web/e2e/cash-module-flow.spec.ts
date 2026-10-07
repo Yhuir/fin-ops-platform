@@ -150,6 +150,8 @@ test.describe("cash module deterministic browser flow", () => {
   test("uses a stable submission ID on explicit retry and deletion rereads the cash pool and report", async ({ page }, testInfo) => {
     const api = await installCashFixtures(page, { firstCreateFailure: true }); await page.goto("/cash?section=accounts"); await expect(page.getByRole("grid", { name: "往来账总表" })).toBeVisible();
     await page.getByRole("link", { name: "现金流水", exact: true }).click(); await expect(page.getByRole("grid", { name: "现金流水明细" })).toBeVisible();
+    const stableTable = page.getByRole("grid", { name: "现金流水明细" });
+    const beforeSave = await stableTable.boundingBox();
     await page.getByRole("button", { name: "新增流水", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "新增现金流水" }); await expect(dialog).toBeVisible();
     await dialog.getByRole("textbox", { name: "金额（元）" }).fill("88.60"); await dialog.getByRole("textbox", { name: "内容说明", exact: true }).fill("合成新增现金流水");
@@ -163,6 +165,12 @@ test.describe("cash module deterministic browser flow", () => {
     await expect(dialog.getByRole("button", { name: "保存", exact: true })).toHaveCount(0);
     await page.keyboard.press("Escape"); await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "关闭抽屉" }).click(); await expect(dialog).toHaveCount(0);
+    const afterSave = await stableTable.boundingBox();
+    expect(afterSave?.x).toBe(beforeSave?.x);
+    expect(afterSave?.y).toBe(beforeSave?.y);
+    expect(afterSave?.width).toBe(beforeSave?.width);
+    await page.getByRole("button", { name: "关闭保存提示" }).click();
+    expect((await stableTable.boundingBox())?.y).toBe(beforeSave?.y);
     expect(api.submitted).toHaveLength(2); expect(api.submitted[0].id).toMatch(/^[0-9a-f-]{36}$/); expect(api.submitted[1].id).toBe(api.submitted[0].id);
     await expect(page.getByRole("grid", { name: "现金流水明细" })).toContainText("合成新增现金流水");
     await expectNoUnexpectedSuccessUiErrors(page);
@@ -372,6 +380,8 @@ test.describe("cash module deterministic browser flow", () => {
       await expect(page.locator(".cash-page").getByText(/^正在读取/)).toHaveCount(0);
       const trigger = page.getByRole("button", { name: label, exact: true });
       await trigger.scrollIntoViewIfNeeded();
+      // Resolve sticky action-column occlusion before measuring the overlay itself.
+      await trigger.click({ trial: true });
       const positions = () => page.locator(".cash-page").evaluate(root => ({
         boxes: [...root.querySelectorAll('.page-header, .cash-toolbar, .finance-table, .finance-table__footer')].map(node => { const b = node.getBoundingClientRect(); return [b.x, b.y, b.width, b.height]; }),
         scroll: [...root.querySelectorAll('.cash-view, .cash-scroll-content, .finance-table__scroll')].map(node => [node.scrollLeft, node.scrollTop]),

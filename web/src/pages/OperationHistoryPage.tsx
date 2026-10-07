@@ -80,6 +80,7 @@ export default function OperationHistoryPage() {
       setNextCursor(result.next_cursor);
     } catch (loadError) {
       if (controller.signal.aborted || listRequest.current !== controller) return;
+      if (!cursor) { setRows([]); setNextCursor(null); }
       setError(loadError instanceof Error ? loadError.message : "操作历史加载失败。");
     } finally {
       if (listRequest.current === controller) {
@@ -143,7 +144,7 @@ export default function OperationHistoryPage() {
   };
 
   return (
-    <PageScaffold
+    <PageScaffold fillViewport
       className="operation-history-page"
       title="操作历史"
       actions={(
@@ -198,10 +199,10 @@ export default function OperationHistoryPage() {
         <Button type="submit" variant="primary"><Search aria-hidden="true" size={16} />查询</Button>
       </form>
 
-      {error ? <StatePanel tone="error" title="操作历史加载失败">{error}</StatePanel> : null}
-      {!error ? (
-        <div aria-busy={loading}>
-          <FinanceTable ariaLabel="操作历史" minWidth={1040}>
+      <div className="finance-page-table-frame operation-history-table-frame" aria-busy={loading}>
+          <FinanceTable ariaLabel="操作历史" minWidth={1040} scrollMode="contained"
+            footer={<div className="operation-history-more">{nextCursor ? <Button isPending={loadingMore} variant="secondary" onPress={() => void load(nextCursor)}>加载更多</Button> : null}</div>}>
+
             <FinanceTableHeader>
               <FinanceTableColumn id="time" columnRole="date" isRowHeader>时间</FinanceTableColumn>
               <FinanceTableColumn id="actor" columnRole="identity">操作人</FinanceTableColumn>
@@ -211,7 +212,7 @@ export default function OperationHistoryPage() {
               <FinanceTableColumn id="outcome" columnRole="status">结果</FinanceTableColumn>
               <FinanceTableColumn id="detail" columnRole="action">详情</FinanceTableColumn>
             </FinanceTableHeader>
-            <FinanceTableBody items={rows} renderEmptyState={() => loading ? <span className="sr-only">正在加载操作历史</span> : "暂无操作记录"}>
+            <FinanceTableBody items={rows} renderEmptyState={() => error ? <StatePanel tone="error" title="操作历史加载失败">{error}</StatePanel> : loading ? <span role="status">正在加载操作历史</span> : "暂无操作记录"}>
               {(row) => {
                 const outcome = outcomeView(row.outcome);
                 return (
@@ -230,10 +231,8 @@ export default function OperationHistoryPage() {
               }}
             </FinanceTableBody>
           </FinanceTable>
-        </div>
-      ) : null}
-
-      {nextCursor ? <div className="operation-history-more"><Button isPending={loadingMore} variant="secondary" onPress={() => void load(nextCursor)}>加载更多</Button></div> : null}
+      </div>
+      {error && rows.length > 0 ? <div className="page-feedback-floating" role="alert">{error}</div> : null}
 
       <OperationHistoryDetailDrawer
         error={detailError}

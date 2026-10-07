@@ -27,7 +27,9 @@ describe("finance table alignment styles", () => {
     expectDeclaration(".finance-table", /border-radius:\s*0/);
     expectDeclaration(".finance-table", /background:\s*var\(--fp-surface\)/);
     expectDeclaration(".finance-table", /padding:\s*0/);
-    expectDeclaration(".finance-page-table-frame", /height:\s*clamp\(600px, calc\(100dvh - 132px\), 1080px\)/);
+    expectDeclaration(".finance-page-table-frame", /flex:\s*1 1 0/);
+    expectDeclaration(".finance-page-table-frame", /min-height:\s*240px/);
+    expectDeclaration("html", /scrollbar-gutter:\s*stable/);
     expectDeclaration(".finance-page-table-frame", /overflow:\s*hidden/);
     expectDeclaration(".finance-table__scroll", /overflow-x:\s*auto/);
     expectDeclaration(".finance-table--contained", /height:\s*100%/);

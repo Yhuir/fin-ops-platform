@@ -447,17 +447,17 @@ export default function InputInvoiceUsagePage() {
   return (
     <>
       <div className="input-invoice-usage-page" data-testid="input-invoice-usage-page">
-        <PageScaffold
+        <PageScaffold fillViewport
           className="invoice-count-page-scaffold"
           title="进项发票使用情况"
           titleAccessory={titleAccessory}
           actions={actions}
         >
-          <div className="input-invoice-usage-content switch-surface">
+          <div className="input-invoice-usage-content switch-surface finance-table-layout">
             {classification ? <InvoiceUsageClassification data={classification} selectedId={selectedClassification}
               pending={loading || refreshing} invalid={Boolean(error)} onSelect={handleClassificationSelect} /> : null}
             {!classification && !loading && !error ? <StatePanel tone="error" compact>分类数据缺失，请刷新页面。</StatePanel> : null}
-            <div className="switch-surface__body">
+            <div className="switch-surface__body finance-table-layout">
             <PageToolbar
               className="input-invoice-usage-query-toolbar"
               right={(

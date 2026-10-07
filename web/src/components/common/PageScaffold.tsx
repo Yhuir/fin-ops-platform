@@ -7,11 +7,12 @@ type PageScaffoldProps = {
   actions?: ReactNode;
   children: ReactNode;
   className?: string;
+  fillViewport?: boolean;
 };
 
-export default function PageScaffold({ title, titleAccessory, description, actions, children, className }: PageScaffoldProps) {
+export default function PageScaffold({ title, titleAccessory, description, actions, children, className, fillViewport = false }: PageScaffoldProps) {
   return (
-    <div className={className ? `page-stack ${className}` : "page-stack"}>
+    <div className={["page-stack", fillViewport && "page-stack--table", className].filter(Boolean).join(" ")}>
       <header className="page-header">
         <div>
           <div className="page-title-row">

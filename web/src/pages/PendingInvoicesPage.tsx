@@ -595,7 +595,7 @@ export default function PendingInvoicesPage() {
 
   return (
     <div className="pending-invoices-page" data-testid="pending-invoices-page">
-      <PageScaffold
+      <PageScaffold fillViewport
         actions={(
           <div className="pending-invoices-toolbar-actions pending-invoices-toolbar-actions--primary">
             <Button onPress={() => setRefreshToken((current) => current + 1)} isDisabled={loading} size="sm" variant="secondary">
@@ -616,7 +616,7 @@ export default function PendingInvoicesPage() {
         title="待找发票"
         titleAccessory={titleAccessory}
       >
-        <div className="pending-invoices-content">
+        <div className="pending-invoices-content finance-table-layout">
         <TableClassificationHeader label="待找发票分类" unit="笔" pending={loading} invalid={Boolean(error)}
           root={{ id: "all", label: "全部流水", count: summaryCounts.all,
             selected: visibleDirections.length === 2 && statusFilters.length === 0, onSelect: () => handleDirectionChange("all") }}
