@@ -372,6 +372,54 @@ test.describe("cash module deterministic browser flow", () => {
     await expect(popup.getByRole("checkbox", { name: "历史停用账户", exact: true })).toBeChecked();
   });
 
+  test("cash flow queries retain the table position through loading, empty and error states", async ({ page }) => {
+    await installCashFixtures(page);
+    await page.goto("/cash?section=flows");
+    const table = page.getByRole("grid", { name: "现金流水明细" });
+    await expect(table).toContainText("合成个人借出");
+    const before = await table.boundingBox();
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    let failed = false;
+    await page.route("**/api/cash/flows?*", async route => {
+      await held;
+      if (failed) await route.fulfill({ status: 503, json: { error: "unavailable", message: "现金读取失败" } });
+      else await route.fallback();
+    });
+    const check = async () => {
+      const after = await table.boundingBox();
+      for (const dimension of ["x", "y", "width"] as const) expect(Math.abs(after![dimension] - before![dimension])).toBeLessThanOrEqual(1);
+    };
+    await page.getByRole("textbox", { name: "搜索流水", exact: true }).fill("不存在的流水");
+    try {
+      await page.getByRole("button", { name: "查询", exact: true }).click();
+      await expect(page.getByRole("region", { name: "现金流水", exact: true })).toHaveAttribute("aria-busy", "true");
+      await check();
+    } finally { release(); }
+    await expect(table).toContainText("当前范围无现金流水。"); await check();
+    failed = true;
+    await page.getByRole("button", { name: "刷新", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("现金读取失败"); await check();
+  });
+
+  test("empty monthly task feedback does not displace any grouped table during refresh", async ({ page }) => {
+    await installCashFixtures(page);
+    await page.goto("/cash?section=tasks");
+    await expect(page.getByRole("region", { name: "本月任务处理" })).toHaveAttribute("aria-busy", "false");
+    const boxes = () => page.locator(".cash-task-group table").evaluateAll(tables => tables.map(table => { const b = table.getBoundingClientRect(); return [b.x, b.y, b.width]; }));
+    const before = await boxes(); expect(before).toHaveLength(3);
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    await page.route("**/api/cash/task-occurrences?*", async route => { await held; await route.fallback(); });
+    try {
+      await page.getByRole("button", { name: "刷新", exact: true }).click();
+      await expect(page.getByRole("region", { name: "本月任务处理" })).toHaveAttribute("aria-busy", "true");
+      expect(await boxes()).toEqual(before);
+    } finally { release(); }
+    await expect(page.getByRole("region", { name: "本月任务处理" })).toHaveAttribute("aria-busy", "false");
+    expect(await boxes()).toEqual(before);
+  });
+
   test("every cash view uses anchored overlays without background layout or scroll displacement", async ({ page }, testInfo) => {
     const api = await installCashFixtures(page); await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/cash?section=accounts");

@@ -89,11 +89,13 @@ export default function CashFlowTable({ itemId, taskOccurrenceId, initialCriteri
       <CashFilterPopover label="方向" value={criteria.kinds} onApply={kinds => applyCriteria({ kinds, page: 1 })} options={[{ value: "receipt", label: "收入" }, { value: "payment", label: "支出" }, { value: "transfer", label: "内部转账" }]} />
       <CashSortMenu sort={sort} order={order} onChange={applySort} options={[{ value: "amount", label: "流水金额" }]} /><div className="cash-toolbar-actions">{actions}</div>
     </form>
-    <CashNotice error={validation || query.error?.message} />
-
+    <div className="cash-flow-summary-slot">
+      {validation || query.error ? <CashNotice error={validation || query.error?.message} /> :
+        <div className="cash-summary"><span>筛选合计：收入 {data ? cashAmount(data.summary.filtered_totals.income_amount) : "—"}</span><span>支出 {data ? cashAmount(data.summary.filtered_totals.expense_amount) : "—"}</span><span>内部转账 {data ? cashAmount(data.summary.filtered_totals.transfer_amount) : "—"}</span><Button size="sm" variant="secondary" isDisabled={!data} aria-expanded={showBalances} onPress={() => setShowBalances(!showBalances)}>账户期间余额</Button>
+          {data?.summary.account_balances.some(row => row.ending_balance?.startsWith("-")) && <span className="cash-hint">部分账户账面为负，请核对或补录。</span>}
+        </div>}
+    </div>
     {data && <>
-      <div className="cash-summary"><span>筛选合计：收入 {cashAmount(data.summary.filtered_totals.income_amount)}</span><span>支出 {cashAmount(data.summary.filtered_totals.expense_amount)}</span><span>内部转账 {cashAmount(data.summary.filtered_totals.transfer_amount)}</span><Button size="sm" variant="secondary" aria-expanded={showBalances} onPress={() => setShowBalances(!showBalances)}>账户期间余额</Button></div>
-      {data.summary.account_balances.some(row => row.ending_balance?.startsWith("-")) && <p className="cash-hint">部分账户账面为负，请核对或补录。</p>}
       {showBalances && <AppDrawer open title="账户期间余额" width={960} className="cash-module cash-drawer" onClose={() => setShowBalances(false)}><FinanceTable ariaLabel="账户期间余额" minWidth={900}>
         <FinanceTableHeader>{["账户", "记账范围", "期间期初", "已知起算余额", "期间转入", "期间转出", "期末余额"].map((label, index) => <FinanceTableColumn key={label} isRowHeader={index === 0} columnRole={index === 0 ? "identity" : index === 1 ? "description" : "amount"}>{label}</FinanceTableColumn>)}</FinanceTableHeader>
         <FinanceTableBody>{data.summary.account_balances.map(row => <FinanceTableRow key={row.account_id} id={row.account_id}>

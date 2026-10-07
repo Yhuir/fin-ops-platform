@@ -209,3 +209,6 @@
 
 .cash-book-surface { flex: 1; min-height: 0; }
 .cash-book-surface > .switch-surface__body { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
+
+.cash-flow-summary-slot { height: 48px; flex-shrink: 0; overflow: auto; scrollbar-gutter: stable; }
+.cash-flow-summary-slot > .cash-notice { margin: 0; }
