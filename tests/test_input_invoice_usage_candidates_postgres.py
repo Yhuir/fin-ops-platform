@@ -148,19 +148,26 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
         first=self.service.candidate_rows({'page_size':['200']})
         second=self.service.candidate_rows({'page_size':['200'],'page':['2']})
         ids=[r['invoiceId'] for r in first['rows']+second['rows']]
-        self.assertEqual(len(ids),210)
-        self.assertEqual(len(set(ids)),210)
-        self.assertEqual(first['pagination']['total'],210)
-        self.assertEqual(first['relationCounts'],{'all':210,'linked':3,'unlinked':207})
-        linked=self.service.candidate_rows({'bank_relation':['linked']})
-        self.assertEqual({r['invoiceId'] for r in linked['rows']},{'candidate-208','candidate-209','candidate-210'})
-        self.assertEqual(linked['summary']['totalWithTax'],'30.00')
-        self.assertEqual(linked['relationCounts'],first['relationCounts'])
-        exact=self.service.candidate_rows_by_invoice_ids(['candidate-208','candidate-209'])
-        self.assertEqual({r['invoiceId'] for r in exact['rows']},{'candidate-208','candidate-209'})
+        self.assertEqual(len(ids),207)
+        self.assertEqual(len(set(ids)),207)
+        self.assertEqual(first['pagination']['total'],207)
+        self.assertNotIn('relationCounts', first)
+        unused_filter = [{'field': 'usage_status', 'operator': 'in', 'values': ['unused']}]
+        unused = self.service.list_rows(page=1, page_size=200, filters=unused_filter)
+        unused_next = self.service.list_rows(page=2, page_size=200, filters=unused_filter)
+        self.assertEqual(set(ids), {r['invoiceId'] for r in unused['rows'] + unused_next['rows']})
+        self.assertEqual(first['summary']['invoiceCount'], unused['summary']['invoiceCount'])
+        self.assertEqual(first['summary']['totalWithTax'], unused['summary']['totalWithTax'])
+        self.assertEqual(first['summary']['totalWithTax'], '2070.00')
+        self.assertTrue(all(row['usageStatus'] == 'unused' for row in first['rows']))
+        self.assertTrue(all('usageStatus' not in row for row in unused['rows']))
+        exact=self.service.candidate_rows_by_invoice_ids(['candidate-208','candidate-209', 'candidate-211', 'candidate-213', 'missing'])
+        self.assertEqual({r['invoiceId'] for r in exact['rows']},{'candidate-208','candidate-209','candidate-211','candidate-213'})
+        self.assertTrue(all(row['usageStatus'] == 'used' for row in exact['rows']))
+        self.assertNotIn('missing', {row['invoiceId'] for row in exact['rows']})
         empty=self.service.candidate_rows({'page':['99']})
         self.assertEqual(empty['rows'],[])
-        self.assertEqual(empty['pagination']['total'],210)
+        self.assertEqual(empty['pagination']['total'],207)
 
     def test_aggregate_bank_evidence_cannot_be_replaced_by_one_equal_transaction(self):
         self.invoices(1)
@@ -195,12 +202,64 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
     def test_missing_bank_detail_still_has_formal_bank_relation(self):
         self.invoices(1)
         self.relation('missing-bank', ['candidate-1', 'bank-unavailable'], ['invoice', 'bank'])
-        pool = self.service.candidate_rows({'bank_relation':['linked']})
-        self.assertEqual(pool['summary']['invoiceCount'], 1)
-        self.assertEqual(pool['rows'][0]['bankRelationStatus'], 'linked')
-        self.assertEqual(pool['rows'][0]['bankTransactions']['relationCount'], 0)
+        pool = self.service.candidate_rows({})
+        self.assertEqual(pool['summary']['invoiceCount'], 0)
+        self.assertEqual(pool['rows'], [])
         exact = self.service.candidate_rows_by_invoice_ids(['candidate-1'])
         self.assertEqual(exact['rows'][0]['bankRelationStatus'], 'linked')
+        self.assertEqual(exact['rows'][0]['usageStatus'], 'used')
+        self.assertEqual(exact['rows'][0]['bankTransactions']['relationCount'], 0)
+
+    def test_candidate_scope_preserves_dates_search_and_filters_but_replaces_classification(self):
+        self.invoices(4)
+        self.bank('bank-only')
+        self.relation('bank-case', ['candidate-4', 'bank-only'], ['invoice', 'bank'])
+        with self.connection.transaction() as tx:
+            tx.execute("set local fin_ops.correction_reason='isolated candidate scope fixture'")
+            tx.execute("update app.invoices set invoice_date='2026-08-01', invoice_month='2026-08-01' where legacy_mongo_id='candidate-3'")
+        month_only = self.service.candidate_rows({'month': ['2026-09']})
+        self.assertEqual({row['invoiceId'] for row in month_only['rows']}, {'candidate-1', 'candidate-2'})
+        self.assertEqual(month_only['summary']['invoiceCount'], 2)
+        self.assertEqual(month_only['summary']['totalWithTax'], '20.00')
+        previous_month = self.service.candidate_rows({'month': ['2026-08']})
+        self.assertEqual([row['invoiceId'] for row in previous_month['rows']], ['candidate-3'])
+        previous_main = self.service.list_rows(month='2026-08', filters=[{'field': 'usage_status', 'operator': 'in', 'values': ['unused']}])
+        self.assertEqual(previous_month['summary']['invoiceCount'], previous_main['summary']['invoiceCount'])
+        self.assertEqual(previous_month['summary']['totalWithTax'], previous_main['summary']['totalWithTax'])
+        filters = [
+            {'field': 'seller_name', 'operator': 'in', 'values': ['测试销方']},
+            {'field': 'usage_status', 'operator': 'in', 'values': ['used']},
+            {'field': 'payment_group', 'operator': 'in', 'values': ['paid']},
+            {'field': 'payment_status', 'operator': 'in', 'values': ['paid']},
+        ]
+        scope = {'month': ['2026-09'], 'invoice_date_from': ['2026-09-01'], 'invoice_date_to': ['2026-09-30'],
+                 'keyword': ['CAND-'], 'filters': [json.dumps(filters)], 'page_size': ['1']}
+        first = self.service.candidate_rows(scope)
+        second = self.service.candidate_rows({**scope, 'page': ['2']})
+        self.assertEqual(first['pagination']['total'], 2)
+        self.assertEqual(first['summary']['totalWithTax'], '20.00')
+        self.assertEqual({row['invoiceId'] for row in first['rows'] + second['rows']}, {'candidate-1', 'candidate-2'})
+        main = self.service.list_rows(month='2026-09', keyword='CAND-', invoice_date_from='2026-09-01',
+            invoice_date_to='2026-09-30', filters=[filters[0], {'field': 'usage_status', 'operator': 'in', 'values': ['unused']}])
+        self.assertEqual(first['summary']['invoiceCount'], main['summary']['invoiceCount'])
+        self.assertEqual(first['summary']['totalWithTax'], main['summary']['totalWithTax'])
+        contradictory = self.service.candidate_rows({'filters': [json.dumps([{'field': 'oa_relation', 'operator': 'in', 'values': ['linked']}])]})
+        self.assertEqual(contradictory['pagination']['total'], 0)
+        self.assertEqual(contradictory['rows'], [])
+
+    def test_multiple_relations_and_duplicate_members_do_not_admit_used_invoice_until_all_withdrawn(self):
+        self.invoices(2)
+        self.relation('bank-link', ['candidate-1', 'candidate-1', 'missing-bank'], ['invoice', 'invoice', 'bank'])
+        self.relation('oa-link', ['candidate-1', 'missing-oa'], ['invoice', 'oa'])
+        def candidate_ids():
+            result = self.service.candidate_rows({})
+            return [row['invoiceId'] for row in result['rows']]
+        self.assertEqual(candidate_ids(), ['candidate-2'])
+        self.connection.execute("update app.workbench_pair_relations set status='withdrawn' where case_id='bank-link'")
+        self.assertEqual(candidate_ids(), ['candidate-2'])
+        self.connection.execute("update app.workbench_pair_relations set status='withdrawn' where case_id='oa-link'")
+        self.assertEqual(set(candidate_ids()), {'candidate-1', 'candidate-2'})
+        self.assertEqual(self.service.candidate_rows({})['summary']['totalWithTax'], '20.00')
 
     def test_zero_amount_requires_actual_members_not_historical_matched_flag(self):
         self.invoices(1, amount=0)
@@ -220,8 +279,8 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
         self.assertTrue(snapshot.groups[0]["payment_facts"]["fully_matched"])
         self.assertTrue(snapshot.groups[0]["payment_facts"]["invoice_oa_amount_matched"])
 
-    def test_candidates_reject_invalid_page_and_bank_filter(self):
+    def test_candidates_reject_invalid_page_and_scope_filters(self):
         from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageError
-        for query in ({'page':['0']},{'page_size':['201']},{'bank_relation':['invented']}):
+        for query in ({'page':['0']},{'page_size':['201']},{'month':['invalid']},{'filters':[json.dumps([{'field':'invented','operator':'in','values':['x']}])]}):
             with self.assertRaises(InputInvoiceUsageError):
                 self.service.candidate_rows(query)

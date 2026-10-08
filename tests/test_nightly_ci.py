@@ -81,6 +81,7 @@ class NightlyCITests(unittest.TestCase):
             "production-route-shell.spec.ts",
             "production-output-invoice-summary.spec.ts",
             "production-input-invoice-tax-values.spec.ts",
+            "production-input-invoice-oa-reverse.spec.ts",
             "production-cash-readonly.spec.ts",
             "production-date-defaults.spec.ts",
             "production-count-stability.spec.ts",

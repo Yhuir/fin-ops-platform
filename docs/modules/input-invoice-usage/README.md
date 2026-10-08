@@ -6,7 +6,7 @@
 
 ## 边界与 I/O
 
-输入：分页、keyword、日期、filters、sort；反提 preview 使用独立 page/pageSize/keyword/bankRelation，提交精确 invoiceIds、申请人、预览证明、版本和幂等身份。输出：rows/summary/statistics/pagination/facets/classification、详情、导出、反提批次和草稿状态。
+输入：分页、keyword、日期、filters、sort；反提 preview 使用 page/pageSize/keyword/month/invoiceDateFrom/invoiceDateTo/filters，提交精确 invoiceIds、申请人、预览证明、版本和幂等身份。输出：rows/summary/statistics/pagination/facets/classification、详情、导出、反提批次和草稿状态。
 
 ## 当前业务约定
 
@@ -17,14 +17,15 @@
 - 同一只读快照组合 canonical 发票、active relation、OA 与银行用途。列表按独立正式关系展示；ETC 展开保留所属关系，共享成员不连接不同关系。单行按关系内实体去重，页面汇总按筛选范围去重，因此共享发票的行数量之和可能大于总数。列表、详情、筛选和导出采用同一范围。
 - 银行摘要的 `bankShortName` 只取同一快照内银行全名与字符串尾号精确匹配的唯一账户简称；缺少映射或简称冲突时为空。原始银行名称、尾号、筛选和导出口径不变，列表不额外请求设置。
 - 流水金额单元格显示正式关系内业务用途的净额（支出减收入），方向为净支出、净收入或收支相抵；`netOutflow` 为有符号净支出，`netAmount` 为展示绝对金额，`original_amount` 保留原始发生额含义。详情保留逐笔原始金额、方向和银行账户，拆分子项在银行明细的既有入口查看。金额筛选和排序使用有符号净支出。
-- 已使用为存在 active OA 或流水关系；待使用为两者都没有，判定依赖正式关系而非详情是否加载成功。`usage_status` 为 used/unused；`oa_relation` 为 linked/unlinked，在 OA 表头下拉筛选，不增加层级。原 `relation_status` 合同供反提等既有调用继续使用。
+- 已使用为存在 active OA 或流水关系；待使用为两者都没有，判定依赖正式关系而非详情是否加载成功。`usage_status` 为 used/unused；`oa_relation` 为 linked/unlinked，在 OA 表头下拉筛选，不增加层级。`relation_status` 等既有关系筛选合同保留给当前查询调用。
 - 分类层级为全部 → 已使用/待使用；已使用 → 已付款/未付款；存在有效银行流水关联即已付款，否则为未付款，不用详情可读性或规则命中代替正式关系。`classification` 与列表读取同一个快照，数量按去重发票张数统计，保留搜索、日期及 OA 等筛选，排除使用/付款分类自身筛选。表格分页仍按关联组计数。分类面板按父级配色，子分类使用连续表格单元格；每栏宽度不足时独立增加第二、第三行，名称可换行且数量完整显示，不横向滚动。关联徽标 `+N` 的 N 是总数，不减去首项。
 - 支付规则按优先级匹配，多个规则可输出同一分类；规则输出 `statusCode` 为稳定分类身份，`label` 可改名；内置分类遵守业务含义，自定义分类使用 custom_ 前缀，根据流水条件自动归属。流水不限制的自定义分类可以出现在两栏，各自按实际关联统计；子分类筛选同时携带父级和分类身份。同一分类的名称必须一致，不保存手工父级。移除最后一条规则后自定义分类消失；禁用规则保留其零数量分类。配置、版本冲突、幂等与审计仍由 Settings owner CAS 原子保存。
 - 已付款的金额分类为发票＝付款、发票＜付款、发票＞付款；规则可通过 `paymentComparison` 选择 equal/less/greater。同一正式关系内去重发票按真实正负价税合计求和，与关联业务用途净支出比较，零与负净额同样可比较。当前 OA/发票/流水匹配使用当前事实，不使用历史 `amount_check` 判定当前分类，历史审计不改写。缺少发票金额、关联流水明细、流水金额或方向、拆分用途不明确时，行内显示具体无法比较原因（`unclassified`），仍归实际流水关联决定的父级，不新增固定异常子分类；摘要 `unclassifiedCount` 统计这类发票数。规则仍按实际流水归属与优先级匹配，无流水未命中规则时为未关联流水。
 - 修改规则后列表和分类一起刷新；删除当前分类后返回已使用并保留其它筛选。刷新失败明确反馈，不用旧分类伪装刷新成功。分类展示不修改关联关系、OA 数据、附件或发票原件。
 - 支付规则申请人候选仅从 OA `sys_user` 的全部未删除用户读取，包含启用和停用账号，不扫描历史单据，不复用访问权限设置的账户排除范围；设置抽屉打开时读取，普通列表查询不访问 OA 目录。目录失败明确返回 503，不退回历史姓名。
 - 申请人条件为 `applicantNames` 数组，任一姓名命中；姓名去除空白、零宽空格和 BOM 后去重匹配，目录按账号显示姓名、账号及只读状态图标，启用在前、停用在后，支持姓名/账号搜索；同名账号联动选择并合并为一个姓名条件。OA 单据只有姓名，不能据此区分同名账号。新选姓名保存时须仍在完整目录，停用账号可选可保存；目录外历史条件保留并可移除，不自动改成不限制。
-- 反提默认候选为未关联 OA 的单张进项票；占用票仍可见但禁选，精确选择必须全部有效。申请人只来自启用且有凭据的非敏感选项。
+- 反提候选复用待使用集合：同一发票无有效 OA 和流水关系，详情缺失不改变正式关系判定。打开抽屉继承主页面关键词、日期及其它筛选，移除使用/付款分类并固定待使用；弹窗搜索独立，关闭重开重新继承。查询按单张票去重并在分页前过滤、统计，同范围同一数据状态下候选与待使用的票数和金额一致。
+- 反提占用票仍计入待使用候选但禁选；同批票必须全部有效且同一非空销方。精确选择、创建批次和暂存重试使用同一 canonical 使用状态复核，已关联 OA 或流水的票明确拒绝，不部分提交剩余票。申请人只来自启用且有凭据的非敏感选项。草稿创建刷新占用与暂存列表，不把草稿占用伪装成正式使用；正式关系变化后重新查询。成功请求幂等重放保留原结果，既有草稿和提交历史不因候选变化删除。
 - 外部 OA 创建前持久化 draft_request 和版本并锁定票身份；相同请求不重复发送。未知结果需要人工核实和原因后释放，不自动删除远端草稿，迟到响应不能覆盖新版本。
 - OA 预填配置按批次冻结；同一非空销方等业务资格以提交前精确 preview 为准。
 - 服务端分页、批量查询，当前页面请求查询预算最多 8 条；详情按需读取，导出上限 20,000 行。
@@ -52,6 +53,7 @@
 - [web/src/components/common/OaDraftPrefillDrawer.tsx](../../../web/src/components/common/OaDraftPrefillDrawer.tsx)
 - [tests/test_invoice_usage_collection_canonical_query.py](../../../tests/test_invoice_usage_collection_canonical_query.py)
 - [web/e2e/input-invoice-usage-flow.spec.ts](../../../web/e2e/input-invoice-usage-flow.spec.ts)
+- [web/e2e/production-input-invoice-oa-reverse.spec.ts](../../../web/e2e/production-input-invoice-oa-reverse.spec.ts)：显式开启生产验证后，只读比对候选与待使用集合，并检查已使用票的精确预览拒绝。
 - [web/e2e/input-invoice-hierarchy.spec.ts](../../../web/e2e/input-invoice-hierarchy.spec.ts)
 - [web/e2e/input-invoice-grouped-header.spec.ts](../../../web/e2e/input-invoice-grouped-header.spec.ts)
 - [tests/test_etc_relation_page_reads_postgres.py](../../../tests/test_etc_relation_page_reads_postgres.py)

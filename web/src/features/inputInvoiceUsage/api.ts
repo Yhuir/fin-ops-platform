@@ -510,7 +510,6 @@ function mapOaReversePreviewResponse(payload: unknown): InputInvoiceUsageOaRever
   });
   return {
     pagination: raw.pagination as InputInvoiceUsageOaReversePreviewResponse["pagination"],
-    relationCounts: raw.relationCounts as InputInvoiceUsageOaReversePreviewResponse["relationCounts"],
     previewId: stringValue(camelOrSnake(raw, "previewId", "preview_id")),
     previewHash: stringValue(camelOrSnake(raw, "previewHash", "preview_hash") ?? camelOrSnake(raw, "expectedPreviewHash", "expected_preview_hash")),
     source: stringValue(raw.source),
@@ -791,7 +790,10 @@ export async function previewInputInvoiceUsageOaReverse(
       page: request.page,
       pageSize: request.pageSize,
       keyword: request.keyword,
-      bankRelation: request.bankRelation,
+      month: request.month,
+      invoiceDateFrom: request.invoiceDateFrom,
+      invoiceDateTo: request.invoiceDateTo,
+      filters: request.filters,
       ...(request.selectedInvoiceIds.length > 0 ? { invoiceIds: request.selectedInvoiceIds } : {}),
       ...(request.targetApplicantCode ? { targetApplicantCode: request.targetApplicantCode } : {}),
     }),

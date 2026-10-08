@@ -104,7 +104,7 @@ class OaReverseOccupancyPostgresTests(unittest.TestCase):
             'invoiceId': self.invoice, 'invoiceIdentityKey': 'identity:' + self.invoice,
             'invoice': {'invoiceNo': self.invoice, 'invoiceDate': '2026-09-28', 'sellerName': '供应商',
                         'sellerTaxNo': 'tax-test', 'totalWithTax': '100.00'},
-            'bankRelationStatus': 'linked', 'oa': {'relationCount': 0, 'summaries': []},
+            'usageStatus': 'unused', 'bankRelationStatus': 'unlinked', 'oa': {'relationCount': 0, 'summaries': []},
             'bankTransactions': {'relationCount': 0, 'summaries': []},
             'paymentStatus': {'code': 'pending', 'label': '待处理'},
         }

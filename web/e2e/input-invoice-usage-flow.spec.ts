@@ -558,21 +558,21 @@ test.describe("input invoice usage browser flow", () => {
       await row.getByRole("button", { name: "查看陈秀云关联OA 2 条" }).click();
       expect((await mark("apiLatencyMs", detailResponsePromise)).status()).toBe(200);
       await mark("firstVisibleResponseLatencyMs", expect(detailDrawer).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(detailDrawer.getByRole("tab", {name: "1 陈秀云 · 88.00"})).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(detailDrawer.getByRole("tab", {name: "1 陈秀云 88.00 申请日期未提供 OA单号 未提供"})).toBeVisible());
     });
     await expect(detailDrawer).toBeVisible();
     await expect(detailDrawer.getByText("关联概况")).toHaveCount(0);
     await expect(detailDrawer.getByText("关系数量")).toHaveCount(0);
     await expect(detailDrawer.getByText("是否多条")).toHaveCount(0);
     await expect(detailDrawer.getByText("关联摘要")).toHaveCount(0);
-    await expect(detailDrawer.getByRole("tab", {name: "1 陈秀云 · 88.00"})).toBeVisible();
-    await expect(detailDrawer.getByText("陈秀云", { exact: true })).toBeVisible();
-    await expect(detailDrawer.getByText("88.00", { exact: true })).toBeVisible();
-    await detailDrawer.getByRole("tab", {name: "2 刘际涛 · 100.00"}).click();
-    await expect(detailDrawer.getByText("陈秀云", {exact: true})).toHaveCount(0);
+    await expect(detailDrawer.getByRole("tab", {name: "1 陈秀云 88.00 申请日期未提供 OA单号 未提供"})).toBeVisible();
+    await expect(detailDrawer.getByRole("tabpanel").getByText("陈秀云", { exact: true })).toBeVisible();
+    await expect(detailDrawer.getByRole("tabpanel").getByText("88.00", { exact: true })).toBeVisible();
+    await detailDrawer.getByRole("tab", {name: "2 刘际涛 100.00 申请日期未提供 OA单号 未提供"}).click();
+    await expect(detailDrawer.getByRole("tabpanel").getByText("陈秀云", {exact: true})).toHaveCount(0);
     await expect(detailDrawer.getByRole("tabpanel")).toHaveCount(1);
-    await expect(detailDrawer.getByText("刘际涛", { exact: true })).toBeVisible();
-    await expect(detailDrawer.getByText("100.00", { exact: true })).toBeVisible();
+    await expect(detailDrawer.getByRole("tabpanel").getByText("刘际涛", { exact: true })).toBeVisible();
+    await expect(detailDrawer.getByRole("tabpanel").getByText("100.00", { exact: true })).toBeVisible();
     await expect(detailDrawer.getByText("详情暂不可用")).toHaveCount(0);
     await expect(detailDrawer.getByText("正在加载完整详情")).toHaveCount(0);
     await expect(detailDrawer.getByText("input_invoice_usage_relation_detail")).toHaveCount(0);
@@ -873,26 +873,25 @@ test("unknown OA creation requires verified local release and requesting batches
 });
 
 
-test("OA reverse shows full invoice numbers and unlinked-OA scope without extra preview requests", async ({ page }, testInfo) => {
+test("OA reverse shows full invoice numbers and unused scope without extra preview requests", async ({ page }, testInfo) => {
   await installDeterministicApiMocks(page, { sessionMode: "admin" });
   const numbers = ["00123456789012345678", "26317000003099582123456789012345"];
   let previewRequests = 0;
   await page.route("**/api/input-invoice-usage/oa-reverse/preview", async (route) => {
     previewRequests += 1;
-    const body = route.request().postDataJSON();
+    expect(route.request().postDataJSON()).not.toHaveProperty("bankRelation");
     const rows = numbers.map((number, index) => ({ invoiceId: `full-number-${index}`, invoiceNo: number,
       invoiceDate: "2026-09-01", sellerName: "完整号码测试销方", totalWithTax: "10.00",
-      bankRelationStatus: index === 0 ? "linked" : "unlinked", oaRelationStatus: "unlinked" }));
-    const filtered = body.bankRelation === "all" || !body.bankRelation ? rows : rows.filter((row) => row.bankRelationStatus === body.bankRelation);
+      bankRelationStatus: "unlinked", oaRelationStatus: "unlinked" }));
     await route.fulfill({ json: { previewId: "full-number-preview", previewHash: "full-number-hash",
       targetApplicantCode: "chen_xiuyun", targetApplicantName: "陈秀云", targetApplicants: [{ code: "chen_xiuyun", name: "陈秀云" }],
-      invoiceCount: filtered.length, totalWithTax: String(filtered.length * 10),
-      relationCounts: { all: 2, linked: 1, unlinked: 1 }, pagination: { page: 1, pageSize: 50, total: filtered.length },
-      invoiceRows: filtered, groups: [], rejectedInvoices: [], canCreateDraft: false } });
+      invoiceCount: rows.length, totalWithTax: String(rows.length * 10),
+      pagination: { page: 1, pageSize: 50, total: rows.length },
+      invoiceRows: rows, groups: [], rejectedInvoices: [], canCreateDraft: false } });
   });
   await page.goto("/input-invoice-usage");
   await page.getByRole("button", { name: "以发票反提 OA" }).click();
-  await expect(page.getByRole("heading", { name: "未关联 OA 的发票" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "待使用发票" })).toBeVisible();
   const grid = page.getByRole("grid", { name: "反提 OA 候选发票清单" });
   await expect(grid.getByText(numbers[0], { exact: true })).toBeVisible();
   expect(previewRequests).toBe(1);
@@ -919,14 +918,7 @@ test("OA reverse shows full invoice numbers and unlinked-OA scope without extra 
   expect(previewRequests).toBe(1);
   await page.evaluate(() => { document.documentElement.style.zoom = "1"; });
   await page.setViewportSize({ width: 1600, height: 1000 });
-  const filter = page.getByRole("button", { name: /筛选流水关联状态/ });
-  for (const label of ["已关联流水", "未关联流水", "全部"]) {
-    await filter.click();
-    await expect(page.getByRole("option", { name: "全部 2 张", exact: true })).toBeVisible();
-    await expect(page.getByRole("option", { name: "已关联流水 1 张", exact: true })).toBeVisible();
-    await expect(page.getByRole("option", { name: "未关联流水 1 张", exact: true })).toBeVisible();
-    await page.getByRole("option", { name: new RegExp(`^${label} `) }).click();
-    await expect(grid.getByRole("checkbox")).toHaveCount(label === "全部" ? 2 : 1);
-  }
-  expect(previewRequests).toBe(4);
+  await expect(page.getByRole("button", { name: /筛选流水关联状态/ })).toHaveCount(0);
+  await expect(grid.getByText("可选择", { exact: true })).toHaveCount(2);
+  expect(previewRequests).toBe(1);
 });

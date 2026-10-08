@@ -1063,6 +1063,18 @@ describe("Input invoice usage page", () => {
     const user = userEvent.setup();
     const fetchMock = installInputInvoiceUsageFetch();
 
+    window.sessionStorage.setItem(buildPageSessionStorageKey({ userScope: "101", pageKey: "input-invoice-usage", stateKey: "query" }), JSON.stringify(createStoredPayload({
+      version: 1, ttlMs: 60_000, value: {
+        page: 1, pageSize: 50, keyword: "供应商", month: "", invoiceDateFrom: "", invoiceDateTo: "",
+        filters: [
+          { field: "usage_status", operator: "in", values: ["used"] },
+          { field: "payment_group", operator: "in", values: ["paid"] },
+          { field: "payment_status", operator: "in", values: ["paid"] },
+          { field: "oa_relation", operator: "in", values: ["unlinked"] },
+        ],
+        sortField: "", sortDirection: "", activeWorkflow: null, detailTarget: null,
+      },
+    })));
     renderAuthenticatedAppAt("/input-invoice-usage");
 
     const page = await screen.findByTestId("input-invoice-usage-page");
@@ -1071,6 +1083,13 @@ describe("Input invoice usage page", () => {
 
     expect(await screen.findByRole("tab", { name: "待处理" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "已提交" })).toBeInTheDocument();
+    const previewBodies = () => fetchMock.mock.calls
+      .filter(([input]) => String(input).endsWith("/api/input-invoice-usage/oa-reverse/preview"))
+      .map(([, init]) => JSON.parse(String(init?.body)));
+    expect(previewBodies()).toHaveLength(1);
+    expect(previewBodies()[0]).toMatchObject({ keyword: "供应商", page: 1, filters: [{ field: "oa_relation", operator: "in", values: ["unlinked"] }] });
+    expect(previewBodies()[0]).not.toHaveProperty("bankRelation");
+    expect(await screen.findByRole("searchbox", { name: "搜索候选发票" })).toHaveValue("供应商");
     await user.click(await screen.findByRole("button", { name: "选择本页" }));
     expect(screen.getByRole("button", { name: "创建 OA 草稿" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "创建本地批次" })).not.toBeInTheDocument();
@@ -1081,6 +1100,9 @@ describe("Input invoice usage page", () => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       return url.pathname === "/api/input-invoice-usage/oa-reverse/oa-draft";
     })).toBe(true));
+    const selectedBody = previewBodies().find((body) => body.source === "explicitSelection");
+    expect(selectedBody.invoiceIds).toEqual(["invoice-001"]);
+    for (const field of ["keyword", "month", "invoiceDateFrom", "invoiceDateTo", "filters"]) expect(selectedBody).not.toHaveProperty(field);
     const confirmDialog = await screen.findByRole("dialog", { name: "OA 草稿提交确认" });
     expect(within(confirmDialog).getByRole("link", { name: "打开 OA 草稿" })).toHaveAttribute("href", "https://oa.example.test/draft/page");
 

@@ -2464,7 +2464,6 @@ textarea {
 
 .input-invoice-usage-oa-target-card { padding: var(--fp-space-2) 0; }
 .input-invoice-usage-oa-select { width: 100%; }
-.input-invoice-usage-oa-bank-filter { width: 190px; }
 
 .input-invoice-usage-oa-stack {
   display: grid;

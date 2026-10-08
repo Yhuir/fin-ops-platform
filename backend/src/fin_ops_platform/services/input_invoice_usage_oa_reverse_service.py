@@ -413,11 +413,6 @@ class InputInvoiceUsageOaReverseService:
         invoice_count = len(candidate_ids) if explicit else int(page_payload["summary"]["invoiceCount"])
         display_total = _money(total) if explicit else str(page_payload["summary"]["totalWithTax"])
         pagination = ({"page": 1, "pageSize": len(rows), "total": len(rows)} if explicit else page_payload["pagination"])
-        relation_counts = page_payload.get("relationCounts") if not explicit else {
-            "all": len(rows),
-            "linked": sum(row["bankRelationStatus"] == "linked" for row in rows),
-            "unlinked": sum(row["bankRelationStatus"] == "unlinked" for row in rows),
-        }
         return {
             "previewId": preview_id,
             "previewHash": preview_hash,
@@ -428,7 +423,6 @@ class InputInvoiceUsageOaReverseService:
             "invoiceCount": invoice_count,
             "totalWithTax": display_total,
             "pagination": pagination,
-            "relationCounts": relation_counts,
             "invoiceRows": display_rows,
             "rejectedInvoices": rejected,
             "groups": [
@@ -473,13 +467,13 @@ class InputInvoiceUsageOaReverseService:
             raise InputInvoiceUsageOaReverseInvalidTransitionError("请明确选择发票后创建草稿。", code="empty_oa_reverse_batch")
         preview_payload = self.preview(preview_request, can_create_draft=True)
         if str(preview_payload["previewHash"]) != expected_hash:
-            raise InputInvoiceUsageOaReverseStalePreviewError("OA reverse preview is stale. Refresh preview before creating a batch.")
+            raise InputInvoiceUsageOaReverseStalePreviewError(_selection_rejection_message(preview_payload["rejectedInvoices"]) if preview_payload["rejectedInvoices"] else "发票预览已变化，请刷新后重新创建批次。")
         invoice_rows = list(preview_payload.get("invoiceRows") or [])
         invoice_ids = [str(row.get("invoiceId") or "") for row in invoice_rows if str(row.get("invoiceId") or "").strip()]
+        if preview_payload["rejectedInvoices"]:
+            raise InputInvoiceUsageOaReverseInvalidTransitionError(_selection_rejection_message(preview_payload["rejectedInvoices"]), code="invalid_oa_reverse_selection")
         if not invoice_ids:
             raise InputInvoiceUsageOaReverseInvalidTransitionError("OA reverse batch requires at least one candidate invoice.", code="empty_oa_reverse_batch")
-        if preview_payload["rejectedInvoices"]:
-            raise InputInvoiceUsageOaReverseInvalidTransitionError("所选发票已不可用，请重新选择。", code="invalid_oa_reverse_selection")
         if not preview_payload["targetApplicantCode"]:
             raise InputInvoiceUsageOaReverseInvalidTransitionError("暂无可用的 OA 申请人凭据。", code="oa_reverse_applicant_unavailable")
         if not bool(preview_payload.get("payeeResolvable")):
@@ -546,7 +540,9 @@ class InputInvoiceUsageOaReverseService:
             raise InputInvoiceUsageOaReverseInvalidTransitionError("请明确选择发票后创建草稿。", code="empty_oa_reverse_batch")
         preview_payload = self.preview(preview_request, can_create_draft=True)
         if str(preview_payload.get("previewHash") or "") != expected_hash:
-            raise InputInvoiceUsageOaReverseStalePreviewError("OA reverse preview is stale. Refresh preview before creating an OA draft.")
+            raise InputInvoiceUsageOaReverseStalePreviewError(_selection_rejection_message(preview_payload["rejectedInvoices"]) if preview_payload["rejectedInvoices"] else "发票预览已变化，请刷新后重新创建 OA 草稿。")
+        if preview_payload["rejectedInvoices"]:
+            raise InputInvoiceUsageOaReverseInvalidTransitionError(_selection_rejection_message(preview_payload["rejectedInvoices"]), code="invalid_oa_reverse_selection")
         if not list(preview_payload.get("invoiceRows") or []):
             raise InputInvoiceUsageOaReverseInvalidTransitionError("OA reverse draft requires at least one candidate invoice.", code="empty_oa_reverse_batch")
         if not preview_payload["canCreateDraft"]:
@@ -625,8 +621,13 @@ class InputInvoiceUsageOaReverseService:
 
         self._resolve_target_applicant(batch.target_applicant_code, self._applicant_options_provider())
         rows, missing, _ = self._rows_for_preview_payload({"invoiceIds": batch.invoice_ids})
-        if missing or any(self._candidate_rejection(row) is not None for row in rows):
-            raise InputInvoiceUsageOaReverseInvalidTransitionError("批次发票已不存在或已关联 OA，请重新核对。", code="invalid_oa_reverse_selection")
+        rejected = [{"invoiceId": invoice_id, "reason": "发票不存在"} for invoice_id in missing]
+        for row in rows:
+            rejection = self._candidate_rejection(row)
+            if rejection is not None:
+                rejected.append({**self._invoice_display_row(row), **rejection})
+        if rejected:
+            raise InputInvoiceUsageOaReverseInvalidTransitionError(_selection_rejection_message(rejected), code="invalid_oa_reverse_selection")
         current_rows = [self._invoice_display_row(row) for row in rows]
         source_keys = ("invoiceId", "invoiceIdentityKey", "invoiceNo", "invoiceDate", "sellerName", "sellerTaxNo", "totalWithTax")
         current_facts = sorted(tuple(row.get(key) for key in source_keys) for row in current_rows)
@@ -942,16 +943,18 @@ class InputInvoiceUsageOaReverseService:
 
     @staticmethod
     def _candidate_rejection(row: dict[str, object]) -> dict[str, object] | None:
-        invoice_id = str(row.get("invoiceId") or "")
-        oa_relation_status = InputInvoiceUsageOaReverseService._oa_relation_status(row)
-        if oa_relation_status == "linked":
-            return {
-                "invoiceId": invoice_id,
-                "reasonCode": "already_has_active_oa",
-                "reason": "发票已有 active OA 关系",
-                "oaRelationStatus": "linked",
-            }
-        return None
+        usage_status = row["usageStatus"]
+        if usage_status == "unused":
+            return None
+        if usage_status != "used":
+            raise ValueError("Candidate query returned an invalid usage status.")
+        has_oa = InputInvoiceUsageOaReverseService._oa_relation_status(row) == "linked"
+        return {
+            "invoiceId": str(row["invoiceId"]),
+            "reasonCode": "already_has_active_oa" if has_oa else "already_has_active_bank",
+            "reason": "发票已关联 OA，不再属于待使用" if has_oa else "发票已关联流水，不再属于待使用",
+            "oaRelationStatus": "linked" if has_oa else "unlinked",
+        }
 
     @staticmethod
     def _invoice_display_row(row: dict[str, object]) -> dict[str, object]:
@@ -1383,6 +1386,11 @@ def _text_list(value: Any) -> list[str]:
     return result
 
 
+def _selection_rejection_message(rejected: list[dict[str, Any]]) -> str:
+    reasons = "；".join(f"{item.get('invoiceNo') or item['invoiceId']}：{item['reason']}" for item in rejected)
+    return f"所选发票已不可用：{reasons}。请重新选择。"
+
+
 def _preview_query_from_payload(payload: dict[str, Any]) -> dict[str, list[Any]]:
     numbers = {}
     for key, default, maximum in (("page", 1, None), ("pageSize", 50, 200)):
@@ -1394,13 +1402,20 @@ def _preview_query_from_payload(payload: dict[str, Any]) -> dict[str, list[Any]]
         if isinstance(value, bool) or str(number) != str(value) or number < 1 or (maximum and number > maximum):
             raise InputInvoiceUsageError("invalid_oa_reverse_query", f"{key} must be a positive integer" + (f" <= {maximum}." if maximum else "."))
         numbers[key] = number
-    relation = payload.get("bankRelation", "all")
-    if relation not in {"all", "linked", "unlinked"}:
-        raise InputInvoiceUsageError("invalid_oa_reverse_query", "bankRelation must be all, linked or unlinked.")
-    return {
+    query = {
         "page": [str(numbers["page"])], "page_size": [str(numbers["pageSize"])],
-        "keyword": [str(payload.get("keyword") or "").strip()], "bank_relation": [relation],
+        "keyword": [str(payload.get("keyword") or "").strip()],
     }
+    for field, query_field in (("month", "month"), ("invoiceDateFrom", "invoice_date_from"), ("invoiceDateTo", "invoice_date_to")):
+        if field in payload:
+            if not isinstance(payload[field], str):
+                raise InputInvoiceUsageError("invalid_oa_reverse_query", f"{field} must be a string.")
+            query[query_field] = [payload[field]]
+    if "filters" in payload:
+        if not isinstance(payload["filters"], list):
+            raise InputInvoiceUsageError("invalid_oa_reverse_query", "filters must be an array.")
+        query["filters"] = [json.dumps(payload["filters"], ensure_ascii=False)]
+    return query
 
 
 def _decimal(value: Any) -> Decimal:

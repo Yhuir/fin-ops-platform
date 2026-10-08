@@ -450,6 +450,71 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertEqual(failed_payload["status"], "oa_draft_failed")
         self.assertEqual(failed_payload["version"], 2)
 
+    def test_oa_reverse_candidate_api_preserves_scope_and_has_no_bank_filter_contract(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._install_service(app, invoices=[])
+            calls = []
+            reverse = app._input_invoice_usage_oa_reverse_service()
+            def rows_loader(query):
+                calls.append(query)
+                return {"rows": [], "summary": {"invoiceCount": 0, "totalWithTax": "0.00"},
+                        "pagination": {"page": 2, "pageSize": 20, "total": 0}}
+            reverse._rows_loader = rows_loader
+            filters = [{"field": "seller_name", "operator": "in", "values": ["供应商"]}]
+            response = app.handle_request("POST", "/api/input-invoice-usage/oa-reverse/preview", body=json.dumps({
+                "month": "2026-05", "invoiceDateFrom": "2026-05-01", "invoiceDateTo": "2026-05-31",
+                "keyword": "供应商", "filters": filters, "page": 2, "pageSize": 20,
+            }))
+            self.assertEqual(response.status_code, 200)
+            payload = json.loads(response.body)
+            self.assertEqual(payload["invoiceRows"], [])
+            self.assertEqual(payload["invoiceCount"], 0)
+            self.assertEqual(payload["totalWithTax"], "0.00")
+            self.assertEqual(payload["pagination"], {"page": 2, "pageSize": 20, "total": 0})
+            self.assertNotIn("relationCounts", payload)
+            self.assertEqual(calls[0]["month"], ["2026-05"])
+            self.assertEqual(calls[0]["invoice_date_from"], ["2026-05-01"])
+            self.assertEqual(calls[0]["invoice_date_to"], ["2026-05-31"])
+            self.assertEqual(calls[0]["keyword"], ["供应商"])
+            self.assertEqual(json.loads(calls[0]["filters"][0]), filters)
+            self.assertNotIn("bank_relation", calls[0])
+            for invalid in ({"filters": {}}, {"month": 202605}, {"invoiceDateFrom": True}):
+                rejected = app.handle_request("POST", "/api/input-invoice-usage/oa-reverse/preview", body=json.dumps(invalid))
+                self.assertEqual(rejected.status_code, 400)
+                self.assertIn("invalid_oa_reverse_query", str(json.loads(rejected.body)["error"]))
+            self.assertEqual(len(calls), 1)
+
+    def test_oa_reverse_api_rejects_bank_link_added_after_preview_without_partial_create(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            provider = FakeTargetOaDraftClientProvider()
+            app._target_oa_applicant_token_provider_instance = provider
+            self._install_service(app, invoices=[self._invoice("inv-free", "1", "供应商"), self._invoice("inv-changed", "2", "供应商")])
+            reverse = app._input_invoice_usage_oa_reverse_service()
+            rows = reverse._rows_by_invoice_ids_loader(["inv-free", "inv-changed"])["rows"]
+            reverse._rows_by_invoice_ids_loader = lambda ids: {"rows": rows}
+            selection = {"invoiceIds": ["inv-free", "inv-changed"]}
+            preview = app.handle_request("POST", "/api/input-invoice-usage/oa-reverse/preview", body=json.dumps(selection))
+            self.assertEqual(preview.status_code, 200)
+            old_preview = json.loads(preview.body)
+            next(row for row in rows if row["invoiceId"] == "inv-changed").update(usageStatus="used", bankRelationStatus="linked")
+            current = app.handle_request("POST", "/api/input-invoice-usage/oa-reverse/preview", body=json.dumps(selection))
+            current_payload = json.loads(current.body)
+            self.assertEqual(current.status_code, 200)
+            self.assertFalse(current_payload["canCreateDraft"])
+            self.assertEqual(current_payload["invoiceCount"], 1)
+            self.assertEqual(current_payload["rejectedInvoices"][0]["reasonCode"], "already_has_active_bank")
+            for endpoint in ("batches", "oa-draft"):
+                response = app.handle_request("POST", f"/api/input-invoice-usage/oa-reverse/{endpoint}", body=json.dumps({
+                    **selection, "expectedPreviewHash": old_preview["previewHash"], "idempotencyKey": endpoint,
+                }))
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(json.loads(response.body)["error"], "stale_oa_reverse_preview")
+            self.assertEqual(provider.client.requests, [])
+            self.assertEqual(reverse._repository.invoice_occupancy(selection["invoiceIds"]), {})
+            self.assertEqual(reverse.staged_drafts()["items"], [])
+
     def test_oa_reverse_preview_ignores_candidate_oa_relation_as_existing_link(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -1098,13 +1163,12 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         reverse = app._input_invoice_usage_oa_reverse_service()
         def candidate_rows(query):
             result = query_service.list_rows(page=int(query["page"][0]), page_size=int(query["page_size"][0]))
-            rows = [row for row in result["rows"] if not row["oa"]["relationCount"]]
+            rows = [dict(row, usageStatus="unused") for row in result["rows"] if not row["oa"]["relationCount"] and row["bankRelationStatus"] == "unlinked"]
             return {"rows": rows, "pagination": {"page": 1, "pageSize": 50, "total": len(rows)},
-                    "summary": {"invoiceCount": len(rows), "totalWithTax": str(sum(Decimal(row["invoice"]["totalWithTax"]) for row in rows))},
-                    "relationCounts": {"all": len(rows), "linked": 0, "unlinked": len(rows)}}
+                    "summary": {"invoiceCount": len(rows), "totalWithTax": str(sum(Decimal(row["invoice"]["totalWithTax"]) for row in rows))}}
         reverse._rows_loader = candidate_rows
         reverse._rows_by_invoice_ids_loader = lambda invoice_ids: {
-            "rows": [row for row in query_service.list_rows(page=1, page_size=200)["rows"]
+            "rows": [dict(row, usageStatus="used" if row["oa"]["relationCount"] or row["bankRelationStatus"] == "linked" else "unused") for row in query_service.list_rows(page=1, page_size=200)["rows"]
                      if row["invoiceId"] in invoice_ids],
         }
 

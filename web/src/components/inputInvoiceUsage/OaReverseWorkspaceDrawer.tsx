@@ -18,6 +18,7 @@ import {
 import type {
   CreateInputInvoiceUsageOaReverseDraftFromSelectionRequest,
   InputInvoiceUsageOaReverseBatch,
+  InputInvoiceUsageOaReversePreviewRequest,
   InputInvoiceUsageOaReverseInvoice,
   InputInvoiceUsageOaReverseStagedDraftsResponse,
   InputInvoiceUsageOaReverseSubmittedHistoryResponse,
@@ -26,15 +27,13 @@ import type {
 } from "../../features/inputInvoiceUsage/types";
 import { formatMoney } from "../../features/money";
 
-export type OaReversePreviewRequest = {
-  page?: number;
-  pageSize?: number;
-  keyword?: string;
-  bankRelation?: "all" | "linked" | "unlinked";
-  selectedInvoiceIds: string[];
+export type OaReversePreviewRequest = Omit<InputInvoiceUsageOaReversePreviewRequest, "targetApplicantCode"> & {
   targetApplicantCode?: string | null;
   signal?: AbortSignal;
 };
+
+type OaReverseCandidateScope = Pick<InputInvoiceUsageOaReversePreviewRequest, "keyword" | "month" | "invoiceDateFrom" | "invoiceDateTo" | "filters">;
+const EMPTY_CANDIDATE_SCOPE: OaReverseCandidateScope = {};
 
 export type OaReversePreviewGroup = {
   targetApplicantCode?: string | null;
@@ -61,7 +60,6 @@ export type OaReverseRejectedInvoice = {
 };
 
 type OaRelationStatus = "linked" | "unlinked";
-type OaRelationFilter = "all" | "linked" | "unlinked";
 
 type OaReverseDisplayInvoice = InputInvoiceUsageOaReverseInvoice & {
   oaRelationStatus: OaRelationStatus;
@@ -71,7 +69,6 @@ type OaReverseDisplayInvoice = InputInvoiceUsageOaReverseInvoice & {
 
 export type OaReversePreviewPayload = {
   pagination?: { page: number; pageSize: number; total: number };
-  relationCounts?: { all: number; linked: number; unlinked: number };
   previewId?: string;
   previewHash?: string;
   source?: string;
@@ -98,6 +95,7 @@ export type OaReversePreviewPayload = {
 
 type OaReverseWorkspaceDrawerProps = {
   open: boolean;
+  initialScope?: OaReverseCandidateScope;
   loadPreview: (request: OaReversePreviewRequest) => Promise<OaReversePreviewPayload>;
   createDraftFromSelection?: (request: CreateInputInvoiceUsageOaReverseDraftFromSelectionRequest) => Promise<InputInvoiceUsageOaReverseBatch>;
   loadStagedDrafts?: (limit?: number) => Promise<InputInvoiceUsageOaReverseStagedDraftsResponse>;
@@ -109,6 +107,7 @@ type OaReverseWorkspaceDrawerProps = {
 
 export default function OaReverseWorkspaceDrawer({
   open,
+  initialScope = EMPTY_CANDIDATE_SCOPE,
   loadPreview,
   createDraftFromSelection,
   loadStagedDrafts,
@@ -136,17 +135,17 @@ export default function OaReverseWorkspaceDrawer({
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const [targetApplicantCode, setTargetApplicantCode] = useState<string | null>(null);
-  const [bankRelationFilter, setBankRelationFilter] = useState<OaRelationFilter>("all");
-  const [candidateSearch, setCandidateSearch] = useState("");
+  const [scope, setScope] = useState(initialScope);
+  const [candidateSearch, setCandidateSearch] = useState(initialScope.keyword ?? "");
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [page, setPage] = useState(1);
-  const [keyword, setKeyword] = useState("");
+  const [keyword, setKeyword] = useState(initialScope.keyword ?? "");
   const [selectedMetadata, setSelectedMetadata] = useState<Record<string, InputInvoiceUsageOaReverseInvoice>>({});
   const previewRequestIdRef = useRef(0);
   const targetApplicantLabelId = useId();
   const request = useMemo(
-    () => ({ selectedInvoiceIds: [], targetApplicantCode, page, pageSize: 50, keyword, bankRelation: bankRelationFilter }),
-    [targetApplicantCode, page, keyword, bankRelationFilter],
+    () => ({ ...scope, selectedInvoiceIds: [], targetApplicantCode, page, pageSize: 50, keyword }),
+    [scope, targetApplicantCode, page, keyword],
   );
 
   useEffect(() => {
@@ -169,11 +168,11 @@ export default function OaReverseWorkspaceDrawer({
       setHistoryLoading(false);
       setSelectedCandidateIds([]);
       setTargetApplicantCode(null);
-      setBankRelationFilter("all");
+      setScope(initialScope);
       setPage(1);
-      setKeyword("");
+      setKeyword(initialScope.keyword ?? "");
       setSelectedMetadata({});
-      setCandidateSearch("");
+      setCandidateSearch(initialScope.keyword ?? "");
       return undefined;
     }
 
@@ -215,7 +214,7 @@ export default function OaReverseWorkspaceDrawer({
       active = false;
       controller.abort();
     };
-  }, [loadPreview, open, request, refreshVersion]);
+  }, [loadPreview, open, request, refreshVersion, initialScope]);
 
   const candidateInvoices = useMemo(() => (preview ? invoicesFromPreview(preview) : []), [preview]);
   const selectableCandidateInvoices = useMemo(() => candidateInvoices.filter((invoice) => invoice.selectable), [candidateInvoices]);
@@ -292,7 +291,10 @@ export default function OaReverseWorkspaceDrawer({
         });
         const checkedIds = new Set(invoicesFromPreview(draftPreview).filter((invoice) => invoice.selectable).map((invoice) => invoice.invoiceId));
         if (checkedIds.size !== selectedIds.length || selectedIds.some((id) => !checkedIds.has(id))) {
-          throw new Error("所选发票的关联或占用状态已变化，请刷新并重新选择。");
+          const rejected = draftPreview.rejectedInvoices ?? [];
+          throw new Error(rejected.length > 0
+            ? rejected.map((invoice) => `${invoice.invoiceNumber || invoice.invoiceId}：${invoice.reason}`).join("；")
+            : "所选发票的关联或占用状态已变化，请刷新并重新选择。");
         }
         if (
           !draftPreview.previewId
@@ -497,7 +499,7 @@ export default function OaReverseWorkspaceDrawer({
                   <SummaryMetric label="候选发票数" value={`${preview.invoiceCount} 张`} />
                   <SummaryMetric label="候选价税合计" value={formatMoney(preview.totalWithTax, "-")} />
                 </div>
-                <Section title="未关联 OA 的发票">
+                <Section title="待使用发票">
                   {preview ? (
                     <div className="input-invoice-usage-oa-actions">
                       <Button
@@ -523,12 +525,6 @@ export default function OaReverseWorkspaceDrawer({
                       >
                         {actionLoading === "createDraft" ? "创建草稿中..." : "创建 OA 草稿"}
                       </Button>
-                      <Select aria-label="筛选流水关联状态" className="input-invoice-usage-oa-bank-filter" selectedKey={bankRelationFilter} onSelectionChange={(key) => { setBankRelationFilter(String(key) as OaRelationFilter); setPage(1); }}>
-                        <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
-                        <Select.Popover><ListBox>
-                          {BANK_RELATION_FILTER_OPTIONS.map((option) => <ListBox.Item id={option.value} key={option.value} textValue={option.label}>{option.label}{preview.relationCounts ? ` ${preview.relationCounts[option.value]} 张` : ""}</ListBox.Item>)}
-                        </ListBox></Select.Popover>
-                      </Select>
                       <QuerySearch ariaLabel="搜索候选发票" className="input-invoice-usage-oa-search" value={candidateSearch} onChange={setCandidateSearch} onSubmit={() => { setKeyword(candidateSearch); setPage(1); }} onClear={() => { setCandidateSearch(""); setKeyword(""); setPage(1); }} placeholder="发票号码、销方、金额" />
                     </div>
                   ) : null}
@@ -538,7 +534,7 @@ export default function OaReverseWorkspaceDrawer({
                       <FinanceTableColumn columnRole="identity" isRowHeader className="input-invoice-usage-oa-table__number">发票号码</FinanceTableColumn>
                       <FinanceTableColumn columnRole="account">销方</FinanceTableColumn>
                       <FinanceTableColumn columnRole="amount">价税合计</FinanceTableColumn>
-                      <FinanceTableColumn columnRole="status">流水关联</FinanceTableColumn>
+                      <FinanceTableColumn columnRole="status">可选状态</FinanceTableColumn>
                     </FinanceTableHeader>
                     <FinanceTableBody>
                       {visibleCandidateInvoices.length === 0 ? (
@@ -556,7 +552,7 @@ export default function OaReverseWorkspaceDrawer({
                           <FinanceTableRow
                             id={invoice.invoiceId}
                             key={invoice.invoiceId}
-                            textValue={`${invoiceNumber} ${invoice.issueDate} ${invoice.sellerName} ${invoice.totalWithTax} ${bankRelationChipLabel(invoice.bankRelationStatus)}`}
+                            textValue={`${invoiceNumber} ${invoice.issueDate} ${invoice.sellerName} ${invoice.totalWithTax} ${candidateStatusLabel(invoice)}`}
                           >
                             <FinanceTableCell columnRole="selection" className="input-invoice-usage-oa-table__select">
                               <Checkbox
@@ -605,13 +601,13 @@ export default function OaReverseWorkspaceDrawer({
                             <FinanceTableCell columnRole="amount" className="input-invoice-usage-oa-table__amount" textValue={invoice.totalWithTax}>
                               {formatMoney(invoice.totalWithTax, "-")}
                             </FinanceTableCell>
-                            <FinanceTableCell columnRole="status" textValue={bankRelationChipLabel(invoice.bankRelationStatus)}>
+                            <FinanceTableCell columnRole="status" textValue={candidateStatusLabel(invoice)}>
                               <Chip
                                 color="default"
                                 size="sm"
                                 variant="soft"
                               >
-                                <Chip.Label>{bankRelationChipLabel(invoice.bankRelationStatus)}{invoice.occupiedBatchId ? " · 已占用" : ""}</Chip.Label>
+                                <Chip.Label>{candidateStatusLabel(invoice)}</Chip.Label>
                               </Chip>
                             </FinanceTableCell>
                           </FinanceTableRow>
@@ -651,13 +647,8 @@ export default function OaReverseWorkspaceDrawer({
   );
 }
 
-const BANK_RELATION_FILTER_OPTIONS: Array<{ value: OaRelationFilter; label: string }> = [
-  { value: "all", label: "全部" },
-  { value: "linked", label: "已关联流水" },
-  { value: "unlinked", label: "未关联流水" },
-];
-function bankRelationChipLabel(value: string | undefined) {
-  return value === "linked" ? "已关联流水" : "未关联流水";
+function candidateStatusLabel(invoice: OaReverseDisplayInvoice) {
+  return invoice.occupiedBatchId ? "已占用" : invoice.selectable ? "可选择" : "不可选择";
 }
 function oaRelationDisabledLabel(value: OaRelationStatus) {
   return value === "linked" ? "已关联 OA 发票" : "不可用发票";
@@ -712,7 +703,7 @@ function invoicesFromPreview(preview: OaReversePreviewPayload) {
     byId.set(invoice.invoiceId, {
       ...invoice,
       oaRelationStatus: relationStatus,
-      selectable: relationStatus === "unlinked" && !invoice.occupiedBatchId,
+      selectable: relationStatus === "unlinked" && invoice.bankRelationStatus !== "linked" && !invoice.occupiedBatchId,
     });
   };
   for (const invoice of preview.candidateInvoices ?? []) {

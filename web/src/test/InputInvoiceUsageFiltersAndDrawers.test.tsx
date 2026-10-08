@@ -375,17 +375,18 @@ describe("Input invoice usage workflow drawers", () => {
     ]));
   });
 
-  test("OA preview browsing omits explicit IDs and main-table filters, while selection sends precise IDs", async () => {
+  test("OA preview browsing sends its inherited scope, while selection sends precise IDs", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
       const count = Object.hasOwn(body, "invoiceIds") ? body.invoiceIds.length : 385;
-      return new Response(JSON.stringify({ invoiceCount: count, totalWithTax: "0", groups: [], pagination: { page: 1, pageSize: 50, total: count }, relationCounts: { all: 385, linked: 1, unlinked: 384 } }), { status: 200, headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ invoiceCount: count, totalWithTax: "0", groups: [], pagination: { page: 1, pageSize: 50, total: count } }), { status: 200, headers: { "Content-Type": "application/json" } });
     });
     vi.stubGlobal("fetch", fetchMock);
-    const all = await previewInputInvoiceUsageOaReverse({ selectedInvoiceIds: [], page: 1, pageSize: 50, bankRelation: "all" });
+    const all = await previewInputInvoiceUsageOaReverse({ selectedInvoiceIds: [], page: 1, pageSize: 50, keyword: "销方", month: "2026-09", invoiceDateFrom: "2026-09-01", invoiceDateTo: "2026-09-30", filters: [{ field: "seller_name", operator: "contains", value: "销方" }] });
     expect(all.invoiceCount).toBe(385);
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).not.toHaveProperty("invoiceIds");
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).not.toHaveProperty("filters");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({ keyword: "销方", month: "2026-09", invoiceDateFrom: "2026-09-01", invoiceDateTo: "2026-09-30", filters: [{ field: "seller_name", operator: "contains", value: "销方" }] });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).not.toHaveProperty("bankRelation");
     const selected = await previewInputInvoiceUsageOaReverse({ selectedInvoiceIds: ["inv-1", "inv-2"] });
     expect(selected.invoiceCount).toBe(2);
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toMatchObject({ invoiceIds: ["inv-1", "inv-2"] });
@@ -671,7 +672,7 @@ describe("Input invoice usage workflow drawers", () => {
     expect(within(screen.getByText("SD-INV-002").closest("td") as HTMLElement).getByText("2026-05-02")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "创建本地批次" })).not.toBeInTheDocument();
     expect(screen.queryByText("尚未创建本地批次。")).not.toBeInTheDocument();
-    const candidateSection = screen.getByRole("heading", { name: "未关联 OA 的发票" }).closest("section") as HTMLElement;
+    const candidateSection = screen.getByRole("heading", { name: "待使用发票" }).closest("section") as HTMLElement;
     const createDraftButton = within(candidateSection).getByRole("button", { name: "创建 OA 草稿" });
     const candidateSearchInput = within(candidateSection).getByLabelText("搜索候选发票");
     expect(createDraftButton.compareDocumentPosition(candidateSearchInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -911,6 +912,21 @@ describe("Input invoice usage workflow drawers", () => {
     expect(createDraftFromSelection).not.toHaveBeenCalled();
   });
 
+  test("OA reverse reports a newly bank-linked invoice and never creates a partial draft", async () => {
+    const user = userEvent.setup();
+    const loadPreview = vi.fn((request) => Promise.resolve(request.selectedInvoiceIds.length ? {
+      ...createReadyPreviewPayload,
+      groups: [], invoiceRows: [],
+      rejectedInvoices: [{ invoiceId: "inv-001", invoiceNumber: "SD-INV-001", reason: "发票已关联银行流水，不能反提 OA" }],
+    } : createReadyPreviewPayload));
+    const createDraftFromSelection = vi.fn();
+    render(<OaReverseWorkspaceDrawer open loadPreview={loadPreview} createDraftFromSelection={createDraftFromSelection} onClose={() => undefined} />);
+    await user.click(await screen.findByRole("button", { name: "选择本页" }));
+    await user.click(screen.getByRole("button", { name: "创建 OA 草稿" }));
+    expect(await screen.findByText("SD-INV-001：发票已关联银行流水，不能反提 OA")).toBeInTheDocument();
+    expect(createDraftFromSelection).not.toHaveBeenCalled();
+  });
+
   test("OA reverse staged tab recovers a draft after closing confirmation without exposing draft link", async () => {
     const user = userEvent.setup();
     const loadPreview = vi.fn(() => Promise.resolve(createReadyPreviewPayload));
@@ -981,36 +997,47 @@ describe("Input invoice usage workflow drawers", () => {
     })));
   });
 
-  test("OA reverse describes the unlinked-OA scope and preserves full invoice numbers", async () => {
-    const user = userEvent.setup();
+  test("OA reverse describes the unused scope and preserves full invoice numbers", async () => {
     const number = "00123456789012345678";
     const first = { ...createReadyPreviewPayload.groups[0].invoiceRows![0], displayNo: number, invoiceNumber: number };
-    const loadPreview = vi.fn((request) => Promise.resolve({ ...createReadyPreviewPayload,
-      invoiceCount: request.bankRelation === "linked" ? 1 : request.bankRelation === "unlinked" ? 384 : 385,
-      relationCounts: { all: 385, linked: 1, unlinked: 384 },
-      groups: [], invoiceRows: [first],
+    const loadPreview = vi.fn(() => Promise.resolve({ ...createReadyPreviewPayload,
+      invoiceCount: 384, groups: [], invoiceRows: [first],
     }));
     render(<OaReverseWorkspaceDrawer open loadPreview={loadPreview} onClose={() => undefined} />);
-    expect(await screen.findByRole("heading", { name: "未关联 OA 的发票" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "待使用发票" })).toBeInTheDocument();
     expect(screen.getByText(number, { exact: true })).toHaveTextContent(number);
     expect(screen.getByRole("checkbox", { name: `选择候选发票 ${number}` })).toBeEnabled();
-    expect(screen.queryByText(/全部流水关联/)).not.toBeInTheDocument();
-    for (const [label, bankRelation] of [["已关联流水", "linked"], ["未关联流水", "unlinked"], ["全部", "all"]]) {
-      await user.click(screen.getByLabelText("筛选流水关联状态"));
-      expect(screen.getByRole("option", { name: "全部 385 张", exact: true })).toHaveTextContent("全部 385 张");
-      expect(screen.getByRole("option", { name: "已关联流水 1 张", exact: true })).toHaveTextContent("已关联流水 1 张");
-      expect(screen.getByRole("option", { name: "未关联流水 384 张", exact: true })).toHaveTextContent("未关联流水 384 张");
-      await user.click(screen.getByRole("option", { name: new RegExp(`^${label} `) }));
-      await waitFor(() => expect(loadPreview).toHaveBeenLastCalledWith(expect.objectContaining({ bankRelation, page: 1 })));
-    }
+    expect(screen.getByText("可选择")).toBeInTheDocument();
+    expect(screen.queryByLabelText("筛选流水关联状态")).not.toBeInTheDocument();
+    expect(loadPreview).toHaveBeenCalledTimes(1);
+  });
+
+  test("OA reverse inherits scope, keeps search local and resets scope on reopen", async () => {
+    const user = userEvent.setup();
+    const loadPreview = vi.fn(() => Promise.resolve(createReadyPreviewPayload));
+    const initialScope = { keyword: "销方", month: "2026-09", invoiceDateFrom: "2026-09-01", invoiceDateTo: "2026-09-30", filters: [{ field: "oa_relation", operator: "equals" as const, value: "unlinked" }] };
+    const { rerender } = render(<OaReverseWorkspaceDrawer open initialScope={initialScope} loadPreview={loadPreview} onClose={() => undefined} />);
+    const search = await screen.findByRole("searchbox", { name: "搜索候选发票" });
+    expect(search).toHaveValue("销方");
+    expect(loadPreview).toHaveBeenLastCalledWith(expect.objectContaining({ ...initialScope, page: 1 }));
+    await user.clear(search);
+    await user.type(search, "500");
+    await user.click(screen.getByRole("button", { name: "查询" }));
+    await waitFor(() => expect(loadPreview).toHaveBeenLastCalledWith(expect.objectContaining({ ...initialScope, keyword: "500", page: 1 })));
+    expect(initialScope.keyword).toBe("销方");
+    const nextScope = { ...initialScope, keyword: "新销方", month: "2026-10" };
+    rerender(<OaReverseWorkspaceDrawer open={false} initialScope={nextScope} loadPreview={loadPreview} onClose={() => undefined} />);
+    rerender(<OaReverseWorkspaceDrawer open initialScope={nextScope} loadPreview={loadPreview} onClose={() => undefined} />);
+    await waitFor(() => expect(loadPreview).toHaveBeenLastCalledWith(expect.objectContaining({ ...nextScope, page: 1 })));
+    expect(await screen.findByRole("searchbox", { name: "搜索候选发票" })).toHaveValue("新销方");
   });
 
   test("OA reverse keeps cross-page selection and disables occupied invoices without reducing totals", async () => {
     const user = userEvent.setup();
     const first = createReadyPreviewPayload.groups[0].invoiceRows![0];
-    const second = { ...first, invoiceId: "inv-002", displayNo: "SD-INV-002", occupiedBatchId: "batch-existing", bankRelationStatus: "linked" as const };
+    const second = { ...first, invoiceId: "inv-002", displayNo: "SD-INV-002", occupiedBatchId: "batch-existing", bankRelationStatus: "unlinked" as const };
     const loadPreview = vi.fn((request) => Promise.resolve({ ...createReadyPreviewPayload, invoiceCount: 51,
-      pagination: { page: request.page || 1, pageSize: 50, total: 51 }, relationCounts: { all: 51, linked: 1, unlinked: 50 },
+      pagination: { page: request.page || 1, pageSize: 50, total: 51 },
       groups: [], invoiceRows: request.page === 2 ? [second] : [first],
     }));
     render(<OaReverseWorkspaceDrawer open loadPreview={loadPreview} onClose={() => undefined} />);
@@ -1021,9 +1048,7 @@ describe("Input invoice usage workflow drawers", () => {
     expect(screen.getByText(/已选 1 张（其中 1 张不在本页）/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "上一页" }));
     expect(await screen.findByRole("checkbox", { name: "选择候选发票 SD-INV-001" })).toBeChecked();
-    await user.click(screen.getByLabelText("筛选流水关联状态"));
-    await user.click(await screen.findByRole("option", { name: /已关联流水/ }));
-    await waitFor(() => expect(loadPreview).toHaveBeenLastCalledWith(expect.objectContaining({ bankRelation: "linked", page: 1 })));
+    expect(loadPreview).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1 }));
   });
 
   test("unknown draft results remain visible and require explicit verified release without retrying creation", async () => {

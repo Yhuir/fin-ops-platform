@@ -386,12 +386,21 @@ export default function InputInvoiceUsagePage() {
     return fetchInputInvoiceUsageRowRelationDetail(target, signal);
   }, []);
 
+  const oaReverseScope = useMemo(() => ({
+    keyword: query.keyword,
+    month: query.month,
+    invoiceDateFrom: query.invoiceDateFrom,
+    invoiceDateTo: query.invoiceDateTo,
+    filters: query.filters.filter((filter) => !["usage_status", "payment_group", "payment_status"].includes(filter.field)),
+  }), [query.keyword, query.month, query.invoiceDateFrom, query.invoiceDateTo, query.filters]);
+
   const loadOaReversePreview = useCallback((request: OaReversePreviewRequest) => (
     previewInputInvoiceUsageOaReverse({
       source: request.selectedInvoiceIds.length > 0 ? "explicitSelection" : "currentFilters",
       selectedInvoiceIds: request.selectedInvoiceIds,
       targetApplicantCode: request.targetApplicantCode || undefined,
-      page: request.page, pageSize: request.pageSize, keyword: request.keyword, bankRelation: request.bankRelation,
+      page: request.page, pageSize: request.pageSize, keyword: request.keyword,
+      month: request.month, invoiceDateFrom: request.invoiceDateFrom, invoiceDateTo: request.invoiceDateTo, filters: request.filters,
     }, request.signal)
   ), []);
 
@@ -527,6 +536,7 @@ export default function InputInvoiceUsagePage() {
         onClose={handleCloseDetail}
       />
       <OaReverseWorkspaceDrawer
+        initialScope={oaReverseScope}
         open={query.activeWorkflow === "oaReverse"}
         loadPreview={loadOaReversePreview}
         createDraftFromSelection={createInputInvoiceUsageOaReverseDraftFromSelection}

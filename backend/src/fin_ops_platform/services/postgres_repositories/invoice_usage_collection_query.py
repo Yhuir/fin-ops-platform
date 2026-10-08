@@ -245,7 +245,7 @@ class PostgresInputInvoiceUsageQueryRepository:
                               join active_relations relation on relation.id = scope.relation_id
                               where scope.group_key = filtered_rows.group_key) as relation_case_ids,
                         status_code, fully_matched, invoice_oa_amount_matched, payment_comparison,
-                        has_oa_relation, has_bank_relation,
+                        usage_status, has_oa_relation, has_bank_relation,
                         oa_count, bank_count, oa_applicant,
                         array[]::text[] as supporting_group_keys,
                         count(*) over()::bigint as filtered_total,
@@ -1011,13 +1011,14 @@ def _fact_cte(
         )
         """
         if invoice_type == "input" and not invoice_level
-        else """
+        else f"""
         group_members as (
             select
                 'identity:' || invoice.identity_key as group_key,
                 null::text as relation_case_id,
                 invoice.invoice_id
             from invoice_rows invoice
+            {"where invoice.in_scope" if invoice_type == "input" else ""}
         )
         """
     )
@@ -1970,6 +1971,7 @@ def _group_payload(
     }
     relation_case_id = str(row.get("relation_case_id") or "").strip()
     if invoice_type == "input":
+        payload["usage_status"] = row["usage_status"]
         payload["payment_facts"] = {
             "has_oa": bool(row.get("has_oa_relation")),
             "has_bank": bool(row.get("has_bank_relation")),

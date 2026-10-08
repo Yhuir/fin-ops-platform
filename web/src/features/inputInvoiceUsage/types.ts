@@ -230,7 +230,10 @@ export type InputInvoiceUsageOaReversePreviewRequest = {
   page?: number;
   pageSize?: number;
   keyword?: string;
-  bankRelation?: "all" | "linked" | "unlinked";
+  month?: string;
+  invoiceDateFrom?: string;
+  invoiceDateTo?: string;
+  filters?: InputInvoiceUsageFilter[];
   source?: "currentFilters" | "explicitSelection";
   selectedInvoiceIds: string[];
   targetApplicantCode?: string;
@@ -238,7 +241,6 @@ export type InputInvoiceUsageOaReversePreviewRequest = {
 
 export type InputInvoiceUsageOaReversePreviewResponse = {
   pagination: { page: number; pageSize: number; total: number };
-  relationCounts: { all: number; linked: number; unlinked: number };
   previewId?: string;
   previewHash?: string;
   source?: string;

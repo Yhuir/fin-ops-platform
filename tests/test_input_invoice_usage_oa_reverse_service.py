@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from decimal import Decimal
 
@@ -13,6 +14,7 @@ from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import (
     InputInvoiceUsageOaReverseInvalidTransitionError,
     InputInvoiceUsageOaReverseMissingClientError,
     InputInvoiceUsageOaReverseService,
+    InputInvoiceUsageOaReverseStalePreviewError,
     InputInvoiceUsageOaReverseStatus,
     InputInvoiceUsageOaReverseVersionConflictError,
     WorkbenchInputInvoiceUsageOaReverseRelationWriter,
@@ -241,7 +243,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             "rows": [self._read_model_row("inv-1", "1001")],
             "summary": {"invoiceCount": 1, "totalWithTax": "100.00"},
             "pagination": {"page": 1, "pageSize": 50, "total": 1},
-            "relationCounts": {"all": 1, "linked": 0, "unlinked": 1},
         }
         candidates = service.preview({})
         self.assertEqual(candidates["invoiceCount"], 1)
@@ -253,9 +254,60 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         preview = service.preview({"invoiceIds": ["inv-1"]}, can_create_draft=True)
         request = {"invoiceIds": ["inv-1"], "idempotencyKey": "same-request", "expectedPreviewHash": preview["previewHash"]}
         first = service.create_oa_draft_from_selection(request, actor_id="test", oa_client_provider=provider)
+        linked = self._read_model_row("inv-1", "1001")
+        linked.update(usageStatus="used", bankRelationStatus="linked")
+        service._rows_by_invoice_ids_loader = lambda ids: {"rows": [linked]}
         again = service.create_oa_draft_from_selection(request, actor_id="test", oa_client_provider=provider)
         self.assertEqual(again["batchId"], first["batchId"])
         self.assertEqual(len(provider.client.requests), 1)
+
+    def test_new_bank_relation_after_preview_rejects_whole_selection_without_side_effects(self):
+        for operation in ("create_batch", "create_oa_draft_from_selection"):
+            with self.subTest(operation=operation):
+                rows = [self._read_model_row("inv-1", "1001"), self._read_model_row("inv-2", "1002")]
+                service = self._service(invoices=[])
+                service._rows_by_invoice_ids_loader = lambda ids: {"rows": rows}
+                selection = {"invoiceIds": ["inv-1", "inv-2"]}
+                preview = service.preview(selection, can_create_draft=True)
+                self.assertTrue(preview["canCreateDraft"])
+                rows[1].update(usageStatus="used", bankRelationStatus="linked")
+                provider = FakeTargetOaDraftClientProvider()
+                request = {**selection, "expectedPreviewHash": preview["previewHash"], "idempotencyKey": operation}
+                kwargs = {"oa_client_provider": provider} if operation == "create_oa_draft_from_selection" else {}
+                with self.assertRaises(InputInvoiceUsageOaReverseStalePreviewError) as error:
+                    getattr(service, operation)(request, actor_id="test", **kwargs)
+                self.assertIn("1002", str(error.exception))
+                self.assertIn("已关联流水", str(error.exception))
+                self.assertEqual(provider.client.requests, [])
+                self.assertEqual(service._repository.invoice_occupancy(selection["invoiceIds"]), {})
+                self.assertIsNone(service._repository.find_batch_by_create_idempotency_key(operation))
+                current = service.preview(selection, can_create_draft=True)
+                self.assertFalse(current["canCreateDraft"])
+                self.assertEqual(current["rejectedInvoices"][0]["reasonCode"], "already_has_active_bank")
+                self.assertEqual(current["rejectedInvoices"][0]["invoiceId"], "inv-2")
+
+    def test_staged_and_failed_batches_recheck_bank_relation_without_mutation(self):
+        for status in (InputInvoiceUsageOaReverseStatus.DRAFT.value, InputInvoiceUsageOaReverseStatus.OA_DRAFT_FAILED.value):
+            with self.subTest(status=status):
+                client = FakeOaDraftClient()
+                service = self._service(invoices=[], oa_client=client)
+                row = self._read_model_row("inv-1", "1001")
+                service._rows_by_invoice_ids_loader = lambda ids: {"rows": [row]}
+                created = self._create_batch(service, ["inv-1"])
+                batch = service._repository.get_batch(created["batchId"])
+                batch.status = status
+                service._repository.save_batch(batch)
+                before = service.batch_payload(batch)
+                occupancy = service._repository.invoice_occupancy(["inv-1"])
+                row.update(usageStatus="used", bankRelationStatus="linked")
+                with self.assertRaises(InputInvoiceUsageOaReverseInvalidTransitionError) as error:
+                    service.create_oa_draft(created["batchId"], expected_version=created["version"], idempotency_key="retry", actor_id="test")
+                self.assertEqual(error.exception.code, "invalid_oa_reverse_selection")
+                self.assertIn("1001", str(error.exception))
+                self.assertIn("已关联流水", str(error.exception))
+                self.assertEqual(client.requests, [])
+                self.assertEqual(service.batch_payload(service._repository.get_batch(created["batchId"])), before)
+                self.assertEqual(service._repository.invoice_occupancy(["inv-1"]), occupancy)
 
     def test_released_batch_cannot_create_external_draft_after_another_batch_reserves_invoice(self):
         client = FakeOaDraftClient()
@@ -278,16 +330,19 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         service = self._service(invoices=[])
         row = self._read_model_row("bank-linked", "1001")
         row["bankRelationStatus"] = "linked"
+        row["usageStatus"] = "used"
         row["bankTransactions"] = {"relationCount": 0, "summaries": []}
         service._rows_by_invoice_ids_loader = lambda ids: {"rows": [row]}
         preview = service.preview({"invoiceIds": ["bank-linked"]}, can_create_draft=True)
-        self.assertEqual(preview["invoiceRows"][0]["bankRelationStatus"], "linked")
-        self.assertEqual(preview["relationCounts"], {"all": 1, "linked": 1, "unlinked": 0})
-        self.assertTrue(preview["canCreateDraft"])
+        self.assertEqual(preview["invoiceRows"], [])
+        self.assertEqual(preview["rejectedInvoices"][0]["bankRelationStatus"], "linked")
+        self.assertEqual(preview["rejectedInvoices"][0]["reasonCode"], "already_has_active_bank")
+        self.assertNotIn("relationCounts", preview)
+        self.assertFalse(preview["canCreateDraft"])
 
     def test_preview_rejects_invalid_candidate_query_and_empty_selection_stays_empty(self):
         service = self._service(invoices=[])
-        for request in ({"page": 0}, {"page": True}, {"pageSize": 201}, {"pageSize": "bad"}, {"bankRelation": "other"}):
+        for request in ({"page": 0}, {"page": True}, {"pageSize": 201}, {"pageSize": "bad"}):
             with self.subTest(request=request), self.assertRaises(InputInvoiceUsageError):
                 service.preview(request)
         service._rows_loader = lambda query: self.fail("Empty explicit IDs cannot load candidates")
@@ -328,7 +383,7 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertEqual(preview["invoiceRows"][0]["invoiceId"], invoice.id)
         self.assertEqual(preview["invoiceRows"][0]["oaRelationStatus"], "unlinked")
 
-    def test_preview_candidates_are_paged_independently_of_main_filters(self) -> None:
+    def test_preview_candidates_preserve_main_scope_and_page_on_server(self) -> None:
         calls: list[dict[str, list[object]]] = []
         service = InputInvoiceUsageOaReverseService(
             repository=InMemoryInputInvoiceUsageOaReverseBatchRepository(),
@@ -339,14 +394,14 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
                     "rows": [self._read_model_row("inv-fast", "9101")],
                     "summary": {"invoiceCount": 351, "totalWithTax": "35100.00"},
                     "pagination": {"page": 2, "pageSize": 50, "total": 351},
-                    "relationCounts": {"all": 500, "linked": 149, "unlinked": 351},
                 }
             ),
         )
 
         preview = service.preview(
             {
-                "source": "candidates", "page": 2, "pageSize": 50, "bankRelation": "unlinked", "month": "2026-01",
+                "source": "candidates", "page": 2, "pageSize": 50, "month": "2026-01",
+                "invoiceDateFrom": "2026-01-02", "invoiceDateTo": "2026-01-28", "keyword": "供应商",
                 "filters": [{"field": "seller_name", "operator": "in", "values": ["供应商"]}],
                 "targetApplicantCode": "chen_xiuyun",
             },
@@ -356,13 +411,16 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertEqual(preview["invoiceCount"], 351)
         self.assertEqual(preview["totalWithTax"], "35100.00")
         self.assertEqual(preview["pagination"], {"page": 2, "pageSize": 50, "total": 351})
-        self.assertEqual(preview["relationCounts"], {"all": 500, "linked": 149, "unlinked": 351})
+        self.assertNotIn("relationCounts", preview)
         self.assertEqual(preview["invoiceRows"][0]["invoiceId"], "inv-fast")
         self.assertEqual(calls[0]["page"], ["2"])
         self.assertEqual(calls[0]["page_size"], ["50"])
-        self.assertNotIn("filters", calls[0])
-        self.assertNotIn("month", calls[0])
-        self.assertEqual(calls[0]["bank_relation"], ["unlinked"])
+        self.assertEqual(json.loads(calls[0]["filters"][0]), [{"field": "seller_name", "operator": "in", "values": ["供应商"]}])
+        self.assertEqual(calls[0]["month"], ["2026-01"])
+        self.assertEqual(calls[0]["invoice_date_from"], ["2026-01-02"])
+        self.assertEqual(calls[0]["invoice_date_to"], ["2026-01-28"])
+        self.assertEqual(calls[0]["keyword"], ["供应商"])
+        self.assertNotIn("bank_relation", calls[0])
 
     def test_preview_explicit_selection_uses_invoice_id_read_model_lookup(self) -> None:
         calls: list[list[str]] = []
@@ -428,7 +486,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
                 "rows": [],
                 "summary": {"invoiceCount": 0, "totalWithTax": "0.00"},
                 "pagination": {"page": 1, "pageSize": 50, "total": 0},
-                "relationCounts": {"all": 0, "linked": 0, "unlinked": 0},
                 "read_model_status": "refreshing",
                 "read_model_scope_key": "all",
             },
@@ -884,6 +941,7 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
                 "taxableItemName": "服务费",
             },
             "bankRelationStatus": "unlinked",
+            "usageStatus": "unused",
             "paymentStatus": {"code": "pending", "label": "待处理", "reason": ""},
             "oa": {"relationCount": 0, "summaries": []},
         }
@@ -955,6 +1013,8 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             for row in list(payload.get("rows") or [])
             if isinstance(row, dict) and str(row.get("invoiceId") or "") in set(invoice_ids)
         ]
+        for row in rows:
+            row["usageStatus"] = "used" if row["oa"]["relationCount"] or row["bankRelationStatus"] == "linked" else "unused"
         known = {str(row.get("invoiceId") or "") for row in rows}
         return {
             "rows": rows,
