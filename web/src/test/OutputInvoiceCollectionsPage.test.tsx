@@ -129,7 +129,7 @@ const rowsPayload = {
       },
       collection_status: {
         code: "reversed_by_red",
-        label: "蓝票已被红冲",
+        label: "已被冲",
         reason: "已由红字发票冲销。",
         collected_amount: "0.00",
         pending_amount: "0.00",
@@ -226,7 +226,7 @@ const rowsPayload = {
       },
       collection_status: {
         code: "reverses_blue",
-        label: "红票已关联蓝票",
+        label: "已关联蓝字",
         reason: "已冲销对应蓝字发票。",
         collected_amount: "0.00",
         pending_amount: "0.00",
@@ -294,7 +294,7 @@ const rowsPayload = {
       displayNo: "XSFP-UNMATCHED-RED-001",
       totalWithTax: "-10000.00",
       statusCode: "unmatched_red",
-      statusLabel: "红票未关联蓝票",
+      statusLabel: "未关联蓝字",
       statusReason: "红字发票尚未形成唯一、确定的蓝字发票配对关系。",
       collectedAmount: "0.00",
       pendingAmount: "0.00",
@@ -325,9 +325,9 @@ const rowsPayload = {
       sortable: true,
       operators: ["in"],
       options: [
-        { value: "reversed_by_red", label: "蓝票已被红冲", count: 1 },
-        { value: "reverses_blue", label: "红票已关联蓝票", count: 1 },
-        { value: "unmatched_red", label: "红票未关联蓝票", count: 1 },
+        { value: "reversed_by_red", label: "已被冲", count: 1 },
+        { value: "reverses_blue", label: "已关联蓝字", count: 1 },
+        { value: "unmatched_red", label: "未关联蓝字", count: 1 },
         { value: "collected", label: "已收款", count: 1 },
         { value: "partial_collected", label: "部分收款", count: 1 },
         { value: "pending_collection", label: "待收款", count: 1 },
@@ -512,8 +512,8 @@ describe("销项发票收款情况", () => {
     expect(within(groups).getByText("销项发票")).toBeVisible();
     expect(within(groups).getByText("收款状态")).toBeVisible();
     expect(within(groups).getByText("收入流水")).toBeVisible();
-    expect(within(table).getByText("蓝票已被红冲")).toBeVisible();
-    expect(within(table).getByText("红票已关联蓝票")).toBeVisible();
+    expect(within(table).getByText("已被冲")).toBeVisible();
+    expect(within(table).getByText("已关联蓝字")).toBeVisible();
     expect(within(table).getByRole("button", { name: "红蓝票 · 2" })).toBeVisible();
 
     const blueRow = within(table).getByRole("row", { name: /XSFP-BLUE-001/ });
@@ -604,9 +604,9 @@ describe("销项发票收款情况", () => {
     expect(bankMetadata.querySelector(".bank-account-value")).not.toHaveClass("output-invoice-collections-table-tag");
     expect(collectedRow.querySelector(".output-invoice-collections-table-cell--status")).not.toHaveClass("output-invoice-collection-status-cell");
 
-    expect(within(unmatchedRedRow).getByText("红票未关联蓝票")).toBeVisible();
-    expect(within(reversedBlueRow).getByText("蓝票已被红冲")).toBeVisible();
-    expect(within(reversesBlueRow).getByText("红票已关联蓝票")).toBeVisible();
+    expect(within(unmatchedRedRow).getByText("未关联蓝字")).toBeVisible();
+    expect(within(reversedBlueRow).getByText("已被冲")).toBeVisible();
+    expect(within(reversesBlueRow).getByText("已关联蓝字")).toBeVisible();
     for (const redStatusRow of [unmatchedRedRow, reversedBlueRow, reversesBlueRow]) {
       expect(within(redStatusRow).queryByText(/^已收 /)).not.toBeInTheDocument();
       expect(within(redStatusRow).queryByText(/^待收 /)).not.toBeInTheDocument();
@@ -667,7 +667,7 @@ describe("销项发票收款情况", () => {
   });
 
   test("父分类选择完整并集，恢复会话不截断，切换子分类保留搜索", async () => {
-    const values = ["reversed_by_red", "reverses_blue", "unmatched_red"];
+    const values = ["reverses_blue", "unmatched_red"];
     window.sessionStorage.setItem(buildPageSessionStorageKey({ userScope: "101", pageKey: "output-invoice-collections", stateKey: "query" }),
       JSON.stringify(createStoredPayload({ version: 2, ttlMs: 60_000, value: {
         page: 1, pageSize: 20, keyword: "客户", month: "", invoiceDateFrom: "", invoiceDateTo: "",
@@ -678,17 +678,17 @@ describe("销项发票收款情况", () => {
     const user = userEvent.setup();
     renderAuthenticatedAppAt('/output-invoice-collections');
     const header = await screen.findByRole('region', { name: '销项发票分类' });
-    expect(await within(header).findByRole('button', { name: '红冲处理 3 张' })).toHaveAttribute('aria-pressed', 'true');
+    expect(await within(header).findByRole('button', { name: '红字 2 张' })).toHaveAttribute('aria-pressed', 'true');
     const request = () => new URL(String(fetchMock.mock.calls.filter(([input]) => String(input).includes('/rows?')).at(-1)?.[0]), 'http://localhost');
     expect(JSON.parse(decodeURIComponent(request().searchParams.get('filters')!))[0].values).toEqual(values);
-    await user.click(within(header).getByRole('button', { name: '收款核对 3 张' }));
-    await waitFor(() => expect(JSON.parse(decodeURIComponent(request().searchParams.get('filters')!))[0].values).toEqual(['pending_collection','partial_collected','collected']));
+    await user.click(within(header).getByRole('button', { name: '蓝字 4 张' }));
+    await waitFor(() => expect(JSON.parse(decodeURIComponent(request().searchParams.get('filters')!))[0].values).toEqual(['pending_collection','partial_collected','collected','reversed_by_red']));
     expect(request().searchParams.get('keyword')).toBe('客户');
     expect(header.querySelectorAll('[aria-pressed="true"]')).toHaveLength(1);
-    expect(within(header).getByRole('button', { name: '收款核对 3 张' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(header).getByRole('button', { name: '蓝字 4 张' })).toHaveAttribute('aria-pressed', 'true');
     await user.click(within(header).getByRole('button', { name: '部分收款 1 张' }));
     await waitFor(() => expect(JSON.parse(decodeURIComponent(request().searchParams.get('filters')!))[0].values).toEqual(['partial_collected']));
-    expect(within(header).getByRole('button', { name: '收款核对 3 张' })).toHaveAttribute('aria-pressed', 'false');
+    expect(within(header).getByRole('button', { name: '蓝字 4 张' })).toHaveAttribute('aria-pressed', 'false');
   });
 
   test("顶部单选替换状态且表头不再提供重复筛选", async () => {

@@ -24,8 +24,24 @@ test('production output tax filters, totals, details and export remain consisten
   await expect(totals).toContainText(`不含税金额合计 ${payload.summary.amountWithoutTax}`);
   await expect(totals).toContainText(`收入合计 ${payload.summary.collectedAmount}`);
   const firstVisibleMs = Date.now()-started;
-  await expect(page.getByRole('button',{name:/红票未关联蓝票/})).toBeVisible();
+  await expect(page.getByRole('button',{name:/未关联蓝字/})).toBeVisible();
   const statusOptions = payload.filterOptions.find((item:{field:string})=>item.field==='collection_status').options;
+  const classification = page.getByRole('region', {name: '销项发票分类'});
+  for (const [label, codes] of [
+    ['蓝字', ['pending_collection', 'partial_collected', 'collected', 'reversed_by_red']],
+    ['红字', ['reverses_blue', 'unmatched_red']],
+  ] as const) {
+    const count = statusOptions.filter((option: {value: string}) => (codes as readonly string[]).includes(option.value)).reduce((sum: number, option: {count: number}) => sum + option.count, 0);
+    const response = rowsResponse();
+    await classification.getByRole('button', {name: `${label} ${count} 张`, exact: true}).click();
+    const filtered = await (await response).json();
+    expect(filtered.pagination.total).toBe(count);
+    expect(filtered.rows.every((row: {collectionStatus: {code: string}}) => (codes as readonly string[]).includes(row.collectionStatus.code))).toBe(true);
+    const preview = page.waitForResponse(r => new URL(r.url()).pathname.endsWith('/output-invoice-collections/export-summary'));
+    await page.getByRole('button', {name: '筛选内容导出'}).click();
+    expect((await (await preview).json()).row_count).toBe(count);
+    await page.getByRole('button', {name: '关闭导出销项发票', exact: true}).click();
+  }
   const pendingOption = statusOptions.find((item:{value:string})=>item.value==='pending_collection');
   expect(pendingOption.label).toBe('待收款');
   const pendingResponse = rowsResponse();

@@ -22,6 +22,13 @@ export function sourceDetailSections(value: unknown): EntityDetailSection[] {
         throw new Error('流水导航摘要格式无效');
       }
     }
+    if (section.document_kind === 'oa') {
+      const summary = section.oa_navigation;
+      if (!summary || typeof summary !== 'object' ||
+        ['applicantName', 'amount', 'applicationDate', 'workflowNo'].some(key => summary[key] !== null && typeof summary[key] !== 'string')) {
+        throw new Error('OA导航摘要格式无效');
+      }
+    }
     if (section.bank_labels !== undefined && (!Array.isArray(section.bank_labels) || section.bank_labels.some((label: unknown) => typeof label !== 'string'))) {
       throw new Error('流水标签格式无效');
     }
@@ -32,6 +39,7 @@ export function sourceDetailSections(value: unknown): EntityDetailSection[] {
       document_kind: section.document_kind,
       invoice_navigation: section.invoice_navigation,
       bank_navigation: section.bank_navigation,
+      oa_navigation: section.oa_navigation,
       bank_labels: section.bank_labels,
       bank_transaction_id: section.bank_transaction_id,
       fields: section.fields.map((field: {label: unknown; value: unknown}) => {

@@ -595,7 +595,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
             ],
             status_labels={
                 "pending_collection": "待收款",
-                "reversed_by_red": "蓝票已被红冲",
+                "reversed_by_red": "已被冲",
                 "collected": "已收款",
             },
             status_field="collection_status",
@@ -605,7 +605,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
             counts["collection_status"],
             [
                 {"value": "pending_collection", "label": "待收款", "count": 1},
-                {"value": "reversed_by_red", "label": "蓝票已被红冲", "count": 2},
+                {"value": "reversed_by_red", "label": "已被冲", "count": 2},
                 {"value": "collected", "label": "已收款", "count": 0},
             ],
         )

@@ -37,8 +37,8 @@ test.describe("销项发票收款情况", () => {
     await expect(groups.getByText("销项发票", {exact:true})).toHaveCount(1);
     await expect(groups.getByText("收款状态", {exact:true})).toHaveCount(1);
     await expect(groups.getByText("收入流水", {exact:true})).toHaveCount(1);
-    await expect(table.getByText("蓝票已被红冲")).toBeVisible();
-    await expect(table.getByText("红票已关联蓝票")).toBeVisible();
+    await expect(table.getByText("已被冲")).toBeVisible();
+    await expect(table.getByText("已关联蓝字")).toBeVisible();
     await expect(table.getByRole("button", { name: "红蓝票 · 2" })).toHaveCount(2);
     const blueInvoiceRow = table.getByRole("row", { name: /XSFP-E2E-0001/ });
     const redInvoiceRow = table.getByRole("row", { name: /XSFP-E2E-0002/ });
@@ -143,7 +143,7 @@ test.describe("销项发票收款情况", () => {
     await page.goto("/output-invoice-collections");
     await expect(page.getByRole('button', { name: '筛选 状态' })).toHaveCount(0);
     const tabs=page.getByRole('region',{name:'销项发票分类'});
-    const reversedOption=tabs.getByRole('button',{name:'蓝票已被红冲 1 张'});
+    const reversedOption=tabs.getByRole('button',{name:'已被冲 1 张'});
     const filteredRowsPromise = page.waitForResponse(response => rowsResponse(response) && new URL(response.url()).searchParams.has("filters"));
     await reversedOption.click();
     const filteredRowsUrl = new URL((await filteredRowsPromise).url());

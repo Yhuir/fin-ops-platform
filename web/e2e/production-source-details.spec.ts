@@ -36,7 +36,7 @@ test('production shared source drawers preserve complete records across pages wi
     await expect(drawer.getByRole('heading', { name: expectedTitle, exact: true })).toBeVisible();
     await expect(drawer.locator('.entity-detail-table').first()).toBeVisible();
     const firstPaintMs = Date.now() - started;
-    type SourceSection = {document_id: string; document_kind: string; document_title: string; invoice_navigation?: {counterpartyName: string | null; totalWithTax: string | null}; bank_navigation?: {counterpartyName: string | null; amount: string | null; direction: string | null; labels: string[]}; bank_labels?: string[]; fields: {label: string}[]};
+    type SourceSection = {document_id: string; document_kind: string; document_title: string; oa_navigation?: {applicantName: string | null; amount: string | null; applicationDate: string | null; workflowNo: string | null}; invoice_navigation?: {counterpartyName: string | null; totalWithTax: string | null}; bank_navigation?: {counterpartyName: string | null; amount: string | null; direction: string | null; labels: string[]}; bank_labels?: string[]; fields: {label: string}[]};
     const documents = new Map<string, SourceSection[]>();
     for (const section of sections as SourceSection[]) {
       const key = `${section.document_kind}:${section.document_id}`;
@@ -68,7 +68,11 @@ test('production shared source drawers preserve complete records across pages wi
           if (summary.amount) await expect(tab).toContainText(summary.amount);
           for (const label of summary.labels) await expect(tab).toContainText(label);
           expect(await nav.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
-        } else await expect(tab).toHaveText(`${index+1}${section.document_title}`);
+        } else {
+          expect(section.oa_navigation).toBeTruthy();
+          for (const value of Object.values(section.oa_navigation!)) if (value !== null) await expect(tab).toContainText(value);
+          expect(await nav.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+        }
         await tab.click();
         await expect(tab).toHaveAttribute('aria-selected', 'true');
         await expect(drawer.getByRole('tabpanel')).toHaveCount(1);
@@ -143,6 +147,12 @@ test('production shared source drawers preserve complete records across pages wi
   }
   await page.goto('/fin-ops/oa-pending-payments');
   await inspect(page.getByRole('button', { name: /^查看 OA .*详情$/ }).first(), 'oa');
+  await page.getByLabel('搜索OA待付款核对').fill('公车');
+  const searched = page.waitForResponse(r => new URL(r.url()).pathname.endsWith('/oa-pending-payments/rows') && new URL(r.url()).searchParams.get('keyword') === '公车');
+  await page.getByRole('button', {name: '查询', exact: true}).click();
+  await searched;
+  await inspect(page.getByRole('button', {name: /关联OA 9 条$/}), 'oa-pending-related-oa', true);
+  await inspect(page.getByRole('button', {name: /关联流水 9 条$/}), 'oa-pending-related-bank', true);
   await page.goto('/fin-ops/pending-invoices');
   await inspect(page.getByRole('button', { name: /^流水详情 / }).first(), 'pending-bank');
   await page.goto('/fin-ops/');

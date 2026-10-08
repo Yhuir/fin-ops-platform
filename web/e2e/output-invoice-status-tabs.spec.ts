@@ -3,7 +3,7 @@ import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
 const states = [
   ["pending_collection", "待收款"], ["partial_collected", "部分收款"], ["collected", "已收款"],
-  ["reversed_by_red", "蓝票已被红冲"], ["reverses_blue", "红票已关联蓝票"], ["unmatched_red", "红票未关联蓝票"],
+  ["reversed_by_red", "已被冲"], ["reverses_blue", "已关联蓝字"], ["unmatched_red", "未关联蓝字"],
 ] as const;
 
 test("tax menu and grouped totals stay aligned with invoice and bank columns", async ({page}, info) => {
@@ -80,10 +80,10 @@ test("all status tabs use invoice counts, one query, and the same export filters
   await page.screenshot({ path: info.outputPath("output-status-tabs-wide.png"), animations: "disabled" });
   await page.setViewportSize({ width: 960, height: 900 });
   await page.screenshot({ path: info.outputPath("output-status-tabs-narrow.png"), animations: "disabled" });
-  const toolbar = page.locator(".output-invoice-collections-query");
+  const toolbar = page.getByRole('search');
   expect(await toolbar.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-  await tabs.getByRole("button", { name: /蓝票已被红冲/ }).click();
-  await expect(tabs.getByRole("button", { name: /蓝票已被红冲/ })).toHaveAttribute("aria-pressed", "true");
+  await tabs.getByRole("button", { name: /已被冲/ }).click();
+  await expect(tabs.getByRole("button", { name: /已被冲/ })).toHaveAttribute("aria-pressed", "true");
   const previewResponse = page.waitForResponse(r => new URL(r.url()).pathname === "/api/output-invoice-collections/export-summary");
   await page.getByRole("button", { name: "筛选内容导出" }).click();
   const previewUrl = new URL((await previewResponse).url());
@@ -93,7 +93,32 @@ test("all status tabs use invoice counts, one query, and the same export filters
   expect(errors).toEqual([]);
 });
 
-test("all seven statuses fit without scrolling at desktop, narrow and scaled widths", async ({ page }, info) => {
+test("blue and red parents filter their exact status unions and preserve export selection", async ({page}) => {
+  const api = await installDeterministicApiMocks(page, {sessionMode: 'user', outputInvoiceCollectionListInteractions: true});
+  await page.goto('/output-invoice-collections');
+  const header = page.getByRole('region', {name: '销项发票分类'});
+  await expect(header.getByRole('button', {name: /^蓝字 \d+ 张$/})).toBeVisible();
+  for (const [label, codes] of [
+    ['蓝字', ['pending_collection', 'partial_collected', 'collected', 'reversed_by_red']],
+    ['红字', ['reverses_blue', 'unmatched_red']],
+  ] as const) {
+    const before = api.count('GET /api/output-invoice-collections/rows');
+    const response = page.waitForResponse(r => new URL(r.url()).pathname === '/api/output-invoice-collections/rows');
+    await header.getByRole('button', {name: new RegExp(`^${label} `)}).click();
+    const result = await response;
+    const expected = [{field: 'collection_status', operator: 'in', values: [...codes]}];
+    expect(JSON.parse(decodeURIComponent(new URL(result.url()).searchParams.get('filters')!))).toEqual(expected);
+    const payload = await result.json();
+    expect(payload.rows.every((row: {collection_status: {code: string}}) => (codes as readonly string[]).includes(row.collection_status.code))).toBe(true);
+    expect(api.count('GET /api/output-invoice-collections/rows') - before).toBe(1);
+    const preview = page.waitForResponse(r => new URL(r.url()).pathname === '/api/output-invoice-collections/export-summary');
+    await page.getByRole('button', {name: '筛选内容导出'}).click();
+    expect(JSON.parse(decodeURIComponent(new URL((await preview).url()).searchParams.get('filters')!))).toEqual(expected);
+    await page.getByRole('button', {name: '关闭导出销项发票', exact: true}).click();
+  }
+});
+
+test("all classification cells fit without scrolling at desktop, narrow and scaled widths", async ({ page }, info) => {
   await installDeterministicApiMocks(page, { sessionMode: "user", outputInvoiceCollectionListInteractions: true });
   await page.goto('/output-invoice-collections');
   const tabs = page.getByRole('region', { name: '销项发票分类' });
@@ -113,8 +138,8 @@ test("all seven statuses fit without scrolling at desktop, narrow and scaled wid
       }
       await expect(page.getByRole('search').getByRole('button', { name: '查询', exact: true })).toBeInViewport();
       const tabBox = (await tabs.boundingBox())!;
-      const pickerBox = (await page.locator('.output-invoice-collections-query .business-period-picker').boundingBox())!;
-      if (pickerBox.y < tabBox.y + tabBox.height) expect(pickerBox.x - tabBox.x - tabBox.width).toBeGreaterThanOrEqual(8);
+      const pickerBox = (await page.locator('.output-invoice-collections-actions .business-period-picker').boundingBox())!;
+      expect(pickerBox.y + pickerBox.height).toBeLessThanOrEqual(tabBox.y);
 
       await page.screenshot({ path: info.outputPath(`statuses-${width}-${collapsed ? 'collapsed' : 'expanded'}.png`), animations: 'disabled' });
       if (collapsed) await page.getByRole('button', { name: '展开菜单', exact: true }).click();
@@ -128,7 +153,7 @@ test("all seven statuses fit without scrolling at desktop, narrow and scaled wid
   await page.screenshot({ path: info.outputPath('statuses-125-percent.png'), animations: 'disabled' });
   await tabs.getByRole('button', { name: /^全部销项发票 / }).focus();
   for (let index = 0; index < 8; index++) await page.keyboard.press('Tab');
-  await expect(tabs.getByRole('button', { name: /^红票未关联蓝票 / })).toBeFocused();
+  await expect(tabs.getByRole('button', { name: /^未关联蓝字 / })).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(tabs.getByRole('button', { name: /^红票未关联蓝票 / })).toHaveAttribute('aria-pressed', 'true');
+  await expect(tabs.getByRole('button', { name: /^未关联蓝字 / })).toHaveAttribute('aria-pressed', 'true');
 });

@@ -97,7 +97,7 @@ for (const kind of ['oa', 'bank'] as const) {
     let reads = 0;
     const sections = titles.map((title, index) => ({document_id: `${kind}-${index}`, document_kind: kind, document_title: title,
       ...(kind === 'bank' ? {bank_navigation: {counterpartyName: ['云南某某设备供应与技术服务有限公司', '收款公司', '另一家公司'][index],
-        amount: ['10000.00', '0.00', '500.00'][index], direction: index === 1 ? '收入' : '支出', transactionDate: '2026-06-10', labels: [index === 1 ? '退款' : '费用 / 项目材料采购和运输费用标签完整展示']}} : {}),
+        amount: ['10000.00', '0.00', '500.00'][index], direction: index === 1 ? '收入' : '支出', transactionDate: '2026-06-10', labels: [index === 1 ? '退款' : '费用 / 项目材料采购和运输费用标签完整展示']}} : {oa_navigation: {applicantName: index === 1 ? '李四' : '张三', amount: index === 1 ? '0.00' : '8000.00', applicationDate: '2026-08-01', workflowNo: `240${index}`}}),
       title: kind === 'oa' ? '申请信息' : '交易信息', fields: [{label: '备注', value: `单据 ${index+1} 原文`}, {label: '金额', value: String(index)}]}));
     await page.route(kind === 'oa' ? '**/api/oa-pending-payments/oa/*/detail' : '**/api/bank-transactions/*/source-detail', route => {
       reads++; return route.fulfill({json: {detail_available: true, sections}});
@@ -109,7 +109,7 @@ for (const kind of ['oa', 'bank'] as const) {
     await expect(tabs).toHaveCount(3);
     for (let index = 0; index < 3; index++) {
       await tabs.nth(index).click();
-      if (kind === 'oa') await expect(tabs.nth(index)).toHaveText(`${index+1}${titles[index]}`);
+      if (kind === 'oa') { await expect(tabs.nth(index)).toContainText(`OA单号 240${index}`); await expect(tabs.nth(index)).toContainText(index === 1 ? '0.00' : '8000.00'); }
       else await expect(tabs.nth(index)).toContainText(index === 1 ? '退款' : '费用 / 项目材料采购和运输费用标签完整展示');
       await expect(drawer.getByRole('cell', {name: `单据 ${index+1} 原文`, exact: true})).toBeVisible();
       await expect(drawer.getByRole('tabpanel')).toHaveCount(1);
@@ -124,8 +124,8 @@ for (const kind of ['oa', 'bank'] as const) {
     for (const width of [1440,480]) {
       await page.setViewportSize({width, height: 800});
       await tabs.first().click();
-      if (width === 1440 || kind === 'bank') expect(await drawer.getByRole('tablist').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
-      if (kind === 'bank') {
+      expect(await drawer.getByRole('tablist').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      {
         const positions = await tabs.evaluateAll(items => items.map(el => ({top: el.getBoundingClientRect().top, left: el.getBoundingClientRect().left})));
         expect(positions[2].top).toBeGreaterThan(positions[0].top);
         if (width === 480) expect(positions[1].left).toBe(positions[0].left);
@@ -133,6 +133,47 @@ for (const kind of ['oa', 'bank'] as const) {
       expect(await tabs.first().evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
       await page.screenshot({animations: 'disabled', path: info.outputPath(`${kind}-${width}.png`)});
     }
+  });
+}
+
+for (const count of [9, 34]) {
+  test(`OA grid keeps ${count} source records distinct and reachable without horizontal scrolling`, async ({page}, info) => {
+    await installDeterministicApiMocks(page, {sessionMode: 'user'});
+    let reads = 0;
+    await page.route('**/api/oa-pending-payments/oa/*/detail', route => {
+      reads++;
+      return route.fulfill({json: {detail_available: true, sections: Array.from({length: count}, (_, index) => ({
+        document_id: `oa-${index}`, document_kind: 'oa', document_title: '张三 · 6868.55',
+        oa_navigation: {applicantName: '张三', amount: '6868.55', applicationDate: '2026-08-01', workflowNo: String(2400 + index)},
+        title: '申请信息', fields: [{label: '申请事由', value: `原始申请 ${index + 1}`}],
+      }))}});
+    });
+    await page.goto('/oa-pending-payments');
+    await page.getByRole('button', {name: /^查看 OA .*详情$/}).first().click();
+    const drawer = page.getByRole('dialog', {name: 'OA详情', exact: true});
+    const nav = drawer.getByRole('tablist');
+    await expect(nav.getByRole('tab')).toHaveCount(count);
+    for (const width of [1440, 480]) {
+      await page.setViewportSize({width, height: 900});
+      const positions = () => nav.getByRole('tab').evaluateAll(tabs => tabs.map(tab => ({top: (tab as HTMLElement).offsetTop, width: (tab as HTMLElement).offsetWidth})));
+      const before = await positions();
+      expect(before[count - 1].top).toBeGreaterThan(before[0].top);
+      expect(await nav.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      for (const tab of await nav.getByRole('tab').all()) expect(await tab.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      const last = nav.getByRole('tab').last();
+      await last.scrollIntoViewIfNeeded();
+      const body = drawer.locator('.finance-drawer__body');
+      const scrollBefore = await body.evaluate(el => el.scrollTop);
+      await last.click();
+      await expect(last).toHaveAttribute('aria-selected', 'true');
+      expect(await body.evaluate(el => el.scrollTop)).toBe(scrollBefore);
+      expect(await positions()).toEqual(before);
+      await expect(drawer.getByRole('tabpanel')).toHaveCount(1);
+      await expect(drawer.getByRole('cell', {name: `原始申请 ${count}`, exact: true})).toBeVisible();
+      await body.evaluate(el => {el.scrollTop = 0;});
+      await page.screenshot({path: info.outputPath(`oa-${count}-${width}.png`), animations: 'disabled'});
+    }
+    expect(reads).toBe(1);
   });
 }
 

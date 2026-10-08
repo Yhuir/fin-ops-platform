@@ -49,6 +49,24 @@ def _fields(payload: dict[str, object], section: int | None = None) -> dict[str,
 
 
 class SourceRecordProjectionTests(unittest.TestCase):
+    def test_oa_navigation_uses_source_fields_and_preserves_zero_without_inference(self) -> None:
+        for amount in ("0.00", "6868.55", None):
+            row = {"oa_id": "oa-real", "applicant": "同名申请人", "application_type": "支付申请",
+                   "amount": amount, "application_time": "2099-01-01", "workflow_no": "guessed",
+                   "detail_fields": {"OA单号": "2403", "申请日期": "2026-08-01"}}
+            original = deepcopy(row)
+            detail = query_source_detail("oa", row)
+            summary = {"applicantName": "同名申请人", "amount": amount,
+                       "applicationDate": "2026-08-01", "workflowNo": "2403"}
+            self.assertTrue(detail["sections"])
+            self.assertTrue(all(section["oa_navigation"] == summary for section in detail["sections"]))
+            self.assertEqual(row, original)
+            missing = query_source_detail("oa", {**row, "detail_fields": {}})["sections"][0]["oa_navigation"]
+            self.assertIsNone(missing["applicationDate"])
+            self.assertIsNone(missing["workflowNo"])
+        expense = query_source_detail("oa", {**row, "application_type": "expense_claim", "amount": "999.00"})
+        self.assertIsNone(expense["sections"][0]["oa_navigation"]["amount"])
+
     def test_invoice_navigation_preserves_direction_identity_and_source_values(self) -> None:
         for invoice_type, expected in ((InvoiceType.INPUT, "销方原名"), (InvoiceType.OUTPUT, "购方原名")):
             for total in (Decimal("0"), Decimal("-2100.005"), None):

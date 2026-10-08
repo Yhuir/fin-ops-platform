@@ -692,9 +692,9 @@ class PostgresOutputInvoiceCollectionQueryRepository:
         filtered_total = int((group_rows[0] if group_rows else {}).get("filtered_total") or 0)
         invoice_count = int(summary_row.get("invoice_count") or 0)
         status_labels = {
-            "reversed_by_red": "蓝票已被红冲",
-            "reverses_blue": "红票已关联蓝票",
-            "unmatched_red": "红票未关联蓝票",
+            "reversed_by_red": "已被冲",
+            "reverses_blue": "已关联蓝字",
+            "unmatched_red": "未关联蓝字",
             "collected": "已收款",
             "partial_collected": "部分收款",
             "pending_collection": "待收款",

@@ -8,5 +8,5 @@ test('all source adapters preserve structured invoice summaries without parsing 
   expect(sourceDetailSections([section])[0].invoice_navigation).toEqual(section.invoice_navigation);
   expect(() => sourceDetailSections([{...section, invoice_navigation: undefined}])).toThrow('发票导航摘要格式无效');
   expect(() => sourceDetailSections([{...section, invoice_navigation: {...section.invoice_navigation, totalWithTax: 0}}])).toThrow('发票导航摘要格式无效');
-  expect(sourceDetailSections([{title: '申请信息', document_kind: 'oa', fields: []}])[0].invoice_navigation).toBeUndefined();
+  expect(sourceDetailSections([{title: '申请信息', document_kind: 'oa', oa_navigation: {applicantName: null, amount: null, applicationDate: null, workflowNo: null}, fields: []}])[0].invoice_navigation).toBeUndefined();
 });

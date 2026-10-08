@@ -1,9 +1,10 @@
 import { Chip, Tabs } from "@heroui/react";
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { formatDateTimeText } from "../../features/dateTime";
 import StatePanel from "./StatePanel";
 import BankDocumentOption, { BankDetailLabels, type BankNavigationSummary } from "./BankDocumentOption";
+import OaDocumentOption, { type OaNavigationSummary } from "./OaDocumentOption";
 import InvoiceDocumentOption, { type InvoiceNavigationSummary } from "./InvoiceDocumentOption";
 
 export type EntityDetailField = {
@@ -19,6 +20,7 @@ export type EntityDetailSection = {
   document_title?: string;
   invoice_navigation?: InvoiceNavigationSummary;
   bank_navigation?: BankNavigationSummary;
+  oa_navigation?: OaNavigationSummary;
   bank_labels?: string[];
   document_kind?: "oa" | "bank" | "invoice";
 };
@@ -320,7 +322,6 @@ export default function EntityDetailContent({
 
 function DetailDocuments({ sections, extraFields, initialDocumentKey, beforeDocumentChange }: Pick<EntityDetailContentProps,
   'sections' | 'extraFields' | 'initialDocumentKey' | 'beforeDocumentChange'>) {
-  const root = useRef<HTMLDivElement>(null);
   const documents = new Map<string, { title: string; sections: Array<{ section: EntityDetailSection; index: number }> }>();
   sections.forEach((section, index) => {
     const key = section.document_id ? `${section.document_kind}:${section.document_id}` : 'single';
@@ -328,23 +329,7 @@ function DetailDocuments({ sections, extraFields, initialDocumentKey, beforeDocu
     documents.get(key)!.sections.push({ section, index });
   });
   const entries = [...documents.entries()];
-  const documentGrid = sections.some(section => section.document_kind === "invoice" || section.document_kind === "bank");
   const [selected, setSelected] = useState(initialDocumentKey ?? entries[0][0]);
-  useLayoutEffect(() => {
-    const nav = root.current?.querySelector<HTMLElement>('[role="tablist"]');
-    if (!nav || documentGrid) return;
-    const revealSelected = () => {
-      const tab = nav.querySelector<HTMLElement>('[aria-selected="true"]');
-      if (!tab) return;
-      const bounds = nav.getBoundingClientRect(), item = tab.getBoundingClientRect();
-      if (item.left < bounds.left) nav.scrollLeft += item.left - bounds.left;
-      else if (item.right > bounds.right) nav.scrollLeft += item.right - bounds.right;
-    };
-    revealSelected();
-    const observer = new ResizeObserver(revealSelected);
-    observer.observe(nav);
-    return () => observer.disconnect();
-  }, [selected, documentGrid]);
   const active = documents.get(selected);
   if (!active) return <StatePanel compact tone="error">所选单据不在当前详情中。</StatePanel>;
   const content = active.sections.map(({section, index: sectionIndex}) => <section className="entity-detail-section" key={sectionIndex}>
@@ -358,20 +343,20 @@ function DetailDocuments({ sections, extraFields, initialDocumentKey, beforeDocu
       <h4>{field.label}</h4>{field.content}
     </div>)}
   </section>);
-  return <div className="entity-detail-content" ref={root}>
+  return <div className="entity-detail-content">
     {entries.length > 1 ? <Tabs className="entity-detail-tabs" keyboardActivation="manual" selectedKey={selected} onSelectionChange={key => {
       if (key === selected || beforeDocumentChange?.() === false) return;
       setSelected(String(key));
-      const scroll = root.current?.closest('.finance-drawer__body');
-      if (scroll && !documentGrid) scroll.scrollTop = 0;
     }}>
-      <Tabs.List className={`entity-detail-index ${documentGrid ? "entity-detail-index--grid" : "entity-detail-index--documents"}`} aria-label="单据导航">
+      <Tabs.List className="entity-detail-index" aria-label="单据导航">
         {entries.map(([key, document], index) => <Tabs.Tab id={key} key={key} className="entity-detail-tab">
           {document.sections[0].section.document_kind === 'invoice'
             ? <InvoiceDocumentOption summary={document.sections[0].section.invoice_navigation!} index={index + 1} />
             : document.sections[0].section.document_kind === 'bank'
               ? <BankDocumentOption summary={document.sections[0].section.bank_navigation!} index={index + 1} />
-              : <><span className="entity-detail-tab__number">{index + 1}</span><span>{document.title}</span></>}
+              : document.sections[0].section.document_kind === 'oa'
+                ? <OaDocumentOption summary={document.sections[0].section.oa_navigation!} index={index + 1} />
+                : <><span className="entity-detail-tab__number">{index + 1}</span><span>{document.title}</span></>}
         </Tabs.Tab>)}
       </Tabs.List>
       <Tabs.Panel id={selected} key={selected} className="entity-detail-panel">{content}</Tabs.Panel>

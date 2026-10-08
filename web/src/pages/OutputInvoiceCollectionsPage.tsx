@@ -357,8 +357,8 @@ export default function OutputInvoiceCollectionsPage() {
                 selected: selectedStatuses.length === 0, onSelect: () => selectStatuses([])
               }}
               groups={[
-                { id: "collection", label: "收款核对", tone: "blue" as const, codes: ["pending_collection", "partial_collected", "collected"] },
-                { id: "reversal", label: "红冲处理", tone: "rose" as const, codes: ["reversed_by_red", "reverses_blue", "unmatched_red"] },
+                { id: "blue", label: "蓝字", tone: "blue" as const, codes: ["pending_collection", "partial_collected", "collected", "reversed_by_red"] },
+                { id: "red", label: "红字", tone: "rose" as const, codes: ["reverses_blue", "unmatched_red"] },
               ].map(group => ({
                 ...group,
                 count: statusOptions ? group.codes.reduce((sum, code) => sum + statusOptions.find(option => option.value === code)!.count!, 0) : undefined,
@@ -368,7 +368,7 @@ export default function OutputInvoiceCollectionsPage() {
                   const option = statusOptions?.find(item => item.value === code);
                   const labels: Record<string, string> = {
                     pending_collection: "待收款", partial_collected: "部分收款", collected: "已收款",
-                    reversed_by_red: "蓝票已被红冲", reverses_blue: "红票已关联蓝票", unmatched_red: "红票未关联蓝票"
+                    reversed_by_red: "已被冲", reverses_blue: "已关联蓝字", unmatched_red: "未关联蓝字"
                   };
                   return {
                     id: code, label: labels[code], count: option?.count,

@@ -9,6 +9,18 @@ function sourceResponse(payload: unknown) {
 
 afterEach(() => vi.unstubAllGlobals());
 
+test('OA structured navigation survives the API boundary and never parses a title as source data', async () => {
+  const summary = {applicantName: '同名申请人', amount: '0.00', applicationDate: '2026-08-01', workflowNo: '2403'};
+  const section = {title: '申请信息', document_id: 'oa-1', document_kind: 'oa', document_title: '错误标题 · 999',
+    oa_navigation: summary, fields: [{label: '申请人', value: '同名申请人'}]};
+  sourceResponse({sections: [section]});
+  expect((await fetchInputInvoiceUsageOaDetail('oa-1')).sections[0].oa_navigation).toEqual(summary);
+  for (const invalid of [undefined, {...summary, amount: 0}, {...summary, applicationDate: undefined}]) {
+    sourceResponse({sections: [{...section, oa_navigation: invalid}]});
+    await expect(fetchInputInvoiceUsageOaDetail('oa-1')).rejects.toThrow('OA导航摘要格式无效');
+  }
+});
+
 test.each([fetchInputInvoiceUsageInvoiceDetail, fetchOutputInvoiceCollectionInvoiceDetail])("invoice detail preserves every source line without substituting group totals or missing tax", async (loadDetail) => {
   sourceResponse({ id: "internal-id", invoiceNo: "SOURCE-INVOICE", invoiceStatus: "正常", isPositiveInvoice: false,
     sections: [

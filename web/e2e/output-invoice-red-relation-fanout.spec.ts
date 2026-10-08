@@ -11,8 +11,8 @@ test.describe("销项发票自动红蓝票关系", () => {
     await page.goto("/output-invoice-collections");
     const blueRow = page.getByRole("row", { name: /XSFP-E2E-0001/ });
     const redRow = page.getByRole("row", { name: /XSFP-E2E-0002/ });
-    await expect(blueRow.getByText("蓝票已被红冲")).toBeVisible();
-    await expect(redRow.getByText("红票已关联蓝票")).toBeVisible();
+    await expect(blueRow.getByText("已被冲")).toBeVisible();
+    await expect(redRow.getByText("已关联蓝字")).toBeVisible();
     await expect(blueRow.getByText("蓝字", { exact: true })).toBeVisible();
     await expect(redRow.getByText("红字", { exact: true })).toBeVisible();
 

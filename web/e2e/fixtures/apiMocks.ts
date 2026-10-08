@@ -4179,7 +4179,7 @@ function inputInvoiceUsageRelationDetailPayload(kind: string) {
     title: `${relationLabel}关联明细`,
     relation_count: 2,
     has_multiple: true,
-    sections: sourceRows.map((row, index) => ({ title: "申请信息", document_id: `source-oa-${index}`, document_kind: "oa", document_title: `${row.applicant_name} · ${row.amount}`, fields: [
+    sections: sourceRows.map((row, index) => ({ title: "申请信息", document_id: `source-oa-${index}`, document_kind: "oa", document_title: `${row.applicant_name} · ${row.amount}`, oa_navigation: {applicantName: row.applicant_name, amount: row.amount, applicationDate: null, workflowNo: null}, fields: [
       { label: "申请人", value: row.applicant_name },
       { label: "OA类型", value: row.application_type },
       { label: "项目名称", value: row.project_name },
@@ -6175,7 +6175,7 @@ export function outputInvoiceCollectionRowsPayload(
       },
       collection_status: {
         code: "reversed_by_red",
-        label: "蓝票已被红冲",
+        label: "已被冲",
         reason: "该蓝字发票已与红字发票建立自动正式关联。",
         collected_amount: "0.00",
         pending_amount: "0.00",
@@ -6234,7 +6234,7 @@ export function outputInvoiceCollectionRowsPayload(
       },
       collection_status: {
         code: "reverses_blue",
-        label: "红票已关联蓝票",
+        label: "已关联蓝字",
         reason: "该红字发票已与蓝字发票建立自动正式关联。",
         collected_amount: "0.00",
         pending_amount: "0.00",
@@ -6534,9 +6534,9 @@ function outputInvoiceCollectionFilterOptionsPayload() {
         sortable: true,
         operators: ["in"],
         options: [
-          { value: "reversed_by_red", label: "蓝票已被红冲", count: 1 },
-          { value: "reverses_blue", label: "红票已关联蓝票", count: 1 },
-          { value: "unmatched_red", label: "红票未关联蓝票", count: 0 },
+          { value: "reversed_by_red", label: "已被冲", count: 1 },
+          { value: "reverses_blue", label: "已关联蓝字", count: 1 },
+          { value: "unmatched_red", label: "未关联蓝字", count: 0 },
           { value: "collected", label: "已收款", count: 0 },
           { value: "partial_collected", label: "部分收款", count: 0 },
           { value: "pending_collection", label: "待收款", count: 1 },
@@ -10199,7 +10199,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       if (url.searchParams.get("row_type") !== row.type) {
         return json(route, { error: "workbench_row_type_required" }, 400);
       }
-      return json(route, { row: { ...row, source_sections: [{title: row.type === "bank" ? "交易信息" : row.type === "invoice" ? "发票信息" : "申请信息", document_id: row.id, document_kind: row.type, ...(row.type === "invoice" ? {invoice_navigation: {polarity: null, counterpartyName: row.seller_name, totalWithTax: null, invoiceDate: null}} : {}), ...(row.type === "bank" ? {bank_transaction_id: row.id, bank_navigation: {counterpartyName: row.counterparty_name ?? null, amount: String(row.debit_amount ?? row.credit_amount ?? ""), direction: row.debit_amount ? "支出" : "收入", transactionDate: null, labels: []}} : {}), fields: row.type === "oa" ? [{label: "申请人", value: row.applicant}, {label: "项目名称", value: row.project_name}, {label: "审批完成时间", value: "2026-03-28 18:10"}] : row.type === "bank" ? [{label: "对方户名", value: row.counterparty_name}, {label: "支出金额", value: row.debit_amount}, {label: "备注", value: row.remark}, ...Object.entries(row.detail_fields ?? {}).filter(([label]) => label === "账户明细编号-交易流水号").map(([label, value]) => ({label, value: String(value)}))] : [{label: "发票号码", value: row.invoice_no}, {label: "销方名称", value: row.seller_name}]}] } });
+      return json(route, { row: { ...row, source_sections: [{title: row.type === "bank" ? "交易信息" : row.type === "invoice" ? "发票信息" : "申请信息", document_id: row.id, document_kind: row.type, ...(row.type === "oa" ? {oa_navigation: {applicantName: row.applicant, amount: row.amount != null ? String(row.amount) : null, applicationDate: null, workflowNo: null}} : {}), ...(row.type === "invoice" ? {invoice_navigation: {polarity: null, counterpartyName: row.seller_name, totalWithTax: null, invoiceDate: null}} : {}), ...(row.type === "bank" ? {bank_transaction_id: row.id, bank_navigation: {counterpartyName: row.counterparty_name ?? null, amount: String(row.debit_amount ?? row.credit_amount ?? ""), direction: row.debit_amount ? "支出" : "收入", transactionDate: null, labels: []}} : {}), fields: row.type === "oa" ? [{label: "申请人", value: row.applicant}, {label: "项目名称", value: row.project_name}, {label: "审批完成时间", value: "2026-03-28 18:10"}] : row.type === "bank" ? [{label: "对方户名", value: row.counterparty_name}, {label: "支出金额", value: row.debit_amount}, {label: "备注", value: row.remark}, ...Object.entries(row.detail_fields ?? {}).filter(([label]) => label === "账户明细编号-交易流水号").map(([label, value]) => ({label, value: String(value)}))] : [{label: "发票号码", value: row.invoice_no}, {label: "销方名称", value: row.seller_name}]}] } });
     }
 
     if (path === "/api/workbench/settings") {

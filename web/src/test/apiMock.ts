@@ -3041,6 +3041,7 @@ function buildWorkbenchDetail(rowId: string) {
   if (row.type === 'bank') fields['支出金额'] = row.debit_amount;
   row.source_sections = [{title: '基本信息', document_id: row.id, document_kind: row.type,
     ...(row.type === 'bank' ? {bank_navigation: {counterpartyName: row.counterparty_name ?? null, amount: String(row.debit_amount ?? row.credit_amount ?? ''), direction: row.debit_amount ? '支出' : '收入', transactionDate: null, labels: []}} : {}),
+    ...(row.type === 'oa' ? {oa_navigation: {applicantName: row.applicant ?? null, amount: row.amount != null ? String(row.amount) : null, applicationDate: null, workflowNo: fields['OA单号'] ?? null}} : {}),
     ...(row.type === 'invoice' ? {invoice_navigation: {polarity: null, counterpartyName: null, totalWithTax: null, invoiceDate: null}} : {}),
     fields: labels.filter(label => fields[label] != null).map(label => ({label, value: fields[label]}))}];
   return payload;

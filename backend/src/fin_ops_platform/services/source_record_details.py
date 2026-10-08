@@ -189,6 +189,14 @@ def source_detail_sections(kind: str, payload: dict[str, Any]) -> list[dict[str,
             "transactionDate": str(payload["transactionDate"]) if payload.get("transactionDate") else None,
             "labels": payload.get("bankLabels"),
         }
+    if kind == "oa":
+        fields = payload.get("detailFields", {})
+        metadata["oa_navigation"] = {
+            "applicantName": payload.get("applicantName"),
+            "amount": source_money(payload["amount"]) if payload.get("amount") not in (None, "") else None,
+            "applicationDate": str(fields["申请日期"]) if fields.get("申请日期") else None,
+            "workflowNo": str(payload["workflowNo"]) if payload.get("workflowNo") else None,
+        }
     sections = []
     def append(title: str, values: Any, fields: Any) -> None:
         projected = []

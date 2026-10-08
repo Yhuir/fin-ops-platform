@@ -1263,7 +1263,7 @@ def _collection_status_for_facts(
     if has_reversal and invoice_sign > 0:
         return _collection_status(
             "reversed_by_red",
-            "蓝票已被红冲",
+            "已被冲",
             "蓝字发票已通过 canonical 配对关系关联红字发票。",
             collected_amount=ZERO,
             pending_amount=ZERO,
@@ -1272,7 +1272,7 @@ def _collection_status_for_facts(
     if has_reversal and invoice_sign < 0:
         return _collection_status(
             "reverses_blue",
-            "红票已关联蓝票",
+            "已关联蓝字",
             "红字发票已通过 canonical 配对关系冲销蓝字发票。",
             collected_amount=ZERO,
             pending_amount=ZERO,
@@ -1281,7 +1281,7 @@ def _collection_status_for_facts(
     if invoice_sign < 0:
         return _collection_status(
             "unmatched_red",
-            "红票未关联蓝票",
+            "未关联蓝字",
             "红字发票尚未形成唯一、确定的蓝字发票配对关系。",
             collected_amount=ZERO,
             pending_amount=ZERO,
@@ -1333,17 +1333,17 @@ def _collection_status_from_snapshot(group: dict[str, Any]) -> dict[str, Any]:
     pending = _decimal(group["pending_amount"]) if group.get("pending_amount") not in (None, "") else None
     definitions = {
         "reversed_by_red": (
-            "蓝票已被红冲",
+            "已被冲",
             "蓝字发票已由红字发票备注中的精确号码指向并冲销。",
             "info",
         ),
         "reverses_blue": (
-            "红票已关联蓝票",
+            "已关联蓝字",
             "红字发票备注已精确指向被冲销的蓝字发票号码。",
             "warning",
         ),
         "unmatched_red": (
-            "红票未关联蓝票",
+            "未关联蓝字",
             "红字发票备注未形成唯一、确定的蓝字发票号码关系。",
             "danger",
         ),

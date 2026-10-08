@@ -248,7 +248,7 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         self.assertEqual(counts["reversed_by_red"], 1)
         self.assertEqual(counts["reverses_blue"], 1)
         labels = {row["collectionStatus"]["label"] for row in rows.values()}
-        self.assertEqual(labels, {"已收款", "蓝票已被红冲", "红票已关联蓝票"})
+        self.assertEqual(labels, {"已收款", "已被冲", "已关联蓝字"})
 
 
     def test_filter_sort_paging_and_export_use_current_contract(self) -> None:
@@ -385,7 +385,7 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         from unittest.mock import Mock
         snapshot = SimpleNamespace(
             groups=assembler._invoice_groups(month=None, context=assembler._query_context()),
-            supporting_groups=[], transactions=[bank], oa_records=[], bank_account_mappings=[],
+            supporting_groups=[], transactions=[bank], oa_records=[], bank_account_mappings=[], bank_labels={bank.id: []},
             relations=[{**self._relation("case", ["invoice", "bank"], ["invoice", "bank"]), "status": "active"}],
         )
         canonical = OutputInvoiceCollectionCanonicalQueryService(

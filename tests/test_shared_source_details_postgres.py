@@ -34,6 +34,11 @@ class SharedSourceDetailsPostgresTests(unittest.TestCase):
         fixtures.BankSplitDocumentScopePostgresTests.setUp(self)
         fixtures.BankSplitDocumentScopePostgresTests.document(self)
         fixtures.BankSplitDocumentScopePostgresTests.sync_relation_fixture(self)
+        # This source-detail fixture includes the normalized fields written by OA sync.
+        # The split-only fixture intentionally omits them because it tests amounts.
+        self.connection.execute("""update app.oa_applications set normalized_payload=normalized_payload ||
+            jsonb_build_object('applicant', applicant, 'detail_fields', jsonb_build_object(
+                '申请日期', '2026-04-29', 'OA单号', '2403'))""")
         self.pending = PendingInvoiceCanonicalQueryService(repository=PostgresPendingInvoiceCanonicalRepository(self.connection))
         self.input = InputInvoiceUsageCanonicalQueryService(
             repository=PostgresInputInvoiceUsageQueryRepository(self.connection),
@@ -62,6 +67,14 @@ class SharedSourceDetailsPostgresTests(unittest.TestCase):
         self.assertEqual(relation, source)
         self.assertTrue(source)
         self.assertEqual({section['document_id'] for section in source}, {'oa-interest'})
+        summary = source[0]['oa_navigation']
+        self.assertEqual(set(summary), {'applicantName', 'amount', 'applicationDate', 'workflowNo'})
+        self.assertEqual(summary, {'applicantName': '测试申请人', 'amount': '1497.22',
+                                   'applicationDate': '2026-04-29', 'workflowNo': '2403'})
+        self.assertTrue(all(section['oa_navigation'] == summary for section in relation))
+        row_id = self.input.list_rows(page=1, page_size=20, include_statistics=False)['rows'][0]['id']
+        input_detail = self.input.relation_details(row_id, {'kind': ['oa']})['sections']
+        self.assertEqual(input_detail[0]['oa_navigation'], summary)
         labels = {field['label'] for section in source for field in section['fields']}
         self.assertIn('申请人', labels)
         self.assertNotIn('Mongo文档ID', labels)
