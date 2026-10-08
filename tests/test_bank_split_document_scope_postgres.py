@@ -1,9 +1,8 @@
 """Document comparisons share split-purpose scope in SQL and hydrated rows."""
-import unittest
 import json
-from io import BytesIO
+import unittest
 from decimal import Decimal
-from openpyxl import load_workbook
+from io import BytesIO
 
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_canonical_query_service import InputInvoiceUsageCanonicalQueryService
@@ -21,12 +20,43 @@ from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_qu
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_query import (
     PostgresOaPendingPaymentQueryRepository,
 )
+from openpyxl import load_workbook
 
 from tests import test_bank_split_consumers_postgres as fixtures
 from tests.postgres_test_utils import apply_test_migrations, require_postgres_test_database_url
 
 
 class BankSplitDocumentScopePostgresTests(unittest.TestCase):
+    def test_source_detail_labels_keep_split_scope_and_refresh_across_consumers(self):
+        from fin_ops_platform.services.bank_details_canonical_query import PostgresBankDetailsCanonicalQueryRepository
+        from fin_ops_platform.services.pending_invoice_canonical_query import (
+            PendingInvoiceCanonicalQueryService,
+            PostgresPendingInvoiceCanonicalRepository,
+        )
+        self.document()
+        self.sync_relation_fixture()
+        service = InputInvoiceUsageCanonicalQueryService(repository=PostgresInputInvoiceUsageQueryRepository(self.connection),
+            row_assembler=InputInvoiceUsageQueryService(import_service=ImportNormalizationService(), payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None)))
+        page = service.list_rows()
+        detail = service.relation_details(page["rows"][0]["id"], {"kind": ["bank"]})
+        metadata = detail["sections"][0]
+        self.assertEqual(metadata["document_id"], "bank-parent")
+        self.assertEqual(metadata["bank_navigation"]["amount"], "1001497.22")
+        labels = metadata["bank_navigation"]["labels"]
+        self.assertEqual(len(labels), 2)
+        self.assertTrue(labels[0].startswith("子项 1："))
+        self.assertTrue(labels[1].startswith("子项 2："))
+        self.assertEqual(detail["sections"][-1]["bank_labels"], labels)
+        pending = PendingInvoiceCanonicalQueryService(repository=PostgresPendingInvoiceCanonicalRepository(self.connection))
+        self.assertEqual(pending.bank_transaction_detail("bank-parent")["sections"][0]["bank_navigation"]["labels"], labels)
+        # Current labels are read again; a persisted instance rename is not hidden by a detail cache.
+        self.connection.execute("update app.bank_transaction_split_items set category_payload=category_payload || '{\"category_label\":\"本次修改的用途\"}'::jsonb where id=%s::uuid", (self.interest,))
+        refreshed = service.relation_details(page["rows"][0]["id"], {"kind": ["bank"]})
+        self.assertIn("本次修改的用途", " ".join(refreshed["sections"][0]["bank_navigation"]["labels"]))
+        with self.connection.transaction() as transaction:
+            with self.assertRaises(KeyError):
+                PostgresBankDetailsCanonicalQueryRepository.source_detail_labels(transaction, ["missing-transaction"])
+
     def test_output_tax_filter_summary_pagination_and_export_share_signed_scope(self):
         rates = ['0.13', '13%', None, '0', '免税', '不征税', 'mixed', '6%']
         with self.connection.transaction() as tx:

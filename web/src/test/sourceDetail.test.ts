@@ -1,7 +1,7 @@
 import { sourceDetailSections } from '../features/sourceDetail';
 
 const section = {title: '发票信息', document_kind: 'invoice', document_id: '123',
-  invoice_navigation: {polarity: null, counterpartyName: null, totalWithTax: '0.00', invoiceDate: null, invoiceNo: '000123'},
+  invoice_navigation: {polarity: null, counterpartyName: null, totalWithTax: '0.00', invoiceDate: null},
   fields: [{label: '价税合计', value: '0.00'}]};
 
 test('all source adapters preserve structured invoice summaries without parsing titles', () => {

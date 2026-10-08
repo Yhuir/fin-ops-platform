@@ -4,7 +4,7 @@ import { installDeterministicApiMocks } from './fixtures/apiMocks';
 const numbers = ['2653400000097888906', '2653400000097888907'];
 function invoiceSections() {
   return numbers.flatMap((number, index) => {
-    const metadata = {document_id: `invoice-${index}`, document_kind: 'invoice', invoice_navigation: {polarity: index ? '红字' : '蓝字', counterpartyName: '测试科技有限公司', totalWithTax: index ? '-2100.00' : '2100.00', invoiceDate: '2026-07-15', invoiceNo: number}, document_title: `${index ? '红字' : '蓝字'} · 测试科技有限公司 · ${index ? '-' : ''}2100.00`};
+    const metadata = {document_id: `invoice-${index}`, document_kind: 'invoice', invoice_navigation: {polarity: index ? '红字' : '蓝字', counterpartyName: '测试科技有限公司', totalWithTax: index ? '-2100.00' : '2100.00', invoiceDate: '2026-07-15'}, document_title: `${index ? '红字' : '蓝字'} · 测试科技有限公司 · ${index ? '-' : ''}2100.00`};
     return [
       {title: '发票信息', fields: [{label: '数电发票号码', value: number}, {label: '开票日期', value: '2026-07-15'}, {label: '发票票种', value: '数电发票（普通发票）'}], ...metadata},
       {title: '购销双方', fields: [{label: '销方名称', value: '测试供应商有限公司'}, {label: '销方识别号', value: '915300000000000001'}, {label: '购买方名称', value: '测试科技有限公司'}, {label: '购买方识别号', value: '915300000000000002'}], ...metadata},
@@ -96,6 +96,8 @@ for (const kind of ['oa', 'bank'] as const) {
       : ['云南某某设备供应与技术服务有限公司 · 10000.00', '收款公司 · 0.00', '另一家公司 · 500.00'];
     let reads = 0;
     const sections = titles.map((title, index) => ({document_id: `${kind}-${index}`, document_kind: kind, document_title: title,
+      ...(kind === 'bank' ? {bank_navigation: {counterpartyName: ['云南某某设备供应与技术服务有限公司', '收款公司', '另一家公司'][index],
+        amount: ['10000.00', '0.00', '500.00'][index], direction: index === 1 ? '收入' : '支出', transactionDate: '2026-06-10', labels: [index === 1 ? '退款' : '费用 / 项目材料采购和运输费用标签完整展示']}} : {}),
       title: kind === 'oa' ? '申请信息' : '交易信息', fields: [{label: '备注', value: `单据 ${index+1} 原文`}, {label: '金额', value: String(index)}]}));
     await page.route(kind === 'oa' ? '**/api/oa-pending-payments/oa/*/detail' : '**/api/bank-transactions/*/source-detail', route => {
       reads++; return route.fulfill({json: {detail_available: true, sections}});
@@ -107,7 +109,8 @@ for (const kind of ['oa', 'bank'] as const) {
     await expect(tabs).toHaveCount(3);
     for (let index = 0; index < 3; index++) {
       await tabs.nth(index).click();
-      await expect(tabs.nth(index)).toHaveText(`${index+1}${titles[index]}`);
+      if (kind === 'oa') await expect(tabs.nth(index)).toHaveText(`${index+1}${titles[index]}`);
+      else await expect(tabs.nth(index)).toContainText(index === 1 ? '退款' : '费用 / 项目材料采购和运输费用标签完整展示');
       await expect(drawer.getByRole('cell', {name: `单据 ${index+1} 原文`, exact: true})).toBeVisible();
       await expect(drawer.getByRole('tabpanel')).toHaveCount(1);
       await expect(drawer.getByRole('cell', {name: /单据 \d 原文/})).toHaveCount(1);
@@ -121,7 +124,12 @@ for (const kind of ['oa', 'bank'] as const) {
     for (const width of [1440,480]) {
       await page.setViewportSize({width, height: 800});
       await tabs.first().click();
-      if (width === 1440) expect(await drawer.getByRole('tablist').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      if (width === 1440 || kind === 'bank') expect(await drawer.getByRole('tablist').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      if (kind === 'bank') {
+        const positions = await tabs.evaluateAll(items => items.map(el => ({top: el.getBoundingClientRect().top, left: el.getBoundingClientRect().left})));
+        expect(positions[2].top).toBeGreaterThan(positions[0].top);
+        if (width === 480) expect(positions[1].left).toBe(positions[0].left);
+      }
       expect(await tabs.first().evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
       await page.screenshot({animations: 'disabled', path: info.outputPath(`${kind}-${width}.png`)});
     }
@@ -133,7 +141,7 @@ for (const count of [1, 3, 4, 10]) {
     await installDeterministicApiMocks(page, {sessionMode: 'user'});
     const sections = Array.from({length: count}, (_, index) => ({...invoiceSections()[0], document_id: `grid-${index}`,
       invoice_navigation: {polarity: index % 2 ? '红字' : '蓝字', counterpartyName: index === 2 ? '成都智领趋势科技有限公司及其他超长项目技术服务供应商名称完整展示' : '成都智领趋势科技有限公司',
-        totalWithTax: index % 2 ? '-182400.005' : '182400.00', invoiceDate: '2026-05-21', invoiceNo: `26532000008093027${index}`},
+        totalWithTax: index % 2 ? '-182400.005' : '182400.00', invoiceDate: '2026-05-21'},
       fields: [{label: '发票号码', value: `26532000008093027${index}`}]}));
     let reads = 0;
     await page.route('**/api/output-invoice-collections/rows/*/relation-details*', route => {reads++; return route.fulfill({json: {kind: 'invoice', sections}});});
@@ -144,6 +152,7 @@ for (const count of [1, 3, 4, 10]) {
     if (count === 1) { await expect(drawer.getByRole('tablist')).toHaveCount(0); return; }
     const nav = drawer.getByRole('tablist');
     await expect(nav.getByRole('tab')).toHaveCount(count);
+    await expect(nav).not.toContainText('尾号');
     for (const width of [1440, 1024]) {
       await page.setViewportSize({width, height: 900});
       expect(await nav.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);

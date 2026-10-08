@@ -3,6 +3,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { formatDateTimeText } from "../../features/dateTime";
 import StatePanel from "./StatePanel";
+import BankDocumentOption, { BankDetailLabels, type BankNavigationSummary } from "./BankDocumentOption";
 import InvoiceDocumentOption, { type InvoiceNavigationSummary } from "./InvoiceDocumentOption";
 
 export type EntityDetailField = {
@@ -17,6 +18,8 @@ export type EntityDetailSection = {
   document_id?: string;
   document_title?: string;
   invoice_navigation?: InvoiceNavigationSummary;
+  bank_navigation?: BankNavigationSummary;
+  bank_labels?: string[];
   document_kind?: "oa" | "bank" | "invoice";
 };
 
@@ -325,11 +328,11 @@ function DetailDocuments({ sections, extraFields, initialDocumentKey, beforeDocu
     documents.get(key)!.sections.push({ section, index });
   });
   const entries = [...documents.entries()];
-  const invoiceGrid = sections.some(section => section.document_kind === "invoice");
+  const documentGrid = sections.some(section => section.document_kind === "invoice" || section.document_kind === "bank");
   const [selected, setSelected] = useState(initialDocumentKey ?? entries[0][0]);
   useLayoutEffect(() => {
     const nav = root.current?.querySelector<HTMLElement>('[role="tablist"]');
-    if (!nav || invoiceGrid) return;
+    if (!nav || documentGrid) return;
     const revealSelected = () => {
       const tab = nav.querySelector<HTMLElement>('[aria-selected="true"]');
       if (!tab) return;
@@ -341,13 +344,13 @@ function DetailDocuments({ sections, extraFields, initialDocumentKey, beforeDocu
     const observer = new ResizeObserver(revealSelected);
     observer.observe(nav);
     return () => observer.disconnect();
-  }, [selected, invoiceGrid]);
+  }, [selected, documentGrid]);
   const active = documents.get(selected);
   if (!active) return <StatePanel compact tone="error">所选单据不在当前详情中。</StatePanel>;
   const content = active.sections.map(({section, index: sectionIndex}) => <section className="entity-detail-section" key={sectionIndex}>
     <h3 className="entity-detail-section__title">{section.title}</h3>
     <table className="entity-detail-table" aria-label={`${section.title}详情`}>
-      <tbody>{section.fields.map((field, fieldIndex) => <tr key={`${field.label}-${fieldIndex}`}>
+      <tbody>{section.bank_labels !== undefined && <tr><th scope="row">流水标签</th><td><BankDetailLabels labels={section.bank_labels} /></td></tr>}{section.fields.map((field, fieldIndex) => <tr key={`${field.label}-${fieldIndex}`}>
         <th scope="row">{field.label}</th><td className={amountLabels.has(field.label) ? 'entity-detail-row__amount' : undefined}>{renderValue(field)}</td>
       </tr>)}</tbody>
     </table>
@@ -360,13 +363,15 @@ function DetailDocuments({ sections, extraFields, initialDocumentKey, beforeDocu
       if (key === selected || beforeDocumentChange?.() === false) return;
       setSelected(String(key));
       const scroll = root.current?.closest('.finance-drawer__body');
-      if (scroll && !invoiceGrid) scroll.scrollTop = 0;
+      if (scroll && !documentGrid) scroll.scrollTop = 0;
     }}>
-      <Tabs.List className={`entity-detail-index ${invoiceGrid ? "entity-detail-index--invoices" : "entity-detail-index--documents"}`} aria-label="单据导航">
+      <Tabs.List className={`entity-detail-index ${documentGrid ? "entity-detail-index--grid" : "entity-detail-index--documents"}`} aria-label="单据导航">
         {entries.map(([key, document], index) => <Tabs.Tab id={key} key={key} className="entity-detail-tab">
           {document.sections[0].section.document_kind === 'invoice'
             ? <InvoiceDocumentOption summary={document.sections[0].section.invoice_navigation!} index={index + 1} />
-            : <><span className="entity-detail-tab__number">{index + 1}</span><span>{document.title}</span></>}
+            : document.sections[0].section.document_kind === 'bank'
+              ? <BankDocumentOption summary={document.sections[0].section.bank_navigation!} index={index + 1} />
+              : <><span className="entity-detail-tab__number">{index + 1}</span><span>{document.title}</span></>}
         </Tabs.Tab>)}
       </Tabs.List>
       <Tabs.Panel id={selected} key={selected} className="entity-detail-panel">{content}</Tabs.Panel>
@@ -384,7 +389,7 @@ export function preparePublicDetailSections(sections: EntityDetailSection[]): En
     const fields = section.fields
       .map(preparePublicField)
       .filter((field): field is EntityDetailField => field !== null);
-    if (fields.length === 0) {
+    if (fields.length === 0 && section.bank_labels === undefined) {
       continue;
     }
     prepared.push({ ...section, title, fields });

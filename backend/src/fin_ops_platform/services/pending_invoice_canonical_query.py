@@ -9,6 +9,7 @@ from typing import Any, Callable, Iterator, Mapping
 
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.services.bank_details_canonical_query import (
+    PostgresBankDetailsCanonicalQueryRepository,
     compile_bank_category_rule_sql,
 )
 from fin_ops_platform.services.bank_transaction_category_service import (
@@ -1878,7 +1879,12 @@ class PostgresPendingInvoiceCanonicalRepository:
         }
 
     def bank_transaction_detail(self, bank_transaction_id: str) -> dict[str, Any] | None:
-        return self._detail(BANK_DETAIL_SQL, bank_transaction_id)
+        with self._snapshot_transaction() as transaction:
+            row = transaction.fetch_one(BANK_DETAIL_SQL, (bank_transaction_id,))
+            if row is not None:
+                row = dict(row)
+                row["bank_labels"] = PostgresBankDetailsCanonicalQueryRepository.source_detail_labels(transaction, [row["id"]])[row["id"]]
+        return row
 
     def invoice_detail(self, invoice_id: str) -> dict[str, Any] | None:
         return self._detail(INVOICE_DETAIL_SQL, invoice_id)
@@ -1887,9 +1893,13 @@ class PostgresPendingInvoiceCanonicalRepository:
         return self._detail(OA_DETAIL_SQL, oa_id)
 
     def relation_detail(self, transaction_id: str, *, direction: str, kind: str) -> dict[str, Any] | None:
-        del direction, kind
+        del direction
         with self._snapshot_transaction() as transaction:
             row = transaction.fetch_one(RELATION_DETAIL_SQL, (transaction_id, transaction_id))
+            if row is not None and kind in {"bank", "all"}:
+                banks = row["bank_rows"]
+                labels = PostgresBankDetailsCanonicalQueryRepository.source_detail_labels(transaction, [bank["id"] for bank in banks])
+                row = {**row, "bank_rows": [{**bank, "bank_labels": labels[bank["id"]]} for bank in banks]}
         return dict(row) if isinstance(row, dict) else None
 
     def _detail(self, sql: str, object_id: str) -> dict[str, Any] | None:

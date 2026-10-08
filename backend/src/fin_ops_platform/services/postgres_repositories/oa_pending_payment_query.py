@@ -5,6 +5,7 @@ from typing import Any, Iterator
 
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction
+from fin_ops_platform.services.bank_details_canonical_query import PostgresBankDetailsCanonicalQueryRepository
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord, oa_flow_id_candidates
 from fin_ops_platform.services.oa_pending_payment_canonical_rows import relation_member_ids
 from fin_ops_platform.services.postgres_repositories.bank_split_relation_scope import bank_split_scope_ctes
@@ -767,6 +768,11 @@ class PostgresOaPendingPaymentQueryRepository:
             "invoices": invoices,
             "payment_statuses": statuses,
         }
+
+    def detail_bank_labels(self, banks: list[Any], *, tenant_id: str) -> dict[str, list[str]]:
+        from fin_ops_platform.services.bank_transaction_unit import original_bank_transaction
+        return PostgresBankDetailsCanonicalQueryRepository.source_detail_labels(
+            self._connection, list(dict.fromkeys(original_bank_transaction(bank).id for bank in banks)), tenant_id=tenant_id)
 
     def _payment_statuses(
         self,

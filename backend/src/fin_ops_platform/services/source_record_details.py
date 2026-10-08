@@ -179,10 +179,16 @@ def source_detail_sections(kind: str, payload: dict[str, Any]) -> list[dict[str,
             "counterpartyName": payload.get(counterparty_key) if counterparty_key else None,
             "totalWithTax": source_money(payload["totalWithTax"]) if payload.get("totalWithTax") not in (None, "") else None,
             "invoiceDate": str(payload["invoiceDate"]) if payload.get("invoiceDate") else None,
-            "invoiceNo": payload.get("digitalInvoiceNo") or payload.get("invoiceNo") or None,
         }
     if kind == "bank":
         metadata["bank_transaction_id"] = identifier
+        metadata["bank_navigation"] = {
+            "counterpartyName": payload.get("counterpartyName"),
+            "amount": source_money(payload["amount"]) if payload.get("amount") not in (None, "") else None,
+            "direction": {"inflow": "收入", "outflow": "支出"}.get(payload.get("direction")),
+            "transactionDate": str(payload["transactionDate"]) if payload.get("transactionDate") else None,
+            "labels": payload.get("bankLabels"),
+        }
     sections = []
     def append(title: str, values: Any, fields: Any) -> None:
         projected = []
@@ -215,10 +221,12 @@ def source_detail_sections(kind: str, payload: dict[str, Any]) -> list[dict[str,
     if kind == "invoice":
         for index, item in enumerate(payload.get("lineItems") or [], 1):
             append(f"货物或应税劳务明细 {index}", item, INVOICE_LINE_FIELDS)
+    if kind == "bank" and payload.get("bankLabels") is not None:
+        sections.append({"title": "业务分类", "fields": [], "bank_labels": payload["bankLabels"], **metadata})
     return sections
 
 
-def bank_source_detail(transaction: Any) -> dict[str, Any]:
+def bank_source_detail(transaction: Any, *, labels: list[str] | None = None) -> dict[str, Any]:
     transaction = original_bank_transaction(transaction)
     payload = {
         "id": transaction.id,
@@ -243,6 +251,7 @@ def bank_source_detail(transaction: Any) -> dict[str, Any]:
         "remark": transaction.remark,
         "balance": source_money(transaction.balance),
         "bankTextFields": list(transaction.bank_text_fields),
+        "bankLabels": labels,
     }
     payload["sections"] = source_detail_sections("bank", payload)
     return payload
@@ -305,7 +314,7 @@ def source_invoice_groups(invoices: list[Invoice]) -> list[dict[str, Any]]:
 
 
 def source_relation_sections(kind: str, summaries: list[Any], *, groups: list[dict[str, Any]],
-                             transactions: list[Any], oa_records: list[Any]) -> list[dict[str, Any]]:
+                             transactions: list[Any], oa_records: list[Any], bank_labels: dict[str, list[str]] | None = None) -> list[dict[str, Any]]:
     """Resolve all members against one authorized snapshot; never use summary fields as detail."""
     typed = [item for item in summaries if isinstance(item, dict)]
     if kind == "bank":
@@ -322,7 +331,7 @@ def source_relation_sections(kind: str, summaries: list[Any], *, groups: list[di
         identifier = str(summary.get(key) or summary.get("id") or "")
         if kind == "bank":
             record = banks.get(identifier)
-            payload = bank_source_detail(record) if record is not None else None
+            payload = bank_source_detail(record, labels=bank_labels[record.id] if bank_labels is not None else None) if record is not None else None
         elif kind == "oa":
             record = oas.get(identifier)
             payload = oa_source_detail(record) if record is not None else None
@@ -361,6 +370,8 @@ def query_source_detail(kind: str, row: dict[str, Any]) -> dict[str, Any]:
                    "expenseItems": public_oa_expense_items(row.get("expense_items") or [])}
     else:
         payload = {target: row.get(source) for source, target in QUERY_SOURCE_KEYS[kind].items()}
+        if kind == "bank":
+            payload["bankLabels"] = row.get("bank_labels")
         if kind == "bank" and payload.get("amount") in (None, ""):
             if row.get("credit_amount") not in (None, "") and row.get("debit_amount") in (None, ""):
                 payload.update(amount=row["credit_amount"], direction="inflow")

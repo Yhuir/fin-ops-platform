@@ -318,7 +318,7 @@ class InputInvoiceUsageCanonicalQueryService:
                 f"Bank transaction detail not found: {bank_transaction_id}",
                 status_code=404,
             )
-        return _bank_detail(transaction, context=context)
+        return _bank_detail(transaction, context=context, labels=snapshot.bank_labels[original_bank_transaction(transaction).id])
 
     def oa_detail(
         self,
@@ -369,7 +369,7 @@ class InputInvoiceUsageCanonicalQueryService:
             relation_payload=relation_payload,
             sections=source_relation_sections(kind, relation_payload["summaries"],
                 groups=[*snapshot.groups, *snapshot.supporting_groups],
-                transactions=snapshot.transactions, oa_records=snapshot.oa_records),
+                transactions=snapshot.transactions, oa_records=snapshot.oa_records, bank_labels=snapshot.bank_labels),
         )
 
     def payment_status_rules(self) -> dict[str, Any]:
@@ -614,10 +614,10 @@ def _group_for_invoice(
     )
 
 
-def _bank_detail(transaction: Any, *, context: DistributedInvoiceRelationContext) -> dict[str, Any]:
+def _bank_detail(transaction: Any, *, context: DistributedInvoiceRelationContext, labels: list[str]) -> dict[str, Any]:
     relation_row_id = transaction.id
     transaction = original_bank_transaction(transaction)
-    return {**bank_source_detail(transaction), "relations": context.relation_summaries_for_row(relation_row_id)}
+    return {**bank_source_detail(transaction, labels=labels), "relations": context.relation_summaries_for_row(relation_row_id)}
 
 
 def _oa_detail(record: Any | None, *, oa_id: str) -> dict[str, Any]:

@@ -161,7 +161,7 @@ const invoiceDocuments = [0, 1, 2].map(index => ({
   title: '发票信息', document_id: `invoice-${index}`, document_kind: 'invoice' as const,
   document_title: '旧标题不应进入发票导航',
   invoice_navigation: {polarity: index === 1 ? '红字' : '蓝字', counterpartyName: '相同公司',
-    totalWithTax: index === 1 ? '-0.005' : '0.00', invoiceDate: '2026-10-02', invoiceNo: `123456789${index}`},
+    totalWithTax: index === 1 ? '-0.005' : '0.00', invoiceDate: '2026-10-02'},
   fields: [{label: '发票号码', value: `123456789${index}`}],
 }));
 
@@ -213,4 +213,29 @@ test('all source line items stay with their invoice and remain numbered after sw
     expect(screen.getByRole('heading', {name: `货物或应税劳务明细 ${index}`})).toBeVisible();
     expect(screen.getByRole('cell', {name: `真实商品 ${index}`})).toBeVisible();
   }
+});
+
+test('bank grid keeps raw directions, labels and identity together without moving scroll', () => {
+  const sections = [0, 1, 2].flatMap(index => {
+    const labels = index === 2 ? [] : [index === 0 ? '货款 / 设备采购' : '退款'];
+    const meta = {document_id: `bank-${index}`, document_kind: 'bank' as const,
+      bank_navigation: {counterpartyName: '同名公司', amount: index === 1 ? '35.00' : '1050.00',
+        direction: index === 1 ? '收入' : '支出', transactionDate: '2026-06-10', labels}};
+    return [{...meta, title: '交易信息', fields: [{label: '备注', value: `原始流水${index}`}]},
+      {...meta, title: '业务分类', fields: [], bank_labels: labels}];
+  });
+  const {container} = render(<div className="finance-drawer__body"><EntityDetailContent sections={preparePublicDetailSections(sections)} /></div>);
+  const body = container.firstElementChild!;
+  body.scrollTop = 123;
+  expect(screen.getAllByRole('tab')).toHaveLength(3);
+  expect(screen.getAllByRole('tab')[0]).toHaveTextContent('支出1050.00');
+  fireEvent.click(screen.getAllByRole('tab')[1]);
+  expect(screen.getAllByRole('tab')[1]).toHaveTextContent('收入35.00');
+  expect(screen.getByRole('cell', {name: '退款'})).toBeVisible();
+  expect(screen.queryByRole('cell', {name: '货款 / 设备采购'})).not.toBeInTheDocument();
+  expect(screen.getByRole('cell', {name: '原始流水1'})).toBeVisible();
+  expect(body.scrollTop).toBe(123);
+  expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
+  fireEvent.click(screen.getAllByRole('tab')[2]);
+  expect(screen.getByRole('cell', {name: '未设置标签'})).toBeVisible();
 });

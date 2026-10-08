@@ -73,3 +73,15 @@ test("a missing source projection fails visibly instead of reconstructing it fro
   sourceResponse({invoiceNo: "list-only", amount: "999.00"});
   await expect(fetchInputInvoiceUsageInvoiceDetail("invoice")).rejects.toThrow("原始详情响应缺少字段表");
 });
+
+test.each([fetchInputInvoiceUsageBankTransactionDetail, fetchOutputInvoiceCollectionBankTransactionDetail])('bank metadata survives the API boundary and invalid labels fail visibly', async loadDetail => {
+  const summary = {counterpartyName: '公司', amount: '35.00', direction: '收入', transactionDate: '2026-06-10', labels: ['退款']};
+  const sections = [{title: '交易信息', document_id: 'bank', document_kind: 'bank', bank_navigation: summary, fields: [{label: '收入金额', value: '35.00'}]},
+    {title: '业务分类', document_id: 'bank', document_kind: 'bank', bank_navigation: summary, fields: [], bank_labels: ['退款']}];
+  sourceResponse({sections});
+  expect((await loadDetail('bank')).sections).toMatchObject(sections);
+  sourceResponse({sections: [{...sections[0], bank_navigation: {...summary, labels: '错误类型'}}]});
+  await expect(loadDetail('bank')).rejects.toThrow('流水导航摘要格式无效');
+  sourceResponse({sections: [{...sections[0], bank_navigation: undefined}]});
+  await expect(loadDetail('bank')).rejects.toThrow('流水导航摘要格式无效');
+});

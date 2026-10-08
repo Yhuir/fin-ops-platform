@@ -3838,7 +3838,8 @@ class PostgresWorkbenchPageQueryRepository:
                     record = PostgresCoreRepository(self._connection).get_transaction(str(row.get("parent_row_id") or normalized_row_id))
                     if record is None:
                         raise ValueError("银行流水原始详情不可用")
-                    row = {**row, "source_sections": bank_source_detail(record)["sections"]}
+                    labels = PostgresBankDetailsCanonicalQueryRepository.source_detail_labels(self._connection, [record.id])
+                    row = {**row, "source_sections": bank_source_detail(record, labels=labels[record.id])["sections"]}
                 if normalized_row_type == "invoice":
                     records = PostgresCoreRepository(self._connection).list_invoice_document_members([normalized_row_id])
                     documents = source_invoice_groups(records)

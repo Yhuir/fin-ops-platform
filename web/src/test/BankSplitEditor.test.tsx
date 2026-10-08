@@ -238,6 +238,7 @@ test('an unchanged historical part remains readable and savable but cannot be mo
 const groupedBanks = ['bank-1', 'bank-2'].map((id, index) => ({
   title: '交易信息', document_id: id, document_kind: 'bank' as const,
   document_title: `公司 · ${index + 1}`, bank_transaction_id: id,
+  bank_navigation: {counterpartyName: '公司', amount: `${index + 1}.00`, direction: '支出', transactionDate: null, labels: []},
   fields: [{label: '金额', value: detail.amount}],
 }));
 
@@ -248,12 +249,12 @@ test('switch confirmation preserves a canceled draft and discards only after app
   fireEvent.click(screen.getByRole('button', {name: '流水子项拆分'}));
   fireEvent.change(await screen.findByLabelText('子项 1 金额'), {target: {value: '999999.00'}});
   view.rerender(<BankTransactionDetailContent sections={groupedBanks.map(section => ({...section}))} onSplitDirtyChange={dirty} />);
-  fireEvent.click(screen.getByRole('tab', {name: '2 公司 · 2'}));
+  fireEvent.click(screen.getAllByRole('tab')[1]);
   expect(confirm).toHaveBeenCalledOnce();
   expect(screen.getByLabelText('子项 1 金额')).toHaveValue('999999.00');
   expect(fetchBankSplits).toHaveBeenCalledOnce();
   confirm.mockReturnValue(true);
-  fireEvent.click(screen.getByRole('tab', {name: '2 公司 · 2'}));
+  fireEvent.click(screen.getAllByRole('tab')[1]);
   expect(screen.queryByLabelText('子项 1 金额')).not.toBeInTheDocument();
   expect(dirty).toHaveBeenLastCalledWith(false, 'bank-1');
   expect(saveBankSplits).not.toHaveBeenCalled();
@@ -271,14 +272,14 @@ test('cannot switch a saving bank, then saves against that identity and permits 
   fireEvent.click(screen.getByRole('button', {name: '流水子项拆分'}));
   fireEvent.change(await screen.findByLabelText('子项 1 金额'), {target: {value: '1000000.0'}});
   fireEvent.click(screen.getByRole('button', {name: '保存', exact: true}));
-  fireEvent.click(screen.getByRole('tab', {name: '2 公司 · 2'}));
-  expect(screen.getByRole('tab', {name: '1 公司 · 1'})).toHaveAttribute('aria-selected', 'true');
+  fireEvent.click(screen.getAllByRole('tab')[1]);
+  expect(screen.getAllByRole('tab')[0]).toHaveAttribute('aria-selected', 'true');
   expect(confirm).not.toHaveBeenCalled();
   expect(saveBankSplits).toHaveBeenCalledWith('bank-1', expect.any(Object));
   finish({...detail, changed: true, version: 3, affected_months: []});
   await screen.findByText('已保存');
-  fireEvent.click(screen.getByRole('tab', {name: '2 公司 · 2'}));
-  expect(screen.getByRole('tab', {name: '2 公司 · 2'})).toHaveAttribute('aria-selected', 'true');
+  fireEvent.click(screen.getAllByRole('tab')[1]);
+  expect(screen.getAllByRole('tab')[1]).toHaveAttribute('aria-selected', 'true');
   expect(screen.queryByText('已保存')).not.toBeInTheDocument();
   confirm.mockRestore();
 });

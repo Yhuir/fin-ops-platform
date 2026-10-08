@@ -6,6 +6,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
+from fin_ops_platform.services.bank_details_canonical_query import PostgresBankDetailsCanonicalQueryRepository
+from fin_ops_platform.services.bank_transaction_unit import original_bank_transaction
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     OUTPUT_PARENTS,
     classification_tree,
@@ -44,6 +46,7 @@ class InvoiceUsageCollectionCanonicalSnapshot:
     payment_status_rules: dict[str, Any] = field(default_factory=dict)
     bank_account_mappings: list[dict[str, Any]] = field(default_factory=list)
     classification: dict[str, Any] = field(default_factory=dict)
+    bank_labels: dict[str, list[str]] | None = None
 
 
 class PostgresInputInvoiceUsageQueryRepository:
@@ -364,6 +367,10 @@ class PostgresInputInvoiceUsageQueryRepository:
                 invoice_type="input",
                 tenant_id=tenant_id,
             )
+            bank_labels = PostgresBankDetailsCanonicalQueryRepository.source_detail_labels(
+                transaction, list(dict.fromkeys(original_bank_transaction(bank).id for bank in facts["transactions"])),
+                tenant_id=tenant_id,
+            ) if row_id is not None else None
             statistics_row = _canonical_header_statistics(
                 transaction,
                 tenant_id=tenant_id,
@@ -373,6 +380,7 @@ class PostgresInputInvoiceUsageQueryRepository:
         labels = {item["id"]: item["label"] for item in payment_categories(payment_settings)}
         labels["unclassified"] = "无法比较"
         return InvoiceUsageCollectionCanonicalSnapshot(
+            bank_labels=bank_labels,
             groups=facts["groups"],
             supporting_groups=[],
             relations=facts["relations"],
@@ -673,6 +681,10 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                 supporting_group_rows=supporting_group_rows,
                 invoice_type="output",
             )
+            bank_labels = PostgresBankDetailsCanonicalQueryRepository.source_detail_labels(
+                transaction, list(dict.fromkeys(original_bank_transaction(bank).id for bank in facts["transactions"])),
+                tenant_id=tenant_id,
+            ) if row_id is not None else None
             statistics_row = _canonical_header_statistics(
                 transaction,
                 tenant_id=tenant_id,
@@ -688,6 +700,7 @@ class PostgresOutputInvoiceCollectionQueryRepository:
             "pending_collection": "待收款",
         }
         return InvoiceUsageCollectionCanonicalSnapshot(
+            bank_labels=bank_labels,
             groups=facts["groups"],
             supporting_groups=facts["supporting_groups"],
             relations=facts["relations"],

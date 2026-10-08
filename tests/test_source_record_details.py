@@ -58,7 +58,7 @@ class SourceRecordProjectionTests(unittest.TestCase):
                 summary = projection["sections"][0]["invoice_navigation"]
                 self.assertEqual(summary, {"polarity": "红字", "counterpartyName": expected,
                     "totalWithTax": "0.00" if total == 0 else "-2100.005" if total is not None else None,
-                    "invoiceDate": "2026-10-02", "invoiceNo": "12345678"})
+                    "invoiceDate": "2026-10-02"})
                 row = {"id": invoice.id, "invoice_type": invoice_type.value, "seller_name": invoice.seller_name,
                        "buyer_name": invoice.buyer_name, "total_with_tax": total, "invoice_no": invoice.invoice_no,
                        "issue_date": invoice.invoice_date, "is_positive_invoice": "否"}
@@ -68,6 +68,20 @@ class SourceRecordProjectionTests(unittest.TestCase):
         multi = invoice_source_detail(_invoice_group(_invoice(), _invoice(id="line-2")))
         self.assertIsNone(multi["sections"][0]["invoice_navigation"]["totalWithTax"])
         self.assertEqual(len({section["document_id"] for section in multi["sections"]}), 1)
+
+    def test_bank_navigation_preserves_raw_amount_direction_and_current_labels(self):
+        for direction, label, amount in [("outflow", "支出", "1050.00"), ("inflow", "收入", "35.00")]:
+            row = {"id": "bank-1", "counterparty_name": "原始对方", "transaction_date": "2026-06-10",
+                   "amount": amount, "txn_direction": direction, "bank_labels": ["货款 / 设备", "子项 2：退款"]}
+            original = deepcopy(row)
+            detail = query_source_detail("bank", row)
+            navigation = detail["sections"][0]["bank_navigation"]
+            self.assertEqual(navigation, {"counterpartyName": "原始对方", "transactionDate": "2026-06-10",
+                "amount": amount, "direction": label, "labels": row["bank_labels"]})
+            self.assertEqual(detail["sections"][-1]["bank_labels"], navigation["labels"])
+            self.assertEqual(row, original)
+        empty = query_source_detail("bank", {**row, "bank_labels": []})
+        self.assertEqual(empty["sections"][-1]["bank_labels"], [])
 
     def test_navigation_titles_use_original_names_and_amounts_only(self) -> None:
         cases = [

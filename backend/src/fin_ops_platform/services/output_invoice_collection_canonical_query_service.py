@@ -228,7 +228,7 @@ class OutputInvoiceCollectionCanonicalQueryService:
             "summaries": list(relation_payload.get("summaries") or []),
             "sections": source_relation_sections(kind, list(relation_payload.get("summaries") or []),
                 groups=[*snapshot.groups, *snapshot.supporting_groups],
-                transactions=snapshot.transactions, oa_records=snapshot.oa_records),
+                transactions=snapshot.transactions, oa_records=snapshot.oa_records, bank_labels=snapshot.bank_labels),
         }
 
     def invoice_detail(
@@ -287,7 +287,7 @@ class OutputInvoiceCollectionCanonicalQueryService:
                 status_code=404,
             )
         transaction = original_bank_transaction(transaction)
-        return bank_source_detail(transaction)
+        return bank_source_detail(transaction, labels=snapshot.bank_labels[original_bank_transaction(transaction).id])
 
     def _export_rows(
         self,

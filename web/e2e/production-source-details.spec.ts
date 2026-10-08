@@ -36,7 +36,7 @@ test('production shared source drawers preserve complete records across pages wi
     await expect(drawer.getByRole('heading', { name: expectedTitle, exact: true })).toBeVisible();
     await expect(drawer.locator('.entity-detail-table').first()).toBeVisible();
     const firstPaintMs = Date.now() - started;
-    type SourceSection = {document_id: string; document_kind: string; document_title: string; invoice_navigation?: {counterpartyName: string | null; totalWithTax: string | null; invoiceNo: string | null}; fields: {label: string}[]};
+    type SourceSection = {document_id: string; document_kind: string; document_title: string; invoice_navigation?: {counterpartyName: string | null; totalWithTax: string | null}; bank_navigation?: {counterpartyName: string | null; amount: string | null; direction: string | null; labels: string[]}; bank_labels?: string[]; fields: {label: string}[]};
     const documents = new Map<string, SourceSection[]>();
     for (const section of sections as SourceSection[]) {
       const key = `${section.document_kind}:${section.document_id}`;
@@ -58,7 +58,15 @@ test('production shared source drawers preserve complete records across pages wi
           const summary = section.invoice_navigation!;
           if (summary.counterpartyName) await expect(tab).toContainText(summary.counterpartyName);
           if (summary.totalWithTax) await expect(tab).toContainText(summary.totalWithTax);
-          if (summary.invoiceNo) await expect(tab).toContainText(`尾号 ${summary.invoiceNo.slice(-6)}`);
+          await expect(tab).not.toContainText("尾号");
+          expect(await nav.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+        } else if (section.document_kind === 'bank') {
+          const summary = section.bank_navigation!;
+          expect(summary).toBeTruthy();
+          expect(Array.isArray(summary.labels)).toBe(true);
+          if (summary.counterpartyName) await expect(tab).toContainText(summary.counterpartyName);
+          if (summary.amount) await expect(tab).toContainText(summary.amount);
+          for (const label of summary.labels) await expect(tab).toContainText(label);
           expect(await nav.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
         } else await expect(tab).toHaveText(`${index+1}${section.document_title}`);
         await tab.click();
@@ -66,6 +74,12 @@ test('production shared source drawers preserve complete records across pages wi
         await expect(drawer.getByRole('tabpanel')).toHaveCount(1);
         expect(await tab.evaluate(el => el.scrollWidth <= el.clientWidth && getComputedStyle(el).textOverflow !== 'ellipsis')).toBe(true);
       } else await expect(drawer.getByRole('tablist')).toHaveCount(0);
+      const bankSection = documentSections.find(section => section.bank_labels !== undefined);
+      if (documentSections[0].document_kind === 'bank') {
+        expect(bankSection).toBeTruthy();
+        const cell = drawer.getByRole('rowheader', {name: '流水标签', exact: true}).locator('..');
+        for (const label of bankSection!.bank_labels!) await expect(cell).toContainText(label);
+      }
       const actual = await drawer.locator('.entity-detail-table th[scope="row"]').allTextContents();
       const expected = documentSections.flatMap(section => section.fields.map(field => field.label));
       expect(actual).toEqual(expected);

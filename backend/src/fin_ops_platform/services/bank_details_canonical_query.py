@@ -177,6 +177,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
         settings: dict[str, Any],
         transaction_ids: list[str],
         tenant_id: str = "default",
+        use_units: bool = True,
     ) -> dict[str, dict[str, Any]]:
         normalized_ids = list(dict.fromkeys(text_list(transaction_ids)))
         if not normalized_ids:
@@ -191,7 +192,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
         ]
         cte_sql, cte_params = bank_category_classification_cte(
             definitions=definitions,
-            use_units=True,
+            use_units=use_units,
             date_from=None,
             date_to=None,
             candidate_transaction_ids=normalized_ids,
@@ -275,6 +276,26 @@ class PostgresBankDetailsCanonicalQueryRepository:
             for row in list(payload.get("rows") or [])
             if str(row.get("id") or "")
         }
+
+    @staticmethod
+    def source_detail_labels(transaction: Any, transaction_ids: list[str], *, tenant_id: str = "default") -> dict[str, list[str]]:
+        """Current labels for original bank documents, in the caller's read snapshot."""
+        if not transaction_ids:
+            return {}
+        categories = PostgresBankDetailsCanonicalQueryRepository.workbench_category_projection_rows(
+            transaction, settings=PostgresBankDetailsCanonicalQueryRepository.settings_payload(transaction),
+            transaction_ids=transaction_ids, tenant_id=tenant_id, use_units=False,
+        )
+        result: dict[str, list[str]] = {}
+        for identifier in dict.fromkeys(transaction_ids):
+            category = categories[identifier]
+            parts = category["bank_split_parts"]
+            if parts:
+                result[identifier] = [f"子项 {index}：{part['category_label']}" for index, part in enumerate(parts, 1)]
+            else:
+                label = category["category_label"]
+                result[identifier] = [label] if category["category_code"] and label else []
+        return result
 
     @staticmethod
     def effective_category_projection_rows(

@@ -3,7 +3,6 @@ export type InvoiceNavigationSummary = {
   counterpartyName: string | null;
   totalWithTax: string | null;
   invoiceDate: string | null;
-  invoiceNo: string | null;
 };
 
 export default function InvoiceDocumentOption({ summary, index }: { summary: InvoiceNavigationSummary; index: number }) {
@@ -16,7 +15,6 @@ export default function InvoiceDocumentOption({ summary, index }: { summary: Inv
     <span className="invoice-document-option__name">{summary.counterpartyName ?? '—'}</span>
     <span className="invoice-document-option__meta">
       <span>{summary.invoiceDate ?? '—'}</span>
-      <span>{summary.invoiceNo ? `尾号 ${summary.invoiceNo.slice(-6)}` : '票号未提供'}</span>
     </span>
   </span>;
 }

@@ -4797,11 +4797,11 @@ textarea {
 .entity-detail-content { container-type: inline-size; }
 .entity-detail-index { gap: 8px; width: 100%; max-width: 100%; padding: 8px 0 12px; margin-bottom: 12px; background: white; border-radius: 0; }
 .entity-detail-index--documents { position: sticky; top: -24px; z-index: 2; display: flex; flex-wrap: nowrap; overflow-x: auto; }
-.entity-detail-index--invoices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.entity-detail-index--grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .entity-detail-index .entity-detail-tab { display: flex; align-items: baseline; gap: 8px; flex: 0 0 auto; width: auto; min-width: 0; justify-content: flex-start; height: auto; min-height: 40px; max-width: min(320px, 100%); padding: 8px 12px; border: 1px solid var(--fp-border); border-radius: 6px; background: #f8fafc; color: var(--fp-text-primary); text-align: left; white-space: normal; overflow-wrap: anywhere; font-size: 14px; line-height: 1.45; }
 .entity-detail-index .entity-detail-tab[data-selected="true"] { border-color: var(--fp-primary); background: #edf3ff; color: var(--fp-primary); }
 .entity-detail-index .entity-detail-tab:focus-visible { outline: 2px solid var(--fp-primary); outline-offset: -2px; }
-.entity-detail-index--invoices .entity-detail-tab { width: 100%; max-width: none; align-items: stretch; padding: 10px 12px; font-weight: 500; }
+.entity-detail-index--grid .entity-detail-tab { width: 100%; max-width: none; align-items: stretch; padding: 10px 12px; font-weight: 500; }
 .invoice-document-option { display: grid; gap: 4px; width: 100%; min-width: 0; }
 .invoice-document-option__heading { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .invoice-document-option__amount { margin-left: auto; text-align: right; font-variant-numeric: tabular-nums; color: var(--fp-text-primary); }
@@ -4809,7 +4809,7 @@ textarea {
 .invoice-document-option__polarity { font-size: 12px; color: var(--fp-text-secondary); }
 .invoice-document-option__polarity--red { color: #b54747; }
 .invoice-document-option__meta { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--fp-text-secondary); font-size: 12px; font-weight: 400; }
-@container (max-width: 560px) { .entity-detail-index--invoices { grid-template-columns: minmax(0, 1fr); } }
+@container (max-width: 560px) { .entity-detail-index--grid { grid-template-columns: minmax(0, 1fr); } }
 .entity-detail-tab__number { flex: 0 0 auto; font-variant-numeric: tabular-nums; font-weight: 700; }
 .entity-detail-panel { padding: 0; outline: none; }
 .entity-detail-actions { margin-top: 14px; border-top: 1px solid var(--fp-border); padding-top: 12px; }
@@ -24076,3 +24076,12 @@ body.column-layout-dragging {
 .cost-section-heading-actions .query-search > button { height: 46px; min-height: 46px; }
 .cost-view-scope-heading .cost-view-search-form,
 .cost-view-scope-heading .cost-view-search-form > [data-slot="search-field"] { min-width: 0; }
+
+.bank-document-option { display: grid; gap: 4px; width: 100%; min-width: 0; }
+.bank-document-option__heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.bank-document-option__amount { margin-left: auto; text-align: right; font-variant-numeric: tabular-nums; color: var(--fp-text-primary); }
+.bank-document-option__name { color: var(--fp-text-primary); overflow-wrap: anywhere; }
+.bank-document-option__date { color: var(--fp-text-secondary); font-size: 12px; }
+.bank-detail-labels { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.bank-detail-label { height: auto; max-width: 100%; white-space: normal; }
+.bank-detail-label__text { white-space: normal; overflow-wrap: anywhere; }

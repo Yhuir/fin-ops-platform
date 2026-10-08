@@ -264,9 +264,11 @@ class OaPendingPaymentQueryService:
                         not_found_message,
                         status_code=HTTPStatus.NOT_FOUND,
                     )
-                if identifier_kind != "row":
-                    return builder(snapshot.load_facts([descriptor], tenant_id=tenant_id))
                 facts = snapshot.load_facts([descriptor], tenant_id=tenant_id)
+                if identifier_kind in {"bank", "row"}:
+                    facts["bank_labels"] = snapshot.detail_bank_labels(facts["bank_transactions"], tenant_id=tenant_id)
+                if identifier_kind != "row":
+                    return builder(facts)
                 rows = self._hydrate_rows(snapshot, [descriptor], tenant_id=tenant_id, facts=facts)
         except OaPendingPaymentError:
             raise
