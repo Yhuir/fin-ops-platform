@@ -67,7 +67,7 @@ type TagTone = "neutral" | "warning" | "info" | "success";
 const paymentStatusToneByCode: Record<string, TagTone> = {
   paid: "success",
   waiting_payment: "warning",
-  pending: "neutral",
+  unclassified: "neutral",
   cash_turnover: "info",
   offset: "info",
 };
@@ -109,16 +109,6 @@ function selectedValues(filter?: InputInvoiceUsageFilter | null) {
     return [filter.value];
   }
   return [];
-}
-
-function directionLabel(value: string) {
-  if (value === "outflow" || value === "支" || value === "支出") {
-    return "支出";
-  }
-  if (value === "inflow" || value === "收" || value === "收入") {
-    return "收入";
-  }
-  return value || "收支为空";
 }
 
 function bankAccountLabel(bank: InputInvoiceUsageRow["bank"]["primary"]) {
@@ -565,7 +555,8 @@ export default function InputInvoiceUsageTable({
                       />
                     </td>
                     <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--strong-separator input-invoice-usage-payment-cell" data-column-role="status">
-                      <Tag tone={paymentStatusTone(row.paymentStatus.code)}>{row.paymentStatus.label || "待处理"}</Tag>
+                      <Tag tone={paymentStatusTone(row.paymentStatus.code)}>{row.paymentStatus.label}</Tag>
+                      {row.paymentStatus.code === "unclassified" ? <div className="input-invoice-usage-cell-secondary">{row.paymentStatus.reason}</div> : null}
                     </td>
                     <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--strong-separator" data-column-role="identity">
                       {oa ? (
@@ -631,7 +622,7 @@ export default function InputInvoiceUsageTable({
                       {bank ? (
                         <>
                           <div className="input-invoice-usage-bank-amount-line">
-                            <span className="input-invoice-usage-money-primary">{formatMoney(row.bank.originalAmount, "—")}</span>
+                            <span className="input-invoice-usage-money-primary">{formatMoney(row.bank.netAmount, "—")}</span>
                             {bankRelationTarget ? (
                               <RelationCountButton
                                 totalCount={bankTotalCount}
@@ -641,7 +632,7 @@ export default function InputInvoiceUsageTable({
                             ) : null}
                           </div>
                           <div className="input-invoice-usage-bank-tag-row">
-                            <Tag tone="info">{directionLabel(bank.directionLabel || bank.direction)}</Tag>
+                            <Tag tone="info">{row.bank.netDirectionLabel}</Tag>
                             <BankAccountValue value={bankAccountLabel(bank) || "—"} />
                           </div>
                         </>

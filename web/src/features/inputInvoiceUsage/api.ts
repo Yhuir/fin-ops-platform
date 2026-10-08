@@ -247,6 +247,8 @@ function mapInvoiceRelation(rawValue: unknown): InputInvoiceUsageRowsResponse["r
 
 function mapRelation<T>(rawValue: unknown, mapper: (value: unknown) => T | null): {
   originalAmount: string;
+  netAmount: string;
+  netDirectionLabel: string;
   originalTransactionCount: number;
   bankSplitParts: ReturnType<typeof mapBankSplitParts>;
   primary: T | null;
@@ -262,6 +264,8 @@ function mapRelation<T>(rawValue: unknown, mapper: (value: unknown) => T | null)
   return {
     primary,
     originalAmount: stringValue(raw.original_amount),
+    netAmount: stringValue(raw.netAmount),
+    netDirectionLabel: stringValue(raw.netDirectionLabel),
     originalTransactionCount: numberValue(raw.original_transaction_count, 0),
     bankSplitParts: mapBankSplitParts(raw.bank_split_parts),
     relationCount: numberValue(camelOrSnake(raw, "relationCount", "relation_count"), primary ? 1 : 0),
@@ -301,7 +305,7 @@ function mapRowsResponse(payload: unknown): InputInvoiceUsageRowsResponse {
       return {
         invoiceCount: numberValue(camelOrSnake(summary, "invoiceCount", "invoice_count"), 0),
         totalWithTax: stringValue(camelOrSnake(summary, "totalWithTax", "total_with_tax")),
-        pendingCount: numberValue(camelOrSnake(summary, "pendingCount", "pending_count"), 0),
+        unclassifiedCount: numberValue(camelOrSnake(summary, "unclassifiedCount", "unclassified_count"), 0),
       };
     })() : undefined,
     statistics: raw.statistics && typeof raw.statistics === "object" ? (() => {

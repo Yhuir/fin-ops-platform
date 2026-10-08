@@ -260,7 +260,7 @@ class PostgresInputInvoiceUsageQueryRepository:
                     select
                         count(*)::bigint as row_count,
                         (select case when count(*) = 0 then 0 when count(invoice.total_with_tax) = count(*) then sum(invoice.total_with_tax) end from invoice_rows invoice join selected_members member using (invoice_id))::numeric as total_with_tax,
-                        (select count(distinct member.invoice_id) from filtered_rows pending cross join lateral unnest(pending.invoice_ids) member(invoice_id) where pending.status_code = 'pending')::bigint as pending_count,
+                        (select count(distinct member.invoice_id) from filtered_rows unclassified cross join lateral unnest(unclassified.invoice_ids) member(invoice_id) where unclassified.status_code = 'unclassified')::bigint as unclassified_count,
                         (select count(*) from selected_members)::bigint as invoice_count
                     from filtered_rows
                 ),
@@ -371,7 +371,7 @@ class PostgresInputInvoiceUsageQueryRepository:
         filtered_total = int(summary_row.get("row_count") or 0)
         invoice_count = int(summary_row.get("invoice_count") or 0)
         labels = {item["id"]: item["label"] for item in payment_categories(payment_settings)}
-        labels["pending"] = "金额待核对"
+        labels["unclassified"] = "无法比较"
         return InvoiceUsageCollectionCanonicalSnapshot(
             groups=facts["groups"],
             supporting_groups=[],
@@ -383,7 +383,7 @@ class PostgresInputInvoiceUsageQueryRepository:
             summary={
                 "invoiceCount": invoice_count,
                 "totalWithTax": _money(summary_row["total_with_tax"]) if summary_row.get("total_with_tax") is not None else "",
-                "pendingCount": int(summary_row.get("pending_count") or 0),
+                "unclassifiedCount": int(summary_row.get("unclassified_count") or 0),
             },
             statistics={
                 "invoiceCount": int(statistics_row.get("input_invoice_count") or 0),
@@ -1098,12 +1098,13 @@ def _fact_cte(
         f"""
         , payment_facts as (
             select facts.*, case
-                when facts.bank_count > 0 and facts.total_with_tax > 0 and facts.bank_outflow_total > 0
-                     and facts.bank_inflow_total = 0 and facts.bank_all_outflow
-                     and facts.bank_comparison_resolved and facts.bank_evidence_complete and not facts.has_negative_invoice
-                then case when abs(facts.total_with_tax - facts.bank_outflow_total) <= 0.01 then 'equal'
-                          when facts.total_with_tax < facts.bank_outflow_total then 'less' else 'greater' end
-                else 'invalid' end as payment_comparison
+                when facts.total_with_tax is null then 'missing_invoice_amount'
+                when not facts.bank_evidence_complete or facts.bank_count = 0 then 'missing_bank_evidence'
+                when not facts.bank_amounts_known then 'invalid_bank_amount'
+                when not facts.bank_comparison_resolved then 'ambiguous_bank_scope'
+                when abs(facts.total_with_tax - (facts.bank_outflow_total - facts.bank_inflow_total)) <= 0.01 then 'equal'
+                when facts.total_with_tax < facts.bank_outflow_total - facts.bank_inflow_total then 'less'
+                else 'greater' end as payment_comparison
             from group_facts facts
         ), classified_rows as (
             select facts.*, {status_case} as status_code from payment_facts facts
@@ -1167,6 +1168,7 @@ def _fact_cte(
         group_relation_presence as (
             select relation.group_key,
                    bool_or(member.row_type = 'oa') as has_oa_relation,
+                   count(distinct member.row_id) filter (where member.row_type = 'oa') as expected_oa_count,
                    bool_or(member.row_type in ('bank', 'bank_transaction')) as has_bank_relation,
                    bool_and(member.row_type not in ('bank', 'bank_transaction') or bank.bank_id is not null) as bank_evidence_complete
             from group_relation_ids relation
@@ -1220,16 +1222,7 @@ def _fact_cte(
                     oa.project_name,
                     ''
                 ) as project_name,
-                oa.amount,
-                bool_or(
-                    coalesce(
-                        member.amount_check->>'matched' = 'true',
-                        member.amount_check->>'status' = 'matched',
-                        false
-                    )
-                    or member.relation_mode = 'oa_invoice_offset_auto_match'
-                    or exists (select 1 from group_scope_balance balance where balance.group_key=relation.group_key and balance.current_split_matched)
-                ) as amount_matched
+                oa.amount
             from group_relation_ids relation
             join relation_members member on member.relation_id = relation.relation_id
             join workflow_oa oa on oa.row_id = member.row_id
@@ -1255,9 +1248,7 @@ def _fact_cte(
             select
                 grouped.group_key,
                 count(distinct oa.oa_id)::bigint as oa_count,
-                count(distinct oa.oa_id) filter (where oa.amount_matched)::bigint as matched_oa_count,
-                coalesce(sum(oa.amount) filter (where oa.amount_matched), 0)::numeric
-                    as matched_oa_total,
+                case when count(oa.amount) = count(oa.oa_id) then sum(oa.amount) end as oa_total,
                 (array_agg(oa.applicant order by oa.oa_id))[1]
                     as oa_applicant,
                 (array_agg(oa.application_type order by oa.oa_id))[1]
@@ -1278,7 +1269,6 @@ def _fact_cte(
                 coalesce(presence.has_bank_relation, false) as has_bank_relation,
                 coalesce(presence.bank_evidence_complete, false) as bank_evidence_complete,
                 coalesce(oa.oa_count, 0)::bigint as oa_count,
-                coalesce(oa.matched_oa_total, 0)::numeric as matched_oa_total,
                 coalesce(oa.oa_applicant, '') as oa_applicant,
                 coalesce(oa.oa_application_type, '') as oa_application_type,
                 coalesce(oa.oa_project_name, '') as oa_project_name,
@@ -1286,7 +1276,6 @@ def _fact_cte(
         if invoice_type == "input"
         else """
                 0::bigint as oa_count,
-                0::numeric as matched_oa_total,
                 ''::text as oa_applicant,
                 ''::text as oa_application_type,
                 ''::text as oa_project_name,
@@ -1295,14 +1284,14 @@ def _fact_cte(
     match_facts_sql = (
         """
                 (
-                    coalesce(oa.matched_oa_count, 0) > 0
-                    and abs(coalesce(oa.matched_oa_total, 0) - grouped.total_with_tax) <= 0.01
+                    oa.oa_count > 0 and oa.oa_count = presence.expected_oa_count
+                    and abs(oa.oa_total - grouped.total_with_tax) <= 0.01
                 ) as invoice_oa_amount_matched,
                 (
-                    coalesce(oa.matched_oa_count, 0) > 0
-                    and coalesce(banks.matched_bank_count, 0) > 0
-                    and abs(coalesce(oa.matched_oa_total, 0) - grouped.total_with_tax) <= 0.01
-                    and abs(coalesce(banks.matched_bank_total, 0) - abs(grouped.total_with_tax)) <= 0.01
+                    oa.oa_count > 0 and oa.oa_count = presence.expected_oa_count
+                    and abs(oa.oa_total - grouped.total_with_tax) <= 0.01
+                    and presence.bank_evidence_complete and banks.bank_amounts_known and banks.bank_comparison_resolved
+                    and abs(banks.bank_outflow_total - banks.bank_inflow_total - grouped.total_with_tax) <= 0.01
                 ) as fully_matched
         """
         if invoice_type == "input"
@@ -1319,6 +1308,8 @@ def _fact_cte(
         if invoice_type == "input"
         else ""
     )
+    bank_amount_sql = "case when banks.bank_amounts_known and presence.bank_evidence_complete then banks.bank_outflow_total - banks.bank_inflow_total end" if invoice_type == "input" else "coalesce(originals.original_amount, 0)"
+    bank_direction_sql = "case when not banks.bank_amounts_known or not presence.bank_evidence_complete then '' when banks.bank_outflow_total > banks.bank_inflow_total then 'outflow' when banks.bank_outflow_total < banks.bank_inflow_total then 'inflow' else 'balanced' end" if invoice_type == "input" else "coalesce(banks.bank_direction, '')"
     financial = invoice_financial_sql("invoice")
     return f"""
         with
@@ -1620,9 +1611,8 @@ def _fact_cte(
             select
                 grouped.group_key,
                 bool_and(not bank.is_split or bank.current_amount_matched) as bank_comparison_resolved,
-                bool_and(bank.txn_direction = 'outflow' and bank.amount is not null and bank.amount >= 0) as bank_all_outflow,
+                bool_and(bank.txn_direction in ('outflow', 'inflow') and bank.amount is not null and bank.amount >= 0) as bank_amounts_known,
                 count(distinct bank.bank_id)::bigint as bank_count,
-                count(distinct bank.bank_id) filter (where bank.current_amount_matched)::bigint as matched_bank_count,
                 coalesce(sum(bank.amount) filter (
                     where bank.txn_direction = 'inflow'
                 ), 0)::numeric as bank_inflow_total,
@@ -1669,17 +1659,18 @@ def _fact_cte(
                 ) as red_related_group_keys,
                 {oa_facts_sql}
                 coalesce(banks.bank_comparison_resolved, false) as bank_comparison_resolved,
-                coalesce(banks.bank_all_outflow, false) as bank_all_outflow,
+                coalesce(banks.bank_amounts_known, false) as bank_amounts_known,
                 coalesce(banks.bank_count, 0)::bigint as bank_count,
                 coalesce(banks.bank_inflow_total, 0)::numeric as bank_inflow_total,
                 coalesce(banks.bank_outflow_total, 0)::numeric as bank_outflow_total,
                 coalesce(banks.matched_bank_total, 0)::numeric as matched_bank_total,
                 coalesce(banks.bank_counterparty_name, '') as bank_counterparty_name,
                 banks.bank_trade_time,
-                coalesce(originals.original_amount, 0)::numeric as bank_amount,
+                {bank_amount_sql}::numeric as bank_amount,
+                originals.original_amount as bank_original_amount,
                 coalesce(banks.bank_name, '') as bank_name,
                 coalesce(banks.bank_account, '') as bank_account,
-                coalesce(banks.bank_direction, '') as bank_direction,
+                {bank_direction_sql} as bank_direction,
                 coalesce(banks.bank_summary, '') as bank_summary,
                 {match_facts_sql}
             from grouped_invoices grouped
@@ -1704,7 +1695,7 @@ def _input_payment_status_case(
     ):
         if not bool(rule.get("enabled", True)):
             continue
-        code = str(rule.get("statusCode") or "pending").strip() or "pending"
+        code = rule["statusCode"]
         conditions = (
             rule.get("conditions")
             if isinstance(rule.get("conditions"), dict)
@@ -1740,7 +1731,7 @@ def _input_payment_status_case(
                       "when facts.payment_comparison = 'equal' then 'paid'",
                       "when facts.payment_comparison = 'less' then 'invoice_less_payment'",
                       "when facts.payment_comparison = 'greater' then 'invoice_greater_payment'"])
-    return ("case " + " ".join(fragments) + " else 'pending' end", params)
+    return ("case " + " ".join(fragments) + " else 'unclassified' end", params)
 
 
 def _where_sql(
@@ -1776,6 +1767,7 @@ def _where_sql(
             "bank_summary",
             "bank_inflow_total::text",
             "bank_outflow_total::text",
+            "bank_original_amount::text",
             *keyword_extra_columns,
             *amount_columns,
         ]
@@ -2077,7 +2069,7 @@ def _facet_counts(
             continue
         label = status_labels.get(value, value)
         if field == "bank_direction":
-            label = {"inflow": "收入", "outflow": "支出"}.get(value, value)
+            label = {"inflow": "收入", "outflow": "支出", "balanced": "收支相抵"}.get(value, value)
         result.setdefault(field, []).append(
             {
                 "value": value,

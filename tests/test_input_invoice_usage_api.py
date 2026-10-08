@@ -368,7 +368,11 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertEqual(rows_payload["pagination"]["total"], 1)
         self.assertEqual(rows_payload["rows"][0]["invoiceId"], "inv-bank-filter")
         self.assertEqual(rows_payload["rows"][0]["bankTransactions"]["bankAccount"], "交通银行 3847")
-        self.assertEqual(rows_payload["rows"][0]["bankTransactions"]["directionLabel"], "支出")
+        self.assertEqual(rows_payload["rows"][0]["bankTransactions"]["directionLabel"], "净支出")
+        bank = rows_payload["rows"][0]["bankTransactions"]
+        self.assertEqual(bank["netOutflow"], bank["amount"])
+        self.assertEqual(bank["netAmount"], bank["amount"])
+        self.assertEqual(bank["netDirectionLabel"], "净支出")
 
     def test_oa_reverse_preview_batch_and_missing_client_draft_routes_are_formal_workflow(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

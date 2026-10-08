@@ -93,6 +93,8 @@ export type InputInvoiceUsageRelationSummary<T> = {
   originalTransactionCount?: number;
   bankSplitParts?: BankSplitPart[];
   originalAmount?: string;
+  netAmount?: string;
+  netDirectionLabel?: string;
   primary: T | null;
   relationCount: number;
   hasMultiple: boolean;
@@ -140,7 +142,7 @@ export type InputInvoiceUsageRowsResponse = {
   summary?: {
     invoiceCount: number;
     totalWithTax: string;
-    pendingCount: number;
+    unclassifiedCount: number;
   };
   statistics?: InputInvoiceUsageStatistics;
   pagination: {

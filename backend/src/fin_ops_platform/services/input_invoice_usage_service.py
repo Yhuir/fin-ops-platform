@@ -12,6 +12,7 @@ from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.bank_transaction_unit import (
     BankTransactionUnit,
+    bank_net_outflow,
     bank_unit_comparison_rows,
     bank_unit_display,
     original_bank_display_totals,
@@ -542,15 +543,22 @@ class InputInvoiceUsageQueryService:
         summaries.sort(key=lambda item: item["_sort"])
         public_summaries = [{key: value for key, value in item.items() if key != "_sort"} for item in summaries]
         primary = public_summaries[0] if public_summaries else {}
-        total_amount = sum((_decimal(summary.get("amount")) for summary in public_summaries), start=ZERO)
+        expected_ids = {row_id for relation in relations for row_id, kind in self._typed_relation_rows(relation)
+                        if kind in {"bank", "bank_transaction"}}
+        net = bank_net_outflow([candidates[bank_id] for bank_id in comparison_ids]) if expected_ids <= bank_map.keys() else None
+        direction = "" if net is None else "outflow" if net > 0 else "inflow" if net < 0 else "balanced"
+        direction_label = {"": "方向未知", "outflow": "净支出", "inflow": "净收入", "balanced": "收支相抵"}[direction]
         return {
             "primaryBankTransactionId": primary.get("bankTransactionId"),
             **original_bank_display_totals(public_summaries),
             "counterpartyName": primary.get("counterpartyName", ""),
             "tradeTime": primary.get("tradeTime", ""),
-            "amount": _money(total_amount) if public_summaries else "",
-            "direction": primary.get("direction", ""),
-            "directionLabel": primary.get("directionLabel", ""),
+            "amount": _money(net) if net is not None else "",
+            "netOutflow": _money(net) if net is not None else "",
+            "netAmount": _money(abs(net)) if net is not None else "",
+            "netDirectionLabel": direction_label,
+            "direction": direction,
+            "directionLabel": direction_label,
             "bankName": primary.get("bankName", ""),
             "accountLast4": primary.get("accountLast4", ""),
             "bankAccount": primary.get("bankAccount", ""),
@@ -575,7 +583,6 @@ class InputInvoiceUsageQueryService:
             0
             if self._relation_is_confirmed(relation)
             and self._relation_has_invoice_oa_bank(relation)
-            and self._relation_amount_check_is_matched(relation)
             else 1
         )
         timestamp = _sortable_time(bank.trade_time or bank.txn_date)
@@ -649,7 +656,6 @@ class InputInvoiceUsageQueryService:
             if relation
             and self._relation_is_confirmed(relation)
             and self._relation_has_invoice_oa_bank(relation)
-            and self._relation_amount_check_is_matched(relation)
             else 1
         )
         return {
@@ -763,26 +769,32 @@ class InputInvoiceUsageQueryService:
             for _row_id, row_type in self._typed_relation_rows(relation)
         )
         applicant = self._first_confirmed_oa_applicant(confirmed_relations, context=context)
-        fully_matched = self._has_fully_matched_relation(line_items, confirmed_relations, context=context)
         invoice_total = _source_invoice_total(line_items)
         bank_map = context.bank_transactions_by_id()
         bank_ids = {row_id for relation in confirmed_relations for row_id, kind in self._typed_relation_rows(relation)
                     if kind in {"bank", "bank_transaction"}}
         comparison_banks = bank_unit_comparison_rows([bank_map[row_id] for row_id in bank_ids if row_id in bank_map], target=invoice_total)
-        payment_comparison = "invalid"
-        if invoice_total is not None and invoice_total > 0 and all(invoice.total_with_tax >= 0 for invoice in line_items) and bank_ids <= bank_map.keys() and comparison_banks and all(
-            bank.txn_direction == TransactionDirection.OUTFLOW and bank.amount is not None and bank.amount >= 0
-            for bank in comparison_banks
+        paid_total = bank_net_outflow(comparison_banks)
+        if invoice_total is None:
+            payment_comparison = "missing_invoice_amount"
+        elif not bank_ids or not bank_ids <= bank_map.keys():
+            payment_comparison = "missing_bank_evidence"
+        elif paid_total is None:
+            payment_comparison = "invalid_bank_amount"
+        elif any(isinstance(bank, BankTransactionUnit) for bank in comparison_banks) and (
+            len({bank.txn_direction for bank in comparison_banks}) != 1 or abs(paid_total) != abs(invoice_total)
         ):
-            paid_total = sum((bank.amount for bank in comparison_banks), ZERO)
-            if paid_total > 0 and (not any(isinstance(bank, BankTransactionUnit) for bank in comparison_banks) or paid_total == invoice_total):
-                payment_comparison = "equal" if _within_cent(invoice_total, paid_total) else "less" if invoice_total < paid_total else "greater"
+            payment_comparison = "ambiguous_bank_scope"
+        else:
+            payment_comparison = "equal" if _within_cent(invoice_total, paid_total) else "less" if invoice_total < paid_total else "greater"
+        oa_amount = oa_payload.get("amount")
+        invoice_oa_matched = invoice_total is not None and bool(oa_amount) and _within_cent(invoice_total, Decimal(oa_amount))
         return (lifecycle_policy or self._lifecycle_policy).evaluate_input_invoice_payment(
             has_oa=has_oa,
             has_bank=has_bank,
             applicant_name=applicant,
-            fully_matched=fully_matched,
-            invoice_oa_amount_matched=self._has_invoice_oa_amount_match(line_items, confirmed_relations, context=context),
+            fully_matched=invoice_oa_matched and payment_comparison == "equal",
+            invoice_oa_amount_matched=invoice_oa_matched,
             payment_comparison=payment_comparison,
         )
 
@@ -804,85 +816,6 @@ class InputInvoiceUsageQueryService:
             if record is not None and str(record.applicant or "").strip():
                 return str(record.applicant)
         return ""
-
-    def _has_fully_matched_relation(
-        self,
-        line_items: list[Invoice],
-        relations: list[dict[str, Any]],
-        *,
-        context: DistributedInvoiceRelationContext,
-    ) -> bool:
-        invoice_total = _source_invoice_total(line_items)
-        if invoice_total is None:
-            return False
-        totals = self._matched_linked_relation_amount_totals(line_items, relations, context=context)
-        if _within_cent(totals["oa"], invoice_total) and _within_cent(totals["bank"], invoice_total):
-            return True
-        return False
-
-    def _has_invoice_oa_amount_match(
-        self,
-        line_items: list[Invoice],
-        relations: list[dict[str, Any]],
-        *,
-        context: DistributedInvoiceRelationContext,
-    ) -> bool:
-        invoice_total = _source_invoice_total(line_items)
-        if invoice_total is None:
-            return False
-        totals = self._matched_linked_relation_amount_totals(line_items, relations, context=context)
-        if _within_cent(totals["oa"], invoice_total):
-            return True
-        return False
-
-    def _matched_linked_relation_amount_totals(
-        self,
-        line_items: list[Invoice],
-        relations: list[dict[str, Any]],
-        *,
-        context: DistributedInvoiceRelationContext,
-    ) -> dict[str, Decimal]:
-        invoice_total = _source_invoice_total(line_items)
-        bank_map = context.bank_transactions_by_id()
-        confirmed = [relation for relation in relations if self._relation_is_confirmed(relation)]
-        group_bank_ids = {row_id for relation in confirmed
-                          for row_id, kind in self._typed_relation_rows(relation)
-                          if kind in {"bank", "bank_transaction"}}
-        group_banks = [bank_map[row_id] for row_id in group_bank_ids]
-        comparison = bank_unit_comparison_rows(group_banks, target=invoice_total)
-        has_split = any(getattr(bank, "is_split", False) for bank in group_banks)
-        current_split_match = (
-            has_split and len({bank.txn_direction for bank in comparison}) == 1
-            and sum((bank.amount for bank in comparison), ZERO) == invoice_total
-        )
-        oa_ids: list[str] = []
-        bank_ids: list[str] = []
-        seen_oa: set[str] = set()
-        seen_bank: set[str] = set()
-        for relation in confirmed:
-            if has_split:
-                if not current_split_match:
-                    continue
-            elif not self._relation_amount_check_is_matched(relation) and not self._relation_is_oa_invoice_offset_auto_match(relation):
-                continue
-            typed_rows = [
-                (row_id, self._canonical_relation_row_type(row_type, row_id))
-                for row_id, row_type in self._typed_relation_rows(relation)
-            ]
-            for row_id, row_type in typed_rows:
-                if row_type == "oa" and row_id not in seen_oa:
-                    seen_oa.add(row_id)
-                    oa_ids.append(row_id)
-                elif row_type == "bank" and row_id not in seen_bank:
-                    seen_bank.add(row_id)
-                    bank_ids.append(row_id)
-        oa_records = context.oa_records_by_id(oa_ids)
-        bank_map = context.bank_transactions_by_id()
-        return {
-            "oa": sum((_decimal(oa_records[oa_id].amount) for oa_id in oa_ids if oa_id in oa_records), start=ZERO),
-            "bank": sum((bank.amount for bank in bank_unit_comparison_rows(
-                [bank_map[bank_id] for bank_id in bank_ids if bank_id in bank_map], target=invoice_total)), ZERO),
-        }
 
     def _parse_filters(self, filters: str | list[dict[str, Any]] | None) -> list[dict[str, Any]]:
         try:
@@ -1004,7 +937,7 @@ class InputInvoiceUsageQueryService:
             "oa_project_name": oa.get("projectName"),
             "bank_counterparty_name": bank.get("counterpartyName"),
             "bank_trade_time": bank.get("tradeTime"),
-            "bank_amount": bank.get("original_amount"),
+            "bank_amount": bank.get("netOutflow"),
             "bank_name": bank.get("bankName"),
             "bank_account": bank.get("bankAccount"),
             "bank_direction": bank.get("direction"),
@@ -1027,7 +960,7 @@ class InputInvoiceUsageQueryService:
             if field == "payment_status":
                 labels[key] = row["paymentStatus"]["label"]
             elif field == "bank_direction":
-                labels[key] = "支出" if key == "outflow" else "收入" if key == "inflow" else key
+                labels[key] = "支出" if key == "outflow" else "收入" if key == "inflow" else "收支相抵" if key == "balanced" else key
             else:
                 labels[key] = key
         return [{"value": value, "label": labels[value], "count": counts[value]} for value in sorted(counts)]
@@ -1037,7 +970,7 @@ class InputInvoiceUsageQueryService:
         return {
             "invoiceCount": len(rows),
             "totalWithTax": _money(sum((_decimal(row["invoice"]["totalWithTax"]) for row in rows), start=ZERO)) if all(row["invoice"]["totalWithTax"] not in (None, "") for row in rows) else "",
-            "pendingCount": sum(1 for row in rows if row["paymentStatus"]["code"] == "pending"),
+            "unclassifiedCount": sum(1 for row in rows if row["paymentStatus"]["code"] == "unclassified"),
         }
 
     def _bank_transactions_by_id(self) -> dict[str, BankTransaction]:
@@ -1117,18 +1050,6 @@ class InputInvoiceUsageQueryService:
         if normalized:
             return normalized
         return _infer_row_type(row_id)
-
-    @staticmethod
-    def _relation_amount_check_is_matched(relation: dict[str, Any]) -> bool:
-        amount_check = relation.get("amount_check")
-        return isinstance(amount_check, dict) and (
-            amount_check.get("matched") is True
-            or str(amount_check.get("status") or "").strip() == "matched"
-        )
-
-    @staticmethod
-    def _relation_is_oa_invoice_offset_auto_match(relation: dict[str, Any]) -> bool:
-        return str(relation.get("relation_mode") or "").strip() == "oa_invoice_offset_auto_match"
 
     def _relation_for_row_id(self, relations: list[dict[str, Any]], row_id: str) -> dict[str, Any] | None:
         for relation in relations:

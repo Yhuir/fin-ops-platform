@@ -62,6 +62,48 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
             'row_types',%s::text[],'relation_mode','manual_confirmed','status','active','amount_check','{"matched":true}'::jsonb)))""",
             (case,ids,types,case,ids,types))
 
+    def test_net_payment_current_facts_drive_rows_filters_export_and_rules(self):
+        self.invoices(3, 1015)
+        with self.connection.transaction() as tx:
+            tx.execute("set local fin_ops.correction_reason='isolated net payment fixture'")
+            tx.execute("update app.invoices set total_with_tax=-1015, amount=-1015, signed_amount=-1015 where legacy_mongo_id='candidate-2'")
+        self.oa('oa-net', 1015)
+        self.bank('out', 1050)
+        self.bank('refund', 35)
+        with self.connection.transaction() as tx:
+            tx.execute("set local fin_ops.correction_reason='isolated refund fixture'")
+            tx.execute("update app.bank_transactions set txn_direction='inflow', signed_amount=35 where legacy_mongo_id='refund'")
+        self.relation('net', ['candidate-1', 'candidate-2', 'candidate-3', 'oa-net', 'out', 'refund'], ['invoice'] * 3 + ['oa', 'bank', 'bank'])
+        self.connection.execute("update app.workbench_pair_relations set amount_check=jsonb_build_object('status','mismatch') where case_id='net'")
+        before = self.connection.fetch_one("select amount_check from app.workbench_pair_relations where case_id='net'")
+        payload = self.service.list_rows()
+        row = payload['rows'][0]
+        self.assertEqual(row['invoice']['totalWithTax'], '1015.00')
+        self.assertEqual(row['paymentStatus']['code'], 'paid')
+        self.assertEqual(row['bankTransactions']['netOutflow'], '1015.00')
+        self.assertEqual(row['bankTransactions']['original_amount'], '1085.00')
+        self.assertEqual(row['bankTransactions']['netDirectionLabel'], '净支出')
+        self.assertEqual(row['bankTransactions']['relationCount'], 2)
+        self.assertEqual({r['amount'] for r in row['bankTransactions']['summaries']}, {'1050.00', '35.00'})
+        children = payload['classification']['groups'][0]['children']
+        self.assertNotIn('category:pending', [c['id'] for c in children])
+        self.assertEqual(next(c['count'] for c in children if c['id'] == 'category:paid'), 3)
+        snapshot = self.repository.load_page(page=1, page_size=20, keyword=None, invoice_date_from=None, invoice_date_to=None, month=None, filters=[], sort_field="invoice_date", sort_direction="desc")
+        self.assertTrue(snapshot.groups[0]['payment_facts']['fully_matched'])
+        for field, operator, value in [('payment_status', 'in', ['paid']), ('bank_amount', 'equals', '1015'), ('bank_direction', 'in', ['outflow'])]:
+            filters = [{'field': field, 'operator': operator, 'values' if operator == 'in' else 'value': value}]
+            selected = self.service.list_rows(filters=filters)
+            self.assertEqual(selected['summary']['invoiceCount'], 3)
+            self.assertEqual(self.service.export_page(filters=filters)['rows'], selected['rows'])
+        self.assertEqual(self.connection.fetch_one("select amount_check from app.workbench_pair_relations where case_id='net'"), before)
+        with self.connection.transaction() as tx:
+            tx.execute("set local fin_ops.correction_reason='isolated refund refresh fixture'")
+            tx.execute("update app.bank_transactions set amount=1050, signed_amount=1050 where legacy_mongo_id='refund'")
+        refreshed = self.service.list_rows()['rows'][0]
+        self.assertEqual(refreshed['bankTransactions']['netAmount'], '0.00')
+        self.assertEqual(refreshed['bankTransactions']['netDirectionLabel'], '收支相抵')
+        self.assertEqual(refreshed['paymentStatus']['code'], 'invoice_greater_payment')
+
     def test_multi_applicant_rule_drives_canonical_rows_filters_and_summary(self):
         from pathlib import Path
         from tempfile import TemporaryDirectory
@@ -140,7 +182,7 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
         self.relation('incomplete', ['candidate-1', 'known-bank', 'missing-bank'], ['invoice', 'bank', 'bank'])
         result = self.service.list_rows()
         self.assertEqual(result['classification']['used']['count'], 1)
-        self.assertEqual(result['rows'][0]['paymentStatus']['code'], 'pending')
+        self.assertEqual(result['rows'][0]['paymentStatus']['code'], 'unclassified')
 
     def test_missing_oa_detail_does_not_turn_an_existing_relation_into_a_candidate(self):
         self.invoices(1)
@@ -160,7 +202,7 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
         exact = self.service.candidate_rows_by_invoice_ids(['candidate-1'])
         self.assertEqual(exact['rows'][0]['bankRelationStatus'], 'linked')
 
-    def test_zero_amount_without_matched_evidence_is_not_a_match(self):
+    def test_zero_amount_requires_actual_members_not_historical_matched_flag(self):
         self.invoices(1, amount=0)
         snapshot = self.repository.load_page(page=1, page_size=50, keyword=None, invoice_date_from=None, invoice_date_to=None, month=None, filters=[], sort_field="invoice_date", sort_direction="desc")
         facts = snapshot.groups[0]["payment_facts"]
@@ -171,8 +213,8 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
         self.relation('zero-case', ['candidate-1','zero-oa','zero-bank'], ['invoice','oa','bank'])
         self.connection.execute("update app.workbench_pair_relations set amount_check='{\"matched\":false}'::jsonb")
         snapshot = self.repository.load_page(page=1, page_size=50, keyword=None, invoice_date_from=None, invoice_date_to=None, month=None, filters=[], sort_field="invoice_date", sort_direction="desc")
-        self.assertFalse(snapshot.groups[0]["payment_facts"]["fully_matched"])
-        self.assertFalse(snapshot.groups[0]["payment_facts"]["invoice_oa_amount_matched"])
+        self.assertTrue(snapshot.groups[0]["payment_facts"]["fully_matched"])
+        self.assertTrue(snapshot.groups[0]["payment_facts"]["invoice_oa_amount_matched"])
         self.connection.execute("update app.workbench_pair_relations set amount_check='{\"matched\":true}'::jsonb")
         snapshot = self.repository.load_page(page=1, page_size=50, keyword=None, invoice_date_from=None, invoice_date_to=None, month=None, filters=[], sort_field="invoice_date", sort_direction="desc")
         self.assertTrue(snapshot.groups[0]["payment_facts"]["fully_matched"])

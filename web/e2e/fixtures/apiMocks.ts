@@ -3715,6 +3715,8 @@ function inputInvoiceUsageRowsPayload(
         },
         relation_count: paymentRulesSaveFlow ? 0 : 1,
         original_amount: paymentRulesSaveFlow ? "0.00" : "88.00",
+        netAmount: paymentRulesSaveFlow ? "0.00" : "88.00",
+        netDirectionLabel: "净支出",
         original_transaction_count: paymentRulesSaveFlow ? 0 : 1,
         has_multiple: false,
         detail_mode: paymentRulesSaveFlow ? "none" : "single",

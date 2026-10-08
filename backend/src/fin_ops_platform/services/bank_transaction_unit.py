@@ -71,3 +71,11 @@ def bank_unit_comparison_rows(banks: list[BankTransaction], *, target: Decimal |
              "turnover_role": bank.turnover_role if isinstance(bank, BankTransactionUnit) else None}
             for bank in banks]
     return [by_id[row["id"]] for row in bank_split_comparison_rows(rows, target=target)]
+
+
+def bank_net_outflow(banks: list[BankTransaction]) -> Decimal | None:
+    """Signed net payment of distinct business units, never their full parent amounts."""
+    unique = {bank.id: bank for bank in banks}
+    if not unique or any(bank.amount is None or bank.amount < 0 or bank.txn_direction.value not in {"inflow", "outflow"} for bank in unique.values()):
+        return None
+    return sum((bank.amount if bank.txn_direction.value == "outflow" else -bank.amount for bank in unique.values()), Decimal("0.00"))

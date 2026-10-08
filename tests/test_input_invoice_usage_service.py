@@ -6,6 +6,7 @@ from unittest.mock import Mock
 
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
+from fin_ops_platform.services.bank_transaction_unit import bank_net_outflow
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_payment_rules import AppSettingsInputInvoiceUsagePaymentRulesProvider
 from fin_ops_platform.services.input_invoice_usage_service import (
@@ -159,6 +160,41 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         imports.get_transaction.assert_called_once_with("bank-unavailable")
         self.assertEqual(context.distributed_relations_for_row_ids(["bank-unavailable"])[0]["case_id"], "missing")
 
+    def test_net_amount_deduplicates_units_and_preserves_missing_amount(self):
+        bank = self._bank_transaction('net-unit', '1050')
+        self.assertEqual(bank_net_outflow([bank, bank]), Decimal('1050'))
+        self.assertIsNone(bank_net_outflow([]))
+        bank.amount = None
+        self.assertIsNone(bank_net_outflow([bank]))
+        bank.amount = Decimal('-1')
+        self.assertIsNone(bank_net_outflow([bank]))
+
+    def test_signed_invoice_and_bank_net_are_compared_without_historical_match(self):
+        for invoice_amounts, bank_amounts, expected in [
+            (["16350", "-16350", "16350"], [("12500", False), ("3850", False)], "paid"),
+            (["1015"], [("1050", False), ("35", True)], "paid"),
+            (["0"], [("35", False), ("35", True)], "paid"),
+            (["-35"], [("35", True)], "paid"),
+            (["10"], [("35", True)], "invoice_greater_payment"),
+        ]:
+            with self.subTest(invoice_amounts=invoice_amounts, bank_amounts=bank_amounts):
+                invoices = [self._invoice(f'inv-net-{i}', f'NET-{i}', self._counterparty('supplier', '供应商')) for i in range(len(invoice_amounts))]
+                for invoice, amount in zip(invoices, invoice_amounts):
+                    invoice.total_with_tax = Decimal(amount)
+                banks = [self._bank_transaction(f'bank-net-{i}', amount) for i, (amount, _) in enumerate(bank_amounts)]
+                for bank, (_, income) in zip(banks, bank_amounts):
+                    bank.txn_direction = TransactionDirection.INFLOW if income else TransactionDirection.OUTFLOW
+                total = sum(map(Decimal, invoice_amounts))
+                oa = self._oa('oa-net', '申请人', str(total))
+                pairs = WorkbenchPairRelationService()
+                self._relation(pairs, 'net-case', [invoice.id for invoice in invoices] + [bank.id for bank in banks] + [oa.id], amount_matched=False)
+                service = self._service(invoices=invoices, transactions=banks, pair_service=pairs, oa_projection=StaticOAProjection([oa]))
+                row = service.list_rows()['rows'][0]
+                self.assertEqual(row['paymentStatus']['code'], expected)
+                expected_net = sum((Decimal(amount) * (-1 if income else 1) for amount, income in bank_amounts), Decimal(0))
+                self.assertEqual(row['bankTransactions']['netOutflow'], f'{expected_net:.2f}')
+                self.assertEqual(row['bankTransactions']['netAmount'], f'{abs(expected_net):.2f}')
+
     def test_missing_source_gross_preserves_relations_without_matching_net_plus_tax(self):
         invoice = self._invoice("inv-source-missing", "MISSING", self._counterparty("supplier", "供应商"))
         invoice.total_with_tax = None
@@ -173,7 +209,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["invoice"]["totalWithTax"], "")
         self.assertEqual(row["bankTransactions"]["relationCount"], 1)
         self.assertEqual(row["oa"]["relationCount"], 1)
-        self.assertEqual(row["paymentStatus"]["code"], "pending")
+        self.assertEqual(row["paymentStatus"]["code"], "unclassified")
         self.assertEqual(payload["summary"]["totalWithTax"], "")
         self.assertEqual(service.list_rows(filters=[{"field": "total_with_tax", "operator": "equals", "value": "0"}])["pagination"]["total"], 0)
         self.assertEqual(service.list_rows(filters=[{"field": "total_with_tax", "operator": "between", "value": {"min": "0", "max": "100"}}])["pagination"]["total"], 0)
@@ -926,7 +962,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         bank = payload["rows"][0]["bankTransactions"]
         self.assertEqual(bank["bankAccount"], "交通银行 3847")
         self.assertEqual(bank["direction"], "outflow")
-        self.assertEqual(bank["directionLabel"], "支出")
+        self.assertEqual(bank["directionLabel"], "净支出")
         fields = {field["field"]: field for field in options["fields"]}
         self.assertIn(
             {"value": "交通银行 3847", "label": "交通银行 3847", "count": 3}, fields["bank_account"]["options"]

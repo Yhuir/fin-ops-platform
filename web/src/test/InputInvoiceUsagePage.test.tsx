@@ -38,7 +38,7 @@ const inputFilterOptions = [
     mode: "enum_multi",
     sortable: true,
     operators: ["in"],
-    options: [{ value: "pending", label: "待处理", count: 1 }],
+    options: [{ value: "unclassified", label: "待处理", count: 1 }],
   },
   {
     field: "oa_applicant",
@@ -104,7 +104,7 @@ function cssRule(source: string, selector: string) {
 const rowsPayload = {
   classification: {
     all: { id: "all", label: "全部发票", count: 1 }, used: { id: "used", label: "已使用", count: 1 }, unused: { id: "unused", label: "待使用", count: 0 },
-    groups: [{ id: "paid", label: "已付款", tone: "paid", count: 0, children: [{ id: "category:paid", label: "发票＝付款", count: 0 }, { id: "category:pending", label: "金额待核对", count: 0 }] },
+    groups: [{ id: "paid", label: "已付款", tone: "paid", count: 0, children: [{ id: "category:paid", label: "发票＝付款", count: 0 }] },
       { id: "unpaid", label: "未付款", tone: "unpaid", count: 0, children: [] }],
   },
   rows: [
@@ -127,9 +127,9 @@ const rowsPayload = {
         taxableItemName: "很长很长的货物或应税劳务名称用于验证两行截断后出现展开按钮",
       },
       paymentStatus: {
-        code: "pending",
+        code: "unclassified",
         label: "待处理",
-        reason: "规则不能自动闭环，需要财务复核后处理",
+        reason: "拆分流水的付款用途尚未明确",
       },
       oa: {
         primaryOaId: "oa-001",
@@ -165,6 +165,8 @@ const rowsPayload = {
           remark: "备注内容很长很长用于验证摘要备注列的展开控制",
           detailAvailable: true,
           original_amount: "12345.67",
+          netAmount: "12345.67",
+          netDirectionLabel: "净支出",
           original_transaction_count: 1,
         },
         relationCount: 1,
@@ -172,6 +174,8 @@ const rowsPayload = {
         detailMode: "single",
         summaries: [],
         original_amount: "12345.67",
+        netAmount: "12345.67",
+        netDirectionLabel: "净支出",
         original_transaction_count: 1,
       },
     },
@@ -184,7 +188,7 @@ const rowsPayload = {
   summary: {
     invoiceCount: 787,
     totalWithTax: "12345.67",
-    pendingCount: 1,
+    unclassifiedCount: 1,
   },
   statistics: {
     invoice_count: 787,
@@ -268,7 +272,7 @@ function installInputInvoiceUsageFetch(
       return new Response(JSON.stringify({
         file_name: "进项发票使用情况-2026-05-31.xlsx",
         row_count: 1,
-        filter_options: { relation_status: [{value: "no_oa",label:"未关联 OA",count:1}], payment_status: [{value:"pending",label:"待核对",count:1}] },
+        filter_options: { relation_status: [{value: "no_oa",label:"未关联 OA",count:1}], payment_status: [{value:"unclassified",label:"待核对",count:1}] },
         scope_label: "当前筛选",
         columns: ["序号", "发票号码", "销方名称"],
         sample_rows: [{ "序号": 1, "发票号码": "SD-INV-2026-0001", "销方名称": "云南长文本供应商科技发展有限公司第一分公司" }],
@@ -398,7 +402,7 @@ afterEach(() => {
 });
 
 describe("Input invoice usage page", () => {
-  test.each([false, true])("流水金额区不显示用途标签，保留原始金额和账户：拆分=%s", async (split) => {
+  test.each([false, true])("流水金额区不显示用途标签，显示业务净额和账户：拆分=%s", async (split) => {
     const parts = split ? [
       { id: "principal", category_code: "repayment", category_label: "归还借款", category_path: ["外部往来款付款", "归还借款", "银行往来"], amount: "1000000.00" },
       { id: "interest", category_code: "interest", category_label: "利息", category_path: ["费用", "利息"], amount: "1497.22" },
@@ -408,6 +412,8 @@ describe("Input invoice usage page", () => {
       bank: {
         ...row.bank,
         original_amount: "1001497.22",
+        netAmount: "1001497.22",
+        netDirectionLabel: "净支出",
         bank_split_parts: parts,
         primary: { ...row.bank.primary, amount: "1497.22", bank_split_parts: parts },
       },
@@ -417,7 +423,7 @@ describe("Input invoice usage page", () => {
     const invoiceRow = within(table).getByRole("row", { name: /SD-INV-2026-0001/ });
     const amountCell = invoiceRow.querySelectorAll("th, td")[8] as HTMLElement;
     expect(within(amountCell).getByText("1001497.22")).toBeVisible();
-    expect(within(amountCell).getByText("支出")).toBeVisible();
+    expect(within(amountCell).getByText("净支出")).toBeVisible();
     expect(amountCell).toHaveTextContent("交行");
     expect(amountCell).toHaveTextContent("3847");
     expect(within(amountCell).queryByText("1497.22")).not.toBeInTheDocument();
@@ -441,16 +447,16 @@ describe("Input invoice usage page", () => {
   });
 
   test.each([
-    ["0.00", "0.00"],
-    ["-123.45", "-123.45"],
-    ["", "—"],
-  ])("流水主金额保留原值和缺失语义：%s", async (originalAmount, displayedAmount) => {
+    ["0.00", "0.00", "收支相抵"],
+    ["123.45", "123.45", "净收入"],
+    ["", "—", "方向未知"],
+  ])("流水主金额保留服务端净额和缺失语义：%s", async (netAmount, displayedAmount, netDirectionLabel) => {
     installInputInvoiceUsageFetch({ ...rowsPayload, rows: rowsPayload.rows.map((row) => ({
       ...row,
       bank: {
         ...row.bank,
-        original_amount: originalAmount,
-        primary: { ...row.bank.primary, original_amount: originalAmount },
+        netAmount,
+        netDirectionLabel,
       },
     })) });
     renderAuthenticatedAppAt("/input-invoice-usage");
@@ -459,7 +465,7 @@ describe("Input invoice usage page", () => {
     const amountCell = invoiceRow.querySelectorAll("th, td")[8] as HTMLElement;
     expect(amountCell.querySelector(".input-invoice-usage-bank-amount-line")?.textContent).toBe(displayedAmount);
     const metadata = amountCell.querySelector(".input-invoice-usage-bank-tag-row") as HTMLElement;
-    expect(within(metadata).getByText("支出")).toBeVisible();
+    expect(within(metadata).getByText(netDirectionLabel)).toBeVisible();
     expect(metadata.querySelector(".bank-account-value")).toHaveTextContent("3847");
   });
 
@@ -716,15 +722,15 @@ describe("Input invoice usage page", () => {
     expect(within(oaCell).queryByText("状态未知")).not.toBeInTheDocument();
     expect(within(oaCell).getByRole("button", { name: "查看OA 樊祖芳 详情" })).toBeInTheDocument();
     expect(within(oaCell).queryByText("详情")).not.toBeInTheDocument();
-    expect(within(page).queryByText("规则不能自动闭环，需要财务复核后处理")).not.toBeInTheDocument();
+    expect(within(page).getByText("拆分流水的付款用途尚未明确")).toBeVisible();
     expect(within(page).getByText("2026-05-03 10:30:00")).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "查看流水 云南银行交易对方户名很长很长需要换行显示 详情" })).toBeInTheDocument();
     expect(within(page).queryByText(/outflow/)).not.toBeInTheDocument();
-    expect(within(page).getByText("支出")).toBeInTheDocument();
+    expect(within(page).getByText("净支出")).toBeInTheDocument();
     const bankAmountCell = firstRowCells[8] as HTMLElement;
     expect(bankAmountCell.querySelector(".input-invoice-usage-bank-amount-line")).toHaveTextContent(/^12345\.67$/);
     const bankMetadata = bankAmountCell.querySelector(".input-invoice-usage-bank-tag-row") as HTMLElement;
-    expect(within(bankMetadata).getByText("支出")).toBeInTheDocument();
+    expect(within(bankMetadata).getByText("净支出")).toBeInTheDocument();
     expect(bankMetadata.querySelector(".bank-account-value")).toHaveTextContent("交行");
     expect(bankMetadata.querySelector(".bank-account-value")).not.toHaveTextContent("交通银行");
     expect(bankMetadata.querySelector(".bank-account-value")).toHaveTextContent("3847");
@@ -784,10 +790,24 @@ describe("Input invoice usage page", () => {
     });
   });
 
-  test("distinguishes paid, pending, and waiting-payment status chips by canonical code", async () => {
+  test("shows net payment while removing the obsolete amount category", async () => {
+    const row = structuredClone(rowsPayload.rows[0]);
+    row.bank.original_amount = "1085.00";
+    row.bank.netAmount = "1015.00";
+    row.bank.netDirectionLabel = "净支出";
+    installInputInvoiceUsageFetch({ ...rowsPayload, rows: [row] });
+    renderAuthenticatedAppAt("/input-invoice-usage");
+    expect(await screen.findByText("1015.00")).toBeInTheDocument();
+    expect(screen.getByText("净支出")).toBeInTheDocument();
+    expect(screen.queryByText("1085.00")).not.toBeInTheDocument();
+    expect(screen.getByText(row.paymentStatus.reason)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /金额待核对/ })).not.toBeInTheDocument();
+  });
+
+  test("distinguishes paid, unclassified, and waiting-payment status chips by canonical code", async () => {
     const statusRows = [
       { code: "paid", label: "已付款", tone: "success" },
-      { code: "pending", label: "待处理", tone: "neutral" },
+      { code: "unclassified", label: "待处理", tone: "neutral" },
       { code: "waiting_payment", label: "待付款", tone: "warning" },
     ].map((status, index) => ({
       ...rowsPayload.rows[0],
@@ -899,6 +919,8 @@ describe("Input invoice usage page", () => {
               id: "bank-multi-a",
               amount: "100.00",
               original_amount: "100.00",
+              netAmount: "100.00",
+              netDirectionLabel: "净支出",
               original_transaction_count: 1,
             },
             relationCount: 2,
@@ -910,6 +932,8 @@ describe("Input invoice usage page", () => {
                 id: "bank-multi-a",
                 amount: "40.00",
                 original_amount: "40.00",
+                netAmount: "40.00",
+                netDirectionLabel: "净支出",
                 original_transaction_count: 1,
               },
               {
@@ -917,10 +941,14 @@ describe("Input invoice usage page", () => {
                 id: "bank-multi-b",
                 amount: "60.00",
                 original_amount: "60.00",
+                netAmount: "60.00",
+                netDirectionLabel: "净支出",
                 original_transaction_count: 1,
               },
             ],
             original_amount: "100.00",
+            netAmount: "100.00",
+            netDirectionLabel: "净支出",
             original_transaction_count: 2,
           },
           invoiceRelations: {
@@ -1090,7 +1118,7 @@ describe("Input invoice usage page", () => {
     expect(rowsRequests(fetchMock)).toHaveLength(initialRowsRequests);
   });
 
-  test("restores payment filters inside used scope and preserves sort", async () => {
+  test.each(["unclassified", "pending"])("restores valid payment filters and clears obsolete %s filter", async (status) => {
     const fetchMock = installInputInvoiceUsageFetch();
     const storageKey = buildPageSessionStorageKey({
       userScope: "101",
@@ -1108,7 +1136,7 @@ describe("Input invoice usage page", () => {
         invoiceDateFrom: "",
         invoiceDateTo: "",
         month: "",
-        filters: [{ field: "payment_status", operator: "in", values: ["pending"] }],
+        filters: [{ field: "payment_status", operator: "in", values: [status] }],
         sortField: "invoice_no",
         sortDirection: "asc",
         activeWorkflow: null,
@@ -1124,8 +1152,8 @@ describe("Input invoice usage page", () => {
     });
     const request = rowsRequests(fetchMock)[0];
     expect(request.searchParams.get("page")).toBe("1");
-    expect(JSON.parse(decodeURIComponent(request.searchParams.get("filters") ?? "[]"))).toEqual([
-      { field: "payment_status", operator: "in", values: ["pending"] },
+    expect(JSON.parse(decodeURIComponent(request.searchParams.get("filters") ?? "[]"))).toEqual(status === "pending" ? [] : [
+      { field: "payment_status", operator: "in", values: [status] },
       { field: "usage_status", operator: "in", values: ["used"] },
     ]);
     expect(request.searchParams.get("sort_field")).toBe("invoice_no");
@@ -1138,7 +1166,7 @@ describe("Input invoice usage page", () => {
       page: 4, pageSize: 50, keyword: "供应商", month: kind === "bounds" ? "2025-12" : "",
       invoiceDateFrom: kind === "bounds" ? "2025-12-01" : "", invoiceDateTo: kind === "bounds" ? "2025-12-31" : "",
       filters: [
-        { field: "payment_status", operator: "in", values: ["pending"] },
+        { field: "payment_status", operator: "in", values: ["unclassified"] },
         ...(kind === "column" ? [
           { field: "invoice_date", operator: "equals", value: "2025-12-01" },
           { field: "bank_trade_time", operator: "between", from: "2025-01-01", to: "2025-12-31" },

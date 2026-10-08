@@ -356,7 +356,7 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
 
         self.assertNotIn("fullyMatched", updated["rules"][1]["conditions"])
         self.assertNotIn("fullyMatched", reloaded["rules"][1]["conditions"])
-        self.assertEqual(status["code"], "pending")
+        self.assertEqual(status["code"], "unclassified")
 
     def test_query_service_uses_injected_rules_provider_for_payload_and_row_status(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

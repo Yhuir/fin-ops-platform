@@ -104,7 +104,7 @@ function restoreQuery(raw: unknown): InputInvoiceUsageQuery {
   if (!validateQuery(raw)) {
     return initialQuery;
   }
-  const filters = raw.filters.filter((filter) => !["invoice_date", "bank_trade_time", "relation_status"].includes(filter.field) && !(filter.field === "payment_group" && filter.values?.includes("pending"))).map(filter => (filter.field === "payment_status" && filter.values && filter.values.length > 1 ? { ...filter, values: [filter.values[0]] } : filter));
+  const filters = raw.filters.filter((filter) => !["invoice_date", "bank_trade_time", "relation_status"].includes(filter.field) && !(["payment_group", "payment_status"].includes(filter.field) && filter.values?.includes("pending"))).map(filter => (filter.field === "payment_status" && filter.values && filter.values.length > 1 ? { ...filter, values: [filter.values[0]] } : filter));
   const hasPaymentFilter = filters.some(filter => ["payment_status", "payment_group"].includes(filter.field));
   if (hasPaymentFilter && !filters.some(filter => filter.field === "usage_status")) {
     filters.push({ field: "usage_status", operator: "in", values: ["used"] });
@@ -362,7 +362,7 @@ export default function InputInvoiceUsagePage() {
     });
   }, [setQuery]);
   useEffect(() => {
-    if (!classification || !selectedCategory) return;
+    if (!classification || !selectedCategory || selectedCategory === "unclassified") return;
     const present = classification.groups.some(group => (!selectedParent || group.id === selectedParent)
       && group.children.some(child => child.id === `category:${selectedCategory}`));
     if (!present) handleClassificationSelect("used");

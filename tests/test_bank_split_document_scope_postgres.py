@@ -121,12 +121,12 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
             self.assertEqual(summary['original_amount'], '1001497.22')
             self.assertEqual(summary['parent_row_id'], 'bank-parent')
 
-    def test_bank_amount_filters_use_original_cash_but_keyword_still_finds_interest(self):
+    def test_input_bank_amount_filters_use_business_net_and_preserve_original_detail(self):
         self.document()
-        visible = self.invoice_page(filters=[{'field': 'bank_amount', 'operator': 'equals', 'value': '1001497.22'}])
+        visible = self.invoice_page(filters=[{'field': 'bank_amount', 'operator': 'equals', 'value': '1497.22'}])
         self.assertEqual(len(visible['rows']), 1)
         self.assert_original_bank_display(visible['rows'][0]['bankTransactions'])
-        invisible = self.invoice_page(filters=[{'field': 'bank_amount', 'operator': 'equals', 'value': '1497.22'}])
+        invisible = self.invoice_page(filters=[{'field': 'bank_amount', 'operator': 'equals', 'value': '1001497.22'}])
         self.assertEqual(invisible['rows'], [])
         self.assertEqual(len(self.invoice_page(keyword='1497.22')['rows']), 1)
         self.assertEqual(len(self.invoice_page(keyword='1001497.22')['rows']), 1)
@@ -174,7 +174,7 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
         invoice = self.invoice_page()
         self.assertEqual(invoice['rows'][0]['bankTransactions']['amount'],'1001497.22')
         self.assert_original_bank_display(invoice['rows'][0]['bankTransactions'])
-        self.assertEqual(invoice['rows'][0]['paymentStatus']['code'],'pending')
+        self.assertEqual(invoice['rows'][0]['paymentStatus']['code'],'unclassified')
 
     def test_equal_buckets_do_not_choose_principal_or_interest(self):
         with self.connection.transaction() as tx:
@@ -185,7 +185,7 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
         self.assertEqual(self.oa_page()['rows'][0]['bankTransaction']['paidTotal'],'2994.44')
         invoice = self.invoice_page()
         self.assertEqual(invoice['rows'][0]['bankTransactions']['amount'],'2994.44')
-        self.assertEqual(invoice['rows'][0]['paymentStatus']['code'],'pending')
+        self.assertEqual(invoice['rows'][0]['paymentStatus']['code'],'unclassified')
 
     def test_mixed_direction_does_not_narrow_document_comparison(self):
         self.document()
@@ -196,7 +196,7 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
         oa = self.oa_page()
         self.assertEqual(oa['summary']['bankPaidTotal'],'1001497.22')
         self.assertEqual(oa['rows'][0]['bankTransaction']['paidTotal'],'1001497.22')
-        self.assertEqual(self.invoice_page()['rows'][0]['paymentStatus']['code'],'pending')
+        self.assertEqual(self.invoice_page()['rows'][0]['paymentStatus']['code'],'unclassified')
 
     def test_unsplit_sibling_is_not_hidden_by_an_interest_bucket_match(self):
         self.document()
@@ -209,7 +209,7 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
         self.assertEqual(oa['rows'][0]['bankTransaction']['paidTotal'],'1001498.22')
         invoice = self.invoice_page()
         self.assertEqual(invoice['rows'][0]['bankTransactions']['amount'],'1001498.22')
-        self.assertEqual(invoice['rows'][0]['paymentStatus']['code'],'pending')
+        self.assertEqual(invoice['rows'][0]['paymentStatus']['code'],'unclassified')
 
     def test_old_matched_flag_cannot_hide_mixed_direction_even_when_absolute_total_matches(self):
         self.document('1001498.22')
@@ -219,8 +219,8 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
         self.connection.execute("""update app.workbench_pair_relations set row_ids=array_append(row_ids,'bank-income'),
             row_types=array_append(row_types,'bank'),amount_check='{"matched":true}'::jsonb""")
         invoice = self.invoice_page()
-        self.assertEqual(invoice['rows'][0]['bankTransactions']['amount'],'1001498.22')
-        self.assertEqual(invoice['rows'][0]['paymentStatus']['code'],'pending')
+        self.assertEqual(invoice['rows'][0]['bankTransactions']['amount'],'1001496.22')
+        self.assertEqual(invoice['rows'][0]['paymentStatus']['code'],'unclassified')
 
     def test_distinct_invoice_lines_in_disjoint_cases_keep_separate_comparisons(self):
         self.document('1497.22')

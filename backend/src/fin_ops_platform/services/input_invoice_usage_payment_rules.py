@@ -111,7 +111,6 @@ def payment_category_parents(rule: dict[str, Any]) -> tuple[str, ...]:
 def payment_categories(settings: dict[str, Any]) -> list[dict[str, str]]:
     categories = {(code, "paid"): {"id": code, "label": label, "parent": "paid"}
                   for code, label in AMOUNT_CATEGORIES.items()}
-    categories[("pending", "paid")] = {"id": "pending", "label": "金额待核对", "parent": "paid"}
     categories[("waiting_payment", "unpaid")] = {"id": "waiting_payment", "label": "未关联流水", "parent": "unpaid"}
     for rule in settings["rules"]:
         code = rule["statusCode"]
@@ -373,11 +372,17 @@ def evaluate_payment_status(settings: dict[str, Any], context: PaymentStatusEval
     comparison_code = {"equal": "paid", "less": "invoice_less_payment", "greater": "invoice_greater_payment"}.get(context.payment_comparison)
     if comparison_code:
         return {"code": comparison_code, "label": next(item["label"] for item in payment_categories(normalized) if item["id"] == comparison_code),
-                "reason": "正式关联组发票与支出流水金额比较", "matchedRuleId": "", "severity": "success"}
+                "reason": "正式关联组发票净额与流水净支出比较", "matchedRuleId": "", "severity": "success"}
     if not context.has_bank:
         return {"code": "waiting_payment", "label": next(item["label"] for item in payment_categories(normalized) if item["id"] == "waiting_payment"),
                 "reason": "未关联银行流水", "matchedRuleId": "", "severity": "warning"}
-    return {"code": "pending", "label": "金额待核对", "reason": "已有银行流水关联，付款金额或方向待核对",
+    return {"code": "unclassified", "label": "无法比较", "reason": {
+        "missing_invoice_amount": "关联发票缺少价税合计",
+        "missing_bank_evidence": "关联银行流水明细缺失",
+        "invalid_bank_amount": "关联流水金额或收支方向不完整",
+        "ambiguous_bank_scope": "拆分流水的付款用途尚未明确",
+        "invalid": "金额比较信息不完整",
+    }[context.payment_comparison],
             "matchedRuleId": "", "severity": "warning"}
 
 

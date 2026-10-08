@@ -93,7 +93,7 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual([tree[key]["count"] for key in ("all", "used", "unused")], [5, 4, 1])
         self.assertEqual([group["count"] for group in tree["groups"]], [4, 0])
         self.assertEqual({row["invoiceId"]: row["paymentStatus"]["code"] for row in payload["rows"]},
-                         {"unused": "waiting_payment", "equal": "paid", "less": "invoice_less_payment", "greater": "invoice_greater_payment", "income": "pending"})
+                         {"unused": "waiting_payment", "equal": "paid", "less": "invoice_less_payment", "greater": "invoice_greater_payment", "income": "invoice_greater_payment"})
         filters = [{"field": "usage_status", "operator": "in", "values": ["used"]},
                    {"field": "oa_relation", "operator": "in", "values": ["unlinked"]},
                    {"field": "payment_group", "operator": "in", "values": ["paid"]}]
