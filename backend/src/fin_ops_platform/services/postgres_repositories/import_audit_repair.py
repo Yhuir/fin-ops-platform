@@ -293,9 +293,10 @@ audit_rows as materialized (
                 'source_attachment_key_hash', edge.source_attachment_key_hash,
                 'source_parent_is_active', source_parent_application.id is not null,
                 'source_parent_canonical_oa_row_id', source_parent_application.row_id,
-                'oa_row_id', owner_application.row_id,
-                'canonical_oa_row_id', owner_canonical_application.row_id,
+                'oa_row_id', coalesce(owner_application.row_id, whole_owner.row_id),
+                'canonical_oa_row_id', coalesce(owner_canonical_application.row_id, whole_owner.row_id),
                 'expense_item_id', owner_item.row_id,
+                'is_current_whole_oa_owner', whole_owner.row_id is not null,
                 'is_current_owner', (
                     owner_item.id is not null
                     and owner_canonical_application.id is not null
@@ -318,6 +319,8 @@ audit_rows as materialized (
                     as source_oa_row_id,
                 nullif(btrim(source_link.value->>'source_expense_item_id'), '')
                     as source_expense_item_id,
+                nullif(btrim(source_link.value->>'source_attachment_key'), '')
+                    as source_attachment_key,
                 case
                     when nullif(btrim(source_link.value->>'source_attachment_key'), '') is null
                         then null
@@ -377,6 +380,18 @@ audit_rows as materialized (
               edge.source_oa_row_id
           )
          and source_parent_application.status <> 'deleted'
+        left join lateral (
+            select application.row_id
+            from app.oa_applications application
+            join app.oa_attachments attachment on attachment.oa_application_id = application.id
+            where application.row_id = source_parent_application.row_id
+              and application.status <> 'deleted' and application.form_type = '支付申请'
+              and edge.source_expense_item_id is null
+              and attachment.source_attachment_key = edge.source_attachment_key
+              and attachment.normalized_payload->>'source_oa_id' = application.row_id
+              and nullif(attachment.normalized_payload->>'source_expense_item_id', '') is null
+              and nullif(attachment.normalized_payload->>'source_expense_row_index', '') is null
+        ) whole_owner on true
     ) attachment_edges on true
     left join lateral (
         select coalesce(

@@ -24,6 +24,8 @@ import {
   previewWorkbenchWithdrawLink,
   printWorkbenchReceipt,
   refreshManualOaImportAttachments,
+  prepareManualOaImportAttachments,
+  searchManualOaImports,
   removeManualOaImport,
   reviewWorkbenchAnomaly,
   resolveWorkbenchActionErrorMessage,
@@ -2367,6 +2369,48 @@ describe("workbench OA manual import affected scopes", () => {
     affected_scope_keys: ["all", "2025-12", "active:2025-12", "all:2025-12"],
   };
 
+  test("rejects missing invoice admission report instead of claiming zero newly imported invoices", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ job: { job_id: "import:oa-1", status: "succeeded" } })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ job: { job_id: "import:oa-1", status: "succeeded" }, result: {
+        imported: ["oa-exp-1981"], already_imported: [], failed: [], rows: [],
+      } })));
+    await expect(importManualOaRows(["oa-exp-1981"])).rejects.toThrow("缺少发票入池结果");
+  });
+
+  test("prepares source attachments through the explicit preview operation", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      event_id: "preview-1", status: "queued", row_ids: ["oa-exp-1981"],
+    }), { status: 202 }));
+    expect(await prepareManualOaImportAttachments(["oa-exp-1981"])).toMatchObject({ eventId: "preview-1" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/workbench/settings/oa/manual-search/prepare-attachments", expect.objectContaining({ method: "POST", body: JSON.stringify({ row_ids: ["oa-exp-1981"] }) }));
+  });
+
+  test.each(["attachment_status", "pending_attachment_count", "failed_attachment_count", "unsupported_attachment_count"])("rejects missing %s in search and detail contracts", async (field) => {
+    const summary = { attachment_status: "ready", pending_attachment_count: 0, failed_attachment_count: 0, unsupported_attachment_count: 0 };
+    const invalid = { ...summary } as Record<string, unknown>;
+    delete invalid[field];
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    for (const row of [{ ...invalid, row_id: "oa-exp-1981" }, { ...summary, row_id: "oa-exp-1981", items: [invalid] }]) {
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ rows: [row], total: 1, page: 0, page_size: 20 })));
+      await expect(searchManualOaImports({})).rejects.toThrow(field);
+    }
+  });
+
+  test.each(["attachment_status", "pending_attachment_count", "failed_attachment_count", "unsupported_attachment_count"])("rejects missing %s in task completion results", async (field) => {
+    const row: Record<string, unknown> = {
+      row_id: "oa-exp-1981", attachment_status: "ready", pending_attachment_count: 0,
+      failed_attachment_count: 0, unsupported_attachment_count: 0, attachment_file_count: 0,
+      importable_invoice_count: 0, unrecognized_attachment_count: 0,
+    };
+    delete row[field];
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({
+      event_id: "preview-1", status: "done", row_ids: ["oa-exp-1981"],
+      result: { rows: [row], errors: [], promotion_summary: {} },
+    })));
+    await expect(getManualOaImportAttachmentRefreshStatus("preview-1", ["oa-exp-1981"])).rejects.toThrow(field);
+  });
+
   test("maps attachment refresh affected scopes", async () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
@@ -2390,6 +2434,10 @@ describe("workbench OA manual import affected scopes", () => {
               rows: [
                 {
                   row_id: "oa-exp-1981",
+                  attachment_status: "ready",
+                  pending_attachment_count: 0,
+                  failed_attachment_count: 0,
+                  unsupported_attachment_count: 0,
                   attachment_file_count: 3,
                   importable_invoice_count: 2,
                   unrecognized_attachment_count: 1,
@@ -2430,6 +2478,10 @@ describe("workbench OA manual import affected scopes", () => {
         rows: [
           {
             row_id: "oa-exp-1981",
+            attachment_status: "ready",
+            pending_attachment_count: 0,
+            failed_attachment_count: 0,
+            unsupported_attachment_count: 0,
             importable_invoice_count: 2,
             unrecognized_attachment_count: 0,
           },
@@ -2455,6 +2507,10 @@ describe("workbench OA manual import affected scopes", () => {
           ...basePayload.result,
           rows: [{
             row_id: "other-row",
+            attachment_status: "ready",
+            pending_attachment_count: 0,
+            failed_attachment_count: 0,
+            unsupported_attachment_count: 0,
             attachment_file_count: 2,
             importable_invoice_count: 2,
             unrecognized_attachment_count: 0,
@@ -2479,6 +2535,10 @@ describe("workbench OA manual import affected scopes", () => {
   test("rejects duplicate refresh result rows and each incomplete row-error field", async () => {
     const validRow = {
       row_id: "oa-exp-1981",
+      attachment_status: "ready",
+      pending_attachment_count: 0,
+      failed_attachment_count: 0,
+      unsupported_attachment_count: 0,
       attachment_file_count: 2,
       importable_invoice_count: 2,
       unrecognized_attachment_count: 0,
@@ -2555,10 +2615,11 @@ describe("workbench OA manual import affected scopes", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({ job: { job_id: "import:oa-1", status: "succeeded" }, result: {
+            attachment_invoice_promotion: { summary: { created_invoice_count: 1, linked_existing_invoice_count: 0 }, action_counts: { create_invoice_and_link: 1 }, reason_counts: { formal_invoice_not_in_pool: 1 } },
             imported: ["oa-exp-1981"],
             already_imported: [],
             failed: [],
-            rows: [{ row_id: "oa-exp-1981", status: "completed", can_import: false }],
+            rows: [{ row_id: "oa-exp-1981", status: "completed", can_import: false, attachment_status: "ready", pending_attachment_count: 0, failed_attachment_count: 0, unsupported_attachment_count: 0 }],
             ...targetEnvelope,
           } }),
           { status: 200, headers: { "Content-Type": "application/json" } },
@@ -2587,6 +2648,7 @@ describe("workbench OA manual import affected scopes", () => {
       }),
     );
     expect(importResult.imported).toEqual(["oa-exp-1981"]);
+    expect(importResult.promotion).toEqual({ createdInvoiceCount: 1, linkedExistingInvoiceCount: 0, ignoredCandidateCount: 0, reasonCounts: { formal_invoice_not_in_pool: 1 } });
     expect(importResult.affectedScopeKeys).toEqual(["2025-12", "active:2025-12", "all:2025-12"]);
     expect(deleteResult).toMatchObject({
       removed: true,

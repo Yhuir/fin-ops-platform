@@ -7,7 +7,7 @@ import re
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from time import monotonic
@@ -33,6 +33,7 @@ from fin_ops_platform.services.oa_attachment_invoice_cache import (
     attachment_invoice_cache_parser_version,
 )
 from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
+from fin_ops_platform.services.oa_attachment_summary import FAILED_ATTACHMENT_STATUSES, attachment_summary
 from fin_ops_platform.services.oa_draft_prefill import OA_APPLICATION_TYPE_OPTIONS
 from fin_ops_platform.services.oa_expense_details import oa_expense_source_metadata
 from fin_ops_platform.services.oa_source_identity import OASourceIdentities, OASourceIdentityConflict
@@ -214,6 +215,8 @@ class MongoOAAdapter(OAAdapter):
         self._attachment_parse_count = 0
         self._attachment_parse_started = 0.0
         self._attachment_invoice_sync_parse_depth = 0
+        self._attachment_preparation_depth = 0
+        self._attachment_preparation_started_at: datetime | None = None
         self._attachment_invoice_force_reparse_depth = 0
         self._client: MongoClient | None = client
         self._owns_client = client is None
@@ -754,9 +757,11 @@ class MongoOAAdapter(OAAdapter):
             return
         keys = set()
         for document in documents:
-            if str(document.get("form_id")) != self._settings.expense_claim_form_id:
-                continue
             data = self._document_data(document)
+            if str(document.get("form_id")) == self._settings.payment_request_form_id:
+                files = self._payment_attachment_files(document)
+                keys.update(self._attachment_invoice_cache_key(entry) for entry in files)
+                continue
             external_id = self._canonical_external_id("oa-exp-", document)
             items = data.get("schedule")
             for index, item in enumerate(items if isinstance(items, list) and items else [data]):
@@ -842,7 +847,30 @@ class MongoOAAdapter(OAAdapter):
             "page_size": page_size,
         }
 
+    def prepare_application_record_attachments(
+        self, row_ids: list[str], *, preparation_started_at: str,
+    ) -> list[OAApplicationRecord]:
+        if not isinstance(preparation_started_at, str) or not preparation_started_at.strip():
+            raise ValueError("OA attachment preparation_started_at is required.")
+        started_at = datetime.fromisoformat(preparation_started_at).astimezone(UTC)
+        self._search_attachment_entries = None
+        settings = {"form_types": [item["id"] for item in OA_IMPORT_FORM_TYPE_OPTIONS],
+                    "statuses": [item["id"] for item in OA_IMPORT_STATUS_OPTIONS]}
+        previous_started_at = self._attachment_preparation_started_at
+        self._attachment_preparation_started_at = started_at
+        self._attachment_preparation_depth += 1
+        try:
+            with self._temporary_import_settings(settings), self.force_attachment_invoice_sync_parse(max_new_attachments=20):
+                self._require_sync_source_read_ready("before attachment preparation")
+                records = self.list_application_records_by_row_ids(row_ids)
+                self._require_sync_source_read_ready("after attachment preparation")
+            return records
+        finally:
+            self._attachment_preparation_depth -= 1
+            self._attachment_preparation_started_at = previous_started_at
+
     def refresh_application_record_attachments(self, row_ids: list[str]) -> list[OAApplicationRecord]:
+        self._search_attachment_entries = None
         normalized_row_ids = [str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()]
         if not normalized_row_ids:
             return []
@@ -1058,8 +1086,18 @@ class MongoOAAdapter(OAAdapter):
             for file in self._attachment_files({"detailReimbursementAttachment": invoice_upload})
             if file.get("filePath")
         })
+        attachment_files = self._payment_attachment_files(document)
+        pool = (
+            self._parse_attachment_evidence_pool(attachment_files, month=self._derive_month(data, document))
+            if workflow_status == OA_IMPORT_STATUS_COMPLETED or self._attachment_preparation_depth > 0
+            else self._cached_attachment_pool(attachment_files)
+        )
         return OAApplicationRecord(
             id=f"oa-pay-{external_id}",
+            attachment_file_count=len(attachment_files),
+            attachment_evidences=pool["evidences"],
+            attachment_invoices=self._dedupe_attachment_invoices(pool["invoices"]),
+            attachment_artifacts=pool["artifacts"],
             source_aliases=self._source_row_aliases("oa-pay-", document, external_id),
             month=self._derive_month(data, document),
             section="unpaired",
@@ -1395,6 +1433,8 @@ class MongoOAAdapter(OAAdapter):
         external_id = self._canonical_external_id("oa-pay-", document)
         project_id = self._first_text(data, "projectName")
         project_name = project_names.get(project_id, project_id or "--")
+        files = self._payment_attachment_files(document)
+        pool = self._cached_attachment_pool(files)
         return self._search_row(
             row_id=f"oa-pay-{external_id}",
             oa_no=self._payment_form_no(data, document),
@@ -1405,8 +1445,9 @@ class MongoOAAdapter(OAAdapter):
             project_name=project_name,
             reason=reason,
             amount=amount,
-            attachment_file_count=0,
-            importable_invoice_count=0,
+            attachment_file_count=len(files),
+            attachment_artifacts=pool["artifacts"],
+            attachment_invoices=pool["invoices"],
             items=[],
             imported_entries=imported_entries,
         )
@@ -1432,7 +1473,8 @@ class MongoOAAdapter(OAAdapter):
         detail_amounts: list[Decimal] = []
         item_rows: list[dict[str, object]] = []
         attachment_file_count = 0
-        importable_invoice_count = 0
+        all_invoices: list[dict] = []
+        all_artifacts: list[dict] = []
         for index, item in enumerate(items):
             if not isinstance(item, dict):
                 continue
@@ -1465,9 +1507,10 @@ class MongoOAAdapter(OAAdapter):
                 source_expense_row_index=row_index,
                 source_expense_item_id=expense_item_id,
             )
-            item_invoice_count = self._cached_attachment_invoice_count(contextual_attachment_files)
+            pool = self._cached_attachment_pool(contextual_attachment_files)
+            all_invoices.extend(pool["invoices"])
+            all_artifacts.extend(pool["artifacts"])
             attachment_file_count += item_attachment_file_count
-            importable_invoice_count += item_invoice_count
             item_rows.append(
                 {
                     "date": reimbursement_date or self._first_text(data, "ApplicationDate", "applicationDate") or record_month,
@@ -1475,8 +1518,8 @@ class MongoOAAdapter(OAAdapter):
                     "content": reason,
                     "project_name": project_name,
                     "reason": reason,
-                    "attachment_file_count": item_attachment_file_count,
-                    "importable_invoice_count": item_invoice_count,
+                    **attachment_summary(file_count=item_attachment_file_count,
+                        artifacts=pool["artifacts"], invoices=pool["invoices"]),
                 }
             )
         detail_sum = sum(detail_amounts, Decimal("0")) if detail_amounts else None
@@ -1504,7 +1547,8 @@ class MongoOAAdapter(OAAdapter):
             reason=reason_summary,
             amount=amount,
             attachment_file_count=attachment_file_count,
-            importable_invoice_count=importable_invoice_count,
+            attachment_artifacts=all_artifacts,
+            attachment_invoices=all_invoices,
             items=item_rows,
             imported_entries=imported_entries,
         )
@@ -1522,7 +1566,8 @@ class MongoOAAdapter(OAAdapter):
         reason: str,
         amount: str,
         attachment_file_count: int,
-        importable_invoice_count: int,
+        attachment_artifacts: list[dict],
+        attachment_invoices: list[dict],
         items: list[dict[str, object]],
         imported_entries: dict[str, Any],
     ) -> dict[str, object]:
@@ -1540,9 +1585,8 @@ class MongoOAAdapter(OAAdapter):
             "project_name": project_name,
             "reason": reason,
             "amount": amount,
-            "attachment_file_count": attachment_file_count,
-            "importable_invoice_count": importable_invoice_count,
-            "unrecognized_attachment_count": max(0, attachment_file_count - importable_invoice_count),
+            **attachment_summary(file_count=attachment_file_count,
+                artifacts=attachment_artifacts, invoices=attachment_invoices),
             "import_status": "imported" if row_id in imported_entries else "not_imported",
             "imported_at": imported_entry.get("imported_at") if isinstance(imported_entry, dict) else None,
             "can_import": can_import,
@@ -1550,19 +1594,31 @@ class MongoOAAdapter(OAAdapter):
             "items": items,
         }
 
-    def _cached_attachment_invoice_count(self, files: list[dict[str, object]]) -> int:
-        cache = self._attachment_invoice_cache
-        if cache is None or not files:
-            return 0
-        total = 0
+    def _cached_attachment_pool(self, files: list[dict[str, object]]) -> dict[str, list[dict]]:
+        invoices, artifacts, evidences = [], [], []
         for file_entry in files:
-            cache_key = self._attachment_invoice_cache_key(file_entry)
-            cached_entry = (self._search_attachment_entries.get(cache_key) if self._search_attachment_entries is not None
-                            else cache.load_oa_attachment_invoice_cache_entry(cache_key))
-            if cached_entry is None or not self._is_current_attachment_invoice_cache_entry(cached_entry):
+            key = self._attachment_invoice_cache_key(file_entry)
+            entry = (self._search_attachment_entries.get(key) if self._search_attachment_entries is not None
+                     else self._attachment_invoice_cache.load_oa_attachment_invoice_cache_entry(key)
+                     if self._attachment_invoice_cache is not None else None)
+            if entry is None or not self._is_current_attachment_invoice_cache_entry(entry):
+                artifacts.append(self._attachment_artifact_for_file(file_entry, evidences=[],
+                    parse_status="stale" if entry is not None else "not_parsed"))
                 continue
-            total += len([invoice for invoice in cached_entry.get("invoices", []) if isinstance(invoice, dict)])
-        return total
+            source = self._attachment_invoice_source_fields(file_entry)
+            invoices.extend({**invoice, **source} for invoice in entry["invoices"])
+            evidences.extend({**evidence, **source} for evidence in entry["evidences"])
+            artifacts.extend({**artifact, **source,
+                              "has_invoice_evidence": "true" if entry["invoices"] else "false"}
+                             for artifact in entry["artifacts"])
+        return {"invoices": invoices, "artifacts": artifacts, "evidences": evidences}
+
+    def _payment_attachment_files(self, document: dict[str, Any]) -> list[dict[str, object]]:
+        data = self._document_data(document)
+        owner = "oa-pay-" + self._canonical_external_id("oa-pay-", document)
+        files = self._attachment_files({"detailReimbursementAttachment": data.get(self._settings.payment_invoice_attachment_field)})
+        return [{**entry, ATTACHMENT_INVOICE_SOURCE_CONTEXT_KEY: {"oa_external_id": owner,
+                 "source_oa_id": owner}} for entry in files]
 
     @classmethod
     def _project_name_display(cls, project_names: list[str]) -> str:
@@ -1762,7 +1818,7 @@ class MongoOAAdapter(OAAdapter):
         source_artifacts = artifacts
         if not source_artifacts:
             source_artifacts = [
-                self._attachment_artifact_for_file(file_entry, evidences=[])
+                self._attachment_artifact_for_file(file_entry, evidences=[], parse_status="not_parsed")
                 for file_entry in attachment_files
             ]
         return self._bind_attachment_rows_to_expense_item(
@@ -1863,7 +1919,7 @@ class MongoOAAdapter(OAAdapter):
                     "evidences": cache_evidences,
                     "invoices": cache_invoices,
                     "artifacts": [],
-                    "parsed_at": datetime.now().isoformat(),
+                    "parsed_at": datetime.now(UTC).isoformat(),
                 },
             )
 
@@ -1880,6 +1936,7 @@ class MongoOAAdapter(OAAdapter):
             return {}
         return {
             "oa_external_id": clean_string(context.get("oa_external_id") or ""),
+            "source_oa_id": clean_string(context.get("source_oa_id") or ""),
             "source_expense_row_index": clean_string(context.get("source_expense_row_index") or ""),
             "source_expense_item_id": clean_string(context.get("source_expense_item_id") or ""),
         }
@@ -1974,10 +2031,12 @@ class MongoOAAdapter(OAAdapter):
     ) -> dict[str, list[dict[str, str]]]:
         if not files:
             return {"evidences": [], "invoices": [], "artifacts": []}
+        if self._search_attachment_entries is not None:
+            return self._cached_attachment_pool(files)
         cache = self._attachment_invoice_cache
         if cache is None:
             artifacts = [
-                self._attachment_artifact_for_file(file_entry, evidences=[])
+                self._attachment_artifact_for_file(file_entry, evidences=[], parse_status="not_parsed")
                 for file_entry in files
             ]
             return {"evidences": [], "invoices": [], "artifacts": artifacts}
@@ -1986,29 +2045,24 @@ class MongoOAAdapter(OAAdapter):
         cached_invoices: list[dict[str, str]] = []
         cached_artifacts: list[dict[str, str]] = []
         missing_files: list[tuple[str, dict[str, object]]] = []
+        stale_keys: set[str] = set()
         for file_entry in files:
             cache_key = self._attachment_invoice_cache_key(file_entry)
-            legacy_cache_key = self._legacy_attachment_invoice_cache_key(file_entry)
             cached_entry = (
                 None
                 if self._attachment_invoice_force_reparse_depth > 0
                 else cache.load_oa_attachment_invoice_cache_entry(cache_key)
             )
             if (
-                cached_entry is None
-                and legacy_cache_key != cache_key
-                and self._attachment_invoice_force_reparse_depth <= 0
+                cached_entry is not None
+                and self._attachment_preparation_started_at is not None
+                and self._is_current_attachment_invoice_cache_entry(cached_entry)
+                and any(artifact.get("parse_status") in FAILED_ATTACHMENT_STATUSES
+                        for artifact in cached_entry.get("artifacts", []))
+                and datetime.fromisoformat(cached_entry["parsed_at"]).astimezone(UTC)
+                    < self._attachment_preparation_started_at
             ):
-                cached_entry = cache.load_oa_attachment_invoice_cache_entry(legacy_cache_key)
-            if cached_entry is not None and not self._is_current_attachment_invoice_cache_entry(cached_entry):
-                migrated_entry = self._migrate_legacy_attachment_invoice_cache_entry(
-                    cached_entry,
-                    cache_key=cache_key,
-                    file_entry=file_entry,
-                )
-                if migrated_entry is not None:
-                    cache.save_oa_attachment_invoice_cache_entry(cache_key, migrated_entry)
-                    cached_entry = migrated_entry
+                cached_entry = None
             if cached_entry is not None and self._is_current_attachment_invoice_cache_entry(cached_entry):
                 normalized_entry, changed = self._normalize_attachment_invoice_cache_entry(cached_entry)
                 if changed:
@@ -2025,11 +2079,13 @@ class MongoOAAdapter(OAAdapter):
                     if isinstance(invoice, dict)
                 )
                 cached_artifacts.extend(
-                    dict(artifact)
+                    {**artifact, "has_invoice_evidence": "true" if cached_entry["invoices"] else "false"}
                     for artifact in cached_entry["artifacts"]
                     if isinstance(artifact, dict)
                 )
                 continue
+            if cached_entry is not None:
+                stale_keys.add(cache_key)
             missing_files.append((cache_key, file_entry))
         if missing_files and self._attachment_invoice_sync_parse_depth > 0:
             parsed_pool = self._parse_attachment_invoice_files_now(missing_files, month=month)
@@ -2038,8 +2094,9 @@ class MongoOAAdapter(OAAdapter):
             cached_artifacts.extend(parsed_pool["artifacts"])
         elif missing_files:
             cached_artifacts.extend(
-                self._attachment_artifact_for_file(file_entry, evidences=[])
-                for _cache_key, file_entry in missing_files
+                self._attachment_artifact_for_file(file_entry, evidences=[],
+                    parse_status="stale" if cache_key in stale_keys else "not_parsed")
+                for cache_key, file_entry in missing_files
             )
         return {
             "evidences": cached_evidences,
@@ -2064,6 +2121,12 @@ class MongoOAAdapter(OAAdapter):
         evidences = entry.get("evidences", [])
         invoices = entry.get("invoices", [])
         artifacts = entry.get("artifacts", [])
+        if any(isinstance(artifact, dict) and artifact.get("parse_status") in FAILED_ATTACHMENT_STATUSES
+               for artifact in artifacts):
+            try:
+                datetime.fromisoformat(entry["parsed_at"])
+            except (KeyError, TypeError, ValueError):
+                return False
         return (
             all(isinstance(evidence, dict) and self._attachment_invoice_has_source_fields(evidence) for evidence in evidences)
             and all(
@@ -2076,56 +2139,12 @@ class MongoOAAdapter(OAAdapter):
             )
         )
 
-    @classmethod
-    def _migrate_legacy_attachment_invoice_cache_entry(
-        cls,
-        entry: object,
-        *,
-        cache_key: str,
-        file_entry: dict[str, object],
-    ) -> dict[str, object] | None:
-        if not isinstance(entry, dict):
-            return None
-        if entry.get("parser_version") != OAAttachmentInvoiceService.PARSER_VERSION:
-            return None
-        raw_evidences = entry.get("evidences")
-        raw_invoices = entry.get("invoices")
-        if not isinstance(raw_evidences, list):
-            raw_evidences = []
-        if not isinstance(raw_invoices, list):
-            raw_invoices = []
-        if not raw_evidences and not raw_invoices:
-            return None
-
-        evidences = [
-            cls._normalize_parsed_attachment_evidence(evidence, file_entry=file_entry)
-            for evidence in raw_evidences
-            if isinstance(evidence, dict)
-        ]
-        invoice_evidences = [
-            cls._normalize_parsed_attachment_invoice(invoice, file_entry=file_entry)
-            for invoice in raw_invoices
-            if isinstance(invoice, dict)
-        ]
-        evidences.extend(invoice_evidences)
-        invoices = cls._dedupe_attachment_invoices(cls._attachment_invoices_from_evidences(evidences))
-        artifacts = [cls._attachment_artifact_for_file(file_entry, evidences=evidences)]
-        return {
-            "cache_key": cache_key,
-            "parser_version": cls._attachment_invoice_cache_parser_version(),
-            "cache_schema_version": ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION,
-            "evidences": evidences,
-            "invoices": invoices,
-            "artifacts": artifacts,
-            "parsed_at": clean_string(entry.get("parsed_at") or "") or datetime.now().isoformat(),
-        }
-
     @staticmethod
     def _attachment_invoice_has_source_fields(invoice: dict[str, object]) -> bool:
-        return all(
-            bool(clean_string(invoice.get(field) or ""))
-            for field in ATTACHMENT_INVOICE_REQUIRED_SOURCE_FIELDS
-        )
+        if str(invoice.get("source_oa_id") or "").startswith("oa-pay-"):
+            return (bool(invoice.get("source_attachment_key")) and bool(invoice.get("source_attachment_name"))
+                    and not invoice.get("source_expense_item_id") and not invoice.get("source_expense_row_index"))
+        return all(bool(clean_string(invoice.get(field) or "")) for field in ATTACHMENT_INVOICE_REQUIRED_SOURCE_FIELDS)
 
     @staticmethod
     def _normalize_attachment_invoice_cache_entry(entry: dict[str, object]) -> tuple[dict[str, object], bool]:
@@ -2183,28 +2202,15 @@ class MongoOAAdapter(OAAdapter):
         raw_fingerprint = json.dumps(fingerprint, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(raw_fingerprint.encode("utf-8")).hexdigest()
 
-    @staticmethod
-    def _legacy_attachment_invoice_cache_key(file_entry: dict[str, object]) -> str:
-        fingerprint = {
-            "cache_schema_version": ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION,
-            "parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
-            "source_attachment_key": MongoOAAdapter._source_attachment_key(file_entry),
-            "size": clean_string(file_entry.get("size") or file_entry.get("fileSize") or ""),
-            "modified_time": clean_string(
-                file_entry.get("modifiedTime")
-                or file_entry.get("lastModified")
-                or file_entry.get("updatedAt")
-                or ""
-            ),
-        }
-        raw_fingerprint = json.dumps(fingerprint, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(raw_fingerprint.encode("utf-8")).hexdigest()
-
     @classmethod
     def _attachment_invoice_source_fields(cls, file_entry: dict[str, object]) -> dict[str, str]:
         context = cls._attachment_source_context(file_entry)
         source_attachment_key = cls._source_attachment_key(file_entry)
         source_attachment_name = cls._attachment_display_name(file_entry)
+        if context.get("source_oa_id"):
+            return {"source_oa_id": context["source_oa_id"], "source_attachment_key": source_attachment_key,
+                    "source_attachment_name": source_attachment_name,
+                    "source_expense_item_id": "", "source_expense_row_index": ""}
         source_expense_row_index = context.get("source_expense_row_index") or clean_string(
             file_entry.get("source_expense_row_index") or ""
         )
@@ -2303,46 +2309,12 @@ class MongoOAAdapter(OAAdapter):
             ),
             "suffix": clean_string(file_entry.get("suffix") or Path(source_attachment_name).suffix.lstrip(".")).lower(),
             "parse_status": status,
+            "has_invoice_evidence": "true" if any(cls._is_attachment_invoice_evidence(e) for e in evidences) else "false",
             "parse_error": clean_string(parse_error or ""),
         }
 
     def _parse_attachment_file_result_from_service(self, file_entry: dict[str, object]) -> dict[str, object]:
-        parse_evidences = getattr(self._attachment_invoice_service, "parse_evidences", None)
-        default_parse_evidences = getattr(type(self._attachment_invoice_service), "parse_evidences", None)
-        if callable(parse_evidences) and getattr(parse_evidences, "__func__", None) is not default_parse_evidences:
-            evidences = self._parse_attachment_evidences_from_service([file_entry])
-            return {
-                "evidences": evidences,
-                "parse_status": "parsed" if evidences else "no_evidence",
-                "parse_error": "",
-            }
-        parse_file_result = getattr(self._attachment_invoice_service, "parse_file_result", None)
-        if callable(parse_file_result):
-            result = parse_file_result(file_entry)
-            return dict(result) if isinstance(result, dict) else {"evidences": [], "parse_status": "parse_failed"}
-        evidences = self._parse_attachment_evidences_from_service([file_entry])
-        return {
-            "evidences": evidences,
-            "parse_status": "parsed" if evidences else "no_evidence",
-            "parse_error": "",
-        }
-
-    def _parse_attachment_evidences_from_service(
-        self,
-        files: list[dict[str, object]],
-    ) -> list[dict[str, object]]:
-        parse_evidences = getattr(self._attachment_invoice_service, "parse_evidences", None)
-        if callable(parse_evidences):
-            return [
-                dict(evidence)
-                for evidence in parse_evidences(files)
-                if isinstance(evidence, dict)
-            ]
-        return [
-            {**dict(invoice), "evidence_type": clean_string(invoice.get("evidence_type") or "tax_invoice")}
-            for invoice in self._attachment_invoice_service.parse_files(files)
-            if isinstance(invoice, dict)
-        ]
+        return self._attachment_invoice_service.parse_file_result(file_entry)
 
     @classmethod
     def _attachment_invoices_from_evidences(cls, evidences: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -2398,7 +2370,7 @@ class MongoOAAdapter(OAAdapter):
                     "evidences": evidences,
                     "invoices": invoices,
                     "artifacts": artifacts,
-                    "parsed_at": datetime.now().isoformat(),
+                    "parsed_at": datetime.now(UTC).isoformat(),
                 },
             )
             self._attachment_parse_count += 1

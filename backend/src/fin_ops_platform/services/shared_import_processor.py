@@ -2,11 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.import_job_queue import ImportJob
+from fin_ops_platform.services.oa_attachment_invoice_promotion_service import OAAttachmentInvoicePromotionService
+from fin_ops_platform.services.oa_attachment_summary import record_attachment_summary
 from fin_ops_platform.services.oa_manual_import_service import OAManualImportService
 from fin_ops_platform.services.postgres_repositories.common import serialize_value
+from fin_ops_platform.services.postgres_repositories.oa_attachment_invoice import PostgresOAAttachmentInvoiceRepository
 from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
+from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.shared_imports import PostgresSharedImportRepository
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService
 
@@ -45,7 +50,8 @@ class SharedImportProcessor:
             raise ValueError("Import owner is required.")
         if self._oa_source_adapter is None:
             raise RuntimeError("OA manual import requires the source adapter.")
-        records = list(self._oa_source_adapter.list_application_records_by_row_ids(row_ids))
+        preparation_started_at = job.payload.get("attachment_preparation_started_at", job.created_at.isoformat())
+        records = list(self._oa_source_adapter.prepare_application_record_attachments(row_ids, preparation_started_at=preparation_started_at))
         records_by_id = {record.id: record for record in records}
         if len(records_by_id) != len(records) or set(records_by_id) - set(row_ids):
             raise ValueError("OA source returned duplicate or unrequested records.")
@@ -58,15 +64,26 @@ class SharedImportProcessor:
             elif str(record.detail_fields.get("流程状态") or "").strip() != "已完成":
                 failed.append({"row_id": row_id, "code": "not_completed", "message": "流程未完成，不能导入"})
             else:
-                selected.append(record)
+                attachments = record_attachment_summary(record)
+                if attachments["pending_attachment_count"] or attachments["failed_attachment_count"]:
+                    failed.append({"row_id": row_id, "code": "attachment_preparation_failed",
+                                   "message": "附件尚未完成解析或解析失败，请修复后重试", **attachments})
+                else:
+                    selected.append(record)
         with self._connection.transaction() as transaction:
             job.completion.lock(transaction)
             repository = PostgresSharedImportRepository(transaction)
             repository.save_oa_records(selected)
+            settings = AppSettingsService.normalize_settings_payload(
+                PostgresOpsTaxEtcRepository(transaction).load_settings("app_settings"))
+            promotion = OAAttachmentInvoicePromotionService(
+                invoice_repository=PostgresOAAttachmentInvoiceRepository(transaction, transaction_bound=True),
+                promotion_mode_provider=lambda: settings["oa_import"]["attachment_invoice_promotion_mode"],
+            ).promote_records(selected)
             result = repository.add_manual_oa_imports([record.id for record in selected], actor_id=actor_id)
             presentation = OAManualImportService(state_store=repository,
                 oa_adapter=self._oa_source_adapter)
-            result.update(failed=failed, rows=presentation.serialize_import_result_rows(
+            result.update(attachment_invoice_promotion=promotion, failed=failed, rows=presentation.serialize_import_result_rows(
                               selected, imported_entries=result["entries"]),
                           affected_scope_keys=sorted({record.month for record in selected}),
                           outcome=("partial_success" if selected else "failed") if failed else "success")

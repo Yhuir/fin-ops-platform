@@ -3,6 +3,8 @@ from __future__ import annotations
 import subprocess
 import sys
 import unittest
+from decimal import Decimal
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from textwrap import dedent
@@ -19,6 +21,13 @@ from fin_ops_platform.services.postgres_connection import PostgresConnection, Po
 from fin_ops_platform.services.runtime_worker import RuntimeWorkerResult, RuntimeWorkerShutdownRequested
 
 from tests.postgres_test_utils import apply_test_migrations, require_postgres_test_database_url, truncate_test_database
+
+
+def _prepared_oa_record(record):
+    return replace(record, attachment_artifacts=[
+        {"source_attachment_key": f"{record.id}:file:{index}", "parse_status": "parsed"}
+        for index in range(record.attachment_file_count)
+    ])
 
 
 class ImportDirectQueuePostgresTests(unittest.TestCase):
@@ -328,7 +337,7 @@ class ImportDirectQueuePostgresTests(unittest.TestCase):
 
         from tests.test_oa_manual_import_service import oa_record
         processor = SharedImportProcessor(self.connection, oa_source_adapter=SimpleNamespace(
-            list_application_records_by_row_ids=lambda ids: [oa_record(value, status="已完成") for value in ids]))
+            prepare_application_record_attachments=lambda ids, *, preparation_started_at: [_prepared_oa_record(oa_record(value, status="已完成")) for value in ids]))
         def create_oa(rows):
             return self.repository.create_or_get_job(import_type='oa_manual_import.create', payload={'row_ids':rows}, created_by='owner')
         first = create_oa(['A','B'])
@@ -370,7 +379,7 @@ class ImportDirectQueuePostgresTests(unittest.TestCase):
 
         from tests.test_oa_manual_import_service import oa_record
         processor = SharedImportProcessor(self.connection, oa_source_adapter=SimpleNamespace(
-            list_application_records_by_row_ids=lambda ids: [oa_record(value) for value in ids]))
+            prepare_application_record_attachments=lambda ids, *, preparation_started_at: [_prepared_oa_record(oa_record(value)) for value in ids]))
         job = self.repository.create_or_get_job(import_type='oa_manual_import.create',
             payload={'row_ids':['rollback-history']}, created_by='owner')
         worker = ImportJobWorker(repository=self.repository, worker_id='worker',
@@ -381,6 +390,174 @@ class ImportDirectQueuePostgresTests(unittest.TestCase):
         self.assertEqual(self.connection.fetch_one('select count(*) n from app.oa_applications')['n'], 0)
         self.assertEqual(self.connection.fetch_one('select count(*) n from app.manual_oa_imports')['n'], 0)
         self.assertNotEqual(self.repository.get_job(job.import_job_id).status, 'succeeded')
+
+    def _manual_attachment_worker(self, *, records=None, prepare=None, mode="create_missing", max_attempts=5):
+        from types import SimpleNamespace
+        from psycopg.types.json import Jsonb
+        from fin_ops_platform.services.shared_import_processor import SharedImportProcessor
+        self.connection.execute("""update app.app_settings
+            set settings_payload=settings_payload || %s,
+                raw_payload=jsonb_build_object('normalized_payload', settings_payload || %s)
+            where settings_key='app_settings'""",
+            (Jsonb({"oa_import": {"attachment_invoice_promotion_mode": mode}}),
+             Jsonb({"oa_import": {"attachment_invoice_promotion_mode": mode}})))
+        if records is None:
+            records = [self._manual_attachment_record()]
+        processor = SharedImportProcessor(self.connection, oa_source_adapter=SimpleNamespace(
+            prepare_application_record_attachments=prepare or (lambda ids, *, preparation_started_at: records)))
+        job = self.repository.create_or_get_job(import_type="oa_manual_import.create", created_by="owner",
+            payload={"row_ids": [record.id for record in records]}, max_attempts=max_attempts)
+        worker = ImportJobWorker(repository=self.repository, worker_id="attachment-worker",
+            processors={"oa_manual_import.create": processor.oa_manual})
+        return job, worker
+
+    @staticmethod
+    def _manual_attachment_record(row_id="oa-manual-attachment", number="26539150014000355216"):
+        from tests.test_oa_manual_import_service import oa_record
+        from tests.test_oa_attachment_invoice_promotion_service import _attachment
+        invoice = _attachment(number, "135.00", f"{row_id}:item:1", "invoice.pdf")
+        invoice["source_attachment_key"] = f"{row_id}:attachment"
+        record = oa_record(row_id, month="2026-06", invoices=[invoice], attachment_file_count=1)
+        record.expense_items[0]["expense_item_id"] = f"{row_id}:item:1"
+        record.attachment_artifacts = [{"source_attachment_key": invoice["source_attachment_key"],
+                                       "parse_status": "parsed", "has_invoice_evidence": "true"}]
+        return record
+
+    def test_manual_attachment_prepares_before_transaction_then_commits_ownership_and_completion_once(self):
+        record = self._manual_attachment_record()
+        calls = []
+        def prepare(ids, *, preparation_started_at):
+            calls.append((ids, preparation_started_at))
+            self.assertEqual(self.connection.fetch_one("select count(*) n from app.invoices")["n"], 0)
+            self.assertEqual(self.connection.fetch_one("select count(*) n from app.oa_applications")["n"], 0)
+            return [record]
+        job, worker = self._manual_attachment_worker(records=[record], prepare=prepare)
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.PROCESSED)
+        self.assertEqual(calls, [([record.id], job.created_at.isoformat())])
+        result = self.repository.get_job(job.import_job_id)
+        self.assertEqual(result.status, "succeeded")
+        self.assertEqual(result.result_payload["attachment_invoice_promotion"]["summary"]["affected_invoice_count"], 1)
+        invoice = self.connection.fetch_one("select legacy_mongo_id, total_with_tax, source_links from app.invoices")
+        self.assertEqual(invoice["total_with_tax"], Decimal("135.00"))
+        self.assertEqual(invoice["source_links"][0]["derived_from_oa_id"], record.id)
+        self.assertEqual(invoice["source_links"][0]["source_expense_item_id"], f"{record.id}:item:1")
+        self.assertGreater(self.connection.fetch_one("select count(*) n from job.workbench_matching_dirty_scopes")["n"], 0)
+        second, repeated = self._manual_attachment_worker(records=[record])
+        self.assertEqual(repeated.run_once(), RuntimeWorkerResult.PROCESSED)
+        replay = self.repository.get_job(second.import_job_id).result_payload
+        self.assertEqual(replay["already_imported"], [record.id])
+        self.assertEqual(replay["attachment_invoice_promotion"]["summary"]["affected_invoice_count"], 0)
+        self.assertEqual(self.connection.fetch_one("select count(*) n from app.invoices")["n"], 1)
+        self.assertEqual(self.connection.fetch_one("select count(*) n from app.manual_oa_imports")["n"], 1)
+
+    def test_manual_attachment_failure_rolls_back_invoice_oa_marker_matching_and_completion(self):
+        from unittest.mock import patch
+        for failed_step in ("marker", "completion"):
+            with self.subTest(failed_step=failed_step):
+                job, worker = self._manual_attachment_worker()
+                target = ("fin_ops_platform.services.shared_import_processor.PostgresSharedImportRepository.add_manual_oa_imports"
+                          if failed_step == "marker" else "fin_ops_platform.services.import_job_queue.ImportJobCompletion.succeed")
+                with patch(target, side_effect=RuntimeError("transaction failure")):
+                    self.assertEqual(worker.run_once(), RuntimeWorkerResult.FAILED_PERMANENT)
+                for table in ("app.invoices", "app.oa_applications", "app.manual_oa_imports", "job.workbench_matching_dirty_scopes"):
+                    self.assertEqual(self.connection.fetch_one(f"select count(*) n from {table}")["n"], 0)
+                self.assertEqual(self.repository.get_job(job.import_job_id).status, "failed")
+                self.assertEqual(self.connection.fetch_one("select count(*) n from audit.events where object_id=%s", (job.import_job_id,))["n"], 0)
+
+    def test_manual_attachment_honors_promotion_mode_and_does_not_create_from_unfinished_oa(self):
+        good = self._manual_attachment_record()
+        bad = self._manual_attachment_record("oa-failed", "26539150014000355217")
+        bad.attachment_artifacts[0]["parse_status"] = "parse_failed"
+        pending = self._manual_attachment_record("oa-pending", "26539150014000355218")
+        pending.attachment_artifacts[0]["parse_status"] = "not_parsed"
+        unsupported = self._manual_attachment_record("oa-support", "26539150014000355219")
+        unsupported.attachment_invoices = []
+        unsupported.expense_items[0]["attachment_invoices"] = []
+        unsupported.attachment_artifacts[0].update(parse_status="unsupported", has_invoice_evidence="false")
+        job, worker = self._manual_attachment_worker(records=[good, bad, pending, unsupported], mode="link_existing_only")
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.PROCESSED)
+        result = self.repository.get_job(job.import_job_id).result_payload
+        self.assertEqual(result["outcome"], "partial_success")
+        self.assertEqual(set(result["imported"]), {good.id, unsupported.id})
+        self.assertEqual({item["row_id"] for item in result["failed"]}, {bad.id, pending.id})
+        self.assertEqual({item["code"] for item in result["failed"]}, {"attachment_preparation_failed"})
+        self.assertEqual(self.connection.fetch_one("select count(*) n from app.invoices")["n"], 0)
+        self.assertEqual(self.connection.fetch_one("select count(*) n from app.oa_applications")["n"], 2)
+        second, create_worker = self._manual_attachment_worker(records=[good, bad, pending, unsupported], mode="create_missing")
+        self.assertEqual(create_worker.run_once(), RuntimeWorkerResult.PROCESSED)
+        self.assertEqual(self.repository.get_job(second.import_job_id).result_payload["outcome"], "partial_success")
+        invoices = self.connection.fetch_all("select invoice_no from app.invoices")
+        self.assertEqual([row["invoice_no"] for row in invoices], [good.attachment_invoices[0]["invoice_no"]])
+
+    def test_manual_attachment_bounded_progress_defers_without_exhausting_failure_budget(self):
+        from fin_ops_platform.services.oa_adapter import OAAttachmentPreparationPending
+        calls = []
+        record = self._manual_attachment_record()
+        def prepare(ids, *, preparation_started_at):
+            calls.append((ids, preparation_started_at))
+            if len(calls) <= 3:
+                raise OAAttachmentPreparationPending(20)
+            return [record]
+        job, worker = self._manual_attachment_worker(records=[record], prepare=prepare, max_attempts=1)
+        for _ in range(3):
+            self.assertEqual(worker.run_once(), RuntimeWorkerResult.DEFERRED)
+            pending = self.repository.get_job(job.import_job_id)
+            self.assertEqual(pending.status, "pending")
+            self.assertEqual(pending.attempt_count, 0)
+            self.assertEqual(pending.result_payload["parsed_in_attempt"], 20)
+            self.assertEqual(self.connection.fetch_one("select count(*) n from app.invoices")["n"], 0)
+            self.assertEqual(self.connection.fetch_one("select count(*) n from app.oa_applications")["n"], 0)
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.PROCESSED)
+        self.assertEqual(calls, [([record.id], job.created_at.isoformat())] * 4)
+        self.assertEqual(self.repository.get_job(job.import_job_id).attempt_count, 1)
+        self.assertEqual(self.connection.fetch_one("select count(*) n from app.invoices")["n"], 1)
+
+    def test_manual_attachment_explicit_retry_starts_new_preparation_cycle_and_defers_keep_it(self):
+        from fin_ops_platform.services.oa_adapter import OAAttachmentPreparationPending
+        record = self._manual_attachment_record()
+        calls = []
+        def prepare(ids, *, preparation_started_at):
+            calls.append(preparation_started_at)
+            if len(calls) == 1:
+                failed_record = replace(record, attachment_artifacts=[{
+                    **record.attachment_artifacts[0], "parse_status": "download_failed"}])
+                return [failed_record]
+            if len(calls) == 2:
+                raise OAAttachmentPreparationPending(20)
+            return [record]
+        job, worker = self._manual_attachment_worker(records=[record], prepare=prepare)
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.FAILED_PERMANENT)
+        failed = self.repository.get_job(job.import_job_id)
+        self.assertEqual(failed.result_payload["failed"][0]["code"], "attachment_preparation_failed")
+        retried = self.repository.retry_job(job.import_job_id, expected_version=failed.version,
+            command_context={"attachment_preparation_started_at": "cannot-override-server-cycle"})
+        expected_cycle = retried.payload["attachment_preparation_started_at"]
+        self.assertGreater(datetime.fromisoformat(expected_cycle), job.created_at)
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.DEFERRED)
+        self.assertEqual(self.repository.get_job(job.import_job_id).payload["attachment_preparation_started_at"], expected_cycle)
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.PROCESSED)
+        self.assertEqual(calls, [job.created_at.isoformat(), expected_cycle, expected_cycle])
+        self.assertEqual(self.connection.fetch_one("select count(*) n from app.invoices")["n"], 1)
+
+    def test_non_oa_retry_does_not_add_attachment_preparation_cycle(self):
+        job = self.create()
+        claimed = self.repository.claim_next("failed-worker")
+        self.repository.fail_claim(claimed, error="test failure", retry=False)
+        failed = self.repository.get_job(job.import_job_id)
+        retried = self.repository.retry_job(job.import_job_id, expected_version=failed.version)
+        self.assertEqual(retried.payload, job.payload)
+        self.assertNotIn("attachment_preparation_started_at", retried.payload)
+
+    def test_attachment_defer_cannot_release_a_newer_owner(self):
+        job, _ = self._manual_attachment_worker()
+        first = self.repository.claim_next("first")
+        self.connection.execute("update job.import_jobs set locked_at=now()-interval '1 hour' where id=%s", (job.import_job_id,))
+        replacement = self.repository.claim_next("replacement")
+        self.assertFalse(self.repository.defer_attachment_preparation(first, parsed_count=20))
+        current = self.repository.get_job(job.import_job_id)
+        self.assertEqual(current.status, "processing")
+        self.assertEqual(current.locked_by, "replacement")
+        self.assertEqual(current.claim_version, replacement.claim_version)
 
     def test_shared_tax_certified_import_commits_one_batch_and_job_together(self):
         from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
@@ -463,7 +640,7 @@ class ImportDirectQueuePostgresTests(unittest.TestCase):
         from tests.test_oa_manual_import_service import oa_record
         records = [oa_record('completed', status='已完成'), oa_record('progress', status='进行中')]
         processor = SharedImportProcessor(self.connection, oa_source_adapter=SimpleNamespace(
-            list_application_records_by_row_ids=lambda ids: records))
+            prepare_application_record_attachments=lambda ids, *, preparation_started_at: [_prepared_oa_record(record) for record in records]))
         job = self.repository.create_or_get_job(import_type='oa_manual_import.create', created_by='owner',
             payload={'row_ids':['completed','progress','missing']})
         worker = ImportJobWorker(repository=self.repository, worker_id='worker', processors={'oa_manual_import.create':processor.oa_manual})
@@ -490,7 +667,7 @@ class ImportDirectQueuePostgresTests(unittest.TestCase):
         from tests.test_oa_manual_import_service import oa_record
         records = []
         processor = SharedImportProcessor(self.connection, oa_source_adapter=SimpleNamespace(
-            list_application_records_by_row_ids=lambda ids: records))
+            prepare_application_record_attachments=lambda ids, *, preparation_started_at: [_prepared_oa_record(record) for record in records]))
         job = self.repository.create_or_get_job(import_type='oa_manual_import.create', created_by='owner', payload={'row_ids':['later']})
         worker = ImportJobWorker(repository=self.repository, worker_id='worker', processors={'oa_manual_import.create':processor.oa_manual})
         self.assertEqual(worker.run_once(), RuntimeWorkerResult.FAILED_PERMANENT)

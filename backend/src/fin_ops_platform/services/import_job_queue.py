@@ -237,6 +237,17 @@ class ImportJobRepository:
                   job.import_job_id, job.locked_by, job.claim_version))
         return row is not None
 
+    def defer_attachment_preparation(self, job: ImportJob, *, parsed_count: int) -> bool:
+        if parsed_count <= 0 or job.import_type != "oa_manual_import.create":
+            raise ValueError("Only progressing OA attachment preparation may defer an import claim.")
+        return bool(self._connection.execute("""
+            update job.import_jobs set status='pending', attempt_count=attempt_count-1,
+                result_payload=jsonb_build_object('attachment_preparation', 'pending', 'parsed_in_attempt', %s::int),
+                available_at=now(), last_error=null, locked_by=null, locked_at=null,
+                version=version+1, updated_at=now()
+            where id=%s and status='processing' and locked_by=%s and claim_version=%s
+        """, (parsed_count, job.import_job_id, job.locked_by, job.claim_version)))
+
     def confirm_job(self, import_job_id: str, *, expected_version: int, payload: dict[str, Any]) -> ImportJob:
         with self._connection.transaction() as transaction:
             row = transaction.fetch_one("""
@@ -255,7 +266,9 @@ class ImportJobRepository:
         with self._connection.transaction() as transaction:
             row = transaction.fetch_one("""
                 update job.import_jobs set status='pending', attempt_count=0, last_error=null,
-                    payload=payload || %s::jsonb,
+                    payload=payload || %s::jsonb || case when import_type='oa_manual_import.create'
+                        then jsonb_build_object('attachment_preparation_started_at', now())
+                        else '{}'::jsonb end,
                     version=version+1, available_at=now(), finished_at=null, acknowledged_at=null, updated_at=now()
                 where id=%s and version=%s and status='failed' and not (result_payload ? 'disposition')
                 returning *, id::text as import_job_id
@@ -504,6 +517,11 @@ class ImportJobWorker(RuntimeWorker):
             )
             if isinstance(exc, (ImportPreviewStaleError, ImportReviewRequiredError, EtcImportPreviewStaleError, StaleReconciliationPreviewError)):
                 self._repository.require_review(job, error=str(exc))
+                return RuntimeWorkerResult.DEFERRED
+            from fin_ops_platform.services.oa_adapter import OAAttachmentPreparationPending
+            if isinstance(exc, OAAttachmentPreparationPending):
+                if self._repository.defer_attachment_preparation(job, parsed_count=exc.parsed_count):
+                    self._record_heartbeat("idle", {"import_job_id": job.import_job_id, "attachment_preparation": "pending"}, force=True)
                 return RuntimeWorkerResult.DEFERRED
             retry = _is_transient_import_failure(exc) and job.attempt_count < job.max_attempts
             self._repository.fail_claim(job, error=str(exc) or type(exc).__name__, retry=retry,

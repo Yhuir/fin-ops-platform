@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 from typing import Any
 
 from fin_ops_platform.services.oa_attachment_invoice_cache import (
@@ -13,9 +15,10 @@ from fin_ops_platform.services.postgres_repositories.workbench_matching_queue im
 
 
 class PostgresOAAttachmentInvoiceRepository:
-    def __init__(self, connection: Any, *, identity_locks_held: bool = False) -> None:
+    def __init__(self, connection: Any, *, identity_locks_held: bool = False, transaction_bound: bool = False) -> None:
         self._connection = connection
         self._identity_locks_held = identity_locks_held
+        self._transaction_bound = transaction_bound
 
     def find_invoices_by_identity_keys(self, *, canonical_keys: set[str]) -> list[Any]:
         return PostgresCoreRepository(self._connection).find_invoices_by_identity_keys(
@@ -80,7 +83,8 @@ class PostgresOAAttachmentInvoiceRepository:
         reason: str,
         debounce_seconds: int,
     ) -> list[str]:
-        with self._connection.transaction() as transaction:
+        context = nullcontext(self._connection) if self._transaction_bound else self._connection.transaction()
+        with context as transaction:
             PostgresCoreRepository(transaction).save_oa_attachment_invoices_in_transaction(
                 transaction,
                 invoices,
@@ -230,6 +234,32 @@ class PostgresOAAttachmentInvoiceRepository:
                        )
                   )
                   {oa_filter_sql}
+                union all
+                select distinct matched.cache_source_attachment_key, matched.ordinality,
+                       attachment.oa_application_id::text,
+                       coalesce(app.oa_source_id, attachment.oa_source_id), app.row_id,
+                       null::text, null::text, attachment.source_attachment_key,
+                       attachment.filename, to_char(app.scope_month, 'YYYY-MM')
+                from matched_invoices matched
+                join app.oa_attachment_invoice_cache_sources source
+                  on source.cache_source_attachment_key = matched.cache_source_attachment_key
+                 and source.source_kind = 'attachment_identity_invoice'
+                join app.oa_attachments attachment
+                  on attachment.source_attachment_key = source.source_attachment_key
+                 and attachment.source_attachment_key = matched.invoice_payload->>'source_attachment_key'
+                join app.oa_applications app
+                  on app.id = attachment.oa_application_id
+                 and app.form_type = '支付申请' and app.status <> 'deleted'
+                where attachment.normalized_payload->>'source_oa_id' = app.row_id
+                  and matched.invoice_payload->>'source_oa_id' = app.row_id
+                  and nullif(attachment.normalized_payload->>'source_expense_item_id', '') is null
+                  and nullif(attachment.normalized_payload->>'source_expense_row_index', '') is null
+                  and nullif(source.source_expense_item_id, '') is null
+                  and nullif(source.source_expense_row_index, '') is null
+                  and nullif(matched.invoice_payload->>'source_expense_item_id', '') is null
+                  and nullif(matched.invoice_payload->>'source_expense_row_index', '') is null
+                  and nullif(attachment.filename, '') is not null
+                  {oa_filter_sql}
             )
             select matched.cache_source_attachment_key,
                    jsonb_build_array(matched.invoice_payload) as invoices,
@@ -257,5 +287,5 @@ class PostgresOAAttachmentInvoiceRepository:
         if normalized_keys:
             params.append(normalized_keys)
         if normalized_row_ids:
-            params.append(normalized_row_ids)
+            params.extend([normalized_row_ids, normalized_row_ids])
         return list(self._connection.fetch_all(sql, tuple(params)) or [])

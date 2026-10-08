@@ -30,6 +30,7 @@ from tests.test_oa_manual_import_service import (
 class RecordingAttachmentRefreshRequestService:
     def __init__(self) -> None:
         self.requests: list[tuple[list[str], str]] = []
+        self.prepare_requests: list[tuple[list[str], str]] = []
 
     def request(self, row_ids: list[str], *, actor_id: str) -> dict[str, object]:
         self.requests.append((list(row_ids), actor_id))
@@ -39,6 +40,10 @@ class RecordingAttachmentRefreshRequestService:
             "row_ids": list(row_ids),
             "affected_scope_keys": ["2025-12"],
         }
+
+    def request_prepare(self, row_ids: list[str], *, actor_id: str) -> dict[str, object]:
+        self.prepare_requests.append((list(row_ids), actor_id))
+        return {"event_id": "preview-event-1", "status": "queued", "row_ids": list(row_ids), "affected_scope_keys": []}
 
     def status(self, event_id: str) -> dict[str, object]:
         return {
@@ -50,6 +55,10 @@ class RecordingAttachmentRefreshRequestService:
                 "rows": [
                     {
                         "row_id": "oa-exp-1981",
+                        "attachment_status": "ready",
+                        "pending_attachment_count": 0,
+                        "failed_attachment_count": 0,
+                        "unsupported_attachment_count": 0,
                         "attachment_file_count": 2,
                         "importable_invoice_count": 1,
                         "unrecognized_attachment_count": 1,
@@ -140,6 +149,30 @@ class OAManualImportApiTests(unittest.TestCase):
         self.assertEqual(json.loads(negative_page.body)["error"], "invalid_oa_manual_search_request")
         self.assertEqual(oversize_page.status_code, 400)
         self.assertEqual(json.loads(oversize_page.body)["error"], "invalid_oa_manual_search_request")
+
+    def test_prepare_endpoint_queues_unimported_source_row_without_formal_scopes(self) -> None:
+        service = RecordingAttachmentRefreshRequestService()
+        app = self._build_app_with_service(adapter=RecordingOAAdapter([]), refresh_request_service=service)
+        response = app.handle_request(
+            "POST", "/api/workbench/settings/oa/manual-search/prepare-attachments",
+            json.dumps({"row_ids": ["historical-oa"], "actor_id": "spoofed-user"}),
+        )
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(json.loads(response.body), {
+            "event_id": "preview-event-1", "status": "queued", "row_ids": ["historical-oa"], "affected_scope_keys": [],
+        })
+        self.assertEqual(service.prepare_requests, [(["historical-oa"], "test-user-id")])
+        self.assertEqual(service.requests, [])
+
+    def test_prepare_endpoint_rejects_empty_invalid_and_oversized_batches(self) -> None:
+        service = RecordingAttachmentRefreshRequestService()
+        app = self._build_app_with_service(adapter=RecordingOAAdapter([]), refresh_request_service=service)
+        for row_ids in ([], [1981], [f"oa-{index}" for index in range(21)]):
+            with self.subTest(row_ids=row_ids):
+                response = app.handle_request("POST", "/api/workbench/settings/oa/manual-search/prepare-attachments", json.dumps({"row_ids": row_ids}))
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("error", json.loads(response.body))
+        self.assertEqual(service.prepare_requests, [])
 
     def test_refresh_endpoint_queues_targeted_worker_and_exposes_status(self) -> None:
         refresh_request_service = RecordingAttachmentRefreshRequestService()
@@ -280,6 +313,7 @@ class OAManualImportApiTests(unittest.TestCase):
 
             with (
                 patch.object(app._oa_attachment_refresh_request_service, "request") as refresh_attachments,
+                patch.object(app._oa_attachment_refresh_request_service, "request_prepare") as prepare_attachments,
                 patch.object(app._oa_attachment_refresh_request_service, "status") as refresh_status,
                 patch.object(app._import_job_repository, "create_or_get_job") as import_row_ids,
                 patch.object(app._oa_manual_import_service, "remove_manual_import") as remove_manual_import,
@@ -288,6 +322,10 @@ class OAManualImportApiTests(unittest.TestCase):
                 search_response = app.handle_request("GET", "/api/workbench/settings/oa/manual-search?q=2025", headers=headers)
                 self.assertEqual(search_response.status_code, 403)
                 source_search.assert_not_called()
+                prepare_response = app.handle_request(
+                    "POST", "/api/workbench/settings/oa/manual-search/prepare-attachments",
+                    body=json.dumps({"row_ids": ["historical-oa"]}), headers=headers,
+                )
                 refresh_response = app.handle_request(
                     "POST",
                     "/api/workbench/settings/oa/manual-search/refresh-attachments",
@@ -312,6 +350,9 @@ class OAManualImportApiTests(unittest.TestCase):
                     headers=headers,
                 )
 
+        self.assertEqual(prepare_response.status_code, 403)
+        self.assertEqual(json.loads(prepare_response.body)["error"], "page_access_denied")
+        prepare_attachments.assert_not_called()
         self.assertEqual(refresh_response.status_code, 403)
         self.assertEqual(json.loads(refresh_response.body)["error"], "page_access_denied")
         self.assertEqual(refresh_status_response.status_code, 403)

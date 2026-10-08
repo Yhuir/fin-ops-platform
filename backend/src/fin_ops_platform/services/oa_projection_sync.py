@@ -11,8 +11,10 @@ from fin_ops_platform.services.oa_adapter import (
     is_in_progress_expense_claim,
 )
 from fin_ops_platform.services.oa_attachment_refresh_request_service import (
+    PREPARE_ATTACHMENTS_OPERATION,
     REFRESH_ATTACHMENTS_OPERATION,
 )
+from fin_ops_platform.services.oa_attachment_summary import record_attachment_summary
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord
 from fin_ops_platform.services.postgres_repositories.oa_projection import is_completed_workflow_status
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
@@ -44,6 +46,11 @@ class OAProjectionSyncService:
         self._pending_payment_source_snapshot_repository = pending_payment_source_snapshot_repository
 
     def handle_runtime_event(self, event: RuntimeQueueEvent) -> dict[str, Any]:
+        if event.payload.get("operation") == PREPARE_ATTACHMENTS_OPERATION:
+            try:
+                return self._run_attachment_preview(event)
+            except OAAttachmentPreparationPending as exc:
+                return {"status": "deferred", "reason": str(exc), "parsed_attachment_count": exc.parsed_count}
         if event.payload.get("operation") == REFRESH_ATTACHMENTS_OPERATION:
             try:
                 return self._run_targeted_attachment_refresh(event)
@@ -54,6 +61,8 @@ class OAProjectionSyncService:
                     sync_type="oa_attachment_refresh",
                 )
                 raise
+        if event.payload.get("operation") is not None:
+            raise ValueError("Unsupported OA sync operation.")
         scope_key = self._event_scope_key(event)
         try:
             return self._run_sync(scope_key)
@@ -62,6 +71,28 @@ class OAProjectionSyncService:
         except Exception as exc:
             self._record_failed_sync_run(scope_key=scope_key, error=exc)
             raise
+
+    def _run_attachment_preview(self, event: RuntimeQueueEvent) -> dict[str, Any]:
+        row_ids = _targeted_refresh_row_ids(event.payload.get("row_ids"))
+        records = list(self._source_adapter.prepare_application_record_attachments(row_ids, preparation_started_at=event.payload["preparation_started_at"]))
+        records_by_id = {record.id: record for record in records}
+        if len(records_by_id) != len(records) or set(records_by_id) != set(row_ids):
+            raise RuntimeError("OA attachment preview source rows do not match requested row_ids.")
+        rows = [_attachment_summary(records_by_id[row_id]) for row_id in row_ids]
+        errors = []
+        for row in rows:
+            if not row["failed_attachment_count"]:
+                continue
+            failed_files = [
+                f"{artifact['source_attachment_name']}（{'下载失败' if artifact['parse_status'] == 'download_failed' else '解析失败'}）"
+                for artifact in records_by_id[row["row_id"]].attachment_artifacts
+                if artifact.get("parse_status") in TARGETED_ATTACHMENT_FAILURE_STATUSES
+            ]
+            errors.append({"row_id": row["row_id"], "code": "attachment_parse_failed",
+                "message": f"{row['failed_attachment_count']} 个附件失败：{'；'.join(failed_files[:3])}。请重试。"})
+        return {"operation": PREPARE_ATTACHMENTS_OPERATION, "status": "succeeded",
+                "row_ids": row_ids, "rows": rows, "errors": errors,
+                "promotion_summary": {}, "affected_scope_keys": []}
 
     def _run_targeted_attachment_refresh(self, event: RuntimeQueueEvent) -> dict[str, Any]:
         row_ids = _targeted_refresh_row_ids(event.payload.get("row_ids"))
@@ -623,20 +654,4 @@ def _targeted_attachment_failure_row_ids(
 
 
 def _attachment_summary(record: OAApplicationRecord) -> dict[str, object]:
-    attachment_file_count = max(
-        int(record.attachment_file_count or 0),
-        len(record.attachment_artifacts),
-        len(record.attachment_invoices),
-    )
-    importable_invoice_count = len(
-        [invoice for invoice in record.attachment_invoices if isinstance(invoice, dict)]
-    )
-    return {
-        "row_id": record.id,
-        "attachment_file_count": attachment_file_count,
-        "importable_invoice_count": importable_invoice_count,
-        "unrecognized_attachment_count": max(
-            0,
-            attachment_file_count - importable_invoice_count,
-        ),
-    }
+    return {"row_id": record.id, **record_attachment_summary(record)}

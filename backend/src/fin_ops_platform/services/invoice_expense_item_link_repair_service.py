@@ -201,9 +201,26 @@ def build_oa_attachment_invoice_link_audit_plan(
         )
         direct_canonical_oa_ids = _current_owner_canonical_oa_ids(attachment_edges)
 
+        whole_owner_oa_ids = {
+            _text(edge.get("canonical_oa_row_id"))
+            for edge in attachment_edges
+            if edge.get("is_current_whole_oa_owner")
+            and _text(edge.get("canonical_oa_row_id"))
+        }
+        all_whole_owners_valid = bool(attachment_edges) and all(
+            edge.get("is_current_whole_oa_owner") for edge in attachment_edges
+        )
         is_visible_canonical = _text(row.get("workbench_visibility")) == "visible"
         if not is_visible_canonical:
             classification = "protected_noncanonical"
+        elif whole_owner_oa_ids:
+            # Whole-payment ownership is already authoritative; an expense-item
+            # repair must never rewrite it into a fabricated child relationship.
+            classification = (
+                "valid_attachment_owner"
+                if all_whole_owners_valid and len(whole_owner_oa_ids) == 1 and not candidate_targets
+                else "conflict"
+            )
         elif direct_targets:
             if not candidate_targets or candidate_targets.issubset(direct_targets):
                 classification = "valid_attachment_owner"

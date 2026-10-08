@@ -30,6 +30,63 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         repository.record_sync_run.assert_not_called()
         repository.upsert_application_records.assert_not_called()
 
+    def test_unknown_operation_does_not_run_full_sync(self) -> None:
+        from unittest.mock import Mock
+        source, repository = Mock(), Mock()
+        service = OAProjectionSyncService(source_adapter=source, projection_repository=repository)
+        event = replace(_targeted_event(["oa-exp-historical"]), payload={"operation": "unknown"})
+        with self.assertRaisesRegex(ValueError, "Unsupported OA sync operation"):
+            service.handle_runtime_event(event)
+        self.assertEqual(source.mock_calls, [])
+        self.assertEqual(repository.mock_calls, [])
+
+    def test_source_only_preview_parses_without_registering_or_promoting_oa(self) -> None:
+        from unittest.mock import Mock
+        selected = replace(_oa("oa-exp-historical", "2025-12", workflow_status="completed"),
+            attachment_file_count=2, attachment_invoices=[{"invoice_no": "12345678901234567890", "source_attachment_key": "a"}],
+            attachment_artifacts=[{"source_attachment_key": "a", "parse_status": "parsed"},
+                                  {"source_attachment_key": "b", "source_attachment_name": "invoice.pdf", "parse_status": "parse_failed"}])
+        source, repository, promoter, owner = Mock(), Mock(), Mock(), Mock()
+        source.prepare_application_record_attachments.return_value = [selected]
+        service = OAProjectionSyncService(source_adapter=source, projection_repository=repository,
+            attachment_invoice_promoter=promoter, pending_payment_source_snapshot_repository=owner)
+        event = replace(_targeted_event([selected.id]), payload={"operation": "prepare_attachments", "preparation_started_at": "2026-10-08T10:00:00+00:00", "row_ids": [selected.id], "affected_scope_keys": []})
+        result = service.handle_runtime_event(event)
+        self.assertEqual(result["rows"][0]["attachment_status"], "partial")
+        self.assertEqual(result["rows"][0]["importable_invoice_count"], 1)
+        self.assertEqual(result["errors"][0]["row_id"], selected.id)
+        self.assertIn("invoice.pdf（解析失败）", result["errors"][0]["message"])
+        source.prepare_application_record_attachments.assert_called_once_with([selected.id], preparation_started_at=event.payload["preparation_started_at"])
+        self.assertEqual(result["promotion_summary"], {})
+        self.assertEqual(result["affected_scope_keys"], [])
+        self.assertEqual(repository.mock_calls, [])
+        self.assertEqual(promoter.mock_calls, [])
+        self.assertEqual(owner.mock_calls, [])
+
+    def test_preview_budget_defer_preserves_no_formal_writes(self) -> None:
+        from unittest.mock import Mock
+        from fin_ops_platform.services.oa_adapter import OAAttachmentPreparationPending
+        source, repository = Mock(), Mock()
+        source.prepare_application_record_attachments.side_effect = OAAttachmentPreparationPending(20)
+        service = OAProjectionSyncService(source_adapter=source, projection_repository=repository)
+        event = replace(_targeted_event(["oa-exp-historical"]), payload={"operation": "prepare_attachments", "preparation_started_at": "2026-10-08T10:00:00+00:00", "row_ids": ["oa-exp-historical"], "affected_scope_keys": []})
+        result = service.handle_runtime_event(event)
+        self.assertEqual(result["status"], "deferred")
+        self.assertEqual(result["parsed_attachment_count"], 20)
+        self.assertEqual(repository.mock_calls, [])
+
+    def test_preview_source_identity_mismatch_fails_without_formal_writes(self) -> None:
+        from unittest.mock import Mock
+        for records in ([], [_oa("unexpected", "2025-12", workflow_status="completed")], [_oa("requested", "2025-12", workflow_status="completed")] * 2):
+            with self.subTest(records=records):
+                source, repository = Mock(), Mock()
+                source.prepare_application_record_attachments.return_value = records
+                service = OAProjectionSyncService(source_adapter=source, projection_repository=repository)
+                event = replace(_targeted_event(["requested"]), payload={"operation": "prepare_attachments", "preparation_started_at": "2026-10-08T10:00:00+00:00", "row_ids": ["requested"], "affected_scope_keys": []})
+                with self.assertRaisesRegex(RuntimeError, "do not match"):
+                    service.handle_runtime_event(event)
+                self.assertEqual(repository.mock_calls, [])
+
     def test_targeted_attachment_refresh_updates_only_selected_completed_rows(self) -> None:
         selected = replace(
             _oa("oa-selected", "2026-06", workflow_status="completed"),
@@ -258,7 +315,7 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         selected = replace(
             _oa("oa-no-evidence", "2026-06", workflow_status="completed"),
             attachment_file_count=1,
-            attachment_artifacts=[{"parse_status": "no_evidence"}],
+            attachment_artifacts=[{"source_attachment_key": "non-invoice", "parse_status": "no_evidence"}],
         )
         source = FakeSourceAdapter(
             months=["2026-06"],

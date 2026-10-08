@@ -14,6 +14,83 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
 class OAAttachmentRefreshRequestServiceTests(unittest.TestCase):
+    def test_prepare_enqueues_source_only_ids_without_workflow_reads_or_formal_scopes(self) -> None:
+        queue = FakeQueueRepository()
+        reader = FakeWorkflowReader([])
+        service = OAAttachmentRefreshRequestService(queue_repository=queue, workflow_reader=reader)
+        result = service.request_prepare([" historical-oa ", "historical-oa"], actor_id="admin")
+        self.assertEqual(reader.calls, [])
+        self.assertEqual(result["row_ids"], ["historical-oa"])
+        self.assertEqual(result["affected_scope_keys"], [])
+        self.assertEqual(result["status"], "queued")
+        payload = dict(queue.enqueued[0]["payload"])
+        from datetime import datetime, timedelta
+        self.assertEqual(datetime.fromisoformat(payload.pop("preparation_started_at")).utcoffset(), timedelta(0))
+        self.assertEqual(payload, {
+            "operation": "prepare_attachments", "row_ids": ["historical-oa"],
+            "affected_scope_keys": [], "triggered_by": "admin",
+        })
+        self.assertTrue(queue.enqueued[0]["dedupe_key"].startswith("oa.sync:prepare_attachments:"))
+        self.assertEqual(queue.enqueued[0]["aggregate_type"], "oa_attachment_preview")
+
+    def test_prepare_reuses_only_matching_active_preview(self) -> None:
+        queue = FakeQueueRepository()
+        reader = FakeWorkflowReader([])
+        service = OAAttachmentRefreshRequestService(queue_repository=queue, workflow_reader=reader)
+        queue.active_event = SimpleNamespace(event_id="active-preview", event_type="oa.sync", payload={
+            "operation": "prepare_attachments", "row_ids": ["historical-oa"], "affected_scope_keys": [],
+        })
+        self.assertEqual(service.request_prepare(["historical-oa"], actor_id="admin"), {
+            "event_id": "active-preview", "status": "pending", "row_ids": ["historical-oa"],
+            "affected_scope_keys": [],
+        })
+        self.assertEqual(reader.calls, [])
+        self.assertEqual(queue.enqueued, [])
+        queue.active_event.payload["operation"] = "refresh_attachments"
+        with self.assertRaises(OAAttachmentRefreshRequestError):
+            service.request_prepare(["historical-oa"], actor_id="admin")
+
+    def test_prepare_rejects_invalid_ids_without_enqueue(self) -> None:
+        queue = FakeQueueRepository()
+        service = OAAttachmentRefreshRequestService(queue_repository=queue, workflow_reader=FakeWorkflowReader([]))
+        for row_ids in ([], [" "], [123], "historical-oa"):
+            with self.subTest(row_ids=row_ids), self.assertRaises(ValueError):
+                service.request_prepare(row_ids, actor_id="admin")
+        self.assertEqual(queue.enqueued, [])
+
+    def test_preview_status_preserves_partial_results_without_promotion_or_scopes(self) -> None:
+        queue = FakeQueueRepository()
+        event_id = "00000000-0000-0000-0000-000000000001"
+        queue.statuses[event_id] = {
+            "event_type": "oa.sync", "status": "done",
+            "payload": {"operation": "prepare_attachments", "row_ids": ["historical-oa"], "affected_scope_keys": []},
+            "runtime_result": {
+                "rows": [{"row_id": "historical-oa", "attachment_status": "partial", "attachment_file_count": 3,
+                          "importable_invoice_count": 1, "unrecognized_attachment_count": 0,
+                          "pending_attachment_count": 0, "failed_attachment_count": 1, "unsupported_attachment_count": 1}],
+                "errors": [{"row_id": "historical-oa", "code": "attachment_parse_failed", "message": "附件解析失败"}],
+                "promotion_summary": {}, "affected_scope_keys": [],
+            },
+        }
+        service = OAAttachmentRefreshRequestService(queue_repository=queue, workflow_reader=FakeWorkflowReader([]))
+        result = service.status(event_id)
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(result["affected_scope_keys"], [])
+        self.assertEqual(result["result"]["promotion_summary"], {})
+        self.assertEqual(result["result"]["rows"][0]["failed_attachment_count"], 1)
+        self.assertEqual(result["result"]["errors"][0]["code"], "attachment_parse_failed")
+        row = queue.statuses[event_id]["runtime_result"]["rows"][0]
+        for field in ("attachment_status", "pending_attachment_count", "failed_attachment_count", "unsupported_attachment_count"):
+            with self.subTest(field=field):
+                value = row.pop(field)
+                self.assertEqual(service.status(event_id)["status"], "failed")
+                row[field] = value
+        queue.statuses[event_id]["runtime_result"]["promotion_summary"] = {"created_invoice_count": 1}
+        self.assertEqual(service.status(event_id)["status"], "failed")
+        queue.statuses[event_id]["runtime_result"]["promotion_summary"] = {}
+        queue.statuses[event_id]["runtime_result"]["affected_scope_keys"] = ["2025-12"]
+        self.assertEqual(service.status(event_id)["status"], "failed")
+
     def test_request_enqueues_exact_row_ids_and_affected_scopes(self) -> None:
         queue = FakeQueueRepository()
         service = OAAttachmentRefreshRequestService(
@@ -169,6 +246,10 @@ class OAAttachmentRefreshRequestServiceTests(unittest.TestCase):
                 "rows": [
                     {
                         "row_id": "oa-1",
+                        "attachment_status": "ready",
+                        "pending_attachment_count": 0,
+                        "failed_attachment_count": 0,
+                        "unsupported_attachment_count": 0,
                         "attachment_file_count": 2,
                         "importable_invoice_count": 1,
                         "unrecognized_attachment_count": 1,

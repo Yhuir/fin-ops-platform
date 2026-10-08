@@ -12,6 +12,7 @@ from fin_ops_platform.services.mongo_oa_adapter import (
     OA_IMPORT_STATUS_IN_PROGRESS,
 )
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.oa_attachment_summary import attachment_summary, record_attachment_summary
 
 SUPPORTED_FORM_TYPES = [OA_IMPORT_FORM_TYPE_PAYMENT, OA_IMPORT_FORM_TYPE_EXPENSE]
 SUPPORTED_STATUSES = [OA_IMPORT_STATUS_COMPLETED, OA_IMPORT_STATUS_IN_PROGRESS]
@@ -77,8 +78,6 @@ class OAManualImportService:
         form_type = self._record_form_type(record)
         imported_entry = imported_entries.get(record.id, {})
         can_import = status == OA_IMPORT_STATUS_COMPLETED
-        attachment_file_count = self._attachment_file_count(record)
-        importable_invoice_count = self._importable_invoice_count(record)
         return {
             "row_id": record.id,
             "oa_no": self._oa_no(record),
@@ -91,9 +90,7 @@ class OAManualImportService:
             "project_name": record.project_name,
             "reason": record.reason,
             "amount": record.amount,
-            "attachment_file_count": attachment_file_count,
-            "importable_invoice_count": importable_invoice_count,
-            "unrecognized_attachment_count": max(0, attachment_file_count - importable_invoice_count),
+            **record_attachment_summary(record),
             "import_status": "imported" if record.id in imported_entries else "not_imported",
             "imported_at": imported_entry.get("imported_at") if isinstance(imported_entry, dict) else None,
             "can_import": can_import,
@@ -102,22 +99,15 @@ class OAManualImportService:
         }
 
     def _expense_item_to_row(self, item: dict[str, Any], record: OAApplicationRecord) -> dict[str, object]:
-        attachment_file_count = self._int_value(item.get("attachment_file_count"))
-        importable_invoice_count = len(
-            [
-                invoice
-                for invoice in list(item.get("attachment_invoices") or [])
-                if isinstance(invoice, dict)
-            ]
-        )
         return {
             "date": clean_string(item.get("reimbursement_date") or item.get("date") or self._application_date(record)),
             "amount": clean_string(item.get("amount") or ""),
             "content": clean_string(item.get("expense_content") or item.get("content") or record.reason),
             "project_name": clean_string(item.get("project_name") or record.project_name),
             "reason": record.reason,
-            "attachment_file_count": attachment_file_count,
-            "importable_invoice_count": importable_invoice_count,
+            **attachment_summary(file_count=self._int_value(item.get("attachment_file_count")),
+                artifacts=list(item.get("attachment_artifacts") or []),
+                invoices=list(item.get("attachment_invoices") or [])),
         }
 
     @staticmethod
@@ -155,14 +145,6 @@ class OAManualImportService:
     @staticmethod
     def _oa_no(record: OAApplicationRecord) -> str:
         return clean_string(record.detail_fields.get("OA单号") or record.id)
-
-    @staticmethod
-    def _attachment_file_count(record: OAApplicationRecord) -> int:
-        return max(int(record.attachment_file_count or 0), len(record.attachment_artifacts), len(record.attachment_invoices))
-
-    @staticmethod
-    def _importable_invoice_count(record: OAApplicationRecord) -> int:
-        return len([invoice for invoice in record.attachment_invoices if isinstance(invoice, dict)])
 
     @staticmethod
     def _int_value(value: object) -> int:

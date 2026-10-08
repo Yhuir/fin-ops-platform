@@ -8,11 +8,11 @@ export async function waitForImportPreparation(accepted: ImportPreparationAccept
   return waitForImportTask(accepted, "prepare");
 }
 
-export async function waitForImportCompletion(accepted: ImportPreparationAccepted): Promise<BackgroundJob> {
-  return waitForImportTask(accepted, "commit");
+export async function waitForImportCompletion(accepted: ImportPreparationAccepted, options: { readBusinessFailure?: boolean } = {}): Promise<BackgroundJob> {
+  return waitForImportTask(accepted, "commit", options.readBusinessFailure === true);
 }
 
-async function waitForImportTask(accepted: ImportPreparationAccepted, phase: "prepare" | "commit"): Promise<BackgroundJob> {
+async function waitForImportTask(accepted: ImportPreparationAccepted, phase: "prepare" | "commit", readBusinessFailure = false): Promise<BackgroundJob> {
   if (!accepted.job?.job_id) throw new Error("导入受理响应缺少任务编号。");
   let job = mapBackgroundJob(accepted.job);
   const deadline = Date.now() + 120_000;
@@ -22,6 +22,9 @@ async function waitForImportTask(accepted: ImportPreparationAccepted, phase: "pr
     }
     await new Promise((resolve) => window.setTimeout(resolve, 300));
     job = await fetchBackgroundJob(job.jobId);
+  }
+  if (readBusinessFailure && job.status === "failed" && job.resultSummary.outcome === "failed" && Array.isArray(job.resultSummary.failed)) {
+    return job;
   }
   if (job.status !== "succeeded" && !(phase === "commit" && job.status === "partial_success") && !(phase === "prepare" && (job.status === "awaiting_confirmation" || job.status === "needs_review"))) {
     throw new Error(job.error || job.message || "文件准备未完成，请查看导入任务。");

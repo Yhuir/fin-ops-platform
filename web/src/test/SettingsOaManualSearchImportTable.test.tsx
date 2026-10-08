@@ -28,6 +28,10 @@ const searchRows = [
     project_name: "大理卷烟厂动力车间中水处理系统升级改造项目",
     reason: "去大理检修中水系统餐费",
     amount: "135.00",
+    attachment_status: "ready",
+    pending_attachment_count: 0,
+    failed_attachment_count: 0,
+    unsupported_attachment_count: 0,
     attachment_file_count: 2,
     importable_invoice_count: 1,
     unrecognized_attachment_count: 1,
@@ -42,6 +46,10 @@ const searchRows = [
         content: "餐费",
         project_name: "大理卷烟厂动力车间中水处理系统升级改造项目",
         reason: "去大理检修中水系统餐费",
+        attachment_status: "ready",
+        pending_attachment_count: 0,
+        failed_attachment_count: 0,
+        unsupported_attachment_count: 0,
         attachment_file_count: 2,
         importable_invoice_count: 1,
       },
@@ -59,6 +67,10 @@ const searchRows = [
     project_name: "调试服务",
     reason: "设备调试服务费",
     amount: "282.00",
+    attachment_status: "ready",
+    pending_attachment_count: 0,
+    failed_attachment_count: 0,
+    unsupported_attachment_count: 0,
     attachment_file_count: 1,
     importable_invoice_count: 0,
     unrecognized_attachment_count: 1,
@@ -80,6 +92,10 @@ const searchRows = [
     project_name: "设备检修",
     reason: "差旅报销",
     amount: "88.00",
+    attachment_status: "ready",
+    pending_attachment_count: 0,
+    failed_attachment_count: 0,
+    unsupported_attachment_count: 0,
     attachment_file_count: 1,
     importable_invoice_count: 0,
     unrecognized_attachment_count: 1,
@@ -101,6 +117,10 @@ const searchRows = [
     project_name: "设备采购",
     reason: "设备采购款",
     amount: "560.00",
+    attachment_status: "ready",
+    pending_attachment_count: 0,
+    failed_attachment_count: 0,
+    unsupported_attachment_count: 0,
     attachment_file_count: 1,
     importable_invoice_count: 0,
     unrecognized_attachment_count: 1,
@@ -174,6 +194,7 @@ function deferredResponse() {
 
 function successfulImportResponse() {
   return new Response(JSON.stringify({
+    attachment_invoice_promotion: { summary: { created_invoice_count: 1, linked_existing_invoice_count: 0 }, action_counts: { create_invoice_and_link: 1 }, reason_counts: { formal_invoice_not_in_pool: 1 } },
     imported: ["oa-exp-1981"],
     already_imported: [],
     failed: [],
@@ -190,11 +211,15 @@ function successfulImportResponse() {
 }
 
 function installFetchMock({
+  importResult,
+  initialRows = searchRows,
   manualImportResponse,
   refreshStatusSequence,
   exactRefreshResponseRows,
   exactRefreshResponseTotal,
 }: {
+  importResult?: Record<string, unknown>;
+  initialRows?: typeof searchRows;
   manualImportResponse?: Promise<Response>;
   refreshStatusSequence?: Array<Record<string, unknown>>;
   exactRefreshResponseRows?: Array<Record<string, unknown>>;
@@ -206,19 +231,27 @@ function installFetchMock({
     const url = new URL(String(input), "http://localhost");
     if (url.pathname === "/api/workbench/settings/oa/manual-search") {
       const exactRowId = url.searchParams.get("q");
-      const exactRow = searchRows.find((row) => row.row_id === exactRowId);
+      const exactRow = initialRows.find((row) => row.row_id === exactRowId);
       const responseRows = exactRow
         ? exactRefreshResponseRows ?? [{
           ...exactRow,
+          attachment_status: "ready",
+          pending_attachment_count: 0,
+          failed_attachment_count: 0,
+          unsupported_attachment_count: 0,
           attachment_file_count: 2,
           importable_invoice_count: 2,
           unrecognized_attachment_count: 0,
           items: exactRow.items.map((item) => ({
             ...item,
+            attachment_status: "ready",
+            pending_attachment_count: 0,
+            failed_attachment_count: 0,
+            unsupported_attachment_count: 0,
             importable_invoice_count: 2,
           })),
         }]
-        : searchRows;
+        : initialRows;
       return new Response(JSON.stringify({
         rows: responseRows,
         total: exactRow && exactRefreshResponseTotal !== undefined
@@ -228,7 +261,7 @@ function installFetchMock({
         page_size: Number(url.searchParams.get("page_size") ?? 20),
       }));
     }
-    if (url.pathname === "/api/workbench/settings/oa/manual-search/refresh-attachments") {
+    if (["/api/workbench/settings/oa/manual-search/prepare-attachments", "/api/workbench/settings/oa/manual-search/refresh-attachments"].includes(url.pathname)) {
       expect(init?.method).toBe("POST");
       const body = JSON.parse(String(init?.body)) as { row_ids: string[] };
       requestedRefreshRowId = body.row_ids[0];
@@ -250,6 +283,10 @@ function installFetchMock({
           rows: [
             {
               row_id: requestedRefreshRowId,
+              attachment_status: "ready",
+              pending_attachment_count: 0,
+              failed_attachment_count: 0,
+              unsupported_attachment_count: 0,
               attachment_file_count: 2,
               importable_invoice_count: 2,
               unrecognized_attachment_count: 0,
@@ -272,11 +309,11 @@ function installFetchMock({
       return new Response(JSON.stringify({ job: { job_id: "import:oa-1", status: "queued" } }), { status: 202 });
     }
     if (decodeURIComponent(url.pathname) === "/api/background-jobs/import:oa-1") {
-      return new Response(JSON.stringify({ job: { job_id: "import:oa-1", status: "succeeded" } }));
+      return new Response(JSON.stringify({ job: { job_id: "import:oa-1", status: importResult?.outcome === "failed" ? "failed" : "succeeded", result_summary: importResult } }));
     }
     if (decodeURIComponent(url.pathname) === "/api/background-jobs/import:oa-1/result") {
       return new Response(JSON.stringify({ job: { job_id: "import:oa-1", status: "succeeded" },
-        result: await successfulImportResponse().json() }));
+        result: importResult ?? await successfulImportResponse().json() }));
     }
     throw new Error(`Unhandled fetch ${url.pathname}`);
   });
@@ -290,6 +327,103 @@ afterEach(() => {
 });
 
 describe("OaManualSearchImportTable", () => {
+  test("shows unparsed attachments as unknown and prepares source-only OA without importing", async () => {
+    const user = userEvent.setup();
+    const initialRow = {
+      ...searchRows[0], attachment_status: "unparsed", pending_attachment_count: 2,
+      importable_invoice_count: 0, unrecognized_attachment_count: 0,
+      items: searchRows[0].items.map((item) => ({ ...item, attachment_status: "unparsed", pending_attachment_count: 2, importable_invoice_count: 0 })),
+    };
+    const fetchMock = installFetchMock({ initialRows: [initialRow] });
+    renderTable();
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    const row = await screen.findByRole("row", { name: "1981" });
+    expect(within(row).getByText("待解析")).toBeInTheDocument();
+    await user.click(within(row).getByLabelText("选择 OA 1981"));
+    expect(screen.getByText("所选 OA 已识别发票合计 0 张（1 个OA附件解析未完成）")).toBeInTheDocument();
+    await user.click(within(row).getByLabelText("展开 OA 1981 明细"));
+    expect(screen.getAllByText("待解析")).toHaveLength(2);
+    await user.click(within(row).getByLabelText("刷新 OA 1981 附件解析"));
+    expect(await screen.findByText("附件预览解析完成，正式导入时处理发票入池")).toBeInTheDocument();
+    expect(screen.getByText("所选 OA 已识别发票合计 2 张")).toBeInTheDocument();
+    expect(screen.queryByText("待解析")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/prepare-attachments"))).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/manual-imports"))).toBe(false);
+  });
+
+  test.each(["imported", "already_imported"])("keeps formal attachment refresh for %s OA", async (importStatus) => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock({ initialRows: [{ ...searchRows[0], import_status: importStatus }] });
+    renderTable();
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    await user.click(await screen.findByRole("button", { name: "刷新 OA 1981 附件解析" }));
+    expect(await screen.findByText("OA 附件刷新完成")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/refresh-attachments"))).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/prepare-attachments"))).toBe(false);
+  });
+
+  test("updates partial counts and selected totals before surfacing attachment parsing errors", async () => {
+    const user = userEvent.setup();
+    const partialRow = {
+      ...searchRows[0], attachment_status: "partial", failed_attachment_count: 1,
+      unsupported_attachment_count: 1, attachment_file_count: 4, unrecognized_attachment_count: 1,
+    };
+    installFetchMock({
+      exactRefreshResponseRows: [partialRow],
+      refreshStatusSequence: [{
+        event_id: "refresh-event-1", status: "done", row_ids: [partialRow.row_id],
+        result: { rows: [partialRow], errors: [{ row_id: partialRow.row_id, code: "attachment_parse_failed", message: "附件 OCR 失败" }], promotion_summary: {} },
+      }],
+    });
+    renderTable();
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    await user.click(await screen.findByLabelText("选择 OA 1981"));
+    await user.click(screen.getByRole("button", { name: "刷新 OA 1981 附件解析" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("附件 OCR 失败");
+    const row = screen.getByRole("row", { name: "1981" });
+    expect(within(row).getByText("1（未完成）")).toBeInTheDocument();
+    expect(within(row).getByText("失败 1 个；不支持 1 个")).toBeInTheDocument();
+    expect(screen.getByText("所选 OA 已识别发票合计 1 张（1 个OA附件解析未完成）")).toBeInTheDocument();
+  });
+
+  test("explains OA success separately from invoice admission settings and review requirements", async () => {
+    const user = userEvent.setup();
+    const result = await successfulImportResponse().json();
+    installFetchMock({ importResult: {
+      ...result,
+      attachment_invoice_promotion: {
+        summary: { created_invoice_count: 0, linked_existing_invoice_count: 0 },
+        action_counts: { ignore: 2 }, reason_counts: { create_missing_disabled: 1, financial_requires_review: 1 },
+      },
+    } });
+    renderTable();
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    await user.click(await screen.findByLabelText("选择 OA 1981"));
+    await user.click(screen.getByRole("button", { name: "导入已选OA项" }));
+    const receipt = await screen.findByRole("status");
+    expect(receipt).toHaveTextContent("OA 已导入 1 条");
+    expect(receipt).toHaveTextContent("发票新增 0 张、关联已有 0 张、未入池候选 2 项");
+    expect(receipt).toHaveTextContent("设置仅关联已有发票，不新增发票 1 项");
+    expect(receipt).toHaveTextContent("财务字段需要复核 1 项");
+    expect(receipt).not.toHaveTextContent("financial_requires_review");
+  });
+
+  test("shows every OA failure reason from an all-failed business result", async () => {
+    const user = userEvent.setup();
+    installFetchMock({ importResult: {
+      outcome: "failed", imported: [], already_imported: [], rows: [],
+      failed: [{ row_id: "oa-exp-1981", code: "attachment_preparation_failed", message: "附件尚未完成解析或解析失败，请修复后重试" }],
+      attachment_invoice_promotion: { summary: { created_invoice_count: 0, linked_existing_invoice_count: 0 }, action_counts: {}, reason_counts: {} },
+    } });
+    renderTable();
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    await user.click(await screen.findByLabelText("选择 OA 1981"));
+    await user.click(screen.getByRole("button", { name: "导入已选OA项" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("OA oa-exp-1981：附件尚未完成解析或解析失败，请修复后重试");
+    expect(screen.getByRole("status")).toHaveTextContent("OA 已导入 0 条");
+    expect(screen.getByRole("button", { name: "导入已选OA项" })).toBeEnabled();
+  });
+
   test("shows source failure instead of presenting it as no historical OA", async () => {
     const fetchMock = installFetchMock();
     fetchMock.mockImplementation(async () => new Response(JSON.stringify({
@@ -356,21 +490,21 @@ describe("OaManualSearchImportTable", () => {
     const completedRow = await screen.findByRole("row", { name: "1981" });
     const inProgressRow = screen.getByRole("row", { name: "2001" });
     expect(within(inProgressRow).getByLabelText("选择 OA 2001")).toBeDisabled();
-    expect(within(inProgressRow).getByLabelText("刷新 OA 2001 附件解析")).toBeDisabled();
+    expect(within(inProgressRow).getByLabelText("刷新 OA 2001 附件解析")).toBeEnabled();
     expect(inProgressRow).toHaveTextContent("流程未完成");
 
     await user.click(within(completedRow).getByLabelText("选择 OA 1981"));
     expect(screen.getByText("已选 1 个OA")).toBeInTheDocument();
     expect(screen.getByText("金额合计 ¥135.00")).toBeInTheDocument();
-    expect(screen.getByText("预计发票 1 张")).toBeInTheDocument();
+    expect(screen.getByText("所选 OA 已识别发票合计 1 张")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "展开 OA 1981 明细" }));
     expect(await screen.findByText("餐费")).toBeInTheDocument();
-    expect(screen.getByText("明细可识别发票")).toBeInTheDocument();
+    expect(screen.getByText("明细已识别发票")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "刷新 OA 1981 附件解析" }));
-    expect(await screen.findByText("预计发票 2 张")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("OA 附件刷新完成");
+    expect(await screen.findByText("所选 OA 已识别发票合计 2 张")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("附件预览解析完成，正式导入时处理发票入池");
     expect(completedRow).toHaveTextContent("2");
     expect(completedRow).toHaveTextContent("0");
     expect(screen.getByRole("row", { name: "2025-12-23" })).toHaveTextContent("2");
@@ -392,6 +526,30 @@ describe("OaManualSearchImportTable", () => {
     expect(screen.getByRole("button", { name: "导入已选OA项" })).toBeDisabled();
   });
 
+  test("previews an unimported in-progress payment without enabling import or formal refresh", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock({ initialRows: [searchRows[1]] });
+    renderTable();
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    expect(await screen.findByLabelText("选择 OA 2001")).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "刷新 OA 2001 附件解析" }));
+    expect(await screen.findByText("附件预览解析完成，正式导入时处理发票入池")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导入已选OA项" })).toBeDisabled();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/prepare-attachments"))).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/refresh-attachments"))).toBe(false);
+  });
+
+  test.each(["imported", "already_imported"])("keeps in-progress payment formal refresh disabled when %s", async (importStatus) => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock({ initialRows: [{ ...searchRows[1], import_status: importStatus }] });
+    renderTable();
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    const refresh = await screen.findByRole("button", { name: "刷新 OA 2001 附件解析" });
+    expect(refresh).toBeDisabled();
+    await user.click(refresh);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("attachments"))).toBe(false);
+  });
+
   test("refreshes an in-progress expense claim without enabling formal import", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();
@@ -406,11 +564,11 @@ describe("OaManualSearchImportTable", () => {
 
     await user.click(refreshButton);
 
-    expect(await screen.findByText("附件已解析，待 OA 完成后进入统一发票池")).toBeInTheDocument();
+    expect(await screen.findByText("附件预览解析完成，正式导入时处理发票入池")).toBeInTheDocument();
     expect(screen.getByText("已选 0 个OA")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导入已选OA项" })).toBeDisabled();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/settings/oa/manual-search/refresh-attachments",
+      "/api/workbench/settings/oa/manual-search/prepare-attachments",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ row_ids: ["oa-exp-2002"] }),
@@ -440,9 +598,9 @@ describe("OaManualSearchImportTable", () => {
 
     await user.click(refreshButton);
 
-    expect(await screen.findByText("OA 附件刷新完成")).toBeInTheDocument();
+    expect(await screen.findByText("附件预览解析完成，正式导入时处理发票入池")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/settings/oa/manual-search/refresh-attachments",
+      "/api/workbench/settings/oa/manual-search/prepare-attachments",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ row_ids: ["oa-pay-2003"] }),
@@ -489,6 +647,10 @@ describe("OaManualSearchImportTable", () => {
       result: {
         rows: [{
           row_id: "oa-exp-1981",
+          attachment_status: "ready",
+          pending_attachment_count: 0,
+          failed_attachment_count: 0,
+          unsupported_attachment_count: 0,
           attachment_file_count: 2,
           importable_invoice_count: 2,
           unrecognized_attachment_count: 0,
@@ -521,10 +683,10 @@ describe("OaManualSearchImportTable", () => {
     expect(fetchMock.mock.calls.filter(([input]) => (
       String(input) === "/api/workbench/settings/oa/manual-imports"
     ))).toHaveLength(0);
-    expect(await screen.findByText("OA 附件刷新完成", {}, { timeout: 2_500 })).toBeInTheDocument();
+    expect(await screen.findByText("附件预览解析完成，正式导入时处理发票入池", {}, { timeout: 2_500 })).toBeInTheDocument();
     expect(importButton).toBeEnabled();
     expect(fetchMock.mock.calls.filter(([input]) => (
-      String(input) === "/api/workbench/settings/oa/manual-search/refresh-attachments"
+      String(input) === "/api/workbench/settings/oa/manual-search/prepare-attachments"
     ))).toHaveLength(1);
   });
 
@@ -559,7 +721,7 @@ describe("OaManualSearchImportTable", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(refreshButton).toBeEnabled();
     expect(fetchMock.mock.calls.filter(([input]) => (
-      String(input) === "/api/workbench/settings/oa/manual-search/refresh-attachments"
+      String(input) === "/api/workbench/settings/oa/manual-search/prepare-attachments"
     ))).toHaveLength(1);
     const statusCallCount = fetchMock.mock.calls.filter(([input]) => (
       String(input).includes("/refresh-attachments/refresh-event-1")
@@ -580,7 +742,7 @@ describe("OaManualSearchImportTable", () => {
       if (url.pathname === "/api/workbench/settings/oa/manual-search") {
         return new Response(JSON.stringify({ rows: searchRows, total: 2, page: 0, page_size: 20 }));
       }
-      if (url.pathname === "/api/workbench/settings/oa/manual-search/refresh-attachments") {
+      if (url.pathname === "/api/workbench/settings/oa/manual-search/prepare-attachments") {
         return new Response(JSON.stringify({
           event_id: "refresh-event-1",
           status: "queued",
@@ -646,7 +808,7 @@ describe("OaManualSearchImportTable", () => {
       if (url.pathname === "/api/workbench/settings/oa/manual-search") {
         return new Response(JSON.stringify({ rows: searchRows, total: 2, page: 0, page_size: 20 }));
       }
-      if (url.pathname === "/api/workbench/settings/oa/manual-search/refresh-attachments") {
+      if (url.pathname === "/api/workbench/settings/oa/manual-search/prepare-attachments") {
         refreshSignal = init?.signal ?? null;
         return new Promise<Response>((resolve, reject) => {
           init?.signal?.addEventListener("abort", () => {
@@ -687,7 +849,7 @@ describe("OaManualSearchImportTable", () => {
       if (url.pathname === "/api/workbench/settings/oa/manual-search") {
         return new Response(JSON.stringify({ rows: searchRows, total: 2, page: 0, page_size: 20 }));
       }
-      if (url.pathname === "/api/workbench/settings/oa/manual-search/refresh-attachments") {
+      if (url.pathname === "/api/workbench/settings/oa/manual-search/prepare-attachments") {
         return new Response(JSON.stringify({
           event_id: "refresh-event-1",
           status: "queued",
@@ -732,7 +894,7 @@ describe("OaManualSearchImportTable", () => {
     expect(refreshButton).toBeDisabled();
     await user.click(refreshButton);
     expect(fetchMock.mock.calls.filter(([input]) => (
-      String(input) === "/api/workbench/settings/oa/manual-search/refresh-attachments"
+      String(input) === "/api/workbench/settings/oa/manual-search/prepare-attachments"
     ))).toHaveLength(0);
 
     await waitFor(() => {

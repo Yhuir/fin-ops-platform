@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, MongoOASettings
@@ -17,6 +17,9 @@ class MemoryAttachmentInvoiceCache:
     def load_oa_attachment_invoice_cache_entry(self, cache_key: str) -> dict[str, object] | None:
         entry = self.entries.get(cache_key)
         return dict(entry) if isinstance(entry, dict) else None
+
+    def load_oa_attachment_invoice_cache_entries(self, cache_keys: list[str]) -> dict[str, dict]:
+        return {key: dict(self.entries[key]) for key in cache_keys if key in self.entries}
 
     def save_oa_attachment_invoice_cache_entry(self, cache_key: str, payload: dict[str, object]) -> None:
         self.entries[cache_key] = dict(payload)
@@ -874,8 +877,8 @@ class MongoOAAdapterTests(unittest.TestCase):
 
         with patch.object(
             adapter,
-            "_cached_attachment_invoice_count",
-            return_value=0,
+            "_cached_attachment_pool",
+            return_value={"invoices": [], "evidences": [], "artifacts": []},
         ) as cached_invoice_count:
             payload = adapter.search_application_record_rows(
                 q="oa-exp-3002",
@@ -1587,8 +1590,7 @@ class MongoOAAdapterTests(unittest.TestCase):
 
         with (
             adapter.force_attachment_invoice_sync_parse(),
-            patch.object(adapter._attachment_invoice_service, "parse_evidences", side_effect=parse_evidences, create=True) as parse_evidences_mock,
-            patch.object(adapter._attachment_invoice_service, "parse_files", side_effect=AssertionError("parse_files fallback should not run")),
+            patch.object(adapter._attachment_invoice_service, "parse_file_result", side_effect=lambda file: {"evidences": parse_evidences([file]), "parse_status": "parsed", "parse_error": ""}, create=True) as parse_evidences_mock,
         ):
             records = adapter.list_application_records("2026-03")
 
@@ -2116,7 +2118,7 @@ class MongoOAAdapterTests(unittest.TestCase):
             },
         )
 
-        with patch.object(adapter._attachment_invoice_service, "parse_files", side_effect=AssertionError("should not parse synchronously")):
+        with patch.object(adapter._attachment_invoice_service, "parse_file_result", side_effect=AssertionError("should not parse synchronously")):
             records = adapter.list_application_records("2026-03")
 
         self.assertEqual(len(records), 1)
@@ -2175,8 +2177,8 @@ class MongoOAAdapterTests(unittest.TestCase):
             adapter.force_attachment_invoice_sync_parse(),
             patch.object(
                 adapter._attachment_invoice_service,
-                "parse_evidences",
-                return_value=[
+                "parse_file_result",
+                return_value={"evidences": [
                     {
                         "evidence_type": "tax_invoice",
                         "invoice_no": "40512344",
@@ -2186,7 +2188,7 @@ class MongoOAAdapterTests(unittest.TestCase):
                         "amount": "11.32",
                         "attachment_name": "invoice-a.pdf",
                     }
-                ],
+                ], "parse_status": "parsed", "parse_error": ""},
             ) as parse_evidences,
         ):
             records = adapter.list_application_records("2026-03")
@@ -2270,15 +2272,15 @@ class MongoOAAdapterTests(unittest.TestCase):
             adapter.force_attachment_invoice_sync_parse(),
             patch.object(
                 adapter._attachment_invoice_service,
-                "parse_evidences",
-                return_value=[
+                "parse_file_result",
+                return_value={"evidences": [
                     {
                         "evidence_type": "tax_invoice",
                         "invoice_no": "40512344",
                         "amount": "11.32",
                         "attachment_name": "invoice-a.pdf",
                     }
-                ],
+                ], "parse_status": "parsed", "parse_error": ""},
             ),
         ):
             records = adapter.list_application_records("2026-03")
@@ -2345,11 +2347,9 @@ class MongoOAAdapterTests(unittest.TestCase):
             adapter.force_attachment_invoice_sync_parse(),
             patch.object(
                 adapter._attachment_invoice_service,
-                "parse_evidences",
-                side_effect=[
-                    [{"evidence_type": "tax_invoice", "invoice_no": "40512344", "amount": "120.00", "attachment_name": "invoice.pdf"}],
-                    [{"evidence_type": "tax_invoice", "invoice_no": "40512345", "amount": "172.00", "attachment_name": "invoice.pdf"}],
-                ],
+                "parse_file_result",
+                side_effect=[{"evidences": [{"evidence_type": "tax_invoice", "invoice_no": "40512344", "amount": "120.00", "attachment_name": "invoice.pdf"}], "parse_status": "parsed", "parse_error": ""},
+{"evidences": [{"evidence_type": "tax_invoice", "invoice_no": "40512345", "amount": "172.00", "attachment_name": "invoice.pdf"}], "parse_status": "parsed", "parse_error": ""}],
             ),
         ):
             records = adapter.list_application_records("2026-03")
@@ -2412,8 +2412,8 @@ class MongoOAAdapterTests(unittest.TestCase):
             adapter.force_attachment_invoice_sync_parse(),
             patch.object(
                 adapter._attachment_invoice_service,
-                "parse_evidences",
-                return_value=[
+                "parse_file_result",
+                return_value={"evidences": [
                     {
                         "evidence_type": "tax_invoice",
                         "digital_invoice_no": "26532000000000000036",
@@ -2422,7 +2422,7 @@ class MongoOAAdapterTests(unittest.TestCase):
                         "total_with_tax": "36.00",
                         "attachment_name": "shared.pdf",
                     }
-                ],
+                ], "parse_status": "parsed", "parse_error": ""},
             ) as parse_evidences,
         ):
             record = adapter.list_application_records("2026-07")[0]
@@ -2532,7 +2532,7 @@ class MongoOAAdapterTests(unittest.TestCase):
             },
         )
 
-        with patch.object(adapter._attachment_invoice_service, "parse_files", side_effect=AssertionError("should not parse synchronously")):
+        with patch.object(adapter._attachment_invoice_service, "parse_file_result", side_effect=AssertionError("should not parse synchronously")):
             records = adapter.list_application_records("2026-03")
 
         self.assertEqual(records[0].attachment_invoices[0]["amount"], "212.86")
@@ -2579,7 +2579,7 @@ class MongoOAAdapterTests(unittest.TestCase):
 
         with patch.object(
             adapter._attachment_invoice_service,
-            "parse_files",
+            "parse_file_result",
             side_effect=AssertionError("API read must not parse attachments"),
         ):
             records = adapter.list_application_records("2026-03")
@@ -2623,7 +2623,7 @@ class MongoOAAdapterTests(unittest.TestCase):
 
         with patch.object(
             adapter._attachment_invoice_service,
-            "parse_files",
+            "parse_file_result",
             side_effect=AssertionError("API read must not parse attachments"),
         ):
             records = adapter.list_application_records("2026-03")
@@ -2642,8 +2642,8 @@ class MongoOAAdapterTests(unittest.TestCase):
 
         with patch.object(
             adapter._attachment_invoice_service,
-            "parse_evidences",
-            return_value=[{"evidence_type": "tax_invoice", "invoice_no": "40512344", "attachment_name": "invoice-a.pdf"}],
+            "parse_file_result",
+            return_value={"evidences": [{"evidence_type": "tax_invoice", "invoice_no": "40512344", "attachment_name": "invoice-a.pdf"}], "parse_status": "parsed", "parse_error": ""},
         ):
             pool = adapter._parse_attachment_invoice_files_now([(cache_key, file_entry)], month="2026-03")
 
@@ -2854,15 +2854,15 @@ class MongoOAAdapterTests(unittest.TestCase):
 
         with patch.object(
             adapter._attachment_invoice_service,
-            "parse_evidences",
-            return_value=[
+            "parse_file_result",
+            return_value={"evidences": [
                 {
                     "evidence_type": "tax_invoice",
                     "invoice_no": "40513002",
                     "amount": "88.00",
                     "attachment_name": "进行中附件.pdf",
                 }
-            ],
+            ], "parse_status": "parsed", "parse_error": ""},
             create=True,
         ) as parse_evidences:
             with adapter.force_attachment_invoice_sync_parse():
@@ -2922,15 +2922,15 @@ class MongoOAAdapterTests(unittest.TestCase):
 
         with patch.object(
             adapter._attachment_invoice_service,
-            "parse_evidences",
-            return_value=[
+            "parse_file_result",
+            return_value={"evidences": [
                 {
                     "evidence_type": "tax_invoice",
                     "invoice_no": "40513002",
                     "amount": "88.00",
                     "attachment_name": "进行中附件.pdf",
                 }
-            ],
+            ], "parse_status": "parsed", "parse_error": ""},
             create=True,
         ) as parse_evidences:
             records = adapter.refresh_application_record_attachments(["oa-exp-3002"])
@@ -3278,7 +3278,7 @@ class MongoOAAdapterTests(unittest.TestCase):
 
         with patch.object(
             adapter._attachment_invoice_service,
-            "parse_evidences",
+            "parse_file_result",
             side_effect=AssertionError("draft without attachments must not invoke OCR"),
             create=True,
         ) as parse_evidences:
@@ -3957,6 +3957,195 @@ class MongoOAAdapterTests(unittest.TestCase):
                     "modifiedTime": 1,
                 },
             )
+
+
+
+class SourceOnlyAttachmentPreparationTests(unittest.TestCase):
+    def _adapter(self, *, payment=False, status="completed", file_count=1):
+        files = [{"fileName": f"invoice-{index}.pdf", "filePath": f"/history/invoice-{index}.pdf", "suffix": "pdf"}
+                 for index in range(file_count)]
+        data = {"process_status": status, "amount": "106.00"}
+        if payment:
+            data.update(applicationDate="2025-12-03", userName="历史申请人", cause="历史付款",
+                        field101={"files": files})
+        else:
+            data.update({"ApplicationDate": "2025-12-03", "Reimbursement Personnel": "历史申请人",
+                         "schedule": [{"row_index": 0, "detailReimbursementAmount": "106.00",
+                                       "feeContent": "历史费用", "detailReimbursementAttachment": {"files": files}}]})
+        form = "2" if payment else "32"
+        adapter = StubMongoOAAdapter(form_documents={form: [{"_id": "historical", "form_id": form, "data": data}]},
+                                     project_documents=[], attachment_invoice_cache=MemoryAttachmentInvoiceCache())
+        adapter._identity_loader = OASourceIdentities
+        return adapter, "oa-pay-historical" if payment else "oa-exp-historical"
+
+    @staticmethod
+    def _parsed_result():
+        return {"evidences": [{"evidence_type": "tax_invoice", "document_kind": "digital_invoice",
+                              "digital_invoice_no": "25532000000000000123", "invoice_no": "25532000000000000123",
+                              "issue_date": "2025-12-03", "amount": "100.00", "tax_amount": "6.00",
+                              "total_with_tax": "106.00"}], "parse_status": "parsed", "parse_error": ""}
+
+    def test_source_only_prepare_then_search_reuses_cache_without_ocr(self):
+        adapter, row_id = self._adapter(file_count=2)
+        with patch.object(adapter._attachment_invoice_service, "parse_file_result", return_value=self._parsed_result()) as parser:
+            before = adapter.search_application_record_rows(q=row_id)["rows"][0]
+            self.assertEqual(before["attachment_status"], "unparsed")
+            self.assertEqual(before["pending_attachment_count"], 2)
+            parser.assert_not_called()
+            record = adapter.prepare_application_record_attachments([row_id], preparation_started_at="2025-01-01T00:00:00+00:00")[0]
+            self.assertEqual(parser.call_count, 2)
+            self.assertEqual(record.attachment_file_count, 2)
+            self.assertEqual(len(record.attachment_invoices), 1)
+            self.assertEqual(len(record.attachment_artifacts), 2)
+            after = adapter.search_application_record_rows(q=row_id)["rows"][0]
+            self.assertEqual(after["attachment_status"], "ready")
+            self.assertEqual(after["importable_invoice_count"], 1)
+            self.assertEqual(after["unrecognized_attachment_count"], 0)
+            self.assertEqual(after["pending_attachment_count"], 0)
+            self.assertEqual(after["items"][0]["importable_invoice_count"], 1)
+            adapter.prepare_application_record_attachments([row_id], preparation_started_at="2025-01-01T00:00:00+00:00")
+            self.assertEqual(parser.call_count, 2)
+
+    def test_failed_file_is_reported_and_retried_with_current_parser(self):
+        adapter, row_id = self._adapter()
+        with patch.object(adapter._attachment_invoice_service, "parse_file_result", side_effect=[
+            {"evidences": [], "parse_status": "download_failed", "parse_error": "source unavailable"},
+            self._parsed_result(),
+        ]) as parser:
+            failed = adapter.prepare_application_record_attachments([row_id], preparation_started_at="2025-01-01T00:00:00+00:00")[0]
+            self.assertEqual(failed.attachment_artifacts[0]["parse_status"], "download_failed")
+            search = adapter.search_application_record_rows(q=row_id)["rows"][0]
+            self.assertEqual(search["attachment_status"], "failed")
+            self.assertEqual(search["failed_attachment_count"], 1)
+            self.assertEqual(parser.call_count, 1)
+            retry_started_at = datetime.now(UTC).isoformat()
+            recovered = adapter.prepare_application_record_attachments([row_id], preparation_started_at=retry_started_at)[0]
+            self.assertEqual(len(recovered.attachment_invoices), 1)
+            self.assertEqual(parser.call_count, 2)
+
+    def test_old_cache_is_stale_and_never_upgraded_without_parsing(self):
+        adapter, row_id = self._adapter(payment=True)
+        file_entry = adapter._payment_attachment_files(adapter._form_documents["2"][0])[0]
+        cache_key = adapter._attachment_invoice_cache_key(file_entry)
+        old = {"parser_version": "retired-parser", "invoices": [{"invoice_no": "wrong-old-invoice"}]}
+        adapter._attachment_invoice_cache.entries[cache_key] = old
+        with patch.object(adapter._attachment_invoice_service, "parse_file_result", return_value=self._parsed_result()) as parser:
+            row = adapter.search_application_record_rows(q=row_id)["rows"][0]
+            self.assertEqual(row["attachment_status"], "unparsed")
+            self.assertEqual(row["importable_invoice_count"], 0)
+            self.assertEqual(adapter._cached_attachment_pool([file_entry])["artifacts"][0]["parse_status"], "stale")
+            self.assertEqual(adapter._attachment_invoice_cache.entries[cache_key], old)
+            parser.assert_not_called()
+            record = adapter.prepare_application_record_attachments([row_id], preparation_started_at="2025-01-01T00:00:00+00:00")[0]
+            parser.assert_called_once()
+            self.assertEqual(record.attachment_invoices[0]["invoice_no"], "25532000000000000123")
+            self.assertEqual(adapter._attachment_invoice_cache.entries[cache_key]["parser_version"],
+                             adapter._attachment_invoice_cache_parser_version())
+
+    def test_payment_preparation_keeps_whole_oa_source_without_expense_item(self):
+        adapter, row_id = self._adapter(payment=True)
+        with patch.object(adapter._attachment_invoice_service, "parse_file_result", return_value=self._parsed_result()):
+            record = adapter.prepare_application_record_attachments([row_id], preparation_started_at="2025-01-01T00:00:00+00:00")[0]
+        self.assertEqual(record.expense_items, [])
+        self.assertEqual(record.attachment_file_count, 1)
+        for evidence in record.attachment_invoices + record.attachment_artifacts:
+            self.assertEqual(evidence["source_oa_id"], row_id)
+            self.assertTrue(evidence["source_attachment_key"])
+            self.assertFalse(evidence.get("source_expense_item_id"))
+            self.assertFalse(evidence.get("source_expense_row_index"))
+
+    def test_in_progress_payment_formal_refresh_does_not_parse_but_preview_can(self):
+        adapter, row_id = self._adapter(payment=True, status="in_progress")
+        with patch.object(adapter._attachment_invoice_service, "parse_file_result", return_value=self._parsed_result()) as parser:
+            formal = adapter.refresh_application_record_attachments([row_id])[0]
+            self.assertEqual(formal.attachment_invoices, [])
+            parser.assert_not_called()
+            preview = adapter.prepare_application_record_attachments([row_id], preparation_started_at="2025-01-01T00:00:00+00:00")[0]
+            self.assertEqual(len(preview.attachment_invoices), 1)
+            parser.assert_called_once()
+            row = adapter.search_application_record_rows(q=row_id, statuses=["in_progress"])["rows"][0]
+            self.assertFalse(row["can_import"])
+
+    def test_persistent_failures_resume_remaining_files_and_only_new_task_retries(self):
+        from fin_ops_platform.services.oa_adapter import OAAttachmentPreparationPending
+        adapter, row_id = self._adapter(file_count=21)
+        failed = {"evidences": [], "parse_status": "download_failed", "parse_error": "unavailable"}
+        first_started_at = datetime.now(UTC).isoformat()
+        with patch.object(adapter._attachment_invoice_service, "parse_file_result", return_value=failed) as parser:
+            with self.assertRaises(OAAttachmentPreparationPending):
+                adapter.prepare_application_record_attachments([row_id], preparation_started_at=first_started_at)
+            self.assertEqual(parser.call_count, 20)
+            resumed = adapter.prepare_application_record_attachments([row_id], preparation_started_at=first_started_at)[0]
+            self.assertEqual(parser.call_count, 21)
+            self.assertEqual(len(resumed.attachment_artifacts), 21)
+            self.assertTrue(all(a["parse_status"] == "download_failed" for a in resumed.attachment_artifacts))
+            self.assertIsNone(adapter._attachment_preparation_started_at)
+            adapter.prepare_application_record_attachments([row_id], preparation_started_at=first_started_at)
+            self.assertEqual(parser.call_count, 21)
+            # Automatic sync does not retry failed evidence on every poll.
+            with adapter.force_attachment_invoice_sync_parse():
+                adapter.list_application_records_by_row_ids([row_id])
+            self.assertEqual(parser.call_count, 21)
+            retry_started_at = datetime.now(UTC).isoformat()
+            with self.assertRaises(OAAttachmentPreparationPending):
+                adapter.prepare_application_record_attachments([row_id], preparation_started_at=retry_started_at)
+            self.assertEqual(parser.call_count, 41)
+            adapter.prepare_application_record_attachments([row_id], preparation_started_at=retry_started_at)
+            self.assertEqual(parser.call_count, 42)
+            self.assertTrue(all(datetime.fromisoformat(entry["parsed_at"]) >= datetime.fromisoformat(retry_started_at)
+                                for entry in adapter._attachment_invoice_cache.entries.values()))
+
+    def test_interleaved_failed_preparations_cannot_starve_later_files(self):
+        from fin_ops_platform.services.oa_adapter import OAAttachmentPreparationPending
+        adapter, row_id = self._adapter(file_count=21)
+        first_started_at = datetime.now(UTC).isoformat()
+        failed = {"evidences": [], "parse_status": "download_failed", "parse_error": "unavailable"}
+        with patch.object(adapter._attachment_invoice_service, "parse_file_result", return_value=failed) as parser:
+            with self.assertRaises(OAAttachmentPreparationPending):
+                adapter.prepare_application_record_attachments([row_id], preparation_started_at=first_started_at)
+            # A new request legitimately retries the first task's earlier failures.
+            second_started_at = datetime.now(UTC).isoformat()
+            with self.assertRaises(OAAttachmentPreparationPending):
+                adapter.prepare_application_record_attachments([row_id], preparation_started_at=second_started_at)
+            self.assertEqual(parser.call_count, 40)
+            first = adapter.prepare_application_record_attachments([row_id], preparation_started_at=first_started_at)[0]
+            second = adapter.prepare_application_record_attachments([row_id], preparation_started_at=second_started_at)[0]
+            self.assertEqual(parser.call_count, 41)
+            self.assertEqual(len(first.attachment_artifacts), 21)
+            self.assertEqual(len(second.attachment_artifacts), 21)
+            self.assertEqual(len(adapter._attachment_invoice_cache.entries), 21)
+
+    def test_naive_historical_failure_timestamp_uses_local_timezone(self):
+        adapter, row_id = self._adapter()
+        with patch.object(adapter._attachment_invoice_service, "parse_file_result", return_value={
+            "evidences": [], "parse_status": "download_failed", "parse_error": "unavailable",
+        }) as parser:
+            started = datetime.now(UTC).isoformat()
+            adapter.prepare_application_record_attachments([row_id], preparation_started_at=started)
+            entry = next(iter(adapter._attachment_invoice_cache.entries.values()))
+            entry["parsed_at"] = datetime.fromisoformat(entry["parsed_at"]).astimezone().replace(tzinfo=None).isoformat()
+            adapter.prepare_application_record_attachments([row_id], preparation_started_at=started)
+            self.assertEqual(parser.call_count, 1)
+
+    def test_preparation_requires_explicit_start_time(self):
+        adapter, row_id = self._adapter()
+        with self.assertRaisesRegex(ValueError, "preparation_started_at"):
+            adapter.prepare_application_record_attachments([row_id], preparation_started_at=" ")
+
+    def test_source_preparation_budget_resumes_completed_files(self):
+        from fin_ops_platform.services.oa_adapter import OAAttachmentPreparationPending
+        adapter, row_id = self._adapter(file_count=25)
+        with patch.object(adapter._attachment_invoice_service, "parse_file_result", return_value=self._parsed_result()) as parser:
+            with self.assertRaises(OAAttachmentPreparationPending) as raised:
+                adapter.prepare_application_record_attachments([row_id], preparation_started_at="2025-01-01T00:00:00+00:00")
+            self.assertEqual(raised.exception.parsed_count, 20)
+            self.assertEqual(len(adapter._attachment_invoice_cache.entries), 20)
+            self.assertEqual(adapter._attachment_preparation_depth, 0)
+            record = adapter.prepare_application_record_attachments([row_id], preparation_started_at="2025-01-01T00:00:00+00:00")[0]
+            self.assertEqual(parser.call_count, 25)
+            self.assertEqual(record.attachment_file_count, 25)
+            self.assertEqual(len(record.attachment_artifacts), 25)
+            self.assertEqual(len(record.attachment_invoices), 1)
 
 
 if __name__ == "__main__":

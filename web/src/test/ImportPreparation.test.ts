@@ -55,6 +55,13 @@ describe("durable import preparation", () => {
     await expect(waitForImportCompletion({ job: { job_id: "import:two", status: "failed", error: "全部来源校验失败" } })).rejects.toThrow("全部来源校验失败");
   });
 
+  test("explicit business failure reads preserve structured failure while ordinary imports still reject it", async () => {
+    const accepted = { job: { job_id: "import:one", status: "failed", error: "全部来源校验失败", result_summary: { outcome: "failed", failed: [{ row_id: "bad", message: "附件失败" }] } } };
+    expect((await waitForImportCompletion(accepted, { readBusinessFailure: true })).status).toBe("failed");
+    await expect(waitForImportCompletion(accepted)).rejects.toThrow("全部来源校验失败");
+    await expect(waitForImportCompletion({ job: { job_id: "import:two", status: "failed", error: "数据库提交失败" } }, { readBusinessFailure: true })).rejects.toThrow("数据库提交失败");
+  });
+
   test("rejects missing task identity", async () => {
     await expect(waitForImportPreparation({ job: {} })).rejects.toThrow("缺少任务编号");
   });

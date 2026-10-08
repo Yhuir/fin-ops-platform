@@ -434,6 +434,11 @@ class OAAttachmentInvoicePromotionService:
                 ):
                     if value := _clean_text(row.get(key)):
                         attachment_invoice[key] = value
+                if not _clean_text(row.get("source_expense_item_id")):
+                    attachment_invoice.pop("source_expense_item_id", None)
+                    attachment_invoice.pop("source_expense_row_index", None)
+                    if oa_row_id:
+                        attachment_invoice["source_oa_id"] = oa_row_id
                 source_workbench_row_id = (
                     row_id_service.oa_attachment_invoice_row_id(
                         oa_row_id,

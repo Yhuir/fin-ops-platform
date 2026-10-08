@@ -39,6 +39,7 @@ import type {
   WorkbenchZoneCounts,
   WorkbenchZoneId,
   WorkbenchZonePageInfo,
+  OaAttachmentSummary,
   OaManualAttachmentRefreshResult,
   OaManualAttachmentRefreshStatus,
   OaManualImportList,
@@ -718,7 +719,14 @@ type WorkbenchSettingsDataResetPayload = {
   pollIntervalMs?: number;
 };
 
-type ApiOaManualSearchItem = {
+type ApiOaAttachmentSummary = {
+  attachment_status: string;
+  pending_attachment_count: number;
+  failed_attachment_count: number;
+  unsupported_attachment_count: number;
+};
+
+type ApiOaManualSearchItem = ApiOaAttachmentSummary & {
   date?: string | null;
   amount?: string | null;
   content?: string | null;
@@ -728,7 +736,7 @@ type ApiOaManualSearchItem = {
   importable_invoice_count?: number | null;
 };
 
-type ApiOaManualSearchRow = {
+type ApiOaManualSearchRow = ApiOaAttachmentSummary & {
   row_id?: string | null;
   oa_no?: string | null;
   applicant?: string | null;
@@ -768,7 +776,7 @@ type ApiOaManualAttachmentRefreshResult = ApiAffectedScopeEnvelope & {
   row_ids?: string[] | null;
 };
 
-type ApiOaManualAttachmentRefreshRow = {
+type ApiOaManualAttachmentRefreshRow = ApiOaAttachmentSummary & {
   row_id?: string | null;
   attachment_file_count?: number | null;
   importable_invoice_count?: number | null;
@@ -796,6 +804,11 @@ type ApiOaManualAttachmentRefreshStatus = ApiAffectedScopeEnvelope & {
 const oaManualAttachmentRefreshRequestTimeoutMs = 15_000;
 
 type ApiOaManualImportResult = ApiAffectedScopeEnvelope & {
+  attachment_invoice_promotion: {
+    summary: { created_invoice_count: number; linked_existing_invoice_count: number };
+    action_counts: Record<string, number>;
+    reason_counts: Record<string, number>;
+  };
   imported?: string[] | null;
   already_imported?: string[] | null;
   failed?: Array<Record<string, unknown>> | null;
@@ -2191,8 +2204,21 @@ function toOptionalCount(value: unknown): number | undefined {
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
+function mapOaAttachmentSummary(value: ApiOaAttachmentSummary): OaAttachmentSummary {
+  if (!["unparsed", "partial", "ready", "failed"].includes(value.attachment_status)) {
+    throw new Error("OA 附件 attachment_status 缺失或无效");
+  }
+  return {
+    attachmentStatus: value.attachment_status as OaAttachmentSummary["attachmentStatus"],
+    pendingAttachmentCount: requireNonNegativeInteger(value.pending_attachment_count, "OA 附件 pending_attachment_count"),
+    failedAttachmentCount: requireNonNegativeInteger(value.failed_attachment_count, "OA 附件 failed_attachment_count"),
+    unsupportedAttachmentCount: requireNonNegativeInteger(value.unsupported_attachment_count, "OA 附件 unsupported_attachment_count"),
+  };
+}
+
 function mapOaManualSearchItem(item: ApiOaManualSearchItem): OaManualSearchItem {
   return {
+    ...mapOaAttachmentSummary(item),
     date: toDisplayValue(item.date),
     amount: toDisplayValue(item.amount),
     content: toDisplayValue(item.content),
@@ -2205,6 +2231,7 @@ function mapOaManualSearchItem(item: ApiOaManualSearchItem): OaManualSearchItem 
 
 function mapOaManualSearchRow(row: ApiOaManualSearchRow): OaManualSearchRow {
   return {
+    ...mapOaAttachmentSummary(row),
     rowId: toDisplayValue(row.row_id, ""),
     oaNo: toDisplayValue(row.oa_no),
     applicant: toDisplayValue(row.applicant),
@@ -3199,13 +3226,22 @@ export async function searchManualOaImports(
   return mapOaManualSearchResult(payload);
 }
 
-export async function refreshManualOaImportAttachments(
+export function prepareManualOaImportAttachments(rowIds: string[], signal?: AbortSignal) {
+  return requestManualOaAttachmentTask("prepare-attachments", rowIds, signal);
+}
+
+export function refreshManualOaImportAttachments(rowIds: string[], signal?: AbortSignal) {
+  return requestManualOaAttachmentTask("refresh-attachments", rowIds, signal);
+}
+
+async function requestManualOaAttachmentTask(
+  operation: "prepare-attachments" | "refresh-attachments",
   rowIds: string[],
   signal?: AbortSignal,
 ): Promise<OaManualAttachmentRefreshResult> {
   const expectedRowIds = requireUniqueStringArray(rowIds, "OA 附件刷新 row_ids");
   const payload = await requestJson<ApiOaManualAttachmentRefreshResult>(
-    "/api/workbench/settings/oa/manual-search/refresh-attachments",
+    `/api/workbench/settings/oa/manual-search/${operation}`,
     {
       method: "POST",
       headers: {
@@ -3282,6 +3318,7 @@ export async function getManualOaImportAttachmentRefreshStatus(
       throw new Error("OA 附件刷新完成结果缺少 promotion_summary");
     }
     const rows = result.rows.map((row) => ({
+      ...mapOaAttachmentSummary(row),
       rowId: requireNonEmptyString(row.row_id, "OA 附件刷新结果 row_id"),
       attachmentFileCount: requireNonNegativeInteger(
         row.attachment_file_count,
@@ -3325,6 +3362,23 @@ export async function getManualOaImportAttachmentRefreshStatus(
   };
 }
 
+function mapOaImportPromotion(value: ApiOaManualImportResult["attachment_invoice_promotion"]): OaManualImportResult["promotion"] {
+  if (!value || !value.summary || !value.action_counts || !value.reason_counts) {
+    throw new Error("OA 导入任务缺少发票入池结果。");
+  }
+  const countMap = (counts: Record<string, number>, label: string) => {
+    if (typeof counts !== "object" || Array.isArray(counts)) throw new Error(`${label} 格式无效`);
+    return Object.fromEntries(Object.entries(counts).map(([key, count]) => [key, requireNonNegativeInteger(count, `${label}.${key}`)]));
+  };
+  const actions = countMap(value.action_counts, "OA 发票处理数量");
+  return {
+    createdInvoiceCount: requireNonNegativeInteger(value.summary.created_invoice_count, "OA 发票新增数量"),
+    linkedExistingInvoiceCount: requireNonNegativeInteger(value.summary.linked_existing_invoice_count, "OA 发票关联数量"),
+    ignoredCandidateCount: actions.ignore ?? 0,
+    reasonCounts: countMap(value.reason_counts, "OA 发票处理原因"),
+  };
+}
+
 export async function importManualOaRows(rowIds: string[]): Promise<OaManualImportResult> {
   const accepted = await requestJson<ImportPreparationAccepted>(
     "/api/workbench/settings/oa/manual-imports",
@@ -3339,7 +3393,7 @@ export async function importManualOaRows(rowIds: string[]): Promise<OaManualImpo
       }),
     },
   );
-  const job = await waitForImportCompletion(accepted);
+  const job = await waitForImportCompletion(accepted, { readBusinessFailure: true });
   const { result: payload } = await fetchImportTaskResult<ApiOaManualImportResult>(job.jobId);
   if (!Array.isArray(payload.imported) || !Array.isArray(payload.failed)) {
     throw new Error("OA 导入任务缺少最终业务结果。");
@@ -3347,7 +3401,12 @@ export async function importManualOaRows(rowIds: string[]): Promise<OaManualImpo
   return {
     imported: (payload.imported ?? []).map((rowId) => String(rowId)),
     alreadyImported: (payload.already_imported ?? []).map((rowId) => String(rowId)),
-    failed: payload.failed ?? [],
+    failed: payload.failed.map((failure) => ({
+      rowId: requireNonEmptyString(failure.row_id, "OA 导入失败 row_id"),
+      code: requireNonEmptyString(failure.code, "OA 导入失败 code"),
+      message: requireNonEmptyString(failure.message, "OA 导入失败 message"),
+    })),
+    promotion: mapOaImportPromotion(payload.attachment_invoice_promotion),
     rows: (payload.rows ?? []).map(mapOaManualSearchRow).filter((row) => row.rowId.length > 0),
     ...mapAffectedScopeEnvelope(payload),
   };

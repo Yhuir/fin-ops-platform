@@ -141,6 +141,8 @@ class SettingsApiRoutes:
                 return self.delete_oa_applicant_credential(target_applicant_code, headers)
         if method == "GET" and route_path == "/api/workbench/settings/oa/manual-search":
             return self.oa_manual_search(query)
+        if method == "POST" and route_path == "/api/workbench/settings/oa/manual-search/prepare-attachments":
+            return self.oa_manual_search_refresh_attachments(body, headers, preview=True)
         if method == "POST" and route_path == "/api/workbench/settings/oa/manual-search/refresh-attachments":
             return self.oa_manual_search_refresh_attachments(body, headers)
         if method == "GET" and route_path.startswith(
@@ -530,7 +532,9 @@ class SettingsApiRoutes:
                 {"error": "oa_search_unavailable", "message": str(exc)})
         return self._json_response(HTTPStatus.OK, payload)
 
-    def oa_manual_search_refresh_attachments(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
+    def oa_manual_search_refresh_attachments(
+        self, body: str | bytes | None, headers: dict[str, str] | None, *, preview: bool = False,
+    ) -> Any:
         session, auth_error = self._resolve_settings_mutation_session(headers)
         if auth_error is not None:
             return auth_error
@@ -545,7 +549,8 @@ class SettingsApiRoutes:
             return row_ids_error
         actor_id = actor_id_for_session(session) if session is not None else "workbench_settings"
         try:
-            result = service.request(row_ids, actor_id=actor_id or "workbench_settings")
+            request = service.request_prepare if preview else service.request
+            result = request(row_ids, actor_id=actor_id or "workbench_settings")
         except OAAttachmentRefreshRowNotFoundError as exc:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,

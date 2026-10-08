@@ -7,10 +7,11 @@ import { formatMoney } from "../../features/money";
 import {
   getManualOaImportAttachmentRefreshStatus,
   importManualOaRows,
+  prepareManualOaImportAttachments,
   refreshManualOaImportAttachments,
   searchManualOaImports,
 } from "../../features/workbench/api";
-import type { OaManualSearchFilters, OaManualSearchRow } from "../../features/workbench/types";
+import type { OaAttachmentSummary, OaManualImportResult, OaManualSearchFilters, OaManualSearchRow } from "../../features/workbench/types";
 import {
   FinanceTable,
   FinanceTableBody,
@@ -73,8 +74,25 @@ function oaDisplayLabel(row: OaManualSearchRow) {
 }
 
 function canRefreshAttachments(row: OaManualSearchRow) {
+  if (row.importStatus === "not_imported") {
+    return row.status === "completed" || row.status === "in_progress";
+  }
   return row.status === "completed"
     || (row.status === "in_progress" && row.formType === "expense_claim");
+}
+
+function attachmentInvoiceLabel(value: OaAttachmentSummary & { importableInvoiceCount: number }) {
+  if (value.attachmentStatus === "unparsed") return "待解析";
+  if (value.attachmentStatus === "failed") return "解析失败";
+  return `${value.importableInvoiceCount}${value.attachmentStatus === "partial" ? "（未完成）" : ""}`;
+}
+
+function attachmentStateLabel(value: OaAttachmentSummary) {
+  return [
+    value.pendingAttachmentCount > 0 ? `待解析 ${value.pendingAttachmentCount} 个` : "",
+    value.failedAttachmentCount > 0 ? `失败 ${value.failedAttachmentCount} 个` : "",
+    value.unsupportedAttachmentCount > 0 ? `不支持 ${value.unsupportedAttachmentCount} 个` : "",
+  ].filter(Boolean).join("；");
 }
 
 function nextToggledList(value: string, current: string[]) {
@@ -114,6 +132,30 @@ function isAbortError(error: unknown) {
   return error instanceof Error && error.name === "AbortError";
 }
 
+const promotionReasonLabels: Record<string, string> = {
+  promotion_disabled: "设置未启用附件发票入池",
+  create_missing_disabled: "设置仅关联已有发票，不新增发票",
+  financial_requires_review: "财务字段需要复核",
+  missing_required_invoice_fields: "缺少必要发票字段",
+  missing_strong_invoice_identity: "缺少可确认的发票号码",
+  ambiguous_invoice_identity: "发票身份存在重复记录",
+  source_context_conflict: "发票已有其他来源归属",
+  missing_oa_context: "缺少 OA 来源信息",
+  not_formal_invoice: "附件不是正式发票",
+  upsert_returned_none: "发票未能保存",
+  already_linked: "来源已经关联",
+  matched_existing_invoice: "识别到已有发票",
+  formal_invoice_not_in_pool: "识别到新发票",
+};
+
+function importResultMessage(result: OaManualImportResult) {
+  const promotion = result.promotion;
+  const reasons = Object.entries(promotion.reasonCounts)
+    .filter(([, count]) => count > 0)
+    .map(([reason, count]) => `${promotionReasonLabels[reason] ?? "处理原因尚未支持显示，请核查导入任务"} ${count} 项`);
+  return `OA 已导入 ${result.imported.length} 条、已存在 ${result.alreadyImported.length} 条；发票新增 ${promotion.createdInvoiceCount} 张、关联已有 ${promotion.linkedExistingInvoiceCount} 张、未入池候选 ${promotion.ignoredCandidateCount} 项${reasons.length > 0 ? `。${reasons.join("；")}` : ""}`;
+}
+
 function attachmentRefreshErrorMessage(errors: Array<{ message: string }>) {
   const suffix = errors.length > 1 ? `（另有 ${errors.length - 1} 条错误）` : "";
   return `${errors[0].message}${suffix}`;
@@ -150,6 +192,7 @@ export default function OaManualSearchImportTable() {
   const selectedImportableRows = selectedList.filter((row) => row.canImport && row.importStatus !== "imported");
   const selectedAmount = selectedList.reduce((sum, row) => sum + amountToNumber(row.amount), 0);
   const selectedInvoiceCount = selectedList.reduce((sum, row) => sum + row.importableInvoiceCount, 0);
+  const selectedIncompleteCount = selectedList.filter((row) => row.attachmentStatus !== "ready").length;
   const allCurrentPageImportableSelected =
     importablePageRows.length > 0 && importablePageRows.every((row) => selectedRows[row.rowId]);
   const someCurrentPageImportableSelected =
@@ -291,7 +334,9 @@ export default function OaManualSearchImportTable() {
     setError("");
     setRefreshMessage("已进入 OA 附件解析队列");
     try {
-      const request = await refreshManualOaImportAttachments([row.rowId], controller.signal);
+      const request = await (row.importStatus === "not_imported"
+        ? prepareManualOaImportAttachments
+        : refreshManualOaImportAttachments)([row.rowId], controller.signal);
       attachmentRefreshObservationTimeoutRef.current = window.setTimeout(() => {
         observationTimedOut = true;
         attachmentRefreshObservationTimeoutRef.current = null;
@@ -318,9 +363,6 @@ export default function OaManualSearchImportTable() {
       if (!status.result || status.result.rows.length === 0) {
         throw new Error("OA 附件刷新完成，但结果缺少附件计数");
       }
-      if (status.result.errors.length > 0) {
-        throw new Error(attachmentRefreshErrorMessage(status.result.errors));
-      }
       const refreshed = await searchManualOaImports({
         query: row.rowId,
         formTypes: [row.formType],
@@ -344,6 +386,10 @@ export default function OaManualSearchImportTable() {
         refreshedRow.attachmentFileCount !== refreshSummary.attachmentFileCount
         || refreshedRow.importableInvoiceCount !== refreshSummary.importableInvoiceCount
         || refreshedRow.unrecognizedAttachmentCount !== refreshSummary.unrecognizedAttachmentCount
+        || refreshedRow.attachmentStatus !== refreshSummary.attachmentStatus
+        || refreshedRow.pendingAttachmentCount !== refreshSummary.pendingAttachmentCount
+        || refreshedRow.failedAttachmentCount !== refreshSummary.failedAttachmentCount
+        || refreshedRow.unsupportedAttachmentCount !== refreshSummary.unsupportedAttachmentCount
       ) {
         throw new Error("OA 附件刷新结果与最新 OA 投影不一致");
       }
@@ -357,10 +403,17 @@ export default function OaManualSearchImportTable() {
           rowId === refreshedRow.rowId ? refreshedRow : selectedRow,
         ]),
       ));
+      if (status.result.errors.length > 0) {
+        throw new Error(attachmentRefreshErrorMessage(status.result.errors));
+      }
       setRefreshMessage(
-        refreshedRow.status === "in_progress"
-          ? "附件已解析，待 OA 完成后进入统一发票池"
-          : "OA 附件刷新完成",
+        refreshedRow.attachmentStatus !== "ready"
+          ? `附件解析尚未完成：${attachmentStateLabel(refreshedRow)}`
+          : refreshedRow.importStatus === "not_imported"
+            ? "附件预览解析完成，正式导入时处理发票入池"
+            : refreshedRow.status === "in_progress"
+              ? "附件已解析，待 OA 完成后进入统一发票池"
+              : "OA 附件刷新完成",
       );
     } catch (refreshError) {
       if (observationTimedOut) {
@@ -413,9 +466,11 @@ export default function OaManualSearchImportTable() {
           Object.entries(current).map(([rowId, row]) => [rowId, updatedMap.get(rowId) ?? row]),
         );
       });
+      setRefreshMessage(importResultMessage(result));
       if (result.failed.length > 0) {
-        setError("部分 OA 导入失败");
-        publishOaImportError("OA导入失败：部分 OA 导入失败");
+        const failureMessage = result.failed.map((failure) => `OA ${failure.rowId}：${failure.message}`).join("；");
+        setError(failureMessage);
+        publishOaImportError(`OA导入失败：${failureMessage}`);
       } else {
         publishOaImportComplete();
       }
@@ -440,7 +495,7 @@ export default function OaManualSearchImportTable() {
         <div className="oa-manual-import__metrics">
           <span>已选 {selectedList.length} 个OA</span>
           <span>金额合计 {formatCurrency(selectedAmount)}</span>
-          <span>预计发票 {selectedInvoiceCount} 张</span>
+          <span>所选 OA 已识别发票合计 {selectedInvoiceCount} 张{selectedIncompleteCount > 0 ? `（${selectedIncompleteCount} 个OA附件解析未完成）` : ""}</span>
         </div>
       </div>
 
@@ -558,8 +613,8 @@ export default function OaManualSearchImportTable() {
               <FinanceTableColumn id="project" columnRole="description">项目摘要</FinanceTableColumn>
               <FinanceTableColumn id="amount" columnRole="amount">整单金额</FinanceTableColumn>
               <FinanceTableColumn id="attachments" columnRole="quantity">附件总数</FinanceTableColumn>
-              <FinanceTableColumn id="invoices" columnRole="quantity">可导入发票</FinanceTableColumn>
-              <FinanceTableColumn id="unrecognized" columnRole="quantity">未识别附件</FinanceTableColumn>
+              <FinanceTableColumn id="invoices" columnRole="quantity">已识别发票</FinanceTableColumn>
+              <FinanceTableColumn id="unrecognized" columnRole="quantity">未识别为发票的附件</FinanceTableColumn>
               <FinanceTableColumn id="importStatus" columnRole="status">导入状态</FinanceTableColumn>
               <FinanceTableColumn id="reason" columnRole="description">禁用原因</FinanceTableColumn>
               <FinanceTableColumn id="action" columnRole="action">操作</FinanceTableColumn>
@@ -612,7 +667,7 @@ export default function OaManualSearchImportTable() {
                     </FinanceTableCell>
                     <FinanceTableCell columnRole="amount" className="settings-table-amount">{formatMoney(row.amount)}</FinanceTableCell>
                     <FinanceTableCell columnRole="quantity" className="settings-table-amount">{row.attachmentFileCount}</FinanceTableCell>
-                    <FinanceTableCell columnRole="quantity" className="settings-table-amount">{row.importableInvoiceCount}</FinanceTableCell>
+                    <FinanceTableCell columnRole="quantity" className="settings-table-amount"><div>{attachmentInvoiceLabel(row)}</div><small>{attachmentStateLabel(row)}</small></FinanceTableCell>
                     <FinanceTableCell columnRole="quantity" className="settings-table-amount">{row.unrecognizedAttachmentCount}</FinanceTableCell>
                     <FinanceTableCell columnRole="status">
                       <span className={`settings-selected-tag settings-selected-tag--${importStatusTone(row)}`}>
@@ -721,7 +776,7 @@ function OaDetailTable({ row }: { row: OaManualSearchRow }) {
           <FinanceTableColumn id="project" columnRole="description">项目名称</FinanceTableColumn>
           <FinanceTableColumn id="reason" columnRole="description">申请事由</FinanceTableColumn>
           <FinanceTableColumn id="attachments" columnRole="quantity">明细附件数量</FinanceTableColumn>
-          <FinanceTableColumn id="invoices" columnRole="quantity">明细可识别发票</FinanceTableColumn>
+          <FinanceTableColumn id="invoices" columnRole="quantity">明细已识别发票</FinanceTableColumn>
         </FinanceTableHeader>
         <FinanceTableBody>
           {row.items.length === 0 ? (
@@ -734,7 +789,7 @@ function OaDetailTable({ row }: { row: OaManualSearchRow }) {
               <FinanceTableCell columnRole="description">{item.projectName}</FinanceTableCell>
               <FinanceTableCell columnRole="description">{item.reason}</FinanceTableCell>
               <FinanceTableCell className="settings-table-amount" columnRole="quantity">{item.attachmentFileCount}</FinanceTableCell>
-              <FinanceTableCell className="settings-table-amount" columnRole="quantity">{item.importableInvoiceCount}</FinanceTableCell>
+              <FinanceTableCell className="settings-table-amount" columnRole="quantity"><div>{attachmentInvoiceLabel(item)}</div><small>{attachmentStateLabel(item)}</small></FinanceTableCell>
             </FinanceTableRow>
           ))}
         </FinanceTableBody>

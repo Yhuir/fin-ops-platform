@@ -248,7 +248,9 @@ class OAManualImportServiceTests(unittest.TestCase):
         self.assertEqual(row["import_status"], "imported")
         self.assertEqual(row["attachment_file_count"], 2)
         self.assertEqual(row["importable_invoice_count"], 0)
-        self.assertEqual(row["unrecognized_attachment_count"], 2)
+        self.assertEqual(row["unrecognized_attachment_count"], 0)
+        self.assertEqual(row["pending_attachment_count"], 2)
+        self.assertEqual(row["attachment_status"], "unparsed")
         self.assertEqual(row["items"][0]["importable_invoice_count"], 0)
 
     def test_remove_manual_import_removes_marker_only(self) -> None:

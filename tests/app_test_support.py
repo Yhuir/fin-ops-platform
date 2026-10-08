@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
@@ -459,6 +461,7 @@ class DurableImportQueueHarness:
             priority=kwargs.get("priority", "normal"), attempt_count=0, max_attempts=5,
             last_error=None, payload=dict(kwargs.get("payload") or {}), result_payload={},
             raw_payload={}, created_by=kwargs.get("created_by"), trace_id=None,
+            created_at=datetime(2026, 10, 8, tzinfo=UTC),
         )
         self.jobs.append(job)
         return job
@@ -540,10 +543,19 @@ class DurableImportQueueHarness:
                         save_oa_records=lambda records: self.application._test_manual_workbench.sync_oa_row_ids([r.id for r in records]),
                         add_manual_oa_imports=add_manual,
                     )
+                    def prepare_attachments(ids, *, preparation_started_at):
+                        return [replace(record, attachment_artifacts=[
+                            {"source_attachment_key": f"{record.id}:file:{index}", "parse_status": "parsed"}
+                            for index in range(record.attachment_file_count)
+                        ]) for record in service._oa_adapter.list_application_records_by_row_ids(ids)]
                     processor = SharedImportProcessor(SimpleNamespace(transaction=lambda: nullcontext(None)),
-                        oa_source_adapter=service._oa_adapter)
+                        oa_source_adapter=SimpleNamespace(prepare_application_record_attachments=prepare_attachments))
                     with patch("fin_ops_platform.services.shared_import_processor.PostgresSharedImportRepository", return_value=repository), \
+                         patch("fin_ops_platform.services.shared_import_processor.PostgresOpsTaxEtcRepository") as settings, \
+                         patch("fin_ops_platform.services.shared_import_processor.OAAttachmentInvoicePromotionService") as promotion, \
                          patch.object(processor, "_record_completion"):
+                        settings.return_value.load_settings.return_value = {}
+                        promotion.return_value.promote_records.return_value = {"summary": {"affected_invoice_count": 0}}
                         processor.oa_manual(job)
                 else:
                     processors[job.import_type](job)

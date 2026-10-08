@@ -29,6 +29,19 @@ def reconcile_oa_attachment_cache_identity_sources(
                     %s::boolean as restrict_cache_keys,
                     %s::text[] as cache_source_attachment_keys
             ),
+            payment_attachment_sources as (
+                select attachment.source_attachment_key, attachment.oa_application_id,
+                       app.row_id as source_oa_id,
+                       nullif(attachment.filename, '') as source_attachment_name
+                from app.oa_attachments attachment
+                join app.oa_applications app on app.id = attachment.oa_application_id
+                where app.form_type = '支付申请' and app.status <> 'deleted'
+                  and attachment.normalized_payload->>'source_oa_id' = app.row_id
+                  and nullif(attachment.normalized_payload->>'source_expense_item_id', '') is null
+                  and nullif(attachment.normalized_payload->>'source_expense_row_index', '') is null
+                  and nullif(attachment.source_attachment_key, '') is not null
+                  and nullif(attachment.filename, '') is not null
+            ),
             target_attachment_sources as (
                 select distinct
                     attachment.source_attachment_key,
@@ -75,6 +88,11 @@ def reconcile_oa_attachment_cache_identity_sources(
                         ),
                         nullif(attachment.filename, '')
                       ) is not null
+                union all
+                select attachment.source_attachment_key, null::text, attachment.source_attachment_name
+                from payment_attachment_sources attachment
+                cross join requested_scope scope
+                where scope.restrict_oa_rows and attachment.source_oa_id = any(scope.oa_row_ids)
             ),
             oa_affected_cache_keys as (
                 select distinct source.cache_source_attachment_key
@@ -117,7 +135,6 @@ def reconcile_oa_attachment_cache_identity_sources(
                 join affected_cache_keys affected
                   on affected.cache_source_attachment_key = source.cache_source_attachment_key
                 where source.source_kind in ('invoice', 'evidence', 'artifact')
-                  and nullif(source.source_expense_item_id, '') is not null
                   and nullif(source.source_attachment_key, '') is not null
                   and nullif(source.source_attachment_name, '') is not null
             ),
@@ -217,6 +234,16 @@ def reconcile_oa_attachment_cache_identity_sources(
                    and cache.source_expense_item_id = attachment.source_expense_item_id
                    and cache.source_attachment_name = attachment.source_attachment_name
                   )
+                union all
+                select cache.cache_source_attachment_key, cache.parsed_source_attachment_key,
+                       cache.source_kind, attachment.source_attachment_key,
+                       attachment.oa_application_id, null::text, null::text,
+                       attachment.source_attachment_name, cache.parsed_at
+                from payment_attachment_sources attachment
+                join cache_evidence_sources cache
+                  on cache.parsed_source_attachment_key = attachment.source_attachment_key
+                 and nullif(cache.source_expense_item_id, '') is null
+                 and nullif(cache.source_expense_row_index, '') is null
             ),
             unique_identity_owners as (
                 select

@@ -690,7 +690,14 @@ export type WorkbenchSettingsDataResetJob = {
   error: string | null;
 };
 
-export type OaManualSearchItem = {
+export type OaAttachmentSummary = {
+  attachmentStatus: "unparsed" | "partial" | "ready" | "failed";
+  pendingAttachmentCount: number;
+  failedAttachmentCount: number;
+  unsupportedAttachmentCount: number;
+};
+
+export type OaManualSearchItem = OaAttachmentSummary & {
   date: string;
   amount: string;
   content: string;
@@ -700,7 +707,7 @@ export type OaManualSearchItem = {
   importableInvoiceCount: number;
 };
 
-export type OaManualSearchRow = {
+export type OaManualSearchRow = OaAttachmentSummary & {
   rowId: string;
   oaNo: string;
   applicant: string;
@@ -738,9 +745,10 @@ export type OaManualImportEntry = {
 };
 
 export type OaManualImportResult = {
+  promotion: { createdInvoiceCount: number; linkedExistingInvoiceCount: number; ignoredCandidateCount: number; reasonCounts: Record<string, number> };
   imported: string[];
   alreadyImported: string[];
-  failed: Array<Record<string, unknown>>;
+  failed: Array<{ rowId: string; code: string; message: string }>;
   rows: OaManualSearchRow[];
   affectedScopeKeys: string[];
 };
@@ -763,7 +771,7 @@ export type OaManualAttachmentRefreshResult = {
   affectedScopeKeys: string[];
 };
 
-export type OaManualAttachmentRefreshRow = {
+export type OaManualAttachmentRefreshRow = OaAttachmentSummary & {
   rowId: string;
   attachmentFileCount: number;
   importableInvoiceCount: number;
