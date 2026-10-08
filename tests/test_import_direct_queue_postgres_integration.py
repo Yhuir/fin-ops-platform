@@ -560,24 +560,23 @@ class ImportDirectQueuePostgresTests(unittest.TestCase):
         self.assertEqual(current.claim_version, replacement.claim_version)
 
     def test_shared_tax_certified_import_commits_one_batch_and_job_together(self):
-        from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
+        from fin_ops_platform.services.postgres_repositories.tax_certified_imports import PostgresTaxCertifiedImportRepository
         from fin_ops_platform.services.shared_import_processor import SharedImportProcessor
         from fin_ops_platform.services.tax_certified_import_service import (
             TaxCertifiedImportService,
-            UploadedCertifiedImportFile,
         )
 
-        from tests.mock_import_files import CERTIFIED_JAN
-        service = TaxCertifiedImportService(state_store=PostgresOpsTaxEtcRepository(self.connection))
-        session = service.preview_files(imported_by='owner', uploads=[UploadedCertifiedImportFile(CERTIFIED_JAN.name, CERTIFIED_JAN.content)])
+        from tests.test_tax_certified_import_service import certified_upload
+        service = TaxCertifiedImportService(repository=PostgresTaxCertifiedImportRepository(self.connection))
+        session = service.preview_files(imported_by='owner', uploads=[certified_upload()])
         job = self.repository.create_or_get_job(import_type='tax_certified_import.confirm', payload={'session_id':session.id}, created_by='owner')
         processor = SharedImportProcessor(self.connection)
         worker = ImportJobWorker(repository=self.repository, worker_id='worker', processors={'tax_certified_import.confirm':processor.tax_certified})
         self.assertEqual(worker.run_once(), RuntimeWorkerResult.PROCESSED)
         result = self.repository.get_job(job.import_job_id)
-        self.assertEqual(result.result_payload['batch']['persisted_record_count'], 2)
+        self.assertEqual(result.result_payload['batch']['persisted_record_count'], 1)
         self.assertEqual(self.connection.fetch_one('select count(*) n from app.tax_certified_import_batches')['n'], 1)
-        self.assertEqual(self.connection.fetch_one('select count(*) n from app.tax_certified_import_records')['n'], 2)
+        self.assertEqual(self.connection.fetch_one('select count(*) n from app.tax_certified_import_records')['n'], 1)
 
     def test_stale_preview_requires_reprepare_and_only_known_transient_errors_retry(self):
         from fin_ops_platform.services.etc_service import EtcImportPreviewStaleError

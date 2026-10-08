@@ -245,6 +245,9 @@ _EXACT_ROUTES = {
         "税金抵扣计划",
         "按当前发票与目标金额计算抵扣方案。",
     ),
+    ("POST", "/api/tax-offset/export"): _semantic(
+        "tax_certification.export", "导出专票清单", "tax_certification", "专票认证情况", "导出当前筛选范围的专票清单。"
+    ),
     ("POST", "/api/tax-offset/certified-import/preview"): _semantic(
         "tax_offset.certified_import.preview",
         "预览已认证发票导入",

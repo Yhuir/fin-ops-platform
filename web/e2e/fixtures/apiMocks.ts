@@ -1,3 +1,4 @@
+import { taxCertificationFixture } from "../../src/test/taxCertificationFixture";
 import { pendingAcquisitionFixture } from "../../src/test/pendingInvoiceFixtures";
 import type { Page, Route } from "@playwright/test";
 
@@ -114,7 +115,6 @@ type ApiMockOptions = {
   sessionUsername?: string;
   allowedPageKeys?: string[];
   taxOffsetLargeDataset?: boolean;
-  taxOffsetPlanSaveConflict?: boolean;
   dashboardError?: boolean;
   oaSyncMode?: OaSyncMockMode;
   operationBarrierMode?: OperationBarrierMockMode;
@@ -3137,244 +3137,6 @@ function etcBusinessBatchPagePayload(batchId: string, batchStatus: EtcBusinessBa
   };
 }
 
-function formatTaxAmount(value: number) {
-  return value.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-function taxSummary(
-  selectedInputIds: string[],
-  certifiedImported: boolean,
-  invoiceImportFanout = false,
-  etcImportFanout = false,
-) {
-  const outputTax = 41600;
-  const certifiedTax = certifiedImported ? 14080 : 0;
-  const plannedTax = selectedInputIds.reduce((total, id) => {
-    if (id === "ti-202603-001" && !certifiedImported) {
-      return total + 12480;
-    }
-    if (id === "ti-202603-002") {
-      return total + 5760;
-    }
-    if (invoiceImportFanout && id === "ti-202603-import-001") {
-      return total + 1038.87;
-    }
-    if (etcImportFanout && id === "ti-202603-etc-import-001") {
-      return total + 0.73;
-    }
-    return total;
-  }, 0);
-  const inputTax = certifiedTax + plannedTax;
-  const deductibleTax = Math.min(outputTax, inputTax);
-  const resultAmount = outputTax - deductibleTax;
-  return {
-    output_tax: formatTaxAmount(outputTax),
-    certified_input_tax: formatTaxAmount(certifiedTax),
-    planned_input_tax: formatTaxAmount(plannedTax),
-    input_tax: formatTaxAmount(inputTax),
-    deductible_tax: formatTaxAmount(deductibleTax),
-    result_label: resultAmount >= 0 ? "本月应纳税额" : "本月留抵税额",
-    result_amount: formatTaxAmount(Math.abs(resultAmount)),
-  };
-}
-
-function taxOffsetLargeOutputItems() {
-  return Array.from({ length: 80 }, (_, index) => {
-    const sequence = index + 2;
-    const day = String((index % 28) + 1).padStart(2, "0");
-    const taxAmount = 800 + index * 17.35;
-    const totalWithTax = taxAmount * 8.7;
-    return {
-      id: `to-202603-large-${String(sequence).padStart(3, "0")}`,
-      buyer_name: `华东超长项目甲方-${String(sequence).padStart(3, "0")}-窄屏横向滚动验证`,
-      issue_date: `2026-03-${day}`,
-      invoice_no: `90342${String(sequence).padStart(5, "0")}`,
-      tax_rate: index % 3 === 0 ? "13%" : "6%",
-      tax_amount: formatTaxAmount(taxAmount),
-      total_with_tax: formatTaxAmount(totalWithTax),
-      invoice_type: "销项专票",
-    };
-  });
-}
-
-function taxOffsetLargeInputItems() {
-  return Array.from({ length: 90 }, (_, index) => {
-    const sequence = index + 3;
-    const day = String(28 - (index % 28)).padStart(2, "0");
-    const taxAmount = 360 + index * 11.2;
-    const totalWithTax = taxAmount * 17.6;
-    return {
-      id: `ti-202603-large-${String(sequence).padStart(3, "0")}`,
-      seller_name: `进项超长供应商-${String(sequence).padStart(3, "0")}-筛选滚动验证`,
-      issue_date: `2026-03-${day}`,
-      invoice_no: `11299${String(sequence).padStart(5, "0")}`,
-      tax_rate: index % 2 === 0 ? "13%" : "6%",
-      tax_amount: formatTaxAmount(taxAmount),
-      total_with_tax: formatTaxAmount(totalWithTax),
-      risk_level: index % 4 === 0 ? "高" : index % 3 === 0 ? "中" : "低",
-      certified_status: "待认证",
-      is_locked_certified: false,
-    };
-  });
-}
-
-function taxOffsetPayload(
-  selectedInputIds: string[],
-  certifiedImported: boolean,
-  invoiceImportFanout = false,
-  etcImportFanout = false,
-  largeDataset = false,
-) {
-  const month = "2026-03";
-  const inputItems = [
-    {
-      id: "ti-202603-001",
-      seller_name: "设备供应商",
-      issue_date: "2026-03-22",
-      invoice_no: "11203490",
-      tax_rate: "13%",
-      tax_amount: "12,480.00",
-      total_with_tax: "108,480.00",
-      risk_level: "低",
-      certified_status: certifiedImported ? "已认证" : "待认证",
-      is_locked_certified: certifiedImported,
-    },
-    {
-      id: "ti-202603-002",
-      seller_name: "材料供应商",
-      issue_date: "2026-03-26",
-      invoice_no: "11203491",
-      tax_rate: "6%",
-      tax_amount: "5,760.00",
-      total_with_tax: "101,760.00",
-      risk_level: "中",
-      certified_status: "待认证",
-      is_locked_certified: false,
-    },
-    ...(invoiceImportFanout
-      ? [
-        {
-          id: "ti-202603-import-001",
-          seller_name: "发票导入进项供应商",
-          issue_date: "2026-05-21",
-          invoice_no: "SD-INV-IMPORT-E2E-001",
-          tax_rate: "6%",
-          tax_amount: "1,038.87",
-          total_with_tax: "18,320.00",
-          risk_level: "低",
-          certified_status: "待认证",
-          is_locked_certified: false,
-        },
-      ]
-      : []),
-    ...(etcImportFanout
-      ? [
-        {
-          id: "ti-202603-etc-import-001",
-          seller_name: "ETC导入通行服务商",
-          issue_date: "2026-03-27",
-          invoice_no: "ETC-2026-005",
-          tax_rate: "6%",
-          tax_amount: "0.73",
-          total_with_tax: "13.07",
-          risk_level: "低",
-          certified_status: "待认证",
-          is_locked_certified: false,
-        },
-      ]
-      : []),
-    ...(largeDataset ? taxOffsetLargeInputItems() : []),
-  ];
-  const defaultSelectedInputIds = certifiedImported
-    ? ["ti-202603-002"]
-    : [
-      ...selectedInputIds,
-      ...(invoiceImportFanout && !selectedInputIds.includes("ti-202603-import-001") ? ["ti-202603-import-001"] : []),
-      ...(etcImportFanout && !selectedInputIds.includes("ti-202603-etc-import-001") ? ["ti-202603-etc-import-001"] : []),
-    ];
-  return {
-    month,
-    canonical_snapshot_version: "tax-offset-v1:e2e-2026-03",
-    output_items: [
-      {
-        id: "to-202603-001",
-        buyer_name: "华东项目甲方",
-        issue_date: "2026-03-25",
-        invoice_no: "90342011",
-        tax_rate: "13%",
-        tax_amount: "41,600.00",
-        total_with_tax: "361,600.00",
-        invoice_type: "销项专票",
-      },
-      ...(largeDataset ? taxOffsetLargeOutputItems() : []),
-    ],
-    input_plan_items: inputItems,
-    certified_items: certifiedImported
-      ? [
-        {
-          id: "tc-202603-001",
-          seller_name: "设备供应商",
-          issue_date: "2026-03-22",
-          invoice_no: "11203490",
-          tax_rate: "13%",
-          tax_amount: "12,480.00",
-          total_with_tax: "108,480.00",
-          status: "已认证",
-          matched_input_id: "ti-202603-001",
-        },
-        {
-          id: "tc-202603-002",
-          seller_name: "高速通行服务商",
-          issue_date: "2026-03-28",
-          invoice_no: "ETC-202603-7788",
-          tax_rate: "6%",
-          tax_amount: "1,600.00",
-          total_with_tax: "28,266.67",
-          status: "已认证",
-          matched_input_id: null,
-        },
-      ]
-      : [],
-    certified_matched_rows: certifiedImported
-      ? [
-        {
-          id: "tc-202603-001",
-          seller_name: "设备供应商",
-          issue_date: "2026-03-22",
-          invoice_no: "11203490",
-          tax_rate: "13%",
-          tax_amount: "12,480.00",
-          total_with_tax: "108,480.00",
-          status: "已认证",
-          matched_input_id: "ti-202603-001",
-        },
-      ]
-      : [],
-    certified_outside_plan_rows: certifiedImported
-      ? [
-        {
-          id: "tc-202603-002",
-          seller_name: "高速通行服务商",
-          issue_date: "2026-03-28",
-          invoice_no: "ETC-202603-7788",
-          tax_rate: "6%",
-          tax_amount: "1,600.00",
-          total_with_tax: "28,266.67",
-          status: "已认证",
-          matched_input_id: null,
-        },
-      ]
-      : [],
-    locked_certified_input_ids: certifiedImported ? ["ti-202603-001"] : [],
-    default_selected_output_ids: ["to-202603-001"],
-    default_selected_input_ids: defaultSelectedInputIds,
-    summary: taxSummary(defaultSelectedInputIds, certifiedImported, invoiceImportFanout, etcImportFanout),
-  };
-}
-
 function taxCertifiedImportPreviewPayload() {
   return {
     session: {
@@ -3390,16 +3152,18 @@ function taxCertifiedImportPreviewPayload() {
         month: "2026-03",
         recognized_count: 2,
         invalid_count: 0,
-        matched_plan_count: 1,
-        outside_plan_count: 1,
+        matched_invoice_count: 1,
+        outside_invoices_count: 1,
+          conflict_count: 0, duplicate_count: 0, ignored_count: 0, blocking_count: 0,
         rows: [
           {
             id: "tax-certified-row-e2e-001",
             month: "2026-03",
             row_status: "recognized",
-            match_status: "matched_plan",
-            matched_plan_id: "ti-202603-001",
+            match_status: "matched_invoice",
+            matched_invoice_id: "ti-202603-001",
             dedupe_status: "new",
+            unique_key: "test-key", expected_version: null, buyer_tax_no: "91530100BUYER",
             error_message: null,
             digital_invoice_no: null,
             invoice_code: "5300261130",
@@ -3419,9 +3183,10 @@ function taxCertifiedImportPreviewPayload() {
             id: "tax-certified-row-e2e-002",
             month: "2026-03",
             row_status: "recognized",
-            match_status: "outside_plan",
-            matched_plan_id: null,
+            match_status: "outside_invoices",
+            matched_invoice_id: null,
             dedupe_status: "new",
+            unique_key: "test-key", expected_version: null, buyer_tax_no: "91530100BUYER",
             error_message: null,
             digital_invoice_no: "ETC-202603-7788",
             invoice_code: null,
@@ -3443,8 +3208,9 @@ function taxCertifiedImportPreviewPayload() {
     summary: {
       recognized_count: 2,
       invalid_count: 0,
-      matched_plan_count: 1,
-      outside_plan_count: 1,
+      matched_invoice_count: 1,
+      outside_invoices_count: 1,
+          conflict_count: 0, duplicate_count: 0, ignored_count: 0, blocking_count: 0,
     },
   };
 }
@@ -8376,8 +8142,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   let etcTicketManualStatusFailuresRemaining =
     options.etcTicketManualStatusFailuresBeforeSuccess ?? (options.etcTicketManualStatusFailOnce ? 1 : 0);
   let taxCertifiedImported = false;
-  let taxSelectedInputIds = ["ti-202603-001", "ti-202603-002"];
-  let taxOffsetPlanSaveConflictRemaining = Boolean(options.taxOffsetPlanSaveConflict);
   let outputInvoiceCollectionRowsFailuresRemaining =
     options.outputInvoiceCollectionRowsFailuresBeforeSuccess ?? (options.outputInvoiceCollectionRowsFailOnce ? 1 : 0);
   let inputInvoiceOaSubmitted = false;
@@ -8902,69 +8666,20 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     const bankFlowRuleCostConfirmed = bankFlowRuleBatchStatus === "submitted" && Boolean(options.bankFlowRuleCostFanout);
     const turnoverCostConfirmed = turnoverClosureConfirmed && Boolean(options.turnoverCostFanout);
     if (path === "/api/tax-offset") {
-      return json(route, taxOffsetPayload(
-        taxSelectedInputIds,
-        taxCertifiedImported,
-        invoiceImportDownstreamConfirmed,
-        etcImportDownstreamConfirmed,
-        Boolean(options.taxOffsetLargeDataset),
-      ));
+      return json(route, taxCertificationFixture(url.searchParams, { certified: taxCertifiedImported, importedInvoice: invoiceImportDownstreamConfirmed, importedEtc: etcImportDownstreamConfirmed, large: options.taxOffsetLargeDataset }));
     }
-
-    if (path === "/api/tax-offset/calculate") {
-      const body = JSON.parse(request.postData() || "{}") as { selected_input_ids?: string[] };
-      const selectedInputIds = Array.isArray(body.selected_input_ids) ? body.selected_input_ids : taxSelectedInputIds;
-      return json(route, {
-        month: "2026-03",
-        summary: taxSummary(
-          selectedInputIds,
-          taxCertifiedImported,
-          invoiceImportDownstreamConfirmed,
-          etcImportDownstreamConfirmed,
-        ),
-      });
-    }
-
-    if (path === "/api/tax-offset/plans") {
-      if (taxOffsetPlanSaveConflictRemaining) {
-        taxOffsetPlanSaveConflictRemaining = false;
-        return json(route, {
-          error: "tax_offset_canonical_version_conflict",
-          message: "税金抵扣数据已变化，请刷新后重新保存。",
-          canonical_snapshot_version: "tax-offset-v1:e2e-current",
-          expected_canonical_snapshot_version: "tax-offset-v1:e2e-stale",
-        }, 409);
-      }
-      const body = JSON.parse(request.postData() || "{}") as { selected_input_ids?: string[] };
-      taxSelectedInputIds = Array.isArray(body.selected_input_ids) ? body.selected_input_ids : taxSelectedInputIds;
-      return json(route, {
-        status: "saved",
-        affected_scope_keys: ["2026-03"],
-        plan: {
-          id: "tax-offset-plan-e2e-001",
-          month: "2026-03",
-          selected_output_ids: ["to-202603-001"],
-          selected_input_ids: taxSelectedInputIds,
-          summary: taxSummary(
-            taxSelectedInputIds,
-            taxCertifiedImported,
-            invoiceImportDownstreamConfirmed,
-            etcImportDownstreamConfirmed,
-          ),
-          canonical_snapshot_version: "tax-offset-v1:e2e-2026-03",
-          updated_at: "2026-06-17T01:00:00Z",
-        },
-      });
-    }
+    if (path === "/api/tax-offset/certified-imports") return json(route, { records: [], batches: [], records_total: 0, batches_total: 0, records_page: 1, batches_page: 1, page_size: 20 });
+    if (path === "/api/tax-offset/export") return route.fulfill({ status: 200, contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", body: "xlsx" });
 
     if (path === "/api/tax-offset/certified-import/preview") {
       return json(route, taxCertifiedImportPreviewPayload());
     }
 
+    if (path === "/api/tax-offset/certified-import/jobs/tax-job-1") return json(route, { import_job: { import_job_id: "tax-job-1", import_type: "tax_certified_import", status: "succeeded", stage: "completed", result_payload: taxCertifiedImportConfirmPayload() } });
+
     if (path === "/api/tax-offset/certified-import/confirm") {
       taxCertifiedImported = true;
-      taxSelectedInputIds = ["ti-202603-002"];
-      return json(route, taxCertifiedImportConfirmPayload());
+      return json(route, { status: "queued", import_job: { import_job_id: "tax-job-1", import_type: "tax_certified_import", status: "queued", stage: "queued" } }, 202);
     }
 
     if (path === "/api/input-invoice-usage/rows") {

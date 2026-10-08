@@ -1,251 +1,176 @@
 from __future__ import annotations
 
-import json
-import re
 from contextlib import contextmanager
+from datetime import date, datetime
 from decimal import Decimal
-from hashlib import sha256
 from typing import Any, Iterator
 
-from fin_ops_platform.services.live_workbench_service import format_decimal
-from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
-from fin_ops_platform.services.tax_offset_service import TaxOffsetService
+from fin_ops_platform.services.postgres_repositories.common import jsonb
+from fin_ops_platform.services.tax_offset_query_service import TaxOffsetQuery
 
-MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+SPECIAL_INVOICE_KINDS = (
+    "进项专票", "增值税专用发票", "增值税电子专用发票", "电子专用发票",
+    "电子发票(增值税专用发票)", "数电票(专用发票)", "数电发票(增值税专用发票)",
+)
+_RAW_INVOICE = "coalesce(i.raw_payload->'normalized_payload', i.raw_payload)"
+_KIND = f"replace(replace(btrim({_RAW_INVOICE}->>'invoice_kind'), '（', '('), '）', ')')"
+SPECIAL_INVOICE_SCOPE_SQL = f"i.status <> 'deleted' and i.invoice_type = 'input' and {_KIND} = any(%s)"
 
 
 class PostgresTaxOffsetCanonicalRepository:
-    """Load one tax-offset month from canonical tables in one DB snapshot."""
+    """Read the special-invoice inventory and certification facts in one snapshot."""
 
     def __init__(self, connection: Any) -> None:
         if connection is None:
-            raise ValueError("Tax offset canonical repository requires a PostgreSQL connection.")
+            raise ValueError("Tax offset query requires PostgreSQL.")
         self._connection = connection
 
-    def load_month_payload(self, month: str) -> dict[str, Any]:
-        normalized_month = _normalize_month(month)
-        with self._snapshot_transaction() as transaction:
-            return load_tax_offset_month(transaction, normalized_month)
-
     @contextmanager
-    def _snapshot_transaction(self) -> Iterator[Any]:
+    def _snapshot(self) -> Iterator[Any]:
         with self._connection.transaction() as transaction:
             transaction.execute("set transaction isolation level repeatable read read only")
             yield transaction
 
+    def load_page(self, query: TaxOffsetQuery, *, limit_override: int | None = None) -> dict[str, Any]:
+        with self._snapshot() as transaction:
+            return load_tax_offset_page(transaction, query, limit_override=limit_override)
 
-class LocalTaxOffsetCanonicalRepository:
-    """Canonical local-state adapter used by tests and non-PostgreSQL development."""
-
-    def __init__(self, tax_offset_service: Any) -> None:
-        if not callable(getattr(tax_offset_service, "get_month_payload", None)):
-            raise ValueError("Tax offset local repository requires a tax offset service.")
-        self._tax_offset_service = tax_offset_service
-
-    def load_month_payload(self, month: str) -> dict[str, Any]:
-        normalized_month = _normalize_month(month)
-        return _finalize_payload(dict(self._tax_offset_service.get_month_payload(normalized_month)))
-
-
-def load_tax_offset_month(connection: Any, month: str) -> dict[str, Any]:
-    """Build a month payload from a caller-owned canonical database snapshot."""
-
-    normalized_month = _normalize_month(month)
-    invoice_rows = connection.fetch_all(
-        """
-        select coalesce(legacy_mongo_id, id::text) as row_id, invoice_type, invoice_no, invoice_code,
-               digital_invoice_no, invoice_date, seller_name, seller_tax_no, buyer_name, buyer_tax_no,
-               tax_amount, total_with_tax, amount, tax_rate, raw_payload
-        from app.invoices
-        where invoice_month = %s::date
-          and status <> 'deleted'
-        order by invoice_date nulls last, row_id
-        """,
-        (month_start(normalized_month),),
-    )
-    certified_rows = connection.fetch_all(
-        """
-        select certified_unique_key, invoice_no, invoice_code, digital_invoice_no, seller_name, seller_tax_no,
-               invoice_date, amount, tax_amount, status, raw_payload
-        from app.tax_certified_import_records
-        where scope_month = %s::date
-          and status <> 'deleted'
-        order by invoice_date nulls last, certified_unique_key
-        """,
-        (month_start(normalized_month),),
-    )
-    saved_plan_row = connection.fetch_one(
-        """
-        select selected_output_ids, selected_input_ids
-        from app.tax_offset_plans
-        where scope_month = %s::date
-          and status = 'saved'
-        order by updated_at desc, plan_id desc
-        limit 1
-        """,
-        (month_start(normalized_month),),
-    )
-    output_items: list[dict[str, Any]] = []
-    input_items: list[dict[str, Any]] = []
-    for row in invoice_rows:
-        output = _is_output_invoice(row.get("invoice_type"))
-        (output_items if output else input_items).append(_tax_invoice_item(row, output=output))
-    certified_items = [_certified_item(row) for row in certified_rows]
-    service = TaxOffsetService(
-        month_data={
-            normalized_month: {
-                "output_items": output_items,
-                "input_plan_items": input_items,
+    def match_certified_rows(self, rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        if not rows:
+            return {}
+        unique_rows: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            key = row.get("unique_key")
+            if not isinstance(key, str) or not key:
+                raise ValueError("认证记录缺少唯一标识。")
+            identity = {field: row.get(field) for field in
+                        ("unique_key", "digital_invoice_no", "invoice_code", "invoice_no", "buyer_tax_no")}
+            if key in unique_rows and unique_rows[key] != identity:
+                raise ValueError("同一认证标识包含不同发票身份。")
+            unique_rows[key] = identity
+        matched = self._connection.fetch_all(
+            f"""with requested as (
+                select * from jsonb_to_recordset(%s::jsonb) as r(
+                    unique_key text, digital_invoice_no text, invoice_code text, invoice_no text, buyer_tax_no text)
+            )
+            select r.unique_key, array_agg(i.id::text order by i.id) filter (where i.id is not null) as invoice_ids
+            from requested r
+            left join app.invoices i on {SPECIAL_INVOICE_SCOPE_SQL}
+                and nullif(r.buyer_tax_no, '') is not null and i.buyer_tax_no = r.buyer_tax_no
+                and ((nullif(r.digital_invoice_no, '') is not null and i.digital_invoice_no = r.digital_invoice_no)
+                     or (nullif(r.digital_invoice_no, '') is null and nullif(r.invoice_code, '') is not null
+                         and nullif(r.invoice_no, '') is not null
+                         and i.invoice_code = r.invoice_code and i.invoice_no = r.invoice_no))
+            group by r.unique_key""", (jsonb(list(unique_rows.values())), list(SPECIAL_INVOICE_KINDS)))
+        result = {}
+        for row in matched:
+            ids = row["invoice_ids"] or []
+            result[row["unique_key"]] = {
+                "match_status": "matched_invoice" if len(ids) == 1 else "ambiguous" if ids else "outside_invoices",
+                "matched_invoice_id": ids[0] if len(ids) == 1 else None,
             }
-        },
-        certified_records_loader=lambda _requested_month: certified_items,
-    )
-    payload = dict(service.get_month_payload(normalized_month))
-    canonical_snapshot_version = _canonical_snapshot_version(payload)
-    if isinstance(saved_plan_row, dict):
-        _apply_saved_plan(payload, saved_plan_row, service=service)
-    payload["canonical_snapshot_version"] = canonical_snapshot_version
-    return _finalize_payload(payload)
+        return result
 
 
-def _apply_saved_plan(
-    payload: dict[str, Any],
-    saved_plan: dict[str, Any],
-    *,
-    service: TaxOffsetService,
-) -> None:
-    available_output_ids = {
-        str(item.get("id") or "")
-        for item in list(payload.get("output_items") or [])
-        if isinstance(item, dict) and item.get("is_selectable", True)
-    }
-    locked_input_ids = {
-        str(value) for value in list(payload.get("locked_certified_input_ids") or [])
-    }
-    available_input_ids = {
-        str(item.get("id") or "")
-        for item in list(payload.get("input_plan_items") or [])
-        if isinstance(item, dict) and item.get("is_selectable", True) and str(item.get("id") or "") not in locked_input_ids
-    }
-    selected_output_ids = [
-        str(value)
-        for value in list(saved_plan.get("selected_output_ids") or [])
-        if str(value) in available_output_ids
-    ]
-    selected_input_ids = [
-        str(value)
-        for value in list(saved_plan.get("selected_input_ids") or [])
-        if str(value) in available_input_ids
-    ]
-    payload["default_selected_output_ids"] = selected_output_ids
-    payload["default_selected_input_ids"] = selected_input_ids
-    payload["summary"] = service.calculate_from_month_payload(
-        month=str(payload["month"]),
-        month_payload=payload,
-        selected_output_ids=selected_output_ids,
-        selected_input_ids=selected_input_ids,
-    )["summary"]
+def _inventory_query(query: TaxOffsetQuery) -> tuple[str, tuple[Any, ...]]:
+    clauses = [SPECIAL_INVOICE_SCOPE_SQL]
+    params: list[Any] = [list(SPECIAL_INVOICE_KINDS)]
+    if query.status != "all":
+        clauses.append("c.id is not null" if query.status == "certified" else "c.id is null")
+    if query.issue_month:
+        clauses.append("i.invoice_date >= %s::date and i.invoice_date < (%s::date + interval '1 month')")
+        params.extend([query.issue_month + "-01"] * 2)
+    if query.selection_month:
+        clauses.append("c.selection_time >= %s::timestamp and c.selection_time < (%s::timestamp + interval '1 month')")
+        params.extend([query.selection_month + "-01"] * 2)
+    if query.search:
+        clauses.append("(i.digital_invoice_no ilike %s escape '\\' or i.invoice_no ilike %s escape '\\' "
+                       "or i.invoice_code ilike %s escape '\\' or i.seller_name ilike %s escape '\\' "
+                       "or i.seller_tax_no ilike %s escape '\\')")
+        escaped = query.search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        params.extend([f"%{escaped}%"] * 5)
+    return f"""with inventory as (
+        select i.id::text as id, i.digital_invoice_no, i.invoice_code, i.invoice_no,
+               i.invoice_date as issue_date, i.seller_name, i.seller_tax_no,
+               i.amount, i.tax_amount, c.deductible_tax_amount, c.selection_time,
+               case when c.id is null then 'uncertified' else 'certified' end as certification_status,
+               to_char(c.scope_month, 'YYYY-MM') as tax_period,
+               jsonb_build_object('invoice_source', {_RAW_INVOICE}->>'invoice_source',
+                   'invoice_kind', {_RAW_INVOICE}->>'invoice_kind', 'risk_level', {_RAW_INVOICE}->>'risk_level',
+                   'invoice_status_from_source', {_RAW_INVOICE}->>'invoice_status_from_source') as invoice_source_fields,
+               jsonb_build_object('source_fields',
+                   coalesce(c.raw_payload->'normalized_payload', c.raw_payload)->'source_fields') as certification_source_fields
+        from app.invoices i
+        left join app.tax_certified_import_records c on c.invoice_id = i.id and c.status = 'active'
+        where {' and '.join(clauses)}
+    )""", tuple(params)
 
 
-def _finalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    payload["statistics"] = tax_offset_scope_statistics(payload)
-    payload.setdefault("canonical_snapshot_version", _canonical_snapshot_version(payload))
-    return payload
+def load_tax_offset_page(connection: Any, query: TaxOffsetQuery, *, limit_override: int | None = None) -> dict[str, Any]:
+    """Caller owns the fixed read snapshot; page and export share filter and ordering."""
+    cte, params = _inventory_query(query)
+    summaries = connection.fetch_all(cte + """
+        select certification_status, count(*) as count, sum(amount) as amount,
+               sum(tax_amount) as tax_amount, sum(deductible_tax_amount) as deductible_tax_amount,
+               count(*) filter (where amount is null) as missing_amount_count,
+               count(*) filter (where tax_amount is null) as missing_tax_count,
+               count(*) filter (where deductible_tax_amount is null) as missing_deductible_tax_count
+        from inventory group by certification_status""", params)
+    summary: dict[str, dict[str, Any]] = {}
+    for status in ("certified", "uncertified"):
+        group = next((row for row in summaries if row["certification_status"] == status), {})
+        summary[status] = {"count": int(group.get("count", 0)), "amount": _money(group.get("amount")),
+                           "tax_amount": _money(group.get("tax_amount")),
+                           "missing_amount_count": int(group.get("missing_amount_count", 0)),
+                           "missing_tax_count": int(group.get("missing_tax_count", 0))}
+        if status == "certified":
+            summary[status].update(deductible_tax_amount=_money(group.get("deductible_tax_amount")),
+                                  missing_deductible_tax_count=int(group.get("missing_deductible_tax_count", 0)))
+    total = sum(group["count"] for group in summary.values())
+    page = min(query.page, max(1, (total + query.page_size - 1) // query.page_size)) if limit_override is None else 1
+    limit = query.page_size if limit_override is None else limit_override
+    offset = (page - 1) * query.page_size if limit_override is None else 0
+    # Columns and direction are validated enum values, never user SQL fragments.
+    ordering = f"{query.sort_by} {query.sort_direction} nulls last, id asc"
+    rows = connection.fetch_all(cte + f" select * from inventory order by {ordering} limit %s offset %s",
+                                (*params, limit, offset))
+    unresolved = connection.fetch_one(
+        "select count(*) as count from app.tax_certified_import_records where status not in ('revoked', 'deleted') and invoice_id is null")
+    return {"rows": [_row_payload(row, sequence=offset + index) for index, row in enumerate(rows, 1)],
+            "total": total,
+            "page": page, "page_size": query.page_size, "summary": summary,
+            "unresolved_record_count": int(unresolved["count"])}
 
 
-def _canonical_snapshot_version(payload: dict[str, Any]) -> str:
-    canonical_payload = {
-        key: payload.get(key)
-        for key in (
-            "month",
-            "output_items",
-            "input_plan_items",
-            "certified_items",
-            "certified_matched_rows",
-            "certified_outside_plan_rows",
-            "locked_certified_input_ids",
-        )
-    }
-    encoded = json.dumps(
-        canonical_payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    ).encode("utf-8")
-    return f"tax-offset-v1:{sha256(encoded).hexdigest()}"
-
-
-def _normalize_month(value: Any) -> str:
-    month = str(value or "").strip()
-    if not MONTH_RE.fullmatch(month):
-        raise ValueError("month must be YYYY-MM.")
-    return month
-
-
-def _is_output_invoice(invoice_type: Any) -> bool:
-    normalized = str(invoice_type or "").strip().lower()
-    return "output" in normalized or "销" in normalized
-
-
-def _tax_invoice_item(row: dict[str, Any], *, output: bool) -> dict[str, Any]:
-    raw_payload = row_payload(row, "raw_payload")
-    common = {
-        "id": str(row.get("row_id") or ""),
-        "issue_date": str(row.get("invoice_date") or ""),
-        "invoice_no": row.get("invoice_no"),
-        "invoice_code": row.get("invoice_code"),
-        "digital_invoice_no": row.get("digital_invoice_no"),
-        "amount": _money(row.get("amount")),
-        "tax_amount": _money(row.get("tax_amount")),
-        "tax_amount_text": raw_payload.get("tax_amount_text"),
-        "total_with_tax": _money(row.get("total_with_tax")),
-        "invoice_type": "销项发票" if output else "进项发票",
-        "tax_rate": row.get("tax_rate") or "—",
-    }
-    if output:
-        return {
-            **common,
-            "buyer_name": row.get("buyer_name") or "",
-            "buyer_tax_no": row.get("buyer_tax_no"),
-        }
-    return {
-        **common,
-        "seller_name": row.get("seller_name") or "",
-        "seller_tax_no": row.get("seller_tax_no"),
-        "risk_level": (
-            raw_payload.get("risk_level") if isinstance(raw_payload, dict) else None
-        )
-        or "待评估",
-    }
-
-
-def _certified_item(row: dict[str, Any]) -> dict[str, Any]:
-    raw_payload = row_payload(row, "raw_payload")
-    return {
-        **(raw_payload if isinstance(raw_payload, dict) else {}),
-        "id": str(row.get("certified_unique_key") or ""),
-        "unique_key": row.get("certified_unique_key"),
-        "invoice_no": row.get("invoice_no"),
-        "invoice_code": row.get("invoice_code"),
-        "digital_invoice_no": row.get("digital_invoice_no"),
-        "seller_name": row.get("seller_name"),
-        "seller_tax_no": row.get("seller_tax_no"),
-        "issue_date": str(row.get("invoice_date") or ""),
-        "amount": _money(row.get("amount")),
-        "tax_amount": _money(row.get("tax_amount")),
-        "status": row.get("status") or "已认证",
-    }
-
-
-def tax_offset_scope_statistics(payload: dict[str, Any]) -> dict[str, int]:
-    return {
-        "input_invoice_count": len(list(payload.get("input_plan_items") or [])),
-        "output_invoice_count": len(list(payload.get("output_items") or [])),
-    }
+def _row_payload(row: dict[str, Any], *, sequence: int) -> dict[str, Any]:
+    source = row["invoice_source_fields"] or {}
+    certification = row["certification_source_fields"] or {}
+    source_fields = certification.get("source_fields") or {}
+    result = {key: row[key] for key in ("id", "digital_invoice_no", "invoice_code", "invoice_no", "seller_name",
+                                       "seller_tax_no", "certification_status", "tax_period")}
+    result.update(sequence=sequence, issue_date=_date_text(row["issue_date"]), selection_time=_date_text(row["selection_time"]),
+                  amount=_money(row["amount"]), tax_amount=_money(row["tax_amount"]),
+                  deductible_tax_amount=_money(row["deductible_tax_amount"]))
+    for key in ("selection_status", "domestic_sales_certificate_no", "invoice_kind_label", "risk_status"):
+        result[key] = source_fields.get(key)
+    for key in ("invoice_source", "invoice_kind", "risk_level"):
+        result[key] = source_fields.get(key) if row["certification_status"] == "certified" else source.get(key)
+    result["invoice_status"] = (source_fields.get("invoice_status") if row["certification_status"] == "certified"
+                                else source.get("invoice_status_from_source"))
+    result["source_fields"] = source_fields
+    return result
 
 
 def _money(value: Any) -> str | None:
-    if value in (None, ""):
+    if value is None:
         return None
-    return format_decimal(Decimal(str(value).replace(",", "").strip()))
+    amount = Decimal(str(value))
+    if amount == amount.quantize(Decimal("0.01")):
+        return format(amount, ".2f")
+    return format(amount, "f")
+
+
+def _date_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat(sep=" ") if isinstance(value, datetime) else value.isoformat() if isinstance(value, date) else str(value)

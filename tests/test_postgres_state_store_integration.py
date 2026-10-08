@@ -45,13 +45,6 @@ from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRep
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.state_store_protocol import SettingsAccessControlCommitOutcomeUnknown
-from fin_ops_platform.services.tax_certified_import_service import (
-    TaxCertifiedImportBatch,
-    TaxCertifiedImportPreviewFile,
-    TaxCertifiedImportService,
-    TaxCertifiedImportSession,
-    TaxCertifiedInvoiceRecord,
-)
 from postgres_test_utils import (
     apply_test_migrations,
     fetch_scalar,
@@ -938,79 +931,6 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             ),
             "batch-owner-a",
         )
-
-    def test_tax_certified_imports_round_trip_through_formal_tables(self) -> None:
-        imported_at = datetime(2026, 1, 20, tzinfo=UTC)
-        record = TaxCertifiedInvoiceRecord(
-            id="cert-record-1",
-            unique_key="cert-key-1",
-            month="2026-01",
-            source_file_name="certified.xlsx",
-            source_row_number=3,
-            taxpayer_tax_no="915300007194052520",
-            taxpayer_name="云南溯源科技有限公司",
-            digital_invoice_no="DINV-001",
-            invoice_code="CODE-001",
-            invoice_no="NO-001",
-            issue_date="2026-01-05",
-            seller_tax_no="SELLER-TAX",
-            seller_name="供应商A",
-            amount="100.00",
-            tax_amount="6.00",
-            deductible_tax_amount="6.00",
-            selection_status="已认证",
-            invoice_status="正常",
-            selection_time="2026-01-20 10:00:00",
-            imported_at=imported_at,
-        )
-        preview_file = TaxCertifiedImportPreviewFile(
-            id="tax-certified-file-0001",
-            file_name="certified.xlsx",
-            month="2026-01",
-            recognized_count=1,
-            invalid_count=0,
-            rows=[record],
-        )
-        session = TaxCertifiedImportSession(
-            id="tax-certified-session-0001",
-            imported_by="tester",
-            file_count=1,
-            status="confirmed",
-            files=[preview_file],
-            created_at=imported_at,
-        )
-        batch = TaxCertifiedImportBatch(
-            id="tax-certified-batch-0001",
-            session_id=session.id,
-            imported_by="tester",
-            file_count=1,
-            months=["2026-01"],
-            persisted_record_count=1,
-            created_at=imported_at,
-        )
-
-        self.store.save_tax_certified_imports(
-            {
-                "session_counter": 1,
-                "file_counter": 1,
-                "batch_counter": 1,
-                "sessions": {session.id: session},
-                "batches": {batch.id: batch},
-                "records": {record.unique_key: record},
-            }
-        )
-
-        self.assertEqual(fetch_scalar(self.database_url, "select count(*) from app.tax_certified_import_sessions;"), "1")
-        self.assertEqual(fetch_scalar(self.database_url, "select count(*) from app.tax_certified_import_batches;"), "1")
-        self.assertEqual(fetch_scalar(self.database_url, "select count(*) from app.tax_certified_import_records;"), "1")
-
-        reloaded_service = TaxCertifiedImportService(state_store=self.store)
-        records = reloaded_service.list_records_for_month("2026-01")
-
-        self.assertEqual(len(records), 1)
-        self.assertIsInstance(records[0], TaxCertifiedInvoiceRecord)
-        self.assertEqual(records[0].invoice_no, "NO-001")
-        self.assertEqual(reloaded_service.get_session(session.id).files[0].rows[0].unique_key, "cert-key-1")
 
     def test_etc_state_round_trip_through_formal_tables(self) -> None:
         now = datetime(2026, 3, 8, tzinfo=UTC)

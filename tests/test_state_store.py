@@ -473,27 +473,6 @@ class StateStoreTests(unittest.TestCase):
             self.assertEqual(reloaded.load_no_oa_bank_batches(), no_oa_snapshot)
             self.assertEqual(reloaded.load_bank_flow_rule_batches(), bank_flow_snapshot)
 
-    def test_tax_imports_and_offset_plan_persist_locally(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            data_dir = Path(temp_dir)
-            store = ApplicationStateStore(data_dir)
-            tax_imports = {
-                "sessions": {"session-1": {"status": "completed"}},
-                "batches": {},
-                "records": {},
-            }
-            plan = {"id": "plan-1", "idempotency_key": "idem-1", "amount": "100.00"}
-
-            store.save_tax_certified_imports(tax_imports)
-            saved_plan = store.save_tax_offset_plan(plan)
-            duplicate_plan = store.save_tax_offset_plan({"id": "plan-2", "idempotency_key": "idem-1"})
-
-            reloaded = ApplicationStateStore(data_dir)
-
-            self.assertEqual(reloaded.load_tax_certified_imports(), tax_imports)
-            self.assertEqual(saved_plan, plan)
-            self.assertEqual(duplicate_plan, plan)
-
     def test_save_no_oa_bank_batches_persists_and_loads_local_snapshot(self) -> None:
         with TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)

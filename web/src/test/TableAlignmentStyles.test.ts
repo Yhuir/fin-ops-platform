@@ -56,7 +56,6 @@ describe("finance table alignment styles", () => {
       ".app-health-section",
       ".app-health-inventory-panel",
       ".import-workflow-panel--table",
-      ".tax-panel",
       ".settings-native-table-shell",
       ".bank-transaction-panel",
       ".bank-transaction-grid",
@@ -71,6 +70,8 @@ describe("finance table alignment styles", () => {
     expect(turnoverStyles).toMatch(/\.turnover-ledger-table-panel\s*\{[^}]*border-radius:\s*6px/);
     expect(turnoverStyles).toMatch(/\.turnover-flows\s*\{[^}]*border-radius:\s*0/);
     expect(source).not.toContain(".turnover-ledger-table-wrap");
+    expect(source).not.toContain(".tax-panel");
+    expect(readFileSync("src/components/tax/TaxCertificationTable.tsx", "utf8")).toContain("<FinanceTable");
 
     flatSurfaceSelectors.forEach((selector) => {
       expectSquareSurface(selector);

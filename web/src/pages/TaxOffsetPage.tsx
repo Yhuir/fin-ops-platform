@@ -1,494 +1,57 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Alert, Button } from "@heroui/react";
-
+import { useState } from "react";
+import { Button, Label, ListBox, Select } from "@heroui/react";
 import PageScaffold from "../components/common/PageScaffold";
-import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
-import StatePanel from "../components/common/StatePanel";
+import QuerySearch from "../components/common/QuerySearch";
 import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
-import CertifiedInvoiceImportModal from "../components/tax/CertifiedInvoiceImportModal";
-import CertifiedResultsDrawer from "../components/tax/CertifiedResultsDrawer";
-import TaxSummaryBand from "../components/tax/TaxSummaryBand";
-import TaxTable from "../components/tax/TaxTable";
-import { useAppChrome } from "../contexts/AppChromeContext";
+import StatePanel from "../components/common/StatePanel";
+import TaxCertificationTable from "../components/tax/TaxCertificationTable";
+import TaxCertificationSummary from "../components/tax/TaxCertificationSummary";
+import TaxCertificationExportDrawer from "../components/tax/TaxCertificationExportDrawer";
+import CertifiedInvoiceImportDrawer from "../components/tax/CertifiedInvoiceImportDrawer";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
-import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
-import { ApiClientError } from "../features/apiClient";
-import { calculateTaxOffset, fetchTaxOffsetMonth, saveTaxOffsetPlan } from "../features/tax/api";
-import { importWorkflowPath } from "../features/imports/importRoutes";
-import type {
-  TaxCertifiedImportConfirmedResult,
-  TaxMonthData,
-  TaxSummary,
-} from "../features/tax/types";
-
-function toggleSelection(currentIds: string[], id: string) {
-  return currentIds.includes(id) ? currentIds.filter((currentId) => currentId !== id) : [...currentIds, id];
-}
-
-function getSelectableInputIds(data: TaxMonthData | null) {
-  if (!data) {
-    return [];
-  }
-  return data.inputPlanInvoices.filter((row) => row.isSelectable !== false && !row.isLocked).map((row) => row.id);
-}
-
-function hasSameIds(left: string[], right: string[]) {
-  if (left.length !== right.length) {
-    return false;
-  }
-  return left.every((id, index) => id === right[index]);
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
-}
-
-function PageNote({ message, tone }: { message: string; tone: "info" | "success" }) {
-  return (
-    <Alert className={`page-note page-note-${tone}`} role="status" status={tone === "success" ? "success" : "accent"}>
-      <Alert.Indicator />
-      <Alert.Content>
-        <Alert.Description>{message}</Alert.Description>
-      </Alert.Content>
-    </Alert>
-  );
-}
+import { useTaxCertifications } from "../features/tax/useTaxCertifications";
+import type { TaxCertificationFilters, TaxCertificationQuery, TaxExportField } from "../features/tax/types";
+import "../components/tax/taxCertification.css";
 
 export default function TaxOffsetPage() {
-  const navigate = useNavigate();
-  const { setWorkbenchHeaderActions } = useAppChrome();
   const { canOperateData } = useSessionPermissions();
   const { active, activationGeneration } = useOptionalPageActivation("tax-offset");
-  const currentMonthSession = usePageSessionState({
-    pageKey: "tax-offset",
-    stateKey: "currentMonth",
-    version: 2,
-    initialValue: DEFAULT_MONTH,
-    ttlMs: 24 * 60 * 60 * 1000,
-    storage: "session",
-    validate: (value): value is string => typeof value === "string" && /^\d{4}-\d{2}$/.test(value),
-  });
-  const selectedInputIdsSession = usePageSessionState({
-    pageKey: "tax-offset",
-    stateKey: "selectedInputIds",
-    version: 1,
-    initialValue: [] as string[],
-    ttlMs: 30 * 60 * 1000,
-    storage: "session",
-    validate: isStringArray,
-  });
-  const certifiedDrawerSession = usePageSessionState({
-    pageKey: "tax-offset",
-    stateKey: "certifiedDrawerCollapsed",
-    version: 1,
-    initialValue: false,
-    ttlMs: 24 * 60 * 60 * 1000,
-    storage: "session",
-    validate: (value): value is boolean => typeof value === "boolean",
-  });
-  const currentMonth = currentMonthSession.value;
-  const setCurrentMonth = currentMonthSession.setValue;
-  const [monthData, setMonthData] = useState<TaxMonthData | null>(null);
-  const [summary, setSummary] = useState<TaxSummary | null>(null);
-  const selectedInputIds = selectedInputIdsSession.value;
-  const setSelectedInputIds = selectedInputIdsSession.setValue;
-  const isCertifiedDrawerCollapsed = certifiedDrawerSession.value;
-  const setIsCertifiedDrawerCollapsed = certifiedDrawerSession.setValue;
-  const [isCertifiedImportModalOpen, setIsCertifiedImportModalOpen] = useState(false);
-  const [highlightedPlanInputId, setHighlightedPlanInputId] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isCalculating, setIsCalculating] = useState(false);
-  const [isSavingPlan, setIsSavingPlan] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [importFeedback, setImportFeedback] = useState<string | null>(null);
-  const [planFeedback, setPlanFeedback] = useState<string | null>(null);
-  const outputTableWrapRef = useRef<HTMLDivElement | null>(null);
-  const inputTableWrapRef = useRef<HTMLDivElement | null>(null);
-  const taxLayoutScrollbarRef = useRef<HTMLDivElement | null>(null);
-  const taxLayoutScrollbarInnerRef = useRef<HTMLDivElement | null>(null);
-  const isSyncingTaxLayoutScrollRef = useRef(false);
-  const isMountedRef = useRef(false);
-  const resetLoadRequestIdRef = useRef(0);
-  const refreshLoadRequestIdRef = useRef(0);
-
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
-
-  useLayoutEffect(() => {
-    setWorkbenchHeaderActions({
-      canOperateData,
-      onOpenImport: (mode) => navigate(importWorkflowPath(mode)),
-      onOpenSettings: () => navigate("/settings"),
-    });
-    return () => {
-      setWorkbenchHeaderActions(null);
-    };
-  }, [canOperateData, navigate, setWorkbenchHeaderActions]);
-
-  const loadMonthData = useCallback(
-    async (mode: "reset" | "refresh", signal?: AbortSignal) => {
-      const requestId = mode === "reset"
-        ? resetLoadRequestIdRef.current + 1
-        : refreshLoadRequestIdRef.current + 1;
-      if (mode === "reset") {
-        resetLoadRequestIdRef.current = requestId;
-      } else {
-        refreshLoadRequestIdRef.current = requestId;
-      }
-      const isCurrentRequest = () => (
-        mode === "reset"
-          ? requestId === resetLoadRequestIdRef.current
-          : requestId === refreshLoadRequestIdRef.current
-      );
-      if (mode === "reset") {
-        setIsLoading(true);
-      } else {
-        setIsRefreshing(true);
-      }
-      setLoadError(null);
-      try {
-        const payload = await fetchTaxOffsetMonth(currentMonth, signal);
-        if (!isMountedRef.current || !isCurrentRequest()) {
-          return;
-        }
-        setMonthData(payload);
-        setSummary(payload.summary);
-        setHighlightedPlanInputId((currentId) =>
-          currentId && payload.inputPlanInvoices.some((row) => row.id === currentId) ? currentId : null,
-        );
-        setSelectedInputIds((currentIds) => {
-          const selectableIds = new Set(
-            payload.inputPlanInvoices
-              .filter((row) => row.isSelectable !== false && !row.isLocked)
-              .map((row) => row.id),
-          );
-          const filteredIds = currentIds.filter((id) => selectableIds.has(id));
-          return mode === "refresh" || filteredIds.length > 0 ? filteredIds : payload.defaultSelectedInputIds;
-        });
-      } catch {
-        if (!signal?.aborted && isMountedRef.current && isCurrentRequest()) {
-          setMonthData(null);
-          setSummary(null);
-          setLoadError("税金抵扣数据加载失败，请稍后重试。");
-        }
-      } finally {
-        if (isMountedRef.current && isCurrentRequest()) {
-          setIsLoading(false);
-          setIsRefreshing(false);
-        }
-      }
-    },
-    [currentMonth],
-  );
-
-  useEffect(() => {
-    if (!active) {
-      return undefined;
-    }
-    const controller = new AbortController();
-    setImportFeedback(null);
-    setPlanFeedback(null);
-    void loadMonthData("reset", controller.signal);
-    return () => controller.abort();
-  }, [active, activationGeneration, loadMonthData]);
-
-  useEffect(() => {
-    if (!monthData) {
-      return;
-    }
-
-    if (hasSameIds(selectedInputIds, monthData.defaultSelectedInputIds)) {
-      setSummary(monthData.summary);
-      setIsCalculating(false);
-      return;
-    }
-
-    let cancelled = false;
-    const monthSnapshot = monthData;
-
-    async function recalculate() {
-      setIsCalculating(true);
-      try {
-        const nextSummary = await calculateTaxOffset({
-          month: currentMonth,
-          selectedOutputIds: monthSnapshot.defaultSelectedOutputIds,
-          selectedInputIds,
-        });
-        if (!cancelled) {
-          setSummary(nextSummary);
-        }
-      } catch {
-        if (!cancelled) {
-          setLoadError("税金抵扣试算失败，请稍后重试。");
-        }
-      } finally {
-        if (!cancelled) {
-          setIsCalculating(false);
-        }
-      }
-    }
-
-    void recalculate();
-    return () => {
-      cancelled = true;
-    };
-  }, [currentMonth, monthData, selectedInputIds]);
-
-  useEffect(() => {
-    const tableWraps = [outputTableWrapRef.current, inputTableWrapRef.current].filter(
-      (node): node is HTMLDivElement => Boolean(node),
-    );
-    const scrollbar = taxLayoutScrollbarRef.current;
-    const scrollbarInner = taxLayoutScrollbarInnerRef.current;
-    if (tableWraps.length === 0 || !scrollbar || !scrollbarInner) {
-      return undefined;
-    }
-
-    const getMaxScrollLeft = (node: HTMLDivElement) => Math.max(0, node.scrollWidth - node.clientWidth);
-
-    const syncDimensions = () => {
-      const maxScrollWidth = Math.max(...tableWraps.map((node) => node.scrollWidth), 0);
-      scrollbarInner.style.width = `${maxScrollWidth}px`;
-      scrollbar.scrollLeft = Math.max(...tableWraps.map((node) => node.scrollLeft), 0);
-    };
-
-    const syncFromTable = (source: HTMLDivElement) => {
-      if (isSyncingTaxLayoutScrollRef.current) {
-        return;
-      }
-      isSyncingTaxLayoutScrollRef.current = true;
-      const nextScrollLeft = source.scrollLeft;
-      scrollbar.scrollLeft = nextScrollLeft;
-      tableWraps.forEach((node) => {
-        if (node === source) {
-          return;
-        }
-        node.scrollLeft = Math.min(nextScrollLeft, getMaxScrollLeft(node));
-      });
-      requestAnimationFrame(() => {
-        isSyncingTaxLayoutScrollRef.current = false;
-      });
-    };
-
-    const syncFromScrollbar = () => {
-      if (isSyncingTaxLayoutScrollRef.current) {
-        return;
-      }
-      isSyncingTaxLayoutScrollRef.current = true;
-      tableWraps.forEach((node) => {
-        node.scrollLeft = Math.min(scrollbar.scrollLeft, getMaxScrollLeft(node));
-      });
-      requestAnimationFrame(() => {
-        isSyncingTaxLayoutScrollRef.current = false;
-      });
-    };
-
-    const cleanupTableListeners = tableWraps.map((node) => {
-      const handleScroll = () => syncFromTable(node);
-      node.addEventListener("scroll", handleScroll);
-      return () => node.removeEventListener("scroll", handleScroll);
-    });
-
-    syncDimensions();
-    scrollbar.addEventListener("scroll", syncFromScrollbar);
-    window.addEventListener("resize", syncDimensions);
-
-    return () => {
-      cleanupTableListeners.forEach((cleanup) => cleanup());
-      scrollbar.removeEventListener("scroll", syncFromScrollbar);
-      window.removeEventListener("resize", syncDimensions);
-    };
-  }, [monthData]);
-
-  const isEmpty = !isLoading && !loadError && monthData
-    ? monthData.outputInvoices.length === 0
-      && monthData.inputPlanInvoices.length === 0
-      && monthData.certifiedMatchedInvoices.length === 0
-      && monthData.certifiedOutsidePlanInvoices.length === 0
-    : false;
-  const selectableInputIds = getSelectableInputIds(monthData);
-  const hasVisibleMonthData = Boolean(monthData);
-  const headerStatusMessage = importFeedback
-    ?? planFeedback
-    ?? null;
-  const visibleStatistics = monthData?.statistics;
-  const titleAccessory = (
-    <div className="page-title-accessory-group">
-      <PageStatisticsPopover
-        ariaLabel="税金抵扣数据统计"
-        loading={isLoading && !monthData?.statistics}
-        coreItems={[
-          { label: "进项发票", value: visibleStatistics?.inputInvoiceCount, unit: "张" },
-          { label: "销项发票", value: visibleStatistics?.outputInvoiceCount, unit: "张" },
-        ]}
-        detailItems={[]}
-      />
-    </div>
-  );
-
-  const handleCertifiedImportComplete = useCallback(
-    async (result: TaxCertifiedImportConfirmedResult) => {
-      setIsCertifiedImportModalOpen(false);
-      await loadMonthData("refresh");
-      setImportFeedback(`已导入 ${result.persistedRecordCount} 条已认证记录，并已刷新当前税金抵扣页面。`);
-      setPlanFeedback(null);
-    },
-    [loadMonthData],
-  );
-
-  const handleSavePlan = useCallback(async () => {
-    if (!monthData || !summary || isSavingPlan) {
-      return;
-    }
-    setIsSavingPlan(true);
-    setLoadError(null);
-    setImportFeedback(null);
-    setPlanFeedback(null);
-    try {
-      await saveTaxOffsetPlan({
-        month: currentMonth,
-        selectedOutputIds: monthData.defaultSelectedOutputIds,
-        selectedInputIds,
-        expectedCanonicalSnapshotVersion: monthData.canonicalSnapshotVersion,
-        idempotencyKey: `tax-offset-plan:${currentMonth}:${monthData.canonicalSnapshotVersion}:${selectedInputIds.join(",")}`,
-      });
-      setPlanFeedback("已保存本月税金抵扣计划。");
-      await loadMonthData("refresh");
-    } catch (error) {
-      if (error instanceof ApiClientError && error.status === 409) {
-        setLoadError(error.message || "税金抵扣数据已变化，请刷新后重新保存。");
-      } else {
-        setLoadError("税金抵扣计划保存失败，请稍后重试。");
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setIsSavingPlan(false);
-      }
-    }
-  }, [currentMonth, isSavingPlan, loadMonthData, monthData, selectedInputIds, summary]);
-
-  return (
-    <PageScaffold
-      title="税金抵扣计划与试算"
-      titleAccessory={titleAccessory}
-      actions={(
-        <div className="tax-page-actions">
-          {headerStatusMessage ? (
-            <PageNote message={headerStatusMessage} tone={importFeedback || planFeedback ? "success" : "info"} />
-          ) : null}
-          {canOperateData ? (
-            <Button type="button" variant="outline" onPress={() => setIsCertifiedImportModalOpen(true)}>
-              已认证发票导入
-            </Button>
-          ) : null}
-          <BusinessPeriodPicker
-            allowAll={false}
-            allowedModes={["month"]}
-            ariaLabel="税金抵扣月份"
-            onChange={(selection) => setCurrentMonth(selection.month)}
-            selection={{ mode: "month", year: currentMonth.slice(0, 4), month: currentMonth }}
-            years={nearbyBusinessYears(currentMonth)}
-          />
-        </div>
-      )}
-    >
-      {loadError ? <StatePanel tone="error">{loadError}</StatePanel> : null}
-      {!hasVisibleMonthData && isLoading ? (
-        <StatePanel tone="loading">正在加载 {currentMonth} 的税金抵扣计划与已认证结果...</StatePanel>
-      ) : null}
-      {isEmpty ? <StatePanel tone="empty">当前月份没有可用于计划与试算的发票数据。</StatePanel> : null}
-
-      {summary ? (
-        <TaxSummaryBand
-          summary={summary}
-          outputCount={monthData?.outputInvoices.length ?? 0}
-          certifiedCount={(monthData?.certifiedMatchedInvoices.length ?? 0) + (monthData?.certifiedOutsidePlanInvoices.length ?? 0)}
-          selectedPlanInputCount={selectedInputIds.length}
-          canSave={canOperateData}
-          isSaving={isSavingPlan}
-          saveDisabled={isCalculating || isLoading || isRefreshing}
-          onSave={handleSavePlan}
-        />
-      ) : null}
-      {!loadError && monthData ? (
-        <div className="tax-offset-workspace">
-          <div className="tax-left-workspace">
-            <div className="tax-layout">
-              <TaxTable
-                selectable={false}
-                showBottomScrollbar={false}
-                tableWrapRef={outputTableWrapRef}
-                title="销项票开票情况"
-                rows={monthData.outputInvoices}
-                selectedIds={[]}
-              />
-              <TaxTable
-                highlightedRowId={highlightedPlanInputId}
-                showBottomScrollbar={false}
-                tableWrapRef={inputTableWrapRef}
-                title="进项票认证计划"
-                rows={monthData.inputPlanInvoices}
-                selectedIds={selectedInputIds}
-                headerActions={(
-                  <>
-                    <Button
-                      className="secondary-button compact"
-                      type="button"
-                      isDisabled={selectableInputIds.length === 0 || selectedInputIds.length === selectableInputIds.length}
-                      size="sm"
-                      variant="outline"
-                      onPress={() => setSelectedInputIds(selectableInputIds)}
-                    >
-                      全选
-                    </Button>
-                    <Button
-                      className="secondary-button compact"
-                      type="button"
-                      isDisabled={selectedInputIds.length === 0}
-                      size="sm"
-                      variant="outline"
-                      onPress={() => setSelectedInputIds([])}
-                    >
-                      清空
-                    </Button>
-                  </>
-                )}
-                onToggleRow={(id) => setSelectedInputIds((currentIds) => toggleSelection(currentIds, id))}
-              />
-            </div>
-            <div
-              ref={taxLayoutScrollbarRef}
-              className="tax-layout-scrollbar"
-              aria-label="税金抵扣表格横向滚动"
-            >
-              <div ref={taxLayoutScrollbarInnerRef} className="tax-layout-scrollbar-inner" />
-            </div>
-          </div>
-          <CertifiedResultsDrawer
-            isCollapsed={isCertifiedDrawerCollapsed}
-            matchedRows={monthData.certifiedMatchedInvoices}
-            outsidePlanRows={monthData.certifiedOutsidePlanInvoices}
-            onSelectMatchedRow={(row) => setHighlightedPlanInputId(row.matchedInputId)}
-            onToggleCollapse={() => setIsCertifiedDrawerCollapsed((current) => !current)}
-          />
-        </div>
-      ) : null}
-
-      {isCertifiedImportModalOpen ? (
-        <CertifiedInvoiceImportModal
-          currentMonth={currentMonth}
-          onClose={() => setIsCertifiedImportModalOpen(false)}
-          onImported={handleCertifiedImportComplete}
-        />
-      ) : null}
-    </PageScaffold>
-  );
+  const [query, setQuery] = useState<TaxCertificationQuery>({ status: "all", sort_by: "issue_date", sort_direction: "desc", page: 1, page_size: 50 });
+  const [search, setSearch] = useState("");
+  const [importOpen, setImportOpen] = useState(false);
+  const [exportSnapshot, setExportSnapshot] = useState<{ filters: TaxCertificationFilters; fields: TaxExportField[] } | null>(null);
+  const { result, loading, error, refresh } = useTaxCertifications(query, active, activationGeneration);
+  function changeFilters(next: Partial<TaxCertificationFilters>) { setQuery(current => ({ ...current, ...next, page: 1 })); }
+  function period(field: "issue_month" | "selection_month", label: string) {
+    const value = query[field] ?? DEFAULT_MONTH;
+    return <BusinessPeriodPicker ariaLabel={label} label={label} allLabel="全部" allowedModes={["month"]} years={nearbyBusinessYears(value)}
+      selection={{ mode: query[field] ? "month" : "all", year: value.slice(0, 4), month: value }}
+      onChange={selection => changeFilters({ [field]: selection.mode === "all" ? undefined : selection.month })} />;
+  }
+  return <PageScaffold title="专票认证情况" className="tax-certification-page"
+    query={<QuerySearch ariaLabel="搜索专票" placeholder="发票号码、销方名称或税号" value={search} onChange={setSearch}
+      onSubmit={() => changeFilters({ search: search.trim() || undefined })} onClear={() => { setSearch(""); changeFilters({ search: undefined }); }} pending={loading} />}
+    actions={<>{result && result.unresolved_record_count > 0 ? <Button variant="ghost" onPress={() => setImportOpen(true)}>待核对 {result.unresolved_record_count}</Button> : null}<Button variant="secondary" isDisabled={!canOperateData} onPress={() => setImportOpen(true)}>导入认证记录</Button>
+      <Button variant="secondary" isDisabled={!result || result.total === 0 || loading || Boolean(error)} onPress={() => {
+        if (!result) return;
+        const { page: _page, page_size: _pageSize, ...filters } = query;
+        setExportSnapshot({ filters, fields: result.export_fields });
+      }}>导出专票清单</Button></>}>
+    <div className="tax-certification-filters"><Select className="tax-certification-status" aria-label="认证状态" selectedKey={query.status} onSelectionChange={key => {
+      if (key === "all" || key === "certified" || key === "uncertified") changeFilters({ status: key });
+    }}><Label>认证状态</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>
+      <ListBox.Item id="all" textValue="全部">全部</ListBox.Item><ListBox.Item id="certified" textValue="已认证">已认证</ListBox.Item><ListBox.Item id="uncertified" textValue="未认证">未认证</ListBox.Item>
+    </ListBox></Select.Popover></Select>{period("issue_month", "开票月份")}{period("selection_month", "勾选月份")}</div>
+    {error ? <StatePanel tone="error" compact title={error}><Button variant="ghost" onPress={refresh}>重试</Button></StatePanel> : null}
+    {loading ? <div role="status" className="tax-certification-loading">加载中…</div> : null}
+    {result ? <div aria-busy={loading} className="tax-certification-results">
+      <TaxCertificationSummary summary={result.summary} status={query.status} />
+      <TaxCertificationTable result={result} query={query} loading={loading} onPageChange={page => setQuery(current => ({ ...current, page }))}
+        onSortChange={sort => { if (sort.column === "issue_date" || sort.column === "selection_time") changeFilters({ sort_by: sort.column, sort_direction: sort.direction === "ascending" ? "asc" : "desc" }); }} />
+    </div> : null}
+    {importOpen ? <CertifiedInvoiceImportDrawer onClose={() => setImportOpen(false)} onImported={() => { refresh(); }} /> : null}
+    {exportSnapshot ? <TaxCertificationExportDrawer {...exportSnapshot} onClose={() => setExportSnapshot(null)} /> : null}
+  </PageScaffold>;
 }

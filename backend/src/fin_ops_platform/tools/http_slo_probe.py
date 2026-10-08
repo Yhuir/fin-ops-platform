@@ -176,8 +176,8 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("oa_pending_payments_rows", "/api/oa-pending-payments/rows?page=1&page_size=20", expected_statuses=(200, 202)),
     HttpProbe("output_invoice_collections_rows", "/api/output-invoice-collections/rows?page=1&page_size=20", expected_statuses=(200, 202)),
     HttpProbe("output_invoice_collections_filter_options", "/api/output-invoice-collections/filter-options", expected_statuses=(200, 202)),
-    HttpProbe("tax_offset_summary", f"/api/tax-offset/summary?month={DEFAULT_BUSINESS_MONTH}", expected_statuses=(200, 202)),
-    HttpProbe("tax_offset_rows", f"/api/tax-offset?month={DEFAULT_BUSINESS_MONTH}", expected_statuses=(200, 202)),
+    HttpProbe("tax_certification_filtered", "/api/tax-offset?status=certified&page=1&page_size=20", expected_statuses=(200,)),
+    HttpProbe("tax_offset_rows", "/api/tax-offset?page=1&page_size=20", expected_statuses=(200,)),
     HttpProbe(
         "cost_statistics_explorer_all",
         f"/api/cost-statistics/explorer?scope={DEFAULT_BUSINESS_MONTH}&view=bank_account&include_statistics=false",

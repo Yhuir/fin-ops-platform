@@ -877,21 +877,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         self.assertNotIn("save_oa_pending_payment_bank_relations", class_source)
         self.assertNotIn('"oa_pending_payment_bank_relations"', class_source)
 
-    def test_application_state_store_tax_imports_do_not_use_app_mongo(self) -> None:
-        path = SERVICES_ROOT / "state_store.py"
-        source = path.read_text(encoding="utf-8")
-        class_source = _class_source(_parse(path), source, "ApplicationStateStore")
-        class_tree = ast.parse(class_source)
-        method_names = ("load_tax_certified_imports", "save_tax_certified_imports", "save_tax_offset_plan")
-        violations: list[str] = []
-
-        for method_name in method_names:
-            method_source = _function_source(class_tree, class_source, method_name)
-            for forbidden in ("_mongo_database", "_mongo_detailed_collections", "MONGO_ONLY_STORAGE_MODE"):
-                if forbidden in method_source:
-                    violations.append(f"{method_name} contains {forbidden}")
-
-        self.assertEqual(violations, [])
+    def test_application_state_store_does_not_expose_tax_certification_snapshot_writes(self) -> None:
+        for name in ("state_store.py", "postgres_state_store.py"):
+            source = (SERVICES_ROOT / name).read_text(encoding="utf-8")
+            for method in ("save_tax_offset_plan", "load_tax_certified_imports", "save_tax_certified_imports"):
+                self.assertNotIn(f"def {method}(", source)
 
     def test_application_state_store_workbench_pair_relations_do_not_use_app_mongo(self) -> None:
         path = SERVICES_ROOT / "state_store.py"
@@ -959,8 +949,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "save_turnover_relations",
             "load_turnover_ledger_extras",
             "save_turnover_ledger_extras",
-            "load_tax_certified_imports",
-            "save_tax_certified_imports",
             "load_pending_invoice_commands",
             "save_pending_invoice_commands",
         )
@@ -1148,8 +1136,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "save_turnover_relations",
             "load_turnover_ledger_extras",
             "save_turnover_ledger_extras",
-            "load_tax_certified_imports",
-            "save_tax_certified_imports",
             "load_pending_invoice_commands",
             "save_pending_invoice_commands",
             "load_workbench_overrides",
@@ -1604,9 +1590,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         route_class = _class_source(route_tree, route_source, "TaxApiRoutes")
         for marker in (
             "def route",
-            "/api/tax-offset/summary",
-            "/api/tax-offset/calculate",
-            "/api/tax-offset/plans",
+            "/api/tax-offset/export",
             "/api/tax-offset/certified-import/jobs/",
             "/api/tax-offset/certified-imports",
             "resolve_mutation_session",

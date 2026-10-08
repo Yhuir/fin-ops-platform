@@ -65,7 +65,7 @@ REVERSIBLE_RELATION_CONSUMER_CONTRACTS: dict[str, dict[str, object]] = {
     },
     "tax-offset": {
         "path": "/api/tax-offset",
-        "business_roots": ("output_items", "input_plan_items", "certified_items"),
+        "business_roots": ("rows", "total", "summary"),
     },
     "turnover-ledger": {
         "path": "/api/turnover-ledger",

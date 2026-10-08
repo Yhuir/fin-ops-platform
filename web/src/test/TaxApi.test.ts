@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { fetchTaxOffsetMonth, taxCertifiedImportConfirmedFromJob } from "../features/tax/api";
+import { fetchTaxCertifications, exportTaxCertifications, taxCertifiedImportConfirmedFromJob } from "../features/tax/api";
 import type { TaxCertifiedImportJob } from "../features/tax/types";
 
 function importJob(resultPayload: Record<string, unknown>): TaxCertifiedImportJob {
@@ -13,64 +13,22 @@ function importJob(resultPayload: Record<string, unknown>): TaxCertifiedImportJo
   };
 }
 
-describe("tax API mappers", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
+describe("tax certification API", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  test("serializes independent filters, server sorting and pagination without changing monetary source values", async () => {
+    const payload = { rows: [{ amount: null, tax_amount: "0.00" }], total: 1 };
+    const fetch = vi.fn(async () => new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetch);
+    expect(await fetchTaxCertifications({ status: "certified", issue_month: "2026-03", selection_month: "2026-04", search: "销方", sort_by: "selection_time", sort_direction: "asc", page: 2, page_size: 50 })).toEqual(payload);
+    const url = new URL(String(fetch.mock.calls[0][0]), "http://localhost");
+    expect(Object.fromEntries(url.searchParams)).toEqual({ status: "certified", issue_month: "2026-03", selection_month: "2026-04", search: "销方", sort_by: "selection_time", sort_direction: "asc", page: "2", page_size: "50" });
   });
-
-  test("maps page-owned statistics and rejects invalid counts", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
-      month: "2026-05",
-      output_items: [],
-      input_items: [],
-      default_selected_output_ids: [],
-      default_selected_input_ids: [],
-      summary: {
-        output_tax: "0.00",
-        input_tax: "0.00",
-        deductible_tax: "0.00",
-        result_label: "应纳税额",
-        result_amount: "0.00",
-      },
-      statistics: {
-        input_invoice_count: "800",
-        output_invoice_count: 600,
-      },
-      canonical_snapshot_version: "tax-offset-v1:test",
-    }), { headers: { "Content-Type": "application/json" } })));
-
-    const result = await fetchTaxOffsetMonth("2026-05");
-
-    expect(result.statistics).toEqual(expect.objectContaining({
-      inputInvoiceCount: 800,
-      outputInvoiceCount: 600,
-    }));
-    expect(result.canonicalSnapshotVersion).toBe("tax-offset-v1:test");
+  test("exports captured filters and chosen columns and rejects incorrect file format", async () => {
+    const fetch = vi.fn(async () => new Response("{}", { headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(exportTaxCertifications({ status: "all", sort_by: "issue_date", sort_direction: "desc" }, ["invoice_no"])).rejects.toThrow("导出文件格式错误");
+    expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({ filters: { status: "all", sort_by: "issue_date", sort_direction: "desc" }, fields: ["invoice_no"] });
   });
-
-  test("uses original amounts across output, planned and certified invoices without subtraction", async () => {
-    const source = {id: "source", invoice_no: "source", tax_rate: null, amount: null,
-      tax_amount: "13.00", total_with_tax: "113.00", is_selectable: true};
-    const zero = {...source, id: "zero", amount: "0.00", tax_amount: "0.00", total_with_tax: "0.00", tax_rate: "0%"};
-    const exempt = {...source, id: "exempt", amount: "100.00", tax_amount: null,
-      tax_amount_text: "*", tax_rate: "免税", is_selectable: false};
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
-      month: "2026-05", output_items: [source, zero, exempt], input_plan_items: [source, exempt],
-      certified_matched_rows: [source], certified_outside_plan_rows: [zero],
-      default_selected_output_ids: ["source", "zero"], default_selected_input_ids: ["source"],
-      summary: {output_tax: "13.00", input_tax: "13.00", deductible_tax: "13.00", result_label: "本月留抵税额", result_amount: "0.00"},
-      canonical_snapshot_version: "tax-offset-v1:source",
-    }), {headers: {"Content-Type": "application/json"}})));
-    const result = await fetchTaxOffsetMonth("2026-05");
-    for (const rows of [result.outputInvoices, result.inputPlanInvoices, result.certifiedMatchedInvoices]) {
-      expect(rows[0]).toMatchObject({amount: "—", taxAmount: "13.00", taxRate: "—"});
-    }
-    expect(result.outputInvoices[1]).toMatchObject({amount: "0.00", taxAmount: "0.00", taxRate: "0%"});
-    expect(result.outputInvoices[2]).toMatchObject({taxAmount: "*", taxRate: "免税", isSelectable: false});
-    expect(result.inputPlanInvoices[1]).toMatchObject({taxAmount: "*", isSelectable: false});
-    expect(result.summary.resultAmount).toBe("0.00");
-  });
-
   test("maps a completed certified import job batch result", () => {
     const result = taxCertifiedImportConfirmedFromJob(
       importJob({
@@ -94,27 +52,6 @@ describe("tax API mappers", () => {
       months: ["2026-03", "2026-04"],
       persistedRecordCount: 18,
     });
-  });
-
-  test("rejects a month payload without its canonical snapshot token", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
-      month: "2026-05",
-      output_items: [],
-      input_items: [],
-      default_selected_output_ids: [],
-      default_selected_input_ids: [],
-      summary: {
-        output_tax: "0.00",
-        input_tax: "0.00",
-        deductible_tax: "0.00",
-        result_label: "应纳税额",
-        result_amount: "0.00",
-      },
-    }), { headers: { "Content-Type": "application/json" } })));
-
-    await expect(fetchTaxOffsetMonth("2026-05")).rejects.toThrow(
-      "Tax offset canonical snapshot version is missing.",
-    );
   });
 
   test("rejects malformed certified import job batch contracts instead of sanitizing them", () => {

@@ -72,7 +72,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
         self.assertEqual(persisted["workbench_pair_relations"], {})
         self.assertEqual(persisted["workbench_overrides"], {})
 
-    def test_reset_invoices_clears_tax_certified_records(self) -> None:
+    def test_reset_invoices_local_store_preserves_external_oa_and_reports_no_local_certification(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             invoice_preview = app._import_service.preview_import(
@@ -93,25 +93,13 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 ],
             )
             app._import_service.confirm_import(invoice_preview.id)
-            preview_session = app._tax_certified_import_service.preview_files(
-                imported_by="tester",
-                uploads=[],
-            )
-            preview_session.files = []
-            app._tax_certified_import_service._sessions[preview_session.id] = preview_session
-            app._tax_certified_import_service._records["manual-cert-001"] = {
-                "id": "manual-cert-001"
-            }
-            app._state_store.save_tax_certified_imports(app._tax_certified_import_service.snapshot())
-
             result = app._settings_data_reset_service.execute(RESET_INVOICES_ACTION)
             persisted = app._state_store.load()
-            tax_persisted = app._state_store.load_tax_certified_imports()
 
         self.assertIn("form_data_db.form_data", result.protected_targets)
         self.assertEqual(result.deleted_counts["invoices"], 1)
         self.assertEqual(len(persisted["imports"]["invoices"]), 0)
-        self.assertEqual(tax_persisted, {})
+        self.assertEqual(result.deleted_counts["tax_certified_import_records"], 0)
 
     def test_reset_oa_and_rebuild_preserves_pure_bank_invoice_pair_relation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -106,9 +106,6 @@ class FakeStore:
             "oa_import": {},
         }
 
-    def load_tax_certified_imports(self) -> dict:
-        return {}
-
     def load_etc_state(self) -> dict:
         return {}
 

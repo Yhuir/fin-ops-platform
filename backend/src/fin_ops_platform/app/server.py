@@ -365,7 +365,6 @@ from fin_ops_platform.services.postgres_repositories.settings_data_reset_request
     PostgresSettingsDataResetRequestRepository,
 )
 from fin_ops_platform.services.postgres_repositories.tax_offset import (
-    LocalTaxOffsetCanonicalRepository,
     PostgresTaxOffsetCanonicalRepository,
 )
 from fin_ops_platform.services.postgres_repositories.turnover_bank_split import PostgresTurnoverBankSplitRepository
@@ -404,9 +403,9 @@ from fin_ops_platform.services.target_oa_applicant_token_provider import (
 from fin_ops_platform.services.tax_certified_import_application_service import TaxCertifiedImportApplicationService
 from fin_ops_platform.services.tax_certified_import_job_service import TaxCertifiedImportJobService
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService
-from fin_ops_platform.services.tax_offset_plan_service import InMemoryTaxOffsetPlanRepository, TaxOffsetPlanService
+from fin_ops_platform.services.postgres_repositories.tax_certified_imports import PostgresTaxCertifiedImportRepository
 from fin_ops_platform.services.tax_offset_query_service import TaxOffsetQueryService
-from fin_ops_platform.services.tax_offset_service import TaxOffsetService
+from fin_ops_platform.services.tax_offset_export_service import TaxOffsetExportService
 from fin_ops_platform.services.turnover_bank_row_version import turnover_bank_row_version
 from fin_ops_platform.services.turnover_ledger_export_service import (
     XLSX_MIME_TYPE,
@@ -1078,7 +1077,9 @@ class Application:
             ),
             local_ledger_service=self._turnover_ledger_service,
         )
-        self._tax_certified_import_service = TaxCertifiedImportService(state_store=self._state_store)
+        self._tax_certified_import_service = TaxCertifiedImportService(
+            repository=PostgresTaxCertifiedImportRepository(postgres_connection) if postgres_connection is not None else None,
+        )
         self._etc_import_session_store = build_etc_import_session_store(self._state_store)
         self._etc_service = EtcService(
             state_store=self._state_store,
@@ -1146,14 +1147,9 @@ class Application:
                 workbench_pair_snapshot_port=SettingsDataResetPairSnapshotPort(
                     pair_relation_snapshot=self._workbench_pair_relation_service.snapshot,
                 ),
-                tax_certified_import_service=self._tax_certified_import_service,
             )
             if self._state_store is not None
             else None
-        )
-        self._tax_offset_service = TaxOffsetService(
-            import_service=self._import_service,
-            certified_records_loader=self._tax_certified_import_service.list_records_for_month,
         )
         self._configure_tax_offset_application_services()
         self._configure_cost_statistics_application_services()
@@ -1191,82 +1187,51 @@ class Application:
             write_precondition_error_payload=self._turnover_write_precondition_error_payload,
         )
     def _configure_tax_offset_application_services(self) -> None:
-        tax_offset_service = getattr(self, "_tax_offset_service", None)
         connection = (
             getattr(self._state_store, "_sql_read_connection", None)
             or getattr(self._state_store, "_connection", None)
         )
-        self._tax_offset_canonical_repository = (
-            PostgresTaxOffsetCanonicalRepository(connection)
-            if connection is not None
-            else LocalTaxOffsetCanonicalRepository(tax_offset_service)
+        self._tax_offset_canonical_repository = PostgresTaxOffsetCanonicalRepository(connection) if connection is not None else None
+        self._tax_offset_query_service = (
+            TaxOffsetQueryService(canonical_repository=self._tax_offset_canonical_repository)
+            if self._tax_offset_canonical_repository is not None else None
         )
-        self._tax_offset_query_service = TaxOffsetQueryService(
-            canonical_repository=self._tax_offset_canonical_repository,
-            tax_offset_service=tax_offset_service,
-        )
-        from fin_ops_platform.services.postgres_repositories.shared_imports import PostgresSharedImportRepository
-        import_connection = getattr(self._state_store, "_connection", None)
-        session_owner_provider = (
-            PostgresSharedImportRepository(import_connection).tax_session_owner
-            if import_connection is not None
-            else lambda session_id: self._tax_certified_import_service.get_session(session_id).imported_by
+        self._tax_offset_export_service = (
+            TaxOffsetExportService(query_service=self._tax_offset_query_service)
+            if self._tax_offset_query_service is not None else None
         )
         self._tax_certified_import_job_service = TaxCertifiedImportJobService(
             import_job_repository_provider=self._get_import_job_repository,
-            session_owner_provider=session_owner_provider,
+            session_owner_provider=self._tax_certified_import_service.session_owner,
         )
         self._tax_certified_import_application_service = TaxCertifiedImportApplicationService(
-            certified_import_service=getattr(self, "_tax_certified_import_service", None),
-            tax_offset_service=tax_offset_service,
-        )
-        tax_offset_plan_repository = self._tax_offset_plan_repository()
-        self._tax_offset_plan_service = TaxOffsetPlanService(
-            query_service=self._tax_offset_query_service,
-            plan_repository=tax_offset_plan_repository,
+            certified_import_service=self._tax_certified_import_service,
         )
         self._tax_api_routes = TaxApiRoutes(
-            tax_offset_service,
             query_service=self._tax_offset_query_service,
+            export_service=self._tax_offset_export_service,
+            export_response=self._turnover_ledger_export_response,
+            revoke_batch_provider=self._tax_certified_import_application_service.revoke_batch,
             certified_import_job_service=self._tax_certified_import_job_service,
-            plan_service=self._tax_offset_plan_service,
             json_response=self._json_response,
             resolve_read_session=self._resolve_tax_offset_read_session,
             resolve_mutation_session=self._resolve_tax_offset_mutation_session,
             load_json_body=self._load_json_body,
             load_multipart_body=self._load_multipart_body,
-            actor_id_provider=self._tax_offset_actor_id,
             certified_import_records_provider=self._tax_certified_import_application_service.records_payload,
             certified_import_preview_provider=self._tax_certified_import_application_service.preview_payload,
             enqueue_import_job=self._enqueue_import_process_job,
             serialize_import_job=self._serialize_import_job,
-            month_metric_emitter=self._emit_tax_offset_month_metric,
-            calculate_metric_emitter=self._emit_tax_offset_calculate_metric,
-            duration_ms=self._duration_ms,
         )
         self._tax_offset_dependency_key = self._tax_offset_current_dependency_key()
 
     def _tax_offset_current_dependency_key(self) -> tuple[int | None, ...]:
         return (
-            id(getattr(self, "_tax_offset_service", None)) if getattr(self, "_tax_offset_service", None) is not None else None,
-            id(getattr(self, "_tax_certified_import_service", None))
-            if getattr(self, "_tax_certified_import_service", None) is not None
-            else None,
-            id(getattr(getattr(self, "_state_store", None), "save_tax_offset_plan", None)),
+            id(getattr(self, "_tax_certified_import_service", None)),
+            id(getattr(getattr(self, "_state_store", None), "_connection", None)),
             id(self.__dict__.get("_import_job_repository")),
             id(getattr(self, "_import_job_repository_override", None)),
         )
-
-    def _tax_offset_plan_repository(self) -> object:
-        state_store = getattr(self, "_state_store", None)
-        save_plan = getattr(state_store, "save_tax_offset_plan", None)
-        if callable(save_plan):
-            return state_store
-        repository = getattr(self, "_in_memory_tax_offset_plan_repository", None)
-        if repository is None:
-            repository = InMemoryTaxOffsetPlanRepository()
-            self._in_memory_tax_offset_plan_repository = repository
-        return repository
 
     def _ensure_tax_offset_application_services(self) -> None:
         if (
@@ -1283,16 +1248,11 @@ class Application:
             resolve_mutation_session=self._resolve_tax_offset_mutation_session,
             load_json_body=self._load_json_body,
             load_multipart_body=self._load_multipart_body,
-            actor_id_provider=self._tax_offset_actor_id,
             certified_import_records_provider=self._tax_certified_import_application_service.records_payload,
             certified_import_preview_provider=self._tax_certified_import_application_service.preview_payload,
             enqueue_import_job=self._enqueue_import_process_job,
             serialize_import_job=self._serialize_import_job,
         )
-
-    def _tax_offset_query(self) -> TaxOffsetQueryService:
-        self._ensure_tax_offset_application_services()
-        return self._tax_offset_query_service
 
     def _configure_cost_statistics_application_services(self) -> None:
         connection = (
@@ -2326,13 +2286,12 @@ class Application:
                 "/api/workbench/actions/cancel-link",
                 "/api/workbench/actions/confirm-personal-advance-repayment",
                 "/api/tax-offset",
-                "/api/tax-offset/summary",
                 "/api/tax-offset/certified-import/preview",
                 "/api/tax-offset/certified-import/confirm",
                 "/api/tax-offset/certified-import/jobs/{import_job_id}",
                 "/api/tax-offset/certified-imports",
-                "/api/tax-offset/calculate",
-                "/api/tax-offset/plans",
+                "/api/tax-offset/export",
+                "/api/tax-offset/certified-imports/{batch_id}/revoke",
                 "/api/cost-statistics/explorer",
                 "/api/cost-statistics/export-summary",
                 "/api/cost-statistics/export",
@@ -5969,7 +5928,7 @@ class Application:
         self,
         headers: dict[str, str] | None,
     ) -> tuple[OARequestSession | None, Response | None]:
-        return self._resolve_fin_ops_read_session(headers, denied_message="当前账户没有访问税金抵扣页面权限。")
+        return self._resolve_fin_ops_read_session(headers, denied_message="当前账户没有访问专票认证情况页面权限。")
 
     def _resolve_cost_statistics_read_session(
         self,
@@ -5994,10 +5953,6 @@ class Application:
         if auth_error is not None:
             return None, auth_error
         return session, None
-
-    @staticmethod
-    def _tax_offset_actor_id(session: OARequestSession | None, payload: dict[str, object], fallback: str) -> str:
-        return actor_id_for_session(session) if session is not None else str(payload.get("actor_id") or fallback)
 
     def _resolve_bank_details_read_session(
         self,
@@ -6332,54 +6287,6 @@ class Application:
             flush=True,
         )
 
-    def _emit_tax_offset_month_metric(
-        self,
-        *,
-        month: str,
-        duration_ms: float,
-        payload: dict[str, object],
-    ) -> None:
-        print(
-            json.dumps(
-                {
-                    "kind": "tax_offset_month_metric",
-                    "metric": "tax_offset.month.duration_ms",
-                    "month": month,
-                    "duration_ms": round(float(duration_ms), 3),
-                    "output_count": self._safe_list_count(payload.get("output_items")),
-                    "input_plan_count": self._safe_list_count(payload.get("input_plan_items")),
-                    "certified_count": self._safe_list_count(payload.get("certified_items")),
-                    "timestamp": datetime.now().isoformat(),
-                },
-                ensure_ascii=False,
-            ),
-            flush=True,
-        )
-
-    def _emit_tax_offset_calculate_metric(
-        self,
-        *,
-        month: str,
-        selected_output_count: int,
-        selected_input_count: int,
-        duration_ms: float,
-    ) -> None:
-        print(
-            json.dumps(
-                {
-                    "kind": "tax_offset_calculate_metric",
-                    "metric": "tax_offset.calculate.duration_ms",
-                    "month": month,
-                    "selected_output_count": int(selected_output_count),
-                    "selected_input_count": int(selected_input_count),
-                    "duration_ms": round(float(duration_ms), 3),
-                    "timestamp": datetime.now().isoformat(),
-                },
-                ensure_ascii=False,
-            ),
-            flush=True,
-        )
-
     def _cost_statistics_file_response(self, filename: str, content: bytes) -> Response:
         return Response(
             status_code=int(HTTPStatus.OK),
@@ -6618,12 +6525,6 @@ class Application:
             return safety_error
         result = self._workbench_action_api_routes.confirm_personal_advance_repayment(payload, request_id=request_id)
         return self._workbench_write_response(result)
-
-    def _get_or_build_tax_offset_month_payload(self, month: str) -> dict[str, object]:
-        return self._tax_offset_query().get_month_payload(month)
-
-    def _get_tax_offset_month_summary_payload(self, month: str) -> dict[str, object]:
-        return self._tax_offset_query().get_summary_payload(month)
 
     @staticmethod
     def _default_bank_auto_tag_rules_file_source() -> dict[str, object]:

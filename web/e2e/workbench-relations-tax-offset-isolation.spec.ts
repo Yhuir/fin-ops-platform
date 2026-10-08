@@ -9,8 +9,8 @@ test.describe("workbench relation and tax-offset boundary", () => {
     const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     await page.goto("/tax-offset");
-    await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
-    const inputPlanGrid = page.getByRole("grid", { name: "进项票认证计划" });
+    await expect(page.getByRole("heading", { name: "专票认证情况" })).toBeVisible();
+    const inputPlanGrid = page.getByRole("grid", { name: "专票认证明细" });
     await expect(inputPlanGrid).toBeVisible();
     const rowsBeforeConfirm = await inputPlanGrid.getByRole("row").allTextContents();
     const requestCountBeforeConfirm = api.count("GET /api/tax-offset");
@@ -18,11 +18,11 @@ test.describe("workbench relation and tax-offset boundary", () => {
     await confirmWorkbenchRelation(page);
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
 
-    await page.getByRole("link", { name: "税金抵扣" }).click();
-    await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
+    await page.getByRole("link", { name: "专票认证情况" }).click();
+    await expect(page.getByRole("heading", { name: "专票认证情况" })).toBeVisible();
     expect(api.count("GET /api/tax-offset")).toBeGreaterThan(requestCountBeforeConfirm);
 
-    const refreshedInputPlanGrid = page.getByRole("grid", { name: "进项票认证计划" });
+    const refreshedInputPlanGrid = page.getByRole("grid", { name: "专票认证明细" });
     await expect(refreshedInputPlanGrid.getByRole("row")).toHaveCount(rowsBeforeConfirm.length);
     expect(await refreshedInputPlanGrid.getByRole("row").allTextContents()).toEqual(rowsBeforeConfirm);
     await expectNoUnexpectedSuccessUiErrors(page);

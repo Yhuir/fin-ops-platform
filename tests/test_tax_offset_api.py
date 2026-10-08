@@ -1,562 +1,198 @@
 import json
 import unittest
-from pathlib import Path
-from tempfile import TemporaryDirectory
+from http import HTTPStatus
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock
 
-from fin_ops_platform.domain.enums import BatchType
-from fin_ops_platform.services.oa_identity_service import OAUserIdentity
-
-from tests.app_test_support import (
-    build_local_state_application as build_application,
-)
-from tests.app_test_support import (
-    configure_access_control,
-    install_durable_import_queue,
-)
-from tests.mock_import_files import CERTIFIED_JAN, MockImportFile
+from fin_ops_platform.app.routes_tax import TaxApiRoutes
+from fin_ops_platform.services.import_job_queue import ImportJobIdempotencyConflict
+from fin_ops_platform.services.tax_certified_import_job_service import TaxCertifiedImportJobService
+from fin_ops_platform.services.tax_offset_query_service import TaxOffsetQueryService
 
 
-def build_multipart_payload(
-    *,
-    imported_by: str,
-    files: list[MockImportFile],
-) -> tuple[bytes, dict[str, str]]:
-    boundary = "----finops-tax-certified-boundary"
-    chunks: list[bytes] = []
-
-    def add_text(name: str, value: str) -> None:
-        chunks.append(f"--{boundary}\r\n".encode("utf-8"))
-        chunks.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
-        chunks.append(value.encode("utf-8"))
-        chunks.append(b"\r\n")
-
-    def add_file(name: str, file: MockImportFile) -> None:
-        chunks.append(f"--{boundary}\r\n".encode("utf-8"))
-        chunks.append(
-            (
-                f'Content-Disposition: form-data; name="{name}"; filename="{file.name}"\r\n'
-                "Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n"
-            ).encode("utf-8")
-        )
-        chunks.append(file.content)
-        chunks.append(b"\r\n")
-
-    add_text("imported_by", imported_by)
-    for file in files:
-        add_file("files", file)
-    chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
-
-    return b"".join(chunks), {"Content-Type": f"multipart/form-data; boundary={boundary}"}
-
-
-def tax_offset_payload(month: str = "2026-05", *, output_count: int = 1, input_count: int = 1, certified_count: int = 0) -> dict[str, object]:
-    return {
-        "month": month,
-        "summary": {
-            "output_tax": "0.00",
-            "input_tax": "0.00",
-            "planned_input_tax": "0.00",
-            "certified_input_tax": "0.00",
-            "deductible_tax": "0.00",
-            "result_label": "本月留抵税额",
-            "result_amount": "0.00",
-        },
-        "output_items": [{"id": f"output-{index}", "tax_amount": "0.00"} for index in range(output_count)],
-        "input_plan_items": [{"id": f"input-{index}", "tax_amount": "0.00"} for index in range(input_count)],
-        "certified_items": [{"id": f"certified-{index}", "tax_amount": "0.00"} for index in range(certified_count)],
-        "certified_matched_rows": [],
-        "certified_outside_plan_rows": [],
-        "locked_certified_input_ids": [],
-        "default_selected_output_ids": [],
-        "default_selected_input_ids": [],
-    }
+def json_body(body):
+    try:
+        payload = json.loads(body or '{}')
+    except (ValueError, TypeError):
+        return {}, (HTTPStatus.BAD_REQUEST, {'error': 'invalid_json'})
+    if not isinstance(payload, dict):
+        return {}, (HTTPStatus.BAD_REQUEST, {'error': 'invalid_json'})
+    return payload, None
 
 
 class TaxOffsetApiTests(unittest.TestCase):
-    def _configure_tax_user(
-        self,
-        app,
-        *,
-        username: str,
-        readonly: bool = False,
-        allowed: bool = True,
-    ) -> None:
-        configure_access_control(
-            app,
-            usernames=[username] if allowed else [],
-        )
-        app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
-            user_id=f"{username}-id",
-            username=username,
-            nickname=username,
-            display_name=username,
-            roles=["finance"],
-            permissions=[],
-        )
-
-    def test_tax_offset_read_endpoint_requires_fin_ops_access_when_auth_is_configured(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            self._configure_tax_user(app, username="BLOCKED001", allowed=False)
-
-            response = app.handle_request(
-                "GET",
-                "/api/tax-offset?month=2026-01",
-                headers={"Authorization": "Bearer blocked-user"},
-            )
-
-        payload = json.loads(response.body)
-        self.assertEqual(response.status_code, 403)
-        self.assertIn(payload["error"], {"forbidden", "permission_denied"})
-
-    def test_tax_certified_import_preview_requires_tax_offset_page(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            configure_access_control(app, page_access={"LIMITED001": ["bank-details"]})
-            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
-                user_id="LIMITED001-id", username="LIMITED001", nickname="受限用户", display_name="受限用户"
-            )
-            preview_body, preview_headers = build_multipart_payload(
-                imported_by="spoofed-user",
-                files=[CERTIFIED_JAN],
-            )
-            preview_headers["Authorization"] = "Bearer readonly-user"
-
-            response = app.handle_request(
-                "POST",
-                "/api/tax-offset/certified-import/preview",
-                body=preview_body,
-                headers=preview_headers,
-            )
-
-        payload = json.loads(response.body)
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(payload["error"], "page_access_denied")
-
-    def test_certified_import_preview_returns_row_level_statuses(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            preview_body, preview_headers = build_multipart_payload(
-                imported_by="user_finance_01",
-                files=[CERTIFIED_JAN],
-            )
-
-            response = app.handle_request(
-                "POST",
-                "/api/tax-offset/certified-import/preview",
-                body=preview_body,
-                headers=preview_headers,
-            )
-
-        self.assertEqual(response.status_code, 200)
-        payload = json.loads(response.body)
-        rows = payload["files"][0]["rows"]
-        self.assertEqual(len(rows), 3)
-        self.assertEqual(rows[0]["row_status"], "recognized")
-        self.assertEqual(rows[0]["match_status"], "outside_plan")
-        self.assertEqual(rows[0]["dedupe_status"], "new")
-        self.assertIsNone(rows[0]["error_message"])
-        self.assertEqual(rows[-1]["row_status"], "invalid")
-        self.assertIn("未勾选", rows[-1]["error_message"])
-
-    def test_tax_certified_confirm_is_idempotent_for_same_session(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            preview_body, preview_headers = build_multipart_payload(
-                imported_by="user_finance_01",
-                files=[CERTIFIED_JAN],
-            )
-            preview_response = app.handle_request(
-                "POST",
-                "/api/tax-offset/certified-import/preview",
-                body=preview_body,
-                headers=preview_headers,
-            )
-            preview_payload = json.loads(preview_response.body)
-
-            first_response = app.handle_request(
-                "POST",
-                "/api/tax-offset/certified-import/confirm",
-                json.dumps({"session_id": preview_payload["session"]["id"]}),
-            )
-            second_response = app.handle_request(
-                "POST",
-                "/api/tax-offset/certified-import/confirm",
-                json.dumps({"session_id": preview_payload["session"]["id"]}),
-            )
-
-        first_payload = json.loads(first_response.body)
-        second_payload = json.loads(second_response.body)
-        self.assertEqual(first_response.status_code, 202)
-        self.assertEqual(second_response.status_code, 202)
-        self.assertEqual(first_payload["import_job"]["import_job_id"], second_payload["import_job"]["import_job_id"])
-        self.assertEqual(len(install_durable_import_queue(app).jobs), 1)
-
-    def test_tax_offset_summary_endpoint_reads_canonical_payload_without_runtime_fields(self) -> None:
-        app = build_application()
-
-        response = app.handle_request("GET", "/api/tax-offset/summary?month=2026-05")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["month"], "2026-05")
-        self.assertIn("canonical_snapshot_version", payload)
-        self.assertNotIn("read_model_status", payload)
-        self.assertNotIn("source_versions", payload)
-
-    def test_tax_offset_plan_save_requires_tax_offset_page(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            configure_access_control(app, page_access={"LIMITED001": ["bank-details"]})
-            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
-                user_id="LIMITED001-id", username="LIMITED001", nickname="受限用户", display_name="受限用户"
-            )
-
-            response = app.handle_request(
-                "POST",
-                "/api/tax-offset/plans",
-                json.dumps(
-                    {
-                        "month": "2026-05",
-                        "selected_output_ids": ["output-0"],
-                        "selected_input_ids": ["input-0"],
-                    }
-                ),
-                headers={"Authorization": "Bearer readonly-user"},
-            )
-
-        payload = json.loads(response.body)
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(payload["error"], "page_access_denied")
-
-    def test_tax_offset_plan_save_persists_calculated_result_idempotently(self) -> None:
-        app = build_application()
-        month_payload = json.loads(app.handle_request("GET", "/api/tax-offset?month=2026-05").body)
-
-        request_payload = {
-            "month": "2026-05",
-            "selected_output_ids": [],
-            "selected_input_ids": [],
-            "expected_canonical_snapshot_version": month_payload["canonical_snapshot_version"],
-            "idempotency_key": "tax-plan-save-2026-05",
+    def setUp(self):
+        self.session = SimpleNamespace(identity=SimpleNamespace(username='tax-user'))
+        self.repository = Mock()
+        self.repository.load_page.return_value = {
+            'rows': [{'id': 'invoice-1', 'certification_status': 'certified', 'tax_amount': '6.00'}],
+            'total': 1, 'page': 1, 'page_size': 50,
+            'summary': {'certified': {'count': 1, 'tax_amount': '6.00'}, 'uncertified': {'count': 0}},
         }
-        first_response = app.handle_request("POST", "/api/tax-offset/plans", json.dumps(request_payload))
-        second_response = app.handle_request("POST", "/api/tax-offset/plans", json.dumps(request_payload))
-
-        first_payload = json.loads(first_response.body)
-        second_payload = json.loads(second_response.body)
-        self.assertEqual(first_response.status_code, 200)
-        self.assertEqual(second_response.status_code, 200)
-        self.assertEqual(first_payload["plan"]["id"], second_payload["plan"]["id"])
-        self.assertEqual(first_payload["plan"]["month"], "2026-05")
-        self.assertEqual(first_payload["plan"]["selected_input_ids"], [])
-        self.assertEqual(first_payload["plan"]["summary"]["result_amount"], "0.00")
-        self.assertEqual(
-            first_payload["plan"]["canonical_snapshot_version"],
-            month_payload["canonical_snapshot_version"],
-        )
-        self.assertEqual(first_payload["affected_scope_keys"], ["2026-05"])
-        self.assertNotIn("read_model_scope_keys", first_payload)
-        self.assertNotIn("source_versions", first_payload["plan"])
-
-    def test_tax_offset_plan_save_rejects_stale_canonical_snapshot(self) -> None:
-        app = build_application()
-
-        response = app.handle_request(
-            "POST",
-            "/api/tax-offset/plans",
-            json.dumps(
-                {
-                    "month": "2026-05",
-                    "selected_output_ids": [],
-                    "selected_input_ids": [],
-                    "expected_canonical_snapshot_version": "tax-offset-v1:stale",
-                    "idempotency_key": "tax-plan-stale-2026-05",
-                }
-            ),
+        self.exporter = Mock()
+        self.exporter.export.return_value = ('专票清单.xlsx', b'xlsx')
+        self.records = Mock(return_value={'records': [], 'batches': []})
+        self.preview = Mock(return_value={'session': {'id': 'session-1'}, 'files': [], 'summary': {}})
+        self.revoke = Mock(return_value={'status': 'revoked', 'batch_id': 'batch-1'})
+        self.jobs = Mock()
+        self.jobs.validate_session_owner.return_value = None
+        self.queue = Mock(return_value={'import_job_id': 'job-1'})
+        self.routes = TaxApiRoutes(
+            query_service=TaxOffsetQueryService(canonical_repository=self.repository),
+            export_service=self.exporter,
+            export_response=lambda name, content: (HTTPStatus.OK, {'filename': name, 'content': content}),
+            certified_import_job_service=self.jobs,
+            resolve_read_session=lambda headers: (self.session, None),
+            resolve_mutation_session=lambda headers: (self.session, None),
+            load_json_body=json_body,
+            certified_import_records_provider=self.records,
+            certified_import_preview_provider=self.preview,
+            revoke_batch_provider=self.revoke,
+            enqueue_import_job=self.queue,
+            serialize_import_job=lambda job: job,
         )
 
-        payload = json.loads(response.body)
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(payload["error"], "tax_offset_canonical_version_conflict")
+    def route(self, method, path, payload=None, query=None):
+        return self.routes.route(method, path, query or {}, json.dumps(payload) if payload is not None else None, {})
 
-    def test_tax_offset_reads_canonical_repository_on_every_request_without_runtime_fields(self) -> None:
-        app = build_application()
-        calls: list[str] = []
+    def test_inventory_reads_paged_rows_summary_and_export_catalog(self):
+        status, payload = self.route('GET', '/api/tax-offset', query={'status': ['certified'], 'issue_month': ['2026-09']})
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(payload['total'], 1)
+        self.assertEqual(payload['rows'][0]['tax_amount'], '6.00')
+        self.assertEqual(payload['summary']['certified']['count'], 1)
+        self.assertEqual(sum(field['default_selected'] for field in payload['export_fields']), 8)
+        query = self.repository.load_page.call_args.args[0]
+        self.assertEqual(query.issue_month, '2026-09')
+        self.assertEqual(query.status, 'certified')
 
-        def build_tax_offset(month: str) -> dict[str, object]:
-            calls.append(month)
-            return tax_offset_payload(month, output_count=1, input_count=2, certified_count=0)
+    def test_invalid_and_retired_query_parameters_are_rejected_before_sql(self):
+        for query in ({'month': ['2026-09']}, {'status': ['bad']}, {'page': ['0']},
+                      {'issue_month': ['2026-13']}, {'sort_by': ['amount']}, {'page': ['1', '2']}):
+            with self.subTest(query=query):
+                status, payload = self.route('GET', '/api/tax-offset', query=query)
+                self.assertEqual(status, HTTPStatus.BAD_REQUEST)
+                self.assertEqual(payload['error'], 'invalid_tax_certification_query')
+        self.repository.load_page.assert_not_called()
 
-        app._tax_offset_service = SimpleNamespace(
-            get_month_payload=build_tax_offset,
-            calculate_from_month_payload=lambda **_kwargs: {"summary": tax_offset_payload()["summary"]},
-            clear_month_cache=lambda *_args, **_kwargs: None,
-        )
-        app._tax_offset_dependency_key = None
+    def test_missing_repository_does_not_fall_back_to_empty_inventory(self):
+        self.routes._query_service = None
+        status, payload = self.route('GET', '/api/tax-offset')
+        self.assertEqual(status, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertEqual(payload['error'], 'tax_certification_unavailable')
+        self.assertNotIn('rows', payload)
 
-        with patch("builtins.print") as print_mock:
-            first_response = app.handle_request("GET", "/api/tax-offset?month=2026-05")
-            second_response = app.handle_request("GET", "/api/tax-offset?month=2026-05")
+    def test_retired_plan_and_calculation_routes_are_absent(self):
+        for method, path in [('GET', '/api/tax-offset/summary'), ('POST', '/api/tax-offset/calculate'), ('POST', '/api/tax-offset/plans')]:
+            self.assertIsNone(self.route(method, path, {}))
 
-        self.assertEqual(first_response.status_code, 200)
-        self.assertEqual(second_response.status_code, 200)
-        self.assertEqual(calls, ["2026-05", "2026-05"])
-        self.assertEqual(
-            [row["id"] for row in json.loads(second_response.body)["input_plan_items"]],
-            ["input-0", "input-1"],
-        )
-        self.assertNotIn("read_model_status", json.loads(second_response.body))
-        self.assertNotIn("source_versions", json.loads(second_response.body))
-        metric_payloads = [
-            json.loads(call.args[0])
-            for call in print_mock.call_args_list
-            if call.args and json.loads(call.args[0]).get("kind") == "tax_offset_month_metric"
-        ]
-        self.assertEqual(len(metric_payloads), 2)
-        self.assertTrue(all("cache_hit" not in payload for payload in metric_payloads))
+    def test_query_and_export_enforce_read_permission(self):
+        denied = (HTTPStatus.FORBIDDEN, {'error': 'page_access_denied'})
+        self.routes._resolve_read_session = lambda headers: (None, denied)
+        self.assertEqual(self.route('GET', '/api/tax-offset'), denied)
+        self.assertEqual(self.route('POST', '/api/tax-offset/export', {}), denied)
+        self.repository.load_page.assert_not_called()
+        self.exporter.export.assert_not_called()
 
-    def test_tax_offset_calculate_logs_structured_metric(self) -> None:
-        app = build_application()
-        app._tax_api_routes = SimpleNamespace(calculate=lambda payload: {"summary": {"result_amount": "0.00"}})
+    def test_export_passes_exact_filters_and_fields_and_returns_file(self):
+        filters = {'status': 'certified', 'search': '测试', 'sort_by': 'selection_time', 'sort_direction': 'asc'}
+        status, payload = self.route('POST', '/api/tax-offset/export', {'filters': filters, 'fields': ['invoice_no', 'tax_amount']})
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(payload, {'filename': '专票清单.xlsx', 'content': b'xlsx'})
+        self.exporter.export.assert_called_once_with(filters, ['invoice_no', 'tax_amount'])
 
-        with patch("builtins.print") as print_mock:
-            response = app.handle_request(
-                "POST",
-                "/api/tax-offset/calculate",
-                json.dumps(
-                    {
-                        "month": "2026-05",
-                        "selected_output_ids": ["output-1"],
-                        "selected_input_ids": ["input-1", "input-2"],
-                    }
-                ),
-            )
+    def test_export_rejects_invalid_shapes_and_surfaces_failures(self):
+        for payload in ({'filters': []}, {'fields': 'invoice_no'}, {'fields': [123]}, {'unknown': 1}):
+            self.assertEqual(self.route('POST', '/api/tax-offset/export', payload)[0], HTTPStatus.BAD_REQUEST)
+        self.exporter.export.assert_not_called()
+        self.exporter.export.side_effect = ValueError('导出数量超出上限。')
+        status, payload = self.route('POST', '/api/tax-offset/export', {})
+        self.assertEqual(status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(payload['message'], '导出数量超出上限。')
 
-        self.assertEqual(response.status_code, 200)
-        metric_payloads = [
-            json.loads(call.args[0])
-            for call in print_mock.call_args_list
-            if call.args and json.loads(call.args[0]).get("kind") == "tax_offset_calculate_metric"
-        ]
-        self.assertEqual(len(metric_payloads), 1)
-        self.assertEqual(metric_payloads[0]["metric"], "tax_offset.calculate.duration_ms")
-        self.assertEqual(metric_payloads[0]["month"], "2026-05")
-        self.assertEqual(metric_payloads[0]["selected_output_count"], 1)
-        self.assertEqual(metric_payloads[0]["selected_input_count"], 2)
+    def test_batch_history_has_no_required_month(self):
+        status, payload = self.route('GET', '/api/tax-offset/certified-imports')
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(payload, {'records': [], 'batches': []})
+        self.records.assert_called_once_with(None, records_page=1, batches_page=1, page_size=20)
 
-    def test_tax_certified_confirm_does_not_trigger_write_side_read_model_refresh(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            preview_body, preview_headers = build_multipart_payload(
-                imported_by="user_finance_01",
-                files=[CERTIFIED_JAN],
-            )
-            preview_response = app.handle_request(
-                "POST",
-                "/api/tax-offset/certified-import/preview",
-                body=preview_body,
-                headers=preview_headers,
-            )
-            preview_payload = json.loads(preview_response.body)
+    def test_preview_parse_error_is_not_reported_as_success(self):
+        self.preview.side_effect = ValueError('未找到发票工作表。')
+        status, payload = self.routes.handle_certified_import_preview(imported_by='tax-user', uploads=[])
+        self.assertEqual(status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(payload['message'], '未找到发票工作表。')
 
-            confirm_response = app.handle_request(
-                "POST",
-                "/api/tax-offset/certified-import/confirm",
-                json.dumps({"session_id": preview_payload["session"]["id"]}),
-            )
+    def test_batch_history_rejects_unbounded_or_invalid_page_size(self):
+        for query in ({'page_size': ['101']}, {'records_page': ['0']}, {'batches_page': ['wrong']}):
+            status, payload = self.route('GET', '/api/tax-offset/certified-imports', query=query)
+            self.assertEqual(status, HTTPStatus.BAD_REQUEST)
+            self.assertEqual(payload['error'], 'invalid_tax_certified_import_request')
+        self.records.assert_not_called()
 
-        self.assertEqual(confirm_response.status_code, 202)
-        self.assertFalse(hasattr(app, "_execute_derived_data_lifecycle_event"))
+    def test_confirmation_binds_actor_and_explicit_corrections(self):
+        corrections = [{'unique_key': 'digital:123', 'expected_version': 2}]
+        status, payload = self.route('POST', '/api/tax-offset/certified-import/confirm', {'session_id': 'session-1', 'actor_id': 'spoof', 'corrections': corrections})
+        self.assertEqual(status, HTTPStatus.ACCEPTED)
+        self.assertEqual(payload['status'], 'queued')
+        self.assertEqual(payload['import_job']['import_job_id'], 'job-1')
+        self.jobs.validate_session_owner.assert_called_once_with('session-1', owner_user_id='tax-user')
+        args = self.queue.call_args.kwargs
+        self.assertEqual(args['created_by'], 'tax-user')
+        self.assertEqual(args['idempotency_key'], 'tax_certified_import.confirm:session-1')
+        self.assertEqual(args['payload']['corrections'], corrections)
 
-    def test_tax_offset_includes_oa_attachment_invoice_rows_by_issue_month(self) -> None:
-        app = build_application()
-        attachment_invoice = {
-            "invoice_code": "",
-            "invoice_no": "26532000000021026521",
-            "seller_name": "云南城建物业运营集团",
-            "seller_tax_no": "91530103MA6KHJWK8C",
-            "buyer_name": "云南溯源科技有限公司",
-            "buyer_tax_no": "915300007194052520",
-            "issue_date": "2026-01-06",
-            "amount": "600.00",
-            "tax_rate": "6%",
-            "tax_amount": "33.96",
-            "total_with_tax": "600.00",
-            "invoice_type": "进项发票",
-            "attachment_name": "物业费.pdf",
-        }
-        app._import_service.upsert_oa_attachment_invoice(
-            attachment_invoice,
-            oa_form_id="OA-TAX-001",
-            oa_row_id="oa-tax-202602-001",
-            source_workbench_row_id=app._import_service.oa_attachment_invoice_row_id(
-                "oa-tax-202602-001",
-                0,
-                attachment_invoice,
-            ),
-            allow_create=True,
-        )
+    def test_confirmation_rejects_invalid_or_duplicate_corrections(self):
+        for corrections in ({}, [{'unique_key': 'x', 'expected_version': True}], [{'unique_key': 'x', 'expected_version': 0}], [{'unique_key': 'x', 'expected_version': 1}] * 2):
+            status, payload = self.route('POST', '/api/tax-offset/certified-import/confirm', {'session_id': 'session-1', 'corrections': corrections})
+            self.assertEqual(status, HTTPStatus.BAD_REQUEST)
+            self.assertEqual(payload['error'], 'invalid_tax_certified_corrections')
+        self.queue.assert_not_called()
 
-        response = app.handle_request("GET", "/api/tax-offset?month=2026-01")
-        payload = json.loads(response.body)
+    def test_confirmation_rejects_other_owner_and_queue_unavailability(self):
+        self.jobs.validate_session_owner.side_effect = KeyError('session-1')
+        self.assertEqual(self.route('POST', '/api/tax-offset/certified-import/confirm', {'session_id': 'session-1'})[0], HTTPStatus.NOT_FOUND)
+        self.queue.assert_not_called()
+        self.jobs.validate_session_owner.side_effect = None
+        self.queue.side_effect = RuntimeError('queue unavailable')
+        status, payload = self.route('POST', '/api/tax-offset/certified-import/confirm', {'session_id': 'session-1'})
+        self.assertEqual(status, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertNotIn('import_job', payload)
 
-        self.assertEqual(response.status_code, 200)
-        matched_items = [
-            item
-            for item in payload["input_plan_items"]
-            if item["invoice_no"] == "26532000000021026521"
-        ]
-        self.assertEqual(len(matched_items), 1)
-        self.assertEqual(matched_items[0]["seller_name"], "云南城建物业运营集团")
-        self.assertEqual(matched_items[0]["tax_amount"], "33.96")
-        self.assertEqual(matched_items[0]["total_with_tax"], "600.00")
-        self.assertIn(matched_items[0]["id"], payload["default_selected_input_ids"])
+    def test_revocation_checks_version_and_uses_session_actor(self):
+        status, payload = self.route('POST', '/api/tax-offset/certified-imports/batch-1/revoke', {'expected_version': 1, 'actor_id': 'spoof'})
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(payload['status'], 'revoked')
+        self.revoke.assert_called_once_with(batch_id='batch-1', actor_id='tax-user', expected_version=1)
+        self.revoke.side_effect = ValueError('批次已变化。')
+        status, payload = self.route('POST', '/api/tax-offset/certified-imports/batch-1/revoke', {'expected_version': 1})
+        self.assertEqual(status, HTTPStatus.CONFLICT)
+        self.assertEqual(payload['error'], 'tax_certified_batch_conflict')
 
-    def test_tax_offset_uses_real_imported_input_invoices_as_plan_rows(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            preview = app._import_service.preview_import(
-                batch_type=BatchType.INPUT_INVOICE,
-                source_name="real-input-plan.xlsx",
-                imported_by="user_finance_01",
-                rows=[
-                    {
-                        "invoice_code": "255020000001",
-                        "digital_invoice_no": "25502000000145098656",
-                        "invoice_no": "45098656",
-                        "counterparty_name": "重庆高新技术产业开发区国家税务局",
-                        "seller_tax_no": "91500226MA60KH3C0Q",
-                        "seller_name": "重庆高新技术产业开发区国家税务局",
-                        "buyer_tax_no": "915300007194052520",
-                        "buyer_name": "云南溯源科技有限公司",
-                        "invoice_date": "2026-01-02",
-                        "amount": "6000.00",
-                        "tax_amount": "180.00",
-                        "total_with_tax": "6180.00",
-                        "tax_rate": "3%",
-                        "invoice_kind": "进项普票",
-                        "risk_level": "低",
-                        "invoice_status_from_source": "正常",
-                    }
-                ],
-            )
-            app._import_service.confirm_import(preview.id)
+    def test_confirmation_payload_conflict_requires_new_preview(self):
+        self.queue.side_effect = ImportJobIdempotencyConflict('different request')
+        status, payload = self.route('POST', '/api/tax-offset/certified-import/confirm', {'session_id': 'session-1'})
+        self.assertEqual(status, HTTPStatus.CONFLICT)
+        self.assertEqual(payload['error'], 'tax_certified_import_confirmation_conflict')
+        self.assertNotIn('import_job', payload)
 
-            response = app.handle_request("GET", "/api/tax-offset?month=2026-01")
-            payload = json.loads(response.body)
+    def test_revocation_cannot_change_another_users_batch(self):
+        self.revoke.side_effect = PermissionError('只能撤销本人导入的批次。')
+        status, payload = self.route('POST', '/api/tax-offset/certified-imports/batch-1/revoke', {'expected_version': 1})
+        self.assertEqual(status, HTTPStatus.FORBIDDEN)
+        self.assertEqual(payload['error'], 'tax_certified_batch_forbidden')
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(payload["input_plan_items"]), 1)
-        self.assertEqual(payload["input_plan_items"][0]["invoice_no"], "25502000000145098656")
-        self.assertEqual(payload["input_plan_items"][0]["digital_invoice_no"], "25502000000145098656")
-        self.assertEqual(payload["input_plan_items"][0]["invoice_type"], "进项普票")
-        self.assertEqual(payload["input_plan_items"][0]["tax_rate"], "3%")
-        self.assertEqual(payload["default_selected_input_ids"], [payload["input_plan_items"][0]["id"]])
+    def test_mutations_enforce_permission_before_side_effect(self):
+        denied = (HTTPStatus.FORBIDDEN, {'error': 'page_access_denied'})
+        self.routes._resolve_mutation_session = lambda headers: (None, denied)
+        for path in ['/api/tax-offset/certified-import/preview', '/api/tax-offset/certified-import/confirm', '/api/tax-offset/certified-imports/batch-1/revoke']:
+            self.assertEqual(self.route('POST', path, {'expected_version': 1, 'session_id': 'session-1'}), denied)
+        self.preview.assert_not_called()
+        self.queue.assert_not_called()
+        self.revoke.assert_not_called()
 
-    def test_certified_import_preview_confirm_and_month_list_round_trip(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            preview_body, preview_headers = build_multipart_payload(
-                imported_by="user_finance_01",
-                files=[CERTIFIED_JAN],
-            )
-
-            preview_response = app.handle_request(
-                "POST",
-                "/api/tax-offset/certified-import/preview",
-                body=preview_body,
-                headers=preview_headers,
-            )
-            self.assertEqual(preview_response.status_code, 200)
-            preview_payload = json.loads(preview_response.body)
-            self.assertEqual(preview_payload["session"]["file_count"], 1)
-            self.assertEqual(preview_payload["files"][0]["month"], "2026-01")
-            self.assertEqual(preview_payload["files"][0]["recognized_count"], 2)
-            self.assertEqual(preview_payload["files"][0]["matched_plan_count"], 0)
-            self.assertEqual(preview_payload["files"][0]["outside_plan_count"], 2)
-            self.assertEqual(preview_payload["summary"]["recognized_count"], 2)
-            self.assertEqual(preview_payload["summary"]["matched_plan_count"], 0)
-            self.assertEqual(preview_payload["summary"]["outside_plan_count"], 2)
-
-            confirm_response = app.handle_request(
-                "POST",
-                "/api/tax-offset/certified-import/confirm",
-                json.dumps({"session_id": preview_payload["session"]["id"]}),
-            )
-            self.assertEqual(confirm_response.status_code, 202)
-            queue = install_durable_import_queue(app)
-            queue.process_all()
-            confirm_payload = queue.get_job(json.loads(confirm_response.body)["import_job"]["import_job_id"]).result_payload
-            self.assertEqual(confirm_payload["batch"]["months"], ["2026-01"])
-            self.assertEqual(confirm_payload["batch"]["persisted_record_count"], 2)
-            self.assertNotIn("read_model_scope_keys", confirm_payload)
-            self.assertNotIn("freshness_targets", confirm_payload)
-            self.assertNotIn("operation_barrier_targets", confirm_payload)
-
-            list_response = app.handle_request("GET", "/api/tax-offset/certified-imports?month=2026-01")
-            self.assertEqual(list_response.status_code, 200)
-            list_payload = json.loads(list_response.body)
-            self.assertEqual(list_payload["month"], "2026-01")
-            self.assertEqual(len(list_payload["records"]), 2)
-            self.assertEqual(list_payload["records"][0]["selection_status"], "已勾选")
-
-            month_payload_response = app.handle_request("GET", "/api/tax-offset?month=2026-01")
-            self.assertEqual(month_payload_response.status_code, 200)
-            month_payload = json.loads(month_payload_response.body)
-            self.assertEqual(len(month_payload["certified_items"]), 2)
-            self.assertEqual(len(month_payload["certified_matched_rows"]), 0)
-            self.assertEqual(len(month_payload["certified_outside_plan_rows"]), 2)
-            self.assertEqual(month_payload["locked_certified_input_ids"], [])
-            self.assertEqual(month_payload["summary"]["certified_input_tax"], "250.75")
-
-    def test_get_tax_offset_returns_month_rows_without_hardcoded_certified_items_by_default(self) -> None:
-        app = build_application()
-
-        response = app.handle_request("GET", "/api/tax-offset?month=2026-03")
-        self.assertEqual(response.status_code, 200)
-        payload = json.loads(response.body)
-
-        self.assertEqual(payload["month"], "2026-03")
-        self.assertEqual(len(payload["output_items"]), 0)
-        self.assertEqual(len(payload["input_plan_items"]), 0)
-        self.assertEqual(len(payload["certified_items"]), 0)
-        self.assertIn("certified_matched_rows", payload)
-        self.assertIn("certified_outside_plan_rows", payload)
-        self.assertEqual(len(payload["certified_outside_plan_rows"]), 0)
-        self.assertEqual(payload["locked_certified_input_ids"], [])
-        self.assertEqual(payload["default_selected_output_ids"], [])
-        self.assertEqual(payload["default_selected_input_ids"], [])
-        self.assertEqual(payload["summary"]["certified_input_tax"], "0.00")
-        self.assertEqual(payload["summary"]["output_tax"], "0.00")
-
-    def test_calculate_tax_offset_uses_zero_certified_input_when_no_real_import_exists(self) -> None:
-        app = build_application()
-
-        response = app.handle_request(
-            "POST",
-            "/api/tax-offset/calculate",
-            json.dumps(
-                {
-                    "month": "2026-03",
-                    "selected_output_ids": [],
-                    "selected_input_ids": [],
-                }
-            ),
-        )
-        self.assertEqual(response.status_code, 200)
-        payload = json.loads(response.body)
-
-        self.assertEqual(payload["summary"]["output_tax"], "0.00")
-        self.assertEqual(payload["summary"]["input_tax"], "0.00")
-        self.assertEqual(payload["summary"]["planned_input_tax"], "0.00")
-        self.assertEqual(payload["summary"]["certified_input_tax"], "0.00")
-        self.assertEqual(payload["summary"]["deductible_tax"], "0.00")
-        self.assertEqual(payload["summary"]["result_label"], "本月留抵税额")
-        self.assertEqual(payload["summary"]["result_amount"], "0.00")
-
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_job_payload_is_private_to_owner_and_type(self):
+        repo = Mock()
+        repo.get_job.return_value = SimpleNamespace(import_type='tax_certified_import.confirm', created_by='another-user')
+        service = TaxCertifiedImportJobService(import_job_repository_provider=lambda: repo)
+        with self.assertRaises(KeyError):
+            service.get_confirm_job_payload('job-1', owner_user_id='tax-user')

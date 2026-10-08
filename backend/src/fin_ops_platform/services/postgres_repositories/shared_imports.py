@@ -2,23 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from fin_ops_platform.services.postgres_repositories.common import jsonb, row_payload
-from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
+from fin_ops_platform.services.postgres_repositories.common import jsonb
 
 
 class PostgresSharedImportRepository:
-    """Transaction-bound ports for the two other users of the import worker."""
+    """Transaction-bound persistence for manual OA imports."""
 
-    def __init__(self, transaction: Any, *, session_id: str | None = None) -> None:
+    def __init__(self, transaction: Any) -> None:
         self._transaction = transaction
-        self._session_id = session_id
-
-    def tax_session_owner(self, session_id: str) -> str:
-        row = self._transaction.fetch_one(
-            "select imported_by from app.tax_certified_import_sessions where session_id=%s", (session_id,))
-        if row is None:
-            raise KeyError(session_id)
-        return str(row["imported_by"])
 
     def save_oa_records(self, records: list[Any]) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
@@ -54,19 +45,3 @@ class PostgresSharedImportRepository:
         for row in existing:
             entries[row["row_id"]].update(imported_at=row["imported_at"].isoformat(), actor_id=row["actor_id"])
         return {"imported": imported, "already_imported": already_imported, "entries": entries, "row_ids": sorted(entries)}
-
-    def load_tax_certified_imports(self) -> dict[str, Any]:
-        session = self._transaction.fetch_one("""
-            select raw_payload from app.tax_certified_import_sessions where session_id=%s for update
-        """, (self._session_id,))
-        if session is None:
-            raise KeyError(self._session_id)
-        batches = self._transaction.fetch_all("""
-            select b.batch_id, b.raw_payload from app.tax_certified_import_batches b
-            join app.tax_certified_import_sessions s on s.id=b.session_id where s.session_id=%s
-        """, (self._session_id,))
-        return {"sessions": {self._session_id: row_payload(session, "raw_payload")},
-                "batches": {row["batch_id"]: row_payload(row, "raw_payload") for row in batches}, "records": {}}
-
-    def save_tax_certified_imports(self, snapshot: dict[str, Any]) -> None:
-        PostgresOpsTaxEtcRepository(self._transaction).save_tax_certified_imports(snapshot)

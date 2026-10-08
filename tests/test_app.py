@@ -59,7 +59,7 @@ class AppTests(unittest.TestCase):
         )
         self.assertIn("/api/session/me", payload["entrypoints"])
         self.assertIn("/api/tax-offset", payload["entrypoints"])
-        self.assertIn("/api/tax-offset/calculate", payload["entrypoints"])
+        self.assertIn("/api/tax-offset/export", payload["entrypoints"])
         self.assertIn("/api/cost-statistics/explorer", payload["entrypoints"])
         self.assertIn("/api/cost-statistics/export", payload["entrypoints"])
         self.assertNotIn("/api/search", payload["entrypoints"])

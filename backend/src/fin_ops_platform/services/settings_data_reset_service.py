@@ -60,7 +60,6 @@ class SettingsDataResetService:
         matching_service: Any,
         workbench_override_service: Any,
         workbench_pair_snapshot_port: SettingsDataResetPairSnapshotPort,
-        tax_certified_import_service: Any,
     ) -> None:
         self._state_store = state_store
         self._import_service = import_service
@@ -68,7 +67,6 @@ class SettingsDataResetService:
         self._matching_service = matching_service
         self._workbench_override_service = workbench_override_service
         self._workbench_pair_snapshot_port = workbench_pair_snapshot_port
-        self._tax_certified_import_service = tax_certified_import_service
 
     @staticmethod
     def supported_actions() -> list[str]:
@@ -280,7 +278,6 @@ class SettingsDataResetService:
             "matching": self._matching_service.snapshot(),
             "workbench_overrides": self._workbench_override_service.snapshot(),
             "workbench_pair_relations": self._workbench_pair_snapshot_port.snapshot(),
-            "tax_certified_imports": self._tax_certified_import_service.snapshot(),
         }
 
     @classmethod

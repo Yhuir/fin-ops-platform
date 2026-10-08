@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import unittest
 from contextlib import contextmanager
+from datetime import date, datetime
+from decimal import Decimal
 
-from fin_ops_platform.services.postgres_repositories.tax_offset import (
-    PostgresTaxOffsetCanonicalRepository,
-)
+from fin_ops_platform.services.postgres_repositories.tax_offset import PostgresTaxOffsetCanonicalRepository
+from fin_ops_platform.services.tax_offset_query_service import TaxOffsetQuery
 
 
 class FakeConnection:
-    def __init__(self) -> None:
-        self.commands: list[str] = []
-        self.queries: list[str] = []
+    def __init__(self, count=21):
+        self.count = count
+        self.commands = []
+        self.queries = []
         self.transaction_count = 0
 
     @contextmanager
@@ -19,135 +21,79 @@ class FakeConnection:
         self.transaction_count += 1
         yield self
 
-    def execute(self, sql: str, _params: object = None) -> None:
-        self.commands.append(" ".join(sql.split()).lower())
+    def execute(self, sql, params=()):
+        self.commands.append(sql)
 
-    def fetch_all(self, sql: str, _params: object = None) -> list[dict[str, object]]:
-        normalized = " ".join(sql.split()).lower()
-        self.queries.append(normalized)
-        if "from app.invoices" in normalized:
-            return [
-                {
-                    "row_id": "output-1",
-                    "invoice_type": "销项发票",
-                    "invoice_no": "OUT-1",
-                    "invoice_date": "2026-05-01",
-                    "buyer_name": "客户",
-                    "amount": None,
-                    "tax_amount": "13.00",
-                    "total_with_tax": "113.00",
-                    "tax_rate": "13%",
-                    "raw_payload": {},
-                },
-                {
-                    "row_id": "input-1",
-                    "invoice_type": "进项发票",
-                    "invoice_no": "IN-1",
-                    "invoice_date": "2026-05-02",
-                    "seller_name": "供应商一",
-                    "tax_amount": "6.00",
-                    "total_with_tax": "106.00",
-                    "tax_rate": "6%",
-                    "raw_payload": {"risk_level": "低"},
-                },
-                {
-                    "row_id": "input-2",
-                    "invoice_type": "进项发票",
-                    "invoice_no": "IN-2",
-                    "invoice_date": "2026-05-03",
-                    "seller_name": "供应商二",
-                    "amount": "100.00",
-                    "tax_amount": "3.00",
-                    "total_with_tax": "103.00",
-                    "tax_rate": "3%",
-                    "raw_payload": {},
-                },
-            ]
-        if "from app.tax_certified_import_records" in normalized:
-            return [
-                {
-                    "certified_unique_key": "certified-1",
-                    "invoice_no": "IN-1",
-                    "invoice_date": "2026-05-02",
-                    "seller_name": "供应商一",
-                    "amount": "100.00",
-                    "tax_amount": "6.00",
-                    "status": "已认证",
-                    "raw_payload": {},
-                }
-            ]
-        raise AssertionError(f"unexpected query: {normalized}")
+    def fetch_one(self, sql, params=()):
+        self.queries.append((sql, params))
+        return {"count": 2}
 
-    def fetch_one(self, sql: str, _params: object = None) -> dict[str, object] | None:
-        normalized = " ".join(sql.split()).lower()
-        self.queries.append(normalized)
-        if "from app.tax_offset_plans" in normalized:
-            return {
-                "selected_output_ids": ["output-1"],
-                "selected_input_ids": ["input-2", "missing-input"],
-            }
-        raise AssertionError(f"unexpected query: {normalized}")
+    def fetch_all(self, sql, params=()):
+        self.queries.append((sql, params))
+        if "group by certification_status" in sql:
+            return [{"certification_status": "certified", "count": self.count, "amount": None,
+                     "tax_amount": Decimal("0"), "deductible_tax_amount": Decimal("1.234567"),
+                     "missing_amount_count": 1, "missing_tax_count": 0, "missing_deductible_tax_count": 0}]
+        return [{"id": "invoice-id", "digital_invoice_no": "001234567890123456789", "invoice_code": None,
+                 "invoice_no": None, "issue_date": date(2026, 9, 1), "seller_name": "源销方", "seller_tax_no": "000123",
+                 "amount": None, "tax_amount": Decimal("0"), "deductible_tax_amount": Decimal("1.234567"),
+                 "selection_time": datetime(2026, 10, 1, 10, 30), "certification_status": "certified", "tax_period": None,
+                 "invoice_source_fields": {"invoice_kind": "数电票(专用发票)"},
+                 "certification_source_fields": {"source_fields": {"risk_status": "无", "amount": "999"}}}]
 
 
 class TaxOffsetCanonicalRepositoryTests(unittest.TestCase):
-    def test_loads_rows_summary_statistics_and_saved_plan_in_one_fixed_snapshot(self) -> None:
+    def test_pagination_and_summary_share_snapshot_filters_and_preserve_source_nulls(self):
         connection = FakeConnection()
-
-        payload = PostgresTaxOffsetCanonicalRepository(connection).load_month_payload("2026-05")
-
+        query = TaxOffsetQuery.parse({"status": "certified", "issue_month": "2026-09", "selection_month": "2026-10",
+                                      "search": "a_%", "page": 2, "page_size": 20, "sort_by": "selection_time"})
+        payload = PostgresTaxOffsetCanonicalRepository(connection).load_page(query)
         self.assertEqual(connection.transaction_count, 1)
-        self.assertEqual(
-            connection.commands,
-            ["set transaction isolation level repeatable read read only"],
-        )
+        self.assertEqual(connection.commands, ["set transaction isolation level repeatable read read only"])
         self.assertEqual(len(connection.queries), 3)
-        self.assertTrue(all("workbench" not in query and "read_model." not in query for query in connection.queries))
-        self.assertEqual([row["id"] for row in payload["output_items"]], ["output-1"])
-        self.assertEqual([row["id"] for row in payload["input_plan_items"]], ["input-1", "input-2"])
-        self.assertEqual(payload["locked_certified_input_ids"], ["input-1"])
-        self.assertEqual(payload["default_selected_output_ids"], ["output-1"])
-        self.assertEqual(payload["default_selected_input_ids"], ["input-2"])
-        self.assertEqual(payload["summary"]["output_tax"], "13.00")
-        self.assertEqual(payload["summary"]["certified_input_tax"], "6.00")
-        self.assertEqual(payload["summary"]["planned_input_tax"], "3.00")
-        self.assertEqual(payload["statistics"]["input_invoice_count"], 2)
-        self.assertEqual(payload["statistics"]["output_invoice_count"], 1)
-        self.assertEqual(
-            payload["statistics"],
-            {"input_invoice_count": 2, "output_invoice_count": 1},
-        )
-        self.assertRegex(payload["canonical_snapshot_version"], r"^tax-offset-v1:[0-9a-f]{64}$")
+        self.assertEqual(connection.queries[0][1], connection.queries[1][1][:-2])
+        self.assertEqual(connection.queries[1][1][-2:], (20, 20))
+        sql = connection.queries[1][0]
+        self.assertIn("c.id is not null", sql)
+        self.assertIn("selection_time desc nulls last, id asc", sql)
+        self.assertNotIn("tax_offset_plans", sql)
+        self.assertNotIn("read_model", sql)
+        self.assertEqual(payload["rows"][0]["sequence"], 21)
+        self.assertIsNone(payload["rows"][0]["amount"])
+        self.assertEqual(payload["rows"][0]["tax_amount"], "0.00")
+        self.assertEqual(payload["rows"][0]["deductible_tax_amount"], "1.234567")
+        self.assertEqual(payload["rows"][0]["risk_status"], "无")
+        self.assertEqual(payload["summary"]["certified"]["missing_amount_count"], 1)
+        self.assertIsNone(payload["summary"]["certified"]["amount"])
+        self.assertEqual(payload["total"], 21)
+        self.assertEqual(payload["unresolved_record_count"], 2)
 
-    def test_original_values_and_unselectable_missing_tax_survive_the_snapshot(self) -> None:
-        class MissingTaxConnection(FakeConnection):
-            def fetch_all(self, sql: str, params: object = None) -> list[dict[str, object]]:
-                rows = super().fetch_all(sql, params)
-                if "from app.invoices" in sql:
-                    rows[0]["total_with_tax"] = None
-                    rows[2]["tax_amount"] = None
-                    rows[2]["raw_payload"] = {"tax_amount_text": "*"}
-                return rows
+    def test_out_of_range_page_clamps_inside_snapshot(self):
+        connection = FakeConnection(count=1)
+        payload = PostgresTaxOffsetCanonicalRepository(connection).load_page(TaxOffsetQuery(page=2, page_size=20))
+        self.assertEqual(payload["page"], 1)
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(connection.queries[1][1][-2:], (20, 0))
+        self.assertEqual(payload["rows"][0]["sequence"], 1)
 
-        payload = PostgresTaxOffsetCanonicalRepository(MissingTaxConnection()).load_month_payload("2026-05")
-        self.assertIsNone(payload["output_items"][0]["amount"])
-        self.assertIsNone(payload["output_items"][0]["total_with_tax"])
-        self.assertEqual(payload["input_plan_items"][1]["amount"], "100.00")
-        self.assertIsNone(payload["input_plan_items"][1]["tax_amount"])
-        self.assertEqual(payload["input_plan_items"][1]["tax_amount_text"], "*")
-        self.assertFalse(payload["input_plan_items"][1]["is_selectable"])
-        self.assertEqual(payload["default_selected_input_ids"], [])
-        self.assertIsNone(payload["certified_items"][0]["total_with_tax"])
-        self.assertEqual(payload["summary"]["planned_input_tax"], "0.00")
-
-    def test_rejects_invalid_month_before_opening_a_snapshot(self) -> None:
+    def test_export_ignores_page_and_matching_never_uses_amount_or_name(self):
         connection = FakeConnection()
-
-        with self.assertRaisesRegex(ValueError, "month must be YYYY-MM"):
-            PostgresTaxOffsetCanonicalRepository(connection).load_month_payload("202605")
-
-        self.assertEqual(connection.transaction_count, 0)
-        self.assertEqual(connection.queries, [])
-
-
-if __name__ == "__main__":
-    unittest.main()
+        repo = PostgresTaxOffsetCanonicalRepository(connection)
+        repo.load_page(TaxOffsetQuery(page=4), limit_override=20001)
+        self.assertEqual(connection.queries[-2][1][-2:], (20001, 0))
+        self.assertEqual(repo.match_certified_rows([]), {})
+        class MatchConnection:
+            def fetch_all(self, sql, params):
+                self.sql = sql
+                return [{"unique_key": "digital:1", "invoice_ids": ["one"]},
+                        {"unique_key": "digital:2", "invoice_ids": ["one", "two"]},
+                        {"unique_key": "digital:3", "invoice_ids": None}]
+        matching = MatchConnection()
+        result = PostgresTaxOffsetCanonicalRepository(matching).match_certified_rows(
+            [{"unique_key": "digital:1", "digital_invoice_no": "1", "buyer_tax_no": "buyer"}])
+        self.assertEqual(result["digital:1"], {"match_status": "matched_invoice", "matched_invoice_id": "one"})
+        self.assertEqual(result["digital:2"]["match_status"], "ambiguous")
+        self.assertEqual(result["digital:3"]["match_status"], "outside_invoices")
+        self.assertNotIn("i.amount", matching.sql)
+        self.assertNotIn("i.seller_name", matching.sql)
+        self.assertIn("i.buyer_tax_no = r.buyer_tax_no", matching.sql)

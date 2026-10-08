@@ -171,7 +171,7 @@ _CONSUMER_PATHS = {
     "output-invoice-collections": "/api/output-invoice-collections/rows?page=1&page_size=20",
     "oa-pending-payments": "/api/oa-pending-payments/rows?page=1&page_size=20",
     "cost-statistics": "/api/cost-statistics/explorer?scope=2026-07&view=project",
-    "tax-offset": "/api/tax-offset?month=2026-07",
+    "tax-offset": "/api/tax-offset?page=1&page_size=20",
     "turnover-ledger": "/api/turnover-ledger?view=grouped&page=1&page_size=20",
 }
 
@@ -235,7 +235,7 @@ def _raw_relation_checkpoint(
                 "assertions": [
                     {
                         "pointer": (
-                            "/input_plan_items"
+                            "/rows"
                             if page_key == "tax-offset"
                             else "/rows/0/transaction_id"
                             if page_key == "cost-statistics"
@@ -460,7 +460,7 @@ def _raw_bank_flow_rule_batch_scenario(name: str) -> dict[str, object]:
                 "path": _CONSUMER_PATHS[page_key],
                 "assertions": [
                     {
-                        "pointer": "/input_plan_items" if page_key == "tax-offset" else "/rows",
+                        "pointer": "/rows" if page_key == "tax-offset" else "/rows",
                         "equals": [],
                     }
                 ],

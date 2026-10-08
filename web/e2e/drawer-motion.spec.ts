@@ -291,28 +291,19 @@ test.describe("right drawer motion", () => {
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 
-  test("keeps the tax results rail mounted and inert while collapsed", async ({ page }) => {
+  test("closes the native tax export drawer without losing table state", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     await page.goto("/tax-offset");
-    const rail = page.getByRole("complementary", { name: "已认证结果" });
-    const body = rail.locator("#tax-certified-results-body");
-    await expect(body).toBeVisible();
-
-    const requestsBeforeCollapse = api.calls.length;
-    await rail.getByRole("button", { name: /收起已认证结果/ }).click();
-    await expect(body).toBeAttached();
-    await expect(body).toHaveAttribute("aria-hidden", "true");
-    await expect(body).toHaveAttribute("inert", "");
-    await expect(rail.getByRole("button", { name: /展开已认证结果/ })).toHaveAttribute("aria-expanded", "false");
-    expect(api.calls.length).toBe(requestsBeforeCollapse);
-
-    const requestsBeforeExpand = api.calls.length;
-    await rail.getByRole("button", { name: /展开已认证结果/ }).click();
-    await expect(body).toHaveAttribute("aria-hidden", "false");
-    await expect(rail.getByRole("button", { name: /收起已认证结果/ })).toHaveAttribute("aria-expanded", "true");
-    expect(api.calls.length).toBe(requestsBeforeExpand);
-    expect(api.count("POST /api/tax-offset/plans")).toBe(0);
-    expect(api.count("POST /api/tax-offset/certified-import/confirm")).toBe(0);
+    await expect(page.getByRole("grid", { name: "专票认证明细" })).toBeVisible();
+    const opener = page.getByRole("button", { name: "导出专票清单", exact: true });
+    await opener.click();
+    const drawer = page.getByRole("dialog", { name: "导出专票清单" });
+    await expect(drawer).toBeVisible();
+    const before = api.count("GET /api/tax-offset");
+    await page.keyboard.press("Escape");
+    await expect(drawer).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    expect(api.count("GET /api/tax-offset")).toBe(before);
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 

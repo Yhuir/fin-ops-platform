@@ -1,107 +1,40 @@
-import type {
-  TaxCertifiedImportConfirmResult,
-  TaxCertifiedImportConfirmedResult,
-  TaxCertifiedImportJob,
-  TaxCertifiedImportPreviewFile,
-  TaxCertifiedImportPreviewResult,
-  TaxCertifiedImportPreviewRow,
-  TaxCertifiedInvoiceRecord,
-  TaxInvoiceRecord,
-  TaxMonthData,
-  TaxOffsetPlanSaveResult,
-  TaxSummary,
-} from "./types";
-import { apiRequestJson } from "../apiClient";
+import { apiFetch, apiRequestJson } from "../apiClient";
 import { formatMoney } from "../money";
+import type { TaxCertificationQuery, TaxCertificationResult, TaxImportHistoryQuery, TaxImportHistory, TaxCertificationFilters, TaxImportCorrection,
+  TaxCertifiedImportConfirmResult, TaxCertifiedImportConfirmedResult, TaxCertifiedImportJob,
+  TaxCertifiedImportPreviewFile, TaxCertifiedImportPreviewResult, TaxCertifiedImportPreviewRow } from "./types";
 
-type ApiTaxSummary = {
-  output_tax: string;
-  certified_input_tax?: string;
-  planned_input_tax?: string;
-  input_tax: string;
-  deductible_tax: string;
-  result_label: string;
-  result_amount: string;
-};
+export async function fetchTaxCertifications(query: TaxCertificationQuery, signal?: AbortSignal): Promise<TaxCertificationResult> {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => { if (value !== undefined && value !== "") params.set(key, String(value)); });
+  return apiRequestJson<TaxCertificationResult>(`/api/tax-offset?${params}`, { signal });
+}
 
-type ApiOutputItem = {
-  id: string;
-  buyer_name: string;
-  issue_date: string;
-  invoice_no: string;
-  tax_rate?: string | null;
-  amount?: string | null;
-  tax_amount: string | null;
-  tax_amount_text?: string | null;
-  total_with_tax: string | null;
-  is_selectable?: boolean;
-  invoice_type: string;
-};
-
-type ApiInputItem = {
-  id: string;
-  seller_name: string;
-  issue_date: string;
-  invoice_no: string;
-  tax_rate?: string | null;
-  amount?: string | null;
-  tax_amount: string | null;
-  tax_amount_text?: string | null;
-  total_with_tax: string | null;
-  is_selectable?: boolean;
-  risk_level: string;
-  certified_status?: string;
-  is_locked_certified?: boolean;
-};
-
-type ApiCertifiedItem = {
-  id: string;
-  seller_name: string;
-  issue_date: string;
-  invoice_no: string;
-  tax_rate?: string | null;
-  amount?: string | null;
-  tax_amount: string | null;
-  tax_amount_text?: string | null;
-  total_with_tax: string | null;
-  is_selectable?: boolean;
-  status?: string;
-  matched_input_id?: string | null;
-  matched_invoice_no?: string | null;
-};
-
-type ApiTaxMonthPayload = {
-  month: string;
-  output_items: ApiOutputItem[];
-  input_items?: ApiInputItem[];
-  input_plan_items?: ApiInputItem[];
-  certified_items?: ApiCertifiedItem[];
-  certified_matched_rows?: ApiCertifiedItem[];
-  certified_outside_plan_rows?: ApiCertifiedItem[];
-  locked_certified_input_ids?: string[];
-  default_selected_output_ids: string[];
-  default_selected_input_ids: string[];
-  summary: ApiTaxSummary;
-  statistics?: {
-    input_invoice_count?: number | null;
-    output_invoice_count?: number | null;
-  } | null;
-  canonical_snapshot_version: string;
-};
-
-type ApiTaxCalculatePayload = {
-  month: string;
-  summary: ApiTaxSummary;
-};
+export async function exportTaxCertifications(filters: TaxCertificationFilters, fields: string[]) {
+  const response = await apiFetch("/api/tax-offset/export", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filters, fields }),
+  });
+  if (!response.ok) {
+    const payload = await response.json() as { message?: string; error?: { message?: string } };
+    throw new Error(payload.error?.message ?? payload.message ?? "导出失败");
+  }
+  if (!response.headers.get("Content-Type")?.includes("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) {
+    throw new Error("导出文件格式错误");
+  }
+  return { blob: await response.blob(), fileName: "专票清单.xlsx" };
+}
 
 type ApiTaxCertifiedImportPreviewRow = {
   id: string;
-  month: string;
-  row_status?: string | null;
-  match_status?: string | null;
-  matched_plan_id?: string | null;
-  dedupe_status?: string | null;
+  month: string | null;
+  buyer_tax_no: string | null;
+  row_status: TaxCertifiedImportPreviewRow["rowStatus"];
+  match_status: TaxCertifiedImportPreviewRow["matchStatus"];
+  unique_key: string | null;
+  expected_version?: number | null;
+  dedupe_status: TaxCertifiedImportPreviewRow["dedupeStatus"];
   error_message?: string | null;
+  blocking: boolean;
   digital_invoice_no?: string | null;
   invoice_code?: string | null;
   invoice_no?: string | null;
@@ -123,8 +56,11 @@ type ApiTaxCertifiedImportPreviewFile = {
   month: string;
   recognized_count: number;
   invalid_count: number;
-  matched_plan_count?: number;
-  outside_plan_count?: number;
+  ignored_count: number;
+  matched_invoice_count: number;
+  outside_invoices_count: number;
+  conflict_count: number;
+  duplicate_count: number;
   rows: ApiTaxCertifiedImportPreviewRow[];
 };
 
@@ -136,11 +72,15 @@ type ApiTaxCertifiedImportPreviewPayload = {
     status: string;
   };
   files: ApiTaxCertifiedImportPreviewFile[];
-  summary?: {
+  summary: {
+    blocking_count: number;
     recognized_count: number;
     invalid_count: number;
-    matched_plan_count: number;
-    outside_plan_count: number;
+  ignored_count: number;
+    matched_invoice_count: number;
+    outside_invoices_count: number;
+    conflict_count: number;
+    duplicate_count: number;
   };
 };
 
@@ -170,121 +110,26 @@ type ApiTaxCertifiedImportJob = {
 };
 
 type ApiTaxCertifiedImportConfirmPayload = {
-  status?: "confirmed" | "queued" | string;
-  success?: boolean;
-  batch?: ApiTaxCertifiedImportBatch;
-  import_job?: ApiTaxCertifiedImportJob;
+  status: "queued";
+  import_job: ApiTaxCertifiedImportJob;
 };
 
 type ApiTaxCertifiedImportJobPayload = {
   import_job: ApiTaxCertifiedImportJob;
 };
 
-type ApiTaxOffsetPlanSavePayload = {
-  status: "saved";
-  affected_scope_keys?: unknown;
-  plan: {
-    id: string;
-    month: string;
-    selected_output_ids: string[];
-    selected_input_ids: string[];
-    summary: ApiTaxSummary;
-    canonical_snapshot_version: string;
-    updated_at?: string;
-  };
-};
-
-function optionalCount(value: unknown): number | undefined {
-  if (value === null || value === undefined || value === "") {
-    return undefined;
-  }
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
-}
-
-function arrayValue(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
-function stringList(value: unknown): string[] {
-  return arrayValue(value).map((item) => String(item).trim()).filter(Boolean);
-}
-
-function mapSummary(summary: ApiTaxSummary): TaxSummary {
-  return {
-    outputTax: formatMoney(summary.output_tax),
-    certifiedInputTax: formatMoney(summary.certified_input_tax ?? "0.00"),
-    plannedInputTax: formatMoney(summary.planned_input_tax ?? "0.00"),
-    inputTax: formatMoney(summary.input_tax),
-    deductibleTax: formatMoney(summary.deductible_tax),
-    resultLabel: summary.result_label,
-    resultAmount: formatMoney(summary.result_amount),
-  };
-}
-
-function mapOutputItem(item: ApiOutputItem): TaxInvoiceRecord {
-  return {
-    id: item.id,
-    invoiceNo: item.invoice_no,
-    invoiceType: item.invoice_type,
-    flowType: "output",
-    counterparty: item.buyer_name,
-    issueDate: item.issue_date,
-    taxRate: item.tax_rate?.trim() || "—",
-    amount: formatMoney(item.amount, "—"),
-    taxAmount: formatMoney(item.tax_amount, item.tax_amount_text?.trim() || "—"),
-    isSelectable: item.is_selectable,
-  };
-}
-
-function mapInputItem(item: ApiInputItem): TaxInvoiceRecord {
-  return {
-    id: item.id,
-    invoiceNo: item.invoice_no,
-    invoiceType: `进项票（风险${item.risk_level}）`,
-    flowType: "input",
-    counterparty: item.seller_name,
-    issueDate: item.issue_date,
-    taxRate: item.tax_rate?.trim() || "—",
-    amount: formatMoney(item.amount, "—"),
-    taxAmount: formatMoney(item.tax_amount, item.tax_amount_text?.trim() || "—"),
-    statusLabel: item.certified_status ?? "待认证",
-    isLocked: Boolean(item.is_locked_certified),
-    isSelectable: !item.is_locked_certified && item.is_selectable !== false,
-  };
-}
-
-function mapCertifiedItem(item: ApiCertifiedItem): TaxCertifiedInvoiceRecord {
-  return {
-    id: item.id,
-    invoiceNo: item.invoice_no,
-    invoiceType: item.status ?? "已认证",
-    flowType: "input",
-    counterparty: item.seller_name,
-    issueDate: item.issue_date,
-    taxRate: item.tax_rate?.trim() || "—",
-    amount: formatMoney(item.amount, "—"),
-    taxAmount: formatMoney(item.tax_amount, item.tax_amount_text?.trim() || "—"),
-    statusLabel: item.status ?? "已认证",
-    isLocked: true,
-    isSelectable: false,
-    matchedInputId: item.matched_input_id ?? null,
-  };
-}
-
-async function requestJson<T>(url: string, init: RequestInit = {}) {
-  return apiRequestJson<T>(url, init);
-}
-
 function mapPreviewRow(row: ApiTaxCertifiedImportPreviewRow): TaxCertifiedImportPreviewRow {
   return {
     id: row.id,
     month: row.month,
-    rowStatus: row.row_status ?? "recognized",
-    matchStatus: row.match_status ?? "unknown",
-    matchedPlanId: row.matched_plan_id ?? null,
-    dedupeStatus: row.dedupe_status ?? "not_applicable",
+    buyerTaxNo: row.buyer_tax_no,
+    rowStatus: row.row_status,
+    matchStatus: row.match_status,
+    uniqueKey: row.unique_key,
+    expectedVersion: row.expected_version ?? null,
+    dedupeStatus: row.dedupe_status,
     errorMessage: row.error_message ?? null,
+    blocking: row.blocking,
     digitalInvoiceNo: row.digital_invoice_no ?? null,
     invoiceCode: row.invoice_code ?? null,
     invoiceNo: row.invoice_no ?? null,
@@ -308,8 +153,11 @@ function mapPreviewFile(file: ApiTaxCertifiedImportPreviewFile): TaxCertifiedImp
     month: file.month,
     recognizedCount: file.recognized_count,
     invalidCount: file.invalid_count,
-    matchedPlanCount: file.matched_plan_count ?? 0,
-    outsidePlanCount: file.outside_plan_count ?? 0,
+    ignoredCount: file.ignored_count,
+    matchedInvoiceCount: file.matched_invoice_count,
+    outsideInvoicesCount: file.outside_invoices_count,
+    conflictCount: file.conflict_count,
+    duplicateCount: file.duplicate_count,
     rows: file.rows.map(mapPreviewRow),
   };
 }
@@ -360,101 +208,20 @@ function mapImportJob(job: ApiTaxCertifiedImportJob): TaxCertifiedImportJob {
   };
 }
 
-export async function fetchTaxOffsetMonth(month: string, signal?: AbortSignal): Promise<TaxMonthData> {
-  const params = new URLSearchParams({ month });
-  const payload = await requestJson<ApiTaxMonthPayload>(`/api/tax-offset?${params.toString()}`, {
-    method: "GET",
-    signal,
-  });
-
-  const inputPlanItems = payload.input_plan_items ?? payload.input_items ?? [];
-  const certifiedMatchedRows = payload.certified_matched_rows ?? [];
-  const certifiedOutsidePlanRows = payload.certified_outside_plan_rows ?? [];
-  const lockedCertifiedInputIds = payload.locked_certified_input_ids ?? [];
-  const canonicalSnapshotVersion = payload.canonical_snapshot_version?.trim();
-  if (!canonicalSnapshotVersion) {
-    throw new Error("Tax offset canonical snapshot version is missing.");
-  }
-
-  const monthData: TaxMonthData = {
-    outputInvoices: payload.output_items.map(mapOutputItem),
-    inputPlanInvoices: inputPlanItems.map(mapInputItem),
-    certifiedMatchedInvoices: certifiedMatchedRows.map(mapCertifiedItem),
-    certifiedOutsidePlanInvoices: certifiedOutsidePlanRows.map(mapCertifiedItem),
-    lockedCertifiedInputIds,
-    defaultSelectedOutputIds: payload.default_selected_output_ids,
-    defaultSelectedInputIds: payload.default_selected_input_ids,
-    summary: mapSummary(payload.summary),
-    statistics: payload.statistics ? {
-      inputInvoiceCount: optionalCount(payload.statistics.input_invoice_count),
-      outputInvoiceCount: optionalCount(payload.statistics.output_invoice_count),
-    } : undefined,
-    canonicalSnapshotVersion,
-  };
-  return monthData;
-}
-
-export async function calculateTaxOffset(params: {
-  month: string;
-  selectedOutputIds: string[];
-  selectedInputIds: string[];
-}) {
-  const payload = await requestJson<ApiTaxCalculatePayload>("/api/tax-offset/calculate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      month: params.month,
-      selected_output_ids: params.selectedOutputIds,
-      selected_input_ids: params.selectedInputIds,
-    }),
-  });
-
-  return mapSummary(payload.summary);
-}
-
-export async function saveTaxOffsetPlan(params: {
-  month: string;
-  selectedOutputIds: string[];
-  selectedInputIds: string[];
-  expectedCanonicalSnapshotVersion: string;
-  idempotencyKey: string;
-}): Promise<TaxOffsetPlanSaveResult> {
-  const payload = await requestJson<ApiTaxOffsetPlanSavePayload>("/api/tax-offset/plans", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      month: params.month,
-      selected_output_ids: params.selectedOutputIds,
-      selected_input_ids: params.selectedInputIds,
-      expected_canonical_snapshot_version: params.expectedCanonicalSnapshotVersion,
-      idempotency_key: params.idempotencyKey,
-    }),
-  });
-  return {
-    status: payload.status,
-    affectedScopeKeys: stringList(payload.affected_scope_keys),
-    plan: {
-      id: payload.plan.id,
-      month: payload.plan.month,
-      selectedOutputIds: payload.plan.selected_output_ids,
-      selectedInputIds: payload.plan.selected_input_ids,
-      summary: mapSummary(payload.plan.summary),
-      canonicalSnapshotVersion: payload.plan.canonical_snapshot_version,
-      updatedAt: payload.plan.updated_at,
-    },
-  };
-}
-
 export async function previewTaxCertifiedImport(params: {
   importedBy: string;
   files: File[];
+  month?: string;
+  buyerTaxNo?: string;
 }): Promise<TaxCertifiedImportPreviewResult> {
   const formData = new FormData();
   formData.append("imported_by", params.importedBy);
+  if (params.month) formData.append("month", params.month);
+  if (params.buyerTaxNo) formData.append("buyer_tax_no", params.buyerTaxNo);
   for (const file of params.files) {
     formData.append("files", file);
   }
-  const payload = await requestJson<ApiTaxCertifiedImportPreviewPayload>("/api/tax-offset/certified-import/preview", {
+  const payload = await apiRequestJson<ApiTaxCertifiedImportPreviewPayload>("/api/tax-offset/certified-import/preview", {
     method: "POST",
     body: formData,
   });
@@ -466,40 +233,36 @@ export async function previewTaxCertifiedImport(params: {
     status: payload.session.status,
     files: payload.files.map(mapPreviewFile),
     summary: {
-      recognizedCount: payload.summary?.recognized_count ?? payload.files.reduce((sum, file) => sum + file.recognized_count, 0),
-      invalidCount: payload.summary?.invalid_count ?? payload.files.reduce((sum, file) => sum + file.invalid_count, 0),
-      matchedPlanCount: payload.summary?.matched_plan_count ?? payload.files.reduce((sum, file) => sum + (file.matched_plan_count ?? 0), 0),
-      outsidePlanCount: payload.summary?.outside_plan_count ?? payload.files.reduce((sum, file) => sum + (file.outside_plan_count ?? 0), 0),
+      blockingCount: payload.summary.blocking_count,
+      recognizedCount: payload.summary.recognized_count,
+      invalidCount: payload.summary.invalid_count,
+      ignoredCount: payload.summary.ignored_count,
+      matchedInvoiceCount: payload.summary.matched_invoice_count,
+      outsideInvoicesCount: payload.summary.outside_invoices_count,
+      conflictCount: payload.summary.conflict_count,
+      duplicateCount: payload.summary.duplicate_count,
     },
   };
 }
 
-export async function confirmTaxCertifiedImport(sessionId: string): Promise<TaxCertifiedImportConfirmResult> {
-  const payload = await requestJson<ApiTaxCertifiedImportConfirmPayload>("/api/tax-offset/certified-import/confirm", {
+export async function confirmTaxCertifiedImport(sessionId: string, corrections: TaxImportCorrection[] = []): Promise<TaxCertifiedImportConfirmResult> {
+  const payload = await apiRequestJson<ApiTaxCertifiedImportConfirmPayload>("/api/tax-offset/certified-import/confirm", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       session_id: sessionId,
+      corrections,
     }),
   });
 
-  if (payload.status === "queued" || payload.import_job) {
-    if (!payload.import_job) {
-      throw new Error("Queued tax certified import response is missing import_job.");
-    }
-    return {
-      status: "queued",
-      importJob: mapImportJob(payload.import_job),
-    };
+  if (payload.status !== "queued" || !payload.import_job) {
+    throw new Error("认证导入未返回后台任务");
   }
-  if (!payload.batch) {
-    throw new Error("Confirmed tax certified import response is missing batch.");
-  }
-  return mapCertifiedImportBatch(payload.batch);
+  return { status: "queued", importJob: mapImportJob(payload.import_job) };
 }
 
 export async function fetchTaxCertifiedImportJob(importJobId: string): Promise<TaxCertifiedImportJob> {
-  const payload = await requestJson<ApiTaxCertifiedImportJobPayload>(
+  const payload = await apiRequestJson<ApiTaxCertifiedImportJobPayload>(
     `/api/tax-offset/certified-import/jobs/${encodeURIComponent(importJobId)}`,
     { method: "GET" },
   );
@@ -512,4 +275,14 @@ export function taxCertifiedImportConfirmedFromJob(job: TaxCertifiedImportJob): 
     return null;
   }
   return mapCertifiedImportBatch(batch);
+}
+
+export async function fetchTaxCertifiedImportBatches(query: TaxImportHistoryQuery, signal?: AbortSignal): Promise<TaxImportHistory> {
+  const params = new URLSearchParams(Object.entries(query).map(([key, value]) => [key, String(value)]));
+  return apiRequestJson<TaxImportHistory>(`/api/tax-offset/certified-imports?${params}`, { signal });
+}
+export async function revokeTaxCertifiedImportBatch(id: string, expectedVersion: number) {
+  return apiRequestJson(`/api/tax-offset/certified-imports/${encodeURIComponent(id)}/revoke`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expected_version: expectedVersion }),
+  });
 }

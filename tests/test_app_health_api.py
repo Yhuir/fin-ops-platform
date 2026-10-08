@@ -158,6 +158,8 @@ class FakePageBusinessAuditConnection(FakeInputInvoiceUsageAuditConnection):
         if self.fail:
             raise RuntimeError("page audit database timeout")
         self.fetch_one_calls.append((sql, params))
+        if "app.tax_certified_import_records" in sql and "count(*) as count" in sql:
+            return {"count": 0}
         return {
             "source_fact_count": 2,
             "active_relation_count": 1,

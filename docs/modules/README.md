@@ -14,7 +14,7 @@
 | [进项发票使用](input-invoice-usage/README.md) | `/input-invoice-usage` |
 | [销项发票收款](output-invoice-collections/README.md) | `/output-invoice-collections` |
 | [OA 待付款核对](oa-pending-payments/README.md) | `/oa-pending-payments` |
-| [税金抵扣](tax-offset/README.md) | `/tax-offset` |
+| [专票认证情况](tax-offset/README.md) | `/tax-offset` |
 | [外部往来款](turnover-ledger/README.md) | `/turnover-ledger` |
 | [成本统计](cost-statistics/README.md) | `/cost-statistics` |
 | [ETC 票据](etc-tickets/README.md) | `/etc-tickets` |

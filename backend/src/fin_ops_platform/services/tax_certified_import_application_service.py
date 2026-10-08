@@ -1,108 +1,54 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 from typing import Any
 
-from fin_ops_platform.services.tax_certified_import_service import (
-    TaxCertifiedImportPreviewRowResult,
-    UploadedCertifiedImportFile,
-)
+from fin_ops_platform.services.postgres_repositories.common import serialize_value
+from fin_ops_platform.services.tax_certified_import_service import UploadedCertifiedImportFile
 
 
 class TaxCertifiedImportApplicationService:
-    def __init__(
-        self,
-        *,
-        certified_import_service: Any,
-        tax_offset_service: Any,
-    ) -> None:
-        self._certified_import_service = certified_import_service
-        self._tax_offset_service = tax_offset_service
+    def __init__(self, *, certified_import_service: Any) -> None:
+        self._service = certified_import_service
 
-    def preview_payload(
-        self,
-        *,
-        imported_by: str,
-        uploads: list[UploadedCertifiedImportFile],
-    ) -> dict[str, object]:
-        if self._certified_import_service is None:
-            raise RuntimeError("Tax certified import service is not configured.")
-        if self._tax_offset_service is None:
-            raise RuntimeError("Tax offset service is not configured.")
-        session = self._certified_import_service.preview_files(imported_by=imported_by, uploads=uploads)
-        preview_files: list[dict[str, object]] = []
-        summary = {
-            "recognized_count": 0,
-            "invalid_count": 0,
-            "matched_plan_count": 0,
-            "outside_plan_count": 0,
-        }
-        for preview_file in session.files:
-            matched_rows = self._tax_offset_service.classify_certified_preview_rows(
-                preview_file.month,
-                preview_file.rows,
-            )
-            matches_by_key = {
-                str(item.get("unique_key") or ""): item
-                for item in matched_rows
-                if str(item.get("unique_key") or "")
-            }
-            row_payloads: list[dict[str, object]] = []
-            matched_plan_count = 0
-            outside_plan_count = 0
-            for row_result in preview_file.row_results:
-                row_payload = self._row_payload(row_result)
-                if row_result.row_status == "recognized":
-                    match = matches_by_key.get(str(row_result.unique_key or ""))
-                    match_status = str(match.get("match_status") if match else "outside_plan")
-                    matched_plan_id = match.get("matched_plan_id") if match else None
-                    row_payload["match_status"] = match_status
-                    row_payload["matched_plan_id"] = matched_plan_id
-                    if match_status == "matched_plan":
-                        matched_plan_count += 1
-                    else:
-                        outside_plan_count += 1
-                row_payloads.append(row_payload)
+    def preview_payload(self, *, imported_by: str, uploads: list[UploadedCertifiedImportFile],
+                        month: str | None = None, buyer_tax_no: str | None = None) -> dict[str, Any]:
+        session = self._service.preview_files(imported_by=imported_by, uploads=uploads,
+                                             month=month, buyer_tax_no=buyer_tax_no)
+        all_rows = [serialize_value(row) for file in session.files for row in file.rows]
+        classifications = self._service.classify_rows(all_rows)
+        summary = {key: 0 for key in ("recognized_count", "invalid_count", "ignored_count", "matched_invoice_count",
+                                     "outside_invoices_count", "conflict_count", "duplicate_count", "blocking_count")}
+        files = []
+        for file in session.files:
+            rows = []
+            counts = dict.fromkeys(summary, 0)
+            for row in file.row_results:
+                payload = {"blocking": False, **serialize_value(row)}
+                if row["row_status"] == "recognized":
+                    payload.update(classifications[row["unique_key"]])
+                    if payload["blocking"]:
+                        payload["row_status"] = "invalid"
+                        counts["invalid_count"] += 1
+                        counts["blocking_count"] += 1
+                        rows.append(payload)
+                        continue
+                    counts["recognized_count"] += 1
+                    counts["matched_invoice_count" if payload["match_status"] == "matched_invoice" else "outside_invoices_count"] += 1
+                    if payload["dedupe_status"] in {"conflict", "duplicate"}:
+                        counts[f'{payload["dedupe_status"]}_count'] += 1
+                else:
+                    counts["ignored_count" if row["row_status"] == "ignored" else "invalid_count"] += 1
+                rows.append(payload)
+            files.append({"id": file.id, "file_name": file.file_name, "month": file.month, "rows": rows, **counts})
+            for key in summary:
+                summary[key] += counts[key]
+        return {"session": {"id": session.id, "imported_by": session.imported_by,
+                            "file_count": session.file_count, "status": session.status},
+                "files": files, "summary": summary}
 
-            file_payload = {
-                "id": preview_file.id,
-                "file_name": preview_file.file_name,
-                "month": preview_file.month,
-                "recognized_count": preview_file.recognized_count,
-                "invalid_count": preview_file.invalid_count,
-                "matched_plan_count": matched_plan_count,
-                "outside_plan_count": outside_plan_count,
-                "rows": row_payloads,
-            }
-            preview_files.append(file_payload)
-            summary["recognized_count"] += preview_file.recognized_count
-            summary["invalid_count"] += preview_file.invalid_count
-            summary["matched_plan_count"] += matched_plan_count
-            summary["outside_plan_count"] += outside_plan_count
+    def records_payload(self, month: str | None = None, *, records_page: int = 1, batches_page: int = 1,
+                        page_size: int = 20) -> dict[str, Any]:
+        return self._service.records_payload(month, records_page=records_page, batches_page=batches_page, page_size=page_size)
 
-        return {
-            "session": {
-                "id": session.id,
-                "imported_by": session.imported_by,
-                "file_count": session.file_count,
-                "status": session.status,
-            },
-            "files": preview_files,
-            "summary": summary,
-        }
-
-    def records_payload(self, month: str) -> dict[str, object]:
-        if self._certified_import_service is None:
-            raise RuntimeError("Tax certified import service is not configured.")
-        return {
-            "month": month,
-            "records": self._certified_import_service.list_records_for_month(month),
-        }
-
-    @staticmethod
-    def _row_payload(row: TaxCertifiedImportPreviewRowResult) -> dict[str, object]:
-        payload = asdict(row)
-        payload.setdefault("match_status", "unknown")
-        payload.setdefault("matched_plan_id", None)
-        payload.setdefault("dedupe_status", "not_applicable")
-        return payload
+    def revoke_batch(self, batch_id: str, *, actor_id: str, expected_version: int) -> dict[str, Any]:
+        return self._service.revoke_batch(batch_id, actor_id=actor_id, expected_version=expected_version)

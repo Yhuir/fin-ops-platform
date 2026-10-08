@@ -355,18 +355,6 @@ class PostgresStateStore:
         self.save_manual_oa_imports(payload)
         return True
 
-    def load_tax_certified_imports(self) -> dict[str, Any]:
-        snapshot = self._ops_tax_etc_repository.load_tax_certified_imports()
-        if snapshot:
-            return snapshot
-        return {}
-
-    def save_tax_certified_imports(self, snapshot: dict[str, Any]) -> None:
-        self._ops_tax_etc_repository.save_tax_certified_imports(snapshot)
-
-    def save_tax_offset_plan(self, plan: dict[str, Any]) -> dict[str, Any]:
-        return self._ops_tax_etc_repository.save_tax_offset_plan(plan)
-
     def load_etc_state(self) -> dict[str, Any]:
         return self._ops_tax_etc_repository.load_etc_state()
 

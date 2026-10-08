@@ -15,7 +15,6 @@ import { vi } from "vitest";
 
 import App from "../app/App";
 import { isSidebarDisclosureItem, sidebarGroups } from "../components/shell/sidebarItems";
-import { currentBusinessMonth } from "../features/dateTime";
 import { installMockApiFetch } from "./apiMock";
 
 const WORKBENCH_RENDER_TIMEOUT = 3000;
@@ -89,7 +88,7 @@ describe("Finance operations shell", () => {
     const systemLabels = sidebarGroups.find((group) => group.title === "系统操作")?.items.map((item) => item.label);
     expect(financeLabels).toBeDefined();
     expect(systemLabels).toBeDefined();
-    expect(financeLabels?.slice(-4)).toEqual(["税金抵扣", "待找发票", "进项发票使用情况", "销项发票收款情况"]);
+    expect(financeLabels?.slice(-4)).toEqual(["专票认证情况", "待找发票", "进项发票使用情况", "销项发票收款情况"]);
     expect(systemLabels?.[0]).toBe("设置");
   });
 
@@ -124,8 +123,6 @@ describe("Finance operations shell", () => {
   });
 
   test("loads the workbench as an all-time view and keeps the month picker scoped to tax offset", async () => {
-    const defaultMonth = currentBusinessMonth();
-    const [defaultYear, defaultMonthNumber] = defaultMonth.split("-");
     window.history.pushState({}, "", "/");
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
@@ -149,19 +146,19 @@ describe("Finance operations shell", () => {
     expect(screen.getByRole("link", { name: "发票导入" })).toHaveAttribute("href", "/imports/invoices");
     expect(screen.getByRole("link", { name: "ETC发票导入" })).toHaveAttribute("href", "/imports/etc-invoices");
     expect(await screen.findByText("王青", {}, { timeout: WORKBENCH_RENDER_TIMEOUT })).toBeInTheDocument();
-    await user.click(screen.getByRole("link", { name: "税金抵扣" }));
+    await user.click(screen.getByRole("link", { name: "专票认证情况" }));
 
     expect(
-      await screen.findByRole("heading", { name: "税金抵扣计划与试算" }, { timeout: WORKBENCH_RENDER_TIMEOUT }),
+      await screen.findByRole("heading", { name: "专票认证情况" }, { timeout: WORKBENCH_RENDER_TIMEOUT }),
     ).toBeInTheDocument();
     expect(document.querySelector(".global-header")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "搜索" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "设置" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "导入" })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("button", { name: `税金抵扣月份：${defaultYear}年${Number(defaultMonthNumber)}月` })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "导入" }).find(button => button.hasAttribute("aria-expanded"))).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "开票月份：年月" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/workbench?month=all", expect.any(Object));
     expect(fetchMock.mock.calls.filter(([input]) => String(input).startsWith("/api/workbench?"))).toHaveLength(1);
-    expect(fetchMock).toHaveBeenCalledWith(`/api/tax-offset?month=${defaultMonth}`, expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith("/api/tax-offset?status=all&sort_by=issue_date&sort_direction=desc&page=1&page_size=50", expect.any(Object));
   });
 
   test("keeps the shell sidebar controls stable on cost statistics", async () => {

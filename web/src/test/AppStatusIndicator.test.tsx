@@ -40,11 +40,11 @@ const globalAppStatus = {
     },
     {
       key: "tax_offset",
-      label: "税金抵扣",
+      label: "专票认证情况",
       route: "/tax-offset",
       level: "busy",
       status: "missing",
-      reason: "税金抵扣正在同步",
+      reason: "专票认证情况正在同步",
       details: [],
       workers: [],
       job_ids: [],
@@ -161,7 +161,7 @@ describe("global app status indicator", () => {
     expect(runtimeSummary).toHaveTextContent("排队 2 / 执行 1 / 失败待处理 3");
     expect(within(statusDialog).getByText("银行明细")).toBeInTheDocument();
     expect(within(statusDialog).getByRole("link", { name: "银行明细 已同步" })).toBeInTheDocument();
-    expect(within(statusDialog).getByText("税金抵扣")).toBeInTheDocument();
+    expect(within(statusDialog).getByText("专票认证情况")).toBeInTheDocument();
     expect(within(statusDialog).getByText("关联台")).toBeInTheDocument();
     expect(within(statusDialog).queryByText("就绪")).not.toBeInTheDocument();
     expect(screen.queryByText("银行明细已同步")).not.toBeInTheDocument();

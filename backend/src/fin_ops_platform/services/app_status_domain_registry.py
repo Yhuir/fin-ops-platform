@@ -45,7 +45,7 @@ APP_STATUS_DOMAIN_REGISTRY: tuple[AppStatusDomainDefinition, ...] = (
     ),
     AppStatusDomainDefinition(
         key="tax_offset",
-        label="税金抵扣",
+        label="专票认证情况",
         route="/tax-offset",
         job_types=("tax_certified_import", "tax_certified_import.confirm"),
     ),

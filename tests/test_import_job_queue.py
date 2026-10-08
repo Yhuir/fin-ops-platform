@@ -22,6 +22,7 @@ from fin_ops_platform.services.runtime_worker_handlers import (
     _tax_offset_scope_keys_for_import_file_session,
 )
 
+from tests.app_test_support import DEFAULT_TEST_USERNAME
 from tests.app_test_support import build_local_state_application as build_application
 from tests.mock_import_files import CERTIFIED_JAN, MockImportFile
 
@@ -375,11 +376,10 @@ class ImportJobRepositoryTests(unittest.TestCase):
         self.assertEqual(len(payload["import_processors"]), 4)
 
     def test_tax_confirm_rejects_foreign_preview_before_claiming_idempotency_key(self) -> None:
-        from fin_ops_platform.services.tax_certified_import_service import UploadedCertifiedImportFile
         app = build_application()
         self.addCleanup(app.close)
-        session = app._tax_certified_import_service.preview_files(imported_by="other-owner", uploads=[
-            UploadedCertifiedImportFile(file_name=CERTIFIED_JAN.name, content=CERTIFIED_JAN.content)])
+        app._tax_certified_import_service = SimpleNamespace(session_owner=lambda session_id: "other-owner")
+        session = SimpleNamespace(id="private-session")
         repository = FakeApplicationImportJobRepository()
         app._import_job_repository = repository
         response = app.handle_request('POST','/api/tax-offset/certified-import/confirm',json.dumps({'session_id':session.id}))
@@ -396,17 +396,9 @@ class ImportJobRepositoryTests(unittest.TestCase):
             queue_settings=SimpleNamespace(backend="postgres"),
         )
         app._import_job_repository = import_jobs  # noqa: SLF001
-        preview_body, preview_headers = build_multipart_payload(
-            imported_by="user_finance_01",
-            files=[CERTIFIED_JAN],
-        )
-        preview_response = app.handle_request(
-            "POST",
-            "/api/tax-offset/certified-import/preview",
-            body=preview_body,
-            headers=preview_headers,
-        )
-        session_id = json.loads(preview_response.body)["session"]["id"]
+        self.addCleanup(app.close)
+        session_id = "tax-session-1"
+        app._tax_certified_import_service = SimpleNamespace(session_owner=lambda session_id: DEFAULT_TEST_USERNAME)
 
         with patch.dict(os.environ, {"FIN_OPS_IMPORT_PROCESSING_BACKEND": "postgres"}):
             confirm_response = app.handle_request(

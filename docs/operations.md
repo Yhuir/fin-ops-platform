@@ -156,7 +156,7 @@ p50/p95/p99、canonical audit、health、worker、PostgreSQL outbox/dead-letter 
 ## 回滚与恢复
 
 - Migration 尚未执行或 frontend-only 发布：deploy control 可切回已验证 previous immutable release。
-- Forward-only migration 已执行：禁止自动回滚，保持 maintenance 并 forward repair。支付规则申请人数组迁移 `0183` 和发票原始金额与 ETC 税额可空迁移 `0185` 属于此类；旧版本不能读取新条件或安全处理缺失原金额，激活前必须安装登记对应版本的 exact-release deploy control。
+- Forward-only migration 已执行：禁止自动回滚，保持 maintenance 并 forward repair。支付规则申请人数组迁移 `0183` 和发票原始金额与 ETC 税额可空迁移 `0185` 属于此类；旧版本不能读取新条件或安全处理缺失原金额，激活前必须安装登记对应版本的 exact-release deploy control。专票认证迁移 `0187` 同样只允许向前修复：旧认证快照写入不理解记录版本、撤销状态与精确发票关联，禁止重新启用旧写入链。
 - 不通过恢复旧 worker/env、重建旧 projection、手写 SQL 或删 queue 行解阻。
 - repair 工具必须先 dry-run，绑定 source fingerprint、精确计数、operator 和 reason；任何漂移在写前失败。银行 Audit terminal suspected link 修复还必须显式提供 `--expected-bank-audit-row-unlink-count`，只允许候选 release 按计划逐行 CAS 清空该引用。
 - OA 附件发票当前子付款项全量审计/修复复用固定 helper：`import-audit-repair <release> --dry-run --repair-all-oa-attachment-invoice-links --rollback-manifest-path /opt/fin-ops/runtime-smoke/import-audit-repair-artifacts/<task>.json`；artifact 路径只能位于硬编码的 root-owned `0700` 目录，helper 明确拒绝通过环境变量重定向该目录，文件以 `O_EXCL/O_NOFOLLOW` 创建且权限固定为 `0600`。为兼容尚未刷新到当前版本的 root-owned helper，CLI 仅在有效 UID 为 root 且未提供配置时自建并使用这一硬编码目录；非 root 直调仍必须显式配置受控 artifact root，缺失时失败关闭。执行必须复用同一 artifact 并追加 dry-run fingerprint、operator 与 reason。报告只输出 artifact 指纹与恢复条数；验证幂等和页面闭环后，优先使用 `import-audit-repair-artifact-delete <task>.json <rollback-manifest-fingerprint>` 校验指纹并精确删除；若 root-owned helper 尚未更新到该命令，则通过同一受控入口执行 `import-audit-repair <release> --delete-rollback-manifest-artifact <task>.json --expected-rollback-manifest-fingerprint <rollback-manifest-fingerprint>`。两条删除路径都只接受安全文件名、root-owned `0700/0600` 工件和精确内容指纹。不得删除平台 PITR、组织级备份或主数据库。

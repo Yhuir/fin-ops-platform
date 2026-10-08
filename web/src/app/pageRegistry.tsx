@@ -173,7 +173,7 @@ export const appPageDefinitions: AppPageDefinition[] = [
     pageKey: "tax-offset",
     component: taxOffsetPage.component,
     preload: taxOffsetPage.preload,
-    sidebar: { group: "finance", label: "税金抵扣", icon: Calculator },
+    sidebar: { group: "finance", label: "专票认证情况", icon: Calculator },
   },
   {
     path: "/pending-invoices",

@@ -197,6 +197,7 @@ EXPECTED_MIGRATION_FILES = [
     "0184_remove_retired_settings.sql",
     "0185_invoice_source_values_nullable.sql",
     "0186_oa_applicant_verified_identity.sql",
+    "0187_tax_certification_evidence.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "app", "staging", "cash")
 TEST_TABLES = (

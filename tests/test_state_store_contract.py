@@ -253,8 +253,8 @@ class StateStoreContractTests(unittest.TestCase):
                     turnover_relation = next(item for item in turnover_relations if item["relation_id"] == "rel-1")
                 self.assertEqual(turnover_relation["relation_id"], "rel-1")
 
-                store.save_tax_certified_imports({"sessions": {"session-1": {"id": "session-1"}}})
-                self.assertEqual(store.load_tax_certified_imports()["sessions"]["session-1"]["id"], "session-1")
+                self.assertFalse(hasattr(store, "save_tax_certified_imports"))
+                self.assertFalse(hasattr(store, "load_tax_certified_imports"))
 
     def test_state_store_file_contract_round_trips_owned_files(self) -> None:
         for name, store in self._with_stores():

@@ -263,7 +263,7 @@ test.describe("ETC invoice import browser flow", () => {
       pageKey: "tax-offset",
       module: "tax-offset",
       operationId: "tax-offset.open-after-etc-import",
-      visibleLabel: "税金抵扣",
+      visibleLabel: "专票认证情况",
       actionType: "navigate",
     }, async (mark) => {
       const taxOffsetResponse = page.waitForResponse((response) =>
@@ -272,9 +272,9 @@ test.describe("ETC invoice import browser flow", () => {
         && response.status() === 200);
       await page.goto("/tax-offset");
       taxOffsetPayload = await mark("apiLatencyMs", taxOffsetResponse);
-      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "专票认证情况" })).toBeVisible());
     });
-    await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "专票认证情况" })).toBeVisible();
     await expectDirectCanonicalResponse(Promise.resolve(taxOffsetPayload!));
     await expect(page.getByText("ETC导入通行服务商")).toBeVisible();
     await expect(page.getByText("ETC-2026-005")).toBeVisible();

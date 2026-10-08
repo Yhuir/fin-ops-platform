@@ -154,7 +154,7 @@ PAGE_AUDIT_REGISTRY: dict[str, PageAuditRegistration] = {
     ),
     "tax-offset": _ready(
         "tax-offset",
-        "税金抵扣",
+        "专票认证情况",
         "tax_offset",
         relation_proof_required=False,
         external_source_boundary="certified tax source plus invoice and ETC evidence",

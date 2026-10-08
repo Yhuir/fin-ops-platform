@@ -45,9 +45,9 @@
       "rows"
     ],
     "tax-offset": [
-      "output_items",
-      "input_plan_items",
-      "certified_items"
+      "rows",
+      "total",
+      "summary"
     ],
     "turnover-ledger": [
       "groups",

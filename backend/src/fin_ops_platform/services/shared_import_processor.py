@@ -13,6 +13,7 @@ from fin_ops_platform.services.postgres_repositories.oa_attachment_invoice impor
 from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.shared_imports import PostgresSharedImportRepository
+from fin_ops_platform.services.postgres_repositories.tax_certified_imports import PostgresTaxCertifiedImportRepository
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService
 
 
@@ -31,10 +32,10 @@ class SharedImportProcessor:
             raise ValueError("import payload.session_id is required.")
         with self._connection.transaction() as transaction:
             job.completion.lock(transaction)
-            service = TaxCertifiedImportService(state_store=PostgresSharedImportRepository(transaction, session_id=session_id))
+            service = TaxCertifiedImportService(repository=PostgresTaxCertifiedImportRepository(transaction))
             if service.get_session(session_id).imported_by != job.created_by:
                 raise ValueError("Tax import session is not owned by the task actor.")
-            result = {"success": True, "batch": serialize_value(service.confirm_session(session_id))}
+            result = {"success": True, "batch": serialize_value(service.confirm_session(session_id, actor_id=job.created_by, corrections=job.payload.get("corrections") or []))}
             self._record_completion(transaction, job, result)
             job.completion.succeed(transaction, result)
         return result

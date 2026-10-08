@@ -292,7 +292,7 @@ test.describe("invoice import browser flow", () => {
       pageKey: "tax-offset",
       module: "tax-offset",
       operationId: "tax-offset.open-after-invoice-import",
-      visibleLabel: "税金抵扣",
+      visibleLabel: "专票认证情况",
       actionType: "navigate",
     }, async (mark) => {
       const taxOffsetResponse = page.waitForResponse((response) =>
@@ -301,11 +301,11 @@ test.describe("invoice import browser flow", () => {
         && response.status() === 200);
       await page.goto("/tax-offset");
       taxOffsetPayload = await mark("apiLatencyMs", taxOffsetResponse);
-      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "专票认证情况" })).toBeVisible());
     });
-    await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "专票认证情况" })).toBeVisible();
     const taxPayload = await expectDirectCanonicalResponse(Promise.resolve(taxOffsetPayload!));
-    expect(taxPayload.canonical_snapshot_version).toEqual(expect.any(String));
+    expect(taxPayload.rows).toEqual(expect.arrayContaining([expect.objectContaining({ digital_invoice_no: "SD-INV-IMPORT-E2E-001", certification_status: "uncertified" })]));
     await expect(page.getByText("SD-INV-IMPORT-E2E-001")).toBeVisible();
     await expect(page.getByText("发票导入进项供应商")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);

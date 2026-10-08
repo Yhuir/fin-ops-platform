@@ -1,40 +1,51 @@
-# 税金抵扣
+# 专票认证情况
 
-入口：`/tax-offset`。
+入口：`/tax-offset`，页面权限标识仍为 `tax-offset`。
 
-按业务月核对销项、进项及认证记录，执行试算并保存抵扣计划。
+查询发票池中未删除的进项专票，导入认证证据，查看认证状态、筛选汇总并导出专票清单。
 
 ## 边界与 I/O
 
-输入：合法 YYYY-MM、精确选择、expected_canonical_snapshot_version 和幂等键；认证文件经导入工作流。输出：发票与认证 rows、summary/statistics、canonical_snapshot_version、试算和已保存计划。
+- 查询输入：认证状态、开票年月、勾选年月、搜索、排序和分页。输出：rows、total、summary、导出字段目录和全局未关联认证记录数量。
+- 发票池拥有发票身份、购销双方及原始金额、税额；认证模块拥有来源批次、所属期、勾选时间、有效抵扣税额和认证版本。认证导入不能新建发票或改写发票原始事实。
+- `GET /api/tax-offset` 在 PostgreSQL 只读快照中查询跨月进项专票，数据库分页和汇总；筛选条件共同生效，汇总覆盖全部匹配结果。
+- `POST /api/tax-offset/export` 接收 filters 和 fields，沿用列表筛选与排序导出全部匹配记录。默认八列，其余字段可选；最多 20000 张。号码和税号作为文本写入，缺失字段不补算。
 
 ## 当前业务约定
 
-- 默认采用上海当前业务月，已有有效选择按页面合同恢复。
-- 查询在一个只读快照批量读取非删除发票、认证记录和最新 saved 计划；旧选择与当前可用 IDs 求交。
-- 发票与认证行直接显示来源金额、税额、价税合计和税率，不相互补算。缺少原始税额的发票保留展示但不可选择，默认计划只选税额完整行；服务端拒绝显式选入缺税额行。已认证记录同时缺少来源税额和可抵扣税额时明确报错。
-- 业务试算金额由 Decimal 策略计算；保存重检页面事实 token，版本冲突不得覆盖新事实。
-- 同一幂等键返回原计划；认证导入由共享 import worker 处理，批次/明细/审计/任务成功同事务。
-- 认证任务保留其 owner 校验，不套用三类共享导入任务的权限规则。
+- 专票按 canonical 来源票种明确识别，不按税率、金额或是否已导入认证反推票种。
+- 开票日期、勾选时间、税款所属期分别保存；默认跨所有月份。未认证且筛选某个勾选月时返回空集，不忽略条件。
+- 默认开票日期倒序，日期排序追加稳定 ID，空勾选日期排最后。金额使用原始精确值，零与缺失分开；汇总包含缺失计数。
+- 认证 XLSX 最多读取 20000 条业务记录，读取时限制行列规模；非专票计为忽略，不计为错误。认证 Excel 读取“发票”工作表及来源元数据，保留十九列来源证据。来源状态与票种决定可处理范围，不能以有效抵扣税额大于零替代认证判断。
+- 发票关联只使用数电票号或发票代码与号码，并核对购买方身份。未匹配和歧义记录单独显示，不按姓名、日期或金额猜测。来源与已匹配发票的金额、税额或身份存在冲突时阻止确认，不能借更正操作覆盖发票事实。
+- 预览保存独立 session；确认沿用共享 import worker。任务归属、当前权限及记录版本在提交时重新验证，认证变更、批次、审计和任务成功状态同事务提交。
+- 重复导入不累计；冲突须明确提交对应 unique_key 与 expected_version。批次撤销只恢复自己的有效贡献；撤销更正批次会恢复前一记录及批次归属并递增版本，不能删除重复引用的原认证或覆盖后续更正。
+- 待核对记录与批次历史独立分页，默认每页 20 条、最多 100 条；历史列表不返回撤销所用内部恢复内容。失败任务重新识别文件后生成新 session，再次提交。
+- 历史无法准确关联的证据保留并报告待核对数量，审计不把它们当作已匹配。发票正常删除后保留认证证据，列表排除该发票。发票晚于认证文件入库时，重新导入认证文件触发补关联，并保留原批次归属。
+- 页面只读 canonical facts，不依赖抵扣计划、试算缓存或页面刷新任务。写入成功重新查询列表与汇总，请求乱序不覆盖当前筛选。
+
+## 界面
+
+标题工具栏包含搜索、导入和导出。状态及两个年月条件位于下一行，统计采用紧凑行，主体为单表与分页。导入、导出分别使用 HeroUI 右侧抽屉；导出只选择字段。界面保留必要错误和结果反馈，不放解释段落。
 
 ## 依赖方向
 
-[发票导入](../imports-invoices/README.md)、[后台任务](../runtime-workers/README.md)、[设置](../settings/README.md)。依赖表示调用或事实消费，不允许读取其它页面的展示结果作为业务事实。
+[发票导入](../imports-invoices/README.md)、[后台任务](../runtime-workers/README.md)、[权限与审计](../permissions-and-audit/README.md)。认证模块不写 OA、付款关系或发票用途，不读取其他页面 payload 作为事实。
 
 ## 代码与验证入口
 
-- [web/src/pages/TaxOffsetPage.tsx](../../../web/src/pages/TaxOffsetPage.tsx)
-- [backend/src/fin_ops_platform/app/routes_tax.py](../../../backend/src/fin_ops_platform/app/routes_tax.py)
-- [backend/src/fin_ops_platform/services/tax_offset_query_service.py](../../../backend/src/fin_ops_platform/services/tax_offset_query_service.py)
-- [backend/src/fin_ops_platform/services/postgres_repositories/tax_offset.py](../../../backend/src/fin_ops_platform/services/postgres_repositories/tax_offset.py)
-- [backend/src/fin_ops_platform/services/postgres_repositories/tax_offset_page_audit.py](../../../backend/src/fin_ops_platform/services/postgres_repositories/tax_offset_page_audit.py)
-- [backend/src/fin_ops_platform/services/tax_offset_service.py](../../../backend/src/fin_ops_platform/services/tax_offset_service.py)
-- [backend/src/fin_ops_platform/services/tax_offset_plan_service.py](../../../backend/src/fin_ops_platform/services/tax_offset_plan_service.py)
-- [web/src/test/TaxOffsetPage.test.tsx](../../../web/src/test/TaxOffsetPage.test.tsx)
-- [web/e2e/drawer-motion.spec.ts](../../../web/e2e/drawer-motion.spec.ts)
-- [tests/test_tax_offset_canonical_repository.py](../../../tests/test_tax_offset_canonical_repository.py)
-- [tests/test_tax_offset_page_audit.py](../../../tests/test_tax_offset_page_audit.py)
-- [tests/test_tax_offset_service.py](../../../tests/test_tax_offset_service.py)
-- [tests/test_tax_offset_api.py](../../../tests/test_tax_offset_api.py)
+- [TaxOffsetPage](../../../web/src/pages/TaxOffsetPage.tsx)
+- [HTTP 路由](../../../backend/src/fin_ops_platform/app/routes_tax.py)
+- [查询合同](../../../backend/src/fin_ops_platform/services/tax_offset_query_service.py)
+- [查询仓库](../../../backend/src/fin_ops_platform/services/postgres_repositories/tax_offset.py)
+- [导出](../../../backend/src/fin_ops_platform/services/tax_offset_export_service.py)
+- [认证解析](../../../backend/src/fin_ops_platform/services/tax_certified_import_service.py)
+- [认证持久化](../../../backend/src/fin_ops_platform/services/postgres_repositories/tax_certified_imports.py)
+- [页面审计](../../../backend/src/fin_ops_platform/services/postgres_repositories/tax_offset_page_audit.py)
+- [API 测试](../../../tests/test_tax_offset_api.py)
+- [查询与导出测试](../../../tests/test_tax_offset_query_service.py)
+- [解析测试](../../../tests/test_tax_certified_import_service.py)
+- [页面测试](../../../web/src/test/TaxOffsetPage.test.tsx)
+- [浏览器链路](../../../web/e2e/tax-offset-flow.spec.ts)
 
-通用查询、事务、权限与错误边界见[系统架构](../../../ARCHITECTURE.md)；验证方法见[开发说明](../../development.md)。测试文件是可执行证据，本文不保存某一次测试的通过记录。
+通用事务、错误和性能约定见[系统架构](../../../ARCHITECTURE.md)；验证方法见[开发说明](../../development.md)。

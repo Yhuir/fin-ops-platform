@@ -1,58 +1,54 @@
-export type TaxInvoiceRecord = {
+export type TaxCertificationStatus = "all" | "certified" | "uncertified";
+export type TaxCertificationFilters = {
+  status: TaxCertificationStatus;
+  issue_month?: string;
+  selection_month?: string;
+  search?: string;
+  sort_by: "issue_date" | "selection_time";
+  sort_direction: "asc" | "desc";
+};
+export type TaxCertificationQuery = TaxCertificationFilters & { page: number; page_size: number };
+export type TaxCertificationRow = {
   id: string;
-  invoiceNo: string;
-  invoiceType: string;
-  flowType?: "input" | "output";
-  counterparty: string;
-  issueDate: string;
-  taxRate: string;
-  amount: string;
-  taxAmount: string;
-  statusLabel?: string;
-  isLocked?: boolean;
-  isSelectable?: boolean;
+  digital_invoice_no: string | null;
+  invoice_code: string | null;
+  invoice_no: string | null;
+  seller_name: string | null;
+  seller_tax_no: string | null;
+  issue_date: string | null;
+  amount: string | null;
+  tax_amount: string | null;
+  certification_status: "certified" | "uncertified";
+  selection_time: string | null;
+  deductible_tax_amount: string | null;
+  tax_period: string | null;
 };
-
-export type TaxCertifiedInvoiceRecord = TaxInvoiceRecord & {
-  matchedInputId: string | null;
+export type TaxCertificationTotals = {
+  count: number; amount: string | null; tax_amount: string | null;
+  missing_amount_count: number; missing_tax_count: number;
 };
-
-export type TaxSummary = {
-  outputTax: string;
-  certifiedInputTax: string;
-  plannedInputTax: string;
-  inputTax: string;
-  deductibleTax: string;
-  resultLabel: string;
-  resultAmount: string;
-};
-
-export type TaxPageStatistics = {
-  inputInvoiceCount?: number;
-  outputInvoiceCount?: number;
-};
-
-export type TaxMonthData = {
-  outputInvoices: TaxInvoiceRecord[];
-  inputPlanInvoices: TaxInvoiceRecord[];
-  certifiedMatchedInvoices: TaxCertifiedInvoiceRecord[];
-  certifiedOutsidePlanInvoices: TaxCertifiedInvoiceRecord[];
-  lockedCertifiedInputIds: string[];
-  defaultSelectedOutputIds: string[];
-  defaultSelectedInputIds: string[];
-  summary: TaxSummary;
-  statistics?: TaxPageStatistics;
-  canonicalSnapshotVersion: string;
+export type TaxExportField = { key: string; label: string; default_selected: boolean };
+export type TaxCertificationResult = {
+  unresolved_record_count: number;
+  rows: TaxCertificationRow[]; total: number; page: number; page_size: number;
+  summary: {
+    certified: TaxCertificationTotals & { deductible_tax_amount: string | null; missing_deductible_tax_count: number };
+    uncertified: TaxCertificationTotals;
+  };
+  export_fields: TaxExportField[];
 };
 
 export type TaxCertifiedImportPreviewRow = {
   id: string;
-  month: string;
-  rowStatus: "recognized" | "invalid" | string;
-  matchStatus: "matched_plan" | "outside_plan" | "unknown" | string;
-  matchedPlanId: string | null;
-  dedupeStatus: "new" | "duplicate" | "not_applicable" | string;
+  month: string | null;
+  buyerTaxNo: string | null;
+  rowStatus: "recognized" | "invalid" | "ignored";
+  matchStatus: "matched_invoice" | "outside_invoices" | "ambiguous" | "unknown";
+  uniqueKey: string | null;
+  expectedVersion: number | null;
+  dedupeStatus: "new" | "duplicate" | "conflict" | "not_applicable";
   errorMessage: string | null;
+  blocking: boolean;
   digitalInvoiceNo: string | null;
   invoiceCode: string | null;
   invoiceNo: string | null;
@@ -71,11 +67,14 @@ export type TaxCertifiedImportPreviewRow = {
 export type TaxCertifiedImportPreviewFile = {
   id: string;
   fileName: string;
-  month: string;
+  month: string | null;
   recognizedCount: number;
   invalidCount: number;
-  matchedPlanCount: number;
-  outsidePlanCount: number;
+  ignoredCount: number;
+  matchedInvoiceCount: number;
+  outsideInvoicesCount: number;
+  conflictCount: number;
+  duplicateCount: number;
   rows: TaxCertifiedImportPreviewRow[];
 };
 
@@ -86,10 +85,14 @@ export type TaxCertifiedImportPreviewResult = {
   status: string;
   files: TaxCertifiedImportPreviewFile[];
   summary: {
+    blockingCount: number;
     recognizedCount: number;
     invalidCount: number;
-    matchedPlanCount: number;
-    outsidePlanCount: number;
+  ignoredCount: number;
+    matchedInvoiceCount: number;
+    outsideInvoicesCount: number;
+  conflictCount: number;
+  duplicateCount: number;
   };
 };
 
@@ -124,20 +127,16 @@ export type TaxCertifiedImportQueuedResult = {
   importJob: TaxCertifiedImportJob;
 };
 
-export type TaxCertifiedImportConfirmResult =
-  | TaxCertifiedImportConfirmedResult
-  | TaxCertifiedImportQueuedResult;
+export type TaxCertifiedImportConfirmResult = TaxCertifiedImportQueuedResult;
 
-export type TaxOffsetPlanSaveResult = {
-  status: "saved";
-  affectedScopeKeys: string[];
-  plan: {
-    id: string;
-    month: string;
-    selectedOutputIds: string[];
-    selectedInputIds: string[];
-    summary: TaxSummary;
-    canonicalSnapshotVersion: string;
-    updatedAt?: string;
-  };
+
+export type TaxCertifiedImportBatch = {
+  id: string; session_id: string; imported_by: string; file_count: number; months: string[];
+  persisted_record_count: number; duplicate_count: number; status: "confirmed" | "revoked"; version: number; created_at: string;
 };
+export type TaxImportCorrection = { unique_key: string; expected_version: number };
+
+export type TaxCertifiedImportRecord = { id: string; unique_key: string; needs_review: boolean; digital_invoice_no: string | null; invoice_no: string | null; seller_name: string | null; matched_invoice_id: string | null; status: string; };
+
+export type TaxImportHistoryQuery = { records_page: number; batches_page: number; page_size: number };
+export type TaxImportHistory = TaxImportHistoryQuery & { records: TaxCertifiedImportRecord[]; batches: TaxCertifiedImportBatch[]; records_total: number; batches_total: number };

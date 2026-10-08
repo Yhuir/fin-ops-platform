@@ -1,0 +1,22 @@
+.tax-certification-page .page-scaffold__header { align-items: center; }
+.tax-certification-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding-bottom: 16px; }
+.tax-certification-summary { display: grid; gap: 10px; padding: 4px 0 18px; }
+.tax-certification-summary-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px 26px; font-size: 13px; }
+.tax-certification-summary-row > strong { min-width: 42px; }
+.tax-certification-summary-row > span:nth-child(2) { min-width: 70px; font-variant-numeric: tabular-nums; }
+.tax-certification-metric { display: inline-flex; gap: 8px; align-items: baseline; }
+.tax-certification-metric > span, .tax-certification-metric small { color: var(--muted); }
+.tax-certification-metric strong { font-weight: 600; font-variant-numeric: tabular-nums; }
+.tax-certification-loading { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.tax-certification-drawer-content { display: grid; gap: 20px; padding: 8px 0; }
+.tax-certification-drawer-content h3 { font-size: 14px; font-weight: 600; }
+.tax-export-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 20px; }
+.tax-import-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.tax-import-batches { display: grid; gap: 12px; }
+.tax-import-batch { padding: 12px 0; border-bottom: 1px solid var(--border); display: flex; gap: 12px; justify-content: space-between; align-items: center; }
+@media (max-width: 680px) { .tax-certification-summary-row { gap: 8px 14px; } .tax-export-fields { grid-template-columns: 1fr; } }
+
+.tax-certification-status { width: 150px; }
+
+.tax-export-heading { display: flex; align-items: center; gap: 10px; }
+.tax-export-heading > button { margin-left: auto; }
