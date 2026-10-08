@@ -81,7 +81,10 @@ test('production shared source drawers preserve complete records across pages wi
         for (const label of bankSection!.bank_labels!) await expect(cell).toContainText(label);
       }
       const actual = await drawer.locator('.entity-detail-table th[scope="row"]').allTextContents();
-      const expected = documentSections.flatMap(section => section.fields.map(field => field.label));
+      const expected = documentSections.flatMap(section => [
+        ...(section.bank_labels !== undefined ? ['流水标签'] : []),
+        ...section.fields.map(field => field.label),
+      ]);
       expect(actual).toEqual(expected);
       expectedLabels.push(...expected);
       for (const label of expected) expect(label).not.toMatch(/^(?:id|source_|row_|case_|normalized_|raw_|状态$)/i);
