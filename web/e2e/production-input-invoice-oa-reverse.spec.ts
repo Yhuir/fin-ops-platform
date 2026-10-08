@@ -25,7 +25,7 @@ test('production reverse candidates match unused invoices and reject used select
   const previewResponse = page.waitForResponse(response => new URL(response.url()).pathname === `${api}/oa-reverse/preview`);
   await page.getByRole('button', { name: '以发票反提 OA', exact: true }).click();
   expect((await previewResponse).status()).toBe(200);
-  const drawer = page.getByRole('dialog', { name: '以发票反提 OA', exact: true });
+  const drawer = page.getByLabel('以发票反提 OA 工作流', { exact: true });
   await expect(drawer.getByText('待使用发票', { exact: true })).toBeVisible();
   await expect(drawer.getByRole('button', { name: /筛选流水关联状态/ })).toHaveCount(0);
 
