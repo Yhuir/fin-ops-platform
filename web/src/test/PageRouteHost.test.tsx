@@ -8,6 +8,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import PageRouteHost from "../app/PageRouteHost";
 import {
   appPageRoutes,
+  assignablePageOptions,
   isSidebarDisclosureItem,
   sidebarGroups,
   type AppPageRoute,
@@ -67,6 +68,24 @@ afterEach(() => {
 });
 
 describe("PageRouteHost", () => {
+  test("opens the settings container for history permission without granting settings permission", () => {
+    const historySession = { ...routeSession, session: { ...routeSession.session, allowedPageKeys: ["batch-accounting"] } };
+    render(<SessionContext.Provider value={historySession}><MemoryRouter initialEntries={["/settings?section=batch-accounting"]}>
+      <PageRouteHost routes={[createRoute("/settings", "settings", () => <p>history container</p>)]} />
+    </MemoryRouter></SessionContext.Provider>);
+    expect(screen.getByText("history container")).toBeInTheDocument();
+    expect(historySession.session.allowedPageKeys).toEqual(["batch-accounting"]);
+  });
+
+  test("redirects the retired batch route into the history tab", async () => {
+    const historySession = { ...routeSession, session: { ...routeSession.session, allowedPageKeys: ["batch-accounting"] } };
+    const oldRoute = appPageRoutes.find(route => route.pageKey === "batch-accounting")!;
+    render(<SessionContext.Provider value={historySession}><MemoryRouter initialEntries={["/batch-accounting"]}>
+      <PageRouteHost routes={[oldRoute, createRoute("/settings", "settings", () => <p>history destination</p>)]} />
+    </MemoryRouter></SessionContext.Provider>);
+    expect(await screen.findByText("history destination")).toBeInTheDocument();
+  });
+
   test.each(["render", "import"])("isolates %s failures and lets the user navigate away", async (kind) => {
     const user = userEvent.setup();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -269,7 +288,9 @@ describe("PageRouteHost", () => {
       "/imports/invoices",
       "/imports/etc-invoices",
     ]);
-    expect(financeItems).toHaveLength(13);
+    expect(financeItems).toHaveLength(12);
+    expect(sidebarItems.some(item => item.pageKey === "batch-accounting")).toBe(false);
+    expect(assignablePageOptions).toContainEqual({ pageKey: "batch-accounting", label: "批量账务", group: "finance" });
     expect(systemItems).toHaveLength(4);
     expect(new Set(appPageRoutes.map((route) => route.pageKey))).toHaveLength(appPageRoutes.length);
     expect(sidebarItems.every((item) => routeByPath.has(item.to.split("?")[0]))).toBe(true);
@@ -290,7 +311,6 @@ describe("PageRouteHost", () => {
       "src/pages/BankDetailsPage.tsx",
       "src/pages/OaPendingPaymentsPage.tsx",
       "src/pages/BankFlowRuleBatchPage.tsx",
-      "src/pages/BatchAccountingPage.tsx",
       "src/pages/TurnoverLedgerPage.tsx",
       "src/pages/EtcTicketManagementPage.tsx",
       "src/pages/TaxOffsetPage.tsx",
@@ -380,7 +400,7 @@ describe("PageRouteHost", () => {
       "src/pages/CostStatisticsPage.tsx",
       "src/pages/BankDetailsPage.tsx",
       "src/pages/BankFlowRuleBatchPage.tsx",
-      "src/pages/BatchAccountingPage.tsx",
+      "src/components/batchAccounting/BatchAccountingHistory.tsx",
       "src/pages/TurnoverLedgerPage.tsx",
       "src/pages/EtcTicketManagementPage.tsx",
       "src/pages/TaxOffsetPage.tsx",

@@ -104,6 +104,17 @@ function renderEmbeddedSidebar(expanded = true) {
 }
 
 describe("AppSidebar shell contract", () => {
+  test("exposes only the settings entry to a batch-history-only user", () => {
+    const session = { ...sidebarSession, session: { ...sidebarSession.session, allowedPageKeys: ["batch-accounting"] } };
+    render(<SessionContext.Provider value={session}><BackgroundJobProgressProvider><MemoryRouter>
+      <AppSidebar embedded={false} expanded isCompact={false} mobileOpen={false}
+        onCloseMobile={() => undefined} onToggleExpanded={() => undefined} />
+    </MemoryRouter></BackgroundJobProgressProvider></SessionContext.Provider>);
+    expect(screen.getByRole("link", { name: "设置", exact: true })).toHaveAttribute("href", "/settings");
+    expect(screen.queryByRole("link", { name: "批量账务", exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "银行明细", exact: true })).not.toBeInTheDocument();
+  });
+
   const appSidebarSource = readFileSync("src/components/shell/AppSidebar.tsx", "utf8");
   const appStatusSource = readFileSync("src/components/shell/AppStatusIndicator.tsx", "utf8");
   const brandMarkSource = readFileSync("src/components/shell/finance-platform-mark.svg", "utf8");

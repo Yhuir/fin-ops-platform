@@ -26,7 +26,9 @@ export default function PageRouteHost({ routes }: { routes: AppPageRoute[] }) {
   const location = useLocation();
   const { canAccessPage } = useOptionalSessionPermissions();
   const matchedRoute = useMemo(() => findRoute(routes, location.pathname), [location.pathname, routes]);
-  const firstAllowedRoute = routes.find((route) => canAccessPage(route.pageKey)) ?? null;
+  const canOpenRoute = (pageKey: string) => canAccessPage(pageKey)
+    || (pageKey === "settings" && canAccessPage("batch-accounting"));
+  const firstAllowedRoute = routes.find((route) => canOpenRoute(route.pageKey)) ?? null;
 
   useEffect(() => {
     if (!matchedRoute) {
@@ -39,7 +41,7 @@ export default function PageRouteHost({ routes }: { routes: AppPageRoute[] }) {
   if (!matchedRoute) {
     return <Navigate replace to="/" />;
   }
-  if (!canAccessPage(matchedRoute.pageKey)) {
+  if (!canOpenRoute(matchedRoute.pageKey)) {
     return <Navigate replace to={firstAllowedRoute?.path ?? "/"} />;
   }
 

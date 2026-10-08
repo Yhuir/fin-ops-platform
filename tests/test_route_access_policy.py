@@ -58,6 +58,25 @@ class RouteAccessPolicyTests(unittest.TestCase):
         ):
             self.assertEqual(page_keys_for_route(path), ("settings",))
 
+    def test_batch_history_tab_keeps_its_own_api_permission(self) -> None:
+        for path in ("/api/batch-accounting", "/api/batch-accounting/relations/relation-1"):
+            self.assertEqual(page_keys_for_route(path), ("batch-accounting",))
+        for path in (
+            "/api/workbench/settings",
+            "/api/workbench/settings/access-control",
+            "/api/workbench/settings/data-reset/preview",
+            "/api/workbench/settings/data-reset/jobs",
+        ):
+            self.assertEqual(page_keys_for_route(path), ("settings",))
+        bank_permissions = page_keys_for_route("/api/bank-transactions/bank-1/source-detail")
+        self.assertNotIn("batch-accounting", bank_permissions)
+        self.assertEqual(bank_permissions, (
+            "bank-details", "reconciliation-workbench", "cost-statistics", "turnover-ledger",
+            "pending-invoices", "input-invoice-usage", "output-invoice-collections",
+            "oa-pending-payments", "bank-flow-rule-batches",
+        ))
+        self.assertNotIn("batch-accounting", page_keys_for_route("/api/background-jobs/active"))
+
 
 if __name__ == "__main__":
     unittest.main()

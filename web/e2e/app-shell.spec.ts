@@ -199,7 +199,6 @@ test.describe("app shell browser smoke", () => {
     const browserErrors = startStrictBrowserErrorCapture(page, {
       expectedAuthResponses: [
         { pathname: "/api/session/me", status: 403 },
-        { pathname: "/api/background-jobs/active", status: 403 },
       ],
     });
     const api = await installDeterministicApiMocks(page, { sessionMode: "forbidden" });
@@ -218,7 +217,7 @@ test.describe("app shell browser smoke", () => {
     await expect(page.getByText("当前 OA 账号未开通访问权限，请联系管理员处理。")).toBeVisible();
     await expect(page.getByTestId("app-health-data")).toHaveCount(0);
     expect(api.count("GET /api/session/me")).toBeGreaterThan(0);
-    expect(api.count("GET /api/background-jobs/active")).toBeGreaterThan(0);
+    expect(api.count("GET /api/background-jobs/active")).toBe(0);
     expect(api.count("GET /api/operations/app-health-dashboard")).toBe(0);
     expect(browserErrors).toEqual([]);
   });
@@ -227,7 +226,6 @@ test.describe("app shell browser smoke", () => {
     const browserErrors = startStrictBrowserErrorCapture(page, {
       expectedAuthResponses: [
         { pathname: "/api/session/me", status: 401 },
-        { pathname: "/api/background-jobs/active", status: 403 },
       ],
     });
     const api = await installDeterministicApiMocks(page, { sessionMode: "expired" });
@@ -245,7 +243,7 @@ test.describe("app shell browser smoke", () => {
     await expect(page.getByRole("heading", { name: "OA 会话已失效" })).toBeVisible();
     await expect(page.getByTestId("app-health-data")).toHaveCount(0);
     expect(api.count("GET /api/session/me")).toBeGreaterThan(0);
-    expect(api.count("GET /api/background-jobs/active")).toBeGreaterThan(0);
+    expect(api.count("GET /api/background-jobs/active")).toBe(0);
     expect(api.count("GET /api/operations/app-health-dashboard")).toBe(0);
     expect(browserErrors).toEqual([]);
   });

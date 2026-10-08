@@ -1,137 +1,35 @@
-export type BatchAccountingBucket = "unsubmitted" | "submitted";
-
-export type BatchAccountingSummary = {
-  bankYear: string | null;
-  unsubmittedCount: number;
-  submittedCount: number;
+export type BatchAccountingHistoryRow = {
+  relation_id: string;
+  trade_time: string;
+  bank_accounts: { bank_name: string; account_last4: string }[];
+  counterparty_names: string[];
+  bank_amount: string | null;
+  bank_count: number;
+  oa_count: number;
 };
 
-export type BatchAccountingBankRow = {
-  bankYear: string | null;
-  id: string;
-  tradeTime: string;
-  counterpartyName: string;
-  direction: string;
-  directionLabel: string;
-  amount: string;
-  bankName: string;
-  accountLast4: string;
-  relationId: string;
-  version: number | null;
-  tagCode: string;
-  tagLabel: string;
-  tagPrimaryLabel: string;
-  tagSubLabel: string;
+export type BatchAccountingHistoryResponse = {
+  summary: { relation_count: number; transaction_count: number; bank_year: string | null };
+  rows: BatchAccountingHistoryRow[];
+  pagination: { page: number; page_size: number; total: number };
+  available_years: string[];
 };
 
-export type BatchAccountingOaRow = {
-  id: string;
-  applicant: string;
-  applyTime: string;
-  projectName: string;
-  amount: string;
-  reason: string;
-  linkedInvoiceRowIds: string[];
+export type BatchAccountingInvoiceRow = {
+  id: string; invoice_no: string; invoice_code: string; digital_invoice_no: string;
+  issue_date: string; seller_name: string; buyer_name: string;
+  amount: string | null; total_with_tax: string | null;
+  etc_invoice_detail_rows?: BatchAccountingInvoiceRow[];
 };
 
-export type BatchAccountingAmountCheck = {
-  status: "matched" | "mismatch" | string;
-  direction: string;
-  bankAmount: string;
-  oaAmount: string;
-  amountDelta: string;
-  requiresNote: boolean;
-};
-
-export type BatchAccountingRelation = {
-  relationId: string;
+export type BatchAccountingHistoryDetail = {
+  relation_id: string;
   note: string;
-  amountCheck?: BatchAccountingAmountCheck;
-};
-
-export type BatchAccountingRelationBucket = {
-  relationId: string;
-  relation?: BatchAccountingRelation;
-  oaRows: BatchAccountingOaRow[];
-};
-
-export type BatchAccountingPageInfo = {
-  page: number;
-  pageSize: number;
-  total: number;
-};
-
-export type BatchAccountingPagination = {
-  bankRows?: BatchAccountingPageInfo;
-  oaRows?: BatchAccountingPageInfo;
-};
-
-export type BatchAccountingResponse = {
-  summary: BatchAccountingSummary;
-  bankRows: BatchAccountingBankRow[];
-  oaRows: BatchAccountingOaRow[];
-  relationsByBankRowId: Record<string, BatchAccountingRelationBucket>;
-  pagination: BatchAccountingPagination;
-  tagSelectionVersion: number;
-};
-
-export type BatchAccountingTagRule = {
-  code: string;
-  label: string;
-  path: string[];
-  outputPrimaryLabel: string;
-  outputSubLabel: string;
-};
-
-export type BatchAccountingTagRules = {
-  version: number;
-  bankAutoTagRulesVersion: number;
-  selectedTagCodes: string[];
-  activeTags: BatchAccountingTagRule[];
-  canSave: boolean;
-};
-
-export type FetchBatchAccountingRequest = {
-  bankYear: string;
-  bucket: BatchAccountingBucket;
-  bankPage?: number;
-  bankPageSize?: number;
-  oaPage?: number;
-  oaPageSize?: number;
-  oaSearch?: string;
-  signal?: AbortSignal;
-};
-
-export type SubmitBatchAccountingRequest = {
-  bankYear: string;
-  bankRowId: string;
-  oaRowIds: string[];
-  expectedVersion?: number | null;
-  expectedTagSelectionVersion?: number | null;
-  note?: string;
-  idempotencyKey: string;
-  signal?: AbortSignal;
-};
-
-export type SaveBatchAccountingTagRulesRequest = {
-  expectedVersion: number;
-  selectedTagCodes: string[];
-  signal?: AbortSignal;
-};
-
-export type WithdrawBatchAccountingRequest = {
-  relationId: string;
-  expectedVersion?: number | null;
-  reason: string;
-  idempotencyKey: string;
-  signal?: AbortSignal;
-};
-
-export type BatchAccountingMutationResult = {
-  success: boolean;
-  relationId: string;
-  affectedRowIds: string[];
-  affectedMonths: string[];
-  affectedScopeKeys: string[];
-  message: string;
+  bank_rows: { id: string; trade_time: string; counterparty_name: string; bank_name: string; account_last4: string; amount: string | null; signed_amount: string | null; direction: string }[];
+  oa_rows: { id: string; applicant: string; apply_time: string; project_name: string; amount: string | null; reason: string; apply_type: string; expense_type: string }[];
+  invoice_rows: BatchAccountingInvoiceRow[];
+  bank_amount: string | null;
+  oa_amount: string | null;
+  amount_delta: string | null;
+  missing_member_ids: string[];
 };

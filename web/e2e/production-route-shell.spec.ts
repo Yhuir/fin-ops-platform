@@ -59,6 +59,11 @@ test.describe("production route shell smoke", () => {
     for (const path of routePaths) {
       await page.goto(path, { waitUntil: "domcontentloaded" });
       await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
+      if (path === "/fin-ops/batch-accounting") {
+        await expect(page).toHaveURL(/\/settings\?section=batch-accounting/);
+        await expect(page.getByRole("heading", { name: "设置", exact: true })).toBeVisible();
+        await expect(page.getByRole("grid", { name: "批量账务历史记录" })).toBeVisible();
+      }
       await page.waitForTimeout(1_500);
       await expect(page.locator('.app-shell-progress-stack, .background-progress-block')).toHaveCount(0);
       await expect(page.getByRole('button', { name: '选择流水子项', exact: true })).toHaveCount(0);

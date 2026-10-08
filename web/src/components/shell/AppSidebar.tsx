@@ -195,7 +195,8 @@ export default function AppSidebar({
                     </li>
                   );
                 }
-                if (!canAccessPage(item.pageKey)) {
+                if (!canAccessPage(item.pageKey)
+                  && !(item.pageKey === "settings" && canAccessPage("batch-accounting"))) {
                   return null;
                 }
                 return (

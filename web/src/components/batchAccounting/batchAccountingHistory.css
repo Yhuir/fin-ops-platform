@@ -1,0 +1,10 @@
+.batch-history { min-width: 0; }
+.batch-history__toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; font-size: 13px; }
+.batch-history__year { width: 160px; }
+.batch-history__detail { display: grid; gap: 14px; min-width: 0; }
+.batch-history__detail h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.batch-history__amounts { display: flex; flex-wrap: wrap; gap: 24px; margin: 0; padding-bottom: 16px; border-bottom: 1px solid var(--fp-border); }
+.batch-history__amounts dt { color: var(--fp-text-secondary); font-size: 12px; }
+.batch-history__amounts dd { margin: 4px 0 0; font-variant-numeric: tabular-nums; font-weight: 600; }
+.batch-history__note p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.batch-history .finance-table, .batch-history__detail .finance-table { border-radius: 0; }

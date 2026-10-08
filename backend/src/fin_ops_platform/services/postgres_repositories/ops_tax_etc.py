@@ -250,20 +250,6 @@ class PostgresOpsTaxEtcRepository:
         self._save_settings_with_executor(transaction, APP_SETTINGS_KEY, persisted_payload)
         return persisted_payload
 
-    def save_app_settings_for_batch_accounting_tag_selection_version_in_transaction(
-        self,
-        payload: dict[str, Any],
-        *,
-        expected_version: int,
-        transaction: Any,
-    ) -> dict[str, Any] | None:
-        return self.save_app_settings_for_versioned_family_in_transaction(
-            payload,
-            family_key="batch_accounting_tag_selection",
-            expected_version=expected_version,
-            transaction=transaction,
-        )
-
     def save_app_settings_for_versioned_family_in_transaction(
         self,
         payload: dict[str, Any],

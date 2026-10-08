@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 
@@ -67,6 +67,24 @@ async function openStatus() {
 }
 
 describe("background tasks are handled only in the runtime status popover", () => {
+  test("history-only user never polls background jobs on mount or focus", async () => {
+    const baseFetch = installMockApiFetch({ sessionRole: "user", allowedPageKeys: ["batch-accounting"] });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).startsWith("/api/batch-accounting?")) return new Response(JSON.stringify({
+        summary: { relation_count: 0, transaction_count: 0, bank_year: null }, rows: [],
+        pagination: { page: 1, page_size: 50, total: 0 }, available_years: [],
+      }));
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderAppAt("/settings?section=batch-accounting");
+    await screen.findByRole("grid", { name: "批量账务历史记录" });
+    fireEvent.focus(window);
+    await Promise.resolve();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/background-jobs"))).toEqual([]);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/workbench/settings"))).toEqual([]);
+  });
+
   test("maps completed job affected scopes", () => {
     expect(mapBackgroundJob({ job_id: "one", status: "succeeded", result_summary: {
       affected_months: ["2026-04"], affected_scope_keys: ["all", "2026-04"],

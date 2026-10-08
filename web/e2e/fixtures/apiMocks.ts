@@ -69,7 +69,6 @@ type ApiMockOptions = {
   bankDetailsLargeDataset?: boolean;
   bankDetailsTransactionsEmpty?: boolean;
   bankDetailsTransactionsTotal?: number;
-  batchAccountingInitialSubmitted?: boolean;
   batchAccountingFailOnce?: boolean;
   batchAccountingFailuresBeforeSuccess?: number;
   costStatisticsExportDownloadSuccess?: boolean;
@@ -145,7 +144,6 @@ type ApiMockOptions = {
 };
 
 type WorkbenchZone = "paired" | "unpaired";
-type BatchAccountingBucket = "unsubmitted" | "submitted";
 type ImportScenario = "bank" | "invoice";
 type SettingsDataResetAction = "reset_bank_transactions" | "reset_invoices" | "reset_oa_and_rebuild";
 type EtcBusinessBatchStatus = "imported" | "oa_draft_creating" | "oa_confirmation_pending" | "manually_marked_submitted" | "not_submitted";
@@ -7951,131 +7949,19 @@ function bankDetailsExportBody(relationConfirmed: boolean, url: URL) {
   ], "银行明细");
 }
 
-function batchAccountingOaRows() {
-  return [
-    {
-      id: "ba-oa-202604-001",
-      applicant: "刘晨",
-      apply_time: "2026-04-02",
-      project_name: "品牌广告投放",
-      amount: "700.00",
-      reason: "4月日常报销，包含广告素材制作。",
-      linked_invoice_row_ids: ["ba-inv-202604-001"],
-    },
-    {
-      id: "ba-oa-202604-002",
-      applicant: "王青",
-      apply_time: "2026-04-03",
-      project_name: "客户拜访差旅报销",
-      amount: "500.00",
-      reason: "上海客户拜访交通与餐费。",
-      linked_invoice_row_ids: [],
-    },
-  ];
+function batchAccountingPayload(url: URL) {
+  const year = url.searchParams.get("bank_year");
+  const rows = year === "all" || year === "2026" ? [{ relation_id: "BA-REL-202604-001", trade_time: "2026-04-03 09:20:00", bank_accounts: [{ bank_name: "建行", account_last4: "8106" }], counterparty_names: ["历史商户"], bank_amount: "1200.00", bank_count: 2, oa_count: 2 }] : [];
+  return { summary: { bank_year: year === "all" ? null : year, relation_count: rows.length, transaction_count: rows.length * 2 }, rows, pagination: { page: Number(url.searchParams.get("page")), page_size: Number(url.searchParams.get("page_size")), total: rows.length }, available_years: ["2026", "2025"] };
 }
-
-function batchAccountingBankRow(relationSubmitted: boolean) {
-  return {
-    id: "ba-bank-202604-001",
-    // Canonical date is in 2025 while the display trade time is in 2026.
-    bank_year: "2025",
-    trade_time: "2026-04-03 09:20:00",
-    counterparty_name: "批量账务集中处理",
-    direction: "expense",
-    direction_label: "支出",
-    amount: "1200.00",
-    bank_name: "建行",
-    account_last4: "8106",
-    tag_code: "fee",
-    tag_label: "手续费",
-    tag_primary_label: "费用",
-    tag_sub_label: "手续费",
-    relation_id: relationSubmitted ? "BA-REL-202604-001" : "",
-    version: relationSubmitted ? 2 : 1,
-  };
-}
-
-function batchAccountingPagination(url: URL, bucket: BatchAccountingBucket, bankTotal: number, oaTotal: number) {
-  const bankPage = Number(url.searchParams.get("bank_page") ?? "1") || 1;
-  const bankPageSize = Number(url.searchParams.get("bank_page_size") ?? "200") || 200;
-  const pagination: Record<string, unknown> = {
-    bank_rows: { page: bankPage, page_size: bankPageSize, total: bankTotal },
-  };
-  if (bucket === "unsubmitted") {
-    const oaPage = Number(url.searchParams.get("oa_page") ?? "1") || 1;
-    const oaPageSize = Number(url.searchParams.get("oa_page_size") ?? "200") || 200;
-    pagination.oa_rows = { page: oaPage, page_size: oaPageSize, total: oaTotal };
-  }
-  return pagination;
-}
-
-function batchAccountingPayload(
-  url: URL,
-  relationSubmitted: boolean,
-  selectedTagCodes: string[],
-  tagSelectionVersion: number,
-) {
-  const requestedYear = url.searchParams.get("bank_year");
-  const inYear = requestedYear === "all" || requestedYear === "2025";
-  const bucket: BatchAccountingBucket = url.searchParams.get("bucket") === "submitted" ? "submitted" : "unsubmitted";
-  const oaRows = batchAccountingOaRows();
-  const bankRow = batchAccountingBankRow(relationSubmitted);
-  const showSubmittedRelation = inYear && bucket === "submitted" && relationSubmitted;
-  const showUnsubmittedRows = inYear && bucket === "unsubmitted"
-    && !relationSubmitted
-    && selectedTagCodes.includes(bankRow.tag_code);
-  const unsubmittedCount = inYear && !relationSubmitted && selectedTagCodes.includes(bankRow.tag_code) ? 1 : 0;
-  const bankRows = showSubmittedRelation || showUnsubmittedRows ? [bankRow] : [];
-  const visibleOaRows = showUnsubmittedRows ? oaRows : [];
-  return {
-    summary: {
-      bank_year: requestedYear === "all" ? null : requestedYear,
-      unsubmitted_count: unsubmittedCount,
-      submitted_count: inYear && relationSubmitted ? 1 : 0,
-    },
-    bank_rows: bankRows,
-    oa_rows: visibleOaRows,
-    relations_by_bank_row_id: showSubmittedRelation ? {
-      [bankRow.id]: {
-        relation_id: "BA-REL-202604-001",
-        relation: {
-          relation_id: "BA-REL-202604-001",
-          note: "",
-          amount_check: {
-            status: "matched",
-            direction: "expense",
-            bank_amount: "1200.00",
-            oa_amount: "1200.00",
-            amount_delta: "0.00",
-            requires_note: false,
-          },
-        },
-        oa_rows: oaRows,
-      },
-    } : {},
-    pagination: batchAccountingPagination(url, bucket, bankRows.length, visibleOaRows.length),
-    tag_selection_version: tagSelectionVersion,
-  };
-}
-
-function batchAccountingSubmitPayload() {
-  return {
-    success: true,
-    relation_id: "BA-REL-202604-001",
-    affected_row_ids: ["ba-bank-202604-001", "ba-oa-202604-001", "ba-oa-202604-002"],
-    affected_months: ["2026-04"],
-    message: "已关联批量账务流水与 2 项 OA。",
-  };
-}
-
-function batchAccountingWithdrawPayload() {
-  return {
-    success: true,
-    relation_id: "BA-REL-202604-001",
-    affected_row_ids: ["ba-bank-202604-001", "ba-oa-202604-001", "ba-oa-202604-002"],
-    affected_months: ["2026-04"],
-    message: "已撤回批量账务关联。",
-  };
+function batchAccountingDetail() {
+  return { relation_id: "BA-REL-202604-001", note: "历史核对备注", bank_amount: "1200.00", oa_amount: "1200.00", amount_delta: "0.00", missing_member_ids: [], bank_rows: [
+    { id: "bank1", trade_time: "2026-04-03", counterparty_name: "历史流水成员一", bank_name: "建行", account_last4: "8106", amount: "700", signed_amount: "-700", direction: "outflow" },
+    { id: "bank2", trade_time: "2026-04-03", counterparty_name: "历史流水成员二", bank_name: "建行", account_last4: "8106", amount: "500", signed_amount: "-500", direction: "outflow" },
+  ], oa_rows: [
+    { id: "oa1", applicant: "刘晨", apply_time: "2026-04-02", project_name: "品牌广告投放", amount: "700", reason: "广告素材制作", apply_type: "报销", expense_type: "广告" },
+    { id: "oa2", applicant: "王青", apply_time: "2026-04-03", project_name: "客户拜访", amount: "500", reason: "交通与餐费", apply_type: "报销", expense_type: "差旅" },
+  ], invoice_rows: [] };
 }
 
 export async function installDeterministicApiMocks(page: Page, options: ApiMockOptions = {}) {
@@ -8119,9 +8005,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   let pendingInvoiceRulesSaveFailuresRemaining =
     options.pendingInvoiceRulesSaveFailuresBeforeSuccess
     ?? (options.pendingInvoiceRulesSaveFailOnce ? 1 : 0);
-  let batchAccountingSubmitted = Boolean(options.batchAccountingInitialSubmitted);
-  let batchAccountingSelectedTagCodes = ["fee", "travel"];
-  let batchAccountingTagSelectionVersion = 1;
   let batchAccountingFailuresRemaining =
     options.batchAccountingFailuresBeforeSuccess ?? (options.batchAccountingFailOnce ? 1 : 0);
   let turnoverClosureConfirmed = false;
@@ -10328,63 +10211,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "批量账务数据加载暂时失败，请刷新后重试。",
         }, 503);
       }
-      return json(route, batchAccountingPayload(
-        url,
-        batchAccountingSubmitted,
-        batchAccountingSelectedTagCodes,
-        batchAccountingTagSelectionVersion,
-      ));
+      return json(route, batchAccountingPayload(url));
     }
-
-    if (path === "/api/batch-accounting/tag-rules") {
-      if (request.method() === "PUT") {
-        const body = parseJsonBody(request.postData()) as Record<string, unknown>;
-        if (body.expected_version !== batchAccountingTagSelectionVersion) {
-          return json(route, {
-            error: "batch_accounting_tag_selection_version_conflict",
-            message: "批量账务标签规则已变化，请刷新后重试。",
-          }, 409);
-        }
-        const nextCodes = Array.isArray(body.selected_tag_codes)
-          ? body.selected_tag_codes.map(String)
-          : [];
-        if (JSON.stringify(nextCodes) !== JSON.stringify(batchAccountingSelectedTagCodes)) {
-          batchAccountingSelectedTagCodes = nextCodes;
-          batchAccountingTagSelectionVersion += 1;
-        }
-      }
-      return json(route, {
-        version: batchAccountingTagSelectionVersion,
-        bank_auto_tag_rules_version: 9,
-        selected_tag_codes: batchAccountingSelectedTagCodes,
-        active_tags: [
-          {
-            code: "fee",
-            label: "手续费",
-            path: ["费用", "手续费"],
-            output_primary_label: "费用",
-            output_sub_label: "手续费",
-          },
-          {
-            code: "travel",
-            label: "差旅费",
-            path: ["费用", "差旅费"],
-            output_primary_label: "费用",
-            output_sub_label: "差旅费",
-          },
-        ],
-        can_save: configuredSessionKind() !== "denied",
-      });
-    }
-
-    if (path === "/api/batch-accounting/submit") {
-      batchAccountingSubmitted = true;
-      return json(route, batchAccountingSubmitPayload());
-    }
-
-    if (path === "/api/batch-accounting/BA-REL-202604-001/withdraw") {
-      batchAccountingSubmitted = false;
-      return json(route, batchAccountingWithdrawPayload());
+    if (path === "/api/batch-accounting/relations/BA-REL-202604-001") {
+      return json(route, batchAccountingDetail());
     }
 
     if (path === "/api/imports/jobs") {

@@ -33,6 +33,12 @@ test("access accounts preserve drafts, report OA failure, save and render respon
   await list.getByRole("option", { name: /YNSYLP002/ }).click();
   await list.getByRole("option", { name: /YNSYLP044/ }).click();
   await expect(section.getByRole("checkbox", { name: "银行明细" })).not.toBeChecked();
+  await page.getByRole("tab", { name: "批量账务", exact: true }).click();
+  await expect(page.getByRole("grid", { name: "批量账务历史记录" })).toBeVisible();
+  await page.getByRole("tab", { name: "访问账户", exact: true }).click();
+  await list.getByRole("option", { name: /YNSYLP044/ }).click();
+  await expect(section.getByRole("checkbox", { name: "银行明细" })).not.toBeChecked();
+  expect(version).toBe(12);
   await page.getByRole("button", { name: "保存访问权限" }).click();
   await expect(page.getByRole("alert")).toContainText("OA 入口角色配置不完整");
   await expect(page.getByRole("alert")).not.toContainText("关联台服务");

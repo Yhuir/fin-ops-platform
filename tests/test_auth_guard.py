@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import fin_ops_platform.app.auth as auth_module
 from fin_ops_platform.app.server import Application
@@ -126,6 +127,65 @@ class AuthGuardTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 403)
         self.assertEqual(json.loads(response.body)["error"], "page_access_policy_missing")
+
+    def test_batch_history_access_does_not_grant_settings_or_control_plane_access(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
+            configure_access_control(app, page_access={"HISTORY001": ["batch-accounting"]})
+            app._oa_identity_service.resolve_identity = lambda _token: self._identity("HISTORY001")
+            app._batch_accounting_query_repository = SimpleNamespace(
+                list_snapshot=lambda **_kwargs: {
+                    "rows": [], "relation_count": 0, "transaction_count": 0, "available_years": [],
+                },
+            )
+            headers = {"Authorization": "Bearer history-reader"}
+            before = app._app_settings_service.get_settings_payload()
+            history = app.handle_request("GET", "/api/batch-accounting?bank_year=all", headers=headers)
+            self.assertEqual(history.status_code, 200)
+            payload = json.loads(history.body)
+            self.assertEqual(payload["rows"], [])
+            self.assertEqual(payload["summary"]["relation_count"], 0)
+            self.assertEqual(payload["pagination"]["total"], 0)
+
+            for method, path, error in (
+                ("GET", "/api/workbench/settings", "page_access_denied"),
+                ("POST", "/api/workbench/settings", "page_access_denied"),
+                ("GET", "/api/workbench/settings/access-control", "admin_access_required"),
+                ("PUT", "/api/workbench/settings/access-control", "admin_access_required"),
+                ("GET", "/api/workbench/settings/data-reset/preview", "admin_access_required"),
+                ("POST", "/api/workbench/settings/data-reset/jobs", "admin_access_required"),
+                ("GET", "/api/bank-transactions/bank-1/source-detail", "page_access_denied"),
+                ("GET", "/api/bank-transactions/bank-1/splits", "page_access_denied"),
+                ("PUT", "/api/bank-transactions/bank-1/splits", "page_access_denied"),
+                ("POST", "/api/bank-transactions/splits/query", "page_access_denied"),
+                ("GET", "/api/background-jobs/active", "page_access_denied"),
+                ("GET", "/api/background-jobs/task-1", "page_access_denied"),
+                ("POST", "/api/background-jobs/task-1/cancel", "page_access_denied"),
+                ("POST", "/api/background-jobs/task-1/retry", "page_access_denied"),
+            ):
+                with self.subTest(method=method, path=path):
+                    response = app.handle_request(method, path, headers=headers, body="{}")
+                    denied = json.loads(response.body)
+                    self.assertEqual(response.status_code, 403)
+                    self.assertEqual(denied["error"], error)
+                    self.assertTrue(denied["message"])
+            self.assertEqual(app._app_settings_service.get_settings_payload(), before)
+
+    def test_settings_access_does_not_grant_batch_history_access(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
+            configure_access_control(app, page_access={"SETTINGS001": ["settings"]})
+            app._oa_identity_service.resolve_identity = lambda _token: self._identity("SETTINGS001")
+            headers = {"Authorization": "Bearer settings-reader"}
+            settings = app.handle_request("GET", "/api/workbench/settings", headers=headers)
+            self.assertEqual(settings.status_code, 200)
+            for path in ("/api/batch-accounting", "/api/batch-accounting/relations/relation-1"):
+                with self.subTest(path=path):
+                    response = app.handle_request("GET", path, headers=headers)
+                    denied = json.loads(response.body)
+                    self.assertEqual(response.status_code, 403)
+                    self.assertEqual(denied["error"], "page_access_denied")
+                    self.assertEqual(denied["required_page_keys"], ["batch-accounting"])
 
     def test_etc_reconciliation_actor_comes_from_authenticated_session(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

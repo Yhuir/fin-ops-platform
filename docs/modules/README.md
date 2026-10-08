@@ -7,7 +7,7 @@
 | [银行明细](bank-details/README.md) | `/bank-details` |
 | [银行账户余额](bank-account-balance/README.md) | `/api/bank-details/accounts` |
 | [流水规则批量处理](bank-flow-rule-batches/README.md) | `/bank-flow-rule-batches` |
-| [批量账务](batch-accounting/README.md) | `/batch-accounting` |
+| [批量账务](batch-accounting/README.md) | `/settings?section=batch-accounting` |
 | [关联台](reconciliation-workbench/README.md) | `/` |
 | [正式关联关系](workbench-relations/README.md) | `公共命令与读取边界` |
 | [待找发票](pending-invoices/README.md) | `/pending-invoices` |

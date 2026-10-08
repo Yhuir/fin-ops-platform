@@ -104,7 +104,7 @@ test.describe("settings data reset browser flow", () => {
     await expect(page.getByText("已保存银行账户与 OA 导入设置。")).toBeVisible();
   });
 
-  test("centers all four settings panels with native tabs at four widths", async ({ page }, testInfo) => {
+  test("fits all four settings editors and five native tabs to the full-width workspace", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     let settingsReads = 0;
     page.on("request", (request) => {
@@ -113,7 +113,8 @@ test.describe("settings data reset browser flow", () => {
     await installDeterministicApiMocks(page, { sessionMode: "admin" });
     await page.goto("/settings");
     const tabs = page.getByRole("tablist", { name: "设置分类" });
-    await expect(tabs.getByRole("tab")).toHaveCount(4);
+    await expect(tabs.getByRole("tab")).toHaveCount(5);
+    await expect(tabs.getByRole("tab").last()).toHaveText("批量账务");
     const initialSettingsReads = settingsReads;
     const sections = [
       { nav: "银行账户", region: "银行账户映射" },
@@ -142,6 +143,9 @@ test.describe("settings data reset browser flow", () => {
         await expect(region).toBeVisible();
         samples.push({width, section: section.nav, elapsedMs: performance.now() - started});
         const workspace = await page.locator(".settings-workspace").boundingBox();
+        const layout = await page.locator(".settings-layout").boundingBox();
+        expect(Math.abs(workspace!.x - layout!.x - 16)).toBeLessThan(2);
+        expect(Math.abs(workspace!.width - layout!.width + 32)).toBeLessThan(2);
         const panel = await page.getByRole("tabpanel", { name: section.nav, exact: true }).boundingBox();
         expect(Math.abs(panel!.x - workspace!.x)).toBeLessThan(2);
         expect(Math.abs(panel!.width - workspace!.width)).toBeLessThan(2);

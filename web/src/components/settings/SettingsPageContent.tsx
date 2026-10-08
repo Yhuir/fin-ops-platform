@@ -1,5 +1,7 @@
 import { Button } from "@heroui/react";
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+
 
 import { usePageSessionState } from "../../contexts/PageSessionStateContext";
 import type {
@@ -29,6 +31,7 @@ import type {
 } from "./types";
 
 type SettingsPageContentProps = {
+  canViewBatchHistory?: boolean;
   settings: WorkbenchSettings;
   accessControl: WorkbenchAccessControl | null;
   onFeedback: (status: SettingsActionStatus | null) => void;
@@ -159,6 +162,7 @@ function parseResetErrorMessage(message: string) {
 
 export default function SettingsPageContent({
   activeDataResetJob,
+  canViewBatchHistory = false,
   settings,
   accessControl,
   onFeedback,
@@ -173,6 +177,7 @@ export default function SettingsPageContent({
   onSaveAccessControl,
   onSearchAccessUsers,
 }: SettingsPageContentProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
   const draftSession = usePageSessionState<SettingsDraftSession>({
     pageKey: "settings",
     stateKey: "safeDraft",
@@ -209,8 +214,12 @@ export default function SettingsPageContent({
   const setBankShortNameDraft = (value: string) => setDraftField("bankShortNameDraft", value);
   const last4Draft = draftSession.value.last4Draft;
   const setLast4Draft = (value: string) => setDraftField("last4Draft", value);
-  const activeSectionId = draftSession.value.activeSectionId;
-  const setActiveSectionId = (value: SettingsSectionId) => setDraftField("activeSectionId", value);
+  const requestedSection = searchParams.get("section");
+  const activeSectionId = (requestedSection ?? draftSession.value.activeSectionId) as SettingsSectionId;
+  const setActiveSectionId = (value: SettingsSectionId) => {
+    if (value !== "batch-accounting") setDraftField("activeSectionId", value);
+    setSearchParams((current) => { const next = new URLSearchParams(current); next.set("section", value); return next; }, { replace: true });
+  };
   const [dataResetDialog, setDataResetDialog] = useState<DataResetDialogState>(null);
   const [dataResetPassword, setDataResetPassword] = useState("");
   const [dataResetReason, setDataResetReason] = useState("");
@@ -300,10 +309,11 @@ export default function SettingsPageContent({
         label: "数据重置",
         visible: canManageAccessControl,
       },
+      { id: "batch-accounting" as const, label: "批量账务", visible: canViewBatchHistory },
     ];
     return items.filter((item) => item.visible).map(({ visible: _visible, ...item }) => item);
   }, [
-    canManageAccessControl,
+    canManageAccessControl, canViewBatchHistory,
   ]);
 
   useEffect(() => {
@@ -479,7 +489,7 @@ export default function SettingsPageContent({
                 <>
                   <div className="settings-save-context">
                     <span className="settings-draft-status" role="status">{hasUnsavedSettings ? "有未保存修改" : ""}</span>
-                    <small>保存银行账户与 OA 导入设置</small>
+
                   </div>
                   <Button className="settings-primary-save" isDisabled={controlsDisabled} isPending={isSaving} variant="primary" onPress={handleSave}>
                     {isSaving ? "保存中..." : "保存设置"}
@@ -493,7 +503,7 @@ export default function SettingsPageContent({
                     <span className="settings-draft-status" role="status">{changedAccountIds.size ? `${changedAccountIds.size} 个账户有未保存修改` : "无未保存修改"}</span>
                     <small className={accessControlValidationMessage ? "settings-field-help--error" : undefined}
                       role={accessControlValidationMessage ? "alert" : undefined}>
-                      {accessControlValidationMessage ?? "保存将提交全部账户修改"}
+                      {accessControlValidationMessage}
                     </small>
                   </div>
                   <Button variant="secondary" isDisabled={accessControlControlsDisabled || changedAccountIds.size === 0}
@@ -508,6 +518,7 @@ export default function SettingsPageContent({
           </header>
           <SettingsTabs items={settingsNavigationItems} activeSectionId={activeSectionId} onSelect={setActiveSectionId}>
             <section aria-label="设置内容" className="settings-content-panel">
+
 
               {activeSectionId === "bank_accounts" ? (
                 <SettingsBankAccountsSection

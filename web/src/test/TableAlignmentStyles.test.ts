@@ -50,7 +50,6 @@ describe("finance table alignment styles", () => {
   test("keeps table-bearing page surfaces square instead of nesting rounded cards", () => {
     const flatSurfaceSelectors = [
       ".oa-pending-payments-table-frame",
-      ".batch-accounting-oa-panel",
       ".turnover-ledger-export-dialog__table-wrap",
       ".bank-flow-rule-batches-transactions",
       ".app-health-section",

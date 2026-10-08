@@ -1,14 +1,17 @@
 import { Button } from "@heroui/react";
 import { X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import StatePanel from "../components/common/StatePanel";
+import BatchAccountingHistory from "../components/batchAccounting/BatchAccountingHistory";
+import SettingsTabs from "../components/settings/SettingsTabs";
+import type { SettingsNavigationItem, SettingsSectionId } from "../components/settings/types";
 import SettingsPageContent from "../components/settings/SettingsPageContent";
 import { useAppChrome } from "../contexts/AppChromeContext";
 import { useAppHealthStatus, useCanMutateWithHealth } from "../contexts/AppHealthStatusContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
-import { useSession, useSessionPermissions } from "../contexts/SessionContext";
+import { useSessionPermissions } from "../contexts/SessionContext";
 import { importWorkflowPath } from "../features/imports/importRoutes";
 import {
   fetchActiveWorkbenchSettingsDataResetJob,
@@ -49,12 +52,37 @@ function normalizeSettingsError(error: unknown, fallback: string) {
 }
 
 export default function SettingsPage() {
+  const { canAccessPage } = useSessionPermissions();
+  const [searchParams] = useSearchParams();
+  if (searchParams.get("section") === "batch-accounting" && !canAccessPage("batch-accounting")) return <StatePanel tone="error">没有批量账务查看权限</StatePanel>;
+  if (canAccessPage("settings")) return <EditableSettingsPage />;
+  if (!canAccessPage("batch-accounting")) return <StatePanel tone="error">没有设置访问权限</StatePanel>;
+  return <div className="settings-route" data-testid="settings-page"><HistorySettingsWorkspace canViewSettings={false} canAdminAccess={false} /></div>;
+}
+
+function HistorySettingsWorkspace({ canViewSettings, canAdminAccess }: { canViewSettings: boolean; canAdminAccess: boolean }) {
+  const [, setSearchParams] = useSearchParams();
+  const items: SettingsNavigationItem[] = [
+    ...(canViewSettings ? [{ id: "bank_accounts" as const, label: "银行账户" }, { id: "oa_retention" as const, label: "OA导入设置" }] : []),
+    ...(canViewSettings && canAdminAccess ? [{ id: "access_accounts" as const, label: "访问账户" }, { id: "data_reset" as const, label: "数据重置" }] : []),
+    { id: "batch-accounting", label: "批量账务" },
+  ];
+  return <div className="settings-layout"><div className="settings-workspace">
+    <header className="settings-content-header"><div className="settings-content-title"><h1>设置</h1></div><div className="settings-save-actions" /></header>
+    <SettingsTabs items={items} activeSectionId="batch-accounting" onSelect={(section: SettingsSectionId) => setSearchParams({ section }, { replace: true })}>
+      <BatchAccountingHistory />
+    </SettingsTabs>
+  </div></div>;
+}
+
+function EditableSettingsPage() {
   const { active, activationGeneration } = useOptionalPageActivation("settings");
   const navigate = useNavigate();
-  const session = useSession();
+  const [searchParams] = useSearchParams();
+  const showingHistory = searchParams.get("section") === "batch-accounting";
   const healthStatus = useAppHealthStatus();
   const canMutateWithHealth = useCanMutateWithHealth();
-  const { canAdminAccess } = useSessionPermissions();
+  const { canAdminAccess, canAccessPage } = useSessionPermissions();
   const { setWorkbenchHeaderActions, setWorkbenchStatus } = useAppChrome();
   const [settings, setSettings] = useState<WorkbenchSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -97,7 +125,7 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
-    if (!active) {
+    if (!active || showingHistory || settings !== null) {
       return undefined;
     }
     const controller = new AbortController();
@@ -105,14 +133,16 @@ export default function SettingsPage() {
     return () => {
       controller.abort();
     };
-  }, [active, activationGeneration, loadSettings]);
+  }, [active, activationGeneration, showingHistory, settings, loadSettings]);
 
   useEffect(() => {
+    if (showingHistory) return;
     if (!active || !canAdminAccess) {
       setAccessControl(null);
       setIsAccessControlLoading(false);
       return undefined;
     }
+    if (accessControl !== null) return;
     const controller = new AbortController();
     setIsAccessControlLoading(true);
     setPageFeedback(null);
@@ -136,9 +166,10 @@ export default function SettingsPage() {
         }
       });
     return () => controller.abort();
-  }, [active, activationGeneration, canAdminAccess]);
+  }, [active, activationGeneration, canAdminAccess, showingHistory, accessControl]);
 
   useEffect(() => {
+    if (showingHistory) return;
     if (!active || !canAdminAccess) {
       setActiveDataResetJob(null);
       return;
@@ -177,9 +208,10 @@ export default function SettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, [active, activationGeneration, canAdminAccess, loadSettings]);
+  }, [active, activationGeneration, canAdminAccess, showingHistory, loadSettings]);
 
   useEffect(() => {
+    if (showingHistory) { setWorkbenchStatus(null); return; }
     if (loadError) {
       setWorkbenchStatus({ level: "error", reason: loadError });
       return;
@@ -192,7 +224,7 @@ export default function SettingsPage() {
       return;
     }
     setWorkbenchStatus(null);
-  }, [isLoading, loadError, loadProgress.label, loadProgress.percent, setWorkbenchStatus]);
+  }, [showingHistory, isLoading, loadError, loadProgress.label, loadProgress.percent, setWorkbenchStatus]);
 
   useEffect(() => () => setWorkbenchStatus(null), [setWorkbenchStatus]);
 
@@ -305,6 +337,8 @@ export default function SettingsPage() {
           <Button aria-label="关闭设置反馈" isIconOnly size="sm" variant="ghost" onPress={() => setPageFeedback(null)}><X size={16} aria-hidden="true" /></Button>
         </div>
       ) : null}
+      {showingHistory ? <HistorySettingsWorkspace canViewSettings canAdminAccess={canAdminAccess} /> : null}
+      <div hidden={showingHistory}>
       <div className="settings-route-status">
         {loadError ? <StatePanel compact tone="error">{loadError}</StatePanel> : null}
         {isLoading && !loadError ? (
@@ -317,6 +351,7 @@ export default function SettingsPage() {
       </div>
       {!isLoading && !loadError && settings ? (
         <SettingsPageContent
+          canViewBatchHistory={canAccessPage("batch-accounting")}
           canManageAccessControl={canAdminAccess}
           accessControl={accessControl}
           onFeedback={setPageFeedback}
@@ -333,6 +368,7 @@ export default function SettingsPage() {
           onSearchAccessUsers={searchWorkbenchAccessUsers}
         />
       ) : null}
+      </div>
     </div>
   );
 }

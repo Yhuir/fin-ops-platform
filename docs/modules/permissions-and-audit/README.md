@@ -11,6 +11,7 @@ OA 负责证明身份，App 根据当前 Settings 页面 ACL 决定访问；审�
 ## 当前业务约定
 
 - 固定管理员 YNSYLP005；其他用户仅获明确 page_keys。OA roles/menu 和环境名单不构成 App grant。
+- 批量账务权限仅提供历史列表与详情读取，不授予普通设置、账户管理、重置、银行流水拆分或通用后台任务操作。设置容器可承载历史入口，但不合并两者权限。
 - 受保护请求在 body 解析和业务执行前校验；未知路由、缺配置或 provider 失败拒绝。纯查询 POST 与 mutation 依明确路由策略区分。
 - 同次判断最多读取一次 ACL snapshot，撤权下一请求生效；服务不自行读取 cookie/header。
 - 客户端 actor/createdBy 不可信；审计身份和 request ID 来自请求边界。业务状态合法性由各领域 service 判断。

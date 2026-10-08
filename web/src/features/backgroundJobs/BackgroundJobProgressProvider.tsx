@@ -9,6 +9,8 @@ import {
   type ReactNode,
 } from "react";
 
+import { useOptionalSessionPermissions } from "../../contexts/SessionContext";
+
 import { acknowledgeBackgroundJob, fetchActiveBackgroundJobs, retryBackgroundJob } from "./api";
 import type { BackgroundJob } from "./types";
 
@@ -40,6 +42,8 @@ function isAbortError(error: unknown) {
 }
 
 export function BackgroundJobProgressProvider({ children }: { children: ReactNode }) {
+  const { canAdminAccess, allowedPageKeys } = useOptionalSessionPermissions();
+  const canReadJobs = canAdminAccess || allowedPageKeys.some((key) => key !== "cash" && key !== "batch-accounting");
   const [jobs, setJobs] = useState<BackgroundJob[]>([]);
   const [failureCount, setFailureCount] = useState(0);
   const [operatingJobId, setOperatingJobId] = useState<string | null>(null);
@@ -67,6 +71,7 @@ export function BackgroundJobProgressProvider({ children }: { children: ReactNod
 
   const refresh = useCallback(async () => {
     abortRef.current?.abort();
+    if (!canReadJobs) { applyJobs([]); setFailureCount(0); return; }
     const controller = new AbortController();
     abortRef.current = controller;
     try {
@@ -82,7 +87,7 @@ export function BackgroundJobProgressProvider({ children }: { children: ReactNod
         abortRef.current = null;
       }
     }
-  }, [applyJobs]);
+  }, [applyJobs, canReadJobs]);
 
   const acknowledgeJob = useCallback(
     async (jobId: string) => {
@@ -133,6 +138,7 @@ export function BackgroundJobProgressProvider({ children }: { children: ReactNod
   }, []);
 
   useEffect(() => {
+    if (!canReadJobs) { applyJobs([]); setFailureCount(0); return; }
     let mounted = true;
 
     const clearPollTimer = () => {
@@ -182,7 +188,7 @@ export function BackgroundJobProgressProvider({ children }: { children: ReactNod
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [refresh]);
+  }, [refresh, canReadJobs, applyJobs]);
 
   const value = useMemo(
     () => ({

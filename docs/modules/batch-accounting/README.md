@@ -1,42 +1,41 @@
-# 批量账务
+# 批量账务历史
 
-入口：`/batch-accounting`。
+入口：设置页的“批量账务”Tab。旧 `/batch-accounting` 地址进入该 Tab。
 
-把批量账务集中处理支出与已完成日常报销 OA 及附件发票建立正式关系。
+本模块只查询当前有效的批量账务正式关系，不创建、撤回关系或修改标签规则。已撤回关系的审计仍由既有操作历史保存。历史页面读取当前 canonical facts，不保存提交时的字段快照。
 
 ## 边界与 I/O
 
-输入：GET bank_year=具体年份或 all、bucket、银行/OA 分页和 oa_search；提交携带具体年份、bank_row_id、oa_row_ids、tag_selection_version、稳定 idempotency_key。输出：同快照 summary、bank_rows、oa_rows、relations_by_bank_row_id 和 pagination。
+- `GET /api/batch-accounting` 接受 `bank_year=all|YYYY`、`page`、`page_size`，默认全部年份、第一页、每页 50 条，最大 200 条。返回 `rows`、`summary`、`pagination`、`available_years`。
+- 每行以 `relation_id` 标识，账户使用 `bank_accounts` 对象数组保持银行名称和后四位的配对；同一关系的流水金额不因 OA 或发票展开重复累计。
+- `summary.relation_count` 是有效关系列表条数；`transaction_count` 是这些关系包含的原始流水去重笔数。分页使用关系条数。
+- `GET /api/batch-accounting/relations/{relation_id}` 返回完整的流水、OA、发票成员、已有备注、流水金额、OA 金额、差额及 `missing_member_ids`。ETC 汇总成员复用 canonical owner 批量解析，`etc_invoice_detail_rows` 提供实际发票明细；不存在或身份冲突的批次保留明确缺失状态。
+- Route 负责参数与错误映射，Application 的页面权限边界负责鉴权；service 组装 DTO，repository 持有 SQL。
 
 ## 当前业务约定
 
-- 银行候选为有效正金额支出、指定对方户名且未被 active relation 占用；有效分类复用银行 owner。
-- OA 候选不限银行年份，必须已完成且没有银行成员占用；附件只按当前候选 IDs 批量读取。
-- 规则由 Settings owner 保存 stable tag codes/version，CAS 与审计同事务；新标签不自动扩大已保存选择。
-- 提交/撤回调用正式关系命令，持久幂等键随同一用户意图重试复用。
-- 双方分页在服务端完成，page_size 最大 200；submitted 不再返回候选 OA 列表。
+- 只读取 `status=active` 且 `relation_mode=batch_accounting` 的正式关系。详情不会读取其它关系类型或已撤回记录。
+- 年份按 canonical 流水交易日期筛选。关系有任一流水成员落入选定年份就进入列表；列表和详情展示该关系的完整成员及金额。可选年份来自全部有效历史。
+- 列表按关系最新流水日期倒序、关联 ID 排序。列表、统计和年份在一个只读 repeatable-read 快照内查询；详情关系和成员也使用一个请求快照。
+- 流水支出金额为 canonical `-signed_amount`，退款保留负数；OA、发票保留 canonical 原符号。缺失成员或金额以明确缺失状态呈现，不替换成零、不使用关系元数据补造事实。
+- 成员类型复用正式关系 owner 的类型规范化，支持已登记的银行、OA、发票别名。
+- 查询不加载未提交候选、候选 OA、标签选择或完整来源 raw payload，不产生写入与后台任务。
+- `batch-accounting` 查看权限独立于 `settings` 权限。设置容器不会让历史用户获取其它设置内容或修改权限。
 
 ## 依赖方向
 
-[银行明细](../bank-details/README.md)、[设置](../settings/README.md)、[正式关联关系](../workbench-relations/README.md)、[OA 集成](../oa-integration/README.md)。依赖表示调用或事实消费，不允许读取其它页面的展示结果作为业务事实。
+消费[银行明细](../bank-details/README.md)、[正式关联关系](../workbench-relations/README.md)、[OA 集成](../oa-integration/README.md)及发票正式事实；由[设置](../settings/README.md)提供 UI 容器。不得读取其它页面展示结果作为业务事实。
 
 ## 代码与验证入口
 
-- [web/src/pages/BatchAccountingPage.tsx](../../../web/src/pages/BatchAccountingPage.tsx)
-- [web/src/components/batchAccounting/BatchAccountingTagRulesDrawer.tsx](../../../web/src/components/batchAccounting/BatchAccountingTagRulesDrawer.tsx)
-- [web/src/features/batchAccounting/api.ts](../../../web/src/features/batchAccounting/api.ts)
-- [web/src/features/batchAccounting/types.ts](../../../web/src/features/batchAccounting/types.ts)
-- [backend/src/fin_ops_platform/app/routes_batch_accounting.py](../../../backend/src/fin_ops_platform/app/routes_batch_accounting.py)
-- [backend/src/fin_ops_platform/services/batch_accounting_service.py](../../../backend/src/fin_ops_platform/services/batch_accounting_service.py)
-- [backend/src/fin_ops_platform/services/postgres_repositories/batch_accounting.py](../../../backend/src/fin_ops_platform/services/postgres_repositories/batch_accounting.py)
-- [backend/src/fin_ops_platform/services/workbench_relation_command_service.py](../../../backend/src/fin_ops_platform/services/workbench_relation_command_service.py)
-- [backend/src/fin_ops_platform/app/server.py](../../../backend/src/fin_ops_platform/app/server.py)
-- [backend/src/fin_ops_platform/postgres/migrations/0135_batch_accounting_tag_selection.sql](../../../backend/src/fin_ops_platform/postgres/migrations/0135_batch_accounting_tag_selection.sql)
-- [tests/test_batch_accounting_api.py](../../../tests/test_batch_accounting_api.py)
-- [tests/test_batch_accounting_postgres_integration.py](../../../tests/test_batch_accounting_postgres_integration.py)
-- [tests/test_audit_page_canonical_data_tool.py](../../../tests/test_audit_page_canonical_data_tool.py)
-- [tests/test_platform_runtime_boundary_guards.py](../../../tests/test_platform_runtime_boundary_guards.py)
-- [web/src/test/BatchAccountingApi.test.ts](../../../web/src/test/BatchAccountingApi.test.ts)
-- [web/src/test/BatchAccountingPage.test.tsx](../../../web/src/test/BatchAccountingPage.test.tsx)
+- [历史前端接口](../../../web/src/features/batchAccounting/api.ts)
+- [历史前端 DTO](../../../web/src/features/batchAccounting/types.ts)
+- [HTTP route](../../../backend/src/fin_ops_platform/app/routes_batch_accounting.py)
+- [查询 service](../../../backend/src/fin_ops_platform/services/batch_accounting_service.py)
+- [PostgreSQL repository](../../../backend/src/fin_ops_platform/services/postgres_repositories/batch_accounting.py)
+- [API 与 service 测试](../../../tests/test_batch_accounting_api.py)
+- [真实 PostgreSQL 测试](../../../tests/test_batch_accounting_postgres_integration.py)
+- [只读性能抽查工具](../../../backend/src/fin_ops_platform/tools/batch_accounting_read_smoke.py)
+- [前端交互测试](../../../web/src/test/BatchAccountingPage.test.tsx)
 
-通用查询、事务、权限与错误边界见[系统架构](../../../ARCHITECTURE.md)；验证方法见[开发说明](../../development.md)。测试文件是可执行证据，本文不保存某一次测试的通过记录。
+通用查询、事务、权限与错误边界见[系统架构](../../../ARCHITECTURE.md)；验证方法见[开发说明](../../development.md)。

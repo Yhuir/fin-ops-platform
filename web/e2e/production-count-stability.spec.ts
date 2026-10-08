@@ -1,11 +1,12 @@
 import { writeFile } from 'node:fs/promises';
 import { expect, test } from './fixtures/strictTest';
+import { expectNoUnexpectedSuccessUiErrors } from './fixtures/successAssertions';
 
 const enabled = process.env.FIN_OPS_E2E_PRODUCTION_COUNTS === '1';
 const token = process.env.FIN_OPS_E2E_ADMIN_TOKEN;
 test.use({ screenshot:'off', trace:'off', video:'off', viewport:{width:1440,height:1000}, reducedMotion:'reduce' });
 
-for (const path of ['oa-pending-payments','input-invoice-usage','output-invoice-collections','pending-invoices','etc-tickets','batch-accounting','bank-flow-rule-batches']) {
+for (const path of ['oa-pending-payments','input-invoice-usage','output-invoice-collections','pending-invoices','etc-tickets','bank-flow-rule-batches']) {
   test(`production read-only count stability: ${path}`, async ({page}, info) => {
     test.skip(!enabled || !token, 'Explicit production count verification and local admin token are required.');
     await page.context().addCookies([{name:'Admin-Token',value:token!,domain:'www.yn-sourcing.com',path:'/',secure:true,sameSite:'Lax'}]);
@@ -47,6 +48,7 @@ for (const path of ['oa-pending-payments','input-invoice-usage','output-invoice-
       const requests=await page.evaluate(since=>performance.getEntriesByType('resource').filter(e=>e.startTime>=since && e.name.includes('/fin-ops-api/')).map(e=>({path:new URL(e.name).pathname,ms:Math.round(e.duration)})), since);
       records.push({index,frameCount:frames.length,first:initial,last:frames.at(-1)?.controls,requests});
     }
+    await expectNoUnexpectedSuccessUiErrors(page);
     expect(writes).toEqual([]);
     expect(failures).toEqual([]);
     await info.attach('production-count-measurements',{body:JSON.stringify(records,null,2),contentType:'application/json'});
@@ -114,3 +116,21 @@ for (const path of ['oa-pending-payments', 'input-invoice-usage', 'pending-invoi
     expect(samples.every(sample => sample.requests > 0)).toBe(true);
   });
 }
+
+
+test("production readonly history counts agree with canonical pagination", async ({ page }) => {
+  test.skip(!enabled || !token, "Explicit production count verification and local admin token are required.");
+  await page.context().addCookies([{ name: 'Admin-Token', value: token!, domain: 'www.yn-sourcing.com', path: '/', secure: true, sameSite: 'Lax' }]);
+  const writes: string[] = [];
+  page.on('request', request => { if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method())) writes.push(request.method()); });
+  const response = page.waitForResponse(value => new URL(value.url()).pathname.endsWith('/api/batch-accounting'));
+  await page.goto('/fin-ops/settings?section=batch-accounting');
+  const result = await response;
+  expect(result.status()).toBe(200);
+  const payload = await result.json();
+  expect(payload.pagination.total).toBe(payload.summary.relation_count);
+  await expect(page.getByText(`已提交流水 ${payload.summary.transaction_count} 笔 · ${payload.summary.relation_count} 条记录`, { exact: true })).toBeVisible();
+  await expect(page.getByRole('grid', { name: '批量账务历史记录' }).locator('tbody tr[data-slot="table-row"]')).toHaveCount(payload.rows.length);
+  await expectNoUnexpectedSuccessUiErrors(page);
+  expect(writes).toEqual([]);
+});

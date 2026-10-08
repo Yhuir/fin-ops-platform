@@ -20,6 +20,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
+import { Navigate } from "react-router-dom";
 
 type AppPageComponent = ComponentType | LazyExoticComponent<ComponentType>;
 type PageModule = { default: ComponentType };
@@ -71,6 +72,7 @@ type AppPageDefinition = AppPageRoute & {
     icon: LucideIcon;
     id?: string;
     active?: boolean;
+    hidden?: boolean;
   };
 };
 
@@ -92,7 +94,6 @@ const inputInvoiceUsagePage = lazyPage(() => import("../pages/InputInvoiceUsageP
 const oaPendingPaymentsPage = lazyPage(() => import("../pages/OaPendingPaymentsPage"));
 const outputInvoiceCollectionsPage = lazyPage(() => import("../pages/OutputInvoiceCollectionsPage"));
 const bankFlowRuleBatchPage = lazyPage(() => import("../pages/BankFlowRuleBatchPage"));
-const batchAccountingPage = lazyPage(() => import("../pages/BatchAccountingPage"));
 const turnoverLedgerPage = lazyPage(() => import("../pages/TurnoverLedgerPage"));
 const etcTicketManagementPage = lazyPage(() => import("../pages/EtcTicketManagementPage"));
 const settingsPage = lazyPage(() => import("../pages/SettingsPage"));
@@ -150,9 +151,9 @@ export const appPageDefinitions: AppPageDefinition[] = [
   {
     path: "/batch-accounting",
     pageKey: "batch-accounting",
-    component: batchAccountingPage.component,
-    preload: batchAccountingPage.preload,
-    sidebar: { group: "finance", label: "批量账务", icon: WalletCards },
+    component: () => <Navigate replace to="/settings?section=batch-accounting" />,
+    preload: settingsPage.preload,
+    sidebar: { group: "finance", label: "批量账务", icon: WalletCards, hidden: true },
   },
   {
     path: "/turnover-ledger",
@@ -274,7 +275,7 @@ export const assignablePageOptions = appPageDefinitions
   }));
 
 function sidebarItemFromDefinition(definition: AppPageDefinition): SidebarItem | null {
-  if (!definition.sidebar) {
+  if (!definition.sidebar || definition.sidebar.hidden) {
     return null;
   }
   return {

@@ -1154,28 +1154,6 @@ class WorkbenchV2ApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
 
-    def _submit_batch_accounting_mismatch_with_note(
-        self,
-        app: Application,
-        *,
-        note: str,
-    ) -> dict[str, object]:
-        response = app.handle_request(
-            "POST",
-            "/api/batch-accounting/submit",
-            json.dumps(
-                {
-                    "year": "2026",
-                    "bank_row_id": "txn_imported_202601_batch_001",
-                    "oa_row_ids": ["oa-exp-ba-001"],
-                    "note": note,
-                    "actor": "finance-user",
-                }
-            ),
-        )
-        self.assertEqual(response.status_code, 200, response.body)
-        return json.loads(response.body)
-
     @staticmethod
     def _find_group_by_row_id(groups: list[dict[str, object]], row_id: str) -> dict[str, object]:
         for group in groups:

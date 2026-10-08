@@ -44,10 +44,14 @@ test("ordinary date filters start in all time and preserve only same-visit selec
       expect(params.get(date) ?? "", `${path}: ${date}`).toBe("");
     }
     await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
-    if (["/", "/bank-details", "/oa-pending-payments", "/output-invoice-collections", "/bank-flow-rule-batches", "/batch-accounting", "/cost-statistics"].includes(path)) {
+    if (["/", "/bank-details", "/oa-pending-payments", "/output-invoice-collections", "/bank-flow-rule-batches", "/cost-statistics"].includes(path)) {
       const all = page.getByRole("button", { name: "全部", exact: true });
       await expect(all.first()).toBeVisible();
       for (const button of await all.all()) await expect(button).toHaveAttribute("aria-pressed", "true");
+    }
+    if (path === "/batch-accounting") {
+      await expect(page).toHaveURL(/\/settings\?section=batch-accounting/);
+      await expect(page.getByRole("button", { name: /流水年份/ })).toContainText("全部年份");
     }
     results.push({ path, status: response.status(), milliseconds: Math.round(performance.now() - started) });
   }

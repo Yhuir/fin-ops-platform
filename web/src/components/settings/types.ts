@@ -20,7 +20,8 @@ export type SettingsSectionId =
   | "bank_accounts"
   | "oa_retention"
   | "access_accounts"
-  | "data_reset";
+  | "data_reset"
+  | "batch-accounting";
 
 export type SettingsNavigationItem = {
   id: SettingsSectionId;

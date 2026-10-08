@@ -315,13 +315,13 @@ class WorkbenchCanonicalRowsBuilder:
             else {}
         )
 
-    def _etc_invoice_summary_rows_for_page(
+    def load_page_etc_invoice_facts(
         self,
         external_batch_ids: set[str],
-    ) -> dict[str, dict[str, Any]]:
-        """Hydrate a bounded page's ETC summaries in one set-based query."""
+    ) -> list[dict[str, Any]]:
+        """Read the selected batches' deduplicated canonical invoice facts in one query."""
 
-        rows = self._connection.fetch_all(
+        return self._connection.fetch_all(
             """
             with requested_batches(external_batch_id) as (
                 select distinct btrim(requested.external_batch_id)
@@ -594,6 +594,14 @@ class WorkbenchCanonicalRowsBuilder:
             """,
             (sorted(external_batch_ids),),
         )
+
+    def _etc_invoice_summary_rows_for_page(
+        self,
+        external_batch_ids: set[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Hydrate a bounded page's ETC summaries in one set-based query."""
+
+        rows = self.load_page_etc_invoice_facts(external_batch_ids)
         invoices_by_external_batch_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
         invoice_keys_by_external_batch_id: dict[str, set[str]] = defaultdict(set)
         batch_payload_by_external_batch_id: dict[str, dict[str, Any]] = {}

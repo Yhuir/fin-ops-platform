@@ -9,7 +9,6 @@ import {
   Inbox,
   ListChecks,
   Ticket,
-  WalletCards,
 } from "lucide-react";
 import { vi } from "vitest";
 
@@ -103,7 +102,7 @@ describe("Finance operations shell", () => {
     expect(iconByLabel.get("OA待付款核对")).toBe(ClipboardCheck);
     expect(iconByLabel.get("销项发票收款情况")).toBe(FileOutput);
     expect(iconByLabel.get("流水规则批量处理")).toBe(ListChecks);
-    expect(iconByLabel.get("批量账务")).toBe(WalletCards);
+    expect(iconByLabel.has("批量账务")).toBe(false);
     expect(iconByLabel.get("ETC票据管理")).toBe(Ticket);
     expect(iconByLabel.get("银行流水导入")).toBe(Inbox);
     expect(iconByLabel.get("发票导入")).toBe(FileText);
@@ -117,9 +116,8 @@ describe("Finance operations shell", () => {
     expect(new Set([
       iconByLabel.get("银行明细"),
       iconByLabel.get("流水规则批量处理"),
-      iconByLabel.get("批量账务"),
       iconByLabel.get("银行流水导入"),
-    ])).toHaveLength(4);
+    ])).toHaveLength(3);
   });
 
   test("loads the workbench as an all-time view and keeps the month picker scoped to tax offset", async () => {

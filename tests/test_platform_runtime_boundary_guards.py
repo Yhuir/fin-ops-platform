@@ -161,11 +161,6 @@ class _ForbiddenRelationReadVisitor(ast.NodeVisitor):
                 "NoOaRelationRepairReadPort.active_relation_by_case_id",
                 "NoOaRelationRepairReadPort.active_relations_for_row_ids",
             },
-            "backend/src/fin_ops_platform/services/batch_accounting_service.py": {
-                "BatchAccountingService._submit_unlocked",
-                "BatchAccountingService.withdraw",
-                "BatchAccountingService._withdraw_unlocked",
-            },
         }
         qualified = f"{class_name}.{function_name}" if class_name and function_name else function_name
         if qualified in allowed_methods.get(rel_path, set()):
@@ -3816,50 +3811,17 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_batch_accounting_submit_has_no_direct_pair_write_fallback(self) -> None:
-        path = SERVICES_ROOT / "batch_accounting_service.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        submit_source = _function_source(tree, source, "_submit_unlocked")
+    def test_batch_accounting_history_has_no_write_or_candidate_chain(self) -> None:
+        from fin_ops_platform.services.batch_accounting_service import BatchAccountingService
+        from fin_ops_platform.app.routes_batch_accounting import BatchAccountingApiRoutes
 
-        violations: list[str] = []
-        for forbidden in (
-            "WorkbenchPairRelationService",
-            "pair_relation_service",
-            "_pair_relation_service",
-        ):
-            if forbidden in source:
-                violations.append(f"BatchAccountingService keeps legacy pair relation dependency {forbidden}")
-        for forbidden in (
-            "replace_with_confirmed_relation",
-            "_pair_relation_service.create_active_relation",
-            "_pair_relation_service.record_history",
-        ):
-            if forbidden in submit_source:
-                violations.append(f"BatchAccountingService.submit keeps direct pair write fallback {forbidden}")
-        if "batch_accounting_relation_command_unavailable" not in source:
-            violations.append("BatchAccountingService.submit does not fail fast when relation command service is unavailable")
-
-        self.assertEqual(violations, [])
-
-    def test_batch_accounting_withdraw_has_no_direct_pair_write_fallback(self) -> None:
-        path = SERVICES_ROOT / "batch_accounting_service.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        withdraw_source = _function_source(tree, source, "_withdraw_unlocked")
-
-        violations: list[str] = []
-        for forbidden in (
-            "withdraw_latest_for_row_ids",
-            "_pair_relation_service.create_active_relation",
-            "_pair_relation_service.record_history",
-        ):
-            if forbidden in withdraw_source:
-                violations.append(f"BatchAccountingService.withdraw keeps direct pair write fallback {forbidden}")
-        if "batch_accounting_relation_command_unavailable" not in source:
-            violations.append("BatchAccountingService.withdraw does not fail fast when relation command service is unavailable")
-
-        self.assertEqual(violations, [])
+        for owner in (BatchAccountingService, BatchAccountingApiRoutes):
+            for method in ("submit", "withdraw", "tag_rules", "update_tag_rules"):
+                self.assertFalse(hasattr(owner, method), (owner.__name__, method))
+        source = (SERVICES_ROOT / "batch_accounting_service.py").read_text(encoding="utf-8")
+        for forbidden in ("_submit_unlocked", "_withdraw_unlocked", "pair_relation_service",
+                          "relation_command", "settings_service", "_unsubmitted_payload"):
+            self.assertNotIn(forbidden, source)
 
     def test_batch_accounting_legacy_repair_entrypoint_is_removed(self) -> None:
         path = SERVICES_ROOT / "batch_accounting_service.py"
@@ -3877,39 +3839,22 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         self.assertEqual(violations, [])
 
     def test_batch_accounting_membership_has_no_special_metadata_fallback(self) -> None:
-        path = SERVICES_ROOT / "batch_accounting_service.py"
-        source = path.read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        submitted_source = _function_source(tree, source, "_submitted_payload")
-        scope_source = _function_source(tree, source, "_affected_scope_keys_for_relation")
-        submit_source = _function_source(tree, source, "submit")
-        metadata_literal = submit_source.split("special_metadata = {", 1)[1].split("case_id =", 1)[0]
-
-        violations: list[str] = []
-        for retired_key in ("bank_row_id", "oa_row_ids", "invoice_row_ids", "year"):
-            marker = f'metadata.get("{retired_key}")'
-            if marker in submitted_source or marker in scope_source:
-                violations.append(f"BatchAccountingService reads retired membership metadata: {retired_key}")
-            if f'"{retired_key}":' in metadata_literal:
-                violations.append(f"BatchAccountingService writes retired membership metadata: {retired_key}")
-        if "relation_payload = dict(relation)" in submitted_source or '"metadata":' in submitted_source:
-            violations.append("BatchAccountingService exposes raw relation metadata in submitted DTO")
-
-        self.assertEqual(violations, [])
+        source = (SERVICES_ROOT / "batch_accounting_service.py").read_text(encoding="utf-8")
+        repository = (SERVICES_ROOT / "postgres_repositories" / "batch_accounting.py").read_text(encoding="utf-8")
+        self.assertNotIn("special_metadata", source)
+        self.assertNotIn("special_metadata", repository)
+        self.assertIn('relation["row_ids"]', source)
+        self.assertIn('relation["row_types"]', source)
 
     def test_batch_accounting_route_handlers_do_not_bypass_service_boundaries(self) -> None:
         path = APP_ROOT / "server.py"
         source = path.read_text(encoding="utf-8")
         tree = _parse(path)
         list_source = _function_source(tree, source, "_handle_api_batch_accounting")
-        submit_source = _function_source(tree, source, "_handle_api_batch_accounting_submit")
-        withdraw_source = _function_source(tree, source, "_handle_api_batch_accounting_withdraw")
         routes_path = APP_ROOT / "routes_batch_accounting.py"
         routes_source = routes_path.read_text(encoding="utf-8")
         routes_tree = _parse(routes_path)
         route_list_source = _function_source(routes_tree, routes_source, "list_payload")
-        route_submit_source = _function_source(routes_tree, routes_source, "submit")
-        route_withdraw_source = _function_source(routes_tree, routes_source, "withdraw")
         service_path = SERVICES_ROOT / "batch_accounting_service.py"
         service_source = service_path.read_text(encoding="utf-8")
         service_factory_source = _function_source(tree, source, "_batch_accounting_service")
@@ -3959,7 +3904,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for required_table in (
             "app.bank_transaction_units",
             "app.oa_applications",
-            "app.oa_attachments",
             "app.invoices",
             "app.workbench_pair_relations",
         ):
@@ -3972,46 +3916,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         if "limit %s offset %s" not in repository_source:
             violations.append("batch accounting page repository no longer performs server-side pagination")
 
-        mutation_handlers = (
-            (
-                "submit",
-                submit_source,
-                route_submit_source,
-                "_batch_accounting_routes().submit",
-                "_service_factory().submit",
-            ),
-            (
-                "withdraw",
-                withdraw_source,
-                route_withdraw_source,
-                "_batch_accounting_routes().withdraw",
-                "_service_factory().withdraw",
-            ),
-        )
-        for name, handler_source, route_source, route_call, service_call in mutation_handlers:
-            if "_batch_accounting_mutation_session" not in handler_source:
-                violations.append(f"batch accounting {name} route no longer enforces mutation session")
-            if route_call not in handler_source:
-                violations.append(f"batch accounting {name} route no longer delegates mutation to BatchAccountingApiRoutes")
-            if service_call not in route_source:
-                violations.append(f"BatchAccountingApiRoutes {name} no longer delegates mutation to BatchAccountingService")
-            for forbidden in (
-                "repair_legacy_case_id_collisions",
-                "_after_relation_mutation",
-                "_execute_derived_data_lifecycle_event",
-                "_schedule_workbench_pair_relation_persist",
-                "_schedule_workbench_read_model_persist",
-                "confirm_relation(",
-                "withdraw_relation(",
-                "replace_with_confirmed_relation",
-                "withdraw_latest_for_row_ids",
-                "create_active_relation",
-                "record_history",
-            ):
-                if forbidden in handler_source:
-                    violations.append(f"batch accounting {name} route bypasses service boundary via {forbidden}")
-                if forbidden in route_source:
-                    violations.append(f"BatchAccountingApiRoutes {name} bypasses service boundary via {forbidden}")
+        for retired in ("_handle_api_batch_accounting_submit", "_handle_api_batch_accounting_withdraw",
+                        "_handle_api_batch_accounting_tag_rules", "_batch_accounting_mutation_session"):
+            if retired in source:
+                violations.append(f"retired batch accounting mutation handler remains: {retired}")
 
         self.assertEqual(violations, [])
 

@@ -1,361 +1,99 @@
-import { expect, setCheckbox, test, type Page, type TestInfo } from "./fixtures/strictTest";
-
-import { installDeterministicApiMocks } from "./fixtures/apiMocks";
-import { createOperationLatencyRecorder } from "./fixtures/operationLatency";
+import { expect, test } from "./fixtures/strictTest";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
+import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
-function startStrictBrowserErrorCapture(page: Page, options: { allowedConsoleErrors?: RegExp[] } = {}) {
-  const errors: string[] = [];
-  page.on("pageerror", (error) => {
-    errors.push(`pageerror: ${error.stack || error.message}`);
+test("history entry moves to settings, preserves drafts and renders readonly complete detail", async ({ page }, testInfo) => {
+  const api = await installDeterministicApiMocks(page, { sessionMode: "admin" });
+  await page.goto("/settings");
+  await expect(page.getByRole("tab", { name: "银行账户", exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await expect(page.getByRole("region", { name: "银行账户映射" })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("settings-bank-1440.png") });
+  await page.getByRole("textbox", { name: / 银行名称$/ }).first().fill("测试银行草稿");
+  expect(api.count("GET /api/batch-accounting")).toBe(0);
+  await page.getByRole("tab", { name: "OA导入设置", exact: true }).click();
+  await page.getByLabel("OA导入起始日期").fill("2026-02-01");
+  await page.getByRole("tab", { name: "批量账务", exact: true }).click();
+  await expect(page.getByRole("grid", { name: "批量账务历史记录" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "保存设置", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "批量账务", exact: true })).toHaveCount(0);
+  for (const width of [1920, 1440, 900]) {
+    await page.setViewportSize({ width, height: 1000 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const geometry = await page.locator(".settings-layout:visible").evaluate((el) => ({ padding: getComputedStyle(el).paddingLeft, width: el.getBoundingClientRect().width, workspace: el.querySelector(".settings-workspace")!.getBoundingClientRect().width }));
+    expect(geometry.padding).toBe("16px");
+    expect(Math.abs(geometry.width - geometry.workspace - 32)).toBeLessThan(2);
+    await page.screenshot({ path: testInfo.outputPath(`batch-history-${width}.png`) });
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole("button", { name: "查看 历史商户 详情" }).click();
+  const drawer = page.getByRole("dialog", { name: "批量账务详情" });
+  await expect(drawer.getByText("历史流水成员二")).toBeVisible();
+  await expect(drawer.getByText("王青", { exact: false })).toBeVisible();
+  await expect(drawer.getByRole("button", { name: /提交|撤回|保存|关联/ })).toHaveCount(0);
+  await page.evaluate(async () => {
+    await Promise.all(document.getAnimations().filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished));
   });
-  page.on("console", (message) => {
-    if (message.type() === "error") {
-      const text = message.text();
-      if (options.allowedConsoleErrors?.some((pattern) => pattern.test(text))) {
-        return;
-      }
-      errors.push(`console.error: ${text}`);
-    }
-  });
-  page.on("requestfailed", (request) => {
-    const failure = request.failure()?.errorText ?? "";
-    if (failure === "net::ERR_ABORTED") {
-      return;
-    }
-    errors.push(`requestfailed: ${request.method()} ${request.url()} ${failure}`.trim());
-  });
-  page.on("dialog", async (dialog) => {
-    errors.push(`dialog: ${dialog.type()} ${dialog.message()}`);
-    await dialog.dismiss().catch(() => undefined);
-  });
-  return errors;
-}
+  await page.screenshot({ path: testInfo.outputPath("batch-history-detail.png") });
+  await page.setViewportSize({ width: 900, height: 1000 });
+  await page.screenshot({ path: testInfo.outputPath("batch-history-detail-900.png") });
+  await drawer.getByRole("button", { name: "关闭抽屉" }).click();
+  await page.getByRole("tab", { name: "OA导入设置", exact: true }).click();
+  await expect(page.getByLabel("OA导入起始日期")).toHaveValue("2026-02-01");
+  await page.getByRole("tab", { name: "银行账户", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "测试银行草稿 银行名称", exact: true })).toHaveValue("测试银行草稿");
+  expect(api.calls.filter((call) => /^(POST|PUT|DELETE)/.test(call) && call.includes("batch-accounting"))).toEqual([]);
+  await expectNoUnexpectedSuccessUiErrors(page);
+  await page.getByRole("tab", { name: "批量账务", exact: true }).click();
+  await expect(page.getByRole("grid", { name: "批量账务历史记录" })).toBeVisible();
+  await page.goto("/settings");
+  await expect(page.getByRole("region", { name: "银行账户映射" })).toBeVisible();
+});
 
-function waitForBatchAccountingList(page: Page) {
-  return page.waitForResponse((response) => {
-    const url = new URL(response.url());
-    return response.request().method() === "GET" && url.pathname.endsWith("/api/batch-accounting");
-  });
-}
+test("history-only permission opens old address without loading other settings", async ({ page }) => {
+  const api = await installDeterministicApiMocks(page, { sessionMode: "user", allowedPageKeys: ["batch-accounting"] });
+  await page.goto("/batch-accounting");
+  await expect(page).toHaveURL(/\/settings\?section=batch-accounting/);
+  await expect(page.getByRole("grid", { name: "批量账务历史记录" })).toBeVisible();
+  await expect(page.getByRole("tab")).toHaveCount(1);
+  expect(api.calls.filter((call) => call.includes("/api/workbench/settings") || call.includes("access-control") || call.includes("/api/background-jobs"))).toEqual([]);
+  await page.reload();
+  await expect(page.getByText("历史商户", { exact: true })).toBeVisible();
+  await expectNoUnexpectedSuccessUiErrors(page);
+});
 
-function createBatchAccountingLatencyRecorder(page: Page, testInfo: TestInfo) {
-  return createOperationLatencyRecorder(page, testInfo, {
-    route: "/batch-accounting",
-    pageKey: "batch-accounting",
-    module: "batch-accounting",
-  });
-}
+test("history failure is distinct from empty and explicit retry recovers", async ({ page }) => {
+  await installDeterministicApiMocks(page, { sessionMode: "user", allowedPageKeys: ["batch-accounting"] });
+  let failing = true;
+  await page.route("**/api/batch-accounting?*", (route) => failing
+    ? route.fulfill({ status: 503, json: { error: "unavailable", message: "批量账务数据加载暂时失败，请刷新后重试。" } })
+    : route.fallback());
+  await page.goto("/settings?section=batch-accounting");
+  await expect(page.getByText("批量账务数据加载暂时失败，请刷新后重试。")).toBeVisible();
+  await expect(page.getByText("暂无已提交记录")).toHaveCount(0);
+  failing = false;
+  await page.getByRole("button", { name: "重试", exact: true }).click();
+  await expect(page.getByText("历史商户", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /流水年份/ }).click();
+  await page.getByRole("option", { name: "2025", exact: true }).click();
+  await expect(page.getByText("暂无已提交记录")).toBeVisible();
+});
 
-function responseFor(method: string, pathname: string) {
-  return (response: { url(): string; request(): { method(): string } }) =>
-    response.request().method() === method && new URL(response.url()).pathname.endsWith(pathname);
-}
+test("settings-only permission does not expose history", async ({ page }) => {
+  const api = await installDeterministicApiMocks(page, { sessionMode: "user", allowedPageKeys: ["settings"] });
+  await page.goto("/settings");
+  await expect(page.getByRole("tab", { name: "银行账户", exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "批量账务", exact: true })).toHaveCount(0);
+  expect(api.count("GET /api/batch-accounting")).toBe(0);
+});
 
-test.describe("batch accounting browser flow", () => {
-  test("recovers list after a transient load failure when refreshed", async ({ page }, testInfo) => {
-    const browserErrors = startStrictBrowserErrorCapture(page, {
-      allowedConsoleErrors: [/Failed to load resource: the server responded with a status of 503/],
-    });
-    const api = await installDeterministicApiMocks(page, {
-      batchAccountingFailuresBeforeSuccess: 2,
-      sessionMode: "user",
-    });
-    const recordLatency = createBatchAccountingLatencyRecorder(page, testInfo);
 
-    await recordLatency({
-      operationId: "batch-accounting.open-page-load-failure",
-      visibleLabel: "批量账务",
-      actionType: "navigate",
-    }, async (mark) => {
-      await page.goto("/batch-accounting");
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "日常报销批量账务管理" })).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByText("批量账务数据加载暂时失败，请刷新后重试。")).toBeVisible());
-    });
-    await expect(page.getByText("批量账务数据加载暂时失败，请刷新后重试。")).toBeVisible();
-    await expect(page.getByText("当前范围暂无批量账务流水")).toHaveCount(0);
-    expect(api.count("GET /api/batch-accounting")).toBeGreaterThanOrEqual(1);
-
-    let recovered = false;
-    for (let attempt = 0; attempt < 3 && !recovered; attempt += 1) {
-      await recordLatency({
-        operationId: `batch-accounting.refresh-after-load-failure.${attempt + 1}`,
-        visibleLabel: "刷新",
-        actionType: "click",
-      }, async (mark) => {
-        const responsePromise = waitForBatchAccountingList(page);
-        await page.getByRole("button", { name: "重试读取" }).click();
-        const response = await mark("apiLatencyMs", responsePromise);
-        recovered = response.status() === 200;
-        if (recovered) {
-          await mark("finalSettledLatencyMs", expect(page.getByRole("grid", { name: "可关联OA项" })).toBeVisible());
-        } else {
-          await mark("firstVisibleResponseLatencyMs", expect(page.getByText("批量账务数据加载暂时失败，请刷新后重试。")).toBeVisible());
-        }
-      });
-    }
-    expect(recovered).toBe(true);
-
-    await expect(page.getByText("批量账务数据加载暂时失败，请刷新后重试。")).toHaveCount(0);
-    const bankPanel = page.getByRole("region", { name: "批量账务流水" });
-    await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
-    const oaTable = page.getByRole("grid", { name: "可关联OA项" });
-    await expect(oaTable.getByRole("checkbox", { name: "选择 刘晨 2026-04-02" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();
-    expect(api.count("GET /api/batch-accounting")).toBeGreaterThanOrEqual(3);
-    await expectNoUnexpectedSuccessUiErrors(page);
-    expect(browserErrors).toEqual([]);
-  });
-
-  test("keeps the bank rail readable in a narrow desktop viewport", async ({ page }, testInfo) => {
-    const browserErrors = startStrictBrowserErrorCapture(page);
-    await page.setViewportSize({ width: 1180, height: 720 });
-    await installDeterministicApiMocks(page, { sessionMode: "user" });
-    const recordLatency = createBatchAccountingLatencyRecorder(page, testInfo);
-
-    await recordLatency({
-      operationId: "batch-accounting.open-page-narrow",
-      visibleLabel: "批量账务",
-      actionType: "navigate",
-    }, async (mark) => {
-      await page.goto("/batch-accounting");
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "日常报销批量账务管理" })).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByRole("region", { name: "批量账务流水" })).toBeVisible());
-    });
-
-    const bankPanel = page.getByRole("region", { name: "批量账务流水" });
-    const bankHeader = bankPanel.locator(".batch-accounting-bank-panel__header");
-    const title = bankPanel.locator(".batch-accounting-bank-panel__title");
-    await expect(bankPanel.getByText("对方户名精确匹配批量账务集中处理")).toHaveCount(0);
-    const yearInput = page.getByRole("button", { name: "流水年份：年月" });
-    const pagination = page.getByRole("group", { name: "批量账务流水分页" });
-    const tagRulesButton = page.getByRole("button", { name: "批量账务标签规则" });
-    await expect(page.getByRole("button", { name: "刷新", exact: true })).toHaveCount(0);
-
-    await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*建行 8106/ })).toBeVisible();
-
-    const actionButtonStyle = async (button: typeof tagRulesButton) => button.evaluate((element) => {
-      const style = window.getComputedStyle(element);
-      return {
-        backgroundColor: style.backgroundColor,
-        borderRadius: style.borderRadius,
-        borderStyle: style.borderStyle,
-        borderWidth: style.borderWidth,
-        color: style.color,
-        fontSize: style.fontSize,
-        height: style.height,
-      };
-    });
-    const tagRulesButtonStyle = await actionButtonStyle(tagRulesButton);
-    expect(tagRulesButtonStyle).toMatchObject({
-      backgroundColor: "rgb(255, 255, 255)",
-      borderRadius: "6px",
-      fontSize: "14px",
-      height: "34px",
-    });
-
-    const headerBox = await bankHeader.boundingBox();
-    const titleBox = await title.boundingBox();
-    const yearBox = await yearInput.boundingBox();
-    const paginationBox = await pagination.boundingBox();
-
-    expect(headerBox).not.toBeNull();
-    expect(titleBox).not.toBeNull();
-    expect(yearBox).not.toBeNull();
-    expect(paginationBox).not.toBeNull();
-    expect(titleBox!.height).toBeLessThan(38);
-
-    const headerRight = headerBox!.x + headerBox!.width + 1;
-    for (const box of [titleBox!, yearBox!, paginationBox!]) {
-      expect(box.x).toBeGreaterThanOrEqual(headerBox!.x - 1);
-      expect(box.x + box.width).toBeLessThanOrEqual(headerRight);
-    }
-    expect(browserErrors).toEqual([]);
-  });
-
-  test("filters the bank rail through the compact canonical tag drawer", async ({ page }, testInfo) => {
-    const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
-    const recordLatency = createBatchAccountingLatencyRecorder(page, testInfo);
-
-    await page.goto("/batch-accounting");
-    const bankPanel = page.getByRole("region", { name: "批量账务流水" });
-    await expect(bankPanel.getByText("手续费")).toBeVisible();
-
-    await recordLatency({
-      operationId: "batch-accounting.open-tag-rules-drawer",
-      visibleLabel: "批量账务标签规则",
-      actionType: "click",
-    }, async (mark) => {
-      const response = page.waitForResponse(responseFor("GET", "/api/batch-accounting/tag-rules"));
-      await page.getByRole("button", { name: "批量账务标签规则" }).click();
-      await mark("apiLatencyMs", response);
-      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "批量账务标签规则" })).toBeVisible());
-    });
-
-    const drawer = page.getByRole("dialog", { name: "批量账务标签规则" });
-    const feeCheckbox = drawer.getByRole("checkbox", { name: /费用 \/ 手续费/ });
-    await drawer.getByText("费用 / 手续费", { exact: true }).click();
-    await expect(feeCheckbox).not.toBeChecked();
-    await recordLatency({
-      operationId: "batch-accounting.save-tag-rules",
-      visibleLabel: "保存",
-      actionType: "click",
-    }, async (mark) => {
-      const saveResponse = page.waitForResponse(responseFor("PUT", "/api/batch-accounting/tag-rules"));
-      const listResponse = waitForBatchAccountingList(page);
-      await drawer.getByRole("button", { name: "保存" }).click();
-      await mark("apiLatencyMs", saveResponse);
-      await mark("finalSettledLatencyMs", listResponse);
-    });
-
-    expect(api.lastBody("PUT /api/batch-accounting/tag-rules")).toEqual({
-      expected_version: 1,
-      selected_tag_codes: ["travel"],
-    });
-    await expect(page.getByText("批量账务标签规则已更新。")).toBeVisible();
-    await expect(page.getByText("当前范围暂无批量账务流水")).toBeVisible();
-    expect(api.count("PUT /api/batch-accounting/tag-rules")).toBe(1);
-    expect(browserErrors).toEqual([]);
-  });
-
-  test("submits an older canonical bank year from all and withdraws the relation", async ({ page }, testInfo) => {
-    const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
-    const recordLatency = createBatchAccountingLatencyRecorder(page, testInfo);
-
-    await recordLatency({
-      operationId: "batch-accounting.open-page",
-      visibleLabel: "批量账务",
-      actionType: "navigate",
-    }, async (mark) => {
-      await page.goto("/batch-accounting");
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "日常报销批量账务管理" })).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByRole("radio", { name: "未提交 1 笔" })).toBeChecked());
-    });
-    await expect(page.getByRole("radio", { name: "未提交 1 笔" })).toBeChecked();
-    await expect(page.getByRole("radio", { name: "已提交 0 笔" })).toBeVisible();
-
-    const bankPanel = page.getByRole("region", { name: "批量账务流水" });
-    await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
-
-    const oaTable = page.getByRole("grid", { name: "可关联OA项" });
-    await recordLatency({
-      operationId: "batch-accounting.select-oa-liu",
-      visibleLabel: "选择 刘晨 2026-04-02",
-      actionType: "check",
-    }, async (mark) => {
-      await setCheckbox(oaTable.getByRole("checkbox", { name: "选择 刘晨 2026-04-02" }));
-      await mark("finalSettledLatencyMs", expect(page.getByText("已选 OA 1 项")).toBeVisible());
-    });
-    await recordLatency({
-      operationId: "batch-accounting.select-oa-wang",
-      visibleLabel: "选择 王青 2026-04-03",
-      actionType: "check",
-    }, async (mark) => {
-      await setCheckbox(oaTable.getByRole("checkbox", { name: "选择 王青 2026-04-03" }));
-      await mark("finalSettledLatencyMs", expect(page.getByText("已选 OA 2 项")).toBeVisible());
-    });
-    await expect(page.getByText("已选 OA 2 项")).toBeVisible();
-    await expect(page.getByText("已选 OA 金额 1200.00")).toBeVisible();
-    await expect(page.getByText("差额 0.00")).toBeVisible();
-
-    const batchAccountingGetsBeforeSubmit = api.count("GET /api/batch-accounting");
-    await recordLatency({
-      operationId: "batch-accounting.submit-relation",
-      visibleLabel: "关联OA项与流水",
-      actionType: "click",
-    }, async (mark) => {
-      const submitResponse = page.waitForResponse(responseFor("POST", "/api/batch-accounting/submit"));
-      const reloadResponse = waitForBatchAccountingList(page);
-      await page.getByRole("button", { name: "关联OA项与流水" }).click();
-      await mark("apiLatencyMs", submitResponse);
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("已关联批量账务流水与 2 项 OA。")).toBeVisible());
-      await mark("finalSettledLatencyMs", reloadResponse);
-    });
-
-    await expect(page.getByText("已关联批量账务流水与 2 项 OA。")).toBeVisible();
-    expect(api.count("POST /api/batch-accounting/submit")).toBe(1);
-    expect(api.lastBody("POST /api/batch-accounting/submit")).toMatchObject({ bank_year: "2025" });
-    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
-    expect(api.count("GET /api/batch-accounting")).toBe(batchAccountingGetsBeforeSubmit + 1);
-    await expect(page.getByRole("radio", { name: "已提交 1 笔" })).toBeVisible();
-    await expectNoUnexpectedSuccessUiErrors(page);
-
-    await recordLatency({
-      operationId: "batch-accounting.open-submitted-bucket",
-      visibleLabel: "已提交 1 笔",
-      actionType: "click",
-    }, async (mark) => {
-      await page.getByRole("radio", { name: "已提交 1 笔" }).click();
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("radio", { name: "已提交 1 笔" })).toBeChecked());
-      await mark("finalSettledLatencyMs", expect(page.getByRole("grid", { name: "已关联OA项" })).toBeVisible());
-    });
-    await expect(page.getByRole("radio", { name: "已提交 1 笔" })).toBeChecked();
-    await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
-
-    const submittedTable = page.getByRole("grid", { name: "已关联OA项" });
-    await expect(submittedTable.getByRole("rowheader", { name: /刘晨 2026-04-02/ })).toBeVisible();
-    await expect(submittedTable.getByRole("gridcell", { name: "品牌广告投放" })).toBeVisible();
-    await expect(submittedTable.getByRole("gridcell", { name: "700.00" })).toBeVisible();
-    await expect(submittedTable.getByRole("rowheader", { name: /王青 2026-04-03/ })).toBeVisible();
-    await expect(submittedTable.getByRole("gridcell", { name: "客户拜访差旅报销" })).toBeVisible();
-    await expect(submittedTable.getByRole("gridcell", { name: "500.00" })).toBeVisible();
-    await expect(page.getByText("银行流水金额 1200.00")).toBeVisible();
-    await expect(page.getByText("已选 OA 2 项")).toBeVisible();
-    await expect(page.getByText("差额 0.00")).toBeVisible();
-
-    const batchAccountingGetsBeforeWithdraw = api.count("GET /api/batch-accounting");
-    const withdrawDialog = page.getByRole("dialog", { name: "撤回关联" });
-    await recordLatency({
-      operationId: "batch-accounting.open-withdraw-dialog",
-      visibleLabel: "撤回关联",
-      actionType: "click",
-    }, async (mark) => {
-      await page.getByRole("button", { name: "撤回关联" }).click();
-      await mark("firstVisibleResponseLatencyMs", expect(withdrawDialog).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(withdrawDialog.getByLabel("撤回原因")).toBeVisible());
-    });
-    await recordLatency({
-      operationId: "batch-accounting.fill-withdraw-reason",
-      visibleLabel: "撤回原因",
-      actionType: "fill",
-    }, async (mark) => {
-      await withdrawDialog.getByLabel("撤回原因").fill("浏览器回归验证撤回");
-      await mark("finalSettledLatencyMs", expect(withdrawDialog.getByLabel("撤回原因")).toHaveValue("浏览器回归验证撤回"));
-    });
-    await recordLatency({
-      operationId: "batch-accounting.confirm-withdraw",
-      visibleLabel: "确认撤回",
-      actionType: "click",
-    }, async (mark) => {
-      const withdrawResponse = page.waitForResponse(responseFor("POST", "/api/batch-accounting/BA-REL-202604-001/withdraw"));
-      const reloadResponse = waitForBatchAccountingList(page);
-      await withdrawDialog.getByRole("button", { name: "确认撤回" }).click();
-      await mark("apiLatencyMs", withdrawResponse);
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("已撤回批量账务关联。")).toBeVisible());
-      await mark("finalSettledLatencyMs", reloadResponse);
-    });
-
-    await expect(page.getByText("已撤回批量账务关联。")).toBeVisible();
-    expect(api.count("POST /api/batch-accounting/BA-REL-202604-001/withdraw")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
-    expect(api.count("GET /api/batch-accounting")).toBe(batchAccountingGetsBeforeWithdraw + 1);
-    await expect(page.getByRole("radio", { name: "已提交 0 笔" })).toBeVisible();
-    await expect(page.getByText("当前范围暂无批量账务流水")).toBeVisible();
-    await expectNoUnexpectedSuccessUiErrors(page);
-
-    await recordLatency({
-      operationId: "batch-accounting.open-unsubmitted-bucket-after-withdraw",
-      visibleLabel: "未提交 1 笔",
-      actionType: "click",
-    }, async (mark) => {
-      await page.getByRole("radio", { name: "未提交 1 笔" }).click();
-      await mark("finalSettledLatencyMs", expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true"));
-    });
-    await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1200.00.*2026-04-03 09:20:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByRole("grid", { name: "可关联OA项" }).getByRole("checkbox", { name: "选择 刘晨 2026-04-02" })).toBeVisible();
-    await expectNoUnexpectedSuccessUiErrors(page);
-    expect(browserErrors).toEqual([]);
-  });
+test("direct history opens independently of unavailable general settings", async ({ page }) => {
+  const api = await installDeterministicApiMocks(page, { sessionMode: "admin" });
+  await page.route("**/api/workbench/settings", route => route.fulfill({ status: 503, json: { message: "设置暂时不可用" } }));
+  await page.goto("/settings?section=batch-accounting");
+  await expect(page.getByRole("grid", { name: "批量账务历史记录" })).toBeVisible();
+  expect(api.calls.filter(call => call.includes("/api/workbench/settings"))).toEqual([]);
+  await expect(page.getByRole("heading", { name: "设置", exact: true })).toHaveCount(1);
+  await expectNoUnexpectedSuccessUiErrors(page);
 });

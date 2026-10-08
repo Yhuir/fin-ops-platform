@@ -27,9 +27,12 @@ test("all settings save actions share a stable desktop header and switching does
   for (const width of [1920, 1440, 1280]) {
     await page.setViewportSize({ width, height: 1000 });
     await page.getByRole('tab', { name: '银行账户', exact: true }).click();
+    await expect(page.getByRole('tab', { name: '银行账户', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('button', { name: '保存设置', exact: true })).toBeVisible();
     const baseline = await geometry(page);
     for (const [index, name] of tabs.entries()) {
       await page.getByRole('tab', { name, exact: true }).click();
+      await expect(page.getByRole('tab', { name, exact: true })).toHaveAttribute('aria-selected', 'true');
       const header = page.getByRole('group', { name: '当前设置操作' });
       if (name === '数据重置') {
         await expect(header.getByRole('button')).toHaveCount(0);

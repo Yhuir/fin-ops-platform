@@ -249,19 +249,6 @@ class PostgresStateStore:
             transaction=transaction,
         )
 
-    def save_app_settings_for_batch_accounting_tag_selection_version_in_transaction(
-        self,
-        payload: dict[str, Any],
-        *,
-        expected_version: int,
-        transaction: Any,
-    ) -> dict[str, Any] | None:
-        return self._ops_tax_etc_repository.save_app_settings_for_batch_accounting_tag_selection_version_in_transaction(
-            payload,
-            expected_version=expected_version,
-            transaction=transaction,
-        )
-
     def save_app_settings_for_versioned_family_in_transaction(
         self,
         payload: dict[str, Any],
