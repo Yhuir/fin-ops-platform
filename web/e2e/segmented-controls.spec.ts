@@ -197,7 +197,7 @@ test('settings scope tabs retain consistent styling and show only active setting
   await installDeterministicApiMocks(page, { sessionMode: 'admin' });
   await page.goto('/settings');
   const scope = page.getByRole('tablist', { name: '设置分类' });
-  await expect(scope.getByRole('tab')).toHaveText(['银行账户', 'OA导入设置', 'OA申请人凭据', '访问账户', '数据重置']);
+  await expect(scope.getByRole('tab')).toHaveText(['银行账户', 'OA导入设置', '访问账户', '数据重置']);
   await expect(scope.getByRole('tab', { selected: true })).toHaveText('银行账户');
   await expect(scope.getByRole('tab', { selected: true })).toHaveCSS('height', '40px');
   await expect(page.getByRole('region', { name: '银行账户映射', exact: true })).toBeVisible();

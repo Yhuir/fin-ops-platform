@@ -520,6 +520,7 @@ function mapOaReversePreviewResponse(payload: unknown): InputInvoiceUsageOaRever
       return {
         code: stringValue(applicant.code),
         name: stringValue(applicant.name),
+        remark: stringValue(applicant.remark),
       };
     }).filter((applicant) => applicant.code && applicant.name),
     invoiceCount: numberValue(camelOrSnake(raw, "invoiceCount", "invoice_count"), topLevelCandidates.length),

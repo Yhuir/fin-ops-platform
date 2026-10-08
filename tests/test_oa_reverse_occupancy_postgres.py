@@ -1,5 +1,6 @@
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from threading import Barrier, Event
 from uuid import uuid4
 
@@ -10,6 +11,11 @@ from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import (
     InputInvoiceUsageOaReverseVersionConflictError,
 )
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.oa_applicant_credentials import (
+    OaApplicantCredentialConflictError,
+    OaApplicantCredentialSummary,
+)
+from fin_ops_platform.services.postgres_repositories.oa_applicant_credentials import PostgresOaApplicantCredentialRepository
 from fin_ops_platform.services.postgres_repositories.input_invoice_usage_oa_reverse import (
     PostgresInputInvoiceUsageOaReverseBatchRepository,
 )
@@ -35,6 +41,18 @@ class OaReverseOccupancyPostgresTests(unittest.TestCase):
             amount,signed_amount,tax_amount,total_with_tax,status)
             values(%s,'input',%s,100,100,0,100,'pending')""", (self.invoice, self.invoice))
         self.repository = PostgresInputInvoiceUsageOaReverseBatchRepository(self.connection)
+        self.credentials = PostgresOaApplicantCredentialRepository(
+            self.connection, encryption_key="test-only-key",
+            delete_guard=self.repository.assert_applicant_deletable,
+        )
+        self.credentials.save_credential(
+            summary=OaApplicantCredentialSummary(
+                target_applicant_code="actual-user", target_applicant_name="真实申请人",
+                oa_username="actual-user", credential_status="configured", has_credential=True,
+                oa_user_id="actual-id", verified_at=datetime.now(UTC),
+            ),
+            password="test-password", actor_id="tester", expected_version=None,
+        )
 
     def tearDown(self):
         truncate_test_database(require_postgres_test_database_url())
@@ -145,6 +163,10 @@ class OaReverseOccupancyPostgresTests(unittest.TestCase):
                 self.assertEqual(pending['draftRequestState'], 'requesting')
                 self.assertFalse(pending['canRelease'])
                 self.assertFalse(pending['canCreateDraft'])
+                with self.assertRaises(OaApplicantCredentialConflictError):
+                    self.credentials.delete_credential(
+                        target_applicant_code="actual-user", expected_version=1, actor_id="tester",
+                    )
                 with self.assertRaises(InputInvoiceUsageOaReverseInvalidTransitionError):
                     service.manual_oa_status(batch.batch_id, decision='not_submitted', reason='cannot release while sending',
                                              expected_version=pending['version'], idempotency_key='release', actor_id='tester')
@@ -154,6 +176,9 @@ class OaReverseOccupancyPostgresTests(unittest.TestCase):
         self.assertCountEqual(results, ['oa_draft_created', 'version_conflict'])
         self.assertEqual(len(calls), 1)
         self.assertEqual(service.get_batch(batch.batch_id)['draftRequestState'], 'succeeded')
+        self.credentials.delete_credential(target_applicant_code="actual-user", expected_version=1, actor_id="tester")
+        self.assertIsNone(self.credentials.get_credential("actual-user"))
+        self.assertEqual(service.get_batch(batch.batch_id)['oaDraftId'], 'oa-one')
 
     def test_failed_external_outcome_visible_and_never_retried_before_manual_release(self):
         calls = []
@@ -169,6 +194,8 @@ class OaReverseOccupancyPostgresTests(unittest.TestCase):
         self.assertEqual(failed['draftRequestState'], 'unknown')
         self.assertTrue(failed['canRelease'])
         self.assertFalse(failed['canCreateDraft'])
+        with self.assertRaises(OaApplicantCredentialConflictError):
+            self.credentials.delete_credential(target_applicant_code="actual-user", expected_version=1, actor_id="tester")
         self.assertIn('OA response unknown', failed['oaDetectionError'])
         with self.assertRaises(InputInvoiceUsageOaReverseInvalidTransitionError):
             service.create_oa_draft(batch.batch_id, expected_version=failed['version'], idempotency_key='new-request', actor_id='tester')
@@ -179,6 +206,21 @@ class OaReverseOccupancyPostgresTests(unittest.TestCase):
         self.assertEqual(self.repository.invoice_occupancy([self.invoice]), {})
         self.assertEqual(service.staged_drafts()['items'], [])
         self.assertEqual(self.repository.get_batch(batch.batch_id).audit_events[-1]['reason'], '已核实 OA 无单据并清理草稿')
+        self.credentials.delete_credential(target_applicant_code="actual-user", expected_version=1, actor_id="tester")
+
+    def test_credential_deleted_after_preview_prevents_external_draft_call(self):
+        calls = []
+        class Client:
+            def create_form_draft(self, **kwargs):
+                calls.append(kwargs)
+                return 'must-not-create', 'https://oa.example/forbidden'
+        service, batch = self.service(Client())
+        self.credentials.delete_credential(target_applicant_code="actual-user", expected_version=1, actor_id="tester")
+        with self.assertRaises(InputInvoiceUsageOaReverseInvalidTransitionError) as raised:
+            service.create_oa_draft(batch.batch_id, expected_version=1, idempotency_key='late', actor_id='tester')
+        self.assertEqual(raised.exception.code, 'oa_reverse_applicant_unavailable')
+        self.assertEqual(calls, [])
+        self.assertEqual(self.repository.get_batch(batch.batch_id).version, 1)
 
     def test_expired_claim_requires_review_and_late_completion_cannot_restore_released_batch(self):
         service, batch = self.service(None)

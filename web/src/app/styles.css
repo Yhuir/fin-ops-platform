@@ -17428,13 +17428,7 @@ body.column-layout-dragging {
   gap: 24px;
 }
 
-.settings-credentials-form {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px 28px;
-  width: 100%;
-  align-items: end;
-}
+
 
 .settings-access-header {
   padding-right: 4px;
@@ -17495,7 +17489,6 @@ body.column-layout-dragging {
 }
 @container settings (max-width: 640px) {
     .settings-bank-mapping-form,
-  .settings-credentials-form,
   .settings-preference-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .settings-field--date { width: 100%; }
   .settings-access-page-list { grid-template-columns: minmax(0, 1fr); }

@@ -546,7 +546,7 @@ describe("Input invoice usage workflow drawers", () => {
     const staged = await fetchInputInvoiceUsageOaReverseStagedDrafts();
 
     expect(preview.invoiceRows?.[0].invoiceId).toBe("inv-backend-1");
-    expect(preview.targetApplicants).toEqual([{ code: "chen_xiuyun", name: "陈秀云" }]);
+    expect(preview.targetApplicants).toEqual([{ code: "chen_xiuyun", name: "陈秀云", remark: "" }]);
     expect(preview.groups[0].invoiceRows?.[0].paymentStatusLabel).toBe("未付");
     expect(preview.rejectedInvoices[0]).toMatchObject({
       invoiceId: "inv-linked-backend",
@@ -645,7 +645,7 @@ describe("Input invoice usage workflow drawers", () => {
       />,
     );
 
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "以发票反提 OA" })).toBeInTheDocument();
     expect(screen.getByRole("progressbar", { name: "正在加载反提 OA 预览" })).toBeInTheDocument();
     expect(screen.queryByText("候选数、合计、拒绝原因和目标申请人均以后端返回为准")).not.toBeInTheDocument();
 
@@ -1139,7 +1139,7 @@ describe("Input invoice usage workflow drawers", () => {
       />,
     );
 
-    const selector = await screen.findByLabelText("目标 OA 申请人");
+    const selector = await screen.findByLabelText("反提 OA 申请人");
     await user.click(selector);
     await user.click(await screen.findByRole("option", { name: "周洁莹" }));
 
@@ -1190,7 +1190,7 @@ describe("Input invoice usage workflow drawers", () => {
       />,
     );
 
-    const selector = await screen.findByLabelText("目标 OA 申请人");
+    const selector = await screen.findByLabelText("反提 OA 申请人");
     await user.click(selector);
     await user.click(await screen.findByRole("option", { name: "周洁莹" }));
     await waitFor(() => expect(loadPreview).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -1198,7 +1198,7 @@ describe("Input invoice usage workflow drawers", () => {
     })));
     expect(screen.getByRole("progressbar", { name: "正在加载反提 OA 预览" })).toBeInTheDocument();
 
-    await user.click(screen.getByLabelText("目标 OA 申请人"));
+    await user.click(screen.getByLabelText("反提 OA 申请人"));
     await user.click(await screen.findByRole("option", { name: "陈秀云" }));
 
     await waitFor(() => expect(loadPreview).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -1561,7 +1561,8 @@ describe("Input invoice usage workflow drawers", () => {
     await user.click(screen.getByRole("button", { name: "以发票反提 OA" }));
     expect(await screen.findByLabelText("以发票反提 OA 工作流")).toBeInTheDocument();
     expect(screen.queryByLabelText("发票与支付状态规则设置")).not.toBeInTheDocument();
-
+    await user.click(screen.getByRole("button", { name: "关闭以发票反提 OA 工作流" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "以发票反提 OA" })).not.toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: "发票与支付状态规则设置" }));
     await waitFor(() => {
       expect(screen.queryByLabelText("以发票反提 OA 工作流")).not.toBeInTheDocument();
@@ -1606,9 +1607,8 @@ describe("Input invoice usage workflow drawers", () => {
     await user.click(oaReverseOpener);
     await screen.findByLabelText("以发票反提 OA 工作流");
     await user.click(screen.getByRole("button", { name: "关闭以发票反提 OA 工作流" }));
-    const exitingOaReverse = document.querySelector(".finance-drawer__content--persistent[data-exiting]");
-    expect(exitingOaReverse).toHaveAttribute("inert");
-    expect(document.activeElement).toBe(oaReverseOpener);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "以发票反提 OA" })).not.toBeInTheDocument());
+    await waitFor(() => expect(document.activeElement).toBe(oaReverseOpener));
     await user.click(screen.getByRole("button", { name: "发票与支付状态规则设置" }));
     await screen.findByLabelText("发票与支付状态规则设置");
 

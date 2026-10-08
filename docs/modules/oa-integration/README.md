@@ -6,7 +6,7 @@
 
 ## 边界与 I/O
 
-输入：受信 token、Settings ACL/预填、同步 scope、精确 OA IDs 和来源附件。输出：身份、PostgreSQL OA/准入/附件事实、支付状态同步结果、非敏感申请人及窄项目目录。
+输入：受信 token、Settings ACL/预填、同步 scope、精确 OA IDs 和来源附件；凭据命令输入 OA 用户 ID、密码、备注及编辑/删除版本。输出：身份、PostgreSQL OA/准入/附件事实、支付状态同步结果、非敏感申请人及窄项目目录。
 
 ## 当前业务约定
 
@@ -27,7 +27,11 @@
 - 已有正式发票的 OA 附件关联只更新来源关联、标签及 OA 关系，不补填或覆盖原始财务字段与明细。新发票创建时整组采用原件数据；同一张票再次同步保持原件追溯信息与真实空值。
 - 铁路客票、机打通行费票和非税缴款书只提供票价/缴款额时，只记来源总额；不生成未税金额、税额零或推算税率。解析器版本变更隔离旧附件识别缓存。OFD 与 DOCX 共用受限 ZIP 验证，按声明页及模板读取文字。
 - OA 角色同步只消费当前 page ACL：有页面的普通用户对应 finops_app_user，固定管理员对应 finops_admin；菜单不是权限事实源。
-- ETC/反提外部创建使用冻结配置、持久请求身份与显式未知结果恢复；凭据只经 owner 使用，不返回密码。
+- 反提申请人凭据管理仅管理员可用，从 OA 目录选择稳定用户 ID，服务端确认姓名、登录账号及启用状态；同一 OA 用户只允许一条配置。备注为本平台别名，不参与身份关联；已绑定记录不能更换为另一 OA 用户。
+- 保存凭据先登录 OA 并核对返回用户 ID 和账号，成功后才在短事务内加密保存密码、备注、验证时间及版本；外部调用期间不持有数据库写锁。修改备注同样重新输入密码；登录或持久化失败不覆盖原记录，密码与 token 不进入 API 摘要、日志或审计正文。
+- 历史凭据未重新验证前不可用于新的反提，验证绑定保留原内部身份及批次引用。可用选项只读取非敏感摘要，不逐行解密或访问 OA 登录；保存成功只说明该次验证通过，后续 OA 改密或停用仍需处理。
+- 删除整条本地凭据配置，保留 OA 用户、远端草稿及历史批次；更新与删除使用版本控制防止过期操作覆盖或复活记录。正在请求或结果未知的 OA 创建按既有持久请求状态核实，不因删除配置抹去外部执行事实。
+- ETC/反提外部创建使用冻结配置、持久请求身份与显式未知结果恢复；凭据只经 owner 使用，不返回密码。OA 网络失败、停用、身份不符和明确密码错误分别反馈，不以失败返回成功空结果。
 - 现金项目与成本项目目录通过各自窄只读端口，不能把外部元数据通道扩张为页面财务源。
 
 ## 依赖方向
@@ -37,6 +41,11 @@
 ## 代码与验证入口
 
 - [backend/src/fin_ops_platform/app/auth.py](../../../backend/src/fin_ops_platform/app/auth.py)
+- [backend/src/fin_ops_platform/services/oa_applicant_credentials.py](../../../backend/src/fin_ops_platform/services/oa_applicant_credentials.py)
+- [backend/src/fin_ops_platform/services/target_oa_applicant_token_provider.py](../../../backend/src/fin_ops_platform/services/target_oa_applicant_token_provider.py)
+- [backend/src/fin_ops_platform/services/postgres_repositories/oa_applicant_credentials.py](../../../backend/src/fin_ops_platform/services/postgres_repositories/oa_applicant_credentials.py)
+- [tests/test_oa_applicant_credentials_service.py](../../../tests/test_oa_applicant_credentials_service.py)
+- [tests/test_target_oa_applicant_token_provider.py](../../../tests/test_target_oa_applicant_token_provider.py)
 - [backend/src/fin_ops_platform/services/oa_identity_service.py](../../../backend/src/fin_ops_platform/services/oa_identity_service.py)
 - [web/src/features/session/api.ts](../../../web/src/features/session/api.ts)
 - [backend/src/fin_ops_platform/services/oa_role_sync_service.py](../../../backend/src/fin_ops_platform/services/oa_role_sync_service.py)

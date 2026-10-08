@@ -1,8 +1,10 @@
 import unittest
+from unittest.mock import patch
 
 from fin_ops_platform.services.oa_identity_service import (
     OAIdentityConfigurationError,
     OAIdentityService,
+    OAIdentityServiceError,
     OAIdentitySettings,
     OAUserIdentity,
 )
@@ -74,6 +76,16 @@ class OAIdentityServicePasswordVerificationTests(unittest.TestCase):
 
         with self.assertRaises(OAIdentityConfigurationError):
             service.verify_current_user_password("session-token", "secret-password")
+
+
+class OAIdentityTransportTests(unittest.TestCase):
+    def test_raw_transport_failures_are_service_errors(self):
+        service = OAIdentityService(OAIdentitySettings(base_url="https://oa.example.test", cache_ttl_seconds=0))
+        for error in (TimeoutError("synthetic timeout"), OSError("synthetic socket failure")):
+            with self.subTest(error=type(error).__name__):
+                with patch("fin_ops_platform.services.oa_identity_service.urlopen", side_effect=error):
+                    with self.assertRaisesRegex(OAIdentityServiceError, "无法连接"):
+                        service.resolve_identity("synthetic-token")
 
 
 if __name__ == "__main__":

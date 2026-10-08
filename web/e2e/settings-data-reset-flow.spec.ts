@@ -104,7 +104,7 @@ test.describe("settings data reset browser flow", () => {
     await expect(page.getByText("已保存银行账户与 OA 导入设置。")).toBeVisible();
   });
 
-  test("centers all five settings panels with native tabs at four widths", async ({ page }, testInfo) => {
+  test("centers all four settings panels with native tabs at four widths", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     let settingsReads = 0;
     page.on("request", (request) => {
@@ -113,12 +113,11 @@ test.describe("settings data reset browser flow", () => {
     await installDeterministicApiMocks(page, { sessionMode: "admin" });
     await page.goto("/settings");
     const tabs = page.getByRole("tablist", { name: "设置分类" });
-    await expect(tabs.getByRole("tab")).toHaveCount(5);
+    await expect(tabs.getByRole("tab")).toHaveCount(4);
     const initialSettingsReads = settingsReads;
     const sections = [
       { nav: "银行账户", region: "银行账户映射" },
       { nav: "OA导入设置", region: "OA导入设置" },
-      { nav: "OA申请人凭据", region: "OA申请人凭据" },
       { nav: "访问账户", region: "访问账户" },
       { nav: "数据重置", region: "数据重置" },
     ];

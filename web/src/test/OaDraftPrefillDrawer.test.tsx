@@ -78,3 +78,26 @@ describe("OaDraftPrefillDrawer", () => {
     expect(within(drawer).queryByRole("button", { name: "保存" })).not.toBeInTheDocument();
   });
 });
+
+test("input prefill requires explicit discard and returns to its parent only after successful save", async () => {
+  vi.mocked(fetchOaDraftPrefill).mockResolvedValue({ ...payload, family: "input_invoice_usage" });
+  vi.mocked(saveOaDraftPrefill).mockRejectedValueOnce(new Error("版本冲突"));
+  const user = userEvent.setup();
+  const onClose = vi.fn();
+  render(<OaDraftPrefillDrawer family="input-invoice-usage" open onClose={onClose} />);
+  const bank = await screen.findByLabelText("开户行");
+  await user.clear(bank);
+  await user.type(bank, "招商银行");
+  await user.keyboard("{Escape}");
+  const confirm = await screen.findByRole("alertdialog");
+  await user.click(within(confirm).getByRole("button", { name: "取消", exact: true }));
+  expect(bank).toHaveValue("招商银行");
+  expect(onClose).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "保存", exact: true }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("版本冲突");
+  expect(bank).toHaveValue("招商银行");
+  expect(onClose).not.toHaveBeenCalled();
+  vi.mocked(saveOaDraftPrefill).mockResolvedValueOnce({ ...payload, family: "input_invoice_usage", version: 4 });
+  await user.click(screen.getByRole("button", { name: "保存", exact: true }));
+  expect(onClose).toHaveBeenCalledOnce();
+});

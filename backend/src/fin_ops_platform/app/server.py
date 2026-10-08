@@ -7,7 +7,7 @@ import os
 import re
 from contextvars import ContextVar
 from copy import deepcopy
-from dataclasses import asdict, dataclass, field, is_dataclass
+from dataclasses import asdict, dataclass, field, is_dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
@@ -244,7 +244,7 @@ from fin_ops_platform.services.no_oa_managed_rule_policy import (
     NO_OA_MANAGED_LABELS,
 )
 from fin_ops_platform.services.oa_applicant_credentials import (
-    InMemoryOaApplicantCredentialRepository,
+    OaApplicantCredentialConfigurationError,
     OaApplicantCredentialService,
 )
 from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
@@ -262,6 +262,7 @@ from fin_ops_platform.services.oa_draft_prefill import (
 from fin_ops_platform.services.oa_identity_service import (
     OAIdentityConfigurationError,
     OAIdentityService,
+    OAIdentitySettings,
     OAIdentityServiceError,
     OASessionExpiredError,
 )
@@ -5318,11 +5319,16 @@ class Application:
             state_store = getattr(self, "_state_store", None)
             connection = getattr(state_store, "_connection", None)
             if str(getattr(state_store, "storage_backend", "") or "").strip() == "postgres" and connection is not None:
-                repository = PostgresOaApplicantCredentialRepository(connection)
+                repository = PostgresOaApplicantCredentialRepository(
+                    connection, delete_guard=PostgresInputInvoiceUsageOaReverseBatchRepository.assert_applicant_deletable,
+                )
             else:
-                repository = InMemoryOaApplicantCredentialRepository()
+                raise OaApplicantCredentialConfigurationError("OA 申请人凭据需要 PostgreSQL 存储。")
             self._oa_applicant_credential_repository = repository
-        service = OaApplicantCredentialService(repository=repository)
+        service = OaApplicantCredentialService(
+            repository=repository, directory=self._oa_role_sync_service, login_client=OaLoginClient(),
+            identity_resolver=OAIdentityService(settings=replace(OAIdentitySettings.from_environment(), cache_ttl_seconds=0)),
+        )
         self._oa_applicant_credential_service_instance = service
         return service
 

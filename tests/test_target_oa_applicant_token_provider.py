@@ -143,7 +143,7 @@ class OaLoginClientTests(unittest.TestCase):
         with self.assertRaises(TargetOaApplicantLoginError) as context:
             client.login("chen_xiuyun", "plain-password")
 
-        self.assertEqual(str(context.exception), "目标账号被锁定")
+        self.assertEqual(str(context.exception), "OA 账号已锁定。")
         self.assertNotIn("plain-password", str(context.exception))
         self.assertEqual(context.exception.code, "target_oa_login_failed")
 
@@ -174,7 +174,7 @@ class OaLoginClientTests(unittest.TestCase):
                     client.login("chen_xiuyun", "plain-password")
 
                 self.assertEqual(str(context.exception), expected_message)
-                self.assertEqual(context.exception.code, "target_oa_login_failed")
+                self.assertEqual(context.exception.code, "target_oa_login_unavailable")
 
 
 class TargetOaApplicantTokenProviderTests(unittest.TestCase):

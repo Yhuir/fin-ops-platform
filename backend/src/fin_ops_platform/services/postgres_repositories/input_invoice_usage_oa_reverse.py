@@ -14,6 +14,11 @@ from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import (
 )
 from fin_ops_platform.services.postgres_repositories.common import jsonb as _jsonb
 from fin_ops_platform.services.postgres_repositories.common import serialize_value as _serialize_jsonb_value
+from fin_ops_platform.services.oa_applicant_credentials import (
+    OaApplicantCredentialConflictError,
+    OaApplicantCredentialError,
+)
+from fin_ops_platform.services.postgres_repositories.oa_applicant_credentials import PostgresOaApplicantCredentialRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 
 
@@ -109,8 +114,29 @@ class PostgresInputInvoiceUsageOaReverseBatchRepository:
     def claim_draft_creation(self, batch: InputInvoiceUsageOaReverseBatch, *, expected_version: int) -> None:
         self.save_batch(batch, claim_expected_version=expected_version)
 
+    @staticmethod
+    def assert_applicant_deletable(connection: Any, target_applicant_code: str) -> None:
+        """Called with the credential row locked, also held by draft reservation."""
+        pending = connection.fetch_one(
+            """select batch_id from app.input_invoice_usage_oa_reverse_batches
+               where target_applicant_code = %s
+                 and nullif(raw_payload->'operation_idempotency'->>'draft_request', '') is not null
+                 and nullif(oa_draft_id, '') is null
+               limit 1""",
+            (target_applicant_code,),
+        )
+        if pending:
+            raise OaApplicantCredentialConflictError("该申请人有正在创建或结果未明的 OA 草稿，请先核实。")
+
     def save_batch(self, batch: InputInvoiceUsageOaReverseBatch, *, claim_expected_version: int | None = None) -> None:
         with self._connection.transaction() as tx:
+            if claim_expected_version is not None:
+                try:
+                    PostgresOaApplicantCredentialRepository.lock_verified_credential(tx, batch.target_applicant_code)
+                except OaApplicantCredentialError as exc:
+                    raise InputInvoiceUsageOaReverseInvalidTransitionError(
+                        "反提 OA 申请人凭据已删除或尚未验证，请重新配置。", code="oa_reverse_applicant_unavailable",
+                    ) from exc
             PostgresWorkbenchRelationRepository(tx).acquire_relation_member_locks(
                 batch.invoice_ids, row_types=["invoice"] * len(batch.invoice_ids))
             # Relation commands use the same member locks and key-share these canonical rows.

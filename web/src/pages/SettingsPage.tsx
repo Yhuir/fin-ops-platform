@@ -11,24 +11,19 @@ import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSession, useSessionPermissions } from "../contexts/SessionContext";
 import { importWorkflowPath } from "../features/imports/importRoutes";
 import {
-  deleteOaApplicantCredential,
   fetchActiveWorkbenchSettingsDataResetJob,
   fetchWorkbenchSettingsDataResetPreview,
   fetchWorkbenchAccessControl,
-  fetchOaApplicantCredentials,
   fetchWorkbenchSettingsWithProgress,
   resetWorkbenchSettingsData,
   resumeWorkbenchSettingsDataResetJob,
   saveWorkbenchSettings,
   saveWorkbenchAccessControl,
   searchWorkbenchAccessUsers,
-  saveOaApplicantCredential,
   type WorkbenchBootstrapProgress,
   WorkbenchApiError,
 } from "../features/workbench/api";
 import type {
-  OaApplicantCredentialSummary,
-  SaveOaApplicantCredentialRequest,
   WorkbenchAccessAccount,
   WorkbenchAccessControl,
   WorkbenchSettings,
@@ -74,9 +69,6 @@ export default function SettingsPage() {
   });
   const [pageFeedback, setPageFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [activeDataResetJob, setActiveDataResetJob] = useState<WorkbenchSettingsDataResetJob | null>(null);
-  const [oaApplicantCredentials, setOaApplicantCredentials] = useState<OaApplicantCredentialSummary[]>([]);
-  const [isOaApplicantCredentialLoading, setIsOaApplicantCredentialLoading] = useState(false);
-  const [isOaApplicantCredentialSaving, setIsOaApplicantCredentialSaving] = useState(false);
   const [accessControl, setAccessControl] = useState<WorkbenchAccessControl | null>(null);
   const [isAccessControlLoading, setIsAccessControlLoading] = useState(false);
   const [isAccessControlSaving, setIsAccessControlSaving] = useState(false);
@@ -144,38 +136,6 @@ export default function SettingsPage() {
         }
       });
     return () => controller.abort();
-  }, [active, activationGeneration, canAdminAccess]);
-
-  useEffect(() => {
-    if (!active || !canAdminAccess) {
-      setOaApplicantCredentials([]);
-      setIsOaApplicantCredentialLoading(false);
-      return;
-    }
-    const controller = new AbortController();
-    setIsOaApplicantCredentialLoading(true);
-    fetchOaApplicantCredentials(controller.signal)
-      .then((credentials) => {
-        if (!controller.signal.aborted) {
-          setOaApplicantCredentials(credentials);
-        }
-      })
-      .catch((error) => {
-        if (!controller.signal.aborted) {
-          setPageFeedback({
-            tone: "error",
-            message: normalizeSettingsError(error, "OA 申请人凭据加载失败，请稍后重试。"),
-          });
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setIsOaApplicantCredentialLoading(false);
-        }
-      });
-    return () => {
-      controller.abort();
-    };
   }, [active, activationGeneration, canAdminAccess]);
 
   useEffect(() => {
@@ -321,51 +281,6 @@ export default function SettingsPage() {
     action: WorkbenchSettingsDataResetAction,
   ): Promise<WorkbenchSettingsDataResetPreview> => fetchWorkbenchSettingsDataResetPreview(action);
 
-  function mergeOaApplicantCredential(credential: OaApplicantCredentialSummary) {
-    setOaApplicantCredentials((current) => {
-      const filtered = current.filter((item) => item.targetApplicantCode !== credential.targetApplicantCode);
-      return [...filtered, credential].sort((left, right) =>
-        (left.targetApplicantName || left.targetApplicantCode).localeCompare(
-          right.targetApplicantName || right.targetApplicantCode,
-          "zh-CN",
-        ),
-      );
-    });
-  }
-
-  const handleSaveOaApplicantCredential = async (
-    payload: SaveOaApplicantCredentialRequest,
-  ): Promise<void> => {
-    if (!canAdminAccess) {
-      throw new Error("当前账号没有管理员权限，不能维护 OA 申请人凭据。");
-    }
-    if (healthStatus.blocksMutations) {
-      throw new Error("登录已失效或系统不可用，不能维护 OA 申请人凭据。");
-    }
-    setIsOaApplicantCredentialSaving(true);
-    try {
-      const saved = await saveOaApplicantCredential(payload);
-      mergeOaApplicantCredential(saved);
-    } finally {
-      setIsOaApplicantCredentialSaving(false);
-    }
-  };
-
-  const handleDeleteOaApplicantCredential = async (targetApplicantCode: string): Promise<void> => {
-    if (!canAdminAccess) {
-      throw new Error("当前账号没有管理员权限，不能维护 OA 申请人凭据。");
-    }
-    if (healthStatus.blocksMutations) {
-      throw new Error("登录已失效或系统不可用，不能维护 OA 申请人凭据。");
-    }
-    setIsOaApplicantCredentialSaving(true);
-    try {
-      const saved = await deleteOaApplicantCredential(targetApplicantCode);
-      mergeOaApplicantCredential(saved);
-    } finally {
-      setIsOaApplicantCredentialSaving(false);
-    }
-  };
 
   const handleStayOnSettings = useCallback(() => {
     navigate("/settings");
@@ -409,18 +324,13 @@ export default function SettingsPage() {
           isSaving={isSaving}
           isAccessControlLoading={isAccessControlLoading}
           isAccessControlSaving={isAccessControlSaving}
-          isOaApplicantCredentialLoading={isOaApplicantCredentialLoading}
-          isOaApplicantCredentialSaving={isOaApplicantCredentialSaving}
-          oaApplicantCredentials={oaApplicantCredentials}
           settings={settings}
           activeDataResetJob={activeDataResetJob}
           onDataReset={handleSettingsDataReset}
           onLoadDataResetPreview={handleLoadSettingsDataResetPreview}
-          onDeleteOaApplicantCredential={handleDeleteOaApplicantCredential}
           onSave={handleSaveSettings}
           onSaveAccessControl={handleSaveAccessControl}
           onSearchAccessUsers={searchWorkbenchAccessUsers}
-          onSaveOaApplicantCredential={handleSaveOaApplicantCredential}
         />
       ) : null}
     </div>

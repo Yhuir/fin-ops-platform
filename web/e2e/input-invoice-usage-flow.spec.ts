@@ -206,7 +206,7 @@ test.describe("input invoice usage browser flow", () => {
       response.request().method() === "GET"
       && new URL(response.url()).pathname === "/api/workbench/settings/oa-draft-prefill/input-invoice-usage",
     );
-    if (await page.getByRole("button", { name: "更多页面操作" }).isVisible()) await page.getByRole("button", { name: "更多页面操作" }).click();
+    await page.getByRole("button", { name: "以发票反提 OA", exact: true }).click();
     await page.getByRole("button", { name: "OA 草稿预填管理" }).click();
     await loadResponse;
 
@@ -227,7 +227,9 @@ test.describe("input invoice usage browser flow", () => {
     expect(body.configuration?.bank).toBe("招商银行");
     expect(body.configuration?.payee).toBe("");
     expect(body.configuration?.reason_template).not.toContain("batch_id");
-    await expect(drawer.getByText("已保存。")).toBeVisible();
+    await expect(drawer).toBeHidden();
+    await expect(page.getByRole("dialog", { name: "以发票反提 OA", exact: true })).toBeVisible();
+    await expect(page.getByText("OA 草稿预填已保存", { exact: true })).toBeVisible();
     expect(browserErrors).toEqual([]);
   });
 

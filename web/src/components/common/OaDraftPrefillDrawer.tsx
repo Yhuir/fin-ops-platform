@@ -1,4 +1,4 @@
-import { Button, Input, ListBox, Select, TextArea } from "@heroui/react";
+import { AlertDialog, Button, Input, ListBox, Select, TextArea } from "@heroui/react";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -14,9 +14,12 @@ type OaDraftPrefillDrawerProps = {
   family: OaDraftPrefillFamily;
   open: boolean;
   onClose: () => void;
+  onSaved?: () => void;
 };
 
-export default function OaDraftPrefillDrawer({ family, open, onClose }: OaDraftPrefillDrawerProps) {
+export default function OaDraftPrefillDrawer({ family, open, onClose, onSaved }: OaDraftPrefillDrawerProps) {
+  const [pendingAction, setPendingAction] = useState<"close" | "reload" | null>(null);
+  const [loadRevision, setLoadRevision] = useState(0);
   const [payload, setPayload] = useState<OaDraftPrefillPayload | null>(null);
   const [draft, setDraft] = useState<OaDraftPrefillConfiguration | null>(null);
   const [loading, setLoading] = useState(false);
@@ -26,6 +29,7 @@ export default function OaDraftPrefillDrawer({ family, open, onClose }: OaDraftP
 
   useEffect(() => {
     if (!open) {
+      setPendingAction(null);
       setPayload(null);
       setDraft(null);
       setError("");
@@ -34,6 +38,10 @@ export default function OaDraftPrefillDrawer({ family, open, onClose }: OaDraftP
     }
     let active = true;
     setLoading(true);
+    setPayload(null);
+    setDraft(null);
+    setError("");
+    setFeedback("");
     fetchOaDraftPrefill(family)
       .then((result) => {
         if (!active) return;
@@ -49,7 +57,7 @@ export default function OaDraftPrefillDrawer({ family, open, onClose }: OaDraftP
     return () => {
       active = false;
     };
-  }, [family, open]);
+  }, [family, open, loadRevision]);
 
   const dirty = useMemo(
     () => Boolean(payload && draft && JSON.stringify(payload.configuration) !== JSON.stringify(draft)),
@@ -60,7 +68,7 @@ export default function OaDraftPrefillDrawer({ family, open, onClose }: OaDraftP
     setFeedback("");
   };
   const handleSave = async () => {
-    if (!payload || !draft || !payload.can_save || !dirty) return;
+    if (loading || saving || !payload || !draft || !payload.can_save || !dirty) return;
     setSaving(true);
     setError("");
     setFeedback("");
@@ -69,6 +77,8 @@ export default function OaDraftPrefillDrawer({ family, open, onClose }: OaDraftP
       setPayload(saved);
       setDraft({ ...saved.configuration });
       setFeedback("已保存。");
+      onSaved?.();
+      if (family === "input-invoice-usage") onClose();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "OA 草稿预填配置保存失败。");
     } finally {
@@ -79,36 +89,39 @@ export default function OaDraftPrefillDrawer({ family, open, onClose }: OaDraftP
   const footer = payload?.can_save ? (
     <div className="oa-prefill-drawer__footer">
       <Button
-        isDisabled={!dirty || saving}
+        isDisabled={!dirty || loading || saving}
         onPress={() => setDraft(payload ? { ...payload.configuration } : null)}
         size="sm"
         variant="secondary"
       >
         还原
       </Button>
-      <Button isDisabled={!dirty || saving} isPending={saving} onPress={handleSave} size="sm" variant="primary">
+      <Button isDisabled={!dirty || loading || saving} isPending={saving} onPress={handleSave} size="sm" variant="primary">
         保存
       </Button>
     </div>
   ) : null;
 
   return (
+    <>
     <AppDrawer
       ariaBusy={loading || saving}
       className="oa-prefill-drawer"
       footer={footer}
-      onClose={onClose}
+      closeDisabled={saving}
+      isDismissable
+      onClose={() => { if (dirty) setPendingAction("close"); else onClose(); }}
       open={open}
       title="OA 草稿预填管理"
       width="min(680px, 100vw)"
     >
       <div className="oa-prefill-drawer__body">
         {loading ? <div className="oa-prefill-drawer__state" role="status">正在加载</div> : null}
-        {error ? <div className="oa-prefill-drawer__alert" role="alert">{error}</div> : null}
+        {error ? <div className="oa-prefill-drawer__alert" role="alert">{error}<Button size="sm" variant="tertiary" onPress={() => { if (dirty) setPendingAction("reload"); else setLoadRevision(value => value + 1); }} isDisabled={loading || saving}>重新加载</Button></div> : null}
         {feedback ? <div className="oa-prefill-drawer__feedback" role="status">{feedback}</div> : null}
         {payload && draft ? (
-          <fieldset className="oa-prefill-form" disabled={!payload.can_save}>
-            <ReadonlyField label="申请人" value={family === "etc" ? payload.dynamic_fields.applicant : "目标 OA 申请人"} />
+          <fieldset className="oa-prefill-form" disabled={!payload.can_save || loading || saving}>
+            <ReadonlyField label="申请人" value={family === "etc" ? payload.dynamic_fields.applicant : "反提 OA 申请人"} />
             <ReadonlyField label="申请日期" value={payload.dynamic_fields.application_date} />
             <SelectField
               label="申请类型"
@@ -162,6 +175,13 @@ export default function OaDraftPrefillDrawer({ family, open, onClose }: OaDraftP
         ) : null}
       </div>
     </AppDrawer>
+    <AlertDialog.Backdrop isOpen={pendingAction !== null} onOpenChange={value => { if (!value) setPendingAction(null); }}>
+      <AlertDialog.Container size="sm"><AlertDialog.Dialog>
+        <AlertDialog.Header><AlertDialog.Heading>放弃未保存的修改？</AlertDialog.Heading></AlertDialog.Header>
+        <AlertDialog.Footer><Button variant="secondary" onPress={() => setPendingAction(null)}>取消</Button><Button variant="danger" onPress={() => { if (pendingAction === "reload") setLoadRevision(value => value + 1); else onClose(); setPendingAction(null); }}>放弃修改</Button></AlertDialog.Footer>
+      </AlertDialog.Dialog></AlertDialog.Container>
+    </AlertDialog.Backdrop>
+    </>
   );
 }
 

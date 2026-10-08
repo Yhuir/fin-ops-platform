@@ -56,7 +56,7 @@ test("OA applicant multiselect saves and reloads without fetching on the list pa
   expect(rules[0].conditions.applicantNames).toEqual(["刘树刚", "周洁莹", "黄亮"]);
   expect(writes).toBe(1);
   await drawer.getByRole("button", { name: "关闭支付状态规则抽屉" }).click();
-  await expect(drawer).not.toBeVisible();
+  await expect(drawer).toHaveCount(0);
   expect(reads).toBe(1);
   if (await page.getByRole("button", { name: "更多页面操作" }).isVisible()) await page.getByRole("button", { name: "更多页面操作" }).click();
   await page.getByRole("button", { name: "发票与支付状态规则设置" }).click();

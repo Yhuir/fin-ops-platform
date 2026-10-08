@@ -60,6 +60,8 @@ class OARoleSyncExecutor(Protocol):
 
     def list_users(self) -> list[OAUserDirectoryEntry]: ...
 
+    def get_user(self, user_id: str) -> OAUserDirectoryEntry | None: ...
+
 
 @dataclass(slots=True, frozen=True)
 class OARoleSyncSettings:
@@ -139,6 +141,11 @@ class OARoleSyncService:
         if self._executor is None:
             raise OARoleSyncConfigurationError("OA user directory is disabled or not configured.")
         return self._executor.list_users()
+
+    def get_user(self, user_id: str) -> OAUserDirectoryEntry | None:
+        if self._executor is None:
+            raise OARoleSyncConfigurationError("OA user directory is disabled or not configured.")
+        return self._executor.get_user(user_id)
 
     def search_users(self, query: str, *, limit: int = 20) -> list[OAUserSummary]:
         if self._executor is None:
@@ -325,6 +332,25 @@ class MySQLOARoleSyncExecutor:
                 ]
         except Exception as exc:
             raise OARoleSyncExecutionError("Failed to read OA user directory.") from exc
+        finally:
+            connection.close()
+
+    def get_user(self, user_id: str) -> OAUserDirectoryEntry | None:
+        connection = self._connect()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT user_id, user_name, nick_name, status FROM sys_user "
+                    "WHERE del_flag = '0' AND user_id = %s", (user_id,),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    return None
+                identity, username, name, status = row
+                return OAUserDirectoryEntry(user_id=str(identity), username=username,
+                                            display_name=name, active=str(status) == "0")
+        except Exception as exc:
+            raise OARoleSyncExecutionError("Failed to read OA user.") from exc
         finally:
             connection.close()
 

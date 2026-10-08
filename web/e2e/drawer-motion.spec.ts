@@ -268,34 +268,24 @@ test.describe("right drawer motion", () => {
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 
-  test("applies viewport motion and safe exit state to the production persistent drawer", async ({ page }) => {
+  test("reverse workflow uses native drawer motion and restores focus on Escape", async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     await page.goto("/input-invoice-usage");
     const opener = page.getByRole("button", { name: "以发票反提 OA", exact: true });
     await expect(opener).toBeEnabled();
-
     await armDrawerSampler(page);
     await opener.click();
-    const workflow = page.getByLabel("以发票反提 OA 工作流", { exact: true });
-    await expect(workflow).toBeVisible();
+    const drawer = page.getByRole("dialog", { name: "以发票反提 OA", exact: true });
+    await expect(drawer).toBeVisible();
     expectFullWidthTravel(await drawerSamples(page), "enter");
-    await expect(page.getByRole("button", { name: "发票与支付状态规则设置" })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "筛选内容导出" })).toBeDisabled();
+    await expect(page.getByRole("grid", { name: "反提 OA 候选发票清单" })).toBeVisible();
     const requestsBeforeClose = api.calls.length;
-    await page.keyboard.press("Escape");
-    await page.getByRole("heading", { name: "进项发票使用情况", exact: true }).click({ position: { x: 5, y: 5 } });
-    await expect(workflow).toBeVisible();
-    expect(api.calls.length).toBe(requestsBeforeClose);
-
     await armDrawerSampler(page);
-    await page.getByRole("button", { name: "关闭以发票反提 OA 工作流" }).click();
-    const persistentDrawer = page.locator(".finance-drawer__content--persistent");
-    await expect(persistentDrawer).toHaveAttribute("data-exiting", "true");
-    await expect(persistentDrawer).toHaveAttribute("inert", "");
-    await expect(opener).toBeFocused();
+    await page.keyboard.press("Escape");
     expectFullWidthTravel(await drawerSamples(page), "exit");
-    await expect(persistentDrawer).toHaveCount(0);
+    await expect(drawer).toHaveCount(0);
+    await expect(opener).toBeFocused();
     expect(api.calls.length).toBe(requestsBeforeClose);
     expect(api.count("POST /api/input-invoice-usage/oa-reverse/oa-draft")).toBe(0);
     await expectNoUnexpectedSuccessUiErrors(page);

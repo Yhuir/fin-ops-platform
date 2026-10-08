@@ -157,7 +157,7 @@ class OAIdentityService:
             if error.code in {401, 403}:
                 raise OASessionExpiredError(self._extract_error_message(raw_body) or "OA 登录状态已过期。") from error
             raise OAIdentityServiceError(self._extract_error_message(raw_body) or "OA 用户信息查询失败。") from error
-        except URLError as error:
+        except (URLError, TimeoutError, OSError) as error:
             raise OAIdentityServiceError("无法连接 OA 用户信息服务。") from error
 
         try:

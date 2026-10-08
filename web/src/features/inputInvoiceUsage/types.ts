@@ -287,6 +287,7 @@ export type InputInvoiceUsageOaReversePreviewResponse = {
 export type InputInvoiceUsageOaReverseTargetApplicant = {
   code: string;
   name: string;
+  remark?: string;
 };
 
 export type InputInvoiceUsageOaReverseInvoice = {

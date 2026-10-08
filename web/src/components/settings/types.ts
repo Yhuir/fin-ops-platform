@@ -1,6 +1,5 @@
 import type {
   BankAccountMapping,
-  OaApplicantCredentialSummary,
   WorkbenchAccessControl,
   WorkbenchAccessUser,
   WorkbenchSettings,
@@ -20,7 +19,6 @@ export type ManagedAccessAccount = {
 export type SettingsSectionId =
   | "bank_accounts"
   | "oa_retention"
-  | "oa_applicant_credentials"
   | "access_accounts"
   | "data_reset";
 
@@ -67,23 +65,6 @@ export type SettingsOaRetentionSectionProps = {
   onChangeAttachmentInvoicePromotionMode: (value: WorkbenchOaImportSettings["attachmentInvoicePromotionMode"]) => void;
   onToggleFormType: (value: string) => void;
   onToggleStatus: (value: string) => void;
-};
-
-export type SettingsOaApplicantCredentialsSectionProps = {
-  controlsDisabled: boolean;
-  credentials: OaApplicantCredentialSummary[];
-  isLoading: boolean;
-  isSaving: boolean;
-  targetApplicantNameDraft: string;
-  targetApplicantCodeDraft: string;
-  oaUsernameDraft: string;
-  oaPasswordDraft: string;
-  onChangeTargetApplicantNameDraft: (value: string) => void;
-  onChangeTargetApplicantCodeDraft: (value: string) => void;
-  onChangeOaUsernameDraft: (value: string) => void;
-  onChangeOaPasswordDraft: (value: string) => void;
-  onSelectCredential: (credential: OaApplicantCredentialSummary) => void;
-  onClearCredential: (targetApplicantCode: string) => Promise<void> | void;
 };
 
 export type SettingsAccessAccountsSectionProps = {

@@ -1,3 +1,4 @@
+import { useSessionPermissions } from "../contexts/SessionContext";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
 import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
 import InvoiceUsageClassification from "../components/inputInvoiceUsage/InvoiceUsageClassification";
@@ -8,7 +9,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import QuerySearch from "../components/common/QuerySearch";
-import OaDraftPrefillDrawer from "../components/common/OaDraftPrefillDrawer";
 import StatePanel from "../components/common/StatePanel";
 import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer";
 import InputInvoiceUsageExportDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageExportDrawer";
@@ -159,6 +159,7 @@ function normalizeFilterValue(filter: {
 }
 
 export default function InputInvoiceUsagePage() {
+  const { canAdminAccess } = useSessionPermissions();
   const { active, activationGeneration } = useOptionalPageActivation("input-invoice-usage");
   const querySession = usePageSessionState({
     pageKey: "input-invoice-usage",
@@ -184,7 +185,6 @@ export default function InputInvoiceUsagePage() {
   const [error, setError] = useState<string | null>(null);
   const [expandedCells, setExpandedCells] = useState<Set<string>>(() => new Set());
   const [keywordDraft, setKeywordDraft] = useState(query.keyword);
-  const [oaPrefillOpen, setOaPrefillOpen] = useState(false);
   const requestIdRef = useRef(0);
   const hasLoadedRef = useRef(false);
 
@@ -414,13 +414,7 @@ export default function InputInvoiceUsagePage() {
     >
       发票与支付状态规则设置
     </Button>
-    <Button
-      onPress={() => setOaPrefillOpen(true)}
-      size="sm"
-      variant="secondary"
-    >
-      OA 草稿预填管理
-    </Button>
+
   </>;
   const actions = useMemo(() => (
     <div className="input-invoice-usage-actions"><BusinessPeriodPicker ariaLabel="进项发票月份" allowedModes={["month"]}
@@ -536,6 +530,7 @@ export default function InputInvoiceUsagePage() {
         onClose={handleCloseDetail}
       />
       <OaReverseWorkspaceDrawer
+        canManageCredentials={canAdminAccess}
         initialScope={oaReverseScope}
         open={query.activeWorkflow === "oaReverse"}
         loadPreview={loadOaReversePreview}
@@ -557,11 +552,7 @@ export default function InputInvoiceUsagePage() {
         open={query.activeWorkflow === "export"}
         onClose={handleCloseWorkflow}
       />
-      <OaDraftPrefillDrawer
-        family="input-invoice-usage"
-        onClose={() => setOaPrefillOpen(false)}
-        open={oaPrefillOpen}
-      />
+
     </>
   );
 }

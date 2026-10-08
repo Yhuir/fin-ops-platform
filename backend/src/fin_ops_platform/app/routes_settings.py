@@ -19,6 +19,8 @@ from fin_ops_platform.services.import_workflow_service import import_job_payload
 from fin_ops_platform.services.mongo_oa_adapter import OASearchUnavailable
 from fin_ops_platform.services.oa_applicant_credentials import (
     OaApplicantCredentialConfigurationError,
+    OaApplicantCredentialConflictError,
+    OaApplicantCredentialNotFoundError,
     OaApplicantCredentialError,
     OaApplicantCredentialPermissionError,
     OaApplicantCredentialService,
@@ -133,12 +135,16 @@ class SettingsApiRoutes:
                 return self.update_oa_draft_prefill(family_slug, body, headers)
         if method == "GET" and route_path == "/api/workbench/settings/oa-applicant-credentials":
             return self.oa_applicant_credentials(headers)
+        if method == "GET" and route_path == "/api/workbench/settings/oa-applicant-credentials/users":
+            return self.oa_applicant_users(headers)
+        if method == "POST" and route_path == "/api/workbench/settings/oa-applicant-credentials":
+            return self.save_oa_applicant_credential(None, body, headers)
         if route_path.startswith("/api/workbench/settings/oa-applicant-credentials/"):
             target_applicant_code = unquote(route_path.rsplit("/", 1)[-1])
             if method == "PUT":
                 return self.save_oa_applicant_credential(target_applicant_code, body, headers)
             if method == "DELETE":
-                return self.delete_oa_applicant_credential(target_applicant_code, headers)
+                return self.delete_oa_applicant_credential(target_applicant_code, body, headers)
         if method == "GET" and route_path == "/api/workbench/settings/oa/manual-search":
             return self.oa_manual_search(query)
         if method == "POST" and route_path == "/api/workbench/settings/oa/manual-search/prepare-attachments":
@@ -464,46 +470,62 @@ class SettingsApiRoutes:
             return self._oa_applicant_credential_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
 
+    def oa_applicant_users(self, headers: dict[str, str] | None) -> Any:
+        session, auth_error = self._resolve_admin_session(headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            payload = self._oa_applicant_credential_service().list_users(
+                can_admin_access=bool(session and session.can_admin_access))
+        except OaApplicantCredentialError as exc:
+            return self._oa_applicant_credential_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
     def save_oa_applicant_credential(
-        self,
-        target_applicant_code: str,
-        body: str | bytes | None,
+        self, target_applicant_code: str | None, body: str | bytes | None,
         headers: dict[str, str] | None,
     ) -> Any:
+        session, auth_error = self._resolve_admin_session(headers)
+        if auth_error is not None:
+            return auth_error
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        session, auth_error = self._resolve_read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        actor_id = actor_id_for_session(session) if session is not None else "system"
         try:
+            allowed = {"oaUserId", "password", "remark"}
+            if target_applicant_code is not None:
+                allowed.add("expectedVersion")
+            if set(payload) - allowed:
+                raise OaApplicantCredentialValidationError("请求包含不支持的字段。")
             credential = self._oa_applicant_credential_service().save_credential(
-                target_applicant_code=target_applicant_code,
-                target_applicant_name=str(payload.get("targetApplicantName") or ""),
-                oa_username=str(payload.get("oaUsername") or ""),
-                password=str(payload.get("password") or ""),
-                actor_id=actor_id,
-                can_admin_access=bool(session and session.can_admin_access),
+                target_applicant_code=target_applicant_code, oa_user_id=payload.get("oaUserId"),
+                password=payload.get("password"), remark=payload.get("remark", ""),
+                expected_version=payload.get("expectedVersion"),
+                actor_id=actor_id_for_session(session), can_admin_access=True,
             )
         except OaApplicantCredentialError as exc:
             return self._oa_applicant_credential_error_response(exc)
         return self._json_response(HTTPStatus.OK, {"credential": credential})
 
-    def delete_oa_applicant_credential(self, target_applicant_code: str, headers: dict[str, str] | None) -> Any:
-        session, auth_error = self._resolve_read_session(headers)
+    def delete_oa_applicant_credential(
+        self, target_applicant_code: str, body: str | bytes | None, headers: dict[str, str] | None,
+    ) -> Any:
+        session, auth_error = self._resolve_admin_session(headers)
         if auth_error is not None:
             return auth_error
-        actor_id = actor_id_for_session(session) if session is not None else "system"
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
         try:
-            credential = self._oa_applicant_credential_service().delete_credential(
-                target_applicant_code=target_applicant_code,
-                actor_id=actor_id,
-                can_admin_access=bool(session and session.can_admin_access),
+            if set(payload) - {"expectedVersion"}:
+                raise OaApplicantCredentialValidationError("请求包含不支持的字段。")
+            deleted = self._oa_applicant_credential_service().delete_credential(
+                target_applicant_code=target_applicant_code, expected_version=payload.get("expectedVersion"),
+                actor_id=actor_id_for_session(session), can_admin_access=True,
             )
         except OaApplicantCredentialError as exc:
             return self._oa_applicant_credential_error_response(exc)
-        return self._json_response(HTTPStatus.OK, {"credential": credential})
+        return self._json_response(HTTPStatus.OK, deleted)
 
     def oa_manual_search(self, query: dict[str, list[str]]) -> Any:
         service = self._oa_manual_import_service_or_response()
@@ -916,6 +938,10 @@ class SettingsApiRoutes:
     def _oa_applicant_credential_error_response(self, exc: OaApplicantCredentialError) -> Any:
         if isinstance(exc, OaApplicantCredentialPermissionError):
             status = HTTPStatus.FORBIDDEN
+        elif isinstance(exc, OaApplicantCredentialConflictError):
+            status = HTTPStatus.CONFLICT
+        elif isinstance(exc, OaApplicantCredentialNotFoundError):
+            status = HTTPStatus.NOT_FOUND
         elif isinstance(exc, OaApplicantCredentialValidationError):
             status = HTTPStatus.BAD_REQUEST
         elif isinstance(exc, OaApplicantCredentialConfigurationError):

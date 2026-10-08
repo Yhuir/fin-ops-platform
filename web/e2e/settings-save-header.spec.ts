@@ -21,7 +21,7 @@ test("all settings save actions share a stable desktop header and switching does
   await page.goto('/settings');
   await expect(page.getByRole('button', { name: '保存设置', exact: true })).toBeVisible();
   // Visit each panel once so initial requests and lazy modules have settled.
-  const tabs = ['银行账户', 'OA导入设置', 'OA申请人凭据', '访问账户', '数据重置'];
+  const tabs = ['银行账户', 'OA导入设置', '访问账户', '数据重置'];
   for (const name of tabs) await page.getByRole('tab', { name, exact: true }).click();
   const initialRequests = requests.length;
   for (const width of [1920, 1440, 1280]) {
@@ -46,52 +46,12 @@ test("all settings save actions share a stable desktop header and switching does
   expect(requests.length).toBe(initialRequests);
 });
 
-test("credential failure preserves drafts; pending and feedback never move the form; switching retains ownership", async ({ page }, testInfo) => {
-  await installDeterministicApiMocks(page, { sessionMode: 'admin' });
-  let finish: (() => void) | undefined;
-  let writes = 0;
-  let fail = true;
-  await page.route('**/api/workbench/settings/oa-applicant-credentials/header_test', async route => {
-    expect(route.request().method()).toBe('PUT');
-    writes += 1;
-    expect(route.request().postDataJSON()).toMatchObject({ targetApplicantName: '测试申请人', oaUsername: 'header_test', password: 'test-only-password' });
-    await new Promise<void>(resolve => { finish = resolve; });
-    if (fail) return route.fulfill({ status: 400, json: { error: 'invalid_credentials', message: '测试凭据被拒绝' } });
-    return route.fulfill({ json: { credential: { targetApplicantName: '测试申请人', targetApplicantCode: 'header_test', oaUsername: 'header_test', hasCredential: true, credentialStatus: 'configured' } } });
-  });
-  await page.goto('/settings');
-  await page.getByRole('tab', { name: 'OA申请人凭据', exact: true }).click();
-  await page.getByLabel('目标 OA 申请人', { exact: true }).fill('测试申请人');
-  await page.getByLabel('申请人账号标识', { exact: true }).fill('header_test');
-  await page.getByLabel('OA 登录账号', { exact: true }).fill('header_test');
-  const password = page.getByLabel('OA 登录密码', { exact: true });
-  await password.fill('test-only-password');
-  const before = await geometry(page);
-  const formBefore = await page.locator('.settings-credentials-form').boundingBox();
-  await page.getByRole('button', { name: '保存凭据', exact: true }).click();
-  await expect(password).toBeDisabled();
-  expect(await geometry(page)).toEqual(before);
-  await expect.poll(() => writes).toBe(1);
-  finish!();
-  await expect(page.getByRole('alert')).toContainText('OA 申请人凭据保存失败：操作失败，请稍后重试。');
-  await expect(password).toHaveValue('test-only-password');
-  expect(await page.locator('.settings-credentials-form').boundingBox()).toEqual(formBefore);
-  expect(await geometry(page)).toEqual(before);
-  await page.screenshot({ path: testInfo.outputPath('credential-failure.png') });
-  fail = false;
-  await page.getByRole('button', { name: '保存凭据', exact: true }).click();
-  await expect.poll(() => writes).toBe(2);
-  await page.getByRole('tab', { name: '银行账户', exact: true }).click();
-  finish!();
-  await expect(page.getByText('已保存 OA 申请人凭据。', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '保存设置', exact: true })).toBeEnabled();
-  await page.getByRole('tab', { name: 'OA申请人凭据', exact: true }).click();
-  await expectNoUnexpectedSuccessUiErrors(page);
-  await expect(password).toHaveValue('');
-  await expect(page.getByLabel('申请人账号标识', { exact: true })).toHaveValue('header_test');
-  await expect(page.getByRole('button', { name: '保存凭据', exact: true })).toBeDisabled();
-  await page.getByRole('button', { name: '关闭设置反馈' }).click();
-  await expect(page.locator('.settings-save-feedback')).toHaveCount(0);
+test("settings no longer loads or exposes applicant credentials", async ({ page }) => {
+  const api = await installDeterministicApiMocks(page, { sessionMode: "admin" });
+  await page.goto("/settings");
+  await expect(page.getByRole("button", { name: "保存设置", exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "OA申请人凭据" })).toHaveCount(0);
+  expect(api.calls.some(call => call.includes("oa-applicant-credentials"))).toBe(false);
 });
 
 test("ordinary save freezes its two draft panels, keeps errors and saves the exact draft on retry", async ({ page }) => {

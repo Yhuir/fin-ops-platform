@@ -10,7 +10,7 @@
 
 ## 当前业务约定
 
-- 头部搜索位于统计右侧，年月按发票日期过滤，默认全部；月份与发票日期列筛选互相替换。导出初始范围继承关键词、月份日期边界、分类及 OA 筛选，预览和下载使用同一查询合同；导出抽屉中的日期和支付状态可以继续调整。规则与 OA 预填管理在窄头部收进“更多”。
+- 头部搜索位于统计右侧，年月按发票日期过滤，默认全部；月份与发票日期列筛选互相替换。导出初始范围继承关键词、月份日期边界、分类及 OA 筛选，预览和下载使用同一查询合同；导出抽屉中的日期和支付状态可以继续调整。支付规则在窄头部收进“更多”；OA 预填管理位于反提抽屉。
 
 - OA、流水与发票详情及多项关联详情统一从授权 canonical 快照投影原始字段；关系摘要只定位成员，不能充当原始详情。流水详情按需在同一快照批量读取银行 owner 当前标签，输出 `bank_navigation` 和正文 `bank_labels`，不增加列表查询；切换已加载流水不请求 API。流水和发票导航均自动换行，发票顶部不显示尾号，完整号码保留在正文。
 
@@ -25,9 +25,12 @@
 - 支付规则申请人候选仅从 OA `sys_user` 的全部未删除用户读取，包含启用和停用账号，不扫描历史单据，不复用访问权限设置的账户排除范围；设置抽屉打开时读取，普通列表查询不访问 OA 目录。目录失败明确返回 503，不退回历史姓名。
 - 申请人条件为 `applicantNames` 数组，任一姓名命中；姓名去除空白、零宽空格和 BOM 后去重匹配，目录按账号显示姓名、账号及只读状态图标，启用在前、停用在后，支持姓名/账号搜索；同名账号联动选择并合并为一个姓名条件。OA 单据只有姓名，不能据此区分同名账号。新选姓名保存时须仍在完整目录，停用账号可选可保存；目录外历史条件保留并可移除，不自动改成不限制。
 - 反提候选复用待使用集合：同一发票无有效 OA 和流水关系，详情缺失不改变正式关系判定。打开抽屉继承主页面关键词、日期及其它筛选，移除使用/付款分类并固定待使用；弹窗搜索独立，关闭重开重新继承。查询按单张票去重并在分页前过滤、统计，同范围同一数据状态下候选与待使用的票数和金额一致。
-- 反提占用票仍计入待使用候选但禁选；同批票必须全部有效且同一非空销方。精确选择、创建批次和暂存重试使用同一 canonical 使用状态复核，已关联 OA 或流水的票明确拒绝，不部分提交剩余票。申请人只来自启用且有凭据的非敏感选项。草稿创建刷新占用与暂存列表，不把草稿占用伪装成正式使用；正式关系变化后重新查询。成功请求幂等重放保留原结果，既有草稿和提交历史不因候选变化删除。
+- 反提占用票仍计入待使用候选但禁选；同批票必须全部有效且同一非空销方。精确选择、创建批次和暂存重试使用同一 canonical 使用状态复核，已关联 OA 或流水的票明确拒绝，不部分提交剩余票。反提 OA 申请人只来自启用、已绑定 OA 身份且完成验证的非敏感凭据选项。草稿创建刷新占用与暂存列表，不把草稿占用伪装成正式使用；正式关系变化后重新查询。成功请求幂等重放保留原结果，既有草稿和提交历史不因候选变化删除。
 - 外部 OA 创建前持久化 draft_request 和版本并锁定票身份；相同请求不重复发送。未知结果需要人工核实和原因后释放，不自动删除远端草稿，迟到响应不能覆盖新版本。
-- OA 预填配置按批次冻结；同一非空销方等业务资格以提交前精确 preview 为准。
+- 反提抽屉通过两个按钮打开 HeroUI 原生右侧子抽屉：OA 申请人凭据、OA 草稿预填管理；两者互斥，关闭子抽屉保留父层选票、筛选和分页。配置入口不依赖候选查询成功或已有申请人；凭据管理仅管理员可见。
+- 凭据表单只有 OA 姓名/登录账号组合下拉框、密码和选填备注。目录仅在打开管理抽屉时读取，按姓名/账号搜索，停用账号禁选；目录失败明确反馈，不使用历史名单代替。备注只影响显示，有值时展示为姓名（备注），不进入 OA 身份或真实申请人姓名。
+- 每次保存均验证 OA 登录和返回身份，再提交凭据；失败保留表单和原记录，成功清空密码输入并刷新父层选项。历史未验证记录显示待验证，重新验证时保留原批次引用身份。删除移除整条本地配置；当前选择被删除时清空申请人，不自动换人，不删除历史批次或远端草稿。数据与外部调用合同由 OA 集成 owner 承担。
+- OA 预填配置按批次冻结，修改只影响后续新建批次；进项与 ETC 配置独立。获本页权限的用户可以只读，管理员保存；同一非空销方等业务资格以提交前精确 preview 为准。
 - 服务端分页、批量查询，当前页面请求查询预算最多 8 条；详情按需读取，导出上限 20,000 行。
 
 - 进销项共用原件财务字段：金额、税额、价税合计、税率均不补算，缺失显示 `—`。真实零、负数、非数字税额、免税、不征税分别保留；真实明细全部显示，未提供明细时不把整票汇总伪装成一条明细。
@@ -49,6 +52,7 @@
 - [backend/src/fin_ops_platform/services/input_invoice_usage_oa_reverse_service.py](../../../backend/src/fin_ops_platform/services/input_invoice_usage_oa_reverse_service.py)
 - [backend/src/fin_ops_platform/services/input_invoice_usage_export_service.py](../../../backend/src/fin_ops_platform/services/input_invoice_usage_export_service.py)
 - [backend/src/fin_ops_platform/services/postgres_repositories/invoice_usage_collection_query.py](../../../backend/src/fin_ops_platform/services/postgres_repositories/invoice_usage_collection_query.py)
+- [web/src/components/inputInvoiceUsage/OaApplicantCredentialsDrawer.tsx](../../../web/src/components/inputInvoiceUsage/OaApplicantCredentialsDrawer.tsx)
 - [web/src/features/oaDraftPrefill.ts](../../../web/src/features/oaDraftPrefill.ts)
 - [web/src/components/common/OaDraftPrefillDrawer.tsx](../../../web/src/components/common/OaDraftPrefillDrawer.tsx)
 - [tests/test_invoice_usage_collection_canonical_query.py](../../../tests/test_invoice_usage_collection_canonical_query.py)

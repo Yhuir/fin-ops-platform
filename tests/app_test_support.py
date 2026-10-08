@@ -15,6 +15,7 @@ from fin_ops_platform.app.server import build_application as _build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.access_control_service import ASSIGNABLE_PAGE_KEYS
 from fin_ops_platform.services.import_job_queue import ImportJob, ImportJobIdempotencyConflict
+from fin_ops_platform.services.oa_applicant_credentials import InMemoryOaApplicantCredentialRepository
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.oa_role_sync_service import (
     OARoleAssignment,
@@ -89,6 +90,7 @@ def build_local_state_application(*args, **kwargs):
 
 def _install_test_oa_directory(application: Application) -> None:
     install_durable_import_queue(application)
+    application._oa_applicant_credential_repository = InMemoryOaApplicantCredentialRepository()
     application._app_settings_service._oa_role_sync_service = OARoleSyncService(  # noqa: SLF001
         executor=_TestOARoleSyncExecutor()
     )

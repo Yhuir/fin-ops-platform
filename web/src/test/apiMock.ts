@@ -4518,12 +4518,13 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       page_keys: string[];
     }>,
   };
-  let oaApplicantCredentialsState = [
+  const oaApplicantCredentialsState = [
     {
       targetApplicantCode: "chen_xiuyun",
       targetApplicantName: "陈秀云",
       oaUsername: "chen_xiuyun",
-      credentialStatus: "configured",
+      credentialStatus: "verified",
+      oaUserId: "oa-user-1", remark: "", verifiedAt: "2026-10-08T08:00:00Z", version: 1,
       hasCredential: true,
       enabled: true,
     },
@@ -5378,6 +5379,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       };
     },
+    "/api/workbench/settings/oa-applicant-credentials/users": () => ({ body: { users: [{ userId: "oa-user-1", displayName: "陈秀云", username: "chen_xiuyun", active: true }] } }),
     "/api/workbench/settings/oa-applicant-credentials": () => ({
       body: {
         credentials: cloneJson(oaApplicantCredentialsState),
@@ -7066,50 +7068,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         : null;
     const formData = init?.body instanceof FormData ? init.body : null;
     const method = (init?.method ?? "GET").toUpperCase();
-
-    const oaApplicantCredentialMatch = url.pathname.match(/^\/api\/workbench\/settings\/oa-applicant-credentials\/([^/]+)$/);
-    if (oaApplicantCredentialMatch) {
-      const targetApplicantCode = decodeURIComponent(oaApplicantCredentialMatch[1] ?? "");
-      if (method === "PUT") {
-        const credential = {
-          targetApplicantCode,
-          targetApplicantName: String(jsonBody?.targetApplicantName ?? "").trim(),
-          oaUsername: String(jsonBody?.oaUsername ?? "").trim(),
-          credentialStatus: "configured",
-          hasCredential: Boolean(jsonBody?.password),
-          enabled: true,
-        };
-        oaApplicantCredentialsState = [
-          ...oaApplicantCredentialsState.filter((item) => item.targetApplicantCode !== targetApplicantCode),
-          credential,
-        ];
-        return jsonResponse({
-          body: {
-            credential: cloneJson(credential),
-          },
-        });
-      }
-      if (method === "DELETE") {
-        const existing = oaApplicantCredentialsState.find((item) => item.targetApplicantCode === targetApplicantCode);
-        const credential = {
-          targetApplicantCode,
-          targetApplicantName: existing?.targetApplicantName ?? "",
-          oaUsername: existing?.oaUsername ?? "",
-          credentialStatus: "unconfigured",
-          hasCredential: false,
-          enabled: true,
-        };
-        oaApplicantCredentialsState = [
-          ...oaApplicantCredentialsState.filter((item) => item.targetApplicantCode !== targetApplicantCode),
-          credential,
-        ];
-        return jsonResponse({
-          body: {
-            credential: cloneJson(credential),
-          },
-        });
-      }
-    }
 
     const turnoverExtraMatch = url.pathname.match(/^\/api\/turnover-ledger\/relations\/([^/]+)\/extra$/);
     if (turnoverExtraMatch) {

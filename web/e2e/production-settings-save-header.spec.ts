@@ -22,7 +22,7 @@ test('production settings header keeps all save scopes reachable with no writes 
     domain: new URL(baseURL!).hostname, path: '/', secure: true, sameSite: 'Lax' }]);
   await page.goto('/fin-ops/settings');
   await expect(page.getByRole('group', { name: '当前设置操作' })).toBeVisible();
-  const names = ['银行账户', 'OA导入设置', 'OA申请人凭据', '访问账户', '数据重置'];
+  const names = ['银行账户', 'OA导入设置', '访问账户', '数据重置'];
   for (const name of names) await page.getByRole('tab', { name, exact: true }).click();
   const samples: { width: number; tab: string; durationMs: number; top: number; right: number | null }[] = [];
   const readCount = reads.length;

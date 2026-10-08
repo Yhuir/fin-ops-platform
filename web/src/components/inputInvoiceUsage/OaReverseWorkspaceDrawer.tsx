@@ -2,6 +2,10 @@ import { Button, Checkbox, Chip, ListBox, Select, Tabs } from "@heroui/react";
 import { X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 
+import OaApplicantCredentialsDrawer from "./OaApplicantCredentialsDrawer";
+import OaDraftPrefillDrawer from "../common/OaDraftPrefillDrawer";
+import { useOaApplicantCredentials } from "../../features/inputInvoiceUsage/useOaApplicantCredentials";
+import { applicantLabel } from "../../features/inputInvoiceUsage/oaApplicantCredentials";
 import AppDrawer from "../common/AppDrawer";
 import AppDialog from "../common/AppDialog";
 import QuerySearch from "../common/QuerySearch";
@@ -95,6 +99,7 @@ export type OaReversePreviewPayload = {
 
 type OaReverseWorkspaceDrawerProps = {
   open: boolean;
+  canManageCredentials?: boolean;
   initialScope?: OaReverseCandidateScope;
   loadPreview: (request: OaReversePreviewRequest) => Promise<OaReversePreviewPayload>;
   createDraftFromSelection?: (request: CreateInputInvoiceUsageOaReverseDraftFromSelectionRequest) => Promise<InputInvoiceUsageOaReverseBatch>;
@@ -107,6 +112,7 @@ type OaReverseWorkspaceDrawerProps = {
 
 export default function OaReverseWorkspaceDrawer({
   open,
+  canManageCredentials = false,
   initialScope = EMPTY_CANDIDATE_SCOPE,
   loadPreview,
   createDraftFromSelection,
@@ -116,6 +122,7 @@ export default function OaReverseWorkspaceDrawer({
   onClose,
   onChanged,
 }: OaReverseWorkspaceDrawerProps) {
+  const [configuration, setConfiguration] = useState<"credentials" | "prefill" | null>(null);
   const [preview, setPreview] = useState<OaReversePreviewPayload | null>(null);
   const [batch, setBatch] = useState<InputInvoiceUsageOaReverseBatch | null>(null);
   const [activeTab, setActiveTab] = useState<"pending" | "staged" | "submitted">("pending");
@@ -150,6 +157,7 @@ export default function OaReverseWorkspaceDrawer({
 
   useEffect(() => {
     if (!open) {
+      setConfiguration(null);
       setPreview(null);
       setBatch(null);
       setLoading(false);
@@ -235,6 +243,10 @@ export default function OaReverseWorkspaceDrawer({
     && new Set(selectedCandidateInvoices.map((invoice) => invoice.sellerName.trim())).size === 1;
   const targetApplicants = preview?.targetApplicants ?? [];
   const selectedTargetApplicantCode = targetApplicantCode ?? preview?.targetApplicantCode ?? "";
+  const credentials = useOaApplicantCredentials(open && configuration === "credentials" && canManageCredentials, (deletedCode) => {
+    if (deletedCode && selectedTargetApplicantCode === deletedCode) setTargetApplicantCode("");
+    setRefreshVersion(value => value + 1);
+  }, () => { setConfiguration(null); setFeedback("凭据已保存"); });
   const canCreateDraft = Boolean(
     preview
     && createDraftFromSelection
@@ -419,16 +431,22 @@ export default function OaReverseWorkspaceDrawer({
   }, [activeTab, loadSubmittedHistory, open]);
 
   return (
+    <>
     <AppDrawer
       className="input-invoice-usage-oa-drawer"
       closeLabel="关闭以发票反提 OA 工作流"
-      onClose={onClose}
+      onClose={() => { if (configuration === null) onClose(); }}
+      closeDisabled={configuration !== null}
+      isDismissable
       open={open}
       title="以发票反提 OA"
-      modal={false}
       width="min(920px, 100vw)"
     >
       <div aria-label="以发票反提 OA 工作流" className="input-invoice-usage-drawer-body">
+        <div className="oa-reverse-settings-actions">
+          {canManageCredentials ? <Button variant="secondary" size="sm" onPress={() => setConfiguration("credentials")}>OA 申请人凭据</Button> : null}
+          <Button variant="secondary" size="sm" onPress={() => setConfiguration("prefill")}>OA 草稿预填管理</Button>
+        </div>
         {headerNotices.length > 0 ? <OaReverseHeaderNotices notices={headerNotices} /> : null}
         {error && activeTab === "pending" ? <Button size="sm" variant="secondary" onPress={() => setActiveTab("staged")}>查看暂存与异常</Button> : null}
         <Tabs
@@ -476,7 +494,7 @@ export default function OaReverseWorkspaceDrawer({
                 <div className="input-invoice-usage-oa-summary-row">
                   {targetApplicants.length > 0 ? (
                     <div className="input-invoice-usage-rules-field input-invoice-usage-oa-target input-invoice-usage-oa-target-card">
-                      <span id={targetApplicantLabelId}>目标 OA 申请人</span>
+                      <span id={targetApplicantLabelId}>反提 OA 申请人</span>
                       <Select
                         aria-labelledby={targetApplicantLabelId}
                         className="input-invoice-usage-oa-select"
@@ -487,14 +505,14 @@ export default function OaReverseWorkspaceDrawer({
                         <Select.Popover>
                           <ListBox>
                             {targetApplicants.map((applicant) => (
-                              <ListBox.Item id={applicant.code} key={applicant.code} textValue={applicant.name}>{applicant.name}</ListBox.Item>
+                              <ListBox.Item id={applicant.code} key={applicant.code} textValue={applicantLabel(applicant.name, applicant.remark)}>{applicantLabel(applicant.name, applicant.remark)}</ListBox.Item>
                             ))}
                           </ListBox>
                         </Select.Popover>
                       </Select>
                     </div>
                   ) : (
-                    <SummaryMetric label="目标 OA 申请人" value={preview.targetApplicantName ?? "-"} />
+                    <SummaryMetric label="反提 OA 申请人" value={preview.targetApplicantName ?? "-"} />
                   )}
                   <SummaryMetric label="候选发票数" value={`${preview.invoiceCount} 张`} />
                   <SummaryMetric label="候选价税合计" value={formatMoney(preview.totalWithTax, "-")} />
@@ -620,7 +638,7 @@ export default function OaReverseWorkspaceDrawer({
                     <span>第 {page} 页 · 当前筛选 {preview.invoiceCount} 张</span>
                     <Button size="sm" variant="secondary" isDisabled={loading || page * 50 >= preview.invoiceCount} onPress={() => setPage((current) => current + 1)}>下一页</Button>
                     {selectedCandidateIds.length > 0 && !selectedPayeeResolvable ? <span>请选择同一销方的发票创建 OA 草稿。</span> : null}
-                    {targetApplicants.length === 0 ? <span>尚无可用 OA 申请人凭据，请在设置中配置。</span> : null}
+                    {targetApplicants.length === 0 ? <span>{canManageCredentials ? "暂无可用申请人" : "暂无可用申请人，请联系管理员"}</span> : null}
                   </div>
                 </Section>
               </>
@@ -644,6 +662,9 @@ export default function OaReverseWorkspaceDrawer({
         ) : null}
       </div>
     </AppDrawer>
+    <OaApplicantCredentialsDrawer {...credentials} open={open && configuration === "credentials" && canManageCredentials} onClose={() => setConfiguration(null)} />
+    <OaDraftPrefillDrawer family="input-invoice-usage" onSaved={() => setFeedback("OA 草稿预填已保存")} open={open && configuration === "prefill"} onClose={() => setConfiguration(null)} />
+    </>
   );
 }
 

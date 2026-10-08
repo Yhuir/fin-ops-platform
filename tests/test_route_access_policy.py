@@ -37,6 +37,7 @@ class RouteAccessPolicyTests(unittest.TestCase):
             "/api/workbench/settings/access-control",
             "/api/workbench/settings/access-control/users",
             "/api/workbench/settings/oa-applicant-credentials",
+            "/api/workbench/settings/oa-applicant-credentials/users",
             "/api/workbench/settings/data-reset/preview",
             "/api/operations/history",
         ):
@@ -45,6 +46,17 @@ class RouteAccessPolicyTests(unittest.TestCase):
 
         self.assertFalse(is_admin_only_route("/api/workbench/settings"))
         self.assertFalse(is_admin_only_route("/api/bank-details"))
+
+    def test_reverse_prefill_read_ownership_does_not_expand_other_settings_routes(self) -> None:
+        self.assertEqual(
+            page_keys_for_route("/api/workbench/settings/oa-draft-prefill/input-invoice-usage"),
+            ("input-invoice-usage", "settings"),
+        )
+        for path in (
+            "/api/workbench/settings", "/api/workbench/settings/oa-draft-prefill/etc",
+            "/api/workbench/settings/oa-draft-prefill/unknown",
+        ):
+            self.assertEqual(page_keys_for_route(path), ("settings",))
 
 
 if __name__ == "__main__":

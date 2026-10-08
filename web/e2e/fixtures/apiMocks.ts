@@ -551,18 +551,7 @@ function appHealthSystemAuditPayload() {
 }
 
 function oaApplicantCredentialsPayload() {
-  return {
-    credentials: [
-      {
-        target_applicant_code: "chen_xiuyun",
-        target_applicant_name: "陈秀云",
-        oa_username: "chen_xiuyun",
-        credential_status: "configured",
-        has_credential: true,
-        enabled: true,
-      },
-    ],
-  };
+  return { credentials: [{ targetApplicantCode: "chen_xiuyun", targetApplicantName: "陈秀云", oaUsername: "chen_xiuyun", credentialStatus: "verified", hasCredential: true, enabled: true, oaUserId: "oa-user-1", remark: "", verifiedAt: "2026-10-08T08:00:00Z", version: 1 }] };
 }
 
 function settingsDataResetJobPayload(params: {
@@ -8660,40 +8649,11 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, workbenchSettingsPayload());
     }
 
-    if (path === "/api/workbench/settings/oa-applicant-credentials") {
+    if (path === "/api/workbench/settings/oa-applicant-credentials/users") {
+      return json(route, { users: [{ userId: "oa-user-1", displayName: "陈秀云", username: "chen_xiuyun", active: true }] });
+    }
+    if (path === "/api/workbench/settings/oa-applicant-credentials" && request.method() === "GET") {
       return json(route, oaApplicantCredentialsPayload());
-    }
-
-    const oaApplicantCredentialMatch = path.match(/^\/api\/workbench\/settings\/oa-applicant-credentials\/([^/]+)$/);
-    if (oaApplicantCredentialMatch && request.method() === "PUT") {
-      const targetApplicantCode = decodeURIComponent(oaApplicantCredentialMatch[1] ?? "");
-      const body = parseJsonBody(request.postData()) as {
-        targetApplicantName?: string;
-        oaUsername?: string;
-      };
-      return json(route, {
-        credential: {
-          target_applicant_code: targetApplicantCode,
-          target_applicant_name: body.targetApplicantName ?? targetApplicantCode,
-          oa_username: body.oaUsername ?? targetApplicantCode,
-          credential_status: "configured",
-          has_credential: true,
-          enabled: true,
-        },
-      });
-    }
-    if (oaApplicantCredentialMatch && request.method() === "DELETE") {
-      const targetApplicantCode = decodeURIComponent(oaApplicantCredentialMatch[1] ?? "");
-      return json(route, {
-        credential: {
-          target_applicant_code: targetApplicantCode,
-          target_applicant_name: targetApplicantCode,
-          oa_username: targetApplicantCode,
-          credential_status: "missing",
-          has_credential: false,
-          enabled: true,
-        },
-      });
     }
 
     if (path === "/api/workbench/settings/data-reset/preview") {

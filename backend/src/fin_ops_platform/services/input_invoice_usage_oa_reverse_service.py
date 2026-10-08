@@ -523,6 +523,8 @@ class InputInvoiceUsageOaReverseService:
         idempotency_key = _required_text(request.get("idempotencyKey"), "idempotencyKey")
         existing = self._repository.find_batch_by_create_idempotency_key(f"{idempotency_key}:batch")
         if existing is not None:
+            if self._is_operation_replay(existing, "create_oa_draft", f"{idempotency_key}:draft"):
+                return self.batch_payload(existing)
             return self.create_oa_draft(
                 existing.batch_id, expected_version=existing.version,
                 idempotency_key=f"{idempotency_key}:draft", actor_id=actor_id,

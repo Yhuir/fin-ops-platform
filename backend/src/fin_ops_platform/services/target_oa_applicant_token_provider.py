@@ -30,6 +30,10 @@ class TargetOaApplicantLoginError(TargetOaApplicantTokenProviderError):
     code = "target_oa_login_failed"
 
 
+class TargetOaApplicantLoginUnavailableError(TargetOaApplicantLoginError):
+    code = "target_oa_login_unavailable"
+
+
 class TargetOaApplicantConfigurationError(TargetOaApplicantTokenProviderError):
     code = "target_oa_login_unavailable"
 
@@ -137,22 +141,24 @@ class OaLoginClient:
                 raw_body = response.read().decode("utf-8")
         except HTTPError as error:
             raw_body = error.read().decode("utf-8", errors="ignore")
-            raise TargetOaApplicantLoginError(_extract_error_message(raw_body) or "目标 OA 申请人登录失败。") from error
-        except URLError as error:
-            raise TargetOaApplicantLoginError("无法连接 OA 登录服务。") from error
+            raise _login_failure(raw_body, unavailable=error.code >= 500) from error
+        except (URLError, TimeoutError, OSError) as error:
+            raise TargetOaApplicantLoginUnavailableError("无法连接 OA 登录服务。") from error
 
         try:
             payload = json.loads(raw_body) if raw_body.strip() else {}
         except json.JSONDecodeError as error:
-            raise TargetOaApplicantLoginError("OA 登录服务返回了无效 JSON。") from error
+            raise TargetOaApplicantLoginUnavailableError("OA 登录服务返回了无效 JSON。") from error
         if not isinstance(payload, dict):
-            raise TargetOaApplicantLoginError("OA 登录服务返回格式不正确。")
+            raise TargetOaApplicantLoginUnavailableError("OA 登录服务返回格式不正确。")
         code = payload.get("code", 200)
+        if not isinstance(code, (str, int)) and code is not None:
+            raise TargetOaApplicantLoginUnavailableError("OA 登录服务返回格式不正确。")
         if code not in {0, 200, "0", "200", None}:
-            raise TargetOaApplicantLoginError(_extract_error_message(payload) or "目标 OA 申请人登录失败。")
+            raise _login_failure(payload, unavailable=isinstance(code, (str, int)) and str(code).startswith("5"))
         token = _extract_token(payload)
         if not token:
-            raise TargetOaApplicantLoginError("OA 登录响应没有返回 token。")
+            raise TargetOaApplicantLoginUnavailableError("OA 登录响应没有返回 token。")
         return token
 
 
@@ -223,3 +229,19 @@ def _extract_error_message(payload: object) -> str | None:
         if value not in (None, ""):
             return str(value)
     return None
+
+
+def _login_failure(payload: object, *, unavailable: bool = False) -> TargetOaApplicantLoginError:
+    # Only known non-secret OA messages are surfaced; never echo arbitrary response bodies.
+    message = _extract_error_message(payload) or ""
+    if "锁定" in message:
+        return TargetOaApplicantLoginError("OA 账号已锁定。")
+    if "停用" in message or "禁用" in message:
+        return TargetOaApplicantLoginError("OA 账号已停用。")
+    if "密码" in message and ("错误" in message or "不正确" in message):
+        if "账号" in message or "用户" in message:
+            return TargetOaApplicantLoginError("账号或密码错误")
+        return TargetOaApplicantLoginError("密码错误")
+    if unavailable:
+        return TargetOaApplicantLoginUnavailableError("OA 登录服务暂不可用，请重试。")
+    return TargetOaApplicantLoginError("OA 登录失败，请检查账号状态。")

@@ -98,6 +98,8 @@ def is_admin_only_route(route_path: str) -> bool:
 
 
 def page_keys_for_route(route_path: str) -> tuple[str, ...] | None:
+    if route_path == "/api/workbench/settings/oa-draft-prefill/input-invoice-usage":
+        return ("input-invoice-usage", "settings")
     for prefix, page_keys in _ROUTE_PAGE_PREFIXES:
         if _matches_prefix(route_path, prefix):
             return page_keys

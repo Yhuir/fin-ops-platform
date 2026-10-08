@@ -59,6 +59,9 @@ class ScriptedCursor:
     def fetchall(self):
         return list(self._rows)
 
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
 
 class ScriptedConnection:
     def __init__(self, cursor: ScriptedCursor) -> None:
@@ -253,6 +256,20 @@ class OARoleSyncServiceTests(unittest.TestCase):
         self.assertNotIn("LIMIT", sql)
         self.assertTrue(connection.closed)
         self.assertEqual(len(connection.cursor_value.executed), 1)
+
+    def test_get_user_uses_exact_identity_and_returns_disabled_or_missing(self):
+        connection = ScriptedConnection(ScriptedCursor([[(7, "login-7", "陈秀云", "1")]]))
+        user, _ = _with_connection(connection, lambda executor: executor.get_user("7"))
+        self.assertEqual(user.user_id, "7")
+        self.assertFalse(user.active)
+        sql, params = connection.cursor_value.executed[0]
+        self.assertIn("user_id = %s", sql)
+        self.assertEqual(params, ("7",))
+        self.assertTrue(connection.closed)
+        missing = ScriptedConnection(ScriptedCursor([[]]))
+        user, _ = _with_connection(missing, lambda executor: executor.get_user("gone"))
+        self.assertIsNone(user)
+        self.assertTrue(missing.closed)
 
     def test_connection_failure_is_wrapped(self) -> None:
         with patch.dict(sys.modules, {"pymysql": SimpleNamespace(connect=lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("connect")))}), self.assertRaises(OARoleSyncExecutionError):

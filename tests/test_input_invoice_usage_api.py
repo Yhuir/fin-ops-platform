@@ -3,16 +3,20 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from decimal import Decimal
 from http import HTTPStatus
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import quote
 
 from fin_ops_platform.app.server import Application
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.oa_applicant_credentials import OaApplicantCredentialSummary
+from fin_ops_platform.services.oa_role_sync_service import OAUserDirectoryEntry
 from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import InputInvoiceUsageOaReverseStatus
 from fin_ops_platform.services.input_invoice_usage_payment_rules import AppSettingsInputInvoiceUsagePaymentRulesProvider
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
@@ -404,7 +408,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertTrue(payload["canCreateDraft"])
         self.assertEqual(payload["nextAction"], "create_batch")
         self.assertEqual(payload["invoiceRows"][0]["invoiceId"], "inv-preview")
-        self.assertIn({"code": "chen_xiuyun", "name": "陈秀云"}, payload["targetApplicants"])
+        self.assertIn({"code": "chen_xiuyun", "name": "陈秀云", "remark": ""}, payload["targetApplicants"])
         self.assertEqual(len(payload["previewHash"]), 64)
         self.assertEqual(oa_projection.write_calls, [])
 
@@ -748,6 +752,14 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
             self._install_identity_resolver(app)
             client = FakeOaDraftClient()
             login_client = RecordingOaLoginClient()
+            credential_service = app._oa_applicant_credential_service()
+            credential_service._directory = SimpleNamespace(get_user=lambda user_id: OAUserDirectoryEntry(
+                user_id=user_id, username="chen_xiuyun_login", display_name="陈秀云", active=True,
+            ))
+            credential_service._login_client = login_client
+            credential_service._identity_resolver = SimpleNamespace(resolve_identity=lambda _token: SimpleNamespace(
+                user_id="chen_xiuyun", username="chen_xiuyun_login",
+            ))
             created_tokens: list[str] = []
             app._target_oa_applicant_token_provider_instance = TargetOaApplicantTokenProvider(
                 credential_service=app._oa_applicant_credential_service(),
@@ -766,8 +778,9 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
                 headers=self._admin_headers(),
                 body=json.dumps(
                     {
-                        "targetApplicantName": "陈秀云",
-                        "oaUsername": "chen_xiuyun_login",
+                        "oaUserId": "chen_xiuyun",
+                        "remark": "差旅报销",
+                        "expectedVersion": 1,
                         "password": "correct-password",
                     }
                 ),
@@ -824,7 +837,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertEqual(draft_payload["status"], "oa_draft_created")
         self.assertNotIn("correct-password", draft_response.body)
         self.assertNotIn("target-applicant-token", draft_response.body)
-        self.assertEqual(login_client.calls, [("chen_xiuyun_login", "correct-password")])
+        self.assertEqual(login_client.calls, [("chen_xiuyun_login", "correct-password")] * 2)
         self.assertEqual(created_tokens, ["target-applicant-token"])
         self.assertEqual(client.requests[0]["payload"]["data"]["applicant"], "陈秀云")
         self.assertEqual(client.requests[0]["payload"]["invoiceRows"][0]["invoiceNo"], "3201")
@@ -837,6 +850,29 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertEqual(history_payload["items"][0]["invoices"][0]["invoiceNo"], "3201")
         self.assertNotIn("batchId", history_payload["items"][0])
         self.assertNotIn("oaDraftId", history_payload["items"][0])
+
+    def test_reverse_prefill_can_be_read_with_input_page_access_without_settings_access(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            configure_access_control(app, page_access={"FULL001": ["input-invoice-usage"]})
+            self._install_identity_resolver(app)
+            try:
+                path = "/api/workbench/settings/oa-draft-prefill/input-invoice-usage"
+                readable = app.handle_request("GET", path, headers=self._full_access_headers())
+                self.assertEqual(readable.status_code, 200, readable.body)
+                payload = json.loads(readable.body)
+                self.assertFalse(payload["can_save"])
+                self.assertIn("configuration", payload)
+                rejected = app.handle_request("PUT", path, headers=self._full_access_headers(), body=json.dumps({
+                    "expected_version": payload["version"], "configuration": payload["configuration"],
+                }))
+                self.assertEqual(rejected.status_code, 403)
+                self.assertEqual(json.loads(rejected.body)["error"], "admin_only")
+                for endpoint in ("/api/workbench/settings", "/api/workbench/settings/oa-applicant-credentials",
+                                 "/api/workbench/settings/oa-applicant-credentials/users"):
+                    self.assertEqual(app.handle_request("GET", endpoint, headers=self._full_access_headers()).status_code, 403)
+            finally:
+                app.close()
 
     def test_oa_reverse_one_step_draft_route_returns_missing_credential_error(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1155,10 +1191,13 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
 
         credential_service = app._oa_applicant_credential_service()
         for code, name in (("chen_xiuyun", "陈秀云"), ("zhou_jieying", "周洁莹")):
-            credential_service.save_credential(
-                target_applicant_code=code, target_applicant_name=name,
-                oa_username=code, password="test-only-credential", actor_id="test",
-                can_admin_access=True,
+            credential_service._repository.save_credential(
+                summary=OaApplicantCredentialSummary(
+                    target_applicant_code=code, target_applicant_name=name, oa_username=code,
+                    credential_status="configured", has_credential=True,
+                    oa_user_id=code, verified_at=datetime.now(UTC),
+                ),
+                password="test-only-credential", actor_id="test", expected_version=None,
             )
         reverse = app._input_invoice_usage_oa_reverse_service()
         def candidate_rows(query):

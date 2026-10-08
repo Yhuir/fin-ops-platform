@@ -257,9 +257,12 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         linked = self._read_model_row("inv-1", "1001")
         linked.update(usageStatus="used", bankRelationStatus="linked")
         service._rows_by_invoice_ids_loader = lambda ids: {"rows": [linked]}
+        provider.fail = True
+        service._applicant_options_provider = lambda: []
         again = service.create_oa_draft_from_selection(request, actor_id="test", oa_client_provider=provider)
         self.assertEqual(again["batchId"], first["batchId"])
         self.assertEqual(len(provider.client.requests), 1)
+        self.assertEqual(len(provider.requested_codes), 1)
 
     def test_new_bank_relation_after_preview_rejects_whole_selection_without_side_effects(self):
         for operation in ("create_batch", "create_oa_draft_from_selection"):

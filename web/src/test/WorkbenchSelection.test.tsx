@@ -3437,7 +3437,7 @@ describe("Workbench row selection and detail drawer", () => {
     const settingsPage = await openWorkbenchSettingsPage(user);
     const settingsTree = within(settingsPage).getByRole("tablist", { name: "设置分类" });
     expect(within(settingsTree).getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
-      "银行账户", "OA导入设置", "OA申请人凭据", "访问账户", "数据重置",
+      "银行账户", "OA导入设置", "访问账户", "数据重置",
     ]);
     expect(within(settingsPage).getByRole("heading", { name: "银行账户映射" })).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/settings/projects"))).toBe(false);

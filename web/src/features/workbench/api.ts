@@ -49,8 +49,6 @@ import type {
   OaManualSearchItem,
   OaManualSearchResult,
   OaManualSearchRow,
-  OaApplicantCredentialSummary,
-  SaveOaApplicantCredentialRequest,
   WorkbenchAccessControl,
   WorkbenchAccessUser,
   WorkbenchInvoiceExpenseItemAssignmentPayload,
@@ -405,28 +403,6 @@ type ApiWorkbenchAccessUserList = {
     display_name?: string;
     active?: boolean;
   }>;
-};
-
-type ApiOaApplicantCredentialSummary = {
-  targetApplicantCode?: string | null;
-  target_applicant_code?: string | null;
-  targetApplicantName?: string | null;
-  target_applicant_name?: string | null;
-  oaUsername?: string | null;
-  oa_username?: string | null;
-  credentialStatus?: string | null;
-  credential_status?: string | null;
-  hasCredential?: boolean | null;
-  has_credential?: boolean | null;
-  enabled?: boolean | null;
-};
-
-type ApiOaApplicantCredentialList = {
-  credentials?: ApiOaApplicantCredentialSummary[] | null;
-};
-
-type ApiOaApplicantCredentialMutationResult = {
-  credential?: ApiOaApplicantCredentialSummary | null;
 };
 
 type ApiWorkbenchSettingsOption =
@@ -2180,18 +2156,6 @@ function mapWorkbenchSettings(payload: ApiWorkbenchSettings): WorkbenchSettings 
   };
 }
 
-function mapOaApplicantCredentialSummary(payload: ApiOaApplicantCredentialSummary): OaApplicantCredentialSummary {
-  const credentialStatus = String(payload.credentialStatus ?? payload.credential_status ?? "unconfigured").trim() || "unconfigured";
-  return {
-    targetApplicantCode: String(payload.targetApplicantCode ?? payload.target_applicant_code ?? "").trim(),
-    targetApplicantName: String(payload.targetApplicantName ?? payload.target_applicant_name ?? "").trim(),
-    oaUsername: String(payload.oaUsername ?? payload.oa_username ?? "").trim(),
-    credentialStatus,
-    hasCredential: Boolean(payload.hasCredential ?? payload.has_credential) && credentialStatus === "configured",
-    enabled: payload.enabled !== false,
-  };
-}
-
 function toCount(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
@@ -3137,16 +3101,6 @@ export async function searchWorkbenchAccessUsers(
   }));
 }
 
-export async function fetchOaApplicantCredentials(signal?: AbortSignal): Promise<OaApplicantCredentialSummary[]> {
-  const payload = await requestJson<ApiOaApplicantCredentialList>(
-    "/api/workbench/settings/oa-applicant-credentials",
-    { method: "GET", signal },
-  );
-  return (payload.credentials ?? [])
-    .map(mapOaApplicantCredentialSummary)
-    .filter((credential) => credential.targetApplicantCode || credential.targetApplicantName || credential.oaUsername);
-}
-
 function clampPercent(value: unknown) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return 0;
@@ -3181,35 +3135,6 @@ export async function saveWorkbenchSettings(
     }),
   });
   return mapWorkbenchSettings(payload);
-}
-
-export async function saveOaApplicantCredential(
-  payload: SaveOaApplicantCredentialRequest,
-): Promise<OaApplicantCredentialSummary> {
-  const targetApplicantCode = payload.targetApplicantCode.trim();
-  const result = await requestJson<ApiOaApplicantCredentialMutationResult>(
-    `/api/workbench/settings/oa-applicant-credentials/${encodeURIComponent(targetApplicantCode)}`,
-    {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        targetApplicantName: payload.targetApplicantName,
-        oaUsername: payload.oaUsername,
-        password: payload.password,
-      }),
-    },
-  );
-  return mapOaApplicantCredentialSummary(result.credential ?? {});
-}
-
-export async function deleteOaApplicantCredential(targetApplicantCode: string): Promise<OaApplicantCredentialSummary> {
-  const result = await requestJson<ApiOaApplicantCredentialMutationResult>(
-    `/api/workbench/settings/oa-applicant-credentials/${encodeURIComponent(targetApplicantCode.trim())}`,
-    { method: "DELETE" },
-  );
-  return mapOaApplicantCredentialSummary(result.credential ?? {});
 }
 
 export async function searchManualOaImports(

@@ -48,6 +48,10 @@ def _semantic(
 
 
 _EXACT_ROUTES = {
+    ("POST", "/api/workbench/settings/oa-applicant-credentials"): _semantic(
+        "settings.oa_credential.save", "保存 OA 申请人凭据", "oa_credential", "OA 申请人凭据",
+        "验证并保存一名反提 OA 申请人的访问凭据。",
+    ),
     ("PUT", "/api/bank-details/auto-tag-rules"): _semantic(
         "bank.auto_tag_rules.update", "保存自动标签规则", "bank_tag_rule", "流水标签规则", "更新银行流水自动标签规则。"
     ),

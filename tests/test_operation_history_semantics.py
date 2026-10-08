@@ -11,6 +11,8 @@ from fin_ops_platform.services.operation_history_semantics import (
 class OperationHistorySemanticsTests(unittest.TestCase):
     def test_known_mutations_have_stable_user_facing_semantics(self) -> None:
         cases = (
+            ("POST", "/api/workbench/settings/oa-applicant-credentials", "保存 OA 申请人凭据", "OA 申请人凭据"),
+            ("DELETE", "/api/workbench/settings/oa-applicant-credentials/test", "删除 OA 申请人凭据", "OA 申请人凭据"),
             ("POST", "/api/workbench/actions/confirm-link", "确认关联", "关联关系"),
             ("POST", "/api/workbench/actions/print-receipt", "打印收据", "关联台收据"),
             ("PUT", "/api/bank-details/auto-tag-rules", "保存自动标签规则", "流水标签规则"),
