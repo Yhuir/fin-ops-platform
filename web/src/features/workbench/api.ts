@@ -2260,6 +2260,9 @@ function buildManualSearchQuery(filters: OaManualSearchFilters) {
 }
 
 const WORKBENCH_API_ERROR_MESSAGES: Record<string, string> = {
+  oa_search_unavailable: "OA 源库搜索失败或超时，请稍后重试。",
+  oa_source_identity_conflict: "OA 单据身份存在冲突，请核对来源后重试。",
+  invalid_oa_manual_search_request: "OA 搜索条件无效，请检查日期范围和分页参数。",
   unknown_bank_transaction_tag: "待找发票筛选引用了不存在的银行明细标签，请刷新后重新选择。",
   archived_bank_transaction_tag: "该银行明细标签已停用，不能用于新的待找发票筛选。",
   duplicate_pending_invoice_tag_mapping: "同一个银行明细标签不能同时归入多个待找发票筛选。",

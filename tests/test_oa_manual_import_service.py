@@ -105,6 +105,18 @@ class RecordingOAAdapter:
             records = [record for record in records if self._status(record) in statuses]
         return records
 
+    def search_application_record_rows(self, **kwargs):
+        records = self.search_application_records(**kwargs)
+        query = str(kwargs.get("q") or "").lower()
+        records = [r for r in records if query in f"{r.id} {r.applicant} {r.project_name} {r.reason}".lower()]
+        records = [r for r in records if (not kwargs.get("date_from") or r.detail_fields["申请日期"] >= kwargs["date_from"])
+                   and (not kwargs.get("date_to") or r.detail_fields["申请日期"] <= kwargs["date_to"])]
+        start = kwargs["page"] * kwargs["page_size"]
+        presentation = OAManualImportService(state_store=MemoryManualImportStore(), oa_adapter=self)
+        return {"rows": presentation.serialize_import_result_rows(records[start:start + kwargs["page_size"]],
+                    imported_entries=kwargs.get("imported_entries", {})), "total": len(records),
+                "page": kwargs["page"], "page_size": kwargs["page_size"]}
+
     def list_application_records_by_row_ids(self, row_ids: list[str]) -> list[OAApplicationRecord]:
         return [self.records_by_id[row_id] for row_id in row_ids if row_id in self.records_by_id]
 
@@ -124,12 +136,6 @@ class RecordingWorkbenchQueryService:
 
     def sync_oa_row_ids(self, row_ids: list[str]) -> None:
         self.synced_row_ids.append(list(row_ids))
-
-
-class FailingWorkbenchQueryService(RecordingWorkbenchQueryService):
-    def sync_oa_row_ids(self, row_ids: list[str]) -> None:
-        self.synced_row_ids.append(list(row_ids))
-        raise RuntimeError("sync unavailable")
 
 
 class FastSearchOAAdapter(RecordingOAAdapter):
@@ -176,7 +182,6 @@ class OAManualImportServiceTests(unittest.TestCase):
         service = OAManualImportService(
             state_store=store,
             oa_adapter=adapter,
-            workbench_query_service=RecordingWorkbenchQueryService(),
         )
 
         payload = service.search(
@@ -203,7 +208,6 @@ class OAManualImportServiceTests(unittest.TestCase):
                     "date_to": "2026-01-31",
                     "page": 2,
                     "page_size": 50,
-                    "imported_entries": {},
                 }
             ],
         )
@@ -216,7 +220,7 @@ class OAManualImportServiceTests(unittest.TestCase):
                 oa_record("oa-pay-2048", apply_type="支付申请", status="进行中", amount="88050", applicant="樊祖芳"),
             ]
         )
-        service = OAManualImportService(state_store=store, oa_adapter=adapter, workbench_query_service=RecordingWorkbenchQueryService())
+        service = OAManualImportService(state_store=store, oa_adapter=adapter)
 
         payload = service.search(q="樊祖芳", form_types=["payment_request"], statuses=["in_progress"])
 
@@ -234,10 +238,10 @@ class OAManualImportServiceTests(unittest.TestCase):
         service = OAManualImportService(
             state_store=store,
             oa_adapter=RecordingOAAdapter([oa_record("oa-exp-1981", invoices=[])]),
-            workbench_query_service=RecordingWorkbenchQueryService(),
         )
 
-        payload = service.search(q="大理", form_types=["expense_claim"], statuses=["completed"])
+        payload = {"rows": service.serialize_import_result_rows([oa_record("oa-exp-1981", invoices=[])],
+            imported_entries=store.load_manual_oa_imports()["entries"])}
 
         row = payload["rows"][0]
         self.assertTrue(row["can_import"])
@@ -247,49 +251,11 @@ class OAManualImportServiceTests(unittest.TestCase):
         self.assertEqual(row["unrecognized_attachment_count"], 2)
         self.assertEqual(row["items"][0]["importable_invoice_count"], 0)
 
-    def test_import_rejects_in_progress_and_imports_completed_idempotently(self) -> None:
-        store = MemoryManualImportStore()
-        adapter = RecordingOAAdapter(
-            [
-                oa_record("oa-exp-1981", status="已完成"),
-                oa_record("oa-pay-2048", apply_type="支付申请", status="进行中"),
-            ]
-        )
-        workbench = RecordingWorkbenchQueryService()
-        service = OAManualImportService(state_store=store, oa_adapter=adapter, workbench_query_service=workbench)
-
-        first = service.import_row_ids(["oa-exp-1981", "oa-pay-2048"], actor_id="tester")
-        second = service.import_row_ids(["oa-exp-1981"], actor_id="tester")
-
-        self.assertEqual(first["imported"], ["oa-exp-1981"])
-        self.assertEqual(first["already_imported"], [])
-        self.assertEqual(first["failed"], [{"row_id": "oa-pay-2048", "code": "not_completed", "message": "流程未完成，不能导入"}])
-        self.assertEqual(second["imported"], [])
-        self.assertEqual(second["already_imported"], ["oa-exp-1981"])
-        self.assertFalse(hasattr(service, "refresh_attachments"))
-        self.assertEqual(workbench.synced_row_ids, [["oa-exp-1981"], ["oa-exp-1981"]])
-        self.assertEqual(store.load_manual_oa_imports()["row_ids"], ["oa-exp-1981"])
-        self.assertEqual(first["rows"][0]["application_date"], "2025-12-23")
-
-    def test_import_does_not_persist_marker_when_sync_fails(self) -> None:
-        store = MemoryManualImportStore()
-        adapter = RecordingOAAdapter([oa_record("oa-exp-1981", status="已完成")])
-        workbench = FailingWorkbenchQueryService()
-        service = OAManualImportService(state_store=store, oa_adapter=adapter, workbench_query_service=workbench)
-
-        result = service.import_row_ids(["oa-exp-1981"], actor_id="tester")
-
-        self.assertEqual(result["imported"], [])
-        self.assertEqual(result["already_imported"], [])
-        self.assertEqual(result["failed"][0]["code"], "sync_failed")
-        self.assertEqual(store.load_manual_oa_imports().get("row_ids"), None)
-        self.assertEqual(workbench.synced_row_ids, [["oa-exp-1981"]])
-
     def test_remove_manual_import_removes_marker_only(self) -> None:
         store = MemoryManualImportStore()
         store.add_manual_oa_imports(["oa-exp-1981"], "tester", {})
         adapter = RecordingOAAdapter([oa_record("oa-exp-1981")])
-        service = OAManualImportService(state_store=store, oa_adapter=adapter, workbench_query_service=RecordingWorkbenchQueryService())
+        service = OAManualImportService(state_store=store, oa_adapter=adapter)
 
         result = service.remove_manual_import("oa-exp-1981", actor_id="tester")
 

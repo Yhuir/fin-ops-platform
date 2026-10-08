@@ -81,8 +81,8 @@ class OAManualImportApiTests(unittest.TestCase):
         app._oa_manual_import_service = OAManualImportService(
             state_store=store or MemoryManualImportStore(),
             oa_adapter=adapter,
-            workbench_query_service=workbench or RecordingWorkbenchQueryService(),
         )
+        app._test_manual_workbench = workbench or RecordingWorkbenchQueryService()
         app._oa_attachment_refresh_request_service = (
             refresh_request_service or RecordingAttachmentRefreshRequestService()
         )
@@ -281,9 +281,13 @@ class OAManualImportApiTests(unittest.TestCase):
             with (
                 patch.object(app._oa_attachment_refresh_request_service, "request") as refresh_attachments,
                 patch.object(app._oa_attachment_refresh_request_service, "status") as refresh_status,
-                patch.object(app._oa_manual_import_service, "import_row_ids") as import_row_ids,
+                patch.object(app._import_job_repository, "create_or_get_job") as import_row_ids,
                 patch.object(app._oa_manual_import_service, "remove_manual_import") as remove_manual_import,
+                patch.object(app._oa_manual_import_service, "search") as source_search,
             ):
+                search_response = app.handle_request("GET", "/api/workbench/settings/oa/manual-search?q=2025", headers=headers)
+                self.assertEqual(search_response.status_code, 403)
+                source_search.assert_not_called()
                 refresh_response = app.handle_request(
                     "POST",
                     "/api/workbench/settings/oa/manual-search/refresh-attachments",

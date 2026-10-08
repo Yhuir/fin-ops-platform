@@ -342,6 +342,45 @@ class ImportDirectQueuePostgresTests(unittest.TestCase):
         self.assertEqual(result['imported'], ['C'])
         rows = self.connection.fetch_all("select row_id from app.manual_oa_imports where status='active' order by row_id")
         self.assertEqual([row['row_id'] for row in rows], ['A','B','C'])
+        from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
+            PostgresOaPendingPaymentSourceSnapshotRepository,
+        )
+        from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
+        snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(self.connection,
+            relation_command_service_for_transaction=lambda _tx: self.fail("Retained manual OA must not lose relations"))
+        snapshot.commit_authoritative_snapshot(scope_key='all', projection_records=[], admission_records=[],
+            payment_statuses={}, authoritative_payment_flow_ids=[], retention_cutoff_month='2026-01')
+        history = PostgresOAProjectionRepository(self.connection).list_application_records('2025-12')
+        self.assertEqual({record.id for record in history}, {'A','B','C'})
+        self.assertEqual(self.repository.get_job(second.import_job_id).status, 'succeeded')
+        from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
+        PostgresOAProjectionRepository(self.connection).upsert_application_records(
+            [oa_record('auto', month='2026-02')], scope_key='2026-02')
+        states = PostgresOpsTaxEtcRepository(self.connection).load_oa_search_import_states(['A', 'auto', 'new'])
+        self.assertEqual({key: value['import_status'] for key, value in states.items()},
+                         {'A':'imported', 'auto':'already_imported', 'new':'not_imported'})
+
+
+
+    def test_manual_import_rolls_back_oa_when_marker_write_fails(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from fin_ops_platform.services.shared_import_processor import SharedImportProcessor
+
+        from tests.test_oa_manual_import_service import oa_record
+        processor = SharedImportProcessor(self.connection, oa_source_adapter=SimpleNamespace(
+            list_application_records_by_row_ids=lambda ids: [oa_record(value) for value in ids]))
+        job = self.repository.create_or_get_job(import_type='oa_manual_import.create',
+            payload={'row_ids':['rollback-history']}, created_by='owner')
+        worker = ImportJobWorker(repository=self.repository, worker_id='worker',
+            processors={'oa_manual_import.create':processor.oa_manual})
+        with patch('fin_ops_platform.services.shared_import_processor.PostgresSharedImportRepository.add_manual_oa_imports',
+                   side_effect=RuntimeError('fixture marker persistence failed')):
+            worker.run_once()
+        self.assertEqual(self.connection.fetch_one('select count(*) n from app.oa_applications')['n'], 0)
+        self.assertEqual(self.connection.fetch_one('select count(*) n from app.manual_oa_imports')['n'], 0)
+        self.assertNotEqual(self.repository.get_job(job.import_job_id).status, 'succeeded')
 
     def test_shared_tax_certified_import_commits_one_batch_and_job_together(self):
         from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository

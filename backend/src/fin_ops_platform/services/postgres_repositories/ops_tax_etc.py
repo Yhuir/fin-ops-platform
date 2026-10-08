@@ -658,6 +658,15 @@ class PostgresOpsTaxEtcRepository:
         payload = row_payload(row, "normalized_payload")
         return dict(payload) if isinstance(payload, dict) else None
 
+    def load_oa_attachment_invoice_cache_entries(self, cache_keys: list[str]) -> dict[str, dict]:
+        if not cache_keys:
+            return {}
+        rows = self._connection.fetch_all(
+            "select source_attachment_key, normalized_payload from app.oa_attachment_invoice_cache "
+            "where source_attachment_key = any(%s::text[])", (cache_keys,),
+        )
+        return {row["source_attachment_key"]: dict(row["normalized_payload"]) for row in rows}
+
     def save_oa_attachment_invoice_cache_entry(self, cache_key: str, payload: dict[str, object]) -> None:
         normalized_key = str(cache_key or "").strip()
         if not normalized_key:
@@ -764,6 +773,21 @@ class PostgresOpsTaxEtcRepository:
                 jsonb({"normalized_payload": normalized}),
             ),
         )
+
+    def load_oa_search_import_states(self, row_ids: list[str]) -> dict[str, dict]:
+        if not row_ids:
+            return {}
+        rows = self._connection.fetch_all(
+            """select requested.row_id, manual.imported_at,
+                      case when manual.row_id is not null then 'imported'
+                           when oa.row_id is not null then 'already_imported'
+                           else 'not_imported' end as import_status
+               from unnest(%s::text[]) requested(row_id)
+               left join app.manual_oa_imports manual on manual.row_id=requested.row_id and manual.status='active'
+               left join app.oa_applications oa on oa.row_id=requested.row_id""", (row_ids,),
+        )
+        return {row["row_id"]: {"import_status": row["import_status"],
+                "imported_at": row["imported_at"].isoformat() if row["imported_at"] else None} for row in rows}
 
     def load_manual_oa_imports(self) -> dict[str, object]:
         rows = self._connection.fetch_all(

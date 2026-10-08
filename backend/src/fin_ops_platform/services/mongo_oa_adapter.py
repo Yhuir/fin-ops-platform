@@ -7,7 +7,7 @@ import re
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from time import monotonic
@@ -137,6 +137,8 @@ class OASyncSourceBatch:
 class OAAttachmentInvoiceCache(Protocol):
     def load_oa_attachment_invoice_cache_entry(self, cache_key: str) -> dict[str, object] | None: ...
 
+    def load_oa_attachment_invoice_cache_entries(self, cache_keys: list[str]) -> dict[str, dict]: ...
+
     def save_oa_attachment_invoice_cache_entry(self, cache_key: str, payload: dict[str, object]) -> None: ...
 
 
@@ -189,6 +191,10 @@ def load_mongo_oa_settings(data_dir: Path | None = None) -> MongoOASettings | No
     )
 
 
+class OASearchUnavailable(RuntimeError):
+    """The source could not provide a complete manual search result."""
+
+
 class MongoOAAdapter(OAAdapter):
     name = "mongo_oa"
 
@@ -198,6 +204,7 @@ class MongoOAAdapter(OAAdapter):
         settings: MongoOASettings,
         attachment_invoice_cache: OAAttachmentInvoiceCache | None = None,
         identity_loader: Callable[[], OASourceIdentities] = OASourceIdentities,
+        client: MongoClient | None = None,
     ) -> None:
         self._settings = settings
         self._attachment_invoice_cache = attachment_invoice_cache
@@ -208,7 +215,9 @@ class MongoOAAdapter(OAAdapter):
         self._attachment_parse_started = 0.0
         self._attachment_invoice_sync_parse_depth = 0
         self._attachment_invoice_force_reparse_depth = 0
-        self._client: MongoClient | None = None
+        self._client: MongoClient | None = client
+        self._owns_client = client is None
+        self._search_attachment_entries: dict[str, dict] | None = None
         self._project_name_cache: dict[str, str] | None = None
         self._records_cache: dict[str, tuple[float, list[OAApplicationRecord]]] = {}
         self._available_months_cache: tuple[float, list[str]] | None = None
@@ -682,77 +691,86 @@ class MongoOAAdapter(OAAdapter):
         imported_entries: dict[str, Any] | None = None,
     ) -> dict[str, object]:
         if self._mongo_temporarily_unavailable():
-            self._set_read_status("error", "OA 连接失败")
-            return {"rows": [], "total": 0, "page": page, "page_size": page_size}
+            raise OASearchUnavailable("OA 源库暂不可用，请稍后重试。")
         search_settings = self._normalize_search_import_settings(form_types=form_types, statuses=statuses)
         normalized_page = max(0, int(page or 0))
         normalized_page_size = max(1, min(int(page_size or 20), 100))
         if not search_settings["form_types"] or not search_settings["statuses"]:
             return {"rows": [], "total": 0, "page": normalized_page, "page_size": normalized_page_size}
-        window_limit = (normalized_page + 1) * normalized_page_size
         project_names = self._project_name_index()
+        if self._mongo_temporarily_unavailable():
+            raise OASearchUnavailable("OA 项目目录读取失败，请稍后重试。")
         imported_by_id = dict(imported_entries or {})
         exact_row_id = clean_string(q)
         parsed_row_id = self._parse_oa_row_id(exact_row_id)
         if parsed_row_id is not None:
             return self._search_application_record_rows_by_exact_row_id(
-                row_id=exact_row_id,
-                parsed_row_id=parsed_row_id,
-                search_settings=search_settings,
-                date_from=date_from,
-                date_to=date_to,
-                page=normalized_page,
-                page_size=normalized_page_size,
-                project_names=project_names,
+                row_id=exact_row_id, parsed_row_id=parsed_row_id, search_settings=search_settings,
+                date_from=date_from, date_to=date_to, page=normalized_page,
+                page_size=normalized_page_size, project_names=project_names,
                 imported_entries=imported_by_id,
             )
         project_query_values = self._project_query_values(q, project_names)
+        queries = [self._build_search_form_query(
+            form_id=(self._settings.payment_request_form_id if form_type == OA_IMPORT_FORM_TYPE_PAYMENT
+                     else self._settings.expense_claim_form_id),
+            form_type=form_type, q=q, statuses=search_settings["statuses"],
+            date_from=date_from, date_to=date_to, project_query_values=project_query_values,
+        ) for form_type in search_settings["form_types"]]
+        documents, total = self._search_documents_page(queries, normalized_page, normalized_page_size)
+        self._prime_search_attachment_entries(documents)
+        rows = []
+        for document in documents:
+            form_type = (OA_IMPORT_FORM_TYPE_PAYMENT if str(document["form_id"]) == self._settings.payment_request_form_id
+                         else OA_IMPORT_FORM_TYPE_EXPENSE)
+            row = self._search_document_to_row(document, form_type=form_type,
+                project_names=project_names, imported_entries=imported_by_id)
+            if row is None:
+                raise OASearchUnavailable("OA 搜索单据缺少必要字段，无法生成完整结果。")
+            rows.append(row)
+        self._set_read_status("ready", "OA 已读取")
+        return {"rows": rows, "total": total, "page": normalized_page, "page_size": normalized_page_size}
 
-        rows: list[dict[str, object]] = []
-        total = 0
-        projection = self._search_document_projection()
-        for form_type in search_settings["form_types"]:
-            form_id = (
-                self._settings.payment_request_form_id
-                if form_type == OA_IMPORT_FORM_TYPE_PAYMENT
-                else self._settings.expense_claim_form_id
-            )
-            query = self._build_search_form_query(
-                form_id=form_id,
-                form_type=form_type,
-                q=q,
-                statuses=search_settings["statuses"],
-                date_from=date_from,
-                date_to=date_to,
-                project_query_values=project_query_values,
-            )
-            total += self._count_search_documents(query)
-            documents = self._search_form_documents(
-                form_id,
-                query,
-                projection=projection,
-                limit=window_limit,
-            )
-            for document in documents:
-                row = self._search_document_to_row(
-                    document,
-                    form_type=form_type,
-                    project_names=project_names,
-                    imported_entries=imported_by_id,
-                )
-                if row is not None:
-                    rows.append(row)
+    def _search_documents_page(self, queries: list[dict], page: int, page_size: int) -> tuple[list[dict], int]:
+        # One aggregate computes both the count and the combined form page.
+        pipeline = [
+            {"$match": {"$or": queries}},
+            {"$addFields": {"_search_date": {"$ifNull": ["$data.applicationDate", "$data.ApplicationDate"]}}},
+            {"$facet": {
+                "count": [{"$count": "total"}],
+                "rows": [{"$sort": {"_search_date": 1, "_id": 1}},
+                         {"$skip": page * page_size}, {"$limit": page_size},
+                         {"$project": self._search_document_projection()}],
+            }},
+        ]
+        try:
+            result = list(self._collection().aggregate(pipeline, maxTimeMS=self._settings.request_timeout_ms))[0]
+        except (OSError, PyMongoError, TimeoutError) as exc:
+            raise OASearchUnavailable("OA 源库搜索失败或超时，请稍后重试。") from exc
+        return result["rows"], result["count"][0]["total"] if result["count"] else 0
 
-        rows.sort(key=lambda item: (clean_string(item.get("application_date") or ""), clean_string(item.get("row_id") or "")))
-        start = normalized_page * normalized_page_size
-        end = start + normalized_page_size
-        self._set_read_status("ready", "OA 已同步")
-        return {
-            "rows": rows[start:end],
-            "total": total,
-            "page": normalized_page,
-            "page_size": normalized_page_size,
-        }
+    def _prime_search_attachment_entries(self, documents: list[dict]) -> None:
+        if self._attachment_invoice_cache is None:
+            return
+        keys = set()
+        for document in documents:
+            if str(document.get("form_id")) != self._settings.expense_claim_form_id:
+                continue
+            data = self._document_data(document)
+            external_id = self._canonical_external_id("oa-exp-", document)
+            items = data.get("schedule")
+            for index, item in enumerate(items if isinstance(items, list) and items else [data]):
+                if not isinstance(item, dict):
+                    continue
+                row_index = clean_string(item.get("row_index", index))
+                item_id = self._expense_item_id(external_id=external_id, row_index=row_index, item=item,
+                    project_id=self._first_text(item, "detailProjectName") or self._first_text(data, "projectName"),
+                    amount=self._first_text(item, "detailReimbursementAmount", "amount"),
+                    reimbursement_date=self._first_text(item, "detailReimbursementDate", "reimbursementDate"))
+                files = self._attachment_files_with_source_context(self._attachment_files(item),
+                    oa_external_id=external_id, source_expense_row_index=row_index, source_expense_item_id=item_id)
+                keys.update(self._attachment_invoice_cache_key(entry) for entry in files)
+        self._search_attachment_entries = self._attachment_invoice_cache.load_oa_attachment_invoice_cache_entries(sorted(keys))
 
     def _search_application_record_rows_by_exact_row_id(
         self,
@@ -788,9 +806,9 @@ class MongoOAAdapter(OAAdapter):
         )
         documents = self._load_form_documents_by_external_ids(form_id, external_ids)
         if self._mongo_temporarily_unavailable():
-            self._set_read_status("error", "OA 连接失败")
-            return {"rows": [], "total": 0, "page": page, "page_size": page_size}
+            raise OASearchUnavailable("OA 源单据读取失败，请稍后重试。")
         documents = self._select_authoritative_documents(form_type, documents)
+        self._prime_search_attachment_entries(documents)
 
         rows: list[dict[str, object]] = []
         allowed_statuses = set(search_settings["statuses"])
@@ -810,7 +828,7 @@ class MongoOAAdapter(OAAdapter):
             application_date = clean_string(row.get("application_date") or "")
             if normalized_date_from and application_date and application_date < normalized_date_from:
                 continue
-            if normalized_date_to and application_date and application_date > normalized_date_to:
+            if normalized_date_to and application_date and application_date[:10] > normalized_date_to:
                 continue
             rows.append(row)
 
@@ -1538,7 +1556,9 @@ class MongoOAAdapter(OAAdapter):
             return 0
         total = 0
         for file_entry in files:
-            cached_entry = cache.load_oa_attachment_invoice_cache_entry(self._attachment_invoice_cache_key(file_entry))
+            cache_key = self._attachment_invoice_cache_key(file_entry)
+            cached_entry = (self._search_attachment_entries.get(cache_key) if self._search_attachment_entries is not None
+                            else cache.load_oa_attachment_invoice_cache_entry(cache_key))
             if cached_entry is None or not self._is_current_attachment_invoice_cache_entry(cached_entry):
                 continue
             total += len([invoice for invoice in cached_entry.get("invoices", []) if isinstance(invoice, dict)])
@@ -2526,55 +2546,6 @@ class MongoOAAdapter(OAAdapter):
             self._mark_mongo_unavailable()
         return []
 
-    def _search_form_documents(
-        self,
-        form_id: str,
-        query: dict[str, Any],
-        *,
-        projection: dict[str, int] | None = None,
-        limit: int,
-    ) -> list[dict]:
-        last_error: Exception | None = None
-        normalized_limit = max(1, int(limit or 1))
-        for attempt in range(2):
-            try:
-                normalized_form_id = clean_string(form_id)
-                application_date_field = (
-                    "data.applicationDate"
-                    if normalized_form_id == clean_string(self._settings.payment_request_form_id)
-                    else "data.ApplicationDate"
-                )
-                cursor = (
-                    self._collection()
-                    .find(query, projection)
-                    .max_time_ms(5000)
-                    .sort([(application_date_field, 1), ("_id", 1)])
-                    .limit(normalized_limit)
-                )
-                return list(cursor)
-            except (OSError, PyMongoError, TimeoutError, ValueError) as exc:
-                last_error = exc
-                self._reset_client()
-                if attempt == 0:
-                    continue
-        if last_error is not None:
-            self._mark_mongo_unavailable()
-        return []
-
-    def _count_search_documents(self, query: dict[str, Any]) -> int:
-        last_error: Exception | None = None
-        for attempt in range(2):
-            try:
-                return int(self._collection().count_documents(query))
-            except (OSError, PyMongoError, TimeoutError, ValueError) as exc:
-                last_error = exc
-                self._reset_client()
-                if attempt == 0:
-                    continue
-        if last_error is not None:
-            self._mark_mongo_unavailable()
-        return 0
-
     def _collection(self):
         if self._client is None:
             self._client = MongoClient(
@@ -2587,6 +2558,8 @@ class MongoOAAdapter(OAAdapter):
         return self._client[self._settings.database][self._settings.collection]
 
     def _reset_client(self) -> None:
+        if not self._owns_client:
+            return
         client = self._client
         self._client = None
         if client is None:
@@ -2690,14 +2663,21 @@ class MongoOAAdapter(OAAdapter):
     @staticmethod
     def _search_status_clause(statuses: list[str]) -> dict[str, Any] | None:
         status_or: list[dict[str, Any]] = []
-        if OA_IMPORT_STATUS_COMPLETED in set(statuses):
+        if OA_IMPORT_STATUS_COMPLETED in statuses:
             status_or.append({"data.processStatus": {"$in": list(COMPLETED_PROCESS_VALUES)}})
-            status_or.append({"data.status": {"$in": list(COMPLETED_STATUS_VALUES)}})
-        if OA_IMPORT_STATUS_IN_PROGRESS in set(statuses):
+            status_or.append({"$and": [
+                {"data.processStatus": {"$nin": list(COMPLETED_PROCESS_VALUES | IN_PROGRESS_PROCESS_VALUES)}},
+                {"data.status": {"$in": list(COMPLETED_STATUS_VALUES)}},
+            ]})
+        if OA_IMPORT_STATUS_IN_PROGRESS in statuses:
             status_or.append({"data.processStatus": {"$in": list(IN_PROGRESS_PROCESS_VALUES)}})
         if not status_or:
             return None
-        return {"$or": status_or}
+        return {"$or": [
+            {"data.process_status": {"$in": statuses}},
+            {"$and": [{"data.process_status": {"$nin": [OA_IMPORT_STATUS_COMPLETED, OA_IMPORT_STATUS_IN_PROGRESS]}},
+                      {"$or": status_or}]},
+        ]}
 
     @staticmethod
     def _search_application_date_clause(*, date_from: str | None, date_to: str | None) -> dict[str, Any] | None:
@@ -2707,7 +2687,7 @@ class MongoOAAdapter(OAAdapter):
         if normalized_date_from:
             bounds["$gte"] = normalized_date_from
         if normalized_date_to:
-            bounds["$lte"] = normalized_date_to
+            bounds["$lt"] = (datetime.strptime(normalized_date_to, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
         if not bounds:
             return None
         return {

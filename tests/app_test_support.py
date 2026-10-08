@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -529,15 +530,21 @@ class DurableImportQueueHarness:
                     batch = self.application._tax_certified_import_service.confirm_session(job.payload["session_id"])
                     job.completion.succeed(None, {"success": True, "batch": self.application._serialize_value(batch)})
                 elif job.import_type == "oa_manual_import.create":
-                    result = self.application._oa_manual_import_service.import_row_ids(
-                        job.payload["row_ids"], actor_id=job.created_by)
-                    result["affected_scope_keys"] = sorted({str(row.get("application_date") or "")[:7] for row in result["rows"]} - {""})
-                    if result["failed"] and not result["imported"] and not result["already_imported"]:
-                        result["outcome"] = "failed"
-                        job.completion.fail(None, result, error="所有选中 OA 均未导入")
-                    else:
-                        result["outcome"] = "partial_success" if result["failed"] else "success"
-                        job.completion.succeed(None, result)
+                    from fin_ops_platform.services.shared_import_processor import SharedImportProcessor
+                    service = self.application._oa_manual_import_service
+                    store = service._state_store
+                    def add_manual(ids, *, actor_id):
+                        result = store.add_manual_oa_imports(ids, actor_id, {})
+                        return {**result, "entries": store.load_manual_oa_imports()["entries"]}
+                    repository = SimpleNamespace(
+                        save_oa_records=lambda records: self.application._test_manual_workbench.sync_oa_row_ids([r.id for r in records]),
+                        add_manual_oa_imports=add_manual,
+                    )
+                    processor = SharedImportProcessor(SimpleNamespace(transaction=lambda: nullcontext(None)),
+                        oa_source_adapter=service._oa_adapter)
+                    with patch("fin_ops_platform.services.shared_import_processor.PostgresSharedImportRepository", return_value=repository), \
+                         patch.object(processor, "_record_completion"):
+                        processor.oa_manual(job)
                 else:
                     processors[job.import_type](job)
                 if self.get_job(job.import_job_id).status == "processing":

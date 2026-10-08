@@ -14,6 +14,7 @@
 - 同一份源文档的 App OA 身份不随 `processId`、`flowRequestId` 或审批状态变化。已入库 OA 保留当前 canonical ID；新 OA 使用表单类型与 Mongo `_id` 建立身份，流程编号仅登记为可查找别名。来源别名与 OA/准入事实在同一事务提交，冲突明确失败。
 - 附件缓存、报销子项和来源证据在确定 canonical OA 身份后生成；完成审批只迁移 pending/completed 归属，不撤销配对，也不重建附件身份。投影写入不按 ID 后缀猜测或直接改写其他模块的关系。
 - OA Mongo 财务源只读；worker 一次读取范围内来源，输出 completed 与 admission 视图。任何必需来源读取失败不提交部分权威集合。
+- 设置中的手动 OA 全量搜索独立读取源库，不受自动同步起始日期限制；只读分页发现尚未入库的单据，不触发同步或附件解析。普通业务页面继续读取 PostgreSQL，正式导入仍由现有 import worker 提交。
 - 仅完整 all 权威快照能证明源消失；清理 active 成员与本地快照后，通过精确事件复核并删除对应外部支付状态，month/retention 不证明源删除。
 - 付款状态复核先将历史事件中的 active 来源别名解析为当前 OA 并去重，未知身份仍明确失败；不按旧 ID 重复写回同一流程。
 - 支付状态由当前 active outflow 收敛；MySQL 写回由专用 adapter 执行，不向 Mongo 写业务。

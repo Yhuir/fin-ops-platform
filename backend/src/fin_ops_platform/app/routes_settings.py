@@ -16,6 +16,7 @@ from fin_ops_platform.services.app_settings_service import (
 )
 from fin_ops_platform.services.background_job_service import BackgroundJobAccessError, BackgroundJobNotFoundError
 from fin_ops_platform.services.import_workflow_service import import_job_payload
+from fin_ops_platform.services.mongo_oa_adapter import OASearchUnavailable
 from fin_ops_platform.services.oa_applicant_credentials import (
     OaApplicantCredentialConfigurationError,
     OaApplicantCredentialError,
@@ -34,6 +35,7 @@ from fin_ops_platform.services.oa_draft_prefill import (
     INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY,
 )
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError
+from fin_ops_platform.services.oa_source_identity import OASourceIdentityConflict
 from fin_ops_platform.services.postgres_repositories.settings_data_reset_request import (
     SettingsDataResetAlreadyActive,
     SettingsDataResetIdempotencyConflict,
@@ -508,15 +510,24 @@ class SettingsApiRoutes:
         pagination, error = self._parse_oa_manual_search_pagination(query)
         if error is not None:
             return error
-        payload = service.search(
-            q=query.get("q", [None])[0],
-            form_types=self._parse_csv_query_values(query, "form_types"),
-            statuses=self._parse_csv_query_values(query, "statuses"),
-            date_from=query.get("date_from", [None])[0],
-            date_to=query.get("date_to", [None])[0],
-            page=pagination["page"],
-            page_size=pagination["page_size"],
-        )
+        try:
+            payload = service.search(
+                q=query.get("q", [None])[0],
+                form_types=self._parse_csv_query_values(query, "form_types"),
+                statuses=self._parse_csv_query_values(query, "statuses"),
+                date_from=query.get("date_from", [None])[0],
+                date_to=query.get("date_to", [None])[0],
+                page=pagination["page"],
+                page_size=pagination["page_size"],
+            )
+        except OASourceIdentityConflict as exc:
+            return self._json_response(HTTPStatus.CONFLICT,
+                {"error": "oa_source_identity_conflict", "message": str(exc)})
+        except ValueError as exc:
+            return self._invalid_oa_manual_search_request(str(exc))
+        except OASearchUnavailable as exc:
+            return self._json_response(HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "oa_search_unavailable", "message": str(exc)})
         return self._json_response(HTTPStatus.OK, payload)
 
     def oa_manual_search_refresh_attachments(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:

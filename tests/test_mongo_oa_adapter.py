@@ -113,36 +113,17 @@ class SearchSummaryStubMongoOAAdapter(CountingStubMongoOAAdapter):
         self.search_document_calls: list[dict[str, object]] = []
         self.count_document_calls: list[dict[str, object]] = []
 
-    def _search_form_documents(
-        self,
-        form_id: str,
-        query: dict,
-        *,
-        projection: dict[str, int] | None = None,
-        limit: int,
-    ) -> list[dict]:
-        self.search_document_calls.append(
-            {
-                "form_id": str(form_id),
-                "query": dict(query),
-                "projection": projection,
-                "limit": limit,
-            }
-        )
-        return [self._with_default_completed_status(document) for document in self._form_documents.get(str(form_id), [])][:limit]
-
-    def _count_search_documents(self, query: dict) -> int:
-        self.count_document_calls.append(dict(query))
-        form_id = query.get("form_id")
-        if form_id is None:
-            for clause in list(query.get("$and") or []):
-                if isinstance(clause, dict) and clause.get("form_id") is not None:
-                    form_id = clause.get("form_id")
-                    break
-        if isinstance(form_id, dict):
-            candidates = sorted({str(value) for value in list(form_id.get("$in") or [])})
-            return sum(len(self._form_documents.get(candidate, [])) for candidate in candidates)
-        return len(self._form_documents.get(str(form_id), []))
+    def _search_documents_page(self, queries, page, page_size):
+        documents = []
+        for query in queries:
+            self.count_document_calls.append(query)
+            form_id = next(clause["form_id"] for clause in query["$and"] if "form_id" in clause)
+            ids = form_id["$in"] if isinstance(form_id, dict) else [form_id]
+            form_id = str(ids[0])
+            self.search_document_calls.append({"form_id": form_id, "limit": page_size})
+            documents.extend({**self._with_default_completed_status(doc), "form_id": form_id}
+                             for doc in self._form_documents.get(form_id, []))
+        return documents[page*page_size:(page+1)*page_size], len(documents)
 
     def _parse_attachment_evidence_pool(self, files: list[dict[str, object]], *, month: str | None = None) -> dict[str, list[dict[str, str]]]:
         raise AssertionError("search summary must not parse or schedule attachment invoices")

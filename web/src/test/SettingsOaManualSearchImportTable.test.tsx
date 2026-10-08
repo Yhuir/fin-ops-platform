@@ -290,6 +290,22 @@ afterEach(() => {
 });
 
 describe("OaManualSearchImportTable", () => {
+  test("shows source failure instead of presenting it as no historical OA", async () => {
+    const fetchMock = installFetchMock();
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({
+      error: "oa_search_unavailable", message: "OA 源库搜索失败或超时，请稍后重试。",
+    }), { status: 503 }));
+    renderTable();
+    fireEvent.change(screen.getByLabelText("开始日期"), { target: { value: "2025-01-01" } });
+    fireEvent.change(screen.getByLabelText("结束日期"), { target: { value: "2025-12-31" } });
+    await userEvent.click(screen.getByRole("button", { name: "搜索", exact: true }));
+    expect(await screen.findByText("OA 源库搜索失败或超时，请稍后重试。")).toBeInTheDocument();
+    const requested = new URL(String(fetchMock.mock.calls[0][0]), "http://localhost");
+    expect(requested.searchParams.get("date_from")).toBe("2025-01-01");
+    expect(requested.searchParams.get("date_to")).toBe("2025-12-31");
+    expect(screen.queryByText("1981")).not.toBeInTheDocument();
+  });
+
   test("searches OA rows with the shared HeroUI table and no DataGrid surface", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();

@@ -5124,6 +5124,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
     def test_oa_mongo_adapter_direct_use_is_allowlisted(self) -> None:
         allowed_paths = {
             "backend/src/fin_ops_platform/services/oa_sync_source_adapter.py",
+            "backend/src/fin_ops_platform/services/oa_manual_search_source.py",
         }
         violations: list[str] = []
         for path in _python_files(APP_ROOT, SERVICES_ROOT):

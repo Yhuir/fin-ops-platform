@@ -266,6 +266,7 @@ from fin_ops_platform.services.oa_identity_service import (
     OASessionExpiredError,
 )
 from fin_ops_platform.services.oa_manual_import_service import OAManualImportService
+from fin_ops_platform.services.oa_manual_search_source import OAManualSearchSource
 from fin_ops_platform.services.oa_payment_admitted_projection import PaymentAdmittedOAProjectionAdapter
 from fin_ops_platform.services.oa_payment_status_service import MySQLOAPaymentStatusRepository
 from fin_ops_platform.services.oa_pending_payment_command_service import OaPendingPaymentCommandService
@@ -585,7 +586,7 @@ class Application:
         self._api_performance_recorder = ApiPerformanceRecorder()
         self._state_store = build_state_store(data_dir)
         self._runtime_repositories = RuntimeRepositoryContext.from_state_store(self._state_store)
-        self._cash_data_dir = data_dir
+        self._data_dir = data_dir
         self._cash_runtime_lock = Lock()
         self._cash_runtime = None
         self._app_health_dashboard_cache_lock = Lock()
@@ -602,6 +603,9 @@ class Application:
         return self._runtime_repositories
 
     def close(self) -> None:
+        source = getattr(self, "_oa_manual_search_source", None)
+        if source is not None:
+            source.close()
         if self._cash_runtime is not None:
             self._cash_runtime.close()
         close = getattr(self._state_store, "close", None)
@@ -966,13 +970,16 @@ class Application:
             oa_adapter=oa_workflow_adapter,
             seed_demo_rows=not self._requires_postgres_runtime(),
         )
+        self._oa_manual_search_source = OAManualSearchSource.from_environment(
+            data_dir=self._data_dir,
+            connection=getattr(self._state_store, "_connection", None),
+        )
         self._oa_manual_import_service = (
             OAManualImportService(
                 state_store=self._state_store,
-                oa_adapter=oa_adapter,
-                workbench_query_service=self._workbench_query_service,
+                oa_adapter=self._oa_manual_search_source,
             )
-            if self._state_store is not None and oa_adapter is not None
+            if self._state_store is not None
             else None
         )
         queue_repository = getattr(
@@ -1617,7 +1624,7 @@ class Application:
             if self._cash_runtime is None:
                 with self._cash_runtime_lock:
                     if self._cash_runtime is None:
-                        self._cash_runtime = CashRuntime(self._cash_data_dir)
+                        self._cash_runtime = CashRuntime(self._data_dir)
             routes = self._cash_runtime.routes(session, self._json_response)
             return routes.route(method, route_path, query, body, session=session)
         except CashError as exc:

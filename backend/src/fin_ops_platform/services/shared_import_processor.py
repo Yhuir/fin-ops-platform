@@ -65,7 +65,7 @@ class SharedImportProcessor:
             repository.save_oa_records(selected)
             result = repository.add_manual_oa_imports([record.id for record in selected], actor_id=actor_id)
             presentation = OAManualImportService(state_store=repository,
-                oa_adapter=self._oa_source_adapter, workbench_query_service=None)
+                oa_adapter=self._oa_source_adapter)
             result.update(failed=failed, rows=presentation.serialize_import_result_rows(
                               selected, imported_entries=result["entries"]),
                           affected_scope_keys=sorted({record.month for record in selected}),
