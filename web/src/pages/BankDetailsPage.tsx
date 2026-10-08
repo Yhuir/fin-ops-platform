@@ -1013,6 +1013,7 @@ function buildConfirmationChoiceGroups(
 function TypeCell({
   row,
   autoTagRules,
+  assignmentChoices,
   confirming,
   canOperateData,
   onConfirm,
@@ -1022,6 +1023,7 @@ function TypeCell({
 }: {
   row: BankDetailTransaction;
   autoTagRules: BankAutoTagEditableRule[];
+  assignmentChoices: ConfirmationChoiceGroup[];
   confirming: boolean;
   canOperateData: boolean;
   onConfirm: (row: BankDetailTransaction, choice: ConfirmationChoice) => Promise<void>;
@@ -1047,12 +1049,8 @@ function TypeCell({
       : []),
     [autoTagRules, row.autoCandidateCategories, row.categoryResolutionStatus],
   );
-  const assignmentGroups = useMemo(
-    () => ((row.categoryResolutionStatus === "unmatched" && !row.effectiveCategoryCode) || row.effectiveCategorySource === "auto"
-      ? buildAssignmentChoiceGroups(autoTagRules)
-      : []),
-    [autoTagRules, row.categoryResolutionStatus, row.effectiveCategoryCode, row.effectiveCategorySource],
-  );
+  const assignmentGroups = (row.categoryResolutionStatus === "unmatched" && !row.effectiveCategoryCode) || row.effectiveCategorySource === "auto"
+    ? assignmentChoices : [];
   const confirmationChoiceKeys = useMemo(() => new Set(
     row.autoCandidateCategories
       .map(confirmationChoiceFromCandidate)
@@ -1060,6 +1058,14 @@ function TypeCell({
       .map(choiceKey),
   ), [row.autoCandidateCategories]);
   const selectionGroups = confirmationGroups.length > 0 ? confirmationGroups : assignmentGroups;
+  useEffect(() => {
+    if (stagedChoice && !selectionGroups.some((group) => group.choices.some(
+      (choice) => choiceKey(choice) === choiceKey(stagedChoice)
+        && choiceDisplayLabel(choice) === choiceDisplayLabel(stagedChoice)
+        && choice.turnoverActionType === stagedChoice.turnoverActionType
+        && choice.turnoverFamily === stagedChoice.turnoverFamily,
+    ))) setStagedChoice(null);
+  }, [selectionGroups, stagedChoice]);
   const autoCategoryCanBeReassigned = row.effectiveCategorySource === "auto" && Boolean(row.effectiveCategoryCode);
   const selectionLabel = autoCategoryCanBeReassigned ? "重新分类" : confirmationGroups.length > 0 ? "待确认" : "待分类";
   const triggerLabel = stagedChoice ? choiceDisplayLabel(stagedChoice) : selectionLabel;
@@ -1492,6 +1498,13 @@ export default function BankDetailsPage() {
     tagDefinitions: [],
   });
   const [activeAutoTagRules, setActiveAutoTagRules] = useState<BankAutoTagEditableRule[]>([]);
+  const categoryOptionsByDirection = useMemo(() => {
+    const options = (direction: "income" | "expense") => {
+      const rules = activeAutoTagRules.filter((rule) => rule.status === "active" && (rule.direction === direction || rule.direction === "any"));
+      return { rules, assignments: buildAssignmentChoiceGroups(rules) };
+    };
+    return { income: options("income"), expense: options("expense") };
+  }, [activeAutoTagRules]);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<BankCategoryFilter>(ALL_CATEGORY_FILTER);
   const selectedCategoryRequestParams = useMemo(
     () => categoryFilterRequestParams(selectedCategoryFilter),
@@ -2417,7 +2430,8 @@ export default function BankDetailsPage() {
                         <FinanceTableCell className="bank-col-type" columnRole="status" textValue={row.effectiveCategoryLabel || row.autoCategoryLabel || row.categoryResolutionStatus}>
                           {row.bankSplitParts?.length ? null : <TypeCell
                             row={row}
-                            autoTagRules={activeAutoTagRules}
+                            autoTagRules={categoryOptionsByDirection[row.direction].rules}
+                            assignmentChoices={categoryOptionsByDirection[row.direction].assignments}
                             confirming={categoryMutationId === row.id}
                             canOperateData={canOperateData}
                             onConfirm={handleConfirmCategory}

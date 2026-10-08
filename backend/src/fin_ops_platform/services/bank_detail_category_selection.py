@@ -3,7 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryValidationError
-from fin_ops_platform.services.bank_turnover_tag_semantics import normalize_external_third_label
+from fin_ops_platform.services.bank_turnover_tag_semantics import (
+    EXTERNAL_TURNOVER_THIRD_LABELS,
+    is_external_turnover_primary_label,
+    normalize_external_third_label,
+)
 
 
 def selected_category_code(payload: dict[str, Any]) -> str:
@@ -29,6 +33,41 @@ def manual_assignment_selection(payload: dict[str, Any]) -> dict[str, Any]:
         "turnover_action_type": payload.get("turnover_action_type"),
         "turnover_family": payload.get("turnover_family"),
     }
+
+
+def validate_manual_assignment_rule(
+    *, selection: dict[str, Any], rule: dict[str, Any], direction: object, transaction_id: str,
+) -> None:
+    if direction not in ("income", "expense"):
+        raise BankTransactionCategoryValidationError(
+            "invalid_bank_transaction_direction", "当前流水缺少有效的收支方向，无法分类。",
+            transaction_id=transaction_id,
+        )
+    if rule["direction"] not in (direction, "any"):
+        raise BankTransactionCategoryValidationError(
+            "category_direction_mismatch", "所选标签与当前流水收支方向不符，请重新选择。",
+            transaction_id=transaction_id,
+        )
+    # A code-only selection is valid; submitted display paths must still describe the current rule.
+    if not any(selection.get(key) for key in ("category_primary_label", "category_sub_label", "category_third_label", "category_label_path")):
+        return
+    primary = rule["output_primary_label"]
+    sub = rule["output_sub_label"]
+    third = selection.get("category_third_label")
+    path = selection.get("category_label_path") or []
+    if not third and len(path) > 2:
+        third = path[2]
+    expected = [value for value in (primary, sub, third) if value]
+    invalid = (
+        (selection.get("category_primary_label") not in (None, "", primary))
+        or (selection.get("category_sub_label") not in (None, "", sub))
+        or (bool(path) and path != expected)
+        or (bool(third) and (not is_external_turnover_primary_label(primary) or third not in EXTERNAL_TURNOVER_THIRD_LABELS))
+    )
+    if invalid:
+        raise BankTransactionCategoryValidationError(
+            "category_rule_changed", "所选标签规则已变化，请重新选择。", transaction_id=transaction_id,
+        )
 
 
 def confirmation_selection(

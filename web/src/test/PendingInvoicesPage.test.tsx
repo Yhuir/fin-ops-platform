@@ -1157,7 +1157,7 @@ describe("Pending invoices page", () => {
     expect(within(page).getByRole("button", { name: "支出待找发票规则设置" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "收入待找发票规则设置" })).toBeInTheDocument();
 
-    expect(within(page).queryByText("2026-04-19 10:52:02")).not.toBeInTheDocument();
+    expect(within(page).getByText("2026-04-19 10:52:02")).toBeVisible();
     expect(within(page).getByText("货款 / 设备采购")).toBeInTheDocument();
     expect(within(page).getAllByText("支").length).toBeGreaterThan(0);
     expect(within(page).getAllByText("1200.00").length).toBeGreaterThan(0);
@@ -1897,4 +1897,15 @@ describe("Pending invoices page", () => {
     })).toBe(true);
   });
 
+});
+
+
+test("shows the actual bank time below the category without using booked date", async () => {
+  installPendingInvoiceFetch({ rowsPayload: () => [upgradedRows()[0]] });
+  renderAppAt("/pending-invoices");
+  await findPendingInvoicesPage();
+  const chip = await screen.findByLabelText("交易时间");
+  expect(chip).toHaveTextContent("2026-04-19 10:52:02");
+  expect(chip.previousElementSibling).toHaveTextContent("货款 / 设备采购");
+  expect(chip).not.toHaveTextContent("2026-05-02");
 });

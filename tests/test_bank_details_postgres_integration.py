@@ -35,6 +35,46 @@ class BankDetailsPostgresIntegrationTests(unittest.TestCase):
     def tearDown(self) -> None:
         truncate_test_database(self.database_url)
 
+    def test_direction_checked_assignment_persists_and_rejected_write_leaves_facts_unchanged(self) -> None:
+        from types import SimpleNamespace
+
+        from fin_ops_platform.services.audit import AuditTrailService
+        from fin_ops_platform.services.bank_detail_auto_category_suggestion_provider import BankDetailAutoCategorySuggestionProvider
+        from fin_ops_platform.services.bank_details_application_service import BankDetailsApplicationService
+        from fin_ops_platform.services.bank_details_service import BankDetailsService
+        from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
+        from fin_ops_platform.services.bank_transaction_category_mutation_writer import BankTransactionCategoryMutationWriter
+        from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService, BankTransactionCategoryValidationError
+        from fin_ops_platform.services.postgres_repositories.bank_transaction_category import PostgresBankTransactionCategoryRepository
+        from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
+
+        for identity, direction in (("expense-test", "outflow"), ("income-test", "inflow")):
+            self.connection.execute("""insert into app.bank_transactions(legacy_mongo_id, account_no, txn_direction,
+                counterparty_name_raw, amount, signed_amount, txn_date, txn_month, trade_time, status)
+                values (%s, 'synthetic', %s, 'Synthetic', 100, %s, '2026-10-08', '2026-10-01', '2026-10-08 09:00:00', 'pending')""",
+                (identity, direction, -100 if direction == "outflow" else 100))
+        category = BankTransactionCategoryService()
+        auto = BankTransactionAutoCategoryService(category_service=category)
+        core = PostgresCoreRepository(self.connection)
+        provider = BankDetailAutoCategorySuggestionProvider(import_service=core,
+            bank_details_service=BankDetailsService(core), bank_transaction_auto_category_service=auto)
+        repository = PostgresBankTransactionCategoryRepository(self.connection)
+        settings = SimpleNamespace(get_bank_auto_tag_rules_payload=lambda **kw: {"active_rules": [
+            {"code": "salary", "direction": "expense", "output_primary_label": "费用", "output_sub_label": "工资"}]})
+        service = BankDetailsApplicationService(app_settings_service=settings,
+            bank_transaction_category_service=category, bank_transaction_auto_category_service=auto,
+            audit_service=AuditTrailService(), bank_transaction_category_store=None, affected_months_provider=lambda ids: ["2026-10"],
+            suggestion_provider=provider.latest, category_mutation_service=BankTransactionCategoryMutationWriter(
+                connection=self.connection, repository=repository))
+        result = service.assign_manual_category("expense-test", {"category_code": "salary"}, actor_id="synthetic-test")
+        self.assertTrue(result["changed"])
+        before = repository.load_snapshot()
+        self.assertEqual(before["categories"]["expense-test"]["category_code"], "salary")
+        with self.assertRaises(BankTransactionCategoryValidationError) as rejected:
+            service.assign_manual_category("income-test", {"category_code": "salary"}, actor_id="synthetic-test")
+        self.assertEqual(rejected.exception.error_code, "category_direction_mismatch")
+        self.assertEqual(repository.load_snapshot(), before)
+
     def test_page_executes_narrow_materialization_with_canonical_rule(self) -> None:
         self.connection.execute(
             """

@@ -565,6 +565,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             return {"ok": True}
 
         app._bank_detail_auto_category_suggestion_provider = lambda _transaction_id: {
+            "transaction_direction": "expense",
             "category_resolution_status": "unmatched",
         }
         app._bank_transaction_category_service.assign_manual_category = assign_stub
@@ -603,6 +604,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             return {"ok": True}
 
         app._bank_detail_auto_category_suggestion_provider = lambda _transaction_id: {
+            "transaction_direction": "expense",
             "category_resolution_status": "unmatched",
         }
         app._bank_transaction_category_service.assign_manual_category = assign_stub
@@ -631,6 +633,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             return {"ok": True}
 
         app._bank_detail_auto_category_suggestion_provider = lambda _transaction_id: {
+            "transaction_direction": "expense",
             "category_resolution_status": "needs_confirmation",
             "auto_candidate_category_codes": ["fee", "salary"],
         }
@@ -661,6 +664,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             return {"ok": True}
 
         app._bank_detail_auto_category_suggestion_provider = lambda _transaction_id: {
+            "transaction_direction": "expense",
             "category_resolution_status": "unmatched",
         }
         app._bank_transaction_category_service.assign_manual_category = assign_stub
@@ -679,6 +683,46 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(payload["ok"])
         self.assertEqual(assign_calls[0]["category_code"], "internal_transfer")
+
+    def test_manual_assignment_direction_matrix(self) -> None:
+        for direction in ("income", "expense"):
+            for rule_direction in ("income", "expense", "any"):
+                with self.subTest(direction=direction, rule_direction=rule_direction):
+                    app = build_application()
+                    app._bank_detail_auto_category_suggestion_provider = lambda _id: {
+                        "category_resolution_status": "unmatched", "transaction_direction": direction,
+                    }
+                    app._bank_transaction_category_affected_months = lambda _ids: []
+                    app._state_store = SimpleNamespace(save_bank_transaction_categories=lambda _snapshot: None)
+                    with patch.object(app._bank_transaction_category_service, "assign_manual_category", return_value={"ok": True}) as assign:
+                        with patch.object(app._app_settings_service, "get_bank_auto_tag_rules_payload", return_value={"active_rules": [{"code": "salary", "direction": rule_direction}]}):
+                            with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+                                response = app._handle_request_untracked("POST", "/api/bank-details/transactions/txn-test/category-assignment", json.dumps({"category_code": "salary"}), {})
+                    allowed = rule_direction in (direction, "any")
+                    self.assertEqual(response.status_code, 200 if allowed else 400)
+                    if allowed:
+                        self.assertTrue(json.loads(response.body)["ok"])
+                        assign.assert_called_once()
+                    else:
+                        self.assertEqual(json.loads(response.body)["error"], "category_direction_mismatch")
+                        assign.assert_not_called()
+
+    def test_manual_assignment_direction_rejects_income_expense_tag_and_missing_direction(self) -> None:
+        for direction, code in (("income", "category_direction_mismatch"), (None, "invalid_bank_transaction_direction")):
+            with self.subTest(direction=direction):
+                app = build_application()
+                app._bank_detail_auto_category_suggestion_provider = lambda _id: {
+                    "category_resolution_status": "unmatched", "transaction_direction": direction,
+                }
+                with patch.object(app._bank_transaction_category_service, "assign_manual_category") as assign, patch.object(
+                    app._app_settings_service, "get_bank_auto_tag_rules_payload",
+                    return_value={"active_rules": [{"code": "salary", "direction": "expense"}]},
+                ):
+                    with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+                        response = app._handle_request_untracked("POST", "/api/bank-details/transactions/txn-income/category-assignment", json.dumps({"category_code": "salary"}), {})
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(json.loads(response.body)["error"], code)
+                assign.assert_not_called()
 
     def test_manual_assignment_delete_endpoint_clears_manual_category(self) -> None:
         app = build_application()

@@ -6202,6 +6202,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         {
           ...visibleRow,
           id: "bank-detail-search-filler",
+          direction: "expense",
+          direction_label: "支",
           trade_time: "2026-04-01 10:30:00",
           counterparty_name: "普通供应商",
           summary: "普通付款",

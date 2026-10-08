@@ -8,6 +8,7 @@ from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.bank_detail_category_selection import (
     confirmation_selection,
     manual_assignment_selection,
+    validate_manual_assignment_rule,
 )
 from fin_ops_platform.services.bank_details_canonical_query import (
     BankDetailsCanonicalQueryService,
@@ -301,16 +302,22 @@ class BankDetailsApplicationService:
                 )
                 or "unmatched"
             )
-        assignable_codes = {
-            *self._active_bank_auto_tag_rule_codes(),
-            BANK_AUTO_TAG_INTERNAL_TRANSFER_CODE,
-        }
-        if selected_code not in assignable_codes:
+        rules = self._app_settings_service.get_bank_auto_tag_rules_payload(can_save=False)["active_rules"]
+        selected_rule = next((rule for rule in rules if rule["code"] == selected_code), None)
+        if selected_rule is None and selected_code != BANK_AUTO_TAG_INTERNAL_TRANSFER_CODE:
             raise BankTransactionCategoryValidationError(
                 "invalid_manual_category_assignment_candidate",
                 "只能选择当前可用的银行明细标签。",
                 transaction_id=transaction_id,
             )
+        validate_manual_assignment_rule(
+            selection=selection,
+            rule=selected_rule if selected_rule is not None else {
+                "direction": "any", "output_primary_label": "内部往来款", "output_sub_label": None,
+            },
+            direction=(suggestion or {}).get("transaction_direction"),
+            transaction_id=transaction_id,
+        )
         with self._category_mutation_lock:
             before_snapshot = (
                 self._bank_transaction_category_service.snapshot()

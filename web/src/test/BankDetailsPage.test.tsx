@@ -1602,3 +1602,50 @@ describe("Bank details page", () => {
     await expect(within(page).findByText("signal is aborted without reason", {}, { timeout: 1000 })).rejects.toThrow();
   });
 });
+
+
+test.each(["income", "expense"])("classification menu filters direction %s before grouping and keeps unrestricted tags", async (direction) => {
+  const user = userEvent.setup();
+  const baseFetch = installMockApiFetch();
+  let ruleChanged = false;
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+    const response = await baseFetch(input, init);
+    if (url.pathname === "/api/bank-details/auto-tag-rules") {
+      const payload = await response.json();
+      payload.active_rules = [
+        { ...payload.active_rules[0], direction: ruleChanged ? (direction === "income" ? "expense" : "income") : "any" },
+        { ...payload.active_rules[1], direction: "expense" },
+        { ...payload.active_rules[1], code: "income_only", direction: "income", output_primary_label: "收入专用", output_sub_label: "销售收入" },
+      ];
+      return new Response(JSON.stringify(payload));
+    }
+    if (url.pathname === "/api/bank-details/transactions") {
+      const payload = await response.json();
+      payload.rows = payload.rows.map((row: Record<string, unknown>) => ({ ...row, direction, direction_label: direction === "income" ? "收" : "支" }));
+      return new Response(JSON.stringify(payload));
+    }
+    return response;
+  }));
+  renderBankDetailsPage();
+  const page = await screen.findByTestId("bank-details-page");
+  await within(page).findByText("费用 / 工资");
+  await user.type(within(page).getByPlaceholderText("搜索流水"), "普通供应商");
+  await user.click(within(page).getByRole("button", { name: "查询" }));
+  const row = (await within(page).findByText("普通供应商")).closest("tr")!;
+  await user.click(within(row).getByRole("button", { name: "待分类" }));
+  const primary = await screen.findByRole("menu", { name: "待分类主标签" });
+  expect(within(primary).queryByRole("menuitem", { name: "收入专用" }) !== null).toBe(direction === "income");
+  expect(within(primary).getByRole("menuitem", { name: "内部往来款" })).toBeVisible();
+  await user.click(within(primary).getByRole("menuitem", { name: "费用" }));
+  const children = await screen.findByRole("menu", { name: "费用可选标签" });
+  expect(within(children).getByRole("menuitem", { name: "手续费" })).toBeVisible();
+  expect(within(children).queryByRole("menuitem", { name: "工资" }) !== null).toBe(direction === "expense");
+  await user.click(within(children).getByRole("menuitem", { name: "手续费" }));
+  expect(within(row).getByRole("button", { name: "费用 / 手续费" })).toBeVisible();
+  ruleChanged = true;
+  act(() => reactivateBankPage());
+  await waitFor(() => expect(within(row).queryByRole("button", { name: "费用 / 手续费" })).not.toBeInTheDocument());
+  expect(baseFetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+
+});

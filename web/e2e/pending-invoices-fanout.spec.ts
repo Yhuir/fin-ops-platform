@@ -80,3 +80,18 @@ test.describe("pending invoices browser flow", () => {
     expect(api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(pendingRowsBefore);
   });
 });
+
+test("transaction time chips remain visible inside identity cells at narrow desktop width", async ({ page }) => {
+  await installDeterministicApiMocks(page, { sessionMode: "user" });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/pending-invoices");
+  const chips = page.locator(".pending-invoices-trade-time");
+  await expect(chips.first()).toBeVisible();
+  const geometry = await chips.evaluateAll((nodes) => nodes.map((node) => {
+    const chip = node.getBoundingClientRect();
+    const cell = node.closest("td")!.getBoundingClientRect();
+    return { text: node.textContent, fits: chip.left >= cell.left && chip.right <= cell.right && chip.bottom <= cell.bottom };
+  }));
+  expect(geometry.length).toBeGreaterThan(0);
+  expect(geometry.every((item) => item.fits && Boolean(item.text))).toBe(true);
+});

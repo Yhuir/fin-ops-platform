@@ -1,3 +1,4 @@
+import { bankTradeTimeLabel } from "../../features/pendingInvoices/bankTradeTime";
 import BankSplitChips from "../../features/bankSplits/BankSplitChips";
 import { Button, Checkbox, ListBox, Select } from "@heroui/react";
 import { Filter, Info } from "lucide-react";
@@ -653,6 +654,7 @@ function PendingInvoiceTableRow({
                 </span>}
               </>
             )}
+            <span className="pending-invoices-trade-time" aria-label="交易时间">{bankTradeTimeLabel(row)}</span>
           </span>
         </span>
       </FinanceTableCell>

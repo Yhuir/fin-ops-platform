@@ -64,7 +64,18 @@ class BankDetailAutoCategorySuggestionProviderTests(unittest.TestCase):
         self.assertEqual(import_service.transaction_ids, ["txn-1"])
         self.assertEqual(bank_details_service.rows[0]["id"], "txn-1")
         self.assertEqual(auto_category_service.rows, [{"id": "txn-1", "counterparty_name": "供应商A", "debit_amount": "100.00"}])
-        self.assertEqual(suggestion, {"category_resolution_status": "needs_confirmation", "auto_candidate_category_codes": ["fee"]})
+        self.assertEqual(suggestion, {"transaction_direction": "expense", "category_resolution_status": "needs_confirmation", "auto_candidate_category_codes": ["fee"]})
+
+    def test_unmatched_transaction_still_exposes_its_real_direction(self) -> None:
+        from unittest.mock import Mock
+
+        provider = BankDetailAutoCategorySuggestionProvider(
+            import_service=_ImportService(), bank_details_service=_BankDetailsService(),
+            bank_transaction_auto_category_service=Mock(suggest_for_rows=Mock(return_value={})),
+        )
+        self.assertEqual(provider.latest("txn-1"), {
+            "category_resolution_status": "unmatched", "transaction_direction": "expense",
+        })
 
 
 if __name__ == "__main__":

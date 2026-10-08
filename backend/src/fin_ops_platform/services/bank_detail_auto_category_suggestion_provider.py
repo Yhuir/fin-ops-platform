@@ -22,7 +22,7 @@ class BankDetailAutoCategorySuggestionProvider:
         self._bank_transaction_auto_category_service = bank_transaction_auto_category_service
         self._serialize_value = serialize_value or self._default_serialize_value
 
-    def latest(self, transaction_id: str) -> dict[str, object] | None:
+    def latest(self, transaction_id: str) -> dict[str, object]:
         normalized_transaction_id = str(transaction_id or "").strip()
         transaction = self._import_service.get_transaction(normalized_transaction_id)
         row = self._serialize_value(transaction)
@@ -30,7 +30,12 @@ class BankDetailAutoCategorySuggestionProvider:
             row = dict(row or {})
         row["id"] = normalized_transaction_id
         input_row = self._bank_details_service.auto_category_input_row(row)
-        return self._bank_transaction_auto_category_service.suggest_for_rows([input_row]).get(normalized_transaction_id)
+        suggestion = self._bank_transaction_auto_category_service.suggest_for_rows([input_row]).get(normalized_transaction_id)
+        if suggestion is None:
+            suggestion = {"category_resolution_status": "unmatched"}
+        direction = row.get("txn_direction")
+        direction = direction.value if isinstance(direction, Enum) else direction
+        return {**suggestion, "transaction_direction": {"inflow": "income", "outflow": "expense"}.get(direction)}
 
     @staticmethod
     def _default_serialize_value(value: Any) -> Any:
