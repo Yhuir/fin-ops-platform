@@ -11,7 +11,7 @@ export default function PaymentRuleApplicantSelect({ label, options, names, onCh
   const directoryNames = new Set(options.map((option) => option.matchName));
   const missingNames = names.filter((name) => !directoryNames.has(name));
   return <>
-    <Select selectionMode="multiple" aria-label={label} placeholder="不限制申请人" value={selectedIds}
+    <Select selectionMode="multiple" aria-label={label} placeholder="选择申请人" value={selectedIds}
       onChange={(keys) => {
         const nextIds = new Set(keys.map(String));
         const nextNames = new Set(names);
@@ -23,7 +23,7 @@ export default function PaymentRuleApplicantSelect({ label, options, names, onCh
         }
         onChange([...nextNames]);
       }}>
-      <Select.Trigger><Select.Value>{names.length ? names.join("、") : "不限制申请人"}</Select.Value><Select.Indicator /></Select.Trigger>
+      <Select.Trigger><Select.Value>{names.length ? names.join("、") : "选择申请人"}</Select.Value><Select.Indicator /></Select.Trigger>
       <Select.Popover className="payment-rule-applicants-popover">
         <Autocomplete.Filter filter={(text, input) => text.toLocaleLowerCase().includes(input.trim().toLocaleLowerCase())}>
           <SearchField aria-label="搜索申请人姓名或账号" className="payment-rule-applicants-search">
@@ -43,7 +43,6 @@ export default function PaymentRuleApplicantSelect({ label, options, names, onCh
         </Autocomplete.Filter>
       </Select.Popover>
     </Select>
-    <span className="input-invoice-usage-payment-rule-applicant-hint">可多选；同名账号共同匹配；清空则不限制</span>
     {missingNames.map((name) => <span key={name} className="input-invoice-usage-payment-rule-applicant-hint">{name}（不在 OA 目录）<Button size="sm" variant="ghost" onPress={() => onChange(names.filter((item) => item !== name))}>移除</Button></span>)}
   </>;
 }

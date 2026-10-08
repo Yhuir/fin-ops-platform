@@ -28,6 +28,7 @@ class PaymentStatusEvaluationContext:
     fully_matched: bool
     invoice_oa_amount_matched: bool
     payment_comparison: str
+    invoice_net_sign: str | None = None
 
 
 class InputInvoiceUsagePaymentRulesProvider(Protocol):
@@ -50,10 +51,10 @@ DEFAULT_RULES: list[dict[str, Any]] = [
     {
         "id": "paid_full_match",
         "statusCode": "paid",
-        "label": "已付款",
+        "label": "发票＝付款",
         "priority": 2,
         "enabled": True,
-        "conditions": {"hasOa": True, "hasBank": True, "fullyMatched": True},
+        "conditions": {"hasOa": True, "hasBank": True, "fullyMatched": True, "paymentComparison": "equal"},
     },
     {
         "id": "offset_zhou_jieying",
@@ -89,17 +90,23 @@ DEFAULT_RULES: list[dict[str, Any]] = [
     },
 ]
 
-OUTPUT_PARENTS = {"cash_turnover": "paid", "paid": "paid", "offset": "unpaid", "waiting_payment": "unpaid",
-                  "invoice_less_payment": "paid", "invoice_greater_payment": "paid"}
-OUTPUT_STATUS_CODES = frozenset(OUTPUT_PARENTS)
-AMOUNT_CATEGORIES = {"paid": "发票＝付款", "invoice_less_payment": "发票＜付款", "invoice_greater_payment": "发票＞付款"}
+# Base classifications are normal editable rules, never evaluator branches.
+DEFAULT_RULES.extend([
+    {"id": "base_paid_equal", "statusCode": "paid", "label": "发票＝付款", "priority": 7, "enabled": True,
+     "conditions": {"hasBank": True, "paymentComparison": "equal"}},
+    {"id": "base_paid_less", "statusCode": "invoice_less_payment", "label": "发票＜付款", "priority": 8, "enabled": True,
+     "conditions": {"hasBank": True, "paymentComparison": "less"}},
+    {"id": "base_paid_greater", "statusCode": "invoice_greater_payment", "label": "发票＞付款", "priority": 9, "enabled": True,
+     "conditions": {"hasBank": True, "paymentComparison": "greater"}},
+    {"id": "base_unpaid", "statusCode": "waiting_payment", "label": "未关联流水", "priority": 10, "enabled": True,
+     "conditions": {"hasBank": False}},
+])
+OUTPUT_STATUS_CODES = frozenset({"cash_turnover", "paid", "offset", "waiting_payment",
+                                 "invoice_less_payment", "invoice_greater_payment"})
 
 
 def payment_category_parents(rule: dict[str, Any]) -> tuple[str, ...]:
-    """Possible destinations; actual relation presence always decides a row's parent."""
-    code = rule["statusCode"]
-    if code in OUTPUT_PARENTS:
-        return (OUTPUT_PARENTS[code],)
+    """Possible destinations depend on conditions; the actual bank relation decides each row."""
     conditions = rule["conditions"]
     if conditions.get("hasBank") is True or conditions.get("fullyMatched") is True or "paymentComparison" in conditions:
         return ("paid",)
@@ -109,14 +116,10 @@ def payment_category_parents(rule: dict[str, Any]) -> tuple[str, ...]:
 
 
 def payment_categories(settings: dict[str, Any]) -> list[dict[str, str]]:
-    categories = {(code, "paid"): {"id": code, "label": label, "parent": "paid"}
-                  for code, label in AMOUNT_CATEGORIES.items()}
-    categories[("waiting_payment", "unpaid")] = {"id": "waiting_payment", "label": "未关联流水", "parent": "unpaid"}
+    categories = {}
     for rule in settings["rules"]:
-        code = rule["statusCode"]
-        label = "发票＝付款" if code == "paid" and rule["label"] == "已付款" else rule["label"]
         for parent in payment_category_parents(rule):
-            categories[(code, parent)] = {"id": code, "label": label, "parent": parent}
+            categories[(rule["statusCode"], parent)] = {"id": rule["statusCode"], "label": rule["label"], "parent": parent}
     return list(categories.values())
 
 
@@ -362,27 +365,16 @@ def public_payment_status_rules_payload(
 def evaluate_payment_status(settings: dict[str, Any], context: PaymentStatusEvaluationContext) -> dict[str, str]:
     normalized = normalize_payment_status_rules_settings(settings)
     for rule in normalized["rules"]:
-        if ("paid" if context.has_bank else "unpaid") not in payment_category_parents(rule):
-            continue
-        expected = {"paid": "equal", "invoice_less_payment": "less", "invoice_greater_payment": "greater"}.get(rule["statusCode"])
-        if expected and context.payment_comparison != expected:
-            continue
         if rule["enabled"] and _conditions_match(rule["conditions"], context):
             return _status_payload(rule)
-    comparison_code = {"equal": "paid", "less": "invoice_less_payment", "greater": "invoice_greater_payment"}.get(context.payment_comparison)
-    if comparison_code:
-        return {"code": comparison_code, "label": next(item["label"] for item in payment_categories(normalized) if item["id"] == comparison_code),
-                "reason": "正式关联组发票净额与流水净支出比较", "matchedRuleId": "", "severity": "success"}
-    if not context.has_bank:
-        return {"code": "waiting_payment", "label": next(item["label"] for item in payment_categories(normalized) if item["id"] == "waiting_payment"),
-                "reason": "未关联银行流水", "matchedRuleId": "", "severity": "warning"}
-    return {"code": "unclassified", "label": "无法比较", "reason": {
+    reason = {
         "missing_invoice_amount": "关联发票缺少价税合计",
-        "missing_bank_evidence": "关联银行流水明细缺失",
+        "missing_bank_evidence": "关联银行流水明细缺失" if context.has_bank else "未命中已配置规则",
         "invalid_bank_amount": "关联流水金额或收支方向不完整",
         "ambiguous_bank_scope": "拆分流水的付款用途尚未明确",
         "invalid": "金额比较信息不完整",
-    }[context.payment_comparison],
+    }.get(context.payment_comparison, "未命中已配置规则")
+    return {"code": "unclassified", "label": "未分类", "reason": reason,
             "matchedRuleId": "", "severity": "warning"}
 
 
@@ -447,7 +439,7 @@ def _normalize_conditions(rule_id: str, value: Any) -> dict[str, Any]:
         raise InputInvoiceUsagePaymentRulesValidationError(
             "empty_input_invoice_usage_payment_rule_conditions", "Payment status rule conditions cannot be empty.",
         )
-    if set(value) - {*bool_keys, "applicantNames", "paymentComparison"}:
+    if set(value) - {*bool_keys, "applicantNames", "paymentComparison", "invoiceNetSign"}:
         raise InputInvoiceUsagePaymentRulesValidationError(
             "unsupported_input_invoice_usage_payment_rule_constraint", "Unsupported payment rule condition.",
         )
@@ -458,6 +450,10 @@ def _normalize_conditions(rule_id: str, value: Any) -> dict[str, Any]:
                 raise InputInvoiceUsagePaymentRulesValidationError(
                     "invalid_input_invoice_usage_payment_rule_condition", f"{key} must be a boolean.",
                 )
+            normalized[key] = item
+        elif key == "invoiceNetSign":
+            if item not in ("positive", "zero", "negative"):
+                raise InputInvoiceUsagePaymentRulesValidationError("invalid_invoice_net_sign", "发票净额条件无效。")
             normalized[key] = item
         elif key == "paymentComparison":
             if not isinstance(item, str) or item not in {"equal", "less", "greater"}:
@@ -502,6 +498,8 @@ def condition_description(conditions: dict[str, Any]) -> str:
     parts.extend(pair[0] if conditions[key] else pair[1] for key, pair in labels.items() if key in conditions)
     if "paymentComparison" in conditions:
         parts.append({"equal": "发票＝付款", "less": "发票＜付款", "greater": "发票＞付款"}[conditions["paymentComparison"]])
+    if "invoiceNetSign" in conditions:
+        parts.append({"positive": "发票净额为正", "zero": "发票净额为零", "negative": "发票净额为负"}[conditions["invoiceNetSign"]])
     return "；".join(parts)
 
 
@@ -517,6 +515,8 @@ def _conditions_match(conditions: dict[str, Any], context: PaymentStatusEvaluati
             return False
     if "paymentComparison" in conditions and conditions["paymentComparison"] != context.payment_comparison:
         return False
+    if "invoiceNetSign" in conditions and conditions["invoiceNetSign"] != context.invoice_net_sign:
+        return False
     applicants = conditions.get("applicantNames", [])
     if applicants and normalize_applicant_name(context.applicant_name) not in applicants:
         return False
@@ -525,7 +525,7 @@ def _conditions_match(conditions: dict[str, Any], context: PaymentStatusEvaluati
 
 def _status_payload(rule: dict[str, Any]) -> dict[str, str]:
     return {
-        "code": rule["statusCode"], "label": "发票＝付款" if rule["statusCode"] == "paid" and rule["label"] == "已付款" else rule["label"],
+        "code": rule["statusCode"], "label": rule["label"],
         "reason": condition_description(rule["conditions"]),
         "matchedRuleId": rule["id"], "severity": "success",
     }

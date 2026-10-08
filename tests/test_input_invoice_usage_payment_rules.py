@@ -46,6 +46,36 @@ class QueueRecorder:
 
 
 class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
+    def test_invoice_net_sign_is_explicit_and_missing_amount_never_matches(self):
+        from fin_ops_platform.services.input_invoice_usage_payment_rules import evaluate_payment_status, payment_categories
+        for sign in ("positive", "zero", "negative"):
+            rule = {"id": "sign", "statusCode": "paid", "label": "自定义名称", "priority": 1,
+                    "enabled": True, "conditions": {"invoiceNetSign": sign}}
+            settings = normalize_payment_status_rules_settings({"version": 1, "rules": [rule]})
+            self.assertEqual({item["parent"] for item in payment_categories(settings)}, {"paid", "unpaid"})
+            for actual in ("positive", "zero", "negative", None):
+                context = PaymentStatusEvaluationContext(False, False, "", False, False, "missing_bank_evidence", actual)
+                result = evaluate_payment_status(settings, context)
+                self.assertEqual(result["code"], "paid" if actual == sign else "unclassified")
+                if actual == sign:
+                    self.assertEqual(result["label"], "自定义名称")
+                    self.assertEqual(result["matchedRuleId"], "sign")
+        for value in ("invalid", "", 0, None, []):
+            with self.subTest(value=value), self.assertRaises(InputInvoiceUsagePaymentRulesValidationError):
+                normalize_payment_status_rules_settings({"version": 1, "rules": [{**rule, "conditions": {"invoiceNetSign": value}}]})
+
+    def test_empty_and_disabled_rules_have_no_implicit_categories_or_evaluation(self):
+        from fin_ops_platform.services.input_invoice_usage_payment_rules import evaluate_payment_status, payment_categories
+        for rules in ([], [{"id": "disabled", "statusCode": "paid", "label": "保留分类", "priority": 1,
+                            "enabled": False, "conditions": {"hasBank": True}}]):
+            settings = normalize_payment_status_rules_settings({"version": 9, "rules": rules})
+            self.assertEqual(len(payment_categories(settings)), len(rules))
+            for comparison in ("equal", "less", "greater", "missing_invoice_amount", "invalid", "unknown"):
+                result = evaluate_payment_status(settings, PaymentStatusEvaluationContext(False, True, "", False, False, comparison))
+                self.assertEqual(result["code"], "unclassified")
+                self.assertTrue(result["reason"])
+                self.assertEqual(result["matchedRuleId"], "")
+
     def test_category_destinations_follow_bank_conditions_and_counts_are_distinct_scopes(self):
         from fin_ops_platform.services.input_invoice_usage_payment_rules import (
             classification_tree,
@@ -129,7 +159,7 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
             self.assertEqual(saved["rules"][0]["conditions"]["applicantNames"], ["李四", "黄亮"])
             for name in ["李四", "黄  亮", "黄\u3000亮", "黄\u200b亮"]:
                 self.assertEqual(provider.evaluate(PaymentStatusEvaluationContext(True, False, name, False, False, "invalid"))["code"], "offset")
-            self.assertEqual(provider.evaluate(PaymentStatusEvaluationContext(True, False, "王五", False, False, "invalid"))["code"], "waiting_payment")
+            self.assertEqual(provider.evaluate(PaymentStatusEvaluationContext(True, False, "王五", False, False, "invalid"))["code"], "unclassified")
             for invalid in [[], "李四", [None], ["  "]]:
                 rule["conditions"]["applicantNames"] = invalid
                 with self.assertRaises(InputInvoiceUsagePaymentRulesValidationError):
@@ -197,7 +227,7 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
         self.assertTrue(payload["permissions"]["canSave"])
         self.assertEqual([rule["id"] for rule in payload["rules"]][:2], ["cash_turnover_chen_xiuyun", "paid_full_match"])
         self.assertNotIn("pendingDirections", payload)
-        self.assertEqual(len(payload["rules"]), 6)
+        self.assertEqual(len(payload["rules"]), 10)
         self.assertEqual(
             payload["sourceMetadata"]["settingsKey"],
             "input_invoice_usage_payment_status_rules",
@@ -210,7 +240,9 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             current = app._app_settings_service.get_input_invoice_usage_payment_status_rules_payload(can_save=True)
             next_rules = [dict(rule) for rule in current["rules"]]
-            next_rules[1]["label"] = "已支付"
+            for rule in next_rules:
+                if rule["statusCode"] == "paid":
+                    rule["label"] = "已支付"
 
             response = app.handle_request(
                 "PUT",
@@ -233,7 +265,9 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
             app = build_application(data_dir=data_dir)
             current = app._app_settings_service.get_input_invoice_usage_payment_status_rules_payload(can_save=True)
             next_rules = [dict(rule) for rule in current["rules"]]
-            next_rules[1]["label"] = "已支付"
+            for rule in next_rules:
+                if rule["statusCode"] == "paid":
+                    rule["label"] = "已支付"
 
             updated = app._app_settings_service.update_input_invoice_usage_payment_status_rules(
                 {
@@ -313,7 +347,7 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
                 app._app_settings_service.update_input_invoice_usage_payment_status_rules(
                     {
                         **request,
-                        "rules": [*next_rules[:-1], {**next_rules[-1], "label": "人工待处理"}],
+                        "rules": [{**rule, "label": "人工待处理"} if rule["statusCode"] == "waiting_payment" else rule for rule in next_rules],
                     },
                     actor_id="finance-owner",
                 )
@@ -356,14 +390,16 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
 
         self.assertNotIn("fullyMatched", updated["rules"][1]["conditions"])
         self.assertNotIn("fullyMatched", reloaded["rules"][1]["conditions"])
-        self.assertEqual(status["code"], "unclassified")
+        self.assertEqual(status["code"], "paid")
 
     def test_query_service_uses_injected_rules_provider_for_payload_and_row_status(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             current = app._app_settings_service.get_input_invoice_usage_payment_status_rules_payload(can_save=True)
             next_rules = [dict(rule) for rule in current["rules"]]
-            next_rules[1]["label"] = "已支付"
+            for rule in next_rules:
+                if rule["statusCode"] == "paid":
+                    rule["label"] = "已支付"
             app._app_settings_service.update_input_invoice_usage_payment_status_rules(
                 {
                     "expectedVersion": current["version"],
@@ -433,7 +469,7 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
             )
             self.assertEqual(provider.payment_status_rules_payload()["rules"], [])
             result = provider.evaluate(PaymentStatusEvaluationContext(True, False, "王五", False, False, "invalid"))
-            self.assertEqual(result["label"], "未关联流水")
+            self.assertEqual(result["label"], "未分类")
             self.assertEqual(result["matchedRuleId"], "")
 
     def test_priority_disabled_and_unpaid_custom_conditions_are_explicit(self) -> None:
@@ -450,8 +486,8 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
         rules[1]["enabled"] = False
         self.assertEqual(evaluate_payment_status(settings, context)["matchedRuleId"], "later")
         unmatched = evaluate_payment_status(settings, PaymentStatusEvaluationContext(True, True, "", False, True, "greater"))
-        self.assertEqual(unmatched["code"], "invoice_greater_payment")
-        self.assertEqual(unmatched["matchedRuleId"], "")
+        self.assertEqual(unmatched["code"], "waiting_payment")
+        self.assertEqual(unmatched["matchedRuleId"], "later")
 
     def test_invalid_rule_values_fail_without_restoring_defaults(self) -> None:
         from fin_ops_platform.services.input_invoice_usage_payment_rules import (

@@ -60,7 +60,7 @@ test("OA applicant multiselect saves and reloads without fetching on the list pa
   expect(reads).toBe(1);
   if (await page.getByRole("button", { name: "更多页面操作" }).isVisible()) await page.getByRole("button", { name: "更多页面操作" }).click();
   await page.getByRole("button", { name: "发票与支付状态规则设置" }).click();
-  await expect(drawer.getByText("申请人（任一）=刘树刚、周洁莹、黄亮")).toBeVisible();
+  await expect(drawer.getByRole("button", { name: "冲 OA 申请人条件" })).toContainText("刘树刚、周洁莹、黄亮");
   await page.screenshot({ path: "../outputs/payment-rule-applicants-saved.png", animations: "disabled" });
   await page.setViewportSize({ width: 1024, height: 850 });
   await drawer.getByRole("button", { name: "冲 OA 申请人条件" }).click();

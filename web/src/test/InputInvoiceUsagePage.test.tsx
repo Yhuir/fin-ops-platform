@@ -188,6 +188,7 @@ const rowsPayload = {
   summary: {
     invoiceCount: 787,
     totalWithTax: "12345.67",
+    taxAmount: "1200.00", missingTaxAmountCount: 2,
     unclassifiedCount: 1,
   },
   statistics: {
@@ -568,6 +569,15 @@ describe("Input invoice usage page", () => {
     expect(compositeFilter).toContain("grid-template-columns: repeat(2, minmax(160px, 1fr))");
   });
 
+  test.each([{ taxAmount: null, missingTaxAmountCount: 1, expected: "税额合计 —（缺失 1 张）" }, { taxAmount: "0.00", missingTaxAmountCount: 0, expected: "税额合计 0.00" }])("filtered summary preserves missing tax versus a real zero: $taxAmount", async ({ taxAmount, missingTaxAmountCount, expected }) => {
+    installInputInvoiceUsageFetch({ ...rowsPayload, summary: { ...rowsPayload.summary, taxAmount, missingTaxAmountCount } });
+    renderAuthenticatedAppAt("/input-invoice-usage");
+    const summary = await screen.findByLabelText("当前筛选发票汇总");
+    await waitFor(() => expect(summary).toHaveTextContent(expected));
+    expect(summary).toHaveTextContent("787 张");
+    expect(summary).not.toHaveTextContent("51 张");
+  });
+
   test("renders a direct empty result without filter-options polling", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -678,7 +688,7 @@ describe("Input invoice usage page", () => {
     const headerRows = table.querySelectorAll("thead > tr");
     expect(headerRows).toHaveLength(2);
     const groupHeaders = Array.from(headerRows[0].querySelectorAll("th"));
-    expect(groupHeaders.map((header) => header.textContent)).toEqual(["进项发票", "支付状态", "OA", "流水"]);
+    expect(groupHeaders.map((header) => header.textContent)).toEqual(["进项发票787 张价税合计 12345.67税额合计 1200.00（缺失 2 张）", "支付状态", "OA", "流水"]);
     expect(groupHeaders.map((header) => header.colSpan)).toEqual([4, 1, 2, 3]);
     expect(groupHeaders[1]).toHaveAttribute("rowspan", "2");
     expect(groupHeaders[1]).toHaveAttribute("scope", "col");
@@ -1040,7 +1050,8 @@ describe("Input invoice usage page", () => {
     const user = userEvent.setup();
     const fetchMock = installInputInvoiceUsageFetch();
     renderAuthenticatedAppAt("/input-invoice-usage");
-    await user.click(await screen.findByRole("button", { name: "已使用 1 张" }));
+    await user.click(await screen.findByRole("button", { name: /使用状态/ }));
+    await user.click(await screen.findByRole("option", { name: "已使用", exact: true }));
     await user.click(screen.getByRole("button", { name: "OA 关联筛选" }));
     await user.click(await screen.findByRole("menuitemradio", { name: "未关联 OA" }));
     await waitFor(() => {
@@ -1173,10 +1184,9 @@ describe("Input invoice usage page", () => {
       expect(rowsRequests(fetchMock).length).toBeGreaterThan(0);
     });
     const request = rowsRequests(fetchMock)[0];
-    expect(request.searchParams.get("page")).toBe("1");
+    expect(request.searchParams.get("page")).toBe(status === "pending" ? "1" : "3");
     expect(JSON.parse(decodeURIComponent(request.searchParams.get("filters") ?? "[]"))).toEqual(status === "pending" ? [] : [
       { field: "payment_status", operator: "in", values: [status] },
-      { field: "usage_status", operator: "in", values: ["used"] },
     ]);
     expect(request.searchParams.get("sort_field")).toBe("invoice_no");
     expect(request.searchParams.get("sort_direction")).toBe("asc");
@@ -1207,7 +1217,7 @@ describe("Input invoice usage page", () => {
       expect(request.searchParams.get("page")).toBe("1");
       expect(request.searchParams.get("page_size")).toBe("50");
       expect(request.searchParams.get("keyword")).toBe("供应商");
-      expect(JSON.parse(decodeURIComponent(request.searchParams.get("filters") ?? "[]"))).toEqual([stored.filters[0], { field: "usage_status", operator: "in", values: ["used"] }]);
+      expect(JSON.parse(decodeURIComponent(request.searchParams.get("filters") ?? "[]"))).toEqual([stored.filters[0]]);
       expect(request.searchParams.get("sort_direction")).toBe("asc");
     }
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

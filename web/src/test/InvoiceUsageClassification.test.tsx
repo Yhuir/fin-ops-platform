@@ -37,8 +37,9 @@ describe("invoice usage classification", () => {
     const paid = screen.getByRole("group", { name: "已付款" });
     expect(within(paid).getAllByRole("button")).toHaveLength(11);
     expect(within(paid).getByRole("button", { name: "分类 10 2 张" })).toHaveAttribute("aria-pressed", "true");
-    await userEvent.click(screen.getByRole("button", { name: "待使用 10 张" }));
-    expect(onSelect).toHaveBeenCalledWith("unused");
+    expect(screen.queryByRole("button", { name: /已使用|待使用/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "未付款 0 张" }));
+    expect(onSelect).toHaveBeenCalledWith("unpaid");
     expect(screen.getByRole("button", { name: "未付款 0 张" })).toBeEnabled();
   });
 

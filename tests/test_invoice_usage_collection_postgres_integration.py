@@ -91,7 +91,7 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
         payload = service.list_rows()
         tree = payload["classification"]
         self.assertEqual([tree[key]["count"] for key in ("all", "used", "unused")], [5, 4, 1])
-        self.assertEqual([group["count"] for group in tree["groups"]], [4, 0])
+        self.assertEqual([group["count"] for group in tree["groups"]], [4, 1])
         self.assertEqual({row["invoiceId"]: row["paymentStatus"]["code"] for row in payload["rows"]},
                          {"unused": "waiting_payment", "equal": "paid", "less": "invoice_less_payment", "greater": "invoice_greater_payment", "income": "invoice_greater_payment"})
         filters = [{"field": "usage_status", "operator": "in", "values": ["used"]},
@@ -99,13 +99,64 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
                    {"field": "payment_group", "operator": "in", "values": ["paid"]}]
         filtered = service.list_rows(filters=filters)
         self.assertEqual(filtered["summary"]["invoiceCount"], 4)
-        self.assertEqual(filtered["classification"], tree)
+        self.assertEqual(filtered["classification"]["all"]["count"], 4)
+        self.assertEqual(filtered["classification"]["unused"]["count"], 0)
+        self.assertEqual([group["count"] for group in filtered["classification"]["groups"]], [4, 0])
         self.assertEqual(service.export_page(filters=filters)["rows"], filtered["rows"])
         linked = service.list_rows(filters=[{"field": "oa_relation", "operator": "in", "values": ["linked"]}])
         self.assertEqual(linked["classification"]["all"]["count"], 0)
         self.connection.execute("update app.workbench_pair_relations set status='withdrawn' where case_id='case-equal'")
         after = service.list_rows()["classification"]
         self.assertEqual([after[key]["count"] for key in ("all", "used", "unused")], [5, 3, 2])
+
+    def test_input_summary_deduplicates_shared_invoice_tax_and_net_sign_uses_signed_groups(self):
+        from fin_ops_platform.services.postgres_repositories.common import jsonb
+        rules = [{"id": "zero", "statusCode": "custom_zero", "label": "零净额", "priority": 1,
+                  "enabled": True, "conditions": {"hasBank": True, "invoiceNetSign": "zero"}},
+                 {"id": "positive", "statusCode": "custom_positive", "label": "正净额", "priority": 2,
+                  "enabled": True, "conditions": {"hasBank": True, "invoiceNetSign": "positive"}}]
+        self.connection.execute("insert into app.app_settings(settings_key,settings_payload) values('app_settings',%s)",
+                                (jsonb({"page_access_accounts": [], "access_control_version": 1, "input_invoice_usage_payment_status_rules": {"version": 1, "rules": rules}}),))
+        for key, gross, tax in (("blue", "113", "13"), ("red", "-113", "-13"), ("missing-tax", "50", None)):
+            self.connection.execute("""insert into app.invoices(legacy_mongo_id,invoice_type,invoice_no,
+                invoice_date,invoice_month,amount,signed_amount,total_with_tax,tax_amount,status)
+                values(%s,'input',%s,'2026-10-03','2026-10-01',%s,%s,%s,%s,'pending')""",
+                (key,key,gross,gross,gross,tax))
+        for bank_id in ("bank-zero", "bank-positive"):
+            self.connection.execute("""insert into app.bank_transactions(legacy_mongo_id,account_no,txn_direction,
+                counterparty_name_raw,amount,signed_amount,txn_date,txn_month,status)
+                values(%s,'test-account','outflow','测试',113,-113,'2026-10-03','2026-10-01','pending')""", (bank_id,))
+        for case, ids, types in (("case-zero", ["blue", "red", "bank-zero"], ["input_invoice", "input_invoice", "bank_transaction"]),
+                                 ("case-positive", ["blue", "bank-positive"], ["input_invoice", "bank_transaction"])):
+            self.connection.execute("""insert into app.workbench_pair_relations(case_id,relation_mode,status,version,
+                month_scope,row_ids,row_types,amount_check,special_metadata,raw_payload)
+                values(%s,'manual','active',1,'2026-10-01',%s,%s,'{}','{}','{}')""", (case,ids,types))
+        repository = PostgresInputInvoiceUsageQueryRepository(self.connection)
+        def load(**overrides):
+            return repository.load_page(**{ "page": 1, "page_size": 50, "keyword": None,
+                "invoice_date_from": None, "invoice_date_to": None, "month": None, "filters": [],
+                "sort_field": "invoice_date", "sort_direction": "desc", **overrides})
+        snapshot = load()
+        self.assertEqual(snapshot.summary["invoiceCount"], 3)
+        self.assertEqual(snapshot.summary["totalWithTax"], "50.00")
+        self.assertEqual(snapshot.summary["taxAmount"], "0.00")
+        self.assertEqual(snapshot.summary["missingTaxAmountCount"], 1)
+        self.assertEqual([group["count"] for group in snapshot.classification["groups"]], [2, 1])
+        facts = {group["row_key"]: group["payment_facts"] for group in snapshot.groups}
+        self.assertEqual(facts["relation:case-zero"]["invoice_net_sign"], "zero")
+        self.assertEqual(facts["relation:case-positive"]["invoice_net_sign"], "positive")
+        selected = load(filters=[{"field": "payment_status", "operator": "in", "values": ["custom_zero"]}])
+        self.assertEqual(selected.summary["invoiceCount"], 2)
+        self.assertEqual(selected.summary["taxAmount"], "0.00")
+        self.assertEqual(selected.summary["missingTaxAmountCount"], 0)
+        missing = load(filters=[{"field": "payment_group", "operator": "in", "values": ["unpaid"]}])
+        self.assertEqual(missing.summary["invoiceCount"], 1)
+        self.assertIsNone(missing.summary["taxAmount"])
+        self.assertEqual(missing.summary["missingTaxAmountCount"], 1)
+        self.assertEqual(missing.summary["unclassifiedCount"], 1)
+        empty = load(keyword="never-matches")
+        self.assertIsNone(empty.summary["taxAmount"])
+        self.assertEqual(empty.summary["missingTaxAmountCount"], 0)
 
     def test_output_relations_sharing_oa_do_not_lose_or_mix_bank_ownership(self):
         for key, amount in [('first', 100), ('second', 200)]:

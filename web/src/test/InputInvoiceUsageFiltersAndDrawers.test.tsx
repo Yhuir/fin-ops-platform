@@ -1316,215 +1316,123 @@ describe("Input invoice usage workflow drawers", () => {
     expect(screen.queryByText("previewHash")).not.toBeInTheDocument();
   });
 
-  test("payment status rules drawer loads Sheet4 rules as read-only content without editable controls or save state", async () => {
-    const loadRules = vi.fn<[], Promise<PaymentStatusRulesPayload>>(() => Promise.resolve({
-      version: "sheet4-v1",
-      readOnly: true,
-      permissions: { canSave: false },
-      rules: [
-        {
-          id: "waiting_payment",
-          label: "待付款（自动识别有oa无流水）",
-          description: "有发票、有 OA、无流水",
-          reason: "有发票、有 OA、无流水",
-          priority: 6,
-          enabled: true,
-          conditions: { hasOa: true, hasBank: false },
-        },
-        {
-          id: "paid_full_match",
-          label: "已付款（自动识别有oa有流水）",
-          description: "有发票、有 OA、有流水，并且关联台完全匹配",
-          reason: "有发票、有 OA、有流水，并且关联台完全匹配",
-          priority: 2,
-          enabled: true,
-          conditions: { hasOa: true, hasBank: true, fullyMatched: true },
-        },
-      ],
-      applicantOptions: [{ userId: "1", name: "陈秀云", account: "CHEN", enabled: true, matchName: "陈秀云" }, { userId: "2", name: "周洁莹", account: "ZHOU", enabled: false, matchName: "周洁莹" }],
-    }));
-
-    render(<PaymentStatusRulesDrawer open loadRules={loadRules} onClose={() => undefined} />);
-
-    await waitFor(() => expect(loadRules).toHaveBeenCalledTimes(1));
-    expect(await screen.findByRole("list", { name: "支付状态规则" })).toBeInTheDocument();
-    expect(screen.getByText("2 条规则")).toBeInTheDocument();
-    expect(screen.queryByRole("table", { name: "支付状态规则" })).not.toBeInTheDocument();
-    expect(await screen.findByText("待付款（自动识别有oa无流水）")).toBeInTheDocument();
-    expect(screen.queryByText("原因文案")).not.toBeInTheDocument();
-    expect(screen.getAllByText("有 OA").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("无流水")).toBeInTheDocument();
-    expect(screen.queryByText("待处理发票处理方向")).not.toBeInTheDocument();
-    expect(screen.queryByText("当前仅作为待处理方向标签，不影响自动分流。")).not.toBeInTheDocument();
-    expect(screen.queryByText(/版本\s*\d|sheet4-v1/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /保存|确认保存/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(screen.queryByText("保存成功")).not.toBeInTheDocument();
+  test("payment status rules display a read-only native table", async () => {
+    const payload: PaymentStatusRulesPayload = { version: 1, readOnly: true, permissions: { canSave: false }, applicantOptions: [], rules: [
+      { id: "r1", statusCode: "custom_wait", label: "待核付", description: "", priority: 1, enabled: true, conditions: { hasOa: true, hasBank: false } },
+    ] };
+    render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} onClose={() => undefined} />);
+    expect(await screen.findByRole("grid", { name: "支付状态规则" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "标签 1" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "保存" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/分类按实际流水/)).not.toBeInTheDocument();
   });
 
-  test("payment status rules drawer only enables edits when backend grants save permission and sends versioned save", async () => {
+  test("rules save explicit OA, net sign and comparison conditions with version", async () => {
     const user = userEvent.setup();
-    const loadRules = vi.fn<[], Promise<PaymentStatusRulesPayload>>(() => Promise.resolve({
-      version: 7,
-      readOnly: false,
-      permissions: { canSave: true },
-      rules: [
-        {
-          id: "waiting_payment",
-          label: "待付款",
-          description: "有发票、有 OA、无流水",
-          reason: "有发票、有 OA、无流水",
-          priority: 6,
-          enabled: true,
-          conditions: { hasOa: true, hasBank: false },
-        },
-      ],
-      applicantOptions: [{ userId: "1", name: "陈秀云", account: "CHEN", enabled: true, matchName: "陈秀云" }, { userId: "2", name: "周洁莹", account: "ZHOU", enabled: false, matchName: "周洁莹" }],
-    }));
-    const saveRules = vi.fn(() => Promise.resolve({
-      version: 8,
-      readOnly: false,
-      permissions: { canSave: true },
-      rules: [
-        {
-          id: "waiting_payment",
-          label: "待付款",
-          description: "已更新规则",
-          reason: "已更新规则",
-          priority: 6,
-          enabled: true,
-          conditions: { hasOa: true, hasBank: false },
-        },
-      ],
-      applicantOptions: [{ userId: "1", name: "陈秀云", account: "CHEN", enabled: true, matchName: "陈秀云" }, { userId: "2", name: "周洁莹", account: "ZHOU", enabled: false, matchName: "周洁莹" }],
-    }));
-
-    render(<PaymentStatusRulesDrawer open loadRules={loadRules} saveRules={saveRules} onClose={() => undefined} />);
-
-    expect(screen.queryByText(/版本\s*7/)).not.toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "保存" })).toBeDisabled();
-    expect(screen.getByText("1 条规则")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "还原" })).toBeDisabled();
-    const ruleEditor = await screen.findByLabelText("支付状态");
-    await user.clear(ruleEditor);
-    await user.type(ruleEditor, "已更新状态");
-    await user.click(screen.getByLabelText("已更新状态 流水条件"));
-    await user.click(await screen.findByRole("option", { name: "不限制" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "还原" })).toBeEnabled());
-    expect(screen.getByText("1 条规则 · 未保存")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "保存" }));
-
-    await waitFor(() => expect(saveRules).toHaveBeenCalledWith(expect.objectContaining({
-      expectedVersion: 7,
-      rules: [expect.objectContaining({ label: "已更新状态", enabled: true })],
-    })));
-    expect(saveRules.mock.calls[0][0].rules[0].conditions).toEqual({ hasOa: true });
-    expect(saveRules.mock.calls[0][0].idempotencyKey).toMatch(/^input-invoice-usage-payment-rules-save:/);
+    const payload: PaymentStatusRulesPayload = { version: 7, readOnly: false, permissions: { canSave: true }, applicantOptions: [
+      { userId: "1", name: "陈秀云", account: "CHEN", enabled: true, matchName: "陈秀云" }, { userId: "2", name: "周洁莹", account: "ZHOU", enabled: false, matchName: "周洁莹" },
+    ], rules: [{ id: "r1", statusCode: "custom_wait", label: "待核付", description: "", priority: 1, enabled: true, conditions: { hasOa: true, applicantNames: ["陈秀云"], hasBank: false } }] };
+    const saveRules = vi.fn(request => Promise.resolve({ ...payload, version: 8, rules: request.rules }));
+    render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} saveRules={saveRules} onClose={() => undefined} />);
+    await user.click(await screen.findByLabelText("待核付 OA 申请人条件"));
+    await user.click(await screen.findByRole("option", { name: "周洁莹 ZHOU" })); await user.keyboard("{Escape}");
+    await user.click(screen.getByLabelText("待核付 发票净额条件")); await user.click(await screen.findByRole("option", { name: "小于 0" }));
+    expect(screen.getByLabelText("待核付 金额比较条件")).toBeDisabled();
+    await user.click(screen.getByLabelText("待核付 流水条件")); await user.click(await screen.findByRole("option", { name: "有流水" }));
+    await user.click(screen.getByLabelText("待核付 金额比较条件")); await user.click(await screen.findByRole("option", { name: "发票＜付款" }));
+    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
+    await waitFor(() => expect(saveRules).toHaveBeenCalledWith(expect.objectContaining({ expectedVersion: 7, rules: [expect.objectContaining({ statusCode: "custom_wait", conditions: { hasOa: true, applicantNames: ["陈秀云", "周洁莹"], hasBank: true, invoiceNetSign: "negative", paymentComparison: "less" } })] })));
     expect(await screen.findByText("规则已保存。")).toBeInTheDocument();
   });
 
-  test("payment status rules drawer handles version conflicts by asking the user to reload", async () => {
+  test("no-bank comparison retains the incompatible draft until the condition is corrected", async () => {
     const user = userEvent.setup();
-    const loadRules = vi.fn<[], Promise<PaymentStatusRulesPayload>>(() => Promise.resolve({
-      version: 7,
-      readOnly: false,
-      permissions: { canSave: true },
-      rules: [{ id: "paid_full_match", label: "已付款", description: "旧规则", priority: 2 }],
-      applicantOptions: [],
-    }));
-    const saveRules = vi.fn(() => Promise.reject({ status: 409, code: "payment_status_rules_version_conflict" }));
-
-    render(<PaymentStatusRulesDrawer open loadRules={loadRules} saveRules={saveRules} onClose={() => undefined} />);
-
-    const ruleEditor = await screen.findByLabelText("支付状态");
-    await user.clear(ruleEditor);
-    await user.type(ruleEditor, "新规则");
-    await user.click(screen.getByRole("button", { name: "保存" }));
-
-    expect(await screen.findByText("规则已被其他人更新，请重新加载后再编辑。")).toBeInTheDocument();
-  });
-
-  test("rules support applicant editing, adding and deleting without obsolete settings", async () => {
-    const user = userEvent.setup();
-    const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: [{ userId: "1", name: "陈秀云", account: "CHEN", enabled: true, matchName: "陈秀云" }, { userId: "2", name: "周洁莹", account: "ZHOU", enabled: false, matchName: "周洁莹" }], rules: [{ id: "r1", statusCode: "paid", label: "已付款", description: "", priority: 1, enabled: true, conditions: { applicantNames: ["陈秀云"], hasOa: true } }] };
-    const saveRules = vi.fn((request) => Promise.resolve({ ...payload, version: 2, rules: request.rules }));
+    const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: [], rules: [{ id: "r1", statusCode: "custom_one", label: "比较", description: "", priority: 1, conditions: { hasBank: true, paymentComparison: "equal" } }] };
+    const saveRules = vi.fn(request => Promise.resolve({ ...payload, rules: request.rules }));
     render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} saveRules={saveRules} onClose={() => undefined} />);
-    expect(screen.queryByText(/按优先级从小到大匹配/)).not.toBeInTheDocument();
-    await user.click(await screen.findByLabelText("已付款 OA 申请人条件"));
-    await user.click(await screen.findByRole("option", { name: "周洁莹 ZHOU" }));
-    await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: "保存" }));
-    await waitFor(() => expect(saveRules).toHaveBeenCalledWith(expect.objectContaining({ rules: [expect.objectContaining({ conditions: { applicantNames: ["陈秀云", "周洁莹"], hasOa: true } })] })));
-    expect(saveRules.mock.calls[0][0]).not.toHaveProperty("pendingDirections");
-    expect(screen.queryByLabelText("原因文案")).not.toBeInTheDocument();
-    await user.click(screen.getByLabelText("已付款 OA 申请人条件"));
-    expect(await screen.findByRole("option", { name: "陈秀云 CHEN" })).toBeInTheDocument();
-    await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: "新增规则" }));
-    expect(screen.getAllByRole("listitem")).toHaveLength(2);
-    await user.click(screen.getAllByRole("button", { name: "删除规则 已付款" })[0]);
-    await user.click(screen.getByRole("button", { name: "保存" }));
-    await waitFor(() => expect(saveRules).toHaveBeenCalledTimes(2));
-    expect(saveRules.mock.calls[1][0].rules).toHaveLength(1);
-    expect(saveRules.mock.calls[1][0].rules[0].id).not.toBe("r1");
+    await user.click(await screen.findByLabelText("比较 流水条件")); await user.click(await screen.findByRole("option", { name: "无流水" }));
+    expect(screen.getByLabelText("比较 金额比较条件")).toBeDisabled();
+    expect(screen.getByLabelText("比较 金额比较条件")).toHaveTextContent("发票＝付款");
+    expect(screen.getByRole("alert")).toHaveTextContent("无流水不能比较付款金额"); expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+    await user.click(screen.getByLabelText("比较 流水条件")); await user.click(await screen.findByRole("option", { name: "有流水" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument(); expect(saveRules).not.toHaveBeenCalled();
   });
 
-  test("category label edits update every matching rule and new rules reuse the shared label", async () => {
+  test("initial rule-directory failure remains explicit and can be reloaded", async () => {
     const user = userEvent.setup();
-    const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: [], rules: [
-      { id: "offset1", statusCode: "offset", label: "冲", description: "", priority: 1, conditions: { hasBank: false } },
-      { id: "offset2", statusCode: "offset", label: "冲", description: "", priority: 2, conditions: { hasBank: false } },
-      { id: "paid1", statusCode: "paid", label: "已核付", description: "", priority: 3, conditions: { fullyMatched: true } },
-    ] };
-    const saveRules = vi.fn((request) => Promise.resolve({ ...payload, version: 2, rules: request.rules, applicantOptions: [] }));
-    render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} saveRules={saveRules} onClose={() => undefined} />);
-    const label = (await screen.findAllByLabelText("支付状态"))[0];
-    await user.clear(label);
-    await user.type(label, "抵账");
-    expect(screen.getAllByDisplayValue("抵账")).toHaveLength(2);
-    await user.click(screen.getByRole("button", { name: "新增规则" }));
-    expect(screen.getAllByDisplayValue("已核付")).toHaveLength(2);
-    await user.click(screen.getByRole("button", { name: "保存" }));
-    await waitFor(() => expect(saveRules).toHaveBeenCalled());
-    expect(saveRules.mock.calls[0][0].rules.filter((rule) => rule.statusCode === "offset").map((rule) => rule.label)).toEqual(["抵账", "抵账"]);
+    const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: [], rules: [] };
+    const loadRules = vi.fn().mockRejectedValueOnce(new Error("OA 目录不可用")).mockResolvedValue(payload);
+    render(<PaymentStatusRulesDrawer open loadRules={loadRules} saveRules={vi.fn()} onClose={() => undefined} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("OA 目录不可用"); expect(screen.queryByRole("button", { name: "保存" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "重新加载" }));
+    expect(await screen.findByRole("grid", { name: "支付状态规则" })).toBeInTheDocument(); expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  test("custom category creation and rename preserve its parent and stable identity", async () => {
+  test("new labels have stable identity and copied rules share rename without predefined classes", async () => {
     const user = userEvent.setup();
-    const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: [], rules: [
-      { id: "r1", statusCode: "paid", label: "已付款", description: "", priority: 1, enabled: true, conditions: { hasBank: true } },
-    ] };
+    const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: [], rules: [] };
     const saveRules = vi.fn(request => Promise.resolve({ ...payload, version: 2, rules: request.rules }));
-    const onSaved = vi.fn();
-    render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} saveRules={saveRules} onSaved={onSaved} onClose={() => undefined} />);
-    await user.click(await screen.findByLabelText("已付款 输出分类"));
-    await user.click(await screen.findByRole("option", { name: "新增分类", exact: true }));
-    const label = screen.getByLabelText("支付状态");
-    await user.clear(label);
-    await user.type(label, "规则一");
-    await user.selectOptions(screen.getByLabelText("规则一 金额比较条件"), "less");
-    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
-    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
-    const category = saveRules.mock.calls[0][0].rules[0];
-    expect(category).toMatchObject({ statusCode: expect.stringMatching(/^custom_/), label: "规则一", conditions: { hasBank: true, paymentComparison: "less" } });
-    await user.clear(screen.getByLabelText("支付状态"));
-    await user.type(screen.getByLabelText("支付状态"), "规则一改名");
-    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
-    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(2));
-    expect(saveRules.mock.calls[1][0].rules[0]).toMatchObject({ statusCode: category.statusCode, label: "规则一改名" });
+    render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} saveRules={saveRules} onClose={() => undefined} />);
+    await user.click(await screen.findByRole("button", { name: "新增规则" }));
+    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+    await user.type(screen.getByRole("textbox", { name: "标签 1" }), "抵账");
+    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+    await user.click(screen.getByLabelText("抵账 发票净额条件")); await user.click(await screen.findByRole("option", { name: "等于 0" }));
+    await user.click(screen.getByRole("button", { name: "复制规则 抵账" }));
+    await user.clear(screen.getByRole("textbox", { name: "标签 1" })); await user.type(screen.getByRole("textbox", { name: "标签 1" }), "抵账改名");
+    expect(screen.getByRole("textbox", { name: "标签 2" })).toHaveValue("抵账改名");
+    await user.click(screen.getAllByRole("checkbox", { name: "启用规则 抵账改名" })[0]);
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(saveRules).toHaveBeenCalledTimes(1));
+    const saved = saveRules.mock.calls[0][0].rules;
+    expect(saved[0].statusCode).toMatch(/^custom_/); expect(saved[1].statusCode).toBe(saved[0].statusCode); expect(saved[1].id).not.toBe(saved[0].id);
+    expect(saved[0].enabled).toBe(false);
+    await user.click(screen.getAllByRole("button", { name: "删除规则 抵账改名" })[0]);
+    await user.click(screen.getByRole("button", { name: "保存" })); await waitFor(() => expect(saveRules).toHaveBeenCalledTimes(2));
+    expect(saveRules.mock.calls[1][0].rules[0].statusCode).toBe(saved[0].statusCode);
   });
 
-  test("rules retain edits after close is cancelled and display save failures", async () => {
+  test("version conflicts preserve draft and reload gets a fresh version only after discard", async () => {
     const user = userEvent.setup();
-    const onClose = vi.fn();
-    render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve({ version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: [], rules: [] })} saveRules={() => Promise.reject(new Error("保存失败"))} onClose={onClose} />);
-    await user.click(await screen.findByRole("button", { name: "新增规则" }));
-    await user.click(screen.getByRole("button", { name: "关闭支付状态规则抽屉" }));
-    expect(await screen.findByRole("dialog", { name: "放弃未保存的规则？" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "继续编辑" }));
-    expect(onClose).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "保存" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("保存失败");
+    const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: [], rules: [{ id: "r1", statusCode: "custom_one", label: "原标签", description: "", priority: 1, conditions: { hasBank: true } }] };
+    const loadRules = vi.fn().mockResolvedValueOnce(payload).mockResolvedValue({ ...payload, version: 2 });
+    const saveRules = vi.fn().mockRejectedValueOnce({ status: 409 }).mockImplementation(request => Promise.resolve({ ...payload, version: 3, rules: request.rules }));
+    render(<PaymentStatusRulesDrawer open loadRules={loadRules} saveRules={saveRules} onClose={() => undefined} />);
+    await user.type(await screen.findByRole("textbox", { name: "标签 1" }), "草稿"); await user.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("规则已被其他人更新");
+    expect(screen.getByRole("textbox", { name: "标签 1" })).toHaveValue("原标签草稿");
+    await user.click(screen.getByRole("button", { name: "重新加载" })); await user.click(screen.getByRole("button", { name: "继续编辑" })); expect(loadRules).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "重新加载" })); await user.click(screen.getByRole("button", { name: "放弃修改" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "标签 1" })).toHaveValue("原标签"));
+    await user.type(screen.getByRole("textbox", { name: "标签 1" }), "新版"); await user.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(saveRules.mock.calls[1][0].expectedVersion).toBe(2));
+  });
+
+  test("save success and list refresh failure are distinct and retry never saves twice", async () => {
+    const user = userEvent.setup();
+    const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: [], rules: [{ id: "r1", statusCode: "custom_one", label: "标签", description: "", priority: 1, conditions: { hasBank: true } }] };
+    const saveRules = vi.fn(request => Promise.resolve({ ...payload, version: 2, rules: request.rules }));
+    const onSaved = vi.fn().mockRejectedValueOnce(new Error("规则已保存，列表刷新失败")).mockResolvedValue(undefined);
+    render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} saveRules={saveRules} onSaved={onSaved} onClose={() => undefined} />);
+    await user.type(await screen.findByRole("textbox", { name: "标签 1" }), "修改"); await user.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("列表刷新失败"); expect(screen.getByText("规则已保存。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled(); await user.click(screen.getByRole("button", { name: "重试刷新" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument()); expect(saveRules).toHaveBeenCalledTimes(1);
+  });
+
+  test("rules retain unsaved edits on cancelled close and save failure, and explicit empty rules can save", async () => {
+    const user = userEvent.setup(); const onClose = vi.fn();
+    const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: [], rules: [] };
+    const saveRules = vi.fn().mockRejectedValueOnce(new Error("保存失败")).mockImplementation(request => Promise.resolve({ ...payload, rules: request.rules }));
+    render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} saveRules={saveRules} onClose={onClose} />);
+    await user.click(await screen.findByRole("button", { name: "新增规则" })); await user.type(screen.getByRole("textbox", { name: "标签 1" }), "新标签");
+    await user.click(screen.getByLabelText("新标签 流水条件")); await user.click(await screen.findByRole("option", { name: "无流水" }));
+    await user.click(screen.getByRole("button", { name: "关闭支付状态规则抽屉" })); await user.click(screen.getByRole("button", { name: "继续编辑" })); expect(onClose).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "保存" })); expect(await screen.findByRole("alert")).toHaveTextContent("保存失败");
+    expect(screen.getByRole("textbox", { name: "标签 1" })).toHaveValue("新标签");
+    await user.click(screen.getByRole("button", { name: "保存" })); await waitFor(() => expect(saveRules).toHaveBeenCalledTimes(2));
+    await user.click(screen.getByRole("button", { name: "删除规则 新标签" })); await user.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(saveRules.mock.calls[2][0].rules).toEqual([]));
   });
 
   test("parent state can keep the two workflow drawers mutually exclusive", async () => {

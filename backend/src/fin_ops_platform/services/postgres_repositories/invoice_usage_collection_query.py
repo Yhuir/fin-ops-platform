@@ -9,7 +9,6 @@ from typing import Any
 from fin_ops_platform.services.bank_details_canonical_query import PostgresBankDetailsCanonicalQueryRepository
 from fin_ops_platform.services.bank_transaction_unit import original_bank_transaction
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
-    OUTPUT_PARENTS,
     classification_tree,
     normalize_payment_status_rules_settings,
     payment_categories,
@@ -206,7 +205,7 @@ class PostgresInputInvoiceUsageQueryRepository:
                 keyword=keyword,
                 invoice_date_from=invoice_date_from,
                 invoice_date_to=invoice_date_to,
-                filters=[item for item in filters if item["field"] not in {"payment_status", "payment_group", "usage_status"}],
+                filters=[item for item in filters if item["field"] not in {"payment_status", "payment_group"}],
                 field_sql=_INPUT_FIELDS,
                 invoice_ids=invoice_ids,
                 row_id=row_id,
@@ -244,7 +243,7 @@ class PostgresInputInvoiceUsageQueryRepository:
                         array(select distinct relation.case_id from group_relation_ids scope
                               join active_relations relation on relation.id = scope.relation_id
                               where scope.group_key = filtered_rows.group_key) as relation_case_ids,
-                        status_code, fully_matched, invoice_oa_amount_matched, payment_comparison,
+                        status_code, fully_matched, invoice_oa_amount_matched, payment_comparison, invoice_net_sign,
                         usage_status, has_oa_relation, has_bank_relation,
                         oa_count, bank_count, oa_applicant,
                         array[]::text[] as supporting_group_keys,
@@ -264,6 +263,8 @@ class PostgresInputInvoiceUsageQueryRepository:
                         count(*)::bigint as row_count,
                         (select case when count(*) = 0 then 0 when count(invoice.total_with_tax) = count(*) then sum(invoice.total_with_tax) end from invoice_rows invoice join selected_members member using (invoice_id))::numeric as total_with_tax,
                         (select count(distinct member.invoice_id) from filtered_rows unclassified cross join lateral unnest(unclassified.invoice_ids) member(invoice_id) where unclassified.status_code = 'unclassified')::bigint as unclassified_count,
+                        (select sum(invoice.tax_amount) from invoice_rows invoice join selected_members member using (invoice_id))::numeric as tax_amount,
+                        (select count(*) from invoice_rows invoice join selected_members member using (invoice_id) where invoice.tax_amount is null)::bigint as missing_tax_amount_count,
                         (select count(*) from selected_members)::bigint as invoice_count
                     from filtered_rows
                 ),
@@ -301,8 +302,7 @@ class PostgresInputInvoiceUsageQueryRepository:
                     from status_option_rows
                     cross join lateral unnest(invoice_ids) member(invoice_id)
                     cross join lateral (values ('all'), (usage_status),
-                        (case when usage_status = 'used' then payment_group end),
-                        (case when usage_status = 'used' then payment_group || ':' || status_code end)
+                        (payment_group), (payment_group || ':' || status_code)
                     ) category(value)
                     where category.value is not null
                     group by category.value
@@ -378,7 +378,7 @@ class PostgresInputInvoiceUsageQueryRepository:
         filtered_total = int(summary_row.get("row_count") or 0)
         invoice_count = int(summary_row.get("invoice_count") or 0)
         labels = {item["id"]: item["label"] for item in payment_categories(payment_settings)}
-        labels["unclassified"] = "无法比较"
+        labels["unclassified"] = "未分类"
         return InvoiceUsageCollectionCanonicalSnapshot(
             bank_labels=bank_labels,
             groups=facts["groups"],
@@ -392,6 +392,8 @@ class PostgresInputInvoiceUsageQueryRepository:
                 "invoiceCount": invoice_count,
                 "totalWithTax": _money(summary_row["total_with_tax"]) if summary_row.get("total_with_tax") is not None else "",
                 "unclassifiedCount": int(summary_row.get("unclassified_count") or 0),
+                "taxAmount": _money(summary_row["tax_amount"]) if summary_row.get("tax_amount") is not None else None,
+                "missingTaxAmountCount": int(summary_row.get("missing_tax_amount_count") or 0),
             },
             statistics={
                 "invoiceCount": int(statistics_row.get("input_invoice_count") or 0),
@@ -1118,7 +1120,10 @@ def _fact_cte(
                 when not facts.bank_comparison_resolved then 'ambiguous_bank_scope'
                 when abs(facts.total_with_tax - (facts.bank_outflow_total - facts.bank_inflow_total)) <= 0.01 then 'equal'
                 when facts.total_with_tax < facts.bank_outflow_total - facts.bank_inflow_total then 'less'
-                else 'greater' end as payment_comparison
+                else 'greater' end as payment_comparison,
+                case when facts.total_with_tax is null then null
+                     when facts.total_with_tax > 0 then 'positive'
+                     when facts.total_with_tax < 0 then 'negative' else 'zero' end as invoice_net_sign
             from group_facts facts
         ), classified_rows as (
             select facts.*, {status_case} as status_code from payment_facts facts
@@ -1716,12 +1721,6 @@ def _input_payment_status_case(
             else {}
         )
         predicates: list[str] = []
-        if code in OUTPUT_PARENTS:
-            predicates.append("facts.has_bank_relation" if OUTPUT_PARENTS[code] == "paid" else "not facts.has_bank_relation")
-        expected = {"paid": "equal", "invoice_less_payment": "less", "invoice_greater_payment": "greater"}.get(code)
-        if expected:
-            predicates.append("facts.payment_comparison = %s")
-            params.append(expected)
         if "paymentComparison" in conditions:
             predicates.append("facts.payment_comparison = %s")
             params.append(conditions["paymentComparison"])
@@ -1733,6 +1732,9 @@ def _input_payment_status_case(
         }.items():
             if key in conditions:
                 predicates.append(column if bool(conditions[key]) else f"not ({column})")
+        if "invoiceNetSign" in conditions:
+            predicates.append("facts.invoice_net_sign = %s")
+            params.append(conditions["invoiceNetSign"])
         applicants = conditions.get("applicantNames", [])
         if applicants:
             predicates.append("regexp_replace(facts.oa_applicant, '[[:space:]​﻿]+', '', 'g') = any(%s::text[])")
@@ -1741,11 +1743,7 @@ def _input_payment_status_case(
             fragments.append(
                 f"when {' and '.join(predicates)} then '{_safe_code(code)}'"
             )
-    fragments.extend(["when not facts.has_bank_relation then 'waiting_payment'",
-                      "when facts.payment_comparison = 'equal' then 'paid'",
-                      "when facts.payment_comparison = 'less' then 'invoice_less_payment'",
-                      "when facts.payment_comparison = 'greater' then 'invoice_greater_payment'"])
-    return ("case " + " ".join(fragments) + " else 'unclassified' end", params)
+    return ("case " + " ".join(fragments) + " else 'unclassified' end" if fragments else "'unclassified'::text", params)
 
 
 def _where_sql(
@@ -1979,6 +1977,7 @@ def _group_payload(
             "fully_matched": bool(row.get("fully_matched")),
             "invoice_oa_amount_matched": bool(row.get("invoice_oa_amount_matched")),
             "payment_comparison": row["payment_comparison"],
+            "invoice_net_sign": row["invoice_net_sign"],
         }
         payload["row_key"] = (
             f"relation:{relation_case_id}"

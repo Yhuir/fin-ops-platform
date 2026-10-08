@@ -22,6 +22,9 @@ from fin_ops_platform.services.input_invoice_usage_payment_rules import AppSetti
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
+from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_query import (
+    InvoiceUsageCollectionCanonicalSnapshot,
+)
 from fin_ops_platform.services.target_oa_applicant_token_provider import TargetOaApplicantTokenProvider
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
@@ -51,6 +54,60 @@ class StaticOAProjection:
 
     def create_draft(self) -> None:
         self.write_calls.append("create_draft")
+
+
+class CanonicalSnapshotRepository:
+    """Explicit API fixture; PostgreSQL query semantics have separate integration tests."""
+
+    def __init__(self, assembler: InputInvoiceUsageQueryService) -> None:
+        self.assembler = assembler
+
+    def load_page(self, *, page, page_size, tenant_id="default", invoice_level=False, **query):
+        del tenant_id, invoice_level
+        context = self.assembler._query_context()
+        rows = self.assembler._filtered_sorted_rows(context=context, **query)
+        selected = rows[(page - 1) * page_size:page * page_size]
+        return self._snapshot(context, selected, rows, page=page, page_size=page_size)
+
+    def load_rows_by_invoice_ids(self, invoice_ids, *, tenant_id="default", invoice_level=False):
+        del tenant_id, invoice_level
+        context = self.assembler._query_context()
+        rows = self.assembler._build_rows(month=None, context=context)
+        selected = [row for row in rows if row["invoiceId"] in invoice_ids]
+        return self._snapshot(context, selected, selected)
+
+    def load_row(self, row_id, *, tenant_id="default"):
+        del tenant_id
+        context = self.assembler._query_context()
+        rows = self.assembler._build_rows(month=None, context=context)
+        selected = [row for row in rows if row["id"] == row_id or any(
+            item["bankTransactionId"] == row_id for item in row["bankTransactions"]["summaries"]
+        )]
+        return self._snapshot(context, selected, selected)
+
+    def load_oa_record(self, oa_id, *, tenant_id="default"):
+        del tenant_id
+        return self.assembler._query_context().oa_records_by_id([oa_id]).get(oa_id)
+
+    def _snapshot(self, context, selected, rows, *, page=1, page_size=200):
+        groups = self.assembler._invoice_groups(month=None, context=context)
+        by_row_id = {
+            self.assembler._row_payload(group, context=context)["id"]: group for group in groups
+        }
+        row_ids = [invoice.id for group in groups for invoice in group["line_items"]]
+        relations = context.distributed_relations_for_row_ids(row_ids)
+        related_ids = [row_id for relation in relations for row_id in relation["row_ids"]]
+        transactions = list(context.bank_transactions_by_id().values())
+        return InvoiceUsageCollectionCanonicalSnapshot(
+            groups=[by_row_id[row["id"]] for row in selected],
+            supporting_groups=[], relations=relations, transactions=transactions,
+            oa_records=list(context.oa_records_by_id(related_ids).values()), overlays={},
+            pagination={"page": page, "pageSize": page_size, "total": len(rows)},
+            summary=self.assembler._summary(rows), statistics={},
+            facet_counts={field["field"]: field["options"] for field in self.assembler.filter_options_for_rows(rows=rows)["fields"]},
+            payment_status_labels={}, payment_status_rules=self.assembler.payment_status_rules(),
+            bank_labels={transaction.id: [] for transaction in transactions},
+        )
 
 
 class FakeOaDraftClient:
@@ -303,6 +360,27 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "canonical query repository"):
             app._input_invoice_usage_page_query_service()
+
+    def test_missing_canonical_repository_returns_unavailable_without_local_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._install_service(app, invoices=[self._invoice("inv-unavailable", "2100", "供应商")])
+            app._input_invoice_usage_canonical_query_repository = None
+            del app._input_invoice_usage_export_service_instance
+            for path in (
+                "/api/input-invoice-usage/rows",
+                "/api/input-invoice-usage/filter-options",
+                "/api/input-invoice-usage/export-summary",
+                "/api/input-invoice-usage/export",
+                "/api/input-invoice-usage/invoices/inv-unavailable/detail",
+                "/api/input-invoice-usage/bank-transactions/bank-unavailable/detail",
+                "/api/input-invoice-usage/oa/oa-unavailable/detail",
+                "/api/input-invoice-usage/rows/inv-unavailable/relation-details?kind=invoice",
+            ):
+                with self.subTest(path=path):
+                    response = app.handle_request("GET", path)
+                    self.assertEqual(response.status_code, 503)
+                    self.assertEqual(json.loads(response.body)["error"]["code"], "input_invoice_usage_query_unavailable")
 
     def test_bank_filter_options_and_invoice_date_sort_are_http_contract_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1170,6 +1248,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
             oa_projection=oa_projection,
         )
         app._input_invoice_usage_query_service = query_service
+        app._input_invoice_usage_canonical_query_repository = CanonicalSnapshotRepository(query_service)
         app._input_invoice_usage_sql_read_repository = object()
         for attr in (
             "_input_invoice_usage_read_model_fresh_gate_instance",

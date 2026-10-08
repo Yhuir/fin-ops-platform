@@ -198,6 +198,7 @@ EXPECTED_MIGRATION_FILES = [
     "0185_invoice_source_values_nullable.sql",
     "0186_oa_applicant_verified_identity.sql",
     "0187_tax_certification_evidence.sql",
+    "0188_input_invoice_payment_rules_explicit.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "app", "staging", "cash")
 TEST_TABLES = (

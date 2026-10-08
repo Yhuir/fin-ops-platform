@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import Mock
 from decimal import Decimal
 
 from fin_ops_platform.services.input_invoice_usage_payment_rules import AppSettingsInputInvoiceUsagePaymentRulesProvider
@@ -37,6 +38,29 @@ class InvoiceLifecyclePolicyTests(unittest.TestCase):
 
         self.assertEqual(status["code"], "paid")
         self.assertEqual(status["label"], "发票＝付款")
+
+    def test_input_invoice_net_sign_and_label_cross_policy_boundary_unchanged(self) -> None:
+        from fin_ops_platform.services.input_invoice_usage_payment_rules import evaluate_payment_status
+
+        settings = {"version": 1, "rules": [{
+            "id": "zero-net", "statusCode": "custom_zero", "label": "净额为零",
+            "priority": 1, "enabled": True, "conditions": {"invoiceNetSign": "zero"},
+        }]}
+        provider = Mock()
+        provider.evaluate.side_effect = lambda context: evaluate_payment_status(settings, context)
+        policy = InvoiceLifecyclePolicy(input_payment_rules_provider=provider)
+        for sign, expected in (("zero", "custom_zero"), ("positive", "unclassified"),
+                               ("negative", "unclassified"), (None, "unclassified")):
+            with self.subTest(sign=sign):
+                status = policy.evaluate_input_invoice_payment(
+                    has_oa=False, has_bank=False, applicant_name="",
+                    fully_matched=False, invoice_oa_amount_matched=False,
+                    payment_comparison="missing_bank_evidence", invoice_net_sign=sign,
+                )
+                self.assertEqual(status["code"], expected)
+                if sign == "zero":
+                    self.assertEqual(status["label"], "净额为零")
+                self.assertEqual(provider.evaluate.call_args.args[0].invoice_net_sign, sign)
 
     def test_input_invoice_payment_requires_explicit_rules_provider(self) -> None:
         policy = InvoiceLifecyclePolicy()

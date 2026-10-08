@@ -44,21 +44,6 @@
   color: #f7f9fc;
 }
 
-.invoice-usage-classification__structure {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 120px;
-}
-
-.invoice-usage-classification__used-region { min-width: 0; }
-.invoice-usage-classification__used { background: #b8ccb6; color: #294b36; }
-.invoice-usage-classification__unused {
-  flex-direction: column;
-  background: #d2c8df;
-  color: #514260;
-  border-left: 1px solid #b5a6c7;
-  border-radius: 0 0 5px 0;
-}
-
 .invoice-usage-classification__groups { display: flex; flex-wrap: wrap; }
 .invoice-usage-classification__group {
   --classification-header: #b5cddd;
@@ -66,14 +51,13 @@
   --classification-child: #eaf1f6;
   --classification-ink: #274b65;
   --classification-border: #a6becf;
-  flex: 1 1 220px;
+  flex: 1 1 320px;
   min-width: 0;
   background: var(--classification-region);
   color: var(--classification-ink);
   border-top: 1px solid var(--classification-border);
 }
 
-.invoice-usage-classification__group--paid { flex-grow: 3; flex-basis: 480px; }
 .invoice-usage-classification__group--unpaid {
   --classification-header: #d8bea5;
   --classification-region: #eee0d2;
@@ -100,7 +84,6 @@
 }
 
 @container (max-width: 700px) {
-  .invoice-usage-classification__structure { grid-template-columns: minmax(0, 1fr) 90px; }
   .invoice-usage-classification__group { flex-basis: 100%; }
   .invoice-usage-classification__button { padding: 8px; }
 }

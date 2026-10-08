@@ -83,40 +83,7 @@ class InputInvoiceUsageCanonicalQueryService:
             self._row_assembler._parse_sort(sort_field, sort_direction)
         )
         if self._repository is None:
-            payload = self._row_assembler.list_rows(
-                page=page_number,
-                page_size=page_limit,
-                keyword=keyword,
-                invoice_date_from=invoice_date_from,
-                invoice_date_to=invoice_date_to,
-                month=month,
-                filters=parsed_filters,
-                sort_field=normalized_sort_field,
-                sort_direction=normalized_sort_direction,
-            )
-            options = self._row_assembler.filter_options(
-                keyword=keyword,
-                invoice_date_from=invoice_date_from,
-                invoice_date_to=invoice_date_to,
-                month=month,
-                filters=parsed_filters,
-            )
-            status_options = self._row_assembler.filter_options(
-                keyword=keyword,
-                invoice_date_from=invoice_date_from,
-                invoice_date_to=invoice_date_to,
-                month=month,
-                filters=_filters_without_field(parsed_filters, "payment_status"),
-            )
-            payload["filterOptions"] = _replace_filter_option_field(
-                list(options.get("fields") or []),
-                list(status_options.get("fields") or []),
-                field="payment_status",
-            )
-            payload["statistics"] = _input_statistics_from_rows(
-                list(payload.get("rows") or [])
-            )
-            return payload
+            raise InputInvoiceUsageError("input_invoice_usage_query_unavailable", "进项发票查询未配置。", status_code=503)
         snapshot = self._repository.load_page(
             page=page_number,
             page_size=page_limit,
@@ -228,7 +195,7 @@ class InputInvoiceUsageCanonicalQueryService:
             kwargs.get("sort_direction"),
         )
         if self._repository is None:
-            raise RuntimeError("Invoice export requires the canonical repository.")
+            raise InputInvoiceUsageError("input_invoice_usage_query_unavailable", "进项发票查询未配置。", status_code=503)
         snapshot = self._repository.load_page(
             page=1,
             page_size=limit,
@@ -256,25 +223,7 @@ class InputInvoiceUsageCanonicalQueryService:
         tenant_id: str = "default",
     ) -> dict[str, Any]:
         if self._repository is None:
-            rows = [
-                row
-                for row in self._row_assembler._build_rows(
-                    month=None,
-                    context=self._row_assembler._query_context(),
-                )
-                if str(row.get("invoiceId") or "") in set(invoice_ids)
-                or any(
-                    str(item.get("invoiceId") or "") in set(invoice_ids)
-                    for item in list(
-                        (row.get("invoiceRelations") or {}).get("summaries") or []
-                    )
-                    if isinstance(item, dict)
-                )
-            ]
-            return {
-                "rows": rows,
-                "pagination": {"page": 1, "pageSize": len(rows), "total": len(rows)},
-            }
+            raise InputInvoiceUsageError("input_invoice_usage_query_unavailable", "进项发票查询未配置。", status_code=503)
         snapshot = self._repository.load_rows_by_invoice_ids(
             invoice_ids,
             tenant_id=tenant_id,
@@ -294,7 +243,7 @@ class InputInvoiceUsageCanonicalQueryService:
         tenant_id: str = "default",
     ) -> dict[str, Any]:
         if self._repository is None:
-            return self._row_assembler.invoice_detail(invoice_id)
+            raise InputInvoiceUsageError("input_invoice_usage_query_unavailable", "进项发票查询未配置。", status_code=503)
         snapshot = self._repository.load_rows_by_invoice_ids(
             [invoice_id],
             tenant_id=tenant_id,
@@ -315,7 +264,7 @@ class InputInvoiceUsageCanonicalQueryService:
         tenant_id: str = "default",
     ) -> dict[str, Any]:
         if self._repository is None:
-            return self._row_assembler.bank_transaction_detail(bank_transaction_id)
+            raise InputInvoiceUsageError("input_invoice_usage_query_unavailable", "进项发票查询未配置。", status_code=503)
         snapshot = self._repository.load_row(
             bank_transaction_id,
             tenant_id=tenant_id,
@@ -337,7 +286,7 @@ class InputInvoiceUsageCanonicalQueryService:
         tenant_id: str = "default",
     ) -> dict[str, Any]:
         if self._repository is None:
-            return self._row_assembler.oa_detail(oa_id)
+            raise InputInvoiceUsageError("input_invoice_usage_query_unavailable", "进项发票查询未配置。", status_code=503)
         record = self._repository.load_oa_record(oa_id, tenant_id=tenant_id)
         return _oa_detail(record, oa_id=oa_id)
 
@@ -355,7 +304,7 @@ class InputInvoiceUsageCanonicalQueryService:
                 "kind must be oa, bank or invoice.",
             )
         if self._repository is None:
-            return self._row_assembler.row_relation_details(row_id, kind=kind)
+            raise InputInvoiceUsageError("input_invoice_usage_query_unavailable", "进项发票查询未配置。", status_code=503)
         snapshot = self._repository.load_row(row_id, tenant_id=tenant_id)
         rows = self._rows_from_snapshot(snapshot)
         row = next((item for item in rows if item.get("id") == row_id), None)
@@ -634,56 +583,3 @@ def _oa_detail(record: Any | None, *, oa_id: str) -> dict[str, Any]:
     if record is None:
         return {"oaId": oa_id, "detailAvailable": False}
     return oa_source_detail(record)
-
-
-def _input_statistics_from_rows(rows: list[dict[str, Any]]) -> dict[str, int]:
-    invoice_count = sum(
-        max(
-            1,
-            len(
-                list(
-                    (
-                        row.get("invoiceRelations")
-                        if isinstance(row.get("invoiceRelations"), dict)
-                        else {}
-                    ).get("summaries")
-                    or []
-                )
-            ),
-        )
-        for row in rows
-    )
-    oa_rows = {
-        str(summary.get("id") or summary.get("oaId") or ""): summary
-        for row in rows
-        for summary in list((row.get("oa") or {}).get("summaries") or [])
-        if isinstance(summary, dict)
-        and str(summary.get("id") or summary.get("oaId") or "")
-    }
-    bank_rows = {
-        str(summary.get("id") or ""): summary
-        for row in rows
-        for summary in list((row.get("bankTransactions") or {}).get("summaries") or [])
-        if isinstance(summary, dict) and str(summary.get("id") or "")
-    }
-    return {
-        "invoiceCount": invoice_count,
-        "completedOaCount": sum(
-            str(summary.get("workflowStatus") or "").strip().lower()
-            in {"", "completed", "已完成", "approved", "2"}
-            for summary in oa_rows.values()
-        ),
-        "inProgressOaCount": sum(
-            str(summary.get("workflowStatus") or "").strip().lower()
-            in {"in_progress", "进行中"}
-            for summary in oa_rows.values()
-        ),
-        "expenseTransactionCount": sum(
-            str(summary.get("direction") or "") in {"outflow", "支出"}
-            for summary in bank_rows.values()
-        ),
-        "incomeTransactionCount": sum(
-            str(summary.get("direction") or "") in {"inflow", "收入"}
-            for summary in bank_rows.values()
-        ),
-    }

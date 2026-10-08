@@ -1595,6 +1595,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "/api/tax-offset/certified-imports",
             "resolve_mutation_session",
             "certified_import_records_provider",
+            "actor_id=self._import_owner(session)",
         ):
             if marker not in route_class:
                 violations.append(f"tax route owner is missing marker {marker}")
@@ -1604,7 +1605,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "resolve_read_session=self._resolve_tax_offset_read_session",
             "resolve_mutation_session=self._resolve_tax_offset_mutation_session",
             "load_json_body=self._load_json_body",
-            "actor_id_provider=self._tax_offset_actor_id",
+            "revoke_batch_provider=self._tax_certified_import_application_service.revoke_batch",
             "certified_import_records_provider=self._tax_certified_import_application_service.records_payload",
         ):
             if marker not in route_factory:

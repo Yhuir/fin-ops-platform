@@ -796,6 +796,7 @@ class InputInvoiceUsageQueryService:
             fully_matched=invoice_oa_matched and payment_comparison == "equal",
             invoice_oa_amount_matched=invoice_oa_matched,
             payment_comparison=payment_comparison,
+            invoice_net_sign=(None if invoice_total is None else "positive" if invoice_total > 0 else "negative" if invoice_total < 0 else "zero"),
         )
 
     def _first_confirmed_oa_applicant(

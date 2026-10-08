@@ -63,6 +63,7 @@ class InvoiceLifecyclePolicy:
         fully_matched: bool,
         invoice_oa_amount_matched: bool,
         payment_comparison: str,
+        invoice_net_sign: str | None = None,
     ) -> dict[str, str]:
         if self._input_payment_rules_provider is None:
             raise ValueError("input_payment_rules_provider is required for input invoice usage payment evaluation.")
@@ -74,6 +75,7 @@ class InvoiceLifecyclePolicy:
                 fully_matched=fully_matched,
                 invoice_oa_amount_matched=invoice_oa_amount_matched,
                 payment_comparison=payment_comparison,
+                invoice_net_sign=invoice_net_sign,
             )
         )
 

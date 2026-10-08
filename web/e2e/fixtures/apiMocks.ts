@@ -3328,7 +3328,7 @@ function inputInvoiceUsageClassification(rows: Array<{ payment_status: { code: s
       id: `category:${item.id}`, label: item.label, count: used.filter(row => row.payment_status.code === item.id).length,
     }));
     return { id: parent, label: parent === "paid" ? "已付款" : "未付款", tone: parent,
-      count: used.filter(row => (row.bank.relation_count > 0 ? "paid" : "unpaid") === parent).length, children };
+      count: rows.filter(row => (row.bank.relation_count > 0 ? "paid" : "unpaid") === parent).length, children };
   });
   return { all: { id: "all", label: "全部发票", count: rows.length },
     used: { id: "used", label: "已使用", count: used.length },
@@ -3490,6 +3490,7 @@ function inputInvoiceUsageRowsPayload(
   return {
     rows,
     classification: inputInvoiceUsageClassification(rows),
+    summary: { invoiceCount: rows.length, totalWithTax: "168.00", taxAmount: null, missingTaxAmountCount: rows.length, unclassifiedCount: 0 },
     pagination: { page: 1, page_size: 20, total: rows.length },
     filter_config: [
       { field: "seller_name", label: "销方名称", mode: "enum_multi", sortable: true, operators: ["in", "contains"] },
@@ -3870,6 +3871,7 @@ function inputInvoiceUsageFilterSortRowsPayload(url?: URL) {
   return {
     rows: filteredRows.slice(offset, offset + pageSize),
     classification: inputInvoiceUsageClassification(rows),
+    summary: { invoiceCount: filteredRows.length, totalWithTax: "4500.00", taxAmount: null, missingTaxAmountCount: filteredRows.length, unclassifiedCount: 0 },
     pagination: { page, page_size: pageSize, total: filteredRows.length },
     filter_config: inputInvoiceUsageFilterConfig(),
     filter_options: inputInvoiceUsageFilterSortOptionsPayload().fields,

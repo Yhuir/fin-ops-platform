@@ -10,7 +10,7 @@ function waitForRows(page: Page) {
 
 async function expectGroupedHeader(table: Locator) {
   const groups = table.locator("thead > tr").first().locator("th");
-  await expect(groups).toHaveText(["进项发票", "支付状态", "OA", "流水"]);
+  await expect(groups).toHaveText([/^进项发票.*张价税合计.*税额合计/, "支付状态", "OA", "流水"]);
   expect(await groups.evaluateAll(headers => headers.map(header => (header as HTMLTableCellElement).colSpan))).toEqual([4, 1, 2, 3]);
   await expect(groups.nth(1)).toHaveAttribute("rowspan", "2");
   await expect(groups.nth(1)).toHaveAttribute("scope", "col");

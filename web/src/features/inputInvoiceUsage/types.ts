@@ -143,6 +143,8 @@ export type InputInvoiceUsageRowsResponse = {
     invoiceCount: number;
     totalWithTax: string;
     unclassifiedCount: number;
+    taxAmount: string | null;
+    missingTaxAmountCount: number;
   };
   statistics?: InputInvoiceUsageStatistics;
   pagination: {
@@ -429,7 +431,7 @@ export type InvoiceUsageClassificationGroup = InvoiceUsageClassificationItem & {
 
 export type InvoiceUsageClassificationData = {
   all: InvoiceUsageClassificationItem;
-  used: InvoiceUsageClassificationItem;
-  unused: InvoiceUsageClassificationItem;
+  used?: InvoiceUsageClassificationItem;
+  unused?: InvoiceUsageClassificationItem;
   groups: InvoiceUsageClassificationGroup[];
 };

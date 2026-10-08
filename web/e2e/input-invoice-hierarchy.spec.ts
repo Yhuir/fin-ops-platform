@@ -37,7 +37,6 @@ test("hierarchy wraps ten categories and combines selection with the OA header f
   await page.getByRole("menuitemradio", { name: "未关联 OA", exact: true }).click();
   const filters = JSON.parse(decodeURIComponent(new URL((await requested).url()).searchParams.get("filters")!));
   expect(filters).toEqual(expect.arrayContaining([
-    { field: "usage_status", operator: "in", values: ["used"] },
     { field: "payment_group", operator: "in", values: ["paid"] },
     { field: "payment_status", operator: "in", values: ["custom_9"] },
     { field: "oa_relation", operator: "in", values: ["unlinked"] },
@@ -46,5 +45,5 @@ test("hierarchy wraps ten categories and combines selection with the OA header f
   payload.classification.groups[0].children = payload.classification.groups[0].children.filter((item: { id: string }) => item.id !== "category:custom_9");
   await page.reload();
   await expect(panel.getByRole("button", { name: "规则分类 10 0 张", exact: true })).toHaveCount(0);
-  await expect(panel.getByRole("button", { name: /^已使用/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(panel.getByRole("button", { name: /^全部发票/ })).toHaveAttribute("aria-pressed", "true");
 });

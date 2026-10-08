@@ -306,6 +306,8 @@ function mapRowsResponse(payload: unknown): InputInvoiceUsageRowsResponse {
         invoiceCount: numberValue(camelOrSnake(summary, "invoiceCount", "invoice_count"), 0),
         totalWithTax: stringValue(camelOrSnake(summary, "totalWithTax", "total_with_tax")),
         unclassifiedCount: numberValue(camelOrSnake(summary, "unclassifiedCount", "unclassified_count"), 0),
+        taxAmount: summary.taxAmount == null ? null : stringValue(summary.taxAmount),
+        missingTaxAmountCount: numberValue(summary.missingTaxAmountCount, 0),
       };
     })() : undefined,
     statistics: raw.statistics && typeof raw.statistics === "object" ? (() => {

@@ -2,7 +2,7 @@ import { useSessionPermissions } from "../contexts/SessionContext";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
 import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
 import InvoiceUsageClassification from "../components/inputInvoiceUsage/InvoiceUsageClassification";
-import { Button } from "@heroui/react";
+import { Label, ListBox, Select, Button } from "@heroui/react";
 import { Download } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -42,6 +42,7 @@ import type {
   InputInvoiceUsageRow,
   InputInvoiceUsageSortDirection,
   InputInvoiceUsageStatistics,
+  InputInvoiceUsageRowsResponse,
 } from "../features/inputInvoiceUsage/types";
 
 const initialQuery: InputInvoiceUsageQuery = {
@@ -105,10 +106,6 @@ function restoreQuery(raw: unknown): InputInvoiceUsageQuery {
     return initialQuery;
   }
   const filters = raw.filters.filter((filter) => !["invoice_date", "bank_trade_time", "relation_status"].includes(filter.field) && !(["payment_group", "payment_status"].includes(filter.field) && filter.values?.includes("pending"))).map(filter => (filter.field === "payment_status" && filter.values && filter.values.length > 1 ? { ...filter, values: [filter.values[0]] } : filter));
-  const hasPaymentFilter = filters.some(filter => ["payment_status", "payment_group"].includes(filter.field));
-  if (hasPaymentFilter && !filters.some(filter => filter.field === "usage_status")) {
-    filters.push({ field: "usage_status", operator: "in", values: ["used"] });
-  }
   const dateScopeChanged = Boolean(raw.month || raw.invoiceDateFrom || raw.invoiceDateTo)
     || filters.length !== raw.filters.length;
   return {
@@ -175,6 +172,7 @@ export default function InputInvoiceUsagePage() {
   const query = querySession.value;
   const setQuery = querySession.setValue;
   const [classification, setClassification] = useState<InvoiceUsageClassificationData | null>(null);
+  const [summary, setSummary] = useState<InputInvoiceUsageRowsResponse["summary"]>();
   const [rows, setRows] = useState<InputInvoiceUsageRow[]>([]);
   const [total, setTotal] = useState(0);
   const [statistics, setStatistics] = useState<InputInvoiceUsageStatistics | null>(null);
@@ -219,6 +217,7 @@ export default function InputInvoiceUsagePage() {
           return;
         }
         setClassification(payload.classification ?? null);
+        setSummary(payload.summary);
         setRows(payload.rows);
         setTotal(payload.pagination.total);
         setStatistics(payload.statistics ?? null);
@@ -233,6 +232,7 @@ export default function InputInvoiceUsagePage() {
         if (signal?.aborted || requestId !== requestIdRef.current) {
           return;
         }
+        setSummary(undefined);
         setRows([]);
         setTotal(0);
         setStatistics(null);
@@ -345,13 +345,11 @@ export default function InputInvoiceUsagePage() {
   const selectedCategory = query.filters.find(item => item.field === "payment_status")?.values?.[0];
   const selectedParent = query.filters.find(item => item.field === "payment_group")?.values?.[0];
   const selectedClassification = selectedCategory && selectedParent ? `category:${selectedParent}:${selectedCategory}`
-    : selectedParent ?? query.filters.find(item => item.field === "usage_status")?.values?.[0] ?? "all";
+    : selectedParent ?? "all";
   const handleClassificationSelect = useCallback((id: string) => {
     setQuery(current => {
-      const filters = current.filters.filter(item => !["usage_status", "payment_group", "payment_status"].includes(item.field));
-      if (id === "used" || id === "unused") filters.push({ field: "usage_status", operator: "in", values: [id] });
-      else if (id !== "all") {
-        filters.push({ field: "usage_status", operator: "in", values: ["used"] });
+      const filters = current.filters.filter(item => !["payment_group", "payment_status"].includes(item.field));
+      if (id !== "all") {
         if (id.startsWith("category:")) {
           const [, parent, category] = id.split(":");
           filters.push({ field: "payment_group", operator: "in", values: [parent] });
@@ -365,7 +363,7 @@ export default function InputInvoiceUsagePage() {
     if (!classification || !selectedCategory || selectedCategory === "unclassified") return;
     const present = classification.groups.some(group => (!selectedParent || group.id === selectedParent)
       && group.children.some(child => child.id === `category:${selectedCategory}`));
-    if (!present) handleClassificationSelect("used");
+    if (!present) handleClassificationSelect("all");
   }, [classification, selectedCategory, selectedParent, handleClassificationSelect]);
 
   const handlePaymentStatusRulesSaved = useCallback(async () => {
@@ -479,6 +477,12 @@ export default function InputInvoiceUsagePage() {
           actions={actions}
         >
           <div className="input-invoice-usage-content switch-surface finance-table-layout">
+            <div className="input-invoice-usage-filterbar"><Select aria-label="使用状态" className="input-invoice-usage-status-select"
+      selectedKey={query.filters.find(filter => filter.field === "usage_status")?.values?.[0] ?? "all"}
+      onSelectionChange={key => key === "all" ? handleFilterClear("usage_status") : handleFilterApply({ field: "usage_status", operator: "in", values: [String(key)] })}>
+      <Label>使用状态</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>
+        <ListBox.Item id="all" textValue="全部">全部</ListBox.Item><ListBox.Item id="used" textValue="已使用">已使用</ListBox.Item><ListBox.Item id="unused" textValue="待使用">待使用</ListBox.Item>
+      </ListBox></Select.Popover></Select></div>
             {classification ? <InvoiceUsageClassification data={classification} selectedId={selectedClassification}
               pending={loading || refreshing} invalid={Boolean(error)} onSelect={handleClassificationSelect} /> : null}
             {!classification && !loading && !error ? <StatePanel tone="error" compact>分类数据缺失，请刷新页面。</StatePanel> : null}
@@ -493,6 +497,7 @@ export default function InputInvoiceUsagePage() {
                 </div>
               ) : (
                 <InputInvoiceUsageTable
+                  summary={summary}
                   rows={rows}
                   page={query.page}
                   pageSize={query.pageSize}

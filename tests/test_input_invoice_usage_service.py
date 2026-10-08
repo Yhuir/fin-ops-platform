@@ -169,6 +169,22 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         bank.amount = Decimal('-1')
         self.assertIsNone(bank_net_outflow([bank]))
 
+    def test_invoice_net_sign_uses_signed_group_amount_and_preserves_missing(self):
+        for amounts, expected in [(["10", "-10"], "zero"), (["10", "-3"], "positive"),
+                                  (["3", "-10"], "negative"), (["10", None], None)]:
+            with self.subTest(amounts=amounts):
+                invoices = [self._invoice(f"sign-{i}", f"SIGN-{i}", self._counterparty("s", "销方"))
+                            for i in range(len(amounts))]
+                for invoice, amount in zip(invoices, amounts):
+                    invoice.total_with_tax = Decimal(amount) if amount is not None else None
+                service = self._service(invoices=invoices)
+                policy = Mock()
+                policy.evaluate_input_invoice_payment.return_value = {"code": "unclassified"}
+                service._payment_status(
+                    invoices[0], invoices, [], {}, {}, context=service._query_context(), lifecycle_policy=policy,
+                )
+                self.assertEqual(policy.evaluate_input_invoice_payment.call_args.kwargs["invoice_net_sign"], expected)
+
     def test_signed_invoice_and_bank_net_are_compared_without_historical_match(self):
         for invoice_amounts, bank_amounts, expected in [
             (["16350", "-16350", "16350"], [("12500", False), ("3850", False)], "paid"),

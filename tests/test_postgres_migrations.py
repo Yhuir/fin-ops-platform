@@ -199,6 +199,7 @@ EXPECTED_MIGRATIONS = [
     "0185_invoice_source_values_nullable.sql",
     "0186_oa_applicant_verified_identity.sql",
     "0187_tax_certification_evidence.sql",
+    "0188_input_invoice_payment_rules_explicit.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -363,7 +364,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
         self.assertEqual(
             [item.version for item in migrations],
-            [f"{number:04d}" for number in range(1, 188)],
+            [f"{number:04d}" for number in range(1, 189)],
         )
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")

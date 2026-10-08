@@ -9,6 +9,7 @@ import type {
   InputInvoiceUsageFilterFieldConfig,
   InputInvoiceUsageFilterOption,
   InputInvoiceUsageRow,
+  InputInvoiceUsageRowsResponse,
   InputInvoiceUsageSortDirection,
 } from "../../features/inputInvoiceUsage/types";
 import { formatMoney } from "../../features/money";
@@ -21,6 +22,7 @@ import { FinanceStatusTag } from "../common/FinanceTable";
 
 type InputInvoiceUsageTableProps = {
   rows: InputInvoiceUsageRow[];
+  summary?: InputInvoiceUsageRowsResponse["summary"];
   page: number;
   pageSize: number;
   total: number;
@@ -374,6 +376,7 @@ function relationListTarget(
 
 export default function InputInvoiceUsageTable({
   rows,
+  summary,
   page,
   pageSize,
   total,
@@ -440,7 +443,12 @@ export default function InputInvoiceUsageTable({
             </colgroup>
             <thead className="input-invoice-usage-table-head">
               <tr>
-                <th className="input-invoice-usage-table-group-header" colSpan={4} scope="colgroup">进项发票</th>
+                <th className="input-invoice-usage-table-group-header" colSpan={4} scope="colgroup"><div className="input-invoice-usage-invoice-heading"><span>进项发票</span>
+                  <span className="input-invoice-usage-filtered-summary" aria-label="当前筛选发票汇总">
+                    <span>{summary ? `${summary.invoiceCount} 张` : "— 张"}</span>
+                    <span>价税合计 {formatMoney(summary?.totalWithTax, "—")}</span>
+                    <span>税额合计 {formatMoney(summary?.taxAmount, "—")}{summary && summary.missingTaxAmountCount > 0 ? <small>（缺失 {summary.missingTaxAmountCount} 张）</small> : null}</span>
+                  </span></div></th>
                 <HeaderCell align="center" label="支付状态" rowSpan={2} strongSeparated emphasized />
                 <th className="input-invoice-usage-table-group-header input-invoice-usage-table-cell--strong-separator" colSpan={2} scope="colgroup">
                   <OaRelationFilter value={selectedValues(filters.find(item => item.field === "oa_relation"))[0] ?? "all"}

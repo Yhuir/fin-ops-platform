@@ -71,6 +71,26 @@ for (const path of ["input-invoice-usage", "output-invoice-collections", "pendin
   test(`high contrast selection and neutral siblings: ${path}`, async ({ page }, testInfo) => {
     await installDeterministicApiMocks(page, { sessionMode: "admin" });
     await page.goto(`/${path}`);
+    if (["input-invoice-usage", "output-invoice-collections", "pending-invoices", "oa-pending-payments"].includes(path)) {
+      const panel = page.locator(".invoice-usage-classification, .table-classification");
+      const selected = panel.locator('.classification-choice[aria-pressed="true"]').first();
+      await expect(selected).toBeVisible();
+      await expect(selected).toHaveCSS("box-shadow", /inset/);
+      await expect(selected.locator(".classification-choice__check")).toHaveCSS("visibility", "visible");
+      const buttons = panel.locator("button.classification-choice");
+      const siblingIndex = await buttons.evaluateAll(items => items.findIndex(item => item.getAttribute("aria-pressed") === "false"));
+      expect(siblingIndex).toBeGreaterThanOrEqual(0);
+      const sibling = buttons.nth(siblingIndex);
+      const before = await sibling.evaluate(element => ({ color: getComputedStyle(element).color, background: getComputedStyle(element).backgroundColor }));
+      await expect(sibling.locator(".classification-choice__check")).toHaveCSS("visibility", "hidden");
+      await sibling.hover();
+      await expect(sibling).toHaveCSS("color", before.color); await expect(sibling).toHaveCSS("background-color", before.background);
+      await sibling.click(); await expect(sibling).toHaveAttribute("aria-pressed", "true");
+      await expect(sibling).toHaveCSS("box-shadow", /inset/); await expect(sibling.locator(".classification-choice__check")).toHaveCSS("visibility", "visible");
+      await expect(sibling).toHaveCSS("background-color", before.background);
+      await page.screenshot({ path: testInfo.outputPath(`contrast-${path}.png`), animations: "disabled" });
+      return;
+    }
     const controls = page.locator('.app-segments [data-selected="true"], .invoice-count-segments [data-selected="true"]');
     await expect(controls.first()).toBeVisible();
     for (const control of await controls.all()) {
@@ -142,18 +162,22 @@ for (const path of ['oa-pending-payments', 'input-invoice-usage', 'pending-invoi
   test(`scope and subordinate controls share the result surface: ${path}`, async ({ page }, info) => {
     await installDeterministicApiMocks(page, { sessionMode: 'user' });
     await page.goto(`/${path}`);
-    const surface = page.locator('.switch-surface').first();
-    const scope = surface.locator('.switch-surface__scope').first();
-    const body = surface.locator(':scope > .switch-surface__body');
-    await expect(scope).toBeVisible();
-    await expect(body.getByRole('grid').first()).toBeVisible();
-    const scopeBox = await scope.boundingBox();
-    const bodyBox = await body.boundingBox();
-    expect(Math.abs(bodyBox!.y - (scopeBox!.y + scopeBox!.height))).toBeLessThanOrEqual(1);
-    const lower = body.locator('.app-segments, .invoice-count-segments').first();
-    await expect(lower).toBeVisible();
-    await expect(scope.locator('[data-selected="true"]')).toHaveCSS('height', '40px');
-    await expect(lower.locator('[data-selected="true"]')).toHaveCSS('height', '36px');
+    const classification = page.locator(".invoice-usage-classification, .table-classification");
+    const owner = classification.locator("xpath=..");
+    await expect(classification).toBeVisible();
+    const table = owner.locator('[role="grid"], table[aria-label]').first();
+    await expect(table).toBeVisible();
+    const panelBox = await classification.boundingBox(); const tableBox = await owner.locator(".finance-table").first().boundingBox();
+    expect(tableBox!.y).toBeGreaterThanOrEqual(panelBox!.y + panelBox!.height - 1);
+    expect(tableBox!.y - (panelBox!.y + panelBox!.height)).toBeLessThanOrEqual(24);
+    const groups = classification.locator('[role="group"]');
+    expect(await groups.count()).toBe(2);
+    const leaves = classification.locator('.table-classification__leaf, .invoice-usage-classification__child');
+    expect(await leaves.count()).toBeGreaterThan(0);
+    for (const leaf of await leaves.all()) {
+      expect(await leaf.evaluate(element => element.closest('[role="group"]') !== null)).toBe(true);
+      await expect(leaf).toHaveCSS("border-radius", "0px");
+    }
     for (const width of [1440, 960, 390]) {
       await page.setViewportSize({ width, height: 900 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2)).toBe(true);
@@ -165,32 +189,29 @@ for (const path of ['oa-pending-payments', 'input-invoice-usage', 'pending-invoi
 test('unselected boundaries and compact count geometry survive digit changes', async ({ page }) => {
   await installDeterministicApiMocks(page, { sessionMode: 'user' });
   await page.goto('/oa-pending-payments');
-  const group = page.getByRole('radiogroup', { name: '支付流水', exact: true });
-  await group.getByRole('radio', { name: /未关联流水/ }).click();
-  const first = group.getByRole('radio').first();
-  const second = group.getByRole('radio').nth(1);
-  await expect(first).toHaveAttribute('aria-checked', 'false');
-  await expect(second).toHaveAttribute('aria-checked', 'false');
-  const separator = await first.evaluate(el => {
-    const css = getComputedStyle(el, '::after');
-    return { display: css.display, width: css.width, background: css.backgroundColor };
-  });
-  expect(separator.display).toBe('block');
-  expect(separator.width).toBe('1px');
-  expect(separator.background).not.toBe('rgba(0, 0, 0, 0)');
+  const group = page.getByRole('group', { name: '已完成 OA', exact: true });
+  await group.getByRole('button', { name: /^已完成 OA/ }).click();
+  const first = group.locator('.table-classification__leaf').first();
+  const second = group.locator('.table-classification__leaf').nth(1);
+  await expect(first).toHaveAttribute('aria-pressed', 'false');
+  await expect(second).toHaveAttribute('aria-pressed', 'false');
+  const firstBox = await first.boundingBox(), secondBox = await second.boundingBox();
+  expect(secondBox!.x - (firstBox!.x + firstBox!.width)).toBe(1);
+  await expect(first.locator('.classification-choice__check')).toHaveCSS('visibility', 'hidden');
+  await expect(second.locator('.classification-choice__check')).toHaveCSS('visibility', 'hidden');
   // Isolate the CSS contract from business counting: exercise the rendered count with wider values.
   const geometry = await first.evaluate(el => {
     const count = el.querySelector('.stable-count')!;
-    const label = el.querySelector('.counted-label__content > span')!;
+    const label = el.querySelector(':scope > span:not(.stable-count):not(.classification-choice__check)')!;
     return ['0条', '56条', '432条', '123456条'].map(value => {
       count.textContent = value;
       const button = el.getBoundingClientRect(), text = label.getBoundingClientRect(), number = count.getBoundingClientRect();
       return { width: button.width, height: button.height, gap: number.left - text.right,
-        centreError: Math.abs((text.left + number.right) / 2 - (button.left + button.right) / 2) };
+        centreError: Math.abs((text.left + number.right) / 2 - (button.left + Number.parseFloat(getComputedStyle(el).paddingLeft) + button.right - Number.parseFloat(getComputedStyle(el).paddingRight)) / 2) };
     });
   });
   expect(new Set(geometry.map(x => x.width)).size).toBe(1);
-  for (const item of geometry) { expect(item.gap).toBe(6); expect(item.centreError).toBeLessThanOrEqual(1); }
+  for (const item of geometry) { expect(item.gap).toBe(8); expect(item.centreError).toBeLessThanOrEqual(1); }
 });
 
 test('settings scope tabs retain consistent styling and show only active settings', async ({ page }) => {

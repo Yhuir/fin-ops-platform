@@ -2118,12 +2118,6 @@ textarea {
   color: var(--fp-warning);
 }
 
-.input-invoice-usage-rules-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--fp-space-2);
-}
 
 .input-invoice-usage-rules-tag {
   display: inline-flex;
@@ -2164,58 +2158,14 @@ textarea {
   background: var(--fp-surface);
 }
 
-.input-invoice-usage-rules-table-shell {
-  overflow: auto;
-  border: 1px solid var(--fp-border);
-  background: var(--fp-surface);
-}
 
-.input-invoice-usage-rules-table {
-  width: 100%;
-  min-width: 620px;
-  border-collapse: collapse;
-  font-size: var(--fp-text-body);
-}
 
-.input-invoice-usage-rules-table th,
-.input-invoice-usage-rules-table td {
-  border-bottom: 1px solid var(--fp-border);
-  padding: var(--fp-space-2) var(--fp-space-3);
-  text-align: left;
-  vertical-align: top;
-}
 
-.input-invoice-usage-rules-table th {
-  background: var(--fp-table-header-bg);
-  color: var(--fp-text-secondary);
-  font-size: var(--fp-text-label);
-  font-weight: 700;
-  line-height: 1.3;
-}
 
-.input-invoice-usage-rules-table td {
-  color: var(--fp-text-primary);
-  line-height: 1.45;
-}
 
-.input-invoice-usage-rules-table tr:last-child td {
-  border-bottom: 0;
-}
 
-.input-invoice-usage-rules-table__status {
-  width: 22%;
-  font-weight: 700;
-}
 
-.input-invoice-usage-rules-table__enabled {
-  width: 90px;
-}
 
-.input-invoice-usage-rules-table__priority {
-  width: 116px;
-  color: var(--fp-text-secondary);
-  font-variant-numeric: tabular-nums;
-}
 
 .input-invoice-usage-rules-field {
   display: grid;
@@ -2226,21 +2176,7 @@ textarea {
   font-weight: 700;
 }
 
-.input-invoice-usage-rules-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--fp-space-1);
-  color: var(--fp-text-primary);
-  font-size: var(--fp-text-label);
-  font-weight: 700;
-}
 
-.input-invoice-usage-rules-chip-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--fp-space-1);
-  min-width: 180px;
-}
 
 .input-invoice-usage-rules-section {
   display: grid;
@@ -2261,11 +2197,6 @@ textarea {
   font-size: var(--fp-text-body);
 }
 
-.input-invoice-usage-rules-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--fp-space-2);
-}
 
 .input-invoice-usage-rules-drawer .finance-drawer__body {
   padding: var(--fp-space-3) var(--fp-space-4);
@@ -2274,151 +2205,6 @@ textarea {
 .input-invoice-usage-rules-drawer .finance-drawer__footer {
   background: var(--fp-surface-raised);
   padding: var(--fp-space-3) var(--fp-space-4);
-}
-
-.input-invoice-usage-payment-rules-body {
-  gap: var(--fp-space-3);
-}
-
-.input-invoice-usage-payment-rules-body .input-invoice-usage-rules-meta {
-  gap: var(--fp-space-2);
-}
-
-.input-invoice-usage-payment-rules-body .input-invoice-usage-rules-tag {
-  max-width: 100%;
-}
-
-.input-invoice-usage-payment-rules-panel {
-  overflow: hidden;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
-  background: var(--fp-surface);
-}
-
-.input-invoice-usage-payment-rules-panel__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--fp-space-2);
-  flex-wrap: wrap;
-  border-bottom: 1px solid var(--fp-border);
-  background: var(--fp-table-header-bg);
-  padding: var(--fp-space-2) var(--fp-space-3);
-}
-
-.input-invoice-usage-payment-rules-panel__header h3 {
-  margin: 0;
-  color: var(--fp-text-primary);
-  font-size: var(--fp-text-body);
-  font-weight: 700;
-  line-height: 1.35;
-}
-
-.input-invoice-usage-payment-rules-panel__meta {
-  color: var(--fp-text-muted);
-  font-size: var(--fp-text-small);
-  font-weight: 700;
-  line-height: 1.4;
-}
-
-.input-invoice-usage-payment-rules-list {
-  display: grid;
-}
-
-.input-invoice-usage-payment-rule-row {
-  display: grid;
-  grid-template-columns: 88px minmax(240px, 1fr) auto;
-  gap: var(--fp-space-3);
-  align-items: start;
-  border-bottom: 1px solid var(--fp-border);
-  padding: var(--fp-space-3);
-}
-
-.input-invoice-usage-payment-rule-row:last-child {
-  border-bottom: 0;
-}
-
-.input-invoice-usage-payment-rule-row__state,
-.input-invoice-usage-payment-rule-row__main {
-  display: grid;
-  min-width: 0;
-  gap: var(--fp-space-2);
-}
-
-.input-invoice-usage-payment-rule-priority input {
-  width: 76px;
-}
-
-.input-invoice-usage-payment-rule-priority-tag {
-  justify-content: flex-start;
-  font-variant-numeric: tabular-nums;
-}
-
-.input-invoice-usage-payment-rule-chips {
-  min-width: 0;
-}
-
-.input-invoice-usage-payment-rule-condition-editor {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--fp-space-2);
-}
-
-.input-invoice-usage-payment-rule-condition {
-  display: grid;
-  align-content: start;
-  min-width: 0;
-  gap: 4px;
-}
-
-.input-invoice-usage-payment-rule-condition > span {
-  overflow: hidden;
-  color: var(--fp-text-secondary);
-  font-size: var(--fp-text-label);
-  font-weight: 700;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.input-invoice-usage-payment-rule-readonly-field {
-  display: grid;
-  min-width: 0;
-  gap: 4px;
-}
-
-.input-invoice-usage-payment-rule-readonly-field span {
-  color: var(--fp-text-secondary);
-  font-size: var(--fp-text-label);
-  font-weight: 700;
-  line-height: 1.35;
-}
-
-.input-invoice-usage-payment-rule-readonly-field strong {
-  color: var(--fp-text-primary);
-  font-size: var(--fp-text-body);
-  font-weight: 700;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-
-.input-invoice-usage-payment-rules-footer {
-  align-items: center;
-}
-
-@media (max-width: 760px) {
-  .input-invoice-usage-payment-rule-row {
-    grid-template-columns: 1fr;
-  }
-
-  .input-invoice-usage-payment-rule-row__state {
-    grid-template-columns: repeat(2, max-content);
-    align-items: end;
-  }
-
-  .input-invoice-usage-payment-rule-condition-editor {
-    grid-template-columns: 1fr;
-  }
 }
 
 .input-invoice-usage-oa-metrics {
@@ -23182,7 +22968,7 @@ body.column-layout-dragging {
 }
 .page-route-error h1 { margin: 0; font-size: 20px; }
 
-.input-invoice-usage-payment-rule-condition > .input-invoice-usage-payment-rule-applicant-hint { font-weight: 400; white-space: normal; line-height: 1.5; }
+
 
 .payment-rule-applicants-popover { width: max(var(--trigger-width), 340px); max-width: calc(100vw - 32px); }
 .payment-rule-applicants-search { padding: 8px; }

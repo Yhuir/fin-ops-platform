@@ -489,7 +489,7 @@ test.describe("input invoice usage browser flow", () => {
       visibleLabel: "支付状态",
       actionType: "fill",
     }, async (mark) => {
-      await rulesDrawer.getByRole("textbox", { name: "支付状态" }).first().fill("待付款（规则保存后刷新）");
+      await rulesDrawer.getByRole("textbox", { name: "标签 1" }).fill("待付款（规则保存后刷新）");
       await mark("finalSettledLatencyMs", expect(rulesDrawer.getByRole("button", { name: "保存", exact: true })).toBeEnabled());
     });
     await expect(rulesDrawer.getByRole("button", { name: "保存", exact: true })).toBeEnabled();
