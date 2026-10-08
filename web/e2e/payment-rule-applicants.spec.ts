@@ -70,3 +70,36 @@ test("OA applicant multiselect saves and reloads without fetching on the list pa
   expect(reads).toBe(2);
   await expectNoUnexpectedSuccessUiErrors(page);
 });
+
+test("empty rules allow directory verification through a discarded local draft without a write", async ({ page }) => {
+  await installDeterministicApiMocks(page, { sessionMode: "admin" });
+  let writes = 0;
+  await page.route("**/api/input-invoice-usage/payment-status-rules", route => {
+    if (route.request().method() !== "GET") writes += 1;
+    return route.fulfill({ json: { version: 1, readOnly: false, permissions: { canSave: true }, rules: [], applicantOptions: [
+      { userId: "1", name: "测试停用账号", account: "TEST_DISABLED", enabled: false, matchName: "测试停用账号" },
+    ] } });
+  });
+  await page.goto("/input-invoice-usage");
+  await expect(page.getByTestId("input-invoice-usage-page")).toBeVisible();
+  if (await page.getByRole("button", { name: "更多页面操作" }).isVisible()) await page.getByRole("button", { name: "更多页面操作" }).click();
+  await page.getByRole("button", { name: "发票与支付状态规则设置" }).click();
+  const drawer = page.getByRole("dialog", { name: "发票与支付状态规则设置" });
+  await drawer.getByRole("button", { name: "新增规则", exact: true }).click();
+  const draft = drawer.getByRole("grid", { name: "支付状态规则" }).getByRole("row").last();
+  await draft.getByRole("textbox").fill("目录验证草稿");
+  await draft.getByRole("button", { name: "目录验证草稿 OA 条件" }).click();
+  await page.getByRole("option", { name: "指定申请人", exact: true }).click();
+  await expect(drawer.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+  await draft.getByRole("button", { name: "目录验证草稿 OA 申请人条件" }).click();
+  const search = page.getByRole("searchbox", { name: "搜索申请人姓名或账号" });
+  await search.fill("TEST_DISABLED");
+  await page.getByRole("option", { name: "测试停用账号 TEST_DISABLED", exact: true }).click();
+  await page.keyboard.press("Escape"); await expect(search).toHaveValue(""); await page.keyboard.press("Escape");
+  await expect(drawer.getByRole("button", { name: "保存", exact: true })).toBeEnabled();
+  await drawer.getByRole("button", { name: "还原", exact: true }).click();
+  await expect(drawer.getByRole("textbox")).toHaveCount(0);
+  await expect(drawer.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+  expect(writes).toBe(0);
+  await expectNoUnexpectedSuccessUiErrors(page);
+});

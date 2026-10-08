@@ -158,6 +158,37 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
         self.assertIsNone(empty.summary["taxAmount"])
         self.assertEqual(empty.summary["missingTaxAmountCount"], 0)
 
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        from fin_ops_platform.services.input_invoice_usage_payment_rules import (
+            AppSettingsInputInvoiceUsagePaymentRulesProvider,
+            InputInvoiceUsagePaymentRulesValidationError,
+        )
+        from fin_ops_platform.services.postgres_state_store import PostgresStateStore
+        with TemporaryDirectory() as directory:
+            provider = AppSettingsInputInvoiceUsagePaymentRulesProvider(
+                state_store=PostgresStateStore(data_dir=Path(directory), connection=self.connection),
+                transaction_factory=self.connection.transaction,
+            )
+            saved = provider.update_payment_status_rules(
+                {"expectedVersion": 1, "idempotencyKey": "clear-query-rules", "rules": []}, actor_id="tester")
+            self.assertEqual(saved["version"], 2)
+            cleared = load()
+            self.assertEqual(cleared.payment_status_rules["rules"], [])
+            self.assertEqual(cleared.summary, {**snapshot.summary, "unclassifiedCount": 3})
+            self.assertEqual({group["row_key"] for group in cleared.groups}, {group["row_key"] for group in snapshot.groups})
+            self.assertEqual([group["count"] for group in cleared.classification["groups"]], [2, 1])
+            self.assertTrue(all(group["children"] == [] for group in cleared.classification["groups"]))
+            with self.assertRaises(InputInvoiceUsagePaymentRulesValidationError) as conflict:
+                provider.update_payment_status_rules(
+                    {"expectedVersion": 1, "idempotencyKey": "stale-query-rules", "rules": rules}, actor_id="tester")
+            self.assertEqual(conflict.exception.error_code, "input_invoice_usage_payment_rules_version_conflict")
+            after_conflict = load()
+            self.assertEqual(after_conflict.summary, cleared.summary)
+            self.assertEqual(after_conflict.classification, cleared.classification)
+            self.assertEqual(after_conflict.payment_status_rules["rules"], [])
+
     def test_output_relations_sharing_oa_do_not_lose_or_mix_bank_ownership(self):
         for key, amount in [('first', 100), ('second', 200)]:
             self.connection.execute("""insert into app.invoices(legacy_mongo_id,invoice_type,invoice_no,
