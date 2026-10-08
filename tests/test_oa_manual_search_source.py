@@ -73,6 +73,32 @@ class ManualOASearchSourceTests(unittest.TestCase):
             source.close()
             client.return_value.close.assert_called_once()
 
+    def test_search_optional_filters_do_not_become_literal_none(self):
+        adapter = MongoOAAdapter(settings=MongoOASettings(host='fixture', database='fixture'))
+        collection = MagicMock()
+        collection.find.return_value = []
+        collection.aggregate.return_value = [{'count':[{'total':1}], 'rows':[document(status='1')]}]
+        with patch.object(adapter, '_collection', return_value=collection):
+            for date_from, date_to, expected_bounds in (
+                (None, None, None),
+                ('2025-01-01', None, {'$gte':'2025-01-01'}),
+                (None, '2025-12-31', {'$lt':'2026-01-01'}),
+            ):
+                with self.subTest(date_from=date_from, date_to=date_to):
+                    payload = adapter.search_application_record_rows(statuses=['in_progress'],
+                        date_from=date_from, date_to=date_to)
+                    self.assertEqual(payload['total'], 1)
+                    self.assertEqual(payload['rows'][0]['status'], 'in_progress')
+                    self.assertFalse(payload['rows'][0]['can_import'])
+                    match = collection.aggregate.call_args.args[0][0]['$match']
+                    self.assertNotIn('None', str(match))
+                    self.assertNotIn('$regex', str(match))
+                    if expected_bounds is None:
+                        self.assertNotIn('applicationDate', str(match))
+                    else:
+                        self.assertIn({'$or':[{'data.applicationDate':expected_bounds},
+                            {'data.ApplicationDate':expected_bounds}]}, match['$or'][0]['$and'])
+
     def test_missing_configuration_fails_explicitly(self):
         with self.assertRaises(OASearchUnavailable):
             OAManualSearchSource(settings=None, connection=None).search_application_record_rows()

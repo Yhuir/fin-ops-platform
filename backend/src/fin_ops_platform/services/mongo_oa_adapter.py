@@ -701,7 +701,7 @@ class MongoOAAdapter(OAAdapter):
         if self._mongo_temporarily_unavailable():
             raise OASearchUnavailable("OA 项目目录读取失败，请稍后重试。")
         imported_by_id = dict(imported_entries or {})
-        exact_row_id = clean_string(q)
+        exact_row_id = clean_string(q or "")
         parsed_row_id = self._parse_oa_row_id(exact_row_id)
         if parsed_row_id is not None:
             return self._search_application_record_rows_by_exact_row_id(
@@ -2682,8 +2682,8 @@ class MongoOAAdapter(OAAdapter):
     @staticmethod
     def _search_application_date_clause(*, date_from: str | None, date_to: str | None) -> dict[str, Any] | None:
         bounds: dict[str, str] = {}
-        normalized_date_from = clean_string(date_from)
-        normalized_date_to = clean_string(date_to)
+        normalized_date_from = clean_string(date_from or "")
+        normalized_date_to = clean_string(date_to or "")
         if normalized_date_from:
             bounds["$gte"] = normalized_date_from
         if normalized_date_to:
@@ -2704,7 +2704,7 @@ class MongoOAAdapter(OAAdapter):
         form_type: str,
         project_query_values: list[str],
     ) -> dict[str, Any] | None:
-        query = clean_string(q)
+        query = clean_string(q or "")
         if not query:
             return None
         regex = {"$regex": re.escape(query), "$options": "i"}
@@ -2781,7 +2781,7 @@ class MongoOAAdapter(OAAdapter):
 
     @staticmethod
     def _project_query_values(q: str | None, project_names: dict[str, str]) -> list[str]:
-        query = clean_string(q).lower()
+        query = clean_string(q or "").lower()
         if not query:
             return []
         values: list[str] = []
