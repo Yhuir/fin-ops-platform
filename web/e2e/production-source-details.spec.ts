@@ -31,7 +31,9 @@ test('production shared source drawers preserve complete records across pages wi
     expect(Array.isArray(sections)).toBe(true);
     expect(sections.length).toBeGreaterThan(0);
     const drawer = page.locator('[role="dialog"].source-detail-drawer');
-    const expectedTitle = sample === 'oa' || sample.endsWith('-oa') ? 'OA详情'
+    const expectedTitle = sample === 'oa-pending-related-oa' ? 'OA关联明细'
+      : sample === 'oa-pending-related-bank' ? '支出流水关联明细'
+      : sample === 'oa' || sample.endsWith('-oa') ? 'OA详情'
       : sample.includes('invoice') || sample === 'red-blue' ? '发票详情' : '银行流水详情';
     await expect(drawer.getByRole('heading', { name: expectedTitle, exact: true })).toBeVisible();
     await expect(drawer.locator('.entity-detail-table').first()).toBeVisible();
