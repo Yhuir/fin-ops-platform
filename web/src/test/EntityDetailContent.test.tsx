@@ -10,6 +10,7 @@ describe("EntityDetailContent", () => {
       { label: "发票票种", value: "电子发票（普通发票）" },
       { label: "发票类型", value: "普通发票" },
       { label: "票种状态", value: "已确认" },
+      { label: "原文", value: "免税" },
     ];
     const sections = preparePublicDetailSections([{title: "发票信息", fields: [
       ...fields,
@@ -19,6 +20,7 @@ describe("EntityDetailContent", () => {
     render(<EntityDetailContent sections={sections} />);
     expect(screen.getByRole("rowheader", {name: "发票类型"}).parentElement).toHaveTextContent("普通发票");
     expect(screen.getByRole("rowheader", {name: "票种状态"}).parentElement).toHaveTextContent("已确认");
+    expect(screen.getByRole("rowheader", {name: "原文"}).parentElement).toHaveTextContent("免税");
     expect(screen.queryByText("internal")).not.toBeInTheDocument();
   });
 

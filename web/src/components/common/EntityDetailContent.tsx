@@ -120,6 +120,7 @@ const publicLabelAliases: Record<string, string> = {
 
 const publicLabels = new Set([
   ...Object.values(publicLabelAliases),
+  "原文",
   "申请人",
   "OA申请人",
   "申请类型",
