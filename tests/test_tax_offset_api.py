@@ -56,7 +56,7 @@ class TaxOffsetApiTests(unittest.TestCase):
         return self.routes.route(method, path, query or {}, json.dumps(payload) if payload is not None else None, {})
 
     def test_inventory_reads_paged_rows_summary_and_export_catalog(self):
-        status, payload = self.route('GET', '/api/tax-offset', query={'status': ['certified'], 'issue_month': ['2026-09']})
+        status, payload = self.route('GET', '/api/tax-offset', query={'status': ['certified'], 'issue_month': ['2026-09'], 'selection_year': ['2027']})
         self.assertEqual(status, HTTPStatus.OK)
         self.assertEqual(payload['total'], 1)
         self.assertEqual(payload['rows'][0]['tax_amount'], '6.00')
@@ -64,11 +64,13 @@ class TaxOffsetApiTests(unittest.TestCase):
         self.assertEqual(sum(field['default_selected'] for field in payload['export_fields']), 8)
         query = self.repository.load_page.call_args.args[0]
         self.assertEqual(query.issue_month, '2026-09')
+        self.assertEqual(query.selection_year, '2027')
         self.assertEqual(query.status, 'certified')
 
     def test_invalid_and_retired_query_parameters_are_rejected_before_sql(self):
         for query in ({'month': ['2026-09']}, {'status': ['bad']}, {'page': ['0']},
-                      {'issue_month': ['2026-13']}, {'sort_by': ['amount']}, {'page': ['1', '2']}):
+                      {'issue_month': ['2026-13']}, {'issue_year': ['2026'], 'issue_month': ['2026-01']},
+                      {'selection_year': ['bad']}, {'issue_year': ['2025', '2026']}, {'sort_by': ['amount']}, {'page': ['1', '2']}):
             with self.subTest(query=query):
                 status, payload = self.route('GET', '/api/tax-offset', query=query)
                 self.assertEqual(status, HTTPStatus.BAD_REQUEST)

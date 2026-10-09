@@ -50,7 +50,7 @@ class TaxOffsetCanonicalRepositoryTests(unittest.TestCase):
         payload = PostgresTaxOffsetCanonicalRepository(connection).load_page(query)
         self.assertEqual(connection.transaction_count, 1)
         self.assertEqual(connection.commands, ["set transaction isolation level repeatable read read only"])
-        self.assertEqual(len(connection.queries), 3)
+        self.assertEqual(len(connection.queries), 2)
         self.assertEqual(connection.queries[0][1], connection.queries[1][1][:-2])
         self.assertEqual(connection.queries[1][1][-2:], (20, 20))
         sql = connection.queries[1][0]
@@ -66,7 +66,7 @@ class TaxOffsetCanonicalRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["certified"]["missing_amount_count"], 1)
         self.assertIsNone(payload["summary"]["certified"]["amount"])
         self.assertEqual(payload["total"], 21)
-        self.assertEqual(payload["unresolved_record_count"], 2)
+        self.assertNotIn("unresolved_record_count", payload)
 
     def test_out_of_range_page_clamps_inside_snapshot(self):
         connection = FakeConnection(count=1)
@@ -80,7 +80,7 @@ class TaxOffsetCanonicalRepositoryTests(unittest.TestCase):
         connection = FakeConnection()
         repo = PostgresTaxOffsetCanonicalRepository(connection)
         repo.load_page(TaxOffsetQuery(page=4), limit_override=20001)
-        self.assertEqual(connection.queries[-2][1][-2:], (20001, 0))
+        self.assertEqual(connection.queries[-1][1][-2:], (20001, 0))
         self.assertEqual(repo.match_certified_rows([]), {})
         class MatchConnection:
             def fetch_all(self, sql, params):

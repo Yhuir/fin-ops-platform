@@ -29,6 +29,7 @@ type BusinessPeriodPickerProps = {
   disabled?: boolean;
   error?: string | null;
   inline?: boolean;
+  compact?: boolean;
   label?: string;
   loading?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -74,6 +75,7 @@ export default function BusinessPeriodPicker({
   disabled = false,
   error,
   inline = false,
+  compact = false,
   label = "时间范围",
   loading = false,
   onOpenChange,
@@ -169,7 +171,7 @@ export default function BusinessPeriodPicker({
   );
 
   return (
-    <div className={`business-period-picker${inline ? " business-period-picker--inline" : ""}${allowAll && !inline ? " business-period-picker--segmented" : ""}${className ? ` ${className}` : ""}`} role="group" aria-label={ariaLabel}>
+    <div className={`business-period-picker${inline ? " business-period-picker--inline" : ""}${allowAll && !inline ? " business-period-picker--segmented" : ""}${compact ? " business-period-picker--compact" : ""}${className ? ` ${className}` : ""}`} role="group" aria-label={ariaLabel}>
       {allowAll ? (
         <Button
           aria-pressed={selection.mode === "all"}
@@ -199,7 +201,7 @@ export default function BusinessPeriodPicker({
             <span><small>{label}</small><strong>{triggerLabel}</strong></span>
             <span aria-hidden="true">▾</span>
           </PopoverTrigger>
-          <PopoverContent className="business-period-popover" containerPadding={12} maxHeight={440} offset={8} placement="bottom end">
+          <PopoverContent className={`business-period-popover${compact ? " business-period-popover--compact" : ""}`} containerPadding={12} maxHeight={440} offset={8} placement="bottom end">
             <PopoverDialog aria-label={`${ariaLabel}选择器`}>{panel}</PopoverDialog>
           </PopoverContent>
         </PopoverRoot>

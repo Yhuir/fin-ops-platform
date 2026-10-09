@@ -75,12 +75,15 @@ def _inventory_query(query: TaxOffsetQuery) -> tuple[str, tuple[Any, ...]]:
     params: list[Any] = [SPECIAL_INVOICE_CODE]
     if query.status != "all":
         clauses.append("c.id is not null" if query.status == "certified" else "c.id is null")
-    if query.issue_month:
-        clauses.append("i.invoice_date >= %s::date and i.invoice_date < (%s::date + interval '1 month')")
-        params.extend([query.issue_month + "-01"] * 2)
-    if query.selection_month:
-        clauses.append("c.selection_time >= %s::timestamp and c.selection_time < (%s::timestamp + interval '1 month')")
-        params.extend([query.selection_month + "-01"] * 2)
+    for year, month, column, sql_type in (
+        (query.issue_year, query.issue_month, "i.invoice_date", "date"),
+        (query.selection_year, query.selection_month, "c.selection_time", "timestamp"),
+    ):
+        if year or month:
+            start = f"{year}-01-01" if year else f"{month}-01"
+            interval = "1 year" if year else "1 month"
+            clauses.append(f"{column} >= %s::{sql_type} and {column} < (%s::{sql_type} + interval '{interval}')")
+            params.extend([start, start])
     if query.search:
         clauses.append("(i.digital_invoice_no ilike %s escape '\\' or i.invoice_no ilike %s escape '\\' "
                        "or i.invoice_code ilike %s escape '\\' or i.seller_name ilike %s escape '\\' "
@@ -132,12 +135,9 @@ def load_tax_offset_page(connection: Any, query: TaxOffsetQuery, *, limit_overri
     ordering = f"{query.sort_by} {query.sort_direction} nulls last, id asc"
     rows = connection.fetch_all(cte + f" select * from inventory order by {ordering} limit %s offset %s",
                                 (*params, limit, offset))
-    unresolved = connection.fetch_one(
-        "select count(*) as count from app.tax_certified_import_records where status not in ('revoked', 'deleted') and invoice_id is null")
     return {"rows": [_row_payload(row, sequence=offset + index) for index, row in enumerate(rows, 1)],
             "total": total,
-            "page": page, "page_size": query.page_size, "summary": summary,
-            "unresolved_record_count": int(unresolved["count"])}
+            "page": page, "page_size": query.page_size, "summary": summary}
 
 
 def _row_payload(row: dict[str, Any], *, sequence: int) -> dict[str, Any]:

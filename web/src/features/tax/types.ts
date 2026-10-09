@@ -1,6 +1,8 @@
 export type TaxCertificationStatus = "all" | "certified" | "uncertified";
 export type TaxCertificationFilters = {
   status: TaxCertificationStatus;
+  issue_year?: string;
+  selection_year?: string;
   issue_month?: string;
   selection_month?: string;
   search?: string;
@@ -29,7 +31,6 @@ export type TaxCertificationTotals = {
 };
 export type TaxExportField = { key: string; label: string; default_selected: boolean };
 export type TaxCertificationResult = {
-  unresolved_record_count: number;
   rows: TaxCertificationRow[]; total: number; page: number; page_size: number;
   summary: {
     certified: TaxCertificationTotals & { deductible_tax_amount: string | null; missing_deductible_tax_count: number };

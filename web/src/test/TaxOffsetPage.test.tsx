@@ -25,9 +25,8 @@ test("search and status use server filters and reset pagination", async () => {
   await user.type(screen.getByRole("searchbox", { name: "搜索专票" }), "材料");
   await user.click(within(document.querySelector(".tax-certification-page") as HTMLElement).getByRole("button", { name: "查询" }));
   await waitFor(() => expect(screen.queryByText("11203490")).not.toBeInTheDocument());
-  await user.click(screen.getByRole("button", { name: /认证状态/ }));
-  await user.click(await screen.findByRole("option", { name: "未认证", exact: true }));
-  await waitFor(() => expect(screen.queryByLabelText("已认证统计")).not.toBeInTheDocument());
+  await user.click(screen.getByRole("radio", { name: "未认证", exact: true }));
+  await waitFor(() => expect(screen.getByLabelText("已认证统计")).toHaveTextContent("0 张"));
   const urls = fetch.mock.calls.map(([input]) => requestUrl(input)).filter(url => url.pathname === "/api/tax-offset");
   expect(urls.at(-1)?.searchParams.get("search")).toBe("材料");
   expect(urls.at(-1)?.searchParams.get("status")).toBe("uncertified");
@@ -62,4 +61,24 @@ test("surfaces query failure and explicit retry restores data", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent("查询失败");
   fail = false; fireEvent.click(screen.getByRole("button", { name: "重试" }));
   expect(await screen.findByText("11203490")).toBeInTheDocument();
+});
+test("both periods switch between all, year and month without leaking mutually exclusive filters", async () => {
+  const user = userEvent.setup(); const fetch = open(); await screen.findByText("11203490");
+  const lastQuery = () => fetch.mock.calls.map(([input]) => requestUrl(input)).filter(url => url.pathname === "/api/tax-offset").at(-1)!.searchParams;
+  for (const [label, prefix] of [["开票月份", "issue"], ["勾选月份", "selection"]]) {
+    await user.click(screen.getByRole("button", { name: `${label}：年月` }));
+    await user.click(screen.getByRole("button", { name: "2026年", exact: true }));
+    await waitFor(() => expect(lastQuery().get(`${prefix}_year`)).toBe("2026"));
+    expect(lastQuery().has(`${prefix}_month`)).toBe(false);
+    await user.click(screen.getByRole("button", { name: `${label}：2026年` }));
+    await user.click(screen.getByRole("radio", { name: "按月", exact: true }));
+    await user.click(screen.getByRole("button", { name: "三月", exact: true }));
+    await waitFor(() => expect(lastQuery().get(`${prefix}_month`)).toBe("2026-03"));
+    expect(lastQuery().has(`${prefix}_year`)).toBe(false);
+    const root = screen.getByRole("button", { name: `${label}：2026年3月` }).closest(".business-period-picker")!;
+    await user.click(within(root as HTMLElement).getByRole("button", { name: "全部", exact: true }));
+    await waitFor(() => expect(lastQuery().has(`${prefix}_month`)).toBe(false));
+    expect(lastQuery().has(`${prefix}_year`)).toBe(false);
+    expect(lastQuery().get("page")).toBe("1");
+  }
 });

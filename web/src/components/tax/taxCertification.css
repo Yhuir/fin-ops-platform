@@ -1,22 +1,60 @@
-.tax-certification-page .page-scaffold__header { align-items: center; }
-.tax-certification-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding-bottom: 16px; }
-.tax-certification-summary { display: grid; gap: 10px; padding: 4px 0 18px; }
-.tax-certification-summary-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px 26px; font-size: 13px; }
-.tax-certification-summary-row > strong { min-width: 42px; }
-.tax-certification-summary-row > span:nth-child(2) { min-width: 70px; font-variant-numeric: tabular-nums; }
-.tax-certification-metric { display: inline-flex; gap: 8px; align-items: baseline; }
-.tax-certification-metric > span, .tax-certification-metric small { color: var(--muted); }
-.tax-certification-metric strong { font-weight: 600; font-variant-numeric: tabular-nums; }
-.tax-certification-loading { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+/* Page-specific composition; shared components retain their default geometry. */
+.tax-certification-page { gap: 16px; }
+.tax-certification-page > .page-header { padding-bottom: 0; }
+.tax-certification-page .page-header-query { max-width: 360px; }
+.tax-certification-results { position: relative; border: 1px solid var(--fp-border); border-radius: 8px; background: var(--fp-surface); overflow: hidden; }
+.tax-certification-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 18px; padding: 12px 16px; border-bottom: 1px solid var(--fp-border); }
+.tax-certification-toolbar > .app-segments { flex: 0 0 auto; }
+.tax-certification-page .tax-certification-toolbar > .app-segments .toggle-button { min-width: 0; height: 30px; min-height: 30px; padding-inline: 8px; font-size: 13px; }
+.tax-certification-summary { display: grid; grid-template-columns: 1.3fr 1fr; gap: 12px; flex: 1 1 0; min-width: 0; }
+.tax-certification-summary-group { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.tax-certification-summary-group + .tax-certification-summary-group { border-left: 1px solid var(--fp-border); padding-left: 12px; }
+.tax-certification-summary-identity { display: flex; flex-direction: column; align-items: center; gap: 1px; flex: none; font-size: 12px; line-height: 18px; color: var(--fp-text-muted); font-variant-numeric: tabular-nums; }
+.tax-certification-summary-identity .finance-status-tag { min-height: 20px; height: 20px; padding-inline: 4px; border-radius: 5px; font-size: 12px; }
+.tax-certification-metrics { display: flex; flex: 1; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
+.tax-certification-metric { display: flex; flex-direction: column; flex: 1 0 auto; text-align: right; white-space: nowrap; }
+.tax-certification-metric > span { color: var(--fp-text-muted); font-size: 12px; line-height: 20px; }
+.tax-certification-metric strong { font-size: 14px; line-height: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tax-certification-metric small { color: var(--fp-text-secondary); font-size: 12px; line-height: 18px; }
+.tax-certification-metric--effective strong, .tax-certification-deductible { color: #287454; }
+.tax-certification-periods { display: flex; align-items: center; gap: 8px; flex: none; margin-left: auto; }
+.tax-certification-results .finance-table { border: 0; border-radius: 0; }
+.tax-certification-results .finance-table__column, .tax-certification-results .finance-table__cell { white-space: nowrap; }
+.tax-certification-results .finance-table__footer { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.tax-certification-results .finance-table__footer > :last-child { margin-left: auto; }
+.tax-certification-results .finance-table-pagination { flex: 1; width: auto; }
+.tax-certification-unit { color: var(--fp-text-muted); font-size: 12px; }
+.tax-certification-loading { position: absolute; bottom: 14px; left: 12px; z-index: 1; font-size: 12px; line-height: 18px; color: var(--fp-text-muted); background: var(--fp-surface); }
+.tax-certification-results[aria-busy="true"] .tax-certification-unit { visibility: hidden; }
+@media (min-width: 1101px) and (max-width: 1320px) {
+  .tax-certification-toolbar { padding-inline: 12px; column-gap: 10px; }
+  .tax-certification-summary { gap: 8px; }
+  .tax-certification-summary-group { gap: 6px; }
+  .tax-certification-summary-group + .tax-certification-summary-group { padding-left: 8px; }
+  .tax-certification-periods .business-period-picker--compact { width: 140px; }
+}
+@media (max-width: 1320px) {
+  .tax-certification-toolbar { display: grid; grid-template-columns: auto 1fr; }
+  .tax-certification-summary { grid-column: 1 / -1; grid-row: 2; padding-top: 8px; border-top: 1px solid var(--fp-border); }
+  .tax-certification-periods { grid-column: 2; grid-row: 1; }
+}
+@media (max-width: 680px) {
+  .tax-certification-toolbar { grid-template-columns: 1fr; padding: 10px; gap: 10px; }
+  .tax-certification-summary { display: flex; flex-direction: column; border: 0; padding: 0; gap: 12px; }
+  .tax-certification-summary-group + .tax-certification-summary-group { padding: 0; border: 0; }
+  .tax-certification-summary-group { gap: 12px; }
+  .tax-certification-periods { grid-column: 1; grid-row: 3; margin: 0; width: 100%; }
+  .tax-certification-periods .business-period-picker--compact { width: calc(50% - 4px); }
+}
+
 .tax-certification-drawer-content { display: grid; gap: 20px; padding: 8px 0; }
 .tax-certification-drawer-content h3 { font-size: 14px; font-weight: 600; }
 .tax-export-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 20px; }
 .tax-import-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .tax-import-batches { display: grid; gap: 12px; }
 .tax-import-batch { padding: 12px 0; border-bottom: 1px solid var(--border); display: flex; gap: 12px; justify-content: space-between; align-items: center; }
-@media (max-width: 680px) { .tax-certification-summary-row { gap: 8px 14px; } .tax-export-fields { grid-template-columns: 1fr; } }
+@media (max-width: 680px) { .tax-export-fields { grid-template-columns: 1fr; } }
 
-.tax-certification-status { width: 150px; }
 
 .tax-export-heading { display: flex; align-items: center; gap: 10px; }
 .tax-export-heading > button { margin-left: auto; }

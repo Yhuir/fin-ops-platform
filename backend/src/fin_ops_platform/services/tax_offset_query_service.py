@@ -8,6 +8,8 @@ from typing import Any, Protocol
 @dataclass(frozen=True)
 class TaxOffsetQuery:
     status: str = "all"
+    issue_year: str | None = None
+    selection_year: str | None = None
     issue_month: str | None = None
     selection_month: str | None = None
     search: str = ""
@@ -33,7 +35,12 @@ class TaxOffsetQuery:
         search = filters.get("search", "")
         if not isinstance(search, str) or len(search) > 200:
             raise ValueError("搜索条件须为不超过 200 字的文本。")
-        return cls(status=status, issue_month=_month(filters.get("issue_month")),
+        issue_year = _year(filters.get("issue_year"))
+        selection_year = _year(filters.get("selection_year"))
+        if (issue_year and filters.get("issue_month")) or (selection_year and filters.get("selection_month")):
+            raise ValueError("同一日期条件不能同时指定年份和月份。")
+        return cls(status=status, issue_year=issue_year, selection_year=selection_year,
+                   issue_month=_month(filters.get("issue_month")),
                    selection_month=_month(filters.get("selection_month")), search=search.strip(),
                    sort_by=sort_by, sort_direction=direction,
                    page=_positive_integer(filters.get("page", 1), "page", 1000000),
@@ -83,6 +90,16 @@ class TaxOffsetQueryService:
 
     def match_certified_rows(self, rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         return self._repository.match_certified_rows(rows)
+
+
+def _year(value: object) -> str | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str) or len(value) != 4 or not value.isascii() or not value.isdecimal():
+        raise ValueError("年份须为 YYYY。")
+    if not 1 <= int(value) <= 9999:
+        raise ValueError("年份须为有效的 YYYY。")
+    return value
 
 
 def _month(value: object) -> str | None:

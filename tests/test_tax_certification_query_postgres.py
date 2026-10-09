@@ -97,6 +97,30 @@ class TaxCertificationQueryPostgresTests(unittest.TestCase):
         workbook.close()
         self.assertEqual(self.service.list_payload({"search": "' or 1=1--"})["total"], 0)
 
+    def test_year_boundaries_intersection_summary_and_export_share_scope(self):
+        self.invoice(day="2023-12-31")
+        first = self.invoice(day="2024-01-01", amount="10.00")
+        leap = self.invoice(day="2024-02-29", amount="20.00")
+        last = self.invoice(day="2024-12-31", amount="30.00")
+        self.invoice(day="2025-01-01")
+        self.certify(first, selected="2025-01-01 00:00:00", deductible="1.25")
+        self.certify(leap, selected="2024-12-31 23:59:59", deductible="2.50")
+        self.certify(last, selected="2025-12-31 23:59:59", deductible="3.75")
+        filters = {"issue_year": "2024", "selection_year": "2025", "page_size": 1,
+                   "sort_by": "issue_date", "sort_direction": "asc"}
+        result = self.service.list_payload(filters)
+        self.assertEqual(result["total"], 2)
+        self.assertEqual([r["id"] for r in result["rows"]], [first])
+        self.assertEqual(result["summary"]["certified"]["amount"], "40.00")
+        self.assertEqual(result["summary"]["certified"]["deductible_tax_amount"], "5.00")
+        self.assertEqual(self.service.list_payload({"issue_year": "2024"})["total"], 3)
+        self.assertEqual(self.service.list_payload({"issue_month": "2024-02"})["rows"][0]["id"], leap)
+        self.assertEqual(self.service.list_payload({"status": "uncertified", "selection_year": "2025"})["total"], 0)
+        _, content = TaxOffsetExportService(query_service=self.service).export(filters, ["digital_invoice_no", "deductible_tax_amount"])
+        workbook = load_workbook(BytesIO(content))
+        self.assertEqual(list(workbook.active.values)[1:], [(first, 1.25), (last, 3.75)])
+        workbook.close()
+
     def test_matching_requires_strong_identity_buyer_and_special_invoice_scope(self):
         invoice = self.invoice(digital="DIG", code="CODE", number="NUMBER")
         ordinary = self.invoice(kind="普通发票", digital="ORDINARY")
@@ -148,7 +172,7 @@ class TaxCertificationQueryPostgresTests(unittest.TestCase):
         self.connection.execute("""insert into app.tax_certified_import_records(certified_unique_key,status,match_status)
                                   values('unresolved','active','unresolved'),('unknown-status','待核对','unresolved'),
                                         ('revoked-evidence','revoked','unresolved')""")
-        self.assertEqual(self.service.list_payload({"issue_month": "2030-01"})["unresolved_record_count"], 2)
+        self.assertNotIn("unresolved_record_count", self.service.list_payload({"issue_month": "2030-01"}))
         report = audit_tax_offset_page(self.connection)
         self.assertEqual(report["summary"]["unresolved_record_count"], 2)
         self.assertIn("tax_offset_unresolved_certification", report["summary"]["issue_sample_counts_by_code"])

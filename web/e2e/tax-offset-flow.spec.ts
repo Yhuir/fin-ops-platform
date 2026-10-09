@@ -64,12 +64,12 @@ test.describe("special invoice certification", () => {
     await page.goto("/tax-offset"); await expect(page.getByText("11203490")).toBeVisible();
     await expect(page.locator(".tax-certification-results")).toHaveAttribute("aria-busy", "false");
     await expect(page.locator(".tax-certification-loading")).toHaveCount(0);
-    await page.getByRole("button", { name: /认证状态/ }).click();
-    await page.getByRole("option", { name: "已认证", exact: true }).click();
+    await page.getByRole("radio", { name: "已认证", exact: true }).click();
     await expect(page.getByText("暂无专票")).toBeVisible();
-    await expect(page.getByLabel("未认证统计")).toHaveCount(0);
+    await expect(page.getByLabel("未认证统计")).toContainText("0 张");
     await page.getByRole("button", { name: "勾选月份：年月" }).click();
     const picker = page.getByRole("dialog", { name: "勾选月份选择器" });
+    await picker.getByRole("radio", { name: "按月", exact: true }).click();
     await picker.getByRole("button", { name: "三月", exact: true }).click();
     await expect(page.getByRole("button", { name: /勾选月份：.*3月/ })).toBeVisible();
     await expect(page.locator(".tax-certification-page").getByRole("button", { name: "导入认证记录", exact: true })).toBeEnabled();
@@ -165,4 +165,34 @@ test("large import exceptions render one page and keep corrections across pages"
   await expect(preview.getByText("显示 1-50 / 60")).toBeVisible();
   await expect(preview.getByRole("checkbox", { name: "更正 票号0" })).not.toBeChecked();
   await expectNoUnexpectedSuccessUiErrors(page);
+});
+
+
+test("compact layout keeps the header and footer fixed while rows scroll", async ({ page }, info) => {
+  await installDeterministicApiMocks(page, { sessionMode: "user", taxOffsetLargeDataset: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/tax-offset");
+  await expect(page.getByLabel("未认证统计")).toContainText("92 张");
+  const scroll = page.locator(".tax-certification-results .finance-table__scroll");
+  const header = page.getByRole("columnheader", { name: "销方名称" });
+  const footer = page.locator(".tax-certification-results .finance-table__footer");
+  const before = { header: await header.boundingBox(), footer: await footer.boundingBox() };
+  await scroll.evaluate(element => { element.scrollTop = 400; });
+  await expect.poll(() => scroll.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  expect((await header.boundingBox())!.y).toBeCloseTo(before.header!.y, 0);
+  expect((await footer.boundingBox())!.y).toBeCloseTo(before.footer!.y, 0);
+  await page.getByRole("columnheader", { name: /开票日期/ }).click();
+  await expect.poll(() => scroll.evaluate(element => element.scrollTop)).toBe(0);
+  for (const width of [1440, 1280, 1024]) {
+    await page.setViewportSize({ width, height: 900 });
+    const toolbar = page.locator(".tax-certification-toolbar");
+    expect((await toolbar.boundingBox())!.height).toBeLessThanOrEqual(width === 1440 ? 70 : 130);
+    const aligned = await page.locator(".tax-certification-summary-group").evaluateAll(groups => groups.every(group => {
+      const values = [...group.querySelectorAll(".tax-certification-metric strong")].map(el => el.getBoundingClientRect().y);
+      return Math.max(...values) - Math.min(...values) < 2;
+    }));
+    expect(aligned).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ animations: "disabled", path: info.outputPath(`tax-compact-${width}.png`) });
+  }
 });

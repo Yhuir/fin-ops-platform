@@ -22,6 +22,18 @@ class TaxOffsetQueryTests(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 TaxOffsetQuery.parse(invalid)
 
+    def test_years_are_independent_and_exclusive_with_their_month(self):
+        query = TaxOffsetQuery.parse({"issue_year": "2026", "selection_month": "2027-01"})
+        self.assertEqual(query.issue_year, "2026")
+        self.assertEqual(query.selection_month, "2027-01")
+        self.assertEqual(TaxOffsetQuery.parse({"selection_year": "2025"}).selection_year, "2025")
+        for filters in ({"issue_year": "2026", "issue_month": "2026-01"},
+                        {"selection_year": "2026", "selection_month": "2026-01"},
+                        {"issue_year": "0000"}, {"issue_year": 2026}, {"issue_year": True},
+                        {"issue_year": "２０２６"}, {"issue_year": "2026-01"}, {"selection_year": "bad"}):
+            with self.subTest(filters=filters), self.assertRaises(ValueError):
+                TaxOffsetQuery.parse(filters)
+
     def test_query_and_export_use_identical_filter_contract_and_catalog(self):
         calls = []
         def load(query, **kwargs):

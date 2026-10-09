@@ -82,3 +82,15 @@ test("rejects xls and mixed file selections as a whole", async () => {
   act(() => result.current.selectFiles([new File(["x"], "valid.xlsx"), new File(["x"], "old.xls")]));
   expect(result.current.files).toEqual([]); expect(result.current.error).toBe("仅支持 .xlsx");
 });
+
+test("new filters never expose a previous summary while waiting or after failure", async () => {
+  vi.mocked(api.fetchTaxCertifications).mockResolvedValueOnce(taxCertificationFixture());
+  const { result, rerender } = renderHook(({ query }) => useTaxCertifications(query, true, 0), { initialProps: { query } });
+  await waitFor(() => expect(result.current.result).not.toBeNull());
+  let reject!: (reason: Error) => void;
+  vi.mocked(api.fetchTaxCertifications).mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+  rerender({ query: { ...query, issue_year: "2025" } });
+  expect(result.current.result).toBeNull(); expect(result.current.loading).toBe(true);
+  await act(async () => reject(new Error("查询失败")));
+  expect(result.current.result).toBeNull(); expect(result.current.error).toBe("查询失败");
+});

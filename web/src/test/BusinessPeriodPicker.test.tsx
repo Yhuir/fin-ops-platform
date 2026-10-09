@@ -26,6 +26,18 @@ function renderPeriodPicker(
 }
 
 describe("BusinessPeriodPicker", () => {
+  test("compact size is opt-in and reaches the portaled popup", async () => {
+    const user = userEvent.setup();
+    const { unmount } = renderPeriodPicker();
+    expect(document.querySelector(".business-period-picker--compact")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "月份：2026年3月" }));
+    expect(screen.getByRole("dialog").closest(".business-period-popover--compact")).toBeNull();
+    unmount();
+    renderPeriodPicker({ compact: true });
+    await user.click(screen.getByRole("button", { name: "月份：2026年3月" }));
+    expect(screen.getByRole("dialog").closest(".business-period-popover--compact")).not.toBeNull();
+    expect(document.querySelector(".business-period-picker--compact")).not.toBeNull();
+  });
   test("uses HeroUI primitives and keeps the retired month picker deleted", () => {
     const source = readFileSync(resolve(__dirname, "..", sourcePath.replace(/^src\//, "")), "utf8");
 
