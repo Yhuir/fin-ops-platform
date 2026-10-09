@@ -15,7 +15,7 @@ for (const path of ['oa-pending-payments','input-invoice-usage','output-invoice-
     page.on('request',r=>{if(['POST','PUT','PATCH','DELETE'].includes(r.method()))writes.push(`${r.method()} ${new URL(r.url()).pathname}`);});
     page.on('response',r=>{if(r.url().includes('/fin-ops-api/') && r.status()>=400)failures.push(`${r.status()} ${new URL(r.url()).pathname}`);});
     await page.goto(`/fin-ops/${path}`);
-    const selector = '.app-segments [role="radio"], .invoice-count-segments [role="tab"], .table-classification button';
+    const selector = '.app-segments [role="radio"], .invoice-count-segments [role="tab"], .table-classification button, .invoice-usage-classification button';
     const controls=page.locator(selector);
     await expect(controls.first().locator('.stable-count')).toContainText(/\d/, { timeout: 30_000 });
     const records=[];
@@ -23,7 +23,7 @@ for (const path of ['oa-pending-payments','input-invoice-usage','output-invoice-
       const target=controls.nth(index);
       await target.scrollIntoViewIfNeeded();
       await target.focus();
-      const activeSelector=path==='oa-pending-payments' ? selector : '.app-segments:first-of-type [role="radio"], .invoice-count-segments:first-of-type [role="tab"], .table-classification button';
+      const activeSelector=path==='oa-pending-payments' ? selector : '.app-segments:first-of-type [role="radio"], .invoice-count-segments:first-of-type [role="tab"], .table-classification button, .invoice-usage-classification button';
       // Sample the actual controls each animation frame while the real network request runs.
       const since=await page.evaluate(()=>performance.now());
       const sampling=page.evaluate(async (selector)=>{
@@ -69,14 +69,15 @@ for (const path of ['oa-pending-payments', 'input-invoice-usage', 'pending-invoi
     page.on('response', response => { if (response.url().includes('/fin-ops-api/') && response.status() >= 400) failures.push(`${response.status()} ${new URL(response.url()).pathname}`); });
     await page.goto(`/fin-ops/${path}`);
     const scope = path === 'input-invoice-usage'
-      ? page.getByRole('tablist', { name: '进项发票关联分类', exact: true })
+      ? page.getByRole('region', { name: '进项发票使用分类', exact: true })
       : page.getByRole('region', { name: path === 'oa-pending-payments' ? 'OA 核对分类' : '待找发票分类', exact: true });
-    const controls = path === 'input-invoice-usage' ? scope.getByRole('tab') : scope.locator('button.table-classification__parent');
+    const controls = path === 'input-invoice-usage' ? scope.locator('.invoice-usage-classification__all, .invoice-usage-classification__group-title') : scope.locator('button.table-classification__parent');
     await expect(controls.first().locator('.stable-count')).toContainText(/\d/, { timeout: 30_000 });
     const samples: { feedbackMs: number; completeMs: number; requests: number }[] = [];
     for (let sample = 0; sample < 100; sample++) {
       await expect(page.locator('[data-count-pending="true"]')).toHaveCount(0);
-      const selected = await controls.nth(0).getAttribute(path === 'input-invoice-usage' ? 'aria-selected' : 'aria-pressed');
+      if (path === 'input-invoice-usage') await expect(scope).toHaveAttribute('aria-busy', 'false');
+      const selected = await controls.nth(0).getAttribute('aria-pressed');
       const target = controls.nth(selected === 'true' ? 1 : 0);
       const before = reads.length;
       await target.evaluate(element => {
@@ -97,6 +98,7 @@ for (const path of ['oa-pending-payments', 'input-invoice-usage', 'pending-invoi
       expect((await response).status()).toBe(200);
       await expect(target).toHaveAttribute('data-latency-ms', /\d/);
       await expect(page.locator('[data-count-pending="true"]')).toHaveCount(0);
+      if (path === 'input-invoice-usage') await expect(scope).toHaveAttribute('aria-busy', 'false');
       const result = await target.evaluate(element => ({
         feedbackMs: Number(element.getAttribute('data-latency-ms')),
         completeMs: performance.now() - Number(element.getAttribute('data-latency-start')),
