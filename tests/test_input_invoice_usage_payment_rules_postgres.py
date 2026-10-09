@@ -44,18 +44,13 @@ class PaymentRulesPostgresTests(unittest.TestCase):
 
     def test_sql_and_python_classification_agree_for_custom_rules_and_amount_states(self):
         custom = {"version": 1, "rules": [
-            {"id": "custom", "statusCode": "custom_paid", "parentStatus": "paid", "label": "自定义付款", "priority": 1,
-             "enabled": True, "conditions": {"hasBank": True, "paymentComparison": "less"}},
-            {"id": "offset", "statusCode": "custom_offset", "parentStatus": "unpaid", "label": "自定义冲账", "priority": 2,
-             "enabled": True, "conditions": {"hasOa": True, "hasBank": False}},
+            {"id": "custom", "statusCode": "custom_paid", "parentStatus": "paid", "label": "自定义付款", "enabled": True, "conditions": {"hasBank": True, "paymentComparison": "less"}},
+            {"id": "offset", "statusCode": "custom_offset", "parentStatus": "unpaid", "label": "自定义冲账", "enabled": True, "conditions": {"hasOa": True, "hasBank": False}},
         ]}
         sign_rules = {"version": 1, "rules": [
-            {"id": sign, "statusCode": "custom_" + sign, "label": sign, "priority": index,
-             "enabled": True, "conditions": {"invoiceNetSign": sign}} for index, sign in enumerate(("positive", "zero", "negative"), 1)]}
-        no_hidden = {"version": 1, "rules": [{"id": "no-hidden", "statusCode": "paid", "label": "原标签", "priority": 1,
-                                             "enabled": True, "conditions": {"hasOa": False}}]}
-        inclusive_rules = [{"version": 1, "rules": [{"id": "inclusive", "statusCode": "custom_inclusive", "label": "边界", "priority": 1,
-                             "enabled": True, "conditions": conditions}]} for conditions in (
+            {"id": sign, "statusCode": "custom_" + sign, "label": sign, "enabled": True, "conditions": {"hasBank": False, "invoiceNetSign": sign}} for index, sign in enumerate(("positive", "zero", "negative"), 1)]}
+        no_hidden = {"version": 1, "rules": [{"id": "no-hidden", "statusCode": "paid", "label": "原标签", "enabled": True, "conditions": {"hasBank": False, "hasOa": False}}]}
+        inclusive_rules = [{"version": 1, "rules": [{"id": "inclusive", "statusCode": "custom_inclusive", "label": "边界", "enabled": True, "conditions": {"hasBank": True, **conditions}}]} for conditions in (
                                  {"paymentComparison": "less_equal"}, {"paymentComparison": "greater_equal"},
                                  {"invoiceNetSign": "nonnegative"}, {"invoiceNetSign": "nonpositive"})]
         for raw in (None, custom, sign_rules, no_hidden, {"version": 1, "rules": []}, *inclusive_rules):
@@ -64,18 +59,20 @@ class PaymentRulesPostgresTests(unittest.TestCase):
             for has_oa, has_bank in ((False, False), (True, False), (False, True), (True, True)):
                 for comparison in (("equal", "less", "greater", "invalid") if has_bank else ("invalid",)):
                     for sign in ("positive", "zero", "negative", None):
-                        context = PaymentStatusEvaluationContext(has_oa, has_bank, "陈秀云", comparison == "equal", True, comparison, sign)
+                        context = PaymentStatusEvaluationContext(has_oa, has_bank, '陈秀云', comparison, sign)
                         with self.subTest(custom=raw is not None, context=context):
                             row = self.connection.fetch_one(
                                 "with facts as (select %s::boolean has_oa_relation, %s::boolean has_bank_relation, "
                                 "%s::text oa_applicant, %s::boolean fully_matched, %s::boolean invoice_oa_amount_matched, "
                                 "%s::text payment_comparison, %s::text invoice_net_sign) select " + expression + " code from facts",
-                                (has_oa, has_bank, context.applicant_name, context.fully_matched, True, comparison, sign, *params),
+                                (has_oa, has_bank, context.applicant_name, comparison == "equal", True, comparison, sign, *params),
                             )
                             self.assertEqual(row["code"], evaluate_payment_status(settings, context)["code"])
 
     def test_explicit_migration_preserves_rules_and_materializes_old_branches_once(self):
         rules = deepcopy(self.request("legacy-explicit")["rules"][:6])
+        for index, rule in enumerate(rules, 1):
+            rule["priority"] = index
         rules[0]["enabled"] = False
         rules[0]["priority"] = 20
         rules[1]["conditions"].pop("paymentComparison")
@@ -95,16 +92,17 @@ class PaymentRulesPostgresTests(unittest.TestCase):
         self.assertEqual(policy["rules"][1]["conditions"]["paymentComparison"], "equal")
         self.assertTrue(all(rule["priority"] > 20 for rule in policy["rules"][6:]))
         self.assertEqual(next(rule for rule in policy["rules"][6:] if rule["statusCode"] == "paid")["label"], "原付款名称")
+        migrate.run_psql(self.database_url, sql=Path("backend/src/fin_ops_platform/postgres/migrations/0190_payment_rules_without_priority.sql").read_text())
         request = self.request("clear-all-explicit")
         request["rules"] = []
         self.provider.update_payment_status_rules(request, actor_id="tester")
         self.assertEqual(self.provider.payment_status_rules_payload()["rules"], [])
-        self.assertEqual(self.provider.evaluate(PaymentStatusEvaluationContext(True, True, "", True, True, "equal"))["code"], "unclassified")
+        self.assertEqual(self.provider.evaluate(PaymentStatusEvaluationContext(True, True, '', 'equal'))["code"], "unclassified")
 
     def test_custom_category_save_rename_delete_and_invalid_conditions_are_atomic(self):
         request = self.request("custom-category")
         request["rules"] = [{"id": "rule-one", "statusCode": "custom_supplier", "parentStatus": "paid",
-                             "label": "供应商付款", "priority": 1, "enabled": True,
+                             "label": "供应商付款", "enabled": True,
                              "conditions": {"hasBank": True, "paymentComparison": "greater_equal", "invoiceNetSign": "nonpositive"}}]
         saved = self.provider.update_payment_status_rules(request, actor_id="tester")
         self.assertNotIn("parentStatus", saved["rules"][0])
@@ -139,6 +137,36 @@ class PaymentRulesPostgresTests(unittest.TestCase):
         migrate.run_psql(self.database_url, sql=sql)
         self.assertEqual(self.store.load_app_settings(), saved)
         self.assertEqual(self.provider.payment_status_rules_payload()["version"], 5)
+
+    def test_0190_migration_preserves_identity_splits_unrestricted_bank_and_audits_once(self):
+        rules = [
+            {"id": "one", "statusCode": "custom_one", "label": "原标签", "priority": 1, "enabled": False,
+             "conditions": {"hasOa": True, "invoiceOaAmountMatched": True}},
+            {"id": "two", "statusCode": "paid", "label": "付款", "priority": 2, "enabled": True,
+             "conditions": {"fullyMatched": True}},
+            {"id": "three", "statusCode": "paid", "label": "付款", "priority": 3, "enabled": True,
+             "conditions": {"paymentComparison": "greater_equal"}},
+        ]
+        before = {"version": 5, "rules": rules, "idempotencyRecords": {"old": {}}}
+        self.store.save_app_settings({"unrelated": {"keep": True}, SETTINGS_KEY: before})
+        sql = Path("backend/src/fin_ops_platform/postgres/migrations/0190_payment_rules_without_priority.sql").read_text()
+        migrate.run_psql(self.database_url, sql=sql)
+        saved = self.store.load_app_settings()
+        policy = saved[SETTINGS_KEY]
+        self.assertEqual(policy["version"], 6)
+        self.assertEqual(saved["unrelated"], {"keep": True})
+        self.assertEqual([r["id"] for r in policy["rules"]], ["one", "one_unpaid", "two", "three"])
+        self.assertEqual([r["conditions"]["hasBank"] for r in policy["rules"]], [True, False, True, True])
+        self.assertFalse(policy["rules"][1]["enabled"])
+        self.assertEqual(policy["rules"][0]["statusCode"], policy["rules"][1]["statusCode"])
+        self.assertTrue(all("priority" not in r and not ({"fullyMatched", "invoiceOaAmountMatched"} & r["conditions"].keys()) for r in policy["rules"]))
+        self.assertEqual(policy["idempotencyRecords"], {})
+        event = self.connection.fetch_one("select payload from audit.events where action='input_invoice_usage_payment_rules_migrated'")
+        self.assertEqual(event["payload"], {"before": before, "after": policy})
+        self.assertEqual(normalize_payment_status_rules_settings(policy), policy)
+        migrate.run_psql(self.database_url, sql=sql)
+        self.assertEqual(self.store.load_app_settings(), saved)
+        self.assertEqual(self.connection.fetch_one("select count(*) n from audit.events where action='input_invoice_usage_payment_rules_migrated'")["n"], 1)
 
     def test_concurrent_cas_idempotency_and_unrelated_settings(self):
         self.store.save_app_settings({"unrelated_test_field": {"value": "keep"}})

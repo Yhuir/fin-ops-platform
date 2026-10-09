@@ -256,7 +256,7 @@ class PostgresInputInvoiceUsageQueryRepository:
                         array(select distinct relation.case_id from group_relation_ids scope
                               join active_relations relation on relation.id = scope.relation_id
                               where scope.group_key = filtered_rows.group_key) as relation_case_ids,
-                        status_code, fully_matched, invoice_oa_amount_matched, payment_comparison, invoice_net_sign,
+                        status_code, payment_comparison, invoice_net_sign,
                         usage_status, has_oa_relation, has_bank_relation,
                         oa_count, bank_count, oa_applicant,
                         array[]::text[] as supporting_group_keys,
@@ -394,6 +394,7 @@ class PostgresInputInvoiceUsageQueryRepository:
         invoice_count = int(summary_row.get("invoice_count") or 0)
         labels = {item["id"]: item["label"] for item in payment_categories(payment_settings)}
         labels["unclassified"] = "未分类"
+        labels["rule_conflict"] = "规则冲突"
         return InvoiceUsageCollectionCanonicalSnapshot(
             bank_labels=bank_labels,
             groups=facts["groups"],
@@ -1315,27 +1316,6 @@ def _fact_cte(
                 ''::text as oa_project_name,
         """
     )
-    match_facts_sql = (
-        """
-                (
-                    oa.oa_count > 0 and oa.oa_count = presence.expected_oa_count
-                    and abs(oa.oa_total - grouped.total_with_tax) <= 0.01
-                ) as invoice_oa_amount_matched,
-                (
-                    oa.oa_count > 0 and oa.oa_count = presence.expected_oa_count
-                    and abs(oa.oa_total - grouped.total_with_tax) <= 0.01
-                    and presence.bank_evidence_complete and banks.bank_amounts_known and banks.bank_comparison_resolved
-                    and abs(banks.bank_outflow_total - banks.bank_inflow_total - grouped.total_with_tax) <= 0.01
-                ) as fully_matched
-        """
-        if invoice_type == "input"
-        else """
-                false as invoice_oa_amount_matched,
-                (
-                    abs(coalesce(banks.matched_bank_total, 0) - abs(grouped.total_with_tax)) <= 0.01
-                ) as fully_matched
-        """
-    )
     oa_join_sql = (
         "left join group_oa oa on oa.group_key = grouped.group_key "
         "left join group_relation_presence presence on presence.group_key = grouped.group_key"
@@ -1705,8 +1685,7 @@ def _fact_cte(
                 coalesce(banks.bank_name, '') as bank_name,
                 coalesce(banks.bank_account, '') as bank_account,
                 {bank_direction_sql} as bank_direction,
-                coalesce(banks.bank_summary, '') as bank_summary,
-                {match_facts_sql}
+                coalesce(banks.bank_summary, '') as bank_summary
             from grouped_invoices grouped
             left join group_reversal_links reversal
               on reversal.group_key = grouped.group_key
@@ -1723,10 +1702,7 @@ def _input_payment_status_case(
 ) -> tuple[str, list[Any]]:
     fragments: list[str] = []
     params: list[Any] = []
-    for rule in sorted(
-        list(settings.get("rules") or []),
-        key=lambda item: (int(item.get("priority") or 0), str(item.get("id") or "")),
-    ):
+    for rule in settings["rules"]:
         if not bool(rule.get("enabled", True)):
             continue
         code = rule["statusCode"]
@@ -1742,8 +1718,6 @@ def _input_payment_status_case(
         for key, column in {
             "hasOa": "facts.has_oa_relation",
             "hasBank": "facts.has_bank_relation",
-            "fullyMatched": "facts.fully_matched",
-            "invoiceOaAmountMatched": "facts.invoice_oa_amount_matched",
         }.items():
             if key in conditions:
                 predicates.append(column if bool(conditions[key]) else f"not ({column})")
@@ -1756,9 +1730,15 @@ def _input_payment_status_case(
             params.append(applicants)
         if predicates:
             fragments.append(
-                f"when {' and '.join(predicates)} then '{_safe_code(code)}'"
+                f"(case when {' and '.join(predicates)} then '{_safe_code(code)}'::text end)"
             )
-    return ("case " + " ".join(fragments) + " else 'unclassified' end" if fragments else "'unclassified'::text", params)
+    if not fragments:
+        return "'unclassified'::text", params
+    return (
+        "(select case count(distinct matched.code) when 0 then 'unclassified' "
+        "when 1 then min(matched.code) else 'rule_conflict' end from (values "
+        + ", ".join(fragments) + ") matched(code))", params,
+    )
 
 
 def _where_sql(
@@ -1989,8 +1969,6 @@ def _group_payload(
             "has_oa": bool(row.get("has_oa_relation")),
             "has_bank": bool(row.get("has_bank_relation")),
             "applicant_name": str(row.get("oa_applicant") or ""),
-            "fully_matched": bool(row.get("fully_matched")),
-            "invoice_oa_amount_matched": bool(row.get("invoice_oa_amount_matched")),
             "payment_comparison": row["payment_comparison"],
             "invoice_net_sign": row["invoice_net_sign"],
         }

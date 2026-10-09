@@ -35,15 +35,13 @@ export function usePaymentStatusRules({ open, loadRules, saveRules, onSaved }: P
   const dirty = Boolean(payload && JSON.stringify(rules) !== JSON.stringify(cloneRules(payload.rules)));
   const conditionErrors = rules.map(rule => {
     const conditions = rule.conditions ?? {};
-    if (Object.keys(conditions).length === 0) return "至少选择一个条件";
+    if (typeof conditions.hasBank !== "boolean") return "请选择是否有流水";
     if (conditions.hasBank === false && conditions.paymentComparison != null) return "无流水不能比较付款金额，请修改流水或金额比较条件";
     if (conditions.hasOa === true && Array.isArray(conditions.applicantNames) && conditions.applicantNames.length === 0) return "请选择 OA 申请人";
-    if (conditions.hasOa === false && (conditions.applicantNames || conditions.invoiceOaAmountMatched === true)) return "无 OA 不能配置申请人或 OA 金额匹配";
-    if (conditions.fullyMatched === true && (conditions.hasOa === false || conditions.hasBank === false || conditions.invoiceOaAmountMatched === false || ['less', 'greater'].includes(String(conditions.paymentComparison)))) return "完全匹配与当前条件冲突";
+    if (conditions.hasOa === false && conditions.applicantNames) return "无 OA 不能配置申请人";
     return "";
   });
-  const invalid = conditionErrors.some(Boolean) || rules.some(rule => !rule.label.trim() || !Number.isInteger(rule.priority) || rule.priority < 1
-);
+  const invalid = conditionErrors.some(Boolean) || rules.some(rule => !rule.label.trim());
   async function refresh() {
     setRefreshError("");
     try { await onSaved?.(); }
@@ -54,7 +52,7 @@ export function usePaymentStatusRules({ open, loadRules, saveRules, onSaved }: P
     setSaving(true); setError(""); setFeedback(""); setRefreshError("");
     try {
       const next = await saveRules({ expectedVersion: payload.version ?? null, idempotencyKey: `input-invoice-usage-payment-rules-save:${crypto.randomUUID()}`,
-        rules: rules.map(({ id, statusCode, label, priority, enabled, conditions }) => ({ id, statusCode, label: label.trim(), priority, enabled: enabled !== false, conditions })) });
+        rules: rules.map(({ id, statusCode, label, enabled, conditions }) => ({ id, statusCode, label: label.trim(), enabled: enabled !== false, conditions })) });
       setPayload({ ...next, applicantOptions: payload.applicantOptions }); setRules(cloneRules(next.rules)); setFeedback("规则已保存。");
       await refresh();
     } catch (reason) {
@@ -71,22 +69,14 @@ export function usePaymentStatusRules({ open, loadRules, saveRules, onSaved }: P
       return { ...rule, conditions };
     }));
   }
-  function add(source?: InputInvoiceUsagePaymentStatusRule) {
-    setRules(current => [...current, { id: `rule_${crypto.randomUUID()}`, statusCode: source?.statusCode ?? `custom_${crypto.randomUUID().replace(/-/g, "")}`,
-      label: source?.label ?? "", description: "", priority: Math.max(0, ...current.map(rule => rule.priority)) + 1,
-      enabled: true, conditions: { ...source?.conditions } }]);
-  }
-  function move(index: number, direction: -1 | 1) {
+  function add(hasBank: boolean, statusCode?: string) {
     setRules(current => {
-      const next = index + direction;
-      if (next < 0 || next >= current.length) return current;
-      const result = [...current];
-      result[index] = { ...current[next], priority: current[index].priority };
-      result[next] = { ...current[index], priority: current[next].priority };
-      return result;
+      const existing = current.find(rule => rule.statusCode === statusCode);
+      return [...current, { id: `rule_${crypto.randomUUID()}`, statusCode: existing?.statusCode ?? `custom_${crypto.randomUUID().replace(/-/g, "")}`,
+        label: existing?.label ?? "", description: "", enabled: true, conditions: { hasBank } }];
     });
   }
-  return { payload, rules, setRules, loading, saving, error, refreshError, feedback, canSave, dirty, invalid, conditionErrors, save, refresh, update, condition, add, move,
+  return { payload, rules, setRules, loading, saving, error, refreshError, feedback, canSave, dirty, invalid, conditionErrors, save, refresh, update, condition, add,
     reload: () => { setPayload(null); setRules([]); setFeedback(""); setRevision(value => value + 1); },
     restore: () => { if (payload) setRules(cloneRules(payload.rules)); setError(""); setFeedback(""); },
   };

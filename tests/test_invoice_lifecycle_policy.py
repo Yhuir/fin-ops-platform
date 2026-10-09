@@ -27,14 +27,7 @@ class InvoiceLifecyclePolicyTests(unittest.TestCase):
     def test_unifies_input_invoice_payment_status_with_configurable_rules(self) -> None:
         policy = InvoiceLifecyclePolicy(input_payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None))
 
-        status = policy.evaluate_input_invoice_payment(
-            has_oa=True,
-            has_bank=True,
-            applicant_name="田孟维",
-            fully_matched=True,
-            invoice_oa_amount_matched=True,
-            payment_comparison="equal",
-        )
+        status = policy.evaluate_input_invoice_payment(has_oa=True, has_bank=True, applicant_name='田孟维', payment_comparison='equal')
 
         self.assertEqual(status["code"], "paid")
         self.assertEqual(status["label"], "发票＝付款")
@@ -44,7 +37,7 @@ class InvoiceLifecyclePolicyTests(unittest.TestCase):
 
         settings = {"version": 1, "rules": [{
             "id": "zero-net", "statusCode": "custom_zero", "label": "净额为零",
-            "priority": 1, "enabled": True, "conditions": {"invoiceNetSign": "zero"},
+            "enabled": True, "conditions": {"hasBank": False, "invoiceNetSign": "zero"},
         }]}
         provider = Mock()
         provider.evaluate.side_effect = lambda context: evaluate_payment_status(settings, context)
@@ -52,11 +45,7 @@ class InvoiceLifecyclePolicyTests(unittest.TestCase):
         for sign, expected in (("zero", "custom_zero"), ("positive", "unclassified"),
                                ("negative", "unclassified"), (None, "unclassified")):
             with self.subTest(sign=sign):
-                status = policy.evaluate_input_invoice_payment(
-                    has_oa=False, has_bank=False, applicant_name="",
-                    fully_matched=False, invoice_oa_amount_matched=False,
-                    payment_comparison="missing_bank_evidence", invoice_net_sign=sign,
-                )
+                status = policy.evaluate_input_invoice_payment(has_oa=False, has_bank=False, applicant_name='', payment_comparison='missing_bank_evidence', invoice_net_sign=sign)
                 self.assertEqual(status["code"], expected)
                 if sign == "zero":
                     self.assertEqual(status["label"], "净额为零")
@@ -69,14 +58,7 @@ class InvoiceLifecyclePolicyTests(unittest.TestCase):
             ValueError,
             "input_payment_rules_provider is required for input invoice usage payment evaluation",
         ):
-            policy.evaluate_input_invoice_payment(
-                has_oa=True,
-                has_bank=True,
-                applicant_name="田孟维",
-                fully_matched=True,
-                invoice_oa_amount_matched=True,
-            payment_comparison="equal",
-            )
+            policy.evaluate_input_invoice_payment(has_oa=True, has_bank=True, applicant_name='田孟维', payment_comparison='equal')
 
     def test_unifies_tax_certification_status(self) -> None:
         policy = InvoiceLifecyclePolicy()

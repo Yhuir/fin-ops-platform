@@ -1,5 +1,4 @@
 import { Autocomplete, Button, ListBox, Popover, SearchField } from "@heroui/react";
-import { ChevronDown } from "lucide-react";
 import { useState } from "react";
 import type { PaymentRuleApplicantOption } from "../../features/inputInvoiceUsage/types";
 
@@ -21,7 +20,7 @@ export default function PaymentRuleApplicantSelect({ label, options, names, mode
   return <Popover isOpen={open} onOpenChange={next => { if (!disabled) setOpen(next); }}>
     <Popover.Trigger className="payment-rule-applicant-trigger" role="combobox" aria-label={label} aria-haspopup="dialog"
       aria-expanded={open} aria-disabled={disabled} tabIndex={disabled ? -1 : 0}>
-      <span title={mode === "named" ? names.join("、") : summary}>{summary}</span><ChevronDown size={14} />
+      <span title={mode === "named" ? names.join("、") : summary}>{summary}</span>
     </Popover.Trigger>
     <Popover.Content className="payment-rule-applicants-popover" placement="bottom start" offset={4}>
       <Popover.Dialog aria-label={`${label} 选择`}><div className="payment-rule-applicants-content" onKeyDownCapture={event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setOpen(false); } }}>

@@ -412,7 +412,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(field_context.exception.error_code, "invalid_filter_field")
         self.assertEqual(operator_context.exception.error_code, "invalid_filter_operator")
 
-    def test_payment_status_uses_priority_and_current_payment_amounts(self) -> None:
+    def test_payment_status_reports_overlap_and_uses_current_payment_amounts(self) -> None:
         vendor = self._counterparty("vendor", "供应商")
         chen_invoice = self._invoice("inv-chen", "9001", vendor, total_with_tax="70.00")
         paid_invoice = self._invoice("inv-paid", "9002", vendor, total_with_tax="80.00")
@@ -440,7 +440,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
 
         rows = {row["invoiceId"]: row for row in service.list_rows(page_size=20)["rows"]}
 
-        self.assertEqual(rows["inv-chen"]["paymentStatus"]["code"], "cash_turnover")
+        self.assertEqual(rows["inv-chen"]["paymentStatus"]["code"], "rule_conflict")
         self.assertEqual(rows["inv-paid"]["paymentStatus"]["code"], "paid")
         self.assertEqual(rows["inv-fallback"]["paymentStatus"]["code"], "paid")
         self.assertEqual("发票＝付款", rows["inv-fallback"]["paymentStatus"]["label"])
@@ -472,7 +472,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["paymentStatus"]["code"], "paid")
         self.assertEqual(row["paymentStatus"]["label"], "发票＝付款")
 
-    def test_no_bank_oa_rules_prioritize_offset_applicants_before_waiting_payment(self) -> None:
+    def test_no_bank_oa_rules_report_offset_and_waiting_payment_overlap(self) -> None:
         vendor = self._counterparty("vendor", "供应商")
         zhou = self._invoice("inv-zhou", "9101", vendor, total_with_tax="50.00")
         liu = self._invoice("inv-liu", "9102", vendor, total_with_tax="60.00")
@@ -497,9 +497,9 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
 
         rows = {row["invoiceId"]: row for row in service.list_rows(page_size=20)["rows"]}
 
-        self.assertEqual(rows["inv-zhou"]["paymentStatus"]["code"], "offset")
-        self.assertEqual(rows["inv-liu"]["paymentStatus"]["code"], "offset")
-        self.assertEqual(rows["inv-wei"]["paymentStatus"]["code"], "offset")
+        self.assertEqual(rows["inv-zhou"]["paymentStatus"]["code"], "rule_conflict")
+        self.assertEqual(rows["inv-liu"]["paymentStatus"]["code"], "rule_conflict")
+        self.assertEqual(rows["inv-wei"]["paymentStatus"]["code"], "rule_conflict")
         self.assertEqual(rows["inv-wait"]["paymentStatus"]["code"], "waiting_payment")
 
     def test_confirmed_multi_invoice_relation_collapses_to_one_payment_row(self) -> None:
@@ -523,7 +523,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["invoiceRelations"]["relationCount"], 2)
         self.assertEqual(row["oa"]["relationCount"], 1)
         self.assertEqual(row["oa"]["amount"], "800.00")
-        self.assertEqual(row["paymentStatus"]["code"], "offset")
+        self.assertEqual(row["paymentStatus"]["code"], "rule_conflict")
 
     def test_independent_formal_relations_sharing_oa_remain_separate(self) -> None:
         vendor = self._counterparty("vendor", "云南城建物业运营集团")
@@ -587,9 +587,9 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
             self.assertEqual(row["invoiceRelations"]["relationCount"], 1)
             self.assertEqual(row["oa"]["relationCount"], 1)
             self.assertEqual(row["oa"]["amount"], "800.00")
-            self.assertEqual(row["paymentStatus"]["code"], "waiting_payment")
+            self.assertEqual(row["paymentStatus"]["code"], "rule_conflict")
 
-    def test_payment_status_accepts_status_matched_amount_check_for_oa_invoice_offset(self) -> None:
+    def test_relation_amount_check_does_not_override_rule_overlap(self) -> None:
         vendor = self._counterparty("vendor", "云南城建物业运营集团")
         first = self._invoice("inv-zhou-1", "26532000000021026521", vendor, total_with_tax="600.00")
         second = self._invoice("inv-zhou-2", "15312761", vendor, total_with_tax="200.00")
@@ -612,10 +612,10 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         row = service.list_rows(page_size=20)["rows"][0]
 
         self.assertEqual(row["invoice"]["totalWithTax"], "800.00")
-        self.assertEqual(row["paymentStatus"]["code"], "offset")
-        self.assertEqual(row["paymentStatus"]["label"], "冲")
+        self.assertEqual(row["paymentStatus"]["code"], "rule_conflict")
+        self.assertEqual(row["paymentStatus"]["label"], "规则冲突")
 
-    def test_payment_status_accepts_legacy_offset_relation_without_amount_check_when_totals_match(self) -> None:
+    def test_relation_without_amount_check_uses_current_rules(self) -> None:
         vendor = self._counterparty("vendor", "云南城建物业运营集团")
         first = self._invoice("inv-zhou-1", "26532000000021026521", vendor, total_with_tax="600.00")
         second = self._invoice("inv-zhou-2", "15312761", vendor, total_with_tax="200.00")
@@ -638,8 +638,8 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         row = service.list_rows(page_size=20)["rows"][0]
 
         self.assertEqual(row["invoice"]["totalWithTax"], "800.00")
-        self.assertEqual(row["paymentStatus"]["code"], "offset")
-        self.assertEqual(row["paymentStatus"]["label"], "冲")
+        self.assertEqual(row["paymentStatus"]["code"], "rule_conflict")
+        self.assertEqual(row["paymentStatus"]["label"], "规则冲突")
 
     def test_one_to_many_oa_and_bank_relations_include_deterministic_primary_and_all_summaries(self) -> None:
         vendor = self._counterparty("vendor", "供应商")

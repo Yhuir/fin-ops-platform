@@ -25,8 +25,6 @@ class PaymentStatusEvaluationContext:
     has_oa: bool
     has_bank: bool
     applicant_name: str
-    fully_matched: bool
-    invoice_oa_amount_matched: bool
     payment_comparison: str
     invoice_net_sign: str | None = None
 
@@ -55,31 +53,27 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "id": "cash_turnover_chen_xiuyun",
         "statusCode": "cash_turnover",
         "label": "现金往来",
-        "priority": 1,
         "enabled": True,
-        "conditions": {"hasOa": True, "hasBank": True, "fullyMatched": True, "applicantNames": ["陈秀云"]},
+        "conditions": {"hasOa": True, "hasBank": True, "applicantNames": ["陈秀云"]},
     },
     {
         "id": "paid_full_match",
         "statusCode": "paid",
         "label": "发票＝付款",
-        "priority": 2,
         "enabled": True,
-        "conditions": {"hasOa": True, "hasBank": True, "fullyMatched": True, "paymentComparison": "equal"},
+        "conditions": {"hasOa": True, "hasBank": True, "paymentComparison": "equal"},
     },
     {
         "id": "offset_zhou_jieying",
         "statusCode": "offset",
         "label": "冲",
-        "priority": 3,
         "enabled": True,
-        "conditions": {"hasOa": True, "hasBank": False, "applicantNames": ["周洁莹"], "invoiceOaAmountMatched": True},
+        "conditions": {"hasOa": True, "hasBank": False, "applicantNames": ["周洁莹"]},
     },
     {
         "id": "offset_liu_shugang_no_pay",
         "statusCode": "offset",
         "label": "冲",
-        "priority": 4,
         "enabled": True,
         "conditions": {"hasOa": True, "hasBank": False, "applicantNames": ["刘树刚"]},
     },
@@ -87,7 +81,6 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "id": "offset_wei_dailian",
         "statusCode": "offset",
         "label": "冲",
-        "priority": 5,
         "enabled": True,
         "conditions": {"hasOa": True, "hasBank": False, "applicantNames": ["韦代连"]},
     },
@@ -95,7 +88,6 @@ DEFAULT_RULES: list[dict[str, Any]] = [
         "id": "waiting_payment",
         "statusCode": "waiting_payment",
         "label": "未关联流水",
-        "priority": 6,
         "enabled": True,
         "conditions": {"hasOa": True, "hasBank": False},
     },
@@ -103,13 +95,13 @@ DEFAULT_RULES: list[dict[str, Any]] = [
 
 # Base classifications are normal editable rules, never evaluator branches.
 DEFAULT_RULES.extend([
-    {"id": "base_paid_equal", "statusCode": "paid", "label": "发票＝付款", "priority": 7, "enabled": True,
+    {"id": "base_paid_equal", "statusCode": "paid", "label": "发票＝付款", "enabled": True,
      "conditions": {"hasBank": True, "paymentComparison": "equal"}},
-    {"id": "base_paid_less", "statusCode": "invoice_less_payment", "label": "发票＜付款", "priority": 8, "enabled": True,
+    {"id": "base_paid_less", "statusCode": "invoice_less_payment", "label": "发票＜付款", "enabled": True,
      "conditions": {"hasBank": True, "paymentComparison": "less"}},
-    {"id": "base_paid_greater", "statusCode": "invoice_greater_payment", "label": "发票＞付款", "priority": 9, "enabled": True,
+    {"id": "base_paid_greater", "statusCode": "invoice_greater_payment", "label": "发票＞付款", "enabled": True,
      "conditions": {"hasBank": True, "paymentComparison": "greater"}},
-    {"id": "base_unpaid", "statusCode": "waiting_payment", "label": "未关联流水", "priority": 10, "enabled": True,
+    {"id": "base_unpaid", "statusCode": "waiting_payment", "label": "未关联流水", "enabled": True,
      "conditions": {"hasBank": False}},
 ])
 OUTPUT_STATUS_CODES = frozenset({"cash_turnover", "paid", "offset", "waiting_payment",
@@ -117,13 +109,8 @@ OUTPUT_STATUS_CODES = frozenset({"cash_turnover", "paid", "offset", "waiting_pay
 
 
 def payment_category_parents(rule: dict[str, Any]) -> tuple[str, ...]:
-    """Possible destinations depend on conditions; the actual bank relation decides each row."""
-    conditions = rule["conditions"]
-    if conditions.get("hasBank") is True or conditions.get("fullyMatched") is True or "paymentComparison" in conditions:
-        return ("paid",)
-    if conditions.get("hasBank") is False:
-        return ("unpaid",)
-    return ("paid", "unpaid")
+    """The bank condition is the sole owner of the display group."""
+    return ("paid" if rule["conditions"]["hasBank"] else "unpaid",)
 
 
 def payment_categories(settings: dict[str, Any]) -> list[dict[str, str]]:
@@ -140,6 +127,9 @@ def classification_tree(settings: dict[str, Any], counts: dict[str, int]) -> dic
         children = [{"id": f"category:{item['id']}", "label": item["label"],
                      "count": counts.get(f"{parent}:{item['id']}", 0)}
                     for item in payment_categories(settings) if item["parent"] == parent]
+        children.extend({"id": f"category:{code}", "label": status_label, "count": counts[f"{parent}:{code}"]}
+                        for code, status_label in (("rule_conflict", "规则冲突"), ("unclassified", "未分类"))
+                        if counts.get(f"{parent}:{code}", 0))
         groups.append({"id": parent, "label": label, "tone": parent,
                        "count": counts.get(parent, 0), "children": children})
     return {key: {"id": key, "label": label, "count": counts.get(key, 0)}
@@ -375,9 +365,16 @@ def public_payment_status_rules_payload(
 
 def evaluate_payment_status(settings: dict[str, Any], context: PaymentStatusEvaluationContext) -> dict[str, str]:
     normalized = normalize_payment_status_rules_settings(settings)
-    for rule in normalized["rules"]:
-        if rule["enabled"] and _conditions_match(rule["conditions"], context):
-            return _status_payload(rule)
+    matches = [rule for rule in normalized["rules"]
+               if rule["enabled"] and _conditions_match(rule["conditions"], context)]
+    codes = {rule["statusCode"] for rule in matches}
+    if len(codes) > 1:
+        return {"code": "rule_conflict", "label": "规则冲突",
+                "reason": "同时命中：" + "；".join(f"{rule['label']}（{rule['id']}）" for rule in sorted(matches, key=lambda rule: rule["id"])),
+                "matchedRuleId": "", "severity": "warning"}
+    if matches:
+        # Stable evidence selection only; all matches have the same output label.
+        return _status_payload(min(matches, key=lambda rule: rule["id"]))
     reason = {
         "missing_invoice_amount": "关联发票缺少价税合计",
         "missing_bank_evidence": "关联银行流水明细缺失" if context.has_bank else "未命中已配置规则",
@@ -396,7 +393,6 @@ def _normalize_rules(value: Any) -> list[dict[str, Any]]:
         )
     normalized: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
-    seen_priorities: set[int] = set()
     labels_by_code: dict[str, str] = {}
     for item in value:
         if not isinstance(item, dict):
@@ -409,12 +405,10 @@ def _normalize_rules(value: Any) -> list[dict[str, Any]]:
                 "duplicate_input_invoice_usage_payment_rule", f"Duplicate payment status rule id: {rule_id}",
             )
         seen_ids.add(rule_id)
-        priority = _required_int(item.get("priority"), "priority", "invalid_input_invoice_usage_payment_rule_priority")
-        if priority in seen_priorities:
+        if "priority" in item:
             raise InputInvoiceUsagePaymentRulesValidationError(
-                "duplicate_input_invoice_usage_payment_rule_priority", f"Duplicate payment status rule priority: {priority}",
+                "unsupported_input_invoice_usage_payment_rule_priority", "规则不再支持优先级，请刷新后编辑。",
             )
-        seen_priorities.add(priority)
         code = item.get("statusCode")
         if not isinstance(code, str) or (code not in OUTPUT_STATUS_CODES and not re.fullmatch(r"custom_[a-z0-9_]{1,72}", code)):
             raise InputInvoiceUsagePaymentRulesValidationError(
@@ -432,11 +426,11 @@ def _normalize_rules(value: Any) -> list[dict[str, Any]]:
             )
         labels_by_code[code] = label
         normalized_rule = {
-            "id": rule_id, "statusCode": code, "label": label, "priority": priority,
+            "id": rule_id, "statusCode": code, "label": label,
             "enabled": enabled, "conditions": _normalize_conditions(rule_id, item.get("conditions")),
         }
         normalized.append(normalized_rule)
-    return sorted(normalized, key=lambda item: (item["priority"], item["id"]))
+    return normalized
 
 
 def normalize_applicant_name(value: str) -> str:
@@ -445,7 +439,7 @@ def normalize_applicant_name(value: str) -> str:
 
 
 def _normalize_conditions(rule_id: str, value: Any) -> dict[str, Any]:
-    bool_keys = ("hasOa", "hasBank", "fullyMatched", "invoiceOaAmountMatched")
+    bool_keys = ("hasOa", "hasBank")
     if not isinstance(value, dict) or not value:
         raise InputInvoiceUsagePaymentRulesValidationError(
             "empty_input_invoice_usage_payment_rule_conditions", "Payment status rule conditions cannot be empty.",
@@ -453,6 +447,10 @@ def _normalize_conditions(rule_id: str, value: Any) -> dict[str, Any]:
     if set(value) - {*bool_keys, "applicantNames", "paymentComparison", "invoiceNetSign"}:
         raise InputInvoiceUsagePaymentRulesValidationError(
             "unsupported_input_invoice_usage_payment_rule_constraint", "Unsupported payment rule condition.",
+        )
+    if type(value.get("hasBank")) is not bool:
+        raise InputInvoiceUsagePaymentRulesValidationError(
+            "input_invoice_usage_payment_rule_bank_required", "请选择是否有流水。",
         )
     normalized: dict[str, Any] = {}
     for key, item in value.items():
@@ -482,14 +480,8 @@ def _normalize_conditions(rule_id: str, value: Any) -> dict[str, Any]:
                 )
             normalized[key] = sorted(set(names))
     impossible = (
-        ("paymentComparison" in normalized and normalized.get("hasBank") is False)
-        or (normalized.get("fullyMatched") is True and normalized.get("paymentComparison") in {"less", "greater"})
-        or
-        (normalized.get("hasOa") is False and (normalized.get("applicantNames") or normalized.get("invoiceOaAmountMatched") is True))
-        or (normalized.get("fullyMatched") is True and (
-            normalized.get("hasOa") is False or normalized.get("hasBank") is False
-            or normalized.get("invoiceOaAmountMatched") is False
-        ))
+        ("paymentComparison" in normalized and normalized["hasBank"] is False)
+        or (normalized.get("hasOa") is False and bool(normalized.get("applicantNames")))
     )
     if impossible:
         raise InputInvoiceUsagePaymentRulesValidationError(
@@ -502,8 +494,6 @@ def _normalize_conditions(rule_id: str, value: Any) -> dict[str, Any]:
 def condition_description(conditions: dict[str, Any]) -> str:
     labels = {
         "hasOa": ("有 OA", "无 OA"), "hasBank": ("有流水", "无流水"),
-        "fullyMatched": ("完全匹配", "未完全匹配"),
-        "invoiceOaAmountMatched": ("发票与 OA 金额匹配", "发票与 OA 金额不匹配"),
     }
     parts = [f"申请人（任一）={'、'.join(conditions['applicantNames'])}"] if "applicantNames" in conditions else []
     parts.extend(pair[0] if conditions[key] else pair[1] for key, pair in labels.items() if key in conditions)
@@ -518,8 +508,6 @@ def _conditions_match(conditions: dict[str, Any], context: PaymentStatusEvaluati
     checks = {
         "hasOa": context.has_oa,
         "hasBank": context.has_bank,
-        "fullyMatched": context.fully_matched,
-        "invoiceOaAmountMatched": context.invoice_oa_amount_matched,
     }
     for key, current_value in checks.items():
         if key in conditions and bool(conditions[key]) != bool(current_value):

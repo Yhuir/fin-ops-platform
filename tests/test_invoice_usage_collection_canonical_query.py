@@ -124,8 +124,6 @@ class RecordingInputRowAssembler:
             has_oa=False,
             has_bank=False,
             applicant_name="",
-            fully_matched=False,
-            invoice_oa_amount_matched=False,
             payment_comparison="invalid",
         )
 
@@ -510,9 +508,8 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
                         "id": "snapshot-no-oa",
                         "statusCode": "waiting_payment",
                         "label": "快照待处理",
-                        "priority": 7,
                         "enabled": True,
-                        "conditions": {"hasOa": False},
+                        "conditions": {"hasOa": False, "hasBank": False},
                     }
                 ],
             },

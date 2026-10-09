@@ -7,8 +7,8 @@ test("OA applicant multiselect saves and reloads without fetching on the list pa
   let version = 5;
   let reads = 0;
   let writes = 0;
-  let rules = [{ id: "multi", statusCode: "offset", label: "冲", description: "", priority: 1, enabled: true,
-    conditions: { hasOa: true, applicantNames: ["刘树刚"] } }];
+  let rules = [{ id: "multi", statusCode: "offset", label: "冲", description: "", enabled: true,
+    conditions: { hasBank: false, hasOa: true, applicantNames: ["刘树刚"] } }];
   await page.route("**/api/input-invoice-usage/payment-status-rules", async (route) => {
     if (route.request().method() === "PUT") {
       const body = route.request().postDataJSON();
@@ -33,7 +33,7 @@ test("OA applicant multiselect saves and reloads without fetching on the list pa
   if (await page.getByRole("button", { name: "更多页面操作" }).isVisible()) await page.getByRole("button", { name: "更多页面操作" }).click();
   await page.getByRole("button", { name: "发票与支付状态规则设置" }).click();
   const drawer = page.getByRole("dialog", { name: "发票与支付状态规则设置" });
-  await drawer.getByRole("button", { name: "冲 OA 申请人条件" }).click();
+  await drawer.getByRole("combobox", { name: "冲 OA 申请人条件" }).click();
   const account = (name: string) => page.getByRole("option", { name, exact: true });
   await expect(account("刘树刚 LIU")).toHaveAttribute("aria-selected", "true");
   await expect(account("刘树刚 LIU_OLD")).toHaveAttribute("aria-selected", "true");
@@ -60,10 +60,10 @@ test("OA applicant multiselect saves and reloads without fetching on the list pa
   expect(reads).toBe(1);
   if (await page.getByRole("button", { name: "更多页面操作" }).isVisible()) await page.getByRole("button", { name: "更多页面操作" }).click();
   await page.getByRole("button", { name: "发票与支付状态规则设置" }).click();
-  await expect(drawer.getByRole("button", { name: "冲 OA 申请人条件" })).toContainText("刘树刚、周洁莹、黄亮");
+  await expect(drawer.getByRole("combobox", { name: "冲 OA 申请人条件" })).toContainText("刘树刚、周洁莹 +1");
   await page.screenshot({ path: "../outputs/payment-rule-applicants-saved.png", animations: "disabled" });
   await page.setViewportSize({ width: 1024, height: 850 });
-  await drawer.getByRole("button", { name: "冲 OA 申请人条件" }).click();
+  await drawer.getByRole("combobox", { name: "冲 OA 申请人条件" }).click();
   await expect(account("周洁莹 ZHOU")).toHaveAttribute("aria-selected", "true");
   await page.screenshot({ path: "../outputs/payment-rule-applicants-narrow.png", animations: "disabled" });
   await page.keyboard.press("Escape");
@@ -86,16 +86,17 @@ test("empty rules allow directory verification through a discarded local draft w
   await page.getByRole("button", { name: "发票与支付状态规则设置" }).click();
   const drawer = page.getByRole("dialog", { name: "发票与支付状态规则设置" });
   await drawer.getByRole("button", { name: "新增规则", exact: true }).click();
+  await page.getByRole("button", { name: "添加", exact: true }).click();
   const draft = drawer.getByRole("grid", { name: "支付状态规则" }).getByRole("row").last();
   await draft.getByRole("textbox").fill("目录验证草稿");
-  await draft.getByRole("button", { name: "目录验证草稿 OA 条件" }).click();
+  await draft.getByRole("combobox", { name: "目录验证草稿 OA 申请人条件" }).click();
   await page.getByRole("option", { name: "指定申请人", exact: true }).click();
   await expect(drawer.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
-  await draft.getByRole("button", { name: "目录验证草稿 OA 申请人条件" }).click();
   const search = page.getByRole("searchbox", { name: "搜索申请人姓名或账号" });
   await search.fill("TEST_DISABLED");
   await page.getByRole("option", { name: "测试停用账号 TEST_DISABLED", exact: true }).click();
-  await page.keyboard.press("Escape"); await expect(search).toHaveValue(""); await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await expect(search).not.toBeVisible();
   await expect(drawer.getByRole("button", { name: "保存", exact: true })).toBeEnabled();
   await drawer.getByRole("button", { name: "还原", exact: true }).click();
   await expect(drawer.getByRole("textbox")).toHaveCount(0);

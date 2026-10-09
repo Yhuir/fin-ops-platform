@@ -420,7 +420,6 @@ function mapPaymentStatusRulesResponse(payload: unknown): InputInvoiceUsagePayme
         label: stringValue(rule.label),
         description: stringValue(rule.description),
         reason: stringValue(rule.reason),
-        priority: numberValue(rule.priority, 0),
         enabled: rule.enabled === undefined ? undefined : booleanValue(rule.enabled),
         conditions: objectValue(rule.conditions),
         applicantConstraints: arrayValue(camelOrSnake(rule, "applicantConstraints", "applicant_constraints")).map(stringValue),

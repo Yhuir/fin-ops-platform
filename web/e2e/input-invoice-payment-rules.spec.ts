@@ -9,7 +9,7 @@ test("payment fact hierarchy, usage parents and rule edits retain scope and serv
   await page.goto("/input-invoice-usage");
   const payload = await (await first).json();
   let version = 2;
-  let rules = [{ id: "r1", statusCode: "custom_review", label: "待核对", description: "", priority: 1, enabled: true, conditions: { hasOa: true, applicantNames: ["陈秀云"], hasBank: false, invoiceNetSign: "negative" } }];
+  let rules = [{ id: "r1", statusCode: "custom_review", label: "待核对", description: "", enabled: true, conditions: { hasOa: true, applicantNames: ["陈秀云"], hasBank: false, invoiceNetSign: "negative" } }];
   let rejectSave = true;
   const writes: Array<Record<string, unknown>> = [];
   await page.route("**/api/input-invoice-usage/rows?*", route => route.fulfill({ json: { ...payload,
@@ -46,7 +46,7 @@ test("payment fact hierarchy, usage parents and rule edits retain scope and serv
   await page.getByRole("button", { name: "发票与支付状态规则设置" }).click();
   const drawer = page.getByRole("dialog", { name: "发票与支付状态规则设置" });
   await expect(drawer.getByRole("grid", { name: "支付状态规则" })).toBeVisible();
-  await expect(drawer.getByRole("columnheader")).toHaveText(["启用", "顺序", "规则", "OA 申请人", "流水", "发票与付款比较", "发票净额", "完全匹配", "发票/OA 金额匹配", "操作"]);
+  await expect(drawer.getByRole("columnheader")).toHaveText(["付款状态", "启用", "规则", "OA 申请人", "是否有流水", "发票 VS 流水", "发票净额（正数票+负数票）", "操作"]);
   for (const width of [1920, 1440, 1024]) {
     await page.setViewportSize({ width, height: 1080 });
     const row = await drawer.getByRole("row").nth(1).boundingBox();
@@ -63,19 +63,27 @@ test("payment fact hierarchy, usage parents and rule edits retain scope and serv
   await page.keyboard.press("Escape");
   await expect(drawer.getByRole("combobox", { name: "待核对 OA 申请人条件" })).toHaveText(/陈秀云、周洁莹/);
   await drawer.getByRole("textbox", { name: "标签 1" }).fill("人工复核");
-  await drawer.getByRole("button", { name: "复制规则 人工复核" }).click();
+  await expect(drawer.getByRole("button", { name: /复制|上移|下移|重新加载/ })).toHaveCount(0);
+  await drawer.getByRole("button", { name: "新增规则" }).click();
+  await page.getByRole("button", { name: /新增规则标签/ }).click();
+  await page.getByRole("option", { name: "人工复核", exact: true }).click();
+  await page.getByRole("button", { name: "添加", exact: true }).click();
   await expect(drawer.getByRole("textbox", { name: "标签 2" })).toHaveValue("人工复核");
-  await drawer.getByRole("button", { name: /启用规则 人工复核$/ }).nth(1).click();
-  await page.getByRole("option", { name: "✕", exact: true }).click();
-  await expect(drawer.getByRole("button", { name: /启用规则 人工复核$/ }).nth(1)).toHaveText(/✕/);
+  await drawer.locator('[data-slot="checkbox"]').first().click();
+  await expect(drawer.getByRole("checkbox", { name: "启用规则 人工复核", exact: true }).first()).not.toBeChecked();
+  await expect(drawer.locator('[data-slot="select-indicator"]')).toHaveCount(0);
+  await expect(drawer.locator(".payment-rule-group--paid")).toHaveCount(1);
+  await expect(drawer.locator(".payment-rule-group--unpaid")).toHaveCount(1);
   await page.screenshot({ animations: "disabled", path: info.outputPath("input-invoice-rules.png") });
   await drawer.getByRole("button", { name: "保存", exact: true }).click();
   await expect(drawer.getByRole("alert")).toContainText("规则已被其他人更新");
   await expect(drawer.getByRole("textbox", { name: "标签 1" })).toHaveValue("人工复核");
+  await drawer.getByRole("button", { name: "重试读取", exact: true }).click();
+  await page.getByRole("button", { name: "放弃修改", exact: true }).click();
+  await drawer.getByRole("textbox", { name: "标签 1" }).fill("人工复核");
   await drawer.getByRole("button", { name: "保存", exact: true }).click();
   await expect(drawer.getByText("规则已保存。", { exact: true })).toBeVisible();
-  expect(writes[1]).toMatchObject({ expectedVersion: 2, rules: [expect.objectContaining({ statusCode: "custom_review", label: "人工复核" }), expect.objectContaining({ statusCode: "custom_review", label: "人工复核", enabled: false })] });
-  await drawer.getByRole("button", { name: "删除规则 人工复核" }).first().click();
+  expect(writes[1]).toMatchObject({ expectedVersion: 2, rules: [expect.objectContaining({ statusCode: "custom_review", label: "人工复核" })] });
   await drawer.getByRole("button", { name: "删除规则 人工复核" }).click();
   await drawer.getByRole("button", { name: "保存", exact: true }).click();
   await expect(drawer.getByRole("button", { name: "保存", exact: true })).toBeDisabled();

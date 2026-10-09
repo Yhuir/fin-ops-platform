@@ -201,6 +201,7 @@ EXPECTED_MIGRATIONS = [
     "0187_tax_certification_evidence.sql",
     "0188_input_invoice_payment_rules_explicit.sql",
     "0189_payment_rule_inclusive_operators.sql",
+    "0190_payment_rules_without_priority.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -365,7 +366,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
         self.assertEqual(
             [item.version for item in migrations],
-            [f"{number:04d}" for number in range(1, 190)],
+            [f"{number:04d}" for number in range(1, 191)],
         )
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
@@ -1967,6 +1968,15 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         self.assertIn("'invoice.oa_source_priority_applied'", oa_source_priority_sql)
         self.assertNotRegex(oa_source_priority_sql, r"\b(delete|truncate|drop)\b")
         checked_sql = checked_sql.replace(oa_source_priority_sql, "approved_oa_source_priority_convergence;")
+        rule_conversion_sql = strip_sql_comments(
+            (MIGRATIONS_DIR / "0190_payment_rules_without_priority.sql").read_text(encoding="utf-8")
+        ).lower()
+        self.assertIn(rule_conversion_sql, checked_sql)
+        self.assertIn("where settings_key = 'app_settings'", rule_conversion_sql)
+        self.assertIn("'input_invoice_usage_payment_rules_migrated'", rule_conversion_sql)
+        self.assertIn("jsonb_build_object('before', before_policy, 'after', after_policy)", rule_conversion_sql)
+        self.assertNotRegex(rule_conversion_sql, r"\b(delete|truncate|drop)\b")
+        checked_sql = checked_sql.replace(rule_conversion_sql, "approved_payment_rule_contract_conversion;")
         approved_legacy_drops = (
             "drop table if exists read_model.cost_statistics_bank_flow_rows;",
             "drop table if exists read_model.cost_statistics_rows;",

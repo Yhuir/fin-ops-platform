@@ -219,7 +219,6 @@ export type InputInvoiceUsagePaymentStatusRule = {
   label: string;
   description: string;
   reason?: string;
-  priority: number;
   enabled?: boolean;
   conditions?: Record<string, unknown>;
   applicantConstraints?: string[];
@@ -228,7 +227,7 @@ export type InputInvoiceUsagePaymentStatusRule = {
 export type SaveInputInvoiceUsagePaymentStatusRulesRequest = {
   expectedVersion: number | string | null;
   idempotencyKey: string;
-  rules: Array<Pick<InputInvoiceUsagePaymentStatusRule, "id" | "statusCode" | "label" | "priority" | "enabled" | "conditions">>;
+  rules: Array<Pick<InputInvoiceUsagePaymentStatusRule, "id" | "statusCode" | "label" | "enabled" | "conditions">>;
 };
 
 export type InputInvoiceUsageOaReversePreviewRequest = {

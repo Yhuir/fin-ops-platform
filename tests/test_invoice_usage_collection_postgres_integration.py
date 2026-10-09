@@ -111,10 +111,8 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
 
     def test_input_summary_deduplicates_shared_invoice_tax_and_net_sign_uses_signed_groups(self):
         from fin_ops_platform.services.postgres_repositories.common import jsonb
-        rules = [{"id": "zero", "statusCode": "custom_zero", "label": "零净额", "priority": 1,
-                  "enabled": True, "conditions": {"hasBank": True, "invoiceNetSign": "zero"}},
-                 {"id": "positive", "statusCode": "custom_positive", "label": "正净额", "priority": 2,
-                  "enabled": True, "conditions": {"hasBank": True, "invoiceNetSign": "positive"}}]
+        rules = [{"id": "zero", "statusCode": "custom_zero", "label": "零净额", "enabled": True, "conditions": {"hasBank": True, "invoiceNetSign": "zero"}},
+                 {"id": "positive", "statusCode": "custom_positive", "label": "正净额", "enabled": True, "conditions": {"hasBank": True, "invoiceNetSign": "positive"}}]
         self.connection.execute("insert into app.app_settings(settings_key,settings_payload) values('app_settings',%s)",
                                 (jsonb({"page_access_accounts": [], "access_control_version": 1, "input_invoice_usage_payment_status_rules": {"version": 1, "rules": rules}}),))
         for key, gross, tax in (("blue", "113", "13"), ("red", "-113", "-13"), ("missing-tax", "50", None)):
@@ -179,7 +177,7 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
             self.assertEqual(cleared.summary, {**snapshot.summary, "unclassifiedCount": 3})
             self.assertEqual({group["row_key"] for group in cleared.groups}, {group["row_key"] for group in snapshot.groups})
             self.assertEqual([group["count"] for group in cleared.classification["groups"]], [2, 0])
-            self.assertTrue(all(group["children"] == [] for group in cleared.classification["groups"]))
+            self.assertEqual(cleared.classification["groups"][0]["children"], [{"id": "category:unclassified", "label": "未分类", "count": 2}])
             with self.assertRaises(InputInvoiceUsagePaymentRulesValidationError) as conflict:
                 provider.update_payment_status_rules(
                     {"expectedVersion": 1, "idempotencyKey": "stale-query-rules", "rules": rules}, actor_id="tester")
@@ -189,8 +187,7 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
             self.assertEqual(after_conflict.classification, cleared.classification)
             self.assertEqual(after_conflict.payment_status_rules["rules"], [])
             inclusive_request = {"expectedVersion": 2, "idempotencyKey": "inclusive-query-rules", "rules": [
-                {"id": "inclusive", "statusCode": "custom_inclusive", "label": "包含边界", "priority": 1,
-                 "enabled": True, "conditions": {"hasBank": True, "paymentComparison": "less_equal", "invoiceNetSign": "nonnegative"}}]}
+                {"id": "inclusive", "statusCode": "custom_inclusive", "label": "包含边界", "enabled": True, "conditions": {"hasBank": True, "paymentComparison": "less_equal", "invoiceNetSign": "nonnegative"}}]}
             inclusive_saved = provider.update_payment_status_rules(inclusive_request, actor_id="tester")
             self.assertEqual(inclusive_saved["version"], 3)
             self.assertEqual(provider.update_payment_status_rules(inclusive_request, actor_id="tester"), inclusive_saved)
@@ -204,6 +201,27 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
             self.assertEqual(selected_inclusive.summary["unclassifiedCount"], 0)
             self.assertEqual(next(child["count"] for child in inclusive.classification["groups"][0]["children"]
                                   if child["label"] == "包含边界"), 2)
+
+            overlapping = [*inclusive_request["rules"], {"id": "other", "statusCode": "custom_other", "label": "另一标签",
+                           "enabled": True, "conditions": {"hasBank": True}}]
+            provider.update_payment_status_rules({"expectedVersion": 3, "idempotencyKey": "overlap", "rules": overlapping}, actor_id="tester")
+            conflict_snapshot = load(filters=[{"field": "payment_status", "operator": "in", "values": ["rule_conflict"]}])
+            self.assertEqual(conflict_snapshot.summary["invoiceCount"], 2)
+            self.assertEqual(conflict_snapshot.summary["totalWithTax"], "0.00")
+            self.assertEqual(conflict_snapshot.payment_status_labels["rule_conflict"], "规则冲突")
+            self.assertEqual(next(c["count"] for c in conflict_snapshot.classification["groups"][0]["children"] if c["id"] == "category:rule_conflict"), 2)
+            import_service = ImportNormalizationService()
+            assembler = InputInvoiceUsageQueryService(import_service=import_service, payment_rules_provider=_UnexpectedPaymentRulesProvider())
+            service = InputInvoiceUsageCanonicalQueryService(repository=repository, row_assembler=assembler)
+            conflict_filter = [{"field": "payment_status", "operator": "in", "values": ["rule_conflict"]}]
+            listed = service.list_rows(filters=conflict_filter)
+            exported = service.export_page(filters=conflict_filter)
+            self.assertEqual(listed["rows"], exported["rows"])
+            self.assertTrue(listed["rows"])
+            self.assertTrue(all(row["paymentStatus"]["code"] == "rule_conflict" for row in listed["rows"]))
+            self.assertIn("另一标签", listed["rows"][0]["paymentStatus"]["reason"])
+            provider.update_payment_status_rules({"expectedVersion": 4, "idempotencyKey": "reverse-order", "rules": overlapping[::-1]}, actor_id="tester")
+            self.assertEqual(service.list_rows(filters=conflict_filter)["rows"], listed["rows"])
 
     def test_output_relations_sharing_oa_do_not_lose_or_mix_bank_ownership(self):
         for key, amount in [('first', 100), ('second', 200)]:

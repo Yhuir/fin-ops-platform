@@ -478,7 +478,7 @@ class InputInvoiceUsageQueryService:
         if "payment_facts" in group:
             if lifecycle_policy is None:
                 raise ValueError("Canonical payment facts require the snapshot payment policy.")
-            payment_status = lifecycle_policy.evaluate_input_invoice_payment(**group["payment_facts"])
+            payment_status = lifecycle_policy.evaluate_input_invoice_payment(**group['payment_facts'])
         else:
             payment_status = self._payment_status(
                 primary, line_items, relations, oa_payload, bank_payload,
@@ -787,16 +787,10 @@ class InputInvoiceUsageQueryService:
             payment_comparison = "ambiguous_bank_scope"
         else:
             payment_comparison = "equal" if _within_cent(invoice_total, paid_total) else "less" if invoice_total < paid_total else "greater"
-        oa_amount = oa_payload.get("amount")
-        invoice_oa_matched = invoice_total is not None and bool(oa_amount) and _within_cent(invoice_total, Decimal(oa_amount))
         return (lifecycle_policy or self._lifecycle_policy).evaluate_input_invoice_payment(
-            has_oa=has_oa,
-            has_bank=has_bank,
-            applicant_name=applicant,
-            fully_matched=invoice_oa_matched and payment_comparison == "equal",
-            invoice_oa_amount_matched=invoice_oa_matched,
+            has_oa=has_oa, has_bank=has_bank, applicant_name=applicant,
             payment_comparison=payment_comparison,
-            invoice_net_sign=(None if invoice_total is None else "positive" if invoice_total > 0 else "negative" if invoice_total < 0 else "zero"),
+            invoice_net_sign=None if invoice_total is None else "positive" if invoice_total > 0 else "negative" if invoice_total < 0 else "zero",
         )
 
     def _first_confirmed_oa_applicant(
