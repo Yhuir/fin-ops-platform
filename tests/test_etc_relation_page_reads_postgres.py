@@ -153,8 +153,10 @@ class EtcRelationPageReadsTests(unittest.TestCase):
             store = PostgresStateStore(data_dir=Path(directory), connection=self.connection)
             provider = AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=store, transaction_factory=self.connection.transaction)
             provider.update_payment_status_rules({"expectedVersion": 1, "idempotencyKey": "shared-category", "rules": [
-                {"id": "any-bank", "statusCode": "custom_shared", "label": "规则一", "priority": 1,
-                 "enabled": True, "conditions": {"hasOa": True}}
+                {"id": "with-bank", "statusCode": "custom_shared", "label": "规则一",
+                 "enabled": True, "conditions": {"hasOa": True, "hasBank": True}},
+                {"id": "without-bank", "statusCode": "custom_shared", "label": "规则一",
+                 "enabled": True, "conditions": {"hasOa": True, "hasBank": False}}
             ]}, actor_id="test")
         shared = usage.rows({})['classification']
         self.assertEqual(shared['used']['count'], 69)
