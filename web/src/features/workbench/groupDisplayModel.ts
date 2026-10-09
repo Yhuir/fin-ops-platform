@@ -636,7 +636,7 @@ function missingInvoicePlaceholder(
     return [];
   }
   const label = anomaly.code === "oa_invoice_attachment_unparsed"
-    ? "OA发票附件未解析"
+    ? "OA附件未关联发票"
     : "无OA附件";
   return [{
     id: `${parent.id}:missing-invoice:${item.id}`,

@@ -293,8 +293,8 @@ function withUnparsedAttachmentGroup(payload: Record<string, unknown>) {
       review_decision: "pending",
       items: [{
         code: "oa_invoice_attachment_unparsed",
-        label: "发票附件未解析",
-        display_label: "发票附件未解析",
+        label: "附件未关联发票",
+        display_label: "附件未关联发票",
         fingerprint: "b".repeat(64),
         comparison_unit_id: "oa-exp-2035:item:0",
         source_oa_ids: ["oa-exp-2035"],

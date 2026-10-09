@@ -1080,8 +1080,8 @@ describe("Workbench candidate grouping layout", () => {
     const selectRow = vi.fn();
     const missingAnomaly = {
       code: "oa_invoice_attachment_unparsed" as const,
-      label: "发票附件未解析",
-      displayLabel: "发票附件未解析",
+      label: "附件未关联发票",
+      displayLabel: "附件未关联发票",
       fingerprint: "c".repeat(64),
       comparisonUnitId: "oa-exp-413:item:0",
       sourceOaIds: ["oa-exp-413"],
@@ -1184,7 +1184,7 @@ describe("Workbench candidate grouping layout", () => {
     const missingInvoiceItem = screen.getByTestId(
       "candidate-group-segment-unpaired-row:oa-exp-413-oa-exp-413:item:0",
     );
-    expect(within(missingInvoiceItem).queryByText("发票附件未解析")).not.toBeInTheDocument();
+    expect(within(missingInvoiceItem).queryByText("附件未关联发票")).not.toBeInTheDocument();
     const missingInvoiceIndicator = within(missingInvoiceItem).getByRole("button", {
       name: "该付款项有 1 项异常，查看详情",
     });
@@ -1213,14 +1213,14 @@ describe("Workbench candidate grouping layout", () => {
     expect(selectRow.mock.calls[0][0].id).toBe(parentOa.id);
 
     fireEvent.mouseEnter(missingInvoiceIndicator);
-    expect(await screen.findByText("发票附件未解析")).toBeVisible();
+    expect(await screen.findByText("附件未关联发票")).toBeVisible();
   });
 
   test("keeps only invoice entry enabled in a read-only grid when amount and document anomalies coexist", () => {
     const documentAnomaly = {
       code: "oa_invoice_attachment_unparsed" as const,
-      label: "发票附件未解析",
-      displayLabel: "发票附件未解析",
+      label: "附件未关联发票",
+      displayLabel: "附件未关联发票",
       fingerprint: "e".repeat(64),
       comparisonUnitId: "oa-mixed-anomaly:item:0",
       sourceOaIds: ["oa-mixed-anomaly"],

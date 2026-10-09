@@ -1742,7 +1742,7 @@ function anomalyLabel(code: string) {
     return "发票附件缺失";
   }
   if (code === "oa_invoice_attachment_unparsed") {
-    return "发票附件未解析";
+    return "附件未关联发票";
   }
   if (code === "oa_invoice_attachment_unassigned") {
     return "发票待归属";

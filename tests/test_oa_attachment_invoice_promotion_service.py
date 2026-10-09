@@ -102,6 +102,25 @@ class OAAttachmentInvoicePromotionServiceTests(unittest.TestCase):
                 self.assertEqual(invoice.source_line_items, lines)
                 self.assertEqual(service.promote_records([record])["summary"]["affected_invoice_count"], 0)
 
+    def test_railway_parse_to_promotion_preserves_nulls_and_is_idempotent(self):
+        from tests.test_oa_attachment_invoice_service import RAILWAY_E_TICKET_PRICE_PREFIX_TEXT
+        evidence = OAAttachmentInvoiceService()._parse_evidences_from_text(RAILWAY_E_TICKET_PRICE_PREFIX_TEXT)[0]
+        evidence.update(source_attachment_key="railway", source_expense_item_id="oa-railway:item:0")
+        record = SimpleNamespace(id="oa-railway", month="2026-06", attachment_invoices=[evidence])
+        repository = FakeAtomicInvoiceRepository([])
+        service = OAAttachmentInvoicePromotionService(invoice_repository=repository,
+            promotion_mode_provider=lambda: OA_ATTACHMENT_INVOICE_PROMOTION_CREATE_MISSING)
+        report = service.promote_records([record])
+        self.assertEqual(report["summary"]["affected_invoice_count"], 1)
+        invoice = repository.invoices[0]
+        self.assertEqual(invoice.total_with_tax, Decimal("145"))
+        self.assertIsNone(invoice.amount)
+        self.assertIsNone(invoice.tax_amount)
+        self.assertIsNone(invoice.tax_rate)
+        self.assertEqual(invoice.source_links[0]["source_expense_item_id"], "oa-railway:item:0")
+        self.assertEqual(service.promote_records([record])["summary"]["affected_invoice_count"], 0)
+        self.assertEqual(len(repository.invoices), 1)
+
     def test_real_partial_parser_output_links_existing_only_without_financial_overwrite(self):
         evidence = OAAttachmentInvoiceService()._parse_evidences_from_text(PARTIAL_HOTEL_TEXT)[0]
         evidence.update(source_attachment_key="hotel", source_expense_item_id="oa-hotel:item:2")
@@ -819,6 +838,24 @@ class PostgresOAAttachmentInvoiceRepositoryIntegrationTests(unittest.TestCase):
         connection = getattr(self, "connection", None)
         if connection is not None:
             connection.close()
+
+    def test_railway_fare_only_creates_formal_invoice_and_matching_once(self):
+        from tests.test_oa_attachment_invoice_service import RAILWAY_E_TICKET_PRICE_PREFIX_TEXT
+        evidence = OAAttachmentInvoiceService()._parse_evidences_from_text(RAILWAY_E_TICKET_PRICE_PREFIX_TEXT)[0]
+        evidence.update(source_attachment_key="railway-source", source_expense_item_id="oa-railway:item:0")
+        repository = PostgresOAAttachmentInvoiceRepository(self.connection)
+        service = OAAttachmentInvoicePromotionService(invoice_repository=repository,
+            promotion_mode_provider=lambda: OA_ATTACHMENT_INVOICE_PROMOTION_CREATE_MISSING)
+        record = SimpleNamespace(id="oa-railway", month="2026-06", attachment_invoices=[evidence])
+        first = service.promote_records([record], ensure_matching=True)
+        self.assertEqual(first["summary"]["affected_invoice_count"], 1)
+        second = service.promote_records([record], ensure_matching=True)
+        self.assertEqual(second["summary"]["affected_invoice_count"], 0)
+        rows = self.connection.fetch_all("select invoice_no, amount, tax_amount, total_with_tax, source_links from app.invoices")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["amount"], rows[0]["tax_amount"], rows[0]["total_with_tax"]), (None, None, Decimal("145.00")))
+        self.assertEqual(rows[0]["source_links"][0]["source_expense_item_id"], "oa-railway:item:0")
+        self.assertGreater(self.connection.fetch_one("select count(*) n from job.workbench_matching_dirty_scopes")["n"], 0)
 
     def test_docx_partial_evidence_persists_existing_invoice_source_and_matching_idempotently(self):
         parser = OAAttachmentInvoiceService()

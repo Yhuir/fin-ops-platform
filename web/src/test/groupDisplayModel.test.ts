@@ -725,8 +725,8 @@ describe("groupDisplayModel time filter", () => {
   test("renders one display-only invoice placeholder for an uploaded item with no parsed invoice", () => {
     const missingAnomaly = {
       code: "oa_invoice_attachment_unparsed" as const,
-      label: "OA发票附件未解析",
-      displayLabel: "OA发票附件未解析",
+      label: "OA附件未关联发票",
+      displayLabel: "OA附件未关联发票",
       fingerprint: "a".repeat(64),
       comparisonUnitId: "item-missing",
       sourceOaIds: ["oa-exp-missing"],
@@ -764,7 +764,7 @@ describe("groupDisplayModel time filter", () => {
     expect(invoiceRows).toHaveLength(1);
     expect(invoiceRows?.[0]).toMatchObject({
       displayOnly: true,
-      label: "OA发票附件未解析",
+      label: "OA附件未关联发票",
       tableValues: {},
       workbenchAnomalies: [missingAnomaly],
     });
@@ -836,8 +836,8 @@ describe("groupDisplayModel time filter", () => {
   test("spans a parent bank row while keeping reimbursement invoices aligned to their owned items", () => {
     const missingAnomaly = {
       code: "oa_invoice_attachment_unparsed" as const,
-      label: "OA发票附件未解析",
-      displayLabel: "OA发票附件未解析",
+      label: "OA附件未关联发票",
+      displayLabel: "OA附件未关联发票",
       fingerprint: "b".repeat(64),
       comparisonUnitId: "item-28.80",
       sourceOaIds: ["oa-exp-174.94"],
@@ -899,7 +899,7 @@ describe("groupDisplayModel time filter", () => {
     expect(layout?.segments.find(({ id }) => id === "item-55.80")?.rows.invoice).toEqual([invoices[2]]);
     expect(layout?.segments.find(({ id }) => id === "item-28.80")?.rows.invoice[0]).toMatchObject({
       displayOnly: true,
-      label: "OA发票附件未解析",
+      label: "OA附件未关联发票",
     });
   });
 

@@ -167,6 +167,12 @@ p50/p95/p99、canonical audit、health、worker、PostgreSQL outbox/dead-letter 
 
 仅在数据修复确有需要时建立任务专属恢复工件；完成验证后按工具合同精确删除，不触碰平台常规备份或主数据库。
 
+## OA 附件原件读取
+
+OA 与 App 同机时，`FIN_OPS_OA_ATTACHMENT_SOURCE_ROOT=/java/project/oaadmin/file-manager` 显式选择原件目录读取。API 和 OA worker 共同加载该配置，仅需目录遍历与文件读取权限；不赋予写入权限，不把个人会话 token 配进后台。已登记 `/fileManager/` 路径映射到该目录下，其余登记相对路径从目录根读取；目录之外、外域 URL 和缺失文件明确失败，不搜索同名替代件。
+
+解析器升级后通过设置里的 OA 全量搜索，对精确 OA 执行附件刷新；历史 OA 不需扩大自动同步日期。核对逐文件结果、入池回执、子项来源与正式关联；缺失原件或原件没有开票日期时保留异常，不补造字段。
+
 ## OA 会话、角色与菜单
 
 - OA 页面通过同域 cookie/token broker 复用会话；后端不向浏览器暴露 OA 密钥。

@@ -764,7 +764,8 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
             "suffix": "pdf",
         }
 
-        with patch.object(service, "_download_content", return_value=None):
+        from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentDownloadError
+        with patch.object(service, "_download_content", side_effect=OAAttachmentDownloadError("http_404")):
             result = service.parse_file_result(file_entry)
 
         self.assertEqual(result["parse_status"], "download_failed")
@@ -944,6 +945,79 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         self.assertIsNone(invoice["tax_amount"])
         self.assertEqual(invoice["total_with_tax"], "38.00")
         self.assertEqual(invoice["invoice_kind"], "电子发票（铁路电子客票）")
+
+    def test_explicit_local_source_reads_exact_registered_path_without_http(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "2026" / "发票.pdf"
+            path.parent.mkdir()
+            path.write_bytes(b"%PDF-source")
+            service = OAAttachmentInvoiceService(base_url="https://oa.example/oa-api", source_root=directory)
+            with patch("fin_ops_platform.services.oa_attachment_invoice_service.urlopen") as http:
+                self.assertEqual(service._download_content(service.build_download_url("/fileManager/2026/发票.pdf")), b"%PDF-source")
+                for source in ("/fileManager/missing.pdf", "/fileManager/../private.pdf", "https://evil.example/file.pdf"):
+                    result = service.parse_file_result({"fileName": "test.pdf", "filePath": source})
+                    self.assertEqual(result["parse_status"], "download_failed")
+                    self.assertTrue(result["parse_error"])
+                http.assert_not_called()
+
+    def test_local_source_rejects_symlink_escape(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        with TemporaryDirectory() as directory:
+            root = Path(directory) / "root"
+            root.mkdir()
+            outside = Path(directory) / "private.pdf"
+            outside.write_bytes(b"%PDF-private")
+            (root / "escape.pdf").symlink_to(outside)
+            service = OAAttachmentInvoiceService(source_root=root)
+            result = service.parse_file_result({"fileName": "escape.pdf", "filePath": "/escape.pdf"})
+            self.assertEqual(result["parse_error"], "source_path_invalid")
+
+    def test_download_rejects_auth_json_and_preserves_http_failure_code(self):
+        from unittest.mock import MagicMock
+        from urllib.error import HTTPError
+        service = OAAttachmentInvoiceService()
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"code":401,"msg":"private response"}'
+        with patch("fin_ops_platform.services.oa_attachment_invoice_service.urlopen", return_value=response):
+            result = service.parse_file_result({"fileName": "file.pdf", "filePath": "/file.pdf"})
+            self.assertEqual(result["parse_error"], "source_auth_required")
+            self.assertEqual(result["parse_status"], "download_failed")
+        with patch("fin_ops_platform.services.oa_attachment_invoice_service.urlopen", side_effect=HTTPError("url", 404, "secret", {}, None)):
+            result = service.parse_file_result({"fileName": "file.pdf", "filePath": "/file.pdf"})
+            self.assertEqual(result["parse_error"], "http_404")
+
+    def test_railway_source_only_fare_is_not_a_financial_parse_failure(self):
+        invoice = OAAttachmentInvoiceService()._parse_invoice_text(RAILWAY_E_TICKET_PRICE_PREFIX_TEXT)
+        self.assertNotIn("financial_review_reason", invoice)
+        self.assertEqual(invoice["total_with_tax"], "145.00")
+        for key in ("amount", "net_amount", "tax_amount", "tax_rate"):
+            self.assertIsNone(invoice[key])
+
+    def test_railway_travel_date_does_not_replace_missing_issue_date(self):
+        text = RAILWAY_E_TICKET_PRICE_PREFIX_TEXT.replace("开票日期:2026年06月08日", "")
+        self.assertIsNone(OAAttachmentInvoiceService()._parse_invoice_text(text))
+
+    def test_machine_tickets_do_not_borrow_missing_amount_or_code(self):
+        service = OAAttachmentInvoiceService()
+        for missing in ("收费金额：23", "发票代码 153012525093"):
+            text = MACHINE_PRINTED_TOLL_INVOICE_PAIR_TEXT
+            position = text.rfind(missing)
+            text = text[:position] + text[position:].replace(missing, "", 1)
+            evidences = service._parse_evidences_from_text(text)
+            self.assertEqual([e["invoice_no"] for e in evidences], ["00827789"])
+
+    def test_machine_amount_does_not_read_tax_number_on_next_line(self):
+        text = MACHINE_PRINTED_TOLL_INVOICE_TEXT.replace("收费金额：15", "收费金额：\n91530000291993988")
+        self.assertEqual(OAAttachmentInvoiceService()._parse_evidences_from_text(text), [])
+
+    def test_text_without_invoice_is_not_empty_ocr(self):
+        service = OAAttachmentInvoiceService()
+        with patch.object(service, "_extract_image_text", return_value="车票截图，未提供发票号码"):
+            result = service.parse_content_result({"fileName": "ticket.jpg"}, VALID_JPEG)
+        self.assertEqual(result["parse_status"], "no_evidence")
 
     def test_party_labels_exclude_stations_and_preserve_full_legal_name(self):
         service = OAAttachmentInvoiceService()

@@ -27,7 +27,7 @@ if tuple(AMOUNT_DISPLAY_LABELS) != AMOUNT_EXCEPTION_CODES:
 
 ATTACHMENT_DISPLAY_LABELS = {
     "oa_invoice_attachment_absent": "发票附件缺失",
-    "oa_invoice_attachment_unparsed": "发票附件未解析",
+    "oa_invoice_attachment_unparsed": "附件未关联发票",
     "oa_invoice_attachment_unassigned": "发票待归属",
     "oa_supporting_document_amount_missing": "待填写凭证金额",
 }
@@ -686,7 +686,7 @@ class WorkbenchAmountCheckService:
         invoice_row_ids = sorted(self._row_id(row) for row in invoice_rows if self._row_id(row))
         label = {
             "oa_invoice_attachment_absent": "无OA附件",
-            "oa_invoice_attachment_unparsed": "OA发票附件未解析",
+            "oa_invoice_attachment_unparsed": "OA附件未关联发票",
             "oa_invoice_attachment_unassigned": "OA发票待归属",
             "oa_supporting_document_amount_missing": "待填写凭证金额",
             "oa_supporting_document_amount_mismatch": "凭证金额与OA明细不一致",

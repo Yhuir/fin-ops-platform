@@ -63,6 +63,28 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         self.assertEqual(promoter.mock_calls, [])
         self.assertEqual(owner.mock_calls, [])
 
+    def test_attachment_failure_labels_are_safe_and_specific(self):
+        from fin_ops_platform.services.oa_projection_sync import _attachment_failure_label
+        self.assertEqual(_attachment_failure_label({"parse_error": "source_auth_required", "parse_status": "download_failed"}), "原件访问未授权")
+        self.assertEqual(_attachment_failure_label({"parse_error": "source_not_found", "parse_status": "download_failed"}), "原件不存在")
+        self.assertEqual(_attachment_failure_label({"parse_error": "private-token-response", "parse_status": "download_failed"}), "下载失败")
+
+    def test_targeted_refresh_retries_promotion_after_owner_commit(self):
+        from unittest.mock import Mock
+        selected = _oa("oa-selected", "2026-06", workflow_status="completed")
+        source = FakeSourceAdapter(months=["2026-06"], records_by_month={"2026-06": [selected]})
+        repository, owner = FakeProjectionRepository(), FakePendingPaymentSourceSnapshotRepository()
+        promoter = Mock()
+        promoter.promote_records.side_effect = [RuntimeError("interrupted"), {"summary": {"affected_invoice_count": 1}}]
+        service = OAProjectionSyncService(source_adapter=source, projection_repository=repository,
+            pending_payment_source_snapshot_repository=owner, attachment_invoice_promoter=promoter)
+        with self.assertRaisesRegex(RuntimeError, "interrupted"):
+            service.handle_runtime_event(_targeted_event([selected.id]))
+        result = service.handle_runtime_event(_targeted_event([selected.id]))
+        self.assertEqual(result["promotion_summary"]["affected_invoice_count"], 1)
+        self.assertEqual(promoter.promote_records.call_count, 2)
+        self.assertEqual(result["row_ids"], [selected.id])
+
     def test_preview_budget_defer_preserves_no_formal_writes(self) -> None:
         from unittest.mock import Mock
         from fin_ops_platform.services.oa_adapter import OAAttachmentPreparationPending

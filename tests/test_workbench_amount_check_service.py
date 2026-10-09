@@ -415,7 +415,7 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         self.assertEqual(len(anomaly["items"]), 1)
         item = anomaly["items"][0]
         self.assertEqual(item["code"], "oa_invoice_attachment_unparsed")
-        self.assertEqual(item["label"], "发票附件未解析")
+        self.assertEqual(item["label"], "附件未关联发票")
         self.assertEqual(item["source_expense_item_ids"], ["item-38"])
         self.assertEqual(item["attachment_file_count"], 1)
         self.assertEqual(item["invoice_row_ids"], [])

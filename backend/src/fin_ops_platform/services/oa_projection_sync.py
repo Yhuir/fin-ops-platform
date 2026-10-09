@@ -84,7 +84,7 @@ class OAProjectionSyncService:
             if not row["failed_attachment_count"]:
                 continue
             failed_files = [
-                f"{artifact['source_attachment_name']}（{'下载失败' if artifact['parse_status'] == 'download_failed' else '解析失败'}）"
+                f"{artifact['source_attachment_name']}（{_attachment_failure_label(artifact)}）"
                 for artifact in records_by_id[row["row_id"]].attachment_artifacts
                 if artifact.get("parse_status") in TARGETED_ATTACHMENT_FAILURE_STATUSES
             ]
@@ -655,3 +655,18 @@ def _targeted_attachment_failure_row_ids(
 
 def _attachment_summary(record: OAApplicationRecord) -> dict[str, object]:
     return {"row_id": record.id, **record_attachment_summary(record)}
+
+
+def _attachment_failure_label(artifact: dict[str, Any]) -> str:
+    labels = {
+        "source_not_found": "原件不存在", "http_404": "原件不存在",
+        "source_auth_required": "原件访问未授权", "http_401": "原件访问未授权",
+        "http_403": "原件访问被拒绝", "source_access_denied": "原件访问被拒绝",
+        "source_path_invalid": "原件路径无效", "source_too_large": "原件超过大小限制",
+        "source_empty": "原件为空", "source_not_document": "来源未返回文件",
+        "source_unavailable": "原件暂不可访问", "document_signature_invalid": "原件格式无效",
+    }
+    error = artifact.get("parse_error")
+    if error in labels:
+        return labels[error]
+    return "下载失败" if artifact.get("parse_status") == "download_failed" else "解析失败"

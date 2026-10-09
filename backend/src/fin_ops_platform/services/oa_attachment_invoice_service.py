@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fin_ops_platform.services.invoice_kind import extract_invoice_kind
 
+import json
 import os
 import re
 import xml.etree.ElementTree as ET
@@ -12,7 +13,7 @@ from pathlib import Path, PurePosixPath
 from statistics import median
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 from zipfile import BadZipFile, ZipFile
 
@@ -57,12 +58,20 @@ class AttachmentTextSegment:
     region: str
 
 
+class OAAttachmentDownloadError(RuntimeError):
+    """A source retrieval failure with a safe, stable code (never response text)."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
 class OAAttachmentOCRRuntimeError(RuntimeError):
     """The required OCR runtime failed and the attachment must not be cached."""
 
 
 class OAAttachmentInvoiceService:
-    PARSER_VERSION = "2026-10-09-source-attributes-v9"
+    PARSER_VERSION = "2026-10-09-attachment-source-v10"
 
     def __init__(
         self,
@@ -70,12 +79,17 @@ class OAAttachmentInvoiceService:
         base_url: str | None = None,
         timeout_seconds: float = 10.0,
         max_download_bytes: int = 20 * 1024 * 1024,
+        source_root: str | Path | None = None,
     ) -> None:
         configured_base_url = clean_string(os.getenv("FIN_OPS_OA_ATTACHMENT_BASE_URL") or "")
         self._base_url = (base_url or configured_base_url or "https://www.yn-sourcing.com/oa-api").rstrip("/")
         self._timeout_seconds = max(float(timeout_seconds), 1.0)
         self._max_download_bytes = max(int(max_download_bytes), 1024 * 1024)
         self._ocr_engine: Any | None = None
+        configured_root = source_root or os.getenv("FIN_OPS_OA_ATTACHMENT_SOURCE_ROOT")
+        self._source_root = Path(configured_root).resolve(strict=True) if configured_root else None
+        if self._source_root is not None and not self._source_root.is_dir():
+            raise ValueError("OA attachment source root must be a directory.")
 
     def parse_files(self, files: list[dict[str, object]]) -> list[dict[str, Any]]:
         return [
@@ -166,12 +180,9 @@ class OAAttachmentInvoiceService:
 
         try:
             content = self._download_content(self.build_download_url(file_path))
-        except Exception as exc:
+        except (OAAttachmentDownloadError, UnicodeError, ValueError) as exc:
             base_result["parse_status"] = "download_failed"
-            base_result["parse_error"] = type(exc).__name__
-            return base_result
-        if content is None:
-            base_result["parse_status"] = "download_failed"
+            base_result["parse_error"] = exc.code if isinstance(exc, OAAttachmentDownloadError) else type(exc).__name__
             return base_result
 
         return self.parse_content_result(file_entry, content)
@@ -241,7 +252,7 @@ class OAAttachmentInvoiceService:
         base_result["evidences"] = parsed_evidences
         if parsed_evidences:
             base_result["parse_status"] = "parsed"
-        elif suffix in {"jpg", "jpeg", "png"}:
+        elif suffix in {"jpg", "jpeg", "png"} and not any(clean_string(segment.text) for segment in extracted_segments):
             base_result["parse_status"] = "ocr_empty"
         else:
             base_result["parse_status"] = "no_evidence"
@@ -341,15 +352,61 @@ class OAAttachmentInvoiceService:
         key_kind, key_value = keys[0]
         return f"{key_kind}:{key_value}"
 
-    def _download_content(self, url: str) -> bytes | None:
+    def _download_content(self, url: str) -> bytes:
+        if self._source_root is not None:
+            return self._read_source_content(url)
         request = Request(url, headers={"User-Agent": "fin-ops-platform/oa-attachment-parser"})
         try:
             with urlopen(request, timeout=self._timeout_seconds) as response:
                 content = response.read(self._max_download_bytes + 1)
-        except (HTTPError, OSError, URLError, TimeoutError, UnicodeError, ValueError):
-            return None
+        except HTTPError as exc:
+            raise OAAttachmentDownloadError(f"http_{exc.code}") from exc
+        except (TimeoutError, URLError, OSError) as exc:
+            raise OAAttachmentDownloadError("source_unavailable") from exc
+        return self._validated_download(content)
+
+    def _read_source_content(self, url: str) -> bytes:
+        # Explicit local-source mode for a co-located OA file owner. It never
+        # retries HTTP or searches other filenames if the registered path fails.
+        base, source = urlsplit(self._base_url), urlsplit(url)
+        if (source.scheme, source.netloc) != (base.scheme, base.netloc) or source.query or source.fragment:
+            raise OAAttachmentDownloadError("source_path_invalid")
+        prefix = base.path.rstrip("/") + "/"
+        if not source.path.startswith(prefix):
+            raise OAAttachmentDownloadError("source_path_invalid")
+        relative = unquote(source.path[len(prefix):])
+        if relative.startswith("fileManager/"):
+            relative = relative[len("fileManager/"):]
+        if not relative or relative.startswith("/") or ".." in PurePosixPath(relative).parts or "\\" in relative:
+            raise OAAttachmentDownloadError("source_path_invalid")
+        assert self._source_root is not None
+        try:
+            path = (self._source_root / relative).resolve(strict=True)
+            if not path.is_relative_to(self._source_root) or not path.is_file():
+                raise OAAttachmentDownloadError("source_path_invalid")
+            with path.open("rb") as stream:
+                content = stream.read(self._max_download_bytes + 1)
+        except FileNotFoundError as exc:
+            raise OAAttachmentDownloadError("source_not_found") from exc
+        except PermissionError as exc:
+            raise OAAttachmentDownloadError("source_access_denied") from exc
+        except OSError as exc:
+            raise OAAttachmentDownloadError("source_unavailable") from exc
+        return self._validated_download(content)
+
+    def _validated_download(self, content: bytes) -> bytes:
         if len(content) > self._max_download_bytes:
-            return None
+            raise OAAttachmentDownloadError("source_too_large")
+        if not content:
+            raise OAAttachmentDownloadError("source_empty")
+        if content.lstrip().startswith(b"{"):
+            try:
+                payload = json.loads(content)
+            except (ValueError, UnicodeError):
+                payload = None
+            if isinstance(payload, dict) and str(payload.get("code")) in {"401", "403"}:
+                raise OAAttachmentDownloadError("source_auth_required")
+            raise OAAttachmentDownloadError("source_not_document")
         return content
 
     def _extract_pdf_evidence_text_segments(
@@ -688,6 +745,8 @@ class OAAttachmentInvoiceService:
         invoice_numbers = set(INVOICE_NO_RE.findall(identity_text))
         invoice_no = next(iter(invoice_numbers)) if len(invoice_numbers) == 1 else ""
         issue_date = self._extract_issue_date(compact_text)
+        if extract_invoice_kind(extracted_text) == "电子发票（铁路电子客票）" and not ISSUE_DATE_RE.search(compact_text):
+            issue_date = ""
         financials = invoice_source_financials(extracted_text)
         if not invoice_no or not issue_date or financials is None:
             non_tax_receipt = self._parse_non_tax_payment_receipt_text(extracted_text, compact_text)
@@ -712,7 +771,9 @@ class OAAttachmentInvoiceService:
             "invoice_type": "进项发票",
             "invoice_kind": extract_invoice_kind(extracted_text),
         }
-        if financials["net_amount"] is None or (financials["tax_amount"] is None and financials["tax_amount_text"] is None):
+        if parsed["invoice_kind"] != "电子发票（铁路电子客票）" and (
+            financials["net_amount"] is None or (financials["tax_amount"] is None and financials["tax_amount_text"] is None)
+        ):
             parsed["financial_review_reason"] = "已识别价税合计，未税金额和税额尚未确认，须以正式发票数据核对。"
         return parsed
 
@@ -724,30 +785,28 @@ class OAAttachmentInvoiceService:
         if "机打发票" not in compact_text and "用机发票" not in compact_text:
             return []
 
-        invoice_codes = [
-            clean_string(match.group(1))
-            for match in LOOSE_INVOICE_CODE_RE.finditer(compact_text)
-            if clean_string(match.group(1))
-        ]
-        invoice_numbers = [
-            clean_string(match.group(1))
-            for match in LOOSE_INVOICE_NO_RE.finditer(compact_text)
-            if clean_string(match.group(1))
-        ]
-        amounts = self._extract_machine_printed_total_amounts(extracted_text, compact_text)
-        if not invoice_numbers or not amounts:
-            return []
-
-        names = self._extract_names_from_lines(extracted_text) or self._extract_names(compact_text)
-        seller_name = names[0] if names else ""
-        issue_date = self._extract_issue_date(compact_text)
-        invoice_kind = extract_invoice_kind(extracted_text)
+        # A title starts a new ticket region. Never zip independent field lists
+        # across tickets: a missing value would shift every following association.
+        regions = re.split(r"(?=^[^\n]*(?:机打发票|用机发票)[^\n]*$)", extracted_text, flags=re.M)
         evidences: list[dict[str, Any]] = []
-        for index, invoice_no in enumerate(invoice_numbers):
-            invoice_code = invoice_codes[index] if index < len(invoice_codes) else (invoice_codes[0] if invoice_codes else "")
-            amount = amounts[index] if index < len(amounts) else amounts[-1]
-            if not invoice_code or not invoice_no or not amount:
+        ticket_index = 0
+        for region in regions:
+            if "机打发票" not in region and "用机发票" not in region:
                 continue
+            ticket_index += 1
+            identity_text = "\n".join(re.sub(r"[^\S\n]+", "", line) for line in region.splitlines())
+            invoice_codes = set(LOOSE_INVOICE_CODE_RE.findall(identity_text))
+            invoice_numbers = set(LOOSE_INVOICE_NO_RE.findall(identity_text))
+            amounts = self._extract_machine_printed_total_amounts(region)
+            if len(invoice_codes) != 1 or len(invoice_numbers) != 1 or len(set(amounts)) != 1:
+                continue
+            invoice_code = invoice_codes.pop()
+            invoice_no = invoice_numbers.pop()
+            amount = amounts[0]
+            names = self._extract_names_from_lines(region)
+            seller_name = names[0] if len(names) == 1 else ""
+            issue_date = self._extract_issue_date(re.sub(r"\s+", "", region).replace("：", ":"))
+            invoice_kind = extract_invoice_kind(region)
             evidences.append(
                 {
                     "evidence_type": "machine_invoice",
@@ -768,7 +827,7 @@ class OAAttachmentInvoiceService:
                     "source_line_items": [],
                     "invoice_type": "进项发票",
                     "invoice_kind": invoice_kind,
-                    "source_region_key": f"machine_invoice:{index + 1}",
+                    "source_region_key": f"machine_invoice:{ticket_index}",
                     "confidence": "high",
                     "parse_status": "parsed",
                 }
@@ -823,31 +882,18 @@ class OAAttachmentInvoiceService:
             return ""
         return clean_string(match.group(1))
 
-    def _extract_machine_printed_total_amount(self, extracted_text: str) -> str:
-        amounts = self._extract_machine_printed_total_amounts(
-            extracted_text,
-            re.sub(r"[\s\u3000]+", "", extracted_text).replace("：", ":").replace("￥", "¥"),
-        )
-        return amounts[0] if amounts else ""
-
-    def _extract_machine_printed_total_amounts(self, extracted_text: str, compact_text: str) -> list[str]:
+    def _extract_machine_printed_total_amounts(self, extracted_text: str) -> list[str]:
         amounts: list[str] = []
         for line in extracted_text.splitlines():
-            normalized_line = clean_string(line).replace("：", ":")
-            if "收费金额" not in normalized_line and not normalized_line.startswith("金额"):
-                continue
-            amount_match = re.search(r"(?:收费金额|金额):?\s*([0-9]+(?:\.\d+)?)", normalized_line)
-            if amount_match is not None:
-                amount = self._normalize_amount_text(amount_match.group(1))
+            normalized_line = clean_string(line).replace("：", ":").replace("￥", "¥")
+            # A labelled amount must be on this ticket's same row; identifiers on
+            # another row are never a substitute for a missing amount.
+            match = re.search(r"(?:收费金额|^金额):?[ \t]*¥?[ \t]*(-?[0-9]+(?:\.[0-9]{1,2})?)(?![0-9.])(?:[ \t]*元)?[ \t]*$", normalized_line)
+            if match:
+                amount = self._normalize_amount_text(match[1])
                 if amount:
                     amounts.append(amount)
-        if amounts:
-            return amounts
-        return [
-            self._normalize_amount_text(match.group(1))
-            for match in re.finditer(r"(?:收费金额|金额):?([0-9]+(?:\.\d+)?)", compact_text)
-            if self._normalize_amount_text(match.group(1))
-        ]
+        return amounts
 
     @staticmethod
     def _match_text(pattern: re.Pattern[str], text: str) -> str:
