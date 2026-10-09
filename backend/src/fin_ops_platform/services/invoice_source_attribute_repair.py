@@ -92,8 +92,12 @@ def build_source_attribute_repair_plan(
         owner = next((row for row, source in facts if source["file_id"] == owner_id), None)
         if owner is None and len(facts) == 1:
             owner = facts[0][0]
-        if owner is not None and not conflicts:
-            fields.update({field: owner.get(field) for field in SOURCE_METADATA_FIELDS})
+        fields.update(
+            {
+                field: owner.get(field) if owner is not None and not conflicts else None
+                for field in SOURCE_METADATA_FIELDS
+            }
+        )
         states[fields["invoice_kind_status"]] += 1
         if any(payload.get(k) != v for k, v in fields.items()):
             payload.update(fields)

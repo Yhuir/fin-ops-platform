@@ -85,6 +85,19 @@ class SourceAttributeRepairTests(unittest.TestCase):
                 self.assertEqual(data["invoice_kind_status"], status)
                 self.assertIsNone(data["invoice_kind_code"])
 
+    def test_unverifiable_source_metadata_is_empty_instead_of_retaining_import_markers(self):
+        for originals in ([], [source(), source()], [source(buyer_tax_no="OTHER")]):
+            current = invoice(invoice_source="ETC导入", is_positive_invoice=True,
+                              risk_level="normal", issuer="unknown", remark="legacy guess")
+            payload = self.plan(originals, current)["updates"][0]["raw_payload"]["normalized_payload"]
+            for field in ("invoice_source", "is_positive_invoice", "risk_level", "issuer", "remark"):
+                self.assertIsNone(payload[field])
+            self.assertEqual(payload["total_with_tax"], "113")
+        payload = self.plan([source(invoice_source="原始平台", is_positive_invoice=False)])[
+            "updates"][0]["raw_payload"]["normalized_payload"]
+        self.assertEqual(payload["invoice_source"], "原始平台")
+        self.assertFalse(payload["is_positive_invoice"])
+
     def test_equivalent_aliases_are_not_conflicts_and_repeat_is_noop(self):
         originals = [source(), source("增值税专用发票")]
         first = self.plan(originals)
