@@ -440,7 +440,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
 
         rows = {row["invoiceId"]: row for row in service.list_rows(page_size=20)["rows"]}
 
-        self.assertEqual(rows["inv-chen"]["paymentStatus"]["code"], "rule_conflict")
+        self.assertEqual(rows["inv-chen"]["paymentStatus"]["code"], "cash_turnover")
         self.assertEqual(rows["inv-paid"]["paymentStatus"]["code"], "paid")
         self.assertEqual(rows["inv-fallback"]["paymentStatus"]["code"], "paid")
         self.assertEqual("发票＝付款", rows["inv-fallback"]["paymentStatus"]["label"])
@@ -497,9 +497,9 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
 
         rows = {row["invoiceId"]: row for row in service.list_rows(page_size=20)["rows"]}
 
-        self.assertEqual(rows["inv-zhou"]["paymentStatus"]["code"], "rule_conflict")
-        self.assertEqual(rows["inv-liu"]["paymentStatus"]["code"], "rule_conflict")
-        self.assertEqual(rows["inv-wei"]["paymentStatus"]["code"], "rule_conflict")
+        self.assertEqual(rows["inv-zhou"]["paymentStatus"]["code"], "offset")
+        self.assertEqual(rows["inv-liu"]["paymentStatus"]["code"], "offset")
+        self.assertEqual(rows["inv-wei"]["paymentStatus"]["code"], "offset")
         self.assertEqual(rows["inv-wait"]["paymentStatus"]["code"], "waiting_payment")
 
     def test_confirmed_multi_invoice_relation_collapses_to_one_payment_row(self) -> None:
@@ -523,7 +523,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["invoiceRelations"]["relationCount"], 2)
         self.assertEqual(row["oa"]["relationCount"], 1)
         self.assertEqual(row["oa"]["amount"], "800.00")
-        self.assertEqual(row["paymentStatus"]["code"], "rule_conflict")
+        self.assertEqual(row["paymentStatus"]["code"], "offset")
 
     def test_independent_formal_relations_sharing_oa_remain_separate(self) -> None:
         vendor = self._counterparty("vendor", "云南城建物业运营集团")
@@ -587,9 +587,9 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
             self.assertEqual(row["invoiceRelations"]["relationCount"], 1)
             self.assertEqual(row["oa"]["relationCount"], 1)
             self.assertEqual(row["oa"]["amount"], "800.00")
-            self.assertEqual(row["paymentStatus"]["code"], "rule_conflict")
+            self.assertEqual(row["paymentStatus"]["code"], "offset")
 
-    def test_relation_amount_check_does_not_override_rule_overlap(self) -> None:
+    def test_relation_amount_check_does_not_override_first_matching_rule(self) -> None:
         vendor = self._counterparty("vendor", "云南城建物业运营集团")
         first = self._invoice("inv-zhou-1", "26532000000021026521", vendor, total_with_tax="600.00")
         second = self._invoice("inv-zhou-2", "15312761", vendor, total_with_tax="200.00")
@@ -612,8 +612,8 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         row = service.list_rows(page_size=20)["rows"][0]
 
         self.assertEqual(row["invoice"]["totalWithTax"], "800.00")
-        self.assertEqual(row["paymentStatus"]["code"], "rule_conflict")
-        self.assertEqual(row["paymentStatus"]["label"], "规则冲突")
+        self.assertEqual(row["paymentStatus"]["code"], "offset")
+        self.assertEqual(row["paymentStatus"]["label"], "冲")
 
     def test_relation_without_amount_check_uses_current_rules(self) -> None:
         vendor = self._counterparty("vendor", "云南城建物业运营集团")
@@ -638,8 +638,8 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         row = service.list_rows(page_size=20)["rows"][0]
 
         self.assertEqual(row["invoice"]["totalWithTax"], "800.00")
-        self.assertEqual(row["paymentStatus"]["code"], "rule_conflict")
-        self.assertEqual(row["paymentStatus"]["label"], "规则冲突")
+        self.assertEqual(row["paymentStatus"]["code"], "offset")
+        self.assertEqual(row["paymentStatus"]["label"], "冲")
 
     def test_one_to_many_oa_and_bank_relations_include_deterministic_primary_and_all_summaries(self) -> None:
         vendor = self._counterparty("vendor", "供应商")

@@ -394,7 +394,6 @@ class PostgresInputInvoiceUsageQueryRepository:
         invoice_count = int(summary_row.get("invoice_count") or 0)
         labels = {item["id"]: item["label"] for item in payment_categories(payment_settings)}
         labels["unclassified"] = "未分类"
-        labels["rule_conflict"] = "规则冲突"
         return InvoiceUsageCollectionCanonicalSnapshot(
             bank_labels=bank_labels,
             groups=facts["groups"],
@@ -1703,14 +1702,10 @@ def _input_payment_status_case(
     fragments: list[str] = []
     params: list[Any] = []
     for rule in settings["rules"]:
-        if not bool(rule.get("enabled", True)):
+        if not rule["enabled"]:
             continue
         code = rule["statusCode"]
-        conditions = (
-            rule.get("conditions")
-            if isinstance(rule.get("conditions"), dict)
-            else {}
-        )
+        conditions = rule["conditions"]
         predicates: list[str] = []
         if "paymentComparison" in conditions:
             predicates.append("facts.payment_comparison = any(%s::text[])")
@@ -1729,16 +1724,10 @@ def _input_payment_status_case(
             predicates.append("regexp_replace(facts.oa_applicant, '[[:space:]​﻿]+', '', 'g') = any(%s::text[])")
             params.append(applicants)
         if predicates:
-            fragments.append(
-                f"(case when {' and '.join(predicates)} then '{_safe_code(code)}'::text end)"
-            )
+            fragments.append(f"when {' and '.join(predicates)} then '{_safe_code(code)}'::text")
     if not fragments:
         return "'unclassified'::text", params
-    return (
-        "(select case count(distinct matched.code) when 0 then 'unclassified' "
-        "when 1 then min(matched.code) else 'rule_conflict' end from (values "
-        + ", ".join(fragments) + ") matched(code))", params,
-    )
+    return "(case " + " ".join(fragments) + " else 'unclassified'::text end)", params
 
 
 def _where_sql(

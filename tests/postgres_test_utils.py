@@ -201,6 +201,7 @@ EXPECTED_MIGRATION_FILES = [
     "0188_input_invoice_payment_rules_explicit.sql",
     "0189_payment_rule_inclusive_operators.sql",
     "0190_payment_rules_without_priority.sql",
+    "0191_payment_rule_group_order.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "app", "staging", "cash")
 TEST_TABLES = (

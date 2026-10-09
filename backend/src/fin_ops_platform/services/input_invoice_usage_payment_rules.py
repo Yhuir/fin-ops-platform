@@ -127,9 +127,9 @@ def classification_tree(settings: dict[str, Any], counts: dict[str, int]) -> dic
         children = [{"id": f"category:{item['id']}", "label": item["label"],
                      "count": counts.get(f"{parent}:{item['id']}", 0)}
                     for item in payment_categories(settings) if item["parent"] == parent]
-        children.extend({"id": f"category:{code}", "label": status_label, "count": counts[f"{parent}:{code}"]}
-                        for code, status_label in (("rule_conflict", "规则冲突"), ("unclassified", "未分类"))
-                        if counts.get(f"{parent}:{code}", 0))
+        if counts.get(f"{parent}:unclassified", 0):
+            children.append({"id": "category:unclassified", "label": "未分类",
+                             "count": counts[f"{parent}:unclassified"]})
         groups.append({"id": parent, "label": label, "tone": parent,
                        "count": counts.get(parent, 0), "children": children})
     return {key: {"id": key, "label": label, "count": counts.get(key, 0)}
@@ -365,16 +365,17 @@ def public_payment_status_rules_payload(
 
 def evaluate_payment_status(settings: dict[str, Any], context: PaymentStatusEvaluationContext) -> dict[str, str]:
     normalized = normalize_payment_status_rules_settings(settings)
-    matches = [rule for rule in normalized["rules"]
-               if rule["enabled"] and _conditions_match(rule["conditions"], context)]
-    codes = {rule["statusCode"] for rule in matches}
-    if len(codes) > 1:
-        return {"code": "rule_conflict", "label": "规则冲突",
-                "reason": "同时命中：" + "；".join(f"{rule['label']}（{rule['id']}）" for rule in sorted(matches, key=lambda rule: rule["id"])),
-                "matchedRuleId": "", "severity": "warning"}
-    if matches:
-        # Stable evidence selection only; all matches have the same output label.
-        return _status_payload(min(matches, key=lambda rule: rule["id"]))
+    return evaluate_payment_status_rules(normalized["rules"], context)
+
+
+def evaluate_payment_status_rules(
+    rules: list[dict[str, Any]], context: PaymentStatusEvaluationContext,
+) -> dict[str, str]:
+    """Evaluate validated snapshot rules in group order, without per-row normalization."""
+    for rule in rules:
+        if (rule["conditions"]["hasBank"] == context.has_bank
+                and rule["enabled"] and _conditions_match(rule["conditions"], context)):
+            return _status_payload(rule)
     reason = {
         "missing_invoice_amount": "关联发票缺少价税合计",
         "missing_bank_evidence": "关联银行流水明细缺失" if context.has_bank else "未命中已配置规则",
@@ -407,7 +408,7 @@ def _normalize_rules(value: Any) -> list[dict[str, Any]]:
         seen_ids.add(rule_id)
         if "priority" in item:
             raise InputInvoiceUsagePaymentRulesValidationError(
-                "unsupported_input_invoice_usage_payment_rule_priority", "规则不再支持优先级，请刷新后编辑。",
+                "unsupported_input_invoice_usage_payment_rule_priority", "请通过组内顺序设置优先级，不支持数字优先级字段。",
             )
         code = item.get("statusCode")
         if not isinstance(code, str) or (code not in OUTPUT_STATUS_CODES and not re.fullmatch(r"custom_[a-z0-9_]{1,72}", code)):
@@ -430,7 +431,8 @@ def _normalize_rules(value: Any) -> list[dict[str, Any]]:
             "enabled": enabled, "conditions": _normalize_conditions(rule_id, item.get("conditions")),
         }
         normalized.append(normalized_rule)
-    return normalized
+    return [rule for has_bank in (True, False) for rule in normalized
+            if rule["conditions"]["hasBank"] == has_bank]
 
 
 def normalize_applicant_name(value: str) -> str:

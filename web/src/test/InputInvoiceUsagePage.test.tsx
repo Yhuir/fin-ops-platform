@@ -1110,6 +1110,38 @@ describe("Input invoice usage page", () => {
     else expect(filters).toContainEqual({ field: "usage_status", operator: "in", values: ["used"] });
   });
 
+  test("retired payment categories are explicitly cleared while other filters remain", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installInputInvoiceUsageFetch();
+    window.sessionStorage.setItem(buildPageSessionStorageKey({ userScope: "101", pageKey: "input-invoice-usage", stateKey: "query" }), JSON.stringify(createStoredPayload({
+      version: 1, ttlMs: 60_000, value: {
+        page: 2, pageSize: 50, keyword: "供应商", month: "", invoiceDateFrom: "", invoiceDateTo: "",
+        filters: [
+          { field: "usage_status", operator: "in", values: ["used"] },
+          { field: "payment_group", operator: "in", values: ["paid"] },
+          { field: "payment_status", operator: "in", values: ["rule_conflict"] },
+          { field: "oa_relation", operator: "in", values: ["unlinked"] },
+        ], sortField: "", sortDirection: "", activeWorkflow: null, detailTarget: null,
+      },
+    })));
+    renderAuthenticatedAppAt("/input-invoice-usage");
+    const notice = await screen.findByText("原支付分类已不存在，已清除该分类筛选，其他筛选条件保留。");
+    expect(notice.closest('[role="status"]')).toBeInTheDocument();
+    await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(1));
+    const query = rowsRequests(fetchMock).at(-1)!;
+    expect(query.searchParams.get("keyword")).toBe("供应商");
+    expect(query.searchParams.get("page")).toBe("1");
+    const filters = JSON.parse(decodeURIComponent(query.searchParams.get("filters")!));
+    expect(filters).toEqual(expect.arrayContaining([
+      { field: "usage_status", operator: "in", values: ["used"] },
+      { field: "payment_group", operator: "in", values: ["paid"] },
+      { field: "oa_relation", operator: "in", values: ["unlinked"] },
+    ]));
+    expect(filters.some((filter: { field: string }) => filter.field === "payment_status")).toBe(false);
+    await user.click(screen.getByRole("button", { name: "知道了" }));
+    expect(screen.queryByText("原支付分类已不存在，已清除该分类筛选，其他筛选条件保留。")).not.toBeInTheDocument();
+  });
+
   test("opens OA reverse workspace with one-step draft creation and submitted history tabs", async () => {
     const user = userEvent.setup();
     const fetchMock = installInputInvoiceUsageFetch();

@@ -194,7 +194,7 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
             reread = service.get_input_invoice_usage_payment_status_rules_payload()
             self.assertEqual(reread["rules"], saved["rules"])
             provider = AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=app._state_store)
-            self.assertEqual(provider.evaluate(PaymentStatusEvaluationContext(True, True, '停用人员', 'equal'))["code"], "rule_conflict")
+            self.assertEqual(provider.evaluate(PaymentStatusEvaluationContext(True, True, '停用人员', 'equal'))["code"], "cash_turnover")
             rules[0]["conditions"]["applicantNames"].append("不存在")
             with self.assertRaises(AppSettingsValidationError) as caught:
                 service.update_input_invoice_usage_payment_status_rules({"expectedVersion": 3, "idempotencyKey": "bad", "rules": rules}, actor_id="tester")
@@ -505,7 +505,7 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
             self.assertEqual(result["label"], "未分类")
             self.assertEqual(result["matchedRuleId"], "")
 
-    def test_overlapping_labels_conflict_independent_of_order_and_disabled_rules_do_not_match(self) -> None:
+    def test_first_enabled_match_wins_in_group_order(self) -> None:
         from fin_ops_platform.services.input_invoice_usage_payment_rules import evaluate_payment_status
         rules = [
             {"id": "later", "statusCode": "waiting_payment", "label": "待付款",
@@ -515,16 +515,15 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
         ]
         settings = {"version": 1, "rules": rules}
         context = PaymentStatusEvaluationContext(True, False, '', 'invalid')
-        self.assertEqual(evaluate_payment_status(settings, context)["code"], "rule_conflict")
-        self.assertIn("冲（first）", evaluate_payment_status(settings, context)["reason"])
-        self.assertEqual(evaluate_payment_status({"version": 1, "rules": rules[::-1]}, context), evaluate_payment_status(settings, context))
-        rules[1]["enabled"] = False
         self.assertEqual(evaluate_payment_status(settings, context)["matchedRuleId"], "later")
+        self.assertEqual(evaluate_payment_status({"version": 1, "rules": rules[::-1]}, context)["matchedRuleId"], "first")
+        rules[0]["enabled"] = False
+        self.assertEqual(evaluate_payment_status(settings, context)["matchedRuleId"], "first")
         unmatched = evaluate_payment_status(settings, PaymentStatusEvaluationContext(True, True, '', 'greater'))
         self.assertEqual(unmatched["code"], "unclassified")
         self.assertEqual(unmatched["matchedRuleId"], "")
 
-    def test_same_label_multiple_matches_count_as_one_without_order_precedence(self) -> None:
+    def test_same_label_keeps_first_matching_rule_evidence(self) -> None:
         from fin_ops_platform.services.input_invoice_usage_payment_rules import evaluate_payment_status
         rules = [
             {"id": "general", "statusCode": "paid", "label": "已付款", "enabled": True,
@@ -535,7 +534,24 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
         context = PaymentStatusEvaluationContext(True, True, "张三", "equal")
         result = evaluate_payment_status({"version": 1, "rules": rules}, context)
         self.assertEqual(result["code"], "paid")
-        self.assertEqual(result, evaluate_payment_status({"version": 1, "rules": rules[::-1]}, context))
+        self.assertEqual(result["matchedRuleId"], "general")
+        self.assertEqual(evaluate_payment_status({"version": 1, "rules": rules[::-1]}, context)["matchedRuleId"], "specific")
+
+    def test_group_order_is_independent_and_normalization_preserves_each_group(self) -> None:
+        from fin_ops_platform.services.input_invoice_usage_payment_rules import (
+            evaluate_payment_status,
+            normalize_payment_status_rules_settings,
+        )
+        rules = [{"id": name, "statusCode": "custom_" + name, "label": name, "enabled": True,
+                  "conditions": {"hasBank": bank}} for name, bank in
+                 (("unpaid_a", False), ("paid_a", True), ("unpaid_b", False), ("paid_b", True))]
+        normalized = normalize_payment_status_rules_settings({"version": 1, "rules": rules})
+        self.assertEqual([r["id"] for r in normalized["rules"]], ["paid_a", "paid_b", "unpaid_a", "unpaid_b"])
+        paid = PaymentStatusEvaluationContext(True, True, "", "equal")
+        unpaid = PaymentStatusEvaluationContext(True, False, "", "invalid")
+        changed = {"version": 1, "rules": [rules[2], rules[1], rules[0], rules[3]]}
+        self.assertEqual(evaluate_payment_status(changed, paid)["matchedRuleId"], "paid_a")
+        self.assertEqual(evaluate_payment_status(changed, unpaid)["matchedRuleId"], "unpaid_b")
 
     def test_invalid_rule_values_fail_without_restoring_defaults(self) -> None:
         from fin_ops_platform.services.input_invoice_usage_payment_rules import (

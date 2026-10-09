@@ -205,23 +205,29 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
             overlapping = [*inclusive_request["rules"], {"id": "other", "statusCode": "custom_other", "label": "另一标签",
                            "enabled": True, "conditions": {"hasBank": True}}]
             provider.update_payment_status_rules({"expectedVersion": 3, "idempotencyKey": "overlap", "rules": overlapping}, actor_id="tester")
-            conflict_snapshot = load(filters=[{"field": "payment_status", "operator": "in", "values": ["rule_conflict"]}])
-            self.assertEqual(conflict_snapshot.summary["invoiceCount"], 2)
-            self.assertEqual(conflict_snapshot.summary["totalWithTax"], "0.00")
-            self.assertEqual(conflict_snapshot.payment_status_labels["rule_conflict"], "规则冲突")
-            self.assertEqual(next(c["count"] for c in conflict_snapshot.classification["groups"][0]["children"] if c["id"] == "category:rule_conflict"), 2)
+            ordered_snapshot = load(filters=[{"field": "payment_status", "operator": "in", "values": ["custom_inclusive"]}])
+            self.assertEqual(ordered_snapshot.summary["invoiceCount"], 2)
+            self.assertEqual(ordered_snapshot.summary["totalWithTax"], "0.00")
+            self.assertNotIn("rule_conflict", ordered_snapshot.payment_status_labels)
+            self.assertEqual(next(c["count"] for c in ordered_snapshot.classification["groups"][0]["children"] if c["id"] == "category:custom_inclusive"), 2)
             import_service = ImportNormalizationService()
             assembler = InputInvoiceUsageQueryService(import_service=import_service, payment_rules_provider=_UnexpectedPaymentRulesProvider())
             service = InputInvoiceUsageCanonicalQueryService(repository=repository, row_assembler=assembler)
-            conflict_filter = [{"field": "payment_status", "operator": "in", "values": ["rule_conflict"]}]
-            listed = service.list_rows(filters=conflict_filter)
-            exported = service.export_page(filters=conflict_filter)
+            ordered_filter = [{"field": "payment_status", "operator": "in", "values": ["custom_inclusive"]}]
+            listed = service.list_rows(filters=ordered_filter)
+            exported = service.export_page(filters=ordered_filter)
             self.assertEqual(listed["rows"], exported["rows"])
             self.assertTrue(listed["rows"])
-            self.assertTrue(all(row["paymentStatus"]["code"] == "rule_conflict" for row in listed["rows"]))
-            self.assertIn("另一标签", listed["rows"][0]["paymentStatus"]["reason"])
+            self.assertTrue(all(row["paymentStatus"]["code"] == "custom_inclusive" for row in listed["rows"]))
+            self.assertTrue(all(row["paymentStatus"]["matchedRuleId"] == "inclusive" for row in listed["rows"]))
             provider.update_payment_status_rules({"expectedVersion": 4, "idempotencyKey": "reverse-order", "rules": overlapping[::-1]}, actor_id="tester")
-            self.assertEqual(service.list_rows(filters=conflict_filter)["rows"], listed["rows"])
+            self.assertEqual(service.list_rows(filters=ordered_filter)["rows"], [])
+            other_filter = [{"field": "payment_status", "operator": "in", "values": ["custom_other"]}]
+            reordered = service.list_rows(filters=other_filter)
+            self.assertEqual(reordered["rows"], service.export_page(filters=other_filter)["rows"])
+            self.assertEqual(reordered["summary"]["invoiceCount"], 2)
+            self.assertTrue(all(row["paymentStatus"]["matchedRuleId"] == "other" for row in reordered["rows"]))
+            self.assertEqual({group["row_key"]: group["payment_facts"] for group in load().groups}, facts)
 
     def test_output_relations_sharing_oa_do_not_lose_or_mix_bank_ownership(self):
         for key, amount in [('first', 100), ('second', 200)]:

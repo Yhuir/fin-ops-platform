@@ -1,5 +1,6 @@
 .payment-rules-body { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
-.payment-rules-toolbar { display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+.payment-rules-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; font-size: 13px; }
+.payment-rules-order-hint { color: var(--muted); }
 .payment-rules-body .finance-table { border-radius: 0; }
 .payment-rules-grid .finance-table__content { table-layout: fixed; }
 .payment-rules-grid .finance-table__column, .payment-rules-grid .finance-table__cell { padding: 0; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); vertical-align: middle; }
@@ -9,12 +10,21 @@
 .payment-rules-grid .finance-table__row { border-radius: 0 !important; }
 .payment-rules-grid .finance-table__column:nth-child(1) { width: 110px; }
 .payment-rules-grid .finance-table__column:nth-child(2) { width: 64px; }
-.payment-rules-grid .finance-table__column:nth-child(3) { width: 170px; }
-.payment-rules-grid .finance-table__column:nth-child(4) { width: 220px; }
-.payment-rules-grid .finance-table__column:nth-child(5) { width: 100px; }
-.payment-rules-grid .finance-table__column:nth-child(6) { width: 130px; }
-.payment-rules-grid .finance-table__column:nth-child(7) { width: 180px; }
-.payment-rules-grid .finance-table__column:nth-child(8) { width: 80px; }
+.payment-rules-grid .finance-table__column:nth-child(3) { width: 56px; }
+.payment-rules-grid .finance-table__column:nth-child(4) { width: 160px; }
+.payment-rules-grid .finance-table__column:nth-child(5) { width: 220px; }
+.payment-rules-grid .finance-table__column:nth-child(6) { width: 100px; }
+.payment-rules-grid .finance-table__column:nth-child(7) { width: 130px; }
+.payment-rules-grid .finance-table__column:nth-child(8) { width: 180px; }
+.payment-rules-grid .finance-table__column:nth-child(9) { width: 80px; }
+.payment-rule-order { display: flex; align-items: center; justify-content: center; gap: 4px; width: 100%; min-height: 44px; background: transparent; border: 0; color: var(--muted); cursor: grab; touch-action: none; font-variant-numeric: tabular-nums; }
+.payment-rule-order:active { cursor: grabbing; }
+.payment-rule-order:disabled { cursor: default; opacity: .5; }
+.payment-rule-order:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.payment-rule-sortable-row > td:not(:first-child) { transform: var(--payment-rule-transform); transition: var(--payment-rule-transition); }
+.payment-rule-sortable-row--dragging > td:not(:first-child) { opacity: .35; }
+.payment-rule-drag-preview { padding: 10px 16px; border: 1px solid var(--accent); background: var(--surface); color: var(--foreground); border-radius: 6px; box-shadow: 0 6px 18px #0002; font-size: 14px; }
+@media (prefers-reduced-motion: reduce) { .payment-rule-sortable-row > td:not(:first-child) { transition: none; } }
 .payment-rules-grid [data-slot="text-field"], .payment-rules-grid [data-slot="select"] { width: 100%; min-width: 0; }
 .payment-rules-grid input, .payment-rules-grid [data-slot="select-trigger"], .payment-rule-applicant-trigger { width: 100%; min-height: 44px; border: 0; border-radius: 0; box-shadow: none; background: transparent; padding: 0 10px; }
 .payment-rules-grid input:focus-visible, .payment-rules-grid [data-slot="select-trigger"]:focus-visible, .payment-rule-applicant-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

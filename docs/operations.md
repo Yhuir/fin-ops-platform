@@ -156,7 +156,7 @@ p50/p95/p99、canonical audit、health、worker、PostgreSQL outbox/dead-letter 
 ## 回滚与恢复
 
 - Migration 尚未执行或 frontend-only 发布：deploy control 可切回已验证 previous immutable release。
-- Forward-only migration 已执行：禁止自动回滚，保持 maintenance 并 forward repair。支付规则申请人数组迁移 `0183` 和发票原始金额与 ETC 税额可空迁移 `0185` 属于此类；旧版本不能读取新条件或安全处理缺失原金额，激活前必须安装登记对应版本的 exact-release deploy control。专票认证迁移 `0187` 同样只允许向前修复：旧认证快照写入不理解记录版本、撤销状态与精确发票关联，禁止重新启用旧写入链。进项支付规则迁移 `0188` 将分类条件显式化，新增净额条件不能交由旧规则引擎读取，同样必须先安装登记该版本的 deploy control，执行后只向前修复。`0189` 登记支付规则包含等于的金额操作符运行时合同边界，不改规则或发票数据；旧引擎不接受新操作符，同样只允许向前修复。`0190` 一次性移除支付规则优先级及两个退役匹配条件、将无流水约束的旧规则按实际条件拆分为明确的布尔分组，保留标签身份并记录迁移前后审计；新引擎评估全部规则并暴露跨标签冲突，旧引擎不可读取迁移后的设置，同样只允许向前修复。
+- Forward-only migration 已执行：禁止自动回滚，保持 maintenance 并 forward repair。支付规则申请人数组迁移 `0183` 和发票原始金额与 ETC 税额可空迁移 `0185` 属于此类；旧版本不能读取新条件或安全处理缺失原金额，激活前必须安装登记对应版本的 exact-release deploy control。专票认证迁移 `0187` 同样只允许向前修复：旧认证快照写入不理解记录版本、撤销状态与精确发票关联，禁止重新启用旧写入链。进项支付规则迁移 `0188` 将分类条件显式化，新增净额条件不能交由旧规则引擎读取，同样必须先安装登记该版本的 deploy control，执行后只向前修复。`0189` 登记支付规则包含等于的金额操作符运行时合同边界，不改规则或发票数据；旧引擎不接受新操作符，同样只允许向前修复。`0190` 一次性移除支付规则优先级及两个退役匹配条件、将无流水约束的旧规则按实际条件拆分为明确的布尔分组，保留标签身份并记录迁移前后审计；新引擎评估全部规则并暴露跨标签冲突，旧引擎不可读取迁移后的设置，同样只允许向前修复。`0191` 登记支付规则组内首次命中合同，保持组内相对顺序、递增配置版本、清理旧幂等回执并审计；旧引擎忽略顺序且会重新生成冲突，因此执行后同样只允许向前修复。
 - `--resume-forward-repair` 要求现有失败证据、运行时停服和相同已应用 schema。即使候选运行时代码未改变，也按 runtime profile 恢复 API/worker，并执行完整 T+0/T+30 检查，不采用仅前端发布路径。退役设置的清理复用 `settings-normalize <release> --dry-run|--execute`，先核对精确变更键，执行后再次预检须零变更。
 - 不通过恢复旧 worker/env、重建旧 projection、手写 SQL 或删 queue 行解阻。
 - repair 工具必须先 dry-run，绑定 source fingerprint、精确计数、operator 和 reason；任何漂移在写前失败。银行 Audit terminal suspected link 修复还必须显式提供 `--expected-bank-audit-row-unlink-count`，只允许候选 release 按计划逐行 CAS 清空该引用。

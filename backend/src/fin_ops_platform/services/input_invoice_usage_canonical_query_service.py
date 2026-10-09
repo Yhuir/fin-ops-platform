@@ -8,7 +8,7 @@ from fin_ops_platform.services.bank_transaction_unit import original_bank_transa
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     PaymentStatusEvaluationContext,
-    evaluate_payment_status,
+    evaluate_payment_status_rules,
     normalize_payment_status_rules_settings,
     public_payment_status_rules_payload,
 )
@@ -401,7 +401,7 @@ class _SnapshotPaymentRulesProvider:
         return int(self._settings["version"])
 
     def evaluate(self, context: PaymentStatusEvaluationContext) -> dict[str, str]:
-        return evaluate_payment_status(self._settings, context)
+        return evaluate_payment_status_rules(self._settings["rules"], context)
 
 
 class _StaticOaProjection:

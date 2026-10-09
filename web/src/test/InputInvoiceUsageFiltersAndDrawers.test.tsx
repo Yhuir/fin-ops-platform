@@ -1434,6 +1434,26 @@ describe("Input invoice usage workflow drawers", () => {
     expect(saveRules.mock.calls[1][0].rules[0].statusCode).toBe(saved[0].statusCode);
   });
 
+  test("saving locks the draft, drag handle and close controls until the committed order is read back", async () => {
+    const user = userEvent.setup();
+    const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: [], rules: [
+      { id: "r1", statusCode: "custom_one", label: "规则一", description: "", enabled: true, conditions: { hasBank: true } },
+    ] };
+    let resolve!: (next: PaymentStatusRulesPayload) => void;
+    const saveRules = vi.fn(() => new Promise<PaymentStatusRulesPayload>(done => { resolve = done; }));
+    render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} saveRules={saveRules} onClose={() => undefined} />);
+    await user.type(await screen.findByRole("textbox", { name: "标签 1" }), "修改");
+    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
+    expect(screen.getByRole("textbox", { name: "标签 1" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /调整规则 规则一修改 的顺序/ })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "启用规则 规则一修改" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "关闭支付状态规则抽屉" })).toBeDisabled();
+    await act(async () => resolve({ ...payload, version: 2, rules: [{ ...payload.rules[0], label: "规则一修改" }] }));
+    expect(await screen.findByText("规则已保存。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "标签 1" })).toBeEnabled();
+  });
+
   test("version conflicts preserve draft and reload gets a fresh version only after discard", async () => {
     const user = userEvent.setup();
     const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: [], rules: [{ id: "r1", statusCode: "custom_one", label: "原标签", description: "", conditions: { hasBank: true } }] };

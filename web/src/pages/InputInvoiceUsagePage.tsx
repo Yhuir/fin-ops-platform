@@ -195,6 +195,7 @@ export default function InputInvoiceUsagePage() {
   const [filterConfigs, setFilterConfigs] = useState<InputInvoiceUsageFilterFieldConfig[]>([]);
   const [filterOptions, setFilterOptions] = useState<Record<string, InputInvoiceUsageFilterOption[]>>({});
   const [error, setError] = useState<string | null>(null);
+  const [classificationNotice, setClassificationNotice] = useState("");
   const [expandedCells, setExpandedCells] = useState<Set<string>>(() => new Set());
   const [keywordDraft, setKeywordDraft] = useState(query.keyword);
   const requestIdRef = useRef(0);
@@ -379,7 +380,10 @@ export default function InputInvoiceUsagePage() {
     if (!classification || !selectedCategory || selectedCategory === "unclassified") return;
     const present = classification.groups.some(group => (!selectedParent || group.id === selectedParent)
       && group.children.some(child => child.id === `category:${selectedCategory}`));
-    if (!present) handleClassificationSelect(selectedParent ?? "used");
+    if (!present) {
+      setClassificationNotice("原支付分类已不存在，已清除该分类筛选，其他筛选条件保留。");
+      handleClassificationSelect(selectedParent ?? "used");
+    }
   }, [classification, selectedCategory, selectedParent, handleClassificationSelect]);
 
   const handlePaymentStatusRulesSaved = useCallback(async () => {
@@ -501,6 +505,7 @@ export default function InputInvoiceUsagePage() {
             <div className="switch-surface__body finance-table-layout">
 
               {error ? <div className="page-feedback-floating"><StatePanel tone="error" compact>{error}<Button size="sm" variant="secondary" onPress={() => void loadRows("refresh")}>重试</Button></StatePanel></div> : null}
+              {classificationNotice && !error ? <div className="page-feedback-floating"><StatePanel tone="info" compact>{classificationNotice}<Button size="sm" variant="ghost" onPress={() => setClassificationNotice("")}>知道了</Button></StatePanel></div> : null}
               {loading ? (
                 <div aria-label="进项发票使用情况加载中" className="input-invoice-usage-loading" role="status">
                   <span className="input-invoice-usage-loading__bar input-invoice-usage-loading__bar--sm" />

@@ -202,6 +202,7 @@ EXPECTED_MIGRATIONS = [
     "0188_input_invoice_payment_rules_explicit.sql",
     "0189_payment_rule_inclusive_operators.sql",
     "0190_payment_rules_without_priority.sql",
+    "0191_payment_rule_group_order.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -366,7 +367,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
         self.assertEqual(
             [item.version for item in migrations],
-            [f"{number:04d}" for number in range(1, 191)],
+            [f"{number:04d}" for number in range(1, 192)],
         )
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
@@ -1977,6 +1978,14 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         self.assertIn("jsonb_build_object('before', before_policy, 'after', after_policy)", rule_conversion_sql)
         self.assertNotRegex(rule_conversion_sql, r"\b(delete|truncate|drop)\b")
         checked_sql = checked_sql.replace(rule_conversion_sql, "approved_payment_rule_contract_conversion;")
+        rule_order_sql = strip_sql_comments(
+            (MIGRATIONS_DIR / "0191_payment_rule_group_order.sql").read_text(encoding="utf-8")
+        ).lower()
+        self.assertIn(rule_order_sql, checked_sql)
+        self.assertIn("where settings_key = 'app_settings'", rule_order_sql)
+        self.assertIn("'input_invoice_usage_payment_rule_order_migrated'", rule_order_sql)
+        self.assertNotRegex(rule_order_sql, r"\b(delete|truncate|drop)\b")
+        checked_sql = checked_sql.replace(rule_order_sql, "approved_payment_rule_order_conversion;")
         approved_legacy_drops = (
             "drop table if exists read_model.cost_statistics_bank_flow_rows;",
             "drop table if exists read_model.cost_statistics_rows;",

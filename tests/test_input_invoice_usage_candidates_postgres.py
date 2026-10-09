@@ -113,7 +113,8 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
         self.assertNotIn('category:pending', [c['id'] for c in children])
         self.assertEqual(next(c['count'] for c in children if c['id'] == 'category:paid'), 3)
         snapshot = self.repository.load_page(page=1, page_size=20, keyword=None, invoice_date_from=None, invoice_date_to=None, month=None, filters=[], sort_field="invoice_date", sort_direction="desc")
-        self.assertTrue(snapshot.groups[0]['payment_facts']['fully_matched'])
+        self.assertEqual(snapshot.groups[0]['payment_facts']['payment_comparison'], 'equal')
+        self.assertTrue(snapshot.groups[0]['payment_facts']['has_bank'])
         for field, operator, value in [('payment_status', 'in', ['paid']), ('bank_amount', 'equals', '1015'), ('bank_direction', 'in', ['outflow'])]:
             filters = [{'field': field, 'operator': operator, 'values' if operator == 'in' else 'value': value}]
             selected = self.service.list_rows(filters=filters)
@@ -143,9 +144,9 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
             store = PostgresStateStore(data_dir=Path(directory), connection=self.connection)
             provider = AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=store, transaction_factory=self.connection.transaction)
             provider.update_payment_status_rules({"expectedVersion": 1, "idempotencyKey": "multi-db", "rules": [
-                {"id": "multi", "statusCode": "offset", "label": "冲", "priority": 1, "enabled": True,
+                {"id": "multi", "statusCode": "offset", "label": "冲", "enabled": True,
                  "conditions": {"hasOa": True, "hasBank": False, "applicantNames": ["黄 亮", "周洁莹"]}},
-                {"id": "waiting", "statusCode": "waiting_payment", "label": "未关联流水", "priority": 2, "enabled": True,
+                {"id": "waiting", "statusCode": "waiting_payment", "label": "未关联流水", "enabled": True,
                  "conditions": {"hasOa": True, "hasBank": False}}
             ]}, actor_id="test")
             result = self.service.list_rows(filters=[{"field": "payment_status", "operator": "in", "values": ["offset"]}])
@@ -291,18 +292,22 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
         self.invoices(1, amount=0)
         snapshot = self.repository.load_page(page=1, page_size=50, keyword=None, invoice_date_from=None, invoice_date_to=None, month=None, filters=[], sort_field="invoice_date", sort_direction="desc")
         facts = snapshot.groups[0]["payment_facts"]
-        self.assertFalse(facts["fully_matched"])
-        self.assertFalse(facts["invoice_oa_amount_matched"])
+        self.assertFalse(facts["has_bank"])
+        self.assertFalse(facts["has_oa"])
+        self.assertEqual(self.service.list_rows()["rows"][0]["paymentStatus"]["code"], "unclassified")
         self.oa('zero-oa', 0)
         self.bank('zero-bank', 0)
         self.relation('zero-case', ['candidate-1','zero-oa','zero-bank'], ['invoice','oa','bank'])
         self.connection.execute("update app.workbench_pair_relations set amount_check='{\"matched\":false}'::jsonb")
         snapshot = self.repository.load_page(page=1, page_size=50, keyword=None, invoice_date_from=None, invoice_date_to=None, month=None, filters=[], sort_field="invoice_date", sort_direction="desc")
-        self.assertTrue(snapshot.groups[0]["payment_facts"]["fully_matched"])
-        self.assertTrue(snapshot.groups[0]["payment_facts"]["invoice_oa_amount_matched"])
+        self.assertTrue(snapshot.groups[0]["payment_facts"]["has_bank"])
+        self.assertTrue(snapshot.groups[0]["payment_facts"]["has_oa"])
+        self.assertEqual(snapshot.groups[0]["payment_facts"]["payment_comparison"], "equal")
+        self.assertEqual(self.service.list_rows()["rows"][0]["paymentStatus"]["code"], "paid")
         self.connection.execute("update app.workbench_pair_relations set amount_check='{\"matched\":true}'::jsonb")
         snapshot = self.repository.load_page(page=1, page_size=50, keyword=None, invoice_date_from=None, invoice_date_to=None, month=None, filters=[], sort_field="invoice_date", sort_direction="desc")
-        self.assertTrue(snapshot.groups[0]["payment_facts"]["fully_matched"])
+        self.assertEqual(snapshot.groups[0]["payment_facts"]["payment_comparison"], "equal")
+        self.assertEqual(self.service.list_rows()["rows"][0]["paymentStatus"]["code"], "paid")
         self.assertTrue(snapshot.groups[0]["payment_facts"]["invoice_oa_amount_matched"])
 
     def test_candidates_reject_invalid_page_and_scope_filters(self):

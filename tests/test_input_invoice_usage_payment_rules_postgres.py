@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from fin_ops_platform.postgres import migrate
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
+    DEFAULT_RULES,
     SETTINGS_KEY,
     AppSettingsInputInvoiceUsagePaymentRulesProvider,
     InputInvoiceUsagePaymentRulesValidationError,
@@ -70,7 +71,7 @@ class PaymentRulesPostgresTests(unittest.TestCase):
                             self.assertEqual(row["code"], evaluate_payment_status(settings, context)["code"])
 
     def test_explicit_migration_preserves_rules_and_materializes_old_branches_once(self):
-        rules = deepcopy(self.request("legacy-explicit")["rules"][:6])
+        rules = deepcopy(DEFAULT_RULES[:6])
         for index, rule in enumerate(rules, 1):
             rule["priority"] = index
         rules[0]["enabled"] = False
@@ -131,7 +132,7 @@ class PaymentRulesPostgresTests(unittest.TestCase):
         saved = self.store.load_app_settings()
         self.assertEqual(saved["unrelated"], "keep")
         self.assertEqual(saved[SETTINGS_KEY]["version"], 5)
-        self.assertEqual(saved[SETTINGS_KEY]["rules"][3]["conditions"]["applicantNames"], ["刘树刚"])
+        self.assertEqual(next(rule for rule in saved[SETTINGS_KEY]["rules"] if rule["id"] == "offset_liu_shugang_no_pay")["conditions"]["applicantNames"], ["刘树刚"])
         self.assertTrue(all("applicantName" not in rule["conditions"] for rule in saved[SETTINGS_KEY]["rules"]))
         self.assertEqual(saved[SETTINGS_KEY]["idempotencyRecords"], {})
         migrate.run_psql(self.database_url, sql=sql)
@@ -163,10 +164,59 @@ class PaymentRulesPostgresTests(unittest.TestCase):
         self.assertEqual(policy["idempotencyRecords"], {})
         event = self.connection.fetch_one("select payload from audit.events where action='input_invoice_usage_payment_rules_migrated'")
         self.assertEqual(event["payload"], {"before": before, "after": policy})
-        self.assertEqual(normalize_payment_status_rules_settings(policy), policy)
+        self.assertEqual(normalize_payment_status_rules_settings(policy),
+                         {**policy, "rules": [policy["rules"][index] for index in (0, 2, 3, 1)]})
         migrate.run_psql(self.database_url, sql=sql)
         self.assertEqual(self.store.load_app_settings(), saved)
         self.assertEqual(self.connection.fetch_one("select count(*) n from audit.events where action='input_invoice_usage_payment_rules_migrated'")["n"], 1)
+
+    def test_group_order_migration_preserves_rules_invalidates_old_drafts_and_audits_once(self):
+        rules = [{"id": name, "statusCode": "custom_" + name, "label": name, "enabled": name != "p2",
+                  "conditions": {"hasBank": bank}} for name, bank in
+                 (("u1", False), ("p2", True), ("u2", False), ("p1", True))]
+        before = {"version": 7, "rules": rules, "idempotencyRecords": {"old": {}}}
+        self.store.save_app_settings({"unrelated": {"keep": True}, SETTINGS_KEY: before})
+        sql = Path("backend/src/fin_ops_platform/postgres/migrations/0191_payment_rule_group_order.sql").read_text()
+        migrate.run_psql(self.database_url, sql=sql)
+        saved = self.store.load_app_settings()
+        expected = {"version": 8, "rules": [rules[i] for i in (1, 3, 0, 2)], "idempotencyRecords": {}}
+        self.assertEqual(saved[SETTINGS_KEY], expected)
+        self.assertEqual(saved["unrelated"], {"keep": True})
+        event = self.connection.fetch_one("select payload from audit.events where action='input_invoice_usage_payment_rule_order_migrated'")["payload"]
+        self.assertEqual(event["before"], before)
+        self.assertEqual(event["after"], expected)
+        self.assertTrue(event["settings_id"])
+        migrate.run_psql(self.database_url, sql=sql)
+        self.assertEqual(self.store.load_app_settings(), saved)
+        self.assertEqual(self.connection.fetch_one("select count(*) n from audit.events where action='input_invoice_usage_payment_rule_order_migrated'")["n"], 1)
+        with self.assertRaises(InputInvoiceUsagePaymentRulesValidationError) as conflict:
+            self.provider.update_payment_status_rules({"expectedVersion": 7, "idempotencyKey": "old-draft", "rules": rules}, actor_id="tester")
+        self.assertEqual(conflict.exception.error_code, "input_invoice_usage_payment_rules_version_conflict")
+
+    def test_sql_python_and_persistence_follow_independent_group_order(self):
+        rules = [{"id": name, "statusCode": "custom_" + name, "label": name, "enabled": True,
+                  "conditions": {"hasBank": bank}} for name, bank in
+                 (("u1", False), ("p1", True), ("u2", False), ("p2", True))]
+        request = {"expectedVersion": 1, "idempotencyKey": "initial", "rules": rules}
+        self.provider.update_payment_status_rules(request, actor_id="tester")
+        for order, key in ((("p1", "p2", "u1", "u2"), "initial"),
+                           (("p2", "p1", "u1", "u2"), "paid"),
+                           (("p2", "p1", "u2", "u1"), "unpaid")):
+            current = self.provider.payment_status_rules_payload()
+            by_id = {rule["id"]: rule for rule in current["rules"]}
+            if key != "initial":
+                request = {"expectedVersion": current["version"], "idempotencyKey": key,
+                           "rules": [by_id[rule_id] for rule_id in order]}
+                current = self.provider.update_payment_status_rules(request, actor_id="tester")
+            self.assertEqual([r["id"] for r in self.provider.payment_status_rules_payload()["rules"]], list(order))
+            self.assertEqual(self.provider.update_payment_status_rules(request, actor_id="tester"), current)
+            expression, params = _input_payment_status_case(normalize_payment_status_rules_settings(current))
+            for has_bank, expected_id in ((True, order[0]), (False, order[2])):
+                context = PaymentStatusEvaluationContext(True, has_bank, "", "equal")
+                python_result = evaluate_payment_status(current, context)
+                row = self.connection.fetch_one("with facts as (select %s::boolean has_bank_relation) select " + expression + " code from facts", (has_bank, *params))
+                self.assertEqual(python_result["matchedRuleId"], expected_id)
+                self.assertEqual(row["code"], python_result["code"])
 
     def test_concurrent_cas_idempotency_and_unrelated_settings(self):
         self.store.save_app_settings({"unrelated_test_field": {"value": "keep"}})
@@ -194,7 +244,7 @@ class PaymentRulesPostgresTests(unittest.TestCase):
 
     def test_migration_preserves_custom_rules_and_removes_dead_configuration(self):
         current = self.request("migration")
-        legacy_rules = current["rules"][:6]
+        legacy_rules = deepcopy(DEFAULT_RULES[:6])
         legacy_rules[0]["label"] = "自定义现金"
         legacy_rules[0]["enabled"] = False
         legacy_rules[5]["label"] = "待付款"
@@ -218,15 +268,15 @@ class PaymentRulesPostgresTests(unittest.TestCase):
         self.assertEqual(self.provider.payment_status_rules_payload()["version"], 9)
 
     def test_migration_preserves_custom_waiting_label(self):
-        rules = self.request("custom-waiting")["rules"][:6]
+        rules = deepcopy(DEFAULT_RULES[:6])
         rules[5]["label"] = "财务核验中"
         self.store.save_app_settings({SETTINGS_KEY: {"version": 8, "rules": rules}})
         sql = Path("backend/src/fin_ops_platform/postgres/migrations/0182_input_invoice_payment_rules_editable.sql").read_text()
         migrate.run_psql(self.database_url, sql=sql)
-        self.assertEqual(self.provider.payment_status_rules_payload()["rules"][5]["label"], "财务核验中")
+        self.assertEqual(next(rule for rule in self.provider.payment_status_rules_payload()["rules"] if rule["id"] == "waiting_payment")["label"], "财务核验中")
 
     def test_migration_rejects_conflicting_labels_without_changing_settings(self):
-        rules = self.request("conflict")["rules"]
+        rules = deepcopy(DEFAULT_RULES)
         rules[2]["label"] = "不同分类名"
         policy = {"version": 8, "rules": rules, "pendingDirections": []}
         self.store.save_app_settings({SETTINGS_KEY: policy})

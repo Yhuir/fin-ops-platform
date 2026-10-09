@@ -19,13 +19,13 @@
 - 流水金额单元格显示正式关系内业务用途的净额（支出减收入），方向为净支出、净收入或收支相抵；`netOutflow` 为有符号净支出，`netAmount` 为展示绝对金额，`original_amount` 保留原始发生额含义。详情保留逐笔原始金额、方向和银行账户，拆分子项在银行明细的既有入口查看。金额筛选和排序使用有符号净支出。
 - 已使用为存在 active OA 或流水关系；待使用为两者都没有，判定依赖正式关系而非详情是否加载成功。`usage_status` 为 used/unused；`oa_relation` 为 linked/unlinked，在 OA 表头下拉筛选，不增加层级。`relation_status` 等既有关系筛选合同保留给当前查询调用。
 - 分类表为全部 → 已使用 → 已付款/未付款 → 已配置规则标签，右侧待使用纵跨已使用各层；不另设使用状态选择器。付款父级与标签仅统计已使用范围，存在有效银行流水关联即已付款，否则为未付款；规则命中不改变正式使用状态。`classification` 与列表读取同一快照，数量按去重发票张数统计，保留搜索、日期、OA 及其它列筛选，排除使用状态、付款父级与标签自身筛选，切换分类仍展示完整分类计数；支付状态筛选选项保持原有查询范围。表格分页仍按关联组计数；共享成员可出现在多个独立关系，不能相加子栏数量推算去重总数。关联徽标 `+N` 表示总数。
-- 支付规则为 HeroUI 原生单元格表格抽屉，按 oil-ui 已确认的紧凑表格设计：付款状态、启用、规则、OA 申请人、是否有流水、发票 VS 流水、发票净额（正数票+负数票）及删除。左侧连续色块按有流水/无流水分为已付款/未付款；启用为 Checkbox，条件下拉不显示箭头，窄屏仅表格横向滚动。没有复制、优先级、常驻重新加载、完全匹配或发票/OA 金额匹配条件。加载错误和版本冲突保留重试读取入口，有草稿时先确认放弃。
-- `conditions.hasBank` 必须是布尔值，规则分组只由该条件派生；新增先选分组和新标签/既有标签，切换流水条件立即移动到对应分组，禁用仍保留所属分组。分组与数组位置不参与匹配。条件之间为 AND，申请人数组内任一命中；评估全部启用规则，多个规则命中同一 `statusCode` 只输出一个标签，命中不同标签输出 `rule_conflict`，原因列出涉及规则；列表、筛选、导出采用相同判断，分类树按实际流水父级显示有数量的规则冲突与未分类。不会按姓名、条件数量或默认顺序偷偷选一条规则。
+- 支付规则为 HeroUI 原生单元格表格抽屉，按 oil-ui 已确认的紧凑表格设计：付款状态、顺序、启用、规则、OA 申请人、是否有流水、发票 VS 流水、发票净额（正数票+负数票）及删除。左侧连续色块按有流水/无流水分为已付款/未付款；启用为 Checkbox，条件下拉不显示箭头，窄屏仅表格横向滚动。顺序列显示拖拽手柄和组内只读序号，支持鼠标及键盘操作；分组标题不参与拖拽。没有复制、数字优先级输入、常驻重新加载、完全匹配或发票/OA 金额匹配条件。加载错误和版本冲突保留重试读取入口，有草稿时先确认放弃。
+- `conditions.hasBank` 必须是布尔值，规则分组只由该条件派生；新增先选分组和新标签/既有标签，切换流水条件立即追加到目标分组末尾，禁用仍保留位置。已付款与未付款各自独立排序、分别从 1 编号；同组从上到下采用第一条启用且满足条件的规则，不能跨组拖拽。条件之间为 AND，申请人数组内任一命中；同标签重叠仍取最先命中规则作为证据，匹配顺序不改变正式关系或金额事实。Python 明细和 SQL 筛选、统计、导出使用相同顺序，分类树按实际流水父级显示规则标签及有数量的未分类。
 - OA 匹配支持不限、无 OA、任意申请人、指定姓名；同名账号共同匹配，停用账号可选，历史缺失姓名可移除。净额可选不限、＞0、≥0、＝0、≤0、＜0。无流水清除草稿中的付款比较；无 OA 清除申请人；切回有流水不自动恢复旧比较，还原才恢复已保存条件。
 - 多个规则可输出同一标签；规则 `id` 与输出 `statusCode` 保持稳定，`label` 可改名，同一身份名称必须一致。新增标签使用 custom_ 身份，新增时显式选择既有标签可复用其身份并独立配置条件；不同条件的“冲”规则不合并。父级由实际流水关系决定，可出现的位置由显式条件决定，不再从 code 推导隐藏条件。删除最后一条规则移除该标签，禁用保留零数量标签，空规则集保持为空。设置 owner 继续以 CAS、幂等和审计原子保存，不覆盖其它配置 family。
 - 发票净额取同一正式关系内去重发票的真实正负价税合计；任一金额缺失则净额未知。付款比较支持 equal/less/less_equal/greater/greater_equal，与关联业务用途净支出比较；净额 nonnegative/nonpositive 分别包含 positive/zero 与 negative/zero，缺失事实不满足任何金额条件。零和负净额同样可以比较，匹配使用当前事实，不修改历史 amount_check。没有命中任何规则时输出 `unclassified`，缺少比较事实时返回具体原因，仍归实际流水父级。摘要 `unclassifiedCount` 按去重发票计数。基础分类也是可编辑、可删除的显式规则，评估器没有隐藏分类分支。
 - 表格“进项发票”组标题右侧展示当前完整筛选范围的去重张数、价税合计、税额合计，翻页不改变汇总。金额取带符号原始字段，不补算、不将缺失当零。API `summary.taxAmount` 为已知税额之和，`missingTaxAmountCount` 表示缺失数量，界面不能把部分数展示为完整税额合计。
-- 保存规则成功后刷新列表与分类；失败保留草稿，版本冲突明确反馈。保存成功但刷新失败单独提示并允许重新刷新。删除当前标签回到对应付款父级，保留已使用范围及其它筛选。分类配置不修改关联关系、OA 数据、附件或原始发票；不包含“对方开错”的专用自动配对和识别。
+- 拖拽只修改草稿，保存期间锁定编辑；还原或拖回原顺序不提交。配置以有流水组、无流水组依次保存，组内相对顺序保持。保存规则成功后刷新列表与分类；失败保留草稿，同一提交重试沿用幂等键，版本冲突明确反馈。保存成功但刷新失败单独提示并允许重新刷新。删除当前标签回到对应付款父级，保留已使用范围及其它筛选。分类配置不修改关联关系、OA 数据、附件或原始发票；不包含“对方开错”的专用自动配对和识别。
 - 支付规则申请人候选仅从 OA `sys_user` 的全部未删除用户读取，包含启用和停用账号，不扫描历史单据，不复用访问权限设置的账户排除范围；设置抽屉打开时读取，普通列表查询不访问 OA 目录。目录失败明确返回 503，不退回历史姓名。
 - 申请人条件为 `applicantNames` 数组，任一姓名命中；姓名去除空白、零宽空格和 BOM 后去重匹配，目录按账号显示姓名、账号及只读状态图标，启用在前、停用在后，支持姓名/账号搜索；同名账号联动选择并合并为一个姓名条件。OA 单据只有姓名，不能据此区分同名账号。新选姓名保存时须仍在完整目录，停用账号可选可保存；目录外历史条件保留并可移除，不自动改成不限制。
 - 反提候选复用待使用集合：同一发票无有效 OA 和流水关系，详情缺失不改变正式关系判定。打开抽屉继承主页面关键词、日期及其它筛选，移除使用/付款分类并固定待使用；弹窗搜索独立，关闭重开重新继承。查询按单张票去重并在分页前过滤、统计，同范围同一数据状态下候选与待使用的票数和金额一致。
@@ -52,7 +52,7 @@
 - [web/src/pages/InputInvoiceUsagePage.tsx](../../../web/src/pages/InputInvoiceUsagePage.tsx)
 - [web/src/features/inputInvoiceUsage/api.ts](../../../web/src/features/inputInvoiceUsage/api.ts)
 - [web/src/features/inputInvoiceUsage/usePaymentStatusRules.ts](../../../web/src/features/inputInvoiceUsage/usePaymentStatusRules.ts)：规则草稿、版本保存与列表刷新边界。
-- [web/src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx](../../../web/src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx)：原生表格与条件编辑。
+- [web/src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx](../../../web/src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx)：原生表格、组内拖拽与条件编辑。
 - [backend/src/fin_ops_platform/app/routes_input_invoice_usage.py](../../../backend/src/fin_ops_platform/app/routes_input_invoice_usage.py)
 - [backend/src/fin_ops_platform/services/input_invoice_usage_canonical_query_service.py](../../../backend/src/fin_ops_platform/services/input_invoice_usage_canonical_query_service.py)
 - [backend/src/fin_ops_platform/services/input_invoice_usage_service.py](../../../backend/src/fin_ops_platform/services/input_invoice_usage_service.py)
@@ -68,6 +68,8 @@
 - [web/e2e/input-invoice-hierarchy.spec.ts](../../../web/e2e/input-invoice-hierarchy.spec.ts)
 - [web/e2e/production-input-invoice-hierarchy.spec.ts](../../../web/e2e/production-input-invoice-hierarchy.spec.ts)：显式开启的生产只读分类、搜索、汇总和三种宽度视觉验证。
 - [web/e2e/input-invoice-payment-rules.spec.ts](../../../web/e2e/input-invoice-payment-rules.spec.ts)
+- [web/e2e/input-invoice-payment-rule-order.spec.ts](../../../web/e2e/input-invoice-payment-rule-order.spec.ts)：鼠标、键盘、跨组边界、取消与保存读回。
+- [web/src/test/usePaymentStatusRules.test.ts](../../../web/src/test/usePaymentStatusRules.test.ts)：草稿顺序、分组移动、权限与幂等重试。
 - [web/e2e/production-payment-rules.spec.ts](../../../web/e2e/production-payment-rules.spec.ts)：生产只读合同与分组三档宽度视觉验证，草稿操作不保存。
 - [tests/test_input_invoice_usage_payment_rules_postgres.py](../../../tests/test_input_invoice_usage_payment_rules_postgres.py)：规则迁移、SQL/Python 一致性、CAS、幂等与审计回滚。
 - [web/e2e/input-invoice-grouped-header.spec.ts](../../../web/e2e/input-invoice-grouped-header.spec.ts)

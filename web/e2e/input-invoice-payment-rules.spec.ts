@@ -46,7 +46,7 @@ test("payment fact hierarchy, usage parents and rule edits retain scope and serv
   await page.getByRole("button", { name: "发票与支付状态规则设置" }).click();
   const drawer = page.getByRole("dialog", { name: "发票与支付状态规则设置" });
   await expect(drawer.getByRole("grid", { name: "支付状态规则" })).toBeVisible();
-  await expect(drawer.getByRole("columnheader")).toHaveText(["付款状态", "启用", "规则", "OA 申请人", "是否有流水", "发票 VS 流水", "发票净额（正数票+负数票）", "操作"]);
+  await expect(drawer.getByRole("columnheader")).toHaveText(["付款状态", "顺序", "启用", "规则", "OA 申请人", "是否有流水", "发票 VS 流水", "发票净额（正数票+负数票）", "操作"]);
   for (const width of [1920, 1440, 1024]) {
     await page.setViewportSize({ width, height: 1080 });
     const row = await drawer.getByRole("row").nth(1).boundingBox();
