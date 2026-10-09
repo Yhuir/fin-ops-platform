@@ -50,7 +50,11 @@ def build_source_attribute_repair_plan(
             if row.get("invoice_kind")
         ]
         codes = {item["invoice_kind_code"] or item["invoice_kind"] for _, _, item in provided}
-        conflicts = conflicts or len(codes) > 1
+        # The registered export can name the toll subtype while the same PDF
+        # explicitly names its general-invoice parent. Retain both originals,
+        # and use the explicitly supplied subtype without deriving a new label.
+        toll_general = codes == {"toll", "vat_general"}
+        conflicts = conflicts or (len(codes) > 1 and not toll_general)
         evidence = [
             {
                 "file_id": source["file_id"],
@@ -65,7 +69,11 @@ def build_source_attribute_repair_plan(
         if conflicts:
             fields = invoice_kind_fields(None, missing_status="conflict")
         elif provided:
-            fields = provided[0][2]
+            fields = (
+                next(item for _, _, item in provided if item["invoice_kind_code"] == "toll")
+                if toll_general
+                else provided[0][2]
+            )
         else:
             fields = invoice_kind_fields(
                 None,

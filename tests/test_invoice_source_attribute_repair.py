@@ -94,6 +94,29 @@ class SourceAttributeRepairTests(unittest.TestCase):
         self.assertEqual(second["update_count"], 0)
         self.assertEqual(second["classification_counts"], {"confirmed": 1})
 
+    def test_explicit_toll_subtype_and_general_title_preserve_both_sources(self):
+        for originals in (
+            [source("电子发票（普通发票）"), source("数电发票（通行费发票）")],
+            [source("数电发票（通行费发票）"), source("电子发票（普通发票）")],
+        ):
+            first = self.plan(originals)
+            payload = first["updates"][0]["raw_payload"]["normalized_payload"]
+            self.assertEqual(payload["invoice_kind_status"], "confirmed")
+            self.assertEqual(payload["invoice_kind_code"], "toll")
+            self.assertEqual(payload["invoice_kind"], "数电发票（通行费发票）")
+            self.assertEqual(len(payload["invoice_kind_evidence"]), 2)
+            current = invoice()
+            current["raw_payload"] = first["updates"][0]["raw_payload"]
+            self.assertEqual(self.plan(originals, current)["update_count"], 0)
+        for original in (
+            source("电子发票（普通发票）", invoice_date="2026-09-23"),
+            source("电子发票（普通发票）", buyer_tax_no="OTHER"),
+            source("电子发票（增值税专用发票）"),
+        ):
+            payload = self.plan([source("数电发票（通行费发票）"), original])["updates"][0]["raw_payload"]["normalized_payload"]
+            self.assertEqual(payload["invoice_kind_status"], "conflict")
+            self.assertIsNone(payload["invoice_kind_code"])
+
     def test_unrelated_source_and_weak_identity_cannot_supply_a_type(self):
         original = source()
         original["invoice_ids"] = ["other"]
