@@ -1,4 +1,4 @@
-# 成本统计
+# 成本
 
 入口：`/cost-statistics`。
 

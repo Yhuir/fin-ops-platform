@@ -30,14 +30,14 @@ test.describe("workbench relations OA pending payment browser fan-out", () => {
 
     await recordLatency({
       operationId: "oa-pending-payments.open-after-workbench-confirm",
-      visibleLabel: "OA待付款核对",
+      visibleLabel: "OA付款情况",
       actionType: "click",
     }, async (mark) => {
       const rowsResponse = page.waitForResponse((response) =>
         response.request().method() === "GET"
         && new URL(response.url()).pathname.endsWith("/api/oa-pending-payments/rows"),
       );
-      await page.getByRole("link", { name: "OA待付款核对" }).click();
+      await page.getByRole("link", { name: "OA付款情况" }).click();
       await mark("apiLatencyMs", rowsResponse);
       await mark("firstVisibleResponseLatencyMs", expect(page.getByTestId("oa-pending-payments-page")).toBeVisible());
       await mark("finalSettledLatencyMs", expect(page.getByRole("row", { name: /陈涛/ })).toContainText("已支付"));

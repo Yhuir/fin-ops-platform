@@ -70,7 +70,7 @@ test.describe("cost statistics browser flow", () => {
     await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     await page.goto("/cost-statistics");
-    await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "成本" })).toBeVisible();
     const switcher = page.getByRole("group", { name: "成本统计视图切换" });
     await expect(switcher.getByText("项目成本")).toBeVisible();
     const views = switcher.getByRole("radiogroup", { name: "项目成本统计视图" });

@@ -289,11 +289,11 @@ test.describe("settings data reset browser flow", () => {
       pageKey: "pending-invoices",
       module: "pending-invoices",
       operationId: "pending-invoices.open-after-settings-data-reset",
-      visibleLabel: "待找发票",
+      visibleLabel: "流水待找发票",
       actionType: "click",
     }, async (mark) => {
       const pendingRowsAfterResetResponse = waitForPendingInvoiceRows(page);
-      await page.getByRole("link", { name: "待找发票" }).click();
+      await page.getByRole("link", { name: "流水待找发票" }).click();
       const response = await mark("apiLatencyMs", pendingRowsAfterResetResponse);
       pendingRowsAfterReset = await response.json() as RowsCanonicalPayload;
       await mark("finalSettledLatencyMs", expect(page.getByTestId("pending-invoices-page")).toBeVisible());
@@ -345,7 +345,7 @@ test.describe("settings data reset browser flow", () => {
       pageKey: "cost-statistics",
       module: "cost-statistics",
       operationId: "cost-statistics.open-after-settings-save-save",
-      visibleLabel: "成本统计",
+      visibleLabel: "成本",
       actionType: "click",
     }, async (mark) => {
       const costExplorerResponse = page.waitForResponse((response) => {
@@ -355,12 +355,12 @@ test.describe("settings data reset browser flow", () => {
           && !url.searchParams.has("project_scope")
           && response.status() === 200;
       });
-      await page.getByRole("link", { name: "成本统计" }).click();
+      await page.getByRole("link", { name: "成本" }).click();
       const response = await mark("apiLatencyMs", costExplorerResponse);
       costPayload = await response.json() as Record<string, unknown>;
-      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "成本" })).toBeVisible());
     });
-    await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "成本" })).toBeVisible();
     if (!costPayload) {
       throw new Error("missing cost statistics payload after settings remaining settings save");
     }

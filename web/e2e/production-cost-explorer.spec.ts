@@ -24,7 +24,7 @@ test('production cost explorer verifies five identity filters, stable pagination
     return url.pathname.endsWith('/cost-statistics/explorer') && url.searchParams.get('include_statistics') === 'false';
   });
   await page.goto('/fin-ops/cost-statistics');
-  await expect(page.getByRole('heading', { name: '成本统计', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '成本', exact: true })).toBeVisible();
   const metrics: object[] = [];
   for (const [view, label] of [['project', '按项目'], ['cost_tag', '按成本标签'], ['bank_account', '按银行账户'], ['bank_tag', '按标签'], ['time', '按时间']]) {
     await page.getByRole('radio', { name: label, exact: true }).click();

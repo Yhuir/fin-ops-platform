@@ -924,7 +924,7 @@ export default function TurnoverLedgerPage() {
   return (
     <div className="turnover-ledger-page" data-testid="turnover-ledger-page">
       <PageScaffold
-        title="外部往来款管理"
+        title="外部往来款"
         titleAccessory={titleAccessory}
         actions={(
           <>

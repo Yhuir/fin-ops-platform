@@ -21,7 +21,7 @@ test.describe("pending invoices browser flow", () => {
 
     await recordLatency({
       operationId: "pending-invoices.open-page-text-selection",
-      visibleLabel: "待找发票",
+      visibleLabel: "流水待找发票",
       actionType: "navigate",
     }, async (mark) => {
       await page.goto("/pending-invoices");
@@ -48,7 +48,7 @@ test.describe("pending invoices browser flow", () => {
 
     await recordLatency({
       operationId: "pending-invoices.open-page-fanout",
-      visibleLabel: "待找发票",
+      visibleLabel: "流水待找发票",
       actionType: "navigate",
     }, async (mark) => {
       await page.goto("/pending-invoices");
@@ -65,10 +65,10 @@ test.describe("pending invoices browser flow", () => {
 
     await recordLatency({
       operationId: "pending-invoices.return-after-fanout-confirm",
-      visibleLabel: "待找发票",
+      visibleLabel: "流水待找发票",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("link", { name: "待找发票" }).click();
+      await page.getByRole("link", { name: "流水待找发票" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(page.getByTestId("pending-invoices-page")).toBeVisible());
       await expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(pendingRowsBefore);
     });

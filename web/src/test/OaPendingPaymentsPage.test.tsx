@@ -993,7 +993,7 @@ describe("OA pending payments page", () => {
     const financeItems = sidebarGroups.find((group) => group.title === "财务业务")?.items ?? [];
     expect(financeItems).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ label: "OA待付款核对", to: "/oa-pending-payments" }),
+        expect.objectContaining({ label: "OA付款情况", to: "/oa-pending-payments" }),
       ]),
     );
 
@@ -1005,7 +1005,7 @@ describe("OA pending payments page", () => {
     expect(initialRowsRequest.searchParams.get("page")).toBe("1");
     expect(initialRowsRequest.searchParams.get("page_size")).toBe("20");
     expect(initialRowsRequest.searchParams.get("view_mode")).toBe("completed");
-    expect(within(page).getByRole("heading", { name: "OA 待付款核对" })).toBeInTheDocument();
+    expect(within(page).getByRole("heading", { name: "OA付款情况" })).toBeInTheDocument();
     expect(await within(page).findByRole("grid", { name: "OA待付款核对表格" })).toBeInTheDocument();
 
     const groupHeader = within(page).getAllByRole("row")[0];

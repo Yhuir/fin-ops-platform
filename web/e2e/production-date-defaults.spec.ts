@@ -67,13 +67,13 @@ test("ordinary date filters start in all time and preserve only same-visit selec
   const selectedMonth = new URL(monthResponse.url()).searchParams.get("date_from");
   await expect(page.getByRole("button", { name: "刷新银行明细" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "false");
-  await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: "成本统计", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "成本统计", exact: true })).toBeVisible();
+  await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: "成本", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "成本", exact: true })).toBeVisible();
   await page.goBack();
   await expect(page.getByRole("button", { name: "银行明细时间范围：年月" })).toBeVisible();
   await expect(page.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.goForward();
-  await expect(page.getByRole("heading", { name: "成本统计", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "成本", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.reload();
   await expect(page.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "true");

@@ -640,7 +640,7 @@ export default function PendingInvoicesPage() {
           </div>
         )}
         className="invoice-count-page-scaffold"
-        title="待找发票"
+        title="流水待找发票"
         titleAccessory={titleAccessory}
       >
         <div className="pending-invoices-content finance-table-layout">

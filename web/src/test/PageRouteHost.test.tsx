@@ -145,7 +145,7 @@ describe("PageRouteHost", () => {
     );
 
     await waitFor(() => {
-      expect(document.title).toBe("成本统计 · 财务运营平台");
+      expect(document.title).toBe("成本 · 财务运营平台");
       expect(document.activeElement).toBe(screen.getByRole("main"));
     });
   });
@@ -271,16 +271,16 @@ describe("PageRouteHost", () => {
       "/",
       "/cost-statistics",
       "/bank-details",
-      "/cash",
       "/oa-pending-payments",
-      "/bank-flow-rule-batches",
-      "/batch-accounting",
-      "/turnover-ledger",
-      "/etc-tickets",
-      "/tax-offset",
       "/pending-invoices",
       "/input-invoice-usage",
       "/output-invoice-collections",
+      "/tax-offset",
+      "/turnover-ledger",
+      "/bank-flow-rule-batches",
+      "/etc-tickets",
+      "/cash",
+      "/batch-accounting",
       "/settings",
       "/operations/app-health",
       "/operations/history",

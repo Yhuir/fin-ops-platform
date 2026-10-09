@@ -12,19 +12,42 @@ function createAppShellLatencyRecorder(page: Parameters<typeof createOperationLa
 }
 
 test.describe("app shell responsive browser smoke", () => {
-  test("aligns standard page headers to the input invoice usage baseline", async ({ page }) => {
+  test("business import shortcuts remain visible at desktop widths and return to their source", async ({ page }, info) => {
+    await installDeterministicApiMocks(page, { sessionMode: "admin" });
+    for (const width of [1920, 1440, 1024]) {
+      await page.setViewportSize({ width, height: 1080 });
+      for (const entry of [
+        { path: "/bank-details", button: "导入流水", back: "返回银行明细" },
+        { path: "/input-invoice-usage", button: "导入进项发票", back: "返回进项发票" },
+        { path: "/output-invoice-collections", button: "导入销项发票", back: "返回销项发票" },
+      ]) {
+        await page.goto(entry.path);
+        await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+        const button = page.getByRole("button", { name: entry.button, exact: true });
+        await expect(button).toBeVisible();
+        await page.screenshot({ path: info.outputPath(`${entry.path.slice(1)}-${width}.png`), animations: "disabled" });
+        await button.click();
+        await expect(page.getByRole("button", { name: entry.back })).toBeVisible();
+        await page.getByRole("button", { name: entry.back }).click();
+        await expect(page).toHaveURL(new RegExp(`${entry.path}$`));
+      }
+    }
+  });
+
+  test("preserves title insets for compact and standard page headers", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await installDeterministicApiMocks(page, { sessionMode: "admin" });
 
     const routes = [
-      { path: "/input-invoice-usage", title: "进项发票使用情况" },
-      { path: "/pending-invoices", title: "待找发票" },
-      { path: "/bank-details", title: "银行明细" },
-      { path: "/cost-statistics", title: "成本统计" },
-      { path: "/", title: "关联台" },
+      { path: "/input-invoice-usage", title: "进项发票使用情况", top: 20.75 },
+      { path: "/pending-invoices", title: "流水待找发票", top: 20.75 },
+      { path: "/bank-details", title: "银行明细", top: 16 },
+      { path: "/cost-statistics", title: "成本", top: 16 },
+      { path: "/", title: "关联台", top: 16 },
     ] as const;
 
-    let baseline: { top: number; left: number } | null = null;
+    // Compact query headers center an 18px title inside 32px controls;
+    // custom headers keep the existing 16px top inset. Preserve both layouts.
     for (const route of routes) {
       await page.goto(route.path);
       const title = page.getByRole("heading", { name: route.title, exact: true });
@@ -39,12 +62,8 @@ test.describe("app shell responsive browser smoke", () => {
           left: headingRect.left - pageBodyRect.left,
         };
       });
-      if (baseline === null) {
-        baseline = inset;
-        continue;
-      }
-      expect(inset.top, route.path).toBeCloseTo(baseline.top, 1);
-      expect(inset.left, route.path).toBeCloseTo(baseline.left, 1);
+      expect(inset.top, route.path).toBeCloseTo(route.top, 1);
+      expect(inset.left, route.path).toBeCloseTo(16, 1);
     }
 
     await page.goto("/operations/app-health");
@@ -120,14 +139,14 @@ test.describe("app shell responsive browser smoke", () => {
     await recordLatency({
       route: "/cost-statistics",
       operationId: "app-shell.open-cost-statistics-mobile",
-      visibleLabel: "成本统计",
+      visibleLabel: "成本",
       actionType: "navigate",
     }, async (mark) => {
       await page.goto("/cost-statistics");
-      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "成本" })).toBeVisible());
     });
 
-    await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "成本" })).toBeVisible();
     const openMenuButton = page.locator("button[aria-label='打开菜单']");
     await expect(openMenuButton).toBeVisible();
 

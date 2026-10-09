@@ -314,7 +314,7 @@ export default function OaPendingPaymentsPage() {
           onSubmit={handleKeywordSubmit}
           placeholder="搜索 OA / 流水 / 发票"
           value={keywordDraft}
-        />)} fillViewport title="OA 待付款核对" titleAccessory={titleAccessory} actions={actions}>
+        />)} fillViewport title="OA付款情况" titleAccessory={titleAccessory} actions={actions}>
           <div className="oa-pending-payments-content finance-table-layout">
             <TableClassificationHeader label="OA 核对分类" unit="条" pending={loading || refreshing} invalid={Boolean(error)}
               root={{ id: "all", label: "OA 核对范围", count: summary ? summary.viewCounts.completed + summary.viewCounts.in_progress : undefined }}

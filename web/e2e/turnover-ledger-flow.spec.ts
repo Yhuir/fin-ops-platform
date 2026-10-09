@@ -139,7 +139,7 @@ test.describe("turnover ledger browser flow", () => {
     await clickCheckbox(firstRow.getByRole("checkbox"));
     await expect(firstRow).not.toHaveClass(/turnover-flow-selected/);
     await trigger.click();
-    await page.getByRole("heading", { name: "外部往来款管理" }).click();
+    await page.getByRole("heading", { name: "外部往来款" }).click();
     await expect(page.getByRole("dialog", { name: "往来款分类明细" })).not.toBeVisible();
     await trigger.click();
     await trigger.click();
@@ -266,14 +266,14 @@ test.describe("turnover ledger browser flow", () => {
 
     await recordLatency({
       operationId: "turnover-ledger.open-page-load-failure",
-      visibleLabel: "外部往来款管理",
+      visibleLabel: "外部往来款",
       actionType: "navigate",
     }, async (mark) => {
       await page.goto("/turnover-ledger");
       await mark("firstVisibleResponseLatencyMs", expect(page.getByTestId("turnover-ledger-page")).toBeVisible());
       await mark("finalSettledLatencyMs", expect(page.getByText("往来款台账加载暂时失败，请刷新后重试。")).toBeVisible());
     });
-    await expect(page.getByRole("heading", { name: "外部往来款管理" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "外部往来款" })).toBeVisible();
     await expect(page.getByText("往来款台账加载暂时失败，请刷新后重试。")).toBeVisible();
     await expect(page.getByText("暂无往来款台账")).toHaveCount(0);
     expect(api.count("GET /api/turnover-ledger")).toBeGreaterThanOrEqual(1);
@@ -317,14 +317,14 @@ test.describe("turnover ledger browser flow", () => {
 
     await recordLatency({
       operationId: "turnover-ledger.open-page-tag-selection",
-      visibleLabel: "外部往来款管理",
+      visibleLabel: "外部往来款",
       actionType: "navigate",
     }, async (mark) => {
       await page.goto("/turnover-ledger");
       await mark("firstVisibleResponseLatencyMs", expect(page.getByTestId("turnover-ledger-page")).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "外部往来款管理" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "外部往来款" })).toBeVisible());
     });
-    await expect(page.getByRole("heading", { name: "外部往来款管理" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "外部往来款" })).toBeVisible();
     const ledgerLoadsBeforeSave = api.count("GET /api/turnover-ledger");
 
     const drawer = page.getByRole("dialog", { name: "外部往来款标签设置" });
@@ -383,7 +383,7 @@ test.describe("turnover ledger browser flow", () => {
     const recordLatency = createTurnoverLatencyRecorder(page, testInfo);
 
     await page.goto("/turnover-ledger");
-    await expect(page.getByRole("heading", { name: "外部往来款管理" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "外部往来款" })).toBeVisible();
     const table = page.getByRole("table", { name: "外部往来款台账" });
     await page.getByRole("button", { name: "展开 云南建设有限公司 流水明细" }).click();
     const expenseRow = table.getByRole("checkbox", { name: `选择流水 ${turnoverFlowLabels.expense}` }).locator("xpath=ancestor::tr[1]");
@@ -552,14 +552,14 @@ test.describe("turnover ledger browser flow", () => {
 
     await recordLatency({
       operationId: "turnover-ledger.open-page",
-      visibleLabel: "外部往来款管理",
+      visibleLabel: "外部往来款",
       actionType: "navigate",
     }, async (mark) => {
       await page.goto("/turnover-ledger");
       await mark("firstVisibleResponseLatencyMs", expect(page.getByTestId("turnover-ledger-page")).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "外部往来款管理" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "外部往来款" })).toBeVisible());
     });
-    await expect(page.getByRole("heading", { name: "外部往来款管理" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "外部往来款" })).toBeVisible();
 
     const table = page.getByRole("table", { name: "外部往来款台账" });
     await expect(table).toBeVisible();
@@ -646,12 +646,12 @@ test.describe("turnover ledger browser flow", () => {
       pageKey: "cost-statistics",
       module: "cost-statistics",
       operationId: "cost-statistics.open-after-turnover-closure",
-      visibleLabel: "成本统计",
+      visibleLabel: "成本",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("link", { name: "成本统计" }).click();
+      await page.getByRole("link", { name: "成本" }).click();
       await mark("apiLatencyMs", costExplorerResponse);
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible());
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "成本" })).toBeVisible());
       await mark("finalSettledLatencyMs", expect(page.getByRole("radio", { name: "按项目" })).toBeVisible());
     });
     const costPayload = await (await costExplorerResponse).json() as Record<string, unknown>;
@@ -673,7 +673,7 @@ test.describe("turnover ledger browser flow", () => {
 
     await recordLatency({
       operationId: "turnover-ledger.reopen-after-cost-fanout",
-      visibleLabel: "外部往来款管理",
+      visibleLabel: "外部往来款",
       actionType: "navigate",
     }, async (mark) => {
       await page.goto("/turnover-ledger");

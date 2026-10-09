@@ -99,7 +99,7 @@ PAGE_AUDIT_REGISTRY: dict[str, PageAuditRegistration] = {
     ),
     "cost-statistics": _ready(
         "cost-statistics",
-        "成本统计",
+        "成本",
         "cost_statistics",
         external_source_boundary="OA, bank, and invoice completeness before App registration",
         external_evidence_keys=("bank", "oa", "invoice", "etc"),
@@ -114,7 +114,7 @@ PAGE_AUDIT_REGISTRY: dict[str, PageAuditRegistration] = {
     ),
     "oa-pending-payments": _ready(
         "oa-pending-payments",
-        "OA待付款核对",
+        "OA付款情况",
         "page_business",
         external_source_boundary="OA source and admission completeness before App registration",
         external_evidence_keys=("oa", "bank", "invoice"),
@@ -138,7 +138,7 @@ PAGE_AUDIT_REGISTRY: dict[str, PageAuditRegistration] = {
     ),
     "turnover-ledger": _ready(
         "turnover-ledger",
-        "外部往来款管理",
+        "外部往来款",
         "page_business",
         external_source_boundary="bank statement completeness before App import",
         external_evidence_keys=("bank",),
@@ -162,7 +162,7 @@ PAGE_AUDIT_REGISTRY: dict[str, PageAuditRegistration] = {
     ),
     "pending-invoices": _ready(
         "pending-invoices",
-        "待找发票",
+        "流水待找发票",
         "page_business",
         external_source_boundary="bank, invoice, and OA completeness before App registration",
         external_evidence_keys=("bank", "invoice", "oa"),

@@ -48,7 +48,7 @@ test.describe("pending invoices export browser download", () => {
 
     await recordLatency({
       operationId: "pending-invoices.open-page-export-download",
-      visibleLabel: "待找发票",
+      visibleLabel: "流水待找发票",
       actionType: "navigate",
     }, async (mark) => {
       await gotoAndExpectPageReady(page, "/pending-invoices", "pending-invoices-page", { diagnostics });
@@ -63,10 +63,10 @@ test.describe("pending invoices export browser download", () => {
 
     await recordLatency({
       operationId: "pending-invoices.return-after-workbench-confirm",
-      visibleLabel: "待找发票",
+      visibleLabel: "流水待找发票",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("link", { name: "待找发票" }).click();
+      await page.getByRole("link", { name: "流水待找发票" }).click();
       await expectPageReady(page, "pending-invoices-page", {
         diagnostics,
         routeDescription: "return to /pending-invoices after workbench relation confirmation",
@@ -187,7 +187,7 @@ test.describe("pending invoices export browser download", () => {
 
     await recordLatency({
       operationId: "pending-invoices.open-page-export-row-limit",
-      visibleLabel: "待找发票",
+      visibleLabel: "流水待找发票",
       actionType: "navigate",
     }, async (mark) => {
       await gotoAndExpectPageReady(page, "/pending-invoices", "pending-invoices-page", { diagnostics });

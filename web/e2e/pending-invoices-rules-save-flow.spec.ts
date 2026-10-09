@@ -64,7 +64,7 @@ test.describe("pending invoices rules save browser flow", () => {
 
     await recordLatency({
       operationId: "pending-invoices.open-page-rules-save",
-      visibleLabel: "待找发票",
+      visibleLabel: "流水待找发票",
       actionType: "navigate",
     }, async (mark) => {
       await gotoAndExpectPageReady(page, "/pending-invoices", "pending-invoices-page", { diagnostics });
@@ -137,7 +137,7 @@ test.describe("pending invoices rules save browser flow", () => {
 
     await recordLatency({
       operationId: "pending-invoices.open-page-rules-save-failure",
-      visibleLabel: "待找发票",
+      visibleLabel: "流水待找发票",
       actionType: "navigate",
     }, async (mark) => {
       await gotoAndExpectPageReady(page, "/pending-invoices", "pending-invoices-page", { diagnostics });

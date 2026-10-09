@@ -155,10 +155,10 @@ test.describe("input invoice usage relation browser fan-out", () => {
       pageKey: "oa-pending-payments",
       module: "oa-pending-payments",
       operationId: "oa-pending-payments.open-after-input-invoice-confirm",
-      visibleLabel: "OA待付款核对",
+      visibleLabel: "OA付款情况",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("link", { name: "OA待付款核对" }).click();
+      await page.getByRole("link", { name: "OA付款情况" }).click();
       await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/oa-pending-payments/rows")).toBeGreaterThan(oaPendingRowsBefore));
       await mark("finalSettledLatencyMs", expect(page.getByTestId("oa-pending-payments-page")).toBeVisible());
     });
@@ -179,14 +179,14 @@ test.describe("input invoice usage relation browser fan-out", () => {
       pageKey: "cost-statistics",
       module: "cost-statistics",
       operationId: "cost-statistics.open-after-input-invoice-confirm",
-      visibleLabel: "成本统计",
+      visibleLabel: "成本",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("link", { name: "成本统计" }).click();
+      await page.getByRole("link", { name: "成本" }).click();
       await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/cost-statistics/explorer")).toBeGreaterThan(costExplorerRowsBefore));
-      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "成本" })).toBeVisible());
     });
-    await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "成本" })).toBeVisible();
     expect(api.count("GET /api/cost-statistics/explorer")).toBeGreaterThan(costExplorerRowsBefore);
     await recordLatency({
       route: "/cost-statistics",

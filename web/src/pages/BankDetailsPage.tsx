@@ -1,3 +1,5 @@
+import { useNavigate } from "react-router-dom";
+import { importEntryPath } from "../features/imports/importRoutes";
 import CountLabel from "../components/common/CountLabel";
 import BankAccountValue from "../components/BankAccountValue";
 import BankSplitChips from "../features/bankSplits/BankSplitChips";
@@ -1444,10 +1446,11 @@ function BankTextCell({ value }: { value: string }) {
 }
 
 export default function BankDetailsPage() {
+  const navigate = useNavigate();
   const [detailTransaction, setDetailTransaction] = useState<BankDetailTransaction | null>(null);
   const { active, activationGeneration } = useOptionalPageActivation("bank-details");
   const { runOperation } = useGlobalOperationOverlay();
-  const { canOperateData } = useSessionPermissions();
+  const { canOperateData, canAccessPage } = useSessionPermissions();
   const selectedAccountSession = usePageSessionState<string | null>({
     pageKey: "bank-details",
     stateKey: "selectedAccountKey",
@@ -2179,6 +2182,8 @@ export default function BankDetailsPage() {
           {titleAccessory ? <div className="page-title-accessory">{titleAccessory}</div> : null}
         </div>
         <div className="page-header-actions">
+          {canAccessPage("imports.bank-transactions") && <Button size="sm" variant="secondary"
+          onPress={() => navigate(importEntryPath("bank-details"))}>导入流水</Button>}
           {(error || accountsError || transactionsError || categoryCountsError || rulesError) && <Button
             aria-label="重试读取"
             isDisabled={loading || rowLoading}

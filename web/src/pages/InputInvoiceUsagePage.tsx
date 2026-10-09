@@ -1,3 +1,5 @@
+import { useNavigate } from "react-router-dom";
+import { importEntryPath } from "../features/imports/importRoutes";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
 import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
@@ -167,7 +169,8 @@ function normalizeFilterValue(filter: {
 }
 
 export default function InputInvoiceUsagePage() {
-  const { canAdminAccess } = useSessionPermissions();
+  const navigate = useNavigate();
+  const { canAdminAccess, canAccessPage } = useSessionPermissions();
   const { active, activationGeneration } = useOptionalPageActivation("input-invoice-usage");
   const querySession = usePageSessionState({
     pageKey: "input-invoice-usage",
@@ -443,6 +446,8 @@ export default function InputInvoiceUsagePage() {
         以发票反提 OA
       </Button>
 
+      {canAccessPage("imports.invoices") && <Button size="sm" variant="secondary"
+          onPress={() => navigate(importEntryPath("input-invoice-usage"))}>导入进项发票</Button>}
       <Button
         isDisabled={exportDisabled || query.activeWorkflow !== null}
         onPress={() => setQuery((current) => ({ ...current, activeWorkflow: "export" }))}
@@ -453,7 +458,7 @@ export default function InputInvoiceUsagePage() {
         筛选内容导出
       </Button>
     </div>
-  ), [exportDisabled, query.activeWorkflow, query.month, setQuery]);
+  ), [canAccessPage, navigate, exportDisabled, query.activeWorkflow, query.month, setQuery]);
   const visibleStatistics = statistics;
   const titleAccessory = useMemo(() => (
     <div className="page-title-accessory-group">

@@ -16,7 +16,7 @@ test.describe("cost statistics relation browser fan-out", () => {
     });
 
     await page.goto("/cost-statistics");
-    await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "成本" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible();
     await expect(page.getByText("智能工厂项目")).toHaveCount(0);
     await expect(page.getByText("智能工厂设备尾款")).toHaveCount(0);
@@ -27,8 +27,8 @@ test.describe("cost statistics relation browser fan-out", () => {
     await confirmWorkbenchRelation(page);
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
 
-    await page.getByRole("link", { name: "成本统计" }).click();
-    await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+    await page.getByRole("link", { name: "成本" }).click();
+    await expect(page.getByRole("heading", { name: "成本" })).toBeVisible();
     expect(api.count("GET /api/cost-statistics/explorer")).toBeGreaterThan(explorerRequestCountBeforeConfirm);
 
     const linkedProject = page.getByRole("option", { name: /智能工厂项目/ });

@@ -133,7 +133,7 @@ async function sourceScenario(page: Page, options: { restoreAutomatic?: boolean;
   });
   if (options.refreshFailure) await page.route('**/api/cost-statistics/explorer**', route => writes > 0 ? route.fulfill({ status: 503, json: { error: 'temporarily_unavailable', message: '统计刷新暂不可用' } }) : route.fallback());
   await page.goto('/cost-statistics');
-  await expect(page.getByRole('heading', { name: '成本统计' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '成本' })).toBeVisible();
   expect(details).toBe(0);
   await page.evaluate(() => {
     const observer = new MutationObserver(() => {

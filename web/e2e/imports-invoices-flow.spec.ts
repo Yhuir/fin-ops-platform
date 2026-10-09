@@ -171,6 +171,34 @@ async function stageInvoiceFilesForPreview(page: Page, recordLatency?: Operation
 }
 
 test.describe("invoice import browser flow", () => {
+  for (const entry of [
+    { path: "/input-invoice-usage", button: "导入进项发票", back: "返回进项发票", direction: "input_invoice", invoice: "SD-INV-IMPORT-E2E-001" },
+    { path: "/output-invoice-collections", button: "导入销项发票", back: "返回销项发票", direction: "output_invoice", invoice: "XSFP-IMPORT-E2E-001" },
+  ]) {
+    test(`imports through ${entry.path} and returns to current canonical rows`, async ({ page }) => {
+      const api = await installDeterministicApiMocks(page, { sessionMode: "user", invoiceImportDownstreamFanout: true });
+      await page.goto(entry.path);
+      await page.getByRole("button", { name: entry.button, exact: true }).click();
+      await expect(page.getByRole("heading", { name: "发票导入", exact: true })).toBeVisible();
+      await page.locator('input[type="file"]').setInputFiles({
+        name: "二月发票.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: Buffer.from("invoice-import-e2e-input"),
+      });
+      await expect(page.getByLabel("票据方向 二月发票.xlsx")).toHaveValue(entry.direction);
+      const preview = waitForImportPreview(page);
+      await page.getByRole("button", { name: "开始预览" }).click();
+      const previewResponse = await preview;
+      expect(previewResponse.status()).toBe(202);
+      expect(await previewResponse.json()).toHaveProperty("job.job_id");
+      await expect(page.getByRole("button", { name: "确认导入" })).toBeEnabled();
+      await page.getByRole("button", { name: "确认导入" }).click();
+      await expect(page.getByRole("status").filter({ hasText: "导入完成。" })).toBeVisible();
+      await page.getByRole("button", { name: entry.back }).click();
+      await expect(page.getByText(entry.invoice)).toBeVisible();
+      expect(api.count("POST /imports/files/confirm")).toBe(1);
+      await expectNoUnexpectedSuccessUiErrors(page);
+    });
+  }
+
   test("clear discards the current preview and returns to a fresh page", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
 
@@ -316,7 +344,7 @@ test.describe("invoice import browser flow", () => {
       pageKey: "pending-invoices",
       module: "pending-invoices",
       operationId: "pending-invoices.open-after-invoice-import",
-      visibleLabel: "待找发票",
+      visibleLabel: "流水待找发票",
       actionType: "navigate",
     }, async (mark) => {
       const pendingRowsResponse = page.waitForResponse((response) =>
@@ -343,7 +371,7 @@ test.describe("invoice import browser flow", () => {
       pageKey: "oa-pending-payments",
       module: "oa-pending-payments",
       operationId: "oa-pending-payments.open-after-invoice-import",
-      visibleLabel: "OA待付款核对",
+      visibleLabel: "OA付款情况",
       actionType: "navigate",
     }, async (mark) => {
       const oaRowsResponse = page.waitForResponse((response) =>
@@ -367,7 +395,7 @@ test.describe("invoice import browser flow", () => {
       pageKey: "cost-statistics",
       module: "cost-statistics",
       operationId: "cost-statistics.open-after-invoice-import",
-      visibleLabel: "成本统计",
+      visibleLabel: "成本",
       actionType: "navigate",
     }, async (mark) => {
       const costRowsResponse = page.waitForResponse((response) =>
@@ -376,9 +404,9 @@ test.describe("invoice import browser flow", () => {
         && response.status() === 200);
       await page.goto("/cost-statistics");
       costRowsPayload = await mark("apiLatencyMs", costRowsResponse);
-      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "成本" })).toBeVisible());
     });
-    await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "成本" })).toBeVisible();
     await expectDirectCanonicalResponse(Promise.resolve(costRowsPayload!));
     await recordLatency({
       route: "/cost-statistics",

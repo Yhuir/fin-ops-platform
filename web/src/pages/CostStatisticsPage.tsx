@@ -1478,7 +1478,7 @@ export default function CostStatisticsPage() {
       <header className="page-header cost-page-header">
         <div className="cost-page-header-main">
           <div className="page-title-row">
-            <h1 className="page-title" ref={pageTitleRef} tabIndex={-1}>成本统计</h1>
+            <h1 className="page-title" ref={pageTitleRef} tabIndex={-1}>成本</h1>
             {titleAccessory ? <div className="page-title-accessory">{titleAccessory}</div> : null}
           </div>
 

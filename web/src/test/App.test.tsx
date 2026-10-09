@@ -82,12 +82,12 @@ describe("Finance operations shell", () => {
     expect(sidebarGroups.map((group) => group.title)).toEqual(["财务业务", "系统操作"]);
   });
 
-  test("places selected invoice pages at the bottom of finance before system operations", () => {
+  test("orders finance pages according to the business navigation contract", () => {
     const financeLabels = sidebarGroups.find((group) => group.title === "财务业务")?.items.map((item) => item.label);
     const systemLabels = sidebarGroups.find((group) => group.title === "系统操作")?.items.map((item) => item.label);
     expect(financeLabels).toBeDefined();
     expect(systemLabels).toBeDefined();
-    expect(financeLabels?.slice(-4)).toEqual(["专票认证情况", "待找发票", "进项发票使用情况", "销项发票收款情况"]);
+    expect(financeLabels).toEqual(["关联台", "成本", "银行明细", "OA付款情况", "流水待找发票", "进项发票使用情况", "销项发票收款情况", "专票认证情况", "外部往来款", "流水规则批量处理", "ETC票据管理", "现金账"]);
     expect(systemLabels?.[0]).toBe("设置");
   });
 
@@ -97,9 +97,9 @@ describe("Finance operations shell", () => {
     )));
     const iconByLabel = new Map(sidebarItems.map((item) => [item.label, item.icon]));
 
-    expect(iconByLabel.get("待找发票")).toBe(FileQuestion);
+    expect(iconByLabel.get("流水待找发票")).toBe(FileQuestion);
     expect(iconByLabel.get("进项发票使用情况")).toBe(FileInput);
-    expect(iconByLabel.get("OA待付款核对")).toBe(ClipboardCheck);
+    expect(iconByLabel.get("OA付款情况")).toBe(ClipboardCheck);
     expect(iconByLabel.get("销项发票收款情况")).toBe(FileOutput);
     expect(iconByLabel.get("流水规则批量处理")).toBe(ListChecks);
     expect(iconByLabel.has("批量账务")).toBe(false);
@@ -108,9 +108,9 @@ describe("Finance operations shell", () => {
     expect(iconByLabel.get("发票导入")).toBe(FileText);
 
     expect(new Set([
-      iconByLabel.get("待找发票"),
+      iconByLabel.get("流水待找发票"),
       iconByLabel.get("进项发票使用情况"),
-      iconByLabel.get("OA待付款核对"),
+      iconByLabel.get("OA付款情况"),
       iconByLabel.get("销项发票收款情况"),
     ])).toHaveLength(4);
     expect(new Set([
@@ -165,12 +165,12 @@ describe("Finance operations shell", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "成本" })).toBeInTheDocument();
     expect(document.querySelector(".global-header")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "搜索" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "设置" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导入" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "成本统计" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "成本" })).toHaveAttribute("aria-current", "page");
   });
 
   test("opens the compact sidebar from the top bar and preserves navigation entries", async () => {
@@ -181,7 +181,7 @@ describe("Finance operations shell", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "成本" })).toBeInTheDocument();
     expect(document.querySelector(".global-header")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "打开菜单" })).toBeInTheDocument();
 
@@ -200,8 +200,8 @@ describe("Finance operations shell", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "外部往来款管理" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "外部往来款管理" })).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("heading", { name: "外部往来款" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "外部往来款" })).toHaveAttribute("aria-current", "page");
   });
 
   test("does not refresh the workbench from cross-page relation events", async () => {
@@ -311,7 +311,7 @@ describe("Finance operations shell", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "成本" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "导入" }));
     await user.click(screen.getByRole("link", { name: "银行流水导入" }));

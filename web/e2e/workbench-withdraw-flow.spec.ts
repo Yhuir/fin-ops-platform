@@ -153,7 +153,7 @@ test.describe("workbench withdraw browser flow", () => {
     await expect(bankRow.getByText("无oa")).toBeVisible();
     await expect(bankRow.getByText("无发票")).toBeVisible();
 
-    await page.getByRole("link", { name: "待找发票" }).click();
+    await page.getByRole("link", { name: "流水待找发票" }).click();
     const pendingRow = page.getByRole("row", { name: /智能工厂设备商/ });
     await expect(pendingRow.getByText("已支付待开票")).toBeVisible();
     await expect(pendingRow.getByText("12561048")).toHaveCount(0);
@@ -163,12 +163,12 @@ test.describe("workbench withdraw browser flow", () => {
     await expect(invoiceRow).toContainText("待处理");
     await expect(invoiceRow).not.toContainText("关联台已确认");
 
-    await page.getByRole("link", { name: "OA待付款核对" }).click();
+    await page.getByRole("link", { name: "OA付款情况" }).click();
     const oaRow = page.getByRole("row", { name: /陈涛/ });
     await expect(oaRow.locator(".oa-pending-payment-status-cell .finance-status-tag")).toHaveText("待支付");
     await expect(oaRow.getByText("候选")).toHaveCount(0);
 
-    await page.getByRole("link", { name: "成本统计" }).click();
+    await page.getByRole("link", { name: "成本" }).click();
     await page.getByRole("radio", { name: "按项目" }).click();
     await expect(page.getByRole("button", { name: /智能工厂项目/ })).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);

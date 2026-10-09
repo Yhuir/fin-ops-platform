@@ -1,3 +1,4 @@
+import { MemoryRouter } from "react-router-dom";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
@@ -43,13 +44,13 @@ let reactivateBankPage: () => void;
 function renderBankDetailsPage() {
   let generation = 0;
   const tree = () => (
-    <SessionContext.Provider value={staticSession}>
+    <MemoryRouter><SessionContext.Provider value={staticSession}>
       <GlobalOperationOverlayProvider>
         <PageSessionStateProvider>
           <PageRuntimeProvider value={{ pageKey: "bank-details", active: true, activationGeneration: generation }}><BankDetailsPage /></PageRuntimeProvider>
         </PageSessionStateProvider>
       </GlobalOperationOverlayProvider>
-    </SessionContext.Provider>
+    </SessionContext.Provider></MemoryRouter>
   );
   const mounted = render(tree());
   reactivateBankPage = () => { generation++; mounted.rerender(tree()); };

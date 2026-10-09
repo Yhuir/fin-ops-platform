@@ -10,13 +10,13 @@
 | [批量账务](batch-accounting/README.md) | `/settings?section=batch-accounting` |
 | [关联台](reconciliation-workbench/README.md) | `/` |
 | [正式关联关系](workbench-relations/README.md) | `公共命令与读取边界` |
-| [待找发票](pending-invoices/README.md) | `/pending-invoices` |
+| [流水待找发票](pending-invoices/README.md) | `/pending-invoices` |
 | [进项发票使用](input-invoice-usage/README.md) | `/input-invoice-usage` |
 | [销项发票收款](output-invoice-collections/README.md) | `/output-invoice-collections` |
-| [OA 待付款核对](oa-pending-payments/README.md) | `/oa-pending-payments` |
+| [OA付款情况](oa-pending-payments/README.md) | `/oa-pending-payments` |
 | [专票认证情况](tax-offset/README.md) | `/tax-offset` |
 | [外部往来款](turnover-ledger/README.md) | `/turnover-ledger` |
-| [成本统计](cost-statistics/README.md) | `/cost-statistics` |
+| [成本](cost-statistics/README.md) | `/cost-statistics` |
 | [ETC 票据](etc-tickets/README.md) | `/etc-tickets` |
 | [银行流水导入](imports-bank-transactions/README.md) | `/imports/bank-transactions` |
 | [发票导入](imports-invoices/README.md) | `/imports/invoices` |

@@ -27,6 +27,17 @@ SYSTEM_AUDIT_PATH = (
 
 
 class PageAuditRegistryTests(unittest.TestCase):
+    def test_business_display_names_preserve_registered_page_identities(self) -> None:
+        for page_key, label in {
+            "cost-statistics": "成本",
+            "oa-pending-payments": "OA付款情况",
+            "pending-invoices": "流水待找发票",
+            "turnover-ledger": "外部往来款",
+        }.items():
+            registration = page_audit_registration(page_key)
+            self.assertEqual(registration.page_key, page_key)
+            self.assertEqual(registration.label, label)
+
     def test_registry_exactly_covers_ordinary_frontend_pages_and_excludes_private_cash(self) -> None:
         source = PAGE_REGISTRY_PATH.read_text(encoding="utf-8")
         frontend_page_keys = re.findall(r'pageKey:\s*"([^"]+)"', source)

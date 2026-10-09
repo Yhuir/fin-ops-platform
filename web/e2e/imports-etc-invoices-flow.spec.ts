@@ -287,7 +287,7 @@ test.describe("ETC invoice import browser flow", () => {
       pageKey: "cost-statistics",
       module: "cost-statistics",
       operationId: "cost-statistics.open-after-etc-import",
-      visibleLabel: "成本统计",
+      visibleLabel: "成本",
       actionType: "navigate",
     }, async (mark) => {
       const costRowsResponse = page.waitForResponse((response) =>
@@ -296,9 +296,9 @@ test.describe("ETC invoice import browser flow", () => {
         && response.status() === 200);
       await page.goto("/cost-statistics");
       costRowsPayload = await mark("apiLatencyMs", costRowsResponse);
-      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "成本" })).toBeVisible());
     });
-    await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "成本" })).toBeVisible();
     await expectDirectCanonicalResponse(Promise.resolve(costRowsPayload!));
     await recordLatency({
       route: "/cost-statistics",

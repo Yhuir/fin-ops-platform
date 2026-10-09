@@ -1,7 +1,7 @@
 import { Alert, Button, Chip, ListBox, Select } from "@heroui/react";
 import { ArrowLeft, FilePlus2, Files, RefreshCw, Search, Trash2, UploadCloud } from "lucide-react";
 import { type DragEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Link as RouterLink, useSearchParams } from "react-router-dom";
+import { Link as RouterLink, useNavigate, useSearchParams } from "react-router-dom";
 import { fetchImportBankMappings } from "../../features/imports/jobOperations";
 import { SharedImportTasksButton } from "./ImportJobDiagnostics";
 import { fetchBackgroundJob } from "../../features/backgroundJobs/api";
@@ -66,7 +66,8 @@ import { useImportProgress } from "../../contexts/ImportProgressContext";
 import { useAppHealthStatus } from "../../contexts/AppHealthStatusContext";
 import { useOptionalPageActivation } from "../../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../../contexts/SessionContext";
-import type { ImportWorkflowMode } from "../../features/imports/importRoutes";
+import { importEntryFor, type ImportWorkflowMode } from "../../features/imports/importRoutes";
+import ConfirmActionDialog from "../common/ConfirmActionDialog";
 
 type ImportWorkflowPageProps = {
   mode: ImportWorkflowMode;
@@ -476,6 +477,9 @@ export default function ImportWorkflowPage({ mode, taskId, onBusyChange }: Impor
     setIsConfirming,
   } = useImportWorkflowDraft();
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const entry = taskId ? null : importEntryFor(mode, searchParams.get("from"));
+  const [returnConfirmationOpen, setReturnConfirmationOpen] = useState(false);
   const [contextRefreshToken, setContextRefreshToken] = useState(0);
   const [submittedJob, setSubmittedJob] = useState<BackgroundJob | null>(null);
   const requestedJobId = taskId ?? searchParams.get("import_job");
@@ -511,7 +515,7 @@ export default function ImportWorkflowPage({ mode, taskId, onBusyChange }: Impor
   }, [requestedJobId, taskId, contextRefreshToken, pageActive, mode, setSelectedEtcTaskId, setEtcPreviewPayload, setEtcImported,
       setPreviewPayload, setErrorMessage, setFeedbackMessage, setSearchParams]);
   const healthStatus = useAppHealthStatus();
-  const { canOperateData } = useSessionPermissions();
+  const { canOperateData, canAccessPage } = useSessionPermissions();
   const {
     selectedFiles,
     fileSelections,
@@ -793,7 +797,23 @@ export default function ImportWorkflowPage({ mode, taskId, onBusyChange }: Impor
   }
 
   function updateFiles(nextFiles: File[]) {
-    setSelectedFiles((current) => mergeSelectedFiles(current, nextFiles));
+    updateDraft((current) => {
+      const fileSelections = { ...current.fileSelections };
+      const existingKeys = new Set(current.selectedFiles.map(buildSelectedFileKey));
+      if (mode === "invoice" && entry?.invoiceBatchType && !requestedJobId) {
+        for (const file of nextFiles) {
+          const key = buildSelectedFileKey(file);
+          if (!existingKeys.has(key) && !fileSelections[key]) {
+            fileSelections[key] = {
+              bankMappingId: "", bankName: "", bankShortName: "", last4: "",
+              invoiceBatchType: entry.invoiceBatchType,
+            };
+          }
+        }
+      }
+      return { ...current, uploadRequestId: crypto.randomUUID(),
+        selectedFiles: mergeSelectedFiles(current.selectedFiles, nextFiles), fileSelections };
+    });
     resetPreviewState();
   }
 
@@ -1151,15 +1171,26 @@ export default function ImportWorkflowPage({ mode, taskId, onBusyChange }: Impor
 
   return (
     <div className="import-workflow-page" data-testid="import-workflow-page">
+      <ConfirmActionDialog open={returnConfirmationOpen} title="放弃未上传的文件？"
+        description="这些文件尚未上传，返回后需要重新选择。" confirmLabel="放弃并返回" cancelLabel="继续导入"
+        onCancel={() => setReturnConfirmationOpen(false)}
+        onConfirm={() => navigate(entry?.path ?? "/")} />
       <PageScaffold
         title={title}
         actions={
           <div className="import-workflow-actions" data-testid="import-workflow-actions">
             {!taskId && <SharedImportTasksButton domain={mode === "bank_transaction" ? "imports_bank_transactions" : mode === "etc_invoice" ? "imports_etc_invoices" : "imports_invoices"} />}
-            {!taskId && <RouterLink className="button button--secondary button--sm import-workflow-back-link" to="/">
+            {!taskId && <Button size="sm" variant="secondary" className="import-workflow-back-link"
+              isDisabled={isPreviewing || isConfirming || isDiscarding
+                || !canAccessPage(entry ? searchParams.get("from")! : "reconciliation-workbench")}
+              onPress={() => {
+                if (selectedFiles.length > 0 && !previewPayload && !etcPreviewPayload) {
+                  setReturnConfirmationOpen(true);
+                } else navigate(entry?.path ?? "/");
+              }}>
               <ArrowLeft aria-hidden="true" size={16} strokeWidth={2.2} />
-              返回关联台
-            </RouterLink>}
+              {entry?.label ?? "返回关联台"}
+            </Button>}
             {mode === "invoice" && canOperateData && !taskId ? (
               <Button
                 isDisabled={healthStatus.blocksMutations || isPreviewing || isConfirming || isDiscarding}

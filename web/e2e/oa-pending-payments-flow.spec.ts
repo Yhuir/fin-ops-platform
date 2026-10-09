@@ -144,7 +144,7 @@ test.describe("OA pending payments browser flow", () => {
 
     await page.goto("/oa-pending-payments");
     await expect(page.getByTestId("oa-pending-payments-page")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "OA 待付款核对" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "OA付款情况" })).toBeVisible();
     await expect(page.getByRole("grid", { name: "OA待付款核对表格" })).toBeVisible();
     await expectSegmentedPeriodPickerGeometry(page, "OA月份筛选");
 

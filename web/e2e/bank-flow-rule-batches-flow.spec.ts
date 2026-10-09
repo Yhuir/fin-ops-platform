@@ -633,8 +633,8 @@ test.describe("bank flow rule batches browser flow", () => {
       response.request().method() === "GET"
       && responsePathMatches(response.url(), "/api/cost-statistics/explorer")
       && response.status() === 200);
-    await page.getByRole("link", { name: "成本统计" }).click();
-    await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+    await page.getByRole("link", { name: "成本" }).click();
+    await expect(page.getByRole("heading", { name: "成本" })).toBeVisible();
     await costExplorerResponse;
     await expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible();
     await expect(page.getByRole("button", { name: /流水规则手续费成本项目/ })).toHaveCount(0);

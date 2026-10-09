@@ -58,7 +58,7 @@ function renderPage(session: SessionContextValue = staticSession) {
 }
 
 async function waitUntilReady() {
-  expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "成本" })).toBeInTheDocument();
   await waitFor(() => {
     expect(screen.queryByTestId("cost-statistics-interaction-overlay")).not.toBeInTheDocument();
   });

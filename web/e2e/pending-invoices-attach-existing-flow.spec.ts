@@ -89,7 +89,7 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
 
     await recordLatency({
       operationId: "pending-invoices.open-page-attach-existing",
-      visibleLabel: "待找发票",
+      visibleLabel: "流水待找发票",
       actionType: "navigate",
     }, async (mark) => {
       await gotoAndExpectPageReady(page, "/pending-invoices", "pending-invoices-page", { diagnostics });
@@ -249,7 +249,7 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
 
     await recordLatency({
       operationId: "pending-invoices.open-page-attach-existing-failure",
-      visibleLabel: "待找发票",
+      visibleLabel: "流水待找发票",
       actionType: "navigate",
     }, async (mark) => {
       await gotoAndExpectPageReady(page, "/pending-invoices", "pending-invoices-page", { diagnostics });
@@ -365,7 +365,7 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
 
     await recordLatency({
       operationId: "pending-invoices.open-page-attach-conflict",
-      visibleLabel: "待找发票",
+      visibleLabel: "流水待找发票",
       actionType: "navigate",
     }, async (mark) => {
       await gotoAndExpectPageReady(page, "/pending-invoices", "pending-invoices-page", { diagnostics });

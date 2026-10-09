@@ -1123,7 +1123,7 @@ describe("Pending invoices page", () => {
     const fetchMock = installPendingInvoiceFetch();
     renderAppAt("/pending-invoices");
 
-    expect(await screen.findByRole("link", { name: "待找发票" })).toHaveAttribute("href", "/pending-invoices");
+    expect(await screen.findByRole("link", { name: "流水待找发票" })).toHaveAttribute("href", "/pending-invoices");
     const page = await findPendingInvoicesPage();
     expect(within(page).getByRole("grid", { name: "待找发票四区表" })).toBeInTheDocument();
     expect(within(page).queryByRole("table", { name: "待找发票四区表" })).not.toBeInTheDocument();
@@ -1153,7 +1153,7 @@ describe("Pending invoices page", () => {
     expect(within(page).getByRole("button", { name: "全部流水 431 笔" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "支出流水 356 笔" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "收入流水 75 笔" })).toBeInTheDocument();
-    expect(within(page).getByRole("heading", { name: "待找发票" })).toBeInTheDocument();
+    expect(within(page).getByRole("heading", { name: "流水待找发票" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "支出待找发票规则设置" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "收入待找发票规则设置" })).toBeInTheDocument();
 

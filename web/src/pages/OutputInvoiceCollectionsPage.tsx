@@ -1,3 +1,6 @@
+import { useSessionPermissions } from "../contexts/SessionContext";
+import { useNavigate } from "react-router-dom";
+import { importEntryPath } from "../features/imports/importRoutes";
 import TableClassificationHeader from "../components/common/TableClassificationHeader";
 import { normalizeOutputTaxRate } from "../features/outputInvoiceCollections/taxRate";
 import { Button } from "@heroui/react";
@@ -141,6 +144,8 @@ function normalizeFilter(filter: {
 }
 
 export default function OutputInvoiceCollectionsPage() {
+  const navigate = useNavigate();
+  const { canAccessPage } = useSessionPermissions();
   const { active, activationGeneration } = useOptionalPageActivation("output-invoice-collections");
   const querySession = usePageSessionState({
     pageKey: "output-invoice-collections",
@@ -320,6 +325,8 @@ export default function OutputInvoiceCollectionsPage() {
         years={nearbyBusinessYears(query.month || DEFAULT_MONTH)}
       />
 
+      {canAccessPage("imports.invoices") && <Button size="sm" variant="secondary"
+          onPress={() => navigate(importEntryPath("output-invoice-collections"))}>导入销项发票</Button>}
       <Button
         isDisabled={loading || refreshing || Boolean(error)}
         onPress={() => setQuery((current) => ({ ...current, activeWorkflow: { kind: "export" } }))}

@@ -30,7 +30,7 @@ test.describe("OA pending payments canonical page states", () => {
 
     await recordLatency({
       operationId: "oa-pending-payments.open-canonical-rows",
-      visibleLabel: "OA待付款核对",
+      visibleLabel: "OA付款情况",
       actionType: "navigate",
     }, async (mark) => {
       await gotoAndExpectPageReady(page, "/oa-pending-payments", "oa-pending-payments-page", { diagnostics });
