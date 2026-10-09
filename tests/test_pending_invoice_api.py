@@ -98,7 +98,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
             )
             relation_response = app.handle_request(
                 "GET",
-                f"/api/pending-invoices/rows/{transaction_id}/relation-detail",
+                f"/api/pending-invoices/bank-transactions/{transaction_id}/detail",
             )
             invoice_detail_response = app.handle_request(
                 "GET",

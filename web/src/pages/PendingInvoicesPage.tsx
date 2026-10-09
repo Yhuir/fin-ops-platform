@@ -11,10 +11,10 @@ import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import PageToolbar from "../components/common/PageToolbar";
 import QuerySearch from "../components/common/QuerySearch";
-import PendingInvoiceDetailDrawer from "../components/pendingInvoices/PendingInvoiceDetailDrawer";
+import SourceDetailDrawer from "../features/SourceDetailDrawer";
+import { useSourceDetail } from "../features/useSourceDetail";
 import PendingInvoiceExportDrawer from "../components/pendingInvoices/PendingInvoiceExportDrawer";
 import PendingInvoiceInvoicePickerDrawer from "../components/pendingInvoices/PendingInvoiceInvoicePickerDrawer";
-import PendingInvoiceRelationDrawer from "../components/pendingInvoices/PendingInvoiceRelationDrawer";
 import PendingInvoiceRulesDrawer from "../components/pendingInvoices/PendingInvoiceRulesDrawer";
 import PendingInvoicesTable from "../components/pendingInvoices/PendingInvoicesTable";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
@@ -26,7 +26,6 @@ import {
   fetchPendingInvoiceCandidatesBatch,
   fetchPendingInvoiceFilterOptions,
   fetchPendingInvoiceObjectDetail,
-  fetchPendingInvoiceRelationDetail,
   fetchPendingInvoiceRows,
   fetchPendingInvoiceRules,
   previewAttachExistingInvoices,
@@ -42,7 +41,6 @@ import type {
   PendingInvoiceFilterField,
   PendingInvoiceIncomeStatusCode,
   PendingInvoiceObjectDetailTarget,
-  PendingInvoiceRelationDetailKind,
   PendingInvoiceRow,
   PendingInvoiceRowsResponse,
   PendingInvoiceSortDirection,
@@ -54,8 +52,7 @@ import type {
 const DEFAULT_PAGE_SIZE = 50;
 const TAG_VERSION_STORAGE_KEY = "finops.bankTransactionTags.version";
 
-type ActiveDrawer = "rules" | "relation" | "invoicePicker" | "detail" | "export" | null;
-type RelationTarget = { transactionId: string; kind: PendingInvoiceRelationDetailKind } | null;
+type ActiveDrawer = "rules" | "invoicePicker" | "detail" | "export" | null;
 type RulesDirection = Exclude<PendingInvoiceDirection, "all">;
 function transactionIdForRow(row: PendingInvoiceRow) {
   return row.bankTransaction.id || row.id;
@@ -128,7 +125,6 @@ export default function PendingInvoicesPage() {
   const [activeDrawer, setActiveDrawer] = useState<ActiveDrawer>(null);
   const [rulesDirection, setRulesDirection] = useState<RulesDirection>("expense");
   const [detailTarget, setDetailTarget] = useState<PendingInvoiceObjectDetailTarget | null>(null);
-  const [relationTarget, setRelationTarget] = useState<RelationTarget>(null);
   const [invoicePickerTransactionIds, setInvoicePickerTransactionIds] = useState<string[]>([]);
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(false);
@@ -291,11 +287,6 @@ export default function PendingInvoicesPage() {
     setSortDirection("asc");
   }, [clearSelectedTransactions, sortField]);
 
-  const handleOpenRelation = useCallback((row: PendingInvoiceRow, kind: PendingInvoiceRelationDetailKind = "all") => {
-    setRelationTarget({ transactionId: row.bankTransaction.id || row.id, kind });
-    setActiveDrawer("relation");
-  }, []);
-
   const handleToggleTransactionSelection = useCallback((row: PendingInvoiceRow) => {
     if (!isTransactionSelectable(row)) {
       return;
@@ -333,7 +324,6 @@ export default function PendingInvoicesPage() {
   function closeDrawer() {
     setActiveDrawer(null);
     setDetailTarget(null);
-    setRelationTarget(null);
     setInvoicePickerTransactionIds([]);
   }
 
@@ -358,10 +348,6 @@ export default function PendingInvoicesPage() {
     clearSelectedTransactions();
   }
 
-  const loadRelation = useCallback(
-    (transactionId: string, signal?: AbortSignal) => fetchPendingInvoiceRelationDetail(transactionId, direction, relationTarget?.kind ?? "all", signal),
-    [direction, relationTarget?.kind],
-  );
   const loadObjectDetail = useCallback((target: PendingInvoiceObjectDetailTarget, signal?: AbortSignal) => fetchPendingInvoiceObjectDetail(target, signal), []);
   const loadRules = useCallback(() => fetchPendingInvoiceRules(rulesDirection), [rulesDirection]);
   const saveRules = useCallback(async (payload: Parameters<typeof savePendingInvoiceRules>[0]) => {
@@ -607,6 +593,8 @@ export default function PendingInvoicesPage() {
       收入待找发票规则设置
     </Button>
   </>;
+  const sourceDetail = useSourceDetail(activeDrawer === "detail", detailTarget, loadObjectDetail);
+
   return (
     <div className="pending-invoices-page" data-testid="pending-invoices-page">
       <PageScaffold secondaryActions={secondaryActions} query={(<QuerySearch
@@ -708,7 +696,6 @@ export default function PendingInvoicesPage() {
             columnFilters={columnFilters}
             onApplyColumnFilters={handleApplyColumnFilters}
             onClearColumnFilters={handleClearColumnFilters}
-            onOpenRelation={handleOpenRelation}
             onOpenObjectDetail={handleOpenDetail}
             direction={direction}
             statusFilterControl={statusFilterControl}
@@ -740,13 +727,6 @@ export default function PendingInvoicesPage() {
         onSaved={() => undefined}
         onClose={closeDrawer}
       />
-      <PendingInvoiceRelationDrawer onBankSplitSaved={() => setRefreshToken(value => value + 1)}
-        open={activeDrawer === "relation"}
-        transactionId={relationTarget?.transactionId ?? null}
-        detailKind={relationTarget?.kind ?? "all"}
-        loadDetail={loadRelation}
-        onClose={closeDrawer}
-      />
       <PendingInvoiceInvoicePickerDrawer
         open={activeDrawer === "invoicePicker"}
         transactionIds={invoicePickerTransactionIds}
@@ -756,10 +736,13 @@ export default function PendingInvoicesPage() {
         onConfirmed={handleAttachConfirmed}
         onClose={closeDrawer}
       />
-      <PendingInvoiceDetailDrawer onBankSplitSaved={() => setRefreshToken(value => value + 1)}
+      <SourceDetailDrawer onBankSplitSaved={() => setRefreshToken(value => value + 1)}
         open={activeDrawer === "detail"}
-        target={detailTarget}
-        loadDetail={loadObjectDetail}
+        target={detailTarget ? { ...detailTarget, kind: detailTarget.kind === "bankTransaction" ? "bank" : detailTarget.kind } : null}
+        sections={sourceDetail.detail?.sections ?? []}
+        loading={sourceDetail.loading} error={sourceDetail.error}
+        detailAvailable={sourceDetail.detail?.detailAvailable}
+        unavailableReason={sourceDetail.detail?.unavailableReason}
         onClose={closeDrawer}
       />
       {activeDrawer === "export" ? <PendingInvoiceExportDrawer

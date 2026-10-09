@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 
 import EntityDetailContent, {
   preparePublicDetailSections,
@@ -139,122 +139,35 @@ const documents = [
   {title: '申请信息', document_id: 'oa-2', document_kind: 'oa' as const, document_title: '张三 · 8000', oa_navigation: {applicantName: '张三', amount: '8000.00', applicationDate: '2026-08-01', workflowNo: null}, fields: [{label: 'OA单号', value: '2441'}]},
 ];
 
-test('switches only the selected source document and all its sections using stable identities', () => {
-  const {rerender} = render(<EntityDetailContent sections={documents} />);
+test('one source document displays all its sections with no collection navigation', () => {
+  render(<EntityDetailContent sections={documents.slice(0, 2)} />);
   expect(screen.getByText('2440')).toBeVisible();
   expect(screen.getByText('0')).toBeVisible();
-  expect(screen.queryByText('2441')).not.toBeInTheDocument();
-  const second = screen.getByRole('tab', {name: /2 张三 8000.00/});
-  fireEvent.click(second);
-  expect(second).toHaveAttribute('aria-selected', 'true');
-  expect(screen.getByText('2441')).toBeVisible();
-  expect(screen.queryByText('2440')).not.toBeInTheDocument();
-  expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
-  rerender(<EntityDetailContent sections={documents.map(section => ({...section}))} />);
-  expect(screen.getByText('2441')).toBeVisible();
-  expect(screen.queryByRole('button', {name: /全部/})).not.toBeInTheDocument();
-});
-
-test('honors explicit initial selection and surfaces an invalid identity without selecting another record', () => {
-  const {rerender} = render(<EntityDetailContent sections={documents} initialDocumentKey="oa:oa-2" />);
-  expect(screen.getByText('2441')).toBeVisible();
-  rerender(<EntityDetailContent sections={documents} initialDocumentKey="oa:missing" />);
-  expect(screen.getByText('所选单据不在当前详情中。')).toBeVisible();
-  expect(screen.queryByText('2440')).not.toBeInTheDocument();
-});
-
-test('plain and single-document sections have no navigation; grid switches preserve drawer scroll', () => {
-  const {rerender,container} = render(<div className="finance-drawer__body"><EntityDetailContent sections={documents} /></div>);
-  const body = container.firstElementChild!;
-  body.scrollTop = 200;
-  fireEvent.click(screen.getByRole('tab', {name: /1 张三 8000.00/}));
-  expect(body.scrollTop).toBe(200);
-  fireEvent.click(screen.getByRole('tab', {name: /2 张三 8000.00/}));
-  expect(body.scrollTop).toBe(200);
-  rerender(<EntityDetailContent sections={documents.slice(0,2)} />);
-  expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
-  expect(screen.getByText('2440')).toBeVisible();
-});
-
-const invoiceDocuments = [0, 1, 2].map(index => ({
-  title: '发票信息', document_id: `invoice-${index}`, document_kind: 'invoice' as const,
-  document_title: '旧标题不应进入发票导航',
-  invoice_navigation: {polarity: index === 1 ? '红字' : '蓝字', counterpartyName: '相同公司',
-    totalWithTax: index === 1 ? '-0.005' : '0.00', invoiceDate: '2026-10-02'},
-  fields: [{label: '发票号码', value: `123456789${index}`}],
-}));
-
-test('invoice grid uses source summaries, preserves identities and scroll, and honors the switch guard', () => {
-  const guard = vi.fn(() => false);
-  const {rerender, container} = render(<div className="finance-drawer__body"><EntityDetailContent sections={invoiceDocuments} beforeDocumentChange={guard} /></div>);
-  const body = container.firstElementChild!;
-  body.scrollTop = 70;
-  expect(screen.getAllByRole('tab')).toHaveLength(3);
-  expect(screen.queryByText('旧标题不应进入发票导航')).not.toBeInTheDocument();
-  expect(screen.getByText('-0.005')).toBeVisible();
-  fireEvent.click(screen.getAllByRole('tab')[1]);
-  expect(screen.getAllByRole('tab')[0]).toHaveAttribute('aria-selected', 'true');
-  guard.mockReturnValue(true);
-  fireEvent.click(screen.getAllByRole('tab')[1]);
-  expect(body.scrollTop).toBe(70);
-  expect(screen.getByRole('cell', {name: '1234567891'})).toBeVisible();
-  expect(screen.queryByRole('cell', {name: '1234567890'})).not.toBeInTheDocument();
-  expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
-  rerender(<EntityDetailContent sections={invoiceDocuments.slice(0, 1)} />);
   expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
 });
 
-
-test('invoice details preserve source tax text, true zero and missing values', () => {
-  const section = {...invoiceDocuments[0], title: '金额与税额', fields: [
-    {label: '税率', value: '免税'},
-    {label: '不含税金额', value: '0.00'},
-    {label: '税额', value: '*'},
-    {label: '价税合计', value: '—'},
-  ]};
-  render(<EntityDetailContent sections={[section]} />);
-  for (const value of ['免税', '0.00', '*', '—']) {
-    expect(screen.getByRole('cell', {name: value, exact: true})).toBeVisible();
-  }
+test('multiple source documents fail visibly instead of selecting an arbitrary source', () => {
+  render(<EntityDetailContent sections={documents} />);
+  expect(screen.getByText('详情接口返回了多条单据，请重新选择单条详情。')).toBeVisible();
+  expect(screen.queryByText('2440')).not.toBeInTheDocument();
+  expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
 });
 
-test('all source line items stay with their invoice and remain numbered after switching', () => {
-  const lineSections = Array.from({length: 5}, (_, index) => ({
-    ...invoiceDocuments[0], title: `货物或应税劳务明细 ${index + 1}`,
-    fields: [{label: '货物或应税劳务名称', value: `真实商品 ${index + 1}`}],
-  }));
-  render(<EntityDetailContent sections={[invoiceDocuments[0], ...lineSections, invoiceDocuments[1]]} />);
+test('one invoice keeps all source lines, original tax text, zero and missing values', () => {
+  const meta = {document_id: 'invoice-1', document_kind: 'invoice' as const};
+  render(<EntityDetailContent sections={[
+    {...meta, title: '金额与税额', fields: [{label: '税率', value: '免税'}, {label: '不含税金额', value: '0.00'},
+      {label: '税额', value: '*'}, {label: '价税合计', value: '—'}]},
+    ...Array.from({length: 5}, (_, index) => ({...meta, title: `货物或应税劳务明细 ${index+1}`,
+      fields: [{label: '货物或应税劳务名称', value: `真实商品 ${index+1}`}]}))
+  ]} />);
+  for (const value of ['免税', '0.00', '*', '—']) expect(screen.getByRole('cell', {name: value, exact: true})).toBeVisible();
   expect(screen.getAllByRole('heading', {name: /货物或应税劳务明细/})).toHaveLength(5);
-  fireEvent.click(screen.getAllByRole('tab')[1]);
-  expect(screen.queryByRole('heading', {name: /货物或应税劳务明细/})).not.toBeInTheDocument();
-  fireEvent.click(screen.getAllByRole('tab')[0]);
-  for (let index = 1; index <= 5; index++) {
-    expect(screen.getByRole('heading', {name: `货物或应税劳务明细 ${index}`})).toBeVisible();
-    expect(screen.getByRole('cell', {name: `真实商品 ${index}`})).toBeVisible();
-  }
 });
 
-test('bank grid keeps raw directions, labels and identity together without moving scroll', () => {
-  const sections = [0, 1, 2].flatMap(index => {
-    const labels = index === 2 ? [] : [index === 0 ? '货款 / 设备采购' : '退款'];
-    const meta = {document_id: `bank-${index}`, document_kind: 'bank' as const,
-      bank_navigation: {counterpartyName: '同名公司', amount: index === 1 ? '35.00' : '1050.00',
-        direction: index === 1 ? '收入' : '支出', transactionDate: '2026-06-10', labels}};
-    return [{...meta, title: '交易信息', fields: [{label: '备注', value: `原始流水${index}`}]},
-      {...meta, title: '业务分类', fields: [], bank_labels: labels}];
-  });
-  const {container} = render(<div className="finance-drawer__body"><EntityDetailContent sections={preparePublicDetailSections(sections)} /></div>);
-  const body = container.firstElementChild!;
-  body.scrollTop = 123;
-  expect(screen.getAllByRole('tab')).toHaveLength(3);
-  expect(screen.getAllByRole('tab')[0]).toHaveTextContent('支出1050.00');
-  fireEvent.click(screen.getAllByRole('tab')[1]);
-  expect(screen.getAllByRole('tab')[1]).toHaveTextContent('收入35.00');
-  expect(screen.getByRole('cell', {name: '退款'})).toBeVisible();
-  expect(screen.queryByRole('cell', {name: '货款 / 设备采购'})).not.toBeInTheDocument();
-  expect(screen.getByRole('cell', {name: '原始流水1'})).toBeVisible();
-  expect(body.scrollTop).toBe(123);
-  expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
-  fireEvent.click(screen.getAllByRole('tab')[2]);
-  expect(screen.getByRole('cell', {name: '未设置标签'})).toBeVisible();
+test.each([{labels:['退款']}, {labels:[]}])('single bank source retains its tags: %j', ({labels}) => {
+  render(<EntityDetailContent sections={[{title: '交易信息', document_id: 'bank-1', document_kind: 'bank',
+    bank_labels: labels, fields: [{label: '备注', value: '原始流水'}, {label: '收入金额', value: '35.00'}]}]} />);
+  expect(screen.getByRole('cell', {name: labels.length ? '退款' : '未设置标签'})).toBeVisible();
+  expect(screen.getByRole('cell', {name: '35.00'})).toBeVisible();
 });

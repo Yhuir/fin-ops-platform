@@ -9,7 +9,8 @@ import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/
 import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import QuerySearch from "../components/common/QuerySearch";
-import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer";
+import SourceDetailDrawer from "../features/SourceDetailDrawer";
+import { useSourceDetail } from "../features/useSourceDetail";
 import OaPendingPaymentExportDrawer from "../components/oaPendingPayments/OaPendingPaymentExportDrawer";
 import OaPendingPaymentsTable from "../components/oaPendingPayments/OaPendingPaymentsTable";
 import PendingInvoiceRulesDrawer from "../components/pendingInvoices/PendingInvoiceRulesDrawer";
@@ -304,6 +305,8 @@ export default function OaPendingPaymentsPage() {
     </div>
   );
 
+  const sourceDetail = useSourceDetail(detailTarget !== null, detailTarget, fetchOaPendingPaymentDetail);
+
   return (
     <>
       <div className="oa-pending-payments-page" data-testid="oa-pending-payments-page">
@@ -369,10 +372,13 @@ export default function OaPendingPaymentsPage() {
           </div>
         </PageScaffold>
       </div>
-      <InputInvoiceUsageDetailDrawer onBankSplitSaved={() => loadRows("refresh")}
+      <SourceDetailDrawer onBankSplitSaved={() => loadRows("refresh")}
         open={detailTarget !== null}
         target={detailTarget}
-        loadDetail={fetchOaPendingPaymentDetail}
+        sections={sourceDetail.detail?.sections ?? []}
+        loading={sourceDetail.loading} error={sourceDetail.error}
+        detailAvailable={sourceDetail.detail?.detailAvailable}
+        unavailableReason={sourceDetail.detail?.unavailableReason}
         onClose={() => setDetailTarget(null)}
       />
       <PendingInvoiceRulesDrawer

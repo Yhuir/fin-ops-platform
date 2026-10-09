@@ -19,7 +19,6 @@ from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageError,
     InputInvoiceUsageQueryService,
     _money,
-    input_invoice_usage_relation_details_from_row,
 )
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.invoice_relation_query_context import (
@@ -33,7 +32,6 @@ from fin_ops_platform.services.source_record_details import (
     invoice_source_detail,
     oa_source_detail,
     source_invoice_groups,
-    source_relation_sections,
 )
 
 
@@ -236,11 +234,8 @@ class InputInvoiceUsageCanonicalQueryService:
     ) -> dict[str, Any]:
         if self._repository is None:
             raise InputInvoiceUsageError("input_invoice_usage_query_unavailable", "进项发票查询未配置。", status_code=503)
-        snapshot = self._repository.load_rows_by_invoice_ids(
-            [invoice_id],
-            tenant_id=tenant_id,
-        )
-        group = _group_for_invoice(source_invoice_groups([line for group in snapshot.groups for line in group["line_items"]]), invoice_id)
+        records = self._repository.load_invoice_records(invoice_id, tenant_id=tenant_id)
+        group = _group_for_invoice(source_invoice_groups(records), invoice_id)
         if group is None:
             raise InputInvoiceUsageError(
                 "invoice_not_found",
@@ -257,19 +252,14 @@ class InputInvoiceUsageCanonicalQueryService:
     ) -> dict[str, Any]:
         if self._repository is None:
             raise InputInvoiceUsageError("input_invoice_usage_query_unavailable", "进项发票查询未配置。", status_code=503)
-        snapshot = self._repository.load_row(
-            bank_transaction_id,
-            tenant_id=tenant_id,
-        )
-        context = _context(snapshot)
-        transaction = context.bank_transactions_by_id().get(bank_transaction_id)
+        transaction, labels = self._repository.load_bank_source(bank_transaction_id, tenant_id=tenant_id)
         if transaction is None:
             raise InputInvoiceUsageError(
                 "bank_transaction_not_found",
                 f"Bank transaction detail not found: {bank_transaction_id}",
                 status_code=404,
             )
-        return _bank_detail(transaction, context=context, labels=snapshot.bank_labels[original_bank_transaction(transaction).id])
+        return bank_source_detail(transaction, labels=labels)
 
     def oa_detail(
         self,
@@ -282,46 +272,6 @@ class InputInvoiceUsageCanonicalQueryService:
         record = self._repository.load_oa_record(oa_id, tenant_id=tenant_id)
         return _oa_detail(record, oa_id=oa_id)
 
-    def relation_details(
-        self,
-        row_id: str,
-        query: dict[str, list[str]],
-        *,
-        tenant_id: str = "default",
-    ) -> dict[str, Any]:
-        kind = _first(query, "kind")
-        if kind not in {"oa", "bank", "invoice"}:
-            raise InputInvoiceUsageError(
-                "invalid_relation_kind",
-                "kind must be oa, bank or invoice.",
-            )
-        if self._repository is None:
-            raise InputInvoiceUsageError("input_invoice_usage_query_unavailable", "进项发票查询未配置。", status_code=503)
-        snapshot = self._repository.load_row(row_id, tenant_id=tenant_id)
-        rows = self._rows_from_snapshot(snapshot)
-        row = next((item for item in rows if item.get("id") == row_id), None)
-        if row is None:
-            raise InputInvoiceUsageError(
-                "row_not_found",
-                f"Input invoice usage row not found: {row_id}",
-                status_code=404,
-            )
-        relation_payload = {
-            "oa": row["oa"],
-            "bank": row["bankTransactions"],
-            "invoice": row["invoiceRelations"],
-        }[kind]
-        return input_invoice_usage_relation_details_from_row(
-            row,
-            kind=kind,
-            relations=[relation for relation in _context(snapshot).relation_summaries_for_row(
-                str(row.get("invoiceId") or "")
-            ) if not row.get("relationGroupId") or relation["caseId"] == row["relationGroupId"]],
-            relation_payload=relation_payload,
-            sections=source_relation_sections(kind, relation_payload["summaries"],
-                groups=[*snapshot.groups, *snapshot.supporting_groups],
-                transactions=snapshot.transactions, oa_records=snapshot.oa_records, bank_labels=snapshot.bank_labels),
-        )
 
     def payment_status_rules(self) -> dict[str, Any]:
         return self._row_assembler.payment_status_rules()
@@ -563,12 +513,6 @@ def _group_for_invoice(
         ),
         None,
     )
-
-
-def _bank_detail(transaction: Any, *, context: DistributedInvoiceRelationContext, labels: list[str]) -> dict[str, Any]:
-    relation_row_id = transaction.id
-    transaction = original_bank_transaction(transaction)
-    return {**bank_source_detail(transaction, labels=labels), "relations": context.relation_summaries_for_row(relation_row_id)}
 
 
 def _oa_detail(record: Any | None, *, oa_id: str) -> dict[str, Any]:

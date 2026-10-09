@@ -568,7 +568,7 @@ describe("BankFlowRuleBatchPage", () => {
         : [];
     });
     const pageSource = sourceByPath["src/pages/BankFlowRuleBatchPage.tsx"];
-    expect(readWebSource("src/features/bankSplits/BankTransactionDrawer.tsx")).toContain("<AppDrawer");
+    expect(readWebSource("src/features/bankSplits/BankTransactionDrawer.tsx")).toContain("<SourceDetailDrawer");
     const primitiveSource = `${pageSource}\n${sourceByPath["src/features/bankFlowRuleBatches/components.tsx"]}`;
     const missingPrimitiveTargets = [
       pageSource.includes("PageScaffold") ? null : "BankFlowRuleBatchPage.tsx should keep PageScaffold",

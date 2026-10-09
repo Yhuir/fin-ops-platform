@@ -35,7 +35,7 @@ export default function BankSplitEditor({ transactionId, initialDetail, onSaved,
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [transactionId, reload, initialDetail]);
-  useEffect(() => { onDirtyChange?.(dirty || saving); }, [dirty, saving, onDirtyChange]);
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
   const changed = (next: DraftPart[]) => { setParts(next); setDirty(true); setNotice(''); setError(''); };
   const total = parts.reduce((sum, part) => sum + (amountCents(part.amount) ?? 0n), 0n);
   const parentAmount = detail ? amountCents(detail.amount) : null;

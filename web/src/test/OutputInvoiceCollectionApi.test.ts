@@ -5,7 +5,7 @@ import { OUTPUT_COLLECTION_STATUS_CODES } from "../features/outputInvoiceCollect
 
 const request = { page: 1, pageSize: 20, keyword: "", invoiceDateFrom: "", invoiceDateTo: "", month: "", filters: [], sortField: "", sortDirection: "" as const };
 const options = () => OUTPUT_COLLECTION_STATUS_CODES.map((value, index) => ({ value, label: `状态 ${index}`, count: index === 0 ? 3 : 0 }));
-const payload = () => ({ rows: [{ invoiceId: "invoice-1", collectionStatus: { code: "pending_collection", label: "待收款" } }],
+const payload = () => ({ rows: [{ relationSources: ['invoice','oa','bank'].map(kind => ({kind, count:0, members:[]})), invoiceId: "invoice-1", collectionStatus: { code: "pending_collection", label: "待收款" } }],
   filterOptions: [{ field: "collection_status", options: options() }], pagination: { page: 1, pageSize: 20, total: 3 } });
 function mockResponse(value: unknown) {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(value), { headers: { "Content-Type": "application/json" } }));
@@ -78,4 +78,13 @@ test.each([
     totalWithTax: invoice.totalWithTax ?? '', amountWithoutTax: invoice.amountWithoutTax,
     taxAmount: invoice.taxAmount ?? '', taxRate: invoice.taxRate ?? '—', taxAmountText: invoice.taxAmountText ?? '',
   });
+});
+
+
+test.each([undefined, [], [{kind:'invoice',count:1,members:[]}], [
+  {kind:'invoice',count:1,members:[{id:'invoice',detailAvailable:true}]},
+  {kind:'bank',count:0,members:[]},{kind:'oa',count:0,members:[]},
+]])('rejects incomplete or reordered relationship sources without manufacturing members', async sources => {
+  mockResponse({...payload(),rows:[{...payload().rows[0],relationSources:sources}]});
+  await expect(fetchOutputInvoiceCollectionRows(request)).rejects.toThrow('配对关系摘要不完整');
 });

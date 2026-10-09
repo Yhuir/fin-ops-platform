@@ -4549,22 +4549,7 @@ textarea {
   vertical-align: top;
 }
 .entity-detail-table th { width: 28%; background: #f6f8fb; color: var(--fp-text-secondary); font-weight: 500; }
-.entity-detail-tabs { display: block; min-width: 0; }
 .entity-detail-content { container-type: inline-size; }
-.entity-detail-index { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; max-width: 100%; padding: 8px 0 12px; margin-bottom: 12px; background: white; border-radius: 0; }
-.entity-detail-index .entity-detail-tab { display: flex; align-items: stretch; gap: 8px; width: 100%; min-width: 0; justify-content: flex-start; height: auto; min-height: 40px; padding: 10px 12px; border: 1px solid var(--fp-border); border-radius: 6px; background: #f8fafc; color: var(--fp-text-primary); text-align: left; white-space: normal; overflow-wrap: anywhere; font-size: 14px; font-weight: 500; line-height: 1.45; }
-.entity-detail-index .entity-detail-tab[data-selected="true"] { border-color: var(--fp-primary); background: #edf3ff; color: var(--fp-primary); }
-.entity-detail-index .entity-detail-tab:focus-visible { outline: 2px solid var(--fp-primary); outline-offset: -2px; }
-.invoice-document-option { display: grid; gap: 4px; width: 100%; min-width: 0; }
-.invoice-document-option__heading { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-.invoice-document-option__amount { margin-left: auto; text-align: right; font-variant-numeric: tabular-nums; color: var(--fp-text-primary); }
-.invoice-document-option__name { color: var(--fp-text-primary); overflow-wrap: anywhere; }
-.invoice-document-option__polarity { font-size: 12px; color: var(--fp-text-secondary); }
-.invoice-document-option__polarity--red { color: #b54747; }
-.invoice-document-option__meta { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--fp-text-secondary); font-size: 12px; font-weight: 400; }
-@container (max-width: 560px) { .entity-detail-index { grid-template-columns: minmax(0, 1fr); } }
-.entity-detail-tab__number { flex: 0 0 auto; font-variant-numeric: tabular-nums; font-weight: 700; }
-.entity-detail-panel { padding: 0; outline: none; }
 .entity-detail-actions { margin-top: 14px; border-top: 1px solid var(--fp-border); padding-top: 12px; }
 .entity-detail-actions h4 { margin: 0 0 8px; font-size: 14px; }
 .source-detail-drawer .entity-detail-section__title { font-size: 14px; margin-bottom: 8px; }
@@ -22070,19 +22055,10 @@ body.column-layout-dragging {
 .cost-view-scope-heading .cost-view-search-form,
 .cost-view-scope-heading .cost-view-search-form > [data-slot="search-field"] { min-width: 0; }
 
-.bank-document-option { display: grid; gap: 4px; width: 100%; min-width: 0; }
-.bank-document-option__heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; min-width: 0; }
-.bank-document-option__amount { margin-left: auto; text-align: right; font-variant-numeric: tabular-nums; color: var(--fp-text-primary); }
-.bank-document-option__name { color: var(--fp-text-primary); overflow-wrap: anywhere; }
-.bank-document-option__date { color: var(--fp-text-secondary); font-size: 12px; }
 .bank-detail-labels { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .bank-detail-label { height: auto; max-width: 100%; white-space: normal; }
 .bank-detail-label__text { white-space: normal; overflow-wrap: anywhere; }
 
-.oa-document-option { display: grid; gap: 6px; width: 100%; min-width: 0; }
-.oa-document-option__heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; min-width: 0; }
-.oa-document-option__amount { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--fp-text-primary); }
-.oa-document-option__meta { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--fp-text-secondary); font-size: 12px; font-weight: 400; }
 
 /* Optional component-owned density; existing consumers retain their geometry. */
 .business-period-picker--segmented.business-period-picker--compact {
@@ -22097,3 +22073,56 @@ body.column-layout-dragging {
 .business-period-popover--compact .business-period-panel { padding: 12px; gap: 12px; }
 .business-period-popover--compact .business-period-grid { gap: 6px; }
 .business-period-popover--compact .business-period-grid .button { width: 100%; height: 30px; min-height: 30px; padding: 0 8px; font-size: 13px; }
+.relation-count-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 5px;
+  border: 1px solid #ccd8f3;
+  border-radius: 4px;
+  background: #f2f6ff;
+  color: #315fd0;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.relation-count-button:hover, .relation-count-button[aria-expanded="true"] { background: #e8efff; border-color: #90a9e8; }
+.relation-count-button svg { transition: transform 170ms ease; }
+.relation-count-button[aria-expanded="true"] svg { transform: rotate(180deg); }
+.relation-count-button:focus-visible, .relation-expansion button:focus-visible { outline: 2px solid #426ed8; outline-offset: 2px; }
+.relation-expansion-row > td.finance-table__cell, .relation-expansion-row > td { padding: 0 !important; border-left: 0; }
+.relation-expansion-motion { overflow: hidden; min-width: 0; position: sticky; left: 0; }
+.relation-expansion { padding: 12px 16px 16px; border-left: 3px solid #9eb5db; background: #f4f7fb; color: #354459; }
+.relation-expansion__heading { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; font-size: 13px; }
+.relation-expansion__heading > strong { color: #344e72; }
+.relation-expansion__scope { color: #6b7b91; font-size: 12px; }
+.relation-expansion__close { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: #536d92; cursor: pointer; }
+.relation-expansion__columns { display: grid; gap: 16px; }
+.relation-expansion__column { min-width: 0; }
+.relation-expansion__column + .relation-expansion__column { padding-left: 16px; border-left: 1px solid #dce4ef; }
+.relation-expansion__column h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font-size: 12px; color: #63748b; font-weight: 600; }
+.relation-expansion__column h3 span { font-weight: 400; color: #8792a3; }
+.relation-expansion__column ul { margin: 0; padding: 0; list-style: none; }
+.relation-expansion__column li { padding: 9px 0; border-bottom: 1px solid #e1e7ef; }
+.relation-expansion__column li:last-child { border-bottom: 0; }
+.relation-expansion__member-heading { display: flex; align-items: baseline; gap: 6px; font-size: 13px; }
+.relation-expansion__member-heading > strong { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.relation-expansion__number { flex: none; color: #8895a6; font-size: 12px; font-variant-numeric: tabular-nums; }
+.relation-expansion__amount { flex: none; margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 600; color: #233b59; white-space: nowrap; }
+.relation-expansion__detail { flex: none; display: inline-flex; align-self: center; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; color: #5878a7; cursor: pointer; }
+.relation-expansion__detail:hover { color: #224da7; }
+.relation-expansion__detail:disabled { color: #a6afbc; cursor: default; }
+.relation-expansion__description { margin: 4px 0 0 14px; font-size: 12px; line-height: 1.5; color: #65748a; overflow-wrap: anywhere; white-space: normal; }
+.relation-expansion__metadata { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 4px 0 0 14px; color: #64748b; font-size: 12px; }
+.relation-expansion__empty { margin: 12px 0; color: #8994a5; font-size: 12px; }
+@media (max-width: 800px) {
+  .relation-expansion__columns { grid-template-columns: 1fr !important; }
+  .relation-expansion__column + .relation-expansion__column { padding-left: 0; border-left: 0; border-top: 1px solid #dce4ef; padding-top: 10px; }
+  .relation-expansion__heading { flex-wrap: wrap; gap: 8px; }
+}
+@media (prefers-reduced-motion: reduce) { .relation-count-button svg { transition: none; } }
+
+.relation-expansion__invoice-status { border-radius: 3px; padding: 0 4px; }
+.relation-expansion__invoice-status--red { color: #a6525d; background: #f4e7e9; }
+.relation-expansion__invoice-status--blue { color: #47679f; background: #e6edf9; }

@@ -164,15 +164,6 @@ function waitForInputInvoiceUsageOaReversePreview(page: Page) {
   });
 }
 
-function waitForInputInvoiceUsageRelationDetails(page: Page) {
-  return page.waitForResponse((response) => {
-    const url = new URL(response.url());
-    return response.request().method() === "GET"
-      && url.pathname.endsWith("/api/input-invoice-usage/rows/input-usage-row-e2e-001/relation-details")
-      && url.searchParams.get("kind") === "oa";
-  });
-}
-
 function waitForInputInvoiceUsageOaDraft(page: Page) {
   return page.waitForResponse((response) =>
     response.url().includes("/api/input-invoice-usage/oa-reverse/oa-draft")
@@ -549,37 +540,18 @@ test.describe("input invoice usage browser flow", () => {
     await expect(row).toBeVisible();
     await expect(row.getByText("合计 188.00")).toBeVisible();
 
-    await expect(row.getByRole("button", { name: "查看陈秀云关联OA 2 条" })).toHaveText("+2");
-    const detailDrawer = page.getByRole("dialog", { name: "OA详情" });
+    await expect(row.getByRole("button", { name: "查看陈秀云关联OA 2 条" })).toHaveText("共 2 条");
     await recordLatency({
-      operationId: "input-invoice-usage.open-relation-detail-fresh",
+      operationId: "input-invoice-usage.expand-relation",
       visibleLabel: "查看陈秀云关联OA 2 条",
       actionType: "click",
     }, async (mark) => {
-      const detailResponsePromise = waitForInputInvoiceUsageRelationDetails(page);
       await row.getByRole("button", { name: "查看陈秀云关联OA 2 条" }).click();
-      expect((await mark("apiLatencyMs", detailResponsePromise)).status()).toBe(200);
-      await mark("firstVisibleResponseLatencyMs", expect(detailDrawer).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(detailDrawer.getByRole("tab", {name: "1 陈秀云 88.00 申请日期未提供 OA单号 未提供"})).toBeVisible());
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("region", {name:"配对关系"})).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("region", {name:"配对关系"}).getByText("刘际涛",{exact:true})).toBeVisible());
     });
-    await expect(detailDrawer).toBeVisible();
-    await expect(detailDrawer.getByText("关联概况")).toHaveCount(0);
-    await expect(detailDrawer.getByText("关系数量")).toHaveCount(0);
-    await expect(detailDrawer.getByText("是否多条")).toHaveCount(0);
-    await expect(detailDrawer.getByText("关联摘要")).toHaveCount(0);
-    await expect(detailDrawer.getByRole("tab", {name: "1 陈秀云 88.00 申请日期未提供 OA单号 未提供"})).toBeVisible();
-    await expect(detailDrawer.getByRole("tabpanel").getByText("陈秀云", { exact: true })).toBeVisible();
-    await expect(detailDrawer.getByRole("tabpanel").getByText("88.00", { exact: true })).toBeVisible();
-    await detailDrawer.getByRole("tab", {name: "2 刘际涛 100.00 申请日期未提供 OA单号 未提供"}).click();
-    await expect(detailDrawer.getByRole("tabpanel").getByText("陈秀云", {exact: true})).toHaveCount(0);
-    await expect(detailDrawer.getByRole("tabpanel")).toHaveCount(1);
-    await expect(detailDrawer.getByRole("tabpanel").getByText("刘际涛", { exact: true })).toBeVisible();
-    await expect(detailDrawer.getByRole("tabpanel").getByText("100.00", { exact: true })).toBeVisible();
-    await expect(detailDrawer.getByText("详情暂不可用")).toHaveCount(0);
-    await expect(detailDrawer.getByText("正在加载完整详情")).toHaveCount(0);
-    await expect(detailDrawer.getByText("input_invoice_usage_relation_detail")).toHaveCount(0);
-
-    expect(api.count("GET /api/input-invoice-usage/rows/input-usage-row-e2e-001/relation-details")).toBe(1);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    expect(api.calls.some(call=>call.includes('relation-details'))).toBe(false);
     expect(mutationCalls(api.calls)).toEqual([]);
     expect(browserErrors).toEqual([]);
   });

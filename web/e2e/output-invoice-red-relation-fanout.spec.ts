@@ -16,26 +16,20 @@ test.describe("销项发票自动红蓝票关系", () => {
     await expect(blueRow.getByText("蓝字", { exact: true })).toBeVisible();
     await expect(redRow.getByText("红字", { exact: true })).toBeVisible();
 
-    const detailResponse = page.waitForResponse((response) =>
-      response.url().includes("/api/output-invoice-collections/rows/output-collection-row-e2e-001/relation-details")
-      && response.request().method() === "GET");
-    await blueRow.getByRole("button", { name: "红蓝票 · 2" }).click();
-    expect((await detailResponse).status()).toBe(200);
-    const drawer = page.getByRole("dialog", { name: "发票详情" });
-    await expect(drawer).toBeVisible();
-    await expect(drawer.getByText("关联概况")).toHaveCount(0);
-    await expect(drawer.getByText("关系数量", { exact: true })).toHaveCount(0);
-    await expect(drawer.getByText("是否多条", { exact: true })).toHaveCount(0);
-    await expect(drawer.getByRole("cell", {name: "XSFP-E2E-0001", exact: true})).toBeVisible();
-    await expect(drawer.getByRole("cell", { name: "12,345.67", exact: true })).toBeVisible();
-    await drawer.getByRole("tab").nth(1).click();
-    await expect(drawer.getByRole("cell", {name: "XSFP-E2E-0002", exact: true})).toBeVisible();
-    await expect(drawer.getByRole("cell", {name: "XSFP-E2E-0001", exact: true})).toHaveCount(0);
-    await expect(drawer.getByRole("cell", { name: "-12,345.67", exact: true })).toBeVisible();
-    await expect(drawer.getByText("output_invoice_reversal")).toHaveCount(0);
-
-    await drawer.getByRole("button", { name: "关闭详情抽屉" }).click();
+    await blueRow.getByRole("button", {name:"展开配对关系，发票共 2 张"}).click();
+    const expansion = page.getByRole("region", {name:"配对关系"});
+    await expect(expansion).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    const response = page.waitForResponse(response=>response.url().endsWith('/api/output-invoice-collections/invoices/out-e2e-002/detail'));
+    await expansion.getByRole("button", {name:"查看发票 XSFP-E2E-0002 详情"}).click();
+    expect((await response).status()).toBe(200);
+    const drawer = page.getByRole("dialog", {name:"发票详情"});
+    await expect(drawer.getByRole("cell", {name:"XSFP-E2E-0002",exact:true})).toBeVisible();
+    await expect(drawer.getByRole("cell", {name:"-12345.67",exact:true})).toBeVisible();
+    await expect(drawer.getByRole("tablist")).toHaveCount(0);
+    await drawer.getByRole("button", {name:"关闭详情抽屉"}).click();
     await expect(drawer).toBeHidden();
+    expect(api.calls.some(call=>call.includes('relation-details'))).toBe(false);
     expect(api.calls.some((call) =>
       /^(POST|PUT|PATCH|DELETE) \/api\/output-invoice-collections\//.test(call))).toBe(false);
     expect(api.calls.some((call) => call.includes("red-invoice-relations"))).toBe(false);

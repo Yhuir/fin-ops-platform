@@ -26,7 +26,6 @@ function api() {
     fetchPendingInvoiceFilterOptions: (request: FetchPendingInvoiceRowsRequest) => Promise<unknown>;
     fetchPendingInvoiceRules: () => Promise<PendingInvoiceRulesPayload>;
     savePendingInvoiceRules: (payload: PendingInvoiceRulesPayload) => Promise<PendingInvoiceRulesPayload>;
-    fetchPendingInvoiceRelationDetail: (transactionId: string, direction?: string, kind?: string) => Promise<unknown>;
     fetchPendingInvoiceObjectDetail: (target: PendingInvoiceObjectDetailTarget) => Promise<unknown>;
     fetchPendingInvoiceCandidates: (request: FetchPendingInvoiceCandidatesRequest) => Promise<unknown>;
     fetchPendingInvoiceCandidatesBatch: (request: FetchPendingInvoiceBatchCandidatesRequest) => Promise<unknown>;
@@ -371,10 +370,10 @@ describe("pending invoices and tag settings API mapping", () => {
     ]);
   });
 
-  test("maps rules, relation detail, object detail, candidates, attach-existing, and export endpoints", async () => {
+  test("maps rules, single-source detail, candidates, attach-existing, and export endpoints", async () => {
     expect(api().fetchPendingInvoiceRules).toBeTypeOf("function");
     expect(api().savePendingInvoiceRules).toBeTypeOf("function");
-    expect(api().fetchPendingInvoiceRelationDetail).toBeTypeOf("function");
+    expect("fetchPendingInvoiceRelationDetail" in api()).toBe(false);
     expect(api().fetchPendingInvoiceObjectDetail).toBeTypeOf("function");
     expect(api().fetchPendingInvoiceCandidates).toBeTypeOf("function");
     expect(api().fetchPendingInvoiceCandidatesBatch).toBeTypeOf("function");
@@ -435,37 +434,6 @@ describe("pending invoices and tag settings API mapping", () => {
           },
         });
         return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
-      }
-      if (url.pathname === "/api/pending-invoices/rows/txn_001/relation-detail") {
-        return new Response(JSON.stringify({
-          title: "关系详情",
-          detail_available: true,
-          sections: [
-            {
-              title: "银行流水",
-              fields: [
-                { label: "交易时间", value: "2026-05-02" },
-                { label: "支出金额", value: "1200.00" },
-              ],
-            },
-            {
-              title: "OA 1 · 支付申请",
-              fields: [
-                { label: "OA单号", value: "2047" },
-                { label: "申请人", value: "杨丽萍" },
-                { label: "OA类型", value: "支付申请" },
-              ],
-            },
-            {
-              title: "OA 2 · 日常报销",
-              fields: [
-                { label: "OA单号", value: "2048" },
-                { label: "申请人", value: "刘晓宇" },
-                { label: "OA类型", value: "日常报销" },
-              ],
-            },
-          ],
-        }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       if (url.pathname === "/api/pending-invoices/invoices/inv_001/detail") {
         return new Response(JSON.stringify({
@@ -574,19 +542,6 @@ describe("pending invoices and tag settings API mapping", () => {
     expect(rules.availableTags.map((tag) => tag.code)).toEqual(["fee", "internal_transfer", "salary"]);
     expect(rules.availableTags.some((tag) => tag.code === "borrow_in_company_repaid")).toBe(false);
     await api().savePendingInvoiceRules(rules);
-
-    const relation = await api().fetchPendingInvoiceRelationDetail("txn_001");
-    expect(relation).toMatchObject({
-      title: "关系详情",
-      detailAvailable: true,
-      sections: [
-        { title: "银行流水" },
-        { title: "OA 1 · 支付申请" },
-        { title: "OA 2 · 日常报销" },
-      ],
-    });
-    expect(JSON.stringify(relation)).toContain('"OA单号","value":"2047"');
-    expect(JSON.stringify(relation)).not.toContain("expense_claim");
 
     const detail = await api().fetchPendingInvoiceObjectDetail({ kind: "invoice", id: "inv_001", rowId: "txn_001" });
     expect(detail).toMatchObject({ title: "DIG-001", sections: [{ title: "发票字段" }] });

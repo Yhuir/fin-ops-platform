@@ -71,6 +71,9 @@ class OutputInvoiceCollectionApiRoutes:
             except OutputInvoiceCollectionError as exc:
                 return self._error(exc)
             return self._xlsx(filename, content, row_count)
+        if method == "GET" and route_path.startswith("/api/output-invoice-collections/oa/") and route_path.endswith("/detail"):
+            oa_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._json_read(headers, lambda session: (HTTPStatus.OK, self.oa_detail(oa_id, session=session)))
         if (
             method == "GET"
             and route_path.startswith("/api/output-invoice-collections/invoices/")
@@ -99,19 +102,6 @@ class OutputInvoiceCollectionApiRoutes:
                     self.bank_transaction_detail(
                         bank_transaction_id, session=session
                     ),
-                ),
-            )
-        if (
-            method == "GET"
-            and route_path.startswith("/api/output-invoice-collections/rows/")
-            and route_path.endswith("/relation-details")
-        ):
-            row_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._json_read(
-                headers,
-                lambda session: (
-                    HTTPStatus.OK,
-                    self.relation_details(row_id, query, session=session),
                 ),
             )
         return None
@@ -164,6 +154,9 @@ class OutputInvoiceCollectionApiRoutes:
             invoice_id, tenant_id=_tenant_id(session)
         )
 
+    def oa_detail(self, oa_id: str, *, session: OARequestSession | None = None) -> dict[str, Any]:
+        return self._query_service.oa_detail(oa_id, tenant_id=_tenant_id(session))
+
     def bank_transaction_detail(
         self,
         bank_transaction_id: str,
@@ -174,16 +167,6 @@ class OutputInvoiceCollectionApiRoutes:
             bank_transaction_id, tenant_id=_tenant_id(session)
         )
 
-    def relation_details(
-        self,
-        row_id: str,
-        query: dict[str, list[str]],
-        *,
-        session: OARequestSession | None = None,
-    ) -> dict[str, Any]:
-        return self._query_service.relation_details(
-            row_id, query, tenant_id=_tenant_id(session)
-        )
 
     def _json_read(
         self,

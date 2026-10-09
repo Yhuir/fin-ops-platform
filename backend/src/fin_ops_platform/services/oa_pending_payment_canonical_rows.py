@@ -291,13 +291,8 @@ def _bank_relation_payload(
                 if linked and edge_key not in seen_non_outflow_edges:
                     seen_non_outflow_edges.add(edge_key)
                     non_outflow_edges.append(
-                        {
-                            "bankTransactionId": bank.id,
-                            **bank_unit_display(bank),
-                            "relationCaseId": edge_key[0],
-                            "relationStatus": relation_status(relation),
-                            "relationSource": str(relation.get("relation_source") or ""),
-                        }
+                        {key: value for key, value in _bank_summary(bank, oa_amount, relation).items()
+                         if key != "_sort"}
                     )
                 continue
             if bank.id not in seen:

@@ -373,7 +373,7 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         )
         self.assertEqual(rows["ambiguous-red"]["invoiceRelations"]["summaries"], [])
 
-    def test_relation_details_allow_only_bank_and_invoice(self) -> None:
+    def test_inline_sources_are_projected_from_the_authorized_snapshot(self) -> None:
         invoice = self._invoice("invoice", "4001", total_with_tax="100.00")
         bank = self._bank("bank", "100.00", TransactionDirection.INFLOW)
         assembler = self._service(
@@ -394,14 +394,14 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         )
         row_id = assembler.list_rows()["rows"][0]["id"]
 
-        bank_details = canonical.relation_details(row_id, {"kind": ["bank"]})
-        invoice_details = canonical.relation_details(row_id, {"kind": ["invoice"]})
-
-        self.assertEqual(bank_details["relationCount"], 1)
-        self.assertEqual(invoice_details["relationCount"], 0)
-        with self.assertRaises(OutputInvoiceCollectionError) as context:
-            canonical.relation_details(row_id, {"kind": ["oa"]})
-        self.assertEqual(context.exception.error_code, "invalid_relation_kind")
+        row = canonical.row_by_id(row_id)
+        sources = {column["kind"]: column for column in row["relationSources"]}
+        self.assertEqual(sources["bank"]["count"], 1)
+        self.assertEqual(sources["bank"]["members"][0]["id"], "bank")
+        self.assertEqual(sources["invoice"]["count"], 1)
+        self.assertEqual(sources["invoice"]["members"][0]["id"], "invoice")
+        self.assertEqual(sources["oa"]["members"], [])
+        self.assertEqual(sources["bank"]["members"][0]["relationIds"], ["case"])
 
     def test_page_size_is_bounded(self) -> None:
         service = self._service(invoices=[])

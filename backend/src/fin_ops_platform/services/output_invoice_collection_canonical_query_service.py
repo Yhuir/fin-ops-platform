@@ -4,6 +4,7 @@ from typing import Any
 
 from fin_ops_platform.services.bank_settings import bank_short_names_from_mappings, bank_summary_with_short_names
 from fin_ops_platform.services.bank_transaction_unit import original_bank_transaction
+from fin_ops_platform.services.invoice_financial_values import invoice_financial_summary
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_canonical_query_service import (
     _dedupe_objects,
@@ -20,14 +21,17 @@ from fin_ops_platform.services.output_invoice_collection_service import (
     OUTPUT_INVOICE_COLLECTION_EXPORT_ROW_LIMIT,
     OutputInvoiceCollectionError,
     OutputInvoiceCollectionQueryService,
+    _invoice_sign,
+    _source_invoice_total,
 )
 from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_query import (
     InvoiceUsageCollectionCanonicalSnapshot,
 )
 from fin_ops_platform.services.source_record_details import (
     bank_source_detail,
+    oa_source_detail,
+    source_money,
     source_invoice_groups,
-    source_relation_sections,
 )
 
 
@@ -192,45 +196,6 @@ class OutputInvoiceCollectionCanonicalQueryService:
             None,
         )
 
-    def relation_details(
-        self,
-        row_id: str,
-        query: dict[str, list[str]],
-        *,
-        tenant_id: str = "default",
-    ) -> dict[str, Any]:
-        kind = _first(query, "kind")
-        if kind not in {"bank", "invoice"}:
-            raise OutputInvoiceCollectionError(
-                "invalid_relation_kind",
-                "kind must be bank or invoice.",
-            )
-        snapshot = self._repository.load_row(row_id, tenant_id=tenant_id)
-        row = next((item for item in self._rows_from_snapshot(snapshot)
-                    if item.get("id") == row_id or item.get("invoiceId") == row_id), None)
-        if row is None:
-            raise OutputInvoiceCollectionError(
-                "row_not_found",
-                f"Output invoice collection row not found: {row_id}",
-                status_code=404,
-            )
-        relation_payload = {
-            "bank": row["bankTransactions"],
-            "invoice": row["invoiceRelations"],
-        }[kind]
-        return {
-            "rowId": row_id,
-            "kind": kind,
-            "title": {
-                "bank": "银行流水关联明细",
-                "invoice": "发票关联明细",
-            }[kind],
-            "relationCount": int(relation_payload.get("relationCount") or 0),
-            "summaries": list(relation_payload.get("summaries") or []),
-            "sections": source_relation_sections(kind, list(relation_payload.get("summaries") or []),
-                groups=[*snapshot.groups, *snapshot.supporting_groups],
-                transactions=snapshot.transactions, oa_records=snapshot.oa_records, bank_labels=snapshot.bank_labels),
-        }
 
     def invoice_detail(
         self,
@@ -240,19 +205,9 @@ class OutputInvoiceCollectionCanonicalQueryService:
     ) -> dict[str, Any]:
         if self._repository is None:
             return self._row_assembler.invoice_detail(invoice_id)
-        snapshot = self._repository.load_row(invoice_id, tenant_id=tenant_id)
-        group = next(
-            (
-                candidate
-                for candidate in source_invoice_groups([line for group in snapshot.groups for line in group["line_items"]])
-                if invoice_id
-                in {
-                    str(getattr(invoice, "id", "") or "")
-                    for invoice in list(candidate.get("line_items") or [])
-                }
-            ),
-            None,
-        )
+        records = self._repository.load_invoice_records(invoice_id, tenant_id=tenant_id)
+        group = next((group for group in source_invoice_groups(records)
+                      if invoice_id in {line.id for line in group["line_items"]}), None)
         if group is None:
             raise OutputInvoiceCollectionError(
                 "invoice_not_found",
@@ -260,6 +215,14 @@ class OutputInvoiceCollectionCanonicalQueryService:
                 status_code=404,
             )
         return self._row_assembler.invoice_detail_for_group(group)
+
+    def oa_detail(self, oa_id: str, *, tenant_id: str = "default") -> dict[str, Any]:
+        if self._repository is None:
+            raise OutputInvoiceCollectionError("output_invoice_query_unavailable", "销项发票查询未配置。", status_code=503)
+        record = self._repository.load_oa_record(oa_id, tenant_id=tenant_id)
+        if record is None:
+            raise OutputInvoiceCollectionError("oa_not_found", "OA 详情不存在。", status_code=404)
+        return oa_source_detail(record)
 
     def bank_transaction_detail(
         self,
@@ -269,26 +232,14 @@ class OutputInvoiceCollectionCanonicalQueryService:
     ) -> dict[str, Any]:
         if self._repository is None:
             return self._row_assembler.bank_transaction_detail(bank_transaction_id)
-        snapshot = self._repository.load_row(
-            bank_transaction_id,
-            tenant_id=tenant_id,
-        )
-        transaction = next(
-            (
-                item
-                for item in snapshot.transactions
-                if str(getattr(item, "id", "") or "") == bank_transaction_id
-            ),
-            None,
-        )
+        transaction, labels = self._repository.load_bank_source(bank_transaction_id, tenant_id=tenant_id)
         if transaction is None:
             raise OutputInvoiceCollectionError(
                 "bank_transaction_not_found",
                 f"Bank transaction detail not found: {bank_transaction_id}",
                 status_code=404,
             )
-        transaction = original_bank_transaction(transaction)
-        return bank_source_detail(transaction, labels=snapshot.bank_labels[original_bank_transaction(transaction).id])
+        return bank_source_detail(transaction, labels=labels)
 
     def _export_rows(
         self,
@@ -375,10 +326,49 @@ class OutputInvoiceCollectionCanonicalQueryService:
             for group in snapshot.groups
         ]
         names = bank_short_names_from_mappings(snapshot.bank_account_mappings)
-        for row in rows:
+        for row, group in zip(rows, snapshot.groups, strict=True):
+            row["relationSources"] = _relation_sources(row, group, snapshot, context)
             if "bankTransactions" in row:
                 row["bankTransactions"] = bank_summary_with_short_names(row["bankTransactions"], names)
         return rows
+
+
+def _relation_sources(row: dict[str, Any], group: dict[str, Any], snapshot: InvoiceUsageCollectionCanonicalSnapshot,
+                      context: DistributedInvoiceRelationContext) -> list[dict[str, Any]]:
+    """Complete display membership only; collection totals and status retain their own projection."""
+    relations = context.distributed_relations_for_row_ids([line.id for line in group["line_items"]], case_ids=group.get("relation_case_ids"))
+    memberships: dict[str, list[str]] = {}
+    for relation in relations:
+        for identifier, _kind in context.typed_relation_rows(relation):
+            memberships.setdefault(identifier, []).append(str(relation["case_id"]))
+    related_invoice_ids = {str(item["invoiceId"]) for item in row["invoiceRelations"]["summaries"]}
+    related_invoice_ids.add(str(row["invoiceId"]))
+    invoice_members = []
+    for source in source_invoice_groups([line for item in [*snapshot.groups, *snapshot.supporting_groups] for line in item["line_items"]]):
+        invoice = source["primary"]
+        ids = [line.id for line in source["line_items"]]
+        if not any(identifier in memberships or identifier in related_invoice_ids for identifier in ids):
+            continue
+        sign = _invoice_sign(invoice, _source_invoice_total(source["line_items"]))
+        invoice_members.append({"id": invoice.id, "title": invoice.digital_invoice_no or invoice.invoice_no,
+            "subtitle": invoice.buyer_name, "date": invoice.invoice_date,
+            "status": "红字" if sign < 0 else "蓝字" if sign > 0 else "",
+            "amount": invoice_financial_summary(source["line_items"])["totalWithTax"], "detailAvailable": True,
+            "relationIds": sorted({case for identifier in ids for case in memberships.get(identifier, [])})})
+    bank_members: dict[str, dict[str, Any]] = {}
+    for unit in snapshot.transactions:
+        if unit.id not in memberships:
+            continue
+        bank = original_bank_transaction(unit)
+        member = bank_members.setdefault(bank.id, {"id": bank.id, "title": bank.counterparty_name_raw,
+            "subtitle": bank.summary, "date": bank.trade_time or bank.txn_date, "amount": source_money(bank.amount),
+            "detailAvailable": True, "relationIds": []})
+        member["relationIds"] = sorted(set(member["relationIds"]) | set(memberships[unit.id]))
+    oa_members = [{"id": record.id, "title": record.applicant, "subtitle": record.project_name,
+        "amount": source_money(record.amount), "detailAvailable": True, "relationIds": memberships[record.id]}
+        for record in snapshot.oa_records if record.id in memberships]
+    return [{"kind": kind, "count": len(members), "members": members}
+            for kind, members in [("invoice", invoice_members), ("oa", oa_members), ("bank", list(bank_members.values()))]]
 
 
 def _context(

@@ -157,15 +157,17 @@ type FinanceTableCellProps = {
   className?: string;
   dataTone?: string;
   textValue?: string;
+  colSpan?: number;
   dataTestId?: string;
   dataHighlight?: string;
   onClick?: MouseEventHandler<HTMLTableCellElement>;
 };
 
-export function FinanceTableCell({ children, columnRole, className, dataHighlight, dataTone, dataTestId, onClick, textValue }: FinanceTableCellProps) {
+export function FinanceTableCell({ children, columnRole, className, colSpan, dataHighlight, dataTone, dataTestId, onClick, textValue }: FinanceTableCellProps) {
   const selectableText = useContext(FinanceTableTextSelectionContext);
   return (
     <Table.Cell
+      colSpan={colSpan}
       className={cx("finance-table__cell", className)}
       data-column-role={columnRole}
       data-testid={dataTestId}

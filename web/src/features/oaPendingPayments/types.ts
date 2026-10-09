@@ -116,9 +116,11 @@ export type OaPendingPaymentBankTransaction = {
   hasMultiple: boolean;
   detailMode?: "none" | "single" | "list";
   summaries?: OaPendingPaymentBankTransactionSummary[];
+  nonOutflowRelationEdges?: OaPendingPaymentBankTransactionSummary[];
 };
 
 export type OaPendingPaymentBankTransactionSummary = {
+  parent_row_id?: string;
   original_amount: string;
   bankTransactionId?: string | null;
   bankName?: string;
@@ -261,10 +263,9 @@ export type LinkOaPendingPaymentBankTransactionsResponse = {
 };
 
 export type OaPendingPaymentDetailTarget = {
-  kind: "oa" | "bank" | "invoice" | "relationList";
+  kind: "oa" | "bank" | "invoice";
   id: string;
   rowId?: string;
-  relationKind?: "oa" | "bank" | "invoice";
 };
 
 export type OaPendingPaymentDetailResponse = {

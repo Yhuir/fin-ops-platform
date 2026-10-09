@@ -74,12 +74,15 @@ class EtcRelationPageReadsTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]['invoice']['relationCount'], 47)
         self.assertEqual(rows[0]['bankTransaction']['paidTotal'], '47.00')
-        detail = oa.relation_details(rows[0]['id'], kind='invoice', tenant_id='default')
-        self.assertEqual(detail["relationCount"], 47)
+        invoice_members = rows[0]['invoice']['summaries']
+        documents = {section['document_id'] for member in invoice_members
+                     for section in oa.invoice_detail(member['invoiceId'], tenant_id='default')['sections']}
+        self.assertEqual(len(documents), 47)
         pending = PendingInvoiceCanonicalQueryService(repository=PostgresPendingInvoiceCanonicalRepository(self.connection))
         row = pending.rows({'direction':['expense'],'filter':['all']})['rows'][0]
         self.assertEqual(row['input_invoices']['relation_count'], 47)
-        self.assertEqual(len({section['document_id'] for section in pending.relation_detail('etc-bank',direction='expense',kind='invoice')['sections']}),47)
+        self.assertEqual(len({section['document_id'] for member in row['input_invoices']['summaries']
+                             for section in pending.invoice_detail(member['id'])['sections']}),47)
         usage = InputInvoiceUsageCanonicalQueryService(repository=PostgresInputInvoiceUsageQueryRepository(self.connection),
             row_assembler=InputInvoiceUsageQueryService(import_service=ImportNormalizationService(), payment_rules_provider=_UnexpectedPaymentRulesProvider()))
         payload = usage.rows({'keyword':['NO-47']})
@@ -140,9 +143,14 @@ class EtcRelationPageReadsTests(unittest.TestCase):
             self.assertEqual(row['oa']['relationCount'], 1)
             self.assertEqual(row['bankTransactions']['relationCount'], 1)
             self.assertEqual(row['paymentStatus']['code'], 'paid')
-            for kind, expected in [('invoice', count), ('oa', 1), ('bank', 1)]:
-                detail = usage.relation_details(row['id'], {'kind': [kind]})
-                self.assertEqual(detail['relationCount'], expected)
+            for summaries, key, load, expected in [
+                (row['invoiceRelations']['summaries'], 'invoiceId', usage.invoice_detail, count),
+                (row['oa']['summaries'], 'oaId', usage.oa_detail, 1),
+                (row['bankTransactions']['summaries'], 'bankTransactionId', usage.bank_transaction_detail, 1),
+            ]:
+                details = [load(member[key]) for member in summaries]
+                documents = {str(detail['oaId'] if key == 'oaId' else detail['id']) for detail in details}
+                self.assertEqual(len(documents), expected)
         self.assertEqual(usage.rows({'keyword': ['NO-80']})['rows'][0]['relationGroupId'], 'CASE-SECOND')
         self.assertEqual(len(usage.export_rows(keyword='NO-80', limit=20000)['rows']), 34)
         self.assertEqual(len(usage.export_rows(limit=20000)['rows']), 69)

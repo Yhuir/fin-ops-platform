@@ -14,9 +14,8 @@ const pendingInvoicesSourceFiles = [
   "src/components/pendingInvoices/PendingInvoicesTable.tsx",
   "src/components/pendingInvoices/PendingInvoiceDrawerFrame.tsx",
   "src/components/pendingInvoices/PendingInvoiceRulesDrawer.tsx",
-  "src/components/pendingInvoices/PendingInvoiceRelationDrawer.tsx",
   "src/components/pendingInvoices/PendingInvoiceInvoicePickerDrawer.tsx",
-  "src/components/pendingInvoices/PendingInvoiceDetailDrawer.tsx",
+  "src/features/SourceDetailDrawer.tsx",
   "src/components/pendingInvoices/PendingInvoiceExportDrawer.tsx",
 ] as const;
 
@@ -659,66 +658,6 @@ function installPendingInvoiceFetch(options: {
         }],
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
-    if (url.pathname === "/api/pending-invoices/rows/txn-invoice-not-paid/relation-detail") {
-      return new Response(JSON.stringify({
-        title: "关系详情",
-        detail_available: true,
-        sections: [
-          {
-            title: "银行流水 1",
-            fields: [
-              { label: "交易时间", value: "2026-05-03" },
-              { label: "对方户名", value: "分期供应商" },
-              { label: "支出金额", value: "1200.00" },
-            ],
-          },
-          {
-            title: "银行流水 2",
-            fields: [
-              { label: "交易时间", value: "2026-04-20" },
-              { label: "对方户名", value: "分期供应商" },
-              { label: "支出金额", value: "300.00" },
-            ],
-          },
-          {
-            title: "发票 1",
-            fields: [
-              { label: "发票号码", value: "DIG-001" },
-              { label: "销方名称", value: "分期供应商" },
-              { label: "价税合计", value: "2000.00" },
-            ],
-          },
-          {
-            title: "发票 2",
-            fields: [
-              { label: "发票号码", value: "DIG-002" },
-              { label: "销方名称", value: "分期供应商二号" },
-              { label: "价税合计", value: "800.00" },
-            ],
-          },
-          {
-            title: "OA 1 · 支付申请",
-            fields: [
-              { label: "OA单号", value: "2047" },
-              { label: "申请人", value: "李四" },
-              { label: "OA类型", value: "支付申请" },
-              { label: "项目名称", value: "建设项目" },
-              { label: "流程状态", value: "进行中" },
-            ],
-          },
-          {
-            title: "OA 2 · 日常报销",
-            fields: [
-              { label: "OA单号", value: "2048" },
-              { label: "申请人", value: "王五" },
-              { label: "OA类型", value: "日常报销" },
-              { label: "项目名称", value: "建设项目二期" },
-              { label: "流程状态", value: "已完成" },
-            ],
-          },
-        ],
-      }), { status: 200, headers: { "Content-Type": "application/json" } });
-    }
     if (url.pathname === "/api/pending-invoices/invoices/inv-001/detail") {
       return new Response(JSON.stringify({
         title: "DIG-001",
@@ -1037,7 +976,7 @@ describe("Pending invoices page", () => {
       pendingInvoicesTableSource.includes("handleNativeSort") ? null : "PendingInvoicesTable.tsx should keep accessible header sorting controls",
       pendingInvoicesTableSource.includes("createPortal") && pendingInvoicesTableSource.includes('role="menuitemcheckbox"') ? null : "PendingInvoicesTable.tsx should use the project portal pattern for reliable multi-select filtering",
       sourceByPath["src/components/pendingInvoices/PendingInvoiceDrawerFrame.tsx"].includes("AppDrawer") ? null : "PendingInvoiceDrawerFrame.tsx should use AppDrawer for right drawer shape",
-      !sourceByPath["src/components/pendingInvoices/PendingInvoiceDetailDrawer.tsx"].includes("AppDialog") ? null : "PendingInvoiceDetailDrawer.tsx should keep object details in the right drawer",
+      !sourceByPath["src/features/SourceDetailDrawer.tsx"].includes("AppDialog") ? null : "PendingInvoiceDetailDrawer.tsx should keep object details in the right drawer",
     ].filter(Boolean);
 
     expect({
@@ -1182,12 +1121,13 @@ describe("Pending invoices page", () => {
     expect(within(page).queryByText("DIG-001")).not.toBeInTheDocument();
     expect(within(page).queryByText("李四")).not.toBeInTheDocument();
     expect(within(page).getByText(/分期供应商二号/)).toBeInTheDocument();
-    expect(within(page).getAllByText("+2")).toHaveLength(2);
+    expect(within(page).getAllByText("共 2 张")).toHaveLength(1);
+    expect(within(page).getAllByText("共 2 条")).toHaveLength(1);
     expect(within(page).getByText("2800.00")).toBeInTheDocument();
     expect(within(page).queryByText("已付 1500.00")).not.toBeInTheDocument();
     expect(within(page).queryByText("待付 1300.00")).not.toBeInTheDocument();
     const invoicedRow = within(page).getByRole("row", { name: /分期供应商/ });
-    expect(within(invoicedRow).getByRole("button", { name: "查看全部发票关系" })).toBeInTheDocument();
+    expect(within(invoicedRow).getByRole("button", { name: "展开配对关系，发票共 2 张" })).toBeInTheDocument();
     expect(within(invoicedRow).queryByText("已配对")).not.toBeInTheDocument();
 
     const request = pendingInvoiceRowsRequests(fetchMock)[0];
@@ -1358,32 +1298,15 @@ describe("Pending invoices page", () => {
 
     const page = await findPendingInvoicesPage();
     await within(page).findByText("云南开票供应商");
-    await user.click(within(page).getByRole("button", { name: "查看全部发票关系" }));
-    const invoiceRelationDrawer = await screen.findByRole("dialog", { name: "发票详情" });
-    expect(within(invoiceRelationDrawer).getByRole("heading", { name: "发票 1" })).toBeInTheDocument();
-    expect(within(invoiceRelationDrawer).getByRole("heading", { name: "发票 2" })).toBeInTheDocument();
-    expect(screen.getByText("DIG-002")).toBeInTheDocument();
-    expect(screen.getByText("分期供应商二号")).toBeInTheDocument();
-    expect(screen.queryByText("关系数量")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
-
-    await user.click(within(page).getByRole("button", { name: /查看全部流水关系/ }));
-    const bankRelationDrawer = await screen.findByRole("dialog", { name: "银行流水详情" });
-    expect(within(bankRelationDrawer).getByRole("heading", { name: "银行流水 1" })).toBeInTheDocument();
-    expect(within(bankRelationDrawer).getByRole("heading", { name: "银行流水 2" })).toBeInTheDocument();
-    expect(within(bankRelationDrawer).getByText("2026-04-20")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
-
-    await user.click(within(page).getByRole("button", { name: "查看全部 OA 关系" }));
-    const oaRelationDrawer = await screen.findByRole("dialog", { name: "OA详情" });
-    expect(within(oaRelationDrawer).getByRole("heading", { name: "OA 1 · 支付申请" })).toBeInTheDocument();
-    expect(within(oaRelationDrawer).getByRole("heading", { name: "OA 2 · 日常报销" })).toBeInTheDocument();
-    expect(within(oaRelationDrawer).getByText("2047")).toBeInTheDocument();
-    expect(screen.getByText("王五")).toBeInTheDocument();
-    expect(screen.getByText("建设项目二期")).toBeInTheDocument();
-    expect(within(oaRelationDrawer).queryByText(/expense_claim|payment_request|case-old/)).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
-    expect(pendingInvoiceRelationRequests(fetchMock).map((url) => url.searchParams.get("kind"))).toEqual(["invoice", "bank", "oa"]);
+    const before = fetchMock.mock.calls.length;
+    await user.click(within(page).getByRole("button", { name: "展开配对关系，发票共 2 张" }));
+    const expansion = await screen.findByRole("region", {name:"配对关系"});
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls).toHaveLength(before);
+    expect(within(expansion).getAllByRole("button", {name:/详情$/}).length).toBeGreaterThan(2);
+    await user.click(within(page).getByRole("button", { name: "收起配对关系，OA共 2 条" }));
+    await waitFor(()=>expect(screen.queryByRole("region", {name:"配对关系"})).not.toBeInTheDocument());
+    expect(pendingInvoiceRelationRequests(fetchMock)).toHaveLength(0);
 
     await user.click(within(page).getByRole("button", { name: "支出待找发票规则设置" }));
     expect(await screen.findByRole("heading", { name: "支出待找发票规则设置" })).toBeInTheDocument();

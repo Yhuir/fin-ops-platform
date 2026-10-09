@@ -1,5 +1,5 @@
-import { fetchInputInvoiceUsageBankTransactionDetail, fetchInputInvoiceUsageInvoiceDetail, fetchInputInvoiceUsageOaDetail, fetchInputInvoiceUsageRowRelationDetail } from "../features/inputInvoiceUsage/api";
-import { fetchOutputInvoiceCollectionBankTransactionDetail, fetchOutputInvoiceCollectionInvoiceDetail, fetchOutputInvoiceCollectionRowRelationDetail } from "../features/outputInvoiceCollections/api";
+import { fetchInputInvoiceUsageBankTransactionDetail, fetchInputInvoiceUsageInvoiceDetail, fetchInputInvoiceUsageOaDetail } from "../features/inputInvoiceUsage/api";
+import { fetchOutputInvoiceCollectionBankTransactionDetail, fetchOutputInvoiceCollectionInvoiceDetail } from "../features/outputInvoiceCollections/api";
 
 function sourceResponse(payload: unknown) {
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(payload), {
@@ -64,17 +64,17 @@ test("OA without source process status does not substitute operational workflow 
   expect(detail.sections.flatMap(section => section.fields).some(field => field.label === "流程状态")).toBe(false);
 });
 
-test.each([fetchInputInvoiceUsageRowRelationDetail, fetchOutputInvoiceCollectionRowRelationDetail])("empty relation source sections never reconstruct facts from poisoned business summaries", async loadDetail => {
+test.each([fetchInputInvoiceUsageBankTransactionDetail, fetchOutputInvoiceCollectionBankTransactionDetail])("empty relation source sections never reconstruct facts from poisoned business summaries", async loadDetail => {
   sourceResponse({ kind: "bank", sections: [], summaries: [{ id: "private-bank", counterpartyName: "推断对方", amount: "999.00", status: "pending", workflowStatus: "completed" }] });
-  const detail = await loadDetail({ kind: "relationList", id: "relation-row", relationKind: "bank" });
+  const detail = await loadDetail("source-bank");
   expect(detail.sections).toEqual([]);
 });
 
-test.each([fetchInputInvoiceUsageRowRelationDetail, fetchOutputInvoiceCollectionRowRelationDetail])("relation source sections retain exact bank identity and original zero", async loadDetail => {
+test.each([fetchInputInvoiceUsageBankTransactionDetail, fetchOutputInvoiceCollectionBankTransactionDetail])("relation source sections retain exact bank identity and original zero", async loadDetail => {
   sourceResponse({ kind: "bank", sections: [{ title: "银行流水 1", bank_transaction_id: "source-bank", fields: [
     { label: "备注", value: "原始备注" }, { label: "余额", value: 0 },
   ] }], summaries: [{ id: "wrong-bank", counterpartyName: "不可信摘要" }] });
-  const detail = await loadDetail({ kind: "relationList", id: "relation-row", relationKind: "bank" });
+  const detail = await loadDetail("source-bank");
   expect(detail.sections).toMatchObject([{ title: "银行流水 1", bank_transaction_id: "source-bank", fields: [
     { label: "备注", value: "原始备注" }, { label: "余额", value: 0 },
   ] }]);

@@ -3334,7 +3334,7 @@ function inputInvoiceUsageClassification(rows: Array<{ payment_status: { code: s
     groups };
 }
 
-function inputInvoiceUsageRowsPayload(
+export function inputInvoiceUsageRowsPayload(
   relationConfirmed = false,
   includeWorkbenchRelationEvidence = false,
   includeRelationDetailList = false,
@@ -3438,12 +3438,18 @@ function inputInvoiceUsageRowsPayload(
             {
               oa_id: "oa-input-e2e-001",
               applicant_name: "陈秀云",
+              application_type: "费用报销",
+              project_name: "浏览器进项项目",
+              detail_available: true,
               amount: "88.00",
               relation_status: "linked",
             },
             {
               oa_id: "oa-input-e2e-002",
               applicant_name: "刘际涛",
+              application_type: "支付申请",
+              project_name: "浏览器进项项目",
+              detail_available: true,
               amount: "100.00",
               relation_status: "linked",
             },
@@ -3485,6 +3491,9 @@ function inputInvoiceUsageRowsPayload(
       },
     },
   ];
+  for (const row of rows) {
+    if (row.bank.primary && row.bank.summaries.length === 0) row.bank.summaries = [{...row.bank.primary}] as typeof row.bank.summaries;
+  }
   return {
     rows,
     classification: inputInvoiceUsageClassification(rows),
@@ -3904,43 +3913,6 @@ function inputInvoiceUsageFilterOptionsPayload() {
         options: [{ value: "陈秀云", label: "陈秀云", count: 1 }],
       },
     ],
-  };
-}
-
-function inputInvoiceUsageRelationDetailPayload(kind: string) {
-  const relationLabel = kind === "bank" ? "银行流水" : kind === "invoice" ? "发票" : "OA";
-  const sourceRows = kind === "oa"
-    ? [
-      {
-        applicant_name: "陈秀云",
-        application_type: "费用报销",
-        project_name: "浏览器进项项目",
-        amount: "88.00",
-        workflow_status: "completed",
-      },
-      {
-        applicant_name: "刘际涛",
-        application_type: "支付申请",
-        project_name: "浏览器进项项目",
-        amount: "100.00",
-        workflow_status: "completed",
-      },
-    ]
-    : [];
-  return {
-    row_id: "input-usage-row-e2e-001",
-    invoice_id: "input-invoice-row-e2e-001",
-    kind,
-    title: `${relationLabel}关联明细`,
-    relation_count: 2,
-    has_multiple: true,
-    sections: sourceRows.map((row, index) => ({ title: "申请信息", document_id: `source-oa-${index}`, document_kind: "oa", document_title: `${row.applicant_name} · ${row.amount}`, oa_navigation: {applicantName: row.applicant_name, amount: row.amount, applicationDate: null, workflowNo: null}, fields: [
-      { label: "申请人", value: row.applicant_name },
-      { label: "OA类型", value: row.application_type },
-      { label: "项目名称", value: row.project_name },
-      { label: "金额", value: row.amount },
-      { label: "流程状态", value: row.workflow_status },
-    ] })),
   };
 }
 
@@ -5873,6 +5845,7 @@ function outputInvoiceReversalRelationSummaries() {
   return [
     {
       id: "out-e2e-001",
+      is_positive_invoice: "是",
       invoice_no: "XSFP-E2E-0001",
       digital_invoice_no: "XSFP-E2E-0001",
       invoice_date: "2026-05-02",
@@ -5884,6 +5857,7 @@ function outputInvoiceReversalRelationSummaries() {
     },
     {
       id: "out-e2e-002",
+      is_positive_invoice: "否",
       invoice_no: "XSFP-E2E-0002",
       digital_invoice_no: "XSFP-E2E-0002",
       invoice_date: "2026-05-06",
@@ -6151,7 +6125,18 @@ export function outputInvoiceCollectionRowsPayload(
   facets.push({field:"tax_rate",label:"税率",mode:"enum_multi",sortable:true,operators:["in"],options:rates.map(value=>({value,label:value,count:rateRows.filter(row=>outputInvoiceCollectionFieldValue(row,"tax_rate")===value).length}))});
 
   return {
-    rows: pageRows,
+    rows: pageRows.map(row => {
+      const invoice = row.invoice as Record<string,string>;
+      const related = (row.invoice_relations as {summaries: Record<string,string>[]}).summaries;
+      const invoices = related.length ? related : [{id: invoice.id, display_no: invoice.display_no, total_with_tax: invoice.total_with_tax}];
+      const bank = row.bank as {summaries: Record<string,string>[]; primary?:Record<string,string>};
+      const banks = bank.summaries.length ? bank.summaries : bank.primary ? [bank.primary] : [];
+      return {...row, relationSources: [
+        {kind:'invoice',count:invoices.length,members:invoices.map(item=>({id:item.id || item.invoice_id,title:item.digital_invoice_no || item.invoice_no || item.display_no,subtitle:item.buyer_name,date:item.invoice_date,amount:item.total_with_tax,status:item.is_positive_invoice === "否" ? "红字" : "蓝字",detailAvailable:true}))},
+        {kind:'oa',count:0,members:[]},
+        {kind:'bank',count:banks.length,members:banks.map(item=>({id:item.id || item.bank_transaction_id,title:item.counterparty_name,date:item.trade_time,amount:item.original_amount,detailAvailable:true}))},
+      ]};
+    }),
     summary: {
       invoice_count: filteredRows.length,
       total_with_tax: filteredRows.reduce((sum,row)=>sum+Number(outputInvoiceCollectionNestedString(row,["invoice","total_with_tax"]).replaceAll(",","")),0).toFixed(2),
@@ -8585,10 +8570,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       ));
     }
 
-    if (path.startsWith("/api/input-invoice-usage/rows/") && path.endsWith("/relation-details")) {
-      return json(route, inputInvoiceUsageRelationDetailPayload(url.searchParams.get("kind") ?? "oa"));
-    }
-
     if (path === "/api/input-invoice-usage/export-summary") {
       if (options.inputInvoiceUsageExportRowLimitError) {
         return json(route, {
@@ -9093,18 +9074,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       });
     }
 
-    if (path === "/api/output-invoice-collections/rows/output-collection-row-e2e-001/relation-details") {
-      return json(route, {
-        kind: "invoice",
-        relation_count: 2,
-        has_multiple: true,
-        sections: outputInvoiceReversalRelationSummaries().map((row, index) => ({ title: "发票信息", document_id: `output-relation-${index}`, document_kind: "invoice", invoice_navigation: {polarity: index ? "红字" : "蓝字", counterpartyName: row.buyer_name, totalWithTax: row.total_with_tax, invoiceDate: row.invoice_date}, document_title: `${index ? "红字" : "蓝字"} · ${row.buyer_name} · ${row.total_with_tax}`, fields: [
-          { label: "发票号码", value: row.invoice_no },
-          { label: "开票日期", value: row.invoice_date },
-          { label: "购买方名称", value: row.buyer_name },
-          { label: "价税合计", value: row.total_with_tax },
-        ] })),
-      });
+    if (path === "/api/output-invoice-collections/invoices/out-e2e-002/detail") {
+      return json(route, {sections:[{title:"发票信息",document_id:"out-e2e-002",document_kind:"invoice",invoice_navigation:{polarity:"红字",counterpartyName:"浏览器销项客户",totalWithTax:"-12345.67",invoiceDate:"2026-05-06"},fields:[
+        {label:"发票号码",value:"XSFP-E2E-0002"},{label:"价税合计",value:"-12345.67"},
+      ]}]});
     }
 
     if (

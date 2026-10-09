@@ -1,70 +1,86 @@
+import { pendingAcquisitionFixture } from '../src/test/pendingInvoiceFixtures';
 import { expect, test } from './fixtures/strictTest';
-import { installDeterministicApiMocks } from './fixtures/apiMocks';
+import { installDeterministicApiMocks, oaPendingPaymentRowsPayload, pendingInvoiceRowsPayload, inputInvoiceUsageRowsPayload } from './fixtures/apiMocks';
 
-const numbers = ['2653400000097888906', '2653400000097888907'];
-function invoiceSections() {
-  return numbers.flatMap((number, index) => {
-    const metadata = {document_id: `invoice-${index}`, document_kind: 'invoice', invoice_navigation: {polarity: index ? '红字' : '蓝字', counterpartyName: '测试科技有限公司', totalWithTax: index ? '-2100.00' : '2100.00', invoiceDate: '2026-07-15'}, document_title: `${index ? '红字' : '蓝字'} · 测试科技有限公司 · ${index ? '-' : ''}2100.00`};
-    return [
-      {title: '发票信息', fields: [{label: '数电发票号码', value: number}, {label: '开票日期', value: '2026-07-15'}, {label: '发票票种', value: '数电发票（普通发票）'}], ...metadata},
-      {title: '购销双方', fields: [{label: '销方名称', value: '测试供应商有限公司'}, {label: '销方识别号', value: '915300000000000001'}, {label: '购买方名称', value: '测试科技有限公司'}, {label: '购买方识别号', value: '915300000000000002'}], ...metadata},
-      {title: '金额与税额', fields: [{label: '不含税金额', value: index ? '-2079.21' : '2079.21'}, {label: '税率', value: index ? '1%' : '—'}, {label: '税额', value: index ? '-20.79' : '20.79'}, {label: '价税合计', value: index ? '-2100.00' : '2100.00'}], ...metadata},
-      ...Array.from({length: index ? 2 : 5}, (_, line) => ({title: `货物或应税劳务明细 ${line + 1}`, fields: [{label: '货物或应税劳务名称', value: `原件商品 ${line + 1}`}, {label: '税率', value: '13%'}], ...metadata})),
-      {title: '业务信息', fields: [{label: '备注', value: '完整备注可换行。'.repeat(20)}], ...metadata},
-    ];
+for (const route of ['input-invoice-usage', 'oa-pending-payments', 'pending-invoices', 'output-invoice-collections']) {
+  test(`${route}: counts expand the full relationship in the row with no detail IO`, async ({page}, info) => {
+    const api = await installDeterministicApiMocks(page, {sessionMode:'user', inputInvoiceUsageRelationDetailList:true});
+    if (route === 'input-invoice-usage') {
+      const payload = inputInvoiceUsageRowsPayload(false,false,true);
+      const row: any = payload.rows[0];
+      row.bank.summaries = [{...row.bank.primary}];
+      await page.route('**/api/input-invoice-usage/rows**', call=>call.fulfill({json:payload}));
+    }
+    if (route === 'oa-pending-payments') {
+      const payload = oaPendingPaymentRowsPayload();
+      const row: any = payload.rows[0];
+      row.oa.summaries = [
+        {...row.oa,oaId:row.oa.id,relationCaseId:'e2e-case'},
+        {...row.oa,oaId:'oa-payment-e2e-002',applicantName:'关联申请人',amount:'3000.00',relationCaseId:'e2e-case'},
+      ];
+      row.oa.relationCount = 2;
+      row.bankTransaction.summaries = [{...row.bankTransaction,bankTransactionId:row.bankTransaction.primaryBankTransactionId,relationCaseId:'e2e-case'}];
+      row.bankTransaction.nonOutflowRelationEdges = [];
+      row.invoice.summaries = [{...row.invoice,invoiceId:row.invoice.primaryInvoiceId,relationCaseId:'e2e-case'}];
+      await page.route('**/api/oa-pending-payments/rows**', call=>call.fulfill({json:payload}));
+    }
+    if (route === 'pending-invoices') {
+      const payload = pendingInvoiceRowsPayload(true);
+      const row: any = payload.rows[0];
+      const oa = row.oa.primary;
+      row.oa.summaries = [oa,{...oa,id:'oa-o-202603-002',applicant:'关联申请人'}];
+      row.oa.relation_count = 2;
+      row.oa.has_multiple = true;
+      row.bank_transactions = {original_transaction_count:1,relation_count:1,summaries:[{...row.bank_transaction,original_amount:'58000.00'}]};
+      await page.route('**/api/pending-invoices/rows**', call=>call.fulfill({json:{...payload,acquisition_summary:pendingAcquisitionFixture(payload.rows as any[])}}));
+    }
+    const sourceReads: string[] = [];
+    page.on('request', request => {
+      if (/\/(?:relation-details?|detail)(?:\?|$)/.test(new URL(request.url()).pathname)) sourceReads.push(request.url());
+    });
+    await page.setViewportSize({width:1440,height:900});
+    await page.goto(`/${route}`);
+    const trigger = page.locator('.relation-count-button').first();
+    await expect(trigger).toBeVisible();
+    const row = trigger.locator('xpath=ancestor::tr');
+    const allTriggers = row.locator('.relation-count-button');
+    const initialRows = api.calls.filter(call=>call.startsWith(`GET /api/${route}/rows`)).length;
+    await trigger.click();
+    const expansion = page.getByRole('region',{name:'配对关系',exact:true});
+    await expect(expansion).toBeVisible();
+    await expect(expansion.getByText('关系摘要不完整，请重新查询后查看。')).toHaveCount(0);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(trigger).toHaveAttribute('aria-expanded','true');
+    const motion = page.locator('.relation-expansion-motion');
+    const durations = await motion.evaluate(node=>node.getAnimations().map(animation=>animation.effect!.getTiming().duration));
+    // The live browser observes the native slide; timing details are attached for inspection.
+    await info.attach('motion-duration',{body:JSON.stringify(durations),contentType:'application/json'});
+    await expect.poll(()=>motion.evaluate(node=>node.getAnimations().length)).toBe(0);
+    await expect(expansion.locator('li')).toHaveCount(await expansion.locator('.relation-expansion__detail').count());
+    expect(sourceReads).toEqual([]);
+    expect(api.calls.filter(call=>call.startsWith(`GET /api/${route}/rows`)).length).toBe(initialRows);
+    expect(await expansion.evaluate(node=>node.scrollWidth<=node.clientWidth+1)).toBe(true);
+    await page.screenshot({path:info.outputPath(`${route}-expanded.png`),animations:'disabled'});
+    const sourceButton = expansion.getByRole('button',{name:/详情$/}).first();
+    await sourceButton.click();
+    const drawer = page.getByRole('dialog');
+    await expect(drawer).toBeVisible();
+    await expect(drawer.getByRole('tablist',{name:'单据导航'})).toHaveCount(0);
+    expect(sourceReads).toHaveLength(1);
+    await drawer.getByRole('button',{name:'关闭详情抽屉'}).click();
+    await expect(expansion).toBeVisible();
+    if (await allTriggers.count()>1) {
+      await allTriggers.nth(1).click();
+      await expect(expansion).toHaveCount(0);
+      await allTriggers.nth(1).click();
+      await expect(page.getByRole('region',{name:'配对关系'})).toHaveCount(1);
+    }
+    await page.emulateMedia({reducedMotion:'reduce'});
+    await page.getByRole('region',{name:'配对关系'}).getByRole('button',{name:'收起',exact:true}).click();
+    await expect(page.getByRole('region',{name:'配对关系'})).toHaveCount(0);
+    expect(sourceReads).toHaveLength(1);
   });
 }
-
-test('full invoice navigation, compact left-aligned values and one reachable scroll area', async ({page}, info) => {
-  await installDeterministicApiMocks(page, {sessionMode: 'user'});
-  let detailReads = 0;
-  await page.route('**/api/output-invoice-collections/rows/*/relation-details*', route => {detailReads++; return route.fulfill({json: {kind: 'invoice', sections: invoiceSections()}});});
-  await page.goto('/output-invoice-collections');
-  const trigger = page.getByRole('button', {name: '红蓝票 · 2'}).first();
-  await trigger.click();
-  const drawer = page.getByRole('dialog', {name: '发票详情', exact: true});
-  await expect(drawer.getByRole('tablist', {name: '单据导航'})).toBeVisible();
-  for (const width of [1440, 1024, 480]) {
-    await page.setViewportSize({width, height: 800});
-    await expect.poll(() => drawer.getByRole('tab', {selected: true}).evaluate(el => {
-      const tab = el.getBoundingClientRect(), nav = el.closest('[role=tablist]')!.getBoundingClientRect();
-      return tab.left >= nav.left-1 && tab.right <= nav.right+1;
-    })).toBe(true);
-    const nav = drawer.getByRole('tablist');
-    for (const [index, number] of numbers.entries()) {
-      const tab = nav.getByRole('tab').nth(index);
-      await tab.click();
-      await expect(tab).toHaveAttribute('aria-selected', 'true');
-      await expect(drawer.getByRole('cell', {name: number, exact: true})).toBeVisible();
-      await expect(drawer.getByRole('cell', {name: numbers[1-index], exact: true})).toHaveCount(0);
-      await expect(drawer.getByRole('tabpanel')).toHaveCount(1);
-      await expect(drawer.getByRole('heading', {name: /^货物或应税劳务明细/})).toHaveCount(index ? 2 : 5);
-      await expect(drawer.getByRole('cell', {name: index ? '-2100.00' : '—', exact: true})).toBeVisible();
-      expect(await tab.evaluate(el => el.scrollWidth <= el.clientWidth && getComputedStyle(el).textOverflow !== 'ellipsis')).toBe(true);
-    }
-    await expect(drawer.locator('.entity-detail-row__amount').first()).toHaveCSS('text-align', 'left');
-    const scroll = drawer.locator('.finance-drawer__body');
-    await scroll.evaluate(el => { el.scrollTop = el.scrollHeight; });
-    expect(await scroll.evaluate(el => el.scrollTop > 0 && el.scrollTop + el.clientHeight >= el.scrollHeight - 2)).toBe(true);
-    await expect(nav).toHaveCSS("position", "static");
-    expect(await nav.evaluate(el => el.getBoundingClientRect().top < el.closest(".finance-drawer__body")!.getBoundingClientRect().top)).toBe(true);
-    expect(await drawer.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-    await page.screenshot({animations: "disabled", path: info.outputPath(`invoices-bottom-${width}.png`)});
-    await nav.getByRole('tab').first().click();
-    expect(await nav.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
-    await page.screenshot({animations: "disabled", path: info.outputPath(`invoices-top-${width}.png`)});
-  }
-  await page.setViewportSize({width: 1440, height: 900});
-  await page.evaluate(() => {document.documentElement.style.zoom = '1.25';});
-  expect(await drawer.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-  await page.screenshot({animations: 'disabled', path: info.outputPath('invoices-125-percent.png')});
-  await page.evaluate(() => {document.documentElement.style.zoom = '';});
-  expect(detailReads).toBe(1);
-  await drawer.getByRole('button', {name: '关闭详情抽屉'}).click();
-  await expect(drawer).toBeHidden();
-  // React Aria restores grid focus to the originating cell and its first control.
-  await expect.poll(() => trigger.evaluate(el => el.closest("td")?.contains(document.activeElement))).toBe(true);
-});
 
 test('bank source opens without split IO and aligns dates, money and account fields', async ({page}, info) => {
   await installDeterministicApiMocks(page, {sessionMode: 'user'});
@@ -89,124 +105,62 @@ test('bank source opens without split IO and aligns dates, money and account fie
   await expect(drawer.getByRole('button', {name: '流水子项拆分'})).toBeVisible();
 });
 
-for (const kind of ['oa', 'bank'] as const) {
-  test(`${kind} multi-document navigation preserves complete names, active fields and keyboard selection`, async ({page}, info) => {
-    await installDeterministicApiMocks(page, {sessionMode: 'user'});
-    const titles = kind === 'oa' ? ['张三 · 8000.00', '李四 · 0.00', '张三 · 8000.00']
-      : ['云南某某设备供应与技术服务有限公司 · 10000.00', '收款公司 · 0.00', '另一家公司 · 500.00'];
-    let reads = 0;
-    const sections = titles.map((title, index) => ({document_id: `${kind}-${index}`, document_kind: kind, document_title: title,
-      ...(kind === 'bank' ? {bank_navigation: {counterpartyName: ['云南某某设备供应与技术服务有限公司', '收款公司', '另一家公司'][index],
-        amount: ['10000.00', '0.00', '500.00'][index], direction: index === 1 ? '收入' : '支出', transactionDate: '2026-06-10', labels: [index === 1 ? '退款' : '费用 / 项目材料采购和运输费用标签完整展示']}} : {oa_navigation: {applicantName: index === 1 ? '李四' : '张三', amount: index === 1 ? '0.00' : '8000.00', applicationDate: '2026-08-01', workflowNo: `240${index}`}}),
-      title: kind === 'oa' ? '申请信息' : '交易信息', fields: [{label: '备注', value: `单据 ${index+1} 原文`}, {label: '金额', value: String(index)}]}));
-    await page.route(kind === 'oa' ? '**/api/oa-pending-payments/oa/*/detail' : '**/api/bank-transactions/*/source-detail', route => {
-      reads++; return route.fulfill({json: {detail_available: true, sections}});
-    });
-    await page.goto(kind === 'oa' ? '/oa-pending-payments' : '/bank-details');
-    await page.getByRole('button', {name: kind === 'oa' ? /^查看 OA .*详情$/ : /^查看银行流水.*详情$/}).first().click();
-    const drawer = page.getByRole('dialog', {name: kind === 'oa' ? 'OA详情' : '银行流水详情', exact: true});
-    const tabs = drawer.getByRole('tab');
-    await expect(tabs).toHaveCount(3);
-    for (let index = 0; index < 3; index++) {
-      await tabs.nth(index).click();
-      if (kind === 'oa') { await expect(tabs.nth(index)).toContainText(`OA单号 240${index}`); await expect(tabs.nth(index)).toContainText(index === 1 ? '0.00' : '8000.00'); }
-      else await expect(tabs.nth(index)).toContainText(index === 1 ? '退款' : '费用 / 项目材料采购和运输费用标签完整展示');
-      await expect(drawer.getByRole('cell', {name: `单据 ${index+1} 原文`, exact: true})).toBeVisible();
-      await expect(drawer.getByRole('tabpanel')).toHaveCount(1);
-      await expect(drawer.getByRole('cell', {name: /单据 \d 原文/})).toHaveCount(1);
-    }
-    await tabs.first().focus();
-    await page.keyboard.press('ArrowRight');
-    await expect(tabs.nth(1)).toBeFocused();
-    await page.keyboard.press('Enter');
-    await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
-    expect(reads).toBe(1);
-    for (const width of [1440,480]) {
-      await page.setViewportSize({width, height: 800});
-      await tabs.first().click();
-      expect(await drawer.getByRole('tablist').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
-      {
-        const positions = await tabs.evaluateAll(items => items.map(el => ({top: el.getBoundingClientRect().top, left: el.getBoundingClientRect().left})));
-        expect(positions[2].top).toBeGreaterThan(positions[0].top);
-        if (width === 480) expect(positions[1].left).toBe(positions[0].left);
+test('large relationship stays bounded to the viewport and slides through real intermediate frames', async ({page}, info) => {
+  await installDeterministicApiMocks(page, {sessionMode:'user'});
+  const {outputInvoiceCollectionRowsPayload} = await import('./fixtures/apiMocks');
+  const payload = outputInvoiceCollectionRowsPayload();
+  const row: any = payload.rows[0];
+  row.invoice_relations.relation_count = 47;
+  row.relationSources[0] = {kind:'invoice', count:47, members:Array.from({length:47},(_,index)=>({
+    id:`source-invoice-${index}`, title:`长发票号码-20261010-${index.toString().padStart(12,'0')}`,
+    subtitle:'云南很长的供应商名称用于验证完整配对关系在窄视口下不会挤出表格区域有限公司',
+    date:'2026-10-10', amount:index===0?'-12345.67':'12345.67', status:index===0?'红字':'蓝字', detailAvailable:true,
+  }))};
+  await page.route('**/api/output-invoice-collections/rows**', route=>route.fulfill({json:payload}));
+  await page.setViewportSize({width:1280,height:900});
+  await page.goto('/output-invoice-collections');
+  await page.evaluate(()=>{
+    const frames: {height:number;time:number}[] = [];
+    (window as any).relationFrames=frames;
+    let start: number | undefined;
+    const record=(now:number)=>{
+      const motion=document.querySelector('.relation-expansion-motion');
+      if(motion) {
+        start ??= now;
+        frames.push({height:motion.getBoundingClientRect().height,time:now-start});
       }
-      expect(await tabs.first().evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
-      await page.screenshot({animations: 'disabled', path: info.outputPath(`${kind}-${width}.png`)});
-    }
+      if(start===undefined || now-start<400) requestAnimationFrame(record);
+    };
+    requestAnimationFrame(record);
   });
-}
-
-for (const count of [9, 34]) {
-  test(`OA grid keeps ${count} source records distinct and reachable without horizontal scrolling`, async ({page}, info) => {
-    await installDeterministicApiMocks(page, {sessionMode: 'user'});
-    let reads = 0;
-    await page.route('**/api/oa-pending-payments/oa/*/detail', route => {
-      reads++;
-      return route.fulfill({json: {detail_available: true, sections: Array.from({length: count}, (_, index) => ({
-        document_id: `oa-${index}`, document_kind: 'oa', document_title: '张三 · 6868.55',
-        oa_navigation: {applicantName: '张三', amount: '6868.55', applicationDate: '2026-08-01', workflowNo: String(2400 + index)},
-        title: '申请信息', fields: [{label: '申请事由', value: `原始申请 ${index + 1}`}],
-      }))}});
-    });
-    await page.goto('/oa-pending-payments');
-    await page.getByRole('button', {name: /^查看 OA .*详情$/}).first().click();
-    const drawer = page.getByRole('dialog', {name: 'OA详情', exact: true});
-    const nav = drawer.getByRole('tablist');
-    await expect(nav.getByRole('tab')).toHaveCount(count);
-    for (const width of [1440, 480]) {
-      await page.setViewportSize({width, height: 900});
-      const positions = () => nav.getByRole('tab').evaluateAll(tabs => tabs.map(tab => ({top: (tab as HTMLElement).offsetTop, width: (tab as HTMLElement).offsetWidth})));
-      const before = await positions();
-      expect(before[count - 1].top).toBeGreaterThan(before[0].top);
-      expect(await nav.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
-      for (const tab of await nav.getByRole('tab').all()) expect(await tab.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
-      const last = nav.getByRole('tab').last();
-      await last.scrollIntoViewIfNeeded();
-      const body = drawer.locator('.finance-drawer__body');
-      const scrollBefore = await body.evaluate(el => el.scrollTop);
-      await last.click();
-      await expect(last).toHaveAttribute('aria-selected', 'true');
-      expect(await body.evaluate(el => el.scrollTop)).toBe(scrollBefore);
-      expect(await positions()).toEqual(before);
-      await expect(drawer.getByRole('tabpanel')).toHaveCount(1);
-      await expect(drawer.getByRole('cell', {name: `原始申请 ${count}`, exact: true})).toBeVisible();
-      await body.evaluate(el => {el.scrollTop = 0;});
-      await page.screenshot({path: info.outputPath(`oa-${count}-${width}.png`), animations: 'disabled'});
+  await page.locator('.relation-count-button').first().click();
+  const expansion=page.getByRole('region',{name:'配对关系'});
+  await expect(expansion.locator('li')).toHaveCount(48);
+  await expect.poll(()=>page.evaluate(()=>(window as any).relationFrames.at(-1)?.time ?? 0)).toBeGreaterThan(300);
+  const frames: {height:number;time:number}[]=await page.evaluate(()=>(window as any).relationFrames);
+  const fullHeight=frames.at(-1)!.height;
+  expect(frames.some(frame=>frame.height>0 && frame.height<fullHeight*.95)).toBe(true);
+  await info.attach('native-slide-frames',{body:JSON.stringify(frames),contentType:'application/json'});
+  // Pin native keyframes only for repeatable visual capture, then restore the finished slide.
+  const motion=page.locator('.relation-expansion-motion');
+  for(const [name,time] of [['start',0],['middle',90],['end',220]] as const){
+    await motion.evaluate((node,time)=>{
+      const animation=node.animate([{height:'0px'},{height:`${node.scrollHeight}px`}],{duration:220,easing:'cubic-bezier(.2,.7,.2,1)',fill:'both'});
+      animation.pause(); animation.currentTime=time;
+    },time);
+    await page.screenshot({path:info.outputPath(`slide-${name}.png`)});
+    await motion.evaluate(node=>node.getAnimations().forEach(animation=>animation.cancel()));
+  }
+  for(const width of [1280,1024,480]) {
+    await page.setViewportSize({width,height:900});
+    await expect.poll(()=>expansion.evaluate(node=>node.scrollWidth<=node.clientWidth+1)).toBe(true);
+    if (width === 480) await expansion.locator('li').first().scrollIntoViewIfNeeded();
+    await page.screenshot({path:info.outputPath(`relationship-long-${width}.png`)});
+    if (width === 480) {
+      await expansion.locator('.relation-expansion__column').last().scrollIntoViewIfNeeded();
+      await page.screenshot({path:info.outputPath('relationship-long-480-bank.png')});
     }
-    expect(reads).toBe(1);
-  });
-}
-
-for (const count of [1, 3, 4, 10]) {
-  test(`invoice grid shows all ${count} choices without horizontal scroll or selection reflow`, async ({page}, info) => {
-    await installDeterministicApiMocks(page, {sessionMode: 'user'});
-    const sections = Array.from({length: count}, (_, index) => ({...invoiceSections()[0], document_id: `grid-${index}`,
-      invoice_navigation: {polarity: index % 2 ? '红字' : '蓝字', counterpartyName: index === 2 ? '成都智领趋势科技有限公司及其他超长项目技术服务供应商名称完整展示' : '成都智领趋势科技有限公司',
-        totalWithTax: index % 2 ? '-182400.005' : '182400.00', invoiceDate: '2026-05-21'},
-      fields: [{label: '发票号码', value: `26532000008093027${index}`}]}));
-    let reads = 0;
-    await page.route('**/api/output-invoice-collections/rows/*/relation-details*', route => {reads++; return route.fulfill({json: {kind: 'invoice', sections}});});
-    await page.goto('/output-invoice-collections');
-    await page.getByRole('button', {name: '红蓝票 · 2'}).first().click();
-    const drawer = page.getByRole('dialog', {name: '发票详情', exact: true});
-    await expect(drawer.getByRole('table')).toBeVisible();
-    if (count === 1) { await expect(drawer.getByRole('tablist')).toHaveCount(0); return; }
-    const nav = drawer.getByRole('tablist');
-    await expect(nav.getByRole('tab')).toHaveCount(count);
-    await expect(nav).not.toContainText('尾号');
-    for (const width of [1440, 1024]) {
-      await page.setViewportSize({width, height: 900});
-      expect(await nav.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
-      const positions = () => nav.getByRole('tab').evaluateAll(tabs => tabs.map(tab => ({height: tab.getBoundingClientRect().height, top: (tab as HTMLElement).offsetTop, left: (tab as HTMLElement).offsetLeft, width: (tab as HTMLElement).offsetWidth})));
-      const before = await positions();
-      expect(before[0].top).toBe(before[1].top);
-      if (count > 2) expect(before[2].top).toBeGreaterThan(before[0].top);
-      await nav.getByRole('tab').last().click();
-      expect(await positions()).toEqual(before);
-      await expect(drawer.getByRole('cell', {name: `26532000008093027${count-1}`, exact: true})).toBeVisible();
-      await drawer.locator('.finance-drawer__body').evaluate(el => {el.scrollTop = 0;});
-      await page.screenshot({animations: 'disabled', path: info.outputPath(`grid-${count}-${width}.png`)});
-    }
-    expect(reads).toBe(1);
-  });
-}
+  }
+  await expansion.getByRole('button',{name:'收起',exact:true}).click();
+  await expect(expansion).toHaveCount(0);
+});

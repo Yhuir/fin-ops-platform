@@ -662,8 +662,8 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         )
 
         row = service.list_rows()["rows"][0]
-        oa_relation_detail = service.row_relation_details(row["id"], kind="oa")
-        relation_detail = service.row_relation_details(row["id"], kind="bank")
+        oa_relation_detail = service.oa_detail("oa-exact")
+        relation_detail = row["bankTransactions"]
 
         self.assertEqual(row["oa"]["primaryOaId"], "oa-exact")
         self.assertEqual(row["oa"]["relationCount"], 2)

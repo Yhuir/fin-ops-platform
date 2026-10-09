@@ -743,8 +743,9 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(row['oa']['relationCount'], 2)
         self.assertEqual({m['oaId'] for m in row['oa']['summaries']}, {first.id, second.id})
         self.assertEqual({o['value'] for o in result['filterOptions']['oa_applicant']}, {'甲', '乙'})
-        detail = service.relation_details(row['id'], kind='oa', tenant_id='default')
-        self.assertEqual(len(detail['summaries']), 2)
+        for member in row['oa']['summaries']:
+            detail = service.oa_detail(member['oaId'], tenant_id='default')
+            self.assertEqual({section['document_id'] for section in detail['sections']}, {member['oaId']})
         for query in ({'month': ['2026-06']}, {'keyword': ['项目乙']}, {'filters': [json.dumps([
             {'field':'oa_applicant','operator':'in','values':['乙']},
             {'field':'oa_project_name','operator':'in','values':['项目乙']},

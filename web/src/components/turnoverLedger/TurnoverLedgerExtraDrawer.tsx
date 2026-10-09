@@ -74,7 +74,7 @@ export default function TurnoverLedgerExtraDrawer({
   onWithdraw: () => void;
   onBankSplitSaved?: () => void | Promise<void>;
 }) {
-  const { close, setDirty } = useBankSplitClose(onClose);
+  const { close, setDirty, setSaving } = useBankSplitClose(onClose);
   const relation = detail?.relation ?? null;
   const canConfirm = canOperateData && relation?.status === "suggested";
   const canWithdraw = canOperateData && relation?.status === "confirmed";
@@ -150,7 +150,7 @@ export default function TurnoverLedgerExtraDrawer({
                 </div>
                 {(detail?.bankRows ?? []).length > 0 ? (
                   <div className="turnover-ledger-extra-bank-list">
-                    <BankTransactionDetailContent onBankSplitSaved={onBankSplitSaved} onSplitDirtyChange={setDirty}
+                    <BankTransactionDetailContent onBankSplitSaved={onBankSplitSaved} onSplitDirtyChange={setDirty} onSplitSavingChange={setSaving}
                       sections={(detail?.bankRows ?? []).map((bankRow, index) => ({
                         title: `银行流水 ${index + 1}`, bank_transaction_id: bankRow.id,
                         fields: [{ label: "金额", value: bankRow.amount }, { label: "收支方向", value: bankRow.directionLabel },

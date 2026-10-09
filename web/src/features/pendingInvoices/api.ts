@@ -30,8 +30,6 @@ import type {
   PendingInvoiceObjectDetail,
   PendingInvoiceObjectDetailTarget,
   PendingInvoiceOaSummary,
-  PendingInvoiceRelationDetail,
-  PendingInvoiceRelationDetailKind,
   PendingInvoiceRelationTransactionSummary,
   PendingInvoiceRuleGroup,
   PendingInvoiceRulesPayload,
@@ -84,6 +82,7 @@ type ApiInvoiceSummary = Partial<{
 
 type ApiOaSummary = Partial<{
   id: string | null;
+  amount: string | null;
   applicant: string | null;
   application_type: string | null;
   project_name: string | null;
@@ -100,6 +99,7 @@ type ApiOaSummary = Partial<{
 }>;
 
 type ApiBankTransactionPayload = Partial<{
+  parent_row_id: string;
   bank_split_parts: BankSplitPart[];
   original_amount: string | null;
   id: string | null;
@@ -445,6 +445,7 @@ function mapBankTransaction(value: ApiBankTransactionPayload | null | undefined,
   const amount = stringValue(value?.amount, stringValue(value?.debit_amount, stringValue(value?.credit_amount)));
   return {
     id: stringValue(value?.id, fallbackId),
+    parentRowId: stringValue(value?.parent_row_id),
     accountNo: stringValue(value?.account_no),
     counterpartyName: stringValue(value?.counterparty_name, "—"),
     counterpartyAccountNo: stringValue(value?.counterparty_account_no),
@@ -512,6 +513,7 @@ function hasInvoiceIdentity(invoice: PendingInvoiceSummary) {
 function mapOa(value: ApiOaSummary | null | undefined): PendingInvoiceOaSummary {
   return {
     id: stringValue(value?.id),
+    amount: stringValue(value?.amount),
     applicant: stringValue(value?.applicant),
     applicationType: stringValue(value?.application_type),
     projectName: stringValue(value?.project_name),
@@ -859,24 +861,6 @@ export async function savePendingInvoiceRules(
     signal,
   });
   return mapRulesPayload(response);
-}
-
-export async function fetchPendingInvoiceRelationDetail(
-  transactionId: string,
-  direction: PendingInvoiceDirection = "expense",
-  kind: PendingInvoiceRelationDetailKind = "all",
-  signal?: AbortSignal,
-): Promise<PendingInvoiceRelationDetail> {
-  const params = new URLSearchParams();
-  params.set("direction", direction);
-  if (kind !== "all") {
-    params.set("kind", kind);
-  }
-  const payload = await requestJson<ApiDetailPayload>(
-    `/api/pending-invoices/rows/${encodeURIComponent(transactionId)}/relation-detail?${params.toString()}`,
-    { method: "GET", signal },
-  );
-  return mapDetailPayload(payload, "关系详情");
 }
 
 function detailPath(target: PendingInvoiceObjectDetailTarget) {

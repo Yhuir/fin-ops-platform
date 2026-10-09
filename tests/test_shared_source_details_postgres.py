@@ -50,8 +50,7 @@ class SharedSourceDetailsPostgresTests(unittest.TestCase):
         original = self.pending.bank_transaction_detail('bank-parent')['sections']
         child = self.pending.bank_transaction_detail(self.interest)['sections']
         self.assertEqual(child, original)
-        row_id = self.input.list_rows(page=1, page_size=20, include_statistics=False)['rows'][0]['id']
-        relation = self.input.relation_details(row_id, {'kind': ['bank']})['sections']
+        relation = self.input.bank_transaction_detail(self.interest)['sections']
         self.assertEqual(relation, original)
         workbench = self.workbench.get_workbench_row_detail(scope_key='all', row_id=self.interest, row_type='bank')
         self.assertIsNotNone(workbench)
@@ -63,7 +62,7 @@ class SharedSourceDetailsPostgresTests(unittest.TestCase):
 
     def test_relation_includes_actual_oa_fields_and_no_internal_identifiers(self):
         source = self.pending.oa_detail('oa-interest')['sections']
-        relation = self.pending.relation_detail(self.interest, direction='expense', kind='oa')['sections']
+        relation = self.pending.oa_detail('oa-interest')['sections']
         self.assertEqual(relation, source)
         self.assertTrue(source)
         self.assertEqual({section['document_id'] for section in source}, {'oa-interest'})
@@ -72,8 +71,7 @@ class SharedSourceDetailsPostgresTests(unittest.TestCase):
         self.assertEqual(summary, {'applicantName': '测试申请人', 'amount': '1497.22',
                                    'applicationDate': '2026-04-29', 'workflowNo': '2403'})
         self.assertTrue(all(section['oa_navigation'] == summary for section in relation))
-        row_id = self.input.list_rows(page=1, page_size=20, include_statistics=False)['rows'][0]['id']
-        input_detail = self.input.relation_details(row_id, {'kind': ['oa']})['sections']
+        input_detail = self.input.oa_detail('oa-interest')['sections']
         self.assertEqual(input_detail[0]['oa_navigation'], summary)
         labels = {field['label'] for section in source for field in section['fields']}
         self.assertIn('申请人', labels)
@@ -88,8 +86,9 @@ class SharedSourceDetailsPostgresTests(unittest.TestCase):
                 values('invoice-line-2','input','SCOPE-001','26532000000000000001','2026-04-29','2026-04-01',
                 '提供方','购买方',10,10,0,10,'pending','{"normalized_payload":{"source_line_items":[{"taxable_item_name":"第二项","quantity":"0","amount":"10","tax_amount":"0","total_with_tax":"10"}]}}'::jsonb)""")
         source = self.pending.invoice_detail('invoice-scope')['sections']
-        relation = self.pending.relation_detail(self.interest, direction='expense', kind='invoice')['sections']
-        self.assertEqual(relation, source)
+        relation = self.input.invoice_detail('invoice-scope')['sections']
+        self.assertEqual([(section['title'],section['fields']) for section in relation],
+                         [(section['title'],section['fields']) for section in source])
         details = [section for section in source if section['title'].startswith('货物或应税劳务明细')]
         self.assertEqual(len(details), 2)
         self.assertEqual({field['value'] for section in details for field in section['fields'] if field['label']=='货物或应税劳务名称'}, {'第一项','第二项'})

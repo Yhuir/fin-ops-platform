@@ -128,9 +128,6 @@ class PendingInvoiceApiRoutes:
                 persist_on_success=True,
                 persist_on_unexpected=True,
             )
-        if method == "GET" and route_path.startswith("/api/pending-invoices/rows/") and route_path.endswith("/relation-detail"):
-            transaction_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._json_read(headers, lambda _session: (HTTPStatus.OK, self.relation_detail(transaction_id, query)))
         if method == "POST" and route_path.startswith("/api/pending-invoices/rows/") and route_path.endswith("/attach-existing-invoice/preview"):
             transaction_id = unquote(route_path.rsplit("/", 3)[-3])
             return self._json_body_read(body, headers, lambda payload: self.attach_existing_preview(transaction_id, payload))
@@ -181,13 +178,6 @@ class PendingInvoiceApiRoutes:
     def invoice_candidates_batch(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._page_query_service.invoice_candidates_batch(payload)
 
-    def relation_detail(self, transaction_id: str, query: dict[str, list[str]] | None = None) -> dict[str, Any]:
-        request_query = query or {}
-        return self._page_query_service.relation_detail(
-            transaction_id,
-            direction=request_query.get("direction", ["expense"])[0],
-            kind=request_query.get("kind", ["all"])[0],
-        )
 
     def bank_transaction_detail(self, bank_transaction_id: str) -> dict[str, Any]:
         return self._page_query_service.bank_transaction_detail(bank_transaction_id)

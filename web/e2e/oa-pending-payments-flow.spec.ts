@@ -335,7 +335,7 @@ test.describe("OA pending payments browser flow", () => {
       );
       await row.getByRole("button", { name: "查看流水 浏览器付款申请人 详情" }).click();
       await mark("apiLatencyMs", detailResponse);
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "支出流水详情" })).toBeVisible());
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "银行流水详情" })).toBeVisible());
       await mark("finalSettledLatencyMs", expect(page.getByText("8000.00").last()).toBeVisible());
     });
     await expect(page.getByText("支出银行")).toBeVisible();
@@ -346,9 +346,9 @@ test.describe("OA pending payments browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       await page.getByRole("button", { name: "关闭详情抽屉" }).click();
-      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "支出流水详情" })).toHaveCount(0));
+      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "银行流水详情" })).toHaveCount(0));
     });
-    await expect(page.getByRole("heading", { name: "支出流水详情" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "银行流水详情" })).toHaveCount(0);
 
     await recordLatency({
       operationId: "oa-pending-payments.open-invoice-detail",

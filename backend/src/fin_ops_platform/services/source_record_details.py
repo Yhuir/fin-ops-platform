@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Any
 
 from fin_ops_platform.domain.models import Invoice
-from fin_ops_platform.services.bank_transaction_unit import original_bank_summaries, original_bank_transaction
+from fin_ops_platform.services.bank_transaction_unit import original_bank_transaction
 from fin_ops_platform.services.invoice_financial_values import (
     PUBLIC_FIELDS,
     invoice_financial_summary,
@@ -327,40 +327,6 @@ def source_invoice_groups(invoices: list[Invoice]) -> list[dict[str, Any]]:
         grouped.setdefault(key, {})[invoice.id] = invoice
     return [{"identity_key": key, "primary": next(iter(lines.values())), "line_items": list(lines.values())}
             for key, lines in grouped.items()]
-
-
-def source_relation_sections(kind: str, summaries: list[Any], *, groups: list[dict[str, Any]],
-                             transactions: list[Any], oa_records: list[Any], bank_labels: dict[str, list[str]] | None = None) -> list[dict[str, Any]]:
-    """Resolve all members against one authorized snapshot; never use summary fields as detail."""
-    typed = [item for item in summaries if isinstance(item, dict)]
-    if kind == "bank":
-        typed = original_bank_summaries(typed)
-    sections: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    banks = {record.id: original_bank_transaction(record) for record in transactions}
-    banks.update({record.id: record for record in list(banks.values())})
-    oas = {record.id: record for record in oa_records}
-    groups = source_invoice_groups([line for group in groups for line in group["line_items"]])
-    invoices = {line.id: group for group in groups for line in group["line_items"]}
-    for summary in typed:
-        key = {"bank": "bankTransactionId", "invoice": "invoiceId", "oa": "oaId"}[kind]
-        identifier = str(summary.get(key) or summary.get("id") or "")
-        if kind == "bank":
-            record = banks.get(identifier)
-            payload = bank_source_detail(record, labels=bank_labels[record.id] if bank_labels is not None else None) if record is not None else None
-        elif kind == "oa":
-            record = oas.get(identifier)
-            payload = oa_source_detail(record) if record is not None else None
-        else:
-            group = invoices.get(identifier)
-            payload = invoice_source_detail(group) if group is not None else None
-        if payload is None:
-            raise ValueError("关联单据原始详情不可用")
-        identity = str(payload.get("oaId") if kind == "oa" else payload["id"])
-        if identity not in seen:
-            seen.add(identity)
-            sections.extend(payload["sections"])
-    return sections
 
 
 # Explicit adapters for the existing canonical SQL query DTOs.

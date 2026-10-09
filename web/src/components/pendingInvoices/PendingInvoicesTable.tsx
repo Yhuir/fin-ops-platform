@@ -1,3 +1,7 @@
+import { Fragment } from "react";
+import RelationGroupExpansion, { RelationCountButton } from "../common/RelationGroupExpansion";
+import { useRelationExpansion } from "../../hooks/useRelationExpansion";
+import { pendingInvoiceRelationColumns } from "../../features/pendingInvoices/relationExpansion";
 import { bankTradeTimeLabel } from "../../features/pendingInvoices/bankTradeTime";
 import BankSplitChips from "../../features/bankSplits/BankSplitChips";
 import { Button, Checkbox, ListBox, Select } from "@heroui/react";
@@ -26,7 +30,6 @@ import type {
   PendingInvoiceColumnFilter,
   PendingInvoiceFilterField,
   PendingInvoiceObjectDetailTarget,
-  PendingInvoiceRelationDetailKind,
   PendingInvoiceRow,
   PendingInvoiceSortDirection,
   PendingInvoiceSortField,
@@ -42,7 +45,6 @@ type PendingInvoicesTableProps = {
   rows: PendingInvoiceRow[];
   config: PendingInvoicesTableConfig;
   onSortChange: (field: PendingInvoiceSortField, direction?: PendingInvoiceSortDirection) => void;
-  onOpenRelation: (row: PendingInvoiceRow, kind?: PendingInvoiceRelationDetailKind) => void;
   onOpenObjectDetail: (target: PendingInvoiceObjectDetailTarget) => void;
   direction: PendingInvoiceDirection;
   statusFilterControl: ReactNode;
@@ -385,7 +387,6 @@ export default function PendingInvoicesTable({
   rows,
   config,
   onSortChange,
-  onOpenRelation,
   onOpenObjectDetail,
   direction,
   statusFilterControl,
@@ -404,6 +405,7 @@ export default function PendingInvoicesTable({
   onPageChange,
   onPageSizeChange,
 }: PendingInvoicesTableProps) {
+  const expansion = useRelationExpansion(rows);
   const bankGroupLabel = direction === "income" ? "收入流水" : direction === "all" ? "流水" : "支出流水";
   const invoiceGroupLabel = direction === "income" ? "销项发票" : direction === "all" ? "发票" : "进项发票";
   const invoicePartyLabel = direction === "income" ? "购方 / 识别号" : "供应商 / 识别号";
@@ -528,7 +530,7 @@ export default function PendingInvoicesTable({
                   direction={direction}
                   key={row.id}
                   onOpenObjectDetail={onOpenObjectDetail}
-                  onOpenRelation={onOpenRelation}
+                  expansion={expansion}
                   onToggleTransactionSelection={onToggleTransactionSelection}
                   row={row}
                   selectedTransactionIds={selectedTransactionIds}
@@ -575,14 +577,14 @@ function DetailButton({
 }
 
 function PendingInvoiceTableRow({
+  expansion,
   row,
   direction,
-  onOpenRelation,
   onOpenObjectDetail,
   selectedTransactionIds,
   onToggleTransactionSelection,
   isTransactionSelectable,
-}: Omit<PendingInvoicesTableProps, "rows" | "config" | "onSortChange" | "statusFilterControl" | "filterFields" | "columnFilters" | "onApplyColumnFilters" | "onClearColumnFilters" | "page" | "pageSize" | "total" | "onPageChange" | "onPageSizeChange"> & { row: PendingInvoiceRow }) {
+}: Omit<PendingInvoicesTableProps, "rows" | "config" | "onSortChange" | "statusFilterControl" | "filterFields" | "columnFilters" | "onApplyColumnFilters" | "onClearColumnFilters" | "page" | "pageSize" | "total" | "onPageChange" | "onPageSizeChange"> & { row: PendingInvoiceRow; expansion: ReturnType<typeof useRelationExpansion> }) {
   const primaryInvoice = row.inputInvoices.primary;
   const primaryOa = row.oa.primary;
   const bankRelationCount = Math.max(0, row.bankTransactions.originalTransactionCount ?? 0);
@@ -604,7 +606,7 @@ function PendingInvoiceTableRow({
   const counterpartyLabel = bankHasMultiple ? uniqueCounterpartyLabel(row) : row.bankTransaction.counterpartyName;
 
   return (
-    <FinanceTableRow className="pending-invoices-table-row" id={row.id}>
+    <Fragment><FinanceTableRow className="pending-invoices-table-row" id={row.id}>
       <FinanceTableCell className="pending-invoices-table-cell pending-invoices-col-counterparty" columnRole="identity">
         <span className="pending-invoices-counterparty-cell pending-invoices-counterparty-cell--selectable">
           <span className="pending-invoices-row-select-slot">
@@ -623,15 +625,7 @@ function PendingInvoiceTableRow({
                 <span className="pending-invoices-counterparty-name" title={counterpartyLabel}>
                   {counterpartyLabel}
                 </span>
-                <button
-                  aria-label={`查看全部流水关系 ${counterpartyLabel}`}
-                  className="pending-invoices-icon-button"
-                  onClick={() => onOpenRelation(row, "bank")}
-                  title="全部流水详情"
-                  type="button"
-                >
-                  <Info aria-hidden="true" size={14} strokeWidth={2.3} />
-                </button>
+                <RelationCountButton kind="bank" count={bankRelationCount} expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id)} />
               </span>
             ) : (
               <>
@@ -685,9 +679,7 @@ function PendingInvoiceTableRow({
       </FinanceTableCell>
       <FinanceTableCell className="pending-invoices-table-cell pending-invoices-table-cell--left-border pending-invoices-col-invoice-no" columnRole="identity">
         {invoiceHasMultiple ? (
-          <DetailButton label="查看全部发票关系" onClick={() => onOpenRelation(row, "invoice")}>
-            +{invoiceRelationCount}
-          </DetailButton>
+          <RelationCountButton kind="invoice" count={invoiceRelationCount} expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id)} />
         ) : primaryInvoice ? (
           <TextCell
             primary={invoiceNumberLabel}
@@ -726,9 +718,7 @@ function PendingInvoiceTableRow({
       </FinanceTableCell>
       <FinanceTableCell className="pending-invoices-table-cell pending-invoices-table-cell--left-border pending-invoices-col-oa-applicant" columnRole="identity">
         {oaHasMultiple ? (
-          <DetailButton label="查看全部 OA 关系" onClick={() => onOpenRelation(row, "oa")}>
-            +{oaRelationCount}
-          </DetailButton>
+          <RelationCountButton kind="oa" count={oaRelationCount} expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id)} />
         ) : primaryOa ? (
           <TextCell
             primary={primaryOa.applicant || <EmptyValue />}
@@ -762,5 +752,11 @@ function PendingInvoiceTableRow({
         ) : <EmptyValue />}
       </FinanceTableCell>
     </FinanceTableRow>
+    {expansion.rowId === row.id && <FinanceTableRow id={`${row.id}:relation`} className="relation-expansion-row"><FinanceTableCell columnRole="description" colSpan={9}>
+      <RelationGroupExpansion columns={pendingInvoiceRelationColumns(row)} expanded={expansion.expanded}
+        onClose={() => expansion.toggle(row.id)} onExited={expansion.exited}
+        onOpenDetail={target => onOpenObjectDetail({ ...target, kind: target.kind === 'bank' ? 'bankTransaction' : target.kind, rowId: row.id })} />
+    </FinanceTableCell></FinanceTableRow>}
+    </Fragment>
   );
 }

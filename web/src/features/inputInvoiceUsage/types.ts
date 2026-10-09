@@ -30,10 +30,9 @@ export type InputInvoiceUsageQuery = {
 };
 
 export type InputInvoiceUsageDetailTarget = {
-  kind: "invoice" | "bank" | "oa" | "relationList";
+  kind: "invoice" | "bank" | "oa";
   id: string;
   rowId?: string;
-  relationKind?: "oa" | "bank" | "invoice";
   scopeKey?: string;
 };
 
@@ -62,6 +61,7 @@ export type InputInvoiceUsagePaymentStatus = {
 };
 
 export type InputInvoiceUsageOaSummary = {
+  relationCaseId?: string;
   id: string;
   applicant: string;
   applicationType: string;
@@ -72,6 +72,8 @@ export type InputInvoiceUsageOaSummary = {
 };
 
 export type InputInvoiceUsageBankSummary = {
+  relationCaseId?: string;
+  parentRowId?: string;
   originalAmount: string;
   bankSplitParts?: BankSplitPart[];
   id: string;
@@ -103,6 +105,7 @@ export type InputInvoiceUsageRelationSummary<T> = {
 };
 
 export type InputInvoiceUsageInvoiceRelationSummary = {
+  relationCaseId?: string;
   id: string;
   displayNo: string;
   invoiceNo: string;

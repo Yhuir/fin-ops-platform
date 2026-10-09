@@ -75,7 +75,7 @@ test('bank detail adds labeled children, persists exact amounts and reloads comp
   await expect(drawer.getByText('已保存', { exact: true })).toBeVisible();
   expect(writes).toBe(1);
   await expectNoUnexpectedSuccessUiErrors(page);
-  await drawer.getByRole('button', { name: '关闭抽屉' }).click();
+  await drawer.getByRole('button', { name: '关闭详情抽屉' }).click();
   await page.getByRole('button', { name: '查看银行流水 智能工厂设备商 详情' }).click();
   await drawer.getByRole('button', { name: '流水子项拆分' }).click();
   await expect(drawer.getByLabel('子项 1 金额')).toHaveValue('56502.78');
@@ -89,7 +89,7 @@ test('bank detail adds labeled children, persists exact amounts and reloads comp
   await expect(drawer.getByLabel('子项 2 金额')).toHaveValue('1500.00');
   expect(writes).toBe(1);
   await drawer.getByRole('button', { name: '取消', exact: true }).click();
-  await drawer.getByRole('button', { name: '关闭抽屉' }).click();
+  await drawer.getByRole('button', { name: '关闭详情抽屉' }).click();
   await page.getByRole('button', { name: '查看银行流水 智能工厂设备商 详情' }).click();
   await drawer.getByRole('button', { name: '流水子项拆分' }).click();
   await expect(drawer.getByLabel('子项 1 金额')).toHaveValue('56502.78');

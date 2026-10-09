@@ -1,7 +1,7 @@
 import { ArrowUpDown, Filter, Info } from "lucide-react";
 import { Button, Checkbox, ListBox, PopoverContent, PopoverDialog, PopoverRoot, PopoverTrigger, Select } from "@heroui/react";
 import type { MutableRefObject, ReactNode } from "react";
-import { useId, useMemo, useState } from "react";
+import { Fragment, useId, useMemo, useState } from "react";
 
 import type {
   InputInvoiceUsageDetailTarget,
@@ -18,6 +18,9 @@ import ExpandableCellText from "./ExpandableCellText";
 import InputInvoiceUsageFilterMenu from "./InputInvoiceUsageFilterMenu";
 import BankAccountValue from "../BankAccountValue";
 import type { InputInvoiceUsageFilterValue } from "./InputInvoiceUsageFilterMenu";
+import RelationGroupExpansion, { RelationCountButton } from '../common/RelationGroupExpansion';
+import { useRelationExpansion } from '../../hooks/useRelationExpansion';
+import { inputInvoiceRelationColumns } from '../../features/inputInvoiceUsage/relationExpansion';
 import { FinanceStatusTag } from "../common/FinanceTable";
 
 type InputInvoiceUsageTableProps = {
@@ -327,51 +330,8 @@ function DetailButton({
   );
 }
 
-function RelationCountButton({
-  label,
-  totalCount,
-  onClick,
-}: {
-  label: string;
-  totalCount: number;
-  onClick: () => void;
-}) {
-  if (totalCount <= 1) {
-    return null;
-  }
-  return (
-    <button
-      aria-label={label}
-      className="input-invoice-usage-table-action input-invoice-usage-relation-count-button"
-      onClick={onClick}
-      title={label}
-      type="button"
-    >
-      {`+${totalCount}`}
-    </button>
-  );
-}
-
 function relationCount(relationCount: number | undefined): number {
   return Math.max(0, Number(relationCount ?? 0));
-}
-
-function relationListTarget(
-  row: InputInvoiceUsageRow,
-  relationKind: NonNullable<InputInvoiceUsageDetailTarget["relationKind"]>,
-): InputInvoiceUsageDetailTarget | null {
-  const relation = relationKind === "oa" ? row.oa : relationKind === "bank" ? row.bank : row.invoiceRelations;
-  if (relation.detailMode === "list" && Number(relation.relationCount ?? 0) > 1) {
-    const scopeKey = row.invoice.issueDate.slice(0, 7);
-    return {
-      kind: "relationList",
-      id: row.id,
-      rowId: row.id,
-      relationKind,
-      scopeKey: /^\d{4}-\d{2}$/.test(scopeKey) ? scopeKey : undefined,
-    };
-  }
-  return null;
 }
 
 export default function InputInvoiceUsageTable({
@@ -396,6 +356,7 @@ export default function InputInvoiceUsageTable({
   emptyStateMessage = "当前条件下没有进项发票使用记录。",
   tableWrapRef,
 }: InputInvoiceUsageTableProps) {
+  const expansion = useRelationExpansion(rows);
   const configsByField = new Map(filterConfigs.map((config) => [config.field, config]));
   const filterFor = (field: string) => filters.find((filter) => filter.field === field) as InputInvoiceUsageFilterValue | undefined;
   const filterMenu = (field: string, label: string) => {
@@ -518,15 +479,15 @@ export default function InputInvoiceUsageTable({
                 const bankRemarkCellExpanded = expandedCells.has(`${row.id}:bank-remark`);
                 const oa = row.oa.primary;
                 const bank = row.bank.primary;
-                const oaRelationTarget = relationListTarget(row, "oa");
-                const bankRelationTarget = relationListTarget(row, "bank");
-                const invoiceRelationTarget = relationListTarget(row, "invoice");
+                const oaRelationTarget = row.oa.relationCount > 1;
+                const bankRelationTarget = row.bank.relationCount > 1;
+                const invoiceRelationTarget = row.invoiceRelations.relationCount > 1;
                 const oaTotalCount = relationCount(row.oa.relationCount);
                 const bankTotalCount = relationCount(row.bank.originalTransactionCount);
                 const invoiceTotalCount = relationCount(row.invoiceRelations.relationCount);
 
                 return (
-                  <tr className="finance-table__row input-invoice-usage-table-row" id={row.id} key={row.id}>
+                  <Fragment key={row.id}><tr className="finance-table__row input-invoice-usage-table-row" id={row.id}>
                     <th className="finance-table__cell input-invoice-usage-table-cell" data-column-role="identity" scope="row">
                       <div className="input-invoice-usage-inline-row">
                         <span className="input-invoice-usage-cell-primary" title={invoiceNo}>{invoiceNo}</span>
@@ -537,9 +498,9 @@ export default function InputInvoiceUsageTable({
                         />
                         {invoiceRelationTarget ? (
                           <RelationCountButton
-                            totalCount={invoiceTotalCount}
+                            count={invoiceTotalCount} kind="invoice" expanded={expansion.rowId === row.id && expansion.expanded}
                             label={`查看发票 ${invoiceNo} 关联发票 ${row.invoiceRelations.relationCount} 张`}
-                            onClick={() => onOpenDetail(invoiceRelationTarget)}
+                            onClick={() => expansion.toggle(row.id)}
                           />
                         ) : null}
                       </div>
@@ -580,9 +541,9 @@ export default function InputInvoiceUsageTable({
                             ) : null}
                             {oaRelationTarget ? (
                               <RelationCountButton
-                                totalCount={oaTotalCount}
+                                count={oaTotalCount} kind="oa" expanded={expansion.rowId === row.id && expansion.expanded}
                                 label={`查看${oa.applicant || "该发票"}关联OA ${row.oa.relationCount} 条`}
-                                onClick={() => onOpenDetail(oaRelationTarget)}
+                                onClick={() => expansion.toggle(row.id)}
                               />
                             ) : null}
                           </div>
@@ -633,9 +594,9 @@ export default function InputInvoiceUsageTable({
                             <span className="input-invoice-usage-money-primary">{formatMoney(row.bank.netAmount, "—")}</span>
                             {bankRelationTarget ? (
                               <RelationCountButton
-                                totalCount={bankTotalCount}
+                                count={bankTotalCount} kind="bank" expanded={expansion.rowId === row.id && expansion.expanded}
                                 label={`查看${bank.counterpartyName || "该发票"}关联流水 ${row.bank.originalTransactionCount} 条`}
-                                onClick={() => onOpenDetail(bankRelationTarget)}
+                                onClick={() => expansion.toggle(row.id)}
                               />
                             ) : null}
                           </div>
@@ -659,6 +620,12 @@ export default function InputInvoiceUsageTable({
                       ) : <EmptyCell />}
                     </td>
                   </tr>
+                  {expansion.rowId === row.id && <tr className="relation-expansion-row"><td colSpan={10}>
+                    <RelationGroupExpansion columns={inputInvoiceRelationColumns(row)} expanded={expansion.expanded}
+                      onClose={() => expansion.toggle(row.id)} onExited={expansion.exited}
+                      onOpenDetail={target => onOpenDetail({ ...target, rowId: row.id })} />
+                  </td></tr>}
+                  </Fragment>
                 );
               })}
             </tbody>

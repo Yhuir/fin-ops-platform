@@ -12,7 +12,8 @@ import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import QuerySearch from "../components/common/QuerySearch";
 import StatePanel from "../components/common/StatePanel";
-import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer";
+import SourceDetailDrawer from "../features/SourceDetailDrawer";
+import { useSourceDetail } from "../features/useSourceDetail";
 import InputInvoiceUsageExportDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageExportDrawer";
 import InputInvoiceUsageTable from "../components/inputInvoiceUsage/InputInvoiceUsageTable";
 import OaReverseWorkspaceDrawer, { type OaReversePreviewRequest } from "../components/inputInvoiceUsage/OaReverseWorkspaceDrawer";
@@ -25,7 +26,6 @@ import {
   fetchInputInvoiceUsageOaDetail,
   fetchInputInvoiceUsagePaymentStatusRules,
   fetchInputInvoiceUsageRows,
-  fetchInputInvoiceUsageRowRelationDetail,
   createInputInvoiceUsageOaReverseDraftFromSelection,
   fetchInputInvoiceUsageOaReverseStagedDrafts,
   fetchInputInvoiceUsageOaReverseSubmittedHistory,
@@ -78,7 +78,7 @@ function isDetailTarget(value: unknown): value is InputInvoiceUsageDetailTarget 
   }
   const target = value as InputInvoiceUsageDetailTarget;
   return typeof target.id === "string"
-    && ["invoice", "bank", "oa", "relationList"].includes(target.kind);
+    && ["invoice", "bank", "oa"].includes(target.kind);
 }
 
 function isWorkflow(value: unknown): value is InputInvoiceUsageQuery["activeWorkflow"] {
@@ -401,7 +401,7 @@ export default function InputInvoiceUsagePage() {
     if (target.kind === "oa") {
       return fetchInputInvoiceUsageOaDetail(target.id, signal);
     }
-    return fetchInputInvoiceUsageRowRelationDetail(target, signal);
+    throw new Error("不支持的单据类型");
   }, []);
 
   const oaReverseScope = useMemo(() => ({
@@ -481,6 +481,8 @@ export default function InputInvoiceUsagePage() {
       />
     </div>
   ), [loading, visibleStatistics]);
+  const sourceDetail = useSourceDetail(Boolean(query.detailTarget), query.detailTarget, loadDetail);
+
   return (
     <>
       <div className="input-invoice-usage-page" data-testid="input-invoice-usage-page">
@@ -545,10 +547,13 @@ export default function InputInvoiceUsagePage() {
           </div>
         </PageScaffold>
       </div>
-      <InputInvoiceUsageDetailDrawer onBankSplitSaved={async () => { await loadRows("refresh"); }}
+      <SourceDetailDrawer onBankSplitSaved={async () => { await loadRows("refresh"); }}
         open={Boolean(query.detailTarget)}
         target={query.detailTarget}
-        loadDetail={loadDetail}
+        sections={sourceDetail.detail?.sections ?? []}
+        loading={sourceDetail.loading} error={sourceDetail.error}
+        detailAvailable={sourceDetail.detail?.detailAvailable}
+        unavailableReason={sourceDetail.detail?.unavailableReason}
         onClose={handleCloseDetail}
       />
       <OaReverseWorkspaceDrawer

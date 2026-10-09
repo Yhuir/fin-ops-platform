@@ -248,7 +248,7 @@ class BankSplitConsumersPostgresTests(unittest.TestCase):
 
         detail = query.bank_transaction_detail(self.interest)
         self.assertEqual(detail['sections'][0]['bank_transaction_id'],'bank-parent')
-        relation = query.relation_detail(self.interest,direction='expense',kind='bank')
+        relation = query.bank_transaction_detail('bank-parent')
         self.assertEqual({section['document_id'] for section in relation['sections']}, {'bank-parent'})
         self.assertEqual(relation['sections'][0]['bank_transaction_id'],'bank-parent')
 

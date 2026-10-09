@@ -1,11 +1,11 @@
-import { Chip, Tabs } from "@heroui/react";
-import { useState, type ReactNode } from "react";
+import { Chip } from "@heroui/react";
+import { type ReactNode } from "react";
 
 import { formatDateTimeText } from "../../features/dateTime";
 import StatePanel from "./StatePanel";
-import BankDocumentOption, { BankDetailLabels, type BankNavigationSummary } from "./BankDocumentOption";
-import OaDocumentOption, { type OaNavigationSummary } from "./OaDocumentOption";
-import InvoiceDocumentOption, { type InvoiceNavigationSummary } from "./InvoiceDocumentOption";
+export type BankNavigationSummary = { counterpartyName: string | null; amount: string | null; direction: string | null; transactionDate: string | null; labels: string[] | null };
+export type OaNavigationSummary = { applicantName: string | null; amount: string | null; applicationDate: string | null; workflowNo: string | null };
+export type InvoiceNavigationSummary = { polarity: string | null; counterpartyName: string | null; totalWithTax: string | null; invoiceDate: string | null };
 
 export type EntityDetailField = {
   label: string;
@@ -33,8 +33,6 @@ type EntityDetailContentProps = {
   loadingLabel?: string;
   sections: EntityDetailSection[];
   unavailableReason?: string;
-  initialDocumentKey?: string;
-  beforeDocumentChange?: () => boolean;
   extraFields?: (section: EntityDetailSection, index: number) => Array<{ label: string; content: ReactNode }>;
 };
 
@@ -292,8 +290,6 @@ export default function EntityDetailContent({
   sections,
   unavailableReason,
   extraFields,
-  initialDocumentKey,
-  beforeDocumentChange,
 }: EntityDetailContentProps) {
   if (loading) {
     return (
@@ -319,23 +315,9 @@ export default function EntityDetailContent({
     return <StatePanel compact tone="info">{emptyMessage}</StatePanel>;
   }
 
-  return <DetailDocuments key={`${initialDocumentKey ?? ''}|${sections.map(section => `${section.document_kind}:${section.document_id ?? section.title}`).join('|')}`}
-    sections={sections} extraFields={extraFields} initialDocumentKey={initialDocumentKey} beforeDocumentChange={beforeDocumentChange} />;
-}
-
-function DetailDocuments({ sections, extraFields, initialDocumentKey, beforeDocumentChange }: Pick<EntityDetailContentProps,
-  'sections' | 'extraFields' | 'initialDocumentKey' | 'beforeDocumentChange'>) {
-  const documents = new Map<string, { title: string; sections: Array<{ section: EntityDetailSection; index: number }> }>();
-  sections.forEach((section, index) => {
-    const key = section.document_id ? `${section.document_kind}:${section.document_id}` : 'single';
-    if (!documents.has(key)) documents.set(key, { title: section.document_title ?? section.title, sections: [] });
-    documents.get(key)!.sections.push({ section, index });
-  });
-  const entries = [...documents.entries()];
-  const [selected, setSelected] = useState(initialDocumentKey ?? entries[0][0]);
-  const active = documents.get(selected);
-  if (!active) return <StatePanel compact tone="error">所选单据不在当前详情中。</StatePanel>;
-  const content = active.sections.map(({section, index: sectionIndex}) => <section className="entity-detail-section" key={sectionIndex}>
+  const documents = new Set(sections.filter(section => section.document_id).map(section => `${section.document_kind}:${section.document_id}`));
+  if (documents.size > 1) return <StatePanel compact tone="error">详情接口返回了多条单据，请重新选择单条详情。</StatePanel>;
+  const content = sections.map((section, sectionIndex) => <section className="entity-detail-section" key={sectionIndex}>
     <h3 className="entity-detail-section__title">{section.title}</h3>
     <table className="entity-detail-table" aria-label={`${section.title}详情`}>
       <tbody>{section.bank_labels !== undefined && <tr><th scope="row">流水标签</th><td><BankDetailLabels labels={section.bank_labels} /></td></tr>}{section.fields.map((field, fieldIndex) => <tr key={`${field.label}-${fieldIndex}`}>
@@ -346,25 +328,13 @@ function DetailDocuments({ sections, extraFields, initialDocumentKey, beforeDocu
       <h4>{field.label}</h4>{field.content}
     </div>)}
   </section>);
-  return <div className="entity-detail-content">
-    {entries.length > 1 ? <Tabs className="entity-detail-tabs" keyboardActivation="manual" selectedKey={selected} onSelectionChange={key => {
-      if (key === selected || beforeDocumentChange?.() === false) return;
-      setSelected(String(key));
-    }}>
-      <Tabs.List className="entity-detail-index" aria-label="单据导航">
-        {entries.map(([key, document], index) => <Tabs.Tab id={key} key={key} className="entity-detail-tab">
-          {document.sections[0].section.document_kind === 'invoice'
-            ? <InvoiceDocumentOption summary={document.sections[0].section.invoice_navigation!} index={index + 1} />
-            : document.sections[0].section.document_kind === 'bank'
-              ? <BankDocumentOption summary={document.sections[0].section.bank_navigation!} index={index + 1} />
-              : document.sections[0].section.document_kind === 'oa'
-                ? <OaDocumentOption summary={document.sections[0].section.oa_navigation!} index={index + 1} />
-                : <><span className="entity-detail-tab__number">{index + 1}</span><span>{document.title}</span></>}
-        </Tabs.Tab>)}
-      </Tabs.List>
-      <Tabs.Panel id={selected} key={selected} className="entity-detail-panel">{content}</Tabs.Panel>
-    </Tabs> : content}
-  </div>;
+  return <div className="entity-detail-content">{content}</div>;
+}
+
+function BankDetailLabels({ labels }: { labels: string[] }) {
+  return labels.length ? <span className="bank-detail-labels">{labels.map((label, index) =>
+    <Chip key={`${index}:${label}`} className="bank-detail-label" size="sm" variant="soft"><Chip.Label className="bank-detail-label__text">{label}</Chip.Label></Chip>
+  )}</span> : <span>未设置标签</span>;
 }
 
 export function preparePublicDetailSections(sections: EntityDetailSection[]): EntityDetailSection[] {

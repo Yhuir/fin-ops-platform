@@ -2,6 +2,7 @@ import userEvent from '@testing-library/user-event';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import BankSplitEditor from '../features/bankSplits/BankSplitEditor';
 import BankTransactionDetailContent from '../features/bankSplits/BankTransactionDetailContent';
+import SourceDetailDrawer from '../features/SourceDetailDrawer';
 import { fetchBankSplits, saveBankSplits, type BankSplitDetail } from '../features/bankSplits/api';
 import { ApiClientError } from '../features/apiClient';
 import { amountCents, centsText } from '../features/bankSplits/amount';
@@ -242,44 +243,41 @@ const groupedBanks = ['bank-1', 'bank-2'].map((id, index) => ({
   fields: [{label: '金额', value: detail.amount}],
 }));
 
-test('switch confirmation preserves a canceled draft and discards only after approval without eager split reads', async () => {
+test('shared source drawer preserves a canceled draft and discards only after approval without eager split reads', async () => {
   const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
-  const dirty = vi.fn();
-  const view = render(<BankTransactionDetailContent sections={groupedBanks} onSplitDirtyChange={dirty} />);
+  const onClose = vi.fn();
+  render(<SourceDetailDrawer open target={{kind:'bank',id:'bank-1'}} sections={[groupedBanks[0]]} loading={false} onClose={onClose} />);
+  expect(fetchBankSplits).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', {name: '流水子项拆分'}));
   fireEvent.change(await screen.findByLabelText('子项 1 金额'), {target: {value: '999999.00'}});
-  view.rerender(<BankTransactionDetailContent sections={groupedBanks.map(section => ({...section}))} onSplitDirtyChange={dirty} />);
-  fireEvent.click(screen.getAllByRole('tab')[1]);
+  fireEvent.click(screen.getByRole('button', {name:'关闭详情抽屉'}));
   expect(confirm).toHaveBeenCalledOnce();
+  expect(onClose).not.toHaveBeenCalled();
   expect(screen.getByLabelText('子项 1 金额')).toHaveValue('999999.00');
   expect(fetchBankSplits).toHaveBeenCalledOnce();
   confirm.mockReturnValue(true);
-  fireEvent.click(screen.getAllByRole('tab')[1]);
-  expect(screen.queryByLabelText('子项 1 金额')).not.toBeInTheDocument();
-  expect(dirty).toHaveBeenLastCalledWith(false, 'bank-1');
+  fireEvent.click(screen.getByRole('button', {name:'关闭详情抽屉'}));
+  expect(onClose).toHaveBeenCalledOnce();
   expect(saveBankSplits).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', {name: '流水子项拆分'}));
-  await screen.findByLabelText('子项 1 金额');
-  expect(fetchBankSplits).toHaveBeenLastCalledWith('bank-2', expect.any(AbortSignal));
   confirm.mockRestore();
 });
 
-test('cannot switch a saving bank, then saves against that identity and permits navigation', async () => {
+test('shared source drawer cannot close a saving bank and saves against its original identity', async () => {
   let finish!: (value: Awaited<ReturnType<typeof saveBankSplits>>) => void;
   vi.mocked(saveBankSplits).mockReturnValue(new Promise(resolve => {finish = resolve;}));
   const confirm = vi.spyOn(window, 'confirm');
-  render(<BankTransactionDetailContent sections={groupedBanks} />);
+  const onClose = vi.fn();
+  render(<SourceDetailDrawer open target={{kind:'bank',id:'bank-1'}} sections={[groupedBanks[0]]} loading={false} onClose={onClose} />);
   fireEvent.click(screen.getByRole('button', {name: '流水子项拆分'}));
   fireEvent.change(await screen.findByLabelText('子项 1 金额'), {target: {value: '1000000.0'}});
   fireEvent.click(screen.getByRole('button', {name: '保存', exact: true}));
-  fireEvent.click(screen.getAllByRole('tab')[1]);
-  expect(screen.getAllByRole('tab')[0]).toHaveAttribute('aria-selected', 'true');
+  fireEvent.click(screen.getByRole('button', {name:'关闭详情抽屉'}));
+  expect(onClose).not.toHaveBeenCalled();
   expect(confirm).not.toHaveBeenCalled();
   expect(saveBankSplits).toHaveBeenCalledWith('bank-1', expect.any(Object));
   finish({...detail, changed: true, version: 3, affected_months: []});
   await screen.findByText('已保存');
-  fireEvent.click(screen.getAllByRole('tab')[1]);
-  expect(screen.getAllByRole('tab')[1]).toHaveAttribute('aria-selected', 'true');
-  expect(screen.queryByText('已保存')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', {name:'关闭详情抽屉'}));
+  expect(onClose).toHaveBeenCalledOnce();
   confirm.mockRestore();
 });

@@ -1,15 +1,12 @@
 import { useEffect, useState } from 'react';
-import AppDrawer from '../../components/common/AppDrawer';
-import { preparePublicDetailSections, type EntityDetailSection } from '../../components/common/EntityDetailContent';
+import SourceDetailDrawer from '../SourceDetailDrawer';
+import { type EntityDetailSection } from '../../components/common/EntityDetailContent';
 import { apiRequestJson } from '../apiClient';
-import BankTransactionDetailContent from './BankTransactionDetailContent';
-import { useBankSplitClose } from './useBankSplitClose';
 
 type SourceDetail = { detail_available: boolean; unavailable_reason?: string; sections: EntityDetailSection[] };
 type Props = { transactionId: string | null; onClose: () => void; onSaved?: () => void | Promise<void> };
 
 export default function BankTransactionDrawer({ transactionId, onClose, onSaved }: Props) {
-  const { close, setDirty } = useBankSplitClose(onClose);
   const [result, setResult] = useState<{ id: string; detail?: SourceDetail; error?: string } | null>(null);
 
   useEffect(() => {
@@ -31,11 +28,8 @@ export default function BankTransactionDrawer({ transactionId, onClose, onSaved 
   }, [transactionId]);
 
   const current = result?.id === transactionId ? result : null;
-  return <AppDrawer className="source-detail-drawer" open={Boolean(transactionId)} title="银行流水详情" width="min(800px, 100vw)" onClose={close}>
-    {transactionId ? <BankTransactionDetailContent key={transactionId} bankTransactionId={transactionId}
-      sections={current?.detail ? preparePublicDetailSections(current.detail.sections) : []}
-      loading={!current} error={current?.error} detailAvailable={current?.detail?.detail_available}
-      unavailableReason={current?.detail?.unavailable_reason}
-      onBankSplitSaved={onSaved} onSplitDirtyChange={setDirty} /> : null}
-  </AppDrawer>;
+  return <SourceDetailDrawer open={Boolean(transactionId)} target={transactionId ? { kind: 'bank', id: transactionId } : null}
+    sections={current?.detail?.sections ?? []} loading={Boolean(transactionId) && !current}
+    error={current?.error} detailAvailable={current?.detail?.detail_available}
+    unavailableReason={current?.detail?.unavailable_reason} onClose={onClose} onBankSplitSaved={onSaved} />;
 }

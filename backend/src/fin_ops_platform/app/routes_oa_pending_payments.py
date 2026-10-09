@@ -127,15 +127,6 @@ class OaPendingPaymentApiRoutes:
                     self.invoice_detail(invoice_id, query, tenant_id=self._tenant_id(session)),
                 ),
             )
-        if method == "GET" and route_path.startswith("/api/oa-pending-payments/rows/") and route_path.endswith("/relation-details"):
-            row_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._json_read(
-                headers,
-                lambda session: (
-                    HTTPStatus.OK,
-                    self.relation_details(row_id, query, tenant_id=self._tenant_id(session)),
-                ),
-            )
         if method == "POST" and route_path == "/api/oa-pending-payments/link-bank-transactions":
             return self._json_write(body, headers, lambda payload, actor_id: self.link_bank_transactions(payload, actor_id=actor_id))
         return None
@@ -195,19 +186,6 @@ class OaPendingPaymentApiRoutes:
             requested_scope_key=_scope_key_from_query(query),
         )
 
-    def relation_details(
-        self,
-        row_id: str,
-        query: dict[str, list[str]],
-        *,
-        tenant_id: str = "default",
-    ) -> dict[str, Any]:
-        return self._query_service_required().relation_details(
-            row_id,
-            kind=query.get("kind", [""])[0],
-            tenant_id=tenant_id,
-            requested_scope_key=_scope_key_from_query(query),
-        )
 
     def link_bank_transactions(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
         if self._command_service is None:

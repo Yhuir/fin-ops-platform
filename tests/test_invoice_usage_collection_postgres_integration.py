@@ -578,17 +578,12 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
         rows = query_service.list_rows(page=1, page_size=20, month="2026-07")["rows"]
         blue_row = next(row for row in rows if row["invoiceId"] == "output-blue-1")
 
-        details = query_service.relation_details(
-            blue_row["id"],
-            {"kind": ["invoice"]},
-        )
-
-        self.assertEqual(details["rowId"], blue_row["id"])
-        self.assertEqual(details["relationCount"], 2)
-        self.assertEqual(
-            [summary["invoiceId"] for summary in details["summaries"]],
-            ["output-blue-1", "output-red-1"],
-        )
+        invoices = next(column for column in blue_row["relationSources"] if column["kind"] == "invoice")
+        self.assertEqual(invoices["count"], 2)
+        self.assertEqual({member["id"] for member in invoices["members"]}, {"output-blue-1", "output-red-1"})
+        for member in invoices["members"]:
+            detail = query_service.invoice_detail(member["id"])
+            self.assertEqual({section["document_id"] for section in detail["sections"]}, {member["id"]})
 
     def test_output_over_collection_is_collected_with_zero_pending_amount(self) -> None:
         self.connection.execute(

@@ -110,7 +110,6 @@ export async function fetchOaPendingPaymentDetail(
   target: OaPendingPaymentDetailTarget,
   signal?: AbortSignal,
 ): Promise<OaPendingPaymentDetailResponse> {
-  const params = new URLSearchParams();
   if (target.kind === "oa") {
     return apiRequestJson<OaPendingPaymentDetailResponse>(
       `/api/oa-pending-payments/oa/${encodeURIComponent(target.id)}/detail`, { signal },
@@ -126,11 +125,7 @@ export async function fetchOaPendingPaymentDetail(
       `/api/oa-pending-payments/invoices/${encodeURIComponent(target.id)}/detail`, { signal },
     );
   }
-  const kind = target.relationKind ?? "bank";
-  params.set("kind", kind);
-  return apiRequestJson<OaPendingPaymentDetailResponse>(
-    `/api/oa-pending-payments/rows/${encodeURIComponent(target.rowId ?? target.id)}/relation-details?${params.toString()}`, { signal },
-  );
+  throw new Error("详情类型无效");
 }
 
 export async function fetchOaPendingPaymentBankCandidates({

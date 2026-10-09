@@ -37,10 +37,9 @@ export type OutputInvoiceCollectionQuery = {
 };
 
 export type OutputInvoiceCollectionDetailTarget = {
-  kind: "invoice" | "bank" | "relationList";
+  kind: "invoice" | "bank" | "oa";
   id: string;
   rowId?: string;
-  relationKind?: "bank" | "invoice";
   scopeKey?: string;
 };
 
@@ -75,6 +74,7 @@ export type OutputInvoiceCollectionStatus = {
 };
 
 export type OutputInvoiceCollectionBankSummary = {
+  parentRowId?: string;
   originalAmount: string;
   bankSplitParts?: BankSplitPart[];
   id: string;
@@ -126,6 +126,7 @@ export type OutputInvoiceCollectionRelationSummary<T> = {
 };
 
 export type OutputInvoiceCollectionRow = {
+  relationSources: import("../../components/common/RelationGroupExpansion").RelationColumn[];
   id: string;
   invoiceId: string;
   invoiceIdentityKey?: string;

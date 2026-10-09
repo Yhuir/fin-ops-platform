@@ -6,6 +6,12 @@ Object.defineProperty(HTMLElement.prototype, "getAnimations", { configurable: tr
 
 // JSDOM has no layout observer; responsive geometry is verified in real Chromium.
 beforeEach(() => {
+  vi.stubGlobal('matchMedia', vi.fn((query: string) => ({matches: false, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn()})));
+  Object.defineProperty(HTMLElement.prototype, 'animate', { configurable: true, value: () => {
+    const animation = { cancel: () => { animation.onfinish = null; }, onfinish: null as null | (() => void) };
+    queueMicrotask(() => animation.onfinish?.());
+    return animation;
+  }});
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 });
 

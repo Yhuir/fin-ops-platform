@@ -10,7 +10,7 @@ import {
 } from "@heroui/react";
 import { ArrowUpDown, Filter, Info } from "lucide-react";
 import type { MutableRefObject, ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 
 import {
   EmptyValue,
@@ -36,6 +36,9 @@ import type {
 } from "../../features/oaPendingPayments/types";
 import { formatMoney } from "../../features/money";
 import { formatDateTimeText } from "../../features/dateTime";
+import RelationGroupExpansion, { RelationCountButton } from "../common/RelationGroupExpansion";
+import { useRelationExpansion } from "../../hooks/useRelationExpansion";
+import { oaPendingRelationColumns } from "../../features/oaPendingPayments/relationExpansion";
 import OaWorkflowStatusChip from "../common/OaWorkflowStatusChip";
 import BankAccountValue from "../BankAccountValue";
 
@@ -155,6 +158,7 @@ export default function OaPendingPaymentsTable({
   emptyStateMessage = "暂无 OA 待付款核对数据",
   tableWrapRef,
 }: OaPendingPaymentsTableProps) {
+  const expansion = useRelationExpansion(rows);
   const configsByField = useMemo(() => new Map(filterConfigs.map((config) => [config.field, config])), [filterConfigs]);
 
   return (
@@ -225,7 +229,7 @@ export default function OaPendingPaymentsTable({
               const rowOaIds = oaRowIds(row);
               const selected = rowOaIds.length > 0 && rowOaIds.every((oaId) => selectedOaRowIds.has(oaId));
               return (
-                <FinanceTableRow className="oa-pending-payments-table-row" id={row.id} key={row.id}>
+                <Fragment key={row.id}><FinanceTableRow className="oa-pending-payments-table-row" id={row.id}>
                   <FinanceTableCell className="oa-pending-payments-table-cell oa-pending-payments-table-cell--oa" columnRole="identity">
                     <div className="oa-pending-payments-oa-grid">
                       <div className="oa-pending-payments-oa-grid__applicant">
@@ -271,19 +275,8 @@ export default function OaPendingPaymentsTable({
                       <div className="oa-pending-payments-oa-grid__amount">
                         <span className="oa-pending-payments-oa-amount-row">
                           <TextLine numeric strong value={row.oa.amount} />
-                          {oaRelationDetailTarget(row) ? (
-                            <DetailButton
-                              disabled={false}
-                              label={oaRelationDetailLabel(row)}
-                              onClick={() => {
-                                const target = oaRelationDetailTarget(row);
-                                if (target) {
-                                  onOpenDetail(target);
-                                }
-                              }}
-                              text={`+${relationCount(row.oa.relationCount)}`}
-                            />
-                          ) : null}
+                          {Number(row.oa.relationCount) > 1 && <RelationCountButton kind="oa" count={row.oa.relationCount!}
+                            expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id)} />}
                         </span>
                       </div>
                     </div>
@@ -306,16 +299,9 @@ export default function OaPendingPaymentsTable({
                         <div className="oa-pending-payments-bank-grid__counterparty">
                           <span className="oa-pending-payments-inline-row">
                             <TextLine strong value={counterpartyDisplay(row)} />
-                            <DetailButton
-                              disabled={!bankTarget}
-                              label={bankDetailLabel(row)}
-                              onClick={() => {
-                                if (bankTarget) {
-                                  onOpenDetail(bankTarget);
-                                }
-                              }}
-                              text={bankRelationButtonText(row)}
-                            />
+                            {row.bankTransaction.original_transaction_count > 1 ? <RelationCountButton kind="bank" count={row.bankTransaction.original_transaction_count}
+                              expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id)} /> :
+                              <DetailButton disabled={!bankTarget} label={bankDetailLabel(row)} onClick={() => { if (bankTarget) onOpenDetail(bankTarget); }} />}
                           </span>
                           <span className="oa-pending-payments-tag-row">
                             {row.bankTransaction.tradeTime ? <TableTag>{formatDateTimeText(row.bankTransaction.tradeTime)}</TableTag> : null}
@@ -344,9 +330,15 @@ export default function OaPendingPaymentsTable({
                     )}
                   </FinanceTableCell>
                   <FinanceTableCell className="oa-pending-payments-table-cell oa-pending-payments-table-cell--invoice oa-pending-payments-table-cell--left-border" columnRole="identity">
-                    <InvoiceCell row={row} onOpenDetail={onOpenDetail} />
+                    <InvoiceCell row={row} onOpenDetail={onOpenDetail} expanded={expansion.rowId === row.id && expansion.expanded} onToggle={() => expansion.toggle(row.id)} />
                   </FinanceTableCell>
                 </FinanceTableRow>
+                {expansion.rowId === row.id && <FinanceTableRow id={`${row.id}:relation`} className="relation-expansion-row"><FinanceTableCell columnRole="description" colSpan={4}>
+                  <RelationGroupExpansion columns={oaPendingRelationColumns(row)} expanded={expansion.expanded}
+                    onClose={() => expansion.toggle(row.id)} onExited={expansion.exited}
+                    onOpenDetail={target => onOpenDetail({ ...target, rowId: row.id })} />
+                </FinanceTableCell></FinanceTableRow>}
+                </Fragment>
               );
             })}
           </FinanceTableBody>
@@ -358,9 +350,13 @@ export default function OaPendingPaymentsTable({
 function InvoiceCell({
   row,
   onOpenDetail,
+  expanded,
+  onToggle,
 }: {
   row: OaPendingPaymentRow;
   onOpenDetail: (target: OaPendingPaymentDetailTarget) => void;
+  expanded: boolean;
+  onToggle: () => void;
 }) {
   if (!hasInvoice(row)) {
     return (
@@ -374,16 +370,8 @@ function InvoiceCell({
     <div className="oa-pending-payments-invoice-stack">
       <span className="oa-pending-payments-inline-row">
         <TextLine strong value={invoiceDisplayNo(row)} />
-        <DetailButton
-          disabled={!invoiceTarget}
-          label={invoiceDetailLabel(row)}
-          onClick={() => {
-            if (invoiceTarget) {
-              onOpenDetail(invoiceTarget);
-            }
-          }}
-          text={invoiceRelationButtonText(row)}
-        />
+        {row.invoice.relationCount > 1 ? <RelationCountButton kind="invoice" count={row.invoice.relationCount} expanded={expanded} onClick={onToggle} /> :
+          <DetailButton disabled={!invoiceTarget} label={invoiceDetailLabel(row)} onClick={() => { if (invoiceTarget) onOpenDetail(invoiceTarget); }} />}
       </span>
       {row.invoice.sellerName ? <TextLine value={row.invoice.sellerName} /> : null}
       <span className="oa-pending-payments-invoice-metadata">
@@ -985,14 +973,6 @@ function bankDetailTarget(row: OaPendingPaymentRow): OaPendingPaymentDetailTarge
       id: row.bankTransaction.primaryBankTransactionId,
     };
   }
-  if (row.bankTransaction.detailMode === "list") {
-    return {
-      kind: "relationList",
-      id: row.id,
-      rowId: row.id,
-      relationKind: "bank",
-    };
-  }
   return null;
 }
 
@@ -1003,31 +983,7 @@ function invoiceDetailTarget(row: OaPendingPaymentRow): OaPendingPaymentDetailTa
       id: row.invoice.primaryInvoiceId,
     };
   }
-  if (row.invoice.detailMode === "list") {
-    return {
-      kind: "relationList",
-      id: row.id,
-      rowId: row.id,
-      relationKind: "invoice",
-    };
-  }
   return null;
-}
-
-function oaRelationDetailTarget(row: OaPendingPaymentRow): OaPendingPaymentDetailTarget | null {
-  if (row.oa.detailMode === "list" && Number(row.oa.relationCount ?? 0) > 1) {
-    return {
-      kind: "relationList",
-      id: row.id,
-      rowId: row.id,
-      relationKind: "oa",
-    };
-  }
-  return null;
-}
-
-function relationCount(relationCount: number | undefined): number {
-  return Math.max(0, Number(relationCount ?? 0));
 }
 
 function bankDetailLabel(row: OaPendingPaymentRow): string {
@@ -1036,21 +992,6 @@ function bankDetailLabel(row: OaPendingPaymentRow): string {
     return `查看${applicant}关联流水 ${row.bankTransaction.original_transaction_count} 条`;
   }
   return `查看流水 ${applicant} 详情`;
-}
-
-function bankRelationButtonText(row: OaPendingPaymentRow): string | undefined {
-  const totalCount = relationCount(row.bankTransaction.original_transaction_count);
-  return row.bankTransaction.detailMode === "list" && totalCount > 1 ? `+${totalCount}` : undefined;
-}
-
-function invoiceRelationButtonText(row: OaPendingPaymentRow): string | undefined {
-  const totalCount = relationCount(row.invoice.relationCount);
-  return row.invoice.detailMode === "list" && totalCount > 1 ? `+${totalCount}` : undefined;
-}
-
-function oaRelationDetailLabel(row: OaPendingPaymentRow): string {
-  const applicant = row.oa.applicantName || "该OA";
-  return `查看${applicant}关联OA ${row.oa.relationCount ?? 0} 条`;
 }
 
 function invoiceDetailLabel(row: OaPendingPaymentRow): string {

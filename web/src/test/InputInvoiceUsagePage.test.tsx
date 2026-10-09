@@ -17,7 +17,7 @@ const inputInvoiceUsageSourceFiles = [
   "src/components/inputInvoiceUsage/InputInvoiceUsageTable.tsx",
   "src/components/inputInvoiceUsage/ExpandableCellText.tsx",
   "src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx",
-  "src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx",
+  "src/features/SourceDetailDrawer.tsx",
   "src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx",
   "src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx",
   "src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx",
@@ -213,33 +213,6 @@ function installInputInvoiceUsageFetch(
     if (url.pathname === "/api/input-invoice-usage/rows") {
       const responsePayload = typeof payload === "function" ? payload(url) : payload;
       return new Response(JSON.stringify(responsePayload), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-    if (url.pathname.startsWith("/api/input-invoice-usage/rows/") && url.pathname.endsWith("/relation-details")) {
-      const kind = url.searchParams.get("kind") ?? "oa";
-      const title = kind === "bank" ? "银行流水关联明细" : kind === "invoice" ? "发票关联明细" : "OA关联明细";
-      const sectionTitle = kind === "bank" ? "银行流水 1" : kind === "invoice" ? "发票 1" : "OA 1";
-      const fieldLabel = kind === "bank" ? "对方户名" : kind === "invoice" ? "发票号码" : "申请人";
-      const fieldValue = kind === "bank" ? "云南银行交易对方户名很长很长需要换行显示" : kind === "invoice" ? "SD-INV-2026-0001" : "刘际涛";
-      return new Response(JSON.stringify({
-        rowId: decodeURIComponent(url.pathname.split("/").at(-2) ?? ""),
-        invoiceId: "invoice-001",
-        kind,
-        title,
-        relationCount: 2,
-        hasMultiple: true,
-        sections: [
-          {
-            title: sectionTitle,
-            fields: [
-              { label: fieldLabel, value: fieldValue },
-              { label: "金额", value: "100.00" },
-            ],
-          },
-        ],
-      }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -506,7 +479,7 @@ describe("Input invoice usage page", () => {
         && sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx"].includes("role=\"menuitemradio\"")
         ? null
         : "InputInvoiceUsageFilterMenu.tsx should use HeroUI Checkbox and preserve radio menu semantics",
-      sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx"].includes("AppDrawer") ? null : "InputInvoiceUsageDetailDrawer.tsx should use AppDrawer for the right drawer shape",
+      sourceByPath["src/features/SourceDetailDrawer.tsx"].includes("AppDrawer") ? null : "InputInvoiceUsageDetailDrawer.tsx should use AppDrawer for the right drawer shape",
       sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx"].includes("FilteredExportDrawer") ? null : "InputInvoiceUsageExportDrawer.tsx should use AppDrawer for the right drawer shape",
       sourceByPath["src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx"].includes("AppDrawer") ? null : "PaymentStatusRulesDrawer.tsx should use AppDrawer for the right drawer shape",
       sourceByPath["src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx"].includes("AppDrawer") ? null : "OaReverseWorkspaceDrawer.tsx should use AppDrawer for the right drawer shape",
@@ -1019,25 +992,20 @@ describe("Input invoice usage page", () => {
     expect(within(firstRowCells[8] as HTMLElement).getByText("100.00")).toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "查看OA 刘际涛 详情" })).not.toBeInTheDocument();
 
-    await user.click(within(page).getByRole("button", { name: "查看刘际涛关联OA 2 条" }));
-    const oaDrawer = await screen.findByRole("dialog", { name: "OA详情" });
-    expect(within(oaDrawer).getByText("刘际涛")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
+    const requestsBefore = fetchMock.mock.calls.length;
+    const toggle = within(page).getByRole('button', {name: '查看刘际涛关联OA 2 条'});
+    await user.click(toggle);
+    const expansion = within(page).getByRole('region', {name: '配对关系'});
+    expect(within(expansion).getByText('张三')).toBeInTheDocument();
+    expect(within(expansion).getAllByRole('button', {name: /详情$/})).toHaveLength(6);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.length).toBe(requestsBefore);
+    await user.click(within(page).getByRole('button', {name: '查看云南银行交易对方户名很长很长需要换行显示关联流水 2 条'}));
+    await waitFor(() => expect(within(page).queryByRole('region', {name: '配对关系'})).not.toBeInTheDocument());
+    await user.click(within(page).getByRole('button', {name: '查看发票 SD-INV-2026-0001 关联发票 2 张'}));
+    expect(within(page).getAllByRole('region', {name: '配对关系'})).toHaveLength(1);
+    expect(fetchMock.mock.calls.length).toBe(requestsBefore);
 
-    await user.click(within(page).getByRole("button", { name: "查看云南银行交易对方户名很长很长需要换行显示关联流水 2 条" }));
-    const bankDrawer = await screen.findByRole("dialog", { name: "银行流水详情" });
-    expect(within(bankDrawer).getByText("银行流水 1")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
-
-    await user.click(within(page).getByRole("button", { name: "查看发票 SD-INV-2026-0001 关联发票 2 张" }));
-    const invoiceDrawer = await screen.findByRole("dialog", { name: "发票详情" });
-    expect(within(invoiceDrawer).getByText("发票 1")).toBeInTheDocument();
-
-    const relationRequests = fetchMock.mock.calls
-      .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
-      .filter((url) => url.pathname === "/api/input-invoice-usage/rows/usage-row-multi/relation-details");
-    expect(relationRequests.map((url) => url.searchParams.get("kind"))).toEqual(["oa", "bank", "invoice"]);
-    expect(relationRequests.map((url) => url.searchParams.get("month"))).toEqual(["2026-05", "2026-05", "2026-05"]);
   });
 
   test("hierarchy and OA header filter combine without changing other query fields", async () => {

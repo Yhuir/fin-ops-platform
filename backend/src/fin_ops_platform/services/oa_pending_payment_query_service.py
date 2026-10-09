@@ -9,7 +9,6 @@ from fin_ops_platform.services.oa_pending_payment_canonical_rows import (
     build_oa_pending_payment_rows,
 )
 from fin_ops_platform.services.oa_pending_payment_details import (
-    oa_pending_payment_relation_details_from_row,
     oa_pending_payment_source_detail,
 )
 from fin_ops_platform.services.oa_pending_payment_export import (
@@ -230,23 +229,6 @@ class OaPendingPaymentQueryService:
             not_found_message=f"Invoice detail not found: {invoice_id}",
         )
 
-    def relation_details(
-        self,
-        row_id: str,
-        *,
-        kind: str,
-        tenant_id: str,
-        requested_scope_key: str | None = None,
-    ) -> dict[str, Any]:
-        return self._detail(
-            identifier_kind="row",
-            identifier=row_id,
-            tenant_id=tenant_id,
-            requested_scope_key=requested_scope_key,
-            builder=lambda data: oa_pending_payment_relation_details_from_row(data["row"], kind=kind, facts=data["facts"]),
-            not_found_code="row_not_found",
-            not_found_message=f"OA pending payment row not found: {row_id}",
-        )
 
     def _detail(
         self,

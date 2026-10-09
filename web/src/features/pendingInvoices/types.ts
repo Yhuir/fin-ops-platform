@@ -119,6 +119,7 @@ export type PendingInvoiceRulesPayload = {
 };
 
 export type PendingInvoiceBankTransaction = {
+  parentRowId?: string;
   originalAmount: string;
   bankSplitParts?: BankSplitPart[];
   id: string;
@@ -227,6 +228,7 @@ export type PendingInvoiceInvoiceZone = {
 
 export type PendingInvoiceOaSummary = {
   id: string;
+  amount?: string;
   applicant: string;
   applicationType: string;
   projectName: string;
@@ -265,7 +267,6 @@ export type PendingInvoiceStatistics = {
   outputInvoiceCount?: number;
 };
 
-export type PendingInvoiceRelationDetailKind = "all" | "bank" | "invoice" | "oa";
 
 export type PendingInvoiceRow = {
   id: string;
@@ -362,7 +363,6 @@ export type PendingInvoiceObjectDetail = {
   sections: PendingInvoiceDetailSection[];
 };
 
-export type PendingInvoiceRelationDetail = PendingInvoiceObjectDetail;
 
 export type PendingInvoiceCandidateStatus = "available" | "already_related" | "conflict" | (string & {});
 export type PendingInvoiceCandidateBankRelationStatus = "unlinked" | "linked" | "already_selected" | "conflict" | (string & {});

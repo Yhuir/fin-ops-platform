@@ -6,9 +6,10 @@ import type { BankSplitDetail } from './api';
 type Props = ComponentProps<typeof EntityDetailContent> & {
   bankTransactionId?: string;
   onBankSplitSaved?: (detail: BankSplitDetail) => void | Promise<void>;
+  onSplitSavingChange?: (saving: boolean) => void;
   onSplitDirtyChange?: (dirty: boolean, source?: string) => void;
 };
-export default function BankTransactionDetailContent({ bankTransactionId, onBankSplitSaved, onSplitDirtyChange, ...props }: Props) {
+export default function BankTransactionDetailContent({ bankTransactionId, onBankSplitSaved, onSplitDirtyChange, onSplitSavingChange, ...props }: Props) {
   const dirtyIds = useRef(new Set<string>());
   const savingIds = useRef(new Set<string>());
   const changeDirty = (id: string, dirty: boolean) => {
@@ -17,13 +18,11 @@ export default function BankTransactionDetailContent({ bankTransactionId, onBank
   };
   const changeSaving = (id: string, saving: boolean) => {
     if (saving) savingIds.current.add(id); else savingIds.current.delete(id);
+    onSplitSavingChange?.(savingIds.current.size > 0);
   };
   const ids = props.sections.map((section, index) => section.bank_transaction_id ?? (index === 0 ? bankTransactionId : undefined));
   const operationIds = ids.map((id, index) => id && ids.lastIndexOf(id) === index ? id : undefined);
-  return <><EntityDetailContent {...props} beforeDocumentChange={() => {
-    if (savingIds.current.size || props.beforeDocumentChange?.() === false) return false;
-    return !dirtyIds.current.size || window.confirm('放弃未保存的流水拆分？');
-  }} extraFields={(_section, index) => {
+  return <><EntityDetailContent {...props} extraFields={(_section, index) => {
     const id = operationIds[index];
     return id ? [{ label: '流水操作', content: <SplitOperation key={id} transactionId={id}
       onSaved={onBankSplitSaved} onDirtyChange={dirty => changeDirty(id, dirty)} onSavingChange={saving => changeSaving(id, saving)} /> }] : [];

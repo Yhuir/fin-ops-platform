@@ -6,8 +6,8 @@ import {
   type EntityDetailSection,
 } from "../common/EntityDetailContent";
 
-export default function CostEntryDetailPanel({ detail, onBankSplitSaved, onSplitDirtyChange }: { detail: CostAllocationDetail; onBankSplitSaved?: () => void | Promise<void>; onSplitDirtyChange?: (dirty: boolean, source?: string) => void }) {
-  return <BankTransactionDetailContent onBankSplitSaved={onBankSplitSaved} onSplitDirtyChange={onSplitDirtyChange} sections={costDetailSections(detail)} />;
+export default function CostEntryDetailPanel({ detail, onBankSplitSaved, onSplitDirtyChange, onSplitSavingChange }: { detail: CostAllocationDetail; onBankSplitSaved?: () => void | Promise<void>; onSplitDirtyChange?: (dirty: boolean, source?: string) => void; onSplitSavingChange?: (saving: boolean) => void }) {
+  return <BankTransactionDetailContent onBankSplitSaved={onBankSplitSaved} onSplitDirtyChange={onSplitDirtyChange} onSplitSavingChange={onSplitSavingChange} sections={costDetailSections(detail)} />;
 }
 
 function costDetailSections(detail: CostAllocationDetail) {

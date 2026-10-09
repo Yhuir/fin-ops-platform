@@ -43,7 +43,6 @@ from fin_ops_platform.services.postgres_repositories.relation_invoice_members im
 from fin_ops_platform.services.search_query import normalize_money_search_query
 from fin_ops_platform.services.source_record_details import (
     oa_source_fields,
-    query_invoice_sections,
     query_source_detail,
     source_money,
 )
@@ -1573,118 +1572,6 @@ where oa.row_id = %s
 limit 1
 """
 
-RELATION_DETAIL_SQL = f"""
-with active_relations as materialized (
-    select relation.case_id, relation.row_ids, relation.row_types
-    from {RELATION_INVOICE_READ_SQL} relation
-    where relation.status = 'active'
-
-      and %s = any(relation.row_ids)
-),
-relation_members as materialized (
-    select distinct
-        relation.row_ids[member_index] as row_id,
-        case
-            when relation.row_types[member_index] in ('bank', 'bank_transaction') then 'bank'
-            when relation.row_types[member_index] in ('invoice', 'input_invoice', 'output_invoice') then 'invoice'
-            else relation.row_types[member_index]
-        end as row_type
-    from active_relations relation
-    cross join lateral generate_subscripts(relation.row_ids, 1) member(member_index)
-),
-bank_member_ids as materialized (
-    select row_id from relation_members where row_type = 'bank'
-    union
-    select %s
-),
-bank_rows as materialized (
-    select distinct
-        coalesce(bank.legacy_mongo_id, bank.id::text) as id,
-        bank.account_no,
-        coalesce(bank.account_name, '') as account_name,
-        bank.txn_direction,
-        coalesce(bank.counterparty_name_raw, '') as counterparty_name,
-        coalesce(bank.raw_payload->'normalized_payload'->>'counterparty_account_no', bank.raw_payload->>'counterparty_account_no', '') as counterparty_account_no,
-        coalesce(bank.raw_payload->'normalized_payload'->>'counterparty_bank_name', bank.raw_payload->>'counterparty_bank_name', '') as counterparty_bank_name,
-        abs(bank.amount) as amount,
-        bank.txn_date::text as transaction_date,
-        coalesce(bank.raw_payload->'normalized_payload'->>'booked_date', bank.raw_payload->>'booked_date', '') as booked_date,
-        bank.balance,
-        coalesce(bank.raw_payload->'normalized_payload'->>'bank_name', bank.raw_payload->>'bank_name', '') as bank_name,
-        coalesce(bank.summary, '') as summary,
-        coalesce(bank.remark, '') as remark,
-        coalesce(bank.bank_serial_no, '') as statement_serial_no,
-        coalesce(bank.raw_payload->'normalized_payload'->>'enterprise_serial_no', bank.raw_payload->>'enterprise_serial_no', '') as enterprise_serial_no,
-        coalesce(bank.raw_payload->'normalized_payload'->>'voucher_kind', bank.raw_payload->>'voucher_kind', '') as voucher_type,
-        coalesce(bank.raw_payload->'normalized_payload'->>'voucher_no', bank.raw_payload->>'voucher_no', '') as voucher_no,
-        coalesce(bank.raw_payload->'normalized_payload'->>'account_detail_no', bank.raw_payload->>'account_detail_no', '') as account_detail_no
-    from bank_member_ids member
-    join app.bank_transaction_units unit on coalesce(unit.legacy_mongo_id, unit.id::text) = member.row_id
-    join app.bank_transactions bank on bank.id = unit.parent_bank_transaction_id
-     and bank.status <> 'deleted'
-),
-source_invoices as not materialized ({INVOICE_SOURCE_SQL}),
-invoice_rows as materialized (
-    select distinct line.* from source_invoices line
-    join source_invoices selected on {INVOICE_MEMBER_MATCH}
-    join relation_members member on member.row_id = selected.id and member.row_type = 'invoice'
-),
-oa_member_ids as materialized (
-    select row_id from relation_members where row_type = 'oa'
-),
-oa_rows as materialized (
-    select
-        oa.row_id as oa_id,
-        oa.applicant,
-        oa.form_type as application_type,
-        oa.project_name,
-        oa.workflow_no,
-        coalesce(oa.workflow_status, oa.status, '') as workflow_status,
-        oa.amount,
-        oa.application_date::text as application_date,
-        oa.approved_at::text as approved_at,
-        coalesce(oa.normalized_payload->>'counterparty_name', '') as counterparty_name,
-        coalesce(oa.normalized_payload->>'reason', '') as reason,
-        coalesce(oa.normalized_payload->>'expense_type', '') as expense_type,
-        coalesce(oa.normalized_payload->>'expense_content', '') as expense_content,
-        coalesce(oa.normalized_payload->'detail_fields', '{{}}'::jsonb) as detail_fields,
-        coalesce(oa.normalized_payload->'expense_items', '[]'::jsonb) as expense_items
-    from oa_member_ids member
-    join app.oa_applications oa on oa.row_id = member.row_id
-    where oa.workflow_status is null
-       or oa.workflow_status = ''
-       or oa.workflow_status in ('completed', '已完成', 'approved', 'APPROVED', 'Approved', '2')
-    union all
-    select
-        admission.oa_id,
-        admission.applicant,
-        coalesce(admission.source_payload->>'apply_type', admission.source_payload->>'form_type', ''),
-        coalesce(admission.project_name_display, admission.project_name, ''),
-        coalesce(admission.source_payload->>'workflow_no', admission.source_payload->>'form_no', ''),
-        'in_progress',
-        admission.amount,
-        '',
-        '',
-        coalesce(admission.source_payload->>'counterparty_name', ''),
-        coalesce(admission.source_payload->>'reason', ''),
-        coalesce(admission.source_payload->>'expense_type', ''),
-        coalesce(admission.source_payload->>'expense_content', ''),
-        case
-            when jsonb_typeof(admission.source_payload->'detail_fields') = 'object'
-            then admission.source_payload->'detail_fields'
-            else '{{}}'::jsonb
-        end,
-        coalesce(admission.source_payload->'expense_items', '[]'::jsonb)
-    from oa_member_ids member
-    join app.oa_pending_payment_admissions admission on admission.oa_id = member.row_id
-    where admission.tenant_id = 'default'
-      and admission.workflow_status = 'in_progress'
-)
-select
-    coalesce((select jsonb_agg(to_jsonb(bank) order by bank.transaction_date desc nulls last, bank.id) from bank_rows bank), '[]'::jsonb) as bank_rows,
-    coalesce((select jsonb_agg(to_jsonb(invoice) order by invoice.issue_date desc nulls last, invoice.id) from invoice_rows invoice), '[]'::jsonb) as invoice_rows,
-    coalesce((select jsonb_agg(to_jsonb(oa) order by oa.application_date desc nulls last, oa.oa_id) from oa_rows oa), '[]'::jsonb) as oa_rows
-"""
 
 
 class PostgresPendingInvoiceCanonicalRepository:
@@ -1899,15 +1786,6 @@ class PostgresPendingInvoiceCanonicalRepository:
     def oa_detail(self, oa_id: str) -> dict[str, Any] | None:
         return self._detail(OA_DETAIL_SQL, oa_id)
 
-    def relation_detail(self, transaction_id: str, *, direction: str, kind: str) -> dict[str, Any] | None:
-        del direction
-        with self._snapshot_transaction() as transaction:
-            row = transaction.fetch_one(RELATION_DETAIL_SQL, (transaction_id, transaction_id))
-            if row is not None and kind in {"bank", "all"}:
-                banks = row["bank_rows"]
-                labels = PostgresBankDetailsCanonicalQueryRepository.source_detail_labels(transaction, [bank["id"] for bank in banks])
-                row = {**row, "bank_rows": [{**bank, "bank_labels": labels[bank["id"]]} for bank in banks]}
-        return dict(row) if isinstance(row, dict) else None
 
     def _detail(self, sql: str, object_id: str) -> dict[str, Any] | None:
         with self._snapshot_transaction() as transaction:
@@ -2116,20 +1994,6 @@ class LocalPendingInvoiceCanonicalRepository:
             "detail_fields": values,
         }
 
-    def relation_detail(self, transaction_id: str, *, direction: str, kind: str) -> dict[str, Any]:
-        payload = self._query_service.relation_detail(
-            transaction_id=transaction_id,
-            direction=direction,
-            kind=kind,
-        )
-        bank_rows = list(payload.get("payment_rows") or [])
-        if not bank_rows and isinstance(payload.get("transaction_summary"), dict):
-            bank_rows = [dict(payload["transaction_summary"])]
-        return {
-            "bank_rows": bank_rows,
-            "invoice_rows": list(payload.get("related_invoices") or payload.get("invoice_summaries") or []),
-            "oa_rows": list(payload.get("related_oa") or payload.get("oa_summaries") or []),
-        }
 
 
 def _filter_options_payload(
@@ -2325,45 +2189,6 @@ class PendingInvoiceCanonicalQueryService:
         return {"title": "OA详情", "detail_available": True,
                 "sections": query_source_detail("oa", row)["sections"]}
 
-    def relation_detail(
-        self,
-        transaction_id: str,
-        *,
-        direction: str,
-        kind: str,
-    ) -> dict[str, Any]:
-        normalized_kind = str(kind or "all").strip()
-        if normalized_kind not in {"all", "bank", "invoice", "oa"}:
-            raise PendingInvoiceError(
-                "invalid_relation_detail_kind",
-                "kind must be all, bank, invoice or oa.",
-            )
-        payload = self._repository.relation_detail(
-            str(transaction_id or "").strip(),
-            direction=direction,
-            kind=normalized_kind,
-        )
-        bank_rows = list((payload or {}).get("bank_rows") or [])
-        invoice_rows = list((payload or {}).get("invoice_rows") or [])
-        oa_rows = list((payload or {}).get("oa_rows") or [])
-        if not bank_rows and not invoice_rows and not oa_rows:
-            raise PendingInvoiceError(
-                "bank_transaction_not_found",
-                f"Bank transaction not found: {transaction_id}",
-                status_code=HTTPStatus.NOT_FOUND,
-            )
-        sections: list[dict[str, Any]] = []
-        if normalized_kind in {"all", "bank"}:
-            sections.extend([section for row in bank_rows for section in query_source_detail("bank", row)["sections"]])
-        if normalized_kind in {"all", "invoice"}:
-            sections.extend(query_invoice_sections(invoice_rows))
-        if normalized_kind in {"all", "oa"}:
-            sections.extend([section for row in oa_rows for section in query_source_detail("oa", row)["sections"]])
-        return {
-            "title": "关系详情",
-            "detail_available": bool(sections),
-            "sections": sections,
-        }
 
 
 def _candidate_transaction_ids(value: Any) -> list[str]:
@@ -2832,7 +2657,7 @@ def _row_payload(row: dict[str, Any]) -> dict[str, Any]:
             "relation_count": len(oa_summaries),
             "has_multiple": len(oa_summaries) > 1,
             "detail_available": any(bool(item.get("detail_available")) for item in oa_summaries),
-            "summaries": oa_summaries if len(oa_summaries) > 1 else [],
+            "summaries": oa_summaries,
         },
         "can_create_invoice": can_create_invoice,
         "available_actions": pending_invoice_available_actions(

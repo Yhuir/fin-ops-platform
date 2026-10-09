@@ -85,6 +85,15 @@ class CanonicalSnapshotRepository:
         )]
         return self._snapshot(context, selected, selected)
 
+    def load_invoice_records(self, invoice_id, *, tenant_id="default"):
+        del tenant_id
+        groups = self.assembler._invoice_groups(month=None, context=self.assembler._query_context())
+        return [line for group in groups if any(line.id == invoice_id for line in group["line_items"]) for line in group["line_items"]]
+
+    def load_bank_source(self, transaction_id, *, tenant_id="default"):
+        del tenant_id
+        return self.assembler._query_context().bank_transactions_by_id().get(transaction_id), []
+
     def load_oa_record(self, oa_id, *, tenant_id="default"):
         del tenant_id
         return self.assembler._query_context().oa_records_by_id([oa_id]).get(oa_id)
@@ -230,20 +239,18 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertEqual(invoice_response.status_code, 200)
         self.assertEqual(bank_response.status_code, 200)
         self.assertEqual(oa_response.status_code, 200)
-        self.assertEqual(relation_response.status_code, 200)
+        self.assertEqual(relation_response.status_code, 404)
         self.assertIn("payment_status", [field["field"] for field in json.loads(filter_response.body)["fields"]])
         self.assertIn("rules", json.loads(rules_response.body))
         self.assertEqual(json.loads(invoice_response.body)["id"], "inv-detail")
         self.assertEqual(json.loads(bank_response.body)["id"], "bank-detail")
         oa_payload = json.loads(oa_response.body)
-        relation_payload = json.loads(relation_response.body)
         self.assertTrue(oa_payload["detailAvailable"])
         self.assertIsNone(oa_payload["workflowStatus"])
         self.assertNotIn("status", oa_payload)
-        self.assertEqual(relation_payload["kind"], "oa")
-        self.assertNotIn("流程状态", [field["label"] for field in relation_payload["sections"][0]["fields"]])
+        self.assertNotIn("流程状态", [field["label"] for field in oa_payload["sections"][0]["fields"]])
 
-    def test_rows_and_relation_details_return_multi_relation_totals_for_oa_bank_and_invoice(self) -> None:
+    def test_rows_include_complete_members_and_details_read_only_the_selected_source(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             invoice_a = self._invoice("inv-multi-a", "2201", "多关系供应商A", total_with_tax="40.00")
@@ -277,18 +284,17 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
             )
             rows_payload = json.loads(rows_response.body)
             row = next(item for item in rows_payload["rows"] if item["invoiceId"] == invoice_a.id)
-            row_id = row["id"]
             oa_detail_response = app.handle_request(
                 "GET",
-                f"/api/input-invoice-usage/rows/{row_id}/relation-details?kind=oa",
+                "/api/input-invoice-usage/oa/oa-multi-a/detail",
             )
             bank_detail_response = app.handle_request(
                 "GET",
-                f"/api/input-invoice-usage/rows/{row_id}/relation-details?kind=bank",
+                "/api/input-invoice-usage/bank-transactions/bank-multi-a/detail",
             )
             invoice_detail_response = app.handle_request(
                 "GET",
-                f"/api/input-invoice-usage/rows/{row_id}/relation-details?kind=invoice",
+                "/api/input-invoice-usage/invoices/inv-multi-a/detail",
             )
 
         self.assertEqual(rows_response.status_code, 200)
@@ -304,17 +310,19 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertEqual(oa_detail_response.status_code, 200)
         self.assertEqual(bank_detail_response.status_code, 200)
         self.assertEqual(invoice_detail_response.status_code, 200)
-        self.assertEqual(len(json.loads(oa_detail_response.body)["summaries"]), 2)
-        oa_detail_payload = json.loads(oa_detail_response.body)
+        self.assertEqual(len(row["oa"]["summaries"]), 2)
+        self.assertEqual(json.loads(oa_detail_response.body)["oaId"], "oa-multi-a")
+        self.assertEqual(json.loads(bank_detail_response.body)["id"], "bank-multi-a")
+        self.assertEqual(json.loads(invoice_detail_response.body)["id"], "inv-multi-a")
         self.assertEqual(
-            [summary["workflowStatus"] for summary in oa_detail_payload["summaries"]],
+            [summary["workflowStatus"] for summary in row["oa"]["summaries"]],
             ["completed", "completed"],
         )
-        self.assertTrue(all("status" not in summary for summary in oa_detail_payload["summaries"]))
-        self.assertEqual(len(json.loads(bank_detail_response.body)["summaries"]), 2)
-        self.assertEqual(len(json.loads(invoice_detail_response.body)["summaries"]), 2)
+        self.assertTrue(all("status" not in summary for summary in row["oa"]["summaries"]))
+        self.assertEqual(len(row["bankTransactions"]["summaries"]), 2)
+        self.assertEqual(len(row["invoiceRelations"]["summaries"]), 2)
 
-    def test_relation_details_do_not_read_legacy_page_repository(self) -> None:
+    def test_single_source_detail_does_not_read_legacy_page_repository(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             invoice = self._invoice("inv-direct-detail", "2110", "直读供应商")
@@ -342,14 +350,14 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
 
             response = app.handle_request(
                 "GET",
-                f"/api/input-invoice-usage/rows/{row['id']}/relation-details?kind=oa",
+                "/api/input-invoice-usage/oa/oa-direct-detail/detail",
             )
 
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("read_model_status", payload)
-        self.assertEqual(payload["relationCount"], 1)
-        self.assertEqual(payload["summaries"][0]["oaId"], "oa-direct-detail")
+        self.assertEqual(row["oa"]["relationCount"], 1)
+        self.assertEqual(payload["oaId"], "oa-direct-detail")
 
     def test_production_requires_canonical_query_repository(self) -> None:
         app = object.__new__(Application)
@@ -375,7 +383,6 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
                 "/api/input-invoice-usage/invoices/inv-unavailable/detail",
                 "/api/input-invoice-usage/bank-transactions/bank-unavailable/detail",
                 "/api/input-invoice-usage/oa/oa-unavailable/detail",
-                "/api/input-invoice-usage/rows/inv-unavailable/relation-details?kind=invoice",
             ):
                 with self.subTest(path=path):
                     response = app.handle_request("GET", path)

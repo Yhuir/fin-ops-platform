@@ -37,8 +37,7 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
         self.sync_relation_fixture()
         service = InputInvoiceUsageCanonicalQueryService(repository=PostgresInputInvoiceUsageQueryRepository(self.connection),
             row_assembler=InputInvoiceUsageQueryService(import_service=ImportNormalizationService(), payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None)))
-        page = service.list_rows()
-        detail = service.relation_details(page["rows"][0]["id"], {"kind": ["bank"]})
+        detail = service.bank_transaction_detail("bank-parent")
         metadata = detail["sections"][0]
         self.assertEqual(metadata["document_id"], "bank-parent")
         self.assertEqual(metadata["bank_navigation"]["amount"], "1001497.22")
@@ -51,7 +50,7 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
         self.assertEqual(pending.bank_transaction_detail("bank-parent")["sections"][0]["bank_navigation"]["labels"], labels)
         # Current labels are read again; a persisted instance rename is not hidden by a detail cache.
         self.connection.execute("update app.bank_transaction_split_items set category_payload=category_payload || '{\"category_label\":\"本次修改的用途\"}'::jsonb where id=%s::uuid", (self.interest,))
-        refreshed = service.relation_details(page["rows"][0]["id"], {"kind": ["bank"]})
+        refreshed = service.bank_transaction_detail("bank-parent")
         self.assertIn("本次修改的用途", " ".join(refreshed["sections"][0]["bank_navigation"]["labels"]))
         with self.connection.transaction() as transaction:
             with self.assertRaises(KeyError):

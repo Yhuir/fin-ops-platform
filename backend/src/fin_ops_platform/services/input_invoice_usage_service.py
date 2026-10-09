@@ -40,7 +40,6 @@ from fin_ops_platform.services.source_record_details import (
     invoice_source_detail,
     oa_source_detail,
     source_invoice_groups,
-    source_relation_sections,
 )
 
 ZERO = Decimal("0.00")
@@ -282,34 +281,6 @@ class InputInvoiceUsageQueryService:
             return {"oaId": str(oa_id), "detailAvailable": False}
         return oa_source_detail(record)
 
-    def row_relation_details(self, row_id: str, *, kind: str) -> dict[str, Any]:
-        normalized_kind = str(kind or "").strip()
-        if normalized_kind not in {"oa", "bank", "invoice"}:
-            raise InputInvoiceUsageError("invalid_relation_kind", "kind must be oa, bank or invoice.")
-        context = self._query_context()
-        row = self._row_by_id(row_id, context=context)
-        if row is None:
-            raise InputInvoiceUsageError(
-                "row_not_found",
-                f"Input invoice usage row not found: {row_id}",
-                status_code=HTTPStatus.NOT_FOUND,
-            )
-        relation_payload = {
-            "oa": row["oa"],
-            "bank": row["bankTransactions"],
-            "invoice": row["invoiceRelations"],
-        }[normalized_kind]
-        return input_invoice_usage_relation_details_from_row(
-            row,
-            kind=normalized_kind,
-            relations=[relation for relation in context.relation_summaries_for_row(row["invoiceId"])
-                       if not row.get("relationGroupId") or relation["caseId"] == row["relationGroupId"]],
-            relation_payload=relation_payload,
-            sections=source_relation_sections(normalized_kind, relation_payload["summaries"],
-                groups=source_invoice_groups(context.list_invoices(month="all", invoice_type=InvoiceType.INPUT)),
-                transactions=list(context.bank_transactions_by_id().values()),
-                oa_records=list(context.oa_records_by_id([str(item.get("oaId") or item.get("id") or "") for item in relation_payload["summaries"]]).values())),
-        )
 
     def payment_status_rules(self) -> dict[str, Any]:
         if self._payment_rules_provider is None:
@@ -1161,43 +1132,6 @@ def _bank_account_label(transaction: BankTransaction) -> str:
     return " ".join(part for part in [bank_name, account_last4] if part)
 
 
-def input_invoice_usage_relation_details_from_row(
-    row: dict[str, Any],
-    *,
-    kind: str,
-    relations: list[dict[str, Any]] | None = None,
-    relation_payload: dict[str, Any] | None = None,
-    sections: list[dict[str, Any]],
-) -> dict[str, Any]:
-    normalized_kind = str(kind or "").strip()
-    if normalized_kind not in {"oa", "bank", "invoice"}:
-        raise ValueError("kind must be oa, bank or invoice.")
-    payload = relation_payload
-    if payload is None:
-        payload = {
-            "oa": row.get("oa"),
-            "bank": row.get("bankTransactions"),
-            "invoice": row.get("invoiceRelations"),
-        }.get(normalized_kind)
-    payload = payload if isinstance(payload, dict) else {}
-    summaries = list(payload.get("summaries") or [])
-    title = {
-        "oa": "OA关联明细",
-        "bank": "银行流水关联明细",
-        "invoice": "发票关联明细",
-    }[normalized_kind]
-    return {
-        "rowId": row.get("id"),
-        "invoiceId": row.get("invoiceId"),
-        "kind": normalized_kind,
-        "title": title,
-        "detailAvailable": payload.get("detailMode") != "none",
-        "relationCount": payload.get("relationCount", 0),
-        "hasMultiple": payload.get("hasMultiple", False),
-        "summaries": summaries,
-        "sections": sections,
-        "relations": list(relations or []),
-    }
 
 
 def _sortable_time(value: str | None) -> float:

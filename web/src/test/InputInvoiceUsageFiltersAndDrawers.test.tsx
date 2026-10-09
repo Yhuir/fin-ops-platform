@@ -6,10 +6,14 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import InputInvoiceUsageDetailDrawer, {
-  type InputInvoiceUsageDetailPayload,
-  type InputInvoiceUsageDetailTarget,
-} from "../components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer";
+import SourceDetailDrawer from '../features/SourceDetailDrawer';
+import { useSourceDetail } from '../features/useSourceDetail';
+import type { InputInvoiceUsageDetailResponse as InputInvoiceUsageDetailPayload, InputInvoiceUsageDetailTarget } from '../features/inputInvoiceUsage/types';
+function InputInvoiceUsageDetailDrawer({open, target, loadDetail, onClose}: {open: boolean; target: InputInvoiceUsageDetailTarget; loadDetail: (target: InputInvoiceUsageDetailTarget, signal?: AbortSignal) => Promise<InputInvoiceUsageDetailPayload>; onClose: () => void}) {
+  const state = useSourceDetail(open, target, loadDetail);
+  return <SourceDetailDrawer open={open} target={target} sections={state.detail?.sections ?? []} loading={state.loading} error={state.error}
+    detailAvailable={state.detail?.detailAvailable} unavailableReason={state.detail?.unavailableReason} onClose={onClose} />;
+}
 import InputInvoiceUsageFilterMenu from "../components/inputInvoiceUsage/InputInvoiceUsageFilterMenu";
 import OaReverseWorkspaceDrawer, {
   type OaReversePreviewPayload,
@@ -20,7 +24,6 @@ import PaymentStatusRulesDrawer, {
 import {
   createInputInvoiceUsageOaReverseDraftFromSelection,
   fetchInputInvoiceUsageOaDetail,
-  fetchInputInvoiceUsageRowRelationDetail,
   fetchInputInvoiceUsageOaReverseStagedDrafts,
   fetchInputInvoiceUsageOaReverseSubmittedHistory,
   previewInputInvoiceUsageOaReverse,
@@ -28,7 +31,7 @@ import {
 
 const inputInvoiceUsageWorkflowSourceFiles = [
   "src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx",
-  "src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx",
+  "src/features/SourceDetailDrawer.tsx",
   "src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx",
   "src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx",
   "src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx",
@@ -61,7 +64,7 @@ describe("Input invoice usage workflow primitive targets", () => {
         && sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx"].includes("role=\"menuitemradio\"")
         ? null
         : "InputInvoiceUsageFilterMenu.tsx should use HeroUI Checkbox and preserve radio menu semantics",
-      sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx"].includes("AppDrawer") ? null : "InputInvoiceUsageDetailDrawer.tsx should use AppDrawer",
+      sourceByPath["src/features/SourceDetailDrawer.tsx"].includes("AppDrawer") ? null : "InputInvoiceUsageDetailDrawer.tsx should use AppDrawer",
       sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx"].includes("FilteredExportDrawer") ? null : "InputInvoiceUsageExportDrawer.tsx should use AppDrawer",
       sourceByPath["src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx"].includes("AppDrawer") ? null : "PaymentStatusRulesDrawer.tsx should use AppDrawer",
       sourceByPath["src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx"].includes("AppDrawer") ? null : "OaReverseWorkspaceDrawer.tsx should use AppDrawer",
@@ -181,7 +184,7 @@ describe("InputInvoiceUsageDetailDrawer", () => {
     await waitFor(() => expect(loadDetail).toHaveBeenCalledWith(target, expect.any(AbortSignal)));
   });
 
-  test("supports invoice, bank, OA and relation-list detail payloads without faking unavailable OA detail", async () => {
+  test("supports single invoice, bank and OA detail payloads without faking unavailable OA detail", async () => {
     const detailByKind: Record<InputInvoiceUsageDetailTarget["kind"], InputInvoiceUsageDetailPayload> = {
       invoice: {
         title: "发票详情",
@@ -199,14 +202,6 @@ describe("InputInvoiceUsageDetailDrawer", () => {
         detailAvailable: false,
         unavailableReason: "后端未提供 OA 完整详情",
         sections: [],
-      },
-      relationList: {
-        title: "关联明细",
-        subtitle: "row-001",
-        sections: [
-          { title: "OA 1", fields: [{ label: "申请人", value: "张三" }] },
-          { title: "OA 2", fields: [{ label: "申请人", value: "李四" }] },
-        ],
       },
     };
     const loadDetail = vi.fn((target: InputInvoiceUsageDetailTarget) => Promise.resolve(detailByKind[target.kind]));
@@ -243,19 +238,7 @@ describe("InputInvoiceUsageDetailDrawer", () => {
     expect(screen.getByText("后端未提供 OA 完整详情")).toBeInTheDocument();
     expect(screen.queryByText("模拟 OA 明细")).not.toBeInTheDocument();
 
-    rerender(
-      <InputInvoiceUsageDetailDrawer
-        open
-        target={{ kind: "relationList", id: "row-001" }}
-        loadDetail={loadDetail}
-        onClose={() => undefined}
-      />,
-    );
-    expect(await screen.findByRole("heading", { name: "OA 1" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "OA 2" })).toBeInTheDocument();
-    expect(await screen.findByText("张三")).toBeInTheDocument();
-    expect(await screen.findByText("李四")).toBeInTheDocument();
-    expect(screen.queryByText("关系数量")).not.toBeInTheDocument();
+
   });
 
   test("hides raw App fields and keeps the title beside the close control", async () => {
@@ -334,12 +317,11 @@ describe("Input invoice usage workflow drawers", () => {
     ]));
   });
 
-  test("relation detail mapper renders the direct canonical relation response", async () => {
+  test("single OA mapper renders the direct canonical source response", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      expect(url.pathname).toBe("/api/input-invoice-usage/rows/row-refreshing/relation-details");
-      expect(url.searchParams.get("kind")).toBe("oa");
-      expect(url.searchParams.get("month")).toBe("2026-05");
+      expect(url.pathname).toBe("/api/input-invoice-usage/oa/oa-refreshing/detail");
+      expect(url.searchParams.has("kind")).toBe(false);
       return new Response(JSON.stringify({
         row_id: "row-refreshing",
         kind: "oa",
@@ -356,13 +338,7 @@ describe("Input invoice usage workflow drawers", () => {
       });
     }));
 
-    const detail = await fetchInputInvoiceUsageRowRelationDetail({
-      kind: "relationList",
-      id: "row-refreshing",
-      rowId: "row-refreshing",
-      relationKind: "oa",
-      scopeKey: "2026-05",
-    });
+    const detail = await fetchInputInvoiceUsageOaDetail('oa-refreshing');
 
     expect(detail.title).toBe("OA详情");
     expect(detail.detailAvailable).toBe(true);

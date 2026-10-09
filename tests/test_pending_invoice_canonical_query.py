@@ -9,7 +9,6 @@ from fin_ops_platform.services.pending_invoice_canonical_query import (
     INVOICE_DETAIL_SQL,
     OA_DETAIL_SQL,
     PAGE_QUERY_SQL,
-    RELATION_DETAIL_SQL,
     PendingInvoiceCanonicalQueryService,
     PostgresPendingInvoiceCanonicalRepository,
     _rule_required_fields,
@@ -75,11 +74,6 @@ class _PageRepository:
             "selected_total": "0.00",
         }
         self.candidate_request: dict[str, object] = {}
-        self.relation_payload: dict[str, object] = {
-            "bank_rows": [],
-            "invoice_rows": [],
-            "oa_rows": [],
-        }
         self.bank_detail_payload: dict[str, object] | None = None
         self.invoice_detail_payload: dict[str, object] | None = None
         self.oa_detail_payload: dict[str, object] | None = None
@@ -107,27 +101,19 @@ class _PageRepository:
     def oa_detail(self, _object_id: str) -> dict[str, object] | None:
         return dict(self.oa_detail_payload) if self.oa_detail_payload is not None else None
 
-    def relation_detail(self, _object_id: str, *, direction: str, kind: str) -> dict[str, object]:
-        del direction, kind
-        return dict(self.relation_payload)
 
 
 class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
-    def test_relation_detail_uses_one_bounded_snapshot_query_without_technical_oa_number_fallback(self) -> None:
-        connection = _RecordingConnection({"bank_rows": [], "invoice_rows": [], "oa_rows": []})
+    def test_single_oa_detail_uses_one_bounded_read_only_query(self) -> None:
+        connection = _RecordingConnection({"oa_id": "oa-1", "workflow_no": "2047"})
         repository = PostgresPendingInvoiceCanonicalRepository(connection)
-
-        payload = repository.relation_detail("bank-1", direction="expense", kind="oa")
-
+        payload = repository.oa_detail("oa-1")
         commands = connection.transaction_state.commands
         self.assertEqual(commands[0][0], "set transaction isolation level repeatable read read only")
-        selects = [sql for sql, _params in commands if sql.lstrip().lower().startswith(("select", "with"))]
+        selects = [(sql, params) for sql, params in commands if sql.lstrip().lower().startswith(("select", "with"))]
         self.assertEqual(len(selects), 1)
         self.assertIsNotNone(payload)
-        self.assertIn("join app.bank_transactions", RELATION_DETAIL_SQL)
-        self.assertIn("join app.invoices", RELATION_DETAIL_SQL)
-        self.assertIn("join app.oa_applications", RELATION_DETAIL_SQL)
-        self.assertIn("join app.oa_pending_payment_admissions", RELATION_DETAIL_SQL)
+        self.assertEqual(selects[0][0], OA_DETAIL_SQL)
         self.assertNotIn("coalesce(oa.workflow_no, oa.form_id", PAGE_QUERY_SQL)
 
     def test_uses_one_read_only_repeatable_read_snapshot_and_fixed_query_count(self) -> None:
@@ -596,9 +582,9 @@ class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):
             service.oa_detail("candidate:123")
         self.assertEqual(raised.exception.error_code, "invalid_oa_detail_id")
 
-    def test_relation_detail_uses_public_sections_and_never_exposes_form_type_as_oa_number(self) -> None:
+    def test_single_details_use_public_sections_and_never_exposes_form_type_as_oa_number(self) -> None:
         repository = _PageRepository()
-        repository.relation_payload = {
+        source_rows = {
             "bank_rows": [
                 {
                     "id": "bank-1",
@@ -631,10 +617,15 @@ class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):
         }
         service = PendingInvoiceCanonicalQueryService(repository=repository)
 
-        payload = service.relation_detail("bank-1", direction="expense", kind="all")
-
-        self.assertEqual([section["title"] for section in payload["sections"]], ["交易信息", "账户信息", "申请信息", "单据信息", "申请信息"])
-        serialized = json.dumps(payload, ensure_ascii=False)
+        repository.bank_detail_payload = source_rows["bank_rows"][0]
+        sections = service.bank_transaction_detail("bank-1")["sections"]
+        for record in source_rows["oa_rows"]:
+            repository.oa_detail_payload = record
+            detail = service.oa_detail(record["oa_id"])
+            self.assertEqual({section["document_id"] for section in detail["sections"]}, {record["oa_id"]})
+            sections.extend(detail["sections"])
+        self.assertEqual([section["title"] for section in sections], ["交易信息", "账户信息", "申请信息", "单据信息", "申请信息"])
+        serialized = json.dumps(sections, ensure_ascii=False)
         self.assertIn('"OA单号", "value": "2047"', serialized)
         self.assertIn('"OA类型", "value": "日常报销"', serialized)
         self.assertNotIn('"OA单号", "value": "expense_claim"', serialized)

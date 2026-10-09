@@ -10,7 +10,8 @@ import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/
 import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import QuerySearch from "../components/common/QuerySearch";
-import OutputInvoiceCollectionDetailDrawer from "../components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer";
+import SourceDetailDrawer from "../features/SourceDetailDrawer";
+import { useSourceDetail } from "../features/useSourceDetail";
 import OutputInvoiceCollectionExportDrawer from "../components/outputInvoiceCollections/OutputInvoiceCollectionExportDrawer";
 import OutputInvoiceCollectionsTable from "../components/outputInvoiceCollections/OutputInvoiceCollectionsTable";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
@@ -19,7 +20,7 @@ import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import {
   fetchOutputInvoiceCollectionBankTransactionDetail,
   fetchOutputInvoiceCollectionInvoiceDetail,
-  fetchOutputInvoiceCollectionRowRelationDetail,
+  fetchOutputInvoiceCollectionOaDetail,
   fetchOutputInvoiceCollectionRows,
   nextSortDirection,
 } from "../features/outputInvoiceCollections/api";
@@ -63,7 +64,7 @@ function isDetailTarget(value: unknown): value is OutputInvoiceCollectionDetailT
   if (value === null) return true;
   if (!value || typeof value !== "object") return false;
   const target = value as OutputInvoiceCollectionDetailTarget;
-  return typeof target.id === "string" && ["invoice", "bank", "relationList"].includes(target.kind);
+  return typeof target.id === "string" && ["invoice", "bank", "oa"].includes(target.kind);
 }
 
 function isWorkflow(value: unknown): value is OutputInvoiceCollectionWorkflow {
@@ -277,7 +278,8 @@ export default function OutputInvoiceCollectionsPage() {
   const loadDetail = useCallback((target: OutputInvoiceCollectionDetailTarget, signal?: AbortSignal) => {
     if (target.kind === "invoice") return fetchOutputInvoiceCollectionInvoiceDetail(target.id, signal);
     if (target.kind === "bank") return fetchOutputInvoiceCollectionBankTransactionDetail(target.id, signal);
-    return fetchOutputInvoiceCollectionRowRelationDetail(target, signal);
+    if (target.kind === 'oa') return fetchOutputInvoiceCollectionOaDetail(target.id, signal);
+    throw new Error("不支持的单据类型");
   }, []);
 
   const titleAccessory = useMemo(() => (
@@ -337,6 +339,8 @@ export default function OutputInvoiceCollectionsPage() {
       </Button>
     </div>
   );
+
+  const sourceDetail = useSourceDetail(Boolean(query.detailTarget), query.detailTarget, loadDetail);
 
   return (
     <>
@@ -422,8 +426,11 @@ export default function OutputInvoiceCollectionsPage() {
           </div>
         </PageScaffold>
       </div>
-      <OutputInvoiceCollectionDetailDrawer onBankSplitSaved={() => loadRows("refresh")}
-        loadDetail={loadDetail}
+      <SourceDetailDrawer onBankSplitSaved={() => loadRows("refresh")}
+        sections={sourceDetail.detail?.sections ?? []}
+        loading={sourceDetail.loading} error={sourceDetail.error}
+        detailAvailable={sourceDetail.detail?.detailAvailable}
+        unavailableReason={sourceDetail.detail?.unavailableReason}
         onClose={() => setQuery((current) => ({ ...current, detailTarget: null }))}
         open={Boolean(query.detailTarget)}
         target={query.detailTarget}

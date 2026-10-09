@@ -14,7 +14,7 @@
 
 - 分类切换采用连续三层区域：全部销项发票 → 蓝字/红字 → 六类既有状态。父分类使用子状态并集，不新增业务状态；区域无外围框或嵌套卡片，窄屏整体纵向排列，无横向滚动。恢复会话保留完整多状态条件，筛选、分页和导出使用同一查询。
 
-- 红蓝票详情在一个公共抽屉中用顶部自动换行选项切换，正文仅展示选中原票及其全部商品行。导航显示序号、红蓝标识、购方名称与价税合计，文字不截断；完整票号保留在正文。详情与关联详情使用同一来源字段投影，切换已加载单据不再请求 API。
+- 红蓝票及正式关系成员在行内展开，成员 icon 打开公共单条详情。列表 `relationSources` 包含同快照发票、OA、原始流水成员，独立关系保留标识；不改变收款状态和金额计算。详情按原始身份定向读取，保留同票全部商品行。
 
 - 正负票各自保留，正式关系不能把发票行折叠，共享 OA 或发票也不能递归连接独立正式关系。只统计可唯一归属于正票的收入流水，支出不计已收。
 - 银行摘要的 `bankShortName` 只取同一快照内银行全名与字符串尾号精确匹配的唯一账户简称；缺少映射或简称冲突时为空。原始银行名称、尾号、筛选和导出口径不变，列表不额外请求设置。
@@ -37,7 +37,7 @@
 
 - [web/src/pages/OutputInvoiceCollectionsPage.tsx](../../../web/src/pages/OutputInvoiceCollectionsPage.tsx)
 - [web/src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx](../../../web/src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx)
-- [web/src/components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer.tsx](../../../web/src/components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer.tsx)
+- [web/src/features/SourceDetailDrawer.tsx](../../../web/src/features/SourceDetailDrawer.tsx)
 - [web/src/features/outputInvoiceCollections/api.ts](../../../web/src/features/outputInvoiceCollections/api.ts)
 - [backend/src/fin_ops_platform/app/routes_output_invoice_collections.py](../../../backend/src/fin_ops_platform/app/routes_output_invoice_collections.py)
 - [backend/src/fin_ops_platform/services/output_invoice_collection_canonical_query_service.py](../../../backend/src/fin_ops_platform/services/output_invoice_collection_canonical_query_service.py)

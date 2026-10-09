@@ -146,20 +146,22 @@ class SplitRouteTests(unittest.TestCase):
 
 class SplitDrawerProjectionTests(unittest.TestCase):
     def test_related_child_sections_have_one_parent_editor_and_original_amount(self):
-        from fin_ops_platform.services.input_invoice_usage_service import source_relation_sections as invoice_sections
-        from fin_ops_platform.services.oa_pending_payment_details import source_relation_sections as oa_sections
-        rows = [{"bankTransactionId":child,"parent_row_id":"parent","parent_amount":"1001497.22",
-                 "amount":amount,"direction":"outflow","bank_split_parts":[{"id":"a"},{"id":"b"}]}
-                for child,amount in [("a","1000000.00"),("b","1497.22")]]
-        for build in (invoice_sections,oa_sections):
-            from fin_ops_platform.domain.enums import TransactionDirection
-            from fin_ops_platform.domain.models import BankTransaction
-            parent = BankTransaction(id='parent', account_no='1234', counterparty_name_raw='原始对方',
-                txn_direction=TransactionDirection.OUTFLOW, amount=Decimal('1001497.22'), signed_amount=Decimal('-1001497.22'))
-            sections=build('bank',rows, groups=[], transactions=[parent], oa_records=[])
-            self.assertEqual({section['document_id'] for section in sections}, {'parent'})
-            self.assertEqual(sections[0]['bank_transaction_id'],'parent')
-            self.assertEqual(next(field['value'] for field in sections[0]['fields'] if field['label']=='支出金额'),'1001497.22')
+        from fin_ops_platform.domain.enums import TransactionDirection
+        from fin_ops_platform.domain.models import BankTransaction
+        from fin_ops_platform.services.bank_transaction_unit import original_bank_summaries
+        from fin_ops_platform.services.source_record_details import bank_source_detail
+        rows = [{"bankTransactionId": child, "parent_row_id": "parent", "parent_amount": "1001497.22",
+                 "amount": amount, "direction": "outflow", "bank_split_parts": [{"id": "a"}, {"id": "b"}]}
+                for child, amount in [("a", "1000000.00"), ("b", "1497.22")]]
+        parent = BankTransaction(id='parent', account_no='1234', counterparty_name_raw='原始对方',
+            txn_direction=TransactionDirection.OUTFLOW, amount=Decimal('1001497.22'), signed_amount=Decimal('-1001497.22'))
+        members = original_bank_summaries(rows)
+        self.assertEqual(len(members), 1)
+        self.assertEqual(members[0]['bankTransactionId'], 'parent')
+        sections = bank_source_detail(parent)['sections']
+        self.assertEqual({section['document_id'] for section in sections}, {'parent'})
+        self.assertEqual(sections[0]['bank_transaction_id'], 'parent')
+        self.assertEqual(next(field['value'] for field in sections[0]['fields'] if field['label'] == '支出金额'), '1001497.22')
 
 
 class SplitSelectableTagsTests(unittest.TestCase):

@@ -1,7 +1,10 @@
 import BankSplitChips from "../../features/bankSplits/BankSplitChips";
 import { ListBox, Select } from "@heroui/react";
 import { ArrowUpDown, Info } from "lucide-react";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
+import RelationGroupExpansion, { RelationCountButton } from "../common/RelationGroupExpansion";
+import { useRelationExpansion } from "../../hooks/useRelationExpansion";
+import { outputInvoiceRelationColumns } from "../../features/outputInvoiceCollections/relationExpansion";
 
 import type {
   OutputInvoiceCollectionDetailTarget,
@@ -110,6 +113,7 @@ export default function OutputInvoiceCollectionsTable({
   onPageSizeChange,
   emptyStateMessage = "当前条件下没有销项发票收款记录。",
 }: OutputInvoiceCollectionsTableProps) {
+  const expansion = useRelationExpansion(rows);
   const configsByField = new Map(filterConfigs.map((config) => [config.field, config]));
   const fieldConfig = (field: string) => configsByField.get(field) ?? defaultFilterConfigs[field];
   const currentFilter = (field: string) => filters.find((filter) => filter.field === field);
@@ -212,6 +216,7 @@ export default function OutputInvoiceCollectionsTable({
             <DataRow
               expandedCells={expandedCells}
               key={row.id}
+              expansion={expansion}
               onOpenDetail={onOpenDetail}
               onToggleCellExpand={onToggleCellExpand}
               row={row}
@@ -224,19 +229,21 @@ export default function OutputInvoiceCollectionsTable({
 }
 
 function DataRow({
+  expansion,
   row,
   expandedCells,
   onToggleCellExpand,
   onOpenDetail,
 }: {
+  expansion: ReturnType<typeof useRelationExpansion>;
   row: OutputInvoiceCollectionRow;
   expandedCells: Set<string>;
   onToggleCellExpand: (rowId: string, cellId: string) => void;
   onOpenDetail: (target: OutputInvoiceCollectionDetailTarget) => void;
 }) {
   const bank = row.bank.primary;
-  const invoiceRelationTarget = relationListTarget(row, "invoice");
-  const bankRelationTarget = relationListTarget(row, "bank");
+  const invoiceRelationTarget = row.invoiceRelations.relationCount > 1;
+  const bankRelationTarget = (row.bank.originalTransactionCount ?? 0) > 1;
   const statusCode = row.collectionStatus.code || "pending_collection";
   const showCollectionAmounts = ["pending_collection", "partial_collected", "collected"].includes(statusCode);
   const polarity = invoicePolarityPresentation(row.invoice.polarity);
@@ -248,7 +255,7 @@ function DataRow({
   ].filter(Boolean).join(" ");
 
   return (
-    <FinanceTableRow className="output-invoice-collections-table-row" id={row.id} textValue={displayInvoiceNo(row)}>
+    <Fragment><FinanceTableRow className="output-invoice-collections-table-row" id={row.id} textValue={displayInvoiceNo(row)}>
       <FinanceTableCell className="output-invoice-collections-table-cell" columnRole="identity" textValue={displayInvoiceNo(row)}>
         <span className="output-invoice-collections-inline-row">
           <TextLine strong value={displayInvoiceNo(row)} />
@@ -261,10 +268,8 @@ function DataRow({
           <FinanceTag>{dateOnly(row.invoice.issueDate)}</FinanceTag>
           <FinanceTag tone={polarity.tone}>{polarity.label}</FinanceTag>
           {invoiceRelationTarget ? (
-            <RelationButton
-              label={`红蓝票 · ${row.invoiceRelations.relationCount}`}
-              onClick={() => onOpenDetail(invoiceRelationTarget)}
-            />
+            <RelationCountButton kind="invoice" count={row.invoiceRelations.relationCount}
+              expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id)} />
           ) : null}
         </span>
       </FinanceTableCell>
@@ -328,10 +333,8 @@ function DataRow({
             <span className="output-invoice-collections-tag-row">
               <FinanceTag>{dateOnly(bank.tradeTime)}</FinanceTag>
               {bankRelationTarget ? (
-                <RelationButton
-                  label={`收入流水 · ${row.bank.originalTransactionCount}`}
-                  onClick={() => onOpenDetail(bankRelationTarget)}
-                />
+                <RelationCountButton kind="bank" count={row.bank.originalTransactionCount!}
+                  expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id)} />
               ) : null}
             </span>
           </>
@@ -359,6 +362,12 @@ function DataRow({
         ) : <EmptyValue />}
       </FinanceTableCell>
     </FinanceTableRow>
+    {expansion.rowId === row.id && <FinanceTableRow id={`${row.id}:relation`} className="relation-expansion-row"><FinanceTableCell columnRole="description" colSpan={8}>
+      <RelationGroupExpansion columns={outputInvoiceRelationColumns(row)} expanded={expansion.expanded}
+        onClose={() => expansion.toggle(row.id)} onExited={expansion.exited}
+        onOpenDetail={target => onOpenDetail({ ...target, rowId: row.id })} />
+    </FinanceTableCell></FinanceTableRow>}
+    </Fragment>
   );
 }
 
@@ -378,13 +387,6 @@ function IconDetailButton({ label, onClick }: { label: string; onClick: () => vo
   );
 }
 
-function RelationButton({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button className="output-invoice-collections-table-action output-invoice-collections-relation-count-button" onClick={onClick} type="button">
-      {label}
-    </button>
-  );
-}
 
 function TextLine({ value, strong = false, muted = false, numeric = false }: {
   value: string | number | null | undefined;
@@ -444,22 +446,6 @@ function PaginationControls({ page, pageSize, total, onPageChange, onPageSizeCha
       <FinanceTablePagination className="finance-table-pagination--fit" compact onPageChange={onPageChange} page={page} pageSize={pageSize} total={total} />
     </div>
   );
-}
-
-function relationListTarget(
-  row: OutputInvoiceCollectionRow,
-  relationKind: NonNullable<OutputInvoiceCollectionDetailTarget["relationKind"]>,
-): OutputInvoiceCollectionDetailTarget | null {
-  const relation = relationKind === "bank" ? row.bank : row.invoiceRelations;
-  if (relation.detailMode !== "list" || Number(relation.relationCount ?? 0) <= 1) return null;
-  const scopeKey = row.invoice.issueDate.slice(0, 7);
-  return {
-    kind: "relationList",
-    id: row.id,
-    rowId: row.id,
-    relationKind,
-    scopeKey: /^\d{4}-\d{2}$/.test(scopeKey) ? scopeKey : undefined,
-  };
 }
 
 function firstColumnInGroup(columnId: string) {

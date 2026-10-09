@@ -401,8 +401,6 @@ class OaPendingPaymentApiTests(unittest.TestCase):
                 "/api/oa-pending-payments/oa/oa-api/detail",
                 "/api/oa-pending-payments/bank-transactions/bank-api/detail",
                 "/api/oa-pending-payments/invoices/inv-api/detail",
-                "/api/oa-pending-payments/rows/row-api/relation-details?kind=bank",
-                "/api/oa-pending-payments/rows/row-api/relation-details?kind=oa",
             ]
 
             responses = [

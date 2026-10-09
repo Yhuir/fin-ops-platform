@@ -42,6 +42,11 @@ function collectionStatusRow({
   const invoiceId = `invoice-${id}`;
   return {
     id,
+    relationSources: [
+      {kind:'invoice',count:1,members:[{id:invoiceId,title:displayNo,amount:totalWithTax,detailAvailable:true}]},
+      {kind:'oa',count:0,members:[]},
+      {kind:'bank',count:bankRelationCount,members:Array.from({length:bankRelationCount},(_,index)=>({id:`bank-${id}-${index}`,title:'云南驰林科技有限公司',amount:collectedAmount,detailAvailable:true}))},
+    ],
     invoice_id: invoiceId,
     invoice_identity_key: `id:${invoiceId}`,
     invoice: {
@@ -337,6 +342,18 @@ const rowsPayload = {
 };
 
 function jsonResponse(payload: unknown, status = 200) {
+  if (payload && typeof payload === 'object' && 'rows' in payload && Array.isArray(payload.rows)) {
+    payload = {...payload, rows: payload.rows.map((row: any) => {
+      const invoices = new Map<string, any>();
+      invoices.set(row.invoice_id, {...row.invoice, id:row.invoice_id});
+      for (const member of row.invoice_relations.summaries) invoices.set(member.id, member);
+      return {...row, relationSources: row.relationSources ?? [
+        {kind:'invoice',count:invoices.size,members:[...invoices.values()].map(item=>({id:item.id,title:item.display_no,amount:item.total_with_tax,detailAvailable:true}))},
+        {kind:'oa',count:0,members:[]},
+        {kind:'bank',count:row.bank.summaries.length,members:row.bank.summaries.map((item:any)=>({id:item.id,title:item.counterparty_name,amount:item.original_amount,detailAvailable:true}))},
+      ]};
+    })};
+  }
   return new Response(JSON.stringify(payload), {
     status,
     headers: { "Content-Type": "application/json" },
@@ -371,17 +388,6 @@ function installFetchMock(rowPayloadFor: (url: URL) => unknown = () => rowsPaylo
         total_with_tax: "-182400.00",
         reversal_target_invoice_nos: ["26532000000395506981"],
         remark: "被红冲蓝字数电发票号码：26532000000395506981",
-      });
-    }
-    if (url.pathname === "/api/output-invoice-collections/rows/output-blue/relation-details") {
-      return jsonResponse({
-        kind: "invoice",
-        relation_count: 2,
-        has_multiple: true,
-        sections: [
-          { title: "发票 1", fields: [{ label: "发票号码", value: "XSFP-RED-001" }] },
-          { title: "发票 2", fields: [{ label: "发票号码", value: "XSFP-BLUE-001" }] },
-        ],
       });
     }
     throw new Error(`unexpected request: ${url.pathname}`);
@@ -514,7 +520,7 @@ describe("销项发票收款情况", () => {
     expect(within(groups).getByText("收入流水")).toBeVisible();
     expect(within(table).getByText("已被冲")).toBeVisible();
     expect(within(table).getByText("已关联蓝字")).toBeVisible();
-    expect(within(table).getByRole("button", { name: "红蓝票 · 2" })).toBeVisible();
+    expect(within(table).getByRole("button", { name: "展开配对关系，发票共 2 张" })).toBeVisible();
 
     const blueRow = within(table).getByRole("row", { name: /XSFP-BLUE-001/ });
     const redRow = within(table).getByRole("row", { name: /XSFP-RED-001/ });
@@ -525,7 +531,7 @@ describe("销项发票收款情况", () => {
     expect(Array.from(blueInvoiceTags?.children ?? []).map((child) => child.textContent)).toEqual([
       "2026-07-08",
       "蓝字",
-      "红蓝票 · 2",
+      "共 2 张",
     ]);
 
     expect(screen.queryByText("OA", { selector: "th" })).not.toBeInTheDocument();
@@ -594,7 +600,7 @@ describe("销项发票收款情况", () => {
     expect(within(collectedRow).getByText("已收款")).toBeVisible();
     expect(within(collectedRow).getByText("已收 1020032.00")).toHaveClass("output-invoice-collection-amount--collected");
     expect(within(collectedRow).getByText("待收 0.00")).toHaveClass("output-invoice-collection-amount--pending");
-    expect(within(collectedRow).getByRole("button", { name: "收入流水 · 2" })).toBeVisible();
+    expect(within(collectedRow).getByRole("button", { name: "展开配对关系，流水共 2 笔" })).toBeVisible();
     const bankAmountCell = collectedRow.querySelectorAll("td")[6] as HTMLElement;
     const bankMetadata = bankAmountCell.querySelector(".output-invoice-collections-tag-row--right") as HTMLElement;
     expect(bankAmountCell.querySelector(".output-invoice-collections-table-text--numeric")).toHaveTextContent("1020032.00");
@@ -737,23 +743,19 @@ describe("销项发票收款情况", () => {
     expect(await within(redInvoiceDrawer).findByText("被红冲蓝字数电发票号码：26532000000395506981")).toBeVisible();
     await user.click(within(redInvoiceDrawer).getByRole("button", { name: "关闭详情抽屉" }));
 
-    await user.click(screen.getByRole("button", { name: "红蓝票 · 2" }));
-    const relationDrawer = await screen.findByRole("dialog", { name: "发票详情" });
-    expect(await within(relationDrawer).findByRole("heading", { name: "发票 1" })).toBeVisible();
-    expect(within(relationDrawer).getByRole("heading", { name: "发票 2" })).toBeVisible();
-    expect(within(relationDrawer).getByText("XSFP-RED-001")).toBeVisible();
-    expect(within(relationDrawer).getByText("XSFP-BLUE-001")).toBeVisible();
-    expect(within(relationDrawer).queryByText("关系数量")).not.toBeInTheDocument();
-    expect(within(relationDrawer).queryByText("关系模式")).not.toBeInTheDocument();
-    expect(within(relationDrawer).queryByText("关系来源")).not.toBeInTheDocument();
-    expect(within(relationDrawer).queryByText("output_invoice_reversal")).not.toBeInTheDocument();
-
-    await waitFor(() => {
-      const requestedPaths = fetchMock.mock.calls.map(([input]) => new URL(String(input), "http://localhost").pathname);
-      expect(requestedPaths).toContain("/api/output-invoice-collections/invoices/invoice-blue/detail");
-      expect(requestedPaths).toContain("/api/output-invoice-collections/invoices/invoice-red/detail");
-      expect(requestedPaths).toContain("/api/output-invoice-collections/rows/output-blue/relation-details");
-      expect(requestedPaths.some((path) => path.includes("/status") || path.includes("/receipts") || path.includes("/red-invoice"))).toBe(false);
-    });
+    const readsBefore = fetchMock.mock.calls.length;
+    await user.click(screen.getByRole("button", { name: "展开配对关系，发票共 2 张" }));
+    const expansion = await screen.findByRole("region", { name: "配对关系" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls).toHaveLength(readsBefore);
+    expect(within(expansion).getByRole("button", { name: "查看发票 XSFP-BLUE-001 详情" })).toBeVisible();
+    await user.click(within(expansion).getByRole("button", { name: "查看发票 XSFP-RED-001 详情" }));
+    const singleDrawer = await screen.findByRole("dialog", { name: "发票详情" });
+    expect(await within(singleDrawer).findByText("被红冲蓝字数电发票号码：26532000000395506981")).toBeVisible();
+    expect(within(singleDrawer).queryByRole("tablist", { name: "单据导航" })).not.toBeInTheDocument();
+    const requestedPaths = fetchMock.mock.calls.map(([input]) => new URL(String(input), "http://localhost").pathname);
+    expect(requestedPaths).toContain("/api/output-invoice-collections/invoices/invoice-blue/detail");
+    expect(requestedPaths).toContain("/api/output-invoice-collections/invoices/invoice-red/detail");
+    expect(requestedPaths.some(path => path.includes("relation-details") || path.includes("/status") || path.includes("/receipts"))).toBe(false);
   });
 });

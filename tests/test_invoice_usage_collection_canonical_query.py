@@ -104,7 +104,7 @@ class RecordingOutputRowAssembler:
             str(candidate.get("group_key") or "")
             for candidate in candidates
         ]
-        return {"invoiceIdentityKey": group["identity_key"]}
+        return {"invoiceIdentityKey": group["identity_key"], "invoiceId": "current", "invoiceRelations": {"summaries": []}}
 
 
 class RecordingInputRowAssembler:

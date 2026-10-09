@@ -1281,76 +1281,7 @@ class PendingInvoiceQueryService:
             {"field": "project_name", "label": "项目", "operators": ["contains", "in"]},
         ]
 
-    def relation_detail(self, *, transaction_id: str, direction: str = "expense", kind: str = "all") -> dict[str, Any]:
-        normalized_direction = self._normalize_direction(direction)
-        if normalized_direction == "all":
-            normalized_direction = self.direction_for_transaction(self._get_transaction(transaction_id))
-        row = self.row_for_transaction(transaction_id, direction=normalized_direction)
-        payment_summary = (
-            row.get("input_invoices", {}).get("payment_summary")
-            if isinstance(row.get("input_invoices"), dict)
-            else {}
-        )
-        payload = {
-            "transaction_summary": row.get("bank_transaction") or {},
-            "related_invoices": list((row.get("input_invoices") or {}).get("summaries") or [])
-            if isinstance(row.get("input_invoices"), dict)
-            else list(row.get("invoices") or []),
-            "invoice_summaries": list((row.get("input_invoices") or {}).get("summaries") or [])
-            if isinstance(row.get("input_invoices"), dict)
-            else list(row.get("invoices") or []),
-            "payment_rows": self._payment_rows_for_transaction(transaction_id),
-            "oa_summaries": list((row.get("oa") or {}).get("summaries") or []) if isinstance(row.get("oa"), dict) else [],
-            "related_oa": list((row.get("oa") or {}).get("summaries") or []) if isinstance(row.get("oa"), dict) else [],
-            "paid_total": payment_summary.get("paid_total", "0.00") if isinstance(payment_summary, dict) else "0.00",
-            "invoice_total": payment_summary.get("invoice_total", "0.00") if isinstance(payment_summary, dict) else "0.00",
-            "remaining_amount": payment_summary.get("remaining_amount", "0.00") if isinstance(payment_summary, dict) else "0.00",
-            "difference_amount": payment_summary.get("difference_amount", "0.00") if isinstance(payment_summary, dict) else "0.00",
-            "available_actions": [
-                action
-                for action in list(row.get("available_actions") or [])
-                if action in {"attach_existing_invoice"}
-            ],
-            "relation_case_ids": list(row.get("relation_case_ids") or []),
-        }
-        relation_row = self._canonical_relation_context_row(transaction_id)
-        if relation_row is None:
-            return self._filter_relation_detail_payload(payload, kind=kind)
-        invoices = self._invoice_payloads_from_relation_context(relation_row, direction=normalized_direction)
-        oa_summaries = self._oa_summaries_from_relation_context(relation_row)
-        payment_summary = self._payment_summary_from_relation_context(relation_row, invoices)
-        payment_rows = self._payment_rows_from_relation_context(relation_row)
-        payload.update(
-            {
-                "related_invoices": invoices,
-                "invoice_summaries": invoices,
-                "payment_rows": payment_rows,
-                "related_oa": oa_summaries,
-                "oa_summaries": oa_summaries,
-                "paid_total": payment_summary["paid_total"],
-                "invoice_total": payment_summary["invoice_total"],
-                "remaining_amount": payment_summary["remaining_amount"],
-                "difference_amount": payment_summary["difference_amount"],
-                "relation_case_ids": self._invoice_relation_case_ids(invoices, relation_row),
-            }
-        )
-        return self._filter_relation_detail_payload(payload, kind=kind)
 
-    @staticmethod
-    def _filter_relation_detail_payload(payload: dict[str, Any], *, kind: str) -> dict[str, Any]:
-        normalized_kind = str(kind or "all").strip().lower() or "all"
-        if normalized_kind == "all":
-            return payload
-        result = dict(payload)
-        if normalized_kind != "invoice":
-            result["related_invoices"] = []
-            result["invoice_summaries"] = []
-        if normalized_kind != "bank":
-            result["payment_rows"] = []
-        if normalized_kind != "oa":
-            result["related_oa"] = []
-            result["oa_summaries"] = []
-        return result
 
     @staticmethod
     def _invoice_relation_case_ids(invoices: list[dict[str, Any]], relation_row: dict[str, Any] | None) -> list[str]:

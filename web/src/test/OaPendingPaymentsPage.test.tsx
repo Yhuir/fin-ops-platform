@@ -160,6 +160,7 @@ const rowsPayload = {
         relationCount: 2,
         hasMultiple: true,
         detailMode: "list",
+        nonOutflowRelationEdges: [],
         summaries: [
           {
             bankTransactionId: "bank-002",
@@ -630,17 +631,6 @@ function installOaPendingPaymentsFetch(overrides?: {
         sections: [{ title: "发票情况", fields: [{ label: "进项发票方名称", value: "云南恒昆机电设备有限公司" }] }],
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
-    if (url.pathname === "/api/oa-pending-payments/rows/oa-payment-group-case-001/relation-details") {
-      const kind = url.searchParams.get("kind");
-      const title = kind === "oa" ? "OA关联明细" : kind === "invoice" ? "发票关联明细" : "支出流水关联明细";
-      const sectionTitle = kind === "oa" ? "OA 1" : kind === "invoice" ? "发票 1" : "流水 1";
-      return new Response(JSON.stringify({
-        title,
-        subtitle: "刘际涛",
-        detailAvailable: true,
-        sections: [{ title: sectionTitle, fields: [{ label: "数量", value: kind === "oa" ? "3" : "2" }] }],
-      }), { status: 200, headers: { "Content-Type": "application/json" } });
-    }
     if (url.pathname === "/api/pending-invoices/rules") {
       const canSave = overrides?.rulesCanSave ?? false;
       return new Response(JSON.stringify({
@@ -1069,13 +1059,13 @@ describe("OA pending payments page", () => {
     const groupedRow = within(page).getByRole("row", { name: /刘际涛/ });
     const groupedCells = groupedRow.querySelectorAll(".oa-pending-payments-table-cell");
     expect(groupedCells[0]).toHaveTextContent("4450.00");
-    expect(groupedCells[0]).toHaveTextContent("+3");
+    expect(groupedCells[0]).toHaveTextContent("共 3 条");
     expect(groupedCells[1]).toHaveTextContent("已支付");
     expect(within(page).queryByText("同步状态异常")).not.toBeInTheDocument();
     expect(groupedCells[1]).not.toHaveTextContent("OA写回状态");
     expect(groupedCells[1]).not.toHaveTextContent("写回失败");
     expect(groupedCells[2]).toHaveTextContent("4450.00");
-    expect(groupedCells[2]).toHaveTextContent("+2");
+    expect(groupedCells[2]).toHaveTextContent("共 2 笔");
     expect(groupedCells[2]).not.toHaveTextContent("3000.00");
     expect(within(page).getByText(/补充住宿费/)).toBeInTheDocument();
     expect(within(page).getByText(/补充流水备注/)).toBeInTheDocument();
@@ -1528,25 +1518,21 @@ describe("OA pending payments page", () => {
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: "查看流水 张三 详情" }));
-    expect(await screen.findByRole("heading", { name: "支出流水详情" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "银行流水详情" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: "查看发票 张三 详情" }));
     expect(await screen.findByRole("heading", { name: "发票详情" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
-    await user.click(within(page).getByRole("button", { name: "查看刘际涛关联OA 3 条" }));
-    expect(await screen.findByRole("heading", { name: "OA关联明细" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
-
-    await user.click(within(page).getByRole("button", { name: "查看刘际涛关联流水 2 条" }));
-    expect(await screen.findByRole("heading", { name: "支出流水关联明细" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
-
-    await user.click(within(page).getByRole("button", { name: "查看刘际涛关联发票 2 张" }));
-    expect(await screen.findByRole("heading", { name: "发票关联明细" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
-
+    const readsBefore = fetchMock.mock.calls.length;
+    await user.click(within(page).getByRole("button", { name: "展开配对关系，OA共 3 条" }));
+    const expansion = await screen.findByRole("region", {name:"配对关系"});
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls).toHaveLength(readsBefore);
+    expect(within(expansion).getAllByRole("button", {name:/详情$/})).toHaveLength(7);
+    await user.click(within(page).getByRole("button", { name: "收起配对关系，流水共 2 笔" }));
+    await waitFor(()=>expect(screen.queryByRole("region", {name:"配对关系"})).not.toBeInTheDocument());
     await user.click(within(page).getByRole("button", { name: "支出流水无需开票规则设置" }));
     await screen.findByRole("heading", { name: "支出流水无需开票规则设置" });
     expect(screen.queryByRole("heading", { name: "待找发票规则设置" })).not.toBeInTheDocument();
@@ -1566,30 +1552,7 @@ describe("OA pending payments page", () => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       return url.pathname.startsWith("/api/oa-pending-payments/invoices/");
     })).toBe(true);
-    expect(fetchMock.mock.calls.some(([input]) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return (
-        url.pathname === "/api/oa-pending-payments/rows/oa-payment-group-case-001/relation-details"
-        && url.searchParams.get("kind") === "oa"
-        && !url.searchParams.has("month")
-      );
-    })).toBe(true);
-    expect(fetchMock.mock.calls.some(([input]) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return (
-        url.pathname === "/api/oa-pending-payments/rows/oa-payment-group-case-001/relation-details"
-        && url.searchParams.get("kind") === "bank"
-        && !url.searchParams.has("month")
-      );
-    })).toBe(true);
-    expect(fetchMock.mock.calls.some(([input]) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return (
-        url.pathname === "/api/oa-pending-payments/rows/oa-payment-group-case-001/relation-details"
-        && url.searchParams.get("kind") === "invoice"
-        && !url.searchParams.has("month")
-      );
-    })).toBe(true);
+    expect(fetchMock.mock.calls.some(([input])=>String(input).includes("relation-details"))).toBe(false);
   });
 
   test("does not invalidate OA pending payment after unrelated pending-invoice rule save", async () => {

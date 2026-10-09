@@ -208,6 +208,7 @@ function mapBank(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"]
   }
   return {
     id,
+    parentRowId: stringValue(raw.parent_row_id),
     bankSplitParts: mapBankSplitParts(raw.bank_split_parts),
     originalAmount: stringValue(raw.original_amount),
     counterpartyName,
@@ -300,6 +301,7 @@ function mapRowsResponse(payload: unknown): OutputInvoiceCollectionRowsResponse 
         },
         collectionStatus: mapCollectionStatus(camelOrSnake(row, "collectionStatus", "collection_status")),
         bank: mapRelation(camelOrSnake(row, "bank", "bankTransactions"), mapBank),
+        relationSources: relationSourceColumns(row.relationSources),
         invoiceRelations: mapRelation(camelOrSnake(row, "invoiceRelations", "invoice_relations"), mapRelatedInvoice),
       };
     }),
@@ -357,10 +359,13 @@ function mapBankDetailResponse(payload: unknown): OutputInvoiceCollectionDetailR
     sections: raw.detailAvailable === false ? [] : sourceDetailSections(raw.sections)};
 }
 
-function mapRelationDetailResponse(payload: unknown): OutputInvoiceCollectionDetailResponse {
-  const raw = objectValue(payload);
-  return {title: raw.kind === "bank" ? "银行流水详情" : raw.kind === "oa" ? "OA详情" : "发票详情",
-    detailAvailable: raw.detailAvailable !== false, sections: sourceDetailSections(raw.sections)};
+function relationSourceColumns(value: unknown): OutputInvoiceCollectionRowsResponse['rows'][number]['relationSources'] {
+  if (!Array.isArray(value) || value.length !== 3 || value.some((column, index) => !column || column.kind !== ['invoice', 'oa', 'bank'][index]
+    || !Array.isArray(column.members) || column.count !== column.members.length || column.members.some((member: Record<string, unknown>) =>
+      typeof member.id !== 'string' || !member.id || typeof member.detailAvailable !== 'boolean'))) {
+    throw new Error('配对关系摘要不完整，请重新查询。');
+  }
+  return value;
 }
 
 function mapFilterOptionsResponse(payload: unknown): OutputInvoiceCollectionFilterOptionsResponse {
@@ -427,6 +432,11 @@ export async function fetchOutputInvoiceCollectionInvoiceDetail(id: string, sign
   return mapInvoiceDetailResponse(payload);
 }
 
+export async function fetchOutputInvoiceCollectionOaDetail(id: string, signal?: AbortSignal): Promise<OutputInvoiceCollectionDetailResponse> {
+  const raw = await apiRequestJson<{sections: unknown}>(`/api/output-invoice-collections/oa/${encodeURIComponent(id)}/detail`, { signal });
+  return { title: 'OA详情', sections: sourceDetailSections(raw.sections) };
+}
+
 export async function fetchOutputInvoiceCollectionBankTransactionDetail(id: string, signal?: AbortSignal) {
   const payload = await apiRequestJson<unknown>(`/api/output-invoice-collections/bank-transactions/${encodeURIComponent(id)}/detail`, {
     method: "GET",
@@ -435,21 +445,6 @@ export async function fetchOutputInvoiceCollectionBankTransactionDetail(id: stri
   return mapBankDetailResponse(payload);
 }
 
-export async function fetchOutputInvoiceCollectionRowRelationDetail(
-  target: OutputInvoiceCollectionDetailTarget,
-  signal?: AbortSignal,
-) {
-  const params = new URLSearchParams();
-  params.set("kind", target.kind === "relationList" ? target.relationKind ?? "bank" : target.kind);
-  if (target.scopeKey) {
-    params.set("month", target.scopeKey);
-  }
-  const payload = await apiRequestJson<unknown>(
-    `/api/output-invoice-collections/rows/${encodeURIComponent(target.rowId ?? target.id)}/relation-details?${params.toString()}`,
-    { method: "GET", signal },
-  );
-  return mapRelationDetailResponse(payload);
-}
 
 export function nextSortDirection(
   currentField: string,

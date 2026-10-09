@@ -50,14 +50,8 @@ class RecordingQueryService:
     ) -> dict[str, Any]:
         return self._record("bank_transaction_detail", bank_transaction_id, tenant_id)
 
-    def relation_details(
-        self,
-        row_id: str,
-        query: object,
-        *,
-        tenant_id: str,
-    ) -> dict[str, Any]:
-        return self._record("relation_details", (row_id, query), tenant_id)
+    def oa_detail(self, oa_id: str, *, tenant_id: str) -> dict[str, Any]:
+        return self._record("oa_detail", oa_id, tenant_id)
 
 
 class OutputInvoiceCollectionApiTests(unittest.TestCase):
@@ -95,8 +89,8 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
                 "/api/output-invoice-collections/bank-transactions/bank%2F1/detail",
             ),
             (
-                "relation_details",
-                "/api/output-invoice-collections/rows/row%2F1/relation-details",
+                "oa_detail",
+                "/api/output-invoice-collections/oa/oa%2F1/detail",
             ),
         ]
 
@@ -113,10 +107,11 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
                 self.assertEqual(self.service.calls[-1][0], expected_call)
                 self.assertEqual(self.service.calls[-1][2], "default")
 
-        self.assertEqual(response, {"status": 200, "payload": {"source": "relation_details"}})
+        self.assertEqual(response, {"status": 200, "payload": {"source": "oa_detail"}})
 
     def test_removed_mutation_and_legacy_routes_are_not_owned(self) -> None:
         removed = [
+            ("GET", "/api/output-invoice-collections/rows/row-1/relation-details"),
             ("GET", "/api/output-invoice-collections/status-rules"),
             ("GET", "/api/output-invoice-collections/receipts/history"),
             ("POST", "/api/output-invoice-collections/receipt-preview"),
@@ -143,7 +138,7 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
             error_response=lambda exc: exc.error_code,
         )
 
-        for path in ("/api/output-invoice-collections/rows", "/api/output-invoice-collections/export-summary", "/api/output-invoice-collections/export"):
+        for path in ("/api/output-invoice-collections/oa/oa-1/detail", "/api/output-invoice-collections/rows", "/api/output-invoice-collections/export-summary", "/api/output-invoice-collections/export"):
             response = routes.route("GET", path, {}, None, {})
             self.assertEqual(response, {"status":401})
         self.assertEqual(self.service.calls, [])

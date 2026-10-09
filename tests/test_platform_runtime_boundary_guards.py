@@ -2552,7 +2552,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "/api/output-invoice-collections/export",
             "/api/output-invoice-collections/invoices/",
             "/api/output-invoice-collections/bank-transactions/",
-            "/api/output-invoice-collections/rows/",
+            "/api/output-invoice-collections/oa/",
             "def _json_read(",
         ):
             if required not in route_class:
@@ -2587,7 +2587,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "def filter_options(",
             "def export_summary(",
             "def export(",
-            "def relation_details(",
+            "def oa_detail(",
         ):
             if required not in query_source:
                 violations.append(
@@ -2693,7 +2693,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "/api/oa-pending-payments/oa/",
             "/api/oa-pending-payments/bank-transactions/",
             "/api/oa-pending-payments/invoices/",
-            "/api/oa-pending-payments/rows/",
+            "/api/oa-pending-payments/oa/",
             "/api/oa-pending-payments/link-bank-transactions",
             "def _json_read(",
             "def _json_write(",
@@ -3736,8 +3736,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "/api/input-invoice-usage/invoices/",
             "/api/input-invoice-usage/bank-transactions/",
             "/api/input-invoice-usage/oa/",
-            "/api/input-invoice-usage/rows/",
-            "relation_details",
+            "/api/input-invoice-usage/oa/",
+            "oa_detail",
             "export_summary",
             "def export(",
         ):
@@ -3764,7 +3764,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "class InputInvoiceUsageCanonicalQueryService",
             "def rows(",
             "def filter_options(",
-            "def relation_details(",
+            "def oa_detail(",
             "def export_page(",
             "def export_rows(",
         ):

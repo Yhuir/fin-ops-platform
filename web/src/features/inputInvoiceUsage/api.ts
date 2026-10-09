@@ -181,6 +181,7 @@ function mapOa(rawValue: unknown): InputInvoiceUsageRowsResponse["rows"][number]
   }
   return {
     id,
+    relationCaseId: stringValue(camelOrSnake(raw, "relationCaseId", "relation_case_id")),
     applicant,
     applicationType,
     workflowStatus,
@@ -201,6 +202,8 @@ function mapBank(rawValue: unknown): InputInvoiceUsageRowsResponse["rows"][numbe
   }
   return {
     id,
+    relationCaseId: stringValue(camelOrSnake(raw, "relationCaseId", "relation_case_id")),
+    parentRowId: stringValue(raw.parent_row_id),
     bankSplitParts: mapBankSplitParts(raw.bank_split_parts),
     originalAmount: stringValue(raw.original_amount),
     counterpartyName,
@@ -233,6 +236,7 @@ function mapInvoiceRelation(rawValue: unknown): InputInvoiceUsageRowsResponse["r
   }
   return {
     id,
+    relationCaseId: stringValue(camelOrSnake(raw, "relationCaseId", "relation_case_id")),
     displayNo,
     invoiceNo,
     invoiceCode,
@@ -363,12 +367,6 @@ function mapOaDetailResponse(payload: unknown): InputInvoiceUsageDetailResponse 
   const raw = objectValue(payload);
   return {title: "OA详情", detailAvailable: raw.detailAvailable !== false,
     sections: raw.detailAvailable === false ? [] : sourceDetailSections(raw.sections)};
-}
-
-function mapRelationDetailResponse(payload: unknown): InputInvoiceUsageDetailResponse {
-  const raw = objectValue(payload);
-  return {title: raw.kind === "bank" ? "银行流水详情" : raw.kind === "oa" ? "OA详情" : "发票详情",
-    detailAvailable: raw.detailAvailable !== false, sections: sourceDetailSections(raw.sections)};
 }
 
 function mapFilterOptionsResponse(payload: unknown): InputInvoiceUsageFilterOptionsResponse {
@@ -740,18 +738,6 @@ export async function fetchInputInvoiceUsageOaDetail(id: string, signal?: AbortS
   return mapOaDetailResponse(payload);
 }
 
-export async function fetchInputInvoiceUsageRowRelationDetail(target: InputInvoiceUsageDetailTarget, signal?: AbortSignal) {
-  const params = new URLSearchParams();
-  params.set("kind", target.kind === "relationList" ? target.relationKind ?? "oa" : target.kind);
-  if (target.scopeKey) {
-    params.set("month", target.scopeKey);
-  }
-  const payload = await apiRequestJson<unknown>(
-    `/api/input-invoice-usage/rows/${encodeURIComponent(target.rowId ?? target.id)}/relation-details?${params.toString()}`,
-    { method: "GET", signal },
-  );
-  return mapRelationDetailResponse(payload);
-}
 
 export async function fetchInputInvoiceUsagePaymentStatusRules(signal?: AbortSignal) {
   const payload = await apiRequestJson<unknown>("/api/input-invoice-usage/payment-status-rules", {

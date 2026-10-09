@@ -75,9 +75,6 @@ class InputInvoiceUsageApiRoutes:
         if method == "GET" and route_path.startswith("/api/input-invoice-usage/oa/") and route_path.endswith("/detail"):
             oa_id = unquote(route_path.rsplit("/", 2)[-2])
             return self.oa_detail(oa_id, headers)
-        if method == "GET" and route_path.startswith("/api/input-invoice-usage/rows/") and route_path.endswith("/relation-details"):
-            row_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self.relation_details(row_id, query, headers)
         return None
 
     def rows(
@@ -167,24 +164,6 @@ class InputInvoiceUsageApiRoutes:
             return self._input_usage_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
 
-    def relation_details(
-        self,
-        row_id: str,
-        query: dict[str, list[str]],
-        headers: dict[str, str] | None = None,
-    ) -> Any:
-        session, auth_error = self._read_session(headers)
-        if auth_error is not None:
-            return auth_error
-        try:
-            payload = self._query_service.relation_details(
-                row_id,
-                query,
-                tenant_id=_tenant_id(session),
-            )
-        except InputInvoiceUsageError as exc:
-            return self._input_usage_error_response(exc)
-        return self._json_response(HTTPStatus.OK, payload)
 
     def payment_status_rules(
         self,
