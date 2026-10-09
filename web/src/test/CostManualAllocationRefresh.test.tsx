@@ -169,6 +169,7 @@ it('shows stale manual decisions as pending review instead of completed', async 
 
 it('disables unchanged metadata-waiting saves but permits actual edits', async () => {
   task={...task,pendingReasons:['bank_account_missing','source_date_missing'],sourceAllocations:task.suggestedSourceAllocations,suggestedSourceAllocations:null};
+  task.bankEvents[0].bankAccountLabel='';task.bankEvents[0].tradeTime='';
   const user=userEvent.setup();render(<Drawer canSave onSaved={vi.fn()}/>);
   await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));await user.click(await screen.findByRole('button',{name:/^项目 /}));
   await screen.findByRole('textbox',{name:'分配金额 1'});
@@ -212,6 +213,27 @@ it('keeps task counts during a delayed list refresh without enabling stale saves
   await act(async () => finish({items:[], counts:{pending:0,allocated:1}, rowCount:0}));
   expect(await screen.findByRole('radio', {name:/待分配.*0/})).toBeInTheDocument();
   expect(pending.closest('[aria-busy]')).toHaveAttribute('aria-busy', 'false');
+});
+
+it('waits for fresh detail before remounting a collapsed editor', async () => {
+  const user = userEvent.setup(); render(<Drawer canSave onSaved={vi.fn()}/>);
+  await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));
+  const heading = await screen.findByRole('button',{name:/^项目 /});
+  await user.click(heading); await screen.findByRole('textbox',{name:'分配金额 1'});
+  await user.click(heading);
+  await waitFor(()=>expect(screen.queryByRole('textbox',{name:'分配金额 1'})).not.toBeInTheDocument());
+  let finish!: (value: CostStatisticsManualAllocationTask) => void;
+  vi.mocked(fetchCostStatisticsManualAllocation).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+  await user.click(heading);
+  await waitFor(()=>expect(finish).toBeDefined());
+  expect(screen.queryByRole('textbox',{name:'分配金额 1'})).not.toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('加载中');
+  const fresh = {...task,sourceFingerprint:'fresh',units:task.units.map(unit=>({...unit,expenseContent:'最新费用'}))};
+  await act(async()=>finish(fresh));
+  await screen.findByRole('textbox',{name:'分配金额 1'});
+  expect(screen.getByRole('table',{name:'OA 与流水对照'})).toHaveTextContent('最新费用');
+  expect(fetchCostStatisticsManualAllocation).toHaveBeenCalledTimes(2);
+  expect(saveCostStatisticsManualAllocation).not.toHaveBeenCalled();
 });
 
 it('opens and reopens collapsed, fetches details only on expansion, and ignores late list expansion', async () => {

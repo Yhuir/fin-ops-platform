@@ -425,6 +425,56 @@ class ApprovalAllocationTests(unittest.TestCase):
         return CostStatisticsPolicy({'settings': policy._settings, 'cost_groups': [group],
                                      'bank_rows': group['bank_rows'], 'bank_statistics': {}})
 
+    def partial_payment_group(self, *, conflicting_reference=False):
+        policy, group = self.policy((100, 100, 100), (100, 100, 100), groups=[
+            {'oa_row_ids': ['0', '1'], 'bank_row_ids': ['0', '1', '2']},
+            {'oa_row_ids': ['2'], 'bank_row_ids': []},
+        ], refs={'1': ['0']} if conflicting_reference else None)
+        for i, row in enumerate(group['oa_rows']):
+            row.update(application_date=f'2026-08-{i + 1:02}', counterparty_name='设备公司')
+        for i, row in enumerate(group['bank_rows']):
+            row.update(trade_time=f'2026-08-{1 if i == 0 else i + 10:02} 12:00:00',
+                       counterparty_name='设备公司')
+        return policy, group
+
+    def test_partial_unique_payment_closes_before_unresolved_history_component(self):
+        policy, group = self.partial_payment_group()
+        for reverse in (False, True):
+            if reverse:
+                group['bank_rows'].reverse()
+            result = self.snapshot_policy(policy, group)
+            self.assertEqual([(r['transaction_id'], r['amount']) for r in result.serialized_cost_rows],
+                             [('0', '100.00')])
+            task = result.allocation_tasks[0]
+            self.assertEqual(task['unallocated_amount'], '200.00')
+            self.assertEqual(task['pending_reasons'], ['source_required'])
+            self.assertEqual(result.pending_manual_allocation_count, 1)
+            # Partial evidence cannot move the newly attached OA into the old history scope.
+            self.assertEqual([line['unit_id'] for line in task['source_allocations']['cost_lines']], ['oa:0'])
+
+    def test_partial_unique_payment_does_not_bypass_competing_explicit_reference(self):
+        policy, group = self.partial_payment_group(conflicting_reference=True)
+        result = self.snapshot_policy(policy, group)
+        self.assertEqual(result.serialized_cost_rows, [])
+        self.assertEqual(result.pending_manual_allocation_count, 1)
+
+    def test_partial_payment_proof_cannot_cross_its_historical_scope(self):
+        policy, group = self.partial_payment_group()
+        group['source_relation_groups'][0]['oa_row_ids'] = ['1']
+        result = self.snapshot_policy(policy, group)
+        self.assertNotIn('0', [row['transaction_id'] for row in result.serialized_cost_rows])
+        self.assertIn('source_required', result.allocation_tasks[0]['pending_reasons'])
+
+    def test_partial_unique_waiting_payment_is_reserved_without_becoming_cost(self):
+        policy, group = self.partial_payment_group()
+        group['oa_rows'][0]['workflow_status'] = 'in_progress'
+        result = self.snapshot_policy(policy, group)
+        self.assertEqual(result.serialized_cost_rows, [])
+        self.assertEqual(result.pending_manual_allocation_count, 1)
+        self.assertIn('source_required', result.allocation_tasks[0]['pending_reasons'])
+        group['oa_rows'][0]['workflow_status'] = 'completed'
+        self.assertEqual(len(self.snapshot_policy(policy, group).serialized_cost_rows), 1)
+
     def test_waiting_source_is_not_manual_and_completion_counts_once(self):
         policy, group = self.policy((6868.55,) * 9, (6868.55,) * 9,
                                    refs={str(i): [str(i)] for i in range(9)})

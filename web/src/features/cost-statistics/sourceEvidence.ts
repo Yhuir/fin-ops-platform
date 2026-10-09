@@ -1,7 +1,8 @@
 import type { CostStatisticsManualAllocationTask } from './types';
 
 // Index the server's current relation blocks; cost draft choices are not evidence.
-export function groupSourceEvidence(task: Pick<CostStatisticsManualAllocationTask, 'units' | 'bankEvents' | 'relationDisplayGroups'>) {
+export function groupSourceEvidence(task: Pick<CostStatisticsManualAllocationTask, 'units' | 'bankEvents' | 'relationDisplayGroups'>,
+  hidden?: { unitIds: ReadonlySet<string>; sourceIds: ReadonlySet<string> }) {
   const units = new Map(task.units.map((unit, index) => [unit.unitId, index]));
   const banks = new Map(task.bankEvents.map((bank, index) => [bank.transactionId, index]));
   return task.relationDisplayGroups.map(group => ({
@@ -16,5 +17,8 @@ export function groupSourceEvidence(task: Pick<CostStatisticsManualAllocationTas
       return index;
     }),
     sourcesExcluded: group.sourcesExcluded,
-  }));
+  })).map(group => ({ ...group,
+    unitIndexes: group.unitIndexes.filter(index => !hidden?.unitIds.has(task.units[index].unitId)),
+    bankIndexes: group.bankIndexes.filter(index => !hidden?.sourceIds.has(task.bankEvents[index].transactionId)),
+  })).filter(group => group.unitIndexes.length || group.bankIndexes.length);
 }

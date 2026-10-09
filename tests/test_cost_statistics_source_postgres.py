@@ -468,6 +468,77 @@ class CostSourcePostgresTests(unittest.TestCase):
         with self.assertRaises(CostStatisticsManualAllocationConflictError):
             self.save(old_payload)
 
+    def test_partial_unique_source_survives_manual_remainder_save_and_relation_withdrawal(self):
+        from tests.test_bank_same_time_ordering_postgres import BankSameTimeOrderingPostgresTests
+
+        BankSameTimeOrderingPostgresTests.add_transaction(
+            self, 'bank-3', signed_amount='-500.00', balance='1000.00',
+            trade_time='2026-11-01 12:00:00+08', txn_date='2026-11-01', account_no='622200008106',
+        )
+        self.connection.execute("""insert into app.bank_transaction_categories
+            (bank_transaction_id,legacy_transaction_id,category,source,status,raw_payload)
+            select id,legacy_mongo_id,'internal_transfer','manual','active',
+                '{"manual_assignment":true}'::jsonb from app.bank_transactions""")
+        self.scope_service().update_project_cost_scope(
+            {'expected_version': 1, 'selected_tag_codes': ['uncategorized', 'internal_transfer']},
+            actor_id='cost-test',
+        )
+        with self.connection.transaction() as tx:
+            tx.execute("""update app.oa_applications set amount=500.00,
+                normalized_payload=jsonb_set(normalized_payload,'{amount}','\"500.00\"'::jsonb)""")
+            tx.execute("""insert into app.oa_applications
+                (oa_source_id,form_id,form_type,row_id,status,workflow_status,applicant,
+                 application_date,scope_month,approved_at,project_name,amount,currency,normalized_payload,raw_payload)
+                values ('oa-c','oa-c','支付申请','oa-c','active','completed','测试申请人',
+                        '2026-10-02','2026-10-01','2026-10-02 10:00:00+08','测试项目',500.00,'CNY',
+                        '{"id":"oa-c","project_name":"测试项目","amount":"500.00","expense_content":"未确定费用"}'::jsonb,'{}'::jsonb)""")
+            tx.execute("""update app.bank_transactions set raw_payload=
+                '{"source_oa_row_id":"oa-a"}'::jsonb where legacy_mongo_id='bank-1'""")
+            tx.execute("""update app.workbench_pair_relations set
+                row_ids=array['oa-a','oa-b','oa-c','bank-1','bank-2','bank-3'],
+                row_types=array['oa','oa','oa','bank','bank','bank']""")
+        task = self.service.get_task('cost-source-case', can_save=True)
+        known = {'unit_id': 'oa:oa-a', 'bank_transaction_id': 'bank-1', 'amount': '500.00'}
+        self.assertEqual(task['source_allocations']['cost_lines'], [known])
+        self.assertEqual(task['unallocated_amount'], '1000.00')
+        self.assertIn('source_required', task['pending_reasons'])
+        for view in ('project', 'cost_tag', 'bank_account'):
+            self.assertEqual(self.query.get_explorer_page(
+                scope='all', view=view, filters={}, cursor=None, page_size=20,
+            )['summary']['total_amount'], '500.00')
+        for view in ('bank_tag', 'time'):
+            self.assertEqual(self.query.get_explorer_page(
+                scope='all', view=view, filters={}, cursor=None, page_size=20,
+            )['summary']['total_amount'], '1500.00')
+        self.assertEqual(self.connection.fetch_one(
+            'select count(*) as n from app.cost_statistics_manual_allocations',
+        )['n'], 0)
+        payload = self.payload()
+        payload['allocations'] = [{'unit_id': u['unit_id'], 'amount': '500.00'} for u in task['units']]
+        payload['source_allocations']['cost_lines'] = [known, *[
+            {'unit_id': unit, 'bank_transaction_id': bank, 'amount': '500.00'}
+            for unit, bank in (('oa:oa-b', 'bank-2'), ('oa:oa-c', 'bank-3'))
+        ]]
+        saved = self.save(payload)
+        self.assertEqual(saved['status'], 'allocated')
+        self.assertEqual(saved['decision_mode'], 'manual')
+        self.assertEqual(saved['source_allocations']['cost_lines'], payload['source_allocations']['cost_lines'])
+        for view in ('project', 'cost_tag', 'bank_account'):
+            self.assertEqual(self.query.get_explorer_page(
+                scope='all', view=view, filters={}, cursor=None, page_size=20,
+            )['summary']['total_amount'], '1500.00')
+        self.assertEqual(self.connection.fetch_one(
+            "select count(*) as n from audit.events where action='cost_statistics.manual_allocation.save'",
+        )['n'], 1)
+        with self.assertRaises(CostStatisticsManualAllocationConflictError):
+            self.save(payload)
+        self.connection.execute("update app.workbench_pair_relations set status='cancelled',version=version+1")
+        self.assertEqual(self.query.get_explorer_page(
+            scope='all', view='project', filters={}, cursor=None, page_size=20,
+        )['summary']['total_amount'], '0.00')
+        with self.assertRaises(KeyError):
+            self.service.get_task('cost-source-case', can_save=True)
+
     def test_explicit_references_auto_allocate_without_writing_then_manual_save(self):
         self.connection.execute("""insert into app.bank_transaction_categories
             (bank_transaction_id,legacy_transaction_id,category,source,status,raw_payload)

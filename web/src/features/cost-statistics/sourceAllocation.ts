@@ -21,6 +21,42 @@ export function money(value: bigint): string {
   const absolute = value < 0n ? -value : value;
   return `${value < 0n ? '-' : ''}${absolute / 100n}.${String(absolute % 100n).padStart(2, '0')}`;
 }
+
+// Presentation coverage comes only from confirmed server lines, never suggestions or a draft.
+export function resolvedAutomaticCoverage(task: CostStatisticsManualAllocationTask) {
+  const unitIds = new Set<string>();
+  const sourceIds = new Set<string>();
+  let amount = 0n;
+  if (task.decisionMode !== 'automatic' || task.status !== 'pending' || task.pendingReasons.includes('allocation_stale') || !task.sourceAllocations) return { unitIds, sourceIds, amount };
+  const unitAmounts = new Map<string, bigint>();
+  const banks = new Map(task.bankEvents.map(source => [source.transactionId, source]));
+  const incompleteUnits = new Set<string>();
+  for (const line of task.sourceAllocations.costLines) {
+    const value = cents(line.amount);
+    if (value === null) throw new Error('自动分配金额格式无效');
+    unitAmounts.set(line.unitId, (unitAmounts.get(line.unitId) ?? 0n) + value);
+    const source = banks.get(line.bankTransactionId);
+    if (!source) throw new Error('自动分配来源不存在');
+    if (!source.tradeTime || !source.bankAccountLabel || !source.bankTagCode) incompleteUnits.add(line.unitId);
+  }
+  for (const unit of task.units) {
+    const original = cents(unit.oaOriginalAmount), outside = cents(unit.outsideCostAmount);
+    if (original === null || outside === null) throw new Error('OA 金额格式无效');
+    const target = original - outside;
+    if (unit.costEligible !== false && !incompleteUnits.has(unit.unitId) && target > 0n && unitAmounts.get(unit.unitId) === target) {
+      unitIds.add(unit.unitId); amount += target;
+    }
+  }
+  const sourceAmounts = new Map<string, bigint>();
+  for (const line of task.sourceAllocations.costLines) {
+    if (unitIds.has(line.unitId)) sourceAmounts.set(line.bankTransactionId, (sourceAmounts.get(line.bankTransactionId) ?? 0n) + cents(line.amount)!);
+  }
+  for (const source of task.bankEvents) {
+    if (source.eventKind === 'outflow' && sourceAmounts.get(source.transactionId) === cents(source.amount)
+      && source.tradeTime && source.bankAccountLabel && source.bankTagCode) sourceIds.add(source.transactionId);
+  }
+  return { unitIds, sourceIds, amount };
+}
 export function createSourceDraft(task: CostStatisticsManualAllocationTask): SourceDraft {
   let id = 0;
   const stale = task.pendingReasons.includes('allocation_stale');

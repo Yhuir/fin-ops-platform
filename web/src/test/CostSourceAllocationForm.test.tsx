@@ -33,7 +33,8 @@ it('saves completed OA alone and shows pending approval without a false balanced
   render(<Editor task={task} save={save} />);
   expect(screen.getByText('待审批')).toBeInTheDocument();
   expect(screen.queryByText('分配金额一致')).not.toBeInTheDocument();
-  expect(within(screen.getByRole('table', {name: '成本分配明细'})).getAllByRole('button', {name: '新增来源'})).toHaveLength(1);
+  expect(within(screen.getByRole('table', {name: '成本分配明细'})).queryAllByRole('button', {name: '新增来源'})).toHaveLength(0);
+  expect(document.querySelector('.cost-source-resolved summary')).toHaveTextContent('已自动确定 1 项');
   await user.click(screen.getByRole('button', {name: '保存'}));
   expect(save).toHaveBeenCalledTimes(1);
   const draft = createSourceDraft(task);
@@ -77,9 +78,36 @@ it('hides exhausted hints while preserving capacity, duplicate, current selectio
 });
 
 describe('compact source allocation editor', () => {
+  it('collapses confirmed automatic costs and edits only the remainder without releasing source capacity', async () => {
+    const task = fixture(); const user = userEvent.setup(); const save = vi.fn();
+    task.oaTotal = task.grossOutflowTotal = task.netOutflowTotal = '700.00';
+    task.bankEvents[0].amount = '500.00';
+    task.bankEvents.push({...task.bankEvents[0], transactionId:'bank-b', amount:'200.00', tradeTime:'2026-09-03'});
+    task.units.forEach(unit => {unit.lockOaAmount = true;});
+    task.sourceAllocations = {costLines:[{unitId:'unit-a',bankTransactionId:'internal-bank',amount:'500.00'}],refundLinks:[],nonCostLines:[]};
+    task.suggestedSourceAllocations = {costLines:[{unitId:'unit-b',bankTransactionId:'bank-b',amount:'200.00'}],refundLinks:[],nonCostLines:[]};
+    const {container} = render(<Editor task={task} save={save} />);
+    const resolved = container.querySelector('.cost-source-resolved')!;
+    expect(resolved).not.toHaveAttribute('open');
+    expect(resolved.querySelector('summary')).toHaveTextContent('已自动确定 1 项¥500.00');
+    const editor = within(screen.getByRole('table',{name:'成本分配明细'}));
+    expect(editor.getAllByRole('textbox')).toHaveLength(1);
+    expect(editor.queryByText('材料采购')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading',{name:/OA费用 · 1 项.*1 张 OA/})).toBeVisible();
+    await user.click(within(resolved as HTMLElement).getByText('查看来源'));
+    const readonly = within(screen.getByRole('table',{name:'已自动确定的成本明细'}));
+    expect(readonly.getByText('材料采购')).toBeVisible();
+    expect(readonly.queryByRole('textbox')).not.toBeInTheDocument();
+    await user.click(editor.getByRole('combobox',{name:'来源流水 1'}));
+    expect(screen.getAllByRole('option')[0]).toHaveAttribute('aria-disabled','true');
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button',{name:'保存'}));
+    expect(save).toHaveBeenCalledOnce();
+    expect(sourceSaveRequest(task,createSourceDraft(task)).sourceAllocations.costLines).toHaveLength(2);
+  });
   it('groups one OA document with two cost units and hides all internal identifiers', () => {
     const { container } = render(<Editor task={fixture()} />);
-    expect(screen.getByRole('heading', { name: 'OA · 2 条' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /OA费用 · 2 项.*1 张 OA/ })).toBeInTheDocument();
     expect(screen.queryByText('按当前分配对齐，未保存的修改尚未生效')).not.toBeInTheDocument();
     expect(container.textContent).not.toMatch(/internal-|unit-a|unit-b|已分/);
     expect(within(screen.getByRole('table', { name: '成本分配明细' })).getAllByRole('button', { name: '新增来源' })).toHaveLength(2);
@@ -246,6 +274,7 @@ it('keeps source ordinals aligned with bank evidence when refunds appear first',
 
 it('shows balance only for complete allocations without changing formal correspondence', async () => {
   const task = fixture(); const user = userEvent.setup();
+  task.decisionMode = 'manual'; task.status = 'allocated';
   task.units.forEach(unit => { unit.lockOaAmount = true; }); task.oaTotal = '600.00'; task.units[0].oaOriginalAmount = '400.00';
   task.bankEvents[0].amount = '400.00';
   task.bankEvents.push({...task.bankEvents[0],transactionId:'bank-b',amount:'200.00',bankAccountLabel:'民生银行 9486', bankAccountDisplayLabel: '民生银行 9486'});
@@ -323,6 +352,7 @@ it('unlocks a full loan OA for interest while preserving original amount and pri
 
 it('manually selects OA cost tags with two columns and restores the source without changing evidence or amounts', async () => {
   const task=fixture();const user=userEvent.setup();const save=vi.fn();
+  task.decisionMode='manual';task.status='allocated';
   task.units=[{...task.units[0],oaOriginalAmount:'1497.22',lockOaAmount:true}];
   task.oaTotal='1497.22';task.netOutflowTotal=task.grossOutflowTotal=task.bankEvents[0].amount='1001497.22';
   task.nonCostAmount='1000000.00';task.nonCostReason='贷款本金';

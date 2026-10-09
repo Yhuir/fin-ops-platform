@@ -17,8 +17,11 @@ export const CostText = memo(function CostText({ text, label }: { text: string; 
 });
 
 // Formal relation display does not depend on editable cost allocation choices.
-export const CostSourceEvidence = memo(function CostSourceEvidence({ task, sourceError }: { task: CostStatisticsManualAllocationTask; sourceError: (id: string) => ReactNode }) {
-  const groups = useMemo(() => groupSourceEvidence(task), [task]);
+export const CostSourceEvidence = memo(function CostSourceEvidence({ task, sourceError, hidden }: { task: CostStatisticsManualAllocationTask; sourceError: (id: string) => ReactNode; hidden?: {unitIds: ReadonlySet<string>; sourceIds: ReadonlySet<string>} }) {
+  const groups = useMemo(() => groupSourceEvidence(task, hidden), [task, hidden]);
+  const visibleUnits = task.units.filter(unit => !hidden?.unitIds.has(unit.unitId));
+  const sourceCount = task.bankEvents.filter(bank => !hidden?.sourceIds.has(bank.transactionId)).length;
+  const oaCount = new Set(visibleUnits.map(unit => unit.oaId)).size;
   const unitContent = (index: number) => {
     const unit = task.units[index];
     return [
@@ -37,7 +40,7 @@ export const CostSourceEvidence = memo(function CostSourceEvidence({ task, sourc
   };
   const cells = (content: ReactNode[], side: string, span: number) => content.map((value, index) => <td key={index} rowSpan={span} className={`cost-evidence-${side} cost-evidence-col-${index}`}>{value}</td>);
   return <section className="cost-source-evidence" aria-label="当前配对关系">
-    <div className="cost-evidence-headings"><h3>OA · {task.units.length} 条</h3><h3>银行流水 · {task.bankEvents.length} 条</h3></div>
+    <div className="cost-evidence-headings"><h3>OA费用 · {visibleUnits.length} 项<span className="cost-source-document-count">{oaCount} 张 OA</span></h3><h3>银行流水 · {sourceCount} 笔</h3></div>
     <div className="cost-source-evidence-table"><table aria-label="OA 与流水对照">
       <colgroup><col /><col /><col className="cost-evidence-amount-col" /><col /><col /><col className="cost-evidence-amount-col" /></colgroup>
       <thead><tr>{['项目 / OA', '费用内容', 'OA 金额', '银行 / 时间', '对方 / 标签', '流水金额'].map((label, index) => <th key={label} scope="col" className={index >= 3 ? 'cost-evidence-bank' : ''}>{label}</th>)}</tr></thead>

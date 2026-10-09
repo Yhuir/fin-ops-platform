@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { cents, createSourceDraft, money, sourceSaveRequest, sourceUnitAmounts, sourceDecisionMatches, validateSourceDraft } from '../features/cost-statistics/sourceAllocation';
+import { cents, createSourceDraft, money, resolvedAutomaticCoverage, sourceSaveRequest, sourceUnitAmounts, sourceDecisionMatches, validateSourceDraft } from '../features/cost-statistics/sourceAllocation';
 import type { CostStatisticsManualAllocationTask } from '../features/cost-statistics/types';
 
 export function sourceTask(): CostStatisticsManualAllocationTask {
@@ -17,6 +17,35 @@ export function sourceTask(): CostStatisticsManualAllocationTask {
 }
 
 describe('cost source amount closure', () => {
+  test('hides only fully confirmed automatic units and keeps complete save and source capacity', () => {
+    const task = sourceTask();
+    task.units = task.bankEvents.map((bank, index) => ({ ...task.units[0], unitId: `unit-${index}`, oaId: `oa-${index}`, oaOriginalAmount: bank.amount }));
+    task.sourceAllocations = { costLines: [{ unitId: 'unit-0', bankTransactionId: 'bank-a', amount: '350.00' }], refundLinks: [], nonCostLines: [] };
+    task.suggestedSourceAllocations = { costLines: [{ unitId: 'unit-1', bankTransactionId: 'bank-b', amount: '250.00' }], refundLinks: [], nonCostLines: [] };
+    expect(resolvedAutomaticCoverage(task)).toEqual({unitIds: new Set(['unit-0']), sourceIds: new Set(['bank-a']), amount: 35000n});
+    const draft = createSourceDraft(task);
+    expect(sourceSaveRequest(task, draft).sourceAllocations.costLines).toEqual([
+      {unitId: 'unit-0', bankTransactionId: 'bank-a', amount: '350.00'},
+      {unitId: 'unit-1', bankTransactionId: 'bank-b', amount: '250.00'},
+    ]);
+    draft.costLines[1].bankTransactionId = 'bank-a';
+    expect(validateSourceDraft(task, draft)['source.bank-a']).toBe('分配金额超过该流水金额');
+    expect(resolvedAutomaticCoverage({...task,decisionMode:'manual'}).unitIds.size).toBe(0);
+    expect(resolvedAutomaticCoverage({...task,status:'stale'}).unitIds.size).toBe(0);
+    expect(resolvedAutomaticCoverage({...task,pendingReasons:['allocation_stale']}).unitIds.size).toBe(0);
+    expect(resolvedAutomaticCoverage({...task,sourceAllocations:null}).unitIds.size).toBe(0);
+    expect(resolvedAutomaticCoverage({...task,units:task.units.map(unit=>({...unit,costEligible:false}))}).unitIds.size).toBe(0);
+  });
+  test('keeps partial units, shared sources and missing source metadata visible', () => {
+    const task = sourceTask();
+    task.sourceAllocations = {costLines:[{unitId:task.units[0].unitId,bankTransactionId:'bank-a',amount:'350.00'}],refundLinks:[],nonCostLines:[]};
+    expect(resolvedAutomaticCoverage(task)).toEqual({unitIds:new Set(),sourceIds:new Set(),amount:0n});
+    task.units[0].outsideCostAmount = '250.00';
+    task.bankEvents[0].tradeTime = '';
+    expect(resolvedAutomaticCoverage(task)).toEqual({unitIds:new Set(),sourceIds:new Set(),amount:0n});
+    task.units[0].outsideCostAmount = 'invalid';
+    expect(()=>resolvedAutomaticCoverage(task)).toThrow('OA 金额格式无效');
+  });
   test('keeps automatic sources while initializing suggestions for the remainder', () => {
     const task = sourceTask();
     task.sourceAllocations = { costLines: [{ unitId: 'oa-1:parent', bankTransactionId: 'bank-a', amount: '350.00' }], refundLinks: [], nonCostLines: [] };

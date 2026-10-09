@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from decimal import Decimal
 from typing import Any
 
@@ -209,19 +210,48 @@ def automatic_relation_sources(
         return automatic_source_allocations({**task})
     allowed_by_bank = {id: frozenset(group["oa_row_ids"]) & all_oa
                        for group in relation_groups for id in group["bank_row_ids"]} if multiple_sources and not full_payment_proof else {}
+    # A unique referenced payment that covers an entire OA owns no part of the
+    # unresolved sources. Close it before broad historical scopes join components.
+    # Partial evidence still must fit its history; competing references and refunds
+    # cannot be silently discarded to obtain a closed pair.
+    result: dict[str, list[dict[str, str]]] = {"cost_lines": [], "refund_links": [], "non_cost_lines": []}
+    reference_count = Counter(oa_id for refs in refs_by_bank.values() for oa_id in refs)
+    closed: dict[str, str] = {}
+    if all(event["event_kind"] == "outflow" for event in task["bank_events"]):
+        for event in task["bank_events"]:
+            bank_id = event["transaction_id"]
+            refs = refs_by_bank.get(bank_id, set())
+            if len(refs) != 1:
+                continue
+            oa_id = next(iter(refs))
+            if reference_count[oa_id] != 1 or oa_id not in allowed_by_bank.get(bank_id, all_oa):
+                continue
+            units = units_by_oa[oa_id]
+            original = sum((Decimal(unit["oa_original_amount"]) for unit in units), ZERO)
+            if original <= ZERO or original != Decimal(event["amount"]):
+                continue
+            closed[bank_id] = oa_id
+            result["cost_lines"].extend(
+                {"unit_id": unit["unit_id"], "bank_transaction_id": bank_id,
+                 "amount": unit["oa_original_amount"]}
+                for unit in units if Decimal(unit["oa_original_amount"]) > ZERO
+            )
+    remaining_oa = all_oa - set(closed.values())
     # Index identical ownership sets once, avoiding a banks × OA adjacency matrix.
     candidates: dict[frozenset[str], list[dict[str, Any]]] = {}
     blocked: set[str] = set()
     for event in task["bank_events"]:
-        allowed = allowed_by_bank.get(event["transaction_id"], all_oa)
+        if event["transaction_id"] in closed:
+            continue
+        allowed = allowed_by_bank.get(event["transaction_id"], all_oa) & remaining_oa
         refs = refs_by_bank.get(event["transaction_id"], set())
         if refs:
             if len(refs) != 1 or not refs <= allowed:
-                blocked.update(allowed | (refs & all_oa))
+                blocked.update(allowed | (refs & remaining_oa))
             else:
                 allowed = frozenset(refs)
         candidates.setdefault(allowed, []).append(event)
-    parents = {id: id for id in all_oa}
+    parents = {id: id for id in remaining_oa}
 
     def root(id: str) -> str:
         while parents[id] != id:
@@ -238,12 +268,12 @@ def automatic_relation_sources(
     component_units: dict[str, list[dict[str, Any]]] = {}
     component_events: dict[str, list[dict[str, Any]]] = {}
     for id, units in units_by_oa.items():
-        component_units.setdefault(root(id), []).extend(units)
+        if id in remaining_oa:
+            component_units.setdefault(root(id), []).extend(units)
     for allowed, events in candidates.items():
         if allowed:
             component_events.setdefault(root(next(iter(allowed))), []).extend(events)
     blocked_roots = {root(id) for id in blocked}
-    result: dict[str, list[dict[str, str]]] = {"cost_lines": [], "refund_links": [], "non_cost_lines": []}
     for key, units in component_units.items():
         events = component_events.get(key, [])
         if key in blocked_roots or not events:

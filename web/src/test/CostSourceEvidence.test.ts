@@ -19,4 +19,13 @@ describe('formal relation evidence', () => {
     expect(()=>groupSourceEvidence({...task,relationDisplayGroups:[{unitIds:['missing'],bankTransactionIds:[],sourcesExcluded:false}]})).toThrow('未知 OA');
     expect(()=>groupSourceEvidence({...task,relationDisplayGroups:[{unitIds:[],bankTransactionIds:['missing'],sourcesExcluded:false}]})).toThrow('未知流水');
   });
+  it('clips resolved members without regrouping or changing original ordinals',()=>{
+    expect(groupSourceEvidence(task,{unitIds:new Set(['a']),sourceIds:new Set(['z','x'])})).toEqual([
+      {unitIndexes:[1],bankIndexes:[1],sourcesExcluded:false},
+    ]);
+    expect(groupSourceEvidence(task,{unitIds:new Set(['a']),sourceIds:new Set(['x'])})).toEqual([
+      {unitIndexes:[],bankIndexes:[2],sourcesExcluded:false},
+      {unitIndexes:[1],bankIndexes:[1],sourcesExcluded:false},
+    ]);
+  });
 });

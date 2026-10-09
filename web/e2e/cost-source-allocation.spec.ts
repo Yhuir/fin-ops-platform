@@ -2,7 +2,7 @@ import { expect, test, type Page } from "./fixtures/strictTest";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { installDeterministicApiMocks } from './fixtures/apiMocks';
 
-async function sourceScenario(page: Page, options: { restoreAutomatic?: boolean; detailDelayMs?: number; automatic?: boolean; partial?: boolean; manual?: boolean;  telecom?: boolean; scopedLoan?: boolean; alignmentCase?: boolean; many?: boolean; longMenu?: boolean; screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
+async function sourceScenario(page: Page, options: { resolvedRemainder?: boolean; restoreAutomatic?: boolean; detailDelayMs?: number; automatic?: boolean; partial?: boolean; manual?: boolean;  telecom?: boolean; scopedLoan?: boolean; alignmentCase?: boolean; many?: boolean; longMenu?: boolean; screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
   await installDeterministicApiMocks(page, { sessionMode: 'user' });
   const task = {
     relation_case_id: 'source-case', relation_version: 1, source_fingerprint: 'a'.repeat(64), scope_version: 7,
@@ -38,6 +38,7 @@ async function sourceScenario(page: Page, options: { restoreAutomatic?: boolean;
     task.bank_events = [{...task.bank_events[0],transaction_id:'hotel',amount:'2100.00',trade_time:'2026-08-03 15:43:00',counterparty_name:'张丽芬',bank_tag_primary_label:'项目开销',bank_tag_sub_label:'住宿费',tags:['项目开销','住宿费']}];
     task.suggested_source_allocations = {cost_lines:[{unit_id:'oa-1',bank_transaction_id:'hotel',amount:'2100.00'}],refund_links:[],non_cost_lines:[]};
   }
+  if (options.performance) task.decision_mode = 'manual';
   if (options.large) {
     task.oa_total = task.net_outflow_total = task.gross_outflow_total = '1000.00';
     task.units = Array.from({ length: 100 }, (_, i) => ({ ...task.units[0], unit_id: `unit-${i}`, oa_id: `doc-${Math.floor(i / 2)}`, expense_content: `成本项目 ${i + 1}`, lock_oa_amount: true, outside_cost_amount: "0.00", oa_original_amount: '10.00' }));
@@ -102,10 +103,19 @@ async function sourceScenario(page: Page, options: { restoreAutomatic?: boolean;
     task.relation_display_groups = task.units.map((u,i)=>({unit_ids:[u.unit_id],bank_transaction_ids:parts[i].map((_,j)=>`bank-${i}-${j}`),sources_excluded:false}));
     task.suggested_source_allocations = {cost_lines:parts.flatMap((part,i)=>part.map((amount,j)=>({unit_id:`unit-${i}`,bank_transaction_id:`bank-${i}-${j}`,amount}))),refund_links:[],non_cost_lines:[]};
   }
+  if (options.resolvedRemainder) {
+    task.oa_total = task.net_outflow_total = task.gross_outflow_total = '68685.50';
+    task.units = Array.from({length:10},(_,i)=>({...task.units[0],unit_id:`unit-${i}`,oa_id:`oa-${i}`,oa_original_amount:'6868.55',expense_content:`车款第 ${i+1} 期`}));
+    task.bank_events = task.units.map((_,i)=>({...task.bank_events[0],transaction_id:`bank-${i}`,amount:'6868.55',trade_time:`2026-${String(i+1).padStart(2,'0')}-03`}));
+    task.allocations = task.units.map((unit,i)=>({unit_id:unit.unit_id,amount:i<8?'6868.55':'0.00'}));
+    task.source_allocations = {cost_lines:task.units.slice(0,8).map((unit,i)=>({unit_id:unit.unit_id,bank_transaction_id:`bank-${i}`,amount:'6868.55'})),refund_links:[],non_cost_lines:[]};
+    task.relation_display_groups = [{unit_ids:task.units.map(u=>u.unit_id),bank_transaction_ids:task.bank_events.map(b=>b.transaction_id),sources_excluded:false}];
+  }
   if (options.automatic) {
     task.status = 'allocated'; task.pending_reasons = [];
     task.source_allocations = {cost_lines: task.bank_events.map(bank => ({unit_id: 'oa-1', bank_transaction_id: bank.transaction_id, amount: bank.amount})), refund_links: [], non_cost_lines: []};
   }
+  task.bank_events = task.bank_events.map(event => ({...event, bank_account_display_label:event.bank_account_label}));
   await page.route('**/api/cost-statistics/manual-tags',route=>route.fulfill({json:{tags:task.manual_options.tags}}));
   let writes = 0; let details = 0; let savedBody: Record<string, any> | null = null;
   await page.route('**/api/cost-statistics/manual-allocations**', async route => {
@@ -133,7 +143,7 @@ async function sourceScenario(page: Page, options: { restoreAutomatic?: boolean;
   });
   if (options.refreshFailure) await page.route('**/api/cost-statistics/explorer**', route => writes > 0 ? route.fulfill({ status: 503, json: { error: 'temporarily_unavailable', message: '统计刷新暂不可用' } }) : route.fallback());
   await page.goto('/cost-statistics');
-  await expect(page.getByRole('heading', { name: '成本' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '成本', exact: true })).toBeVisible();
   expect(details).toBe(0);
   await page.evaluate(() => {
     const observer = new MutationObserver(() => {
@@ -153,7 +163,7 @@ async function sourceScenario(page: Page, options: { restoreAutomatic?: boolean;
     await drawer.locator('.cost-source-task-heading').first().click();
   }
   if (!options.detailFailure && !options.automatic) await expect(drawer.getByRole('heading', { name: /银行流水/ })).toBeVisible();
-  const unit = drawer.locator('.cost-source-table tbody').first();
+  const unit = drawer.getByRole('table', {name:'成本分配明细',exact:true}).locator('tbody').first();
   return { drawer, unit, task, writes: () => writes, body: () => savedBody, details: () => details };
 }
 
@@ -167,6 +177,40 @@ async function fillSources(page: Page, unit: ReturnType<Page['locator']>) {
     await unit.getByRole('textbox', { name: `分配金额 ${index + 1}`, exact: true }).fill(amount);
   }
 }
+
+test('keeps eight proven costs readonly and saves the two unresolved costs with all ten sources', async ({page}) => {
+  const scene = await sourceScenario(page,{resolvedRemainder:true});
+  const summary = scene.drawer.locator('.cost-source-resolved summary');
+  await expect(summary).toHaveText('已自动确定 8 项¥54948.40查看来源');
+  await expect(scene.drawer.locator('.cost-source-resolved')).not.toHaveAttribute('open');
+  const table = scene.drawer.getByRole('table',{name:'成本分配明细',exact:true});
+  await expect(table.locator('tbody')).toHaveCount(2);
+  await expect(scene.drawer.getByRole('heading',{name:/OA费用 · 2 项.*2 张 OA/})).toBeVisible();
+  await summary.click();
+  const known = scene.drawer.getByRole('table',{name:'已自动确定的成本明细'});
+  await expect(known.locator('tbody tr')).toHaveCount(8);
+  await expect(known.getByRole('textbox')).toHaveCount(0);
+  await summary.click();
+  for (let i=0;i<2;i++) {
+    const unit = table.locator('tbody').nth(i);
+    await unit.getByRole('button',{name:'新增来源',exact:true}).click();
+    await unit.getByRole('combobox',{name:/来源流水/}).click();
+    const sources = page.getByRole('listbox',{name:/来源流水/}).getByRole('option');
+    await expect(sources).toHaveCount(10);
+    for (let n=0;n<8;n++) await expect(sources.nth(n)).toBeDisabled();
+    await sources.nth(i+8).click();
+    await unit.getByRole('textbox',{name:/分配金额/}).fill('6868.55');
+  }
+  await scene.drawer.getByRole('button',{name:'保存',exact:true}).click();
+  await expect(scene.drawer.getByText('暂无待分配任务')).toBeVisible();
+  await scene.drawer.getByRole('radio',{name:'已完成 1'}).click();
+  await scene.drawer.locator('.cost-source-task-heading').first().click();
+  await expect(table.locator('tbody')).toHaveCount(10);
+  expect(scene.writes()).toBe(1);
+  expect(scene.body()!.source_allocations.cost_lines).toEqual(scene.task.units.map((unit,i)=>({unit_id:unit.unit_id,bank_transaction_id:`bank-${i}`,amount:'6868.55'})));
+  expect(scene.body()!.allocations).toHaveLength(10);
+  await expectNoUnexpectedSuccessUiErrors(page);
+});
 
 test('automatic allocations do not enter pending or completed manual lists', async ({page}) => {
   const scene = await sourceScenario(page, {automatic: true});
@@ -563,7 +607,7 @@ test('shows many-to-many evidence as one group without duplicating bank facts',a
 test('scoped hotel task omits excluded loan, saves only scoped source and keeps green hint readable', async ({page}, testInfo) => {
   await page.setViewportSize({width:1440,height:1000});
   const scene = await sourceScenario(page,{scopedLoan:true});
-  await expect(scene.drawer.getByRole('heading',{name:'银行流水 · 1 条'})).toBeVisible();
+  await expect(scene.drawer.getByRole('heading',{name:'银行流水 · 1 笔'})).toBeVisible();
   await expect(scene.drawer.getByText(/范围外|借出款|2026-08-01/)).toHaveCount(0);
   await expect(scene.drawer.getByText('分配金额一致',{exact:true})).toBeVisible();
   await scene.unit.getByRole('combobox', {name:/来源流水/}).click();
@@ -696,21 +740,34 @@ for (const large of [false, true]) {
       const panel = element.querySelector<HTMLElement>('.cost-source-panel')!;
       const frames: {time:number;height:number}[] = [];
       const start = performance.now();
+      let transitionStart: number | null = null;
+      const started = new Promise<void>(resolve => {
+        const onStart = (event: TransitionEvent) => {
+          if (event.target === panel && event.propertyName === 'height') {
+            transitionStart = performance.now(); panel.removeEventListener('transitionstart',onStart); resolve();
+          }
+        };
+        panel.addEventListener('transitionstart',onStart);
+      });
       element.querySelector<HTMLButtonElement>('.cost-source-task-heading')!.click();
+      // Opening fetches and mounts the form first; sample the actual CSS transition.
+      await started;
       do {
         await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));
         frames.push({time:performance.now()-start,height:panel.getBoundingClientRect().height});
-      } while (performance.now()-start < 400);
+      } while (performance.now()-transitionStart! < 400);
       return frames;
     });
     // Let initial detail rendering settle before measuring an explicit interaction.
     await expect.poll(()=>block.locator('.cost-source-panel').evaluate(e=>e.getAnimations().length)).toBe(0);
     const full = await block.locator('.cost-source-panel').evaluate(e=>e.getBoundingClientRect().height);
     const closing = await sample();
+    await testInfo.attach('accordion-closing', {body:JSON.stringify({rows:large?100:2,full,closing}),contentType:'application/json'});
     expect(closing.some(f=>f.height>1 && f.height<full-1)).toBe(true);
     expect(closing.at(-1)!.height).toBe(0);
     await expect(block.locator('.cost-source-form')).toHaveCount(0);
     const opening = await sample();
+    await testInfo.attach('accordion-opening', {body:JSON.stringify({rows:large?100:2,full,opening}),contentType:'application/json'});
     expect(opening.some(f=>f.height>1 && f.height<full-1)).toBe(true);
     await expect(scene.drawer.getByRole('textbox',{name:'分配金额 1',exact:true}).first()).toHaveValue(large ? '10.00' : '350.00');
     expect(scene.details()).toBe(2); expect(scene.writes()).toBe(0);

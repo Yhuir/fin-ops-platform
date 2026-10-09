@@ -2,7 +2,7 @@ import { Button, Popover } from '@heroui/react';
 import { CircleAlert, Plus, Trash2 } from 'lucide-react';
 import { Fragment, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CostManualItem, CostStatisticsManualAllocationTask } from '../../features/cost-statistics/types';
-import { cents, money, usedBySource, validateSourceDraft, type SourceDraft, type SourceDraftLine } from '../../features/cost-statistics/sourceAllocation';
+import { cents, money, resolvedAutomaticCoverage, usedBySource, validateSourceDraft, type SourceDraft, type SourceDraftLine } from '../../features/cost-statistics/sourceAllocation';
 import { formatDateTimeText } from '../../features/dateTime';
 import { CostChips, CostSourceEvidence, CostText } from './CostSourceEvidence';
 import CostSourcePicker from './CostSourcePicker';
@@ -32,6 +32,13 @@ export default function CostSourceAllocationForm({ tagLoading, tagError, onLoadT
   const nextId = useRef(Math.max(0, ...draft.costLines.map(line => line.id), ...draft.refundLinks.map(line => line.id), ...draft.nonCostLines.map(line => line.id)) + 1);
   const errors = useMemo(() => validateSourceDraft(task, draft), [task, draft]);
   const used = useMemo(() => usedBySource(draft), [draft]);
+  const resolved = useMemo(() => resolvedAutomaticCoverage(task), [task]);
+  const editableUnits = useMemo(() => task.units.map((unit, index) => ({ unit, index })).filter(({unit}) => !resolved.unitIds.has(unit.unitId)), [task.units, resolved]);
+  const confirmedLines = useMemo(() => {
+    const units = new Map(task.units.map(unit => [unit.unitId, unit]));
+    const banks = new Map(task.bankEvents.map(bank => [bank.transactionId, bank]));
+    return (task.sourceAllocations?.costLines ?? []).filter(line => resolved.unitIds.has(line.unitId)).map(line => ({...line, unit:units.get(line.unitId)!, bank:banks.get(line.bankTransactionId)!}));
+  }, [task, resolved]);
   const sources = useMemo(() => task.bankEvents.filter(event => event.eventKind === 'outflow'), [task.bankEvents]);
   const sourceOptions = useMemo(() => task.bankEvents.flatMap((event, index) => event.eventKind === 'outflow' ? [{
     id: event.transactionId, label: `${index + 1}. ${event.bankAccountDisplayLabel}`, amount: event.amount, amountCents: cents(event.amount)!,
@@ -145,12 +152,23 @@ export default function CostSourceAllocationForm({ tagLoading, tagError, onLoadT
     {task.pendingReasons.includes('source_date_missing') ? <p className="cost-source-notice">付款日期待完善</p> : null}
     {task.pendingReasons.includes('bank_tag_missing') ? <p className="cost-source-notice">银行标签待完善</p> : null}
     {task.pendingReasons.includes('allocation_stale') ? <p className="cost-source-notice">数据已变化，请重新核对</p> : null}
-    <CostSourceEvidence task={task} sourceError={sourceError} />
+    {resolved.unitIds.size ? <details className="cost-source-resolved">
+      <summary><span>已自动确定 <strong>{resolved.unitIds.size} 项</strong></span><span className="cost-source-money">¥{money(resolved.amount)}</span><span className="cost-source-muted">查看来源</span></summary>
+      <div className="cost-source-table-scroll"><table className="cost-source-table cost-source-resolved-table" aria-label="已自动确定的成本明细">
+        <thead><tr><th>项目 / 费用</th><th>来源流水</th><th>确定金额</th></tr></thead>
+        <tbody>{confirmedLines.map(line => <tr key={`${line.unitId}:${line.bankTransactionId}`}>
+          <td><strong>{line.unit.projectName}</strong><div>{line.unit.expenseContent || line.unit.oaApplyType}</div><span className="cost-source-applicant">{line.unit.oaApplicant}</span></td>
+          <td><div>{line.bank.bankAccountDisplayLabel} · {line.bank.counterpartyName}</div><span className="cost-source-muted">{formatDateTimeText(line.bank.tradeTime)}</span></td>
+          <td className="cost-source-money">¥{line.amount}</td>
+        </tr>)}</tbody>
+      </table></div>
+    </details> : null}
+    <CostSourceEvidence task={task} sourceError={sourceError} hidden={resolved} />
     <section className="cost-source-allocation"><div className="cost-source-heading"><h3>成本分配明细</h3><Button variant="secondary" size="sm" isDisabled={disabled} onPress={addManual}><Plus size={14} />新增人工成本</Button></div>
       <div className="cost-source-table-scroll"><table className="cost-source-table" aria-label="成本分配明细">
         <colgroup><col className="cost-source-project-col" /><col className="cost-source-unit-col" /><col /><col className="cost-source-tag-col" /><col className="cost-source-amount-col" /><col className="cost-source-action-col" /></colgroup>
         <thead><tr><th>项目</th><th>OA / 成本项</th><th>来源流水</th><th>成本标签</th><th>分配金额</th><th>操作</th></tr></thead>
-        {task.units.map((unit, unitIndex) => {
+        {editableUnits.map(({unit, index:unitIndex}) => {
           const lines = draft.costLines.filter(line => line.ownerId === unit.unitId);
           const zero = draft.zeroUnitIds.includes(unit.unitId) || draft.oaAmountLocks[unit.unitId] && cents(unit.oaOriginalAmount) === 0n;
           const identity = <><td className="cost-source-project-cell cost-source-identity-cell" rowSpan={Math.max(1, lines.length)} title={unit.projectName}>{unit.projectName}</td><td className="cost-source-identity-cell" rowSpan={Math.max(1, lines.length)}><CostText text={`${unitIndex + 1}. ${unit.expenseContent || unit.oaApplyType}`} label={`成本项 ${unitIndex + 1} 全文`} /><span className="cost-source-applicant">{unit.oaApplicant}</span><CostChips values={[unit.oaApplyType]} /><label className="cost-source-oa-lock"><input type="checkbox" checked={draft.oaAmountLocks[unit.unitId]} disabled={disabled || unit.costEligible === false} onChange={event => { touch(`unit.${unit.unitId}`); onChange({ ...draft, oaAmountLocks: { ...draft.oaAmountLocks, [unit.unitId]: event.target.checked } }); }} />按 OA 原额</label>{showError(`unit.${unit.unitId}`)}</td></>;

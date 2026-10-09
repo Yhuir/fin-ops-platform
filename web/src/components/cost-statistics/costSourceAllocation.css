@@ -4,13 +4,23 @@
 .cost-source-drawer .finance-drawer__body { padding:0 16px 16px; margin:0; }
 .cost-source-body { font-size:14px; line-height:1.5; color:#1a2233; display:flex; flex-direction:column; gap:8px; min-width:0; }
 .cost-source-body :focus-visible { outline:2px solid #2454df; outline-offset:1px; }
+.cost-source-resolved { margin:10px 16px 0; border:1px solid #dce4ef; border-radius:6px; background:#fff; }
+.cost-source-resolved > summary { display:flex; align-items:center; gap:12px; padding:8px 12px; cursor:pointer; color:#334155; font-size:13px; }
+.cost-source-resolved > summary::before { content:'›'; font-size:18px; line-height:18px; }
+.cost-source-resolved[open] > summary::before { transform:rotate(90deg); }
+.cost-source-resolved > summary > .cost-source-money { margin-left:auto; color:#166534; }
+.cost-source-resolved-table { min-width:560px; table-layout:auto; }
+.cost-source-resolved-table th:last-child,.cost-source-resolved-table td:last-child { text-align:right; width:120px; }
+.cost-source-resolved-table strong { font-weight:500; }
+.cost-source-document-count { margin-left:8px; font-weight:400; font-size:12px; color:#64748b; }
 .cost-source-toolbar { display:flex; gap:12px; align-items:center; justify-content:space-between; border-bottom:1px solid #dce4ef; margin-bottom:4px; position:sticky; top:0; background:#fff; z-index:2; }
 .cost-source-search { display:flex; align-items:center; gap:6px; width:240px; }
 .cost-source-search input { flex:1; min-width:0; }
 .cost-source-tasks { display:flex; flex-direction:column; gap:8px; }
-.cost-source-panel { --cost-content-height:0px; height:0; }
+.cost-source-panel { --cost-content-height:0px; height:0; transition:height 160ms var(--ease-out-quad),opacity 160ms var(--ease-out); }
 .cost-source-panel[data-expanded="true"] { height:var(--cost-content-height); }
 .cost-source-panel-content { display:flow-root; }
+@media (prefers-reduced-motion:reduce) { .cost-source-panel { transition:none; } }
 .cost-source-task { border:1px solid #dce4ef; border-radius:8px; background:#c5d4b8; }
 .cost-source-task:nth-of-type(4n + 2) { background:#e8c5a5; }
 .cost-source-task:nth-of-type(4n + 3) { background:#ddb9c3; }

@@ -15,29 +15,43 @@ import './costSourceAllocation.css';
 type Props = { caseId?: string; onCloseCase?: () => void; refreshKey?: string; active?: boolean; canSave: boolean; pendingCount?: number; onSaved: () => void };
 type TaskState = { task?: CostStatisticsManualAllocationTask; draft?: SourceDraft; dirty?: boolean; conflict?: boolean; loading?: boolean; saving?: boolean; error?: string; notice?: string; unconfirmedRequest?: SaveCostStatisticsManualAllocationRequest };
 // Keep the form only until HeroUI finishes hiding the panel; drafts live in the drawer.
-function AllocationPanel({ expanded, children }: { expanded: boolean; children: ReactNode }) {
+function AllocationPanel({ expanded, loading, children }: { expanded: boolean; loading: boolean; children: ReactNode }) {
   const panel = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
+  const visibleChildren = useRef<ReactNode>(null);
+  const showEditor = expanded && (!loading || visibleChildren.current !== null);
+  // Closing retains the committed form without rendering every editor again.
+  useLayoutEffect(() => { if (showEditor) visibleChildren.current = children; }, [showEditor, children]);
   // Native disclosure measures only toggles. Observe this form for async details and row edits.
   useLayoutEffect(() => {
+    let frame = 0;
     const observer = new ResizeObserver(([entry]) => {
-      panel.current!.style.setProperty('--cost-content-height', `${entry.contentRect.height}px`);
+      cancelAnimationFrame(frame);
+      const height = entry.contentRect.height;
+      // Commit the mounted content before changing height, so large forms animate from zero.
+      frame = requestAnimationFrame(() => panel.current!.style.setProperty('--cost-content-height', `${height}px`));
     });
     observer.observe(content.current!);
-    return () => observer.disconnect();
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); };
   }, []);
   const [retained, setRetained] = useState(expanded);
   useLayoutEffect(() => {
     if (expanded) { setRetained(true); return; }
     const element = panel.current!;
-    const release = () => { if (element.hasAttribute('hidden')) setRetained(false); };
+    const release = () => {
+      if (element.hasAttribute('hidden')) {
+        visibleChildren.current = null;
+        element.style.setProperty('--cost-content-height','0px');
+        setRetained(false);
+      }
+    };
     const observer = new MutationObserver(release);
     observer.observe(element, { attributes: true, attributeFilter: ['hidden'] });
     release();
     return () => observer.disconnect();
   }, [expanded]);
   return <Accordion.Panel ref={panel} className="cost-source-panel" inert={!expanded}>
-    <div ref={content} className="cost-source-panel-content">{expanded || retained ? children : null}</div>
+    <div ref={content} className="cost-source-panel-content">{expanded ? showEditor ? children : <p role="status">加载中…</p> : retained ? visibleChildren.current : null}</div>
   </Accordion.Panel>;
 }
 
@@ -224,7 +238,7 @@ export default function CostStatisticsManualAllocationDrawer({ caseId, onCloseCa
               <Accordion.Indicator className="cost-source-indicator"><ChevronRight size={15} /></Accordion.Indicator><strong>{item.projectNames.join('、') || '项目未填写'}</strong>
               <span className="cost-source-task-meta"><span className={`cost-source-badge${item.status === 'allocated' ? ' is-complete' : ''}`}>{allocationStatusLabel(item)}</span>{state?.dirty ? <span>未保存</span> : null}</span>
             </Accordion.Trigger></Accordion.Heading>
-            <AllocationPanel expanded={active}>
+            <AllocationPanel expanded={active} loading={!!state?.loading}>
               {renderEditor(id)}
             </AllocationPanel>
           </Accordion.Item>;
