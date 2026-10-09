@@ -54,7 +54,11 @@ class PaymentRulesPostgresTests(unittest.TestCase):
              "enabled": True, "conditions": {"invoiceNetSign": sign}} for index, sign in enumerate(("positive", "zero", "negative"), 1)]}
         no_hidden = {"version": 1, "rules": [{"id": "no-hidden", "statusCode": "paid", "label": "原标签", "priority": 1,
                                              "enabled": True, "conditions": {"hasOa": False}}]}
-        for raw in (None, custom, sign_rules, no_hidden, {"version": 1, "rules": []}):
+        inclusive_rules = [{"version": 1, "rules": [{"id": "inclusive", "statusCode": "custom_inclusive", "label": "边界", "priority": 1,
+                             "enabled": True, "conditions": conditions}]} for conditions in (
+                                 {"paymentComparison": "less_equal"}, {"paymentComparison": "greater_equal"},
+                                 {"invoiceNetSign": "nonnegative"}, {"invoiceNetSign": "nonpositive"})]
+        for raw in (None, custom, sign_rules, no_hidden, {"version": 1, "rules": []}, *inclusive_rules):
             settings = normalize_payment_status_rules_settings(raw)
             expression, params = _input_payment_status_case(settings)
             for has_oa, has_bank in ((False, False), (True, False), (False, True), (True, True)):
@@ -101,7 +105,7 @@ class PaymentRulesPostgresTests(unittest.TestCase):
         request = self.request("custom-category")
         request["rules"] = [{"id": "rule-one", "statusCode": "custom_supplier", "parentStatus": "paid",
                              "label": "供应商付款", "priority": 1, "enabled": True,
-                             "conditions": {"hasBank": True, "paymentComparison": "less"}}]
+                             "conditions": {"hasBank": True, "paymentComparison": "greater_equal", "invoiceNetSign": "nonpositive"}}]
         saved = self.provider.update_payment_status_rules(request, actor_id="tester")
         self.assertNotIn("parentStatus", saved["rules"][0])
         invalid = self.request("invalid-parent")

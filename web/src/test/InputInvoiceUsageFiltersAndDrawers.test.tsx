@@ -1336,26 +1336,63 @@ describe("Input invoice usage workflow drawers", () => {
     render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} saveRules={saveRules} onClose={() => undefined} />);
     await user.click(await screen.findByLabelText("待核付 OA 申请人条件"));
     await user.click(await screen.findByRole("option", { name: "周洁莹 ZHOU" })); await user.keyboard("{Escape}");
-    await user.click(screen.getByLabelText("待核付 发票净额条件")); await user.click(await screen.findByRole("option", { name: "小于 0" }));
-    expect(screen.getByLabelText("待核付 金额比较条件")).toBeDisabled();
-    await user.click(screen.getByLabelText("待核付 流水条件")); await user.click(await screen.findByRole("option", { name: "有流水" }));
-    await user.click(screen.getByLabelText("待核付 金额比较条件")); await user.click(await screen.findByRole("option", { name: "发票＜付款" }));
+    await user.click(screen.getByLabelText("待核付 发票净额条件")); await user.click(await screen.findByRole("option", { name: "＜0" }));
+    expect(screen.getByLabelText("待核付 金额比较不可用")).toHaveTextContent("—");
+    await user.click(screen.getByLabelText("待核付 流水条件")); await user.click(await screen.findByRole("option", { name: "✓", exact: true }));
+    await user.click(screen.getByLabelText("待核付 金额比较条件")); await user.click(await screen.findByRole("option", { name: "≤", exact: true }));
     await user.click(screen.getByRole("button", { name: "保存", exact: true }));
-    await waitFor(() => expect(saveRules).toHaveBeenCalledWith(expect.objectContaining({ expectedVersion: 7, rules: [expect.objectContaining({ statusCode: "custom_wait", conditions: { hasOa: true, applicantNames: ["陈秀云", "周洁莹"], hasBank: true, invoiceNetSign: "negative", paymentComparison: "less" } })] })));
+    await waitFor(() => expect(saveRules).toHaveBeenCalledWith(expect.objectContaining({ expectedVersion: 7, rules: [expect.objectContaining({ statusCode: "custom_wait", conditions: { hasOa: true, applicantNames: ["陈秀云", "周洁莹"], hasBank: true, invoiceNetSign: "negative", paymentComparison: "less_equal" } })] })));
     expect(await screen.findByText("规则已保存。")).toBeInTheDocument();
   });
 
-  test("no-bank comparison retains the incompatible draft until the condition is corrected", async () => {
+  test("no-bank selection clears payment comparison in draft and restore recovers the saved condition", async () => {
     const user = userEvent.setup();
     const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: [], rules: [{ id: "r1", statusCode: "custom_one", label: "比较", description: "", priority: 1, conditions: { hasBank: true, paymentComparison: "equal" } }] };
     const saveRules = vi.fn(request => Promise.resolve({ ...payload, rules: request.rules }));
     render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} saveRules={saveRules} onClose={() => undefined} />);
-    await user.click(await screen.findByLabelText("比较 流水条件")); await user.click(await screen.findByRole("option", { name: "无流水" }));
-    expect(screen.getByLabelText("比较 金额比较条件")).toBeDisabled();
-    expect(screen.getByLabelText("比较 金额比较条件")).toHaveTextContent("发票＝付款");
-    expect(screen.getByRole("alert")).toHaveTextContent("无流水不能比较付款金额"); expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
-    await user.click(screen.getByLabelText("比较 流水条件")); await user.click(await screen.findByRole("option", { name: "有流水" }));
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument(); expect(saveRules).not.toHaveBeenCalled();
+    await user.click(await screen.findByLabelText("比较 流水条件")); await user.click(await screen.findByRole("option", { name: "✕", exact: true }));
+    expect(screen.getByLabelText("比较 金额比较不可用")).toHaveTextContent("—");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "还原", exact: true }));
+    expect(screen.getByLabelText("比较 金额比较条件")).toHaveTextContent("＝");
+    expect(screen.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+    await user.click(screen.getByLabelText("比较 流水条件")); await user.click(await screen.findByRole("option", { name: "✕", exact: true }));
+    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
+    await waitFor(() => expect(saveRules).toHaveBeenCalledWith(expect.objectContaining({ rules: [expect.objectContaining({ conditions: { hasBank: false } })] })));
+  });
+
+  test("inclusive operators round-trip and reordering preserves rule and label identities", async () => {
+    const user = userEvent.setup();
+    const payload: PaymentStatusRulesPayload = { version: 3, readOnly: false, permissions: { canSave: true }, applicantOptions: [], rules: [
+      { id: "r1", statusCode: "custom_first", label: "第一", description: "", priority: 2, enabled: true, conditions: { hasBank: true, paymentComparison: "equal" } },
+      { id: "r2", statusCode: "custom_second", label: "第二", description: "", priority: 7, enabled: true, conditions: { invoiceNetSign: "positive" } },
+    ] };
+    const saveRules = vi.fn(request => Promise.resolve({ ...payload, version: 4, rules: request.rules }));
+    render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} saveRules={saveRules} onClose={() => undefined} />);
+    await user.click(await screen.findByLabelText("第一 金额比较条件")); await user.click(await screen.findByRole("option", { name: "≥", exact: true }));
+    await user.click(screen.getByLabelText("第一 发票净额条件")); await user.click(await screen.findByRole("option", { name: "≥0", exact: true }));
+    await user.click(screen.getByRole("button", { name: "下移规则 第一" }));
+    expect(screen.getByRole("textbox", { name: "标签 1" })).toHaveValue("第二");
+    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
+    await waitFor(() => expect(saveRules).toHaveBeenCalledWith(expect.objectContaining({ expectedVersion: 3, rules: [
+      expect.objectContaining({ id: "r2", statusCode: "custom_second", priority: 2 }),
+      expect.objectContaining({ id: "r1", statusCode: "custom_first", priority: 7, conditions: { hasBank: true, paymentComparison: "greater_equal", invoiceNetSign: "nonnegative" } }),
+    ] })));
+    expect(screen.getByLabelText("第一 金额比较条件")).toHaveTextContent("≥");
+    expect(screen.getByLabelText("第一 发票净额条件")).toHaveTextContent("≥0");
+  });
+
+  test("choosing no OA clears applicant and OA amount conditions without changing bank or net amount", async () => {
+    const user = userEvent.setup();
+    const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: [], rules: [
+      { id: "r1", statusCode: "custom_one", label: "规则", description: "", priority: 1, conditions: { hasOa: true, applicantNames: ["历史申请人"], invoiceOaAmountMatched: true, hasBank: false, invoiceNetSign: "zero" } },
+    ] };
+    const saveRules = vi.fn(request => Promise.resolve({ ...payload, version: 2, rules: request.rules }));
+    render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} saveRules={saveRules} onClose={() => undefined} />);
+    await user.click(await screen.findByLabelText("规则 OA 申请人条件")); await user.click(await screen.findByRole("option", { name: "无 OA", exact: true }));
+    expect(screen.getByLabelText("规则 OA 金额匹配不可用")).toHaveTextContent("—");
+    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
+    await waitFor(() => expect(saveRules).toHaveBeenCalledWith(expect.objectContaining({ rules: [expect.objectContaining({ conditions: { hasOa: false, hasBank: false, invoiceNetSign: "zero" } })] })));
   });
 
   test("initial rule-directory failure remains explicit and can be reloaded", async () => {
@@ -1377,11 +1414,12 @@ describe("Input invoice usage workflow drawers", () => {
     expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
     await user.type(screen.getByRole("textbox", { name: "标签 1" }), "抵账");
     expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
-    await user.click(screen.getByLabelText("抵账 发票净额条件")); await user.click(await screen.findByRole("option", { name: "等于 0" }));
+    await user.click(screen.getByLabelText("抵账 发票净额条件")); await user.click(await screen.findByRole("option", { name: "＝0" }));
     await user.click(screen.getByRole("button", { name: "复制规则 抵账" }));
     await user.clear(screen.getByRole("textbox", { name: "标签 1" })); await user.type(screen.getByRole("textbox", { name: "标签 1" }), "抵账改名");
     expect(screen.getByRole("textbox", { name: "标签 2" })).toHaveValue("抵账改名");
-    await user.click(screen.getAllByRole("checkbox", { name: "启用规则 抵账改名" })[0]);
+    await user.click(screen.getAllByLabelText("启用规则 抵账改名")[0]);
+    await user.click(screen.getByRole("option", { name: "✕", exact: true }));
     await user.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(saveRules).toHaveBeenCalledTimes(1));
     const saved = saveRules.mock.calls[0][0].rules;
@@ -1426,7 +1464,7 @@ describe("Input invoice usage workflow drawers", () => {
     const saveRules = vi.fn().mockRejectedValueOnce(new Error("保存失败")).mockImplementation(request => Promise.resolve({ ...payload, rules: request.rules }));
     render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} saveRules={saveRules} onClose={onClose} />);
     await user.click(await screen.findByRole("button", { name: "新增规则" })); await user.type(screen.getByRole("textbox", { name: "标签 1" }), "新标签");
-    await user.click(screen.getByLabelText("新标签 流水条件")); await user.click(await screen.findByRole("option", { name: "无流水" }));
+    await user.click(screen.getByLabelText("新标签 流水条件")); await user.click(await screen.findByRole("option", { name: "✕", exact: true }));
     await user.click(screen.getByRole("button", { name: "关闭支付状态规则抽屉" })); await user.click(screen.getByRole("button", { name: "继续编辑" })); expect(onClose).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "保存" })); expect(await screen.findByRole("alert")).toHaveTextContent("保存失败");
     expect(screen.getByRole("textbox", { name: "标签 1" })).toHaveValue("新标签");

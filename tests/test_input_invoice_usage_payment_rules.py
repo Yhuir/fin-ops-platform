@@ -48,7 +48,7 @@ class QueueRecorder:
 class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
     def test_invoice_net_sign_is_explicit_and_missing_amount_never_matches(self):
         from fin_ops_platform.services.input_invoice_usage_payment_rules import evaluate_payment_status, payment_categories
-        for sign in ("positive", "zero", "negative"):
+        for sign in ("positive", "zero", "negative", "nonnegative", "nonpositive"):
             rule = {"id": "sign", "statusCode": "paid", "label": "自定义名称", "priority": 1,
                     "enabled": True, "conditions": {"invoiceNetSign": sign}}
             settings = normalize_payment_status_rules_settings({"version": 1, "rules": [rule]})
@@ -56,13 +56,25 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
             for actual in ("positive", "zero", "negative", None):
                 context = PaymentStatusEvaluationContext(False, False, "", False, False, "missing_bank_evidence", actual)
                 result = evaluate_payment_status(settings, context)
-                self.assertEqual(result["code"], "paid" if actual == sign else "unclassified")
+                self.assertEqual(result["code"], "paid" if actual in {"positive": ("positive",), "zero": ("zero",), "negative": ("negative",), "nonnegative": ("positive", "zero"), "nonpositive": ("negative", "zero")}[sign] else "unclassified")
                 if actual == sign:
                     self.assertEqual(result["label"], "自定义名称")
                     self.assertEqual(result["matchedRuleId"], "sign")
         for value in ("invalid", "", 0, None, []):
             with self.subTest(value=value), self.assertRaises(InputInvoiceUsagePaymentRulesValidationError):
                 normalize_payment_status_rules_settings({"version": 1, "rules": [{**rule, "conditions": {"invoiceNetSign": value}}]})
+
+    def test_inclusive_comparisons_match_boundaries_and_reject_unknown_facts(self):
+        from fin_ops_platform.services.input_invoice_usage_payment_rules import evaluate_payment_status
+        for operator, expected in (("less_equal", ("less", "equal")), ("greater_equal", ("greater", "equal"))):
+            settings = {"version": 1, "rules": [{"id": "inclusive", "statusCode": "paid", "label": "比较", "priority": 1,
+                        "enabled": True, "conditions": {"paymentComparison": operator}}]}
+            for actual in ("equal", "less", "greater", "invalid", "missing_invoice_amount", None):
+                with self.subTest(operator=operator, actual=actual):
+                    result = evaluate_payment_status(settings, PaymentStatusEvaluationContext(True, True, "", False, True, actual))
+                    self.assertEqual(result["code"], "paid" if actual in expected else "unclassified")
+            settings["rules"][0]["conditions"]["fullyMatched"] = True
+            self.assertEqual(evaluate_payment_status(settings, PaymentStatusEvaluationContext(True, True, "", True, True, "equal"))["code"], "paid")
 
     def test_empty_and_disabled_rules_have_no_implicit_categories_or_evaluation(self):
         from fin_ops_platform.services.input_invoice_usage_payment_rules import evaluate_payment_status, payment_categories
@@ -232,6 +244,35 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
             payload["sourceMetadata"]["settingsKey"],
             "input_invoice_usage_payment_status_rules",
         )
+
+    def test_inclusive_operators_http_save_reload_and_invalid_input_preserve_contract(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            directory = Mock()
+            directory.list_users.return_value = []
+            app._app_settings_service._oa_role_sync_service = directory
+            version = 1
+            for conditions in ({"paymentComparison": "less_equal"}, {"paymentComparison": "greater_equal"},
+                               {"invoiceNetSign": "nonnegative"}, {"invoiceNetSign": "nonpositive"}):
+                request = {"expectedVersion": version, "idempotencyKey": f"inclusive-{version}", "rules": [
+                    {"id": "inclusive", "statusCode": "custom_inclusive", "label": "边界", "priority": 1,
+                     "enabled": True, "conditions": conditions}]}
+                saved = app.handle_request("PUT", "/api/input-invoice-usage/payment-status-rules", body=json.dumps(request))
+                self.assertEqual(saved.status_code, 200)
+                payload = json.loads(saved.body)
+                self.assertEqual(payload["version"], version + 1)
+                self.assertEqual(payload["rules"][0]["conditions"], conditions)
+                reread = app.handle_request("GET", "/api/input-invoice-usage/payment-status-rules")
+                self.assertEqual(reread.status_code, 200)
+                self.assertEqual(json.loads(reread.body)["rules"], payload["rules"])
+                self.assertEqual(json.loads(app.handle_request("PUT", "/api/input-invoice-usage/payment-status-rules", body=json.dumps(request)).body), payload)
+                version += 1
+            request.update(expectedVersion=version, idempotencyKey="invalid-inclusive")
+            request["rules"][0]["conditions"] = {"invoiceNetSign": []}
+            rejected = app.handle_request("PUT", "/api/input-invoice-usage/payment-status-rules", body=json.dumps(request))
+            self.assertEqual(rejected.status_code, 400)
+            self.assertIn("invalid_invoice_net_sign", str(json.loads(rejected.body)["error"]))
+            self.assertEqual(app._app_settings_service.get_input_invoice_usage_payment_status_rules_payload()["rules"], payload["rules"])
 
     def test_put_rules_handler_saves_and_enqueues_refresh(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

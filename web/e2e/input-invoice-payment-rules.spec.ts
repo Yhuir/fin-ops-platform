@@ -1,4 +1,4 @@
-import { expect, test, setCheckbox } from "./fixtures/strictTest";
+import { expect, test } from "./fixtures/strictTest";
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 
@@ -46,12 +46,28 @@ test("payment fact hierarchy, usage parents and rule edits retain scope and serv
   await page.getByRole("button", { name: "发票与支付状态规则设置" }).click();
   const drawer = page.getByRole("dialog", { name: "发票与支付状态规则设置" });
   await expect(drawer.getByRole("grid", { name: "支付状态规则" })).toBeVisible();
-  await expect(drawer.getByRole("columnheader")).toHaveText(["启用", "优先级", "标签", "OA 申请人", "流水", "发票净额", "发票付款比较", "更多条件", "操作"]);
+  await expect(drawer.getByRole("columnheader")).toHaveText(["启用", "顺序", "规则", "OA 申请人", "流水", "发票与付款比较", "发票净额", "完全匹配", "发票/OA 金额匹配", "操作"]);
+  for (const width of [1920, 1440, 1024]) {
+    await page.setViewportSize({ width, height: 1080 });
+    const row = await drawer.getByRole("row").nth(1).boundingBox();
+    expect(row!.height).toBeGreaterThanOrEqual(44);
+    expect(row!.height).toBeLessThanOrEqual(50);
+    expect(await drawer.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+    await expect(drawer.getByRole("button", { name: "保存", exact: true })).toBeVisible();
+    await page.screenshot({ animations: "disabled", path: info.outputPath(`rules-grid-${width}.png`) });
+  }
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await drawer.getByRole("combobox", { name: "待核对 OA 申请人条件" }).click();
+  await page.getByRole("option", { name: "周洁莹 TEST002", exact: true }).click();
+  await page.screenshot({ animations: "disabled", path: info.outputPath("rules-applicants.png") });
+  await page.keyboard.press("Escape");
+  await expect(drawer.getByRole("combobox", { name: "待核对 OA 申请人条件" })).toHaveText(/陈秀云、周洁莹/);
   await drawer.getByRole("textbox", { name: "标签 1" }).fill("人工复核");
   await drawer.getByRole("button", { name: "复制规则 人工复核" }).click();
   await expect(drawer.getByRole("textbox", { name: "标签 2" })).toHaveValue("人工复核");
-  await setCheckbox(drawer.getByRole("checkbox", { name: "启用规则 人工复核" }).nth(1), false);
-  await expect(drawer.getByRole("checkbox", { name: "启用规则 人工复核" }).nth(1)).not.toBeChecked();
+  await drawer.getByRole("button", { name: /启用规则 人工复核$/ }).nth(1).click();
+  await page.getByRole("option", { name: "✕", exact: true }).click();
+  await expect(drawer.getByRole("button", { name: /启用规则 人工复核$/ }).nth(1)).toHaveText(/✕/);
   await page.screenshot({ animations: "disabled", path: info.outputPath("input-invoice-rules.png") });
   await drawer.getByRole("button", { name: "保存", exact: true }).click();
   await expect(drawer.getByRole("alert")).toContainText("规则已被其他人更新");

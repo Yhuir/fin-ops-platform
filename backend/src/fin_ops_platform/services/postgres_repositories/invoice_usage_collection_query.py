@@ -9,6 +9,8 @@ from typing import Any
 from fin_ops_platform.services.bank_details_canonical_query import PostgresBankDetailsCanonicalQueryRepository
 from fin_ops_platform.services.bank_transaction_unit import original_bank_transaction
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
+    INVOICE_NET_SIGN_STATES,
+    PAYMENT_COMPARISON_STATES,
     classification_tree,
     normalize_payment_status_rules_settings,
     payment_categories,
@@ -1735,8 +1737,8 @@ def _input_payment_status_case(
         )
         predicates: list[str] = []
         if "paymentComparison" in conditions:
-            predicates.append("facts.payment_comparison = %s")
-            params.append(conditions["paymentComparison"])
+            predicates.append("facts.payment_comparison = any(%s::text[])")
+            params.append(list(PAYMENT_COMPARISON_STATES[conditions["paymentComparison"]]))
         for key, column in {
             "hasOa": "facts.has_oa_relation",
             "hasBank": "facts.has_bank_relation",
@@ -1746,8 +1748,8 @@ def _input_payment_status_case(
             if key in conditions:
                 predicates.append(column if bool(conditions[key]) else f"not ({column})")
         if "invoiceNetSign" in conditions:
-            predicates.append("facts.invoice_net_sign = %s")
-            params.append(conditions["invoiceNetSign"])
+            predicates.append("facts.invoice_net_sign = any(%s::text[])")
+            params.append(list(INVOICE_NET_SIGN_STATES[conditions["invoiceNetSign"]]))
         applicants = conditions.get("applicantNames", [])
         if applicants:
             predicates.append("regexp_replace(facts.oa_applicant, '[[:space:]​﻿]+', '', 'g') = any(%s::text[])")

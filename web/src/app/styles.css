@@ -22133,16 +22133,7 @@ body.column-layout-dragging {
 
 
 
-.payment-rule-applicants-popover { width: max(var(--trigger-width), 340px); max-width: calc(100vw - 32px); }
-.payment-rule-applicants-search { padding: 8px; }
-.payment-rule-applicants-list { max-height: 320px; overflow-y: auto; }
-.payment-rule-applicant-identity { display: flex; align-items: baseline; gap: 8px; flex: 1; min-width: 0; }
-.payment-rule-applicant-identity > span, .payment-rule-applicant-identity > small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.payment-rule-applicant-identity > small { color: var(--fp-text-muted); font-size: 12px; }
-.payment-rule-applicant-status { position: relative; width: 26px; height: 15px; border-radius: 999px; background: #cbd5e1; flex: 0 0 26px; margin-inline: 8px 24px; }
-.payment-rule-applicant-status::after { content: ""; position: absolute; width: 11px; height: 11px; border-radius: 50%; top: 2px; left: 2px; background: white; }
-.payment-rule-applicant-status[data-enabled="true"] { background: #2563eb; }
-.payment-rule-applicant-status[data-enabled="true"]::after { left: 13px; }
+
 
 /* List routes opt into remaining viewport space; natural document pages keep scrolling. */
 .app-shell-content:has(.page-stack--table) { display: flex; flex-direction: column; height: 100dvh; min-height: 0; }

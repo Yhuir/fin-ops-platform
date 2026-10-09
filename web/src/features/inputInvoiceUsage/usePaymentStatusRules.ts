@@ -38,6 +38,8 @@ export function usePaymentStatusRules({ open, loadRules, saveRules, onSaved }: P
     if (Object.keys(conditions).length === 0) return "至少选择一个条件";
     if (conditions.hasBank === false && conditions.paymentComparison != null) return "无流水不能比较付款金额，请修改流水或金额比较条件";
     if (conditions.hasOa === true && Array.isArray(conditions.applicantNames) && conditions.applicantNames.length === 0) return "请选择 OA 申请人";
+    if (conditions.hasOa === false && (conditions.applicantNames || conditions.invoiceOaAmountMatched === true)) return "无 OA 不能配置申请人或 OA 金额匹配";
+    if (conditions.fullyMatched === true && (conditions.hasOa === false || conditions.hasBank === false || conditions.invoiceOaAmountMatched === false || ['less', 'greater'].includes(String(conditions.paymentComparison)))) return "完全匹配与当前条件冲突";
     return "";
   });
   const invalid = conditionErrors.some(Boolean) || rules.some(rule => !rule.label.trim() || !Number.isInteger(rule.priority) || rule.priority < 1
@@ -74,7 +76,17 @@ export function usePaymentStatusRules({ open, loadRules, saveRules, onSaved }: P
       label: source?.label ?? "", description: "", priority: Math.max(0, ...current.map(rule => rule.priority)) + 1,
       enabled: true, conditions: { ...source?.conditions } }]);
   }
-  return { payload, rules, setRules, loading, saving, error, refreshError, feedback, canSave, dirty, invalid, conditionErrors, save, refresh, update, condition, add,
+  function move(index: number, direction: -1 | 1) {
+    setRules(current => {
+      const next = index + direction;
+      if (next < 0 || next >= current.length) return current;
+      const result = [...current];
+      result[index] = { ...current[next], priority: current[index].priority };
+      result[next] = { ...current[index], priority: current[next].priority };
+      return result;
+    });
+  }
+  return { payload, rules, setRules, loading, saving, error, refreshError, feedback, canSave, dirty, invalid, conditionErrors, save, refresh, update, condition, add, move,
     reload: () => { setPayload(null); setRules([]); setFeedback(""); setRevision(value => value + 1); },
     restore: () => { if (payload) setRules(cloneRules(payload.rules)); setError(""); setFeedback(""); },
   };

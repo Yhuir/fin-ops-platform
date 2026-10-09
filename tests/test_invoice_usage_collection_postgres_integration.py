@@ -188,6 +188,22 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
             self.assertEqual(after_conflict.summary, cleared.summary)
             self.assertEqual(after_conflict.classification, cleared.classification)
             self.assertEqual(after_conflict.payment_status_rules["rules"], [])
+            inclusive_request = {"expectedVersion": 2, "idempotencyKey": "inclusive-query-rules", "rules": [
+                {"id": "inclusive", "statusCode": "custom_inclusive", "label": "包含边界", "priority": 1,
+                 "enabled": True, "conditions": {"hasBank": True, "paymentComparison": "less_equal", "invoiceNetSign": "nonnegative"}}]}
+            inclusive_saved = provider.update_payment_status_rules(inclusive_request, actor_id="tester")
+            self.assertEqual(inclusive_saved["version"], 3)
+            self.assertEqual(provider.update_payment_status_rules(inclusive_request, actor_id="tester"), inclusive_saved)
+            inclusive = load()
+            self.assertEqual(inclusive.summary, snapshot.summary)
+            self.assertEqual({group["row_key"]: group["payment_facts"] for group in inclusive.groups}, facts)
+            selected_inclusive = load(filters=[{"field": "payment_status", "operator": "in", "values": ["custom_inclusive"]}])
+            self.assertEqual(selected_inclusive.summary["invoiceCount"], 2)
+            self.assertEqual(selected_inclusive.summary["totalWithTax"], "0.00")
+            self.assertEqual(selected_inclusive.summary["taxAmount"], "0.00")
+            self.assertEqual(selected_inclusive.summary["unclassifiedCount"], 0)
+            self.assertEqual(next(child["count"] for child in inclusive.classification["groups"][0]["children"]
+                                  if child["label"] == "包含边界"), 2)
 
     def test_output_relations_sharing_oa_do_not_lose_or_mix_bank_ownership(self):
         for key, amount in [('first', 100), ('second', 200)]:

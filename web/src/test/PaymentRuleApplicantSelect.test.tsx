@@ -12,7 +12,7 @@ const options: PaymentRuleApplicantOption[] = [
 ];
 function Harness() {
   const [names, setNames] = useState(["黄亮", "目录外人员"]);
-  return <PaymentRuleApplicantSelect label="申请人条件" options={options} names={names} onChange={setNames} />;
+  return <PaymentRuleApplicantSelect label="申请人条件" options={options} names={names} mode="named" disabled={false} onModeChange={vi.fn()} onChange={setNames} />;
 }
 
 describe("payment rule account choices", () => {
@@ -22,23 +22,25 @@ describe("payment rule account choices", () => {
     await user.click(screen.getByLabelText("申请人条件"));
     const search = screen.getByRole("searchbox", { name: "搜索申请人姓名或账号" });
     await user.type(search, "huang_old");
-    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(1));
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(5));
     await user.click(screen.getByRole("option", { name: "黄亮 HUANG_OLD" }));
     await user.clear(search);
     await waitFor(() => expect(screen.getByRole("option", { name: "黄 亮 HUANG" })).toHaveAttribute("aria-selected", "false"));
     await user.click(screen.getByRole("option", { name: "李四 LI" }));
     await user.keyboard("{Escape}");
     expect(screen.getByLabelText("申请人条件")).toHaveTextContent("目录外人员、李四");
-    expect(screen.getByText("目录外人员（不在 OA 目录）")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "移除" }));
+    await user.click(screen.getByLabelText("申请人条件"));
+    expect(screen.getByText("目录外人员", { exact: true })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "移除申请人 目录外人员" }));
+    await user.keyboard("{Escape}");
     expect(screen.getByLabelText("申请人条件")).toHaveTextContent("李四");
   });
 
   test("status refresh preserves the selected name and exposes read-only status", async () => {
     const user = userEvent.setup();
     const change = vi.fn();
-    const { rerender } = render(<PaymentRuleApplicantSelect label="申请人条件" options={options} names={["黄亮"]} onChange={change} />);
-    rerender(<PaymentRuleApplicantSelect label="申请人条件" options={options.map((option) => ({ ...option, enabled: false }))} names={["黄亮"]} onChange={change} />);
+    const { rerender } = render(<PaymentRuleApplicantSelect label="申请人条件" options={options} names={["黄亮"]} mode="named" disabled={false} onModeChange={vi.fn()} onChange={change} />);
+    rerender(<PaymentRuleApplicantSelect label="申请人条件" options={options.map((option) => ({ ...option, enabled: false }))} names={["黄亮"]} mode="named" disabled={false} onModeChange={vi.fn()} onChange={change} />);
     await user.click(screen.getByLabelText("申请人条件"));
     expect(screen.getAllByRole("img", { name: "账号已停用" })).toHaveLength(3);
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();

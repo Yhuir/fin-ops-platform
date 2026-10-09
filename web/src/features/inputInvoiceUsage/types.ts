@@ -209,6 +209,9 @@ export type InputInvoiceUsagePaymentStatusRulesResponse = {
   };
 };
 
+export type PaymentComparisonOperator = "equal" | "less" | "less_equal" | "greater" | "greater_equal";
+export type InvoiceNetSignOperator = "positive" | "nonnegative" | "zero" | "nonpositive" | "negative";
+
 export type InputInvoiceUsagePaymentStatusRule = {
   id?: string;
   code?: string;

@@ -39,6 +39,17 @@ class InputInvoiceUsagePaymentRulesProvider(Protocol):
     def evaluate(self, context: PaymentStatusEvaluationContext) -> dict[str, str]: ...
 
 
+# Rule operators match existing fact states; absent/invalid facts never match.
+PAYMENT_COMPARISON_STATES = {
+    "equal": ("equal",), "less": ("less",), "greater": ("greater",),
+    "less_equal": ("less", "equal"), "greater_equal": ("greater", "equal"),
+}
+INVOICE_NET_SIGN_STATES = {
+    "positive": ("positive",), "zero": ("zero",), "negative": ("negative",),
+    "nonnegative": ("positive", "zero"), "nonpositive": ("negative", "zero"),
+}
+
+
 DEFAULT_RULES: list[dict[str, Any]] = [
     {
         "id": "cash_turnover_chen_xiuyun",
@@ -452,11 +463,11 @@ def _normalize_conditions(rule_id: str, value: Any) -> dict[str, Any]:
                 )
             normalized[key] = item
         elif key == "invoiceNetSign":
-            if item not in ("positive", "zero", "negative"):
+            if not isinstance(item, str) or item not in INVOICE_NET_SIGN_STATES:
                 raise InputInvoiceUsagePaymentRulesValidationError("invalid_invoice_net_sign", "发票净额条件无效。")
             normalized[key] = item
         elif key == "paymentComparison":
-            if not isinstance(item, str) or item not in {"equal", "less", "greater"}:
+            if not isinstance(item, str) or item not in PAYMENT_COMPARISON_STATES:
                 raise InputInvoiceUsagePaymentRulesValidationError("invalid_payment_comparison", "金额比较条件无效。")
             normalized[key] = item
         else:
@@ -497,9 +508,9 @@ def condition_description(conditions: dict[str, Any]) -> str:
     parts = [f"申请人（任一）={'、'.join(conditions['applicantNames'])}"] if "applicantNames" in conditions else []
     parts.extend(pair[0] if conditions[key] else pair[1] for key, pair in labels.items() if key in conditions)
     if "paymentComparison" in conditions:
-        parts.append({"equal": "发票＝付款", "less": "发票＜付款", "greater": "发票＞付款"}[conditions["paymentComparison"]])
+        parts.append({"equal": "发票＝付款", "less": "发票＜付款", "greater": "发票＞付款", "less_equal": "发票≤付款", "greater_equal": "发票≥付款"}[conditions["paymentComparison"]])
     if "invoiceNetSign" in conditions:
-        parts.append({"positive": "发票净额为正", "zero": "发票净额为零", "negative": "发票净额为负"}[conditions["invoiceNetSign"]])
+        parts.append({"positive": "发票净额为正", "zero": "发票净额为零", "negative": "发票净额为负", "nonnegative": "发票净额≥0", "nonpositive": "发票净额≤0"}[conditions["invoiceNetSign"]])
     return "；".join(parts)
 
 
@@ -513,9 +524,9 @@ def _conditions_match(conditions: dict[str, Any], context: PaymentStatusEvaluati
     for key, current_value in checks.items():
         if key in conditions and bool(conditions[key]) != bool(current_value):
             return False
-    if "paymentComparison" in conditions and conditions["paymentComparison"] != context.payment_comparison:
+    if "paymentComparison" in conditions and context.payment_comparison not in PAYMENT_COMPARISON_STATES[conditions["paymentComparison"]]:
         return False
-    if "invoiceNetSign" in conditions and conditions["invoiceNetSign"] != context.invoice_net_sign:
+    if "invoiceNetSign" in conditions and context.invoice_net_sign not in INVOICE_NET_SIGN_STATES[conditions["invoiceNetSign"]]:
         return False
     applicants = conditions.get("applicantNames", [])
     if applicants and normalize_applicant_name(context.applicant_name) not in applicants:
