@@ -8,6 +8,8 @@ const legacyWorkbenchTables = new Set([
 ]);
 
 const approvedNativeTableSurfaces = new Set([
+  // The ordering form delegates arrow keys to dnd-kit instead of grid navigation.
+  "components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx",
   // This grouped invoice table needs colgroup spans and a payment header spanning both rows.
   "components/inputInvoiceUsage/InputInvoiceUsageTable.tsx",
   // Six-column object rows span an independent eight-column HeroUI flow grid.

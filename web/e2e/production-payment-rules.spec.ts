@@ -52,10 +52,26 @@ test('production grouped rules preserve persisted contract and discard local edi
   const sortableGroup = [true, false].map(hasBank => payload.rules.filter((rule: { conditions: { hasBank: boolean } }) => rule.conditions.hasBank === hasBank)).find(group => group.length > 1);
   if (sortableGroup) {
     const handle = drawer.getByRole('button', { name: new RegExp(`调整规则 ${sortableGroup[1].label} 的顺序，当前第 2 条`) });
-    await handle.focus(); await page.keyboard.press('Space'); await page.keyboard.press('ArrowUp'); await page.keyboard.press('Space');
+    await handle.focus();
+    await expect(handle).toBeFocused();
+    await page.keyboard.press('Space');
+    await expect(handle).toHaveAttribute('aria-pressed', 'true');
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('Space');
     const expected = [...savedIds];
     const start = expected.indexOf(sortableGroup[0].id);
     [expected[start], expected[start + 1]] = [expected[start + 1], expected[start]];
+    await expect.poll(ids).toEqual(expected);
+    await drawer.getByRole('button', { name: '还原', exact: true }).click();
+    await expect.poll(ids).toEqual(savedIds);
+    const source = drawer.getByRole('button', { name: new RegExp(`调整规则 ${sortableGroup[1].label} 的顺序，当前第 2 条`) });
+    const target = drawer.getByRole('button', { name: new RegExp(`调整规则 ${sortableGroup[0].label} 的顺序，当前第 1 条`) });
+    await source.hover();
+    const from = await source.boundingBox(); const to = await target.boundingBox();
+    await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(to!.x + to!.width / 2, to!.y + to!.height / 2, { steps: 12 });
+    await page.mouse.up();
     await expect.poll(ids).toEqual(expected);
     await drawer.getByRole('button', { name: '还原', exact: true }).click();
     await expect.poll(ids).toEqual(savedIds);

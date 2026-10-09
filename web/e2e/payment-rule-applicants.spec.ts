@@ -87,7 +87,7 @@ test("empty rules allow directory verification through a discarded local draft w
   const drawer = page.getByRole("dialog", { name: "发票与支付状态规则设置" });
   await drawer.getByRole("button", { name: "新增规则", exact: true }).click();
   await page.getByRole("button", { name: "添加", exact: true }).click();
-  const draft = drawer.getByRole("grid", { name: "支付状态规则" }).getByRole("row").last();
+  const draft = drawer.getByRole("table", { name: "支付状态规则" }).getByRole("row").last();
   await draft.getByRole("textbox").fill("目录验证草稿");
   await draft.getByRole("combobox", { name: "目录验证草稿 OA 申请人条件" }).click();
   await page.getByRole("option", { name: "指定申请人", exact: true }).click();

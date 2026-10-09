@@ -144,9 +144,10 @@ test('redundant copy is absent while payment rules remain editable', async ({ pa
   const drawer = page.getByRole('dialog');
   await expect(drawer.getByText(/按优先级从小到大匹配/)).toHaveCount(0);
   await expect(drawer.getByRole('button', { name: '新增规则' })).toBeVisible();
-  const rows = drawer.getByRole('grid', { name: '支付状态规则' }).getByRole('row');
+  const rows = drawer.getByRole('table', { name: '支付状态规则' }).getByRole('row');
   const before = await rows.count();
   await drawer.getByRole('button', { name: '新增规则' }).click();
+  await page.getByRole('button', { name: '添加', exact: true }).click();
   await expect(rows).toHaveCount(before + 1);
 });
 

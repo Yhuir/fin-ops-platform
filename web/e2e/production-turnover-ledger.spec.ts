@@ -202,7 +202,7 @@ test("production payment rule applicants match all OA accounts and support disab
   for (const rule of policy.rules) expect(rule.conditions).not.toHaveProperty("applicantName");
   const drawer = page.getByRole("dialog", { name: "发票与支付状态规则设置" });
   await drawer.getByRole("button", { name: "新增规则", exact: true }).click();
-  const draft = drawer.getByRole("grid", { name: "支付状态规则" }).getByRole("row").last();
+  const draft = drawer.getByRole("table", { name: "支付状态规则" }).getByRole("row").last();
   await draft.getByRole("textbox").fill("目录验证草稿");
   await draft.getByRole("button", { name: "目录验证草稿 OA 条件" }).click();
   await page.getByRole("option", { name: "指定申请人", exact: true }).click();

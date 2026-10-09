@@ -1,4 +1,3 @@
-import { Table } from "@heroui/react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
@@ -18,11 +17,12 @@ export default function SortablePaymentRuleRow({ id, name, order, disabled, chil
     "--payment-rule-transition": transition,
   } as CSSProperties;
   const handle = <button type="button" className="payment-rule-order" ref={setActivatorNodeRef}
-    {...attributes} {...listeners} disabled={disabled} aria-label={`调整规则 ${name} 的顺序，当前第 ${order} 条`}>
+    {...attributes} {...listeners} disabled={disabled}
+    aria-label={`调整规则 ${name} 的顺序，当前第 ${order} 条`}>
     <GripVertical size={16} aria-hidden="true" /><span>{order}</span>
   </button>;
-  return <Table.Row id={id} ref={setNodeRef} textValue={name} style={style}
-    className={`finance-table__row payment-rule-sortable-row${isDragging ? " payment-rule-sortable-row--dragging" : ""}`}>
+  return <tr data-key={id} ref={setNodeRef} style={style}
+    className={`table__row finance-table__row payment-rule-sortable-row${isDragging ? " payment-rule-sortable-row--dragging" : ""}`}>
     {children(handle)}
-  </Table.Row>;
+  </tr>;
 }

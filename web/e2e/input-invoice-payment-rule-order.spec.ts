@@ -27,11 +27,21 @@ test("payment rules support pointer and keyboard group ordering, cancellation an
   const ids = () => drawer.locator(".payment-rule-sortable-row").evaluateAll(nodes => nodes.map(node => node.getAttribute("data-key")));
   const handle = (name: string) => drawer.getByRole("button", { name: new RegExp(`调整规则 ${name} 的顺序`) });
   const drag = async (source: string, target: string) => {
+    await handle(source).hover();
     const from = await handle(source).boundingBox(); const to = await handle(target).boundingBox();
     await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2);
     await page.mouse.down(); await page.mouse.move(to!.x + to!.width / 2, to!.y + to!.height / 2, { steps: 12 }); await page.mouse.up();
   };
   await expect(handle("付款二")).toHaveText("2");
+  await handle("付款二").focus();
+  await expect(handle("付款二")).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(handle("付款二")).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("Space");
+  await expect.poll(ids).toEqual(["p2", "p1", "u1", "u2"]);
+  await drawer.getByRole("button", { name: "还原", exact: true }).click();
+  await expect.poll(ids).toEqual(["p1", "p2", "u1", "u2"]);
   await drag("付款二", "付款一");
   await expect.poll(ids).toEqual(["p2", "p1", "u1", "u2"]);
   expect(writes).toHaveLength(0);

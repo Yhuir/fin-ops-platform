@@ -1321,7 +1321,7 @@ describe("Input invoice usage workflow drawers", () => {
       { id: "r1", statusCode: "custom_wait", label: "待核付", description: "", enabled: true, conditions: { hasOa: true, hasBank: false } },
     ] };
     render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} onClose={() => undefined} />);
-    expect(await screen.findByRole("grid", { name: "支付状态规则" })).toBeInTheDocument();
+    expect(await screen.findByRole("table", { name: "支付状态规则" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "标签 1" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "保存" })).not.toBeInTheDocument();
     expect(screen.queryByText(/分类按实际流水/)).not.toBeInTheDocument();
@@ -1401,7 +1401,7 @@ describe("Input invoice usage workflow drawers", () => {
     render(<PaymentStatusRulesDrawer open loadRules={loadRules} saveRules={vi.fn()} onClose={() => undefined} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("OA 目录不可用"); expect(screen.queryByRole("button", { name: "保存" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "重试读取" }));
-    expect(await screen.findByRole("grid", { name: "支付状态规则" })).toBeInTheDocument(); expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(await screen.findByRole("table", { name: "支付状态规则" })).toBeInTheDocument(); expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   test("new rules choose group and existing label explicitly, checkbox and rename retain identity", async () => {
@@ -1409,7 +1409,11 @@ describe("Input invoice usage workflow drawers", () => {
     const payload: PaymentStatusRulesPayload = { version: 1, readOnly: false, permissions: { canSave: true }, applicantOptions: [], rules: [] };
     const saveRules = vi.fn(request => Promise.resolve({ ...payload, version: 2, rules: request.rules }));
     render(<PaymentStatusRulesDrawer open loadRules={() => Promise.resolve(payload)} saveRules={saveRules} onClose={() => undefined} />);
-    await user.click(await screen.findByRole("button", { name: "新增规则" })); await user.click(screen.getByRole("button", { name: "添加", exact: true }));
+    await user.click(await screen.findByRole("button", { name: "新增规则" }));
+    await user.click(screen.getByRole("button", { name: "取消新增" }));
+    expect(screen.queryByRole("button", { name: "添加", exact: true })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "新增规则" })); await user.click(screen.getByRole("button", { name: "添加", exact: true }));
     expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
     await user.type(screen.getByRole("textbox", { name: "标签 1" }), "抵账");
     expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
