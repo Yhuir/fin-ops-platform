@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import date
+from decimal import InvalidOperation
 from io import BytesIO
 
 from fin_ops_platform.services.turnover_ledger_export_service import (
@@ -49,6 +50,8 @@ class TurnoverLedgerExportServiceTests(unittest.TestCase):
                     "family_label": "公司往来",
                     "pending_direction": "repayment",
                     "pending_amount": "100000.00",
+                    "pending_repayment_amount": "100000.00",
+                    "pending_collection_amount": "0.00",
                     "summary_row": {
                         "relation_id": "turnover_rel_001",
                         "row_kind": "summary",
@@ -258,6 +261,8 @@ class TurnoverLedgerExportServiceTests(unittest.TestCase):
                     "family_label": "业务往来",
                     "pending_direction": "collection",
                     "pending_amount": "5000.00",
+                    "pending_repayment_amount": "0.00",
+                    "pending_collection_amount": "5000.00",
                     "summary_row": {
                             "relation_id": "turnover_rel_002",
                             "status": "suggested",
@@ -281,6 +286,59 @@ class TurnoverLedgerExportServiceTests(unittest.TestCase):
                 },
             ],
         }
+
+    def test_export_keeps_both_pending_directions_from_canonical_group(self) -> None:
+        payload = self._grouped_payload()
+        group = payload["groups"][0]
+        group.update(pending_direction="mixed", pending_repayment_amount="100000.00",
+                     pending_collection_amount="50000.00", pending_amount="150000.00")
+        group["summary_row"].update(business_type="borrow_in", balance_amount="50000.00")
+        group["flow_rows"] = [{"source_bank_row_id": "mixed-flow", "business_type": "borrow_out",
+                               "flow_direction": "expense", "flow_amount": "50000.00", "balance_amount": "50000.00"}]
+        service = TurnoverLedgerExportService(lambda **_: payload)
+
+        _, data, count = service.export(family="company")
+
+        workbook = load_workbook(BytesIO(data), read_only=True)
+        try:
+            rows = list(workbook.active.values)
+            self.assertEqual(count, 1)
+            self.assertEqual(rows[1][1], "合计")
+            self.assertEqual(rows[1][7:10], ("100000.00", "50000.00", "150000.00"))
+            self.assertEqual(rows[2][1:5], ("真实流水", "mixed-flow", "expense", "50000.00"))
+            self.assertEqual(rows[2][7:10], ("0.00", "50000.00", "50000.00"))
+        finally:
+            workbook.close()
+
+    def test_export_does_not_replace_missing_or_invalid_group_totals_with_zero(self) -> None:
+        for field in ("pending_repayment_amount", "pending_collection_amount", "pending_amount"):
+            with self.subTest(field=field, state="missing"):
+                payload = self._grouped_payload()
+                del payload["groups"][0][field]
+                with self.assertRaises(KeyError):
+                    TurnoverLedgerExportService(lambda **_: payload).export(family="company")
+            with self.subTest(field=field, state="invalid"):
+                payload = self._grouped_payload()
+                payload["groups"][0][field] = "invalid"
+                with self.assertRaises(InvalidOperation):
+                    TurnoverLedgerExportService(lambda **_: payload).export(family="company")
+
+    def test_export_keeps_settled_canonical_totals_at_zero(self) -> None:
+        payload = self._grouped_payload()
+        group = payload["groups"][0]
+        group.update(pending_direction="none", pending_repayment_amount="0.00",
+                     pending_collection_amount="0.00", pending_amount="0.00")
+        group["summary_row"].update(business_type="borrow_in", balance_amount="100000.00")
+        service = TurnoverLedgerExportService(lambda **_: payload)
+
+        _, data, count = service.export(family="company")
+
+        workbook = load_workbook(BytesIO(data), read_only=True)
+        try:
+            self.assertEqual(count, 1)
+            self.assertEqual(list(workbook.active.values)[1][7:10], ("0.00", "0.00", "0.00"))
+        finally:
+            workbook.close()
 
     def test_formal_rows_keep_summary_and_real_flow_rows(self) -> None:
         service = TurnoverLedgerExportService(lambda **_: self._grouped_payload())

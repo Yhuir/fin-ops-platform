@@ -1012,6 +1012,19 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(flow_by_id["txn-in-principal"]["repayment_remark"], "")
         self.assertEqual(flow_by_id["txn-out-principal"]["repayment_remark"], "")
         self.assertEqual(flow_by_id["txn-out-collected"]["bank_account_labels"], ["工行 2002"])
+        from io import BytesIO
+
+        from fin_ops_platform.services.turnover_ledger_export_service import TurnoverLedgerExportService
+        from openpyxl import load_workbook
+
+        _, content, count = TurnoverLedgerExportService(ledger_service.list_grouped_ledger).export(family="personal")
+        workbook = load_workbook(BytesIO(content), read_only=True)
+        try:
+            self.assertEqual(count, 1)
+            exported_summary = list(workbook.active.values)[1]
+            self.assertEqual(exported_summary[7:10], ("1000.00", "500.00", "1500.00"))
+        finally:
+            workbook.close()
         for row_id, action, label in [
             ("txn-in-principal", "pending_repayment", "待还款"),
             ("txn-in-repaid", "repaid", "已还款"),

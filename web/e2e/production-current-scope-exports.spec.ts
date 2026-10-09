@@ -25,6 +25,8 @@ function rowsResponse(page: Page, module: string) {
 function exportConditions(url: string) {
   const query = new URL(url).searchParams;
   for (const key of ['page', 'page_size', 'include_statistics', 'view']) query.delete(key);
+  // The turnover page always sends this default; its export has no direction filter.
+  if (query.get('direction') === 'all') query.delete('direction');
   return Object.fromEntries([...query.entries()].filter(([, value]) => value !== '').sort());
 }
 
@@ -47,7 +49,7 @@ for (const scope of scopes) {
     const region = scope.region ? page.getByRole('region', { name: scope.region, exact: true }) : page.getByLabel('往来款账单范围');
     const categoryRegion = scope.group ? region.getByRole('group', { name: scope.group, exact: true }) : region;
     const selected = rowsResponse(page, scope.module);
-    await categoryRegion.getByRole('button', { name: scope.category }).click();
+    await categoryRegion.getByRole(scope.module === 'turnover-ledger' ? 'radio' : 'button', { name: scope.category }).click();
     const rows = await selected;
     expect(rows.status()).toBe(200);
     const payload = await rows.json();

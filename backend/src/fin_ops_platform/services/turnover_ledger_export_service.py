@@ -93,9 +93,15 @@ class TurnoverLedgerExportService:
         return rows
 
     def _formal_row(self, sequence: int, group: dict[str, Any], row: dict[str, Any], *, row_type: str) -> dict[str, Any]:
-        balance_amount = self._balance_amount(group, row)
-        pending_repayment, pending_collection = self._pending_amounts(group, row, balance_amount=balance_amount)
         normalized_row_type = "flow" if row_type == "flow" else "summary"
+        if normalized_row_type == "summary":
+            # A counterparty can owe and be owed at the same time. Keep the owner totals separate.
+            pending_repayment = Decimal(str(group["pending_repayment_amount"])).quantize(MONEY_QUANT)
+            pending_collection = Decimal(str(group["pending_collection_amount"])).quantize(MONEY_QUANT)
+            balance_amount = Decimal(str(group["pending_amount"])).quantize(MONEY_QUANT)
+        else:
+            balance_amount = self._balance_amount(group, row)
+            pending_repayment, pending_collection = self._pending_amounts(group, row, balance_amount=balance_amount)
         source_bank_row_id = str(row.get("source_bank_row_id") or "") if normalized_row_type == "flow" else ""
         flow_direction = str(row.get("flow_direction") or "") if normalized_row_type == "flow" else ""
         flow_amount = (
