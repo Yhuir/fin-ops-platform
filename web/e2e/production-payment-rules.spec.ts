@@ -99,7 +99,7 @@ test('production grouped rules preserve persisted contract and discard local edi
     expect(group.children.some((child: { id: string }) => child.id === 'category:rule_conflict')).toBe(false);
     for (const child of group.children.filter((item: { count: number }) => item.count > 0)) {
       const code = child.id.slice('category:'.length);
-      const filters = JSON.stringify([{ field: 'payment_group', operator: 'in', values: [group.id] }, { field: 'payment_status', operator: 'in', values: [code] }]);
+      const filters = JSON.stringify([{ field: 'usage_status', operator: 'in', values: ['used'] }, { field: 'payment_group', operator: 'in', values: [group.id] }, { field: 'payment_status', operator: 'in', values: [code] }]);
       const query = new URLSearchParams({ page: '1', page_size: '200', filters });
       const filtered = await (await get('rows', query)).json();
       expect(filtered.summary.invoiceCount).toBe(child.count);
