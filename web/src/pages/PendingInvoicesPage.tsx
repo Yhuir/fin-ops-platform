@@ -762,11 +762,10 @@ export default function PendingInvoicesPage() {
         loadDetail={loadObjectDetail}
         onClose={closeDrawer}
       />
-      <PendingInvoiceExportDrawer
+      {activeDrawer === "export" ? <PendingInvoiceExportDrawer
         query={query}
-        open={activeDrawer === "export"}
         onClose={closeDrawer}
-      />
+      /> : null}
     </div>
   );
 }

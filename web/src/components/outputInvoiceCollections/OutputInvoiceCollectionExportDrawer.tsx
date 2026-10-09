@@ -1,13 +1,13 @@
-import FilteredExportDrawer from '../common/FilteredExportDrawer';
-import { useCallback } from 'react';
-import type { ExportSelection } from '../../features/exports/types';
-import type { OutputInvoiceCollectionQuery } from '../../features/outputInvoiceCollections/types';
-import { fetchOutputInvoiceCollectionExportSummary, downloadOutputInvoiceCollectionSelection } from '../../features/outputInvoiceCollections/api';
-type Query = Pick<OutputInvoiceCollectionQuery, 'page' | 'pageSize' | 'keyword' | 'month' | 'invoiceDateFrom' | 'invoiceDateTo' | 'filters' | 'sortField' | 'sortDirection'>;
-export default function OutputInvoiceCollectionExportDrawer({ open, onClose, query }: { open: boolean; onClose: () => void; query: Query }) {
-  const loadSummary = useCallback((selection: ExportSelection, signal: AbortSignal) => fetchOutputInvoiceCollectionExportSummary(selection, signal, query), [query]);
-  const download = useCallback((selection: ExportSelection) => downloadOutputInvoiceCollectionSelection(selection, query), [query]);
-  const status = query.filters.find(filter => filter.field === 'collection_status');
-  return open ? <FilteredExportDrawer title="导出销项发票" unit="张" onClose={onClose} loadSummary={loadSummary} download={download}
-    initialSelection={{ values: status?.values ? { collection_status: status.values } : {}, startDate: query.invoiceDateFrom, endDate: query.invoiceDateTo }} /> : null;
+import { useCallback, useState } from "react";
+import FilteredExportDrawer from "../common/FilteredExportDrawer";
+import { fetchOutputInvoiceCollectionExportSummary, downloadOutputInvoiceCollectionExport } from "../../features/outputInvoiceCollections/api";
+import type { OutputInvoiceCollectionQuery } from "../../features/outputInvoiceCollections/types";
+
+export default function OutputInvoiceCollectionExportDrawer({ onClose, query }: {
+  onClose: () => void; query: OutputInvoiceCollectionQuery;
+}) {
+  const [scope] = useState(() => structuredClone(query));
+  const loadSummary = useCallback((signal: AbortSignal) => fetchOutputInvoiceCollectionExportSummary(scope, signal), [scope]);
+  const download = useCallback(() => downloadOutputInvoiceCollectionExport(scope), [scope]);
+  return <FilteredExportDrawer title="导出销项发票" unit="张销项发票" onClose={onClose} loadSummary={loadSummary} download={download} />;
 }

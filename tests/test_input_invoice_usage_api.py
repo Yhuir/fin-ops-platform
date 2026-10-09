@@ -1146,9 +1146,10 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
 
         preview_payload = json.loads(preview_response.body)
         self.assertEqual(preview_response.status_code, 200)
-        self.assertEqual(preview_payload["row_count"], 1)
+        self.assertEqual(preview_payload, {"row_count":1})
         self.assertNotIn("sample_rows", preview_payload)
         self.assertEqual(export_response.status_code, 200)
+        self.assertEqual(export_response.headers["X-Export-Count"], "1")
         self.assertIn(
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             export_response.headers["Content-Type"],

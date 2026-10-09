@@ -161,17 +161,18 @@ class OutputInvoiceCollectionCanonicalQueryService:
         }
 
     def export_summary(self, query: dict[str, list[str]], *, tenant_id: str = "default") -> dict[str, Any]:
-        payload = self.rows({**query, "page": ["1"], "page_size": ["1"]}, tenant_id=tenant_id)
-        return {"row_count": payload["summary"]["invoiceCount"], "filter_options": payload["filterOptions"]}
+        payload = self._export_invoice_payload(query, tenant_id=tenant_id, limit=0)
+        return {"row_count": payload["total"]}
 
     def export(
         self,
         query: dict[str, list[str]],
         *,
         tenant_id: str = "default",
-    ) -> tuple[str, bytes]:
+    ) -> tuple[str, bytes, int]:
         rows = self._export_rows(query, tenant_id=tenant_id)
-        return self._row_assembler.export_for_rows(rows)
+        filename, content = self._row_assembler.export_for_rows(rows)
+        return filename, content, len(rows)
 
     def row_by_id(
         self,
@@ -295,63 +296,35 @@ class OutputInvoiceCollectionCanonicalQueryService:
         *,
         tenant_id: str,
     ) -> list[dict[str, Any]]:
-        try:
-            month, invoice_date_from, invoice_date_to = _validate_temporal_query(
-                _first(query, "month") or None,
-                _first(query, "invoice_date_from") or None,
-                _first(query, "invoice_date_to") or None,
-            )
-        except ValueError as exc:
-            raise OutputInvoiceCollectionError(
-                "invalid_date_filter",
-                str(exc),
-            ) from exc
-        if self._repository is None:
-            local_kwargs = _query_kwargs(query)
-            local_kwargs.update(
-                {
-                    "month": month,
-                    "invoice_date_from": invoice_date_from,
-                    "invoice_date_to": invoice_date_to,
-                }
-            )
-            local_kwargs.pop("page", None)
-            local_kwargs.pop("page_size", None)
-            return self._row_assembler._export_rows(
-                **local_kwargs,
-                tenant_id=tenant_id,
-            )
-        parsed_filters = self._row_assembler._parse_filters(
-            _first(query, "filters") or None
-        )
-        sort_field, sort_direction = self._row_assembler._parse_sort(
-            _first(query, "sort_field") or "invoice_date",
-            _first(query, "sort_direction") or "desc",
-        )
-        snapshot = self._repository.load_page(
-            page=1,
-            page_size=OUTPUT_INVOICE_COLLECTION_EXPORT_ROW_LIMIT + 1,
-            keyword=_first(query, "keyword") or None,
-            invoice_date_from=invoice_date_from,
-            invoice_date_to=invoice_date_to,
-            month=month,
-            filters=parsed_filters,
-            sort_field=sort_field,
-            sort_direction=sort_direction,
-            tenant_id=tenant_id,
-        )
-        if snapshot.summary["invoiceCount"] > OUTPUT_INVOICE_COLLECTION_EXPORT_ROW_LIMIT:
+        payload = self._export_invoice_payload(query, tenant_id=tenant_id, limit=OUTPUT_INVOICE_COLLECTION_EXPORT_ROW_LIMIT + 1)
+        if payload["total"] > OUTPUT_INVOICE_COLLECTION_EXPORT_ROW_LIMIT:
             raise OutputInvoiceCollectionError(
                 "output_invoice_collection_export_row_limit_exceeded",
                 "当前筛选结果超过 20000 行，请缩小筛选范围后导出。",
-                details={
-                    "total": snapshot.summary["invoiceCount"],
-                    "limit": OUTPUT_INVOICE_COLLECTION_EXPORT_ROW_LIMIT,
-                },
+                details={"total": payload["total"], "limit": OUTPUT_INVOICE_COLLECTION_EXPORT_ROW_LIMIT},
             )
-        invoices = {invoice.id: invoice for group in snapshot.groups for invoice in group["line_items"]}
         return [{"invoice": self._row_assembler._invoice_summary(invoice, [invoice])}
-                for invoice in invoices.values()]
+                for invoice in payload["invoices"]]
+
+    def _export_invoice_payload(self, query: dict[str, list[str]], *, tenant_id: str, limit: int) -> dict[str, Any]:
+        try:
+            month, date_from, date_to = _validate_temporal_query(
+                _first(query, "month") or None, _first(query, "invoice_date_from") or None,
+                _first(query, "invoice_date_to") or None,
+            )
+        except ValueError as exc:
+            raise OutputInvoiceCollectionError("invalid_date_filter", str(exc)) from exc
+        filters = self._row_assembler._parse_filters(_first(query, "filters") or None)
+        sort_field, sort_direction = self._row_assembler._parse_sort(
+            _first(query, "sort_field") or "invoice_date", _first(query, "sort_direction") or "desc",
+        )
+        if self._repository is None:
+            raise OutputInvoiceCollectionError("output_invoice_collection_query_unavailable", "销项导出查询未配置。", status_code=503)
+        return self._repository.export_invoices(
+            limit=limit, keyword=_first(query, "keyword") or None,
+            invoice_date_from=date_from, invoice_date_to=date_to, month=month,
+            filters=filters, sort_field=sort_field, sort_direction=sort_direction, tenant_id=tenant_id,
+        )
 
     def _payload(
         self,

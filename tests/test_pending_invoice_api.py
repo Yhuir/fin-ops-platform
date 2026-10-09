@@ -134,6 +134,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertNotIn("sample_rows", export_preview_payload)
         self.assertEqual(export_response.status_code, 200)
         self.assertTrue(export_response.body)
+        self.assertEqual(export_response.headers["X-Export-Count"], "1")
         self.assertEqual(rules_response.status_code, 200)
         self.assertIn("pending_invoice_tag_groups", rules_payload)
 

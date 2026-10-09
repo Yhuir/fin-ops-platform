@@ -21,6 +21,7 @@ class PendingInvoiceExportFile:
     filename: str
     content: bytes
     content_type: str
+    row_count: int
 
 
 ReadSessionResolver = Callable[[dict[str, str] | None], tuple[Any | None, Any | None]]
@@ -292,6 +293,7 @@ class PendingInvoiceApiRoutes:
             filename=filename,
             content=content,
             content_type=self._export_content_type,
+            row_count=rows_payload["total"],
         )
 
     def _json_read(self, headers: dict[str, str] | None, action: Callable[[Any | None], tuple[HTTPStatus, dict[str, Any]]]) -> Any:

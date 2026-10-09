@@ -231,7 +231,8 @@ class InvoiceFinancialValuesTests(unittest.TestCase):
                        **invoice_financial_summary([invoice(tax_amount=tax, tax_amount_text=text,
                            total_with_tax=Decimal("113"), tax_rate="13%")])}
                 service = InputInvoiceUsageExportService(row_export_loader=lambda **_: {"total": 1, "rows": [{"invoice": inv}]})
-                _, binary = service.export()
+                _, binary, count = service.export()
+                self.assertEqual(count, 1)
                 book = load_workbook(BytesIO(binary), data_only=True)
                 values = list(book.active.values)
                 self.assertEqual(values[1][10], exported)

@@ -124,14 +124,14 @@ test("production turnover register filters, details and exports use canonical fa
   await page.getByRole("button", { name: "查询", exact: true }).click();
   const filtered = await (await filteredResponse).json();
   expect(filtered.groups.every((item: { counterparty_name: string }) => item.counterparty_name.includes(group.counterparty_name))).toBe(true);
-  const previewResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/fin-ops-api/api/turnover-ledger/export-preview");
+  const previewResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/fin-ops-api/api/turnover-ledger/export-summary");
   await page.getByRole("button", { name: "下载表格" }).click();
   const preview = await previewResponse;
   expect(new URL(preview.url()).searchParams.get("query")).toBe(group.counterparty_name);
   const previewPayload = await preview.json();
-  expect(previewPayload.totals.row_count).toBeGreaterThan(0);
+  expect(previewPayload.row_count).toBeGreaterThan(0);
   const downloadEvent = page.waitForEvent("download");
-  await page.getByRole("button", { name: "确认下载", exact: true }).click();
+  await page.getByRole("button", { name: "导出", exact: true }).click();
   const download = await downloadEvent;
   expect(download.suggestedFilename()).toMatch(/\.xlsx$/);
   expect(await download.failure()).toBeNull();

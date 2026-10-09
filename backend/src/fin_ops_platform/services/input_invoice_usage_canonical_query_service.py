@@ -196,24 +196,16 @@ class InputInvoiceUsageCanonicalQueryService:
         )
         if self._repository is None:
             raise InputInvoiceUsageError("input_invoice_usage_query_unavailable", "进项发票查询未配置。", status_code=503)
-        snapshot = self._repository.load_page(
-            page=1,
-            page_size=limit,
-            keyword=kwargs.get("keyword"),
-            invoice_date_from=invoice_date_from,
-            invoice_date_to=invoice_date_to,
-            month=month,
-            filters=parsed_filters,
-            sort_field=sort_field,
-            sort_direction=sort_direction,
-            tenant_id=tenant_id,
+        payload = self._repository.export_invoices(
+            limit=limit, keyword=kwargs.get("keyword"),
+            invoice_date_from=invoice_date_from, invoice_date_to=invoice_date_to,
+            month=month, filters=parsed_filters, sort_field=sort_field,
+            sort_direction=sort_direction, tenant_id=tenant_id,
         )
-        invoices = {invoice.id: invoice for group in snapshot.groups for invoice in group["line_items"]}
         return {
             "rows": [{"invoice": self._row_assembler._invoice_summary(invoice, [invoice])}
-                     for invoice in invoices.values()],
-            "total": snapshot.summary["invoiceCount"],
-            "filterOptions": snapshot.facet_counts,
+                     for invoice in payload["invoices"]],
+            "total": payload["total"],
         }
 
     def rows_by_invoice_ids(

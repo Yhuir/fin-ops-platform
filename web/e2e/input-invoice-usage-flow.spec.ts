@@ -129,7 +129,7 @@ test("search keeps a single focus frame and usable controls at desktop and narro
   await expect(search).toHaveValue("");
 });
 
-function waitForInputInvoiceUsageExportPreview(page: Page) {
+function waitForInputInvoiceUsageExportSummary(page: Page) {
   return page.waitForResponse((response) => {
     const url = new URL(response.url());
     return response.request().method() === "GET" && url.pathname.endsWith("/api/input-invoice-usage/export-summary");
@@ -614,20 +614,20 @@ test.describe("input invoice usage browser flow", () => {
     });
     await expect(page.getByRole("row", { name: /SD-INV-E2E-0001/ })).toBeVisible();
 
-    let previewResponse: Awaited<ReturnType<typeof waitForInputInvoiceUsageExportPreview>> | undefined;
+    let previewResponse: Awaited<ReturnType<typeof waitForInputInvoiceUsageExportSummary>> | undefined;
     await recordLatency({
-      operationId: "input-invoice-usage.open-export-preview",
+      operationId: "input-invoice-usage.open-export-summary",
       visibleLabel: "筛选内容导出",
       actionType: "click",
     }, async (mark) => {
-      const previewResponsePromise = waitForInputInvoiceUsageExportPreview(page);
+      const previewResponsePromise = waitForInputInvoiceUsageExportSummary(page);
       await page.getByRole("button", { name: "筛选内容导出" }).click();
       previewResponse = await mark("apiLatencyMs", previewResponsePromise);
       await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("dialog", { name: "导出进项发票" })).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "导出进项发票" }).getByText("导出 1 张")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "导出进项发票" }).getByText("即将导出 1 张进项发票")).toBeVisible());
     });
     if (!previewResponse) {
-      throw new Error("missing input invoice usage export preview response");
+      throw new Error("missing input invoice usage export summary response");
     }
     const previewUrl = new URL(previewResponse.url());
     expect(previewResponse.status()).toBe(200);
@@ -637,18 +637,18 @@ test.describe("input invoice usage browser flow", () => {
 
     const drawer = page.getByRole("dialog", { name: "导出进项发票" });
     await expect(drawer).toBeVisible();
-    await expect(drawer.getByText("导出 1 张")).toBeVisible();
+    await expect(drawer.getByText("即将导出 1 张进项发票")).toBeVisible();
 
     let exportResponse: Awaited<ReturnType<typeof waitForInputInvoiceUsageExport>> | undefined;
     let download: Download | undefined;
     await recordLatency({
       operationId: "input-invoice-usage.download-export",
-      visibleLabel: "下载 Excel",
+      visibleLabel: "导出",
       actionType: "click",
     }, async (mark) => {
       const exportResponsePromise = waitForInputInvoiceUsageExport(page);
       const downloadPromise = page.waitForEvent("download");
-      await drawer.getByRole("button", { name: "下载 Excel" }).click();
+      await drawer.getByRole("button", { name: "导出", exact: true }).click();
       exportResponse = await mark("apiLatencyMs", exportResponsePromise);
       download = await mark("finalSettledLatencyMs", downloadPromise);
     });
@@ -667,6 +667,7 @@ test.describe("input invoice usage browser flow", () => {
     const downloadedText = await readXlsxText(downloadPath);
     expect(downloadedText).toContain("SD-INV-E2E-0001");
     expect(downloadedText).toContain("浏览器进项供应商");
+    // Development StrictMode remounts effects; the first count request is cancelled.
     expect(api.count("GET /api/input-invoice-usage/export-summary")).toBe(2);
     expect(api.count("GET /api/input-invoice-usage/export")).toBe(1);
     expect(mutationCalls(api.calls)).toEqual([]);
@@ -696,11 +697,11 @@ test.describe("input invoice usage browser flow", () => {
     await expect(page.getByTestId("input-invoice-usage-page")).toBeVisible();
     const drawer = page.getByRole("dialog", { name: "导出进项发票" });
     await recordLatency({
-      operationId: "input-invoice-usage.open-export-preview-row-limit",
+      operationId: "input-invoice-usage.open-export-summary-row-limit",
       visibleLabel: "筛选内容导出",
       actionType: "click",
     }, async (mark) => {
-      const previewResponsePromise = waitForInputInvoiceUsageExportPreview(page);
+      const previewResponsePromise = waitForInputInvoiceUsageExportSummary(page);
       await page.getByRole("button", { name: "筛选内容导出" }).click();
       expect((await mark("apiLatencyMs", previewResponsePromise)).status()).toBe(400);
       await mark("firstVisibleResponseLatencyMs", expect(drawer).toBeVisible());
@@ -708,8 +709,9 @@ test.describe("input invoice usage browser flow", () => {
     });
     await expect(drawer).toBeVisible();
     await expect(drawer.getByRole("alert")).toContainText("进项发票使用情况导出超过 20000 行，请缩小筛选范围后重试。");
-    await expect(drawer.getByRole("button", { name: "下载 Excel" })).toBeDisabled();
+    await expect(drawer.getByRole("button", { name: "重试" })).toBeEnabled();
 
+    // Development StrictMode remounts effects; the first count request is cancelled.
     expect(api.count("GET /api/input-invoice-usage/export-summary")).toBe(2);
     expect(api.count("GET /api/input-invoice-usage/export")).toBe(0);
     expect(mutationCalls(api.calls)).toEqual([]);

@@ -2407,12 +2407,12 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("TurnoverLedgerApiRoutes does not own read/export route dispatch")
         for snippet in (
             'route_path == "/api/turnover-ledger"',
-            'route_path == "/api/turnover-ledger/export-preview"',
+            'route_path == "/api/turnover-ledger/export-summary"',
             'route_path == "/api/turnover-ledger/export"',
             'route_path == "/api/turnover-ledger/tag-selection"',
             'route_path.startswith("/api/turnover-ledger/relations/")',
             "def handle_list_route(",
-            "def handle_export_preview_route(",
+            "def handle_export_summary_route(",
             "def handle_export_route(",
             "def handle_relation_route(",
             "def handle_relation_extra_route(",

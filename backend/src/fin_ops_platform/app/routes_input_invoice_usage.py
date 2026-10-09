@@ -24,7 +24,7 @@ class InputInvoiceUsageApiRoutes:
         export_query_kwargs: Callable[[dict[str, list[str]]], dict[str, object]],
         export_error_response: Callable[[InputInvoiceUsageExportError], Any],
         record_export_download: Callable[[Any | None, str, dict[str, list[str]]], None],
-        xlsx_response: Callable[[str, bytes], Any],
+        xlsx_response: Callable[[str, bytes, int], Any],
         app_settings_service: Any,
         load_json_body: Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]],
         payment_rules_error_response: Callable[[AppSettingsValidationError], Any],
@@ -252,7 +252,7 @@ class InputInvoiceUsageApiRoutes:
         if auth_error is not None:
             return auth_error
         try:
-            filename, content = self._export_service.export(
+            filename, content, row_count = self._export_service.export(
                 **self._export_query_kwargs(query),
                 tenant_id=_tenant_id(session),
             )
@@ -261,7 +261,7 @@ class InputInvoiceUsageApiRoutes:
         except InputInvoiceUsageExportError as exc:
             return self._export_error_response(exc)
         self._record_export_download(session, filename, query)
-        return self._xlsx_response(filename, content)
+        return self._xlsx_response(filename, content, row_count)
 
     def _read_session(
         self,

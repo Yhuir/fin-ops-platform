@@ -190,6 +190,7 @@ export type OutputInvoiceCollectionFilterOptionsResponse = {
 export type OutputInvoiceCollectionExportDownload = {
   blob: Blob;
   fileName: string;
+  count: number;
 };
 
 export type OutputInvoiceCollectionDetailResponse = {

@@ -77,7 +77,11 @@ class FakeQueryService:
             "pagination": {"page": 1, "pageSize": 100, "total": 1},
         }
 
-    def export_sources(
+    def export_summary(self, query, *, tenant_id):
+        self.export_queries.append((dict(query), tenant_id))
+        return {"row_count": 17}
+
+    def export(
         self,
         query: dict[str, list[str]],
         *,
@@ -240,6 +244,16 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(query["oa_row_ids"], ["oa-api", "oa-extra"])
         self.assertEqual(tenant_id, "default")
 
+    def test_export_summary_inherits_exact_query_and_returns_only_count(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            query_service = FakeQueryService()
+            app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(query_service=query_service)
+            response = app.handle_request("GET", "/api/oa-pending-payments/export-summary?view_mode=in_progress&keyword=test&page=7")
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(json.loads(response.body), {"row_count":17})
+            self.assertEqual(query_service.export_queries, [({'view_mode':['in_progress'],'keyword':['test'],'page':['7']}, 'default')])
+
     def test_export_route_returns_xlsx_and_records_metadata_only_audit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -250,7 +264,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
 
             response = app.handle_request(
                 "GET",
-                "/api/oa-pending-payments/export?sources=completed,in_progress",
+                "/api/oa-pending-payments/export?view_mode=in_progress",
             )
             audit_entries = app._audit_service.as_dicts()  # noqa: SLF001
 
@@ -261,7 +275,8 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         )
         self.assertIn("OA%E4%BA%8B%E5%AE%9E%E6%BA%90_2026-08-19.xlsx", response.headers["Content-Disposition"])
         self.assertEqual(response.headers["Cache-Control"], "no-store")
-        self.assertEqual(response.headers["Access-Control-Expose-Headers"], "Content-Disposition")
+        self.assertEqual(response.headers["Access-Control-Expose-Headers"], "Content-Disposition, X-Export-Count")
+        self.assertEqual(response.headers["X-Export-Count"], "2")
         workbook = load_workbook(BytesIO(response.body), read_only=True, data_only=False)
         self.assertEqual(workbook.sheetnames, ["已完成OA", "进行中OA"])
         self.assertEqual(workbook["已完成OA"]["A2"].value, "oa-completed-api")
@@ -269,7 +284,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         workbook.close()
         self.assertEqual(
             query_service.export_queries,
-            [({"sources": ["completed,in_progress"]}, "default")],
+            [({"view_mode": ["in_progress"]}, "default")],
         )
         audit = audit_entries[-1]
         self.assertEqual(audit["action"], "oa_pending_payment_source_export_downloaded")
@@ -380,7 +395,8 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             )
             endpoints = [
                 "/api/oa-pending-payments/rows",
-                "/api/oa-pending-payments/export?sources=completed",
+                "/api/oa-pending-payments/export-summary?view_mode=in_progress",
+                "/api/oa-pending-payments/export?view_mode=completed",
                 "/api/oa-pending-payments/bank-transaction-candidates",
                 "/api/oa-pending-payments/oa/oa-api/detail",
                 "/api/oa-pending-payments/bank-transactions/bank-api/detail",
@@ -401,7 +417,8 @@ class OaPendingPaymentApiTests(unittest.TestCase):
     def test_all_module_endpoints_require_module_owned_authentication(self) -> None:
         requests = [
             ("GET", "/api/oa-pending-payments/rows", None),
-            ("GET", "/api/oa-pending-payments/export?sources=completed", None),
+            ("GET", "/api/oa-pending-payments/export-summary?view_mode=in_progress", None),
+            ("GET", "/api/oa-pending-payments/export?view_mode=completed", None),
             ("GET", "/api/oa-pending-payments/bank-transaction-candidates", None),
             ("GET", "/api/oa-pending-payments/oa/oa-api/detail", None),
             ("GET", "/api/oa-pending-payments/bank-transactions/bank-api/detail", None),
@@ -465,7 +482,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
 
             response = app.handle_request(
                 "GET",
-                "/api/oa-pending-payments/export?sources=completed,in_progress",
+                "/api/oa-pending-payments/export?view_mode=in_progress",
                 headers={"Authorization": "Bearer oa-readonly-token"},
             )
 

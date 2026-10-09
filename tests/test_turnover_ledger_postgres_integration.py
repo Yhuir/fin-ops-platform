@@ -50,6 +50,8 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
         )
 
         self.assertEqual(payload["groups"], [])
+        self.assertEqual(TurnoverLedgerQueryService(connection=self.connection).list_ledger(
+            view="grouped", count_only=True), {"row_count":0})
         self.assertEqual(payload["pagination"]["total"], 0)
         self.assertNotIn("read_model_status", payload)
         self.assertNotIn("source_versions", payload)

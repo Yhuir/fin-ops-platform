@@ -27,9 +27,9 @@ class InputInvoiceUsageExportService:
 
     def export_summary(self, **query: Any) -> dict[str, Any]:
         payload = self._row_export_loader(limit=0, **query)
-        return {"row_count": payload["total"], "filter_options": payload["filterOptions"]}
+        return {"row_count": payload["total"]}
 
-    def export(self, *, today: date | None = None, **query: Any) -> tuple[str, bytes]:
+    def export(self, *, today: date | None = None, **query: Any) -> tuple[str, bytes, int]:
         payload = self._row_export_loader(limit=INPUT_INVOICE_USAGE_EXPORT_ROW_LIMIT + 1, **query)
         if payload["total"] > INPUT_INVOICE_USAGE_EXPORT_ROW_LIMIT:
             raise InputInvoiceUsageExportError(
@@ -50,7 +50,7 @@ class InputInvoiceUsageExportService:
             sheet.append(cells)
         buffer = BytesIO()
         workbook.save(buffer)
-        return f"进项发票-{(today or date.today()).isoformat()}.xlsx", buffer.getvalue()
+        return f"进项发票-{(today or date.today()).isoformat()}.xlsx", buffer.getvalue(), len(payload["rows"])
 
     @staticmethod
     def _formal_row(index: int, row: dict[str, Any]) -> list[Any]:

@@ -62,27 +62,12 @@ class TurnoverLedgerExportService:
     def __init__(self, grouped_ledger_loader: Callable[..., dict[str, Any]]) -> None:
         self._grouped_ledger_loader = grouped_ledger_loader
 
-    def preview(self, *, family: str = "all", limit: int = 20, query: str = "", settlement_status: str = "all") -> dict[str, Any]:
+    def export_summary(self, *, family: str = "all", query: str = "", settlement_status: str = "all") -> dict[str, int]:
         normalized_family = self._normalize_family(family)
-        normalized_limit = max(int(limit or 20), 1)
-        grouped_payload = self._grouped_ledger_loader(family=normalized_family, query=query, settlement_status=settlement_status, paginate=False)
-        self._ensure_export_group_limit(grouped_payload)
-        rows = self._formal_rows(grouped_payload, family=normalized_family)
-        self._ensure_export_row_limit(len(rows))
-        preview_rows = rows[:normalized_limit]
-        return {
-            "columns": list(EXPORT_COLUMNS),
-            "rows": preview_rows,
-            "totals": self._totals(rows),
-            "pagination": {
-                "preview_count": len(preview_rows),
-                "total": len(rows),
-                "limit": normalized_limit,
-            },
-            "filters": {"family": normalized_family},
-        }
+        return self._grouped_ledger_loader(family=normalized_family, query=query,
+                                          settlement_status=settlement_status, count_only=True)
 
-    def export(self, *, family: str = "all", today: date | None = None, query: str = "", settlement_status: str = "all") -> tuple[str, bytes]:
+    def export(self, *, family: str = "all", today: date | None = None, query: str = "", settlement_status: str = "all") -> tuple[str, bytes, int]:
         normalized_family = self._normalize_family(family)
         grouped_payload = self._grouped_ledger_loader(family=normalized_family, query=query, settlement_status=settlement_status, paginate=False)
         self._ensure_export_group_limit(grouped_payload)
@@ -91,7 +76,7 @@ class TurnoverLedgerExportService:
         workbook = self._build_workbook(rows)
         scope = FAMILY_SCOPE_LABELS.get(normalized_family, FAMILY_SCOPE_LABELS["all"])
         filename = f"往来款台账-{scope}-{(today or date.today()).isoformat()}.xlsx"
-        return filename, self._serialize_workbook(workbook)
+        return filename, self._serialize_workbook(workbook), sum(1 for group in grouped_payload["groups"] if normalized_family == "all" or group["family"] == normalized_family)
 
     def _formal_rows(self, grouped_payload: dict[str, Any], *, family: str) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
@@ -256,23 +241,6 @@ class TurnoverLedgerExportService:
         workbook.save(buffer)
         return buffer.getvalue()
 
-    @classmethod
-    def _totals(cls, rows: list[dict[str, Any]]) -> dict[str, Any]:
-        summary_rows = [row for row in rows if row.get("row_type") == "summary"]
-        total_rows = summary_rows or rows
-        return {
-            "row_count": len(rows),
-            "pending_repayment_amount": cls._format_money(
-                sum((cls._money(row.get("待还款金额")) for row in total_rows), ZERO)
-            ),
-            "pending_collection_amount": cls._format_money(
-                sum((cls._money(row.get("待收款金额")) for row in total_rows), ZERO)
-            ),
-            "borrow_amount": cls._format_money(sum((cls._money(row.get("借款金额")) for row in total_rows), ZERO)),
-            "repayment_amount": cls._format_money(sum((cls._money(row.get("还款金额")) for row in total_rows), ZERO)),
-            "accrued_interest": cls._format_money(sum((cls._money(row.get("应还利息")) for row in total_rows), ZERO)),
-        }
-
     @staticmethod
     def _has_value(value: Any) -> bool:
         return value is not None and str(value).strip() != ""
@@ -300,7 +268,9 @@ class TurnoverLedgerExportService:
     @staticmethod
     def _normalize_family(family: str | None) -> str:
         normalized = str(family or "all").strip().lower()
-        return normalized if normalized in FAMILY_SCOPE_LABELS else "all"
+        if normalized not in FAMILY_SCOPE_LABELS:
+            raise ValueError("往来分类无效")
+        return normalized
 
     @staticmethod
     def _money(value: Any) -> Decimal:

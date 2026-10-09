@@ -5465,13 +5465,15 @@ class Application:
             metadata={"query": {key: values[0] for key, values in query.items() if values}},
         )
 
-    def _input_invoice_usage_xlsx_response(self, filename: str, content: bytes) -> Response:
+    def _input_invoice_usage_xlsx_response(self, filename: str, content: bytes, row_count: int) -> Response:
         return Response(
             status_code=int(HTTPStatus.OK),
             body=content,
             headers={
                 "Content-Type": XLSX_MIME_TYPE,
+                "X-Export-Count": str(row_count),
                 "Content-Disposition": _build_content_disposition(filename),
+                "Access-Control-Expose-Headers": "Content-Disposition, X-Export-Count",
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Content-Type",
                 "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
@@ -5715,18 +5717,19 @@ class Application:
         )
 
     @staticmethod
-    def _oa_pending_payment_xlsx_response(filename: str, content: bytes) -> Response:
+    def _oa_pending_payment_xlsx_response(filename: str, content: bytes, row_count: int) -> Response:
         return Response(
             status_code=int(HTTPStatus.OK),
             body=content,
             headers={
                 "Content-Type": XLSX_MIME_TYPE,
+                "X-Export-Count": str(row_count),
                 "Content-Disposition": _build_content_disposition(filename),
                 "Cache-Control": "no-store",
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Content-Type",
                 "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-                "Access-Control-Expose-Headers": "Content-Disposition",
+                "Access-Control-Expose-Headers": "Content-Disposition, X-Export-Count",
             },
         )
 
@@ -5768,17 +5771,18 @@ class Application:
             error_response=self._output_invoice_collection_error_response,
         )
 
-    def _output_invoice_collection_xlsx_response(self, filename: str, content: bytes) -> Response:
+    def _output_invoice_collection_xlsx_response(self, filename: str, content: bytes, row_count: int) -> Response:
         return Response(
             status_code=int(HTTPStatus.OK),
             body=content,
             headers={
                 "Content-Type": XLSX_MIME_TYPE,
+                "X-Export-Count": str(row_count),
                 "Content-Disposition": _build_content_disposition(filename),
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Content-Type",
                 "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-                "Access-Control-Expose-Headers": "Content-Disposition",
+                "Access-Control-Expose-Headers": "Content-Disposition, X-Export-Count",
             },
         )
 
@@ -5871,6 +5875,8 @@ class Application:
             body=result.content,
             headers={
                 "Content-Type": result.content_type,
+                "X-Export-Count": str(result.row_count),
+                "Access-Control-Expose-Headers": "Content-Disposition, X-Export-Count",
                 "Content-Disposition": _build_content_disposition(result.filename),
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Content-Type",
@@ -6933,13 +6939,15 @@ class Application:
         return int(value)
 
     @staticmethod
-    def _turnover_ledger_export_response(filename: str, content: bytes) -> Response:
+    def _turnover_ledger_export_response(filename: str, content: bytes, row_count: int) -> Response:
         return Response(
             status_code=int(HTTPStatus.OK),
             body=content,
             headers={
                 "Content-Type": XLSX_MIME_TYPE,
+                "X-Export-Count": str(row_count),
                 "Content-Disposition": _build_content_disposition(filename),
+                "Access-Control-Expose-Headers": "Content-Disposition, X-Export-Count",
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Content-Type",
                 "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",

@@ -49,11 +49,12 @@ class TurnoverLedgerQueryService:
         query: str = "",
         settlement_status: str = "all",
         paginate: bool = True,
+        count_only: bool = False,
     ) -> dict[str, Any]:
         with self._ledger_snapshot() as ledger_service:
             if str(view or "").strip().lower() == "grouped":
                 payload = ledger_service.list_grouped_ledger(
-                    query=query, settlement_status=settlement_status, paginate=paginate,
+                    query=query, settlement_status=settlement_status, paginate=paginate, count_only=count_only,
                     family=family,
                     direction=direction,
                     status=status,

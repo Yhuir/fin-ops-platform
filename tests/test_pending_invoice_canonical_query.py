@@ -326,6 +326,19 @@ class PendingInvoiceCanonicalRepositoryTests(unittest.TestCase):
         self.assertNotIn("read_model.", commands[2][0])
         self.assertEqual(payload, {"rows": [], "total": 0, "selected_total": "118.00"})
 
+    def test_export_count_skips_page_hydration_facets_and_inventory(self):
+        connection = _RecordingConnection({"total": 696})
+        service = PendingInvoiceCanonicalQueryService(repository=PostgresPendingInvoiceCanonicalRepository(connection))
+        payload = service.export_summary({'direction':['expense'], 'filter':['no_invoice_required'], 'page':['9']})
+        self.assertEqual(payload, {"row_count":696})
+        sql, _params = connection.transaction_state.commands[-1]
+        self.assertIn("scope_summary as", sql)
+        self.assertNotIn("ordered_rows as", sql)
+        self.assertNotIn("page_bank_metadata", sql)
+        self.assertNotIn("statistics as", sql)
+        self.assertNotIn("source_summary", sql)
+        self.assertTrue(sql.endswith(" select total from scope_summary"))
+
     def test_query_template_is_bounded_and_has_no_forbidden_page_fact_sources(self) -> None:
         self.assertIn("limit %s offset %s", PAGE_QUERY_SQL.lower())
         self.assertIn("scope_summary as (", PAGE_QUERY_SQL.lower())

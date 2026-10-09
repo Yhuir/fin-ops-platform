@@ -418,6 +418,7 @@ export type InputInvoiceUsageOaReverseStagedDraftsResponse = {
 export type InputInvoiceUsageExportDownload = {
   blob: Blob;
   fileName: string;
+  count: number;
 };
 
 export type InvoiceUsageClassificationItem = {

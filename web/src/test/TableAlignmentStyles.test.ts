@@ -50,7 +50,6 @@ describe("finance table alignment styles", () => {
   test("keeps table-bearing page surfaces square instead of nesting rounded cards", () => {
     const flatSurfaceSelectors = [
       ".oa-pending-payments-table-frame",
-      ".turnover-ledger-export-dialog__table-wrap",
       ".bank-flow-rule-batches-transactions",
       ".app-health-section",
       ".app-health-inventory-panel",
@@ -73,8 +72,11 @@ describe("finance table alignment styles", () => {
     const paymentRuleStyles = readFileSync("src/components/inputInvoiceUsage/paymentStatusRules.css", "utf8");
     expect(paymentRuleStyles).toMatch(/\.payment-rules-body \.finance-table\s*\{[^}]*border-radius:\s*0/);
     expect(paymentRuleStyles).toMatch(/\.payment-rules-body \.finance-table__cell\s*\{[^}]*border-radius:\s*0/);
-    expect(readFileSync("src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx", "utf8")).toContain("<FinanceTable");
+    const paymentRuleTable = readFileSync("src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx", "utf8");
+    expect(paymentRuleTable).toContain('<Table className="finance-table payment-rules-grid">');
+    expect(paymentRuleTable).toContain('className="table__content finance-table__content"');
     expect(readFileSync("src/components/tax/TaxCertificationTable.tsx", "utf8")).toContain("<FinanceTable");
+    expect(source).not.toContain(".turnover-ledger-export-dialog");
 
     flatSurfaceSelectors.forEach((selector) => {
       expectSquareSurface(selector);

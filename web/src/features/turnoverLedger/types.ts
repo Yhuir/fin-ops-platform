@@ -289,50 +289,10 @@ export type SaveTurnoverLedgerExtraResponse = {
   extra: TurnoverLedgerExtra;
 };
 
-export type TurnoverLedgerExportRow = {
-  flowLabels: string;
-  turnoverActionLabel: string;
-  sequenceNo: number;
-  rowType: "summary" | "lot" | string;
-  lotId: string;
-  familyLabel: string;
-  counterpartyName: string;
-  pendingRepaymentAmount: string;
-  pendingCollectionAmount: string;
-  balanceAmount: string;
-  borrowAmount: string;
-  borrowDate: string | null;
-  repaymentAmount: string;
-  repaymentDate: string | null;
-  counterpartyBankName: string;
-  repaymentRemark: string;
-  interestRateType: TurnoverLedgerInterestRateType;
-  interestRateValue: string;
-  interestPaidAmount: string;
-  loanDays: number | null;
-  accruedInterest: string;
-  interestPaidDate: string | null;
-  interestPaymentMethod: string;
-  note: string;
-  statusLabel: string;
-};
-
-export type TurnoverLedgerExportPreview = {
-  fileName: string;
-  scopeLabel: string;
-  summary: {
-    rowCount: number;
-    pendingRepaymentAmount: string;
-    pendingCollectionAmount: string;
-    accruedInterest: string;
-  };
-  columns: string[];
-  rows: TurnoverLedgerExportRow[];
-};
-
 export type TurnoverLedgerExportDownload = {
   blob: Blob;
   fileName: string;
+  count: number;
 };
 
 export type TurnoverBankRow = {

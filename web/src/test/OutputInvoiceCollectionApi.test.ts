@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { fetchOutputInvoiceCollectionRows, fetchOutputInvoiceCollectionExportSummary, downloadOutputInvoiceCollectionSelection } from "../features/outputInvoiceCollections/api";
+import { fetchOutputInvoiceCollectionRows, fetchOutputInvoiceCollectionExportSummary, downloadOutputInvoiceCollectionExport } from "../features/outputInvoiceCollections/api";
 import { normalizeOutputTaxRate } from "../features/outputInvoiceCollections/taxRate";
 import { OUTPUT_COLLECTION_STATUS_CODES } from "../features/outputInvoiceCollections/types";
 
@@ -21,17 +21,16 @@ test("maps full-scope signed totals and carries tax/search/status into preview a
   const calls: URL[] = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
     const url = new URL(String(input), "http://localhost"); calls.push(url);
-    if (url.pathname.endsWith('/export')) return new Response('xlsx', {headers:{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}});
+    if (url.pathname.endsWith('/export')) return new Response('xlsx', {headers:{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','X-Export-Count':'3'}});
     const result = url.pathname.endsWith('/export-summary') ? {row_count:3,filter_options:[{field:'collection_status',options:options()}]} : {...payload(),summary:totals};
     return new Response(JSON.stringify(result),{headers:{'Content-Type':'application/json'}});
   });
   expect((await fetchOutputInvoiceCollectionRows(request)).summary).toEqual(totals);
-  const query = {...request,keyword:'客户',filters:[{field:'tax_rate',operator:'in' as const,values:['13%','—']}],sortField:'total_with_tax',sortDirection:'asc' as const};
-  const selection = {values:{collection_status:['collected']},startDate:'2026-01-01',endDate:'2026-12-31'};
-  expect((await fetchOutputInvoiceCollectionExportSummary(selection,new AbortController().signal,query)).rowCount).toBe(3);
-  await downloadOutputInvoiceCollectionSelection(selection,query);
+  const query = {...request,keyword:'客户',invoiceDateFrom:'2026-01-01',invoiceDateTo:'2026-12-31',filters:[{field:'tax_rate',operator:'in' as const,values:['13%','—']},{field:'collection_status',operator:'in' as const,values:['collected']}],sortField:'total_with_tax',sortDirection:'asc' as const};
+  expect((await fetchOutputInvoiceCollectionExportSummary(query,new AbortController().signal)).rowCount).toBe(3);
+  await downloadOutputInvoiceCollectionExport(query);
   for (const url of calls.slice(1)) {
-    expect(JSON.parse(decodeURIComponent(url.searchParams.get('filters')!))).toEqual([...query.filters,{field:'collection_status',operator:'in',values:['collected']}]);
+    expect(JSON.parse(decodeURIComponent(url.searchParams.get('filters')!))).toEqual(query.filters);
     expect(url.searchParams.get('keyword')).toBe('客户');
     expect(url.searchParams.get('invoice_date_from')).toBe('2026-01-01');
     expect(url.searchParams.get('sort_field')).toBe('total_with_tax');

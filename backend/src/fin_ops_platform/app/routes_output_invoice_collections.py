@@ -13,7 +13,7 @@ ReadSessionResolver = Callable[
     [dict[str, str] | None], tuple[OARequestSession | None, Any | None]
 ]
 JsonResponse = Callable[[HTTPStatus, object], Any]
-XlsxResponse = Callable[[str, bytes], Any]
+XlsxResponse = Callable[[str, bytes, int], Any]
 ErrorResponse = Callable[[OutputInvoiceCollectionError], Any]
 
 
@@ -67,10 +67,10 @@ class OutputInvoiceCollectionApiRoutes:
             if auth_error is not None:
                 return auth_error
             try:
-                filename, content = self.export(query, session=session)
+                filename, content, row_count = self.export(query, session=session)
             except OutputInvoiceCollectionError as exc:
                 return self._error(exc)
-            return self._xlsx(filename, content)
+            return self._xlsx(filename, content, row_count)
         if (
             method == "GET"
             and route_path.startswith("/api/output-invoice-collections/invoices/")
@@ -151,7 +151,7 @@ class OutputInvoiceCollectionApiRoutes:
         query: dict[str, list[str]],
         *,
         session: OARequestSession | None = None,
-    ) -> tuple[str, bytes]:
+    ) -> tuple[str, bytes, int]:
         return self._query_service.export(query, tenant_id=_tenant_id(session))
 
     def invoice_detail(
@@ -215,12 +215,12 @@ class OutputInvoiceCollectionApiRoutes:
             )
         return self._json_response(status, payload)
 
-    def _xlsx(self, filename: str, content: bytes) -> Any:
+    def _xlsx(self, filename: str, content: bytes, row_count: int) -> Any:
         if not callable(self._xlsx_response):
             raise RuntimeError(
                 "output invoice collection xlsx response port is not configured"
             )
-        return self._xlsx_response(filename, content)
+        return self._xlsx_response(filename, content, row_count)
 
     def _error(self, exc: OutputInvoiceCollectionError) -> Any:
         if not callable(self._error_response):

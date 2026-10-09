@@ -1,5 +1,5 @@
 import { sourceDetailSections } from "../sourceDetail";
-import { selectionFilters, type ExportSelection, type ExportSummary, type ExportOption } from "../exports/types";
+import { readExportCount, validateExportCount, type ExportSummary } from "../exports/types";
 import { mapBankSplitParts } from '../bankSplits/api';
 import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
 import { OUTPUT_COLLECTION_STATUS_CODES } from "./types";
@@ -149,6 +149,7 @@ async function requestExportBlob(url: string, init: RequestInit = {}): Promise<O
   return {
     blob: await response.blob(),
     fileName: parseContentDispositionFileName(response.headers?.get?.("Content-Disposition") ?? null) ?? "销项发票收款情况.xlsx",
+    count: readExportCount(response.headers),
   };
 }
 
@@ -406,21 +407,10 @@ export async function fetchOutputInvoiceCollectionRows(request: FetchRowsRequest
   return mapRowsResponse(payload);
 }
 
-function exportRequest(selection: ExportSelection, query: FetchRowsRequest): FetchRowsRequest {
-  return { ...query, page: 1, pageSize: 1,
-    invoiceDateFrom: selection.startDate, invoiceDateTo: selection.endDate,
-    month: selection.startDate || selection.endDate ? '' : query.month,
-    filters: [...query.filters.filter(filter => filter.field !== 'collection_status' && !(filter.field in selection.values)), ...selectionFilters(selection)],
-  };
+export async function fetchOutputInvoiceCollectionExportSummary(query: FetchRowsRequest, signal: AbortSignal): Promise<ExportSummary> {
+  const raw = await apiRequestJson<{ row_count: number }>(`/api/output-invoice-collections/export-summary?${buildRowsQuery(query, false)}`, { method: "GET", signal });
+  return { rowCount: validateExportCount(raw.row_count) };
 }
-export async function fetchOutputInvoiceCollectionExportSummary(selection: ExportSelection, signal: AbortSignal, query: FetchRowsRequest): Promise<ExportSummary> {
-  const url = `/api/output-invoice-collections/export-summary?${buildRowsQuery(exportRequest(selection, query))}`;
-  const raw = await apiRequestJson<{ row_count: number; filter_options: { field: string; options: ExportOption[] }[] }>(url, { method: 'GET', signal });
-  const status = raw.filter_options.find(item => item.field === 'collection_status');
-  if (!status) throw new Error('收款状态统计缺失');
-  return { rowCount: raw.row_count, groups: [{ field: 'collection_status', label: '收款状态', options: status.options }] };
-}
-export function downloadOutputInvoiceCollectionSelection(selection: ExportSelection, query: FetchRowsRequest) { return downloadOutputInvoiceCollectionExport(exportRequest(selection, query)); }
 
 export async function downloadOutputInvoiceCollectionExport(request: FetchRowsRequest): Promise<OutputInvoiceCollectionExportDownload> {
   return requestExportBlob(`/api/output-invoice-collections/export?${buildRowsQuery(request, false)}`, {

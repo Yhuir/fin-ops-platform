@@ -58,6 +58,9 @@ class PostgresInputInvoiceUsageQueryRepository:
             raise ValueError("Input invoice usage query repository requires PostgreSQL.")
         self._connection = connection
 
+    def export_invoices(self, *, limit: int, **query: Any) -> dict[str, Any]:
+        return _export_invoices(self._connection, invoice_type="input", limit=limit, **query)
+
     def load_page(
         self,
         *,
@@ -440,6 +443,9 @@ class PostgresOutputInvoiceCollectionQueryRepository:
         if connection is None:
             raise ValueError("Output invoice collection query repository requires PostgreSQL.")
         self._connection = connection
+
+    def export_invoices(self, *, limit: int, **query: Any) -> dict[str, Any]:
+        return _export_invoices(self._connection, invoice_type="output", limit=limit, **query)
 
     def load_page(
         self,
@@ -2169,3 +2175,47 @@ def _date_text(value: Any) -> str:
     if isinstance(value, (date, datetime)):
         return value.isoformat()
     return str(value or "")
+
+
+def _export_invoices(connection: Any, *, invoice_type: str, limit: int,
+                     keyword: str | None, invoice_date_from: str | None,
+                     invoice_date_to: str | None, month: str | None,
+                     filters: list[dict[str, Any]], sort_field: str,
+                     sort_direction: str, tenant_id: str = "default") -> dict[str, Any]:
+    """Filter complete business groups, then deduplicate invoices before limiting."""
+    with connection.transaction() as transaction:
+        transaction.execute("set transaction isolation level repeatable read read only")
+        status_case = None
+        params: list[Any] = []
+        if invoice_type == "input":
+            settings = transaction.fetch_one("select settings_payload from app.app_settings where settings_key = 'app_settings'")
+            payment_settings = normalize_payment_status_rules_settings(
+                (settings["settings_payload"] if settings else {}).get("input_invoice_usage_payment_status_rules")
+            )
+            status_case, status_params = _input_payment_status_case(payment_settings)
+            params = [tenant_id, *status_params]
+        fields = _INPUT_FIELDS if invoice_type == "input" else _OUTPUT_FIELDS
+        cte = _fact_cte(invoice_type=invoice_type, month=_month(month), status_case=status_case)
+        where_sql, where_params = _where_sql(
+            keyword=keyword, invoice_date_from=invoice_date_from, invoice_date_to=invoice_date_to,
+            filters=filters, field_sql=fields,
+            keyword_extra_columns=("invoice_remarks",) if invoice_type == "output" else (),
+        )
+        order_sql = _order_sql(sort_field=sort_field, sort_direction=sort_direction, field_sql=fields)
+        sql = f"""{cte}, filtered_rows as materialized (
+            select invoice_ids, row_number() over ({order_sql}) as row_order
+            from final_rows {where_sql}
+        ), selected_members as (
+            select member.invoice_id, min(row_order) as row_order
+            from filtered_rows cross join lateral unnest(invoice_ids) member(invoice_id)
+            group by member.invoice_id
+        )
+        select (select count(*) from selected_members)::integer as row_count,
+               coalesce((select jsonb_agg(invoice_id order by row_order, invoice_id) from (
+                   select * from selected_members order by row_order, invoice_id limit %s
+               ) bounded), '[]'::jsonb) as invoice_ids"""
+        result = transaction.fetch_one(sql, (*params, *where_params, limit))
+        invoice_ids = result["invoice_ids"]
+        invoices = PostgresCoreRepository(transaction).list_invoices_by_ids(invoice_ids) if invoice_ids else []
+        by_id = {invoice.id: invoice for invoice in invoices}
+        return {"total": int(result["row_count"]), "invoices": [by_id[invoice_id] for invoice_id in invoice_ids]}

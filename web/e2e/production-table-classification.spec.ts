@@ -74,7 +74,7 @@ for (const name of ['pending-invoices', 'oa-pending-payments', 'output-invoice-c
       expect((await (await preview).json()).row_count).toBe(expected);
       if (expected > 0) {
         const download = page.waitForEvent('download');
-        await page.getByRole('button', { name: '下载 Excel', exact: true }).click();
+        await page.getByRole('button', { name: '导出', exact: true }).click();
         expect((await download).suggestedFilename()).toMatch(/\.xlsx$/);
       }
       await page.getByRole('button', { name: name === 'pending-invoices' ? '关闭导出待找发票' : '关闭导出销项发票', exact: true }).click();

@@ -473,6 +473,29 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertNotIn("matchedOaCount", payload.summary)
         self.assertNotIn("matchedBankTransactionCount", payload.summary)
 
+    def test_export_summary_queries_only_deduplicated_members_without_hydration_or_facets(self):
+        class ExportTransaction(RecordingTransaction):
+            def fetch_one(self, sql, params=None):
+                self.statements.append(sql)
+                if "select settings_payload" in sql:
+                    return {"settings_payload": {}}
+                self.params = params
+                return {"row_count": 17, "invoice_ids": []}
+        for repository_type, reads in ((PostgresInputInvoiceUsageQueryRepository, 3), (PostgresOutputInvoiceCollectionQueryRepository, 2)):
+            transaction = ExportTransaction()
+            repository = repository_type(StaticTransactionConnection(transaction))
+            payload = repository.export_invoices(limit=0, month=None, keyword="供应商", invoice_date_from=None,
+                invoice_date_to=None, filters=[], sort_field="invoice_date", sort_direction="desc", tenant_id="tenant-a")
+            self.assertEqual(payload, {"total": 17, "invoices": []})
+            self.assertEqual(len(transaction.statements), reads)
+            sql = transaction.statements[-1]
+            self.assertIn("group by member.invoice_id", sql)
+            self.assertIn("row_number() over", sql)
+            self.assertNotIn("facet_rows", sql)
+            self.assertNotIn("page_rows as", sql)
+            self.assertNotIn("invoice_statistics", sql)
+            self.assertEqual(transaction.params[-1], 0)
+
     def test_invoice_lookup_map_is_reused_across_export_rows(self) -> None:
         import_service = CountingImportService()
         context = DistributedInvoiceRelationContext(import_service=import_service)

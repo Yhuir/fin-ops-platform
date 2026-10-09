@@ -422,7 +422,7 @@ export default function InputInvoiceUsagePage() {
     }, request.signal)
   ), []);
 
-  const exportDisabled = Boolean(error);
+  const exportDisabled = loading || refreshing || Boolean(error);
   const secondaryActions = <>
     <Button
       isDisabled={query.activeWorkflow !== null}
@@ -570,10 +570,9 @@ export default function InputInvoiceUsagePage() {
         onSaved={handlePaymentStatusRulesSaved}
         onClose={handleCloseWorkflow}
       />
-      <InputInvoiceUsageExportDrawer query={query}
-        open={query.activeWorkflow === "export"}
+      {query.activeWorkflow === "export" ? <InputInvoiceUsageExportDrawer query={query}
         onClose={handleCloseWorkflow}
-      />
+      /> : null}
 
     </>
   );

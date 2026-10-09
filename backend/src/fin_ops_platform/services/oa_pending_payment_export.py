@@ -10,10 +10,8 @@ from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 
-from fin_ops_platform.services.oa_pending_payment_query_contract import OaPendingPaymentError
 
 OA_PENDING_PAYMENT_EXPORT_ROW_LIMIT = 20_000
-OA_PENDING_PAYMENT_EXPORT_SOURCES = ("completed", "in_progress")
 OA_PENDING_PAYMENT_EXPORT_COLUMNS = (
     ("oa_id", "OA ID", 26),
     ("workflow_no", "OA单号", 18),
@@ -34,28 +32,6 @@ OA_PENDING_PAYMENT_EXPORT_SHEETS = {
     "completed": "已完成OA",
     "in_progress": "进行中OA",
 }
-
-
-def parse_oa_pending_payment_export_sources(query: dict[str, list[str]]) -> tuple[str, ...]:
-    requested = {
-        source.strip()
-        for value in query.get("sources", [])
-        for source in str(value or "").split(",")
-        if source.strip()
-    }
-    if not requested:
-        raise OaPendingPaymentError(
-            "oa_pending_payment_export_sources_required",
-            "请至少选择一种 OA 来源。",
-        )
-    invalid = sorted(requested.difference(OA_PENDING_PAYMENT_EXPORT_SOURCES))
-    if invalid:
-        raise OaPendingPaymentError(
-            "invalid_oa_pending_payment_export_source",
-            "OA 导出来源只能是 completed 或 in_progress。",
-            details={"sources": invalid},
-        )
-    return tuple(source for source in OA_PENDING_PAYMENT_EXPORT_SOURCES if source in requested)
 
 
 def build_oa_pending_payment_export_workbook(

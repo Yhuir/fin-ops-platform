@@ -13,19 +13,19 @@ from openpyxl import load_workbook
 
 
 class TurnoverLedgerExportServiceTests(unittest.TestCase):
-    def test_flow_tags_are_identical_in_preview_and_workbook(self):
+    def test_flow_tags_are_identical_in_formal_rows_and_workbook(self):
         payload = self._grouped_payload()
         group = payload["groups"][0]
         group["flow_rows"] = [{"source_bank_row_id": "tag-flow", "flow_amount": "12.34",
                                "flow_direction": "expense", "category_label_path": ["外部往来款付款", "保证金", "业务往来"],
                                "turnover_action_label": "待收款"}]
         service = TurnoverLedgerExportService(lambda **kwargs: payload)
-        preview = service.preview()
+        preview = {"rows": service._formal_rows(payload, family="all")}
         flow = next(row for row in preview["rows"] if row["source_bank_row_id"] == "tag-flow")
         self.assertEqual(flow["流水标签"], "外部往来款付款 / 保证金 / 业务往来")
         self.assertEqual(flow["往来标记"], "待收款")
         self.assertEqual(preview["rows"][0]["往来标记"], "")
-        _, data = service.export()
+        _, data, count = service.export()
         workbook = load_workbook(BytesIO(data))
         rows = list(workbook.active.values)
         self.assertEqual(rows[0][-2:], ("流水标签", "往来标记"))
@@ -282,13 +282,11 @@ class TurnoverLedgerExportServiceTests(unittest.TestCase):
             ],
         }
 
-    def test_preview_flattens_grouped_payload_to_summary_and_real_flow_rows(self) -> None:
+    def test_formal_rows_keep_summary_and_real_flow_rows(self) -> None:
         service = TurnoverLedgerExportService(lambda **_: self._grouped_payload())
 
-        payload = service.preview(family="company")
+        payload = {"rows": service._formal_rows(self._grouped_payload(), family="company")}
 
-        self.assertEqual(payload["filters"]["family"], "company")
-        self.assertEqual(payload["columns"][:8], ["序号", "行类型", "源银行流水ID", "流水方向", "流水金额", "往来大类", "对方户名", "待还款金额"])
         self.assertEqual(len(payload["rows"]), 4)
         row = payload["rows"][0]
         flow_row = payload["rows"][1]
@@ -324,43 +322,37 @@ class TurnoverLedgerExportServiceTests(unittest.TestCase):
         self.assertNotIn("allocation_status", flow_row)
         self.assertNotIn("allocated_lot_ids", flow_row)
 
-    def test_preview_does_not_fallback_to_lot_rows_as_flow_rows(self) -> None:
+    def test_export_does_not_replace_missing_flow_rows_with_lot_rows(self) -> None:
         payload = self._grouped_payload()
         company_group = payload["groups"][0]
         company_group.pop("flow_rows")
         service = TurnoverLedgerExportService(lambda **_: payload)
 
-        preview = service.preview(family="company")
+        preview = {"rows": service._formal_rows(payload, family="company")}
 
         self.assertEqual([row["row_type"] for row in preview["rows"]], ["summary"])
 
-    def test_preview_applies_limit_after_summary_and_flow_flattening_and_reports_totals(self) -> None:
-        service = TurnoverLedgerExportService(lambda **_: self._grouped_payload())
+    def test_summary_is_count_only_and_keeps_exact_scope(self):
+        from unittest.mock import Mock
+        loader = Mock(return_value={"row_count": 2})
+        service = TurnoverLedgerExportService(loader)
+        result = service.export_summary(family="company", query="梁", settlement_status="unsettled")
+        self.assertEqual(result, {"row_count": 2})
+        loader.assert_called_once_with(family="company", query="梁", settlement_status="unsettled", count_only=True)
+        with self.assertRaisesRegex(ValueError, "分类无效"):
+            service.export_summary(family="invalid")
+        loader.side_effect = RuntimeError("database unavailable")
+        with self.assertRaisesRegex(RuntimeError, "database unavailable"):
+            service.export_summary()
 
-        preview = service.preview(family="company", limit=2)
-
-        self.assertEqual([row["row_type"] for row in preview["rows"]], ["summary", "flow"])
-        self.assertEqual(preview["pagination"], {"preview_count": 2, "total": 4, "limit": 2})
-        self.assertEqual(preview["totals"]["row_count"], 4)
-        self.assertEqual(preview["totals"]["pending_repayment_amount"], "100000.00")
-        self.assertEqual(preview["totals"]["pending_collection_amount"], "0.00")
-
-    def test_preview_empty_grouped_payload_keeps_current_empty_shape(self) -> None:
-        service = TurnoverLedgerExportService(
-            lambda **_: {"summary": {}, "family_summaries": [], "filters": {}, "pagination": {"total": 0}, "groups": []}
-        )
-
-        preview = service.preview(family="all", limit=20)
-
-        self.assertEqual(preview["rows"], [])
-        self.assertEqual(preview["totals"]["row_count"], 0)
-        self.assertEqual(preview["pagination"], {"preview_count": 0, "total": 0, "limit": 20})
-        self.assertEqual(preview["filters"], {"family": "all"})
+    def test_summary_empty_result_has_only_zero_count(self):
+        service = TurnoverLedgerExportService(lambda **_: {"row_count": 0})
+        self.assertEqual(service.export_summary(), {"row_count": 0})
 
     def test_export_builds_xlsx_and_filename_for_family_scope(self) -> None:
         service = TurnoverLedgerExportService(lambda **_: self._grouped_payload())
 
-        filename, content = service.export(family="business", today=date(2026, 5, 12))
+        filename, content, count = service.export(family="business", today=date(2026, 5, 12))
         workbook = load_workbook(BytesIO(content))
         sheet = workbook.active
 
@@ -379,16 +371,10 @@ class TurnoverLedgerExportServiceTests(unittest.TestCase):
         payload["pagination"] = {"page": 1, "page_size": 10000, "total": TURNOVER_LEDGER_EXPORT_ROW_LIMIT + 1}
         service = TurnoverLedgerExportService(lambda **_: payload)
 
-        with self.assertRaises(TurnoverLedgerExportLimitError) as preview_context:
-            service.preview(family="all")
         with self.assertRaises(TurnoverLedgerExportLimitError) as export_context:
             service.export(family="all")
-
-        expected_details = {"total": TURNOVER_LEDGER_EXPORT_ROW_LIMIT + 1, "limit": TURNOVER_LEDGER_EXPORT_ROW_LIMIT}
-        self.assertEqual(preview_context.exception.error_code, "turnover_ledger_export_row_limit_exceeded")
         self.assertEqual(export_context.exception.error_code, "turnover_ledger_export_row_limit_exceeded")
-        self.assertEqual(preview_context.exception.details, expected_details)
-        self.assertEqual(export_context.exception.details, expected_details)
+        self.assertEqual(export_context.exception.details, {"total": TURNOVER_LEDGER_EXPORT_ROW_LIMIT + 1, "limit": TURNOVER_LEDGER_EXPORT_ROW_LIMIT})
 
     def test_export_rejects_flattened_flow_rows_above_sync_row_limit(self) -> None:
         payload = self._grouped_payload()

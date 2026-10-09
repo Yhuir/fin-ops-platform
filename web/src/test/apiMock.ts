@@ -6284,82 +6284,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       };
     },
-    "/api/turnover-ledger/export-preview": ({ url }) => {
-      const family = url.searchParams.get("family") ?? "all";
-      const scopeLabel = family === "all"
-        ? "全部"
-        : family === "personal"
-          ? "个人往来"
-          : family === "company"
-            ? "公司往来"
-            : family === "bank"
-              ? "银行往来"
-              : "业务往来";
-      return {
-        body: {
-          file_name: `往来款台账-${scopeLabel}-2026-05-12.xlsx`,
-          scope_label: scopeLabel,
-          summary: {
-            row_count: 1,
-            pending_repayment_amount: family === "business" ? "0.00" : "2800.00",
-            pending_collection_amount: family === "business" ? "8000.00" : "0.00",
-            accrued_interest: "0.19",
-          },
-          columns: [
-            "序号",
-            "行类型",
-            "批次 ID",
-            "往来大类",
-            "对方户名",
-            "待还款金额",
-            "待收款金额",
-            "余额",
-            "借款金额",
-            "借款日",
-            "还款金额",
-            "还款日",
-            "对方开户机构",
-            "还款备注",
-            "利率类型",
-            "利率值",
-            "已还利息额",
-            "借款天数",
-            "应还利息",
-            "还利息日期",
-            "还利息方式",
-            "备注",
-            "关系状态",
-          ],
-          rows: [
-            {
-              sequence_no: 1,
-              row_type: "summary",
-              lot_id: "",
-              family_label: scopeLabel === "全部" ? "个人往来" : scopeLabel,
-              counterparty_name: family === "business" ? "昆明客户" : "张三",
-              pending_repayment_amount: family === "business" ? "0.00" : "800.00",
-              pending_collection_amount: family === "business" ? "8000.00" : "0.00",
-              balance_amount: family === "business" ? "8000.00" : "800.00",
-              borrow_amount: family === "business" ? "8000.00" : "1000.00",
-              borrow_date: "2026-05-01",
-              repayment_amount: family === "business" ? "0.00" : "200.00",
-              repayment_date: family === "business" ? null : "2026-05-03",
-              counterparty_bank_name: family === "business" ? "招商银行" : "建行 8106",
-              repayment_remark: family === "business" ? "" : "归还暂借款",
-              interest_rate_type: family === "business" ? "none" : "annual",
-              interest_rate_value: family === "business" ? "0.000000" : "0.035000",
-              interest_paid_amount: "0.00",
-              loan_days: family === "business" ? null : 2,
-              accrued_interest: family === "business" ? "0.00" : "0.19",
-              interest_paid_date: null,
-              interest_payment_method: "",
-              note: "",
-              status_label: "待人工确认",
-            },
-          ],
-        },
-      };
-    },
+    "/api/turnover-ledger/export-summary": () => ({ body: { row_count: 1 } }),
     "/api/turnover-ledger/export": ({ url }) => {
       const family = url.searchParams.get("family") ?? "all";
       const scopeLabel = family === "all" ? "全部" : family;
@@ -6369,6 +6294,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         headers: {
           "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           "Content-Disposition": `attachment; filename="turnover-ledger-${scopeLabel}.xlsx"`,
+          "X-Export-Count": "1",
         },
       });
     },

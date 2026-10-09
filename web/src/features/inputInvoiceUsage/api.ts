@@ -1,5 +1,5 @@
 import { sourceDetailSections } from "../sourceDetail";
-import { selectionFilters, type ExportSelection, type ExportSummary, type ExportOption } from "../exports/types";
+import { readExportCount, validateExportCount, type ExportSummary } from "../exports/types";
 import { mapBankSplitParts } from '../bankSplits/api';
 import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
 import type {
@@ -105,9 +105,11 @@ function encodeFilters(filters: InputInvoiceUsageFilter[]) {
   return encodeURIComponent(JSON.stringify(filters));
 }
 
-function appendRowsQuery(params: URLSearchParams, request: FetchRowsRequest) {
-  params.set("page", String(request.page));
-  params.set("page_size", String(request.pageSize));
+function appendRowsQuery(params: URLSearchParams, request: FetchRowsRequest, includePagination = true) {
+  if (includePagination) {
+    params.set("page", String(request.page));
+    params.set("page_size", String(request.pageSize));
+  }
   if (request.keyword.trim()) {
     params.set("keyword", request.keyword.trim());
   }
@@ -129,11 +131,9 @@ function appendRowsQuery(params: URLSearchParams, request: FetchRowsRequest) {
   }
 }
 
-function buildRowsQuery(request: FetchRowsRequest) {
+function buildRowsQuery(request: FetchRowsRequest, includePagination = true) {
   const params = new URLSearchParams();
-  appendRowsQuery(params, request);
-  params.delete("page");
-  params.delete("page_size");
+  appendRowsQuery(params, request, includePagination);
   return params.toString();
 }
 
@@ -690,6 +690,7 @@ async function requestExportBlob(url: string, init: RequestInit = {}): Promise<I
   return {
     blob: await response.blob(),
     fileName: parseContentDispositionFileName(response.headers?.get?.("Content-Disposition") ?? null) ?? "进项发票使用情况.xlsx",
+    count: readExportCount(response.headers),
   };
 }
 
@@ -703,24 +704,13 @@ export async function fetchInputInvoiceUsageRows(request: FetchRowsRequest): Pro
   return mapRowsResponse(payload);
 }
 
-function exportRequest(selection: ExportSelection, query: FetchRowsRequest): FetchRowsRequest {
-  return { ...query, page: 1, pageSize: 1, month: '',
-    invoiceDateFrom: selection.startDate, invoiceDateTo: selection.endDate,
-    filters: [...query.filters.filter(filter => !['relation_status', 'payment_status'].includes(filter.field)
-      && !(filter.field in selection.values)), ...selectionFilters(selection)],
-  };
+export async function fetchInputInvoiceUsageExportSummary(query: FetchRowsRequest, signal: AbortSignal): Promise<ExportSummary> {
+  const raw = await apiRequestJson<{ row_count: number }>(`/api/input-invoice-usage/export-summary?${buildRowsQuery(query, false)}`, { method: "GET", signal });
+  return { rowCount: validateExportCount(raw.row_count) };
 }
-export async function fetchInputInvoiceUsageExportSummary(selection: ExportSelection, signal: AbortSignal, query: FetchRowsRequest): Promise<ExportSummary> {
-  const url = `/api/input-invoice-usage/export-summary?${buildRowsQuery(exportRequest(selection, query))}`;
-  const raw = await apiRequestJson<{ row_count: number; filter_options: Record<string, ExportOption[]> }>(url, { method: 'GET', signal });
-  const relationLabels: Record<string,string> = { no_oa: '未关联 OA', oa_no_bank: '有 OA / 无流水', oa_bank: 'OA / 流水均已关联' };
-  const relations = Object.entries(relationLabels).map(([value, label]) => ({ value, label, count: raw.filter_options.relation_status.find(item => item.value === value)?.count ?? 0 }));
-  return { rowCount: raw.row_count, groups: [{ field: 'relation_status', label: '关联情况', options: relations }, { field: 'payment_status', label: '支付状态', options: raw.filter_options.payment_status }] };
-}
-export function downloadInputInvoiceUsageSelection(selection: ExportSelection, query: FetchRowsRequest) { return downloadInputInvoiceUsageExport(exportRequest(selection, query)); }
 
 export async function downloadInputInvoiceUsageExport(request: FetchRowsRequest): Promise<InputInvoiceUsageExportDownload> {
-  return requestExportBlob(`/api/input-invoice-usage/export?${buildRowsQuery(request)}`, {
+  return requestExportBlob(`/api/input-invoice-usage/export?${buildRowsQuery(request, false)}`, {
     method: "GET",
     signal: request.signal,
   });

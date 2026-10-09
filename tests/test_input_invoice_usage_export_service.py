@@ -13,7 +13,7 @@ class InputInvoiceUsageExportServiceTests(TestCase):
     def test_summary_reads_no_details_and_passes_exact_filters(self):
         loader = Mock(return_value={"total": 47, "rows": [], "filterOptions": {"payment_status": []}})
         result = InputInvoiceUsageExportService(row_export_loader=loader).export_summary(filters=[{"field": "relation_status", "operator": "in", "values": ["oa_bank"]}])
-        self.assertEqual(result, {"row_count": 47, "filter_options": {"payment_status": []}})
+        self.assertEqual(result, {"row_count": 47})
         self.assertEqual(loader.call_args.kwargs["limit"], 0)
         self.assertEqual(loader.call_args.kwargs["filters"][0]["values"], ["oa_bank"])
         self.assertNotIn("sample_rows", result)
@@ -21,8 +21,9 @@ class InputInvoiceUsageExportServiceTests(TestCase):
     def test_file_has_public_fields_exact_identifiers_numeric_money_and_safe_text(self):
         invoice = {"invoiceNo": "00123456789012345678", "invoiceCode": "0012", "sellerTaxNo": "000123", "sellerName": "=SUM(1,2)", "invoiceDate": "2026-09-01", "specificBusinessType": "", "taxableItemName": "服务", "amount": "100.00", "taxRate": "6%", "taxAmount": "6.00", "totalWithTax": "106.00"}
         loader = Mock(return_value={"total": 1, "rows": [{"invoice": invoice}]})
-        filename, data = InputInvoiceUsageExportService(row_export_loader=loader).export()
+        filename, data, count = InputInvoiceUsageExportService(row_export_loader=loader).export()
         self.assertTrue(filename.endswith('.xlsx'))
+        self.assertEqual(count, 1)
         sheet = load_workbook(BytesIO(data)).active
         headers = [cell.value for cell in sheet[1]]
         self.assertFalse(any('ID' in field or '状态代码' in field for field in headers))

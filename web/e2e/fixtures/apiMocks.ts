@@ -3944,9 +3944,8 @@ function inputInvoiceUsageRelationDetailPayload(kind: string) {
   };
 }
 
-function inputInvoiceUsageExportSummaryPayload() {
-  return {row_count:1,filter_options:{relation_status:[{value:'oa_with_bank',label:'OA / 流水均已关联',count:1}],payment_status:[{value:'pending',label:'待核对',count:1}]}};
-}
+function inputInvoiceUsageExportSummaryPayload() { return { row_count: 1 }; }
+
 function inputInvoiceUsageExportBody(_url: URL) {
   return createMinimalXlsx([['发票号码','销方名称','价税合计'],['SD-INV-E2E-0001','浏览器进项供应商','88.00']]);
 }
@@ -6309,7 +6308,7 @@ function outputInvoiceCollectionFilterOptionsPayload() {
 
 function outputInvoiceCollectionExportSummaryPayload(url: URL) {
   const payload = outputInvoiceCollectionRowsPayload(url);
-  return {row_count:payload.pagination.total,filter_options:payload.filter_options};
+  return {row_count:payload.pagination.total};
 }
 function outputInvoiceCollectionExportBody(url: URL) {
   const scope = new URL(url); scope.searchParams.set('page_size','20000'); scope.searchParams.set('page','1');
@@ -7913,8 +7912,8 @@ function pendingInvoiceFilterSortOptionsPayload() {
   };
 }
 
-function pendingInvoiceExportSummaryPayload(relationConfirmed: boolean) {
-  return {row_count:1,source_summary:{expense_rows:1,income_rows:0},acquisition_summary:{status_counts:Object.fromEntries(['paid_pending_invoice','paid_invoiced','invoice_not_fully_paid','invoice_amount_missing','bank_statement_as_invoice','no_invoice_required','income_pending_invoice','income_invoiced','income_no_invoice_required','cash_income'].map(code=>[code,code===(relationConfirmed?'paid_invoiced':'paid_pending_invoice')?1:0]))}};
+function pendingInvoiceExportSummaryPayload(_relationConfirmed: boolean) {
+  return { row_count: 1 };
 }
 function pendingInvoiceExportBody(relationConfirmed: boolean, _url: URL) {
   const row = pendingInvoiceRow(relationConfirmed);
@@ -8618,6 +8617,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers: {
           "Content-Disposition": "attachment; filename*=UTF-8''input-invoice-usage.xlsx",
+          "X-Export-Count": "1",
         },
         body: inputInvoiceUsageExportBody(url),
       });
@@ -8718,6 +8718,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, oaPendingPaymentRowsPayload(invoiceImportDownstreamConfirmed));
     }
 
+    if (path === "/api/oa-pending-payments/export-summary") return json(route, { row_count: 1 });
+
     if (path === "/api/oa-pending-payments/export") {
       return route.fulfill({
         status: 200,
@@ -8728,6 +8730,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         headers: {
           "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           "Content-Disposition": "attachment; filename*=UTF-8''OA%E4%BA%8B%E5%AE%9E%E6%BA%90_2026-08-19.xlsx",
+          "X-Export-Count": "1",
           "Cache-Control": "no-store",
         },
       });
@@ -9050,6 +9053,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers: {
           "Content-Disposition": "attachment; filename*=UTF-8''output-invoice-collections.xlsx",
+          "X-Export-Count": String(outputInvoiceCollectionExportSummaryPayload(url).row_count),
         },
         body: outputInvoiceCollectionExportBody(url),
       });
@@ -10196,6 +10200,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers: {
           "Content-Disposition": "attachment; filename*=UTF-8''pending-invoices.xlsx",
+          "X-Export-Count": "1",
         },
         body: pendingInvoiceExportBody(relationConfirmed, url),
       });

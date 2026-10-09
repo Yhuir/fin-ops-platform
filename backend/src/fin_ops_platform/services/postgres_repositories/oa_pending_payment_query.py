@@ -84,140 +84,10 @@ class PostgresOaPendingPaymentQueryRepository:
             transaction.execute("set transaction isolation level repeatable read read only")
             yield PostgresOaPendingPaymentQueryRepository(transaction)
 
-    def export_oa_sources(
-        self,
-        *,
-        tenant_id: str,
-        sources: tuple[str, ...],
-        limit: int,
-    ) -> list[dict[str, Any]]:
-        requested = set(sources)
-        if not requested or not requested.issubset({"completed", "in_progress"}):
-            raise ValueError("OA export sources must be completed and/or in_progress.")
-
-        branches: list[str] = []
-        params: list[Any] = []
-        if "completed" in requested:
-            branches.append(
-                """
-                select
-                    'completed'::text as source_kind,
-                    oa.row_id as oa_id,
-                    coalesce(
-                        nullif(oa.workflow_no, ''),
-                        nullif(oa.normalized_payload->'detail_fields'->>'OA单号', ''),
-                        ''
-                    ) as workflow_no,
-                    '已完成'::text as workflow_status,
-                    to_char(oa.scope_month, 'YYYY-MM') as month,
-                    coalesce(nullif(oa.normalized_payload->>'applicant', ''), oa.applicant, '') as applicant,
-                    coalesce(
-                        nullif(oa.normalized_payload->>'apply_type', ''),
-                        nullif(oa.form_type, ''),
-                        ''
-                    ) as apply_type,
-                    coalesce(
-                        nullif(oa.normalized_payload->'detail_fields'->>'申请日期', ''),
-                        oa.application_date::text,
-                        ''
-                    ) as application_time,
-                    coalesce(
-                        nullif(oa.normalized_payload->>'completed_at', ''),
-                        nullif(oa.normalized_payload->'detail_fields'->>'审批完成时间', ''),
-                        oa.approved_at::text,
-                        ''
-                    ) as completed_at,
-                    coalesce(
-                        nullif(oa.normalized_payload->>'project_name_display', ''),
-                        nullif(oa.normalized_payload->>'project_name', ''),
-                        oa.project_name,
-                        ''
-                    ) as project_name,
-                    oa.amount,
-                    coalesce(nullif(oa.normalized_payload->>'counterparty_name', ''), '') as counterparty_name,
-                    coalesce(nullif(oa.normalized_payload->>'reason', ''), '') as reason,
-                    coalesce(nullif(oa.normalized_payload->>'expense_type', ''), '') as expense_type,
-                    coalesce(nullif(oa.normalized_payload->>'expense_content', ''), '') as expense_content
-                from app.oa_applications oa
-                where oa.scope_month is not null
-                  and (
-                      oa.workflow_status is null
-                      or oa.workflow_status = ''
-                      or oa.workflow_status = any(%s::text[])
-                  )
-                """
-            )
-            params.append(sorted(COMPLETED_WORKFLOW_STATUS_ALIASES))
-        if "in_progress" in requested:
-            branches.append(
-                """
-                select
-                    'in_progress'::text as source_kind,
-                    admission.oa_id,
-                    coalesce(
-                        nullif(admission.source_payload->'detail_fields'->>'OA单号', ''),
-                        nullif(admission.source_payload->>'workflow_no', ''),
-                        nullif(admission.source_payload->>'form_no', ''),
-                        ''
-                    ) as workflow_no,
-                    '进行中'::text as workflow_status,
-                    admission.scope_key as month,
-                    coalesce(nullif(admission.source_payload->>'applicant', ''), admission.applicant, '') as applicant,
-                    coalesce(nullif(admission.source_payload->>'apply_type', ''), '') as apply_type,
-                    coalesce(
-                        nullif(admission.source_payload->'detail_fields'->>'申请日期', ''),
-                        ''
-                    ) as application_time,
-                    ''::text as completed_at,
-                    coalesce(
-                        nullif(admission.source_payload->>'project_name_display', ''),
-                        nullif(admission.source_payload->>'project_name', ''),
-                        admission.project_name_display,
-                        admission.project_name,
-                        ''
-                    ) as project_name,
-                    admission.amount,
-                    coalesce(nullif(admission.source_payload->>'counterparty_name', ''), '') as counterparty_name,
-                    coalesce(nullif(admission.source_payload->>'reason', ''), '') as reason,
-                    coalesce(nullif(admission.source_payload->>'expense_type', ''), '') as expense_type,
-                    coalesce(nullif(admission.source_payload->>'expense_content', ''), '') as expense_content
-                from app.oa_pending_payment_admissions admission
-                where admission.tenant_id = %s
-                  and admission.workflow_status = 'in_progress'
-                """
-            )
-            params.append(text(tenant_id) or "default")
-
-        params.append(limit)
-        rows = self._connection.fetch_all(
-            f"""
-            select *
-            from ({' union all '.join(branches)}) exported_oa
-            order by
-                case source_kind when 'completed' then 0 else 1 end,
-                month desc nulls last,
-                oa_id
-            limit %s
-            """,
-            tuple(params),
-        )
-        return [dict(row) for row in list(rows or []) if isinstance(row, dict)]
-
-    def select_page(
-        self,
-        *,
-        tenant_id: str,
-        month: str | None,
-        keyword: str | None,
-        trade_date_from: str | None,
-        trade_date_to: str | None,
-        filters: list[dict[str, Any]],
-        sort_field: str,
-        sort_direction: str,
-        page: int,
-        page_size: int,
-        view_mode: str,
-    ) -> dict[str, Any]:
+    @staticmethod
+    def _filter_scope(*, month: str | None, keyword: str | None,
+                      trade_date_from: str | None, trade_date_to: str | None,
+                      filters: list[dict[str, Any]], view_mode: str) -> tuple[str, list[Any], str, list[Any], str]:
         base_where: list[str] = []
         base_params: list[Any] = []
         if month:
@@ -265,6 +135,58 @@ class PostgresOaPendingPaymentQueryRepository:
             else "oa_workflow_status = 'completed'"
         )
         base_where_sql = " and ".join(base_where) if base_where else "true"
+        return base_where_sql, base_params, status_where_sql, status_params, view_clause
+
+    def _export_scope(self, *, tenant_id: str, sort_field: str, sort_direction: str, **scope: Any) -> tuple[str, tuple[Any, ...]]:
+        base_where, base_params, status_where, status_params, view_clause = self._filter_scope(**scope)
+        order_sql = _order_sql(sort_field, sort_direction)
+        sql = f"""{_CANONICAL_ROWS_CTE},
+            filtered_rows as materialized (
+                select *, row_number() over (order by {order_sql}) as row_order
+                from canonical_rows where {base_where} and {view_clause} and {status_where}
+            ),
+            selected_members as (
+                select source_kind, member.oa_id, min(row_order) as row_order
+                from filtered_rows cross join lateral unnest(oa_ids) member(oa_id)
+                group by source_kind, member.oa_id
+            )"""
+        return sql, (text(tenant_id) or "default", *base_params, *status_params)
+
+    def export_count(self, **scope: Any) -> int:
+        sql, params = self._export_scope(**scope)
+        result = self._connection.fetch_one(f"{sql} select count(*)::integer as row_count from selected_members", params)
+        return int(result["row_count"])
+
+    def export_oa_rows(self, *, limit: int, **scope: Any) -> list[dict[str, Any]]:
+        sql, params = self._export_scope(**scope)
+        rows = self._connection.fetch_all(
+            f"""{sql}, source_rows as ({_OA_EXPORT_PROJECTION_SQL})
+            select exported_oa.* from source_rows exported_oa
+            join selected_members members using (source_kind, oa_id)
+            order by members.row_order, exported_oa.oa_id limit %s""",
+            (*params, sorted(COMPLETED_WORKFLOW_STATUS_ALIASES), text(scope["tenant_id"]) or "default", limit),
+        )
+        return [dict(row) for row in rows]
+
+    def select_page(
+        self,
+        *,
+        tenant_id: str,
+        month: str | None,
+        keyword: str | None,
+        trade_date_from: str | None,
+        trade_date_to: str | None,
+        filters: list[dict[str, Any]],
+        sort_field: str,
+        sort_direction: str,
+        page: int,
+        page_size: int,
+        view_mode: str,
+    ) -> dict[str, Any]:
+        base_where_sql, base_params, status_where_sql, status_params, view_clause = self._filter_scope(
+            month=month, keyword=keyword, trade_date_from=trade_date_from,
+            trade_date_to=trade_date_to, filters=filters, view_mode=view_mode,
+        )
         order_sql = _order_sql(sort_field, sort_direction)
         result = self._connection.fetch_one(
             f"""
@@ -1256,3 +1178,86 @@ def list_oa_pending_payment_relation_visibility_gaps(
         (text(tenant_id) or "default", max(int(limit), 1)),
     )
     return [dict(row) for row in list(rows or []) if isinstance(row, dict)]
+
+
+_OA_EXPORT_PROJECTION_SQL = """
+                select
+                    'completed'::text as source_kind,
+                    oa.row_id as oa_id,
+                    coalesce(
+                        nullif(oa.workflow_no, ''),
+                        nullif(oa.normalized_payload->'detail_fields'->>'OA单号', ''),
+                        ''
+                    ) as workflow_no,
+                    '已完成'::text as workflow_status,
+                    to_char(oa.scope_month, 'YYYY-MM') as month,
+                    coalesce(nullif(oa.normalized_payload->>'applicant', ''), oa.applicant, '') as applicant,
+                    coalesce(
+                        nullif(oa.normalized_payload->>'apply_type', ''),
+                        nullif(oa.form_type, ''),
+                        ''
+                    ) as apply_type,
+                    coalesce(
+                        nullif(oa.normalized_payload->'detail_fields'->>'申请日期', ''),
+                        oa.application_date::text,
+                        ''
+                    ) as application_time,
+                    coalesce(
+                        nullif(oa.normalized_payload->>'completed_at', ''),
+                        nullif(oa.normalized_payload->'detail_fields'->>'审批完成时间', ''),
+                        oa.approved_at::text,
+                        ''
+                    ) as completed_at,
+                    coalesce(
+                        nullif(oa.normalized_payload->>'project_name_display', ''),
+                        nullif(oa.normalized_payload->>'project_name', ''),
+                        oa.project_name,
+                        ''
+                    ) as project_name,
+                    oa.amount,
+                    coalesce(nullif(oa.normalized_payload->>'counterparty_name', ''), '') as counterparty_name,
+                    coalesce(nullif(oa.normalized_payload->>'reason', ''), '') as reason,
+                    coalesce(nullif(oa.normalized_payload->>'expense_type', ''), '') as expense_type,
+                    coalesce(nullif(oa.normalized_payload->>'expense_content', ''), '') as expense_content
+                from app.oa_applications oa
+                where oa.scope_month is not null
+                  and (
+                      oa.workflow_status is null
+                      or oa.workflow_status = ''
+                      or oa.workflow_status = any(%s::text[])
+                  )
+                 union all
+                select
+                    'in_progress'::text as source_kind,
+                    admission.oa_id,
+                    coalesce(
+                        nullif(admission.source_payload->'detail_fields'->>'OA单号', ''),
+                        nullif(admission.source_payload->>'workflow_no', ''),
+                        nullif(admission.source_payload->>'form_no', ''),
+                        ''
+                    ) as workflow_no,
+                    '进行中'::text as workflow_status,
+                    admission.scope_key as month,
+                    coalesce(nullif(admission.source_payload->>'applicant', ''), admission.applicant, '') as applicant,
+                    coalesce(nullif(admission.source_payload->>'apply_type', ''), '') as apply_type,
+                    coalesce(
+                        nullif(admission.source_payload->'detail_fields'->>'申请日期', ''),
+                        ''
+                    ) as application_time,
+                    ''::text as completed_at,
+                    coalesce(
+                        nullif(admission.source_payload->>'project_name_display', ''),
+                        nullif(admission.source_payload->>'project_name', ''),
+                        admission.project_name_display,
+                        admission.project_name,
+                        ''
+                    ) as project_name,
+                    admission.amount,
+                    coalesce(nullif(admission.source_payload->>'counterparty_name', ''), '') as counterparty_name,
+                    coalesce(nullif(admission.source_payload->>'reason', ''), '') as reason,
+                    coalesce(nullif(admission.source_payload->>'expense_type', ''), '') as expense_type,
+                    coalesce(nullif(admission.source_payload->>'expense_content', ''), '') as expense_content
+                from app.oa_pending_payment_admissions admission
+                where admission.tenant_id = %s
+                  and admission.workflow_status = 'in_progress'
+                """

@@ -83,7 +83,8 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
         self.assertEqual(service.export_summary(query)['row_count'],4)
         retired = service.list_rows(filters=[{'field':'tax_rate','operator':'in','values':['未提供']}])
         self.assertEqual(retired['pagination']['total'], 0)
-        _, content = service.export(query)
+        _, content, count = service.export(query)
+        self.assertEqual(count, 4)
         workbook = load_workbook(BytesIO(content),read_only=True)
         try:
             exported = list(workbook.active.values)
@@ -160,6 +161,50 @@ class BankSplitDocumentScopePostgresTests(unittest.TestCase):
         self.assertEqual(invisible['rows'], [])
         self.assertEqual(len(self.invoice_page(keyword='1497.22')['rows']), 1)
         self.assertEqual(len(self.invoice_page(keyword='1001497.22')['rows']), 1)
+
+    def test_input_export_keeps_full_group_and_deduplicates_before_limit(self):
+        self.document()
+        self.connection.execute("""insert into app.invoices(legacy_mongo_id,invoice_type,invoice_no,invoice_date,invoice_month,
+            seller_name,buyer_name,amount,signed_amount,tax_amount,total_with_tax,status)
+            values('invoice-extra','input','EXTRA-002','2026-04-29','2026-04-01','提供方','购买方',1,1,0,1,'pending')""")
+        self.connection.execute("""insert into app.workbench_pair_relations(case_id,relation_mode,status,row_ids,row_types,month_scope,amount_check)
+            select 'duplicated-group-a',relation_mode,status,row_ids,row_types,month_scope,amount_check
+            from app.workbench_pair_relations limit 1""")
+        self.connection.execute("""insert into app.workbench_pair_relations(case_id,relation_mode,status,row_ids,row_types,month_scope,amount_check)
+            values('extra-group-z','manual_confirmed','active',array['invoice-extra'],array['invoice'],'2026-04-01','{}'::jsonb)""")
+        self.sync_relation_fixture()
+        repository = PostgresInputInvoiceUsageQueryRepository(self.connection)
+        scope = dict(keyword=None, month='2026-04', invoice_date_from=None, invoice_date_to=None,
+            filters=[], sort_field='invoice_date', sort_direction='desc', tenant_id='default')
+        exported = repository.export_invoices(limit=2, **scope)
+        self.assertEqual(exported['total'], 2)
+        self.assertEqual({invoice.id for invoice in exported['invoices']}, {'invoice-scope', 'invoice-extra'})
+        scope['filters'] = [{'field':'bank_amount','operator':'equals','value':'1497.22'}]
+        filtered = repository.export_invoices(limit=2, **scope)
+        self.assertEqual(filtered['total'], 1)
+        self.assertEqual([invoice.id for invoice in filtered['invoices']], ['invoice-scope'])
+        self.assertEqual(repository.export_invoices(limit=0, **scope), {'total':1, 'invoices':[]})
+
+    def test_oa_export_filter_keeps_all_oa_members_of_a_matching_group(self):
+        self.document()
+        self.connection.execute("""insert into app.oa_applications(oa_source_id,form_id,row_id,status,workflow_status,
+            scope_month,application_date,applicant,project_name,amount,normalized_payload)
+            values('second-member','test','oa-second-member','active','completed','2026-04-01','2026-04-29',
+            '其他申请人','其他项目',1,'{"id":"oa-second-member","applicant":"其他申请人","amount":"1"}'::jsonb)""")
+        self.connection.execute("""update app.workbench_pair_relations set row_ids=array_append(row_ids,'oa-second-member'),
+            row_types=array_append(row_types,'oa')""")
+        self.sync_relation_fixture()
+        service = OaPendingPaymentQueryService(repository=PostgresOaPendingPaymentQueryRepository(self.connection))
+        query = {'view_mode':['completed'],'month':['2026-04'],'page':['9'],'page_size':['1'],
+            'filters':[json.dumps([{'field':'oa_applicant','operator':'in','values':['测试申请人']}])]}
+        self.assertEqual(service.export_summary(query, tenant_id='default'), {'row_count':2})
+        exported = service.export(query, tenant_id='default')
+        workbook = load_workbook(BytesIO(exported['content']), read_only=True)
+        try:
+            self.assertEqual({row[0] for row in list(workbook.active.values)[1:]}, {'oa-interest','oa-second-member'})
+            self.assertEqual(exported['row_count'],2)
+        finally:
+            workbook.close()
 
     def test_interest_oa_and_input_invoice_use_current_unique_purpose_despite_old_mismatch(self):
         self.document()

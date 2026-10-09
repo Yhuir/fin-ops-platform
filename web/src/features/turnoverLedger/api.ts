@@ -1,3 +1,4 @@
+import { readExportCount, validateExportCount, type ExportSummary } from "../exports/types";
 import type {
   ConfirmTurnoverClosureRequest,
   ConfirmTurnoverRelationRequest,
@@ -11,8 +12,6 @@ import type {
   TurnoverLedgerChip,
   TurnoverLedgerAllocationLot,
   TurnoverLedgerExportDownload,
-  TurnoverLedgerExportPreview,
-  TurnoverLedgerExportRow,
   TurnoverLedgerFamilySummary,
   TurnoverLedgerFlowRow,
   TurnoverLedgerGroup,
@@ -237,49 +236,6 @@ type ApiSaveTurnoverLedgerExtraResponse = {
   row?: ApiTurnoverLedgerGroupedRow | null;
 };
 
-type ApiTurnoverLedgerExportSummary = {
-  row_count?: number | null;
-  pending_repayment_amount?: string | null;
-  pending_collection_amount?: string | null;
-  accrued_interest?: string | null;
-};
-
-type ApiTurnoverLedgerExportRow = {
-  "序号"?: number | null;
-  row_type?: string | null;
-  lot_id?: string | null;
-  "往来大类"?: string | null;
-  "对方户名"?: string | null;
-  "待还款金额"?: string | null;
-  "待收款金额"?: string | null;
-  "余额"?: string | null;
-  "借款金额"?: string | null;
-  "借款日"?: string | null;
-  "还款金额"?: string | null;
-  "还款日"?: string | null;
-  "对方开户机构"?: string | null;
-  "还款备注"?: string | null;
-  "利率类型"?: string | null;
-  "利率值"?: string | null;
-  "已还利息额"?: string | null;
-  "借款天数"?: number | null;
-  "应还利息"?: string | null;
-  "还利息日期"?: string | null;
-  "还利息方式"?: string | null;
-  "备注"?: string | null;
-  "关系状态"?: string | null;
-  "流水标签"?: string;
-  "往来标记"?: string;
-};
-
-type ApiTurnoverLedgerExportPreview = {
-  file_name?: string | null;
-  scope_label?: string | null;
-  totals?: ApiTurnoverLedgerExportSummary;
-  columns?: string[];
-  rows?: ApiTurnoverLedgerExportRow[];
-};
-
 type ApiTurnoverBankRow = {
   id?: string | null;
   trade_time?: string | null;
@@ -381,6 +337,7 @@ async function requestBlob(url: string, init: RequestInit = {}): Promise<Turnove
   return {
     blob,
     fileName: parseContentDispositionFileName(contentDisposition) ?? "往来款台账.xlsx",
+    count: readExportCount(response.headers),
   };
 }
 
@@ -719,36 +676,6 @@ function mapExtra(extra: ApiTurnoverLedgerExtra, relationId = ""): TurnoverLedge
   };
 }
 
-function mapExportRow(row: ApiTurnoverLedgerExportRow): TurnoverLedgerExportRow {
-  return {
-    flowLabels: text(row["流水标签"]),
-    turnoverActionLabel: text(row["往来标记"]),
-    sequenceNo: numberValue(row["序号"]),
-    rowType: text(row.row_type),
-    lotId: text(row.lot_id),
-    familyLabel: text(row["往来大类"]),
-    counterpartyName: text(row["对方户名"]),
-    pendingRepaymentAmount: text(row["待还款金额"], "0.00"),
-    pendingCollectionAmount: text(row["待收款金额"], "0.00"),
-    balanceAmount: text(row["余额"], "0.00"),
-    borrowAmount: text(row["借款金额"], "0.00"),
-    borrowDate: text(row["借款日"]) || null,
-    repaymentAmount: text(row["还款金额"], "0.00"),
-    repaymentDate: text(row["还款日"]) || null,
-    counterpartyBankName: text(row["对方开户机构"]),
-    repaymentRemark: text(row["还款备注"]),
-    interestRateType: text(row["利率类型"], "none"),
-    interestRateValue: text(row["利率值"], "0.000000"),
-    interestPaidAmount: text(row["已还利息额"], "0.00"),
-    loanDays: nullableNumberValue(row["借款天数"]),
-    accruedInterest: text(row["应还利息"], "0.00"),
-    interestPaidDate: text(row["还利息日期"]) || null,
-    interestPaymentMethod: text(row["还利息方式"]),
-    note: text(row["备注"]),
-    statusLabel: text(row["关系状态"]),
-  };
-}
-
 function mapBankRow(row: ApiTurnoverBankRow): TurnoverBankRow {
   const debitAmount = text(row.debit_amount);
   const creditAmount = text(row.credit_amount);
@@ -994,34 +921,12 @@ export async function saveTurnoverRelationExtra(
   };
 }
 
-export async function fetchTurnoverLedgerExportPreview(
-  {
-    family = "all",
-    query = "",
-    settlementStatus = "all",
-    signal,
-  }: Pick<FetchTurnoverLedgerRequest, "family" | "query" | "settlementStatus" | "signal"> = {},
-): Promise<TurnoverLedgerExportPreview> {
-  const params = new URLSearchParams();
-  params.set("family", family);
-  params.set("query", query);
-  params.set("settlement_status", settlementStatus);
-  const payload = await requestJson<ApiTurnoverLedgerExportPreview>(
-    `/api/turnover-ledger/export-preview?${params.toString()}`,
-    { method: "GET", signal },
-  );
-  return {
-    fileName: text(payload.file_name, "往来款台账.xlsx"),
-    scopeLabel: text(payload.scope_label),
-    summary: {
-      rowCount: numberValue(payload.totals?.row_count),
-      pendingRepaymentAmount: text(payload.totals?.pending_repayment_amount, "0.00"),
-      pendingCollectionAmount: text(payload.totals?.pending_collection_amount, "0.00"),
-      accruedInterest: text(payload.totals?.accrued_interest, "0.00"),
-    },
-    columns: stringList(payload.columns),
-    rows: (payload.rows ?? []).map(mapExportRow),
-  };
+export async function fetchTurnoverLedgerExportSummary(
+  { family = "all", query = "", settlementStatus = "all", signal }: Pick<FetchTurnoverLedgerRequest, "family" | "query" | "settlementStatus" | "signal"> = {},
+): Promise<ExportSummary> {
+  const params = new URLSearchParams({ family, query, settlement_status: settlementStatus });
+  const payload = await requestJson<{ row_count: number }>(`/api/turnover-ledger/export-summary?${params.toString()}`, { method: "GET", signal });
+  return { rowCount: validateExportCount(payload.row_count) };
 }
 
 export async function downloadTurnoverLedgerExport(

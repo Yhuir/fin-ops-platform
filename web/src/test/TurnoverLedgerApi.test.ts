@@ -6,7 +6,7 @@ import {
   downloadTurnoverLedgerExport,
   fetchTurnoverLedgerTagSelection,
   fetchTurnoverLedger,
-  fetchTurnoverLedgerExportPreview,
+  fetchTurnoverLedgerExportSummary,
   fetchTurnoverLedgerGrouped,
   fetchTurnoverRelationDetail,
   saveTurnoverLedgerTagSelection,
@@ -851,96 +851,22 @@ describe("turnover ledger API", () => {
     expect(saved).not.toHaveProperty("row");
   });
 
-  test("maps export preview and downloads xlsx as Blob without JSON parsing", async () => {
-    const exportJsonSpy = vi.fn(() => {
-      throw new Error("download response should not be parsed as JSON");
-    });
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/turnover-ledger/export-preview") {
-        expect(url.searchParams.get("family")).toBe("business");
-        return new Response(JSON.stringify({
-          file_name: "往来款台账-业务往来-2026-05-12.xlsx",
-          scope_label: "业务往来",
-          totals: {
-            row_count: 1,
-            pending_repayment_amount: "0.00",
-            pending_collection_amount: "8000.00",
-          },
-          columns: ["序号", "往来大类", "对方户名"],
-          rows: [
-            {
-              "序号": 1,
-              "往来大类": "业务往来",
-              "对方户名": "昆明客户",
-              "待还款金额": "0.00",
-              "待收款金额": "8000.00",
-              "借款金额": "8000.00",
-              "借款日": "2026-05-01",
-              "还款金额": "0.00",
-              "还款日": null,
-              "对方开户机构": "招商银行",
-              "还款备注": "",
-              "利率类型": "none",
-              "利率值": "0.000000",
-              "已还利息额": "0.00",
-              "借款天数": null,
-              "应还利息": "0.00",
-              "还利息日期": null,
-              "还利息方式": "",
-              "备注": "",
-              "关系状态": "待人工确认",
-              row_type: "lot",
-              lot_id: "lot-business-001",
-              "余额": "8000.00",
-            },
-          ],
-        }), { headers: { "Content-Type": "application/json" } });
-      }
-      return {
-        ok: true,
-        status: 200,
-        headers: {
-          get(name: string) {
-            if (name.toLowerCase() === "content-type") {
-              return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-            }
-            if (name.toLowerCase() === "content-disposition") {
-              return "attachment; filename=\"turnover.xlsx\"";
-            }
-            return null;
-          },
-        },
-        blob: async () => new Blob(["xlsx-bytes"], {
-          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        }),
-        text: async () => {
-          throw new Error("download response should not be parsed as text");
-        },
-        json: exportJsonSpy,
-      } as unknown as Response;
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const preview = await fetchTurnoverLedgerExportPreview({ family: "business" });
-    expect(preview.fileName).toBe("往来款台账-业务往来-2026-05-12.xlsx");
-    expect(preview.summary.pendingCollectionAmount).toBe("8000.00");
-    expect(preview.rows[0]).toMatchObject({
-      sequenceNo: 1,
-      counterpartyName: "昆明客户",
-      pendingCollectionAmount: "8000.00",
-      interestRateType: "none",
-      loanDays: null,
-      rowType: "lot",
-      lotId: "lot-business-001",
-      balanceAmount: "8000.00",
-    });
-
-    const downloaded = await downloadTurnoverLedgerExport({ family: "business" });
+  test("counts objects and downloads the same scope as a Blob without parsing file JSON", async () => {
+    const calls: URL[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost"); calls.push(url);
+      if (url.pathname.endsWith("export-summary")) return Response.json({ row_count: 1 });
+      return new Response("xlsx-bytes", { headers: {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": 'attachment; filename="turnover.xlsx"', "X-Export-Count": "1",
+      } });
+    }));
+    const scope = { family: "business" as const, query: "昆明客户", settlementStatus: "unsettled" as const };
+    expect(await fetchTurnoverLedgerExportSummary(scope)).toEqual({ rowCount: 1 });
+    const downloaded = await downloadTurnoverLedgerExport(scope);
     expect(downloaded.fileName).toBe("turnover.xlsx");
-    expect(downloaded.blob.size).toBeGreaterThan(0);
-    expect(downloaded.blob.type).toBe("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    expect(exportJsonSpy).not.toHaveBeenCalled();
+    expect(downloaded.count).toBe(1); expect(downloaded.blob.size).toBeGreaterThan(0);
+    expect(calls[0].search).toBe(calls[1].search);
   });
 
   test("surfaces backend row-limit messages from failed export downloads", async () => {

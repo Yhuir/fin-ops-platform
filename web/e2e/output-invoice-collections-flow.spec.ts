@@ -91,12 +91,12 @@ test.describe("销项发票收款情况", () => {
     expect((await previewResponse).status()).toBe(200);
     const exportDrawer = page.getByRole("dialog", { name: "导出销项发票" });
     await expect(exportDrawer).toBeVisible();
-    await expect(exportDrawer.getByText('导出 1 张')).toBeVisible();
+    await expect(exportDrawer.getByText('即将导出 1 张销项发票')).toBeVisible();
     await expect(exportDrawer.getByRole('grid')).toHaveCount(0);
 
     let download: Download | undefined;
     const downloadPromise = page.waitForEvent("download");
-    await exportDrawer.getByRole("button", { name: "下载 Excel" }).click();
+    await exportDrawer.getByRole("button", { name: "导出", exact: true }).click();
     download = await downloadPromise;
     expect(download.suggestedFilename()).toBe("output-invoice-collections.xlsx");
     const savePath = testInfo.outputPath("output-invoice-collections.xlsx");

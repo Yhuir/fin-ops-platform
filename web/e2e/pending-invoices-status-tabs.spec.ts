@@ -67,8 +67,8 @@ test("continuous hierarchy partitions bank counts and share status/export query 
   await page.getByRole("button", { name:"筛选内容导出" }).click();
   const url = new URL((await preview).url());
   expect(JSON.parse(url.searchParams.get("filters")!)).toEqual([
-    { field: "direction", operator: "in", values: ["expense"] },
     { field: "status_code", operator: "in", values: ["invoice_not_fully_paid", "invoice_amount_missing"] },
   ]);
+  expect(url.searchParams.get("direction")).toBe("expense");
   expect(errors).toEqual([]);
 });

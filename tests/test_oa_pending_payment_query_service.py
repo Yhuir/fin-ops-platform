@@ -18,6 +18,16 @@ from openpyxl import load_workbook
 
 
 class OaPendingPaymentQueryServiceTests(unittest.TestCase):
+    def test_obsolete_export_parameters_fail_without_exporting_default_scope(self) -> None:
+        repository = CanonicalQueryRepository()
+        service = OaPendingPaymentQueryService(repository=repository)
+        for method in (service.export_summary, service.export):
+            with self.subTest(method=method.__name__), self.assertRaises(OaPendingPaymentError) as caught:
+                method({"sources": ["in_progress"]}, tenant_id="default")
+            self.assertEqual(caught.exception.error_code, "invalid_oa_pending_payment_export")
+            self.assertIn("刷新页面", str(caught.exception))
+        self.assertEqual(repository.snapshot_entries, 0)
+
     def test_amount_keywords_are_normalized_before_canonical_queries(self) -> None:
         repository = CanonicalQueryRepository()
         service = OaPendingPaymentQueryService(repository=repository)
@@ -182,7 +192,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["id"], "bank-canonical-1")
         self.assertEqual(payload["filters"]["oaRowIds"], ["oa-1", "oa-2"])
 
-    def test_export_sources_builds_oa_only_xlsx_in_one_snapshot(self) -> None:
+    def test_export_builds_oa_only_xlsx_in_one_snapshot(self) -> None:
         repository = CanonicalQueryRepository()
         repository.export_rows = [
             {
@@ -222,8 +232,8 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         ]
         service = OaPendingPaymentQueryService(repository=repository)
 
-        result = service.export_sources(
-            {"sources": ["completed,in_progress"]},
+        result = service.export(
+            {"view_mode": ["in_progress"], "keyword": ["4,311.00"], "sort_field": ["oa_amount"], "sort_direction": ["asc"]},
             tenant_id="tenant-a",
             today=date(2026, 8, 19),
         )
@@ -232,7 +242,9 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertEqual(repository.snapshot_entries, 1)
         self.assertEqual(repository.snapshot_exits, 1)
         self.assertEqual(repository.export_calls[0]["tenant_id"], "tenant-a")
-        self.assertEqual(repository.export_calls[0]["sources"], ("completed", "in_progress"))
+        self.assertEqual(repository.export_calls[0]["view_mode"], "in_progress")
+        self.assertEqual(repository.export_calls[0]["keyword"], "4311.00")
+        self.assertEqual(repository.export_calls[0]["sort_direction"], "asc")
         self.assertEqual(result["filename"], "OA事实源_2026-08-19.xlsx")
         self.assertEqual(result["counts"], {"completed": 1, "in_progress": 1})
         self.assertEqual(workbook.sheetnames, ["已完成OA", "进行中OA"])
@@ -243,16 +255,16 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertNotIn("流水", [cell.value for cell in workbook["已完成OA"][1]])
         self.assertNotIn("发票", [cell.value for cell in workbook["已完成OA"][1]])
 
-    def test_export_sources_rejects_invalid_or_oversized_requests(self) -> None:
+    def test_export_rejects_invalid_or_oversized_requests(self) -> None:
         repository = CanonicalQueryRepository()
         service = OaPendingPaymentQueryService(repository=repository)
 
         for query, code in (
-            ({}, "oa_pending_payment_export_sources_required"),
-            ({"sources": ["completed,bank"]}, "invalid_oa_pending_payment_export_source"),
+            ({"view_mode": ["invalid"]}, "invalid_view_mode"),
+            ({"month": ["2026-13"]}, "invalid_month"),
         ):
             with self.subTest(query=query), self.assertRaises(OaPendingPaymentError) as caught:
-                service.export_sources(query, tenant_id="default")
+                service.export(query, tenant_id="default")
             self.assertEqual(caught.exception.error_code, code)
         self.assertEqual(repository.snapshot_entries, 0)
 
@@ -264,8 +276,19 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
             "fin_ops_platform.services.oa_pending_payment_query_service.OA_PENDING_PAYMENT_EXPORT_ROW_LIMIT",
             1,
         ), self.assertRaises(OaPendingPaymentError) as caught:
-            service.export_sources({"sources": ["completed"]}, tenant_id="default")
+            service.export({"view_mode": ["completed"]}, tenant_id="default")
         self.assertEqual(caught.exception.error_code, "oa_pending_payment_export_row_limit_exceeded")
+
+    def test_export_summary_ignores_pagination_and_does_not_hydrate(self):
+        repository = CanonicalQueryRepository()
+        repository.export_count = lambda **kwargs: repository.select_calls.append(kwargs) or 17
+        service = OaPendingPaymentQueryService(repository=repository)
+        result = service.export_summary({"view_mode": ["in_progress"], "page": ["9"], "page_size": ["1"]}, tenant_id="tenant-a")
+        self.assertEqual(result, {"row_count": 17})
+        self.assertEqual(repository.select_calls[0]["view_mode"], "in_progress")
+        self.assertNotIn("page", repository.select_calls[0])
+        self.assertEqual(repository.load_calls, [])
+        self.assertEqual(repository.export_calls, [])
 
 
 class PostgresOaPendingPaymentQueryRepositoryTests(unittest.TestCase):
@@ -344,41 +367,24 @@ class PostgresOaPendingPaymentQueryRepositoryTests(unittest.TestCase):
             with repository.snapshot():
                 self.fail("snapshot unexpectedly opened")
 
-    def test_export_query_reads_only_selected_canonical_oa_sources(self) -> None:
+    def test_export_query_reuses_group_filters_and_deduplicates_before_limit(self) -> None:
         connection = RecordingConnection()
         repository = PostgresOaPendingPaymentQueryRepository(connection)
-
-        repository.export_oa_sources(
-            tenant_id="tenant-a",
-            sources=("completed", "in_progress"),
-            limit=20_001,
-        )
-
-        self.assertEqual(len(connection.fetch_all_calls), 1)
+        kwargs = dict(tenant_id="tenant-a", month="2026-05", keyword="供应商",
+                      trade_date_from=None, trade_date_to=None,
+                      filters=[{"field": "oa_applicant", "operator": "in", "values": ["测试"]}],
+                      sort_field="oa_amount", sort_direction="asc", view_mode="in_progress")
+        repository.export_oa_rows(**kwargs, limit=20_001)
         sql, params = connection.fetch_all_calls[0]
-        self.assertIn("from app.oa_applications", sql)
-        self.assertIn("from app.oa_pending_payment_admissions", sql)
-        for forbidden in (
-            "app.bank_transactions",
-            "app.invoices",
-            "app.workbench_pair_relations",
-            "read_model.",
-            "job.outbox_events",
-            "raw_payload",
-        ):
-            self.assertNotIn(forbidden, sql)
-        self.assertEqual(params[-2:], ("tenant-a", 20_001))
-
-        completed_only = RecordingConnection()
-        PostgresOaPendingPaymentQueryRepository(completed_only).export_oa_sources(
-            tenant_id="tenant-a",
-            sources=("completed",),
-            limit=20_001,
-        )
-        self.assertNotIn(
-            "app.oa_pending_payment_admissions",
-            completed_only.fetch_all_calls[0][0],
-        )
+        self.assertIn("member.oa_id = any(canonical_rows.oa_ids)", sql)
+        self.assertIn("filtered_rows", sql)
+        self.assertIn("group by source_kind, member.oa_id", sql)
+        self.assertIn("order by members.row_order, exported_oa.oa_id", sql)
+        self.assertNotIn("option_values", sql)
+        self.assertEqual(params[-1], 20_001)
+        repository.export_count(**kwargs)
+        self.assertEqual(len(connection.fetch_one_calls), 1)
+        self.assertNotIn("option_values", connection.fetch_one_calls[0][0])
 
     def test_fact_hydration_query_count_is_fixed_for_page_size_200(self) -> None:
         one = RecordingConnection()
@@ -448,7 +454,7 @@ class CanonicalQueryRepository:
             },
         }
 
-    def export_oa_sources(self, **kwargs: object) -> list[dict[str, object]]:
+    def export_oa_rows(self, **kwargs: object) -> list[dict[str, object]]:
         self.export_calls.append(dict(kwargs))
         return list(self.export_rows)
 
@@ -507,7 +513,7 @@ class RecordingConnection:
     def fetch_one(self, sql: str, params: object = None) -> dict[str, object] | None:
         normalized_params = tuple(params or ())
         self.fetch_one_calls.append((sql, normalized_params))
-        return {"oa_count": 0, "classification_counts": {"completed": {"paid": 0, "unpaid": 0}, "in_progress": {"paid": 0, "unpaid": 0}}}
+        return {"row_count": 0, "oa_count": 0, "classification_counts": {"completed": {"paid": 0, "unpaid": 0}, "in_progress": {"paid": 0, "unpaid": 0}}}
 
     def fetch_all(self, sql: str, params: object = None) -> list[dict[str, object]]:
         self.fetch_all_calls.append((sql, params))

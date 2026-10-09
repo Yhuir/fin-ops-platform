@@ -1,3 +1,4 @@
+import { readExportCount, validateExportCount, type ExportSummary } from "../exports/types";
 import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
 import type {
   OaPendingPaymentDetailResponse,
@@ -26,11 +27,10 @@ type FetchContextRequest = Pick<
   signal?: AbortSignal;
 };
 
-export type OaPendingPaymentExportSource = "completed" | "in_progress";
-
 export type OaPendingPaymentExportDownload = {
   blob: Blob;
   fileName: string;
+  count: number;
 };
 
 export function nextOaPendingPaymentSortDirection(
@@ -63,13 +63,24 @@ export async function fetchOaPendingPaymentRows(request: FetchRowsRequest): Prom
   return payload;
 }
 
-export async function downloadOaPendingPaymentSources(
-  sources: OaPendingPaymentExportSource[],
-): Promise<OaPendingPaymentExportDownload> {
+function exportQuery(request: FetchRowsRequest): string {
   const params = new URLSearchParams();
-  params.set("sources", sources.join(","));
-  const url = `/api/oa-pending-payments/export?${params.toString()}`;
-  const response = await apiFetch(url, { method: "GET" });
+  appendContextQuery(params, request);
+  if (request.sortField && request.sortDirection) {
+    params.set("sort_field", request.sortField);
+    params.set("sort_direction", request.sortDirection);
+  }
+  return params.toString();
+}
+
+export async function fetchOaPendingPaymentExportSummary(query: FetchRowsRequest, signal: AbortSignal): Promise<ExportSummary> {
+  const raw = await apiRequestJson<{ row_count: number }>(`/api/oa-pending-payments/export-summary?${exportQuery(query)}`, { method: "GET", signal });
+  return { rowCount: validateExportCount(raw.row_count) };
+}
+
+export async function downloadOaPendingPaymentExport(request: FetchRowsRequest): Promise<OaPendingPaymentExportDownload> {
+  const url = `/api/oa-pending-payments/export?${exportQuery(request)}`;
+  const response = await apiFetch(url, { method: "GET", signal: request.signal });
   const contentType = response.headers?.get?.("Content-Type") ?? "";
   const normalizedContentType = contentType.toLowerCase();
 
@@ -91,6 +102,7 @@ export async function downloadOaPendingPaymentSources(
   return {
     blob: await response.blob(),
     fileName: exportFileName(response.headers?.get?.("Content-Disposition") ?? null) ?? "OA事实源.xlsx",
+    count: readExportCount(response.headers),
   };
 }
 

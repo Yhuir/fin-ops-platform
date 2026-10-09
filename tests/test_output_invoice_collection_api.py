@@ -37,7 +37,7 @@ class RecordingQueryService:
 
     def export(self, query: object, *, tenant_id: str) -> tuple[str, bytes]:
         self._record("export", query, tenant_id)
-        return "销项发票收款情况.xlsx", b"xlsx"
+        return "销项发票收款情况.xlsx", b"xlsx", 17
 
     def invoice_detail(self, invoice_id: str, *, tenant_id: str) -> dict[str, Any]:
         return self._record("invoice_detail", invoice_id, tenant_id)
@@ -69,9 +69,10 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
                 "status": int(status),
                 "payload": payload,
             },
-            xlsx_response=lambda filename, content: {
+            xlsx_response=lambda filename, content, count: {
                 "filename": filename,
                 "content": content,
+                "row_count": count,
             },
             error_response=lambda exc: {
                 "status": int(exc.status_code),
@@ -138,20 +139,19 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
                 {"status": int(HTTPStatus.UNAUTHORIZED)},
             ),
             json_response=lambda status, payload: (status, payload),
-            xlsx_response=lambda filename, content: (filename, content),
+            xlsx_response=lambda filename, content, count: (filename, content),
             error_response=lambda exc: exc.error_code,
         )
 
-        response = routes.route(
-            "GET",
-            "/api/output-invoice-collections/rows",
-            {},
-            None,
-            {},
-        )
-
-        self.assertEqual(response, {"status": 401})
+        for path in ("/api/output-invoice-collections/rows", "/api/output-invoice-collections/export-summary", "/api/output-invoice-collections/export"):
+            response = routes.route("GET", path, {}, None, {})
+            self.assertEqual(response, {"status":401})
         self.assertEqual(self.service.calls, [])
+
+    def test_download_port_receives_count_from_the_generated_file(self):
+        response = self.routes.route("GET", "/api/output-invoice-collections/export", {'keyword':['match']}, None, {})
+        self.assertEqual(response, {"filename":"销项发票收款情况.xlsx", "content":b"xlsx", "row_count":17})
+        self.assertEqual(self.service.calls, [('export', {'keyword':['match']}, 'default')])
 
     def test_domain_error_is_mapped_by_the_http_error_port(self) -> None:
         self.service.error_on = "rows"

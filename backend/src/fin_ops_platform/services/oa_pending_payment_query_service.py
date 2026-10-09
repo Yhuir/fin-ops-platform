@@ -16,7 +16,6 @@ from fin_ops_platform.services.oa_pending_payment_export import (
     OA_PENDING_PAYMENT_EXPORT_ROW_LIMIT,
     build_oa_pending_payment_export_workbook,
     oa_pending_payment_export_filename,
-    parse_oa_pending_payment_export_sources,
 )
 from fin_ops_platform.services.oa_pending_payment_query_contract import (
     OaPendingPaymentError,
@@ -45,37 +44,16 @@ class OaPendingPaymentQueryService:
         tenant_id: str,
     ) -> dict[str, Any]:
         repository = self._repository_required()
-        month = _parse_month(_query_value(query, "month"))
-        trade_date_from = _parse_date(_query_value(query, "trade_date_from"), "trade_date_from")
-        trade_date_to = _parse_date(_query_value(query, "trade_date_to"), "trade_date_to")
-        if trade_date_from and trade_date_to and trade_date_from > trade_date_to:
-            raise OaPendingPaymentError(
-                "invalid_trade_date_range",
-                "trade_date_from must be on or before trade_date_to.",
-            )
+        scope = self._query_scope(query)
         page = parse_positive_int(_query_value(query, "page") or 1, "page")
         page_size = parse_positive_int(_query_value(query, "page_size") or 50, "page_size", maximum=200)
-        filters = parse_filters(_query_value(query, "filters"))
-        sort_field, sort_direction = parse_sort(
-            _query_value(query, "sort_field") or "bank_trade_time",
-            _query_value(query, "sort_direction") or "desc",
-        )
-        view_mode = parse_view_mode(_query_value(query, "view_mode"))
-        keyword = normalize_money_search_query(_query_value(query, "keyword")) or None
         try:
             with repository.snapshot() as snapshot:
                 selected = snapshot.select_page(
                     tenant_id=tenant_id,
-                    month=month,
-                    keyword=keyword,
-                    trade_date_from=trade_date_from,
-                    trade_date_to=trade_date_to,
-                    filters=filters,
-                    sort_field=sort_field,
-                    sort_direction=sort_direction,
+                    **scope,
                     page=page,
                     page_size=page_size,
-                    view_mode=view_mode,
                 )
                 descriptors = list(selected.get("descriptors") or [])
                 rows = self._hydrate_rows(snapshot, descriptors, tenant_id=tenant_id)
@@ -93,25 +71,57 @@ class OaPendingPaymentQueryService:
             "statistics": dict(selected.get("statistics") or {}),
             "filterConfig": filter_config(),
             "filterOptions": dict(selected.get("filterOptions") or {}),
-            "appliedFilters": {"filters": filters},
-            "sort": {"field": sort_field, "direction": sort_direction},
-            "viewMode": view_mode,
+            "appliedFilters": {"filters": scope["filters"]},
+            "sort": {"field": scope["sort_field"], "direction": scope["sort_direction"]},
+            "viewMode": scope["view_mode"],
         }
 
-    def export_sources(
+    @staticmethod
+    def _query_scope(query: dict[str, list[str]]) -> dict[str, Any]:
+        if "sources" in query:
+            raise OaPendingPaymentError(
+                "invalid_oa_pending_payment_export",
+                "导出请求已过期，请刷新页面后重试。",
+            )
+        month = _parse_month(_query_value(query, "month"))
+        trade_date_from = _parse_date(_query_value(query, "trade_date_from"), "trade_date_from")
+        trade_date_to = _parse_date(_query_value(query, "trade_date_to"), "trade_date_to")
+        if trade_date_from and trade_date_to and trade_date_from > trade_date_to:
+            raise OaPendingPaymentError(
+                "invalid_trade_date_range",
+                "trade_date_from must be on or before trade_date_to.",
+            )
+        filters = parse_filters(_query_value(query, "filters"))
+        sort_field, sort_direction = parse_sort(
+            _query_value(query, "sort_field") or "bank_trade_time",
+            _query_value(query, "sort_direction") or "desc",
+        )
+        view_mode = parse_view_mode(_query_value(query, "view_mode"))
+        keyword = normalize_money_search_query(_query_value(query, "keyword")) or None
+        return dict(month=month, trade_date_from=trade_date_from, trade_date_to=trade_date_to,
+                    filters=filters, sort_field=sort_field, sort_direction=sort_direction,
+                    view_mode=view_mode, keyword=keyword)
+
+    def export_summary(self, query: dict[str, list[str]], *, tenant_id: str) -> dict[str, int]:
+        scope = self._query_scope(query)
+        with self._repository_required().snapshot() as snapshot:
+            count = snapshot.export_count(tenant_id=tenant_id, **scope)
+        return {"row_count": count}
+
+    def export(
         self,
         query: dict[str, list[str]],
         *,
         tenant_id: str,
         today: date | None = None,
     ) -> dict[str, Any]:
-        sources = parse_oa_pending_payment_export_sources(query)
+        scope = self._query_scope(query)
         repository = self._repository_required()
         try:
             with repository.snapshot() as snapshot:
-                rows = snapshot.export_oa_sources(
+                rows = snapshot.export_oa_rows(
                     tenant_id=tenant_id,
-                    sources=sources,
+                    **scope,
                     limit=OA_PENDING_PAYMENT_EXPORT_ROW_LIMIT + 1,
                 )
         except OaPendingPaymentError:
@@ -124,6 +134,7 @@ class OaPendingPaymentQueryService:
                 f"OA 事实源超过 {OA_PENDING_PAYMENT_EXPORT_ROW_LIMIT} 行导出上限。",
                 details={"limit": OA_PENDING_PAYMENT_EXPORT_ROW_LIMIT},
             )
+        sources = tuple(dict.fromkeys(str(row["source_kind"]) for row in rows)) or (scope["view_mode"],)
         counts = {
             source: sum(1 for row in rows if str(row.get("source_kind") or "") == source)
             for source in sources

@@ -270,14 +270,7 @@ function installInputInvoiceUsageFetch(
       });
     }
     if (url.pathname === "/api/input-invoice-usage/export-summary") {
-      return new Response(JSON.stringify({
-        file_name: "进项发票使用情况-2026-05-31.xlsx",
-        row_count: 1,
-        filter_options: { relation_status: [{value: "no_oa",label:"未关联 OA",count:1}], payment_status: [{value:"unclassified",label:"待核对",count:1}] },
-        scope_label: "当前筛选",
-        columns: ["序号", "发票号码", "销方名称"],
-        sample_rows: [{ "序号": 1, "发票号码": "SD-INV-2026-0001", "销方名称": "云南长文本供应商科技发展有限公司第一分公司" }],
-      }), {
+      return new Response(JSON.stringify({ row_count: 1      }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -291,6 +284,7 @@ function installInputInvoiceUsageFetch(
         headers: {
           "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           "Content-Disposition": "attachment; filename*=UTF-8''%E8%BF%9B%E9%A1%B9.xlsx",
+          "X-Export-Count": "1",
         },
       });
     }
@@ -1314,14 +1308,14 @@ describe("Input invoice usage page", () => {
     const page = await screen.findByTestId("input-invoice-usage-page");
     await user.click(within(page).getByRole("button", { name: "筛选内容导出" }));
 
-    expect(await screen.findByText("导出 1 张")).toBeInTheDocument();
+    expect(await screen.findByText("即将导出 1 张进项发票")).toBeInTheDocument();
     expect(screen.getAllByText("SD-INV-2026-0001").length).toBeGreaterThanOrEqual(1);
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       return url.pathname === "/api/input-invoice-usage/export-summary";
     })).toBe(true);
 
-    await user.click(screen.getByRole("button", { name: "下载 Excel" }));
+    await user.click(screen.getByRole("button", { name: "导出" }));
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([input]) => {
         const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -1349,8 +1343,8 @@ describe("Input invoice usage page", () => {
     const page = await screen.findByTestId("input-invoice-usage-page");
     await user.click(within(page).getByRole("button", { name: "筛选内容导出" }));
 
-    expect(await screen.findByText("导出 1 张")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "下载 Excel" }));
+    expect(await screen.findByText("即将导出 1 张进项发票")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "导出" }));
 
     expect(await screen.findByText("进项发票使用情况导出超过 20000 行，请缩小筛选范围后重试。")).toBeInTheDocument();
     expect(screen.queryByText("已生成 进项.xlsx")).not.toBeInTheDocument();

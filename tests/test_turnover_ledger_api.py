@@ -2878,11 +2878,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             self.assertEqual(json.loads(response.body)["groups"], [])
             self.assertEqual(json.loads(response.body)["statistics"]["group_count"], 0)
             self.assertEqual(json.loads(response.body)["summary"]["pending_repayment_amount"], "0.00")
-            preview = app.handle_request("GET", "/api/turnover-ledger/export-preview?query=不存在的对象&settlement_status=unsettled")
+            preview = app.handle_request("GET", "/api/turnover-ledger/export-summary?query=不存在的对象&settlement_status=unsettled")
             self.assertEqual(preview.status_code, 200)
-            self.assertEqual(json.loads(preview.body)["rows"], [])
-            self.assertEqual(json.loads(preview.body)["totals"]["row_count"], 0)
-            for path in ("/api/turnover-ledger?view=grouped&", "/api/turnover-ledger/export-preview?", "/api/turnover-ledger/export?"):
+            self.assertEqual(json.loads(preview.body), {"row_count": 0})
+            for path in ("/api/turnover-ledger?view=grouped&", "/api/turnover-ledger/export-summary?", "/api/turnover-ledger/export?"):
                 invalid = app.handle_request("GET", path + "settlement_status=paired")
                 self.assertEqual(invalid.status_code, 400)
                 self.assertIn("结算状态无效", json.loads(invalid.body)["message"])
@@ -3463,31 +3462,17 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_export_preview_uses_formal_fields_without_ui_only_values(self) -> None:
+    def test_export_summary_returns_object_count_without_preview(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
 
-            response = app.handle_request("GET", "/api/turnover-ledger/export-preview?family=company")
+            response = app.handle_request("GET", "/api/turnover-ledger/export-summary?family=company")
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["filters"]["family"], "company")
-        self.assertIn("序号", payload["columns"])
-        self.assertIn("往来大类", payload["columns"])
-        self.assertGreaterEqual(len(payload["rows"]), 1)
-        self.assertIn("row_type", payload["rows"][0])
-        self.assertEqual(payload["rows"][0]["row_type"], "summary")
-        flow_rows = [row for row in payload["rows"] if row.get("row_type") == "flow"]
-        self.assertEqual(len(flow_rows), len({row["source_bank_row_id"] for row in flow_rows}))
-        for row in flow_rows:
-            self.assertIn(row["flow_direction"], {"income", "expense"})
-            self.assertRegex(row["flow_amount"], r"^\d+\.\d{2}$")
-        self.assertIn("lot_id", payload["rows"][0])
-        self.assertIn("balance_amount", payload["rows"][0])
-        forbidden_keys = {"chips", "row_tone", "group_tone", "row_span", "bank_row_ids"}
-        self.assertFalse(forbidden_keys.intersection(payload["rows"][0]))
+        self.assertEqual(payload, {"row_count": 1})
 
     def test_export_xlsx_returns_content_type_and_applies_family_filter(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -3503,6 +3488,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             data_row = [cell.value for cell in sheet[2]]
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["X-Export-Count"], "1")
         self.assertEqual(
             response.headers["Content-Type"],
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -3523,7 +3509,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         class ExportLimitRoutes:
             @staticmethod
-            def export_preview(**_kwargs: object) -> dict[str, object]:
+            def export_summary(**_kwargs: object) -> dict[str, object]:
                 raise TurnoverLedgerExportLimitError(total=TURNOVER_LEDGER_EXPORT_ROW_LIMIT + 1)
 
             @staticmethod
@@ -3531,10 +3517,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 raise TurnoverLedgerExportLimitError(total=TURNOVER_LEDGER_EXPORT_ROW_LIMIT + 1)
 
         app = build_application()
-        app._turnover_ledger_api_routes.export_preview = ExportLimitRoutes.export_preview  # type: ignore[method-assign]
+        app._turnover_ledger_api_routes.export_summary = ExportLimitRoutes.export_summary  # type: ignore[method-assign]
         app._turnover_ledger_api_routes.export = ExportLimitRoutes.export  # type: ignore[method-assign]
 
-        preview_response = app.handle_request("GET", "/api/turnover-ledger/export-preview?family=all")
+        preview_response = app.handle_request("GET", "/api/turnover-ledger/export-summary?family=all")
         export_response = app.handle_request("GET", "/api/turnover-ledger/export?family=all")
 
         expected_details = {"total": TURNOVER_LEDGER_EXPORT_ROW_LIMIT + 1, "limit": TURNOVER_LEDGER_EXPORT_ROW_LIMIT}

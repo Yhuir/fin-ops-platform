@@ -428,11 +428,10 @@ export default function OutputInvoiceCollectionsPage() {
         open={Boolean(query.detailTarget)}
         target={query.detailTarget}
       />
-      <OutputInvoiceCollectionExportDrawer
-        query={rowsRequest}
+      {query.activeWorkflow?.kind === "export" ? <OutputInvoiceCollectionExportDrawer
+        query={query}
         onClose={() => setQuery((current) => ({ ...current, activeWorkflow: null }))}
-        open={query.activeWorkflow?.kind === "export"}
-      />
+      /> : null}
     </>
   );
 }

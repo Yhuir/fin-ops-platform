@@ -34,7 +34,7 @@ function api() {
     confirmAttachExistingInvoice: (request: AttachExistingInvoiceConfirmRequest) => Promise<unknown>;
     previewAttachExistingInvoices: (request: AttachExistingInvoicesPreviewRequest) => Promise<unknown>;
     confirmAttachExistingInvoices: (request: AttachExistingInvoicesConfirmRequest) => Promise<unknown>;
-    fetchPendingInvoiceExportSummary: (selection: {values: Record<string,string[]>; startDate: string; endDate: string}, signal: AbortSignal) => Promise<unknown>;
+    fetchPendingInvoiceExportSummary: (request: FetchPendingInvoiceRowsRequest, signal: AbortSignal) => Promise<unknown>;
     downloadPendingInvoiceExport: (request: FetchPendingInvoiceRowsRequest) => Promise<{ blob: Blob; fileName: string }>;
     savePendingInvoiceIncomeStatuses: typeof pendingInvoicesApi.savePendingInvoiceIncomeStatuses;
   };
@@ -556,6 +556,7 @@ describe("pending invoices and tag settings API mapping", () => {
           headers: {
             "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             "Content-Disposition": "attachment; filename*=UTF-8''pending-invoices.xlsx",
+            "X-Export-Count": "128",
           },
         });
       }
@@ -628,7 +629,7 @@ describe("pending invoices and tag settings API mapping", () => {
     });
     expect(confirm).toMatchObject({ status: "completed", relationCaseId: "case_001", affectedMonths: ["2026-05"] });
 
-    const summary = await api().fetchPendingInvoiceExportSummary({ values: {}, startDate: '', endDate: '' }, new AbortController().signal, { direction: 'all', filter: 'all' });
+    const summary = await api().fetchPendingInvoiceExportSummary({ direction: 'all', filter: 'all' }, new AbortController().signal);
     expect(summary).toMatchObject({ rowCount: 128 });
     expect(summary).not.toHaveProperty('sampleRows');
 

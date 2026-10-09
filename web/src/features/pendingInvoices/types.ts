@@ -515,6 +515,7 @@ export type AttachExistingInvoicesResult = {
 export type PendingInvoiceExportDownload = {
   blob: Blob;
   fileName: string;
+  count: number;
 };
 
 export type PendingInvoiceIncomeStatusCode = "income_no_invoice_required" | "cash_income";

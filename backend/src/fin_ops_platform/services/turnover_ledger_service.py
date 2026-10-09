@@ -144,6 +144,7 @@ class TurnoverLedgerService:
         query: str = "",
         settlement_status: str = "all",
         paginate: bool = True,
+        count_only: bool = False,
     ) -> dict[str, Any]:
         query = str(query).strip()
         if len(query) > 200:
@@ -219,6 +220,8 @@ class TurnoverLedgerService:
 
         facet_groups = [group for group in all_groups if matches(group)]
         groups = [group for group in groups if matches(group)]
+        if count_only:
+            return {"row_count": len(groups)}
         group_keys = {(group["family"], group["counterparty_name"]) for group in groups}
         filtered_items = [item for item in filtered_items if (item["family"], item["counterparty_name"]) in group_keys]
         facet_keys = {(group["family"], group["counterparty_name"]) for group in facet_groups}

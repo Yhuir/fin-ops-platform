@@ -9,7 +9,7 @@ import { FinanceTablePagination } from "../components/common/FinanceTable";
 import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import StatePanel from "../components/common/StatePanel";
-import TurnoverLedgerExportDialog from "../components/turnoverLedger/TurnoverLedgerExportDialog";
+import TurnoverLedgerExportDrawer from "../components/turnoverLedger/TurnoverLedgerExportDrawer";
 import TurnoverLedgerExtraDrawer from "../components/turnoverLedger/TurnoverLedgerExtraDrawer";
 import TurnoverLedgerGroupedTable from "../components/turnoverLedger/TurnoverLedgerGroupedTable";
 import { formatMoney, formatNullable } from "../features/turnoverLedger/presentation";
@@ -25,8 +25,6 @@ import { ApiClientError } from "../features/apiClient";
 import {
   confirmTurnoverClosure,
   confirmTurnoverRelation,
-  downloadTurnoverLedgerExport,
-  fetchTurnoverLedgerExportPreview,
   fetchTurnoverLedgerGrouped,
   fetchTurnoverLedgerTagSelection,
   fetchTurnoverRelationDetail,
@@ -36,7 +34,7 @@ import {
   withdrawTurnoverRelation,
 } from "../features/turnoverLedger/api";
 import type {
-  TurnoverLedgerExportPreview,
+  FetchTurnoverLedgerRequest,
   TurnoverLedgerExtra,
   TurnoverLedgerFamily,
   TurnoverLedgerGroup,
@@ -266,12 +264,7 @@ export default function TurnoverLedgerPage() {
   const [closureMode, setClosureMode] = useState<"confirm" | "withdraw">("confirm");
   const [closureSubmitting, setClosureSubmitting] = useState(false);
   const [closureSelection, setClosureSelection] = useState<ClosureSelection | null>(null);
-  const [exportOpen, setExportOpen] = useState(false);
-  const [exportFamily, setExportFamily] = useState<TurnoverLedgerFamily>("all");
-  const [exportPreview, setExportPreview] = useState<TurnoverLedgerExportPreview | null>(null);
-  const [exportLoading, setExportLoading] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
-  const [exportDownloading, setExportDownloading] = useState(false);
+  const [exportScope, setExportScope] = useState<Pick<FetchTurnoverLedgerRequest, "family" | "query" | "settlementStatus"> | null>(null);
   const [toast, setToast] = useState<{ severity: TurnoverLedgerToastSeverity; message: string } | null>(null);
   const activeLedgerRequestRef = useRef<{
     family: TurnoverLedgerFamily;
@@ -480,25 +473,6 @@ export default function TurnoverLedgerPage() {
     activeLedgerRequestRef.current = null;
     activeLedgerRequest?.controller.abort();
   }, []);
-
-  useEffect(() => {
-    if (!active || !exportOpen) {
-      return undefined;
-    }
-    const controller = new AbortController();
-    setExportLoading(true);
-    setExportError(null);
-    fetchTurnoverLedgerExportPreview({ family: exportFamily, query, settlementStatus, signal: controller.signal })
-      .then(setExportPreview)
-      .catch((caught: unknown) => {
-        if (isAbortLikeError(caught)) {
-          return;
-        }
-        setExportError(caught instanceof Error ? caught.message : "导出预览加载失败");
-      })
-      .finally(() => setExportLoading(false));
-    return () => controller.abort();
-  }, [active, exportFamily, exportOpen]);
 
   const handleFamilyChange = (nextFamily: TurnoverLedgerFamily) => {
     if (!nextFamily || nextFamily === family || ledgerNavigationDisabled) {
@@ -839,10 +813,8 @@ export default function TurnoverLedgerPage() {
   };
 
   const handleOpenExport = () => {
-    setExportFamily(family);
-    setExportPreview(null);
-    setExportError(null);
-    setExportOpen(true);
+    if (loading || error || !ledger) return;
+    setExportScope({ family, query, settlementStatus });
   };
 
   const handleSaveTagSelection = async () => {
@@ -881,28 +853,6 @@ export default function TurnoverLedgerPage() {
       });
     } else {
       setToast({ severity: "error", message: result.error instanceof Error ? result.error.message : "外部往来款标签设置保存失败" });
-    }
-  };
-
-  const handleDownloadExport = async () => {
-    setExportDownloading(true);
-    try {
-      const download = await downloadTurnoverLedgerExport({ family: exportFamily, query, settlementStatus });
-      const blob = download.blob;
-      const href = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = href;
-      anchor.download = download.fileName;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(href);
-      setToast({ severity: "success", message: "往来款台账下载已开始" });
-      setExportOpen(false);
-    } catch (caught) {
-      setExportError(caught instanceof Error ? caught.message : "往来款台账下载失败");
-    } finally {
-      setExportDownloading(false);
     }
   };
 
@@ -1006,7 +956,7 @@ export default function TurnoverLedgerPage() {
                   <Button variant="secondary" size="sm" onPress={() => setClosureSelection(null)}>清除选择</Button>
                   <Button className="turnover-ledger-button" isDisabled={!canRunClosurePrimaryAction} onPress={() => { setClosureCompletion(undefined); setClosureMode(selectedRowsAllCashClosure ? "withdraw" : "confirm"); setClosureDrawerOpen(true); }} size="sm" variant={selectedRowsAllCashClosure ? "danger" : "primary"}>{closureActionLabel}</Button>
                 </> : null}
-                <Button className="turnover-ledger-button turnover-ledger-button--primary" onPress={handleOpenExport} size="sm" variant="primary">
+                <Button isDisabled={loading || Boolean(error) || !ledger} className="turnover-ledger-button turnover-ledger-button--primary" onPress={handleOpenExport} size="sm" variant="primary">
                   <Download aria-hidden="true" size={16} strokeWidth={2.2} />
                   下载表格
                 </Button>
@@ -1208,17 +1158,7 @@ export default function TurnoverLedgerPage() {
         onWithdraw={() => void handleRelationMutation("withdraw")}
       />
 
-      <TurnoverLedgerExportDialog
-        open={exportOpen}
-        family={exportFamily}
-        preview={exportPreview}
-        loading={exportLoading}
-        downloading={exportDownloading}
-        error={exportError}
-        onClose={() => setExportOpen(false)}
-        onFamilyChange={setExportFamily}
-        onDownload={() => void handleDownloadExport()}
-      />
+      {exportScope ? <TurnoverLedgerExportDrawer query={exportScope} onClose={() => setExportScope(null)} /> : null}
 
       {toast ? (
         <div className={`turnover-ledger-toast turnover-ledger-toast--${toast.severity}`} role={toast.severity === "error" ? "alert" : "status"}>

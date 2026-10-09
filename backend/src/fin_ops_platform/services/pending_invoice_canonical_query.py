@@ -1774,6 +1774,13 @@ class PostgresPendingInvoiceCanonicalRepository:
                 .replace("__ORDER_SQL__", order_sql)
                 .replace("__RULE_MATCH_SQL__", rule_match_sql)
             )
+            if request.get("_export_objects") and page_size == 0:
+                count_sql = sql.partition(",\nordered_rows as materialized")[0] + " select total from scope_summary"
+                result = transaction.fetch_one(count_sql, (
+                    json.dumps(config, ensure_ascii=False), *rule_match_params,
+                    *base_params, *direction_params, *status_params,
+                ))
+                return {"total": int(result["total"]), "rows": [], "settings": settings}
             direction = str(request["direction"])
             row = transaction.fetch_one(
                 sql,
@@ -2215,9 +2222,7 @@ class PendingInvoiceCanonicalQueryService:
             raise PendingInvoiceError("pending_invoice_export_row_limit_exceeded",
                 f"导出结果超过 {PENDING_INVOICE_EXPORT_ROW_LIMIT} 笔，请缩小筛选范围。",
                 details={"total": total, "limit": PENDING_INVOICE_EXPORT_ROW_LIMIT})
-        return {"row_count": total,
-                "acquisition_summary": payload["acquisition_summary"],
-                "source_summary": payload["source_summary"]}
+        return {"row_count": total}
 
     def all_rows(self, query: dict[str, list[str]]) -> dict[str, Any]:
         request = _request(query)

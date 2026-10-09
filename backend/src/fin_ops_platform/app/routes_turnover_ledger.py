@@ -163,7 +163,7 @@ class TurnoverLedgerApiRoutes:
         extra_service: Any | None = None,
         query_service: TurnoverLedgerQueryService | None = None,
         json_response: Callable[[HTTPStatus, dict[str, object]], Any] | None = None,
-        export_response: Callable[[str, bytes], Any] | None = None,
+        export_response: Callable[[str, bytes, int], Any] | None = None,
         tag_selection_provider: Callable[[], dict[str, object]] | None = None,
         mutation_session_resolver: Callable[[dict[str, str] | None], Any] | None = None,
         session_error_detector: Callable[[Any], bool] | None = None,
@@ -207,8 +207,8 @@ class TurnoverLedgerApiRoutes:
         body: str | bytes | None = None,
         headers: dict[str, str] | None = None,
     ) -> Any | None:
-        if method == "GET" and route_path == "/api/turnover-ledger/export-preview":
-            return self.handle_export_preview_route(query)
+        if method == "GET" and route_path == "/api/turnover-ledger/export-summary":
+            return self.handle_export_summary_route(query)
         if method == "GET" and route_path == "/api/turnover-ledger/export":
             return self.handle_export_route(query)
         if method == "GET" and route_path == "/api/turnover-ledger/tag-selection":
@@ -579,11 +579,10 @@ class TurnoverLedgerApiRoutes:
             )
         return self._respond(HTTPStatus.OK, result)
 
-    def handle_export_preview_route(self, query: dict[str, list[str]]) -> Any:
+    def handle_export_summary_route(self, query: dict[str, list[str]]) -> Any:
         try:
-            payload = self.export_preview(
+            payload = self.export_summary(
                 family=self._query_value(query, "family", "all") or "all",
-                limit=self._query_int(query, "limit", 20),
                 query=self._query_value(query, "query", "") or "",
                 settlement_status=self._query_value(query, "settlement_status", "all") or "all",
             )
@@ -601,7 +600,7 @@ class TurnoverLedgerApiRoutes:
 
     def handle_export_route(self, query: dict[str, list[str]]) -> Any:
         try:
-            filename, content = self.export(
+            filename, content, row_count = self.export(
                 family=self._query_value(query, "family", "all") or "all",
                 query=self._query_value(query, "query", "") or "",
                 settlement_status=self._query_value(query, "settlement_status", "all") or "all",
@@ -618,7 +617,7 @@ class TurnoverLedgerApiRoutes:
             )
         if self._export_response is None:
             raise RuntimeError("turnover ledger export response port is not configured")
-        return self._export_response(filename, content)
+        return self._export_response(filename, content, row_count)
 
     def handle_relation_route(self, relation_id: str) -> Any:
         try:
@@ -787,17 +786,20 @@ class TurnoverLedgerApiRoutes:
         query: str = "",
         settlement_status: str = "all",
         paginate: bool = True,
+        count_only: bool = False,
     ) -> dict[str, object]:
         if self._query_service is None:
             raise RuntimeError("turnover ledger canonical query service is unavailable.")
         payload = self._query_service.list_ledger(
-            view="grouped", query=query, settlement_status=settlement_status, paginate=paginate,
+            view="grouped", query=query, settlement_status=settlement_status, paginate=paginate, count_only=count_only,
             family=family,
             direction=direction,
             status=status,
             page=page,
             page_size=page_size,
         )
+        if count_only:
+            return payload
         return self._normalize_grouped_payload(
             payload,
             include_allocation_details=True,
@@ -850,10 +852,10 @@ class TurnoverLedgerApiRoutes:
             return {"version": 1, "extras": []}
         return snapshot()
 
-    def export_preview(self, *, family: str = "all", limit: int = 20, query: str = "", settlement_status: str = "all") -> dict[str, object]:
-        return self._export_service.preview(family=family, limit=limit, query=query, settlement_status=settlement_status)
+    def export_summary(self, *, family: str = "all", query: str = "", settlement_status: str = "all") -> dict[str, object]:
+        return self._export_service.export_summary(family=family, query=query, settlement_status=settlement_status)
 
-    def export(self, *, family: str = "all", today: date | None = None, query: str = "", settlement_status: str = "all") -> tuple[str, bytes]:
+    def export(self, *, family: str = "all", today: date | None = None, query: str = "", settlement_status: str = "all") -> tuple[str, bytes, int]:
         return self._export_service.export(family=family, today=today, query=query, settlement_status=settlement_status)
 
     def confirm_relation(

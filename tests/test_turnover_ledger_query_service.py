@@ -113,6 +113,7 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
                         "query": "",
                         "settlement_status": "all",
                         "paginate": True,
+                        "count_only": False,
                     },
                 )
             ],

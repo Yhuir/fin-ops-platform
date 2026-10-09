@@ -1100,8 +1100,22 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(complete["statistics"]["filtered_transaction_count"], 205)
         from fin_ops_platform.services.turnover_ledger_export_service import TurnoverLedgerExportService
 
-        preview = TurnoverLedgerExportService(service.list_grouped_ledger).preview(query="往来对象")
-        self.assertEqual(preview["pagination"]["total"], 410)
+        from io import BytesIO
+
+        from openpyxl import load_workbook
+
+        exporter = TurnoverLedgerExportService(service.list_grouped_ledger)
+        self.assertEqual(exporter.export_summary(query="往来对象"), {"row_count": 205})
+        _, content, count = exporter.export(query="往来对象")
+        self.assertEqual(count, 205)
+        workbook = load_workbook(BytesIO(content), read_only=True)
+        try:
+            rows = list(workbook.active.values)
+            self.assertEqual(len(rows) - 1, 410)
+            self.assertEqual(sum(row[1] == "合计" for row in rows[1:]), 205)
+            self.assertEqual({row[6] for row in rows[1:]}, {f"往来对象{index:03d}" for index in range(205)})
+        finally:
+            workbook.close()
 
     def test_grouped_ledger_groups_same_counterparty_family_and_summarizes_pending_amounts(self) -> None:
         ledger_service = self._grouped_service()

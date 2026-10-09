@@ -97,7 +97,7 @@ test('production output tax filters, totals, details and export remain consisten
   await page.getByRole('button',{name:'筛选内容导出'}).click();
   expect((await (await preview).json()).row_count).toBe(filtered.pagination.total);
   const download = page.waitForEvent('download');
-  await page.getByRole('button',{name:'下载 Excel',exact:true}).click();
+  await page.getByRole('button',{name:'导出',exact:true}).click();
   expect((await download).suggestedFilename()).toMatch(/\.xlsx$/);
   await page.getByRole('button',{name:'关闭导出销项发票',exact:true}).click();
   const detail = page.waitForResponse(response=>new URL(response.url()).pathname.includes('/output-invoice-collections/invoices/') && response.url().endsWith('/detail'));

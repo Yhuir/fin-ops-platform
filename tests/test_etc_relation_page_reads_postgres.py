@@ -188,7 +188,8 @@ class EtcRelationPageReadsTests(unittest.TestCase):
         self.assertEqual(summary["row_count"], 47)
         self.assertNotIn("sample_rows", summary)
         self.assertEqual(usage.export_rows(limit=0)["rows"], [])
-        _, content = service.export()
+        _, content, count = service.export()
+        self.assertEqual(count, 47)
         sheet = load_workbook(BytesIO(content)).active
         self.assertEqual(sheet.max_row, 48)
         self.assertEqual({sheet.cell(i, 2).value for i in range(2,49)}, {f"NO-{n}" for n in range(1,48)})

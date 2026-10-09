@@ -2680,36 +2680,7 @@ textarea {
   color: var(--fp-success-strong);
 }
 
-.oa-pending-payment-export-drawer__body {
-  display: grid;
-  gap: var(--fp-space-3);
-}
 
-.oa-pending-payment-export-drawer__body > p {
-  margin: 0;
-  color: var(--fp-text-secondary);
-  line-height: 1.6;
-}
-
-.oa-pending-payment-export-drawer__options {
-  display: grid;
-  gap: var(--fp-space-2);
-  padding: var(--fp-space-3);
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
-  background: var(--fp-surface-muted);
-}
-
-.oa-pending-payment-export-drawer__hint {
-  color: var(--fp-warning);
-  font-size: var(--fp-text-label);
-}
-
-.oa-pending-payment-export-drawer__footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--fp-space-2);
-}
 
 .oa-pending-payments-table-frame {
   position: relative;
@@ -5246,75 +5217,7 @@ textarea {
   gap: var(--fp-space-2);
 }
 
-.turnover-ledger-export-dialog {
-  display: grid;
-  gap: var(--fp-space-4);
-}
 
-.turnover-ledger-export-dialog__range {
-  width: min(220px, 100%);
-}
-
-.turnover-ledger-export-dialog__table-wrap {
-  height: min(560px, calc(100vh - 280px));
-  min-height: 0;
-  overflow: hidden;
-  border: 1px solid var(--fp-border);
-  background: var(--fp-surface);
-}
-
-.turnover-ledger-export-dialog__table {
-  width: 100%;
-  min-width: 1440px;
-  border-collapse: separate;
-  border-spacing: 0;
-  table-layout: fixed;
-  color: var(--fp-text-primary);
-  font-size: var(--fp-text-body);
-}
-
-.turnover-ledger-export-dialog__table th,
-.turnover-ledger-export-dialog__table td {
-  border-bottom: 1px solid var(--fp-border-subtle);
-  padding: var(--fp-table-cell-padding-y) var(--fp-table-cell-padding-x);
-  text-align: left;
-  transition: background-color var(--motion-fast) var(--ease-out-quart);
-  vertical-align: top;
-  overflow-wrap: anywhere;
-}
-
-.turnover-ledger-export-dialog__table th {
-  position: sticky;
-  z-index: 2;
-  top: 0;
-  background: color-mix(in srgb, var(--fp-surface-muted) 82%, var(--fp-surface));
-  color: var(--fp-text-secondary);
-  font-size: var(--fp-text-label);
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.turnover-ledger-export-dialog__money-cell {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-}
-
-.turnover-ledger-export-dialog__state-cell {
-  height: 120px;
-  color: var(--fp-text-secondary);
-  font-weight: 700;
-  text-align: center !important;
-  vertical-align: middle !important;
-}
-
-.turnover-ledger-export-dialog__summary {
-  margin: 0;
-  color: var(--fp-text-secondary);
-  font-size: var(--fp-text-caption);
-  font-variant-numeric: tabular-nums;
-  line-height: var(--fp-leading-normal);
-}
 
 .turnover-ledger-toast {
   position: fixed;

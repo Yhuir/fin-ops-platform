@@ -21,7 +21,6 @@ import {
   fetchOaPendingPaymentBankCandidates,
   fetchOaPendingPaymentDetail,
   fetchOaPendingPaymentRows,
-  downloadOaPendingPaymentSources,
   linkOaPendingPaymentBankTransactions,
   nextOaPendingPaymentSortDirection,
 } from "../features/oaPendingPayments/api";
@@ -80,7 +79,7 @@ export default function OaPendingPaymentsPage() {
   const [selectedOaRowIds, setSelectedOaRowIds] = useState<Set<string>>(() => new Set());
   const [detailTarget, setDetailTarget] = useState<OaPendingPaymentDetailTarget | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
-  const [exportOpen, setExportOpen] = useState(false);
+  const [exportScope, setExportScope] = useState<OaPendingPaymentQuery | null>(null);
   const [bankLinkDrawerOpen, setBankLinkDrawerOpen] = useState(false);
   const requestIdRef = useRef(0);
   const tableWrapRef = useRef<HTMLDivElement | null>(null);
@@ -280,14 +279,15 @@ export default function OaPendingPaymentsPage() {
       <button
         aria-label="导出 OA"
         className="oa-pending-payments-button"
-        onClick={() => setExportOpen(true)}
+        disabled={loading || refreshing || Boolean(error)}
+        onClick={() => setExportScope(structuredClone(query))}
         type="button"
       >
         <Download aria-hidden="true" size={16} />
         导出 OA
       </button>
     </div>
-  ), [canOperateData, loading, query.viewMode, query.month, refreshing, selectedOaRowIds.size]);
+  ), [canOperateData, loading, query, refreshing, selectedOaRowIds.size, error]);
   const paymentValues = query.filters.find(filter => filter.field === "payment_status")?.values ?? [];
   const titleAccessory = (
     <div className="page-title-accessory-group">
@@ -390,11 +390,10 @@ export default function OaPendingPaymentsPage() {
         onError={setError}
         onClose={() => setBankLinkDrawerOpen(false)}
       />
-      <OaPendingPaymentExportDrawer
-        downloadExport={downloadOaPendingPaymentSources}
-        open={exportOpen}
-        onClose={() => setExportOpen(false)}
-      />
+      {exportScope ? <OaPendingPaymentExportDrawer
+        query={exportScope}
+        onClose={() => setExportScope(null)}
+      /> : null}
     </>
   );
 }

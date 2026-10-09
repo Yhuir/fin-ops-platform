@@ -14,7 +14,7 @@ const turnoverLedgerSourceFiles = [
   "src/pages/TurnoverLedgerPage.tsx",
   "src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx",
   "src/components/turnoverLedger/TurnoverLedgerExtraDrawer.tsx",
-  "src/components/turnoverLedger/TurnoverLedgerExportDialog.tsx",
+  "src/components/turnoverLedger/TurnoverLedgerExportDrawer.tsx",
 ] as const;
 
 const fullSession: SessionPayload = {
@@ -906,41 +906,8 @@ function installTurnoverLedgerFetch(options: {
         extra: JSON.parse(String(init?.body)),
       });
     }
-    if (url.pathname === "/api/turnover-ledger/export-preview" && method === "GET") {
-      return Response.json({
-        rows: [
-          {
-            "序号": 1,
-            row_type: "summary",
-            lot_id: "",
-            "往来大类": url.searchParams.get("family") === "company" ? "公司往来" : "个人往来",
-            "对方户名": url.searchParams.get("family") === "company" ? "云南建设有限公司" : "张三",
-            "待还款金额": "0.00",
-            "待收款金额": "2000.00",
-            "余额": "2000.00",
-            "借款金额": "3000.00",
-            "借款日": "2026-05-02",
-            "还款金额": "1000.00",
-            "还款日": "2026-05-04",
-            "对方开户机构": "中国银行",
-            "还款备注": "回款",
-            "利率类型": "月息",
-            "利率值": "0.005000",
-            "已还利息额": "0.00",
-            "借款天数": 2,
-            "应还利息": "1.00",
-            "还利息日期": "",
-            "还利息方式": "",
-            "备注": "项目保证金",
-            "关系状态": "人工确认",
-          },
-        ],
-        totals: {
-          pending_repayment_amount: "0.00",
-          pending_collection_amount: "2000.00",
-          accrued_interest: "1.00",
-        },
-      });
+    if (url.pathname === "/api/turnover-ledger/export-summary" && method === "GET") {
+      return Response.json({ row_count: 1 });
     }
     if (url.pathname === "/api/turnover-ledger/export" && method === "GET") {
       if (options.exportDownloadResponse) {
@@ -948,7 +915,7 @@ function installTurnoverLedgerFetch(options: {
       }
       return new Response(new Blob(["mock xlsx"], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      }));
+      }), { headers: { "X-Export-Count": "1" } });
     }
     if (url.pathname === "/api/turnover-ledger/relations/confirm" && method === "POST") {
       return Response.json({ relation_id: "rel-personal-1", status: "confirmed" });
@@ -1020,8 +987,8 @@ describe("Turnover ledger page", () => {
     await user.click(screen.getByRole("option", { name: "未结清", exact: true }));
     await waitFor(() => expect(requestUrls(fetchMock, "/api/turnover-ledger").at(-1)?.searchParams.get("settlement_status")).toBe("unsettled"));
     await user.click(screen.getByRole("button", { name: "下载表格" }));
-    await waitFor(() => expect(requestUrls(fetchMock, "/api/turnover-ledger/export-preview")).toHaveLength(1));
-    const preview = requestUrls(fetchMock, "/api/turnover-ledger/export-preview")[0];
+    await waitFor(() => expect(requestUrls(fetchMock, "/api/turnover-ledger/export-summary")).toHaveLength(1));
+    const preview = requestUrls(fetchMock, "/api/turnover-ledger/export-summary")[0];
     expect(preview.searchParams.get("query")).toBe("张三");
     expect(preview.searchParams.get("settlement_status")).toBe("unsettled");
   });
@@ -1059,7 +1026,7 @@ describe("Turnover ledger page", () => {
     const pageSource = sourceByPath["src/pages/TurnoverLedgerPage.tsx"];
     const tableSource = sourceByPath["src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx"];
     const extraDrawerSource = sourceByPath["src/components/turnoverLedger/TurnoverLedgerExtraDrawer.tsx"];
-    const exportDialogSource = sourceByPath["src/components/turnoverLedger/TurnoverLedgerExportDialog.tsx"];
+    const exportDialogSource = sourceByPath["src/components/turnoverLedger/TurnoverLedgerExportDrawer.tsx"];
     const missingPrimitiveTargets = [
       pageSource.includes("PageScaffold") ? null : "TurnoverLedgerPage.tsx should keep PageScaffold",
       pageSource.includes("StatePanel") ? null : "TurnoverLedgerPage.tsx should keep StatePanel for loading/empty/error states",
@@ -1069,9 +1036,9 @@ describe("Turnover ledger page", () => {
       /AppDrawer|turnover.*drawer/.test(pageSource) && /AppDrawer|turnover.*drawer/.test(extraDrawerSource)
         ? null
         : "Tag, closure and extra info surfaces should use AppDrawer or project drawer classes",
-      /AppDialog|turnover.*dialog/.test(exportDialogSource)
+      /FilteredExportDrawer/.test(exportDialogSource)
         ? null
-        : "Export confirmation should use AppDialog or project dialog classes",
+        : "Export confirmation should use the shared right drawer",
       /turnover.*toast|turnover.*feedback|turnover.*notice/.test(pageSource)
         ? null
         : "Mutation feedback should use a project feedback/toast class",
@@ -2071,7 +2038,7 @@ describe("Turnover ledger page", () => {
     expect(within(flowRows[0]).queryByText("收支闭环")).not.toBeInTheDocument();
   });
 
-  test("does not reload on category updates and downloads a previewed export for the current tab", async () => {
+  test("does not reload on category updates and downloads the effective scope for the current tab", async () => {
     const user = userEvent.setup();
     const fetchMock = installTurnoverLedgerFetch();
     renderTurnoverLedgerPage();
@@ -2090,15 +2057,10 @@ describe("Turnover ledger page", () => {
     await user.click(within(page).getByRole("button", { name: "下载表格" }));
 
     const dialog = await screen.findByRole("dialog", { name: "下载往来款台账" });
-    expect(within(dialog).getByRole("button", { name: /下载范围/ })).toHaveTextContent("公司往来");
-    expect(await within(dialog).findByText("正式字段预览")).toBeInTheDocument();
-    expect(within(dialog).getByText("行类型")).toBeInTheDocument();
-    expect(within(dialog).getByText("余额")).toBeInTheDocument();
-    expect(within(dialog).getByText("合计")).toBeInTheDocument();
-    expect(within(dialog).getByText("对方户名")).toBeInTheDocument();
-    expect(within(dialog).getByText("云南建设有限公司")).toBeInTheDocument();
-
-    await user.click(within(dialog).getByRole("button", { name: "确认下载" }));
+    expect(await within(dialog).findByText("即将导出 1 个往来对象")).toBeVisible();
+    expect(within(dialog).queryByRole("grid")).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("combobox")).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "导出", exact: true }));
     await waitFor(() => {
       const request = requestUrls(fetchMock, "/api/turnover-ledger/export").at(-1);
       expect(request?.searchParams.get("family")).toBe("company");
@@ -2123,7 +2085,8 @@ describe("Turnover ledger page", () => {
     await within(page).findByText("张三");
     await user.click(within(page).getByRole("button", { name: "下载表格" }));
     const dialog = await screen.findByRole("dialog", { name: "下载往来款台账" });
-    await user.click(within(dialog).getByRole("button", { name: "确认下载" }));
+    await within(dialog).findByText("即将导出 1 个往来对象");
+    await user.click(within(dialog).getByRole("button", { name: "导出", exact: true }));
 
     expect(await within(dialog).findByText("往来款台账导出超过 20000 行，请缩小下载范围后重试。")).toBeInTheDocument();
     expect(URL.createObjectURL).not.toHaveBeenCalled();
