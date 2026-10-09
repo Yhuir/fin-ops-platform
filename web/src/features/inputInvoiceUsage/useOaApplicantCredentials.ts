@@ -35,5 +35,5 @@ export function useOaApplicantCredentials(open: boolean, onChanged: (deletedCode
     } catch (reason) { setError(reason instanceof Error ? reason.message : "删除失败"); return false; }
     finally { setBusy(false); }
   };
-  return { credentials, users, loaded, loading, busy, error, save, remove, reload: () => setRevision(value => value + 1) };
+  return { credentials, users, loaded, loading, busy, error, save, remove, reload: () => setRevision(value => value + 1), clearError: () => setError("") };
 }

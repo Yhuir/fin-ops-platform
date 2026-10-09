@@ -498,8 +498,8 @@ export default function OaReverseWorkspaceDrawer({
                       <Select
                         aria-labelledby={targetApplicantLabelId}
                         className="input-invoice-usage-oa-select"
-                        onSelectionChange={(key) => setTargetApplicantCode(String(key))}
-                        selectedKey={selectedTargetApplicantCode}
+                        onSelectionChange={(key) => setTargetApplicantCode(key === null ? "" : String(key))}
+                        selectedKey={selectedTargetApplicantCode || null}
                       >
                         <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
                         <Select.Popover>
