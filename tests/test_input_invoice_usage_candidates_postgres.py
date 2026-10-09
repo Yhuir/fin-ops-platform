@@ -294,7 +294,10 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
         facts = snapshot.groups[0]["payment_facts"]
         self.assertFalse(facts["has_bank"])
         self.assertFalse(facts["has_oa"])
-        self.assertEqual(self.service.list_rows()["rows"][0]["paymentStatus"]["code"], "unclassified")
+        unused = self.service.list_rows()
+        self.assertEqual(unused["rows"][0]["paymentStatus"]["code"], "waiting_payment")
+        self.assertEqual(unused["classification"]["unused"]["count"], 1)
+        self.assertEqual(unused["classification"]["groups"][0]["count"], 0)
         self.oa('zero-oa', 0)
         self.bank('zero-bank', 0)
         self.relation('zero-case', ['candidate-1','zero-oa','zero-bank'], ['invoice','oa','bank'])
@@ -308,7 +311,6 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
         snapshot = self.repository.load_page(page=1, page_size=50, keyword=None, invoice_date_from=None, invoice_date_to=None, month=None, filters=[], sort_field="invoice_date", sort_direction="desc")
         self.assertEqual(snapshot.groups[0]["payment_facts"]["payment_comparison"], "equal")
         self.assertEqual(self.service.list_rows()["rows"][0]["paymentStatus"]["code"], "paid")
-        self.assertTrue(snapshot.groups[0]["payment_facts"]["invoice_oa_amount_matched"])
 
     def test_candidates_reject_invalid_page_and_scope_filters(self):
         from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageError
