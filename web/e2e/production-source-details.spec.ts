@@ -18,11 +18,13 @@ test('production shared source drawers preserve complete records across pages wi
   page.on('response', response => { if (response.url().includes('/fin-ops-api/') && response.status() >= 400) failures.push(response.status()); });
   const inspect = async (button: Locator, sample: string, multiple = false) => {
     await expect(button).toBeVisible({ timeout: 25_000 });
+    const advertisedLabel = sample.startsWith('oa-pending-related-')
+      ? await button.getAttribute('aria-label') : null;
     const started = Date.now();
     const pending = page.waitForResponse(response => {
       const path = new URL(response.url()).pathname;
       return response.request().method() === 'GET' && path.includes('/fin-ops-api/') && (/\/[^/]*(?:detail|details)$/.test(path) || /\/workbench\/rows\/[^/]+$/.test(path));
-    });
+    }, { timeout: 25_000 });
     await button.click();
     const response = await pending;
     expect(response.status()).toBe(200);
@@ -47,6 +49,11 @@ test('production shared source drawers preserve complete records across pages wi
     }
     const ids = new Set(documents.keys());
     if (multiple) expect(ids.size).toBeGreaterThan(1);
+    if (sample.startsWith('oa-pending-related-')) {
+      expect(advertisedLabel).toMatch(/关联(?:OA|流水) \d+ 条$/);
+      const advertisedCount = Number(advertisedLabel!.match(/(\d+) 条$/)![1]);
+      expect(ids.size).toBe(advertisedCount);
+    }
     const expectedLabels: string[] = [];
     const switchMs: number[] = [];
     for (const [index, [, documentSections]] of [...documents].entries()) {
@@ -153,8 +160,9 @@ test('production shared source drawers preserve complete records across pages wi
   const searched = page.waitForResponse(r => new URL(r.url()).pathname.endsWith('/oa-pending-payments/rows') && new URL(r.url()).searchParams.get('keyword') === '公车');
   await page.getByRole('button', {name: '查询', exact: true}).click();
   await searched;
-  await inspect(page.getByRole('button', {name: /关联OA 9 条$/}), 'oa-pending-related-oa', true);
-  await inspect(page.getByRole('button', {name: /关联流水 9 条$/}), 'oa-pending-related-bank', true);
+  const oaTable = page.getByRole('grid', {name: 'OA待付款核对表格'});
+  await inspect(oaTable.getByRole('button', {name: /^查看.+关联OA (?:[2-9]|\d{2,}) 条$/}).first(), 'oa-pending-related-oa', true);
+  await inspect(oaTable.getByRole('button', {name: /^查看.+关联流水 (?:[2-9]|\d{2,}) 条$/}).first(), 'oa-pending-related-bank', true);
   await page.goto('/fin-ops/pending-invoices');
   await inspect(page.getByRole('button', { name: /^流水详情 / }).first(), 'pending-bank');
   await page.goto('/fin-ops/');
