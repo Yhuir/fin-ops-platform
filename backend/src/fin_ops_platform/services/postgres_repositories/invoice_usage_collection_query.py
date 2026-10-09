@@ -50,7 +50,54 @@ class InvoiceUsageCollectionCanonicalSnapshot:
     bank_labels: dict[str, list[str]] | None = None
 
 
-class PostgresInputInvoiceUsageQueryRepository:
+class _PostgresSourceDetailReads:
+    """Canonical source reads shared by the input and output page repositories."""
+
+    _connection: Any
+
+    def load_invoice_records(self, invoice_id: str, *, tenant_id: str = "default") -> list[Any]:
+        # Invoice and bank canonical facts are shared; tenant-scoped labels and OA stay scoped below.
+        with self._connection.transaction() as transaction:
+            transaction.execute("set transaction isolation level repeatable read read only")
+            return PostgresCoreRepository(transaction).list_invoice_document_members([invoice_id])
+
+    def load_bank_source(self, transaction_id: str, *, tenant_id: str = "default") -> tuple[Any | None, list[str]]:
+        with self._connection.transaction() as transaction:
+            transaction.execute("set transaction isolation level repeatable read read only")
+            selected = transaction.fetch_one(
+                """select coalesce(bank.legacy_mongo_id, bank.id::text) as source_id
+                   from app.bank_transactions bank
+                   where bank.status <> 'deleted' and (bank.id::text = %s or bank.legacy_mongo_id = %s
+                     or bank.id = (select bank_transaction_id from app.bank_transaction_split_items where id::text = %s))""",
+                (transaction_id, transaction_id, transaction_id),
+            )
+            if selected is None:
+                return None, []
+            record = PostgresCoreRepository(transaction).get_transaction(selected["source_id"])
+            labels = PostgresBankDetailsCanonicalQueryRepository.source_detail_labels(
+                transaction, [record.id], tenant_id=tenant_id,
+            )
+            return record, labels[record.id]
+
+    def load_oa_record(
+        self,
+        oa_id: str,
+        *,
+        tenant_id: str = "default",
+    ) -> Any | None:
+        normalized_oa_id = str(oa_id or "").strip()
+        if not normalized_oa_id:
+            return None
+        with self._connection.transaction() as transaction:
+            transaction.execute("set transaction isolation level repeatable read read only")
+            records = PostgresOAWorkflowRepository(
+                transaction,
+                tenant_id=tenant_id,
+            ).list_application_records_by_row_ids([normalized_oa_id])
+        return records[0] if records else None
+
+
+class PostgresInputInvoiceUsageQueryRepository(_PostgresSourceDetailReads):
     """Page-specific canonical query repository for 进项发票使用情况."""
 
     def __init__(self, connection: Any) -> None:
@@ -134,47 +181,6 @@ class PostgresInputInvoiceUsageQueryRepository:
             tenant_id=tenant_id,
             row_id=str(row_id or "").strip(),
         )
-
-    def load_invoice_records(self, invoice_id: str, *, tenant_id: str = "default") -> list[Any]:
-        # Invoice and bank canonical facts are shared; tenant-scoped labels and OA stay scoped below.
-        with self._connection.transaction() as transaction:
-            transaction.execute("set transaction isolation level repeatable read read only")
-            return PostgresCoreRepository(transaction).list_invoice_document_members([invoice_id])
-
-    def load_bank_source(self, transaction_id: str, *, tenant_id: str = "default") -> tuple[Any | None, list[str]]:
-        with self._connection.transaction() as transaction:
-            transaction.execute("set transaction isolation level repeatable read read only")
-            selected = transaction.fetch_one(
-                """select coalesce(bank.legacy_mongo_id, bank.id::text) as source_id
-                   from app.bank_transactions bank
-                   where bank.status <> 'deleted' and (bank.id::text = %s or bank.legacy_mongo_id = %s
-                     or bank.id = (select bank_transaction_id from app.bank_transaction_split_items where id::text = %s))""",
-                (transaction_id, transaction_id, transaction_id),
-            )
-            if selected is None:
-                return None, []
-            record = PostgresCoreRepository(transaction).get_transaction(selected["source_id"])
-            labels = PostgresBankDetailsCanonicalQueryRepository.source_detail_labels(
-                transaction, [record.id], tenant_id=tenant_id,
-            )
-            return record, labels[record.id]
-
-    def load_oa_record(
-        self,
-        oa_id: str,
-        *,
-        tenant_id: str = "default",
-    ) -> Any | None:
-        normalized_oa_id = str(oa_id or "").strip()
-        if not normalized_oa_id:
-            return None
-        with self._connection.transaction() as transaction:
-            transaction.execute("set transaction isolation level repeatable read read only")
-            records = PostgresOAWorkflowRepository(
-                transaction,
-                tenant_id=tenant_id,
-            ).list_application_records_by_row_ids([normalized_oa_id])
-        return records[0] if records else None
 
     def _load(
         self,
@@ -460,7 +466,7 @@ class PostgresInputInvoiceUsageQueryRepository:
         )
 
 
-class PostgresOutputInvoiceCollectionQueryRepository:
+class PostgresOutputInvoiceCollectionQueryRepository(_PostgresSourceDetailReads):
     """Page-specific canonical query repository for 销项发票收款情况."""
 
     def __init__(self, connection: Any) -> None:

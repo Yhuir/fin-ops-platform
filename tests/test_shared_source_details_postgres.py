@@ -5,6 +5,8 @@ from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_canonical_query_service import InputInvoiceUsageCanonicalQueryService
 from fin_ops_platform.services.input_invoice_usage_payment_rules import AppSettingsInputInvoiceUsagePaymentRulesProvider
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
+from fin_ops_platform.services.output_invoice_collection_canonical_query_service import OutputInvoiceCollectionCanonicalQueryService
+from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionError, OutputInvoiceCollectionQueryService
 from fin_ops_platform.services.pending_invoice_canonical_query import (
     PendingInvoiceCanonicalQueryService,
     PostgresPendingInvoiceCanonicalRepository,
@@ -12,6 +14,7 @@ from fin_ops_platform.services.pending_invoice_canonical_query import (
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_query import (
     PostgresInputInvoiceUsageQueryRepository,
+    PostgresOutputInvoiceCollectionQueryRepository,
 )
 from fin_ops_platform.services.postgres_repositories.workbench_page_query import PostgresWorkbenchPageQueryRepository
 from fin_ops_platform.services.source_record_details import (
@@ -44,7 +47,19 @@ class SharedSourceDetailsPostgresTests(unittest.TestCase):
             repository=PostgresInputInvoiceUsageQueryRepository(self.connection),
             row_assembler=InputInvoiceUsageQueryService(import_service=ImportNormalizationService(),
                 payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None)))
+        self.output = OutputInvoiceCollectionCanonicalQueryService(
+            repository=PostgresOutputInvoiceCollectionQueryRepository(self.connection),
+            row_assembler=OutputInvoiceCollectionQueryService(import_service=ImportNormalizationService()))
         self.workbench = PostgresWorkbenchPageQueryRepository(self.connection, tenant_id='default')
+
+    def test_output_source_owner_reports_missing_records_explicitly(self):
+        for load, code in [(self.output.invoice_detail, "invoice_not_found"),
+                           (self.output.bank_transaction_detail, "bank_transaction_not_found"),
+                           (self.output.oa_detail, "oa_not_found")]:
+            with self.subTest(error=code), self.assertRaises(OutputInvoiceCollectionError) as error:
+                load("missing-source")
+            self.assertEqual(error.exception.error_code, code)
+            self.assertEqual(error.exception.status_code, 404)
 
     def test_split_children_open_one_original_bank_with_identical_fields_on_every_page(self):
         original = self.pending.bank_transaction_detail('bank-parent')['sections']
@@ -52,6 +67,7 @@ class SharedSourceDetailsPostgresTests(unittest.TestCase):
         self.assertEqual(child, original)
         relation = self.input.bank_transaction_detail(self.interest)['sections']
         self.assertEqual(relation, original)
+        self.assertEqual(self.output.bank_transaction_detail(self.interest)["sections"], original)
         workbench = self.workbench.get_workbench_row_detail(scope_key='all', row_id=self.interest, row_type='bank')
         self.assertIsNotNone(workbench)
         self.assertEqual(workbench_source_row(workbench['row'])['source_sections'], original)
@@ -71,6 +87,7 @@ class SharedSourceDetailsPostgresTests(unittest.TestCase):
         self.assertEqual(summary, {'applicantName': '测试申请人', 'amount': '1497.22',
                                    'applicationDate': '2026-04-29', 'workflowNo': '2403'})
         self.assertTrue(all(section['oa_navigation'] == summary for section in relation))
+        self.assertEqual(self.output.oa_detail('oa-interest')['sections'], source)
         input_detail = self.input.oa_detail('oa-interest')['sections']
         self.assertEqual(input_detail[0]['oa_navigation'], summary)
         labels = {field['label'] for section in source for field in section['fields']}
