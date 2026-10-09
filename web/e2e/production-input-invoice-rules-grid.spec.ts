@@ -1,4 +1,5 @@
 import { expect, test } from './fixtures/strictTest';
+import { expectNoUnexpectedSuccessUiErrors } from './fixtures/successAssertions';
 
 const enabled = process.env.FIN_OPS_E2E_PRODUCTION_SMOKE === '1';
 const token = process.env.FIN_OPS_E2E_ADMIN_TOKEN;
@@ -93,5 +94,6 @@ test('production rules grid preserves configuration while editing and restoring 
   await drawer.getByRole('button', { name: '关闭支付状态规则抽屉' }).click();
   expect(errors).toEqual([]);
   expect(writes).toEqual([]);
+  await expectNoUnexpectedSuccessUiErrors(page);
   await info.attach('production-rules-grid-readonly', { body: JSON.stringify({ version: before.version, ruleCount: before.rules.length, applicantCount: before.applicantOptions.length, openMs, editMs, geometry, ruleRequests, writes, errors }), contentType: 'application/json' });
 });
