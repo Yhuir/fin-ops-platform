@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import json
 import unittest
 from contextlib import contextmanager
+from io import StringIO
 from types import SimpleNamespace
+from unittest.mock import patch
 
+from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.batch_accounting_service import BatchAccountingError, BatchAccountingService
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.batch_accounting import PostgresBatchAccountingQueryRepository
+from fin_ops_platform.services.postgres_repositories.settings_page_audit import audit_settings_page
+from fin_ops_platform.tools import settings_normalization_ops
 from tests.postgres_test_utils import apply_test_migrations, require_postgres_test_database_url, truncate_test_database
 
 
@@ -23,6 +29,39 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
         self.repository = PostgresBatchAccountingQueryRepository(self.connection)
         self.service = BatchAccountingService(query_repository=self.repository)
         self._seed_canonical_facts()
+
+    def test_retired_tag_normalization_preserves_settings_and_history_and_is_repeatable(self):
+        payload = AppSettingsService.normalize_settings_payload(AppSettingsService.normalize_settings_payload({}))
+        payload["batch_accounting_tag_selection"] = {"version": 3, "selected_tag_codes": ["fee"]}
+        self.connection.execute(
+            "insert into app.app_settings(settings_key,version,settings_payload,raw_payload) "
+            "values ('app_settings',7,%s::jsonb,%s::jsonb)",
+            (json.dumps(payload), json.dumps({"normalized_payload": payload})),
+        )
+        before_history = self.service.detail("CASE-BATCH-SUBMITTED")
+        before_report = audit_settings_page(self.connection)
+        self.assertIn("settings_payload_not_normalized", before_report["summary"]["issue_sample_counts_by_code"])
+
+        def normalize(mode):
+            output = StringIO()
+            with patch.object(settings_normalization_ops.PostgresSettings, "from_env",
+                              return_value=PostgresSettings(database_url=self.database_url, pool_enabled=False)):
+                self.assertEqual(settings_normalization_ops.main([mode], stdout=output), 0)
+            return json.loads(output.getvalue())
+
+        plan = normalize("--dry-run")
+        self.assertEqual(plan["changed_keys"], ["batch_accounting_tag_selection"])
+        self.assertFalse(plan["written"])
+        self.assertTrue(normalize("--execute")["written"])
+        row = self.connection.fetch_one("select version,settings_payload,raw_payload from app.app_settings")
+        expected = {key: value for key, value in payload.items() if key != "batch_accounting_tag_selection"}
+        self.assertEqual(row["settings_payload"], expected)
+        self.assertEqual(row["raw_payload"], {"normalized_payload": expected})
+        self.assertEqual(row["version"], 8)
+        self.assertEqual(audit_settings_page(self.connection)["overall_status"], "pass")
+        self.assertEqual(self.service.detail("CASE-BATCH-SUBMITTED"), before_history)
+        self.assertFalse(normalize("--execute")["written"])
+        self.assertEqual(self.connection.fetch_one("select version,settings_payload,raw_payload from app.app_settings"), row)
 
     def _seed_canonical_facts(self) -> None:
         self.connection.execute(
