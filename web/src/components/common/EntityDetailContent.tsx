@@ -70,6 +70,8 @@ const publicLabelAliases: Record<string, string> = {
   invoice_code: "发票代码",
   invoice_date: "开票日期",
   invoice_kind: "发票票种",
+  invoice_kind_code: "发票类型",
+  invoice_kind_status: "票种状态",
   invoice_no: "发票号码",
   invoice_source: "发票来源",
   invoice_status: "发票状态",

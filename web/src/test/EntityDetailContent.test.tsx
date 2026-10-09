@@ -5,6 +5,23 @@ import EntityDetailContent, {
 } from "../components/common/EntityDetailContent";
 
 describe("EntityDetailContent", () => {
+  test("shows source invoice type and verification state while hiding internal evidence", () => {
+    const fields = [
+      { label: "发票票种", value: "电子发票（普通发票）" },
+      { label: "发票类型", value: "普通发票" },
+      { label: "票种状态", value: "已确认" },
+    ];
+    const sections = preparePublicDetailSections([{title: "发票信息", fields: [
+      ...fields,
+      {label: "invoice_kind_evidence", value: '[{"file_id":"internal"}]'},
+    ]}]);
+    expect(sections[0].fields).toEqual(fields);
+    render(<EntityDetailContent sections={sections} />);
+    expect(screen.getByRole("rowheader", {name: "发票类型"}).parentElement).toHaveTextContent("普通发票");
+    expect(screen.getByRole("rowheader", {name: "票种状态"}).parentElement).toHaveTextContent("已确认");
+    expect(screen.queryByText("internal")).not.toBeInTheDocument();
+  });
+
   test("normalizes public fields, preserves zero values, and removes internal or raw data", () => {
     const sections = preparePublicDetailSections([
       {
