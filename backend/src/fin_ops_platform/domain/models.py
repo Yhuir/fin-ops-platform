@@ -81,6 +81,9 @@ class Invoice:
     unit_price: Decimal | None = None
     invoice_source: str | None = None
     invoice_kind: str | None = None
+    invoice_kind_code: str | None = None
+    invoice_kind_status: str | None = None
+    invoice_kind_evidence: list[dict[str, Any]] = field(default_factory=list)
     is_positive_invoice: str | None = None
     risk_level: str | None = None
     issuer: str | None = None

@@ -15,14 +15,17 @@ from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachment
 from fin_ops_platform.services.pending_invoice_service import PendingInvoiceApplicationService
 from PIL import Image
 
+from tests.invoice_source_fixtures import with_original
+
 
 class FakeDocumentRecognizer:
     def __init__(self, values: dict[str, str] | None = None) -> None:
         self.values = dict(values or {})
 
     def recognize_uploaded_invoice(self, *, file_name: str, content: bytes) -> dict[str, str]:
-        del file_name, content
-        return dict(self.values)
+        if self.values:
+            return dict(self.values)
+        return OAAttachmentInvoiceService().recognize_uploaded_invoice(file_name=file_name, content=content)
 
 
 def payload(**overrides: str) -> dict[str, str]:
@@ -42,7 +45,7 @@ def payload(**overrides: str) -> dict[str, str]:
         "total_with_tax": "113.00",
     }
     values.update(overrides)
-    return values
+    return with_original(values)
 
 
 def _build_pdf_with_blank_pages(page_count: int) -> bytes:
@@ -92,7 +95,7 @@ class ManualInvoiceEntryServiceTests(unittest.TestCase):
         self.assertEqual(normalized["tax_amount"], "13.00")
         self.assertEqual(normalized["total_with_tax"], "113.00")
         self.assertEqual(normalized["tax_rate"], "13%")
-        self.assertEqual(normalized["is_positive_invoice"], "是")
+        self.assertEqual(normalized["is_positive_invoice"], None)
 
     def test_red_invoice_accepts_positive_form_values_and_persists_negative_money(self) -> None:
         preview = self.service.preview_batch(
@@ -111,7 +114,7 @@ class ManualInvoiceEntryServiceTests(unittest.TestCase):
         self.assertEqual(normalized["amount"], "-100.00")
         self.assertEqual(normalized["tax_amount"], "-13.00")
         self.assertEqual(normalized["total_with_tax"], "-113.00")
-        self.assertEqual(normalized["is_positive_invoice"], "否")
+        self.assertEqual(normalized["is_positive_invoice"], None)
 
         self.file_import_service.confirm_session(
             session_id=preview.session.id,
@@ -120,7 +123,7 @@ class ManualInvoiceEntryServiceTests(unittest.TestCase):
         invoice = self.import_service.list_invoices()[0]
         self.assertEqual(str(invoice.amount), "-100.00")
         self.assertEqual(str(invoice.total_with_tax), "-113.00")
-        self.assertEqual(invoice.is_positive_invoice, "否")
+        self.assertEqual(invoice.is_positive_invoice, None)
 
     def test_traditional_invoice_requires_code_but_twenty_digit_invoice_does_not(self) -> None:
         with self.assertRaisesRegex(ManualInvoiceEntryError, "传统发票必须填写发票代码"):
@@ -133,16 +136,37 @@ class ManualInvoiceEntryServiceTests(unittest.TestCase):
         self.assertEqual(preview.values[0]["invoice_code"], "")
 
     def test_amount_balance_and_tax_rate_are_validated_before_import_preview(self) -> None:
-        with self.assertRaisesRegex(ManualInvoiceEntryError, "价税合计必须等于"):
+        with self.assertRaisesRegex(ManualInvoiceEntryError, "原件"):
             self.service.preview_batch(
                 payloads=[payload(total_with_tax="112.99")],
                 imported_by="finance-user",
             )
-        with self.assertRaisesRegex(ManualInvoiceEntryError, "税率必须是 0 到 100"):
+        with self.assertRaisesRegex(ManualInvoiceEntryError, "原件"):
             self.service.preview_batch(
                 payloads=[payload(tax_rate="101")],
                 imported_by="finance-user",
             )
+
+    def test_original_is_required_and_user_changes_cannot_replace_source_facts(self):
+        missing = payload(); missing.pop("source_file_content")
+        with self.assertRaisesRegex(ManualInvoiceEntryError, "上传发票原件"):
+            self.service.preview_batch(payloads=[missing], imported_by="finance-user")
+        for key, value in (("seller_name", "改写销方"), ("invoice_number", "26532000000000000001"),
+                           ("net_amount", "100.004"), ("tax_amount", "NaN")):
+            changed = payload(); changed[key] = value
+            with self.subTest(key=key), self.assertRaises(ManualInvoiceEntryError):
+                self.service.preview_batch(payloads=[changed], imported_by="finance-user")
+        self.assertEqual(self.import_service.list_invoices(), [])
+
+    def test_recognition_preserves_source_zero_and_absent_properties(self):
+        recognizer = FakeDocumentRecognizer({"invoice_no": "26532000000000000001", "net_amount": 0,
+                                            "tax_amount": 0, "total_with_tax": 0})
+        service = ManualInvoiceEntryService(file_import_service=self.file_import_service, document_recognizer=recognizer)
+        values = service.recognize(file_name="original.pdf", content=b"original")
+        self.assertEqual(values["net_amount"], "0")
+        self.assertEqual(values["tax_amount"], "0")
+        self.assertEqual(values["tax_rate"], "")
+        self.assertEqual(values["invoice_kind"], "")
 
     def test_duplicate_invoice_is_blocked_and_not_left_as_active_manual_session(self) -> None:
         first = self.service.preview_batch(payloads=[payload()], imported_by="finance-user")
@@ -264,7 +288,7 @@ class ManualInvoiceEntryServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(preview.session.file_count, 2)
-        self.assertEqual([item.file_name for item in preview.session.files], ["新发票1", "新发票2"])
+        self.assertEqual([item.file_name for item in preview.session.files], ["original.pdf", "original.pdf"])
         self.assertEqual(len(preview.file_ids), 2)
         self.file_import_service.confirm_session(
             session_id=preview.session.id,

@@ -108,7 +108,12 @@ describe("ManualInvoiceEntryDrawer", () => {
 
     expect(screen.getByRole("dialog", { name: "发票录入" })).toBeInTheDocument();
     expect(screen.getByText("上传识别")).toBeInTheDocument();
-    fillRequiredFields();
+    vi.mocked(recognizeManualInvoice).mockResolvedValue(previewPayload.values[0]!);
+    await user.click(screen.getByText("上传识别"));
+    fireEvent.drop(screen.getByText("拖入或选择 JPG / PNG / PDF").closest("label")!, {
+      dataTransfer: { files: [new File(["pdf"], "original.pdf", { type: "application/pdf" })] },
+    });
+    await waitFor(() => expect(screen.getByLabelText("发票号码")).toHaveValue("12345678901234567890"));
     await user.click(screen.getByRole("button", { name: "预览" }));
 
     expect(await screen.findByText("12345678901234567890")).toBeInTheDocument();
@@ -127,6 +132,7 @@ describe("ManualInvoiceEntryDrawer", () => {
         invoiceDirection: "input",
         invoiceNature: "blue",
         invoiceCode: "",
+        sourceFileName: "original.pdf", sourceFileContent: "cGRm",
       })]);
       expect(confirmImportFiles).toHaveBeenCalledWith("manual_session_1", ["manual_file_1"]);
       expect(onImportAccepted).toHaveBeenCalledTimes(1);
@@ -151,7 +157,7 @@ describe("ManualInvoiceEntryDrawer", () => {
 
     await waitFor(() => expect(recognizeManualInvoice).toHaveBeenCalledWith(file));
     const seller = screen.getByLabelText("销方名称") as HTMLInputElement;
-    expect(seller.value).toBe("OCR销方");
+    await waitFor(() => expect(seller.value).toBe("OCR销方"));
     await user.clear(seller);
     await user.type(seller, "人工修正销方");
     expect(seller.value).toBe("人工修正销方");

@@ -24,13 +24,22 @@ from openpyxl import Workbook
 from postgres_test_utils import apply_test_migrations, require_postgres_test_database_url, truncate_test_database
 from test_import_file_service import FakeImportIdStore
 
+from tests.invoice_source_fixtures import with_original
+import base64
+
 HEADERS = ["发票代码", "发票号码", "数电发票号码", "销方名称", "销方识别号", "购买方名称", "购方识别号", "开票日期", "金额", "税额", "价税合计"]
 
 
 def invoice_row(number: str = "26110000000000000001") -> dict:
-    return {"digital_invoice_no": number, "invoice_date": "2026-09-01", "counterparty_name": "供应商",
+    row = {"digital_invoice_no": number, "invoice_date": "2026-09-01", "counterparty_name": "供应商",
             "seller_name": "供应商", "seller_tax_no": "SELLER", "buyer_name": "云南溯源科技有限公司",
             "buyer_tax_no": "915300007194052520", "amount": "100", "tax_amount": "13", "total_with_tax": "113"}
+
+    original = with_original({"invoice_direction": "input", "invoice_nature": "blue", "seller_name": "供应商",
+        "seller_tax_no": "SELLER", "buyer_name": row["buyer_name"], "buyer_tax_no": row["buyer_tax_no"],
+        "invoice_number": number, "invoice_date": "2026-09-01", "net_amount": "100", "tax_amount": "13",
+        "total_with_tax": "113", "tax_rate": "13"})
+    return {**row, "_source_file_name": "original.pdf", "_source_file_content": base64.b64decode(original['source_file_content'])}
 
 
 def workbook_bytes(*, sheets: int = 1, mixed: bool = False, missing_identity: bool = False) -> bytes:

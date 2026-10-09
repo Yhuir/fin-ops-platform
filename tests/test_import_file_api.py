@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from tests.invoice_source_fixtures import with_original
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import sleep
@@ -81,7 +82,7 @@ def manual_invoice_payload(**overrides: str) -> dict[str, str]:
         "total_with_tax": "113.00",
     }
     values.update(overrides)
-    return values
+    return with_original(values)
 
 
 def manual_bank_transaction_payload(**overrides: str) -> dict[str, str]:
@@ -285,8 +286,9 @@ class ImportFileApiTests(unittest.TestCase):
         self.assertEqual(len(invoices), 2)
         self.assertEqual(invoices[0].invoice_no, "26117000001052654674")
         self.assertEqual(str(invoices[0].amount), "100.00")
-        self.assertEqual(invoices[0].invoice_source, "manual_invoice_entry")
+        self.assertIsNone(invoices[0].invoice_source)
         self.assertEqual(invoices[0].source_links[0]["source_type"], "manual_invoice_import")
+        self.assertEqual(invoices[0].invoice_kind_code, "vat_general")
 
     def test_manual_invoice_preview_blocks_exact_duplicate(self) -> None:
         app = build_application()

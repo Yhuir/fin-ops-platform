@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fin_ops_platform.services.import_job_queue import ImportJobRepository, ImportJobWorker
+from fin_ops_platform.services.invoice_kind import invoice_kind_fields
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.common import jsonb
 from fin_ops_platform.services.postgres_repositories.tax_certified_imports import (
@@ -19,6 +20,7 @@ from fin_ops_platform.services.tax_certified_import_application_service import T
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService
 from fin_ops_platform.services.tax_offset_query_service import TaxOffsetQuery
 from postgres_test_utils import apply_test_migrations, require_postgres_test_database_url, truncate_test_database
+
 from tests.test_tax_certified_import_service import certified_upload
 
 
@@ -46,7 +48,7 @@ class TaxCertifiedImportPostgresTests(unittest.TestCase):
                 amount,signed_amount,tax_amount,invoice_date,invoice_month,status,raw_payload)
             VALUES ('input','NUMBER-1','CODE-1','TEST-DIGITAL-1','TEST-BUYER',100,100,13,'2026-08-15','2026-08-01','active',%s)
             RETURNING id::text AS id
-        """, (jsonb({"normalized_payload": {"invoice_kind": "增值税专用发票"}}),))["id"]
+        """, (jsonb({"normalized_payload": {**invoice_kind_fields("增值税专用发票")}}),))["id"]
 
     def preview(self, **kwargs):
         return self.service.preview_files(imported_by="owner", uploads=[certified_upload(**kwargs)])
@@ -203,7 +205,9 @@ class TaxCertifiedImportPostgresTests(unittest.TestCase):
         self.assertEqual(self.repository.records_payload()["batches"], [])
 
     def test_existing_invoice_reset_clears_certification_without_fk_regression(self):
-        from fin_ops_platform.services.postgres_repositories.settings_data_reset import PostgresSettingsDataResetRepository
+        from fin_ops_platform.services.postgres_repositories.settings_data_reset import (
+            PostgresSettingsDataResetRepository,
+        )
         self.confirm(self.preview())
         with self.connection.transaction() as transaction:
             repository = PostgresSettingsDataResetRepository(transaction)
@@ -221,7 +225,7 @@ class TaxCertifiedImportPostgresTests(unittest.TestCase):
         invoice = self.connection.fetch_one("""INSERT INTO app.invoices(invoice_type,invoice_no,digital_invoice_no,
             buyer_tax_no,amount,signed_amount,status,raw_payload)
             VALUES ('input','NUMBER-1','LATE-DIGITAL','TEST-BUYER',100,100,'active',%s) RETURNING id::text AS id""",
-            (jsonb({"normalized_payload": {"invoice_kind": "增值税专用发票"}}),))
+            (jsonb({"normalized_payload": {**invoice_kind_fields("增值税专用发票")}}),))
         second = self.confirm(self.preview(digital="LATE-DIGITAL"))
         self.assertEqual((second["persisted_record_count"], second["duplicate_count"]), (0, 1))
         self.assertEqual(self.current()["matched_invoice_id"], invoice["id"])

@@ -666,10 +666,6 @@ def apply_import_audit_repair(connection: Any, plan: dict[str, Any]) -> None:
         )
         if affected == 0:
             raise RuntimeError(f"Import row {row['row_id']} is owned by another batch.")
-    PostgresCoreRepository(connection).repair_imported_invoice_totals(
-        connection,
-        list(plan.get("invoice_updates") or []),
-    )
     for repair in list(plan.get("lifecycle_repairs") or []):
         batch_id = str(repair["batch_id"])
         file_id = str(repair["file_id"])

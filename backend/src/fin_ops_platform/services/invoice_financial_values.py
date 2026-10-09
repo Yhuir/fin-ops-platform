@@ -76,11 +76,9 @@ def _source_tax_rate(
         if known - {header}:
             return None, "来源税率与明细税率不一致"
         return header, None
-    if header == MULTIPLE_TAX_RATES or MULTIPLE_TAX_RATES in known or len(known) > 1:
-        return MULTIPLE_TAX_RATES, None
-    if UNKNOWN_TAX_RATE in labels or not known:
-        return None, None
-    return next(iter(known)), None
+    # Missing header rates remain missing; detail-rate summaries belong to the view.
+    return (MULTIPLE_TAX_RATES if header == MULTIPLE_TAX_RATES else None), None
+
 
 
 def invoice_financial_values(invoice: Any) -> InvoiceFinancialValues:

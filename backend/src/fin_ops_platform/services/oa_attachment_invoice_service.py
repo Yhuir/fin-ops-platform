@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from fin_ops_platform.services.invoice_kind import extract_invoice_kind
+
 import os
 import re
 import xml.etree.ElementTree as ET
@@ -60,7 +62,7 @@ class OAAttachmentOCRRuntimeError(RuntimeError):
 
 
 class OAAttachmentInvoiceService:
-    PARSER_VERSION = "2026-10-04-source-financial-fields-v8"
+    PARSER_VERSION = "2026-10-09-source-attributes-v9"
 
     def __init__(
         self,
@@ -708,7 +710,7 @@ class OAAttachmentInvoiceService:
             "issue_date": issue_date,
             **financials,
             "invoice_type": "进项发票",
-            "invoice_kind": self._extract_invoice_kind(extracted_text),
+            "invoice_kind": extract_invoice_kind(extracted_text),
         }
         if financials["net_amount"] is None or (financials["tax_amount"] is None and financials["tax_amount_text"] is None):
             parsed["financial_review_reason"] = "已识别价税合计，未税金额和税额尚未确认，须以正式发票数据核对。"
@@ -739,7 +741,7 @@ class OAAttachmentInvoiceService:
         names = self._extract_names_from_lines(extracted_text) or self._extract_names(compact_text)
         seller_name = names[0] if names else ""
         issue_date = self._extract_issue_date(compact_text)
-        invoice_kind = self._extract_invoice_kind(extracted_text) or "通用机打发票"
+        invoice_kind = extract_invoice_kind(extracted_text)
         evidences: list[dict[str, Any]] = []
         for index, invoice_no in enumerate(invoice_numbers):
             invoice_code = invoice_codes[index] if index < len(invoice_codes) else (invoice_codes[0] if invoice_codes else "")
@@ -798,7 +800,7 @@ class OAAttachmentInvoiceService:
             "total_with_tax": total_amount,
             "source_line_items": [],
             "invoice_type": "进项发票",
-            "invoice_kind": self._extract_invoice_kind(extracted_text) or "非税收入一般缴款书",
+            "invoice_kind": extract_invoice_kind(extracted_text),
         }
 
     def _extract_non_tax_receipt_date(self, compact_text: str) -> str:
@@ -970,19 +972,6 @@ class OAAttachmentInvoiceService:
             value = re.match(r"([0-9A-Z]{20}|[0-9A-Z]{18}|[0-9A-Z]{15})(?![0-9A-Z])", text[match.end():])
             values.append(value.group(1) if value else "")
         return values
-
-    @staticmethod
-    def _extract_invoice_kind(extracted_text: str) -> str:
-        title = re.search(r"电子发票[（(][^）)\n]+[）)]", extracted_text)
-        if title:
-            return title.group(0)
-        for line in extracted_text.splitlines():
-            normalized_line = clean_string(line)
-            if "非税收入一般缴款书" in normalized_line:
-                return normalized_line
-            if "发票" in normalized_line and "发票号码" not in normalized_line:
-                return normalized_line
-        return ""
 
     @staticmethod
     def _normalize_amount_text(value: str) -> str:

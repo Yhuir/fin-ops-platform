@@ -11,7 +11,7 @@ from fin_ops_platform.services.postgres_repositories.audit_report import (
     use_audit_snapshot,
 )
 from fin_ops_platform.services.postgres_repositories.tax_offset import (
-    SPECIAL_INVOICE_KINDS,
+    SPECIAL_INVOICE_CODE,
     SPECIAL_INVOICE_SCOPE_SQL,
     load_tax_offset_page,
 )
@@ -37,7 +37,7 @@ def audit_tax_offset_page(connection: Any, *, tenant_id: str = "default", exampl
                          or (nullif(c.digital_invoice_no, '') is null and nullif(c.invoice_code, '') is not null
                              and nullif(c.invoice_no, '') is not null
                              and c.invoice_code = i.invoice_code and c.invoice_no = i.invoice_no)), false))))
-                order by c.certified_unique_key""", (list(SPECIAL_INVOICE_KINDS),))
+                order by c.certified_unique_key""", (SPECIAL_INVOICE_CODE,))
         issues = [AuditIssue(severity="error", code="tax_offset_invalid_certification_binding",
                              message="认证记录与进项专票身份不一致。", subject_id=row["certified_unique_key"],
                              scope_key=row["tax_period"] or "", details={"invoice_id": row["invoice_id"]})

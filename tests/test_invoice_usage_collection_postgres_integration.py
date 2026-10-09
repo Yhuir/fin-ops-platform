@@ -268,20 +268,20 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
         missing = {**known, "tax_rate": None}
         other = {"amount": "100", "tax_amount": "6", "tax_rate": "6%"}
         cases = [
-            ("200", "26", "226", None, [known, {**known, "tax_rate": "13.00%"}], None, "13%"),
+            ("200", "26", "226", None, [known, {**known, "tax_rate": "13.00%"}], None, "—"),
             ("200", "26", "226", None, [known, missing], None, "—"),
             ("200", "19", "219", "mixed", [known, other], None, "多税率"),
-            ("300", "32", "332", None, [known, other, missing], None, "多税率"),
+            ("300", "32", "332", None, [known, other, missing], None, "—"),
             ("100", "13", "113", "6%", [known], None, "—"),
             ("100", "13", "113", "13%", [missing], None, "13%"),
             ("100", "13", "113", "13%", [], None, "13%"),
-            (None, None, None, None, [known], None, "13%"),
-            ("100", "13", None, None, [known], None, "13%"),
+            (None, None, None, None, [known], None, "—"),
+            ("100", "13", None, None, [known], None, "—"),
             ("100", "0", "100", "0", [], None, "0%"),
             ("100", None, "100", "免税", [{**known, "tax_rate": "免税", "tax_amount": None, "tax_amount_text": "*"}], "*", "免税"),
             ("100", None, "100", "不征税", [], "*", "不征税"),
             ("100", None, "100", "*", [], "*", "*"),
-            ("100", "13", "113", None, [{"source_sheet_role": "invoice_header", "tax_rate": "6%"}, known], None, "13%"),
+            ("100", "13", "113", None, [{"source_sheet_role": "invoice_header", "tax_rate": "6%"}, known], None, "—"),
             ("100", "13", "113", None, [{"source_sheet_role": "invoice_header", "tax_rate": "6%"}], None, "—"),
             ("100", "13", "113", "13%", [{"source_sheet_role": "invoice_header", "tax_rate": "6%"}], None, "13%"),
         ]

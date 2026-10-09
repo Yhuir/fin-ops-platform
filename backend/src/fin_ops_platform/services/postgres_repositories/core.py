@@ -1382,41 +1382,14 @@ class PostgresCoreRepository:
             raise RuntimeError("ETC invoice payload changed after preview; transaction must roll back.")
         return changed
 
-    def repair_imported_invoice_totals(self, connection: Any, updates: list[dict[str, Any]]) -> None:
-        if updates:
-            connection.execute(
-                "select set_config('fin_ops.correction_reason', '修复导入发票金额事实', true)"
-            )
-            connection.execute(
-                "select set_config('fin_ops.actor_id', 'import-audit-repair', true)"
-            )
+    def repair_verified_invoice_source_attributes(self, updates: list[dict[str, Any]]) -> None:
         for update in updates:
-            affected = connection.execute(
-                """
-                update app.invoices
-                set amount = %s,
-                    signed_amount = %s,
-                    tax_amount = %s,
-                    total_with_tax = %s,
-                    tax_rate = %s,
-                    raw_payload = %s,
-                    updated_at = now()
-                where coalesce(legacy_mongo_id, id::text) = %s
-                  and legacy_source_batch_id = %s
-                """,
-                (
-                    update["amount"],
-                    update["signed_amount"],
-                    update["tax_amount"],
-                    update["total_with_tax"],
-                    update["tax_rate"],
-                    _jsonb(update["raw_payload"]),
-                    update["invoice_id"],
-                    update["source_batch_id"],
-                ),
-            )
-            if affected != 1:
-                raise RuntimeError(f"Invoice {update['invoice_id']} changed after the repair plan was built.")
+            count = self._connection.execute("""update app.invoices set raw_payload=%s, updated_at=now()
+                where coalesce(legacy_mongo_id,id::text)=%s and raw_payload=%s and updated_at=%s""",
+                (_jsonb(update["raw_payload"]), update["invoice_id"],
+                 _jsonb(update["before"]["raw_payload"]), update["before"]["updated_at"]))
+            if count != 1:
+                raise RuntimeError("Concurrent invoice modification")
 
     def repair_verified_invoice_financial_facts(
         self, connection: Any, updates: list[dict[str, Any]], *, operator_id: str, reason: str,
@@ -2381,6 +2354,9 @@ class PostgresCoreRepository:
             unit_price=self._decimal_or_none(payload.get("unit_price")),
             invoice_source=self._text(payload.get("invoice_source")),
             invoice_kind=self._text(payload.get("invoice_kind")),
+            invoice_kind_code=self._text(payload.get("invoice_kind_code")),
+            invoice_kind_status=self._text(payload.get("invoice_kind_status")),
+            invoice_kind_evidence=list(payload.get("invoice_kind_evidence") or []),
             is_positive_invoice=self._text(payload.get("is_positive_invoice")),
             risk_level=self._text(payload.get("risk_level")),
             issuer=self._text(payload.get("issuer")),

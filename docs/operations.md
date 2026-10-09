@@ -225,6 +225,13 @@ ETC 台账真实明细使用独立 `--repair-etc-source-lines` 模式。无 ID �
 成功执行在 `audit.events` 追加逐票原件验证证明，包含来源文件与哈希、身份、日期、四个金额字段、税率和完整明细；原始导入回执保持不变。已有修复可使用相同原件及目标重新 dry-run/execute 补充证明；零更新时保留每张发票既有修复指纹，`written_invoice_count` 为 0，`verified_invoice_count` 表示本次核验张数。零事实及缓存更新的执行无需恢复工件。需要校正或证明购销双方字段时使用 `--repair-invoice-party-fields`，原件必须完整提供这些字段。发布前可通过固定 helper 指定已准备的 candidate release 运行同一 CLI；它读取候选代码，不切换线上 release。
 
 
+## 原件发票票种统一维护
+
+通过 `import-audit-repair <release> --repair-invoice-source-attributes --dry-run --rollback-manifest-path <固定工件目录内文件>` 读取已登记 Excel、OA 附件及 ETC XML／PDF。只按强身份匹配并核对明确的购方和日期；缺原件、未提供、无法读取、未映射或冲突分别输出，不猜测。原件哈希和行位置保留在票种证据内。
+
+执行沿用同一 release 和 `--execute --expected-fingerprint <fingerprint> --operator-id <operator> --reason <reason> --rollback-manifest-path <同一工件>`。事务重新锁定 canonical 版本，只写票种及原件所属元数据；金额、发票身份、认证和关系保持不变。验证数量、原件证据、跨页读取和二次零更新后，使用既有 artifact-delete 清理本任务工件。该模式不能与其它修复模式混用。
+
+
 ## 数据与恢复边界
 
 迁移目录和部署代码维护结构兼容性、forward-only 版本集合及恢复条件；它们是可执行系统的一部分，不能按过程文档删除。未执行结构变更时可以使用已验证 previous release；已经发生不兼容结构变更时只能向前修复。不得通过删迁移记录、恢复已失效字段、删除主数据库或业务队列“消除报错”。

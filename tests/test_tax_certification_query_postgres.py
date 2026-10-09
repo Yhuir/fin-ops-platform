@@ -6,14 +6,15 @@ from io import BytesIO
 from types import SimpleNamespace
 from uuid import uuid4
 
-from openpyxl import load_workbook
-
+from fin_ops_platform.services.invoice_kind import invoice_kind_fields
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.common import jsonb
 from fin_ops_platform.services.postgres_repositories.tax_offset import PostgresTaxOffsetCanonicalRepository
 from fin_ops_platform.services.postgres_repositories.tax_offset_page_audit import audit_tax_offset_page
 from fin_ops_platform.services.tax_offset_export_service import TaxOffsetExportService
 from fin_ops_platform.services.tax_offset_query_service import TaxOffsetQueryService
+from openpyxl import load_workbook
+
 from tests.postgres_test_utils import apply_test_migrations, require_postgres_test_database_url, truncate_test_database
 
 
@@ -41,7 +42,7 @@ class TaxCertificationQueryPostgresTests(unittest.TestCase):
             invoice_date,invoice_month,seller_name,seller_tax_no,buyer_tax_no,amount,signed_amount,tax_amount,status,raw_payload)
             values(%s::uuid,%s,%s,%s,%s,%s::date,date_trunc('month',%s::date),%s,'SELLER',%s,%s,%s,%s,%s,%s)""",
             (identity, invoice_type, number or identity, code, digital or identity, day, day, seller, buyer,
-             amount, amount, tax, status, jsonb({"normalized_payload": {"invoice_kind": kind}})))
+             amount, amount, tax, status, jsonb({"normalized_payload": {**invoice_kind_fields(kind)}})))
         return identity
 
     def certify(self, invoice, *, selected="2026-10-02 10:30:00", period=None, deductible="12.123456", status="active"):

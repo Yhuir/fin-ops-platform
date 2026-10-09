@@ -182,6 +182,9 @@ export type ManualInvoiceDirection = "input" | "output";
 export type ManualInvoiceNature = "blue" | "red";
 
 export type ManualInvoiceEntryValues = {
+  sourceFileName?: string;
+  sourceFileContent?: string;
+  invoiceKind?: string;
   invoiceDirection: ManualInvoiceDirection;
   invoiceNature: ManualInvoiceNature;
   sellerName: string;

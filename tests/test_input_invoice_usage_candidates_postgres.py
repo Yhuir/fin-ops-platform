@@ -120,7 +120,9 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
             provider = AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=store, transaction_factory=self.connection.transaction)
             provider.update_payment_status_rules({"expectedVersion": 1, "idempotencyKey": "multi-db", "rules": [
                 {"id": "multi", "statusCode": "offset", "label": "冲", "priority": 1, "enabled": True,
-                 "conditions": {"hasOa": True, "hasBank": False, "applicantNames": ["黄 亮", "周洁莹"]}}
+                 "conditions": {"hasOa": True, "hasBank": False, "applicantNames": ["黄 亮", "周洁莹"]}},
+                {"id": "waiting", "statusCode": "waiting_payment", "label": "未关联流水", "priority": 2, "enabled": True,
+                 "conditions": {"hasOa": True, "hasBank": False}}
             ]}, actor_id="test")
             result = self.service.list_rows(filters=[{"field": "payment_status", "operator": "in", "values": ["offset"]}])
             self.assertEqual(result["pagination"]["total"], 2)

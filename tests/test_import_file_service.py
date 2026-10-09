@@ -395,9 +395,9 @@ class ImportFileServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["amount"], "37.81")
-        self.assertEqual(rows[0]["tax_amount"], "4.92")
-        self.assertEqual(rows[0]["total_with_tax"], "42.73")
+        self.assertEqual(rows[0]["amount"], None)
+        self.assertEqual(rows[0]["tax_amount"], None)
+        self.assertEqual(rows[0]["total_with_tax"], None)
         self.assertEqual(rows[0]["source_line_count"], 2)
 
     def test_invoice_actual_single_detail_and_missing_values_are_preserved(self) -> None:
@@ -419,7 +419,7 @@ class ImportFileServiceTests(unittest.TestCase):
         [merged] = aggregate_invoice_line_rows(rows)
         self.assertEqual(merged["source_line_items"], rows)
         self.assertEqual(merged["source_line_count"], 2)
-        self.assertEqual((merged["amount"], merged["tax_amount"], merged["total_with_tax"]), ("20.00", "2.60", None))
+        self.assertEqual((merged["amount"], merged["tax_amount"], merged["total_with_tax"]), (None, None, None))
         # Repeating an invoice header is not evidence of two printed item rows.
         headers = [{**row, "source_sheet_role": "invoice_header"} for row in rows]
         self.assertEqual(aggregate_invoice_line_rows(headers), headers)
@@ -434,7 +434,7 @@ class ImportFileServiceTests(unittest.TestCase):
              "amount": "20", "tax_amount": "*", "total_with_tax": "20", "tax_rate": "免税"},
         ])
         self.assertIsNone(rows[0]["tax_amount"])
-        self.assertEqual(rows[0]["amount"], "30.00")
+        self.assertEqual(rows[0]["amount"], None)
         self.assertEqual([item["tax_amount"] for item in rows[0]["source_line_items"]], ["*", "*"])
 
     def test_invoice_export_keeps_identical_repeated_rows_for_duplicate_audit(self) -> None:

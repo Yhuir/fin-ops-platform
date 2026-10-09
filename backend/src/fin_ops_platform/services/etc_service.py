@@ -28,6 +28,7 @@ from fin_ops_platform.services.etc_invoice_pdf_bundle_service import (
     EtcInvoicePdfBundleError,
     open_single_page_etc_invoice_pdf,
 )
+from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
 from fin_ops_platform.services.oa_draft_prefill import (
     ETC_OA_DRAFT_PREFILL_FAMILY,
     default_oa_draft_prefill,
@@ -451,6 +452,7 @@ class EtcInvoice:
     xml_file_hash: str | None
     pdf_file_path: str | None
     pdf_file_hash: str | None
+    invoice_kind: str | None = None
     tax_amount_text: str | None = None
     source_line_items: list[dict[str, object]] = field(default_factory=list)
     status: EtcInvoiceStatus = EtcInvoiceStatus.UNSUBMITTED
@@ -745,6 +747,7 @@ class ParsedEtcXml:
     tax_amount: Decimal | None
     total_amount: Decimal
     tax_rate: str | None
+    invoice_kind: str | None = None
     tax_amount_text: str | None = None
     source_line_items: list[dict[str, object]] = field(default_factory=list)
 
@@ -3611,6 +3614,19 @@ class EtcService:
                             parse_error=parse_error,
                         )
                     )
+        if depth == 0:
+            pdf_entries = [entry for entry in entries if EtcService._is_pdf_entry(entry.path)]
+            for entry in entries:
+                parsed = entry.parsed_invoice
+                if parsed is None:
+                    continue
+                pdf = EtcService._match_pdf_entry(parsed.invoice_number, entry.path, pdf_entries)
+                if pdf is not None:
+                    result = OAAttachmentInvoiceService().parse_content_result({'fileName': 'invoice.pdf'}, pdf.content)
+                    matches = [row for row in result['evidences']
+                               if str(row.get('digital_invoice_no') or row.get('invoice_no') or '') == parsed.invoice_number]
+                    if len(matches) == 1:
+                        parsed.invoice_kind = matches[0].get('invoice_kind')
         return entries
 
     @staticmethod
@@ -3707,6 +3723,7 @@ class EtcService:
                 tax_amount=parsed.tax_amount,
                 total_amount=parsed.total_amount,
                 tax_rate=parsed.tax_rate,
+                invoice_kind=parsed.invoice_kind,
                 tax_amount_text=parsed.tax_amount_text,
                 source_line_items=deepcopy(parsed.source_line_items),
                 zip_source_name=zip_source_name,
@@ -4543,11 +4560,6 @@ def parse_etc_xml(content: bytes) -> ParsedEtcXml:
             values.setdefault(field_name, text)
     source_line_items = [{**_etc_xml_source_line_item(item), "source_region_key": f"xml:IssuItemInformation:{index}"}
                          for index, item in enumerate(item_nodes, start=1)]
-    line_rates = {normalize_output_tax_rate(item.get("tax_rate")) for item in source_line_items}
-    if not values.get("tax_rate") and len(line_rates) == 1 and all(item.get("tax_rate") for item in source_line_items):
-        values["tax_rate"] = str(source_line_items[0]["tax_rate"])
-    elif len(line_rates - {"—"}) > 1:
-        values["tax_rate"] = "mixed"
     tax_source = _required_text(values, "tax_amount")
     tax_amount_text = tax_source if tax_source in {"*", "**", "***", "免税", "不征税"} else None
     invoice_number = _required_text(values, "invoice_number")

@@ -189,7 +189,7 @@ class SourceRecordProjectionTests(unittest.TestCase):
             "tax_amount": None, "tax_amount_text": "*", "total_with_tax": "133", "source_line_items": lines})
         self.assertEqual(formal["lineItems"], query["lineItems"])
         self.assertEqual(lines, original)
-        self.assertEqual(formal["taxRate"], "多税率")
+        self.assertEqual(formal["taxRate"], "—")
         self.assertEqual(formal["taxAmount"], "")
         self.assertEqual(formal["taxAmountText"], "*")
         self.assertEqual([line["amount"] for line in formal["lineItems"]], ["110.00", "-10.00", "20.00"])

@@ -3,10 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import Counter, defaultdict
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any
 
-from fin_ops_platform.services.import_file_service import aggregate_invoice_line_rows
 
 FAILED_IMPORT_RECOVERY_ERROR_SIGNATURE = "background_jobs_idempotency_uidx"
 
@@ -45,7 +44,7 @@ def build_import_audit_repair_plan(snapshot: dict[str, list[dict[str, Any]]]) ->
         snapshot.get("bank_transactions") or [],
         snapshot.get("bank_rows") or [],
     )
-    invoice_updates = _invoice_update_plan(snapshot.get("invoice_rows") or [])
+    invoice_updates: list[dict[str, Any]] = []
     lifecycle_repairs = _lifecycle_repair_plan(snapshot)
     etc_session_retirements = _etc_session_retirement_plan(snapshot)
     reverted_batch_normalizations = _reverted_batch_normalization_plan(snapshot)
@@ -737,86 +736,6 @@ def _assert_existing_bank_row_matches(existing: dict[str, Any], desired: dict[st
             raise ValueError(f"Existing bank import row {desired['row_id']} conflicts on {field_name}.")
 
 
-def _invoice_update_plan(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
-    for row in rows:
-        batch_id = _text(row.get("batch_id"))
-        invoice_id = _text(row.get("invoice_id"))
-        if invoice_id and _text(row.get("invoice_source_batch_id")) == batch_id:
-            grouped[(batch_id, invoice_id)].append(row)
-    updates: list[dict[str, Any]] = []
-    for (batch_id, invoice_id), component_rows in grouped.items():
-        if len(component_rows) < 2:
-            continue
-        normalized_rows = [_normalized_row(row.get("row_raw_payload")) for row in component_rows]
-        _assert_invoice_headers_match(invoice_id, normalized_rows)
-        aggregated_rows = aggregate_invoice_line_rows(normalized_rows)
-        if len(aggregated_rows) != 1:
-            continue
-        aggregate = aggregated_rows[0]
-        amount = Decimal(_text(aggregate.get("amount")) or "0")
-        signed_amount = _sum_decimal(normalized_rows, "signed_amount")
-        tax_amount = Decimal(_text(aggregate.get("tax_amount")) or "0")
-        total_with_tax = Decimal(_text(aggregate.get("total_with_tax")) or "0")
-        tax_rate = _text(aggregate.get("tax_rate"))
-        current = component_rows[0]
-        before = {
-            "invoice_id": invoice_id,
-            "source_batch_id": batch_id,
-            "amount": _decimal_text(current.get("amount")),
-            "signed_amount": _decimal_text(current.get("signed_amount")),
-            "tax_amount": _decimal_text(current.get("tax_amount")),
-            "total_with_tax": _decimal_text(current.get("total_with_tax")),
-            "tax_rate": current.get("tax_rate"),
-        }
-        after = {
-            "amount": _decimal_text(amount),
-            "signed_amount": _decimal_text(signed_amount),
-            "tax_amount": _decimal_text(tax_amount),
-            "total_with_tax": _decimal_text(total_with_tax),
-            "tax_rate": tax_rate,
-        }
-        if all(before[key] == after[key] for key in after):
-            continue
-        raw_payload = dict(current.get("invoice_raw_payload") or {})
-        normalized_payload = dict(raw_payload.get("normalized_payload") or raw_payload)
-        normalized_payload.update(after)
-        raw_payload["normalized_payload"] = normalized_payload
-        invoice_month = _text(current.get("invoice_month") or normalized_rows[0].get("invoice_date"))[:7]
-        updates.append(
-            {
-                "invoice_id": invoice_id,
-                "invoice_month": invoice_month,
-                "source_batch_id": batch_id,
-                **after,
-                "raw_payload": raw_payload,
-                "before": before,
-            }
-        )
-    return updates
-
-
-def _assert_invoice_headers_match(invoice_id: str, rows: list[dict[str, Any]]) -> None:
-    for field_name in (
-        "digital_invoice_no",
-        "invoice_code",
-        "invoice_no",
-        "invoice_date",
-        "seller_tax_no",
-        "buyer_tax_no",
-    ):
-        values = {_text(row.get(field_name)) for row in rows if _text(row.get(field_name))}
-        if len(values) > 1:
-            raise ValueError(f"Invoice {invoice_id} has conflicting {field_name} component evidence.")
-
-
-def _sum_decimal(rows: list[dict[str, Any]], field_name: str) -> Decimal:
-    try:
-        return sum((Decimal(_text(row.get(field_name)) or "0") for row in rows), Decimal("0"))
-    except InvalidOperation as exc:
-        raise ValueError(f"Invalid invoice component decimal field: {field_name}") from exc
-
-
 def _normalized_row(raw_payload: Any) -> dict[str, Any]:
     return dict(_payload(raw_payload).get("normalized_row") or {})
 
@@ -824,10 +743,6 @@ def _normalized_row(raw_payload: Any) -> dict[str, Any]:
 def _payload(value: Any) -> dict[str, Any]:
     payload = dict(value or {}) if isinstance(value, dict) else {}
     return dict(payload.get("normalized_payload") or payload)
-
-
-def _decimal_text(value: Any) -> str:
-    return format(Decimal(str(value or "0")).normalize(), "f")
 
 
 def _text(value: Any) -> str:

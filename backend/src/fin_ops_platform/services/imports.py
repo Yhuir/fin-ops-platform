@@ -30,6 +30,7 @@ from fin_ops_platform.services.invoice_expense_item_links import (
     effective_invoice_source_tags,
     has_oa_attachment_source,
 )
+from fin_ops_platform.services.invoice_kind import invoice_kind_fields
 from fin_ops_platform.services.object_dedup_decision_service import ObjectDedupDecisionService
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
@@ -1389,7 +1390,7 @@ class ImportNormalizationService:
             "specification_model": self._string_or_none(raw_row.get("specification_model")),
             "unit": self._string_or_none(raw_row.get("unit")),
             "invoice_source": self._string_or_none(raw_row.get("invoice_source")),
-            "invoice_kind": self._string_or_none(raw_row.get("invoice_kind")),
+            **invoice_kind_fields(raw_row.get("invoice_kind"), missing_status="unreadable" if raw_row.get("invoice_kind_status") == "unreadable" else "not_provided"),
             "is_positive_invoice": self._string_or_none(raw_row.get("is_positive_invoice")),
             "risk_level": self._string_or_none(raw_row.get("risk_level")),
             "issuer": self._string_or_none(raw_row.get("issuer")),
@@ -1746,6 +1747,8 @@ class ImportNormalizationService:
             unit_price=Decimal(normalized["unit_price"]) if normalized.get("unit_price") else None,
             invoice_source=normalized.get("invoice_source"),
             invoice_kind=normalized.get("invoice_kind"),
+            invoice_kind_code=normalized.get("invoice_kind_code"),
+            invoice_kind_status=normalized.get("invoice_kind_status"),
             is_positive_invoice=normalized.get("is_positive_invoice"),
             risk_level=normalized.get("risk_level"),
             issuer=normalized.get("issuer"),
@@ -1893,8 +1896,8 @@ class ImportNormalizationService:
             "source_line_items": self._normalize_source_lines(getattr(etc_invoice, "source_line_items", [])),
             "total_with_tax": self._format_decimal(total_amount) if total_amount is not None else None,
             "tax_rate": self._string_or_none(getattr(etc_invoice, "tax_rate", None)),
-            "invoice_source": "ETC导入",
-            "invoice_kind": "ETC发票",
+            "invoice_source": None,
+            **invoice_kind_fields(getattr(etc_invoice, "invoice_kind", None)),
             "tags": ["ETC"],
             "invoice_type": InvoiceType.INPUT.value,
             "etc_invoice_id": self._string_or_none(getattr(etc_invoice, "id", None)),
@@ -1977,8 +1980,8 @@ class ImportNormalizationService:
             "unit": self._string_or_none(attachment_invoice.get("unit")),
             "quantity": self._format_decimal(quantity) if quantity is not None else None,
             "unit_price": self._format_decimal(unit_price) if unit_price is not None else None,
-            "invoice_source": "OA附件解析",
-            "invoice_kind": self._string_or_none(attachment_invoice.get("invoice_kind")),
+            "invoice_source": self._string_or_none(attachment_invoice.get("invoice_source")),
+            **invoice_kind_fields(attachment_invoice.get("invoice_kind"), missing_status="unreadable"),
             "is_positive_invoice": self._string_or_none(attachment_invoice.get("is_positive_invoice")),
             "risk_level": self._string_or_none(attachment_invoice.get("risk_level")),
             "issuer": self._string_or_none(attachment_invoice.get("issuer")),
@@ -2048,6 +2051,8 @@ class ImportNormalizationService:
             unit_price=Decimal(normalized["unit_price"]) if normalized.get("unit_price") else None,
             invoice_source=normalized.get("invoice_source"),
             invoice_kind=normalized.get("invoice_kind"),
+            invoice_kind_code=normalized.get("invoice_kind_code"),
+            invoice_kind_status=normalized.get("invoice_kind_status"),
             is_positive_invoice=normalized.get("is_positive_invoice"),
             risk_level=normalized.get("risk_level"),
             issuer=normalized.get("issuer"),
@@ -2298,8 +2303,11 @@ class ImportNormalizationService:
                 "project_id",
             ):
                 incoming = normalized.get(field_name)
-                if incoming not in (None, ""):
-                    setattr(invoice, field_name, incoming)
+                setattr(invoice, field_name, incoming)
+            invoice.invoice_kind = normalized.get("invoice_kind")
+            invoice.invoice_kind_code = normalized.get("invoice_kind_code")
+            invoice.invoice_kind_status = normalized.get("invoice_kind_status")
+            invoice.invoice_kind_evidence = []
             invoice.tax_rate = normalized.get("tax_rate")
             invoice.tax_amount_text = normalized.get("tax_amount_text")
             invoice.source_line_items = list(normalized.get("source_line_items") or [])
@@ -2318,35 +2326,6 @@ class ImportNormalizationService:
                 setattr(invoice, field_name, Decimal(incoming) if incoming not in (None, "") else None)
         if normalized.get("invoice_status_from_source"):
             invoice.invoice_status_from_source = normalized.get("invoice_status_from_source")
-        for field_name in (
-            "invoice_code",
-            "digital_invoice_no",
-            "invoice_date",
-            "seller_tax_no",
-            "seller_name",
-            "buyer_tax_no",
-            "buyer_name",
-            "tax_classification_code",
-            "specific_business_type",
-            "taxable_item_name",
-            "specification_model",
-            "unit",
-            "invoice_source",
-            "invoice_kind",
-            "is_positive_invoice",
-            "risk_level",
-            "issuer",
-            "remark",
-            "project_id",
-            "oa_form_id",
-        ):
-            incoming = normalized.get(field_name)
-            if incoming and not getattr(invoice, field_name):
-                setattr(invoice, field_name, incoming)
-        for field_name in ("quantity", "unit_price"):
-            incoming = normalized.get(field_name)
-            if incoming not in (None, "") and getattr(invoice, field_name) is None:
-                setattr(invoice, field_name, Decimal(incoming))
         if not invoice.source_unique_key:
             invoice.source_unique_key = normalized.get("source_unique_key")
             if invoice.source_unique_key:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 from dataclasses import dataclass
 from datetime import date
@@ -9,10 +11,9 @@ from typing import Any, Protocol
 
 from fin_ops_platform.domain.enums import BatchType, ImportDecision
 from fin_ops_platform.services.import_file_service import FileImportSession
+from fin_ops_platform.services.invoice_kind import invoice_kind_fields
 
-CENT = Decimal("0.01")
 HUNDRED = Decimal("100")
-MANUAL_INVOICE_SOURCE = "manual_invoice_entry"
 TWENTY_DIGIT_INVOICE_RE = re.compile(r"^\d{20}$")
 
 
@@ -70,7 +71,7 @@ class ManualInvoiceEntryService:
             code = str(getattr(exc, "code", "") or str(exc) or "invoice_recognition_failed")
             raise ManualInvoiceEntryError(code, self._recognition_error_message(code)) from exc
         if not isinstance(evidence, dict):
-            return {}
+            raise ManualInvoiceEntryError("manual_invoice_source_invalid", "发票原件无法读取。")
         invoice_no = self._text(evidence.get("digital_invoice_no") or evidence.get("invoice_no"))
         return {
             "seller_name": self._text(evidence.get("seller_name")),
@@ -80,10 +81,11 @@ class ManualInvoiceEntryService:
             "invoice_number": invoice_no,
             "invoice_code": self._text(evidence.get("invoice_code")),
             "invoice_date": self._text(evidence.get("issue_date") or evidence.get("invoice_date")),
-            "net_amount": self._text(evidence.get("net_amount") or evidence.get("amount")),
+            "net_amount": self._text(evidence.get("net_amount") if evidence.get("net_amount") is not None else evidence.get("amount")),
             "tax_rate": self._text(evidence.get("tax_rate")).removesuffix("%"),
             "tax_amount": self._text(evidence.get("tax_amount")),
             "total_with_tax": self._text(evidence.get("total_with_tax")),
+            "invoice_kind": self._text(evidence.get("invoice_kind")),
         }
 
     def preview_batch(
@@ -197,10 +199,10 @@ class ManualInvoiceEntryService:
     ) -> tuple[dict[str, str], dict[str, str], BatchType]:
         direction = self._choice(payload, "invoice_direction", {"input", "output"}, "请选择票据方向。")
         nature = self._choice(payload, "invoice_nature", {"blue", "red"}, "请选择发票性质。")
-        seller_name = self._required_text(payload, "seller_name", "请填写销方名称。")
-        seller_tax_no = self._required_text(payload, "seller_tax_no", "请填写销方识别号。").upper()
-        buyer_name = self._required_text(payload, "buyer_name", "请填写购方名称。")
-        buyer_tax_no = self._required_text(payload, "buyer_tax_no", "请填写购方识别号。").upper()
+        seller_name = self._text(payload.get("seller_name"))
+        seller_tax_no = self._text(payload.get("seller_tax_no")).upper()
+        buyer_name = self._text(payload.get("buyer_name"))
+        buyer_tax_no = self._text(payload.get("buyer_tax_no")).upper()
         invoice_number = self._required_text(payload, "invoice_number", "请填写发票号码。")
         invoice_code = self._text(payload.get("invoice_code"))
         is_digital_invoice = bool(TWENTY_DIGIT_INVOICE_RE.fullmatch(invoice_number))
@@ -213,20 +215,47 @@ class ManualInvoiceEntryService:
         except ValueError as exc:
             raise ManualInvoiceEntryError("manual_invoice_date_invalid", "开票日期格式不正确。") from exc
 
-        net_amount = self._money(payload, "net_amount", "不含税价格", allow_zero=False)
-        tax_amount = self._money(payload, "tax_amount", "税额", allow_zero=True)
-        total_with_tax = self._money(payload, "total_with_tax", "价税合计", allow_zero=False)
-        if net_amount + tax_amount != total_with_tax:
-            raise ManualInvoiceEntryError(
-                "manual_invoice_amounts_unbalanced",
-                "价税合计必须等于不含税价格与税额之和。",
-            )
-        tax_rate = self._rate(payload.get("tax_rate"))
+        filename = self._text(payload.get("source_file_name"))
+        encoded = self._text(payload.get("source_file_content"))
+        if not filename or not encoded:
+            raise ManualInvoiceEntryError("manual_invoice_source_required", "请上传发票原件。")
+        try:
+            content = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise ManualInvoiceEntryError("manual_invoice_source_invalid", "发票原件内容无效。") from exc
+        try:
+            evidence = self._document_recognizer.recognize_uploaded_invoice(file_name=filename, content=content)
+        except ValueError as exc:
+            raise ManualInvoiceEntryError("manual_invoice_source_invalid", "发票原件无法读取。") from exc
+        if not evidence or str(evidence.get("digital_invoice_no") or evidence.get("invoice_no") or "") != invoice_number:
+            raise ManualInvoiceEntryError("manual_invoice_source_identity_conflict", "原件与发票号码不一致或无法读取。")
+        source_fields = {"seller_name": "seller_name", "seller_tax_no": "seller_tax_no",
+                         "buyer_name": "buyer_name", "buyer_tax_no": "buyer_tax_no",
+                         "invoice_date": "issue_date", "invoice_code": "invoice_code"}
+        for field, source_field in source_fields.items():
+            if self._text(payload.get(field)) != self._text(evidence.get(source_field)):
+                raise ManualInvoiceEntryError("manual_invoice_source_conflict", "录入属性与原件不一致。")
+        financials = {"net_amount": evidence.get("net_amount"), "tax_amount": evidence.get("tax_amount"),
+                      "total_with_tax": evidence.get("total_with_tax")}
         sign = Decimal("-1") if nature == "red" else Decimal("1")
-        signed_net_amount = (net_amount * sign).quantize(CENT)
-        signed_tax_amount = (tax_amount * sign).quantize(CENT)
-        signed_total = (total_with_tax * sign).quantize(CENT)
-        normalized_rate = self._decimal_text(tax_rate)
+        for field, raw in financials.items():
+            entered = self._text(payload.get(field))
+            if raw is None:
+                if entered:
+                    raise ManualInvoiceEntryError("manual_invoice_attribute_missing", "原件未提供该金额，不能补填。")
+            elif not entered or self._money(payload, field, "金额", allow_zero=True) * sign != Decimal(str(raw)):
+                raise ManualInvoiceEntryError("manual_invoice_source_conflict", "录入金额与原件不一致。")
+        if all(raw is not None for raw in financials.values()) and Decimal(str(financials["net_amount"])) + Decimal(str(financials["tax_amount"])) != Decimal(str(financials["total_with_tax"])):
+            raise ManualInvoiceEntryError("manual_invoice_source_invalid", "发票原件金额存在冲突。")
+        source_rate = self._text(evidence.get("tax_rate"))
+        if source_rate and re.fullmatch(r"[\d.]+%?", source_rate):
+            try:
+                self._rate(source_rate)
+            except ManualInvoiceEntryError as exc:
+                raise ManualInvoiceEntryError("manual_invoice_source_invalid", "发票原件税率无效。") from exc
+        if self._text(payload.get("tax_rate")).removesuffix("%") != source_rate.removesuffix("%"):
+            raise ManualInvoiceEntryError("manual_invoice_source_conflict", "录入税率与原件不一致。")
+        normalized_rate = source_rate.removesuffix("%")
         values = {
             "invoice_direction": direction,
             "invoice_nature": nature,
@@ -237,10 +266,10 @@ class ManualInvoiceEntryService:
             "invoice_number": invoice_number,
             "invoice_code": invoice_code,
             "invoice_date": invoice_date,
-            "net_amount": self._money_text(net_amount),
+            "net_amount": self._text(payload.get("net_amount")),
             "tax_rate": normalized_rate,
-            "tax_amount": self._money_text(tax_amount),
-            "total_with_tax": self._money_text(total_with_tax),
+            "tax_amount": self._text(payload.get("tax_amount")),
+            "total_with_tax": self._text(payload.get("total_with_tax")),
         }
         row = {
             "counterparty_name": seller_name if direction == "input" else buyer_name,
@@ -248,16 +277,19 @@ class ManualInvoiceEntryService:
             "invoice_no": "" if is_digital_invoice else invoice_number,
             "digital_invoice_no": invoice_number if is_digital_invoice else "",
             "invoice_date": invoice_date,
-            "amount": self._money_text(signed_net_amount),
-            "tax_amount": self._money_text(signed_tax_amount),
-            "total_with_tax": self._money_text(signed_total),
-            "tax_rate": f"{normalized_rate}%",
+            "amount": financials["net_amount"],
+            "tax_amount": financials["tax_amount"],
+            "tax_amount_text": evidence.get("tax_amount_text"),
+            "total_with_tax": financials["total_with_tax"],
+            "tax_rate": source_rate or None,
             "seller_name": seller_name,
             "seller_tax_no": seller_tax_no,
             "buyer_name": buyer_name,
             "buyer_tax_no": buyer_tax_no,
-            "invoice_source": MANUAL_INVOICE_SOURCE,
-            "is_positive_invoice": "否" if nature == "red" else "是",
+            "invoice_source": evidence.get("invoice_source"),
+            **invoice_kind_fields(evidence.get("invoice_kind"), missing_status="unreadable"),
+            "_source_file_name": filename, "_source_file_content": content,
+            "is_positive_invoice": evidence.get("is_positive_invoice"),
             "tags": ["人工录入", "红字发票" if nature == "red" else "蓝字发票"],
         }
         batch_type = BatchType.INPUT_INVOICE if direction == "input" else BatchType.OUTPUT_INVOICE
@@ -271,7 +303,7 @@ class ManualInvoiceEntryService:
             return "文件过大，无法安全解析。"
         if code in {"document_pdf_too_many_pages"}:
             return "PDF 页数超过解析上限。"
-        return "发票文件解析失败，请改用手工录入。"
+        return "发票原件无法读取，请核对文件。"
 
     @staticmethod
     def _choice(payload: dict[str, Any], key: str, choices: set[str], message: str) -> str:
@@ -290,10 +322,10 @@ class ManualInvoiceEntryService:
     @staticmethod
     def _money(payload: dict[str, Any], key: str, label: str, *, allow_zero: bool) -> Decimal:
         try:
-            value = Decimal(ManualInvoiceEntryService._text(payload.get(key))).quantize(CENT)
+            value = Decimal(ManualInvoiceEntryService._text(payload.get(key)))
         except (InvalidOperation, ValueError) as exc:
             raise ManualInvoiceEntryError(f"manual_{key}_invalid", f"{label}必须是有效数字。") from exc
-        if value < 0 or (not allow_zero and value == 0):
+        if not value.is_finite() or value < 0 or (not allow_zero and value == 0):
             qualifier = "非负数" if allow_zero else "正数"
             raise ManualInvoiceEntryError(f"manual_{key}_invalid", f"{label}必须填写{qualifier}。")
         return value
@@ -305,18 +337,10 @@ class ManualInvoiceEntryService:
             rate = Decimal(normalized)
         except (InvalidOperation, ValueError) as exc:
             raise ManualInvoiceEntryError("manual_tax_rate_invalid", "税率必须是 0 到 100 之间的数字。") from exc
-        if rate < 0 or rate > HUNDRED:
+        if not rate.is_finite() or rate < 0 or rate > HUNDRED:
             raise ManualInvoiceEntryError("manual_tax_rate_invalid", "税率必须是 0 到 100 之间的数字。")
         return rate.normalize()
 
     @staticmethod
     def _text(value: Any) -> str:
-        return str(value or "").strip()
-
-    @staticmethod
-    def _money_text(value: Decimal) -> str:
-        return format(value, ".2f")
-
-    @staticmethod
-    def _decimal_text(value: Decimal) -> str:
-        return format(value, "f").rstrip("0").rstrip(".") or "0"
+        return str(value).strip() if value is not None else ""

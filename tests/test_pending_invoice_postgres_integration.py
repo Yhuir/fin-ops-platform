@@ -241,7 +241,7 @@ class PendingInvoicePostgresIntegrationTests(unittest.TestCase):
                 rates = [field["value"] for section in detail["sections"] for field in section["fields"]
                          if field["label"] == "税率"]
                 self.assertTrue(rates)
-                self.assertEqual(set(rates), {expected})
+                self.assertEqual(set(rates), {expected, "—"} if tax_rate is None and identity in {"root-lines", "normalized-lines"} else {expected})
                 self.assertNotIn("_sourceLineItems", json.dumps(detail))
                 persisted = self.connection.fetch_one(
                     "select tax_rate, raw_payload from app.invoices where legacy_mongo_id=%s", (identity,))

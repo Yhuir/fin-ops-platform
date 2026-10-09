@@ -26,9 +26,6 @@ def invoice_financial_sql(alias: str) -> dict[str, str]:
                     and bool_or(detail.rate is not null and detail.rate <> header.rate)
                     then '—'
                 when header.rate is not null then header.rate
-                when bool_or(detail.rate = '多税率') or count(distinct detail.rate) >= 2 then '多税率'
-                when count(distinct detail.rate) = 1 and bool_and(detail.rate is not null)
-                    then min(detail.rate)
                 else '—' end
             from (select {header} as rate) header
             left join lateral (

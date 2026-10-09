@@ -525,35 +525,38 @@ class FileImportService:
     ) -> FileImportSession:
         if not entries:
             raise ValueError("manual invoice entry batch requires at least one invoice")
+        session_id = self._next_session_id()
         files: list[FileImportPreviewItem] = []
-        for index, (batch_type, row) in enumerate(entries, start=1):
+        for batch_type, row in entries:
             if batch_type not in {BatchType.INPUT_INVOICE, BatchType.OUTPUT_INVOICE}:
                 raise ValueError("manual invoice entry requires an invoice batch type")
-            preview = self._import_service.preview_import(
-                batch_type=batch_type,
-                source_name="manual_invoice_entry",
-                imported_by=imported_by,
-                rows=[dict(row)],
-            )
-            files.append(FileImportPreviewItem(
-                id=self._next_file_id(),
-                file_name=f"新发票{index}",
-                template_code="manual_invoice_entry",
-                batch_type=batch_type,
-                status="preview_ready",
-                message="手工录入发票已通过预览校验。",
-                row_count=1,
-                success_count=preview.success_count,
-                error_count=preview.error_count,
-                duplicate_count=preview.duplicate_count,
-                suspected_duplicate_count=preview.suspected_duplicate_count,
-                updated_count=preview.updated_count,
-                preview_batch_id=preview.id,
-                row_results=preview.row_results,
-                normalized_rows=preview.normalized_rows,
-            ))
+            if not row.get("_source_file_name") or not isinstance(row.get("_source_file_content"), bytes):
+                raise ValueError("manual invoice entry requires an original")
+        try:
+            for batch_type, row in entries:
+                row = dict(row)
+                filename = row.pop("_source_file_name")
+                content = row.pop("_source_file_content")
+                file_id = self._next_file_id()
+                stored = self._store_upload_file(session_id, file_id, UploadedImportFile(file_name=filename, content=content), imported_by=imported_by)
+                item = FileImportPreviewItem(id=file_id, file_name=filename, stored_file_path=stored,
+                    template_code="manual_invoice_entry", batch_type=batch_type, status="uploaded",
+                    message="", row_count=0, content_sha256=hashlib.sha256(content).hexdigest())
+                files.append(item)
+                preview = self._import_service.preview_import(batch_type=batch_type,
+                    source_name="manual_invoice_entry", imported_by=imported_by, rows=[row])
+                item.status = "preview_ready"
+                item.message = "手工录入发票已通过预览校验。"
+                item.row_count = 1
+                for field in ("success_count", "error_count", "duplicate_count", "suspected_duplicate_count", "updated_count", "row_results", "normalized_rows"):
+                    setattr(item, field, getattr(preview, field))
+                item.preview_batch_id = preview.id
+        except Exception:
+            if self._file_store is not None:
+                self._file_store.delete_unregistered_import_uploads(session_id, files)
+            raise
         session = FileImportSession(
-            id=self._next_session_id(),
+            id=session_id,
             imported_by=imported_by,
             file_count=len(files),
             status="preview_ready",
@@ -2140,6 +2143,8 @@ def aggregate_invoice_line_rows(rows: list[dict[str, Any]]) -> list[dict[str, An
             row = dict(line_rows[0])
             if row.get("source_sheet_role") != "invoice_header" and (row.get("taxable_item_name") or row.get("tax_classification_code")):
                 row.update(source_line_count=1, source_line_items=[dict(row)])
+                if row.get("source_sheet_name") == INVOICE_DETAIL_SHEET_NAME:
+                    row.update(amount=None, tax_amount=None, total_with_tax=None, tax_rate=None)
             aggregated.append(row)
             continue
         line_signatures = [_invoice_line_signature(row) for row in line_rows]
@@ -2165,30 +2170,15 @@ def aggregate_invoice_line_rows(rows: list[dict[str, Any]]) -> list[dict[str, An
             "buyer_name",
             "invoice_date",
             "invoice_status_from_source",
+            "invoice_kind",
         ):
             values = {clean(row.get(field_name)) for row in line_rows if clean(row.get(field_name))}
             if len(values) > 1:
                 raise ValueError(f"同一发票的 {field_name} 不一致，无法安全合并明细行。")
-        financial_rows = [resolve_invoice_financial_values(
-            amount=clean(row.get("amount")).replace(",", ""),
-            tax_amount=None if row.get("tax_amount") in ("*", "免税", "不征税") else clean(row.get("tax_amount")).replace(",", ""),
-            tax_amount_text=row.get("tax_amount") if row.get("tax_amount") in ("*", "免税", "不征税") else row.get("tax_amount_text"),
-            total_with_tax=clean(row.get("total_with_tax")).replace(",", ""), tax_rate=row.get("tax_rate"),
-        ) for row in line_rows]
-        totals = {}
-        for field in ("amount", "tax_amount", "total_with_tax"):
-            parts = [getattr(row, field) for row in financial_rows]
-            totals[field] = _invoice_line_decimal_text(sum(parts, Decimal("0"))) if all(part is not None for part in parts) else None
+        # Detail totals are not printed invoice-header facts.
         merged = dict(line_rows[0])
-        merged.update(
-            {
-                **totals,
-                "source_line_count": len(line_rows),
-                "source_line_items": [dict(row) for row in line_rows],
-            }
-        )
-        rate = combine_invoice_tax_rates(row.tax_rate for row in financial_rows)
-        merged["tax_rate"] = None if rate == UNKNOWN_TAX_RATE else "mixed" if rate == MULTIPLE_TAX_RATES else rate
+        merged.update(amount=None, tax_amount=None, total_with_tax=None, tax_rate=None,
+                      source_line_count=len(line_rows), source_line_items=[dict(row) for row in line_rows])
         aggregated.append(merged)
     return aggregated
 

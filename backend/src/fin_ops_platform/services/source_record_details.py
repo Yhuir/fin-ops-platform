@@ -17,6 +17,7 @@ from fin_ops_platform.services.invoice_financial_values import (
     invoice_financial_summary,
     resolve_invoice_financial_values,
 )
+from fin_ops_platform.services.invoice_kind import INVOICE_KIND_NAMES
 from fin_ops_platform.services.oa_expense_details import OA_EXPENSE_FIELDS, public_oa_expense_items
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from fin_ops_platform.services.output_invoice_tax_rate import combine_invoice_tax_rates
@@ -78,6 +79,9 @@ def invoice_source_detail(group: dict[str, Any]) -> dict[str, Any]:
         "taxableItemName": primary.taxable_item_name,
         "invoiceSource": primary.invoice_source,
         "invoiceKind": primary.invoice_kind,
+        "invoiceKindCode": primary.invoice_kind_code,
+        "invoiceKindStatus": primary.invoice_kind_status,
+        "invoiceKindEvidence": primary.invoice_kind_evidence,
         "invoiceStatus": primary.invoice_status_from_source,
         "isPositiveInvoice": primary.is_positive_invoice,
         "riskLevel": primary.risk_level,
@@ -133,7 +137,7 @@ SOURCE_FIELD_GROUPS = {
         ("凭证与备注", (("bankSerialNo", "银行流水号"), ("enterpriseSerialNo", "企业流水号"), ("accountDetailNo", "账户明细编号-交易流水号"), ("voucherKind", "凭证种类"), ("voucherNo", "凭证号"), ("remark", "备注"))),
     ),
     "invoice": (
-        ("发票信息", (("digitalInvoiceNo", "数电发票号码"), ("invoiceNo", "发票号码"), ("invoiceCode", "发票代码"), ("invoiceDate", "开票日期"), ("invoiceKind", "发票票种"), ("invoiceSource", "发票来源"), ("invoiceStatus", "发票状态"), ("isPositiveInvoice", "是否正数发票"), ("riskLevel", "发票风险等级"), ("issuer", "开票人"))),
+        ("发票信息", (("digitalInvoiceNo", "数电发票号码"), ("invoiceNo", "发票号码"), ("invoiceCode", "发票代码"), ("invoiceDate", "开票日期"), ("invoiceKind", "发票票种"), ("invoiceKindName", "发票类型"), ("invoiceKindStatusLabel", "票种状态"), ("invoiceSource", "发票来源"), ("invoiceStatus", "发票状态"), ("isPositiveInvoice", "是否正数发票"), ("riskLevel", "发票风险等级"), ("issuer", "开票人"))),
         ("购销双方", (("sellerName", "销方名称"), ("sellerTaxNo", "销方识别号"), ("buyerName", "购买方名称"), ("buyerTaxNo", "购买方识别号"))),
         ("金额与税额", (("amount", "不含税金额"), ("taxRate", "税率"), ("taxAmount", "税额"), ("totalWithTax", "价税合计"), ("financialIssue", "核对说明"))),
         ("业务信息", (("taxClassificationCode", "税收分类编码"), ("specificBusinessType", "特定业务类型"), ("taxableItemName", "货物或应税劳务名称"), ("remark", "备注"))),
@@ -163,6 +167,10 @@ def source_detail_sections(kind: str, payload: dict[str, Any]) -> list[dict[str,
         raise ValueError(f"Unknown source detail kind: {kind}")
     identifier = str(payload.get("oaId") if kind == "oa" else payload.get("id") or "")
     if kind == "invoice":
+        payload["invoiceKindName"] = INVOICE_KIND_NAMES.get(payload.get("invoiceKindCode"))
+        payload["invoiceKindStatusLabel"] = {"confirmed": "已确认", "unmapped": "待映射",
+            "not_provided": "原件未提供", "unreadable": "未读取", "source_unavailable": "原件不可用",
+            "conflict": "来源冲突"}.get(payload.get("invoiceKindStatus"))
         polarity = {"是": "蓝字", "否": "红字", "True": "蓝字", "False": "红字"}.get(str(payload.get("isPositiveInvoice")))
         title_values = (polarity, payload.get("buyerName"), payload.get("totalWithTax"))
     elif kind == "bank":
@@ -358,7 +366,7 @@ def source_relation_sections(kind: str, summaries: list[Any], *, groups: list[di
 # Explicit adapters for the existing canonical SQL query DTOs.
 QUERY_SOURCE_KEYS = {
     "bank": {"id": "id", "transaction_date": "transactionDate", "booked_date": "bookedDate", "txn_direction": "direction", "amount": "amount", "balance": "balance", "summary": "summary", "remark": "remark", "account_name": "accountName", "account_no": "accountNo", "counterparty_name": "counterpartyName", "counterparty_account_no": "counterpartyAccountNo", "counterparty_bank_name": "counterpartyBankName", "statement_serial_no": "bankSerialNo", "enterprise_serial_no": "enterpriseSerialNo", "voucher_type": "voucherKind", "voucher_no": "voucherNo", "account_detail_no": "accountDetailNo"},
-    "invoice": {"id": "id", "invoice_type": "invoiceType", "invoice_no": "invoiceNo", "digital_invoice_no": "digitalInvoiceNo", "invoice_code": "invoiceCode", "issue_date": "invoiceDate", "seller_name": "sellerName", "seller_tax_no": "sellerTaxNo", "buyer_name": "buyerName", "buyer_tax_no": "buyerTaxNo", "amount_without_tax": "amount", "tax_amount": "taxAmount", "tax_amount_text": "taxAmountText", "tax_rate": "taxRate", "total_with_tax": "totalWithTax", "tax_classification_code": "taxClassificationCode", "specific_business_type": "specificBusinessType", "taxable_item_name": "taxableItemName", "invoice_source": "invoiceSource", "invoice_kind": "invoiceKind", "invoice_status_from_source": "invoiceStatus", "is_positive_invoice": "isPositiveInvoice", "risk_level": "riskLevel", "issuer": "issuer", "remark": "remark", "model": "specificationModel", "unit": "unit", "quantity": "quantity", "unit_price": "unitPrice"},
+    "invoice": {"id": "id", "invoice_type": "invoiceType", "invoice_no": "invoiceNo", "digital_invoice_no": "digitalInvoiceNo", "invoice_code": "invoiceCode", "issue_date": "invoiceDate", "seller_name": "sellerName", "seller_tax_no": "sellerTaxNo", "buyer_name": "buyerName", "buyer_tax_no": "buyerTaxNo", "amount_without_tax": "amount", "tax_amount": "taxAmount", "tax_amount_text": "taxAmountText", "tax_rate": "taxRate", "total_with_tax": "totalWithTax", "tax_classification_code": "taxClassificationCode", "specific_business_type": "specificBusinessType", "taxable_item_name": "taxableItemName", "invoice_source": "invoiceSource", "invoice_kind": "invoiceKind", "invoice_kind_code": "invoiceKindCode", "invoice_kind_status": "invoiceKindStatus", "invoice_status_from_source": "invoiceStatus", "is_positive_invoice": "isPositiveInvoice", "risk_level": "riskLevel", "issuer": "issuer", "remark": "remark", "model": "specificationModel", "unit": "unit", "quantity": "quantity", "unit_price": "unitPrice"},
 }
 
 

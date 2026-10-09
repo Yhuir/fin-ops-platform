@@ -10,7 +10,7 @@ from uuid import uuid4
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.postgres_repositories.common import jsonb, row_payload, run_in_transaction, serialize_value
 from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
-from fin_ops_platform.services.postgres_repositories.tax_offset import SPECIAL_INVOICE_KINDS, PostgresTaxOffsetCanonicalRepository
+from fin_ops_platform.services.postgres_repositories.tax_offset import SPECIAL_INVOICE_CODE, PostgresTaxOffsetCanonicalRepository
 
 BATCH_FIELDS = ("id", "session_id", "imported_by", "file_count", "months", "persisted_record_count", "duplicate_count",
                 "status", "version", "created_at", "revoked_record_count", "restored_record_count", "revoked_at")
@@ -87,7 +87,7 @@ class PostgresTaxCertifiedImportRepository:
         invoice_ids = sorted({match["matched_invoice_id"] for match in matches.values() if match["matched_invoice_id"]})
         facts = connection.fetch_all("""SELECT i.id::text AS invoice_id,i.amount,i.tax_amount,i.digital_invoice_no,
                 i.invoice_code,i.invoice_no,i.buyer_tax_no,i.status,i.invoice_type,c.certified_unique_key,
-                replace(replace(btrim(coalesce(i.raw_payload->'normalized_payload',i.raw_payload)->>'invoice_kind'),'（','('),'）',')') AS invoice_kind
+                coalesce(i.raw_payload->'normalized_payload',i.raw_payload)->>'invoice_kind_code' AS invoice_kind_code
             FROM app.invoices i LEFT JOIN app.tax_certified_import_records c ON c.invoice_id=i.id AND c.status='active'
             WHERE i.id=ANY(%s::uuid[])""" + (" FOR SHARE OF i" if lock_invoices else ""), (invoice_ids,)) if invoice_ids else []
         by_id = {row["invoice_id"]: row for row in facts}
@@ -108,7 +108,7 @@ class PostgresTaxCertifiedImportRepository:
                 continue
             canonical = by_id.get(invoice_id)
             if (canonical is None or canonical["status"] == "deleted" or canonical["invoice_type"] != "input"
-                    or canonical["invoice_kind"] not in SPECIAL_INVOICE_KINDS or canonical["buyer_tax_no"] != row.get("buyer_tax_no")):
+                    or canonical["invoice_kind_code"] != SPECIAL_INVOICE_CODE or canonical["buyer_tax_no"] != row.get("buyer_tax_no")):
                 errors[key] = "发票池身份或状态已变化，请重新预览。"
                 continue
             if canonical["certified_unique_key"] and canonical["certified_unique_key"] != key:

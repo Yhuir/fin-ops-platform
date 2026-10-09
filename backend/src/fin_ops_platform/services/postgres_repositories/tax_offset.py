@@ -8,13 +8,11 @@ from typing import Any, Iterator
 from fin_ops_platform.services.postgres_repositories.common import jsonb
 from fin_ops_platform.services.tax_offset_query_service import TaxOffsetQuery
 
-SPECIAL_INVOICE_KINDS = (
-    "进项专票", "增值税专用发票", "增值税电子专用发票", "电子专用发票",
-    "电子发票(增值税专用发票)", "数电票(专用发票)", "数电发票(增值税专用发票)",
-)
+from fin_ops_platform.services.invoice_kind import SPECIAL_INVOICE_CODE
+
 _RAW_INVOICE = "coalesce(i.raw_payload->'normalized_payload', i.raw_payload)"
-_KIND = f"replace(replace(btrim({_RAW_INVOICE}->>'invoice_kind'), '（', '('), '）', ')')"
-SPECIAL_INVOICE_SCOPE_SQL = f"i.status <> 'deleted' and i.invoice_type = 'input' and {_KIND} = any(%s)"
+SPECIAL_INVOICE_SCOPE_SQL = f"i.status <> 'deleted' and i.invoice_type = 'input' and {_RAW_INVOICE}->>'invoice_kind_code' = %s"
+
 
 
 class PostgresTaxOffsetCanonicalRepository:
@@ -61,7 +59,7 @@ class PostgresTaxOffsetCanonicalRepository:
                      or (nullif(r.digital_invoice_no, '') is null and nullif(r.invoice_code, '') is not null
                          and nullif(r.invoice_no, '') is not null
                          and i.invoice_code = r.invoice_code and i.invoice_no = r.invoice_no))
-            group by r.unique_key""", (jsonb(list(unique_rows.values())), list(SPECIAL_INVOICE_KINDS)))
+            group by r.unique_key""", (jsonb(list(unique_rows.values())), SPECIAL_INVOICE_CODE))
         result = {}
         for row in matched:
             ids = row["invoice_ids"] or []
@@ -74,7 +72,7 @@ class PostgresTaxOffsetCanonicalRepository:
 
 def _inventory_query(query: TaxOffsetQuery) -> tuple[str, tuple[Any, ...]]:
     clauses = [SPECIAL_INVOICE_SCOPE_SQL]
-    params: list[Any] = [list(SPECIAL_INVOICE_KINDS)]
+    params: list[Any] = [SPECIAL_INVOICE_CODE]
     if query.status != "all":
         clauses.append("c.id is not null" if query.status == "certified" else "c.id is null")
     if query.issue_month:

@@ -1585,7 +1585,7 @@ class EtcServiceTests(unittest.TestCase):
         parsed = parse_etc_xml(xml.encode())
         self.assertEqual(parsed.total_amount, Decimal("19.71"))
         self.assertEqual(parsed.amount_without_tax, Decimal("18.63"))
-        self.assertEqual(parsed.tax_rate, "mixed")
+        self.assertEqual(parsed.tax_rate, None)
         self.assertEqual(len(parsed.source_line_items), 2)
         self.assertEqual(parsed.source_line_items[0]["taxable_item_name"], "通行费一")
         self.assertEqual(parsed.source_line_items[0]["total_with_tax"], "10.30")
@@ -1597,7 +1597,7 @@ class EtcServiceTests(unittest.TestCase):
             service.confirm_import_session(preview["sessionId"])
             saved = service.list_invoices()[0][0]
             self.assertEqual(saved.source_line_items, parsed.source_line_items)
-            self.assertEqual(saved.tax_rate, "mixed")
+            self.assertIsNone(saved.tax_rate)
 
     def test_etc_xml_non_numeric_tax_is_preserved_and_flat_summary_does_not_forge_item(self) -> None:
         xml = real_etc_xml().decode().replace("<TotalTaxAm>0.56</TotalTaxAm>", "<TotalTaxAm>*</TotalTaxAm>")
@@ -1606,7 +1606,7 @@ class EtcServiceTests(unittest.TestCase):
         parsed = parse_etc_xml(xml.encode())
         self.assertIsNone(parsed.tax_amount)
         self.assertEqual(parsed.tax_amount_text, "*")
-        self.assertEqual(parsed.tax_rate, "不征税")
+        self.assertEqual(parsed.tax_rate, None)
         self.assertIsNone(parsed.source_line_items[0]["tax_amount"])
         self.assertEqual(parsed.source_line_items[0]["tax_amount_text"], "*")
         historical_record = HistoricalEtcRepairService._parsed_invoice_record(parsed)

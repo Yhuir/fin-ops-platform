@@ -111,22 +111,22 @@ class InvoiceFinancialValuesTests(unittest.TestCase):
         lines = [{"amount": "40", "tax_amount": "5.20", "tax_rate": "0.13"},
                  {"amount": "60", "tax_amount": "7.80", "tax_rate": "13.00%"}]
         before = deepcopy(lines)
-        self.assertEqual(resolve(source_line_items=lines).rate_label, "13%")
-        self.assertEqual(resolve(None, None, None, source_line_items=lines).rate_label, "13%")
-        self.assertEqual(resolve(source_line_items=[{"tax_rate": "13%"}]).rate_label, "13%")
+        self.assertEqual(resolve(source_line_items=lines).rate_label, "—")
+        self.assertEqual(resolve(None, None, None, source_line_items=lines).rate_label, "—")
+        self.assertEqual(resolve(source_line_items=[{"tax_rate": "13%"}]).rate_label, "—")
         self.assertEqual(lines, before)
         missing_rate = [lines[0], {**lines[1], "tax_rate": None}]
         self.assertEqual(resolve(source_line_items=missing_rate).rate_label, "—")
         self.assertEqual(resolve(r="13%", source_line_items=missing_rate).rate_label, "13%")
         header_only = [{"source_sheet_role": "invoice_header", "tax_rate": "6%"}]
         self.assertEqual(resolve(source_line_items=header_only).rate_label, "—")
-        self.assertEqual(resolve(source_line_items=[*header_only, *lines]).rate_label, "13%")
+        self.assertEqual(resolve(source_line_items=[*header_only, *lines]).rate_label, "—")
 
     def test_mixed_source_lines_and_source_conflict_preserve_actual_details(self):
         lines = [{"amount": "1000", "tax_amount": "130", "tax_rate": "13%"},
                  {"amount": "1000", "tax_amount": "60", "tax_rate": "6%"}]
-        self.assertEqual(resolve("2000", "190", "2190", source_line_items=lines).rate_label, "多税率")
-        self.assertEqual(resolve("3000", "190", "3190", source_line_items=[*lines, {"amount": "1000"}]).rate_label, "多税率")
+        self.assertEqual(resolve("2000", "190", "2190", source_line_items=lines).rate_label, "—")
+        self.assertEqual(resolve("3000", "190", "3190", source_line_items=[*lines, {"amount": "1000"}]).rate_label, "—")
         conflict = resolve("2000", "190", "2190", "13%", source_line_items=lines)
         self.assertEqual(conflict.rate_label, "—")
         self.assertEqual(conflict.issue, "来源税率与明细税率不一致")
@@ -160,7 +160,7 @@ class InvoiceFinancialValuesTests(unittest.TestCase):
                     for i, rate in enumerate(rates)]
             before = deepcopy(rows)
             [result] = aggregate_invoice_line_rows(rows)
-            self.assertEqual(result["tax_rate"], expected)
+            self.assertIsNone(result["tax_rate"])
             self.assertEqual(result["source_line_items"], before)
             self.assertEqual(rows, before)
 

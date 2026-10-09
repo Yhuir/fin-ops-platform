@@ -48,3 +48,5 @@
 - [web/src/test/EtcTicketManagementPage.test.tsx](../../../web/src/test/EtcTicketManagementPage.test.tsx)
 
 通用查询、事务、权限与错误边界见[系统架构](../../../ARCHITECTURE.md)；验证方法见[开发说明](../../development.md)。测试文件是可执行证据，本文不保存某一次测试的通过记录。
+
+ETC XML 的整票字段与真实明细分别保存；没有整票税率时保持空值，不用明细补齐。登记 PDF 票面提供准确身份及明确标题时读取票种，渠道本身不代表任何票种。

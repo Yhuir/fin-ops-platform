@@ -138,6 +138,7 @@ type ApiImportTemplatesPayload = {
 };
 
 type ApiManualInvoiceEntryValues = {
+  invoice_kind?: string;
   invoice_direction?: string;
   invoice_nature?: string;
   seller_name?: string;
@@ -414,6 +415,7 @@ function mapManualInvoiceEntryValues(
   if (direction === "input" || direction === "output") values.invoiceDirection = direction;
   if (nature === "blue" || nature === "red") values.invoiceNature = nature;
   const fields: Array<[keyof ManualInvoiceEntryValues, unknown]> = [
+    ["invoiceKind", payload.invoice_kind],
     ["sellerName", payload.seller_name],
     ["sellerTaxNo", payload.seller_tax_no],
     ["buyerName", payload.buyer_name],
@@ -436,6 +438,8 @@ function mapManualInvoiceEntryValues(
 
 function serializeManualInvoiceEntryValues(values: ManualInvoiceEntryValues) {
   return {
+    source_file_name: values.sourceFileName,
+    source_file_content: values.sourceFileContent,
     invoice_direction: values.invoiceDirection,
     invoice_nature: values.invoiceNature,
     seller_name: values.sellerName,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.invoice_source_fixtures import with_original
+
 import json
 import unittest
 from types import SimpleNamespace
@@ -44,7 +46,7 @@ def _multipart_document() -> tuple[bytes, dict[str, str]]:
 
 
 def _manual_invoice_payload() -> dict[str, str]:
-    return {
+    return with_original({
         "invoice_direction": "input",
         "invoice_nature": "blue",
         "seller_name": "云南供应商有限公司",
@@ -58,7 +60,7 @@ def _manual_invoice_payload() -> dict[str, str]:
         "tax_rate": "13",
         "tax_amount": "13.00",
         "total_with_tax": "113.00",
-    }
+    })
 
 
 class WorkbenchInvoiceSupplementApiTests(unittest.TestCase):

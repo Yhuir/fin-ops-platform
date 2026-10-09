@@ -864,17 +864,14 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
         self.assertIn("status = 'completed'", connection.calls[1][0])
         self.assertIn("status = 'confirmed'", connection.calls[2][0])
 
-    def test_plan_restores_bank_provenance_and_aggregates_invoice_components(self) -> None:
+    def test_plan_restores_bank_provenance_without_inventing_invoice_totals(self) -> None:
         plan = build_import_audit_repair_plan(_snapshot())
 
         self.assertEqual(len(plan["bank_rows"]), 1)
         self.assertEqual(plan["bank_rows"][0]["row_id"], "batch_row:batch-bank-1:00001")
         self.assertEqual(plan["bank_rows"][0]["linked_object_id"], "transaction-1")
-        self.assertEqual(len(plan["invoice_updates"]), 1)
-        self.assertEqual(plan["invoice_updates"][0]["amount"], "37.81")
-        self.assertEqual(plan["invoice_updates"][0]["tax_amount"], "4.92")
-        self.assertEqual(plan["invoice_updates"][0]["total_with_tax"], "42.73")
-        self.assertEqual(plan["affected_invoice_months"], ["2026-07"])
+        self.assertEqual(plan["invoice_updates"], [])
+        self.assertEqual(plan["affected_invoice_months"], [])
         self.assertEqual(
             plan["rollback_manifest"]["delete_bank_row_ids"],
             ["batch_row:batch-bank-1:00001"],
@@ -899,18 +896,6 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                 )
             }
         ]
-        invoice_update = first_plan["invoice_updates"][0]
-        for component in snapshot["invoice_rows"]:
-            component.update(
-                {
-                    "amount": invoice_update["amount"],
-                    "signed_amount": invoice_update["signed_amount"],
-                    "tax_amount": invoice_update["tax_amount"],
-                    "total_with_tax": invoice_update["total_with_tax"],
-                    "tax_rate": invoice_update["tax_rate"],
-                }
-            )
-
         second_plan = build_import_audit_repair_plan(snapshot)
 
         self.assertEqual(second_plan["bank_rows"], [])

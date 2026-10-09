@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+from tests.invoice_source_fixtures import with_original
+from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
 from contextlib import contextmanager
 from copy import deepcopy
 
@@ -16,8 +18,7 @@ from fin_ops_platform.services.workbench_invoice_supplement_service import (
 
 class _Recognizer:
     def recognize_uploaded_invoice(self, *, file_name: str, content: bytes) -> dict[str, str]:
-        del file_name, content
-        return {}
+        return OAAttachmentInvoiceService().recognize_uploaded_invoice(file_name=file_name, content=content)
 
 
 class _Connection:
@@ -83,7 +84,7 @@ class _RelationCommandService:
 
 
 def _invoice_payload(invoice_number: str, total: str, net: str, tax: str) -> dict[str, str]:
-    return {
+    return with_original({
         "invoice_direction": "input",
         "invoice_nature": "blue",
         "seller_name": "云南供应商有限公司",
@@ -97,7 +98,7 @@ def _invoice_payload(invoice_number: str, total: str, net: str, tax: str) -> dic
         "tax_rate": "10",
         "tax_amount": tax,
         "total_with_tax": total,
-    }
+    })
 
 
 class WorkbenchInvoiceSupplementServiceTests(unittest.TestCase):
@@ -219,6 +220,7 @@ class WorkbenchInvoiceSupplementServiceTests(unittest.TestCase):
         })
         duplicate_payload = _invoice_payload("26117000001052654676", "27.05", "26.26", "0.79")
         duplicate_payload.update({"buyer_name": "购方识别错字", "seller_name": "销方识别错字"})
+        duplicate_payload = with_original(duplicate_payload)
         link_preview = ManualInvoiceEntryService(
             file_import_service=self.files,
             document_recognizer=_Recognizer(),

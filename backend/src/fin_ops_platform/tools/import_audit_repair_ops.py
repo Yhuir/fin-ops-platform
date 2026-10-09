@@ -396,6 +396,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Stored tax header import file ID; use --invoice-id for exact existing targets.")
     parser.add_argument("--repair-invoice-oa-source", action="append", default=[],
                         help="Exact registered OA attachment keys; read financial facts from their originals.")
+    parser.add_argument("--repair-invoice-source-attributes", action="store_true")
     parser.add_argument("--repair-invoice-party-fields", action="store_true",
                         help="Also correct explicit seller/buyer names and tax IDs from verified tax headers.")
     parser.add_argument("--expected-invoice-header-repair-count", type=int)
@@ -858,6 +859,9 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         return _run_oa_bank_account_invoice_repair(args, stdout=stdout)
     if args.export_source_file_id:
         return _export_source_file(args, stdout=stdout)
+    if args.repair_invoice_source_attributes:
+        from fin_ops_platform.tools.invoice_source_attribute_repair import run
+        return run(args, stdout=stdout)
     if args.repair_invoice_party_fields and not (args.repair_invoice_financial_source or args.repair_invoice_oa_source):
         raise SystemExit("Party repair requires a verified financial source and exact invoice IDs.")
     if args.repair_invoice_financial_source or args.repair_invoice_oa_source:
