@@ -3122,15 +3122,21 @@ release_gate_activate() {
   schema_plan_path="$(mktemp /run/finops-schema-plan.XXXXXX)"
   trap "$(printf 'rm -f -- %q %q' "$profile_report" "$schema_plan_path")" EXIT
   release_gate_profile "$release" --json >"$profile_report"
-  release_profile="$("$API_PYTHON" - "$profile_report" <<'PY'
+  release_profile="$("$API_PYTHON" - "$profile_report" "$resume_forward_repair" <<'PY'
 import json
 from pathlib import Path
 import sys
 
-payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+path = Path(sys.argv[1])
+payload = json.loads(path.read_text(encoding="utf-8"))
 profile = payload.get("profile")
 if profile not in {"frontend", "runtime", "acl"}:
     raise SystemExit("release profile is invalid")
+if sys.argv[2] == "--resume-forward-repair" and profile == "frontend":
+    # Even an unchanged candidate must restart and fully verify the stopped runtime.
+    profile = "runtime"
+    payload["profile"] = profile
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 print(profile)
 PY
 )"
@@ -3152,7 +3158,6 @@ PY
   install -m 0600 "$profile_report" "$evidence_dir/profile.json"
   install -m 0600 "$schema_plan_path" "$evidence_dir/schema-compatibility-plan.json"
   if [[ "$resume_forward_repair" == --resume-forward-repair ]]; then
-    [[ "$release_profile" != frontend ]] || die "forward repair requires a runtime candidate"
     record_forward_repair_preflight "$previous_release" "$schema_plan_path" "$evidence_dir"
   elif [[ "$release_profile" == "frontend" ]]; then
     if ! release_gate_frontend_checkpoint \

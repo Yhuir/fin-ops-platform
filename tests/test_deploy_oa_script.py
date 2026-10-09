@@ -284,6 +284,33 @@ class DeployOAScriptTest(unittest.TestCase):
                 "--no-activate", "--resume-forward-repair",
             ]), root_dir=Path("/workspace"))
 
+    def test_forward_repair_uses_full_runtime_profile_even_without_source_changes(self) -> None:
+        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
+        activation = script.split("release_gate_activate() {", 1)[1]
+        selection = '  release_profile="$(' + activation.split('  release_profile="$(', 1)[1].split(
+            '  schema_compatibility_plan "$release"', 1
+        )[0]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "profile.json"
+            for mode in ("", "--resume-forward-repair"):
+                for original in ("frontend", "runtime", "acl", "invalid"):
+                    with self.subTest(mode=mode, original=original):
+                        path.write_text(json.dumps({"profile": original}))
+                        result = subprocess.run(
+                            ["bash", "-c", 'set -euo pipefail\n' + selection + '\nprintf "%s" "$release_profile"'],
+                            env={**os.environ, "profile_report": str(path), "API_PYTHON": sys.executable,
+                                 "resume_forward_repair": mode}, text=True, capture_output=True, check=False,
+                        )
+                        if original == "invalid":
+                            self.assertNotEqual(result.returncode, 0)
+                            continue
+                        expected = "runtime" if mode and original == "frontend" else original
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(result.stdout, expected)
+                        self.assertEqual(json.loads(path.read_text())["profile"], expected)
+        self.assertIn('release_gate_checkpoint "$release" t0', activation)
+        self.assertIn('release_gate_checkpoint "$release" t30', activation)
+
     def test_forward_repair_requires_exact_failed_schema_and_stopped_runtime(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
         function = "forward_repair_maintenance_services() {" + script.split(
