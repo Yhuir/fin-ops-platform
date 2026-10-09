@@ -80,6 +80,7 @@ class OAAttachmentInvoiceService:
         timeout_seconds: float = 10.0,
         max_download_bytes: int = 20 * 1024 * 1024,
         source_root: str | Path | None = None,
+        source_url_prefix: str | None = None,
     ) -> None:
         configured_base_url = clean_string(os.getenv("FIN_OPS_OA_ATTACHMENT_BASE_URL") or "")
         self._base_url = (base_url or configured_base_url or "https://www.yn-sourcing.com/oa-api").rstrip("/")
@@ -88,6 +89,11 @@ class OAAttachmentInvoiceService:
         self._ocr_engine: Any | None = None
         configured_root = source_root or os.getenv("FIN_OPS_OA_ATTACHMENT_SOURCE_ROOT")
         self._source_root = Path(configured_root).resolve(strict=True) if configured_root else None
+        self._source_url_prefix = (source_url_prefix or os.getenv("FIN_OPS_OA_ATTACHMENT_SOURCE_URL_PREFIX") or "").rstrip("/") + "/"
+        if self._source_url_prefix != "/":
+            source_url = urlsplit(self._source_url_prefix)
+            if source_url.scheme not in {"http", "https"} or not source_url.netloc or source_url.query or source_url.fragment:
+                raise ValueError("OA attachment source URL prefix must be an absolute URL path.")
         if self._source_root is not None and not self._source_root.is_dir():
             raise ValueError("OA attachment source root must be a directory.")
 
@@ -368,15 +374,20 @@ class OAAttachmentInvoiceService:
     def _read_source_content(self, url: str) -> bytes:
         # Explicit local-source mode for a co-located OA file owner. It never
         # retries HTTP or searches other filenames if the registered path fails.
-        base, source = urlsplit(self._base_url), urlsplit(url)
-        if (source.scheme, source.netloc) != (base.scheme, base.netloc) or source.query or source.fragment:
+        source = urlsplit(url)
+        if source.query or source.fragment:
             raise OAAttachmentDownloadError("source_path_invalid")
-        prefix = base.path.rstrip("/") + "/"
-        if not source.path.startswith(prefix):
+        base_prefix = self._base_url.rstrip("/") + "/"
+        if url.startswith(base_prefix):
+            relative = unquote(url[len(base_prefix):])
+            if relative.startswith("fileManager/"):
+                relative = relative[len("fileManager/"):]
+        elif self._source_url_prefix != "/" and url.startswith(self._source_url_prefix):
+            # The configured OA file-service origin is an explicit source mapping,
+            # not an alternate download attempted after a failed request.
+            relative = unquote(url[len(self._source_url_prefix):])
+        else:
             raise OAAttachmentDownloadError("source_path_invalid")
-        relative = unquote(source.path[len(prefix):])
-        if relative.startswith("fileManager/"):
-            relative = relative[len("fileManager/"):]
         if not relative or relative.startswith("/") or ".." in PurePosixPath(relative).parts or "\\" in relative:
             raise OAAttachmentDownloadError("source_path_invalid")
         assert self._source_root is not None

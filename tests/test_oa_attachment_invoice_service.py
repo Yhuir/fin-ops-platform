@@ -962,6 +962,18 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
                     self.assertTrue(result["parse_error"])
                 http.assert_not_called()
 
+    def test_registered_internal_file_service_prefix_maps_to_same_original(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        with TemporaryDirectory() as directory:
+            (Path(directory) / "ticket.pdf").write_bytes(b"%PDF-source")
+            service = OAAttachmentInvoiceService(source_root=directory,
+                source_url_prefix="http://127.0.0.1:9300/fileManager/")
+            self.assertEqual(service._download_content("http://127.0.0.1:9300/fileManager/ticket.pdf"), b"%PDF-source")
+            for url in ("http://127.0.0.1:9301/fileManager/ticket.pdf", "http://127.0.0.1:9300/private/ticket.pdf"):
+                result = service.parse_file_result({"fileName": "ticket.pdf", "filePath": url})
+                self.assertEqual(result["parse_error"], "source_path_invalid")
+
     def test_local_source_rejects_symlink_escape(self):
         from tempfile import TemporaryDirectory
         from pathlib import Path
