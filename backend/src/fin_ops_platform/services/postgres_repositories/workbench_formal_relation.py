@@ -27,6 +27,7 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLE
 from fin_ops_platform.services.postgres_repositories.oa_source_alias_sql import (
     oa_source_aliases_sql,
 )
+from fin_ops_platform.services.postgres_repositories.workbench_page_query import _visible_invoice_sql
 from fin_ops_platform.services.workbench_etc_batch_link import (
     relation_external_etc_batch_ids,
     workbench_etc_summary_row_id,
@@ -213,7 +214,7 @@ class PostgresWorkbenchFormalRelationFactRepository:
             (start_date, end_date),
         )
         invoice_rows = self._connection.fetch_all(
-            """
+            f"""
             select
                 coalesce(legacy_mongo_id, id::text) as canonical_object_identity,
                 coalesce(legacy_mongo_id, id::text) as row_id,
@@ -240,11 +241,7 @@ class PostgresWorkbenchFormalRelationFactRepository:
                 updated_at as source_version
             from app.invoices
             where invoice_date between %s::date and %s::date
-              and status <> 'deleted'
-              and coalesce(workbench_visibility, 'visible') <> 'hidden_after_etc_submission'
-              and coalesce(raw_payload->'normalized_payload'->>'workbench_visibility', 'visible')
-                    <> 'hidden_after_etc_submission'
-              and coalesce(raw_payload->'normalized_payload'->>'etc_submission_status', '') <> 'submitted'
+              and {_visible_invoice_sql('invoices')}
             order by coalesce(legacy_mongo_id, id::text)
             """,
             (start_date, end_date),
@@ -692,7 +689,7 @@ class PostgresWorkbenchFormalRelationFactRepository:
             (bank_ids,),
         ) if bank_ids else []
         invoice_rows = self._connection.fetch_all(
-            """
+            f"""
             select
                 coalesce(legacy_mongo_id, id::text) as canonical_object_identity,
                 coalesce(legacy_mongo_id, id::text) as row_id,
@@ -719,8 +716,7 @@ class PostgresWorkbenchFormalRelationFactRepository:
                 updated_at as source_version
             from app.invoices
             where coalesce(legacy_mongo_id, id::text) = any(%s::text[])
-              and status <> 'deleted'
-              and coalesce(workbench_visibility, 'visible') <> 'hidden_after_etc_submission'
+              and {_visible_invoice_sql('invoices')}
             order by coalesce(legacy_mongo_id, id::text)
             """,
             (invoice_ids,),

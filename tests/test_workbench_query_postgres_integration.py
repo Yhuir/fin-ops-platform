@@ -195,6 +195,45 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(plan()["classification_counts"]["unresolved"], 1)
         self.assertEqual(plan()["update_count"], 0)
 
+    def test_oa_attachment_matching_excludes_submitted_etc_details_in_both_load_paths(self):
+        from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import (
+            PostgresWorkbenchFormalRelationFactRepository,
+        )
+
+        ids = ["attachment-normal", "attachment-etc-link", "attachment-etc-number"]
+        for index, row_id in enumerate(ids):
+            self.raw_connection.execute("""insert into app.invoices
+                (legacy_mongo_id, invoice_type, invoice_no, digital_invoice_no, invoice_date,
+                 invoice_month, amount, signed_amount, total_with_tax, status,
+                 workbench_visibility, source_links)
+                values (%s, 'input', %s, %s, '2026-07-01', '2026-07-01', 10, 10, 10,
+                        'active', 'visible', %s::jsonb)""",
+                (row_id, f"2650000000000000000{index}", f"2650000000000000000{index}",
+                 json.dumps([{"source_type": "oa_attachment_invoice",
+                              "derived_from_oa_id": "oa-attachment-proof"}])))
+        self.raw_connection.execute("""insert into app.etc_business_batches
+            (business_batch_id, status, scope_month, invoice_count, total_amount)
+            values ('attachment-etc-batch', 'oa_submitted', '2026-07-01', 2, 20)""")
+        self.raw_connection.execute("""insert into app.etc_invoices
+            (etc_invoice_id, business_batch_id, status, invoice_no, invoice_date,
+             amount, tax_amount, total_with_tax)
+            values ('attachment-etc-source', 'attachment-etc-batch', 'submitted',
+                    '26500000000000000002', '2026-07-01', 10, 0, 10)""")
+        self.raw_connection.execute("""insert into app.etc_batch_invoice_links
+            (business_batch_id, invoice_id, identity_key, link_status, link_source, confidence)
+            select 'attachment-etc-batch', id, 'attachment-etc-link', 'active', 'test', 'strict'
+            from app.invoices where legacy_mongo_id='attachment-etc-link'""")
+        repository = PostgresWorkbenchFormalRelationFactRepository(self.raw_connection)
+        facts = repository.load_batch(["2026-07"]).facts
+        self.assertEqual({fact.row_id for fact in facts} & set(ids), {"attachment-normal"})
+        historical = repository._load_historical_targets({"oa": set(), "bank": set(), "invoice": set(ids)})
+        self.assertEqual({row["row_id"] for row in historical["invoice"]}, {"attachment-normal"})
+        # A source-link refresh cannot expose ETC details alongside their summary.
+        self.repository.get_workbench_initial_page(scope_key="all")
+        self.assertEqual(self.raw_connection.fetch_one(
+            "select count(*) as count from app.invoices where legacy_mongo_id=any(%s)", (ids,)
+        )["count"], 3)
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.database_url = require_postgres_test_database_url()
