@@ -23,6 +23,18 @@ function Editor({ task, save = vi.fn() }: { task: CostStatisticsManualAllocation
   return <CostSourceAllocationForm tagLoading={false} onLoadTags={() => {}} task={task} draft={draft} disabled={false} saving={false} onChange={setDraft} onSave={save} />;
 }
 
+it('shows automatic zero placeholders as unallocated rather than explicit zero costs', () => {
+  const task = fixture();
+  task.allowsPartial = true;
+  task.units.forEach(unit => { unit.lockOaAmount = true; });
+  task.allocations = task.units.map(unit => ({unitId:unit.unitId,amount:'0.00'}));
+  render(<Editor task={task} />);
+  const table = within(screen.getByRole('table',{name:'成本分配明细',exact:true}));
+  expect(table.getAllByText('未分配',{exact:true})).toHaveLength(2);
+  expect(table.queryByText('零成本',{exact:true})).not.toBeInTheDocument();
+  expect(table.getAllByRole('button',{name:'新增来源',exact:true})).toHaveLength(2);
+});
+
 it('saves completed OA alone and shows pending approval without a false balanced message', async () => {
   const task = fixture(); const user = userEvent.setup(); const save = vi.fn();
   task.allowsPartial = true; task.waitingOaIds = ['pending-oa'];
@@ -221,6 +233,7 @@ it('opens full evidence with the keyboard without exposing internal IDs or movin
 
 it('keeps refunds and non-cost sources editable through inline actions with full closure', async () => {
   const user = userEvent.setup(); const task = fixture(); const save = vi.fn();
+  task.decisionMode = 'manual'; task.status = 'allocated'; task.pendingReasons = [];
   task.netOutflowTotal = '500.00'; task.wrongPaymentRefundTotal = '100.00';
   task.bankEvents.push({ ...task.bankEvents[0], transactionId: 'refund', eventKind: 'wrong_payment_refund', amount: '100.00' });
   task.nonCostAmount = '100.00'; task.nonCostReason = '往来款';

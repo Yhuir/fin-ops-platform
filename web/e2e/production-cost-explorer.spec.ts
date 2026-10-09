@@ -37,7 +37,9 @@ test('production cost explorer verifies five identity filters, stable pagination
     };
     if (view === 'bank_account') {
       const account = [...payload.facets.bank_accounts].sort((a, b) => Number(b.total_amount) - Number(a.total_amount))[0];
-      await choose('银行账户', 'bank_account_label', account.bank_account_label);
+      q.bank_account_label = account.bank_account_label;
+      await page.getByRole('option', { name: `选择银行账户 ${account.bank_account_display_label}`, exact: true }).click();
+      payload = await read(q);
     }
     if (view === 'project' || view === 'bank_account') await choose('项目名', 'project_name', payload.facets.projects[0].project_name);
     if (['project', 'cost_tag', 'bank_account'].includes(view)) {

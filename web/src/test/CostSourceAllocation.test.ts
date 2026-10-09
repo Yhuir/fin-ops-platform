@@ -138,11 +138,22 @@ describe('cost source amount closure', () => {
     expect(validateSourceDraft(task, draft)['unit.oa-1:parent']).toBe('请删除来源行后再设为零成本');
   });
   test('rehydrates valid zero decisions but does not reuse stale decisions', () => {
-    const task = sourceTask(); task.units.forEach(unit => { unit.lockOaAmount = false; }); task.allocations[0].amount = '0.00';
+    const task = sourceTask(); task.decisionMode = 'manual'; task.units.forEach(unit => { unit.lockOaAmount = false; }); task.allocations[0].amount = '0.00';
     expect(createSourceDraft(task).zeroUnitIds).toEqual(['oa-1:parent']);
     task.pendingReasons = ['allocation_stale'];
     task.sourceAllocations = { costLines: [{ unitId: 'oa-1:parent', bankTransactionId: 'bank-a', amount: '350.00' }], refundLinks: [], nonCostLines: [] };
     expect(createSourceDraft(task)).toMatchObject({ zeroUnitIds: [], costLines: [] });
+  });
+  test('does not turn an automatic unresolved zero amount into a zero-cost decision', () => {
+    const task = sourceTask(); task.allocations[0].amount = '0.00';
+    const draft = createSourceDraft(task);
+    expect(draft.zeroUnitIds).toEqual([]);
+    expect(sourceUnitAmounts(task, draft).get('oa-1:parent')).toBe(60000n);
+    expect(validateSourceDraft(task, draft)['unit.oa-1:parent']).toBe('该成本项分配合计须为 600.00');
+    task.allowsPartial = true;
+    expect(sourceUnitAmounts(task, draft).get('oa-1:parent')).toBe(0n);
+    expect(sourceSaveRequest(task, draft).allocations).toEqual([{unitId:'oa-1:parent',amount:'0.00'}]);
+    expect(draft.zeroUnitIds).toEqual([]);
   });
   test('rejects rows owned by an unavailable OA and malformed source amounts', () => {
     const task = sourceTask(); const draft = createSourceDraft(task);

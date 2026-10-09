@@ -67,7 +67,7 @@ export function createSourceDraft(task: CostStatisticsManualAllocationTask): Sou
   return {
     oaAmountLocks: Object.fromEntries(task.units.map(unit => [unit.unitId, unit.lockOaAmount])),
     manualItems: task.pendingReasons.includes("allocation_stale") ? [] : task.manualItems.map(item => ({ ...item })),
-    zeroUnitIds: task.pendingReasons.includes('allocation_stale') ? [] : task.allocations.filter(line => cents(line.amount) === 0n).map(line => line.unitId),
+    zeroUnitIds: stale || task.decisionMode !== 'manual' ? [] : task.allocations.filter(line => cents(line.amount) === 0n).map(line => line.unitId),
     costLines: [...(saved?.costLines ?? []), ...(suggested?.costLines ?? [])].map(line => ({ ...line, ownerId: line.unitId, id: ++id, costTag: stale ? undefined : tags.get(JSON.stringify([line.unitId, line.bankTransactionId])) })),
     refundLinks: [...(saved?.refundLinks ?? []), ...(suggested?.refundLinks ?? [])].map(line => ({ ...line, ownerId: line.refundTransactionId, id: ++id })),
     nonCostLines: [...(saved?.nonCostLines ?? []), ...(suggested?.nonCostLines ?? [])].map(line => ({ ...line, ownerId: '', id: ++id })),

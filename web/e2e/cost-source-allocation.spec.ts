@@ -185,6 +185,8 @@ test('keeps eight proven costs readonly and saves the two unresolved costs with 
   await expect(scene.drawer.locator('.cost-source-resolved')).not.toHaveAttribute('open');
   const table = scene.drawer.getByRole('table',{name:'成本分配明细',exact:true});
   await expect(table.locator('tbody')).toHaveCount(2);
+  await expect(table.getByText('未分配',{exact:true})).toHaveCount(2);
+  await expect(table.getByText('零成本',{exact:true})).toHaveCount(0);
   await expect(scene.drawer.getByRole('heading',{name:/OA费用 · 2 项.*2 张 OA/})).toBeVisible();
   await summary.click();
   const known = scene.drawer.getByRole('table',{name:'已自动确定的成本明细'});

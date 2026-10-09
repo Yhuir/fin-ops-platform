@@ -51,6 +51,13 @@ test('production pending costs show only unresolved editors and preserve readonl
     await headings.nth(index).click();
     const table = drawer.getByRole('table',{name:'成本分配明细',exact:true});
     await expect(table.locator('tbody')).toHaveCount(expectedEditors.length + task.manual_items.length);
+    if (task.decision_mode === 'automatic' && !task.pending_reasons.includes('allocation_stale')) {
+      for (let unitIndex=0;unitIndex<expectedEditors.length;unitIndex++) {
+        if (cents(expectedEditors[unitIndex].oa_original_amount)! > 0n) {
+          await expect(table.locator('tbody').nth(unitIndex).getByText('零成本',{exact:true})).toHaveCount(0);
+        }
+      }
+    }
     const readyMs = Date.now() - start;
     const resolved = drawer.locator('.cost-source-resolved');
     if (coverage.unitIds.size) {
