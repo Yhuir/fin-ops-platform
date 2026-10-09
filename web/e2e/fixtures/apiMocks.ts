@@ -3326,7 +3326,7 @@ function inputInvoiceUsageClassification(rows: Array<{ payment_status: { code: s
       id: `category:${item.id}`, label: item.label, count: used.filter(row => row.payment_status.code === item.id).length,
     }));
     return { id: parent, label: parent === "paid" ? "已付款" : "未付款", tone: parent,
-      count: rows.filter(row => (row.bank.relation_count > 0 ? "paid" : "unpaid") === parent).length, children };
+      count: used.filter(row => (row.bank.relation_count > 0 ? "paid" : "unpaid") === parent).length, children };
   });
   return { all: { id: "all", label: "全部发票", count: rows.length },
     used: { id: "used", label: "已使用", count: used.length },

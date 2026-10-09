@@ -210,6 +210,15 @@ class PostgresInputInvoiceUsageQueryRepository:
                 invoice_ids=invoice_ids,
                 row_id=row_id,
             )
+            classification_where_sql, classification_where_params = _where_sql(
+                keyword=keyword,
+                invoice_date_from=invoice_date_from,
+                invoice_date_to=invoice_date_to,
+                filters=[item for item in filters if item["field"] not in {"usage_status", "payment_status", "payment_group"}],
+                field_sql=_INPUT_FIELDS,
+                invoice_ids=invoice_ids,
+                row_id=row_id,
+            )
             relation_where_sql, relation_where_params = _where_sql(
                 keyword=keyword, invoice_date_from=invoice_date_from,
                 invoice_date_to=invoice_date_to,
@@ -221,6 +230,8 @@ class PostgresInputInvoiceUsageQueryRepository:
                 f"(select * from final_rows {where_sql}), "
                 f"status_option_rows as materialized "
                 f"(select * from final_rows {status_where_sql}), "
+                f"classification_rows as materialized "
+                f"(select invoice_ids, usage_status, payment_group, status_code from final_rows {classification_where_sql}), "
                 f"relation_option_rows as materialized "
                 f"(select * from final_rows {relation_where_sql})"
             )
@@ -299,10 +310,11 @@ class PostgresInputInvoiceUsageQueryRepository:
                     group by status_code
                     union all
                     select 'classification', category.value, count(distinct member.invoice_id)::bigint
-                    from status_option_rows
+                    from classification_rows
                     cross join lateral unnest(invoice_ids) member(invoice_id)
                     cross join lateral (values ('all'), (usage_status),
-                        (payment_group), (payment_group || ':' || status_code)
+                        (case when usage_status = 'used' then payment_group end),
+                        (case when usage_status = 'used' then payment_group || ':' || status_code end)
                     ) category(value)
                     where category.value is not null
                     group by category.value
@@ -352,6 +364,7 @@ class PostgresInputInvoiceUsageQueryRepository:
                     *base_params,
                     *where_params,
                     *status_where_params,
+                    *classification_where_params,
                     *relation_where_params,
                     page_size,
                     offset,

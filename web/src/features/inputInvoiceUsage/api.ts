@@ -278,6 +278,12 @@ function mapRelation<T>(rawValue: unknown, mapper: (value: unknown) => T | null)
 function mapRowsResponse(payload: unknown): InputInvoiceUsageRowsResponse {
   const raw = objectValue(payload);
   const pagination = objectValue(raw.pagination);
+  if (raw.classification != null) {
+    const classification = objectValue(raw.classification);
+    if (!classification.all || !classification.used || !classification.unused || !Array.isArray(classification.groups)) {
+      throw new Error("进项发票分类数据不完整，请刷新页面。");
+    }
+  }
   return {
     classification: raw.classification as InputInvoiceUsageRowsResponse["classification"],
     rows: arrayValue(raw.rows).map((item) => {

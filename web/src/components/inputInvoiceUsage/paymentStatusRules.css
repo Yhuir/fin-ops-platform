@@ -8,10 +8,6 @@
 .payment-rules-body [data-slot="text-field"] input:not([type="number"]) { min-width: 110px; }
 .payment-rules-oa { min-width: 200px; display: grid; gap: 8px; }
 .payment-rules-body [role="alert"] { color: var(--danger); }
-.input-invoice-usage-filterbar { display: flex; justify-content: flex-end; padding: 10px 16px 0; }
-.input-invoice-usage-status-select { width: 200px; display: flex; flex-direction: row; align-items: center; gap: 10px; }
-.input-invoice-usage-status-select > label { white-space: nowrap; }
-.input-invoice-usage-status-select > button { flex: 1; }
 .payment-rules-condition-error { display: block; max-width: 160px; margin-top: 6px; font-size: 12px; line-height: 1.5; }
 .input-invoice-usage-invoice-heading { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px 14px; }
 .input-invoice-usage-filtered-summary { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }

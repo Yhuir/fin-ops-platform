@@ -2,7 +2,7 @@ import { expect, test, setCheckbox } from "./fixtures/strictTest";
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 
-test("payment fact hierarchy, independent usage and rule edits retain scope and server summary", async ({ page }, info) => {
+test("payment fact hierarchy, usage parents and rule edits retain scope and server summary", async ({ page }, info) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await installDeterministicApiMocks(page, { sessionMode: "admin" });
   const first = page.waitForResponse(response => new URL(response.url()).pathname === "/api/input-invoice-usage/rows");
@@ -14,7 +14,7 @@ test("payment fact hierarchy, independent usage and rule edits retain scope and 
   const writes: Array<Record<string, unknown>> = [];
   await page.route("**/api/input-invoice-usage/rows?*", route => route.fulfill({ json: { ...payload,
     summary: { invoiceCount: 13, totalWithTax: "8765.43", taxAmount: "350.10", missingTaxAmountCount: 2, unclassifiedCount: 0 },
-    classification: { all: { id: "all", label: "全部发票", count: 13 }, groups: [
+    classification: { all: { id: "all", label: "全部发票", count: 13 }, used: { id: "used", label: "已使用", count: 13 }, unused: { id: "unused", label: "待使用", count: 0 }, groups: [
       { id: "paid", label: "已付款", count: 4, tone: "paid", children: [] },
       { id: "unpaid", label: "未付款", count: 9, tone: "unpaid", children: rules.length ? [{ id: "category:custom_review", label: rules[0].label, count: 9 }] : [] },
     ] },
@@ -32,15 +32,14 @@ test("payment fact hierarchy, independent usage and rule edits retain scope and 
   });
   await page.reload();
   const classification = page.getByRole("region", { name: "进项发票使用分类" });
-  await expect(classification.getByRole("button", { name: /待使用|已使用/ })).toHaveCount(0);
+  await expect(classification.getByRole("button", { name: /待使用|已使用/ })).toHaveCount(2);
   await expect(classification.getByRole("button", { name: "未付款 9 张", exact: true })).toBeVisible();
   await expect(page.getByLabel("当前筛选发票汇总")).toHaveText("13 张价税合计 8765.43税额合计 350.10（缺失 2 张）");
-  await page.getByRole("button", { name: /使用状态/ }).click();
-  await page.getByRole("option", { name: "待使用", exact: true }).click();
+  await classification.getByRole("button", { name: "待使用 0 张", exact: true }).click();
   const categoryRequest = page.waitForRequest(request => request.url().includes("/api/input-invoice-usage/rows?"));
   await classification.getByRole("button", { name: "待核对 9 张", exact: true }).click();
   expect(JSON.parse(decodeURIComponent(new URL((await categoryRequest).url()).searchParams.get("filters")!))).toEqual(expect.arrayContaining([
-    { field: "usage_status", operator: "in", values: ["unused"] }, { field: "payment_group", operator: "in", values: ["unpaid"] }, { field: "payment_status", operator: "in", values: ["custom_review"] },
+    { field: "usage_status", operator: "in", values: ["used"] }, { field: "payment_group", operator: "in", values: ["unpaid"] }, { field: "payment_status", operator: "in", values: ["custom_review"] },
   ]));
   await page.screenshot({ animations: "disabled", path: info.outputPath("input-invoice-main.png") });
   if (await page.getByRole("button", { name: "更多页面操作" }).isVisible()) await page.getByRole("button", { name: "更多页面操作" }).click();
@@ -65,7 +64,7 @@ test("payment fact hierarchy, independent usage and rule edits retain scope and 
   await drawer.getByRole("button", { name: "保存", exact: true }).click();
   await expect(drawer.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
   await drawer.getByRole("button", { name: "关闭支付状态规则抽屉" }).click();
-  await expect(classification.getByRole("button", { name: "全部发票 13 张" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: /待使用.*使用状态/ })).toBeVisible();
+  await expect(classification.getByRole("button", { name: "未付款 9 张" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: /使用状态/ })).toHaveCount(0);
   await expectNoUnexpectedSuccessUiErrors(page);
 });

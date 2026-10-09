@@ -37,10 +37,22 @@ describe("invoice usage classification", () => {
     const paid = screen.getByRole("group", { name: "已付款" });
     expect(within(paid).getAllByRole("button")).toHaveLength(11);
     expect(within(paid).getByRole("button", { name: "分类 10 2 张" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.queryByRole("button", { name: /已使用|待使用/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "已使用 20 张" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "待使用 10 张" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "未付款 0 张" }));
     expect(onSelect).toHaveBeenCalledWith("unpaid");
     expect(screen.getByRole("button", { name: "未付款 0 张" })).toBeEnabled();
+  });
+
+  test("usage parents stay in the table and select by stable identity", async () => {
+    const onSelect = vi.fn();
+    render(<InvoiceUsageClassification data={data} selectedId="unused" onSelect={onSelect} />);
+    expect(within(screen.getByRole("group", { name: "已使用" })).getByRole("group", { name: "已付款" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "待使用 10 张" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(screen.getByRole("button", { name: "已使用 20 张" }));
+    expect(onSelect).toHaveBeenCalledWith("used");
+    await userEvent.click(screen.getByRole("button", { name: "全部发票 30 张" }));
+    expect(onSelect).toHaveBeenCalledWith("all");
   });
 
   test("refresh retains known counts; failure shows unknown rather than false zero", () => {

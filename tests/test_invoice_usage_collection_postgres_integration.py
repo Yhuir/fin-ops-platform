@@ -91,7 +91,7 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
         payload = service.list_rows()
         tree = payload["classification"]
         self.assertEqual([tree[key]["count"] for key in ("all", "used", "unused")], [5, 4, 1])
-        self.assertEqual([group["count"] for group in tree["groups"]], [4, 1])
+        self.assertEqual([group["count"] for group in tree["groups"]], [4, 0])
         self.assertEqual({row["invoiceId"]: row["paymentStatus"]["code"] for row in payload["rows"]},
                          {"unused": "waiting_payment", "equal": "paid", "less": "invoice_less_payment", "greater": "invoice_greater_payment", "income": "invoice_greater_payment"})
         filters = [{"field": "usage_status", "operator": "in", "values": ["used"]},
@@ -99,8 +99,8 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
                    {"field": "payment_group", "operator": "in", "values": ["paid"]}]
         filtered = service.list_rows(filters=filters)
         self.assertEqual(filtered["summary"]["invoiceCount"], 4)
-        self.assertEqual(filtered["classification"]["all"]["count"], 4)
-        self.assertEqual(filtered["classification"]["unused"]["count"], 0)
+        self.assertEqual(filtered["classification"]["all"]["count"], 5)
+        self.assertEqual(filtered["classification"]["unused"]["count"], 1)
         self.assertEqual([group["count"] for group in filtered["classification"]["groups"]], [4, 0])
         self.assertEqual(service.export_page(filters=filters)["rows"], filtered["rows"])
         linked = service.list_rows(filters=[{"field": "oa_relation", "operator": "in", "values": ["linked"]}])
@@ -141,7 +141,7 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(snapshot.summary["totalWithTax"], "50.00")
         self.assertEqual(snapshot.summary["taxAmount"], "0.00")
         self.assertEqual(snapshot.summary["missingTaxAmountCount"], 1)
-        self.assertEqual([group["count"] for group in snapshot.classification["groups"]], [2, 1])
+        self.assertEqual([group["count"] for group in snapshot.classification["groups"]], [2, 0])
         facts = {group["row_key"]: group["payment_facts"] for group in snapshot.groups}
         self.assertEqual(facts["relation:case-zero"]["invoice_net_sign"], "zero")
         self.assertEqual(facts["relation:case-positive"]["invoice_net_sign"], "positive")
@@ -178,7 +178,7 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
             self.assertEqual(cleared.payment_status_rules["rules"], [])
             self.assertEqual(cleared.summary, {**snapshot.summary, "unclassifiedCount": 3})
             self.assertEqual({group["row_key"] for group in cleared.groups}, {group["row_key"] for group in snapshot.groups})
-            self.assertEqual([group["count"] for group in cleared.classification["groups"]], [2, 1])
+            self.assertEqual([group["count"] for group in cleared.classification["groups"]], [2, 0])
             self.assertTrue(all(group["children"] == [] for group in cleared.classification["groups"]))
             with self.assertRaises(InputInvoiceUsagePaymentRulesValidationError) as conflict:
                 provider.update_payment_status_rules(

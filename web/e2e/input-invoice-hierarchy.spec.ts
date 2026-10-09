@@ -15,6 +15,13 @@ test("hierarchy wraps ten categories and combines selection with the OA header f
   for (const width of [1920, 1440, 1024]) {
     await page.setViewportSize({ width, height: 1100 });
     expect(await panel.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+    await expect(page.getByRole("button", { name: /使用状态/ })).toHaveCount(0);
+    const usedBox = await panel.getByRole("group", { name: "已使用", exact: true }).boundingBox();
+    const unusedBox = await panel.getByRole("button", { name: /^待使用/ }).boundingBox();
+    expect(unusedBox!.x).toBeGreaterThanOrEqual(usedBox!.x + usedBox!.width - 1);
+    expect(Math.abs(unusedBox!.y - usedBox!.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(unusedBox!.height - usedBox!.height)).toBeLessThanOrEqual(1);
+
     const parent = panel.getByRole("group", { name: "已付款", exact: true });
     const parentBox = await parent.boundingBox();
     const rowPositions = new Set<number>();
@@ -37,6 +44,7 @@ test("hierarchy wraps ten categories and combines selection with the OA header f
   await page.getByRole("menuitemradio", { name: "未关联 OA", exact: true }).click();
   const filters = JSON.parse(decodeURIComponent(new URL((await requested).url()).searchParams.get("filters")!));
   expect(filters).toEqual(expect.arrayContaining([
+    { field: "usage_status", operator: "in", values: ["used"] },
     { field: "payment_group", operator: "in", values: ["paid"] },
     { field: "payment_status", operator: "in", values: ["custom_9"] },
     { field: "oa_relation", operator: "in", values: ["unlinked"] },
@@ -45,5 +53,5 @@ test("hierarchy wraps ten categories and combines selection with the OA header f
   payload.classification.groups[0].children = payload.classification.groups[0].children.filter((item: { id: string }) => item.id !== "category:custom_9");
   await page.reload();
   await expect(panel.getByRole("button", { name: "规则分类 10 0 张", exact: true })).toHaveCount(0);
-  await expect(panel.getByRole("button", { name: /^全部发票/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(panel.getByRole("button", { name: /^已付款/ })).toHaveAttribute("aria-pressed", "true");
 });

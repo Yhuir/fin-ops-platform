@@ -1050,8 +1050,8 @@ describe("Input invoice usage page", () => {
     const user = userEvent.setup();
     const fetchMock = installInputInvoiceUsageFetch();
     renderAuthenticatedAppAt("/input-invoice-usage");
-    await user.click(await screen.findByRole("button", { name: /使用状态/ }));
-    await user.click(await screen.findByRole("option", { name: "已使用", exact: true }));
+    await user.click(await screen.findByRole("button", { name: "已使用 1 张", exact: true }));
+    expect(screen.queryByRole("button", { name: /使用状态/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "OA 关联筛选" }));
     await user.click(await screen.findByRole("menuitemradio", { name: "未关联 OA" }));
     await waitFor(() => {
@@ -1066,8 +1066,48 @@ describe("Input invoice usage page", () => {
     await waitFor(() => {
       const filters = JSON.parse(decodeURIComponent(rowsRequests(fetchMock).at(-1)!.searchParams.get("filters")!));
       expect(filters).toContainEqual({ field: "payment_status", operator: "in", values: ["paid"] });
+      expect(filters).toContainEqual({ field: "usage_status", operator: "in", values: ["used"] });
+      expect(filters).toContainEqual({ field: "payment_group", operator: "in", values: ["paid"] });
       expect(filters).toContainEqual({ field: "oa_relation", operator: "in", values: ["unlinked"] });
     });
+    await user.click(screen.getByRole("button", { name: "待使用 0 张" }));
+    await waitFor(() => expect(JSON.parse(decodeURIComponent(rowsRequests(fetchMock).at(-1)!.searchParams.get("filters")!))).toEqual([
+      { field: "oa_relation", operator: "in", values: ["unlinked"] },
+      { field: "usage_status", operator: "in", values: ["unused"] },
+    ]));
+    await user.click(screen.getByRole("button", { name: "全部发票 1 张" }));
+    await waitFor(() => expect(JSON.parse(decodeURIComponent(rowsRequests(fetchMock).at(-1)!.searchParams.get("filters")!))).toEqual([
+      { field: "oa_relation", operator: "in", values: ["unlinked"] },
+    ]));
+  });
+
+  test("missing usage classification surfaces an error instead of fabricating counts", async () => {
+    installInputInvoiceUsageFetch({ ...rowsPayload, classification: { ...rowsPayload.classification, used: null } });
+    renderAuthenticatedAppAt("/input-invoice-usage");
+    expect(await screen.findByText("进项发票分类数据不完整，请刷新页面。")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "已使用 0 张" })).not.toBeInTheDocument();
+  });
+
+  test.each(["unused", "payment"])("normalizes stored %s classification without losing search", async mode => {
+    const fetchMock = installInputInvoiceUsageFetch();
+    window.sessionStorage.setItem(buildPageSessionStorageKey({ userScope: "101", pageKey: "input-invoice-usage", stateKey: "query" }), JSON.stringify(createStoredPayload({
+      version: 1, ttlMs: 60_000, value: {
+        page: 2, pageSize: 50, keyword: "供应商", month: "", invoiceDateFrom: "", invoiceDateTo: "",
+        filters: [
+          ...(mode === "unused" ? [{ field: "usage_status", operator: "in", values: ["unused"] }] : []),
+          { field: "payment_group", operator: "in", values: ["paid"] },
+          { field: "payment_status", operator: "in", values: ["paid"] },
+        ],
+        sortField: "", sortDirection: "", activeWorkflow: null, detailTarget: null,
+      },
+    })));
+    renderAuthenticatedAppAt("/input-invoice-usage");
+    await screen.findByRole("button", { name: "待使用 0 张" });
+    const query = rowsRequests(fetchMock)[0];
+    expect(query.searchParams.get("keyword")).toBe("供应商");
+    const filters = JSON.parse(decodeURIComponent(query.searchParams.get("filters")!));
+    if (mode === "unused") expect(filters).toEqual([{ field: "usage_status", operator: "in", values: ["unused"] }]);
+    else expect(filters).toContainEqual({ field: "usage_status", operator: "in", values: ["used"] });
   });
 
   test("opens OA reverse workspace with one-step draft creation and submitted history tabs", async () => {
@@ -1184,9 +1224,10 @@ describe("Input invoice usage page", () => {
       expect(rowsRequests(fetchMock).length).toBeGreaterThan(0);
     });
     const request = rowsRequests(fetchMock)[0];
-    expect(request.searchParams.get("page")).toBe(status === "pending" ? "1" : "3");
+    expect(request.searchParams.get("page")).toBe("1");
     expect(JSON.parse(decodeURIComponent(request.searchParams.get("filters") ?? "[]"))).toEqual(status === "pending" ? [] : [
       { field: "payment_status", operator: "in", values: [status] },
+      { field: "usage_status", operator: "in", values: ["used"] },
     ]);
     expect(request.searchParams.get("sort_field")).toBe("invoice_no");
     expect(request.searchParams.get("sort_direction")).toBe("asc");
@@ -1217,7 +1258,7 @@ describe("Input invoice usage page", () => {
       expect(request.searchParams.get("page")).toBe("1");
       expect(request.searchParams.get("page_size")).toBe("50");
       expect(request.searchParams.get("keyword")).toBe("供应商");
-      expect(JSON.parse(decodeURIComponent(request.searchParams.get("filters") ?? "[]"))).toEqual([stored.filters[0]]);
+      expect(JSON.parse(decodeURIComponent(request.searchParams.get("filters") ?? "[]"))).toEqual([stored.filters[0], { field: "usage_status", operator: "in", values: ["used"] }]);
       expect(request.searchParams.get("sort_direction")).toBe("asc");
     }
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

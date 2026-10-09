@@ -1,4 +1,5 @@
 import { Button } from "@heroui/react";
+import type { CSSProperties } from "react";
 import CountLabel from "../common/CountLabel";
 import "./invoiceUsageClassification.css";
 import "../common/classificationSelection.css";
@@ -38,14 +39,21 @@ export default function InvoiceUsageClassification({
   return (
     <section className="invoice-usage-classification" aria-label="进项发票使用分类" aria-busy={pending && !invalid}>
       {renderButton(data.all, "invoice-usage-classification__all")}
-      <div className="invoice-usage-classification__groups">
-        {data.groups.map(group => <div key={group.id} role="group" aria-label={group.label}
-          className={`invoice-usage-classification__group invoice-usage-classification__group--${group.tone}`}>
-          {renderButton(group, "invoice-usage-classification__group-title")}
-          <div className="invoice-usage-classification__children">
-            {group.children.map(child => renderButton(child, "invoice-usage-classification__child", `category:${group.id}:${child.id.slice("category:".length)}`))}
+      <div className="invoice-usage-classification__structure">
+        <div className="invoice-usage-classification__used-region" role="group" aria-label={data.used.label}>
+          {renderButton(data.used, "invoice-usage-classification__used")}
+          <div className="invoice-usage-classification__groups">
+            {data.groups.map(group => <div key={group.id} role="group" aria-label={group.label}
+              className={`invoice-usage-classification__group invoice-usage-classification__group--${group.tone}`}
+              style={{ "--classification-category-count": Math.max(1, group.children.length) } as CSSProperties}>
+              {renderButton(group, "invoice-usage-classification__group-title")}
+              <div className="invoice-usage-classification__children">
+                {group.children.map(child => renderButton(child, "invoice-usage-classification__child", `category:${group.id}:${child.id.slice("category:".length)}`))}
+              </div>
+            </div>)}
           </div>
-        </div>)}
+        </div>
+        {renderButton(data.unused, "invoice-usage-classification__unused")}
       </div>
     </section>
   );

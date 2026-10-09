@@ -62,6 +62,30 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
             'row_types',%s::text[],'relation_mode','manual_confirmed','status','active','amount_check','{"matched":true}'::jsonb)))""",
             (case,ids,types,case,ids,types))
 
+    def test_hierarchy_counts_stay_complete_and_unpaid_excludes_unused(self):
+        self.invoices(4)
+        self.bank("paid-bank", 10)
+        self.oa("unpaid-oa", 10)
+        self.relation("used-paid", ["candidate-1", "paid-bank"], ["invoice", "bank"])
+        self.relation("used-unpaid", ["candidate-2", "unpaid-oa"], ["invoice", "oa"])
+        # An invoice-only relation remains unused, even when a rule matches it.
+        self.relation("unused-pair", ["candidate-3", "candidate-4"], ["invoice", "invoice"])
+        expected = self.service.list_rows()["classification"]
+        self.assertEqual(expected["all"]["count"], 4)
+        self.assertEqual(expected["used"]["count"], 2)
+        self.assertEqual(expected["unused"]["count"], 2)
+        self.assertEqual({group["id"]: group["count"] for group in expected["groups"]}, {"paid": 1, "unpaid": 1})
+        for status, count in (("used", 2), ("unused", 2)):
+            filters = [{"field": "usage_status", "operator": "in", "values": [status]}]
+            selected = self.service.list_rows(filters=filters, page_size=1)
+            self.assertEqual(selected["classification"], expected)
+            self.assertEqual(selected["summary"]["invoiceCount"], count)
+            self.assertEqual(self.service.export_page(filters=filters)["summary"]["invoiceCount"], count)
+        keyword = self.service.list_rows(keyword="CAND-3")["classification"]
+        self.assertEqual(keyword["unused"]["count"], 2)
+        self.assertEqual(keyword["used"]["count"], 0)
+        self.assertEqual(sum(group["count"] for group in keyword["groups"]), 0)
+
     def test_net_payment_current_facts_drive_rows_filters_export_and_rules(self):
         self.invoices(3, 1015)
         with self.connection.transaction() as tx:

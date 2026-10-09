@@ -2,7 +2,7 @@ import { useSessionPermissions } from "../contexts/SessionContext";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
 import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
 import InvoiceUsageClassification from "../components/inputInvoiceUsage/InvoiceUsageClassification";
-import { Label, ListBox, Select, Button } from "@heroui/react";
+import { Button } from "@heroui/react";
 import { Download } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -106,6 +106,17 @@ function restoreQuery(raw: unknown): InputInvoiceUsageQuery {
     return initialQuery;
   }
   const filters = raw.filters.filter((filter) => !["invoice_date", "bank_trade_time", "relation_status"].includes(filter.field) && !(["payment_group", "payment_status"].includes(filter.field) && filter.values?.includes("pending"))).map(filter => (filter.field === "payment_status" && filter.values && filter.values.length > 1 ? { ...filter, values: [filter.values[0]] } : filter));
+  const usage = filters.find(filter => filter.field === "usage_status")?.values?.[0];
+  const hasPayment = filters.some(filter => ["payment_group", "payment_status"].includes(filter.field));
+  if (usage === "unused") {
+    for (let index = filters.length - 1; index >= 0; index--) {
+      if (["payment_group", "payment_status"].includes(filters[index].field)) filters.splice(index, 1);
+    }
+  } else if (hasPayment && usage !== "used") {
+    const index = filters.findIndex(filter => filter.field === "usage_status");
+    if (index >= 0) filters.splice(index, 1);
+    filters.push({ field: "usage_status", operator: "in", values: ["used"] });
+  }
   const dateScopeChanged = Boolean(raw.month || raw.invoiceDateFrom || raw.invoiceDateTo)
     || filters.length !== raw.filters.length;
   return {
@@ -345,11 +356,13 @@ export default function InputInvoiceUsagePage() {
   const selectedCategory = query.filters.find(item => item.field === "payment_status")?.values?.[0];
   const selectedParent = query.filters.find(item => item.field === "payment_group")?.values?.[0];
   const selectedClassification = selectedCategory && selectedParent ? `category:${selectedParent}:${selectedCategory}`
-    : selectedParent ?? "all";
+    : selectedParent ?? query.filters.find(item => item.field === "usage_status")?.values?.[0] ?? "all";
   const handleClassificationSelect = useCallback((id: string) => {
     setQuery(current => {
-      const filters = current.filters.filter(item => !["payment_group", "payment_status"].includes(item.field));
-      if (id !== "all") {
+      const filters = current.filters.filter(item => !["usage_status", "payment_group", "payment_status"].includes(item.field));
+      if (id === "used" || id === "unused") filters.push({ field: "usage_status", operator: "in", values: [id] });
+      else if (id !== "all") {
+        filters.push({ field: "usage_status", operator: "in", values: ["used"] });
         if (id.startsWith("category:")) {
           const [, parent, category] = id.split(":");
           filters.push({ field: "payment_group", operator: "in", values: [parent] });
@@ -363,7 +376,7 @@ export default function InputInvoiceUsagePage() {
     if (!classification || !selectedCategory || selectedCategory === "unclassified") return;
     const present = classification.groups.some(group => (!selectedParent || group.id === selectedParent)
       && group.children.some(child => child.id === `category:${selectedCategory}`));
-    if (!present) handleClassificationSelect("all");
+    if (!present) handleClassificationSelect(selectedParent ?? "used");
   }, [classification, selectedCategory, selectedParent, handleClassificationSelect]);
 
   const handlePaymentStatusRulesSaved = useCallback(async () => {
@@ -477,12 +490,6 @@ export default function InputInvoiceUsagePage() {
           actions={actions}
         >
           <div className="input-invoice-usage-content switch-surface finance-table-layout">
-            <div className="input-invoice-usage-filterbar"><Select aria-label="使用状态" className="input-invoice-usage-status-select"
-      selectedKey={query.filters.find(filter => filter.field === "usage_status")?.values?.[0] ?? "all"}
-      onSelectionChange={key => key === "all" ? handleFilterClear("usage_status") : handleFilterApply({ field: "usage_status", operator: "in", values: [String(key)] })}>
-      <Label>使用状态</Label><Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger><Select.Popover><ListBox>
-        <ListBox.Item id="all" textValue="全部">全部</ListBox.Item><ListBox.Item id="used" textValue="已使用">已使用</ListBox.Item><ListBox.Item id="unused" textValue="待使用">待使用</ListBox.Item>
-      </ListBox></Select.Popover></Select></div>
             {classification ? <InvoiceUsageClassification data={classification} selectedId={selectedClassification}
               pending={loading || refreshing} invalid={Boolean(error)} onSelect={handleClassificationSelect} /> : null}
             {!classification && !loading && !error ? <StatePanel tone="error" compact>分类数据缺失，请刷新页面。</StatePanel> : null}

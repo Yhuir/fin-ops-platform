@@ -304,8 +304,25 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         )
 
         sql = "\n".join(connection.transactions[0].statements)
-        self.assertEqual(sql.count("seller_name = any(%s::text[])"), 3)
+        self.assertEqual(sql.count("seller_name = any(%s::text[])"), 4)
         self.assertEqual(sql.count("status_code = any(%s::text[])"), 2)
+
+    def test_input_classification_excludes_own_filters_without_expanding_other_facets(self) -> None:
+        connection = RecordingConnection()
+        repository = PostgresInputInvoiceUsageQueryRepository(connection)
+        repository.load_page(
+            page=1, page_size=20, keyword="2986", invoice_date_from=None, invoice_date_to=None, month=None,
+            filters=[{"field": "usage_status", "operator": "in", "values": ["unused"]},
+                     {"field": "payment_group", "operator": "in", "values": ["unpaid"]}],
+            sort_field="invoice_date", sort_direction="desc", tenant_id="tenant-a",
+        )
+        sql = "\n".join(connection.transactions[0].statements)
+        classification_sql = sql.split("classification_rows as materialized", 1)[1].split("relation_option_rows", 1)[0]
+        self.assertNotIn("usage_status = any", classification_sql)
+        self.assertNotIn("payment_group = any", classification_sql)
+        status_sql = sql.split("status_option_rows as materialized", 1)[1].split("classification_rows", 1)[0]
+        self.assertIn("usage_status = any", status_sql)
+        self.assertIn("case when usage_status = 'used' then payment_group end", sql)
 
     def test_output_facets_keep_other_filters_and_overview_is_separate(self) -> None:
         connection = RecordingConnection()

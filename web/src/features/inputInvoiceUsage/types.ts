@@ -431,7 +431,7 @@ export type InvoiceUsageClassificationGroup = InvoiceUsageClassificationItem & {
 
 export type InvoiceUsageClassificationData = {
   all: InvoiceUsageClassificationItem;
-  used?: InvoiceUsageClassificationItem;
-  unused?: InvoiceUsageClassificationItem;
+  used: InvoiceUsageClassificationItem;
+  unused: InvoiceUsageClassificationItem;
   groups: InvoiceUsageClassificationGroup[];
 };

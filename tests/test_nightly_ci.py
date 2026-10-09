@@ -82,6 +82,7 @@ class NightlyCITests(unittest.TestCase):
             "production-output-invoice-summary.spec.ts",
             "production-input-invoice-tax-values.spec.ts",
             "production-input-invoice-oa-reverse.spec.ts",
+            "production-input-invoice-hierarchy.spec.ts",
             "production-oa-applicant-credentials.spec.ts",
             "production-tax-certification.spec.ts",
             "production-oa-manual-search.spec.ts",
