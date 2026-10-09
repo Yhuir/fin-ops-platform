@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer';
 import { expect, test } from './fixtures/strictTest';
 import { installDeterministicApiMocks } from './fixtures/apiMocks';
+import { expectNoUnexpectedSuccessUiErrors } from './fixtures/successAssertions';
 
 test('manual entry requires an original and sends its exact bytes without inventing missing values', async ({ page }) => {
   await installDeterministicApiMocks(page, {sessionMode: "user"});
@@ -28,6 +29,7 @@ test('manual entry requires an original and sends its exact bytes without invent
   await expect(drawer.getByLabel('发票票种')).toHaveValue('电子发票（增值税专用发票）');
   await expect(drawer.getByLabel('不含税价格')).toHaveValue('');
   await expect(drawer.getByLabel('税额', { exact: true })).toHaveValue('');
+  await expectNoUnexpectedSuccessUiErrors(page);
   await drawer.getByRole('button', { name: '预览', exact: true }).click();
   await drawer.getByRole('button', { name: '保存信息', exact: true }).click();
   await drawer.getByRole('button', { name: '录入发票池', exact: true }).click();
