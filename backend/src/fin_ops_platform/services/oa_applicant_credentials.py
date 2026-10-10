@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from threading import RLock
 from typing import Protocol
@@ -13,6 +13,8 @@ from fin_ops_platform.services.target_oa_applicant_token_provider import (
     TargetOaApplicantLoginError,
     TargetOaApplicantLoginUnavailableError,
 )
+
+_PASSWORD_UNCHANGED = object()
 
 
 class OaApplicantCredentialError(RuntimeError):
@@ -67,8 +69,9 @@ class OaApplicantLoginCredential:
 class OaApplicantCredentialRepository(Protocol):
     def list_credentials(self) -> list[OaApplicantCredentialSummary]: ...
     def get_credential(self, code: str) -> OaApplicantCredentialSummary | None: ...
-    def save_credential(self, *, summary: OaApplicantCredentialSummary, password: str,
+    def save_credential(self, *, summary: OaApplicantCredentialSummary, password: str | None,
                         actor_id: str, expected_version: int | None) -> OaApplicantCredentialSummary: ...
+    def read_password_for_verification(self, code: str, expected_version: int) -> OaApplicantLoginCredential: ...
     def delete_credential(self, *, target_applicant_code: str, actor_id: str, expected_version: int) -> None: ...
     def resolve_login_credential(self, target_applicant_code: str) -> OaApplicantLoginCredential | None: ...
 
@@ -118,13 +121,14 @@ class OaApplicantCredentialService:
                 if item.enabled and item.has_credential and item.credential_status == "configured"
                 and item.verified_at is not None and item.oa_user_id]
 
-    def save_credential(self, *, oa_user_id: object, password: object, remark: object,
+    def save_credential(self, *, oa_user_id: object, password: object = _PASSWORD_UNCHANGED, remark: object,
                         actor_id: str, can_admin_access: bool,
                         target_applicant_code: str | None = None,
                         expected_version: object = None) -> dict[str, object]:
         self._require_admin(can_admin_access)
         user_id = self._required_text(oa_user_id, "oaUserId")
-        if not isinstance(password, str) or not password or len(password) > 4096:
+        keep_password = password is _PASSWORD_UNCHANGED
+        if not keep_password and (not isinstance(password, str) or not password or len(password) > 4096):
             raise OaApplicantCredentialValidationError("请输入有效的 OA 登录密码。")
         if not isinstance(remark, str) or len(remark.strip()) > 100:
             raise OaApplicantCredentialValidationError("备注须为不超过 100 字的文本。")
@@ -140,6 +144,14 @@ class OaApplicantCredentialService:
                 raise OaApplicantCredentialValidationError("已绑定的 OA 申请人不能更换。")
         elif expected_version is not None:
             raise OaApplicantCredentialValidationError("新增申请人不能指定版本。")
+        if keep_password:
+            if existing is None or not existing.has_credential or existing.credential_status != "configured":
+                raise OaApplicantCredentialValidationError("请输入有效的 OA 登录密码。")
+            if existing.oa_user_id and existing.verified_at:
+                saved = self._repository.save_credential(
+                    summary=replace(existing, remark=remark.strip(), version=existing.version + 1),
+                    password=None, actor_id=self._actor(actor_id), expected_version=expected_version)
+                return self._summary_payload(saved)
         if self._directory is None or self._login_client is None or self._identity_resolver is None:
             raise OaApplicantCredentialConfigurationError("OA 凭据验证服务未配置。")
         try:
@@ -159,7 +171,9 @@ class OaApplicantCredentialService:
                for item in self._repository.list_credentials()):
             raise OaApplicantCredentialConflictError("该 OA 申请人已配置，请编辑已有记录。")
         try:
-            token = self._login_client.login(user.username, password)
+            verification_password = (self._repository.read_password_for_verification(
+                target_applicant_code, expected_version).password if keep_password else password)
+            token = self._login_client.login(user.username, verification_password)
             identity = self._identity_resolver.resolve_identity(token)
         except (TargetOaApplicantConfigurationError, TargetOaApplicantLoginUnavailableError, OAIdentityServiceError, TimeoutError, OSError) as exc:
             raise OaApplicantCredentialConfigurationError("暂时无法验证 OA 账号，请重试。") from exc
@@ -171,10 +185,11 @@ class OaApplicantCredentialService:
             target_applicant_code=target_applicant_code or uuid4().hex,
             target_applicant_name=user.display_name, oa_username=user.username,
             credential_status="configured", has_credential=True, oa_user_id=user.user_id,
+            enabled=existing.enabled if existing is not None else True,
             remark=remark.strip(), verified_at=datetime.now(UTC),
             version=expected_version + 1 if isinstance(expected_version, int) else 1,
         )
-        saved = self._repository.save_credential(summary=summary, password=password,
+        saved = self._repository.save_credential(summary=summary, password=None if keep_password else password,
                                                 actor_id=self._actor(actor_id), expected_version=expected_version)
         return self._summary_payload(saved)
 
@@ -236,7 +251,7 @@ class InMemoryOaApplicantCredentialRepository:
             row = self._records.get(code)
             return row[0] if row else None
 
-    def save_credential(self, *, summary: OaApplicantCredentialSummary, password: str,
+    def save_credential(self, *, summary: OaApplicantCredentialSummary, password: str | None,
                         actor_id: str, expected_version: int | None) -> OaApplicantCredentialSummary:
         del actor_id
         with self._lock:
@@ -248,8 +263,21 @@ class InMemoryOaApplicantCredentialRepository:
             if summary.oa_user_id and any(row[0].oa_user_id == summary.oa_user_id
                     and code != summary.target_applicant_code for code, row in self._records.items()):
                 raise OaApplicantCredentialConflictError("该 OA 申请人已配置。")
+            if password is None:
+                if current is None or not current.has_credential:
+                    raise OaApplicantCredentialValidationError("没有已保存的 OA 登录密码。")
+                password = self._records[summary.target_applicant_code][1]
             self._records[summary.target_applicant_code] = (summary, password)
             return summary
+
+    def read_password_for_verification(self, code: str, expected_version: int) -> OaApplicantLoginCredential:
+        with self._lock:
+            row = self._records.get(code)
+            if row is None or row[0].version != expected_version:
+                raise OaApplicantCredentialConflictError("申请人记录已修改或删除，请刷新。")
+            if row[0].credential_status != "configured" or not row[1]:
+                raise OaApplicantCredentialValidationError("没有已保存的 OA 登录密码。")
+            return OaApplicantLoginCredential(code, row[0].oa_username, row[1])
 
     def delete_credential(self, *, target_applicant_code: str, actor_id: str, expected_version: int) -> None:
         del actor_id

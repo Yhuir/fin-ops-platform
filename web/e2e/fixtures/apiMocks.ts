@@ -549,7 +549,7 @@ function appHealthSystemAuditPayload() {
 }
 
 function oaApplicantCredentialsPayload() {
-  return { credentials: [{ targetApplicantCode: "chen_xiuyun", targetApplicantName: "陈秀云", oaUsername: "chen_xiuyun", credentialStatus: "verified", hasCredential: true, enabled: true, oaUserId: "oa-user-1", remark: "", verifiedAt: "2026-10-08T08:00:00Z", version: 1 }] };
+  return { credentials: [{ targetApplicantCode: "chen_xiuyun", targetApplicantName: "陈秀云", oaUsername: "chen_xiuyun", credentialStatus: "configured", hasCredential: true, enabled: true, oaUserId: "oa-user-1", remark: "", verifiedAt: "2026-10-08T08:00:00Z", version: 1 }] };
 }
 
 function settingsDataResetJobPayload(params: {

@@ -499,9 +499,10 @@ class SettingsApiRoutes:
                 raise OaApplicantCredentialValidationError("请求包含不支持的字段。")
             credential = self._oa_applicant_credential_service().save_credential(
                 target_applicant_code=target_applicant_code, oa_user_id=payload.get("oaUserId"),
-                password=payload.get("password"), remark=payload.get("remark", ""),
+                remark=payload.get("remark", ""),
                 expected_version=payload.get("expectedVersion"),
                 actor_id=actor_id_for_session(session), can_admin_access=True,
+                **({"password": payload["password"]} if "password" in payload else {}),
             )
         except OaApplicantCredentialError as exc:
             return self._oa_applicant_credential_error_response(exc)

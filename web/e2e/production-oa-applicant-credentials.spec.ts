@@ -54,7 +54,9 @@ test("production applicant management and prefill are reachable inside reverse w
   const editStart = performance.now();
   await drawer.getByRole("button", { name: "编辑", exact: true }).first().click();
   await expect(drawer.getByLabel("备注（选填）")).toHaveValue(original.remark);
-  await expect(drawer.getByRole("combobox")).toBeEnabled({ enabled: !original.oaUserId });
+  await expect(drawer.getByLabel("OA 申请人 / 登录账号", { exact: true })).toHaveValue(`${original.targetApplicantName} · ${original.oaUsername}`);
+  await expect(drawer.getByLabel("OA 登录密码", { exact: true })).toHaveValue("");
+  await expect(drawer.getByText(/密码已保存，留空/)).toBeVisible();
   await page.screenshot({ path: info.outputPath("production-credentials-edit.png"), animations: "disabled" });
   await drawer.getByRole("button", { name: "取消编辑", exact: true }).click();
   await expect(page.getByRole("alertdialog")).toHaveCount(0);
@@ -82,7 +84,7 @@ test("production applicant management and prefill are reachable inside reverse w
   await page.screenshot({ path: info.outputPath("production-credentials-direct-create-mobile.png"), animations: "disabled" });
   await drawer.getByRole("button", { name: "编辑", exact: true }).first().click();
   await expect(drawer.getByRole("button", { name: "取消编辑", exact: true })).toBeInViewport();
-  await expect(drawer.getByRole("button", { name: "保存凭据", exact: true })).toBeInViewport();
+  await expect(drawer.getByRole("button", { name: original.verifiedAt && original.oaUserId ? "保存修改" : "验证并保存", exact: true })).toBeInViewport();
   await page.screenshot({ path: info.outputPath("production-credentials-edit-mobile.png"), animations: "disabled" });
   await drawer.getByRole("button", { name: "取消编辑", exact: true }).click();
   await page.setViewportSize({ width: 1440, height: 900 });

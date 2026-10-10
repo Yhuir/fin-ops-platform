@@ -4031,7 +4031,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       targetApplicantCode: "chen_xiuyun",
       targetApplicantName: "陈秀云",
       oaUsername: "chen_xiuyun",
-      credentialStatus: "verified",
+      credentialStatus: "configured",
       oaUserId: "oa-user-1", remark: "", verifiedAt: "2026-10-08T08:00:00Z", version: 1,
       hasCredential: true,
       enabled: true,

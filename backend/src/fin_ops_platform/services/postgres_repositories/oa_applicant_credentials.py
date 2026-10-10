@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any, Callable
 
-from psycopg.errors import UniqueViolation
+from psycopg.errors import ExternalRoutineInvocationException, UniqueViolation
 
 from fin_ops_platform.services.oa_applicant_credentials import (
     OaApplicantCredentialConfigurationError,
@@ -39,29 +39,34 @@ class PostgresOaApplicantCredentialRepository:
             f"select {_SUMMARY_COLUMNS} from app.oa_applicant_credentials where target_applicant_code = %s", (code,))
         return self._summary_from_row(row) if row else None
 
-    def save_credential(self, *, summary: OaApplicantCredentialSummary, password: str,
+    def save_credential(self, *, summary: OaApplicantCredentialSummary, password: str | None,
                         actor_id: str, expected_version: int | None) -> OaApplicantCredentialSummary:
-        key = self._required_encryption_key()
-        values = (summary.target_applicant_name, summary.oa_username, password, key, actor_id,
-                  summary.oa_user_id, summary.remark, summary.verified_at, summary.version)
+        if expected_version is None and password is None:
+            raise OaApplicantCredentialValidationError("新增申请人须提供 OA 登录密码。")
+        password_values = () if password is None else (password, self._required_encryption_key())
+        values = (summary.target_applicant_name, summary.oa_username, *password_values, actor_id,
+                  summary.oa_user_id, summary.remark, summary.verified_at, summary.version,
+                  summary.credential_status, summary.enabled)
         try:
             with self._connection.transaction() as transaction:
                 if expected_version is None:
                     row = transaction.fetch_one(
                         f"""insert into app.oa_applicant_credentials(
                             target_applicant_name, oa_username, encrypted_password, updated_by,
-                            oa_user_id, remark, verified_at, version, target_applicant_code,
-                            credential_status, enabled)
+                            oa_user_id, remark, verified_at, version, credential_status, enabled,
+                            target_applicant_code)
                         values (%s, %s, pgp_sym_encrypt(%s, %s, 'cipher-algo=aes256, compress-algo=1'),
-                                %s, %s, %s, %s, %s, %s, 'configured', true)
+                                %s, %s, %s, %s, %s, %s, %s, %s)
                         returning {_SUMMARY_COLUMNS}""", (*values, summary.target_applicant_code))
                 else:
+                    password_update = ("" if password is None else
+                        "encrypted_password = pgp_sym_encrypt(%s, %s, 'cipher-algo=aes256, compress-algo=1'),")
                     row = transaction.fetch_one(
                         f"""update app.oa_applicant_credentials set
                             target_applicant_name = %s, oa_username = %s,
-                            encrypted_password = pgp_sym_encrypt(%s, %s, 'cipher-algo=aes256, compress-algo=1'),
+                            {password_update}
                             updated_by = %s, oa_user_id = %s, remark = %s, verified_at = %s,
-                            version = %s, credential_status = 'configured', enabled = true, updated_at = now()
+                            version = %s, credential_status = %s, enabled = %s, updated_at = now()
                         where target_applicant_code = %s and version = %s
                           and (oa_user_id is null or oa_user_id = %s)
                         returning {_SUMMARY_COLUMNS}""",
@@ -71,6 +76,21 @@ class PostgresOaApplicantCredentialRepository:
                 return self._summary_from_row(row)
         except UniqueViolation as exc:
             raise OaApplicantCredentialConflictError("该 OA 申请人已配置，请编辑已有记录。") from exc
+
+    def read_password_for_verification(self, code: str, expected_version: int) -> OaApplicantLoginCredential:
+        key = self._required_encryption_key()
+        try:
+            row = self._connection.fetch_one(
+                """select target_applicant_code, oa_username,
+                          pgp_sym_decrypt(encrypted_password, %s) as password
+                   from app.oa_applicant_credentials where target_applicant_code = %s and version = %s
+                     and credential_status = 'configured' and encrypted_password is not null""",
+                (key, code, expected_version))
+        except ExternalRoutineInvocationException as exc:
+            raise OaApplicantCredentialConfigurationError("已保存的 OA 密码无法解密，请检查凭据密钥。") from exc
+        if row is None:
+            raise OaApplicantCredentialConflictError("申请人记录已修改或删除，请刷新。")
+        return OaApplicantLoginCredential(row["target_applicant_code"], row["oa_username"], row["password"])
 
     def delete_credential(self, *, target_applicant_code: str, actor_id: str, expected_version: int) -> None:
         del actor_id

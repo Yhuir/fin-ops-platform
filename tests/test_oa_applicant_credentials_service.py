@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -48,6 +49,65 @@ def save(service, **changes):
 
 
 class OaApplicantCredentialServiceTests(unittest.TestCase):
+    def test_remark_only_update_preserves_password_verification_and_disabled_state_without_oa(self):
+        repo = InMemoryOaApplicantCredentialRepository()
+        original = save(credential_service(repo))
+        code = original["targetApplicantCode"]
+        record = replace(repo.get_credential(code), enabled=False)
+        repo.save_credential(summary=record, password=" secret ", actor_id="test", expected_version=1)
+        service = OaApplicantCredentialService(repository=repo)
+        updated = service.save_credential(oa_user_id="7", remark=" 新备注 ", actor_id="admin",
+            can_admin_access=True, target_applicant_code=code, expected_version=1)
+        self.assertEqual(updated["remark"], "新备注")
+        self.assertEqual(updated["verifiedAt"], original["verifiedAt"])
+        self.assertFalse(updated["enabled"])
+        self.assertEqual(updated["version"], 2)
+        self.assertEqual(service.applicant_options(), [])
+        self.assertEqual(repo.read_password_for_verification(code, 2).password, " secret ")
+
+    def test_legacy_verification_uses_stored_password_and_keeps_code(self):
+        repo = InMemoryOaApplicantCredentialRepository()
+        repo.save_credential(summary=OaApplicantCredentialSummary("legacy", "旧名", "LOGIN-7", "configured", True),
+            password=" old secret ", actor_id="test", expected_version=None)
+        calls = []
+        service = credential_service(repo, login=lambda *args: calls.append(args) or "token")
+        self.assertEqual(service.applicant_options(), [])
+        result = service.save_credential(oa_user_id="7", remark="报销", actor_id="admin", can_admin_access=True,
+            target_applicant_code="legacy", expected_version=1)
+        self.assertEqual(calls, [("login-7", " old secret ")])
+        self.assertEqual(result["targetApplicantCode"], "legacy")
+        self.assertEqual(result["oaUserId"], "7")
+        self.assertTrue(result["verifiedAt"])
+        self.assertEqual(service.resolve_login_credential("legacy").password, " old secret ")
+        self.assertEqual(service.applicant_options(), [{"code": "legacy", "name": "陈秀云", "remark": "报销"}])
+
+    def test_omitted_password_create_null_password_and_unconfigured_preserve_are_invalid(self):
+        repo = InMemoryOaApplicantCredentialRepository()
+        service = credential_service(repo)
+        with self.assertRaises(OaApplicantCredentialValidationError):
+            service.save_credential(oa_user_id="7", remark="", actor_id="admin", can_admin_access=True)
+        original = save(service)
+        with self.assertRaises(OaApplicantCredentialValidationError):
+            save(service, password=None, target_applicant_code=original["targetApplicantCode"], expected_version=1)
+        repo.save_credential(summary=OaApplicantCredentialSummary("empty", "旧名", "login-7", "missing", False),
+            password="", actor_id="test", expected_version=None)
+        with self.assertRaises(OaApplicantCredentialValidationError):
+            service.save_credential(oa_user_id="7", remark="", actor_id="admin", can_admin_access=True,
+                target_applicant_code="empty", expected_version=1)
+
+    def test_new_password_failure_never_retries_stored_password(self):
+        repo = InMemoryOaApplicantCredentialRepository()
+        original = save(credential_service(repo))
+        calls = []
+        def reject(username, password):
+            calls.append((username, password))
+            raise TargetOaApplicantLoginError("密码错误")
+        with self.assertRaises(OaApplicantCredentialVerificationError):
+            save(credential_service(repo, login=reject), password="wrong", remark="new",
+                target_applicant_code=original["targetApplicantCode"], expected_version=1)
+        self.assertEqual(calls, [("login-7", "wrong")])
+        self.assertEqual(credential_service(repo).list_credentials(can_admin_access=True)["credentials"], [original])
+
     def test_verified_save_preserves_password_and_returns_nonsecret_authoritative_identity(self):
         calls = []
         service = credential_service(login=lambda username, password: calls.append((username, password)) or "token")

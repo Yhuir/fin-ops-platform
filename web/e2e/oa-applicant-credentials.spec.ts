@@ -4,7 +4,7 @@ import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 import type { OaApplicantCredential } from "../src/features/inputInvoiceUsage/oaApplicantCredentials";
 
 const endpoint = "/api/workbench/settings/oa-applicant-credentials";
-const initial: OaApplicantCredential = { targetApplicantCode: "chen_xiuyun", targetApplicantName: "陈秀云", oaUsername: "chen_xiuyun", oaUserId: "u1", remark: "报销", credentialStatus: "verified", hasCredential: true, enabled: true, verifiedAt: "2026-10-08T08:00:00Z", version: 1 };
+const initial: OaApplicantCredential = { targetApplicantCode: "chen_xiuyun", targetApplicantName: "陈秀云", oaUsername: "chen_xiuyun", oaUserId: "u1", remark: "报销", credentialStatus: "configured", hasCredential: true, enabled: true, verifiedAt: "2026-10-08T08:00:00Z", version: 1 };
 async function setup(page: Page, admin = true, legacy = false) {
   const api = await installDeterministicApiMocks(page, { sessionMode: admin ? "admin" : "user" });
   let records = [{ ...initial, ...(legacy ? { oaUserId: null, oaUsername: "CHEN_XIUYUN", verifiedAt: null } : {}) }];
@@ -76,7 +76,7 @@ test("editing binds identity, dirty Escape stays in child and deletion removes t
   await page.getByRole("button", { name: "OA 申请人凭据", exact: true }).click();
   const drawer = page.getByRole("dialog", { name: "OA 申请人凭据", exact: true });
   await drawer.getByRole("button", { name: "编辑", exact: true }).click();
-  await expect(drawer.getByRole("combobox")).toBeDisabled();
+  await expect(drawer.getByLabel("OA 申请人 / 登录账号", { exact: true })).toHaveAttribute("readonly", "");
   await drawer.getByLabel("备注（选填）").fill("更改");
   await page.keyboard.press("Escape");
   const discard = page.getByRole("alertdialog");
@@ -127,6 +127,70 @@ test("ordinary users cannot open credentials and prefill stays within reverse wo
   await expect(page.getByRole("dialog", { name: "以发票反提 OA", exact: true })).toBeVisible();
 });
 
+test("directory failure leaves verified remark editing available without password or extra reads", async ({ page }, info) => {
+  const state = await setup(page);
+  state.failDirectory(true);
+  let reads = 0;
+  page.on("request", request => { if (request.method() === "GET" && request.url().includes(endpoint)) reads += 1; });
+  await page.getByRole("button", { name: "OA 申请人凭据", exact: true }).click();
+  const drawer = page.getByRole("dialog", { name: "OA 申请人凭据", exact: true });
+  await expect(drawer.getByRole("alert")).toContainText("OA 目录暂时不可用");
+  await expect(drawer.getByText("陈秀云（报销）", { exact: true })).toBeVisible();
+  await drawer.getByRole("button", { name: "编辑", exact: true }).click();
+  await expect(drawer.getByLabel("OA 申请人 / 登录账号", { exact: true })).toHaveValue("陈秀云 · chen_xiuyun");
+  await expect(drawer.getByLabel("备注（选填）")).toHaveValue("报销");
+  await expect(drawer.getByText("密码已保存，留空保留原密码。")).toBeVisible();
+  await expect(drawer.getByRole("button", { name: "保存修改", exact: true })).toBeDisabled();
+  await drawer.getByLabel("备注（选填）").fill("新备注");
+  await expect(drawer.getByRole("button", { name: "保存修改", exact: true })).toBeEnabled();
+  expect(reads).toBe(2);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(drawer.getByRole("button", { name: "保存修改", exact: true })).toBeInViewport();
+  await expect(drawer.getByRole("button", { name: "取消编辑", exact: true })).toBeInViewport();
+  await page.screenshot({ path: info.outputPath("oa-credentials-edit-mobile.png"), fullPage: true });
+  state.acceptPassword();
+  await drawer.getByRole("button", { name: "保存修改", exact: true }).click();
+  await expect(drawer).toBeHidden();
+  expect(state.writes).toEqual([{ oaUserId: "u1", remark: "新备注", expectedVersion: 1 }]);
+  await page.getByRole("button", { name: "OA 申请人凭据", exact: true }).click();
+  await drawer.getByRole("button", { name: "编辑", exact: true }).click();
+  await expect(drawer.getByLabel("备注（选填）")).toHaveValue("新备注");
+  await expect(drawer.getByLabel("OA 登录密码", { exact: true })).toHaveValue("");
+  await expectNoUnexpectedSuccessUiErrors(page);
+});
+
+test("saved credentials become editable before the OA directory response arrives", async ({ page }) => {
+  await setup(page);
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  await page.route(`**${endpoint}/users`, async route => {
+    await pending;
+    await route.fulfill({ json: { users: [] } });
+  });
+  try {
+    await page.getByRole("button", { name: "OA 申请人凭据", exact: true }).click();
+    const drawer = page.getByRole("dialog", { name: "OA 申请人凭据", exact: true });
+    await drawer.getByRole("button", { name: "编辑", exact: true }).click();
+    await expect(drawer.getByLabel("OA 申请人 / 登录账号", { exact: true })).toHaveValue("陈秀云 · chen_xiuyun");
+    await drawer.getByLabel("备注（选填）").fill("不等待目录");
+    await expect(drawer.getByRole("button", { name: "保存修改", exact: true })).toBeEnabled();
+  } finally { release(); }
+});
+
+test("unmatched historical identity is displayed but cannot be guessed or submitted", async ({ page }) => {
+  const state = await setup(page, true, true);
+  await page.route(`**${endpoint}/users`, route => route.fulfill({ json: { users: [] } }));
+  await page.getByRole("button", { name: "OA 申请人凭据", exact: true }).click();
+  const drawer = page.getByRole("dialog", { name: "OA 申请人凭据", exact: true });
+  await drawer.getByRole("button", { name: "编辑", exact: true }).click();
+  await expect(drawer.getByLabel("OA 申请人 / 登录账号", { exact: true })).toHaveValue("陈秀云 · CHEN_XIUYUN");
+  await expect(drawer.getByRole("alert")).toContainText("无法唯一匹配");
+  await expect(drawer.getByRole("button", { name: "验证并保存", exact: true })).toBeDisabled();
+  await drawer.getByRole("button", { name: "取消编辑", exact: true }).click();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  expect(state.writes).toEqual([]);
+});
+
 test("management remains reachable with an unavailable preview and prefill dirty close is contained", async ({ page }) => {
   await installDeterministicApiMocks(page, { sessionMode: "admin" });
   await page.route("**/api/input-invoice-usage/oa-reverse/preview", route => route.fulfill({ status: 503, json: { message: "预览暂时不可用" } }));
@@ -169,7 +233,7 @@ test("version conflict reload discards only after confirmation and retries with 
   const drawer = page.getByRole("dialog", { name: "OA 申请人凭据", exact: true });
   await drawer.getByRole("button", { name: "编辑", exact: true }).click();
   await drawer.getByLabel("OA 登录密码", { exact: true }).fill("new-password");
-  await drawer.getByRole("button", { name: "保存凭据", exact: true }).click();
+  await drawer.getByRole("button", { name: "保存修改", exact: true }).click();
   await expect(drawer.getByRole("alert")).toContainText("凭据已被修改");
   await drawer.getByRole("button", { name: "重新加载", exact: true }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "取消", exact: true }).click();
@@ -187,7 +251,7 @@ test("version conflict reload discards only after confirmation and retries with 
   await expect(drawer.getByLabel("OA 登录密码", { exact: true })).toHaveValue("");
   await drawer.getByRole("button", { name: "编辑", exact: true }).click();
   await drawer.getByLabel("OA 登录密码", { exact: true }).fill("new-password");
-  await drawer.getByRole("button", { name: "保存凭据", exact: true }).click();
+  await drawer.getByRole("button", { name: "保存修改", exact: true }).click();
   await expect(drawer).toBeHidden();
   expect(versions).toEqual([1, 2]);
 });
@@ -203,7 +267,7 @@ test("cancel editing restores direct creation, clears save errors and never writ
   await expect(page.getByRole("option", { name: "陈秀云 · OTHER_ACCOUNT", exact: true })).not.toHaveAttribute("aria-disabled", "true");
   await page.keyboard.press("Escape");
   await drawer.getByRole("button", { name: "编辑", exact: true }).click();
-  await expect(combo).toBeDisabled();
+  await expect(drawer.getByLabel("OA 申请人 / 登录账号", { exact: true })).toHaveValue("陈秀云 · chen_xiuyun");
   await drawer.getByRole("button", { name: "取消编辑", exact: true }).click();
   await expect(combo).toBeEnabled();
   await expect(combo).toHaveValue("");
@@ -214,7 +278,7 @@ test("cancel editing restores direct creation, clears save errors and never writ
   await drawer.getByRole("button", { name: "编辑", exact: true }).click();
   await drawer.getByLabel("OA 登录密码", { exact: true }).fill("wrong-password");
   await drawer.getByLabel("备注（选填）").fill("未保存");
-  await drawer.getByRole("button", { name: "保存凭据", exact: true }).click();
+  await drawer.getByRole("button", { name: "保存修改", exact: true }).click();
   await expect(drawer.getByRole("alert")).toContainText("密码错误");
   expect(state.requests).toEqual([{ method: "PUT", path: `${endpoint}/${initial.targetApplicantCode}` }]);
   expect(state.writes[0]).toEqual({ oaUserId: "u1", password: "wrong-password", remark: "未保存", expectedVersion: 1 });
@@ -234,7 +298,7 @@ test("cancel editing restores direct creation, clears save errors and never writ
   await page.screenshot({ path: info.outputPath("oa-credentials-direct-create.png"), fullPage: true });
 });
 
-test("legacy records block duplicate creation but can bind their original account through editing", async ({ page }) => {
+test("legacy editing autofills the saved account and verifies with the stored password", async ({ page }, info) => {
   const state = await setup(page, true, true);
   await page.getByRole("button", { name: "OA 申请人凭据", exact: true }).click();
   const drawer = page.getByRole("dialog", { name: "OA 申请人凭据", exact: true });
@@ -242,18 +306,27 @@ test("legacy records block duplicate creation but can bind their original accoun
   await combo.fill("chen_xiuyun");
   await expect(page.getByRole("option", { name: "陈秀云 · chen_xiuyun", exact: true })).toHaveAttribute("aria-disabled", "true");
   await page.keyboard.press("Escape");
+  // Search text is not a selected account and does not make the draft dirty.
   await drawer.getByRole("button", { name: "编辑", exact: true }).click();
-  await expect(combo).toBeEnabled();
-  await combo.fill("OTHER_ACCOUNT");
-  await expect(page.getByRole("option", { name: "陈秀云 · OTHER_ACCOUNT", exact: true })).toHaveAttribute("aria-disabled", "true");
-  await combo.fill("chen_xiuyun");
-  await page.getByRole("option", { name: "陈秀云 · chen_xiuyun", exact: true }).click();
+  await expect(drawer.getByLabel("OA 申请人 / 登录账号", { exact: true })).toHaveValue("陈秀云 · CHEN_XIUYUN");
+  await expect(drawer.getByText("密码已保存，留空使用原密码验证。")).toBeVisible();
+  await expect(drawer.getByLabel("OA 登录密码", { exact: true })).toHaveValue("");
+  await expect(drawer.getByRole("button", { name: "验证并保存", exact: true })).toBeEnabled();
+  await page.screenshot({ path: info.outputPath("oa-credentials-legacy-edit.png"), fullPage: true });
+  // 200% browser zoom halves the logical viewport; CSS zoom on the root does not emulate it.
+  await page.setViewportSize({ width: 640, height: 360 });
+  await expect(drawer.getByRole("button", { name: "验证并保存", exact: true })).toBeInViewport();
+  await drawer.getByLabel("OA 登录密码", { exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: info.outputPath("oa-credentials-legacy-edit-200.png"), fullPage: true });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await drawer.getByRole("button", { name: "取消编辑", exact: true }).click();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  await drawer.getByRole("button", { name: "编辑", exact: true }).click();
   state.acceptPassword();
-  await drawer.getByLabel("OA 登录密码", { exact: true }).fill("correct-password");
-  await drawer.getByRole("button", { name: "保存凭据", exact: true }).click();
+  await drawer.getByRole("button", { name: "验证并保存", exact: true }).click();
   await expect(drawer).toBeHidden();
   expect(state.requests).toEqual([{ method: "PUT", path: `${endpoint}/${initial.targetApplicantCode}` }]);
-  expect(state.writes[0]).toEqual({ oaUserId: "u1", password: "correct-password", remark: "报销", expectedVersion: 1 });
+  expect(state.writes[0]).toEqual({ oaUserId: "u1", remark: "报销", expectedVersion: 1 });
   await expectNoUnexpectedSuccessUiErrors(page);
 });
 
@@ -268,7 +341,7 @@ test("failed deletion retains the edit; successful deletion resets it and releas
   await drawer.getByRole("button", { name: "删除陈秀云（报销）", exact: true }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "删除", exact: true }).click();
   await expect(drawer.getByRole("alert")).toContainText("申请人记录已修改");
-  await expect(drawer.getByRole("combobox")).toBeDisabled();
+  await expect(drawer.getByLabel("OA 申请人 / 登录账号", { exact: true })).toHaveAttribute("readonly", "");
   await expect(drawer.getByLabel("OA 登录密码", { exact: true })).toHaveValue("draft-password");
   await expect(drawer.getByLabel("备注（选填）")).toHaveValue("未保存备注");
   state.failDelete(false);
@@ -299,7 +372,7 @@ test("a pending save keeps editing controls locked and preserves the draft on fa
   await drawer.getByRole("button", { name: "编辑", exact: true }).click();
   await drawer.getByLabel("OA 登录密码", { exact: true }).fill("wrong-password");
   try {
-    await drawer.getByRole("button", { name: "保存凭据", exact: true }).click();
+    await drawer.getByRole("button", { name: "保存修改", exact: true }).click();
     await expect(drawer.getByRole("button", { name: "取消编辑", exact: true })).toBeDisabled();
     await expect(drawer.getByRole("button", { name: "返回反提", exact: true })).toBeDisabled();
     await expect(drawer.getByRole("button", { name: "编辑", exact: true })).toBeDisabled();

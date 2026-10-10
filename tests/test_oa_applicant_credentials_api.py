@@ -16,6 +16,33 @@ from tests.app_test_support import (
 
 
 class OaApplicantCredentialApiTests(unittest.TestCase):
+    def test_update_omits_password_but_rejects_explicit_invalid_values_and_preserves_version(self):
+        from tests.test_oa_applicant_credentials_service import credential_service, save
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._install_identity_resolver(app)
+            service = credential_service()
+            original = save(service)
+            service._directory = service._login_client = service._identity_resolver = None
+            app._oa_applicant_credential_service_instance = service
+            endpoint = "/api/workbench/settings/oa-applicant-credentials/" + original["targetApplicantCode"]
+            body = {"oaUserId": "7", "remark": "新备注", "expectedVersion": 1}
+            for password in (None, "", False, 42):
+                response = app.handle_request("PUT", endpoint, headers=self._admin_headers(),
+                    body=json.dumps({**body, "password": password}))
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(json.loads(response.body)["error"], "invalid_oa_applicant_credential")
+            response = app.handle_request("PUT", endpoint, headers=self._admin_headers(), body=json.dumps(body))
+            self.assertEqual(response.status_code, 200)
+            saved = json.loads(response.body)["credential"]
+            self.assertEqual(saved["remark"], "新备注")
+            self.assertEqual(saved["version"], 2)
+            self.assertEqual(saved["verifiedAt"], original["verifiedAt"])
+            self.assertNotIn("password", saved)
+            response = app.handle_request("PUT", endpoint, headers=self._admin_headers(), body=json.dumps(body))
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(json.loads(response.body)["error"], "oa_applicant_credential_conflict")
+
     def test_admin_can_save_list_update_delete_and_directory_without_secret_echo(self) -> None:
         from tests.test_oa_applicant_credentials_service import credential_service
         with tempfile.TemporaryDirectory() as temp_dir:
