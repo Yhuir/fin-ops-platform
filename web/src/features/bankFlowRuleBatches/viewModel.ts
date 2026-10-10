@@ -2,6 +2,8 @@ import type {
   BankFlowRuleBatch,
   BankFlowRuleBatchDetailRow,
   BankFlowRuleBatchSummaryCategory,
+  BankFlowRuleBatchSummary,
+  BankFlowRuleLabelCount,
   BankFlowRuleBatchStatusBucket,
   BankFlowRuleBatchTagDefinition,
   BankFlowRuleBatchTagSelection,
@@ -197,6 +199,79 @@ export function categoryCountForBucket(
   if (bucket === "submitted") return category.submitted;
   if (bucket === "withdrawn") return category.withdrawn;
   return category.total;
+}
+
+export type BankFlowRuleCategoryChild = {
+  key: string;
+  label: string;
+  codes: string[];
+  rowCount: number;
+};
+
+export type BankFlowRuleCategoryGroup = {
+  label: string;
+  codes: string[];
+  rowCount: number;
+  childCount: number;
+  children: BankFlowRuleCategoryChild[];
+};
+
+export function buildCategoryGroups(
+  summary: BankFlowRuleBatchSummary,
+  bucket: BankFlowRuleBatchStatusBucket,
+): BankFlowRuleCategoryGroup[] {
+  const counts = new Map<string, Map<string | null, BankFlowRuleLabelCount>>();
+  for (const item of summary.labelCounts) {
+    let primary = counts.get(item.primaryLabel);
+    if (!primary) {
+      primary = new Map();
+      counts.set(item.primaryLabel, primary);
+    }
+    primary.set(item.subLabel, item);
+  }
+  const countFor = (primary: string, sub: string | null) => {
+    const item = counts.get(primary)?.get(sub);
+    if (!item) throw new Error("流水分类统计缺失。");
+    if (bucket === "unsubmitted") return item.draftRowCount;
+    if (bucket === "submitted") return item.submittedRowCount;
+    if (bucket === "withdrawn") return item.withdrawnRowCount;
+    return item.totalRowCount;
+  };
+  const groups = new Map<string, BankFlowRuleCategoryGroup>();
+  const children = new Map<string, Map<string, BankFlowRuleCategoryChild>>();
+  const seenCodes = new Set<string>();
+  for (const category of summary.categories) {
+    if (categoryCountForBucket(category, bucket) <= 0 || seenCodes.has(category.code)) continue;
+    seenCodes.add(category.code);
+    const primary = tagPrimaryLabel(category);
+    const sub = tagSubLabel(category);
+    let group = groups.get(primary);
+    if (!group) {
+      group = { label: primary, codes: [], rowCount: countFor(primary, null), childCount: 0, children: [] };
+      groups.set(primary, group);
+      children.set(primary, new Map());
+    }
+    group.codes.push(category.code);
+    const primaryChildren = children.get(primary)!;
+    let child = primaryChildren.get(sub);
+    if (!child) {
+      child = { key: sub, label: sub || SELF_SUB_LABEL, codes: [], rowCount: countFor(primary, sub) };
+      primaryChildren.set(sub, child);
+      group.children.push(child);
+      if (sub) group.childCount += 1;
+    }
+    child.codes.push(category.code);
+  }
+  return [...groups.values()];
+}
+
+export function categoryCodesForSelection(
+  groups: BankFlowRuleCategoryGroup[], primary: string, sub: string | null,
+): string[] | null {
+  if (!primary) return [];
+  const group = groups.find((item) => item.label === primary);
+  if (!group) return null;
+  return sub === null ? group.codes : group.children.find((item) => item.key === sub)?.codes ?? null;
 }
 
 

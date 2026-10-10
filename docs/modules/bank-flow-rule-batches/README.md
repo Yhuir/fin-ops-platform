@@ -16,11 +16,14 @@
 - 标签要求改变时，配置、后台任务和 settings-maintenance 事件同事务提交。任务成功后才提示重算完成。
 - 撤回处理所选正式批次及后续合并历史；没有 active owner 时关系撤回幂等完成。
 - 冲突清理旧选择和详情后回读一次，不自动重复提交。
-- 分类筛选作用于完整候选及正式批次，之后排序和分页；summary 保持月份、账户范围内的全分类统计。导航显示原始流水笔数，批次显示明细条数，分页显示批次数。
+- 分类筛选作用于完整候选及正式批次，之后排序和分页；summary 保持月份、账户范围内的全分类统计。主标签显示当前状态、时间范围内有流水的真实子标签数量；子标签显示原始流水笔数，批次显示明细条数，分页显示批次数。计数读取完整范围的 labelCounts，不累加当前页批次或重复规则。
 
 ## 页面交互
 
-- 单列主/子分类导航默认选择全部分类，批次初始收起。箭头独立展开各批次，允许多个批次同时保持展开；收起全部只作用于当前结果页。
+- 宽屏使用主标签、子标签、流水三栏，内容宽度最多 1600px；页面可用宽度不足时分类区移至流水区上方，保留明细表必要列宽。默认展示全部分类，工具栏提供「查看全部分类」，左栏不再重复此入口。
+- 点击主标签展示其全部流水，不自动选择子标签；同名子标签合并规则代码并完整筛选。直属主标签的流水在「主标签本身」中单独查看，不计入真实子标签数量。主标签在选择子标签后保持选中。
+- 切换提交状态或月份回到全部分类并清理选择、展开和分页。刷新保留有效分类；代码集合变化时以最新集合回读，分类消失时回到全部分类。校正读取只执行一次；校正期间分类再次变化明确提示重新读取，不重复循环。加载失败不清空分类、不补造统计。
+- 批次初始收起。箭头独立展开各批次，允许多个批次同时保持展开；收起全部只作用于当前结果页。
 - 展开和选择独立。收起保留已选明细并在批次标题显示数量；选择绑定真实账户与批次月份，同范围可以跨批次选择，内部转账仍只能整批提交。
 - 详情按展开批次请求，取消及乱序响应按查询范围和请求身份隔离。切换筛选或分页清理旧状态；刷新保留仍可见的展开项并使旧详情失效。单条流水复用公共来源详情。
 - 写入结果与刷新结果分别反馈。写入成功后刷新失败只重试读取，旧候选不再可提交；当前页超过最新总页数时回到最近有效页重新读取。
@@ -34,6 +37,8 @@
 
 - [web/src/pages/BankFlowRuleBatchPage.tsx](../../../web/src/pages/BankFlowRuleBatchPage.tsx)
 - [web/src/features/bankFlowRuleBatches/api.ts](../../../web/src/features/bankFlowRuleBatches/api.ts)
+- [web/src/features/bankFlowRuleBatches/CategoryNavigation.tsx](../../../web/src/features/bankFlowRuleBatches/CategoryNavigation.tsx)：只展示分类并发出选择事件，不请求业务 API。
+- [web/src/features/bankFlowRuleBatches/viewModel.ts](../../../web/src/features/bankFlowRuleBatches/viewModel.ts)：分类分组、计数和规则代码集合的纯计算。
 - [backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py](../../../backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py)
 - [backend/src/fin_ops_platform/services/bank_flow_rule_batch_application_service.py](../../../backend/src/fin_ops_platform/services/bank_flow_rule_batch_application_service.py)
 - [backend/src/fin_ops_platform/services/postgres_repositories/bank_flow_rule_batch_canonical_query.py](../../../backend/src/fin_ops_platform/services/postgres_repositories/bank_flow_rule_batch_canonical_query.py)
@@ -45,6 +50,7 @@
 - [web/e2e/bank-flow-rule-batches-flow.spec.ts](../../../web/e2e/bank-flow-rule-batches-flow.spec.ts)
 - [web/e2e/production-bank-flow-rule-batches.spec.ts](../../../web/e2e/production-bank-flow-rule-batches.spec.ts)：显式生产模式及 token 下只读验证分类范围、多展开和公共详情，禁止业务写请求。
 - [web/src/test/BankFlowRuleBatchApi.test.ts](../../../web/src/test/BankFlowRuleBatchApi.test.ts)
+- [web/src/test/BankFlowRuleBatchCategories.test.ts](../../../web/src/test/BankFlowRuleBatchCategories.test.ts)
 - [web/src/test/BankFlowRuleBatchExpansion.test.tsx](../../../web/src/test/BankFlowRuleBatchExpansion.test.tsx)
 - [web/src/test/BankFlowRuleBatchPage.test.tsx](../../../web/src/test/BankFlowRuleBatchPage.test.tsx)
 - [web/src/test/BankFlowRuleBatchPolicy.test.ts](../../../web/src/test/BankFlowRuleBatchPolicy.test.ts)

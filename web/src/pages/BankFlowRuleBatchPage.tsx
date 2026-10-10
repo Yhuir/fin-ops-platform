@@ -4,6 +4,7 @@ import BankTransactionDrawer from "../features/bankSplits/BankTransactionDrawer"
 import { Button, Checkbox } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Eye } from "lucide-react";
+import CategoryNavigation from "../features/bankFlowRuleBatches/CategoryNavigation";
 import BatchExpansion from "../features/bankFlowRuleBatches/BatchExpansion";
 import { useBatchExpansion } from "../features/bankFlowRuleBatches/useBatchExpansion";
 
@@ -43,7 +44,9 @@ import type { BatchSelectionScope } from "../features/bankFlowRuleBatches/policy
 import {
   accountLabel,
   buildTagDrawerRows,
-  categoryCountForBucket,
+  buildCategoryGroups,
+  categoryCodesForSelection,
+  SELF_SUB_LABEL,
   currentMonth,
   cx,
   directionTagLabel,
@@ -102,7 +105,6 @@ const EMPTY_TAG_SELECTION: BankFlowRuleBatchTagSelection = {
   affectedScopeKeys: [],
 };
 
-const SELF_SUB_LABEL = "主标签本身";
 const BANK_FLOW_RULE_BATCH_PAGE_SIZE = 50;
 const CANDIDATE_CONFLICT_CODE = "bank_flow_rule_batch_candidate_conflict";
 const CANDIDATE_CONFLICT_MESSAGE = "候选已更新，请重新选择。";
@@ -159,7 +161,7 @@ export default function BankFlowRuleBatchPage() {
   const [tagDrawerOpen, setTagDrawerOpen] = useState(false);
   const [draftTagRequirements, setDraftTagRequirements] = useState<BankFlowRuleDraftRequirements>(() => ({}));
   const [selectedPrimaryLabel, setSelectedPrimaryLabel] = useState("");
-  const [selectedSubKey, setSelectedSubKey] = useState("");
+  const [selectedSubKey, setSelectedSubKey] = useState<string | null>(null);
   const [categoryCodes, setCategoryCodes] = useState<string[]>([]);
   const [snapshotVersion, setSnapshotVersion] = useState(0);
   const [candidatesInvalid, setCandidatesInvalid] = useState(false);
@@ -184,7 +186,7 @@ export default function BankFlowRuleBatchPage() {
     enabled: active && !loading && !error && !candidatesInvalid,
   });
   const { details, errors: detailErrors } = expansion;
-  const pendingCorrectedPageRef = useRef<number | null>(null);
+  const pendingCorrectedScopeRef = useRef<string | null>(null);
 
   const loadTagSelection = useCallback((signal?: AbortSignal) => {
     const requestId = tagRequestSeqRef.current + 1;
@@ -227,23 +229,57 @@ export default function BankFlowRuleBatchPage() {
   const readBatches = useCallback(async (signal?: AbortSignal) => {
     const requestId = ++batchRequestSeqRef.current;
     let nextPage = batchPage;
-    const read = (page: number) => fetchBankFlowRuleBatches({
-      month, bucket, type: categoryCodes, page,
+    let nextCodes = categoryCodes;
+    let nextPrimary = selectedPrimaryLabel;
+    let nextSub = selectedSubKey;
+    const codesMatch = (codes: string[] | null) => {
+      const expected = new Set(nextCodes);
+      return codes !== null && codes.length === nextCodes.length && codes.every((code) => expected.has(code));
+    };
+    const read = (page: number, codes: string[]) => fetchBankFlowRuleBatches({
+      month, bucket, type: codes, page,
       pageSize: BANK_FLOW_RULE_BATCH_PAGE_SIZE, signal,
     });
-    let nextPayload = await read(nextPage);
-    if (signal?.aborted || requestId !== batchRequestSeqRef.current) return null;
+    const isCurrent = () => !signal?.aborted && requestId === batchRequestSeqRef.current;
+    let nextPayload = await read(nextPage, nextCodes);
+    if (!isCurrent()) return null;
+    const groups = buildCategoryGroups(nextPayload.summary, bucket);
+    const currentCodes = categoryCodesForSelection(groups, nextPrimary, nextSub);
+    if (currentCodes === null) {
+      nextPrimary = "";
+      nextSub = null;
+    }
+    const resolvedCodes = currentCodes ?? [];
+    const codesChanged = !codesMatch(resolvedCodes);
+    if (codesChanged) {
+      nextCodes = resolvedCodes;
+      nextPage = 1;
+      nextPayload = await read(nextPage, nextCodes);
+      if (!isCurrent()) return null;
+      const verifiedCodes = categoryCodesForSelection(buildCategoryGroups(nextPayload.summary, bucket), nextPrimary, nextSub);
+      if (!codesMatch(verifiedCodes)) {
+        throw new Error("流水分类已变化，请重新读取。");
+      }
+    }
     const lastPage = Math.max(1, Math.ceil(nextPayload.pagination.total / nextPayload.pagination.pageSize));
     if (nextPage > lastPage) {
       nextPage = lastPage;
-      nextPayload = await read(nextPage);
-      if (signal?.aborted || requestId !== batchRequestSeqRef.current) return null;
-      pendingCorrectedPageRef.current = nextPage;
+      nextPayload = await read(nextPage, nextCodes);
+      if (!isCurrent()) return null;
+      if (!codesMatch(categoryCodesForSelection(buildCategoryGroups(nextPayload.summary, bucket), nextPrimary, nextSub))) {
+        throw new Error("流水分类已变化，请重新读取。");
+      }
+    }
+    if (nextPage !== batchPage || nextPrimary !== selectedPrimaryLabel || nextSub !== selectedSubKey || codesChanged) {
+      pendingCorrectedScopeRef.current = JSON.stringify({ month, bucket, page: nextPage, types: nextCodes });
       setBatchPage(nextPage);
+      setSelectedPrimaryLabel(nextPrimary);
+      setSelectedSubKey(nextSub);
+      setCategoryCodes(nextCodes);
     }
     applyBatchesPayload(nextPayload);
     return nextPayload;
-  }, [applyBatchesPayload, batchPage, bucket, categoryCodes, month]);
+  }, [applyBatchesPayload, batchPage, bucket, categoryCodes, month, selectedPrimaryLabel, selectedSubKey]);
 
   const reloadBatchesAfterMutation = useCallback(async () => {
     setLoading(true);
@@ -289,45 +325,23 @@ export default function BankFlowRuleBatchPage() {
       return undefined;
     }
     const controller = new AbortController();
-    if (pendingCorrectedPageRef.current === batchPage) {
-      pendingCorrectedPageRef.current = null;
+    if (pendingCorrectedScopeRef.current === queryScopeKey) {
+      pendingCorrectedScopeRef.current = null;
       return;
     }
     loadBatches(controller.signal);
     return () => controller.abort();
-  }, [active, activationGeneration, batchPage, loadBatches, refreshToken]);
+  }, [active, activationGeneration, loadBatches, queryScopeKey, refreshToken]);
 
-  const categoryGroups = useMemo(() => {
-    const groups = new Map<string, { label: string; codes: string[]; rowCount: number; children: { label: string; key: string; codes: string[]; rowCount: number }[] }>();
-    const countFor = (primaryLabel: string, subLabel: string | null) => {
-      const counts = payload.summary.labelCounts.find((item) => item.primaryLabel === primaryLabel && item.subLabel === subLabel);
-      if (!counts) throw new Error("流水分类统计缺失。");
-      return bucket === "unsubmitted" ? counts.draftRowCount : bucket === "submitted" ? counts.submittedRowCount : counts.withdrawnRowCount;
-    };
-    payload.summary.categories.forEach((category) => {
-      if (categoryCountForBucket(category, bucket) <= 0) return;
-      const primary = tagPrimaryLabel(category) || category.label || category.code;
-      const sub = tagSubLabel(category);
-      if (!groups.has(primary)) groups.set(primary, { label: primary, codes: [], rowCount: countFor(primary, null), children: [] });
-      const group = groups.get(primary)!;
-      group.codes.push(category.code);
-      const key = sub || SELF_SUB_LABEL;
-      let child = group.children.find((item) => item.key === key);
-      if (!child) {
-        child = { label: key, key, codes: [], rowCount: countFor(primary, sub) };
-        group.children.push(child);
-      }
-      child.codes.push(category.code);
-    });
-    return [...groups.values()];
-  }, [bucket, payload.summary]);
+  const categoryGroups = useMemo(() => buildCategoryGroups(payload.summary, bucket), [bucket, payload.summary]);
+  const selectedGroup = categoryGroups.find((group) => group.label === selectedPrimaryLabel);
+  const selectedChild = selectedGroup?.children.find((child) => child.key === selectedSubKey);
 
   const visibleBatches = payload.batches;
   const hasBatchActions = canOperateData && visibleBatches.some((batch) =>
     canSubmitInternalTransferBatch(batch, bucket) || (bucket === "submitted" && canWithdrawBatch(batch)));
   const selectedAccountBatch = selectionScope ? visibleBatches.find((batch) => batch.accountKey === selectionScope.accountKey && batch.scopeMonth === selectionScope.scopeMonth) : undefined;
   const listPagination = payload.pagination;
-  const bucketRowCount = bucket === "unsubmitted" ? payload.summary.draftRowCount : bucket === "submitted" ? payload.summary.submittedRowCount : payload.summary.withdrawnRowCount;
   useEffect(() => {
     if (!feedback || feedback.severity !== "success") {
       return undefined;
@@ -552,7 +566,7 @@ export default function BankFlowRuleBatchPage() {
     expansion.reset();
   }, [clearSelection, expansion.reset]);
 
-  const selectCategory = (primary: string, sub: string, codes: string[]) => {
+  const selectCategory = (primary: string, sub: string | null, codes: string[]) => {
     if (primary === selectedPrimaryLabel && sub === selectedSubKey) return;
     resetListScope();
     setSelectedPrimaryLabel(primary);
@@ -580,7 +594,7 @@ export default function BankFlowRuleBatchPage() {
     resetListScope();
     setBatchPage(1);
     setSelectedPrimaryLabel("");
-    setSelectedSubKey("");
+    setSelectedSubKey(null);
     setCategoryCodes([]);
     setBucket(nextBucket);
   };
@@ -589,7 +603,7 @@ export default function BankFlowRuleBatchPage() {
     resetListScope();
     setBatchPage(1);
     setSelectedPrimaryLabel("");
-    setSelectedSubKey("");
+    setSelectedSubKey(null);
     setCategoryCodes([]);
     setMonth(nextMonth);
   };
@@ -601,6 +615,7 @@ export default function BankFlowRuleBatchPage() {
 
   return (
     <PageScaffold
+      className="bank-flow-rule-batches-page"
       title="流水规则批量处理"
       actions={(
         <div className="bank-flow-rule-batches-actions">
@@ -663,6 +678,9 @@ export default function BankFlowRuleBatchPage() {
           }}
           years={nearbyBusinessYears(month || currentMonth())}
         />
+        <button type="button" className="bank-flow-rule-batches-overview"
+          aria-pressed={!selectedPrimaryLabel} disabled={Boolean(error)}
+          onClick={() => selectCategory("", null, [])}>查看全部分类</button>
         {bucket === "unsubmitted" && canOperateData ? (
           <div className="bank-flow-rule-batches-selection-actions">
             {selectedTransactionIds.size > 0 ? (
@@ -697,38 +715,14 @@ export default function BankFlowRuleBatchPage() {
       {error ? <StatePanel tone="error" title={error} /> : null}
 
       <div className="bank-flow-rule-batches-layout">
-        <nav aria-label="流水分类" className="bank-flow-rule-batches-rail">
-          <h2 className="bank-flow-rule-batches-rail__title">流水分类</h2>
-          <button type="button" aria-pressed={!selectedPrimaryLabel}
-            aria-label={hasCounts ? `全部分类 ${bucketRowCount}笔` : "全部分类"}
-            className={cx("bank-flow-rule-batches-rail__item", !selectedPrimaryLabel && "bank-flow-rule-batches-rail__item--active")}
-            onClick={() => selectCategory("", "", [])}>
-            <span>全部分类</span><span className="bank-flow-rule-batches-rail__item-count">{hasCounts ? `${bucketRowCount}笔` : "—"}</span>
-          </button>
-          {categoryGroups.map((group) => <div key={group.label} className="bank-flow-rule-batches-rail__group">
-            <button type="button" aria-label={`${group.label} ${group.rowCount}笔`}
-              aria-pressed={selectedPrimaryLabel === group.label && !selectedSubKey}
-              className={cx("bank-flow-rule-batches-rail__item", selectedPrimaryLabel === group.label && !selectedSubKey && "bank-flow-rule-batches-rail__item--active")}
-              onClick={() => selectCategory(group.label, "", group.codes)}>
-              <span className="bank-flow-rule-batches-rail__item-label">{group.label}</span>
-              <span className="bank-flow-rule-batches-rail__item-count">{group.rowCount}笔</span>
-            </button>
-            {group.children.map((child) => <button key={child.key} type="button"
-              aria-label={`${group.label} / ${child.label} ${child.rowCount}笔`}
-              aria-pressed={selectedPrimaryLabel === group.label && selectedSubKey === child.key}
-              className={cx("bank-flow-rule-batches-rail__item", "bank-flow-rule-batches-rail__item--child", selectedPrimaryLabel === group.label && selectedSubKey === child.key && "bank-flow-rule-batches-rail__item--active")}
-              onClick={() => selectCategory(group.label, child.key, child.codes)}>
-              <span className="bank-flow-rule-batches-rail__item-label">{child.label}</span>
-              <span className="bank-flow-rule-batches-rail__item-count">{child.rowCount}笔</span>
-            </button>)}
-          </div>)}
-        </nav>
+        <CategoryNavigation groups={categoryGroups} primaryLabel={selectedPrimaryLabel} subKey={selectedSubKey}
+          loading={loading} disabled={Boolean(error)} onSelect={selectCategory} />
 
         <section aria-label="流水" className="bank-flow-rule-batches-transactions" role="region">
           <header className="bank-flow-rule-batches-transactions__header">
             <div className="bank-flow-rule-batches-transactions__heading">
               <h2 className="bank-flow-rule-batches-transactions__title">
-                {selectedPrimaryLabel ? `${selectedPrimaryLabel}${selectedSubKey && selectedSubKey !== selectedPrimaryLabel ? ` / ${selectedSubKey}` : ""}` : "全部分类"}
+                {selectedPrimaryLabel ? `${selectedPrimaryLabel}${selectedChild ? ` / ${selectedChild.label}` : ""}` : "全部分类"}
               </h2>
               <span className="bank-flow-rule-batches-result-count">{hasCounts && !error ? `${listPagination.total} 批次` : "—"}</span>
             </div>
