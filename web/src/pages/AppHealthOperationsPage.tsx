@@ -1,972 +1,276 @@
-import ImportJobDiagnostics from "../components/imports/ImportJobDiagnostics";
-import { useCallback, useEffect, useRef, useState } from "react";
-
-import { Alert, Button, Spinner, Tooltip } from "@heroui/react";
-import { ClipboardCheck, History, RefreshCw, Undo2 } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Alert, Button, Spinner } from "@heroui/react";
+import { ArrowLeft, History, RefreshCw, Search } from "lucide-react";
 
 import AppDialog from "../components/common/AppDialog";
 import AppDrawer from "../components/common/AppDrawer";
-import {
-  FinanceStatusTag,
-  FinanceTable,
-  FinanceTableBody,
-  FinanceTableCell,
-  FinanceTableColumn,
-  FinanceTableHeader,
-  FinanceTableRow,
-  TableCellStack,
-} from "../components/common/FinanceTable";
+import { FinanceStatusTag, FinanceTable, FinanceTableBody, FinanceTableCell, FinanceTableColumn, FinanceTableHeader, FinanceTableRow } from "../components/common/FinanceTable";
+import ImportJobDiagnostics from "../components/imports/ImportJobDiagnostics";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSession, useSessionPermissions } from "../contexts/SessionContext";
-import { fetchAppHealthDashboard, fetchAppHealthSystemAudit, fetchImportHistory, withdrawBankTransactionImport } from "../features/appHealth/api";
-import type {
-  AppHealthSystemAuditPayload,
-  OperationsDashboardEndpointPerformance,
-  OperationsDashboardImportEvent,
-  OperationsDashboardInventoryBlock,
-  OperationsDashboardPayload,
-  OperationsImportHistoryPayload,
-  OperationsDashboardPercentiles,
-} from "../features/appHealth/types";
+import { fetchAppHealthDashboard, fetchImportHistory, fetchImportHistoryDetail, withdrawBankTransactionImport } from "../features/appHealth/api";
+import type { ImportHistoryQuery, OperationsDashboardImportEvent, OperationsDashboardInventoryBlock, OperationsDashboardPayload, OperationsImportHistoryPayload } from "../features/appHealth/types";
 
-const EMPTY_VALUE = "--";
 const REFRESH_INTERVAL_MS = 10_000;
-
-type NoticeStatus = "accent" | "warning" | "danger";
-
-function Section({ title, children, testId }: { title: string; children: React.ReactNode; testId: string }) {
-  return (
-    <section className="app-health-section" data-testid={testId}>
-      <header className="app-health-section__header">
-        <h2 className="app-health-section__title">{title}</h2>
-      </header>
-      <div className="app-health-section__body">{children}</div>
-    </section>
-  );
+const initialQuery: ImportHistoryQuery = { page: 1, page_size: 50, batch_type: "", status: "", search: "", start_date: "", end_date: "" };
+const numberFormat = new Intl.NumberFormat("zh-CN");
+const timeFormat = new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Shanghai" });
+const eventStates = {
+  awaiting_confirmation: { label: "待确认", tone: "warning" }, queued: { label: "排队中", tone: "warning" },
+  processing: { label: "导入中", tone: "warning" }, succeeded: { label: "已完成", tone: "success" },
+  partial_success: { label: "部分完成", tone: "warning" }, withdrawn: { label: "已撤回", tone: "neutral" },
+  failed: { label: "导入失败", tone: "danger" }, discarded: { label: "已放弃", tone: "neutral" },
+  preview_failed: { label: "预览失败", tone: "danger" }, inconsistent: { label: "状态异常", tone: "danger" },
+  unknown: { label: "未记录", tone: "neutral" },
+} as const;
+function count(value: number | null | undefined) { return value == null ? "—" : numberFormat.format(value); }
+function timestamp(value: string | null | undefined) { return value ? timeFormat.format(new Date(value)) : "—"; }
+function source(block: OperationsDashboardInventoryBlock, key: string) { return block.sources.find(row => row.key === key); }
+function Notice({ children, danger = false }: { children: ReactNode; danger?: boolean }) {
+  return <Alert className="app-health-notice" status={danger ? "danger" : "accent"} role={danger ? "alert" : "status"}>
+    <Alert.Indicator /><Alert.Content><Alert.Description>{children}</Alert.Description></Alert.Content>
+  </Alert>;
 }
-
-function AppHealthNotice({
-  status,
-  children,
-  role = status === "danger" ? "alert" : "status",
-}: {
-  status: NoticeStatus;
-  children: React.ReactNode;
-  role?: "alert" | "status";
-}) {
-  return (
-    <Alert className={`app-health-notice app-health-notice--${status}`} role={role} status={status}>
-      <Alert.Indicator />
-      <Alert.Content className="app-health-notice__content">
-        <Alert.Description className="app-health-notice__description">{children}</Alert.Description>
-      </Alert.Content>
-    </Alert>
-  );
+function EventStatus({ status }: { status: string }) {
+  const state = eventStates[status as keyof typeof eventStates];
+  return <FinanceStatusTag tone={state?.tone ?? "neutral"}>{state?.label ?? "状态未识别"}</FinanceStatusTag>;
 }
-
-function formatNumber(value: number | null | undefined) {
-  if (value === null || value === undefined || !Number.isFinite(value)) {
-    return EMPTY_VALUE;
-  }
-  return new Intl.NumberFormat("zh-CN").format(value);
+function Section({ title, id, actions, children }: { title: string; id: string; actions?: ReactNode; children: ReactNode }) {
+  return <section className="app-health-section" data-testid={id}>
+    <header className="app-health-section__header"><h2 className="app-health-section__title">{title}</h2>{actions}</header>
+    <div className="app-health-section__body">{children}</div>
+  </section>;
 }
-
-function formatCountWithSupplement(value: number | null | undefined, supplementary: number | null | undefined) {
-  if (value === null || value === undefined || !Number.isFinite(value)) {
-    return EMPTY_VALUE;
-  }
-  const base = formatNumber(value);
-  if (supplementary === null || supplementary === undefined || !Number.isFinite(supplementary)) {
-    return base;
-  }
-  return `${base}（${formatNumber(supplementary)}）`;
-}
-
-function inventorySource(block: OperationsDashboardInventoryBlock, key: string) {
-  return block.sources.find((source) => source.key === key);
-}
-
-function partitionDifference(total: number | null | undefined, values: Array<number | null | undefined>) {
-  const knownValues = values.filter((value): value is number => value !== null && value !== undefined && Number.isFinite(value));
-  if (total === null || total === undefined || !Number.isFinite(total) || knownValues.length !== values.length) {
-    return null;
-  }
-  const difference = Math.abs(total - knownValues.reduce((sum, value) => sum + value, 0));
-  return difference === 0 ? null : difference;
-}
-
-function formatMs(value: number | null | undefined) {
-  if (value === null || value === undefined || !Number.isFinite(value)) {
-    return EMPTY_VALUE;
-  }
-  return `${Math.round(value)} ms`;
-}
-
-function formatSeconds(value: number | null | undefined) {
-  if (value === null || value === undefined || !Number.isFinite(value)) {
-    return EMPTY_VALUE;
-  }
-  return `${Math.round(value)} s`;
-}
-
-function formatTimestamp(value: string | null | undefined) {
-  if (!value) {
-    return EMPTY_VALUE;
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(date);
-}
-
-type MetricTone = "green" | "yellow" | "red" | "unknown";
-
-function metricTone(value: number | null | undefined, kind: "p95" | "p99"): MetricTone {
-  if (value === null || value === undefined) {
-    return "unknown";
-  }
-  if (kind === "p95" && value > 1500) {
-    return "red";
-  }
-  if (kind === "p99" && value > 5000) {
-    return "red";
-  }
-  if ((kind === "p95" && value >= 500) || (kind === "p99" && value > 2500)) {
-    return "yellow";
-  }
-  return "green";
-}
-
-function PerformanceCell({ value, kind }: { value: number | null | undefined; kind: "p95" | "p99" }) {
-  const tone = metricTone(value, kind);
-  return (
-    <FinanceTableCell columnRole="status" dataTone={tone}>
-      <FinanceStatusTag tone={tone === "green" ? "success" : tone === "yellow" ? "warning" : tone === "red" ? "danger" : "neutral"}>
-        {formatMs(value)}
-      </FinanceStatusTag>
-    </FinanceTableCell>
-  );
-}
-
-function PercentileCells({ value }: { value: OperationsDashboardPercentiles }) {
-  return (
-    <>
-      <PerformanceCell value={value.p95} kind="p95" />
-      <PerformanceCell value={value.p99} kind="p99" />
-    </>
-  );
-}
-
-function workerState(row: OperationsDashboardPayload["runtime_performance"]["workers"][number]) {
-  if (row.warning_code || row.status === "unknown" || row.status === "missing" || row.status === "stale" || row.status === "mismatch") {
-    return { label: row.warning_code || row.status, tone: row.status === "stale" ? "warning" as const : "danger" as const };
-  }
-  return { label: row.current_effective === false ? "historical" : "active", tone: row.current_effective === false ? "neutral" as const : "success" as const };
-}
-
-function importEventState(row: OperationsDashboardImportEvent) {
-  const states = {
-    awaiting_confirmation: { label: "待确认", tone: "warning" as const },
-    queued: { label: "排队中", tone: "warning" as const },
-    processing: { label: "导入中", tone: "warning" as const },
-    succeeded: { label: "已完成", tone: "success" as const },
-    withdrawn: { label: "已撤回", tone: "neutral" as const },
-    failed: { label: "导入失败", tone: "danger" as const },
-    discarded: { label: "已放弃", tone: "neutral" as const },
-    preview_failed: { label: "预览失败", tone: "danger" as const },
-    inconsistent: { label: "状态异常", tone: "danger" as const },
-    unknown: { label: "未知", tone: "neutral" as const },
-  };
-  return states[row.status as keyof typeof states] ?? states.unknown;
-}
-
-function auditStatus(payload: AppHealthSystemAuditPayload | null) {
-  if (!payload) {
-    return { label: "未验证", tone: "neutral" as const };
-  }
-  const status = String(payload.overall_status || "unknown");
-  const blockingIssueSampleCount = payload.summary?.blocking_issue_sample_count ?? 0;
-  const errorSampleCount = payload.summary?.error_sample_count ?? 0;
-  const proofReady = payload.audit_contract?.proof_availability === "ready";
-  const proofVersioned = Boolean(payload.audit_contract?.contract_revision);
-  const snapshotConsistent =
-    payload.audit_contract?.database_snapshot === true
-    && payload.audit_contract?.snapshot_consistency === "repeatable_read_read_only";
-  if (
-    status === "pass"
-    && payload.audit_status?.integrity === "pass"
-    && payload.audit_status?.freshness === "fresh"
-    && payload.audit_status?.queue === "drained"
-    && proofReady
-    && proofVersioned
-    && snapshotConsistent
-    && blockingIssueSampleCount === 0
-    && errorSampleCount === 0
-  ) {
-    return { label: "pass", tone: "success" as const };
-  }
-  if (!proofReady || !proofVersioned || !snapshotConsistent) {
-    return { label: "proof_unavailable", tone: "danger" as const };
-  }
-  if (payload.audit_status?.integrity === "issues_found" || blockingIssueSampleCount > 0 || errorSampleCount > 0) {
-    return { label: status, tone: "danger" as const };
-  }
-  if (
-    payload.audit_status?.freshness === "not_fresh"
-    || payload.audit_status?.queue !== "drained"
-    || status === "issues_found"
-  ) {
-    return { label: status, tone: "warning" as const };
-  }
-  return { label: status, tone: "neutral" as const };
-}
-
-function AuditMetric({ label, value }: { label: string; value: number | null | undefined }) {
-  return (
-    <div className="app-health-audit-metric">
-      <span>{label}</span>
-      <strong>{formatNumber(value)}</strong>
+function Partition({ title, total, rows }: { title: string; total: number | null; rows: Array<{ label: string; value: number | null | undefined }> }) {
+  const known = total !== null && rows.every(row => row.value != null);
+  const sum = known ? rows.reduce((value, row) => value + row.value!, 0) : null;
+  const difference = sum === null ? null : Math.abs(sum - total!);
+  return <div className="app-health-partition" aria-label={title}>
+    <div className="app-health-partition__heading"><h4>{title}</h4>
+      {difference === 0 ? <span className="app-health-partition__total">合计 {count(sum)} 张</span> : null}
     </div>
-  );
+    <dl>{rows.map(row => <div key={row.label}><dt>{row.label}</dt><dd>{count(row.value)} <small>张</small></dd></div>)}</dl>
+    {difference !== null && difference > 0 ? <p role="alert" className="app-health-partition__warning">统计未闭合 · 差异 {count(difference)} 张</p> : null}
+  </div>;
 }
-
-function AppHealthSystemAuditPanel({
-  payload,
-  error,
-  isLoading,
-  onRun,
-}: {
-  payload: AppHealthSystemAuditPayload | null;
-  error: string | null;
-  isLoading: boolean;
-  onRun: () => void;
-}) {
-  const state = auditStatus(payload);
-  const summary = payload?.summary;
-  const registeredPageLabel = typeof summary?.registered_page_count === "number"
-    ? `${summary.registered_page_count} 页 App 内部合同`
-    : "App 内部合同";
-  const externalStatus = payload?.external_evidence?.status ?? "unknown";
-  const externalTone = externalStatus === "pass" ? "success" : externalStatus === "fail" ? "danger" : externalStatus === "unknown" ? "warning" : "neutral";
-  const issueCodeEntries = Object.entries(summary?.issue_sample_counts_by_code ?? {})
-    .sort((left, right) => right[1] - left[1])
-    .slice(0, 4);
-  const visibleIssues = (payload?.issues ?? []).slice(0, 3);
-  return (
-    <Section title="System Audit" testId="app-health-system-audit">
-      <div className="app-health-audit-card">
-        <div className="app-health-audit-header">
-          <div className="app-health-audit-heading">
-            <h3>{registeredPageLabel}</h3>
-            <p>{payload?.database_system_snapshot?.snapshot_generated_at ? formatTimestamp(payload.database_system_snapshot.snapshot_generated_at) : "未验证"}</p>
-          </div>
-          <div className="app-health-audit-actions">
-            <FinanceStatusTag tone={state.tone}>{state.label}</FinanceStatusTag>
-            <Tooltip delay={0}>
-              <Tooltip.Trigger>
-                <Button
-                  aria-label="Audit 全系统 App 内部合同"
-                  className="app-health-audit-button"
-                  isDisabled={isLoading}
-                  isIconOnly
-                  onPress={onRun}
-                  size="sm"
-                  variant="tertiary"
-                >
-                  {isLoading ? <Spinner color="current" size="sm" /> : <ClipboardCheck aria-hidden="true" size={15} strokeWidth={2.2} />}
-                </Button>
-              </Tooltip.Trigger>
-              <Tooltip.Content>Audit 全系统 App 内部合同</Tooltip.Content>
-            </Tooltip>
-          </div>
-        </div>
-        {error ? <AppHealthNotice status="danger">{error}</AppHealthNotice> : null}
-        <div className="app-health-audit-grid">
-          <AuditMetric label="注册页面" value={summary?.registered_page_count} />
-          <AuditMetric label="业务页面 Audit" value={summary?.audited_business_page_count} />
-          <AuditMetric label="业务页面通过" value={summary?.passed_business_page_count} />
-          <AuditMetric label="外部域 unknown" value={payload?.external_evidence?.summary?.unknown_domain_count ?? payload?.external_evidence?.domains?.filter((item) => item.status === "unknown").length} />
-          <AuditMetric label="问题样本" value={summary?.issue_sample_count} />
-          <AuditMetric label="Blocking samples" value={summary?.blocking_issue_sample_count} />
-        </div>
-        {payload ? (
-          <div className="app-health-audit-issues" aria-label="System Audit 证明边界">
-            <FinanceStatusTag tone={state.tone}>{`App 内部 ${summary?.database_internal_contracts ?? "unknown"}`}</FinanceStatusTag>
-            <FinanceStatusTag tone={externalTone}>
-              {`外部证据 ${externalStatus}`}
-            </FinanceStatusTag>
-            <span>仅证明该只读数据库快照内的已登记 App 内部合同；后续写入会使本结果失效。</span>
-            {(payload.external_evidence?.domains ?? []).map((domain) => (
-              <FinanceStatusTag
-                key={domain.domain ?? "external-domain"}
-                tone={domain.status === "pass" ? "success" : domain.status === "fail" ? "danger" : "warning"}
-              >
-                {`${domain.domain ?? "external"} ${domain.status ?? "unknown"}${domain.observed_at ? ` · ${formatTimestamp(domain.observed_at)}` : ""}`}
-              </FinanceStatusTag>
-            ))}
-            <span>{payload.external_evidence?.claim_boundary ?? "外部来源证明未登记；App 内部绿色不能替代外部来源对账。"}</span>
-          </div>
-        ) : null}
-        {issueCodeEntries.length > 0 || visibleIssues.length > 0 ? (
-          <div className="app-health-audit-issues" aria-label="System Audit 问题">
-            {issueCodeEntries.map(([code, count]) => (
-              <FinanceStatusTag key={code} tone={state.tone === "danger" ? "danger" : "warning"}>{`${code}: ${formatNumber(count)}`}</FinanceStatusTag>
-            ))}
-            {visibleIssues.map((issue, index) => (
-              <span key={`${issue.code || "issue"}:${index}`}>{issue.message || issue.code || "检测到问题"}</span>
-            ))}
-          </div>
-        ) : null}
+function Inventory({ payload }: { payload: OperationsDashboardPayload }) {
+  const { bank, invoice, oa } = payload.data_inventory;
+  return <div className="app-health-inventory-grid">
+    <div className="app-health-invoice" aria-label="发票统计">
+      <div className="app-health-invoice__heading"><h3>发票</h3><span>最近同步 {timestamp(invoice.latest_synced_at)}</span></div>
+      <div className="app-health-total"><strong>{count(invoice.total_count)}</strong><span>张</span></div>
+      <div className="app-health-partitions">
+        <Partition title="按类型" total={invoice.total_count} rows={[{ label: "进项发票", value: source(invoice, "input_invoice")?.count }, { label: "销项发票", value: source(invoice, "output_invoice")?.count }]} />
+        <Partition title="按导入方式" total={invoice.total_count} rows={[{ label: "手工导入", value: source(invoice, "manual")?.count }, { label: "OA 解析新增", value: source(invoice, "oa_attachment")?.supplementary_count }]} />
       </div>
-    </Section>
-  );
-}
-
-function RuntimeOverview({ payload }: { payload: OperationsDashboardPayload }) {
-  const workers = payload.runtime_performance.workers;
-  const workerIssues = workers.filter((row) => row.warning_code || row.status === "unknown" || row.status === "missing" || row.status === "stale" || row.status === "mismatch").length;
-  const queueBacklog = payload.runtime_performance.queues.reduce((sum, queue) => sum + (queue.pending_count ?? 0) + (queue.processing_count ?? 0), 0);
-  const queueUnavailable = payload.freshness.warnings.includes("queue_metrics_unavailable");
-  const queueAttention = payload.runtime_performance.queues.reduce((sum, queue) => sum + (queue.failed_count ?? 0) + (queue.needs_review_count ?? 0) + (queue.awaiting_confirmation_count ?? 0), 0);
-  const rows = [
-    {
-      key: "workers",
-      label: "Worker",
-      value: workerIssues > 0 ? `${workerIssues} issue` : `active ${workers.filter((row) => row.current_effective !== false).length}`,
-      tone: workerIssues > 0 ? "warning" as const : "success" as const,
-    },
-    {
-      key: "queue",
-      label: "Queue",
-      value: queueUnavailable ? "队列状态未知" : `执行或排队 ${queueBacklog} / 待处理 ${queueAttention}`,
-      tone: queueUnavailable || queueBacklog + queueAttention > 0 ? "warning" as const : "success" as const,
-    },
-  ];
-  return (
-    <div className="app-health-runtime-overview" data-testid="app-health-runtime-overview">
-      {rows.map((row) => (
-        <div key={row.key} className="app-health-runtime-overview__item">
-          <span>{row.label}</span>
-          <FinanceStatusTag tone={row.tone}>{row.value}</FinanceStatusTag>
-        </div>
-      ))}
     </div>
-  );
+    <div className="app-health-other-inventory">
+      <div className="app-health-bank"><h3>银行流水</h3><div className="app-health-total app-health-total--small"><strong>{count(bank.total_count)}</strong><span>笔</span></div><p>最近同步 {timestamp(bank.latest_synced_at)}</p></div>
+      <div className="app-health-oa" aria-label="OA 状态"><h3>OA</h3><dl>
+        <div><dt>已完成</dt><dd>{count(source(oa, "oa_records_completed")?.count)} <small>条</small></dd></div>
+        <div><dt>进行中</dt><dd>{count(source(oa, "oa_records_in_progress")?.count)} <small>条</small></dd></div>
+      </dl><p>最近同步 {timestamp(oa.latest_synced_at)}</p></div>
+    </div>
+  </div>;
 }
-
-function InventoryPanel({
-  title,
-  syncedAt,
-  children,
-}: {
-  title: string;
-  syncedAt: string | null | undefined;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="app-health-inventory-panel">
-      <header className="app-health-inventory-panel__header">
-        <h3>{title}</h3>
-        <span>同步 {formatTimestamp(syncedAt)}</span>
-      </header>
-      <div className="app-health-inventory-table-shell">{children}</div>
-    </section>
-  );
+function EventsTable({ rows, label, loading = false, onDetail }: { rows: OperationsDashboardImportEvent[]; label: string; loading?: boolean; onDetail: (id: string) => void }) {
+  return <FinanceTable ariaLabel={label} className="app-health-import-history-table" minWidth={660}>
+    <FinanceTableHeader>
+      <FinanceTableColumn columnRole="status">类型</FinanceTableColumn><FinanceTableColumn columnRole="description" isRowHeader>文件 / 来源</FinanceTableColumn>
+      <FinanceTableColumn columnRole="amount">数量</FinanceTableColumn><FinanceTableColumn columnRole="date">时间</FinanceTableColumn>
+      <FinanceTableColumn columnRole="status">状态</FinanceTableColumn><FinanceTableColumn columnRole="action">操作</FinanceTableColumn>
+    </FinanceTableHeader>
+    <FinanceTableBody renderEmptyState={() => loading ? "正在加载…" : "暂无导入记录"}>
+      {rows.map(row => <FinanceTableRow key={row.key} id={row.key}>
+        <FinanceTableCell columnRole="status">{row.batch_type === "input_invoice" ? "进项发票" : row.batch_type === "output_invoice" ? "销项发票" : row.label}</FinanceTableCell>
+        <FinanceTableCell columnRole="description"><span className="app-health-file-name" title={row.source_name}>{row.source_name || "未记录文件名"}</span><small className="app-health-file-actor">{row.imported_by || "未记录操作人"}</small></FinanceTableCell>
+        <FinanceTableCell columnRole="amount">{count(row.count)}</FinanceTableCell><FinanceTableCell columnRole="date">{timestamp(row.imported_at)}</FinanceTableCell>
+        <FinanceTableCell columnRole="status"><EventStatus status={row.status} /></FinanceTableCell>
+        <FinanceTableCell columnRole="action"><Button size="sm" variant="tertiary" aria-label={`查看 ${row.source_name}`} onPress={() => onDetail(row.batch_id)}>详情</Button></FinanceTableCell>
+      </FinanceTableRow>)}
+    </FinanceTableBody>
+  </FinanceTable>;
 }
-
-function BankInventory({ block }: { block: OperationsDashboardInventoryBlock }) {
-  return (
-    <InventoryPanel title="流水" syncedAt={block.latest_synced_at}>
-      <FinanceTable ariaLabel="银行流水来源" className="app-health-inventory-table" minWidth={420}>
-        <FinanceTableHeader><FinanceTableColumn columnRole="identity" isRowHeader>来源</FinanceTableColumn><FinanceTableColumn columnRole="quantity">数量</FinanceTableColumn><FinanceTableColumn columnRole="date">最近同步</FinanceTableColumn></FinanceTableHeader>
-        <FinanceTableBody>
-          {block.sources.map((source) => (
-            <FinanceTableRow id={source.key} key={source.key}>
-              <FinanceTableCell columnRole="identity">{source.label}</FinanceTableCell><FinanceTableCell className="app-health-inventory-table__number" columnRole="quantity">{formatNumber(source.count)}</FinanceTableCell><FinanceTableCell columnRole="date">{formatTimestamp(source.latest_synced_at)}</FinanceTableCell>
-            </FinanceTableRow>
-          ))}
-        </FinanceTableBody>
-      </FinanceTable>
-    </InventoryPanel>
-  );
+function EventDetail({ row, onTask, onWithdraw }: { row: OperationsDashboardImportEvent; onTask: (jobId: string) => void; onWithdraw: () => void }) {
+  const accountName = row.selected_bank_name || row.detected_bank_name;
+  const accountLast4 = row.selected_bank_last4 || row.detected_last4;
+  return <div className="app-health-history-detail">
+    <div className="app-health-detail-heading"><h3>{row.source_name || "未记录文件名"}</h3><EventStatus status={row.status} /></div>
+    <dl className="app-health-detail-facts">
+      <div><dt>类型</dt><dd>{row.batch_type === "input_invoice" ? "进项发票" : row.batch_type === "output_invoice" ? "销项发票" : row.label}</dd></div>
+      <div><dt>导入数量</dt><dd>{count(row.count)}</dd></div><div><dt>操作人</dt><dd>{row.imported_by || "未记录"}</dd></div>
+      <div><dt>导入时间</dt><dd>{timestamp(row.imported_at)}</dd></div>
+      {row.batch_type === "bank_transaction" ? <div><dt>银行账户</dt><dd>{[accountName, accountLast4].filter(Boolean).join(" · ") || "未记录"}</dd></div> : null}
+      <div><dt>批次编号</dt><dd>{row.batch_id}</dd></div>
+    </dl>
+    {row.error ? <Notice danger>{row.error}</Notice> : null}
+    {row.withdrawal ? <Notice>已撤回 {count(row.withdrawal.withdrawn_count)} 笔 · {row.withdrawal.withdrawn_by} · {timestamp(row.withdrawal.withdrawn_at)}</Notice> : null}
+    <div className="app-health-detail-actions">
+      {row.job_id ? <Button variant="secondary" onPress={() => onTask(row.job_id!)}>查看任务</Button> : <span>未关联导入任务</span>}
+      {row.withdrawal_allowed ? <Button variant="danger" onPress={onWithdraw}>撤回本次流水导入</Button> : null}
+    </div>
+  </div>;
 }
-
-function InvoiceInventory({ block }: { block: OperationsDashboardInventoryBlock }) {
-  const input = inventorySource(block, "input_invoice");
-  const output = inventorySource(block, "output_invoice");
-  const manual = inventorySource(block, "manual");
-  const oa = inventorySource(block, "oa_attachment");
-  const typeDifference = partitionDifference(block.total_count, [input?.count, output?.count]);
-  const importDifference = partitionDifference(block.total_count, [manual?.count, oa?.supplementary_count]);
-
-  const dimensionCell = (label: string, difference: number | null) => (
-    <span className="app-health-inventory-table__dimension">
-      <span>{label}</span>
-      {difference !== null ? <small role="status">口径未闭合 · 差异 {formatNumber(difference)}</small> : null}
-    </span>
-  );
-
-  return (
-    <InventoryPanel title="发票统计" syncedAt={block.latest_synced_at}>
-      <FinanceTable ariaLabel="发票统计" className="app-health-inventory-table app-health-inventory-table--invoice" minWidth={620}>
-        <FinanceTableHeader><FinanceTableColumn columnRole="identity">统计维度</FinanceTableColumn><FinanceTableColumn columnRole="identity" isRowHeader>分类</FinanceTableColumn><FinanceTableColumn columnRole="quantity">数量</FinanceTableColumn><FinanceTableColumn columnRole="quantity">合计</FinanceTableColumn><FinanceTableColumn columnRole="date">最近同步</FinanceTableColumn></FinanceTableHeader>
-        <FinanceTableBody>
-          <FinanceTableRow id="invoice-type-input"><FinanceTableCell columnRole="identity">{dimensionCell("按类型分", typeDifference)}</FinanceTableCell><FinanceTableCell columnRole="identity">{input?.label ?? "进项发票"}</FinanceTableCell><FinanceTableCell className="app-health-inventory-table__number" columnRole="quantity">{formatNumber(input?.count)}</FinanceTableCell><FinanceTableCell className="app-health-inventory-table__total" columnRole="quantity">{formatNumber(block.total_count)}</FinanceTableCell><FinanceTableCell columnRole="date">{formatTimestamp(input?.latest_synced_at)}</FinanceTableCell></FinanceTableRow>
-          <FinanceTableRow id="invoice-type-output"><FinanceTableCell columnRole="identity">{dimensionCell("按类型分", null)}</FinanceTableCell><FinanceTableCell columnRole="identity">{output?.label ?? "销项发票"}</FinanceTableCell><FinanceTableCell className="app-health-inventory-table__number" columnRole="quantity">{formatNumber(output?.count)}</FinanceTableCell><FinanceTableCell className="app-health-inventory-table__total" columnRole="quantity">{formatNumber(block.total_count)}</FinanceTableCell><FinanceTableCell columnRole="date">{formatTimestamp(output?.latest_synced_at)}</FinanceTableCell></FinanceTableRow>
-          <FinanceTableRow id="invoice-mode-manual"><FinanceTableCell columnRole="identity">{dimensionCell("按导入方式分", importDifference)}</FinanceTableCell><FinanceTableCell columnRole="identity">{manual?.label ?? "手工导入"}</FinanceTableCell><FinanceTableCell className="app-health-inventory-table__number" columnRole="quantity">{formatNumber(manual?.count)}</FinanceTableCell><FinanceTableCell className="app-health-inventory-table__total" columnRole="quantity">{formatNumber(block.total_count)}</FinanceTableCell><FinanceTableCell columnRole="date">{formatTimestamp(manual?.latest_synced_at)}</FinanceTableCell></FinanceTableRow>
-          <FinanceTableRow id="invoice-mode-oa"><FinanceTableCell columnRole="identity">{dimensionCell("按导入方式分", null)}</FinanceTableCell><FinanceTableCell columnRole="identity">
-              <span>{oa?.label ?? "OA 解析"}</span>
-              <small className="app-health-inventory-table__annotation">仅新增入池</small>
-            </FinanceTableCell><FinanceTableCell className="app-health-inventory-table__number" columnRole="quantity">{formatNumber(oa?.supplementary_count)}</FinanceTableCell><FinanceTableCell className="app-health-inventory-table__total" columnRole="quantity">{formatNumber(block.total_count)}</FinanceTableCell><FinanceTableCell columnRole="date">{formatTimestamp(oa?.latest_synced_at)}</FinanceTableCell></FinanceTableRow>
-        </FinanceTableBody>
-      </FinanceTable>
-    </InventoryPanel>
-  );
-}
-
-function OaInventory({ block }: { block: OperationsDashboardInventoryBlock }) {
-  const rows = [
-    inventorySource(block, "oa_records_completed"),
-    inventorySource(block, "oa_records_in_progress"),
-  ];
-
-  return (
-    <InventoryPanel title="OA 状态" syncedAt={block.latest_synced_at}>
-      <FinanceTable ariaLabel="OA 状态" className="app-health-inventory-table" minWidth={420}>
-        <FinanceTableHeader><FinanceTableColumn columnRole="status" isRowHeader>状态</FinanceTableColumn><FinanceTableColumn columnRole="quantity">数量</FinanceTableColumn><FinanceTableColumn columnRole="date">最近同步</FinanceTableColumn></FinanceTableHeader>
-        <FinanceTableBody>
-          {rows.map((source, index) => (
-            <FinanceTableRow id={source?.key ?? index} key={source?.key ?? index}>
-              <FinanceTableCell columnRole="status">{source?.label ?? (index === 0 ? "已完成 OA" : "进行中 OA")}</FinanceTableCell><FinanceTableCell className="app-health-inventory-table__number" columnRole="quantity">{formatNumber(source?.count)}</FinanceTableCell><FinanceTableCell columnRole="date">{formatTimestamp(source?.latest_synced_at)}</FinanceTableCell>
-            </FinanceTableRow>
-          ))}
-        </FinanceTableBody>
-      </FinanceTable>
-    </InventoryPanel>
-  );
-}
-
-function ImportEventsTable({
-  ariaLabel,
-  rows,
-  onWithdraw,
-  withdrawingBatchId,
-}: {
-  ariaLabel: string;
-  rows: OperationsDashboardImportEvent[];
-  onWithdraw?: (row: OperationsDashboardImportEvent) => void;
-  withdrawingBatchId?: string | null;
-}) {
-  const showActions = Boolean(onWithdraw);
-  return (
-    <FinanceTable ariaLabel={ariaLabel} className={showActions ? "app-health-import-history-table" : undefined} minWidth={showActions ? "100%" : 760}>
-      <FinanceTableHeader>
-        <FinanceTableColumn columnRole="identity" isRowHeader>类型</FinanceTableColumn>
-        <FinanceTableColumn columnRole="description">文件/来源</FinanceTableColumn>
-        {showActions ? <FinanceTableColumn columnRole="account">账户核对</FinanceTableColumn> : null}
-        <FinanceTableColumn columnRole="quantity">数量</FinanceTableColumn>
-        <FinanceTableColumn columnRole="date">时间</FinanceTableColumn>
-        <FinanceTableColumn columnRole="status">状态</FinanceTableColumn>
-        {showActions ? <FinanceTableColumn columnRole="action">操作</FinanceTableColumn> : null}
-      </FinanceTableHeader>
-      <FinanceTableBody>
-          {rows.length === 0 ? (
-            <FinanceTableRow id="empty-import-events">
-              <FinanceTableCell columnRole="identity">{EMPTY_VALUE}</FinanceTableCell>
-              <FinanceTableCell columnRole="description">{EMPTY_VALUE}</FinanceTableCell>
-              {showActions ? <FinanceTableCell columnRole="account">{EMPTY_VALUE}</FinanceTableCell> : null}
-              <FinanceTableCell columnRole="quantity">{EMPTY_VALUE}</FinanceTableCell>
-              <FinanceTableCell columnRole="date">{EMPTY_VALUE}</FinanceTableCell>
-              <FinanceTableCell columnRole="status">{EMPTY_VALUE}</FinanceTableCell>
-              {showActions ? <FinanceTableCell columnRole="action">{EMPTY_VALUE}</FinanceTableCell> : null}
-            </FinanceTableRow>
-          ) : (
-            rows.map((row, index) => {
-              const state = importEventState(row);
-              const rowKey = row.key || `${row.source_key}:${row.imported_at ?? index}`;
-              return (
-                <FinanceTableRow key={rowKey} id={rowKey}>
-                  <FinanceTableCell columnRole="identity" textValue={row.label}>{row.label}</FinanceTableCell>
-                  <FinanceTableCell columnRole="description" textValue={row.source_name}>
-                    <TableCellStack primary={row.source_name || EMPTY_VALUE} secondary={row.imported_by || undefined} />
-                  </FinanceTableCell>
-                  {showActions ? (
-                    <FinanceTableCell columnRole="account">
-                      <TableCellStack
-                        primary={[row.selected_bank_name, row.selected_bank_last4].filter(Boolean).join(" ") || EMPTY_VALUE}
-                        secondary={row.detected_bank_name || row.detected_last4
-                          ? `识别 ${[row.detected_bank_name, row.detected_last4].filter(Boolean).join(" ")}`
-                          : undefined}
-                      />
-                    </FinanceTableCell>
-                  ) : null}
-                  <FinanceTableCell columnRole="quantity">{formatCountWithSupplement(row.count, row.supplementary_count)}</FinanceTableCell>
-                  <FinanceTableCell columnRole="date">{formatTimestamp(row.imported_at)}</FinanceTableCell>
-                  <FinanceTableCell columnRole="status">
-                    <FinanceStatusTag tone={state.tone}>{state.label}</FinanceStatusTag>
-                  </FinanceTableCell>
-                  {showActions ? (
-                    <FinanceTableCell columnRole="action">
-                      {row.withdrawal_allowed ? (
-                        <Button
-                          aria-label={`撤回 ${row.source_name}`}
-                          isDisabled={Boolean(withdrawingBatchId)}
-                          onPress={() => onWithdraw?.(row)}
-                          size="sm"
-                          variant="danger"
-                        >
-                          <Undo2 aria-hidden="true" size={14} />
-                          撤回
-                        </Button>
-                      ) : EMPTY_VALUE}
-                    </FinanceTableCell>
-                  ) : null}
-                </FinanceTableRow>
-              );
-            })
-          )}
-      </FinanceTableBody>
-    </FinanceTable>
-  );
-}
-
-function DataInventory({ payload, onOpenImportHistory }: { payload: OperationsDashboardPayload; onOpenImportHistory: () => void }) {
-  const importEvents = payload.data_inventory.import_events ?? [];
-  const latestImportEvents = importEvents.slice(0, 5);
-  return (
-    <Section title="数据" testId="app-health-data">
-      <div className="app-health-inventory-grid">
-        <BankInventory block={payload.data_inventory.bank} />
-        <InvoiceInventory block={payload.data_inventory.invoice} />
-        <OaInventory block={payload.data_inventory.oa} />
-      </div>
-      <div className="app-health-import-events">
-        <div className="app-health-import-events__header">
-          <h3 className="app-health-import-events__title">最近导入记录</h3>
-          <Button
-            className="app-health-history-button"
-            onPress={onOpenImportHistory}
-            size="sm"
-            variant="tertiary"
-          >
-            <History aria-hidden="true" size={15} strokeWidth={2.2} />
-            查看全部导入历史
-          </Button>
-        </div>
-        <ImportEventsTable ariaLabel="最近导入记录" rows={latestImportEvents} />
-      </div>
-    </Section>
-  );
-}
-
-function RequestPerformance({ rows }: { rows: OperationsDashboardEndpointPerformance[] }) {
-  return (
-    <Section title="请求" testId="app-health-requests">
-      <FinanceTable ariaLabel="请求性能" minWidth={820}>
-        <FinanceTableHeader>
-          <FinanceTableColumn columnRole="description" isRowHeader>接口</FinanceTableColumn>
-          <FinanceTableColumn columnRole="quantity">样本</FinanceTableColumn>
-          <FinanceTableColumn columnRole="status">API p95</FinanceTableColumn>
-          <FinanceTableColumn columnRole="status">API p99</FinanceTableColumn>
-          <FinanceTableColumn columnRole="status">DB p95</FinanceTableColumn>
-          <FinanceTableColumn columnRole="status">DB p99</FinanceTableColumn>
-          <FinanceTableColumn columnRole="status">SQL p95</FinanceTableColumn>
-          <FinanceTableColumn columnRole="status">连接 p95</FinanceTableColumn>
-        </FinanceTableHeader>
-        <FinanceTableBody>
-            {rows.map((row) => (
-              <FinanceTableRow key={row.endpoint} id={row.endpoint}>
-                <FinanceTableCell columnRole="description" textValue={row.endpoint}>{row.endpoint}</FinanceTableCell>
-                <FinanceTableCell columnRole="quantity">{formatNumber(row.sample_count)}</FinanceTableCell>
-                <PercentileCells value={row.duration_ms} />
-                <PercentileCells value={row.database_duration_ms} />
-                <PerformanceCell value={row.sql_execute_fetch_ms.p95} kind="p95" />
-                <PerformanceCell value={row.connection_acquire_ms.p95} kind="p95" />
-              </FinanceTableRow>
-            ))}
-        </FinanceTableBody>
-      </FinanceTable>
-    </Section>
-  );
-}
-
-function OutboxTable({ payload }: { payload: OperationsDashboardPayload }) {
-  const outbox = payload.runtime_performance.outbox;
-  const rows = [
-    ["pending", outbox.pending_count],
-    ["processing", outbox.processing_count],
-    ["failed", outbox.failed_count],
-    ["oldest_pending", outbox.oldest_pending_age_seconds],
-  ] as const;
-  return (
-    <FinanceTable ariaLabel="Outbox 状态" minWidth={300}>
-      <FinanceTableHeader>
-        <FinanceTableColumn columnRole="identity" isRowHeader>Outbox</FinanceTableColumn>
-        <FinanceTableColumn columnRole="quantity">值</FinanceTableColumn>
-      </FinanceTableHeader>
-      <FinanceTableBody>
-          {rows.map(([label, value]) => (
-            <FinanceTableRow key={label} id={label}>
-              <FinanceTableCell columnRole="identity" textValue={label}>{label}</FinanceTableCell>
-              <FinanceTableCell columnRole="quantity">{label === "oldest_pending" ? formatSeconds(value) : formatNumber(value)}</FinanceTableCell>
-            </FinanceTableRow>
-          ))}
-      </FinanceTableBody>
-    </FinanceTable>
-  );
-}
-
-function QueueTable({ payload }: { payload: OperationsDashboardPayload }) {
-  return (
-    <FinanceTable ariaLabel="PostgreSQL 任务队列" minWidth={720}>
-      <FinanceTableHeader>
-        <FinanceTableColumn columnRole="identity" isRowHeader>任务类型</FinanceTableColumn>
-        <FinanceTableColumn columnRole="description">queue</FinanceTableColumn>
-        <FinanceTableColumn columnRole="quantity">排队</FinanceTableColumn>
-        <FinanceTableColumn columnRole="quantity">执行</FinanceTableColumn>
-        <FinanceTableColumn columnRole="quantity">失败</FinanceTableColumn>
-        <FinanceTableColumn columnRole="quantity">待确认／复核</FinanceTableColumn>
-      </FinanceTableHeader>
-      <FinanceTableBody>
-          {payload.runtime_performance.queues.map((row) => (
-            <FinanceTableRow key={`${row.event_type}:${row.queue}`} id={`${row.event_type}:${row.queue}`}>
-              <FinanceTableCell columnRole="identity">{row.event_type}</FinanceTableCell>
-              <FinanceTableCell columnRole="description" textValue={row.queue}>{row.queue}</FinanceTableCell>
-              <FinanceTableCell columnRole="quantity">{formatNumber(row.pending_count)}</FinanceTableCell>
-              <FinanceTableCell columnRole="quantity">{formatNumber(row.processing_count)}</FinanceTableCell>
-              <FinanceTableCell columnRole="quantity">{formatNumber(row.failed_count)}</FinanceTableCell>
-              <FinanceTableCell columnRole="quantity">{formatNumber((row.awaiting_confirmation_count ?? 0) + (row.needs_review_count ?? 0))}</FinanceTableCell>
-            </FinanceTableRow>
-          ))}
-      </FinanceTableBody>
-    </FinanceTable>
-  );
-}
-
-function WorkerTable({ payload }: { payload: OperationsDashboardPayload }) {
-  return (
-    <FinanceTable ariaLabel="Worker 状态" minWidth={900}>
-      <FinanceTableHeader>
-        <FinanceTableColumn columnRole="identity" isRowHeader>Worker</FinanceTableColumn>
-        <FinanceTableColumn columnRole="description">kind</FinanceTableColumn>
-        <FinanceTableColumn columnRole="status">状态</FinanceTableColumn>
-        <FinanceTableColumn columnRole="status">required</FinanceTableColumn>
-        <FinanceTableColumn columnRole="quantity">lag</FinanceTableColumn>
-        <FinanceTableColumn columnRole="description">warning</FinanceTableColumn>
-      </FinanceTableHeader>
-      <FinanceTableBody>
-          {payload.runtime_performance.workers.length === 0 ? (
-            <FinanceTableRow id="empty-worker">
-              <FinanceTableCell columnRole="identity">{EMPTY_VALUE}</FinanceTableCell>
-              <FinanceTableCell columnRole="description">{EMPTY_VALUE}</FinanceTableCell>
-              <FinanceTableCell columnRole="status">{EMPTY_VALUE}</FinanceTableCell>
-              <FinanceTableCell columnRole="status">{EMPTY_VALUE}</FinanceTableCell>
-              <FinanceTableCell columnRole="quantity">{EMPTY_VALUE}</FinanceTableCell>
-              <FinanceTableCell columnRole="description">{EMPTY_VALUE}</FinanceTableCell>
-            </FinanceTableRow>
-          ) : (
-            payload.runtime_performance.workers.map((row) => (
-              (() => {
-                const state = workerState(row);
-                const workerName = row.worker_instance || row.worker_kind;
-                return (
-              <FinanceTableRow key={workerName} id={workerName}>
-                <FinanceTableCell columnRole="identity" textValue={workerName}>{workerName}</FinanceTableCell>
-                <FinanceTableCell columnRole="description" textValue={row.worker_kind}>{row.worker_kind}</FinanceTableCell>
-                <FinanceTableCell columnRole="status"><FinanceStatusTag tone={state.tone}>{state.label}</FinanceStatusTag></FinanceTableCell>
-                <FinanceTableCell columnRole="status">{row.required === false ? "optional" : "required"}</FinanceTableCell>
-                <FinanceTableCell columnRole="quantity">{formatSeconds(row.heartbeat_lag_seconds)}</FinanceTableCell>
-                <FinanceTableCell columnRole="description" textValue={row.warning_code || ""}>{row.warning_code || EMPTY_VALUE}</FinanceTableCell>
-              </FinanceTableRow>
-                );
-              })()
-            ))
-          )}
-      </FinanceTableBody>
-    </FinanceTable>
-  );
-}
-
-function RuntimePerformance({ payload }: { payload: OperationsDashboardPayload }) {
-  return (
-    <Section title="后台" testId="app-health-runtime">
-      <RuntimeOverview payload={payload} />
-      <div className="app-health-runtime-grid app-health-runtime-grid--primary">
-        <OutboxTable payload={payload} />
-        <QueueTable payload={payload} />
-      </div>
-      <WorkerTable payload={payload} />
-    </Section>
-  );
-}
-
 export default function AppHealthOperationsPage() {
   const session = useSession();
-  const permissions = useSessionPermissions();
+  const { canAdminAccess } = useSessionPermissions();
   const { active, activationGeneration } = useOptionalPageActivation("app-health-operations");
   const [payload, setPayload] = useState<OperationsDashboardPayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [auditPayload, setAuditPayload] = useState<AppHealthSystemAuditPayload | null>(null);
-  const [auditError, setAuditError] = useState<string | null>(null);
-  const [isAuditLoading, setAuditLoading] = useState(false);
-  const [isImportHistoryOpen, setImportHistoryOpen] = useState(false);
-  const [importHistory, setImportHistory] = useState<OperationsImportHistoryPayload | null>(null);
-  const [importHistoryError, setImportHistoryError] = useState<string | null>(null);
-  const [isImportHistoryLoading, setImportHistoryLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [history, setHistory] = useState<OperationsImportHistoryPayload | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [query, setQuery] = useState(initialQuery);
+  const [draft, setDraft] = useState(initialQuery);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<OperationsDashboardImportEvent | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [task, setTask] = useState<{ jobId?: string; sequence: number } | null>(null);
   const [withdrawTarget, setWithdrawTarget] = useState<OperationsDashboardImportEvent | null>(null);
-  const [withdrawingBatchId, setWithdrawingBatchId] = useState<string | null>(null);
-  const [withdrawFeedback, setWithdrawFeedback] = useState<string | null>(null);
-  const inFlightRef = useRef<AbortController | null>(null);
-  const auditInFlightRef = useRef<AbortController | null>(null);
-  const importHistoryInFlightRef = useRef<AbortController | null>(null);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawError, setWithdrawError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const dashboardRequest = useRef<AbortController | null>(null);
+  const historyRequest = useRef<AbortController | null>(null);
+  const detailRequest = useRef<AbortController | null>(null);
+  const withdrawalBusy = useRef(false);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const historyButtonRef = useRef<HTMLButtonElement | null>(null);
+  const scrollPosition = useRef(0);
 
   const loadDashboard = useCallback(async () => {
-    if (!permissions.canAdminAccess) {
-      return;
-    }
-    inFlightRef.current?.abort();
-    const controller = new AbortController();
-    inFlightRef.current = controller;
-    setIsLoading(true);
+    if (!canAdminAccess) return;
+    dashboardRequest.current?.abort();
+    const request = new AbortController(); dashboardRequest.current = request; setLoading(true);
     try {
-      const nextPayload = await fetchAppHealthDashboard(controller.signal);
-      if (controller.signal.aborted) return;
-      setPayload(nextPayload);
-      setLoadError(null);
+      const result = await fetchAppHealthDashboard(request.signal);
+      if (!request.signal.aborted) { setPayload(result); setLoadError(null); }
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        return;
-      }
-      setLoadError(error instanceof Error && error.message.trim() ? error.message : "AppHealth 状态加载失败。");
+      if (!request.signal.aborted) setLoadError(error instanceof Error ? error.message : "数据读取失败。");
     } finally {
-      if (inFlightRef.current === controller) {
-        inFlightRef.current = null;
-      }
-      setIsLoading(false);
+      if (dashboardRequest.current === request) { dashboardRequest.current = null; setLoading(false); }
     }
-  }, [permissions.canAdminAccess]);
-
-  const runSystemAudit = useCallback(async () => {
-    if (!permissions.canAdminAccess || auditInFlightRef.current) {
-      return;
-    }
-    const controller = new AbortController();
-    auditInFlightRef.current = controller;
-    setAuditLoading(true);
+  }, [canAdminAccess]);
+  const loadHistory = useCallback(async () => {
+    if (!canAdminAccess) return;
+    historyRequest.current?.abort();
+    const request = new AbortController(); historyRequest.current = request; setHistoryLoading(true);
     try {
-      const nextPayload = await fetchAppHealthSystemAudit(controller.signal);
-      setAuditPayload(nextPayload);
-      if (nextPayload.page_projection) {
-        setPayload(nextPayload.page_projection);
+      const result = await fetchImportHistory(query, request.signal);
+      if (request.signal.aborted) return;
+      if (!result.rows.length && query.page > Math.max(result.pagination.total_pages, 1)) {
+        setQuery(current => ({ ...current, page: Math.max(result.pagination.total_pages, 1) })); return;
       }
-      setAuditError(null);
+      setHistory(result); setHistoryError(null);
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        return;
-      }
-      setAuditError(error instanceof Error && error.message.trim() ? error.message : "System Audit 失败。");
+      if (!request.signal.aborted) setHistoryError(error instanceof Error ? error.message : "导入历史读取失败。");
     } finally {
-      if (auditInFlightRef.current === controller) {
-        auditInFlightRef.current = null;
-      }
-      setAuditLoading(false);
+      if (historyRequest.current === request) { historyRequest.current = null; setHistoryLoading(false); }
     }
-  }, [permissions.canAdminAccess]);
-
-  const loadImportHistory = useCallback(async (page = 1) => {
-    if (!permissions.canAdminAccess) return;
-    importHistoryInFlightRef.current?.abort();
-    const controller = new AbortController();
-    importHistoryInFlightRef.current = controller;
-    setImportHistoryLoading(true);
-    setImportHistoryError(null);
+  }, [canAdminAccess, query]);
+  const loadDetail = useCallback(async (id: string) => {
+    detailRequest.current?.abort();
+    const request = new AbortController(); detailRequest.current = request; setDetailLoading(true);
     try {
-      setImportHistory(await fetchImportHistory(page, 50, controller.signal));
+      const result = await fetchImportHistoryDetail(id, request.signal);
+      if (!request.signal.aborted) { setDetail(result.row); setDetailError(null); }
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") return;
-      setImportHistoryError(error instanceof Error && error.message.trim() ? error.message : "导入历史加载失败。");
+      if (!request.signal.aborted) setDetailError(error instanceof Error ? error.message : "导入详情读取失败。");
     } finally {
-      if (importHistoryInFlightRef.current === controller) {
-        importHistoryInFlightRef.current = null;
-        setImportHistoryLoading(false);
-      }
+      if (detailRequest.current === request) { detailRequest.current = null; setDetailLoading(false); }
     }
-  }, [permissions.canAdminAccess]);
-
-  const confirmWithdrawal = useCallback(async () => {
-    if (!withdrawTarget?.batch_id || withdrawingBatchId) return;
-    setWithdrawingBatchId(withdrawTarget.batch_id);
-    setImportHistoryError(null);
-    setWithdrawFeedback(null);
-    try {
-      const result = await withdrawBankTransactionImport(withdrawTarget.batch_id, "从导入历史撤回误导入的银行流水");
-      setWithdrawFeedback(`已撤回 ${result.withdrawn_count} 条银行流水；OA、发票和导入审计记录已保留。`);
-      setWithdrawTarget(null);
-      await Promise.all([
-        loadImportHistory(importHistory?.pagination.page ?? 1),
-        loadDashboard(),
-      ]);
-    } catch (error) {
-      setImportHistoryError(error instanceof Error && error.message.trim() ? error.message : "撤回失败，请稍后重试。");
-    } finally {
-      setWithdrawingBatchId(null);
-    }
-  }, [importHistory?.pagination.page, loadDashboard, loadImportHistory, withdrawTarget, withdrawingBatchId]);
+  }, []);
+  const refreshAll = useCallback(async () => {
+    await Promise.all([loadDashboard(), historyOpen ? loadHistory() : Promise.resolve(), historyOpen && selectedId ? loadDetail(selectedId) : Promise.resolve()]);
+  }, [historyOpen, loadDashboard, loadHistory, loadDetail, selectedId]);
 
   useEffect(() => {
-    if (!permissions.canAdminAccess || !active) {
-      return undefined;
-    }
-    void loadDashboard();
-    const timer = window.setInterval(() => {
-      void loadDashboard();
-    }, REFRESH_INTERVAL_MS);
-    return () => {
-      window.clearInterval(timer);
-      inFlightRef.current?.abort();
-      inFlightRef.current = null;
-      auditInFlightRef.current?.abort();
-      auditInFlightRef.current = null;
-      importHistoryInFlightRef.current?.abort();
-      importHistoryInFlightRef.current = null;
+    if (!canAdminAccess || !active) return;
+    let stopped = false;
+    let timer: number | undefined;
+    let generation = 0;
+    const poll = async () => {
+      if (stopped || document.hidden) return;
+      const currentGeneration = generation;
+      if (!dashboardRequest.current || dashboardRequest.current.signal.aborted) await loadDashboard();
+      if (!stopped && !document.hidden && currentGeneration === generation) timer = window.setTimeout(() => void poll(), REFRESH_INTERVAL_MS);
     };
-  }, [active, activationGeneration, loadDashboard, permissions.canAdminAccess]);
+    const visibility = () => {
+      generation++;
+      window.clearTimeout(timer);
+      if (document.hidden) dashboardRequest.current?.abort(); else void poll();
+    };
+    void poll(); document.addEventListener("visibilitychange", visibility);
+    return () => { stopped = true; window.clearTimeout(timer); document.removeEventListener("visibilitychange", visibility); dashboardRequest.current?.abort(); };
+  }, [active, activationGeneration, canAdminAccess, loadDashboard]);
+  useEffect(() => {
+    if (!historyOpen || task || !active) return;
+    if (selectedId) void loadDetail(selectedId); else void loadHistory();
+    return () => { historyRequest.current?.abort(); detailRequest.current?.abort(); };
+  }, [historyOpen, task, selectedId, active, loadHistory, loadDetail]);
+  useLayoutEffect(() => { if (historyOpen && !selectedId && listRef.current) listRef.current.scrollTop = scrollPosition.current; }, [historyOpen, selectedId, task]);
+  useEffect(() => () => { dashboardRequest.current?.abort(); historyRequest.current?.abort(); detailRequest.current?.abort(); }, []);
 
-  if (session.status === "loading") {
-    return (
-      <div className="app-health-page app-health-page--status" data-testid="app-health-page">
-        <AppHealthNotice status="accent">正在加载。</AppHealthNotice>
-      </div>
-    );
-  }
-
-  if (!permissions.canAdminAccess) {
-    return (
-      <div className="app-health-page app-health-page--status" data-testid="app-health-page">
-        <AppHealthNotice status="warning">当前账号没有管理员权限，不能查看 AppHealth 运维状态。</AppHealthNotice>
-      </div>
-    );
-  }
-
-  return (
-    <div className="app-health-page" data-testid="app-health-page">
-      <header className="app-health-header" data-testid="app-health-header">
-        <div className="app-health-heading">
-          <h1 className="app-health-title">AppHealth 运维状态</h1>
-          <p className="app-health-generated-at">{payload ? formatTimestamp(payload.generated_at) : EMPTY_VALUE}</p>
+  const openHistory = (id: string | null = null) => {
+    // The entry survives table refreshes, so native drawer focus restoration has a stable target.
+    historyButtonRef.current?.focus();
+    setSelectedId(id); setDetail(null); setDetailError(null); setFeedback(null); setHistoryOpen(true);
+  };
+  const confirmWithdrawal = async () => {
+    if (!withdrawTarget || withdrawalBusy.current) return;
+    withdrawalBusy.current = true; setWithdrawing(true); setFeedback(null); setWithdrawError(null);
+    try {
+      const result = await withdrawBankTransactionImport(withdrawTarget.batch_id, "从导入历史撤回误导入的银行流水");
+      setFeedback(`已撤回 ${result.withdrawn_count} 笔银行流水。`); setWithdrawTarget(null);
+      await refreshAll();
+    } catch (error) { setWithdrawError(error instanceof Error ? error.message : "撤回失败，请核实结果。"); }
+    finally { withdrawalBusy.current = false; setWithdrawing(false); }
+  };
+  if (session.status === "loading") return <div className="app-health-page"><Notice>正在加载。</Notice></div>;
+  if (!canAdminAccess) return <div className="app-health-page"><Notice>当前账号没有管理员权限，不能查看 AppHealth 运维状态。</Notice></div>;
+  return <div className="app-health-page" data-testid="app-health-page">
+    <header className="app-health-header" data-testid="app-health-header"><div className="app-health-heading"><h1 className="app-health-title">数据与导入</h1><p className="app-health-generated-at">最近更新 {timestamp(payload?.generated_at)}</p></div>
+      <Button aria-label="刷新" className="app-health-refresh-button" isIconOnly isDisabled={loading} variant="secondary" onPress={() => void refreshAll()}>{loading ? <Spinner size="sm" /> : <RefreshCw size={17} />}</Button>
+    </header>
+    {loadError ? <Notice danger>{loadError}</Notice> : null}
+    {payload ? <div className="app-health-content" aria-busy={loading}>
+      <Section title="数据" id="app-health-data"><Inventory payload={payload} /></Section>
+      <Section title="最近导入记录" id="app-health-recent-imports" actions={<div className="app-health-section-actions">
+        <Button size="sm" variant="tertiary" onPress={() => setTask({ sequence: Date.now() })}>导入任务</Button>
+        <Button ref={historyButtonRef} size="sm" variant="secondary" onPress={() => openHistory()}><History size={15} />导入历史</Button>
+      </div>}><EventsTable rows={payload.data_inventory.import_events} label="最近导入记录" onDetail={openHistory} /></Section>
+    </div> : !loadError ? <Notice>正在加载。</Notice> : null}
+    <AppDrawer className="app-health-import-history-drawer" title="导入历史" width="min(960px, calc(100vw - 24px))" open={historyOpen && !task} closeLabel="关闭导入历史" onClose={() => setHistoryOpen(false)} headerActions={selectedId ? <Button size="sm" variant="tertiary" onPress={() => { setSelectedId(null); setDetailError(null); }}><ArrowLeft size={15} />返回列表</Button> : undefined}>
+      {feedback ? <Notice>{feedback}</Notice> : null}
+      {selectedId ? <div className="app-health-history-view" key={selectedId}>
+        {detailLoading ? <Spinner aria-label="正在读取导入详情" size="sm" /> : null}
+        {detailError ? <Notice danger>{detailError}<Button variant="tertiary" onPress={() => void loadDetail(selectedId)}>重试</Button></Notice> : null}
+        {detail?.batch_id === selectedId && !detailError ? <EventDetail row={detail} onTask={jobId => setTask({ jobId, sequence: Date.now() })} onWithdraw={() => { setWithdrawError(null); setWithdrawTarget(detail); }} /> : null}
+      </div> : <>
+        <form className="app-health-history-filters" onSubmit={event => { event.preventDefault(); scrollPosition.current = 0; setHistory(null); setQuery({ ...draft, page: 1, page_size: query.page_size }); }}>
+          <label>类型<select value={draft.batch_type} onChange={event => setDraft({ ...draft, batch_type: event.target.value })}><option value="">全部类型</option><option value="bank_transaction">银行流水</option><option value="input_invoice">进项发票</option><option value="output_invoice">销项发票</option></select></label>
+          <label>状态<select value={draft.status} onChange={event => setDraft({ ...draft, status: event.target.value })}><option value="">全部状态</option>{Object.entries(eventStates).map(([value, state]) => <option value={value} key={value}>{state.label}</option>)}</select></label>
+          <label>开始日期<input type="date" value={draft.start_date} onChange={event => setDraft({ ...draft, start_date: event.target.value })} /></label>
+          <label>结束日期<input type="date" value={draft.end_date} min={draft.start_date} onChange={event => setDraft({ ...draft, end_date: event.target.value })} /></label>
+          <label className="app-health-history-search">文件名<input type="search" maxLength={200} placeholder="搜索文件名" value={draft.search} onChange={event => setDraft({ ...draft, search: event.target.value })} /></label>
+          <Button type="submit" variant="primary" isDisabled={historyLoading}><Search size={15} />查询</Button>
+        </form>
+        {historyError ? <Notice danger>{historyError}<Button variant="tertiary" onPress={() => void loadHistory()}>重试</Button></Notice> : null}
+        <div ref={listRef} className="app-health-history-list" onScroll={event => { scrollPosition.current = event.currentTarget.scrollTop; }} aria-busy={historyLoading}>
+          <EventsTable rows={history?.rows ?? []} label="导入历史记录" loading={historyLoading} onDetail={id => { setSelectedId(id); setDetail(null); setDetailError(null); }} />
         </div>
-        <Tooltip delay={0}>
-          <Button
-            aria-label="刷新"
-            className="app-health-refresh-button"
-            isDisabled={isLoading}
-            isIconOnly
-            onPress={() => {
-              void loadDashboard();
-            }}
-            size="sm"
-            variant="tertiary"
-          >
-            {isLoading ? <Spinner color="current" size="sm" /> : <RefreshCw aria-hidden="true" size={16} strokeWidth={2.2} />}
-          </Button>
-          <Tooltip.Content>刷新</Tooltip.Content>
-        </Tooltip>
-      </header>
-
-      {loadError ? <AppHealthNotice status="danger">{loadError}</AppHealthNotice> : null}
-
-      {payload ? (
-        <>
-          <DataInventory payload={payload} onOpenImportHistory={() => {
-            setImportHistoryOpen(true);
-            void loadImportHistory(1);
-          }} />
-          <AppHealthSystemAuditPanel
-            error={auditError}
-            isLoading={isAuditLoading}
-            onRun={runSystemAudit}
-            payload={auditPayload}
-          />
-          <RequestPerformance rows={payload.request_performance.endpoints} />
-          <RuntimePerformance payload={payload} />
-          <ImportJobDiagnostics refreshToken={payload} onHandled={loadDashboard} />
-          <AppDrawer
-            className="app-health-import-history-drawer"
-            closeLabel="关闭导入历史"
-            open={isImportHistoryOpen}
-            onClose={() => {
-              importHistoryInFlightRef.current?.abort();
-              setImportHistoryOpen(false);
-            }}
-            title="导入历史"
-            width="min(1440px, calc(100vw - 32px))"
-          >
-            {isImportHistoryLoading && !importHistory ? <Spinner aria-label="正在加载导入历史" /> : null}
-            {importHistoryError ? <AppHealthNotice status="danger">{importHistoryError}</AppHealthNotice> : null}
-            {withdrawFeedback ? <AppHealthNotice status="accent">{withdrawFeedback}</AppHealthNotice> : null}
-            {importHistory ? (
-              <>
-                <ImportEventsTable
-                  ariaLabel="全部导入历史"
-                  onWithdraw={setWithdrawTarget}
-                  rows={importHistory.rows}
-                  withdrawingBatchId={withdrawingBatchId}
-                />
-                <div className="app-health-import-history-drawer__pagination">
-                  <Button
-                    isDisabled={isImportHistoryLoading || importHistory.pagination.page <= 1}
-                    onPress={() => void loadImportHistory(importHistory.pagination.page - 1)}
-                    size="sm"
-                    variant="secondary"
-                  >上一页</Button>
-                  <span>{importHistory.pagination.page} / {Math.max(importHistory.pagination.total_pages, 1)}</span>
-                  <Button
-                    isDisabled={isImportHistoryLoading || importHistory.pagination.page >= importHistory.pagination.total_pages}
-                    onPress={() => void loadImportHistory(importHistory.pagination.page + 1)}
-                    size="sm"
-                    variant="secondary"
-                  >下一页</Button>
-                </div>
-              </>
-            ) : null}
-          </AppDrawer>
-          <AppDialog
-            actions={(
-              <>
-                <Button isDisabled={Boolean(withdrawingBatchId)} onPress={() => setWithdrawTarget(null)} variant="secondary">取消</Button>
-                <Button isDisabled={Boolean(withdrawingBatchId)} onPress={() => void confirmWithdrawal()} variant="danger">
-                  {withdrawingBatchId ? "正在撤回..." : "确认撤回"}
-                </Button>
-              </>
-            )}
-            disableEscapeClose={Boolean(withdrawingBatchId)}
-            isDismissable={!withdrawingBatchId}
-            onClose={() => setWithdrawTarget(null)}
-            open={Boolean(withdrawTarget)}
-            title="撤回流水导入"
-          >
-            <div className="app-health-import-withdrawal-confirmation">
-              <p>将从本 APP 数据库移除这次导入独占创建的银行流水，并解除其工作台关联。</p>
-              <dl>
-                <div><dt>文件</dt><dd>{withdrawTarget?.source_name || EMPTY_VALUE}</dd></div>
-                <div><dt>导入时间</dt><dd>{formatTimestamp(withdrawTarget?.imported_at)}</dd></div>
-                <div><dt>流水数量</dt><dd>{formatNumber(withdrawTarget?.count)}</dd></div>
-              </dl>
-              <AppHealthNotice status="warning">OA、发票及导入/操作审计记录不会删除；撤回后的流水不可在页面内恢复，需要重新选择正确银行后导入原文件。</AppHealthNotice>
-            </div>
-          </AppDialog>
-        </>
-      ) : !loadError ? (
-        <AppHealthNotice status="accent">正在加载。</AppHealthNotice>
-      ) : null}
-    </div>
-  );
+        <div className="app-health-history-pagination"><label>每页<select value={query.page_size} onChange={event => { scrollPosition.current = 0; setHistory(null); setQuery({ ...query, page: 1, page_size: Number(event.target.value) }); }}><option value={50}>50 条</option><option value={100}>100 条</option></select></label>
+          <span>共 {count(history?.pagination.total)} 条</span><div><Button size="sm" variant="tertiary" isDisabled={historyLoading || query.page <= 1} onPress={() => setQuery({ ...query, page: query.page - 1 })}>上一页</Button>
+          <span>{query.page} / {Math.max(history?.pagination.total_pages ?? 1, 1)}</span><Button size="sm" variant="tertiary" isDisabled={historyLoading || !history || query.page >= history.pagination.total_pages} onPress={() => setQuery({ ...query, page: query.page + 1 })}>下一页</Button></div>
+        </div>
+      </>}
+    </AppDrawer>
+    {task ? <ImportJobDiagnostics key={task.sequence} initialJobId={task.jobId} refreshToken={payload?.generated_at} onHandled={refreshAll} drawer={{ open: true, onClose: () => { setTask(null); void refreshAll(); } }} /> : null}
+    <AppDialog title="撤回流水导入" open={Boolean(withdrawTarget)} isDismissable={!withdrawing} disableEscapeClose={withdrawing} onClose={() => setWithdrawTarget(null)} actions={<><Button variant="secondary" isDisabled={withdrawing} onPress={() => setWithdrawTarget(null)}>取消</Button><Button variant="danger" isDisabled={withdrawing} onPress={() => void confirmWithdrawal()}>{withdrawing ? "正在撤回…" : "确认撤回"}</Button></>}>
+      <div className="app-health-import-withdrawal-confirmation">{withdrawError ? <Notice danger>{withdrawError}</Notice> : null}<p>{withdrawTarget?.source_name}</p><p>撤回 {count(withdrawTarget?.count)} 笔本次导入独占创建的银行流水，并解除其关联。</p><Notice>OA、发票及导入/操作审计记录不会删除；需要恢复时请重新导入原文件。</Notice></div>
+    </AppDialog>
+  </div>;
 }

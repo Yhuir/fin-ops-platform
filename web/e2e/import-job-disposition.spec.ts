@@ -71,7 +71,7 @@ test("administrator inspects another owner's failure, ends handling once and see
     return route.fulfill({ json: { rows: closed ? [] : [job], pagination } });
   });
   await page.goto("/operations/app-health");
-  await expect(page.getByRole("heading", { name: "导入任务诊断" })).toBeVisible();
+  await page.getByRole("button", { name: "导入任务", exact: true }).click();
   await page.getByRole("button", { name: "查看详情", exact: true }).click();
   const drawer = page.getByRole("dialog", { name: "导入任务详情" });
   await expect(drawer).toContainText("other-owner");
@@ -81,6 +81,7 @@ test("administrator inspects another owner's failure, ends handling once and see
   await drawer.getByRole("button", { name: "结束处理并关闭提醒" }).click();
   await expect(drawer).toContainText("本次任务已结束处理；原执行结果和历史记录保留。");
   await expect(drawer.getByRole("button", { name: "结束处理并关闭提醒" })).toHaveCount(0);
+  await drawer.getByRole("button", { name: "返回任务列表", exact: true }).click();
   await expect(page.getByText("无待处理导入任务", { exact: true })).toBeVisible();
   expect(commands).toBe(1);
 });

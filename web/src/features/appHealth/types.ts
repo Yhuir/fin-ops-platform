@@ -176,6 +176,16 @@ export type BankImportWithdrawalPayload = {
   idempotent_replay: boolean;
 };
 
+export type ImportHistoryQuery = {
+  page: number;
+  page_size: number;
+  batch_type: string;
+  status: string;
+  search: string;
+  start_date: string;
+  end_date: string;
+};
+
 export type OperationsImportHistoryPayload = {
   rows: OperationsDashboardImportEvent[];
   pagination: {
@@ -259,156 +269,4 @@ export type OperationsDashboardPayload = {
   freshness: {
     warnings: string[];
   };
-};
-
-export type PageAuditOverallStatus = "pass" | "issues_found" | string;
-
-export type PageAuditPageKey =
-  | "reconciliation-workbench"
-  | "cost-statistics"
-  | "bank-details"
-  | "oa-pending-payments"
-  | "bank-flow-rule-batches"
-  | "batch-accounting"
-  | "turnover-ledger"
-  | "etc-tickets"
-  | "tax-offset"
-  | "pending-invoices"
-  | "input-invoice-usage"
-  | "output-invoice-collections"
-  | "settings"
-  | "operation-history"
-  | "app-health-operations"
-  | "imports.bank-transactions"
-  | "imports.invoices"
-  | "imports.etc-invoices";
-
-export type PageAuditStatus = {
-  integrity?: "pass" | "issues_found";
-  freshness?: "fresh" | "not_fresh";
-  queue?: "drained" | "backlog";
-  external?: "pass" | "fail" | "unknown" | "not_applicable" | string;
-};
-
-export type PageAuditSummary = {
-  source_fact_count?: number | null;
-  active_relation_count?: number | null;
-  linked_relation_group_count?: number | null;
-  outbox_backlog_count?: number | null;
-  active_workbench_pair_relation_count?: number | null;
-  linked_workbench_relation_group_count?: number | null;
-  blocking_issue_sample_count?: number | null;
-  issue_sample_count?: number | null;
-  error_sample_count?: number | null;
-  warning_sample_count?: number | null;
-  issue_sample_counts_by_code?: Record<string, number>;
-  issue_sample_limit_per_code?: number | null;
-  issue_samples_truncated?: boolean;
-  detected_issue_code_count?: number | null;
-};
-
-export type PageAuditIssue = {
-  severity?: string;
-  code?: string;
-  message?: string;
-  subject_id?: string | null;
-  scope_key?: string | null;
-  details?: Record<string, unknown> | null;
-};
-
-export type PageAuditContract = {
-  source_tables?: string[];
-  relation_tables?: string[];
-  scope_types?: string[];
-  event_types?: string[];
-  pass_condition?: string;
-  guarantee_boundary?: string;
-  canonical_expected_set?: string;
-  key_display_fields?: string[];
-  relation_edge_equality?: string;
-  snapshot_consistency?: "repeatable_read_read_only" | "caller_managed" | string;
-  database_snapshot?: boolean;
-  external_source_boundary?: string;
-  proof_checks?: string[];
-  contract_revision?: string;
-  proof_availability?: "ready" | "unavailable" | string;
-  relation_proof_required?: boolean;
-  write_policy?: "read_only" | string;
-};
-
-export type PageAuditPayload = {
-  mode?: string;
-  tenant_id?: string;
-  page_key?: PageAuditPageKey;
-  domain_key?: string;
-  label?: string;
-  generated_at?: string;
-  overall_status?: PageAuditOverallStatus;
-  audit_status?: PageAuditStatus;
-  summary?: PageAuditSummary;
-  issues?: PageAuditIssue[];
-  audit_contract?: PageAuditContract;
-};
-
-export type AppHealthSystemAuditPayload = PageAuditPayload & {
-  summary?: PageAuditSummary & {
-    registered_page_count?: number | null;
-    audited_business_page_count?: number | null;
-    passed_business_page_count?: number | null;
-    database_internal_contracts?: "pass" | "issues_found" | string;
-    end_to_end_source_truth?: "unproven" | "proven_as_of_external_evidence" | "not_applicable" | string;
-  };
-  database_system_snapshot?: {
-    system_audit_id?: string;
-    snapshot_identity?: string;
-    snapshot_generated_at?: string;
-    snapshot_consistency?: string;
-    database_snapshot?: boolean;
-    evidence_fingerprint?: string;
-    page_results?: PageAuditPayload[];
-  };
-  runtime_observation?: {
-    observed_at?: string;
-    database_snapshot?: boolean;
-    warnings?: string[];
-  };
-  external_evidence?: {
-    status?: "pass" | "fail" | "unknown" | "not_applicable" | string;
-    end_to_end_source_truth?: "unproven" | "proven_as_of_external_evidence" | "not_applicable" | string;
-    as_of?: string;
-    claim_boundary?: string;
-    summary?: {
-      required_domain_count?: number;
-      passed_domain_count?: number;
-      failed_domain_count?: number;
-      unknown_domain_count?: number;
-    };
-    domains?: Array<{
-      domain?: "bank" | "oa" | "invoice" | "etc" | string;
-      status?: "pass" | "fail" | "unknown" | string;
-      reason?: string;
-      evidence_id?: string;
-      source_snapshot_id?: string;
-      observed_at?: string;
-      valid_until?: string;
-      manifest_fingerprint?: string;
-      issue_count?: number;
-      boundary?: string;
-    }>;
-    items?: Array<{
-      domain?: "bank" | "oa" | "invoice" | "etc" | string;
-      status?: "pass" | "fail" | "unknown" | string;
-      reason?: string;
-      evidence_id?: string;
-      observed_at?: string;
-      boundary?: string;
-    }>;
-    page_coverage?: Array<{
-      page_key?: PageAuditPageKey;
-      status?: "pass" | "fail" | "unknown" | "not_applicable" | string;
-      dependency_keys?: Array<"bank" | "oa" | "invoice" | "etc" | string>;
-      boundary?: string;
-    }>;
-  };
-  page_projection?: OperationsDashboardPayload;
 };

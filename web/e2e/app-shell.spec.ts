@@ -127,21 +127,21 @@ test.describe("app shell browser smoke", () => {
       const dashboardResponse = waitForAppHealthDashboard(page);
       await page.goto("/operations/app-health");
       await mark("apiLatencyMs", dashboardResponse);
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "AppHealth 运维状态" })).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByTestId("app-health-requests")).toBeVisible());
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("heading", { name: "数据与导入" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByTestId("app-health-recent-imports")).toBeVisible());
     });
 
     await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
     await expect(page.getByRole("link", { name: "关联台" })).toBeVisible();
     await expect(page.getByRole("link", { name: "银行明细" })).toBeVisible();
     await expect(page.getByRole("link", { name: "系统状态" })).toHaveAttribute("aria-current", "page");
-    await expect(page.getByRole("heading", { name: "AppHealth 运维状态" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "数据与导入" })).toBeVisible();
     await expect(page.getByTestId("app-health-data")).toBeVisible();
-    await expect(page.getByRole("grid", { name: "发票统计" })).toContainText("按类型分");
-    await expect(page.getByRole("grid", { name: "发票统计" })).toContainText("按导入方式分");
-    await expect(page.getByRole("grid", { name: "OA 状态" })).not.toContainText("单据");
-    await expect(page.getByRole("grid", { name: "OA 状态" })).not.toContainText("明细");
-    await expect(page.getByTestId("app-health-requests")).toBeVisible();
+    await expect(page.getByLabel("发票统计")).toContainText("按类型");
+    await expect(page.getByLabel("发票统计")).toContainText("按导入方式");
+    await expect(page.getByLabel("OA 状态")).not.toContainText("单据");
+    await expect(page.getByLabel("OA 状态")).not.toContainText("明细");
+    await expect(page.getByTestId("app-health-recent-imports")).toBeVisible();
     await expect(page.getByRole("button", { name: "刷新", exact: true })).toBeVisible();
     expect(api.count("GET /api/session/me")).toBeGreaterThan(0);
     expect(api.count("GET /api/operations/app-health-dashboard")).toBeGreaterThan(0);
@@ -155,22 +155,17 @@ test.describe("app shell browser smoke", () => {
       const dashboardResponse = waitForAppHealthDashboard(page);
       await page.getByRole("button", { name: "刷新", exact: true }).click();
       await mark("apiLatencyMs", dashboardResponse);
-      await mark("finalSettledLatencyMs", expect(page.getByTestId("app-health-runtime")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByTestId("app-health-recent-imports")).toBeVisible());
     });
     expect(api.count("GET /api/operations/app-health-dashboard")).toBeGreaterThan(dashboardCountBeforeRefresh);
 
-    const auditPanel = page.getByTestId("app-health-system-audit");
-    await auditPanel.getByLabel("Audit 全系统 App 内部合同").click();
-    await expect(auditPanel).toContainText("pass");
-    await expect(auditPanel).toContainText("Blocking samples");
-    await expect(auditPanel).toContainText("外部证据 unknown");
-    await expect(auditPanel).not.toContainText("Blocking issues");
-    await expect(page.getByRole("grid", { name: "发票统计" })).not.toContainText("口径未闭合");
-    expect(api.count("GET /api/operations/app-health/page-audit")).toBe(1);
-    expect(api.count("POST /api/operations/app-health/page-audit")).toBe(0);
-    // Queue column headers are labels, not an operation failure notification.
-    await expect(page.getByRole("columnheader", { name: "失败", exact: true })).toBeVisible();
-    await expectNoUnexpectedSuccessUiErrors(page, { allowText: /Read model|排队 执行 失败 待确认／复核/gi });
+    await expect(page.getByTestId("app-health-system-audit")).toHaveCount(0);
+    await expect(page.getByTestId("app-health-requests")).toHaveCount(0);
+    await expect(page.getByTestId("app-health-runtime")).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "导入任务诊断" })).toHaveCount(0);
+    await expect(page.getByLabel("发票统计")).not.toContainText("统计未闭合");
+    expect(api.count("GET /api/operations/app-health/page-audit")).toBe(0);
+    await expectNoUnexpectedSuccessUiErrors(page, { allowText: /Read model/gi });
     expect(browserErrors).toEqual([]);
   });
 

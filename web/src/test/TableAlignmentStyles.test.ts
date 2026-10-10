@@ -51,8 +51,6 @@ describe("finance table alignment styles", () => {
     const flatSurfaceSelectors = [
       ".oa-pending-payments-table-frame",
       ".bank-flow-rule-batches-transactions",
-      ".app-health-section",
-      ".app-health-inventory-panel",
       ".import-workflow-panel--table",
       ".settings-native-table-shell",
       ".bank-transaction-panel",
@@ -68,6 +66,8 @@ describe("finance table alignment styles", () => {
     expect(turnoverStyles).toMatch(/\.turnover-flows\s*\{[^}]*border-radius:\s*0/);
     expect(source).not.toContain(".turnover-ledger-table-wrap");
     expect(source).not.toContain(".tax-panel");
+    expectDeclaration(".app-health-section", /border-radius:\s*12px/);
+    expect(source).not.toContain(".app-health-inventory-panel");
     expect(source).not.toContain(".input-invoice-usage-rules-table-shell");
     const paymentRuleStyles = readFileSync("src/components/inputInvoiceUsage/paymentStatusRules.css", "utf8");
     expect(paymentRuleStyles).toMatch(/\.payment-rules-body \.finance-table\s*\{[^}]*border-radius:\s*0/);

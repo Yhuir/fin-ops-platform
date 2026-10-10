@@ -11,7 +11,8 @@ class FakeLifecycleRepository:
     def __init__(self, rows: list[dict[str, object]]) -> None:
         self.rows = rows
 
-    def list_events(self, *, page: int, page_size: int):
+    def list_events(self, **query):
+        self.query = query
         return self.rows, len(self.rows)
 
 class FakeDiscardTransaction:
@@ -54,19 +55,19 @@ class RecordingLifecycleConnection:
 
     def fetch_all(self, sql: str, _params: tuple[object, ...]):
         self.queries.append(sql)
-        return []
+        return [{"event_id": None, "total": 0}]
 
 
 class ImportLifecycleServiceTests(unittest.TestCase):
     def test_maps_durable_lifecycle_states_and_pagination(self) -> None:
         rows = [
-            {"event_id": "preview", "batch_status": "pending", "file_status": "preview_ready"},
-            {"event_id": "queued", "batch_status": "pending", "job_status": "pending"},
-            {"event_id": "running", "batch_status": "pending", "job_status": "processing"},
-            {"event_id": "done", "batch_status": "completed", "file_status": "confirmed"},
-            {"event_id": "failed", "batch_status": "pending", "job_status": "failed"},
-            {"event_id": "discarded", "batch_status": "reverted", "file_status": "reverted"},
-            {"event_id": "broken", "batch_status": "pending", "job_status": "succeeded"},
+            {"display_status": "awaiting_confirmation", "event_id": "preview", "batch_status": "pending", "file_status": "preview_ready"},
+            {"display_status": "queued", "event_id": "queued", "batch_status": "pending", "job_status": "pending"},
+            {"display_status": "processing", "event_id": "running", "batch_status": "pending", "job_status": "processing"},
+            {"display_status": "succeeded", "event_id": "done", "batch_status": "completed", "file_status": "confirmed"},
+            {"display_status": "failed", "event_id": "failed", "batch_status": "pending", "job_status": "failed"},
+            {"display_status": "discarded", "event_id": "discarded", "batch_status": "reverted", "file_status": "reverted"},
+            {"display_status": "inconsistent", "event_id": "broken", "batch_status": "pending", "job_status": "succeeded"},
         ]
         payload = ImportLifecycleService(FakeLifecycleRepository(rows)).list_events(page=1, page_size=3)  # type: ignore[arg-type]
 
@@ -75,6 +76,21 @@ class ImportLifecycleServiceTests(unittest.TestCase):
             ["awaiting_confirmation", "queued", "processing", "succeeded", "failed", "discarded", "inconsistent"],
         )
         self.assertEqual(payload["pagination"], {"page": 1, "page_size": 3, "total": 7, "total_pages": 3})
+
+    def test_validates_history_filters_and_inclusive_business_dates(self):
+        repository = FakeLifecycleRepository([])
+        service = ImportLifecycleService(repository)
+        service.list_events(search=" bank%_.xlsx ", start_date="2026-10-10", end_date="2026-10-10")
+        self.assertEqual(repository.query["search"], "bank%_.xlsx")
+        self.assertEqual(repository.query["start_at"].isoformat(), "2026-10-10T00:00:00+08:00")
+        self.assertEqual(repository.query["end_at"].isoformat(), "2026-10-11T00:00:00+08:00")
+        for query in ({"page": 0}, {"page_size": 101}, {"batch_type": "fake"}, {"status": "fake"},
+                      {"start_date": "20261010"}, {"start_date": "2026-10-11", "end_date": "2026-10-10"},
+                      {"search": "x" * 201}):
+            with self.subTest(query=query), self.assertRaises(ValueError):
+                service.list_events(**query)
+        with self.assertRaises(KeyError):
+            service.detail_event("missing")
 
     def test_postgres_discard_is_atomic_owned_and_rejects_active_job(self) -> None:
         rows = [{"id": "file-1", "status": "preview_ready", "imported_by": "user-1", "batch_id": "batch-1"}]
@@ -109,9 +125,10 @@ class ImportLifecycleServiceTests(unittest.TestCase):
         self.assertTrue(all("import_job.id::text as import_job_id" in sql for sql in job_queries))
         self.assertTrue(all("import_job.import_job_id" not in sql for sql in job_queries))
         history_query = job_queries[0]
-        self.assertEqual(history_query.count("left join lateral"), 3)
+        self.assertEqual(history_query.count("left join lateral"), 4)
         self.assertIn("batch_row.decision = 'created'", history_query)
         self.assertIn("limit %s offset %s", history_query)
+        self.assertIn("select count(*)::bigint as total from filtered", history_query)
 
 
 if __name__ == "__main__":

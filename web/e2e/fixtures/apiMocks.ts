@@ -415,6 +415,16 @@ function percentile(value: number | null) {
   };
 }
 
+function appHealthImportEvents() {
+  return Array.from({ length: 51 }, (_, index) => ({
+    key: `bank-${index}`, batch_id: `bank-${index}`, batch_type: "bank_transaction", label: "流水导入",
+    source_name: index === 0 ? "A058171TB_ND9438900000501277800011_CN000_20261010163813_20466424_resp.xls" : `交易明细-${index}.xlsx`,
+    imported_by: "YNSYLP007", imported_at: "2026-10-10T08:38:00Z", count: index === 0 ? 18 : 2,
+    status: index === 1 ? "partial_success" : "succeeded", job_id: null,
+    selected_bank_name: "建设银行", selected_bank_last4: "8106", withdrawal_allowed: index === 0, withdrawal: null,
+  }));
+}
+
 function operationsDashboardPayload() {
   return {
     generated_at: "2026-06-17T01:00:00Z",
@@ -422,6 +432,7 @@ function operationsDashboardPayload() {
       bank: inventoryBlock("银行流水"),
       invoice: inventoryBlock("发票"),
       oa: inventoryBlock("OA"),
+      import_events: appHealthImportEvents().slice(0, 5),
     },
     request_performance: {
       window: {
@@ -10155,6 +10166,22 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
 
     if (path === "/api/imports/jobs") {
       return json(route, { rows: [], pagination: { page: 1, page_size: 20, total: 0, has_more: false } });
+    }
+
+    if (path === "/api/operations/import-history") {
+      const rows = appHealthImportEvents().filter(row => (!url.searchParams.get("batch_type") || row.batch_type === url.searchParams.get("batch_type"))
+        && (!url.searchParams.get("status") || row.status === url.searchParams.get("status"))
+        && (!url.searchParams.get("search") || row.source_name.includes(url.searchParams.get("search")!)));
+      const pageNumber = Number(url.searchParams.get("page") || 1);
+      const pageSize = Number(url.searchParams.get("page_size") || 50);
+      return json(route, { rows: rows.slice((pageNumber - 1) * pageSize, pageNumber * pageSize), pagination: {
+        page: pageNumber, page_size: pageSize, total: rows.length, total_pages: Math.ceil(rows.length / pageSize),
+        has_previous: pageNumber > 1, has_more: pageNumber * pageSize < rows.length,
+      } });
+    }
+    if (path.startsWith("/api/operations/import-history/")) {
+      const row = appHealthImportEvents().find(row => row.batch_id === decodeURIComponent(path.split("/").at(-1)!));
+      return row ? json(route, { row }) : json(route, { error: "import_batch_not_found", message: "导入记录不存在。" }, 404);
     }
 
     if (path === "/api/operations/app-health-dashboard") {

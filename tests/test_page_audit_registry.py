@@ -137,10 +137,12 @@ class PageAuditRegistryTests(unittest.TestCase):
 
         api_source = APP_HEALTH_API_PATH.read_text(encoding="utf-8")
 
-        self.assertIn("fetchAppHealthSystemAudit", source)
-        self.assertIn("AppHealthSystemAuditPanel", source)
-        self.assertIn("fetchAppHealthSystemAudit", api_source)
-        self.assertIn('page-audit?page=app-health-operations', api_source)
+        self.assertNotIn("fetchAppHealthSystemAudit", source)
+        self.assertNotIn("AppHealthSystemAuditPanel", source)
+        self.assertNotIn("fetchAppHealthSystemAudit", api_source)
+        self.assertNotIn('page-audit?page=app-health-operations', api_source)
+        self.assertIn('title="数据"', source)
+        self.assertIn('title="最近导入记录"', source)
         self.assertNotIn("fetchPageAudit", api_source)
         self.assertNotIn("InputInvoiceUsageAuditPanel", source)
         self.assertNotIn("runInputUsageAudit", source)

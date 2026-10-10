@@ -590,8 +590,6 @@ class Application:
         self._data_dir = data_dir
         self._cash_runtime_lock = Lock()
         self._cash_runtime = None
-        self._app_health_dashboard_cache_lock = Lock()
-        self._app_health_dashboard_cache: tuple[float, dict[str, object]] | None = None
         self._app_status_runtime_snapshot_cache_lock = Lock()
         self._app_status_runtime_snapshot_cache: tuple[float, dict[str, object]] | None = None
         self._seed_payload = build_demo_seed()
@@ -1875,8 +1873,9 @@ class Application:
             return self._handle_api_operations_app_health_dashboard(headers)
         if route_path == "/api/imports/jobs" or route_path.startswith("/api/imports/jobs/"):
             return self._handle_import_job_operations(method, route_path, query, body, headers, request_id=request_id)
-        if method == "GET" and route_path == "/api/operations/import-history":
-            return self._handle_api_operations_import_history(query, headers)
+        if method == "GET" and (route_path == "/api/operations/import-history" or route_path.startswith("/api/operations/import-history/")):
+            batch_id = unquote(route_path.removeprefix("/api/operations/import-history/")) if route_path != "/api/operations/import-history" else None
+            return self._handle_api_operations_import_history(query, headers, batch_id=batch_id)
         if (
             method == "POST"
             and route_path.startswith("/api/imports/bank-transaction-batches/")
@@ -3339,14 +3338,6 @@ class Application:
             return 2.0
 
     @staticmethod
-    def _app_health_dashboard_cache_ttl_seconds() -> float:
-        raw_value = os.getenv("FIN_OPS_APP_HEALTH_DASHBOARD_CACHE_TTL_SECONDS", "30").strip()
-        try:
-            return min(120.0, max(0.0, float(raw_value)))
-        except ValueError:
-            return 30.0
-
-    @staticmethod
     def _app_status_runtime_snapshot_cache_ttl_seconds() -> float:
         raw_value = os.getenv("FIN_OPS_APP_STATUS_RUNTIME_SNAPSHOT_CACHE_TTL_SECONDS", "1").strip()
         try:
@@ -3383,7 +3374,7 @@ class Application:
             connection,
             api_performance_recorder=self._api_performance_recorder,
         )
-        return self._json_response(HTTPStatus.OK, self._cached_operations_app_health_dashboard_payload(service))
+        return self._json_response(HTTPStatus.OK, service.build_payload())
 
     def _handle_import_job_operations(self, method, route_path, query, body, headers, *, request_id):
         session, error = self._resolve_fin_ops_read_session(headers, denied_message="当前账户不能处理导入任务。")
@@ -3428,31 +3419,30 @@ class Application:
         return self._json_response(HTTPStatus.OK, self._serialize_value(result))
 
     def _handle_api_operations_import_history(
-        self,
-        query: dict[str, list[str]],
-        headers: dict[str, str] | None,
+        self, query: dict[str, list[str]], headers: dict[str, str] | None, *, batch_id: str | None = None,
     ) -> Response:
         _, admin_error = self._resolve_admin_session(headers)
         if admin_error is not None:
             return admin_error
-        try:
-            page = max(int((query.get("page") or ["1"])[0] or 1), 1)
-            page_size = min(max(int((query.get("page_size") or ["50"])[0] or 50), 1), 100)
-        except ValueError:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_import_history_request", "message": "page and page_size must be integers."},
-            )
         connection = getattr(self._state_store, "_connection", None)
         if connection is None:
-            return self._json_response(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {"error": "postgres_required", "message": "Import history requires PostgreSQL."},
-            )
-        payload = ImportLifecycleService(PostgresImportLifecycleRepository(connection)).list_events(
-            page=page,
-            page_size=page_size,
-        )
+            return self._json_response(HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "postgres_required", "message": "导入历史需要 PostgreSQL。"})
+        service = ImportLifecycleService(PostgresImportLifecycleRepository(connection))
+        try:
+            if batch_id is not None:
+                payload = service.detail_event(batch_id)
+            else:
+                payload = service.list_events(
+                    page=int(query.get("page", ["1"])[0]), page_size=int(query.get("page_size", ["50"])[0]),
+                    **{key: query.get(key, [""])[0] for key in ("batch_type", "status", "search", "start_date", "end_date")},
+                )
+        except (ValueError, OverflowError) as exc:
+            return self._json_response(HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_import_history_request", "message": str(exc)})
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND,
+                {"error": "import_batch_not_found", "message": "导入记录不存在。"})
         return self._json_response(HTTPStatus.OK, payload)
 
     def _handle_api_bank_import_withdrawal(
@@ -3508,8 +3498,6 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_bank_import_withdrawal", "message": str(error)},
             )
-        with self._app_health_dashboard_cache_lock:
-            self._app_health_dashboard_cache = None
         return self._json_response(HTTPStatus.OK, result)
 
     def _bank_import_withdrawal_service(self, *, tenant_id: str) -> BankImportWithdrawalService | Any | None:
@@ -3703,48 +3691,6 @@ class Application:
             ).strip(),
             "actor_account": str(getattr(identity, "username", "") or "").strip(),
         }
-
-    def _cached_operations_app_health_dashboard_payload(self, service: OperationsDashboardService) -> dict[str, object]:
-        ttl_seconds = self._app_health_dashboard_cache_ttl_seconds()
-        if ttl_seconds <= 0:
-            return service.build_payload()
-        cached_entry = self._app_health_dashboard_cache_entry()
-        cached_payload = cached_entry[0] if cached_entry is not None else None
-        if cached_entry is not None and cached_entry[1]:
-            return service.with_current_runtime(cached_payload)
-        try:
-            payload = service.build_payload()
-        except Exception:
-            if cached_payload is not None:
-                return service.with_current_runtime(self._app_health_dashboard_stale_payload(cached_payload))
-            raise
-        expires_at = monotonic() + ttl_seconds
-        with self._app_health_dashboard_cache_lock:
-            self._app_health_dashboard_cache = (expires_at, deepcopy(payload))
-        return payload
-
-    def _app_health_dashboard_cache_entry(self) -> tuple[dict[str, object], bool] | None:
-        now = monotonic()
-        with self._app_health_dashboard_cache_lock:
-            cached = self._app_health_dashboard_cache
-        if not isinstance(cached, tuple) or len(cached) != 2:
-            return None
-        expires_at, payload = cached
-        if not isinstance(expires_at, (int, float)) or not isinstance(payload, dict):
-            return None
-        return deepcopy(payload), now < float(expires_at)
-
-    @staticmethod
-    def _app_health_dashboard_stale_payload(payload: dict[str, object]) -> dict[str, object]:
-        stale_payload = deepcopy(payload)
-        freshness = stale_payload.get("freshness") if isinstance(stale_payload.get("freshness"), dict) else {}
-        freshness = dict(freshness)
-        warnings = [str(item) for item in list(freshness.get("warnings") or [])]
-        if "dashboard_cache_stale_after_error" not in warnings:
-            warnings.append("dashboard_cache_stale_after_error")
-        freshness["warnings"] = sorted(set(warnings))
-        stale_payload["freshness"] = freshness
-        return stale_payload
 
     def _resolve_app_health_session(
         self,

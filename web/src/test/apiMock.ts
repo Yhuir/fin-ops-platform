@@ -69,6 +69,8 @@ type MockApiOptions = {
   appHealthErrorStatus?: number;
   appHealthErrorBody?: Record<string, unknown>;
   appHealthDashboard?: Record<string, unknown>;
+  appHealthImportHistoryRows?: Array<Record<string, unknown>>;
+  appHealthWithdrawalError?: boolean;
   appHealthDashboardSequence?: Array<{ status?: number; body: Record<string, unknown> }>;
   appHealthDashboardErrorStatus?: number;
   appHealthDashboardErrorBody?: Record<string, unknown>;
@@ -4043,6 +4045,16 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   let workbenchOaSyncStatusIndex = 0;
   let appHealthDashboardIndex = 0;
 
+  const importHistoryRows = options.appHealthImportHistoryRows ?? [{
+    key: "bank-6", batch_id: "bank-6", batch_type: "bank_transaction", source_key: "bank_transactions",
+    label: "流水导入", source_name: "bank-6.xlsx", imported_by: "admin.ops", count: 8,
+    supplementary_count: null, imported_at: "2026-05-23T09:20:00+08:00", status: "succeeded", withdrawal_allowed: true,
+    selected_bank_name: "建设银行", selected_bank_last4: "8106",
+  }];
+  let historyWithdrawn = false;
+  const historyRow = (row: Record<string, unknown>) => historyWithdrawn && row.batch_id === "bank-6"
+    ? { ...row, status: "withdrawn", withdrawal_allowed: false, withdrawal: { withdrawn_count: 8 } } : row;
+
   const handlers: Record<string, MockFetchHandler> = {
     "/api/session/me": () => {
       if (options.sessionMode === "expired") {
@@ -4484,7 +4496,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             },
             import_events: [
               {
-                key: "bank-5",
+                key: "bank-5", batch_id: "bank-5", batch_type: "bank_transaction",
                 source_key: "bank_transactions",
                 label: "流水导入",
                 source_name: "bank-5.xlsx",
@@ -4495,7 +4507,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
                 status: "succeeded",
               },
               {
-                key: "invoice-4",
+                key: "invoice-4", batch_id: "invoice-4", batch_type: "input_invoice",
                 source_key: "manual",
                 label: "手工导入",
                 source_name: "invoice-4.xlsx",
@@ -4506,7 +4518,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
                 status: "succeeded",
               },
               {
-                key: "bank-4",
+                key: "bank-4", batch_id: "bank-4", batch_type: "bank_transaction",
                 source_key: "bank_transactions",
                 label: "流水导入",
                 source_name: "bank-4.xlsx",
@@ -4517,7 +4529,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
                 status: "succeeded",
               },
               {
-                key: "invoice-3",
+                key: "invoice-3", batch_id: "invoice-3", batch_type: "input_invoice",
                 source_key: "manual",
                 label: "手工导入",
                 source_name: "invoice-3.xlsx",
@@ -4528,7 +4540,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
                 status: "succeeded",
               },
               {
-                key: "bank-3",
+                key: "bank-3", batch_id: "bank-3", batch_type: "bank_transaction",
                 source_key: "bank_transactions",
                 label: "流水导入",
                 source_name: "bank-3.xlsx",
@@ -4621,33 +4633,20 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         limit: 50,
       },
     }),
-    "/api/operations/import-history": () => ({
-      body: {
-        rows: [{
-          key: "bank-6",
-          batch_id: "bank-6",
-          batch_type: "bank_transaction",
-          source_key: "bank_transactions",
-          label: "流水导入",
-          source_name: "bank-6.xlsx",
-          imported_by: "admin.ops",
-          count: 8,
-          supplementary_count: null,
-          imported_at: "2026-05-23T09:20:00+08:00",
-          status: "succeeded",
-          withdrawal_allowed: true,
-        }],
-        pagination: { page: 1, page_size: 50, total: 1, total_pages: 1 },
-      },
-    }),
-    "/api/imports/bank-transaction-batches/bank-6/withdraw": () => ({
-      body: {
-        status: "withdrawn",
-        batch_id: "bank-6",
-        withdrawn_count: 8,
-        idempotent_replay: false,
-      },
-    }),
+    "/api/operations/import-history": ({ url }) => {
+      const page = Number(url.searchParams.get("page") ?? 1);
+      const size = Number(url.searchParams.get("page_size") ?? 50);
+      const rows = importHistoryRows.map(historyRow).filter(row =>
+        (!url.searchParams.get("batch_type") || row.batch_type === url.searchParams.get("batch_type"))
+        && (!url.searchParams.get("status") || row.status === url.searchParams.get("status"))
+        && (!url.searchParams.get("search") || String(row.source_name).includes(url.searchParams.get("search")!)));
+      return { body: { rows: rows.slice((page - 1) * size, page * size), pagination: { page, page_size: size, total: rows.length, total_pages: Math.ceil(rows.length / size) } } };
+    },
+    "/api/imports/bank-transaction-batches/bank-6/withdraw": () => {
+      if (options.appHealthWithdrawalError) return { status: 409, body: { message: "该批次包含更新记录，不能撤回。" } };
+      historyWithdrawn = true;
+      return { body: { status: "withdrawn", batch_id: "bank-6", withdrawn_count: 8, idempotent_replay: false } };
+    },
     "/api/operations/history/actors": () => ({
       body: { rows: [{ actor_id: "005", actor_name: "权限管理员", actor_account: "YNSYLP005" }] },
     }),
@@ -6968,6 +6967,11 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     if (["/api/cost-statistics/export-summary", "/api/cost-statistics/export"].includes(url.pathname)) {
       if (init?.method !== "POST") throw new Error("Cost export requires POST");
       url.search = String(init.body);
+    }
+    if (url.pathname.startsWith("/api/operations/import-history/")) {
+      const id = decodeURIComponent(url.pathname.split("/import-history/")[1]);
+      const row = importHistoryRows.find(item => item.batch_id === id);
+      return jsonResponse(row ? { body: { row: historyRow(row) } } : { status: 404, body: { message: "导入记录不存在。" } });
     }
     const handler = handlers[url.pathname];
     if (!handler) {

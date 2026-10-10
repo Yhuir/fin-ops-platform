@@ -172,15 +172,14 @@ class FakeSystemAuditConnection:
                 "oa_records_in_progress_count": 0,
                 "oa_items_count": 0,
             }
-        if "count(*)::bigint as total from app.import_batches batch" in normalized:
-            return {"total": len(self.import_rows)}
         raise AssertionError(f"Unexpected fetch_one SQL: {sql}")
 
     def fetch_all(self, sql: str, params: object = None) -> list[dict[str, object]]:
         normalized = " ".join(sql.split()).lower()
         if "from app.import_batches" in normalized:
             limit, offset = params or (len(self.import_rows), 0)
-            return self.import_rows[int(offset) : int(offset) + int(limit)]
+            rows = self.import_rows[int(offset) : int(offset) + int(limit)]
+            return [{**row, "total": len(self.import_rows)} for row in rows] or [{"event_id": None, "total": len(self.import_rows)}]
         if "from audit.external_control_evidence" in normalized:
             return []
         raise AssertionError(f"Unexpected fetch_all SQL: {sql}")
@@ -227,6 +226,7 @@ class AppHealthSystemAuditTests(unittest.TestCase):
                 "count": 1,
                 "batch_status": "completed",
                 "file_status": "confirmed",
+                "display_status": "succeeded",
             }
             for index in range(7)
         ]

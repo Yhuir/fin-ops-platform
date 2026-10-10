@@ -1,3 +1,5 @@
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { expect, test } from "./fixtures/strictTest";
 
 const productionAdminSmokeEnabled = process.env.FIN_OPS_E2E_PRODUCTION_ADMIN_SMOKE === "1";
@@ -87,13 +89,60 @@ test.describe("production admin AppHealth smoke", () => {
 
     await page.goto("/fin-ops/operations/app-health", { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "AppHealth 运维状态" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "数据与导入" })).toBeVisible();
     await expect(page.getByTestId("app-health-data")).toBeVisible();
-    await expect(page.getByTestId("app-health-requests")).toBeVisible();
-    await expect(page.getByTestId("app-health-runtime")).toBeVisible();
+    await expect(page.getByTestId("app-health-recent-imports")).toBeVisible();
+    await expect(page.getByTestId("app-health-requests")).toHaveCount(0);
+    await expect(page.getByTestId("app-health-runtime")).toHaveCount(0);
 
-    await expect(page.getByRole("heading", { name: "导入任务诊断" })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "失败", exact: true })).toBeVisible();
+    const dashboardResponse = await page.request.get("/fin-ops-api/api/operations/app-health-dashboard");
+    expect(dashboardResponse.status()).toBe(200);
+    const inventory = (await dashboardResponse.json()).data_inventory;
+    const counts = Object.fromEntries(inventory.invoice.sources.map((source: { key: string; count: number; supplementary_count: number }) => [source.key, source]));
+    expect(counts.input_invoice.count + counts.output_invoice.count).toBe(inventory.invoice.total_count);
+    expect(counts.manual.count + counts.oa_attachment.supplementary_count).toBe(inventory.invoice.total_count);
+    await expect(page.getByLabel("发票统计")).not.toContainText("统计未闭合");
+    const visualDirectory = process.env.FIN_OPS_VISUAL_OUTPUT_DIR;
+    if (visualDirectory) {
+      await mkdir(visualDirectory, { recursive: true });
+      await page.screenshot({ path: join(visualDirectory, "production-desktop.png"), fullPage: true });
+    }
+    await page.getByRole("button", { name: "导入历史", exact: true }).click();
+    const historyDrawer = page.getByRole("dialog", { name: "导入历史", exact: true });
+    await expect(historyDrawer.getByRole("grid", { name: "导入历史记录" })).toBeVisible();
+    await historyDrawer.getByRole("combobox", { name: "类型", exact: true }).selectOption("bank_transaction");
+    await historyDrawer.getByRole("combobox", { name: "状态", exact: true }).selectOption("succeeded");
+    await historyDrawer.getByLabel("每页").selectOption("100");
+    const filteredRead = page.waitForResponse(response => response.url().includes("/api/operations/import-history?") && response.url().includes("status=succeeded"));
+    await historyDrawer.getByRole("button", { name: "查询", exact: true }).click();
+    const filteredResponse = await filteredRead;
+    expect(filteredResponse.status()).toBe(200);
+    const filtered = await filteredResponse.json();
+    expect(filtered.pagination.page_size).toBe(100);
+    expect(filtered.rows.length).toBeGreaterThan(0);
+    for (const row of filtered.rows) { expect(row.batch_type).toBe("bank_transaction"); expect(row.status).toBe("succeeded"); }
+    const first = filtered.rows[0];
+    const detailRead = page.waitForResponse(response => response.url().endsWith(`/api/operations/import-history/${encodeURIComponent(first.batch_id)}`));
+    await historyDrawer.getByRole("button", { name: `查看 ${first.source_name}`, exact: true }).first().click();
+    const detailResponse = await detailRead;
+    expect(detailResponse.status()).toBe(200);
+    expect((await detailResponse.json()).row.batch_id).toBe(first.batch_id);
+    await expect(historyDrawer.getByRole("heading", { name: first.source_name, exact: true })).toBeVisible();
+    if (visualDirectory) await page.screenshot({ path: join(visualDirectory, "production-detail.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(historyDrawer.getByRole("heading", { name: first.source_name, exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
+    if (visualDirectory) await page.screenshot({ path: join(visualDirectory, "production-mobile-detail.png") });
+    await historyDrawer.getByRole("button", { name: "返回列表", exact: true }).click();
+    await expect(historyDrawer.getByRole("combobox", { name: "状态", exact: true })).toHaveValue("succeeded");
+    expect((await historyDrawer.getByLabel("开始日期").boundingBox())!.width).toBeGreaterThan(240);
+    await historyDrawer.getByRole("button", { name: "关闭导入历史", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "导入历史", exact: true })).toBeFocused();
+    if (visualDirectory) await page.screenshot({ path: join(visualDirectory, "production-mobile.png"), fullPage: true });
+    await page.setViewportSize({ width: 1280, height: 720 });
+
+    await page.getByRole("button", { name: "导入任务", exact: true }).click();
     const taskList = page.getByRole("grid", { name: "待处理导入任务" });
     await expect(taskList).toBeVisible();
     const detailButton = taskList.getByRole("button", { name: "查看详情" }).first();
@@ -123,7 +172,7 @@ test.describe("production admin AppHealth smoke", () => {
 
     const bodyText = (await page.locator("body").innerText()).replace(/\s+/g, " ").trim();
     expect(
-      /缺少 OA 登录态|请返回 OA 系统重新登录|会话校验失败|没有权限访问|当前账号没有管理员权限，不能查看 AppHealth 运维状态。/.test(bodyText),
+      /缺少 OA 登录态|请返回 OA 系统重新登录|会话校验失败|没有权限访问|当前账号没有管理员权限，不能查看 数据与导入。/.test(bodyText),
       bodyText.slice(0, 200),
     ).toBe(false);
     expect(bodyText.includes("正在加载页面") && bodyText.length < 80, bodyText.slice(0, 200)).toBe(false);

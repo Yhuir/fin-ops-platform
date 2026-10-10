@@ -315,11 +315,11 @@ class PlaywrightE2EStrictDiagnosticsTests(unittest.TestCase):
             '"DELETE"',
             '"/fin-ops/operations/app-health"',
             '"/api/operations/app-health-dashboard"',
-            '"AppHealth 运维状态"',
+            '"数据与导入"',
             '"app-health-data"',
             '"app-health-requests"',
             '"app-health-runtime"',
-            "当前账号没有管理员权限，不能查看 AppHealth 运维状态。",
+            "当前账号没有管理员权限，不能查看 数据与导入。",
             "dashboardStatuses",
             "mutatingRequests",
         ):

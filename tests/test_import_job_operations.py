@@ -100,6 +100,33 @@ class ImportJobOperationsTests(unittest.TestCase):
         self.assertEqual(self.service.list_jobs(page=1, page_size=20)['rows'], [])
         self.assertEqual(self.service.detail(self.job.import_job_id, actor_account='YNSYLP005')['job']['status'], 'succeeded')
 
+    def test_history_filters_detail_partial_result_and_missing_are_canonical(self):
+        from fin_ops_platform.services.import_lifecycle_service import ImportLifecycleService
+        history = ImportLifecycleService(PostgresImportLifecycleRepository(self.connection))
+        initial = history.list_events(status='failed', batch_type='input_invoice', page_size=1)
+        self.assertEqual(initial['pagination']['total'], 1)
+        row = initial['rows'][0]
+        self.assertEqual(row['job_id'], self.job.import_job_id)
+        self.assertEqual(history.detail_event(row['batch_id'])['row'], row)
+        self.assertEqual(history.list_events(status='succeeded')['pagination']['total'], 0)
+        self.assertEqual(history.list_events(search='does_not_exist%_')['rows'], [])
+        day = row['imported_at'][:10]
+        # Date boundaries use Asia/Shanghai, including the entire selected day.
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        day = datetime.fromisoformat(row['imported_at']).astimezone(ZoneInfo('Asia/Shanghai')).date().isoformat()
+        self.assertEqual(history.list_events(start_date=day, end_date=day)['pagination']['total'], 1)
+        self.assertEqual(history.list_events(page=2, page_size=1)['rows'], [])
+        self.assertEqual(history.list_events(page=2, page_size=1)['pagination']['total'], 1)
+        with self.assertRaises(KeyError):
+            history.detail_event('missing-batch')
+        self.connection.execute("update job.import_jobs set status='succeeded', result_payload='{\"outcome\":\"partial_success\"}'::jsonb where id=%s", (self.job.import_job_id,))
+        partial = history.list_events(status='partial_success')['rows'][0]
+        self.assertEqual(partial['status'], 'partial_success')
+        self.assertFalse(partial['withdrawal_allowed'])
+        self.assertEqual(history.list_events(status='succeeded')['pagination']['total'], 0)
+        self.assertEqual(self.jobs.get_job(self.job.import_job_id).status, 'succeeded')
+
     def test_disposed_job_rejects_all_resume_paths_but_acknowledged_can_retry(self):
         self.jobs.acknowledge_job(self.job.import_job_id,created_by='owner')
         self.jobs.retry_job(self.job.import_job_id,expected_version=self.job.version)

@@ -8,7 +8,8 @@ import type {
   OperationsDashboardPayload,
   BankImportWithdrawalPayload,
   OperationsImportHistoryPayload,
-  AppHealthSystemAuditPayload,
+  OperationsDashboardImportEvent,
+  ImportHistoryQuery,
 } from "./types";
 
 async function requestJson<T>(path: string, signal?: AbortSignal): Promise<T> {
@@ -19,7 +20,7 @@ async function requestJson<T>(path: string, signal?: AbortSignal): Promise<T> {
     });
   } catch (error) {
     if (error instanceof ApiClientError) {
-      const appHealthError = new Error(error.responseText.trim() || error.message || "App health request failed");
+      const appHealthError = new Error(error.message);
       appHealthError.name = error.status === 401
         ? "AppHealthUnauthorizedError"
         : error.status === 403
@@ -93,13 +94,19 @@ export async function fetchAppHealthDashboard(signal?: AbortSignal): Promise<Ope
 }
 
 export async function fetchImportHistory(
-  page = 1,
-  pageSize = 50,
+  query: ImportHistoryQuery,
   signal?: AbortSignal,
 ): Promise<OperationsImportHistoryPayload> {
-  return requestJson<OperationsImportHistoryPayload>(
-    `/api/operations/import-history?page=${page}&page_size=${pageSize}`,
-    signal,
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== "") params.set(key, String(value));
+  }
+  return requestJson<OperationsImportHistoryPayload>(`/api/operations/import-history?${params}`, signal);
+}
+
+export async function fetchImportHistoryDetail(batchId: string, signal?: AbortSignal) {
+  return requestJson<{ row: OperationsDashboardImportEvent }>(
+    `/api/operations/import-history/${encodeURIComponent(batchId)}`, signal,
   );
 }
 
@@ -129,11 +136,4 @@ export async function withdrawBankTransactionImport(
     }
     throw error;
   }
-}
-
-export async function fetchAppHealthSystemAudit(signal?: AbortSignal): Promise<AppHealthSystemAuditPayload> {
-  return requestJson<AppHealthSystemAuditPayload>(
-    "/api/operations/app-health/page-audit?page=app-health-operations",
-    signal,
-  );
 }

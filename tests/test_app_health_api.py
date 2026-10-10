@@ -78,7 +78,7 @@ class FakeOperationsDashboardConnection:
         if "from app.import_batches" in normalized and "batch_type in" in normalized:
             return [
                 {
-                    "event_id": "batch-bank-1",
+                    "total": 1, "display_status": "succeeded" if self.import_status == "completed" else "awaiting_confirmation", "event_id": "batch-bank-1",
                     "source_key": "bank_transactions",
                     "label": "流水导入",
                     "source_name": "bank.xlsx",
@@ -154,6 +154,12 @@ class FakeOutputInvoiceCollectionAuditConnection(FakeInputInvoiceUsageAuditConne
 
 
 class FakePageBusinessAuditConnection(FakeInputInvoiceUsageAuditConnection):
+    def fetch_all(self, sql, params=()):
+        if "from filtered) totals" in sql:
+            self.fetch_all_calls.append((sql, params))
+            return [{"event_id": None, "total": 0}]
+        return super().fetch_all(sql, params)
+
     def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object]:
         if self.fail:
             raise RuntimeError("page audit database timeout")
@@ -559,80 +565,56 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(json.loads(response.body)["error"], "page_access_policy_missing")
 
-    def test_dashboard_cached_inventory_does_not_cache_import_queue_state(self):
-        with self._temporary_env(FIN_OPS_APP_HEALTH_DASHBOARD_CACHE_TTL_SECONDS="30"), tempfile.TemporaryDirectory() as directory:
+    def test_dashboard_reads_inventory_and_queue_on_every_request(self):
+        with tempfile.TemporaryDirectory() as directory:
             app = self._build_admin_application(data_dir=Path(directory))
-            app._state_store._connection = FakeOperationsDashboardConnection()
+            connection = FakeOperationsDashboardConnection()
+            app._state_store._connection = connection
             with patch("fin_ops_platform.services.runtime_monitoring.RuntimeMonitoringRepository.dashboard_queue_metrics",
                        side_effect=[[{"failed_count": 1}], [{"failed_count": 0}]]):
                 first = json.loads(app.handle_request("GET", "/api/operations/app-health-dashboard").body)
+                connection.import_status = "pending"
                 second = json.loads(app.handle_request("GET", "/api/operations/app-health-dashboard").body)
             self.assertEqual(first["runtime_performance"]["queues"][0]["failed_count"], 1)
             self.assertEqual(second["runtime_performance"]["queues"][0]["failed_count"], 0)
-            self.assertEqual(first["data_inventory"], second["data_inventory"])
+            self.assertEqual(first["data_inventory"]["import_events"][0]["status"], "succeeded")
+            self.assertEqual(second["data_inventory"]["import_events"][0]["status"], "awaiting_confirmation")
             self.assertNotIn("import_jobs", second["runtime_performance"])
 
-    def test_operations_app_health_dashboard_returns_stale_cached_payload_after_refresh_error(self) -> None:
-        current_time = {"value": 100.0}
+    def test_dashboard_build_error_is_not_replaced_by_previous_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = self._build_admin_application(data_dir=Path(directory))
+            app._state_store._connection = FakeOperationsDashboardConnection()
+            self.assertEqual(app.handle_request("GET", "/api/operations/app-health-dashboard").status_code, 200)
+            with patch("fin_ops_platform.app.server.OperationsDashboardService.build_payload",
+                       side_effect=RuntimeError("dashboard build failed")):
+                with self.assertRaisesRegex(RuntimeError, "dashboard build failed"):
+                    app.handle_request("GET", "/api/operations/app-health-dashboard")
 
-        def fake_monotonic() -> float:
-            return current_time["value"]
-
-        with (
-            self._temporary_env(
-                FIN_OPS_APP_HEALTH_DASHBOARD_CACHE_TTL_SECONDS="30",
-            ),
-            tempfile.TemporaryDirectory() as temp_dir,
-            patch("fin_ops_platform.app.server.monotonic", side_effect=fake_monotonic),
-        ):
-            app = self._build_admin_application(data_dir=Path(temp_dir))
-            connection = FakeOperationsDashboardConnection()
-            setattr(app._state_store, "_connection", connection)
-
-            first_response = app.handle_request("GET", "/api/operations/app-health-dashboard")
-            current_time["value"] = 140.0
-            with patch(
-                "fin_ops_platform.app.server.OperationsDashboardService.build_payload",
-                side_effect=RuntimeError("dashboard build failed"),
-            ):
-                second_response = app.handle_request("GET", "/api/operations/app-health-dashboard")
-            second_payload = json.loads(second_response.body)
-
-        self.assertEqual(first_response.status_code, 200)
-        self.assertEqual(second_response.status_code, 200)
-        self.assertEqual(second_payload["data_inventory"]["bank"]["total_count"], 1)
-        self.assertIn("dashboard_cache_stale_after_error", second_payload["freshness"]["warnings"])
-
-    def test_operations_app_health_dashboard_refreshes_import_status_when_read_model_metrics_fail(self) -> None:
-        current_time = {"value": 100.0}
-
-        def fake_monotonic() -> float:
-            return current_time["value"]
-
-        with (
-            self._temporary_env(
-                FIN_OPS_APP_HEALTH_DASHBOARD_CACHE_TTL_SECONDS="30",
-            ),
-            tempfile.TemporaryDirectory() as temp_dir,
-            patch("fin_ops_platform.app.server.monotonic", side_effect=fake_monotonic),
-        ):
-            app = self._build_admin_application(data_dir=Path(temp_dir))
-            connection = FakeOperationsDashboardConnection()
-            connection.import_status = "pending"
-            setattr(app._state_store, "_connection", connection)
-
-            first_response = app.handle_request("GET", "/api/operations/app-health-dashboard")
-            first_payload = json.loads(first_response.body)
-            connection.import_status = "completed"
-            current_time["value"] = 140.0
-            second_response = app.handle_request("GET", "/api/operations/app-health-dashboard")
-            second_payload = json.loads(second_response.body)
-
-        self.assertEqual(first_payload["data_inventory"]["import_events"][0]["status"], "awaiting_confirmation")
-        self.assertEqual(second_response.status_code, 200)
-        self.assertEqual(second_payload["data_inventory"]["import_events"][0]["status"], "succeeded")
-        self.assertNotIn("read_models", second_payload["runtime_performance"])
-        self.assertNotIn("dashboard_cache_stale_after_error", second_payload["freshness"]["warnings"])
+    def test_history_filters_detail_missing_and_admin_permissions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = self._build_admin_application(data_dir=Path(directory))
+            app._state_store._connection = FakeOperationsDashboardConnection()
+            response = app.handle_request("GET", "/api/operations/import-history?batch_type=bank_transaction&status=succeeded&page_size=100")
+            self.assertEqual(response.status_code, 200)
+            payload = json.loads(response.body)
+            self.assertEqual(payload["pagination"]["page_size"], 100)
+            self.assertEqual(payload["rows"][0]["status"], "succeeded")
+            for query in ("page=0", "page_size=101", "status=wrong", "start_date=bad", "batch_type=wrong"):
+                result = app.handle_request("GET", "/api/operations/import-history?" + query)
+                self.assertEqual(result.status_code, 400)
+                self.assertEqual(json.loads(result.body)["error"], "invalid_import_history_request")
+            detail = app.handle_request("GET", "/api/operations/import-history/batch-bank-1")
+            self.assertEqual(detail.status_code, 200)
+            self.assertEqual(json.loads(detail.body)["row"]["status"], "succeeded")
+            with patch("fin_ops_platform.services.import_lifecycle_service.ImportLifecycleService.detail_event", side_effect=KeyError("missing")):
+                missing = app.handle_request("GET", "/api/operations/import-history/missing")
+            self.assertEqual(missing.status_code, 404)
+            self.assertEqual(json.loads(missing.body)["error"], "import_batch_not_found")
+            user = build_application(data_dir=Path(directory) / "user")
+            user._resolve_request_session = lambda _headers=None: SimpleNamespace(allowed=True, role="user", can_access_page=lambda _page: False, identity=SimpleNamespace(username="ordinary", display_name="普通用户"))
+            for path in ("/api/operations/import-history", "/api/operations/import-history/batch-bank-1"):
+                self.assertEqual(user.handle_request("GET", path).status_code, 403)
 
     def test_operations_input_invoice_usage_audit_returns_read_only_report_for_admin(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

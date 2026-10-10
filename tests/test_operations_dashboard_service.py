@@ -71,7 +71,7 @@ class FakeDashboardConnection:
         if "from app.import_batches" in normalized and "batch_type in" in normalized:
             return [
                 {
-                    "event_id": "bank-batch-2",
+                    "total": 2, "display_status": "succeeded", "event_id": "bank-batch-2",
                     "source_key": "bank_transactions",
                     "label": "流水导入",
                     "source_name": "bank-2.xlsx",
@@ -85,7 +85,7 @@ class FakeDashboardConnection:
                     "job_status": "succeeded",
                 },
                 {
-                    "event_id": "invoice-batch-1",
+                    "total": 2, "display_status": "succeeded", "event_id": "invoice-batch-1",
                     "source_key": "manual",
                     "label": "手工导入",
                     "source_name": "invoice-1.xlsx",
