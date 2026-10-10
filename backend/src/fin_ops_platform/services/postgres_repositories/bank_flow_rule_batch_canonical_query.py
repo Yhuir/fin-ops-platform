@@ -184,19 +184,14 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                 from bank_identities
             ),
             active_relations as materialized (
+                -- Candidate derivation needs only occupancy and mode; avoid copying
+                -- full relation evidence into every live batch reconstruction.
                 select
                     relation.case_id,
                     relation.relation_mode,
                     relation.status,
-                    relation.month_scope,
                     relation.row_ids,
-                    relation.row_types,
-                    relation.note,
-                    relation.amount_check,
-                    relation.special_metadata,
-                    relation.created_by,
-                    relation.created_at,
-                    relation.updated_at
+                    relation.row_types
                 from app.workbench_pair_relations relation
                 cross join candidate_identity_array candidate_ids
                 where relation.status = 'active'

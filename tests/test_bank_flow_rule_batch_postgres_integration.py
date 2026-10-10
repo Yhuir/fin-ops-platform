@@ -113,3 +113,83 @@ class BankFlowRuleBatchPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(result["batches"][0]["scope_month"], "2026-05")
         self.assertCountEqual(result["batches"][0]["row_ids"], ["transfer-out", "transfer-in"])
         self.assertEqual(result["batches"][0]["total_amount"], "100.00")
+
+    def test_compact_relation_source_preserves_occupancy_and_formal_detail(self) -> None:
+        for identity in ("occupied-bank", "submitted-bank", "fresh-bank"):
+            self._insert_bank(identity, "622200008106", "2026-05-04T10:20:00", "fee")
+        large_evidence = {"details": ["Synthetic evidence" * 512 for _ in range(32)]}
+        for case_id, relation_mode, row_id in (
+            ("other-owner", "manual_confirmed", "occupied-bank"),
+            ("submitted-batch", BANK_FLOW_RULE_BATCH_RELATION_MODE, "submitted-bank"),
+        ):
+            self.connection.execute(
+                """
+                insert into app.workbench_pair_relations(
+                    case_id, relation_mode, status, row_ids, row_types, month_scope,
+                    note, amount_check, special_metadata, created_by
+                ) values (%s, %s, 'active', array[%s], array['bank'], '2026-05-01',
+                          %s, %s::jsonb, %s::jsonb, 'synthetic-test')
+                """,
+                (case_id, relation_mode, row_id, "Synthetic note" * 512,
+                 json.dumps(large_evidence), json.dumps(large_evidence)),
+            )
+        batch_evidence = {"source": "selected_transaction_ids", "retained_proof": "formal-proof"}
+        batch_payload = {
+            "batch_id": "submitted-batch", "batch_type": "fee", "row_ids": ["submitted-bank"],
+            "row_count": 1, "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+            "relation_case_id": "submitted-batch", "evidence": batch_evidence,
+            "row_tag_snapshot": {
+                "submitted-bank": {"category_code": "fee", "category_label": "Original fee label"},
+            },
+        }
+        self.connection.execute(
+            """
+            insert into app.bank_flow_rule_batches(
+                batch_id, status, status_bucket, version, scope_month, total_amount,
+                bank_transaction_ids, submitted_by, submitted_at, raw_payload
+            ) values ('submitted-batch', 'submitted', 'submitted', 2, '2026-05-01', 100,
+                      array['submitted-bank'], 'synthetic-test', '2026-05-04T10:25:00+08:00', %s::jsonb)
+            """,
+            (json.dumps({"normalized_payload": batch_payload}),),
+        )
+        event_payload = {"amount_check": large_evidence, "special_metadata": large_evidence}
+        self.connection.execute(
+            """
+            insert into app.bank_flow_rule_batch_events(batch_id, event_type, actor_id, payload)
+            values ('submitted-batch', 'submit', 'synthetic-test', %s::jsonb)
+            """,
+            (json.dumps(event_payload),),
+        )
+
+        source = self.service._query_repository.read_page({"month": "2026-05"})
+        self.assertEqual(len(source["active_relations"]), 2)
+        for relation in source["active_relations"]:
+            self.assertEqual(set(relation), {"case_id", "relation_mode", "status", "row_ids", "row_types"})
+        self.assertCountEqual(
+            [relation["row_ids"] for relation in source["active_relations"]],
+            [["occupied-bank"], ["submitted-bank"]],
+        )
+        unsubmitted = self.service.list_batches_payload({"month": ["2026-05"], "bucket": ["unsubmitted"]})
+        self.assertEqual([batch["row_ids"] for batch in unsubmitted["batches"]], [["fresh-bank"]])
+        self.assertEqual(unsubmitted["summary"]["draft_row_count"], 1)
+        self.assertEqual(unsubmitted["summary"]["submitted_row_count"], 1)
+        submitted = self.service.list_batches_payload({"month": ["2026-05"], "bucket": ["submitted"]})
+        self.assertEqual([batch["batch_id"] for batch in submitted["batches"]], ["submitted-batch"])
+        self.assertTrue(submitted["batches"][0]["can_withdraw"])
+        self.assertEqual(submitted["batches"][0]["evidence"], batch_evidence)
+        self.assertEqual(submitted["summary"], unsubmitted["summary"])
+
+        detail = self.service.detail_payload("submitted-batch", view="formal")
+        self.assertTrue(detail["batch"]["can_withdraw"])
+        self.assertEqual(detail["batch"]["evidence"], batch_evidence)
+        self.assertEqual([row["id"] for row in detail["rows"]], ["submitted-bank"])
+        self.assertEqual(detail["rows"][0]["relation_case_ids"], ["submitted-batch"])
+        self.assertEqual(detail["rows"][0]["category_label"], "Original fee label")
+        self.assertEqual(detail["events"][0]["event_type"], "submit")
+        self.assertEqual(detail["events"][0]["payload"], event_payload)
+        persisted = self.connection.fetch_one(
+            "select note, amount_check, special_metadata from app.workbench_pair_relations where case_id = 'submitted-batch'"
+        )
+        self.assertEqual(persisted["note"], "Synthetic note" * 512)
+        self.assertEqual(persisted["amount_check"], large_evidence)
+        self.assertEqual(persisted["special_metadata"], large_evidence)
