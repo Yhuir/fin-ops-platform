@@ -313,6 +313,40 @@ def test_submitted_page_query_keeps_candidate_rows_and_active_relations_in_snaps
     assert source_params[-1] == "2026-05-01"
 
 
+def test_multi_type_page_query_preserves_complete_candidate_and_formal_source() -> None:
+    unfiltered_connection = _Connection(include_formal_item=True)
+    filtered_connection = _Connection(include_formal_item=True)
+    unfiltered = BankFlowRuleBatchCanonicalQueryRepository(unfiltered_connection).read_page(
+        {"month": "2026-05"}, summary_filters={"month": "2026-05"},
+    )
+    filtered = BankFlowRuleBatchCanonicalQueryRepository(filtered_connection).read_page(
+        {"month": "2026-05", "type": ["internal_transfer", "archived_fee", "internal_transfer"]},
+        summary_filters={"month": "2026-05"}, page=2, page_size=1,
+    )
+    assert filtered == unfiltered
+    assert filtered_connection.fetched_one == unfiltered_connection.fetched_one
+    assert len(filtered_connection.fetched_one) == 2
+    assert filtered_connection.transaction_enters == filtered_connection.transaction_exits == 1
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_types"),
+    [
+        (None, []), ("", []), ("all", []), ([], []),
+        ("fee", ["fee"]), (["fee", "archived_fee", "fee"], ["fee", "archived_fee"]),
+        ((" fee ", "interest"), ["fee", "interest"]),
+    ],
+)
+def test_type_set_filter_uses_one_parameterized_array(value: object, expected_types: list[str]) -> None:
+    where, params = BankFlowRuleBatchCanonicalQueryRepository._filters_sql({"type": value})
+    if expected_types:
+        assert where == "true and batch_type = any(%s::text[])"
+        assert params == [expected_types]
+    else:
+        assert where == "true"
+        assert params == []
+
+
 def test_all_page_query_reads_the_complete_canonical_source_without_a_month_predicate() -> None:
     connection = _Connection()
     repository = BankFlowRuleBatchCanonicalQueryRepository(connection)
@@ -483,6 +517,10 @@ def test_detail_reads_bank_rows_events_and_only_active_canonical_relations() -> 
         ({"month": "2026-13"}, "invalid_bank_flow_rule_batch_month"),
         ({"status": "processing"}, "invalid_bank_flow_rule_batch_status"),
         ({"bucket": "refreshing"}, "invalid_bank_flow_rule_batch_bucket"),
+        ({"type": ["all", "fee"]}, "invalid_bank_flow_rule_batch_type"),
+        ({"type": ["fee", ""]}, "invalid_bank_flow_rule_batch_type"),
+        ({"type": ["fee", 1]}, "invalid_bank_flow_rule_batch_type"),
+        ({"type": {"fee": True}}, "invalid_bank_flow_rule_batch_type"),
     ],
 )
 def test_invalid_page_filters_fail_before_opening_snapshot(

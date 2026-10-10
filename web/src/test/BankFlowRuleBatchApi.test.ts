@@ -56,6 +56,30 @@ describe("bank flow rule batch API", () => {
     );
   });
 
+  test("sends distinct repeated rule codes without changing the current month, bucket or page", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      summary: { label_counts: [], categories: [], total_row_count: 0, draft_row_count: 0, submitted_row_count: 0, withdrawn_row_count: 0 },
+      batches: [], pagination: { page: 2, page_size: 50, total: 65 },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await fetchBankFlowRuleBatches({ type: ["fee", "custom_fee", "fee"], month: "2026-05", bucket: "submitted", page: 2, pageSize: 50 });
+    const query = new URL(String(fetchMock.mock.calls[0][0]), "http://localhost").searchParams;
+    expect(query.getAll("type")).toEqual(["fee", "custom_fee"]);
+    expect(query.get("month")).toBe("2026-05"); expect(query.get("bucket")).toBe("submitted");
+    expect(query.get("page")).toBe("2"); expect(response.pagination.total).toBe(65);
+  });
+
+  test.each([
+    undefined, { page: 0, page_size: 50, total: 0 }, { page: 1, page_size: 201, total: 0 },
+    { page: 1, page_size: 50, total: -1 }, { page: 1, page_size: 50, total: 0.5 },
+    { page: "1", page_size: 50, total: 0 },
+  ])("rejects absent or invalid authoritative pagination %j", async (pagination) => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      summary: { label_counts: [], categories: [], total_row_count: 0, draft_row_count: 0, submitted_row_count: 0, withdrawn_row_count: 0 }, batches: [], pagination,
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    await expect(fetchBankFlowRuleBatches({})).rejects.toThrow("流水规则批次分页信息不完整，请重新读取。");
+  });
+
   test("maps tag selection rules and saves paired requirements", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -282,6 +306,7 @@ describe("bank flow rule batch API", () => {
           total_row_count: 1, draft_row_count: 1, submitted_row_count: 0, withdrawn_row_count: 0,
           categories: [],
         },
+        pagination: { page: 1, page_size: 50, total: 1 },
         batches: [
           {
             batch_id: "batch-legacy-unsubmitted-fee",
@@ -331,6 +356,7 @@ describe("bank flow rule batch API", () => {
           total_row_count: 1, draft_row_count: 0, submitted_row_count: 1, withdrawn_row_count: 0,
           categories: [],
         },
+        pagination: { page: 1, page_size: 50, total: 1 },
         batches: [
           {
             batch_id: "batch-stale-submitted",
@@ -374,6 +400,7 @@ describe("bank flow rule batch API", () => {
           total_row_count: 2, draft_row_count: 1, submitted_row_count: 1, withdrawn_row_count: 0,
           categories: [],
         },
+        pagination: { page: 1, page_size: 50, total: 2 },
         batches: [
           {
             batch_id: "batch-draft-fee",

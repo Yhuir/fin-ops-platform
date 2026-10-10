@@ -3,7 +3,9 @@ import { Segment, SegmentGroup } from "../components/common/SegmentedControl";
 import BankTransactionDrawer from "../features/bankSplits/BankTransactionDrawer";
 import { Button, Checkbox } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Eye } from "lucide-react";
+import { ChevronDown, ChevronUp, Eye } from "lucide-react";
+import BatchExpansion from "../features/bankFlowRuleBatches/BatchExpansion";
+import { useBatchExpansion } from "../features/bankFlowRuleBatches/useBatchExpansion";
 
 import AppDialog from "../components/common/AppDialog";
 import AppDrawer from "../components/common/AppDrawer";
@@ -23,7 +25,6 @@ import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { ApiClientError } from "../features/apiClient";
 import {
-  fetchBankFlowRuleBatchDetail,
   fetchBankFlowRuleBatchTagSelection,
   fetchBankFlowRuleBatches,
   saveBankFlowRuleBatchTagSelection,
@@ -35,13 +36,12 @@ import {
   canSelectBatchRows,
   canSubmitInternalTransferBatch,
   canWithdrawBatch,
-  statusBucketFor,
+  batchMatchesSelectionScope,
 } from "../features/bankFlowRuleBatches/policy";
-import { BatchStatusTag, LabelRail, PageControls } from "../features/bankFlowRuleBatches/components";
-import type { LabelRailGroup } from "../features/bankFlowRuleBatches/components";
+import { BatchStatusTag, PageControls } from "../features/bankFlowRuleBatches/components";
+import type { BatchSelectionScope } from "../features/bankFlowRuleBatches/policy";
 import {
   accountLabel,
-  batchBlockingReason,
   buildTagDrawerRows,
   categoryCountForBucket,
   currentMonth,
@@ -57,13 +57,10 @@ import {
 } from "../features/bankFlowRuleBatches/viewModel";
 import type {
   BankFlowRuleDraftRequirements,
-  BankFlowRuleTagNode,
 } from "../features/bankFlowRuleBatches/viewModel";
 import type {
   BankFlowRuleBatch,
-  BankFlowRuleBatchDetail,
   BankFlowRuleBatchesResponse,
-  BankFlowRuleBatchStatus,
   BankFlowRuleBatchStatusBucket,
   BankFlowRuleBatchDetailRow,
   BankFlowRuleBatchTagRule,
@@ -88,6 +85,7 @@ const EMPTY_BATCHES: BankFlowRuleBatchesResponse = {
     categories: [],
   },
   batches: [],
+  pagination: { page: 1, pageSize: 50, total: 0 },
 };
 
 const EMPTY_TAG_SELECTION: BankFlowRuleBatchTagSelection = {
@@ -162,11 +160,12 @@ export default function BankFlowRuleBatchPage() {
   const [draftTagRequirements, setDraftTagRequirements] = useState<BankFlowRuleDraftRequirements>(() => ({}));
   const [selectedPrimaryLabel, setSelectedPrimaryLabel] = useState("");
   const [selectedSubKey, setSelectedSubKey] = useState("");
-  const [details, setDetails] = useState<Record<string, BankFlowRuleBatchDetail>>({});
-  const [detailErrors, setDetailErrors] = useState<Record<string, string>>({});
-  const [selectedBatchId, setSelectedBatchId] = useState("");
+  const [categoryCodes, setCategoryCodes] = useState<string[]>([]);
+  const [snapshotVersion, setSnapshotVersion] = useState(0);
+  const [candidatesInvalid, setCandidatesInvalid] = useState(false);
+  const [discardTagChangesOpen, setDiscardTagChangesOpen] = useState(false);
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(() => new Set());
-  const [selectedAccountForSubmit, setSelectedAccountForSubmit] = useState<string | null>(null);
+  const [selectionScope, setSelectionScope] = useState<BatchSelectionScope | null>(null);
   const [batchPage, setBatchPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [hasCounts, setHasCounts] = useState(false);
@@ -179,10 +178,13 @@ export default function BankFlowRuleBatchPage() {
   const [refreshToken, setRefreshToken] = useState(0);
   const tagRequestSeqRef = useRef(0);
   const batchRequestSeqRef = useRef(0);
-  const detailRequestSeqRef = useRef(0);
-  const batchQueryKeyRef = useRef("");
-  const manualLabelSelectionRef = useRef(false);
-  const suppressNextAutoSelectRef = useRef(false);
+  const queryScopeKey = JSON.stringify({ month, bucket, page: batchPage, types: categoryCodes });
+  const expansion = useBatchExpansion({
+    batches: payload.batches, bucket, scopeKey: queryScopeKey, snapshotVersion,
+    enabled: active && !loading && !error && !candidatesInvalid,
+  });
+  const { details, errors: detailErrors } = expansion;
+  const pendingCorrectedPageRef = useRef<number | null>(null);
 
   const loadTagSelection = useCallback((signal?: AbortSignal) => {
     const requestId = tagRequestSeqRef.current + 1;
@@ -210,70 +212,68 @@ export default function BankFlowRuleBatchPage() {
 
   const clearSelection = useCallback(() => {
     setSelectedTransactionIds(new Set());
-    setSelectedAccountForSubmit(null);
+    setSelectionScope(null);
   }, []);
 
   const applyBatchesPayload = useCallback((nextPayload: BankFlowRuleBatchesResponse) => {
-    detailRequestSeqRef.current += 1;
-    setDetails({});
-    setDetailErrors({});
     setPayload(nextPayload);
+    setSnapshotVersion((current) => current + 1);
+    setCandidatesInvalid(false);
     setHasCounts(true);
+    setError(null);
     clearSelection();
   }, [clearSelection]);
 
-  const reloadBatchesAfterMutation = useCallback(async (query?: {
-    bucket?: BankFlowRuleBatchStatusBucket;
-    page?: number;
-  }) => {
-    const requestId = batchRequestSeqRef.current + 1;
-    batchRequestSeqRef.current = requestId;
-    const nextPayload = await fetchBankFlowRuleBatches({
-      month,
-      bucket: query?.bucket ?? bucket,
-      page: query?.page ?? batchPage,
-      pageSize: BANK_FLOW_RULE_BATCH_PAGE_SIZE,
+  const readBatches = useCallback(async (signal?: AbortSignal) => {
+    const requestId = ++batchRequestSeqRef.current;
+    let nextPage = batchPage;
+    const read = (page: number) => fetchBankFlowRuleBatches({
+      month, bucket, type: categoryCodes, page,
+      pageSize: BANK_FLOW_RULE_BATCH_PAGE_SIZE, signal,
     });
-    if (requestId !== batchRequestSeqRef.current) {
-      return null;
+    let nextPayload = await read(nextPage);
+    if (signal?.aborted || requestId !== batchRequestSeqRef.current) return null;
+    const lastPage = Math.max(1, Math.ceil(nextPayload.pagination.total / nextPayload.pagination.pageSize));
+    if (nextPage > lastPage) {
+      nextPage = lastPage;
+      nextPayload = await read(nextPage);
+      if (signal?.aborted || requestId !== batchRequestSeqRef.current) return null;
+      pendingCorrectedPageRef.current = nextPage;
+      setBatchPage(nextPage);
     }
     applyBatchesPayload(nextPayload);
-    setLoading(false);
     return nextPayload;
-  }, [applyBatchesPayload, batchPage, bucket, month]);
+  }, [applyBatchesPayload, batchPage, bucket, categoryCodes, month]);
+
+  const reloadBatchesAfterMutation = useCallback(async () => {
+    setLoading(true);
+    const pendingRead = readBatches();
+    const requestId = batchRequestSeqRef.current;
+    try {
+      return await pendingRead;
+    } catch (caught) {
+      if (requestId !== batchRequestSeqRef.current) return null;
+      throw caught;
+    } finally {
+      if (requestId === batchRequestSeqRef.current) setLoading(false);
+    }
+  }, [readBatches]);
 
   const loadBatches = useCallback((signal?: AbortSignal) => {
-    const requestId = batchRequestSeqRef.current + 1;
-    batchRequestSeqRef.current = requestId;
     setLoading(true);
     setError(null);
-    fetchBankFlowRuleBatches({
-      month,
-      bucket,
-      page: batchPage,
-      pageSize: BANK_FLOW_RULE_BATCH_PAGE_SIZE,
-      signal,
-    })
-      .then((nextPayload) => {
-        if (signal?.aborted || requestId !== batchRequestSeqRef.current) {
-          return;
-        }
-        applyBatchesPayload(nextPayload);
-      })
+    const pendingRead = readBatches(signal);
+    const requestId = batchRequestSeqRef.current;
+    pendingRead
       .catch((caught: unknown) => {
-        if (signal?.aborted || requestId !== batchRequestSeqRef.current) {
-          return;
-        }
-        if (!isAbortLikeError(caught)) {
+        if (!signal?.aborted && requestId === batchRequestSeqRef.current && !isAbortLikeError(caught)) {
           setError(caught instanceof Error ? caught.message : "流水规则批次加载失败");
         }
       })
       .finally(() => {
-        if (!signal?.aborted && requestId === batchRequestSeqRef.current) {
-          setLoading(false);
-        }
+        if (!signal?.aborted && requestId === batchRequestSeqRef.current) setLoading(false);
       });
-  }, [applyBatchesPayload, batchPage, bucket, month]);
+  }, [readBatches]);
 
   useEffect(() => {
     if (!active) {
@@ -289,178 +289,45 @@ export default function BankFlowRuleBatchPage() {
       return undefined;
     }
     const controller = new AbortController();
-    const batchQueryKey = JSON.stringify({ bucket, month, page: batchPage });
-    if (batchQueryKeyRef.current !== batchQueryKey) {
-      batchQueryKeyRef.current = batchQueryKey;
-      setDetails({});
-      setDetailErrors({});
-      setSelectedBatchId("");
+    if (pendingCorrectedPageRef.current === batchPage) {
+      pendingCorrectedPageRef.current = null;
+      return;
     }
     loadBatches(controller.signal);
     return () => controller.abort();
-  }, [active, activationGeneration, batchPage, bucket, loadBatches, month, refreshToken]);
+  }, [active, activationGeneration, batchPage, loadBatches, refreshToken]);
 
-  const tagNodesByCode = useMemo(() => {
-    const nodes = new Map<string, BankFlowRuleTagNode>();
-    payload.summary.categories.forEach((category) => {
-      if (categoryCountForBucket(category, bucket) <= 0) {
-        return;
-      }
-      nodes.set(category.code, {
-        code: category.code,
-        label: category.label || category.code,
-        primaryLabel: tagPrimaryLabel(category) || category.label || category.code,
-        subLabel: tagSubLabel(category),
-      });
-    });
-    return nodes;
-  }, [bucket, payload.summary.categories]);
-
-  const visibleBucketBatches = useMemo(
-    () => payload.batches.filter((batch) => statusBucketFor(batch) === bucket),
-    [bucket, payload.batches],
-  );
-
-  const primaryGroups = useMemo(() => {
-    const groups = new Map<string, { primaryLabel: string; codes: string[]; batchCount: number; rowCount: number }>();
-    const categoriesByCode = new Map(payload.summary.categories.map((category) => [category.code, category]));
-    tagNodesByCode.forEach((node) => {
-      if (!groups.has(node.primaryLabel)) {
-        groups.set(node.primaryLabel, { primaryLabel: node.primaryLabel, codes: [], batchCount: 0, rowCount: 0 });
-      }
-      const group = groups.get(node.primaryLabel);
-      if (group) {
-        const category = categoriesByCode.get(node.code);
-        group.codes.push(node.code);
-        group.batchCount += category ? categoryCountForBucket(category, bucket) : 0;
-        const counts = payload.summary.labelCounts.find((item) => item.primaryLabel === node.primaryLabel && item.subLabel === null);
-        if (!counts) throw new Error("流水分类统计缺失。");
-        group.rowCount = (bucket === "unsubmitted" ? counts.draftRowCount : bucket === "submitted" ? counts.submittedRowCount : bucket === "withdrawn" ? counts.withdrawnRowCount : counts.totalRowCount);
-      }
-    });
-    return Array.from(groups.values());
-  }, [bucket, payload.summary.categories, payload.summary.labelCounts, tagNodesByCode]);
-
-  useEffect(() => {
-    if (primaryGroups.length === 0) {
-      setSelectedPrimaryLabel("");
-      setSelectedSubKey("");
-      return;
-    }
-    const selectedGroup = primaryGroups.find((group) => group.primaryLabel === selectedPrimaryLabel);
-    const preferredGroup = primaryGroups.find((group) => group.batchCount > 0);
-    if (!selectedGroup) {
-      const nextGroup = preferredGroup ?? (!loading ? primaryGroups[0] : null);
-      if (nextGroup) {
-        setSelectedPrimaryLabel(nextGroup.primaryLabel);
-      }
-      return;
-    }
-    if (!manualLabelSelectionRef.current && preferredGroup && selectedGroup.batchCount === 0) {
-      setSelectedPrimaryLabel(preferredGroup.primaryLabel);
-    }
-  }, [loading, primaryGroups, selectedPrimaryLabel]);
-
-  const subGroups = useMemo(() => {
-    const groups = new Map<string, { key: string; label: string; codes: string[]; batchCount: number; rowCount: number }>();
-    const categoriesByCode = new Map(payload.summary.categories.map((category) => [category.code, category]));
-    tagNodesByCode.forEach((node) => {
-      if (node.primaryLabel !== selectedPrimaryLabel) {
-        return;
-      }
-      const key = node.subLabel || SELF_SUB_LABEL;
-      if (!groups.has(key)) {
-        groups.set(key, { key, label: key, codes: [], batchCount: 0, rowCount: 0 });
-      }
-      const group = groups.get(key);
-      if (group) {
-        const category = categoriesByCode.get(node.code);
-        group.codes.push(node.code);
-        group.batchCount += category ? categoryCountForBucket(category, bucket) : 0;
-        const counts = payload.summary.labelCounts.find((item) => item.primaryLabel === node.primaryLabel && item.subLabel === node.subLabel);
-        if (!counts) throw new Error("流水分类统计缺失。");
-        group.rowCount = (bucket === "unsubmitted" ? counts.draftRowCount : bucket === "submitted" ? counts.submittedRowCount : bucket === "withdrawn" ? counts.withdrawnRowCount : counts.totalRowCount);
-      }
-    });
-    return Array.from(groups.values());
-  }, [bucket, payload.summary.categories, payload.summary.labelCounts, selectedPrimaryLabel, tagNodesByCode]);
-
-  useEffect(() => {
-    if (subGroups.length === 0) {
-      setSelectedSubKey("");
-      return;
-    }
-    const selectedGroup = subGroups.find((group) => group.key === selectedSubKey);
-    const preferredGroup = subGroups.find((group) => group.batchCount > 0);
-    if (!selectedGroup) {
-      const nextGroup = preferredGroup ?? (!loading ? subGroups[0] : null);
-      if (nextGroup) {
-        setSelectedSubKey(nextGroup.key);
-      }
-      return;
-    }
-    if (!manualLabelSelectionRef.current && preferredGroup && selectedGroup.batchCount === 0) {
-      setSelectedSubKey(preferredGroup.key);
-    }
-  }, [loading, selectedSubKey, subGroups]);
-
-  const selectedSubGroup = subGroups.find((group) => group.key === selectedSubKey) ?? null;
-  const visibleBatches = useMemo(() => {
-    const codes = new Set(selectedSubGroup?.codes ?? []);
-    return visibleBucketBatches.filter((batch) => codes.has(batch.batchType));
-  }, [selectedSubGroup, visibleBucketBatches]);
-  const selectedBatch = visibleBatches.find((batch) => batch.batchId === selectedBatchId) ?? null;
-  const listPagination = payload.pagination ?? {
-    page: batchPage,
-    pageSize: BANK_FLOW_RULE_BATCH_PAGE_SIZE,
-    total: payload.batches.length,
-  };
-
-  useEffect(() => {
-    if (visibleBatches.length === 0) {
-      setSelectedBatchId("");
-      return;
-    }
-    if (!selectedBatchId && suppressNextAutoSelectRef.current) {
-      return;
-    }
-    if (!visibleBatches.some((batch) => batch.batchId === selectedBatchId)) {
-      setSelectedBatchId(visibleBatches[0].batchId);
-    }
-  }, [selectedBatchId, visibleBatches]);
-
-  useEffect(() => {
-    if (loading || !selectedBatch || details[selectedBatch.batchId] || detailErrors[selectedBatch.batchId]) {
-      return undefined;
-    }
-    const batchId = selectedBatch.batchId;
-    const controller = new AbortController();
-    const requestId = detailRequestSeqRef.current + 1;
-    detailRequestSeqRef.current = requestId;
-    let cancelled = false;
-    fetchBankFlowRuleBatchDetail(batchId, selectedBatch.scopeMonth, bucket === "unsubmitted" ? "candidate" : "formal", controller.signal)
-      .then((detail) => {
-        if (!cancelled && requestId === detailRequestSeqRef.current) {
-          setDetails((current) => ({ ...current, [batchId]: detail }));
-        }
-      })
-      .catch((caught) => {
-        if (isAbortLikeError(caught)) {
-          return;
-        }
-        if (!cancelled && requestId === detailRequestSeqRef.current) {
-          setDetailErrors((current) => ({
-            ...current,
-            [batchId]: caught instanceof Error ? caught.message : "批次明细加载失败",
-          }));
-        }
-      });
-    return () => {
-      cancelled = true;
-      controller.abort();
+  const categoryGroups = useMemo(() => {
+    const groups = new Map<string, { label: string; codes: string[]; rowCount: number; children: { label: string; key: string; codes: string[]; rowCount: number }[] }>();
+    const countFor = (primaryLabel: string, subLabel: string | null) => {
+      const counts = payload.summary.labelCounts.find((item) => item.primaryLabel === primaryLabel && item.subLabel === subLabel);
+      if (!counts) throw new Error("流水分类统计缺失。");
+      return bucket === "unsubmitted" ? counts.draftRowCount : bucket === "submitted" ? counts.submittedRowCount : counts.withdrawnRowCount;
     };
-  }, [bucket, detailErrors, details, loading, selectedBatch]);
+    payload.summary.categories.forEach((category) => {
+      if (categoryCountForBucket(category, bucket) <= 0) return;
+      const primary = tagPrimaryLabel(category) || category.label || category.code;
+      const sub = tagSubLabel(category);
+      if (!groups.has(primary)) groups.set(primary, { label: primary, codes: [], rowCount: countFor(primary, null), children: [] });
+      const group = groups.get(primary)!;
+      group.codes.push(category.code);
+      const key = sub || SELF_SUB_LABEL;
+      let child = group.children.find((item) => item.key === key);
+      if (!child) {
+        child = { label: key, key, codes: [], rowCount: countFor(primary, sub) };
+        group.children.push(child);
+      }
+      child.codes.push(category.code);
+    });
+    return [...groups.values()];
+  }, [bucket, payload.summary]);
 
+  const visibleBatches = payload.batches;
+  const hasBatchActions = canOperateData && visibleBatches.some((batch) =>
+    canSubmitInternalTransferBatch(batch, bucket) || (bucket === "submitted" && canWithdrawBatch(batch)));
+  const selectedAccountBatch = selectionScope ? visibleBatches.find((batch) => batch.accountKey === selectionScope.accountKey && batch.scopeMonth === selectionScope.scopeMonth) : undefined;
+  const listPagination = payload.pagination;
+  const bucketRowCount = bucket === "unsubmitted" ? payload.summary.draftRowCount : bucket === "submitted" ? payload.summary.submittedRowCount : payload.summary.withdrawnRowCount;
   useEffect(() => {
     if (!feedback || feedback.severity !== "success") {
       return undefined;
@@ -469,81 +336,68 @@ export default function BankFlowRuleBatchPage() {
     return () => window.clearTimeout(timeout);
   }, [feedback]);
 
-  const handleMutationComplete = useCallback((message: string) => {
-    suppressNextAutoSelectRef.current = true;
-    setSelectedBatchId("");
-    clearSelection();
-    setDetails({});
-    setDetailErrors({});
-    setFeedback({ severity: "success", message });
-  }, [clearSelection]);
-
-  const toggleTransaction = (row: BankFlowRuleBatchDetailRow, checked: boolean) => {
-    setSelectedTransactionIds((current) => {
-      const next = new Set(current);
-      if (!checked) {
-        next.delete(row.transactionId);
-        if (next.size === 0) {
-          setSelectedAccountForSubmit(null);
-        }
-        return next;
-      }
-      if (selectedAccountForSubmit && selectedAccountForSubmit !== row.accountKey) {
-        setFeedback({ severity: "warning", message: "请先清空当前选择，再选择其他流水。" });
-        return current;
-      }
-      setSelectedAccountForSubmit(row.accountKey);
+  const toggleTransaction = (batch: BankFlowRuleBatch, row: BankFlowRuleBatchDetailRow, checked: boolean) => {
+    if (checked && (!batchMatchesSelectionScope(batch, selectionScope) || row.accountKey !== batch.accountKey)) {
+      setFeedback({ severity: "warning", message: "只能选择同一账户、同一月份的流水，请先清空当前选择。" });
+      return;
+    }
+    const next = new Set(selectedTransactionIds);
+    if (checked) {
       next.add(row.transactionId);
-      return next;
-    });
+      setSelectionScope({ accountKey: batch.accountKey, scopeMonth: batch.scopeMonth! });
+    } else {
+      next.delete(row.transactionId);
+      if (!next.size) setSelectionScope(null);
+    }
+    setSelectedTransactionIds(next);
   };
 
-  const setRegionSelection = (rows: BankFlowRuleBatchDetailRow[], checked: boolean) => {
-    if (!checked) {
-      setSelectedTransactionIds((current) => {
-        const next = new Set(current);
-        rows.forEach((row) => next.delete(row.transactionId));
-        if (next.size === 0) {
-          setSelectedAccountForSubmit(null);
-        }
-        return next;
-      });
+  const setRegionSelection = (batch: BankFlowRuleBatch, rows: BankFlowRuleBatchDetailRow[], checked: boolean) => {
+    if (checked && (!batchMatchesSelectionScope(batch, selectionScope) || rows.some((row) => row.accountKey !== batch.accountKey))) {
+      setFeedback({ severity: "warning", message: "只能选择同一账户、同一月份的流水，请先清空当前选择。" });
       return;
     }
-    const account = rows[0]?.accountKey;
-    if (!account) {
-      return;
-    }
-    if (selectedAccountForSubmit && selectedAccountForSubmit !== account) {
-      setFeedback({ severity: "warning", message: "请先清空当前选择，再选择其他流水。" });
-      return;
-    }
-    setSelectedAccountForSubmit(account);
-    setSelectedTransactionIds((current) => new Set([...current, ...rows.map((row) => row.transactionId)]));
+    const next = new Set(selectedTransactionIds);
+    rows.forEach((row) => checked ? next.add(row.transactionId) : next.delete(row.transactionId));
+    setSelectedTransactionIds(next);
+    setSelectionScope(next.size ? checked ? { accountKey: batch.accountKey, scopeMonth: batch.scopeMonth! } : selectionScope : null);
   };
 
   const refreshAfterCandidateConflict = async (caught: unknown, setMessage: (message: string) => void) => {
     if (!isCandidateConflict(caught)) return;
-    suppressNextAutoSelectRef.current = true;
-    setSelectedBatchId("");
     clearSelection();
-    setDetails({});
-    setDetailErrors({});
+    expansion.invalidate();
+    setCandidatesInvalid(true);
     setMessage("候选已变化，正在刷新流水规则批次...");
-    await reloadBatchesAfterMutation();
+    try { await reloadBatchesAfterMutation(); }
+    catch (readError) { setError(readError instanceof Error ? readError.message : "列表刷新失败，请重试读取。"); }
+  };
+
+  const readAfterSuccessfulWrite = async (message: string, setMessage: (message: string) => void) => {
+    clearSelection();
+    expansion.invalidate();
+    setCandidatesInvalid(true);
+    setMessage("正在加载流水规则批次最新数据...");
+    try {
+      const refreshed = await reloadBatchesAfterMutation();
+      if (refreshed) setFeedback({ severity: "success", message });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "列表刷新失败");
+      setFeedback({ severity: "warning", message: `${message}，列表刷新失败，请重试读取。` });
+    }
   };
 
   const handleSubmitSelected = async () => {
-    if (!canOperateData || selectedTransactionIds.size === 0 || mutating) {
+    if (!canOperateData || selectedTransactionIds.size === 0 || mutating || loading || candidatesInvalid) {
       return;
     }
-    if (!selectedBatch?.scopeMonth) {
+    if (!selectionScope?.scopeMonth) {
       setFeedback({ severity: "error", message: "流水规则候选月份缺失，请刷新列表后重试" });
       return;
     }
     const transactionIds = Array.from(selectedTransactionIds);
-    const scopeMonth = selectedBatch.scopeMonth;
-    const result = await runOperation({
+    const scopeMonth = selectionScope.scopeMonth;
+    await runOperation({
       loadingMessage: "正在提交选中流水规则...",
       action: async ({ setMessage }) => {
         setMutating(true);
@@ -553,8 +407,7 @@ export default function BankFlowRuleBatchPage() {
             scopeMonth,
             note: "",
           });
-          setMessage("正在加载流水规则批次最新数据...");
-          await reloadBatchesAfterMutation();
+          await readAfterSuccessfulWrite("选中流水已提交", setMessage);
           return submitResult;
         } catch (caught) {
           await refreshAfterCandidateConflict(caught, setMessage);
@@ -565,13 +418,10 @@ export default function BankFlowRuleBatchPage() {
       },
       errorMessage: (caught) => mutationErrorMessage(caught, "提交选中流水失败"),
     });
-    if (result.status === "success") {
-      handleMutationComplete("选中流水已提交");
-    }
   };
 
   const handleSubmitBatch = async (batch: BankFlowRuleBatch) => {
-    if (!canOperateData || !canSubmitInternalTransferBatch(batch, bucket) || mutating) {
+    if (!canOperateData || !canSubmitInternalTransferBatch(batch, bucket) || mutating || loading || candidatesInvalid) {
       return;
     }
     const scopeMonth = batch.scopeMonth;
@@ -579,7 +429,7 @@ export default function BankFlowRuleBatchPage() {
       setFeedback({ severity: "error", message: "流水规则候选月份缺失，请刷新列表后重试" });
       return;
     }
-    const result = await runOperation({
+    await runOperation({
       loadingMessage: "正在提交内部往来流水规则批次...",
       action: async ({ setMessage }) => {
         setMutating(true);
@@ -590,8 +440,7 @@ export default function BankFlowRuleBatchPage() {
             scopeMonth,
             note: "",
           });
-          setMessage("正在加载流水规则批次最新数据...");
-          await reloadBatchesAfterMutation();
+          await readAfterSuccessfulWrite("内部往来批次已提交", setMessage);
           return submitResult;
         } catch (caught) {
           await refreshAfterCandidateConflict(caught, setMessage);
@@ -602,9 +451,6 @@ export default function BankFlowRuleBatchPage() {
       },
       errorMessage: (caught) => mutationErrorMessage(caught, "提交内部往来批次失败"),
     });
-    if (result.status === "success") {
-      handleMutationComplete("内部往来批次已提交");
-    }
   };
 
   const handleConfirmWithdraw = async () => {
@@ -613,7 +459,7 @@ export default function BankFlowRuleBatchPage() {
     }
     const target = withdrawTarget;
     const reason = withdrawReason.trim();
-    const result = await runOperation({
+    await runOperation({
       loadingMessage: "正在撤回流水规则批次...",
       action: async ({ setMessage }) => {
         setMutating(true);
@@ -625,8 +471,7 @@ export default function BankFlowRuleBatchPage() {
           });
           setWithdrawTarget(null);
           setWithdrawReason("");
-          setMessage("正在加载流水规则批次最新数据...");
-          await reloadBatchesAfterMutation();
+          await readAfterSuccessfulWrite("批次已撤回", setMessage);
           return withdrawResult;
         } finally {
           setMutating(false);
@@ -634,9 +479,6 @@ export default function BankFlowRuleBatchPage() {
       },
       errorMessage: (caught) => mutationErrorMessage(caught, "撤回批次失败"),
     });
-    if (result.status === "success") {
-      handleMutationComplete("批次已撤回");
-    }
   };
 
   const saveTagSelection = async () => {
@@ -651,7 +493,7 @@ export default function BankFlowRuleBatchPage() {
         requiresInvoice: requirement.requiresInvoice,
       };
     });
-    const result = await runOperation({
+    await runOperation({
       loadingMessage: "正在保存流水规则...",
       action: async ({ setMessage }) => {
         setMutating(true);
@@ -663,15 +505,20 @@ export default function BankFlowRuleBatchPage() {
           setTagSelection(saved);
           setDraftTagRequirements(requirementsFromSelection(saved));
           clearSelection();
-          setSelectedBatchId("");
-          setDetails({});
-          setDetailErrors({});
+          expansion.invalidate();
+          setCandidatesInvalid(true);
           if (saved.recalculationJobId) {
             setMessage("流水规则已保存，正在重算受影响关联...");
-            await waitForRequirementRecalculation(saved.recalculationJobId);
+            try {
+              await waitForRequirementRecalculation(saved.recalculationJobId);
+            } catch (caught) {
+              const message = caught instanceof Error ? caught.message : "关联重算失败";
+              const savedMessage = message.startsWith("流水规则已保存") ? message : `流水规则已保存，但${message}`;
+              setError(savedMessage);
+              throw new Error(savedMessage);
+            }
           }
-          setMessage("流水规则已保存，正在加载当前页面最新数据...");
-          await reloadBatchesAfterMutation();
+          await readAfterSuccessfulWrite(saved.recalculationJobId ? "流水规则已保存，受影响关联已重算" : "流水规则已保存", setMessage);
           return saved;
         } finally {
           setMutating(false);
@@ -679,13 +526,6 @@ export default function BankFlowRuleBatchPage() {
       },
       errorMessage: (caught) => mutationErrorMessage(caught, "保存流水规则失败"),
     });
-    if (result.status === "success") {
-      const saved = result.value;
-      setFeedback({
-        severity: "success",
-        message: saved?.recalculationJobId ? "流水规则已保存，受影响关联已重算" : "流水规则已保存",
-      });
-    }
   };
 
   const drawerRows = useMemo(() => buildTagDrawerRows(tagSelection.activeTags), [tagSelection.activeTags]);
@@ -709,14 +549,29 @@ export default function BankFlowRuleBatchPage() {
 
   const resetListScope = useCallback(() => {
     clearSelection();
-    suppressNextAutoSelectRef.current = false;
-    manualLabelSelectionRef.current = false;
-    setSelectedPrimaryLabel("");
-    setSelectedSubKey("");
-    setSelectedBatchId("");
-    setDetails({});
-    setDetailErrors({});
-  }, [clearSelection]);
+    expansion.reset();
+  }, [clearSelection, expansion.reset]);
+
+  const selectCategory = (primary: string, sub: string, codes: string[]) => {
+    if (primary === selectedPrimaryLabel && sub === selectedSubKey) return;
+    resetListScope();
+    setSelectedPrimaryLabel(primary);
+    setSelectedSubKey(sub);
+    setCategoryCodes(codes);
+    setBatchPage(1);
+  };
+
+  const savedTagRequirements = useMemo(() => requirementsFromSelection(tagSelection), [tagSelection]);
+  const tagDraftDirty = tagSelection.activeTags.some((tag) => {
+    const current = requirementFor(draftTagRequirements, tag.code);
+    const saved = requirementFor(savedTagRequirements, tag.code);
+    return current.requiresOa !== saved.requiresOa || current.requiresInvoice !== saved.requiresInvoice;
+  });
+  const closeTagDrawer = () => {
+    if (tagLoading || mutating) return;
+    if (tagDraftDirty) setDiscardTagChangesOpen(true);
+    else setTagDrawerOpen(false);
+  };
 
   const selectBucket = (nextBucket: BankFlowRuleBatchStatusBucket) => {
     if (nextBucket === bucket) {
@@ -724,12 +579,18 @@ export default function BankFlowRuleBatchPage() {
     }
     resetListScope();
     setBatchPage(1);
+    setSelectedPrimaryLabel("");
+    setSelectedSubKey("");
+    setCategoryCodes([]);
     setBucket(nextBucket);
   };
 
   const handleMonthChange = (nextMonth: string) => {
     resetListScope();
     setBatchPage(1);
+    setSelectedPrimaryLabel("");
+    setSelectedSubKey("");
+    setCategoryCodes([]);
     setMonth(nextMonth);
   };
 
@@ -789,7 +650,7 @@ export default function BankFlowRuleBatchPage() {
         >
           <Segment id="unsubmitted"><CountedLabel label="未提交" value={!hasCounts || error ? undefined : payload.summary.draftRowCount} unit="笔" spaced /></Segment>
           <Segment id="submitted"><CountedLabel label="已提交" value={!hasCounts || error ? undefined : payload.summary.submittedRowCount} unit="笔" spaced /></Segment>
-          <Segment id="withdrawn"><CountedLabel label="历史" value={!hasCounts || error ? undefined : payload.summary.withdrawnRowCount} unit="笔" spaced /></Segment>
+          <Segment id="withdrawn"><CountedLabel label="已撤回" value={!hasCounts || error ? undefined : payload.summary.withdrawnRowCount} unit="笔" spaced /></Segment>
         </SegmentGroup>
         <BusinessPeriodPicker
           allowedModes={["month"]}
@@ -802,21 +663,12 @@ export default function BankFlowRuleBatchPage() {
           }}
           years={nearbyBusinessYears(month || currentMonth())}
         />
-        <PageControls
-          disabled={loading}
-          label="流水规则批次分页"
-          onNext={() => handlePageChange(listPagination.page + 1)}
-          onPrevious={() => handlePageChange(listPagination.page - 1)}
-          page={listPagination.page}
-          pageSize={listPagination.pageSize}
-          total={listPagination.total}
-        />
         {bucket === "unsubmitted" && canOperateData ? (
           <div className="bank-flow-rule-batches-selection-actions">
             {selectedTransactionIds.size > 0 ? (
               <>
                 <span className="bank-flow-rule-batches-selected-count">
-                  已选 {selectedTransactionIds.size} 项明细
+                  已选 {selectedTransactionIds.size} 条明细 · {selectedAccountBatch ? accountLabel(selectedAccountBatch) : ""} · {selectionScope?.scopeMonth}
                 </span>
                 <Button
                   className="bank-flow-rule-batches-button bank-flow-rule-batches-button--compact"
@@ -831,12 +683,12 @@ export default function BankFlowRuleBatchPage() {
             ) : null}
             <Button
               className="bank-flow-rule-batches-button bank-flow-rule-batches-button--primary"
-              isDisabled={selectedTransactionIds.size === 0 || mutating}
+              isDisabled={selectedTransactionIds.size === 0 || mutating || loading || candidatesInvalid}
               onPress={handleSubmitSelected}
               size="sm"
               variant="primary"
             >
-              提交批次
+              提交所选
             </Button>
           </div>
         ) : null}
@@ -845,57 +697,53 @@ export default function BankFlowRuleBatchPage() {
       {error ? <StatePanel tone="error" title={error} /> : null}
 
       <div className="bank-flow-rule-batches-layout">
-        <LabelRail
-          ariaLabel="主标签"
-          emptyTitle="请先在标签管理中选择流水标签"
-          groups={primaryGroups.map((group) => ({
-            key: group.primaryLabel,
-            label: group.primaryLabel,
-            batchCount: group.batchCount,
-            rowCount: group.rowCount,
-          }))}
-          onSelect={(primaryLabel) => {
-            clearSelection();
-            manualLabelSelectionRef.current = true;
-            setSelectedPrimaryLabel(primaryLabel);
-          }}
-          selectedKey={selectedPrimaryLabel}
-          title="主标签"
-        />
-
-        <LabelRail
-          ariaLabel="子标签"
-          emptyTitle="暂无子标签"
-          groups={subGroups.map((group) => ({
-            key: group.key,
-            label: group.label,
-            batchCount: group.batchCount,
-            rowCount: group.rowCount,
-          }))}
-          onSelect={(subKey) => {
-            clearSelection();
-            manualLabelSelectionRef.current = true;
-            setSelectedSubKey(subKey);
-          }}
-          selectedKey={selectedSubKey}
-          title="子标签"
-        />
+        <nav aria-label="流水分类" className="bank-flow-rule-batches-rail">
+          <h2 className="bank-flow-rule-batches-rail__title">流水分类</h2>
+          <button type="button" aria-pressed={!selectedPrimaryLabel}
+            aria-label={hasCounts ? `全部分类 ${bucketRowCount}笔` : "全部分类"}
+            className={cx("bank-flow-rule-batches-rail__item", !selectedPrimaryLabel && "bank-flow-rule-batches-rail__item--active")}
+            onClick={() => selectCategory("", "", [])}>
+            <span>全部分类</span><span className="bank-flow-rule-batches-rail__item-count">{hasCounts ? `${bucketRowCount}笔` : "—"}</span>
+          </button>
+          {categoryGroups.map((group) => <div key={group.label} className="bank-flow-rule-batches-rail__group">
+            <button type="button" aria-label={`${group.label} ${group.rowCount}笔`}
+              aria-pressed={selectedPrimaryLabel === group.label && !selectedSubKey}
+              className={cx("bank-flow-rule-batches-rail__item", selectedPrimaryLabel === group.label && !selectedSubKey && "bank-flow-rule-batches-rail__item--active")}
+              onClick={() => selectCategory(group.label, "", group.codes)}>
+              <span className="bank-flow-rule-batches-rail__item-label">{group.label}</span>
+              <span className="bank-flow-rule-batches-rail__item-count">{group.rowCount}笔</span>
+            </button>
+            {group.children.map((child) => <button key={child.key} type="button"
+              aria-label={`${group.label} / ${child.label} ${child.rowCount}笔`}
+              aria-pressed={selectedPrimaryLabel === group.label && selectedSubKey === child.key}
+              className={cx("bank-flow-rule-batches-rail__item", "bank-flow-rule-batches-rail__item--child", selectedPrimaryLabel === group.label && selectedSubKey === child.key && "bank-flow-rule-batches-rail__item--active")}
+              onClick={() => selectCategory(group.label, child.key, child.codes)}>
+              <span className="bank-flow-rule-batches-rail__item-label">{child.label}</span>
+              <span className="bank-flow-rule-batches-rail__item-count">{child.rowCount}笔</span>
+            </button>)}
+          </div>)}
+        </nav>
 
         <section aria-label="流水" className="bank-flow-rule-batches-transactions" role="region">
           <header className="bank-flow-rule-batches-transactions__header">
             <div className="bank-flow-rule-batches-transactions__heading">
               <h2 className="bank-flow-rule-batches-transactions__title">
-                {selectedPrimaryLabel && selectedSubKey ? `${selectedPrimaryLabel} / ${selectedSubKey}` : "流水"}
+                {selectedPrimaryLabel ? `${selectedPrimaryLabel}${selectedSubKey && selectedSubKey !== selectedPrimaryLabel ? ` / ${selectedSubKey}` : ""}` : "全部分类"}
               </h2>
+              <span className="bank-flow-rule-batches-result-count">{hasCounts && !error ? `${listPagination.total} 批次` : "—"}</span>
             </div>
+            {expansion.expandedIds.size >= 2 && <button type="button" className="bank-flow-rule-batches-text-action" onClick={expansion.collapseAll}>收起全部</button>}
           </header>
           <div className="bank-flow-rule-batches-transactions__list">
             {loading ? <StatePanel compact tone="loading" title="流水加载中" /> : null}
             {!loading && !error && visibleBatches.length === 0 ? <StatePanel compact tone="empty" title="当前标签下暂无流水" /> : null}
-            {!loading ? visibleBatches.map((batch) => {
+            {!loading && !error ? visibleBatches.map((batch) => {
               const detail = details[batch.batchId];
               const rows = detail?.rows ?? [];
-              const selected = selectedBatchId === batch.batchId;
+              const selected = expansion.expandedIds.has(batch.batchId);
+              const mounted = expansion.mountedIds.has(batch.batchId);
+              const batchIdentity = `${accountLabel(batch)} ${batch.scopeMonth || "月份缺失"}`;
+              const scopeCompatible = batchMatchesSelectionScope(batch, selectionScope);
               const rowSelectionEnabled = canSelectBatchRows(batch, bucket);
               const internalTransferSubmitEnabled = canSubmitInternalTransferBatch(batch, bucket);
               const selectedRowCount = rowSelectionEnabled
@@ -903,42 +751,39 @@ export default function BankFlowRuleBatchPage() {
                 : 0;
               const regionChecked = rowSelectionEnabled && rows.length > 0 && selectedRowCount === rows.length;
               const regionIndeterminate = selectedRowCount > 0 && selectedRowCount < rows.length;
-              const showRelationColumn = rows.some((row) => relationContextLabels(row).length > 0);
-              const blockingReason = batchBlockingReason(batch);
               return (
                 <section
                   className={cx(
                     "bank-flow-rule-batches-batch",
-                    selected && "bank-flow-rule-batches-batch--selected",
+                    selected && "bank-flow-rule-batches-batch--expanded",
                   )}
                   key={batch.batchId}
                 >
                   <div className="bank-flow-rule-batches-batch__body">
                     <div className="bank-flow-rule-batches-batch__header">
+                      <button type="button" className="bank-flow-rule-batches-expand" aria-label={`${selected ? "收起" : "展开"}批次 ${batchIdentity}`}
+                        aria-expanded={selected} aria-controls={`batch-body-${batch.batchId}`} onClick={() => expansion.toggle(batch.batchId)}>
+                        {selected ? <ChevronUp size={16} aria-hidden="true" /> : <ChevronDown size={16} aria-hidden="true" />}
+                      </button>
                       <div className="bank-flow-rule-batches-batch__summary">
                         <div className="bank-flow-rule-batches-batch__title-row">
                           <h3 className="bank-flow-rule-batches-batch__title">{accountLabel(batch)}</h3>
+                          <span className="bank-flow-rule-batches-batch__scope">{batch.scopeMonth || "月份缺失"}</span>
                           <BatchStatusTag status={batch.status} />
+                          {!selectedPrimaryLabel && <span className="bank-flow-rule-batches-batch__category">{batch.categoryLabelPath?.length ? batch.categoryLabelPath.filter((label, index, path) => index === 0 || label !== path[index - 1]).join(" / ") : batch.batchLabel}</span>}
+                          {selectedRowCount > 0 && <span className="bank-flow-rule-batches-selected-count">已选 {selectedRowCount} 条</span>}
                         </div>
-                        <p className="bank-flow-rule-batches-batch__meta">
-                          {batch.rowCount} 项明细 · 合计 {formatMoney(batch.totalAmount)}
-                        </p>
+                        {(batch.submittedAt || batch.withdrawnAt) && <p className="bank-flow-rule-batches-batch__audit">
+                          {batch.withdrawnAt ? "撤回于" : "提交于"} {formatDateTimeText(batch.withdrawnAt || batch.submittedAt || "")}
+                        </p>}
                       </div>
-                      <div className="bank-flow-rule-batches-batch__actions">
-                        {!selected ? (
-                          <button
-                            aria-label={`查看${accountLabel(batch)}流水`}
-                            className="bank-flow-rule-batches-button bank-flow-rule-batches-button--compact"
-                            onClick={() => setSelectedBatchId(batch.batchId)}
-                            type="button"
-                          >
-                            查看流水
-                          </button>
-                        ) : null}
+                      <div className={cx("bank-flow-rule-batches-batch__actions", !hasBatchActions && "bank-flow-rule-batches-batch__actions--read")}>
+                        <span className="bank-flow-rule-batches-batch__meta">{batch.rowCount} 条明细</span>
+                        <span className="bank-flow-rule-batches-batch__total-group"><span className="bank-flow-rule-batches-batch__meta">合计</span><strong className="bank-flow-rule-batches-batch__total">{formatMoney(batch.totalAmount)}</strong></span>
                         {internalTransferSubmitEnabled && canOperateData ? (
                           <button
                             className="bank-flow-rule-batches-button bank-flow-rule-batches-button--compact bank-flow-rule-batches-button--primary"
-                            disabled={mutating}
+                            disabled={mutating || loading || candidatesInvalid}
                             onClick={() => handleSubmitBatch(batch)}
                             type="button"
                           >
@@ -957,29 +802,25 @@ export default function BankFlowRuleBatchPage() {
                         ) : null}
                       </div>
                     </div>
-                    {blockingReason ? (
-                      <div
-                        className={cx(
-                          "bank-flow-rule-batches-notice",
-                          "bank-flow-rule-batches-notice--warning",
-                        )}
-                        role="alert"
-                      >
-                        {blockingReason}
-                      </div>
-                    ) : null}
+                    {mounted && <BatchExpansion id={`batch-body-${batch.batchId}`} label={`批次明细 ${batchIdentity}`}
+                      expanded={selected} contentKey={`${rows.length}:${detailErrors[batch.batchId] || ""}:${Boolean(detail)}`}
+                      onExited={() => expansion.onExited(batch.batchId)}>
+                      {rowSelectionEnabled && !scopeCompatible && <p className="bank-flow-rule-batches-selection-hint">
+                        {batch.scopeMonth ? "只能选择同一账户、同一月份的流水；清空当前选择后可切换。" : "该批次月份缺失，暂不可选择提交。"}
+                      </p>}
                     {selected && detailErrors[batch.batchId] ? (
                       <div className="bank-flow-rule-batches-notice bank-flow-rule-batches-notice--error" role="alert">
                         {detailErrors[batch.batchId]}
+                        <button type="button" className="bank-flow-rule-batches-text-action" aria-label={`重试批次 ${batchIdentity}`} onClick={() => expansion.retry(batch.batchId)}>重试</button>
                       </div>
                     ) : null}
                     {selected && !detail && !detailErrors[batch.batchId] ? <StatePanel compact tone="loading" title="正在加载流水明细" /> : null}
                     {selected && detail && rows.length === 0 ? <StatePanel compact tone="empty" title="暂无流水明细" /> : null}
-                    {selected && rows.length > 0 ? (
+                    {detail && rows.length > 0 ? (
                       <FinanceTable
                         ariaLabel={`${accountLabel(batch)}流水`}
                         className="bank-flow-rule-batches-table"
-                        minWidth={showRelationColumn ? 920 : 780}
+                        minWidth={920}
                       >
                           <FinanceTableHeader>
                               {rowSelectionEnabled ? (
@@ -987,11 +828,11 @@ export default function BankFlowRuleBatchPage() {
                                   <Checkbox
                                     aria-label={`${accountLabel(batch)}全选`}
                                     className="bank-flow-rule-batches-checkbox bank-flow-rule-batches-checkbox--table"
-                                    isDisabled={!canOperateData}
+                                    isDisabled={!canOperateData || !scopeCompatible || mutating || candidatesInvalid || loading}
                                     isIndeterminate={regionIndeterminate}
                                     isSelected={regionChecked}
                                     slot="selection"
-                                    onChange={(selected) => setRegionSelection(rows, selected)}
+                                    onChange={(selected) => setRegionSelection(batch, rows, selected)}
                                   >
                                     <Checkbox.Control className="bank-flow-rule-batches-checkbox__control">
                                       <Checkbox.Indicator />
@@ -1002,9 +843,7 @@ export default function BankFlowRuleBatchPage() {
                               <FinanceTableColumn className="bank-flow-rule-batches-table__counterparty" columnRole="identity" isRowHeader>对方户名</FinanceTableColumn>
                               <FinanceTableColumn className="bank-flow-rule-batches-table__time" columnRole="date">交易时间</FinanceTableColumn>
                               <FinanceTableColumn className="bank-flow-rule-batches-table__amount" columnRole="amount">金额</FinanceTableColumn>
-                              {showRelationColumn ? (
-                                <FinanceTableColumn className="bank-flow-rule-batches-table__relation" columnRole="status">关联</FinanceTableColumn>
-                              ) : null}
+                              <FinanceTableColumn className="bank-flow-rule-batches-table__relation" columnRole="status">关联</FinanceTableColumn>
                               <FinanceTableColumn className="bank-flow-rule-batches-table__description" columnRole="description">摘要/用途/备注</FinanceTableColumn>
                           </FinanceTableHeader>
                           <FinanceTableBody>
@@ -1027,9 +866,9 @@ export default function BankFlowRuleBatchPage() {
                                       <Checkbox
                                         aria-label={`选择流水 ${row.counterpartyName || "未知对方"} ${formatDateTimeText(row.tradeTime)} ${formatMoney(row.amount)} ${row.bankName || "未知银行"} ${row.accountLast4 || ""}`}
                                         className="bank-flow-rule-batches-checkbox bank-flow-rule-batches-checkbox--table"
-                                        isDisabled={!canOperateData}
+                                        isDisabled={!canOperateData || !scopeCompatible || row.accountKey !== batch.accountKey || mutating || candidatesInvalid || loading}
                                         isSelected={rowSelected}
-                                        onChange={(selected) => toggleTransaction(row, selected)}
+                                        onChange={(selected) => toggleTransaction(batch, row, selected)}
                                       >
                                         <Checkbox.Control className="bank-flow-rule-batches-checkbox__control">
                                           <Checkbox.Indicator />
@@ -1037,7 +876,7 @@ export default function BankFlowRuleBatchPage() {
                                       </Checkbox>
                                     </FinanceTableCell>
                                   ) : null}
-                                  <FinanceTableCell className="bank-flow-rule-batches-table__counterparty" columnRole="identity">{row.counterpartyName || "—"}<button type="button" aria-label={`查看银行流水 ${row.counterpartyName} 详情`} onClick={() => setBankDetailRow(row)}><Eye size={16} /></button></FinanceTableCell>
+                                  <FinanceTableCell className="bank-flow-rule-batches-table__counterparty" columnRole="identity">{row.counterpartyName || "—"}<button type="button" aria-label={`查看银行流水 ${row.counterpartyName} 详情`} className="bank-flow-rule-batches-detail" onClick={() => setBankDetailRow(row)}><Eye size={14} aria-hidden="true" /></button></FinanceTableCell>
                                   <FinanceTableCell className="bank-flow-rule-batches-table__time" columnRole="date">{formatDateTimeText(row.tradeTime)}</FinanceTableCell>
                                   <FinanceTableCell className="bank-flow-rule-batches-table__amount" columnRole="amount">
                                     <div className="bank-flow-rule-batches-amount-cell">
@@ -1049,8 +888,7 @@ export default function BankFlowRuleBatchPage() {
                                       </div>
                                     </div>
                                   </FinanceTableCell>
-                                  {showRelationColumn ? (
-                                    <FinanceTableCell className="bank-flow-rule-batches-table__relation" columnRole="status">
+                                  <FinanceTableCell className="bank-flow-rule-batches-table__relation" columnRole="status">
                                       {relationLabels.length > 0 ? (
                                         <div className="bank-flow-rule-batches-relation-cell">
                                           <span className="bank-flow-rule-batches-tag">{relationLabels[0]}</span>
@@ -1059,8 +897,7 @@ export default function BankFlowRuleBatchPage() {
                                           </span>
                                         </div>
                                       ) : <span className="bank-flow-rule-batches-empty-value">—</span>}
-                                    </FinanceTableCell>
-                                  ) : null}
+                                  </FinanceTableCell>
                                   <FinanceTableCell className="bank-flow-rule-batches-table__description" columnRole="description">
                                     <div className="bank-flow-rule-batches-summary-cell">
                                       <span className="bank-flow-rule-batches-summary-cell__summary">{row.summary.trim() || "—"}</span>
@@ -1073,11 +910,18 @@ export default function BankFlowRuleBatchPage() {
                           </FinanceTableBody>
                       </FinanceTable>
                     ) : null}
+                    </BatchExpansion>}
                   </div>
                 </section>
               );
             }) : null}
           </div>
+          <footer className="bank-flow-rule-batches-transactions__footer">
+            <span>{hasCounts && !error ? `共 ${listPagination.total} 批次` : "—"}</span>
+            <PageControls disabled={loading} label="流水规则批次分页"
+              onNext={() => handlePageChange(listPagination.page + 1)} onPrevious={() => handlePageChange(listPagination.page - 1)}
+              page={listPagination.page} pageSize={listPagination.pageSize} total={listPagination.total} />
+          </footer>
         </section>
       </div>
 
@@ -1090,7 +934,7 @@ export default function BankFlowRuleBatchPage() {
           <div className="bank-flow-rule-batches-drawer__actions">
             <Button
               className="bank-flow-rule-batches-button bank-flow-rule-batches-button--compact bank-flow-rule-batches-button--primary"
-              isDisabled={!canOperateData || tagLoading || mutating}
+              isDisabled={!canOperateData || tagLoading || mutating || !tagDraftDirty}
               isPending={mutating}
               onPress={saveTagSelection}
               size="sm"
@@ -1100,7 +944,7 @@ export default function BankFlowRuleBatchPage() {
             </Button>
           </div>
         )}
-        onClose={() => setTagDrawerOpen(false)}
+        onClose={closeTagDrawer}
         open={tagDrawerOpen}
         title="流水规则标签管理"
         width="min(960px, 92vw)"
@@ -1111,8 +955,8 @@ export default function BankFlowRuleBatchPage() {
                       <FinanceTableColumn className="bank-flow-rule-batches-drawer__direction-col" columnRole="direction">收支类型</FinanceTableColumn>
                       <FinanceTableColumn columnRole="identity" isRowHeader>流水主标签</FinanceTableColumn>
                       <FinanceTableColumn columnRole="description">流水子标签</FinanceTableColumn>
-                      <FinanceTableColumn className="bank-flow-rule-batches-drawer__check-col" columnRole="selection">OA</FinanceTableColumn>
-                      <FinanceTableColumn className="bank-flow-rule-batches-drawer__check-col" columnRole="selection">发票</FinanceTableColumn>
+                      <FinanceTableColumn className="bank-flow-rule-batches-drawer__check-col" columnRole="selection">需要 OA</FinanceTableColumn>
+                      <FinanceTableColumn className="bank-flow-rule-batches-drawer__check-col" columnRole="selection">需要发票</FinanceTableColumn>
                   </FinanceTableHeader>
                   <FinanceTableBody>
                     {drawerRows.map(({
@@ -1147,7 +991,7 @@ export default function BankFlowRuleBatchPage() {
                             <Checkbox
                               aria-label={`${rowLabel} 需要OA`}
                               className="bank-flow-rule-batches-checkbox"
-                              isDisabled={!canOperateData || tagLoading}
+                              isDisabled={!canOperateData || tagLoading || mutating}
                               isSelected={rule.requiresOa}
                               onChange={(selected) => updateDraftRequirement(tag.code, "requiresOa", selected)}
                             >
@@ -1158,7 +1002,7 @@ export default function BankFlowRuleBatchPage() {
                             <Checkbox
                               aria-label={`${rowLabel} 需要发票`}
                               className="bank-flow-rule-batches-checkbox"
-                              isDisabled={!canOperateData || tagLoading}
+                              isDisabled={!canOperateData || tagLoading || mutating}
                               isSelected={rule.requiresInvoice}
                               onChange={(selected) => updateDraftRequirement(tag.code, "requiresInvoice", selected)}
                             >
@@ -1172,6 +1016,14 @@ export default function BankFlowRuleBatchPage() {
               </FinanceTable>
             </div>
       </AppDrawer>
+
+      <AppDialog open={discardTagChangesOpen} title="放弃未保存的修改？" maxWidth="xs"
+        onClose={() => setDiscardTagChangesOpen(false)} actions={<>
+          <Button variant="secondary" onPress={() => setDiscardTagChangesOpen(false)}>继续编辑</Button>
+          <Button variant="danger" onPress={() => { setDiscardTagChangesOpen(false); setTagDrawerOpen(false); setDraftTagRequirements(requirementsFromSelection(tagSelection)); }}>放弃修改</Button>
+        </>}>
+        流水关联要求尚未保存。
+      </AppDialog>
 
       <AppDialog
         maxWidth="xs"

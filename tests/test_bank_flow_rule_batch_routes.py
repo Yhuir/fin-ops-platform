@@ -3,12 +3,16 @@ from __future__ import annotations
 import unittest
 from http import HTTPStatus
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from fin_ops_platform.app.routes_bank_flow_rule_batches import BankFlowRuleBatchApiRoutes
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
 from fin_ops_platform.services.bank_batch_application_service import BankBatchRelationMutationError
 from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
-from fin_ops_platform.services.bank_flow_rule_batch_application_service import BankFlowRuleBatchPersistenceError
+from fin_ops_platform.services.bank_flow_rule_batch_application_service import (
+    BankFlowRuleBatchApplicationService,
+    BankFlowRuleBatchPersistenceError,
+)
 
 
 class FakeBankFlowRuleBatchApplicationService:
@@ -98,6 +102,30 @@ class FakeBankFlowRuleBatchApplicationService:
 
 
 class BankFlowRuleBatchRoutesTests(unittest.TestCase):
+    def test_list_route_preserves_repeated_types_and_maps_ambiguous_set_to_bad_request(self) -> None:
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        repository = SimpleNamespace(read_page=Mock(return_value={"bank_parent_ids": {}, "tag_policy": {}}))
+        service._query_repository = repository
+        service._live_batch_service = lambda *_args, **_kwargs: SimpleNamespace(list_batches=lambda _filters: [])
+        routes = BankFlowRuleBatchApiRoutes(application_service=service)
+
+        status, payload = routes.route("GET", "/api/bank-flow-rule-batches", {
+            "type": ["fee", "archived_fee", "fee"], "page": ["1"], "page_size": ["50"],
+        }, None, {})
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(payload["batches"], [])
+        self.assertEqual(payload["pagination"], {"page": 1, "page_size": 50, "pageSize": 50, "total": 0})
+        self.assertEqual(payload["summary"]["total_row_count"], 0)
+        self.assertEqual(repository.read_page.call_args.args[0]["type"], ("fee", "archived_fee"))
+        repository.read_page.reset_mock()
+
+        status, payload = routes.route("GET", "/api/bank-flow-rule-batches", {"type": ["all", "fee"]}, None, {})
+        self.assertEqual(status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(payload["error"], "invalid_bank_flow_rule_batch_type")
+        self.assertTrue(payload["message"])
+        repository.read_page.assert_not_called()
+
     def test_list_route_uses_bank_flow_relation_mode(self) -> None:
         service = FakeBankFlowRuleBatchApplicationService()
         routes = BankFlowRuleBatchApiRoutes(

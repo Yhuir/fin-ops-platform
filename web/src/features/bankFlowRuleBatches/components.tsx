@@ -1,9 +1,7 @@
-import type { KeyboardEvent } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
-import StatePanel from "../../components/common/StatePanel";
 import type { BankFlowRuleBatchStatus } from "./types";
-import { cx, formatCountMeta } from "./viewModel";
+import { cx } from "./viewModel";
 
 type BatchStatusMeta = { label: string; color: "default" | "primary" | "success" | "warning" | "error" };
 
@@ -13,14 +11,6 @@ const STATUS_META: Record<BankFlowRuleBatchStatus | "unsubmitted", BatchStatusMe
   submitted: { label: "已提交", color: "success" },
   withdrawn: { label: "已撤回", color: "default" },
 };
-
-function handleButtonKeyDown(event: KeyboardEvent<HTMLElement>, action: () => void) {
-  if (event.key !== "Enter" && event.key !== " ") {
-    return;
-  }
-  event.preventDefault();
-  action();
-}
 
 export function PageControls({
   disabled,
@@ -42,7 +32,7 @@ export function PageControls({
   const pageCount = Math.max(1, Math.ceil(total / Math.max(1, pageSize)));
   return (
     <div aria-label={label} className="bank-flow-rule-batches-pagination" role="group">
-      <span className="bank-flow-rule-batches-pagination__summary">第 {page} / {pageCount} 页</span>
+      <span className="bank-flow-rule-batches-pagination__summary">第 {page} / {pageCount} 页 · 每页 {pageSize} 批次</span>
       <button
         aria-label={`${label}上一页`}
         className="bank-flow-rule-batches-pagination__button"
@@ -73,78 +63,5 @@ export function BatchStatusTag({ status }: { status: string }) {
     <span className={cx("bank-flow-rule-batches-status", `bank-flow-rule-batches-status--${meta.color}`)}>
       {meta.label}
     </span>
-  );
-}
-
-export type LabelRailGroup = {
-  key: string;
-  label: string;
-  batchCount: number;
-  rowCount: number;
-};
-
-export function LabelRail({
-  title,
-  subtitle,
-  ariaLabel,
-  emptyTitle,
-  groups,
-  selectedKey,
-  onSelect,
-}: {
-  title: string;
-  subtitle?: string;
-  ariaLabel: string;
-  emptyTitle: string;
-  groups: LabelRailGroup[];
-  selectedKey: string;
-  onSelect: (key: string) => void;
-}) {
-  return (
-    <section aria-label={ariaLabel} className="bank-flow-rule-batches-rail" role="region">
-      <header className="bank-flow-rule-batches-rail__header">
-        <h2 className="bank-flow-rule-batches-rail__title">{title}</h2>
-        {subtitle ? <p className="bank-flow-rule-batches-rail__subtitle">{subtitle}</p> : null}
-      </header>
-      {groups.length === 0 ? (
-        <div className="bank-flow-rule-batches-rail__empty">
-          <StatePanel compact tone="empty" title={emptyTitle} />
-        </div>
-      ) : (
-        <div className="bank-flow-rule-batches-rail__list">
-          {groups.map((group) => {
-            const selected = selectedKey === group.key;
-            const countMeta = formatCountMeta(group.rowCount);
-            const isEmpty = group.batchCount === 0 && group.rowCount === 0;
-            return (
-              <button
-                aria-label={`${group.label} ${countMeta}`}
-                aria-pressed={selected}
-                className={cx(
-                  "bank-flow-rule-batches-rail__item",
-                  selected && "bank-flow-rule-batches-rail__item--active",
-                )}
-                key={group.key}
-                onClick={() => onSelect(group.key)}
-                onKeyDown={(event) => handleButtonKeyDown(event, () => onSelect(group.key))}
-                type="button"
-              >
-                <span className="bank-flow-rule-batches-rail__item-label" title={group.label}>
-                  {group.label}
-                </span>
-                <span
-                  className={cx(
-                    "bank-flow-rule-batches-rail__item-count",
-                    isEmpty && "bank-flow-rule-batches-rail__item-count--empty",
-                  )}
-                >
-                  {countMeta}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </section>
   );
 }

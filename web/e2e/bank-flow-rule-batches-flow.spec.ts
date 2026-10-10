@@ -1,4 +1,4 @@
-import { lstat, readFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 
 import { expect, test, type Locator, type Page, type TestInfo } from "./fixtures/strictTest";
 
@@ -72,6 +72,13 @@ function putResponse(pathname: string) {
 async function clickCheckbox(checkbox: Locator) {
   const label = checkbox.locator("xpath=ancestor::label[1]");
   await (await label.count() ? label : checkbox).click();
+}
+
+async function expandBatch(page: Page, accountLabel = "建设银行8106", scopeMonth = "2026-05") {
+  const toggle = page.getByRole("button", { name: `展开批次 ${accountLabel} ${scopeMonth}`, exact: true });
+  await toggle.click();
+  await expect(page.getByRole("button", { name: `收起批次 ${accountLabel} ${scopeMonth}`, exact: true })).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("region", { name: `批次明细 ${accountLabel} ${scopeMonth}`, exact: true })).toBeVisible();
 }
 
 const ordinaryBankFlowRuleCheckboxCases = [
@@ -284,6 +291,145 @@ async function loadWorkbenchDirectCommitVisibilityFixtures(
 }
 
 test.describe("bank flow rule batches browser flow", () => {
+  test("keeps multiple batches expanded with visible selection and smooth reversible motion", async ({ page }, testInfo) => {
+    const errors = startStrictBrowserErrorCapture(page);
+    const api = await installDeterministicApiMocks(page, { bankFlowRuleBatchScenario: "ordinaryDraftMatrix", sessionMode: "user" });
+    await page.setViewportSize({ width: 1440, height: 980 });
+    await page.goto("/bank-flow-rule-batches");
+    const feeToggle = page.getByRole("button", { name: /^(展开|收起)批次 建设银行8106 2026-05$/ });
+    await expect(feeToggle).toBeVisible();
+    await expect(page.getByRole("grid")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "收起全部" })).toHaveCount(0);
+    await expandBatch(page);
+    const feeTable = page.getByRole("grid", { name: "建设银行8106流水" });
+    const feeCheck = feeTable.getByRole("checkbox", { name: ordinaryBankFlowRuleCheckboxCases[0].accessibleName });
+    await clickCheckbox(feeCheck);
+    await expandBatch(page, "工商银行6386");
+    const salaryTable = page.getByRole("grid", { name: "工商银行6386流水" });
+    await expect(feeTable).toBeVisible(); await expect(salaryTable).toBeVisible();
+    await expect(salaryTable.getByRole("checkbox", { name: ordinaryBankFlowRuleCheckboxCases[1].accessibleName })).toBeDisabled();
+    await expect(page.getByText("已选 1 条明细 · 建设银行8106 · 2026-05")).toBeVisible();
+    await page.getByRole("button", { name: "收起全部" }).click();
+    await expect(page.getByRole("grid")).toHaveCount(0);
+    await expect(page.getByText("已选 1 条明细 · 建设银行8106 · 2026-05")).toBeVisible();
+    await expect(page.getByText("已选 1 条", { exact: true })).toBeVisible();
+    await expandBatch(page);
+    await expect(feeCheck).toBeChecked();
+    expect(api.count("GET /api/bank-flow-rule-batches/bank-flow-rule-batch-e2e-fee")).toBeLessThanOrEqual(1);
+
+    const feeRegion = page.getByRole("region", { name: "批次明细 建设银行8106 2026-05" });
+    const output = "/tmp/fin-ops-batch-ui";
+    await mkdir(output, { recursive: true });
+    await page.getByRole("button", { name: "收起批次 建设银行8106 2026-05" }).click();
+    await expect(feeRegion).toHaveCount(0);
+    await expect(page.locator(".bank-flow-rule-batches-batch").filter({ has: feeToggle }).locator(".bank-flow-rule-batches-expansion")).toHaveCount(0);
+    // Freeze the real native animation clock at exact frames; screenshots cannot race its short duration.
+    await feeToggle.evaluate(async (element) => {
+      (element as HTMLButtonElement).click();
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+      const panel = element.closest(".bank-flow-rule-batches-batch")!.querySelector(".bank-flow-rule-batches-expansion")!;
+      const animation = panel.getAnimations()[0];
+      if (!animation) throw new Error("batch slide did not start a native animation");
+      animation.id = "batch-ui-animation";
+      animation.pause();
+      await animation.ready;
+      animation.currentTime = 0;
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+    });
+    const expander = feeRegion.locator("..");
+    const atStart = await expander.evaluate((element) => {
+      const animation = element.getAnimations()[0];
+      return { height: element.getBoundingClientRect().height, currentTime: animation.currentTime, progress: animation.effect!.getComputedTiming().progress, keyframes: (animation.effect as KeyframeEffect).getKeyframes(), ...animation.effect!.getTiming() };
+    });
+    const heightAtStart = atStart.height;
+    await page.screenshot({ path: `${output}/animation-1-start.png`, fullPage: true });
+    const atMiddle = await expander.evaluate(async (element) => {
+      const animation = element.getAnimations()[0];
+      if (animation.id !== "batch-ui-animation") throw new Error("recorded batch animation was replaced");
+      animation.currentTime = 110; await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame);
+      return { height: element.getBoundingClientRect().height, currentTime: animation.currentTime, progress: animation.effect!.getComputedTiming().progress, keyframes: (animation.effect as KeyframeEffect).getKeyframes(), ...animation.effect!.getTiming() };
+    });
+    const heightAtMiddle = atMiddle.height;
+    await page.screenshot({ path: `${output}/animation-2-middle.png`, fullPage: true });
+    const atEnd = await expander.evaluate(async (element) => {
+      const animation = element.getAnimations()[0];
+      if (animation.id !== "batch-ui-animation") throw new Error("recorded batch animation was replaced");
+      animation.currentTime = 220; await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame);
+      return { height: element.getBoundingClientRect().height, currentTime: animation.currentTime, progress: animation.effect!.getComputedTiming().progress, keyframes: (animation.effect as KeyframeEffect).getKeyframes(), ...animation.effect!.getTiming() };
+    });
+    const heightAtEnd = atEnd.height;
+    await page.screenshot({ path: `${output}/animation-3-complete.png`, fullPage: true });
+    await writeFile(`${output}/animation-metrics.json`, JSON.stringify({ start: atStart, middle: atMiddle, end: atEnd }, null, 2));
+    await testInfo.attach("batch slide frame metrics", { path: `${output}/animation-metrics.json`, contentType: "application/json" });
+    expect(atStart.duration).toBe(220); expect(atMiddle.duration).toBe(220); expect(atEnd.duration).toBe(220);
+    expect(heightAtStart).toBeLessThanOrEqual(1);
+    expect(heightAtMiddle).toBeGreaterThan(heightAtEnd * 0.5);
+    expect(heightAtMiddle).toBeLessThan(heightAtEnd - 1);
+    await expander.evaluate((element) => element.getAnimations().forEach((animation) => animation.finish()));
+    const reversalMetrics = await feeToggle.evaluate(async (element) => {
+      const panel = element.closest(".bank-flow-rule-batches-batch")!.querySelector(".bank-flow-rule-batches-expansion")!;
+      (element as HTMLButtonElement).click();
+      await new Promise(requestAnimationFrame);
+      const closing = panel.getAnimations()[0];
+      if (!closing) throw new Error("closing batch did not start a native animation");
+      closing.pause(); await closing.ready; closing.currentTime = 85;
+      await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame);
+      const closingHeight = panel.getBoundingClientRect().height;
+      (element as HTMLButtonElement).click();
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+      const reopening = panel.getAnimations()[0];
+      if (!reopening || reopening === closing) throw new Error("reopening did not replace the obsolete closing animation");
+      reopening.pause(); await reopening.ready; reopening.currentTime = 0;
+      await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame);
+      const reopeningStartHeight = panel.getBoundingClientRect().height;
+      reopening.currentTime = 220;
+      await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame);
+      const reopeningEndHeight = panel.getBoundingClientRect().height;
+      reopening.finish();
+      return { closingDuration: closing.effect!.getTiming().duration, closingHeight, reopeningStartHeight, reopeningEndHeight };
+    });
+    await writeFile(`${output}/reversal-metrics.json`, JSON.stringify(reversalMetrics, null, 2));
+    await testInfo.attach("batch slide reversal metrics", { path: `${output}/reversal-metrics.json`, contentType: "application/json" });
+    expect(reversalMetrics.closingDuration).toBe(170);
+    expect(reversalMetrics.closingHeight).toBeGreaterThan(0);
+    expect(reversalMetrics.closingHeight).toBeLessThan(heightAtEnd - 1);
+    expect(Math.abs(reversalMetrics.reopeningStartHeight - reversalMetrics.closingHeight)).toBeLessThan(1);
+    expect(reversalMetrics.reopeningEndHeight).toBeGreaterThan(reversalMetrics.closingHeight + 1);
+    await expect(feeToggle).toHaveAttribute("aria-expanded", "true");
+    await expect(feeRegion).toBeVisible(); await expect(feeCheck).toBeChecked();
+    await page.getByRole("button", { name: "清空选择" }).click();
+    await expect(feeCheck).not.toBeChecked();
+    await expandBatch(page, "工商银行6386");
+    await expect.poll(() => page.locator(".bank-flow-rule-batches-expansion").evaluateAll((panels) => panels.some((panel) => panel.getAnimations().some((animation) => animation.playState === "running")))).toBe(false);
+    await expect(salaryTable).toBeVisible();
+    await page.screenshot({ path: `${output}/multiple-expanded-1440.png`, fullPage: true });
+    await testInfo.attach("multiple batches expanded", { path: `${output}/multiple-expanded-1440.png`, contentType: "image/png" });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.evaluate(async () => { await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame); });
+    await expect.poll(() => page.locator(".bank-flow-rule-batches-expansion").evaluateAll((panels) => panels.some((panel) => panel.getAnimations().some((animation) => animation.playState === "running")))).toBe(false);
+    await page.screenshot({ path: `${output}/multiple-expanded-1280.png`, fullPage: true });
+    await page.setViewportSize({ width: 1024, height: 900 });
+    await page.evaluate(async () => { await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame); });
+    await expect.poll(() => page.locator(".bank-flow-rule-batches-expansion").evaluateAll((panels) => panels.some((panel) => panel.getAnimations().some((animation) => animation.playState === "running")))).toBe(false);
+    await page.screenshot({ path: `${output}/multiple-expanded-1024.png`, fullPage: true });
+    const narrowTable = await feeTable.evaluate((element) => {
+      const scroll = element.closest(".finance-table__scroll")!;
+      scroll.scrollLeft = scroll.scrollWidth;
+      return { width: scroll.clientWidth, totalWidth: scroll.scrollWidth, scrollLeft: scroll.scrollLeft,
+        right: scroll.getBoundingClientRect().right, lastColumnRight: element.querySelector("th:last-child")!.getBoundingClientRect().right };
+    });
+    expect(narrowTable.totalWidth).toBeGreaterThan(narrowTable.width);
+    expect(narrowTable.scrollLeft).toBeGreaterThan(0);
+    expect(narrowTable.lastColumnRight).toBeLessThanOrEqual(narrowTable.right + 1);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.getByRole("button", { name: "收起全部" }).click();
+    await expect(page.getByRole("grid")).toHaveCount(0);
+    await expectNoUnexpectedSuccessUiErrors(page); expect(errors).toEqual([]);
+  });
+
   test("recovers list after a transient load failure when refreshed", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page, {
       allowedConsoleErrors: [/Failed to load resource: the server responded with a status of 503/],
@@ -310,13 +456,14 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(page.getByText("流水规则批次加载暂时失败，请刷新后重试。")).toHaveCount(0);
     await expect(page.getByRole("radio", { name: "未提交 1 笔" })).toBeChecked();
     await expect(page.getByRole("button", { name: "费用 1笔" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "手续费 1笔" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "费用 / 手续费 1笔" })).toBeVisible();
 
+    await expandBatch(page);
     const draftTable = page.getByRole("grid", { name: "建设银行8106流水" });
     await expect(draftTable).toBeVisible();
     await expect(draftTable.getByText("网银手续费")).toBeVisible();
     await expect(draftTable.getByText("浏览器 e2e 月结手续费")).toBeVisible();
-    await expect(page.getByRole("button", { name: "提交批次" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "提交所选" })).toBeDisabled();
     expect(api.count("GET /api/bank-flow-rule-batches")).toBeGreaterThanOrEqual(3);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
@@ -332,8 +479,9 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(page.getByRole("heading", { name: "流水规则批量处理" })).toBeVisible();
     await expect(page.getByRole("radio", { name: "未提交 1 笔" })).toBeChecked();
     await expect(page.getByRole("button", { name: "费用 1笔" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "手续费 1笔" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "费用 / 手续费 1笔" })).toBeVisible();
 
+    await expandBatch(page);
     const draftTable = page.getByRole("grid", { name: "建设银行8106流水" });
     await expect(draftTable).toBeVisible();
     await expect(draftTable.getByText("网银手续费")).toBeVisible();
@@ -343,6 +491,7 @@ test.describe("bank flow rule batches browser flow", () => {
       "对方户名",
       "交易时间",
       "金额",
+      "关联",
       "摘要/用途/备注",
     ]);
     await expect(draftTable.getByText("建设银行8106", { exact: true })).toHaveCount(0);
@@ -384,7 +533,8 @@ test.describe("bank flow rule batches browser flow", () => {
 
     for (const [index, item] of ordinaryBankFlowRuleCheckboxCases.entries()) {
       await page.getByRole("button", { name: item.primaryButton, exact: true }).click();
-      await page.getByRole("button", { name: item.subButton, exact: true }).click();
+      await page.getByRole("button", { name: `${item.primaryButton.replace(/ \d+笔$/, "")} / ${item.subButton}`, exact: true }).click();
+      await expandBatch(page, item.tableName.replace(/流水$/, ""));
 
       const table = page.getByRole("grid", { name: item.tableName });
       await expect(table).toBeVisible();
@@ -413,9 +563,24 @@ test.describe("bank flow rule batches browser flow", () => {
     });
     const recordLatency = createBankFlowRuleBatchLatencyRecorder(page, testInfo);
 
+    const visualOutput = "/tmp/fin-ops-batch-ui";
+    await mkdir(visualOutput, { recursive: true });
+    let releaseInitialRead!: () => void;
+    const initialReadGate = new Promise<void>((resolve) => { releaseInitialRead = resolve; });
+    await page.route(/\/api\/bank-flow-rule-batches\?/, async (route) => {
+      await initialReadGate;
+      await route.fallback();
+    });
     await page.goto("/bank-flow-rule-batches");
+    await expect(page.getByText("流水加载中", { exact: true })).toBeVisible();
+    await page.screenshot({ path: `${visualOutput}/first-entry-loading.png`, fullPage: true });
+    releaseInitialRead();
     await expect(page.getByRole("heading", { name: "流水规则批量处理" })).toBeVisible();
     await expect(page.getByRole("radio", { name: "未提交 1 笔" })).toBeChecked();
+    await expect(page.getByText("流水加载中", { exact: true })).toHaveCount(0);
+    await page.screenshot({ path: `${visualOutput}/first-entry-complete.png`, fullPage: true });
+    await testInfo.attach("first entry loading", { path: `${visualOutput}/first-entry-loading.png`, contentType: "image/png" });
+    await testInfo.attach("first entry ready", { path: `${visualOutput}/first-entry-complete.png`, contentType: "image/png" });
     const monthReload = waitForBankFlowRuleBatches(page);
     await page.getByRole("button", { name: "批次月份：年月" }).click();
     await page.getByRole("dialog", { name: "批次月份选择器" }).getByRole("button", { name: "五月" }).click();
@@ -528,17 +693,18 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(page.getByRole("heading", { name: "流水规则批量处理" })).toBeVisible();
     await expect(page.getByRole("radio", { name: "未提交 4 笔" })).toBeChecked();
     await expect(page.getByRole("button", { name: "内部往来款 4笔" }).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: "主标签本身 4笔" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "内部往来款 / 主标签本身 4笔" })).toBeVisible();
 
     const firstBatch = page.locator(".bank-flow-rule-batches-batch").filter({ hasText: "光大银行8826" });
     await expect(firstBatch).toBeVisible();
-    await expect(firstBatch.getByText("2 项明细 · 合计 50000.00")).toBeVisible();
+    await expect(firstBatch.getByText("2 条明细")).toBeVisible();
+    await expandBatch(page, "光大银行8826", "2026-01");
     await expect(page.getByRole("grid", { name: "光大银行8826流水" })).toBeVisible();
     const secondBatch = page
       .locator(".bank-flow-rule-batches-batch")
       .filter({ hasText: "建设银行8106" })
-      .filter({ hasText: "2 项明细 · 合计 7000.00" });
-    await expect(secondBatch.getByText("2 项明细 · 合计 7000.00")).toBeVisible();
+      .filter({ hasText: "7000.00" });
+    await expect(secondBatch.getByText("2 条明细")).toBeVisible();
 
     const submitRequest = page.waitForRequest((request) =>
       request.url().endsWith("/api/bank-flow-rule-batches/bank-flow-internal-ccb-8106/submit")
@@ -589,14 +755,26 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(page.getByRole("radio", { name: "未提交 1 笔" })).toBeChecked();
     await expect(page.getByRole("radio", { name: "已提交 0 笔" })).toBeVisible();
     await expect(page.getByRole("button", { name: "费用 1笔" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "手续费 1笔" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "费用 / 手续费 1笔" })).toBeVisible();
 
+    await expandBatch(page);
     const draftTable = page.getByRole("grid", { name: "建设银行8106流水" });
     await expect(draftTable).toBeVisible();
     await expect(draftTable.getByText("网银手续费")).toBeVisible();
     await expect(draftTable.getByText("浏览器 e2e 月结手续费")).toBeVisible();
     await clickCheckbox(draftTable.getByLabel("选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106"));
-    await expect(page.getByText("已选 1 项明细")).toBeVisible();
+    await expect(page.getByText("已选 1 条明细 · 建设银行8106 · 2026-05")).toBeVisible();
+
+    const visualOutput = "/tmp/fin-ops-batch-ui";
+    await mkdir(visualOutput, { recursive: true });
+    await expect.poll(() => page.locator(".bank-flow-rule-batches-expansion").evaluateAll((panels) => panels.some((panel) => panel.getAnimations().some((animation) => animation.playState === "running")))).toBe(false);
+    await page.screenshot({ path: `${visualOutput}/submit-1-start.png`, fullPage: true });
+    let releaseSubmit!: () => void;
+    const submitGate = new Promise<void>((resolve) => { releaseSubmit = resolve; });
+    await page.route("**/api/bank-flow-rule-batches/submit-selection", async (route) => {
+      await submitGate;
+      await route.fallback();
+    });
 
     const submitRequest = page.waitForRequest((request) =>
       request.url().endsWith("/api/bank-flow-rule-batches/submit-selection")
@@ -607,14 +785,27 @@ test.describe("bank flow rule batches browser flow", () => {
     const submitListReload = waitForBankFlowRuleBatches(page);
     await recordLatency({
       operationId: "bank-flow-rule-batches.submit-selected-bank-row",
-      visibleLabel: "提交批次",
+      visibleLabel: "提交所选",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("button", { name: "提交批次" }).click();
+      await page.getByRole("button", { name: "提交所选" }).click();
+      await expect(page.getByText("正在提交选中流水规则...", { exact: true })).toBeVisible();
+      await expect.poll(() => page.getByRole("dialog", { name: "全局操作进度" }).evaluate((element) => {
+        for (let current: Element | null = element; current; current = current.parentElement) {
+          if (current.getAnimations().some((animation) => animation.playState === "running" && animation.effect?.getTiming().iterations !== Infinity)) return false;
+        }
+        return true;
+      })).toBe(true);
+      await page.screenshot({ path: `${visualOutput}/submit-2-loading.png`, fullPage: true });
+      releaseSubmit();
       await mark("apiLatencyMs", submitResponse);
       await mark("firstVisibleResponseLatencyMs", expect(page.getByText("选中流水已提交")).toBeVisible());
       await mark("finalSettledLatencyMs", submitListReload);
+      await page.screenshot({ path: `${visualOutput}/submit-3-complete.png`, fullPage: true });
     });
+    for (const file of ["submit-1-start.png", "submit-2-loading.png", "submit-3-complete.png"]) {
+      await testInfo.attach(file, { path: `${visualOutput}/${file}`, contentType: "image/png" });
+    }
     const submitBody = JSON.parse((await submitRequest).postData() ?? "{}") as {
       transaction_ids?: string[];
     };
@@ -667,7 +858,8 @@ test.describe("bank flow rule batches browser flow", () => {
     await page.getByRole("radio", { name: "已提交 1 笔" }).click();
     await expect(page.getByRole("radio", { name: "已提交 1 笔" })).toBeChecked();
     await expect(page.getByRole("button", { name: "费用 1笔" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "手续费 1笔" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "费用 / 手续费 1笔" })).toBeVisible();
+    await expandBatch(page);
     await expect(page.getByRole("grid", { name: "建设银行8106流水" })).toBeVisible();
     await expect(page.getByRole("button", { name: "撤回批次" })).toBeVisible();
 
@@ -720,10 +912,10 @@ test.describe("bank flow rule batches browser flow", () => {
     expect(api.count("GET /api/bank-flow-rule-batches")).toBe(listReadsBeforeWithdraw + 1);
     await expectNoUnexpectedSuccessUiErrors(page);
 
-    await page.getByRole("radio", { name: "历史 1 笔" }).click();
-    await expect(page.getByRole("radio", { name: "历史 1 笔" })).toBeChecked();
-    await expect(page.getByText("已撤回", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "提交批次" })).toHaveCount(0);
+    await page.getByRole("radio", { name: "已撤回 1 笔" }).click();
+    await expect(page.getByRole("radio", { name: "已撤回 1 笔" })).toBeChecked();
+    await expect(page.getByRole("region", { name: "流水", exact: true }).getByText("已撤回", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "提交所选" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "撤回批次" })).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);

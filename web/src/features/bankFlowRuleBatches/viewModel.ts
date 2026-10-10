@@ -57,10 +57,6 @@ export function directionTagLabel(row: { direction?: string; directionLabel?: st
   return row.directionLabel || (row.direction === "income" ? "收" : row.direction === "expense" ? "支" : "-");
 }
 
-export function batchBlockingReason(_batch: BankFlowRuleBatch) {
-  return "";
-}
-
 export function mutationEventDetail(result: {
   affectedMonths?: string[];
   affectedScopeKeys?: string[];
@@ -183,9 +179,7 @@ export function requirementFor(requirements: BankFlowRuleDraftRequirements, tagC
   return requirements[tagCode] ?? { requiresOa: true, requiresInvoice: true };
 }
 
-export function formatCountMeta(rowCount: number) {
-  return `${rowCount}笔`;
-}
+
 
 export function isUnsubmittedEligible(
   requirements: BankFlowRuleDraftRequirements,

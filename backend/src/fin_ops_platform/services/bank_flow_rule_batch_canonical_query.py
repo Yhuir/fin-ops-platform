@@ -24,6 +24,21 @@ from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchP
 _BUSINESS_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
+def normalize_bank_flow_rule_batch_types(value: object) -> tuple[str, ...]:
+    """Resolve one or repeated type values without restricting historical codes."""
+    if value is None:
+        return ()
+    values = (value,) if isinstance(value, str) else value
+    if not isinstance(values, (list, tuple)) or any(not isinstance(code, str) for code in values):
+        raise ValueError("invalid_bank_flow_rule_batch_type")
+    codes = tuple(dict.fromkeys(code.strip() for code in values))
+    if not codes or codes in (("",), ("all",)):
+        return ()
+    if "" in codes or "all" in codes:
+        raise ValueError("invalid_bank_flow_rule_batch_type")
+    return codes
+
+
 def _candidate_datetime(value: object) -> datetime | None:
     if isinstance(value, datetime):
         parsed = value

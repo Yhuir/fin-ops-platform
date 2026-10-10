@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  batchMatchesSelectionScope,
   canSelectBatchRows,
   canSubmitInternalTransferBatch,
   canWithdrawBatch,
@@ -38,6 +39,15 @@ function batch(overrides: Partial<BankFlowRuleBatch> = {}): BankFlowRuleBatch {
 }
 
 describe("bank flow rule batch policy", () => {
+  test("selection requires an explicit account and month, allowing only matching batches", () => {
+    const scope = { accountKey: "ccb:8106", scopeMonth: "2026-01" };
+    expect(batchMatchesSelectionScope(batch(), null)).toBe(true);
+    expect(batchMatchesSelectionScope(batch({ batchId: "another-batch" }), scope)).toBe(true);
+    expect(batchMatchesSelectionScope(batch({ accountKey: "boc:7001" }), scope)).toBe(false);
+    expect(batchMatchesSelectionScope(batch({ scopeMonth: "2026-02" }), scope)).toBe(false);
+    expect(batchMatchesSelectionScope(batch({ scopeMonth: undefined }), null)).toBe(false);
+    expect(batchMatchesSelectionScope(batch({ accountKey: "" }), null)).toBe(false);
+  });
   test.each([
     "fee",
     "salary",

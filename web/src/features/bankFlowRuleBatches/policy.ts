@@ -31,3 +31,10 @@ export function canSubmitInternalTransferBatch(batch: BankFlowRuleBatch, bucket:
     && batch.canSubmit
     && batch.batchType === "internal_transfer";
 }
+
+export type BatchSelectionScope = { accountKey: string; scopeMonth: string };
+
+export function batchMatchesSelectionScope(batch: BankFlowRuleBatch, scope: BatchSelectionScope | null) {
+  return Boolean(batch.scopeMonth && batch.accountKey)
+    && (!scope || (scope.accountKey === batch.accountKey && scope.scopeMonth === batch.scopeMonth));
+}

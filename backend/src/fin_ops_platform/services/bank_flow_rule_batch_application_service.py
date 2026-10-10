@@ -24,6 +24,7 @@ from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
     bank_flow_rule_batch_selected_row_proofs,
     build_live_bank_flow_rule_batch_service,
     eligible_bank_flow_rule_batch_codes,
+    normalize_bank_flow_rule_batch_types,
 )
 from fin_ops_platform.services.bank_relation_requirement_recalculation import (
     BANK_RELATION_REQUIREMENT_RECALCULATION_JOB_TYPE,
@@ -61,7 +62,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         pagination = self._pagination_from_query(query)
         filters = {
             "month": query.get("month", [""])[0],
-            "type": query.get("type", [""])[0],
+            "type": normalize_bank_flow_rule_batch_types(query.get("type")),
             "status": query.get("status", [""])[0],
             "bucket": query.get("bucket", [""])[0],
             "account_key": query.get("account_key", [""])[0],
@@ -128,9 +129,12 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         filters: dict[str, object],
     ) -> list[dict[str, object]]:
         resolved = list(batches)
+        batch_types = normalize_bank_flow_rule_batch_types(filters.get("type"))
+        if batch_types:
+            type_set = set(batch_types)
+            resolved = [batch for batch in resolved if batch.get("batch_type") in type_set]
         for field_name, filter_key in (
             ("scope_month", "month"),
-            ("batch_type", "type"),
             ("status", "status"),
             ("account_key", "account_key"),
             ("status_bucket", "bucket"),

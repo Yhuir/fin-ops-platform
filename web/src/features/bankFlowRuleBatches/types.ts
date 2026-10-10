@@ -93,7 +93,7 @@ export type BankFlowRuleBatchSummary = {
 
 export type BankFlowRuleBatchesRequest = {
   month?: string | null;
-  type?: BankFlowRuleBatchTypeFilter;
+  type?: BankFlowRuleBatchTypeFilter | string[];
   status?: BankFlowRuleBatchStatusFilter;
   bucket?: BankFlowRuleBatchStatusBucket;
   accountKey?: string | null;
@@ -111,7 +111,7 @@ export type BankFlowRuleBatchesPageInfo = {
 export type BankFlowRuleBatchesResponse = {
   summary: BankFlowRuleBatchSummary;
   batches: BankFlowRuleBatch[];
-  pagination?: BankFlowRuleBatchesPageInfo;
+  pagination: BankFlowRuleBatchesPageInfo;
 };
 
 export type BankFlowRuleBatchDirection = "income" | "expense" | string;

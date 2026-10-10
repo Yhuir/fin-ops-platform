@@ -5605,11 +5605,18 @@ function bankFlowRuleBatchSummary(status: BankFlowRuleBrowserBatchStatus, batche
 
 function bankFlowRuleBatchesPayload(
   status: BankFlowRuleBrowserBatchStatus,
-  bucket: string | null,
+  params: URLSearchParams,
   scenario: BankFlowRuleBatchMockScenario = "single",
 ) {
+  const bucket = params.get("bucket");
+  const codes = params.getAll("type");
+  const month = params.get("month");
+  const page = Number(params.get("page") ?? "1");
+  const pageSize = Number(params.get("page_size") ?? "50");
   const batches = bankFlowRuleBatchesForScenario(status, scenario);
   const visibleBatches = batches.filter((batch) => {
+    if (codes.length && !codes.includes(String(batch.batch_type))) return false;
+    if (month && month !== "all" && batch.scope_month !== month) return false;
     if (bucket === "submitted") {
       return batch.status_bucket === "submitted";
     }
@@ -5622,10 +5629,10 @@ function bankFlowRuleBatchesPayload(
   });
   return {
     summary: bankFlowRuleBatchSummary(status, batches),
-    batches: visibleBatches,
+    batches: visibleBatches.slice((page - 1) * pageSize, page * pageSize),
     pagination: {
-      page: 1,
-      page_size: 200,
+      page,
+      page_size: pageSize,
       total: visibleBatches.length,
     },
   };
@@ -8967,7 +8974,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       }
       return json(route, bankFlowRuleBatchesPayload(
         bankFlowRuleBatchStatus,
-        url.searchParams.get("bucket"),
+        url.searchParams,
         options.bankFlowRuleBatchScenario ?? "single",
       ));
     }

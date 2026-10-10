@@ -57,7 +57,9 @@ class BankSummaryShortNameTests(unittest.TestCase):
             transactions=[], oa_records=[], overlays={}, pagination={}, summary={}, statistics={},
             facet_counts={}, payment_status_labels={}, bank_account_mappings=deepcopy(MAPPINGS),
         )
-        assembler = SimpleNamespace(_row_payload=lambda *args, **kwargs: {"bankTransactions": original})
+        assembler = SimpleNamespace(_row_payload=lambda *args, **kwargs: {
+            "invoiceId": "invoice", "invoiceRelations": {"summaries": []}, "bankTransactions": original,
+        })
         for cls in (InputInvoiceUsageCanonicalQueryService, OutputInvoiceCollectionCanonicalQueryService):
             bank = cls(repository=None, row_assembler=assembler)._rows_from_snapshot(snapshot)[0]["bankTransactions"]
             self.assertEqual(bank["bankShortName"], "建行")

@@ -10,6 +10,9 @@ from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.bank_details_canonical_query import (
     bank_category_classification_cte,
 )
+from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
+    normalize_bank_flow_rule_batch_types,
+)
 from fin_ops_platform.services.postgres_repositories.common import int_value, month_start, row_payload, text, text_list
 
 _CLASSIFIED_CANDIDATE_ROWS_SQL = """
@@ -598,10 +601,9 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                 raise ValueError("invalid_bank_flow_rule_batch_month")
             where.append("scope_month = %s::date")
             params.append(month_start(value))
-        if value := text(resolved.get("type")):
-            if value != "all":
-                where.append("batch_type = %s")
-                params.append(value)
+        if batch_types := normalize_bank_flow_rule_batch_types(resolved.get("type")):
+            where.append("batch_type = any(%s::text[])")
+            params.append(list(batch_types))
         if value := text(resolved.get("status")):
             if value not in {"all", "draft", "submitted", "withdrawn"}:
                 raise ValueError("invalid_bank_flow_rule_batch_status")

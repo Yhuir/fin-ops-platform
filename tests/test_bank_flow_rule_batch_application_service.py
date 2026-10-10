@@ -225,6 +225,107 @@ class RecordingTransactionConnection:
 
 
 class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
+    @staticmethod
+    def _type_filter_service() -> BankFlowRuleBatchApplicationService:
+        rows = [
+            {
+                "id": row_id,
+                "trade_time": f"{month}-04T10:20:00",
+                "account_key": account_key,
+                "direction": "expense",
+                "amount": "10.00",
+                "category_code": code,
+                "category_source": "auto_confirmation",
+                "category_resolution_authority": "canonical_sql",
+            }
+            for row_id, month, account_key, code in (
+                ("fee-a", "2026-05", "CCB:8106", "fee"),
+                ("interest-a", "2026-05", "CCB:8106", "interest"),
+                ("fee-b", "2026-05", "ICBC:6386", "fee"),
+                ("tax-a", "2026-05", "CCB:8106", "tax_payment"),
+                ("fee-june", "2026-06", "CCB:8106", "fee"),
+            )
+        ]
+        source = _canonical_source({
+            "candidate_rows": rows,
+            "active_relations": [],
+            "formal_items": [{
+                "batch_id": "archived-rule-batch",
+                "batch_type": "archived_fee",
+                "scope_month": "2026-05",
+                "account_key": "CCB:8106",
+                "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                "status": "withdrawn",
+                "status_bucket": "withdrawn",
+                "version": 2,
+                "row_ids": ["archived-row"],
+                "row_count": 1,
+                "total_amount": "3.00",
+            }],
+            "tag_policy": {
+                "active_tags": [{"code": code, "label": code} for code in ("fee", "interest", "tax_payment")],
+                "requirements_by_tag_code": {
+                    code: {"requires_oa": False, "requires_invoice": False}
+                    for code in ("fee", "interest", "tax_payment")
+                },
+            },
+        })
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._query_repository = SimpleNamespace(read_page=Mock(return_value=source))
+        return service
+
+    def test_repeated_type_filters_live_batches_before_pagination_without_narrowing_summary(self) -> None:
+        service = self._type_filter_service()
+        query = {"month": ["2026-05"], "bucket": ["unsubmitted"],
+                 "type": ["fee", "interest", "fee"], "page_size": ["1"]}
+        pages = [service.list_batches_payload({**query, "page": [str(page)]}) for page in range(1, 5)]
+        self.assertEqual([page["pagination"]["total"] for page in pages], [3, 3, 3, 3])
+        batches = [batch for page in pages for batch in page["batches"]]
+        self.assertEqual(len({batch["batch_id"] for batch in batches}), 3)
+        self.assertCountEqual([batch["batch_type"] for batch in batches], ["fee", "fee", "interest"])
+        self.assertTrue(all(batch["scope_month"] == "2026-05" for batch in batches))
+        self.assertEqual(pages[-1]["batches"], [])
+        self.assertEqual(pages[0]["summary"]["draft_count"], 4)
+        self.assertEqual(pages[0]["summary"]["withdrawn_count"], 1)
+        self.assertEqual(pages[0]["summary"], pages[-1]["summary"])
+        read_call = service._query_repository.read_page.call_args
+        self.assertEqual(read_call.args[0]["type"], ("fee", "interest"))
+        self.assertEqual(read_call.kwargs["summary_filters"], {"month": "2026-05", "account_key": ""})
+
+    def test_single_all_and_missing_type_keep_existing_list_contract(self) -> None:
+        service = self._type_filter_service()
+        query = {"month": ["2026-05"], "bucket": ["unsubmitted"]}
+        single = service.list_batches_payload({**query, "type": ["fee"]})
+        self.assertEqual(len(single["batches"]), 2)
+        self.assertTrue(all(batch["batch_type"] == "fee" for batch in single["batches"]))
+        unfiltered = service.list_batches_payload(query)
+        self.assertEqual(len(unfiltered["batches"]), 4)
+        for value in (["all"], [""], []):
+            with self.subTest(value=value):
+                result = service.list_batches_payload({**query, "type": value})
+                self.assertEqual(result["summary"], unfiltered["summary"])
+                self.assertEqual(
+                    [(batch["batch_id"], batch["row_ids"], batch["total_amount"]) for batch in result["batches"]],
+                    [(batch["batch_id"], batch["row_ids"], batch["total_amount"]) for batch in unfiltered["batches"]],
+                )
+
+    def test_type_set_accepts_formal_historical_codes_and_zero_matches(self) -> None:
+        service = self._type_filter_service()
+        query = {"month": ["2026-05"], "bucket": ["withdrawn"], "page": ["1"], "page_size": ["2"]}
+        historical = service.list_batches_payload({**query, "type": ["archived_fee", "fee"]})
+        self.assertEqual([batch["batch_id"] for batch in historical["batches"]], ["archived-rule-batch"])
+        empty = service.list_batches_payload({**query, "type": ["missing_historical_code"]})
+        self.assertEqual(empty["batches"], [])
+        self.assertEqual(empty["pagination"]["total"], 0)
+        self.assertEqual(empty["summary"], historical["summary"])
+
+    def test_ambiguous_type_set_is_rejected_before_repository_io(self) -> None:
+        service = self._type_filter_service()
+        for values in (["all", "fee"], ["fee", ""], ["fee", 1]):
+            with self.subTest(values=values), self.assertRaisesRegex(ValueError, "invalid_bank_flow_rule_batch_type"):
+                service.list_batches_payload({"type": values})
+        service._query_repository.read_page.assert_not_called()
+
     def test_counts_deduplicate_original_transactions_across_splits_tags_and_history(self):
         service = object.__new__(BankFlowRuleBatchApplicationService)
         batches = [
@@ -1769,7 +1870,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                 {
                     "filters": {
                         "month": "2026-07",
-                        "type": "",
+                        "type": (),
                         "status": "",
                         "bucket": "",
                         "account_key": "",
@@ -2076,7 +2177,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                 {
                     "filters": {
                         "month": "",
-                        "type": "",
+                        "type": (),
                         "status": "",
                         "bucket": "all",
                         "account_key": "",

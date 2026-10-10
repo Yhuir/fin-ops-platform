@@ -253,11 +253,6 @@ function numberValue(value: number | null | undefined) {
   return Number.isFinite(value) ? Number(value) : 0;
 }
 
-function positiveNumberValue(value: number | null | undefined, fallback: number) {
-  const number = numberValue(value);
-  return number > 0 ? number : fallback;
-}
-
 function nullableNumberValue(value: number | null | undefined) {
   return Number.isFinite(value) ? Number(value) : null;
 }
@@ -384,15 +379,16 @@ function mapSummary(summary: ApiBankFlowRuleBatchSummary = {}): BankFlowRuleBatc
   };
 }
 
-function mapPagination(value: ApiBankFlowRuleBatchesPageInfo | null | undefined): BankFlowRuleBatchesPageInfo | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
+function mapPagination(value: ApiBankFlowRuleBatchesPageInfo | null | undefined): BankFlowRuleBatchesPageInfo {
+  const page = value?.page;
+  const pageSize = value?.page_size ?? value?.pageSize;
+  const total = value?.total;
+  if (typeof page !== "number" || !Number.isSafeInteger(page) || page < 1
+    || typeof pageSize !== "number" || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 200
+    || typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) {
+    throw new Error("流水规则批次分页信息不完整，请重新读取。");
   }
-  return {
-    page: positiveNumberValue(value.page, 1),
-    pageSize: positiveNumberValue(value.page_size ?? value.pageSize, 200),
-    total: Math.max(0, numberValue(value.total)),
-  };
+  return { page, pageSize, total };
 }
 
 function mapSummaryCategory(category: ApiBankFlowRuleBatchSummaryCategory) {
@@ -543,7 +539,9 @@ export async function fetchBankFlowRuleBatches({
   if (month) {
     params.set("month", month);
   }
-  if (type && type !== "all") {
+  if (Array.isArray(type)) {
+    [...new Set(type)].forEach((code) => params.append("type", code));
+  } else if (type && type !== "all") {
     params.set("type", type);
   }
   if (status && status !== "all") {
