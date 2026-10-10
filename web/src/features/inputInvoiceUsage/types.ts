@@ -104,18 +104,9 @@ export type InputInvoiceUsageRelationSummary<T> = {
   summaries: T[];
 };
 
-export type InputInvoiceUsageInvoiceRelationSummary = {
+export type InputInvoiceUsageInvoiceRelationSummary = Omit<InputInvoiceUsageInvoiceSummary, 'issueDate'> & {
   relationCaseId?: string;
-  id: string;
-  displayNo: string;
-  invoiceNo: string;
-  invoiceCode: string;
-  digitalInvoiceNo: string;
   invoiceDate: string;
-  sellerName: string;
-  sellerTaxNo: string;
-  totalWithTax: string;
-  taxableItemName: string;
 };
 
 export type InputInvoiceUsageInvoiceRelations = InputInvoiceUsageRelationSummary<InputInvoiceUsageInvoiceRelationSummary> & {

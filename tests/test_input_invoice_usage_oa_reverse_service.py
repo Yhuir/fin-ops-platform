@@ -77,6 +77,21 @@ class RecordingRelationCommandService:
 
 
 class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
+    def test_rule_match_rejects_exact_selection_without_creating_draft(self):
+        row = self._read_model_row("rule-used", "1001")
+        row.update(usageStatus="used", paymentStatus={"code": "custom_wrong", "label": "对方开错", "matchedRuleId": "wrong"})
+        service = self._service(invoices=[])
+        service._rows_by_invoice_ids_loader = lambda ids: {"rows": [row]}
+        preview = service.preview({"invoiceIds": ["rule-used"]}, can_create_draft=True)
+        self.assertEqual(preview["invoiceRows"], [])
+        self.assertFalse(preview["canCreateDraft"])
+        self.assertEqual(preview["rejectedInvoices"][0]["reasonCode"], "already_classified_by_rule")
+        provider = FakeTargetOaDraftClientProvider()
+        with self.assertRaises(InputInvoiceUsageOaReverseInvalidTransitionError) as rejected:
+            service.create_oa_draft_from_selection({"invoiceIds": ["rule-used"], "idempotencyKey": "blocked-rule", "expectedPreviewHash": preview["previewHash"]}, actor_id="tester", oa_client_provider=provider)
+        self.assertEqual(rejected.exception.code, "invalid_oa_reverse_selection")
+        self.assertEqual(provider.client.requests, [])
+
     def test_workbench_relation_writer_delegates_to_relation_command_service(self) -> None:
         command_service = RecordingRelationCommandService()
         writer = WorkbenchInputInvoiceUsageOaReverseRelationWriter(command_service)
@@ -945,6 +960,7 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             },
             "bankRelationStatus": "unlinked",
             "usageStatus": "unused",
+            "oaRelationStatus": "unlinked",
             "paymentStatus": {"code": "pending", "label": "待处理", "reason": ""},
             "oa": {"relationCount": 0, "summaries": []},
         }

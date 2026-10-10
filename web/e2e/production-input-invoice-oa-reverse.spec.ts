@@ -70,7 +70,7 @@ test('production reverse candidates match unused invoices and reject used select
   expect(rejected.invoiceRows).toEqual([]);
   expect(rejected.canCreateDraft).toBe(false);
   expect(rejected.rejectedInvoices).toHaveLength(1);
-  expect(['already_has_active_oa', 'already_has_active_bank']).toContain(rejected.rejectedInvoices[0].reasonCode);
+  expect(['already_has_active_oa', 'already_has_active_bank', 'already_classified_by_rule']).toContain(rejected.rejectedInvoices[0].reasonCode);
   expect(writes).toEqual([]);
   await info.attach('reverse-unused-readonly-verification', { body: JSON.stringify({ candidateCount: candidateIds.size,
     unusedCount: unusedIds.size, totalWithTax: candidateAmount, usedSelectionRejected: true, writes: writes.length }), contentType: 'application/json' });

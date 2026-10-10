@@ -301,7 +301,12 @@ class InputInvoiceUsageQueryService:
         context.preload_oa_records_from_relations(
             relation_lookup_ids
         )
-        return [self._row_payload(group, context=context) for group in groups]
+        rows = []
+        for group in groups:
+            relations = context.distributed_relations_for_row_ids(self._invoice_relation_lookup_ids(group['line_items']), case_ids=group.get('relation_case_ids'))
+            payment_status = self._payment_status(group['primary'], group['line_items'], relations, {}, {}, context=context)
+            rows.append(self._row_payload(group, context=context, payment_status=payment_status))
+        return rows
 
     def _invoice_groups(
         self,
@@ -345,6 +350,8 @@ class InputInvoiceUsageQueryService:
                 "line_items": sorted_items,
             })
         groups.sort(key=lambda group: (str(group["primary"].invoice_date or ""), str(group["identity_key"])))
+        for group in groups:
+            group["display_line_items"] = group["line_items"]
         return groups
 
     def _confirmed_relation_invoice_groups(
@@ -435,7 +442,7 @@ class InputInvoiceUsageQueryService:
         group: dict[str, Any],
         *,
         context: DistributedInvoiceRelationContext,
-        lifecycle_policy: InvoiceLifecyclePolicy | None = None,
+        payment_status: dict[str, str],
     ) -> dict[str, Any]:
         primary: Invoice = group["primary"]
         line_items: list[Invoice] = group["line_items"]
@@ -445,25 +452,18 @@ class InputInvoiceUsageQueryService:
             relations = [relation for relation in relations if relation.get("case_id") == group["relation_group_id"]]
         bank_payload = self._bank_relation_payload(primary, line_items, relations, context=context)
         oa_payload = self._oa_relation_payload(primary, line_items, relations, context=context)
-        invoice_relation_payload = self._invoice_relation_payload(primary, line_items, relations, context=context)
-        if "payment_facts" in group:
-            if lifecycle_policy is None:
-                raise ValueError("Canonical payment facts require the snapshot payment policy.")
-            payment_status = lifecycle_policy.evaluate_input_invoice_payment(**group['payment_facts'])
-        else:
-            payment_status = self._payment_status(
-                primary, line_items, relations, oa_payload, bank_payload,
-                context=context, lifecycle_policy=lifecycle_policy,
-            )
+        display_line_items = group['display_line_items']
+        invoice_relation_payload = self._invoice_relation_payload(primary, display_line_items, relations, context=context)
         row_id = "invoice_usage_row_" + sha1(str(group.get("row_key") or group["identity_key"]).encode("utf-8")).hexdigest()[:16]
         payload = {
             "id": row_id,
             "invoiceId": primary.id,
             "invoiceIdentityKey": group["identity_key"],
-            "invoice": self._invoice_summary(primary, line_items),
+            "invoice": self._invoice_summary(primary, [invoice for invoice in line_items if self._identity_key(invoice) == self._identity_key(primary)]),
             "paymentStatus": payment_status,
             "oa": oa_payload,
             "bankTransactions": bank_payload,
+            "oaRelationStatus": "linked" if any(row_type == 'oa' for relation in relations for _, row_type in self._typed_relation_rows(relation)) else "unlinked",
             "bankRelationStatus": "linked" if any(
                 row_type in {"bank", "bank_transaction"}
                 for relation in relations
@@ -657,10 +657,11 @@ class InputInvoiceUsageQueryService:
         )
         summaries = []
         seen: set[str] = set()
+        displayed_ids = {invoice.id for invoice in line_items}
         for relation in relations:
             for row_id, row_type in self._typed_relation_rows(relation):
                 invoice = invoice_map.get(row_id)
-                if row_type == "invoice" and invoice is not None and invoice.id not in seen:
+                if row_type == "invoice" and invoice is not None and invoice.id in displayed_ids and invoice.id not in seen:
                     seen.add(invoice.id)
                     summaries.append(self._invoice_relation_summary(invoice, primary_invoice, relation))
         if not summaries:
@@ -709,7 +710,8 @@ class InputInvoiceUsageQueryService:
             "invoiceDate": invoice.invoice_date or "",
             "sellerName": invoice.seller_name or invoice.counterparty.name,
             "sellerTaxNo": invoice.seller_tax_no or invoice.counterparty.tax_no or "",
-            "totalWithTax": _money(invoice.total_with_tax) if invoice.total_with_tax is not None else "",
+            **invoice_financial_summary([invoice]),
+            "specificBusinessType": invoice.specific_business_type or "",
             "taxableItemName": invoice.taxable_item_name or "",
             "relationCaseId": relation.get("case_id", "") if relation else "",
             "relationStatus": InputInvoiceUsageQueryService._relation_status(relation),

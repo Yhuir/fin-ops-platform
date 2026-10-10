@@ -855,9 +855,9 @@ describe("Input invoice usage page", () => {
           id: "usage-row-multi",
           invoice: {
             ...rowsPayload.rows[0].invoice,
-            totalWithTax: "100.00",
-            amountWithoutTax: "94.34",
-            taxAmount: "5.66",
+            totalWithTax: "-100.00",
+            amountWithoutTax: "-94.34",
+            taxAmount: "-5.66",
           },
           oa: {
             primary: {
@@ -987,7 +987,7 @@ describe("Input invoice usage page", () => {
     await within(page).findByRole("table", { name: "进项发票使用情况表" });
     const firstBodyRow = page.querySelector(".input-invoice-usage-table tbody > tr") as HTMLElement;
     const firstRowCells = firstBodyRow.querySelectorAll("th, td");
-    expect(within(firstRowCells[2] as HTMLElement).getByText("100.00")).toBeInTheDocument();
+    expect(within(firstRowCells[2] as HTMLElement).getByText("-100.00")).toBeInTheDocument();
     expect(within(firstRowCells[5] as HTMLElement).getByText("合计 100.00")).toBeInTheDocument();
     expect(within(firstRowCells[8] as HTMLElement).getByText("100.00")).toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "查看OA 刘际涛 详情" })).not.toBeInTheDocument();
@@ -997,14 +997,21 @@ describe("Input invoice usage page", () => {
     await user.click(toggle);
     const expansion = within(page).getByRole('region', {name: '配对关系'});
     expect(within(expansion).getByText('张三')).toBeInTheDocument();
-    expect(within(expansion).getAllByRole('button', {name: /详情$/})).toHaveLength(6);
+    expect(within(expansion).getAllByRole('button', {name: /详情$/})).toHaveLength(4);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.length).toBe(requestsBefore);
     await user.click(within(page).getByRole('button', {name: '查看云南银行交易对方户名很长很长需要换行显示关联流水 2 条'}));
     await waitFor(() => expect(within(page).queryByRole('region', {name: '配对关系'})).not.toBeInTheDocument());
     await user.click(within(page).getByRole('button', {name: '查看发票 SD-INV-2026-0001 关联发票 2 张'}));
-    expect(within(page).getAllByRole('region', {name: '配对关系'})).toHaveLength(1);
+    expect(within(page).queryByRole('region', {name: '配对关系'})).not.toBeInTheDocument();
+    const invoiceRows = page.querySelectorAll(".input-invoice-usage-table tbody > tr");
+    expect(invoiceRows).toHaveLength(2);
+    for (const row of invoiceRows) expect(row.querySelectorAll('th, td')).toHaveLength(10);
+    expect(within(invoiceRows[1] as HTMLElement).getByText('60.00')).toBeInTheDocument();
+    expect(within(invoiceRows[1] as HTMLElement).getByRole('button', {name: '查看发票 SD-INV-2026-0002 详情'})).toBeInTheDocument();
     expect(fetchMock.mock.calls.length).toBe(requestsBefore);
+    await user.click(within(page).getByRole('button', {name: '查看发票 SD-INV-2026-0001 关联发票 2 张'}));
+    expect(page.querySelectorAll(".input-invoice-usage-table tbody > tr")).toHaveLength(1);
 
   });
 

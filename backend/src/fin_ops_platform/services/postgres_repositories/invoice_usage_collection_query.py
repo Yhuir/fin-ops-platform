@@ -224,8 +224,8 @@ class PostgresInputInvoiceUsageQueryRepository(_PostgresSourceDetailReads):
                 invoice_type="input",
                 month=normalized_month,
                 status_case=status_case,
-                invoice_level=invoice_level,
             )
+            member_scope = _input_member_scope(filters)
             base_params: list[Any] = [tenant_id, *status_params]
             where_sql, where_params = _where_sql(
                 keyword=keyword,
@@ -270,10 +270,31 @@ class PostgresInputInvoiceUsageQueryRepository(_PostgresSourceDetailReads):
                 f"relation_option_rows as materialized "
                 f"(select * from final_rows {relation_where_sql})"
             )
+            if invoice_level:
+                projection_where = 'where member.invoice_id = any(%s::text[])' if invoice_ids is not None else ''
+                filtered_sql += f""", invoice_projection as (
+                    select distinct on (member.invoice_id) filtered.*,
+                        member.invoice_id as projected_invoice_id,
+                        invoice.identity_key as projected_identity_key,
+                        invoice.invoice_date as projected_invoice_date,
+                        case when usage.is_used then 'used' else 'unused' end as projected_usage_status
+                    from filtered_rows filtered
+                    cross join lateral unnest(filtered.{member_scope}) member(invoice_id)
+                    join invoice_usage usage on usage.invoice_id = member.invoice_id
+                    join invoice_rows invoice on invoice.invoice_id = member.invoice_id
+                    {projection_where}
+                    order by member.invoice_id, (filtered.usage_status = 'used') desc,
+                        filtered.has_oa_relation desc, filtered.has_bank_relation desc,
+                        (filtered.matched_rule_id <> '') desc, filtered.group_key
+                )"""
+            page_source = 'invoice_projection' if invoice_level else 'filtered_rows'
+            page_members = 'array[projected_invoice_id]' if invoice_level else member_scope
+            page_primary = 'projected_invoice_id' if invoice_level else f"case when primary_invoice_id = any({member_scope}) then primary_invoice_id else ({member_scope})[1] end"
+            summary_members = 'array[filtered.projected_invoice_id]' if invoice_level else f'filtered.{member_scope}'
             order_sql = _order_sql(
                 sort_field=sort_field,
                 sort_direction=sort_direction,
-                field_sql=_INPUT_FIELDS,
+                field_sql={**_INPUT_FIELDS, 'invoice_date': 'projected_invoice_date'} if invoice_level else _INPUT_FIELDS,
             )
             offset = (page - 1) * page_size
             page_result = transaction.fetch_one(
@@ -283,41 +304,42 @@ class PostgresInputInvoiceUsageQueryRepository(_PostgresSourceDetailReads):
                     select
                         group_key,
                         relation_case_id,
-                        identity_key,
-                        primary_invoice_id,
-                        invoice_ids,
+                        {"projected_identity_key" if invoice_level else "identity_key"} as identity_key,
+                        {str(invoice_level).lower()} as invoice_level,
+                        {page_primary} as primary_invoice_id,
+                        {page_members} as invoice_ids,
+                        invoice_ids as source_invoice_ids,
                         array(select distinct relation.case_id from group_relation_ids scope
                               join active_relations relation on relation.id = scope.relation_id
-                              where scope.group_key = filtered_rows.group_key) as relation_case_ids,
-                        status_code, payment_comparison, invoice_net_sign,
-                        usage_status, has_oa_relation, has_bank_relation,
+                              where scope.group_key = {page_source}.group_key) as relation_case_ids,
+                        status_code, matched_rule_id, payment_comparison, invoice_net_sign,
+                        {"projected_usage_status" if invoice_level else "usage_status"} as usage_status, has_oa_relation, has_bank_relation,
                         oa_count, bank_count, oa_applicant,
                         array[]::text[] as supporting_group_keys,
                         count(*) over()::bigint as filtered_total,
                         row_number() over ({order_sql}) as page_order
-                    from filtered_rows
+                    from {page_source}
                     {order_sql}
                     limit %s offset %s
                 ),
                 selected_members as (
                     select distinct member.invoice_id
-                    from filtered_rows filtered
-                    cross join lateral unnest(filtered.invoice_ids) member(invoice_id)
+                    from {page_source} filtered
+                    cross join lateral unnest({summary_members}) member(invoice_id)
                 ),
                 summary as (
                     select
-                        count(*)::bigint as row_count,
+                        (select count(*) from {page_source})::bigint as row_count,
                         (select case when count(*) = 0 then 0 when count(invoice.total_with_tax) = count(*) then sum(invoice.total_with_tax) end from invoice_rows invoice join selected_members member using (invoice_id))::numeric as total_with_tax,
-                        (select count(distinct member.invoice_id) from filtered_rows unclassified cross join lateral unnest(unclassified.invoice_ids) member(invoice_id) where unclassified.status_code = 'unclassified')::bigint as unclassified_count,
+                        (select count(distinct member.invoice_id) from filtered_rows unclassified cross join lateral unnest(unclassified.{member_scope}) member(invoice_id) where unclassified.status_code = 'unclassified')::bigint as unclassified_count,
                         (select sum(invoice.tax_amount) from invoice_rows invoice join selected_members member using (invoice_id))::numeric as tax_amount,
                         (select count(*) from invoice_rows invoice join selected_members member using (invoice_id) where invoice.tax_amount is null)::bigint as missing_tax_amount_count,
                         (select count(*) from selected_members)::bigint as invoice_count
-                    from filtered_rows
                 ),
                 facet_rows as (
                     select facet.field, facet.value, count(distinct member.invoice_id)::bigint as option_count
                     from filtered_rows
-                    cross join lateral unnest(invoice_ids) member(invoice_id)
+                    cross join lateral unnest({member_scope}) member(invoice_id)
                     cross join lateral (
                         values
                             ('seller_name', seller_name),
@@ -340,32 +362,33 @@ class PostgresInputInvoiceUsageQueryRepository(_PostgresSourceDetailReads):
                         status_code,
                         count(distinct member.invoice_id)::bigint
                     from status_option_rows
-                    cross join lateral unnest(invoice_ids) member(invoice_id)
+                    cross join lateral unnest({member_scope}) member(invoice_id)
                     where nullif(status_code, '') is not null
                     group by status_code
                     union all
                     select 'classification', category.value, count(distinct member.invoice_id)::bigint
                     from classification_rows
                     cross join lateral unnest(invoice_ids) member(invoice_id)
-                    cross join lateral (values ('all'), (usage_status),
-                        (case when usage_status = 'used' then payment_group end),
-                        (case when usage_status = 'used' then payment_group || ':' || status_code end)
+                    join invoice_usage usage on usage.invoice_id = member.invoice_id
+                    cross join lateral (values ('all'), (case when usage.is_used then 'used' else 'unused' end),
+                        (case when usage.is_used then payment_group end),
+                        (case when usage.is_used then payment_group || ':' || status_code end)
                     ) category(value)
                     where category.value is not null
                     group by category.value
                     union all
                     select 'oa_relation', oa_relation, count(distinct member.invoice_id)::bigint
-                    from relation_option_rows cross join lateral unnest(invoice_ids) member(invoice_id)
+                    from relation_option_rows cross join lateral unnest({member_scope}) member(invoice_id)
                     group by oa_relation
                     union all
                     select 'relation_status', relation_status, count(distinct member.invoice_id)::bigint
                     from relation_option_rows
-                    cross join lateral unnest(invoice_ids) member(invoice_id)
+                    cross join lateral unnest({member_scope}) member(invoice_id)
                     group by relation_status
                     union all
                     select 'bank_relation', bank_relation, count(distinct member.invoice_id)::bigint
                     from relation_option_rows
-                    cross join lateral unnest(invoice_ids) member(invoice_id)
+                    cross join lateral unnest({member_scope}) member(invoice_id)
                     where relation_status = 'no_oa'
                     group by bank_relation
                 )
@@ -401,6 +424,7 @@ class PostgresInputInvoiceUsageQueryRepository(_PostgresSourceDetailReads):
                     *status_where_params,
                     *classification_where_params,
                     *relation_where_params,
+                    *([invoice_ids] if invoice_level and invoice_ids is not None else []),
                     page_size,
                     offset,
                 ),
@@ -952,7 +976,6 @@ def _fact_cte(
     invoice_type: str,
     month: str | None,
     status_case: str | None,
-    invoice_level: bool = False,
 ) -> str:
     purpose_scope_sql = bank_split_scope_ctes(
         bank_rows_sql="select group_key,bank_id,amount,txn_direction as direction,is_split,turnover_role from raw_group_bank_rows",
@@ -1063,7 +1086,7 @@ def _fact_cte(
               )
         )
         """
-        if invoice_type == "input" and not invoice_level
+        if invoice_type == "input"
         else f"""
         group_members as (
             select
@@ -1176,12 +1199,32 @@ def _fact_cte(
                      when facts.total_with_tax > 0 then 'positive'
                      when facts.total_with_tax < 0 then 'negative' else 'zero' end as invoice_net_sign
             from group_facts facts
-        ), classified_rows as (
-            select facts.*, {status_case} as status_code from payment_facts facts
+        ), rule_matches as (
+            select facts.*, {status_case} as matched_rule from payment_facts facts
+        ), classified_rows as materialized (
+            select facts.*, coalesce(matched_rule->>'statusCode', 'unclassified') as status_code,
+                coalesce(matched_rule->>'id', '') as matched_rule_id
+            from rule_matches facts
+        ), invoice_usage as (
+            select member.invoice_id,
+                bool_or(facts.has_oa_relation or facts.has_bank_relation or facts.matched_rule_id <> '') as is_used
+            from classified_rows facts
+            cross join lateral unnest(facts.invoice_ids) member(invoice_id)
+            group by member.invoice_id
+        ), group_usage_members as (
+            select facts.group_key,
+                coalesce(array_agg(member.invoice_id order by member.invoice_id) filter (where not usage.is_used), array[]::text[]) as unused_ids,
+                coalesce(array_agg(member.invoice_id order by member.invoice_id) filter (where usage.is_used), array[]::text[]) as used_ids
+            from classified_rows facts
+            cross join lateral unnest(facts.invoice_ids) member(invoice_id)
+            join invoice_usage usage on usage.invoice_id = member.invoice_id
+            group by facts.group_key
         ), final_rows as (
             select
                 facts.*,
-                case when facts.has_oa_relation or facts.has_bank_relation then 'used' else 'unused' end as usage_status,
+                case when facts.has_oa_relation or facts.has_bank_relation or facts.matched_rule_id <> '' then 'used' else 'unused' end as usage_status,
+                members.unused_ids as unused_invoice_ids,
+                members.used_ids as used_invoice_ids,
                 case when facts.has_oa_relation then 'linked' else 'unlinked' end as oa_relation,
                 case when facts.has_bank_relation then 'paid' else 'unpaid' end as payment_group,
                 case when not facts.has_oa_relation then 'no_oa'
@@ -1191,6 +1234,7 @@ def _fact_cte(
                 0::numeric as collected_amount,
                 abs(facts.total_with_tax)::numeric as pending_amount
             from classified_rows facts
+            join group_usage_members members on members.group_key = facts.group_key
         )
         """
         if invoice_type == "input"
@@ -1740,7 +1784,6 @@ def _input_payment_status_case(
     for rule in settings["rules"]:
         if not rule["enabled"]:
             continue
-        code = rule["statusCode"]
         conditions = rule["conditions"]
         predicates: list[str] = []
         if "paymentComparison" in conditions:
@@ -1760,10 +1803,11 @@ def _input_payment_status_case(
             predicates.append("regexp_replace(facts.oa_applicant, '[[:space:]​﻿]+', '', 'g') = any(%s::text[])")
             params.append(applicants)
         if predicates:
-            fragments.append(f"when {' and '.join(predicates)} then '{_safe_code(code)}'::text")
+            fragments.append(f"when {' and '.join(predicates)} then jsonb_build_object('id', %s::text, 'statusCode', %s::text)")
+            params.extend([rule['id'], rule['statusCode']])
     if not fragments:
-        return "'unclassified'::text", params
-    return "(case " + " ".join(fragments) + " else 'unclassified'::text end)", params
+        return "null::jsonb", params
+    return "(case " + " ".join(fragments) + " else null::jsonb end)", params
 
 
 def _where_sql(
@@ -1854,6 +1898,10 @@ def _where_sql(
             clauses.append(f"{column} = %s{cast}")
             params.append(str(value or ""))
         elif operator == "in":
+            if field == 'usage_status' and field_sql is _INPUT_FIELDS:
+                scopes = {'used': 'used_invoice_ids', 'unused': 'unused_invoice_ids'}
+                clauses.append('(' + ' or '.join(f'cardinality({scopes[value]}) > 0' for value in values) + ')' if values else 'false')
+                continue
             cast = _filter_array_cast(field)
             clauses.append(f"{column} = any(%s{cast})")
             params.append(values)
@@ -1907,7 +1955,7 @@ def _load_facts(
     invoice_ids = _texts(
         invoice_id
         for row in all_group_rows
-        for invoice_id in list(row.get("invoice_ids") or [])
+        for invoice_id in [*list(row.get("invoice_ids") or []), *list(row.get("source_invoice_ids") or [])]
     )
     core = PostgresCoreRepository(transaction)
     invoices = core.list_invoices_by_ids(invoice_ids)
@@ -1977,7 +2025,8 @@ def _group_payload(
     invoice_type: str,
 ) -> dict[str, Any]:
     invoice_ids = [str(value) for value in list(row.get("invoice_ids") or [])]
-    line_items = [invoices_by_id[invoice_id] for invoice_id in invoice_ids]
+    source_ids = row['source_invoice_ids'] if invoice_type == 'input' else invoice_ids
+    line_items = [invoices_by_id[invoice_id] for invoice_id in source_ids]
     primary_id = str(row.get("primary_invoice_id") or "")
     primary = invoices_by_id[primary_id]
     payload = {
@@ -1989,7 +2038,9 @@ def _group_payload(
     }
     relation_case_id = str(row.get("relation_case_id") or "").strip()
     if invoice_type == "input":
+        payload["display_line_items"] = [invoices_by_id[invoice_id] for invoice_id in invoice_ids]
         payload["usage_status"] = row["usage_status"]
+        payload["matched_rule_id"] = row['matched_rule_id']
         payload["payment_facts"] = {
             "has_oa": bool(row.get("has_oa_relation")),
             "has_bank": bool(row.get("has_bank_relation")),
@@ -1998,6 +2049,7 @@ def _group_payload(
             "invoice_net_sign": row["invoice_net_sign"],
         }
         payload["row_key"] = (
+            f"invoice:{primary_id}" if row.get('invoice_level') else
             f"relation:{relation_case_id}"
             if relation_case_id
             else str(row.get("identity_key") or "")
@@ -2188,12 +2240,6 @@ def _dict_value(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _safe_code(value: str) -> str:
-    if not re.fullmatch(r"[a-z0-9_]+", value):
-        raise ValueError("Invalid payment status code.")
-    return value
-
-
 def _money(value: Any) -> str:
     try:
         return f"{Decimal(str(value or '0')).quantize(Decimal('0.01'))}"
@@ -2232,8 +2278,9 @@ def _export_invoices(connection: Any, *, invoice_type: str, limit: int,
             keyword_extra_columns=("invoice_remarks",) if invoice_type == "output" else (),
         )
         order_sql = _order_sql(sort_field=sort_field, sort_direction=sort_direction, field_sql=fields)
+        member_scope = _input_member_scope(filters) if invoice_type == 'input' else 'invoice_ids'
         sql = f"""{cte}, filtered_rows as materialized (
-            select invoice_ids, row_number() over ({order_sql}) as row_order
+            select {member_scope} as invoice_ids, row_number() over ({order_sql}) as row_order
             from final_rows {where_sql}
         ), selected_members as (
             select member.invoice_id, min(row_order) as row_order
@@ -2249,3 +2296,10 @@ def _export_invoices(connection: Any, *, invoice_type: str, limit: int,
         invoices = PostgresCoreRepository(transaction).list_invoices_by_ids(invoice_ids) if invoice_ids else []
         by_id = {invoice.id: invoice for invoice in invoices}
         return {"total": int(result["row_count"]), "invoices": [by_id[invoice_id] for invoice_id in invoice_ids]}
+
+
+def _input_member_scope(filters: list[dict[str, Any]]) -> str:
+    for item in filters:
+        if item['field'] == 'usage_status' and item.get('values') in (['used'], ['unused']):
+            return f"{item['values'][0]}_invoice_ids"
+    return 'invoice_ids'

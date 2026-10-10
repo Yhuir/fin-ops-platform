@@ -53,9 +53,9 @@ class BankSummaryShortNameTests(unittest.TestCase):
                     ]}
         before = deepcopy(original)
         snapshot = InvoiceUsageCollectionCanonicalSnapshot(
-            groups=[{"group_key": "invoice", "line_items": []}], supporting_groups=[], relations=[],
+            groups=[{"group_key": "invoice", "line_items": [], "matched_rule_id": "", "payment_facts": {"has_oa": False, "has_bank": False, "applicant_name": "", "payment_comparison": "missing_bank_evidence"}}], supporting_groups=[], relations=[],
             transactions=[], oa_records=[], overlays={}, pagination={}, summary={}, statistics={},
-            facet_counts={}, payment_status_labels={}, bank_account_mappings=deepcopy(MAPPINGS),
+            facet_counts={}, payment_status_labels={}, payment_status_rules={"rules": []}, bank_account_mappings=deepcopy(MAPPINGS),
         )
         assembler = SimpleNamespace(_row_payload=lambda *args, **kwargs: {
             "invoiceId": "invoice", "invoiceRelations": {"summaries": []}, "bankTransactions": original,

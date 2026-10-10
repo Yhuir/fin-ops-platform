@@ -8,9 +8,7 @@ from fin_ops_platform.services.bank_transaction_unit import original_bank_transa
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     PaymentStatusEvaluationContext,
-    evaluate_payment_status_rules,
-    normalize_payment_status_rules_settings,
-    public_payment_status_rules_payload,
+    payment_status_for_match,
 )
 from fin_ops_platform.services.input_invoice_usage_query_contract import (
     input_invoice_usage_filter_config,
@@ -20,7 +18,6 @@ from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageQueryService,
     _money,
 )
-from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.invoice_relation_query_context import (
     DistributedInvoiceRelationContext,
 )
@@ -307,17 +304,18 @@ class InputInvoiceUsageCanonicalQueryService:
         self,
         snapshot: InvoiceUsageCollectionCanonicalSnapshot,
     ) -> list[dict[str, Any]]:
+        if not snapshot.groups:
+            return []
         context = _context(snapshot)
-        lifecycle_policy = InvoiceLifecyclePolicy(
-            input_payment_rules_provider=_SnapshotPaymentRulesProvider(
-                snapshot.payment_status_rules
-            )
-        )
+        rules_by_id = {rule['id']: rule for rule in snapshot.payment_status_rules['rules']}
         rows = [
             self._row_assembler._row_payload(
                 group,
                 context=context,
-                lifecycle_policy=lifecycle_policy,
+                payment_status=payment_status_for_match(
+                    rules_by_id[group['matched_rule_id']] if group['matched_rule_id'] else None,
+                    PaymentStatusEvaluationContext(**group['payment_facts']),
+                ),
             )
             for group in snapshot.groups
         ]
@@ -326,24 +324,6 @@ class InputInvoiceUsageCanonicalQueryService:
             if "bankTransactions" in row:
                 row["bankTransactions"] = bank_summary_with_short_names(row["bankTransactions"], names)
         return rows
-
-
-class _SnapshotPaymentRulesProvider:
-    def __init__(self, settings: dict[str, Any]) -> None:
-        self._settings = normalize_payment_status_rules_settings(settings)
-
-    def payment_status_rules_payload(self, *, can_save: bool = True) -> dict[str, Any]:
-        return public_payment_status_rules_payload(
-            self._settings,
-            read_only=True,
-            can_save=can_save,
-        )
-
-    def rules_source_version(self) -> int:
-        return int(self._settings["version"])
-
-    def evaluate(self, context: PaymentStatusEvaluationContext) -> dict[str, str]:
-        return evaluate_payment_status_rules(self._settings["rules"], context)
 
 
 class _StaticOaProjection:

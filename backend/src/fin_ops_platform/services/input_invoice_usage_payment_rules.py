@@ -376,6 +376,13 @@ def evaluate_payment_status_rules(
         if (rule["conditions"]["hasBank"] == context.has_bank
                 and rule["enabled"] and _conditions_match(rule["conditions"], context)):
             return _status_payload(rule)
+    return payment_status_for_match(None, context)
+
+
+def payment_status_for_match(rule: dict[str, Any] | None, context: PaymentStatusEvaluationContext) -> dict[str, str]:
+    """Format a canonical match without evaluating its conditions again."""
+    if rule is not None:
+        return _status_payload(rule)
     reason = {
         "missing_invoice_amount": "关联发票缺少价税合计",
         "missing_bank_evidence": "关联银行流水明细缺失" if context.has_bank else "未命中已配置规则",

@@ -100,9 +100,25 @@ class CanonicalSnapshotRepository:
 
     def _snapshot(self, context, selected, rows, *, page=1, page_size=200):
         groups = self.assembler._invoice_groups(month=None, context=context)
-        by_row_id = {
-            self.assembler._row_payload(group, context=context)["id"]: group for group in groups
-        }
+        by_row_id = {}
+        for group in groups:
+            relations = context.distributed_relations_for_row_ids(
+                self.assembler._invoice_relation_lookup_ids(group["line_items"]),
+                case_ids=group.get("relation_case_ids"),
+            )
+            status = self.assembler._payment_status(
+                group["primary"], group["line_items"], relations, {}, {}, context=context,
+            )
+            row = self.assembler._row_payload(group, context=context, payment_status=status)
+            by_row_id[row["id"]] = group
+        for row in selected:
+            group = by_row_id[row["id"]]
+            group["matched_rule_id"] = row["paymentStatus"]["matchedRuleId"]
+            group["payment_facts"] = {
+                "has_oa": row["oaRelationStatus"] == "linked",
+                "has_bank": row["bankRelationStatus"] == "linked",
+                "applicant_name": "", "payment_comparison": "missing_bank_evidence",
+            }
         row_ids = [invoice.id for group in groups for invoice in group["line_items"]]
         relations = context.distributed_relations_for_row_ids(row_ids)
         related_ids = [row_id for relation in relations for row_id in relation["row_ids"]]

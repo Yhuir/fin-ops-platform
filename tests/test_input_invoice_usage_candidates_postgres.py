@@ -3,16 +3,18 @@ from __future__ import annotations
 
 import unittest
 import json
+from copy import deepcopy
 from uuid import uuid4
 
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_canonical_query_service import InputInvoiceUsageCanonicalQueryService
-from fin_ops_platform.services.input_invoice_usage_payment_rules import AppSettingsInputInvoiceUsagePaymentRulesProvider
+from fin_ops_platform.services.input_invoice_usage_payment_rules import DEFAULT_RULES, AppSettingsInputInvoiceUsagePaymentRulesProvider
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_query import (
     PostgresInputInvoiceUsageQueryRepository,
 )
+from fin_ops_platform.services.state_store_protocol import default_settings_access_control
 
 from tests.postgres_test_utils import apply_test_migrations, require_postgres_test_database_url, truncate_test_database
 
@@ -34,6 +36,15 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
             row_assembler=InputInvoiceUsageQueryService(import_service=ImportNormalizationService(),
                 payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None)),
         )
+        self.rules([rule for rule in deepcopy(DEFAULT_RULES) if rule['id'] != 'base_unpaid'])
+
+    def rules(self, rules):
+        self.connection.execute("""insert into app.app_settings (settings_key, settings_payload)
+            values ('app_settings', %s::jsonb) on conflict (settings_key) do update
+            set settings_payload=excluded.settings_payload""", (json.dumps({
+                **default_settings_access_control(),
+                'input_invoice_usage_payment_status_rules': {'version': 1, 'rules': rules},
+            }),))
 
     def invoices(self, count, amount=10):
         self.connection.execute("""insert into app.invoices
@@ -68,7 +79,7 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
         self.oa("unpaid-oa", 10)
         self.relation("used-paid", ["candidate-1", "paid-bank"], ["invoice", "bank"])
         self.relation("used-unpaid", ["candidate-2", "unpaid-oa"], ["invoice", "oa"])
-        # An invoice-only relation remains unused, even when a rule matches it.
+        # An invoice-only relation without a matching rule remains unused.
         self.relation("unused-pair", ["candidate-3", "candidate-4"], ["invoice", "invoice"])
         expected = self.service.list_rows()["classification"]
         self.assertEqual(expected["all"]["count"], 4)
@@ -85,6 +96,67 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
         self.assertEqual(keyword["unused"]["count"], 2)
         self.assertEqual(keyword["used"]["count"], 0)
         self.assertEqual(sum(group["count"] for group in keyword["groups"]), 0)
+
+    def test_zero_net_rule_is_shared_by_hierarchy_candidates_exact_selection_and_export(self):
+        self.invoices(3, 2986)
+        with self.connection.transaction() as tx:
+            tx.execute("set local fin_ops.correction_reason='isolated red invoice fixture'")
+            tx.execute("update app.invoices set total_with_tax=-2986, amount=-2986, signed_amount=-2986 where legacy_mongo_id='candidate-1'")
+        self.relation('wrong-pair', ['candidate-1', 'candidate-2'], ['invoice', 'invoice'])
+        rule = {'id': 'wrong', 'statusCode': 'custom_wrong', 'label': '对方开错', 'enabled': True,
+                'conditions': {'hasBank': False, 'invoiceNetSign': 'zero'}}
+        self.rules([rule])
+        result = self.service.list_rows()
+        self.assertEqual((result['classification']['used']['count'], result['classification']['unused']['count']), (2, 1))
+        unpaid = next(group for group in result['classification']['groups'] if group['id'] == 'unpaid')
+        self.assertEqual(unpaid['count'], 2)
+        self.assertEqual(next(item for item in unpaid['children'] if item['id'] == 'category:custom_wrong')['count'], 2)
+        pair = next(row for row in result['rows'] if row['invoiceRelations']['relationCount'] == 2)
+        self.assertEqual(pair['invoice']['totalWithTax'], '-2986.00')
+        self.assertEqual(pair['paymentStatus']['matchedRuleId'], 'wrong')
+        self.assertEqual([item['totalWithTax'] for item in pair['invoiceRelations']['summaries']], ['-2986.00', '2986.00'])
+        self.assertEqual({row['invoiceId'] for row in self.service.candidate_rows({})['rows']}, {'candidate-3'})
+        exact = self.service.candidate_rows_by_invoice_ids(['candidate-1', 'candidate-2'])
+        self.assertEqual(len(exact['rows']), 2)
+        self.assertTrue(all(row['usageStatus'] == 'used' and row['paymentStatus']['matchedRuleId'] == 'wrong' for row in exact['rows']))
+        pending = [{'field': 'usage_status', 'operator': 'in', 'values': ['unused']}]
+        self.assertEqual(self.service.list_rows(filters=pending)['summary']['invoiceCount'], 1)
+        self.assertEqual(self.service.export_page(filters=pending)['summary']['invoiceCount'], 1)
+        self.assertEqual(self.service.export_rows(limit=200, filters=pending)['total'], 1)
+        self.rules([{**rule, 'enabled': False}])
+        self.assertEqual(self.service.list_rows()['classification']['unused']['count'], 3)
+        self.assertEqual({row['invoiceId'] for row in self.service.candidate_rows({})['rows']}, {'candidate-1', 'candidate-2', 'candidate-3'})
+        self.rules([])
+        self.assertEqual(self.service.list_rows()['classification']['unused']['count'], 3)
+
+    def test_shared_invoice_used_by_another_group_never_reenters_pending(self):
+        self.invoices(3, 10)
+        with self.connection.transaction() as tx:
+            tx.execute("set local fin_ops.correction_reason='isolated overlapping group fixture'")
+            tx.execute("update app.invoices set total_with_tax=-10, amount=-10, signed_amount=-10 where legacy_mongo_id='candidate-2'")
+        self.relation('wrong', ['candidate-1', 'candidate-2'], ['invoice', 'invoice'])
+        self.relation('other', ['candidate-1', 'candidate-3'], ['invoice', 'invoice'])
+        self.rules([{'id': 'wrong', 'statusCode': 'custom_wrong', 'label': '对方开错', 'enabled': True,
+                     'conditions': {'hasBank': False, 'invoiceNetSign': 'zero'}}])
+        pending = [{'field': 'usage_status', 'operator': 'in', 'values': ['unused']}]
+        result = self.service.list_rows(filters=pending)
+        self.assertEqual((result['classification']['used']['count'], result['classification']['unused']['count']), (2, 1))
+        self.assertEqual(result['summary']['invoiceCount'], 1)
+        self.assertEqual([row['invoiceId'] for row in result['rows']], ['candidate-3'])
+        self.assertEqual([row['invoiceId'] for row in self.service.candidate_rows({})['rows']], ['candidate-3'])
+        exported = self.service.export_rows(limit=200, filters=pending)
+        self.assertEqual(exported['total'], 1)
+        self.assertEqual([row['invoice']['invoiceNo'] for row in exported['rows']], ['CAND-3'])
+        exact = self.service.candidate_rows_by_invoice_ids(['candidate-1'])['rows'][0]
+        self.assertEqual((exact['usageStatus'], exact['paymentStatus']['matchedRuleId']), ('used', 'wrong'))
+        used = [{'field': 'usage_status', 'operator': 'in', 'values': ['used']}]
+        scoped = self.service.list_rows(keyword='CAND-3', filters=used)
+        self.assertEqual(scoped['classification']['used']['count'], 1)
+        self.assertEqual(scoped['summary']['invoiceCount'], 1)
+        self.assertEqual([row['invoiceId'] for row in scoped['rows']], ['candidate-1'])
+        self.assertEqual(scoped['rows'][0]['invoiceRelations']['relationCount'], 1)
+        self.assertEqual(self.service.export_rows(limit=200, keyword='CAND-3', filters=used)['total'], 1)
+        self.assertEqual([row['invoiceId'] for row in self.service.candidate_rows({'keyword': ['CAND-3']})['rows']], ['candidate-3'])
 
     def test_net_payment_current_facts_drive_rows_filters_export_and_rules(self):
         self.invoices(3, 1015)
@@ -295,7 +367,7 @@ class InputInvoiceCandidatesPostgresTests(unittest.TestCase):
         self.assertFalse(facts["has_bank"])
         self.assertFalse(facts["has_oa"])
         unused = self.service.list_rows()
-        self.assertEqual(unused["rows"][0]["paymentStatus"]["code"], "waiting_payment")
+        self.assertEqual(unused["rows"][0]["paymentStatus"]["code"], "unclassified")
         self.assertEqual(unused["classification"]["unused"]["count"], 1)
         self.assertEqual(unused["classification"]["groups"][0]["count"], 0)
         self.oa('zero-oa', 0)

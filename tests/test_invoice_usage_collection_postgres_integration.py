@@ -70,6 +70,12 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
         truncate_test_database(self.database_url)
 
     def test_input_hierarchy_usage_amounts_filters_and_withdrawal(self):
+        from copy import deepcopy
+        from fin_ops_platform.services.input_invoice_usage_payment_rules import DEFAULT_RULES
+        from fin_ops_platform.services.postgres_repositories.common import jsonb
+        rules = [rule for rule in deepcopy(DEFAULT_RULES) if rule["id"] != "base_unpaid"]
+        self.connection.execute("insert into app.app_settings(settings_key,settings_payload) values('app_settings',%s)",
+            (jsonb({"page_access_accounts": [], "access_control_version": 1, "input_invoice_usage_payment_status_rules": {"version": 1, "rules": rules}}),))
         for key, amount in [("unused", 100), ("equal", 100), ("less", 80), ("greater", 130), ("income", 100)]:
             self.connection.execute("""insert into app.invoices(legacy_mongo_id, invoice_type, invoice_no,
                 invoice_date, invoice_month, seller_name, amount, signed_amount, total_with_tax, status)
@@ -93,7 +99,7 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual([tree[key]["count"] for key in ("all", "used", "unused")], [5, 4, 1])
         self.assertEqual([group["count"] for group in tree["groups"]], [4, 0])
         self.assertEqual({row["invoiceId"]: row["paymentStatus"]["code"] for row in payload["rows"]},
-                         {"unused": "waiting_payment", "equal": "paid", "less": "invoice_less_payment", "greater": "invoice_greater_payment", "income": "invoice_greater_payment"})
+                         {"unused": "unclassified", "equal": "paid", "less": "invoice_less_payment", "greater": "invoice_greater_payment", "income": "invoice_greater_payment"})
         filters = [{"field": "usage_status", "operator": "in", "values": ["used"]},
                    {"field": "oa_relation", "operator": "in", "values": ["unlinked"]},
                    {"field": "payment_group", "operator": "in", "values": ["paid"]}]
@@ -362,11 +368,16 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
             return service.list_rows(filters=[{"field": "tax_rate", "operator": "in", "values": [rate]}], include_statistics=False)
         unknown = filtered("—")
         self.assertEqual(unknown["pagination"]["total"], 1)
-        self.assertEqual(unknown["rows"][0]["invoice"]["taxRate"], "—")
-        self.assertEqual(unknown["rows"][0]["invoice"]["totalWithTax"], "226.00")
+        self.assertEqual(unknown["rows"][0]["invoice"]["taxRate"], "13%")
+        self.assertEqual([member["taxRate"] for member in unknown["rows"][0]["invoiceRelations"]["summaries"]], ["13%", "—"])
+        self.assertEqual(unknown["rows"][0]["invoice"]["totalWithTax"], "113.00")
+        self.assertEqual(unknown["summary"]["totalWithTax"], "226.00")
         self.assertEqual(filtered("13%")["pagination"]["total"], 0)
         self.connection.execute("update app.invoices set tax_rate=%s where legacy_mongo_id='rate-unknown'", ("6%",))
-        self.assertEqual(filtered("多税率")["rows"][0]["invoice"]["taxRate"], "多税率")
+        mixed = filtered("多税率")
+        self.assertEqual(mixed["pagination"]["total"], 1)
+        self.assertEqual(mixed["rows"][0]["invoice"]["taxRate"], "13%")
+        self.assertEqual([member["taxRate"] for member in mixed["rows"][0]["invoiceRelations"]["summaries"]], ["13%", "6%"])
         self.assertEqual(filtered("13%")["pagination"]["total"], 0)
 
     def test_output_missing_source_gross_remains_unknown_in_status_summary_and_filters(self):

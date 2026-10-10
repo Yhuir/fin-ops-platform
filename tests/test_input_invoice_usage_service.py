@@ -519,7 +519,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["pagination"]["total"], 1)
         row = payload["rows"][0]
-        self.assertEqual(row["invoice"]["totalWithTax"], "800.00")
+        self.assertEqual(row["invoice"]["totalWithTax"], "600.00")
         self.assertEqual(row["invoiceRelations"]["relationCount"], 2)
         self.assertEqual(row["oa"]["relationCount"], 1)
         self.assertEqual(row["oa"]["amount"], "800.00")
@@ -611,7 +611,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
 
         row = service.list_rows(page_size=20)["rows"][0]
 
-        self.assertEqual(row["invoice"]["totalWithTax"], "800.00")
+        self.assertEqual(row["invoice"]["totalWithTax"], "600.00")
         self.assertEqual(row["paymentStatus"]["code"], "offset")
         self.assertEqual(row["paymentStatus"]["label"], "冲")
 
@@ -637,7 +637,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
 
         row = service.list_rows(page_size=20)["rows"][0]
 
-        self.assertEqual(row["invoice"]["totalWithTax"], "800.00")
+        self.assertEqual(row["invoice"]["totalWithTax"], "600.00")
         self.assertEqual(row["paymentStatus"]["code"], "offset")
         self.assertEqual(row["paymentStatus"]["label"], "冲")
 

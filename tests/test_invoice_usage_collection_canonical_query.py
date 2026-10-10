@@ -109,23 +109,17 @@ class RecordingOutputRowAssembler:
 
 class RecordingInputRowAssembler:
     def __init__(self) -> None:
-        self.lifecycle_policies: list[object] = []
+        self.payment_statuses: list[dict] = []
 
     def _row_payload(
         self,
         _group: dict[str, object],
         *,
-        lifecycle_policy: object,
+        payment_status: dict,
         **_kwargs: object,
     ) -> dict[str, object]:
-        self.lifecycle_policies.append(lifecycle_policy)
-        evaluate = getattr(lifecycle_policy, "evaluate_input_invoice_payment")
-        return evaluate(
-            has_oa=False,
-            has_bank=False,
-            applicant_name="",
-            payment_comparison="invalid",
-        )
+        self.payment_statuses.append(payment_status)
+        return payment_status
 
 
 class RecordingInputDetailRepository:
@@ -316,11 +310,12 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         )
         sql = "\n".join(connection.transactions[0].statements)
         classification_sql = sql.split("classification_rows as materialized", 1)[1].split("relation_option_rows", 1)[0]
-        self.assertNotIn("usage_status = any", classification_sql)
+        self.assertNotIn("cardinality(unused_invoice_ids)", classification_sql)
+        self.assertNotIn("cardinality(used_invoice_ids)", classification_sql)
         self.assertNotIn("payment_group = any", classification_sql)
         status_sql = sql.split("status_option_rows as materialized", 1)[1].split("classification_rows", 1)[0]
-        self.assertIn("usage_status = any", status_sql)
-        self.assertIn("case when usage_status = 'used' then payment_group end", sql)
+        self.assertIn("cardinality(unused_invoice_ids) > 0", status_sql)
+        self.assertIn("case when usage.is_used then payment_group end", sql)
 
     def test_output_facets_keep_other_filters_and_overview_is_separate(self) -> None:
         connection = RecordingConnection()
@@ -506,14 +501,14 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertIs(first, second)
         self.assertEqual(import_service.calls, 1)
 
-    def test_input_row_assembly_reuses_one_snapshot_payment_policy(self) -> None:
+    def test_input_row_assembly_uses_authoritative_snapshot_rule_without_rematching(self) -> None:
         assembler = RecordingInputRowAssembler()
         service = InputInvoiceUsageCanonicalQueryService(
             repository=None,
             row_assembler=assembler,  # type: ignore[arg-type]
         )
         snapshot = InvoiceUsageCollectionCanonicalSnapshot(
-            groups=[{"line_items": []}, {"line_items": []}],
+            groups=[{"line_items": [], "matched_rule_id": "snapshot-no-oa", "payment_facts": {"has_oa": True, "has_bank": False, "applicant_name": "", "payment_comparison": "invalid"}}] * 2,
             supporting_groups=[],
             relations=[],
             transactions=[],
@@ -541,7 +536,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         rows = service._rows_from_snapshot(snapshot)
 
         self.assertEqual([row["label"] for row in rows], ["快照待处理"] * 2)
-        self.assertIs(assembler.lifecycle_policies[0], assembler.lifecycle_policies[1])
+        self.assertEqual([status["matchedRuleId"] for status in assembler.payment_statuses], ["snapshot-no-oa"] * 2)
 
     def test_relation_context_returns_only_direct_formal_relations(
         self,

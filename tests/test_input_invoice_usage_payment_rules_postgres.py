@@ -68,7 +68,8 @@ class PaymentRulesPostgresTests(unittest.TestCase):
                                 "%s::text payment_comparison, %s::text invoice_net_sign) select " + expression + " code from facts",
                                 (has_oa, has_bank, context.applicant_name, comparison == "equal", True, comparison, sign, *params),
                             )
-                            self.assertEqual(row["code"], evaluate_payment_status(settings, context)["code"])
+                            expected = evaluate_payment_status(settings, context)
+                            self.assertEqual(row['code'], {'id': expected['matchedRuleId'], 'statusCode': expected['code']} if expected['matchedRuleId'] else None)
 
     def test_explicit_migration_preserves_rules_and_materializes_old_branches_once(self):
         rules = deepcopy(DEFAULT_RULES[:6])
@@ -216,7 +217,7 @@ class PaymentRulesPostgresTests(unittest.TestCase):
                 python_result = evaluate_payment_status(current, context)
                 row = self.connection.fetch_one("with facts as (select %s::boolean has_bank_relation) select " + expression + " code from facts", (has_bank, *params))
                 self.assertEqual(python_result["matchedRuleId"], expected_id)
-                self.assertEqual(row["code"], python_result["code"])
+                self.assertEqual(row['code'], {'id': expected_id, 'statusCode': python_result['code']})
 
     def test_concurrent_cas_idempotency_and_unrelated_settings(self):
         self.store.save_app_settings({"unrelated_test_field": {"value": "keep"}})

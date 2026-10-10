@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { fetchBankDetailTransactions } from "../features/bankDetails/api";
 import { fetchTurnoverLedger, fetchTurnoverRelationDetail } from "../features/turnoverLedger/api";
-import { inputInvoiceRelationColumns } from "../features/inputInvoiceUsage/relationExpansion";
+import { inputInvoiceSourceRelationColumns } from "../features/inputInvoiceUsage/relationExpansion";
 import { fetchInputInvoiceUsageRows } from "../features/inputInvoiceUsage/api";
 import { fetchOutputInvoiceCollectionRows } from "../features/outputInvoiceCollections/api";
 import { OUTPUT_COLLECTION_STATUS_CODES } from "../features/outputInvoiceCollections/types";
@@ -96,8 +96,8 @@ test("input expansion keeps independent formal cases and deduplicates their shar
     invoiceRelations: {relationCount: 1, summaries: [{id: "invoice-1", relationCaseId: "case-a"}]},
   }]}));
   const {rows} = await fetchInputInvoiceUsageRows(request);
-  const columns = inputInvoiceRelationColumns(rows[0]);
-  expect(columns[0].members[0].relationId).toBe("case-a");
-  expect(columns[1].members.map(member => member.relationId)).toEqual(["case-a", "case-b"]);
-  expect(columns[2]).toMatchObject({count: 1, members: [{id: "original-bank", amount: "100", relationIds: ["case-a", "case-b"]}]});
+  const columns = inputInvoiceSourceRelationColumns(rows[0]);
+  expect(columns).toHaveLength(2);
+  expect(columns[0].members.map(member => member.relationId)).toEqual(["case-a", "case-b"]);
+  expect(columns[1]).toMatchObject({count: 1, members: [{id: "original-bank", amount: "100", relationIds: ["case-a", "case-b"]}]});
 });

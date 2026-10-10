@@ -950,11 +950,19 @@ class InputInvoiceUsageOaReverseService:
             return None
         if usage_status != "used":
             raise ValueError("Candidate query returned an invalid usage status.")
-        has_oa = InputInvoiceUsageOaReverseService._oa_relation_status(row) == "linked"
+        has_oa = row["oaRelationStatus"] == "linked"
+        if has_oa:
+            reason_code, reason = "already_has_active_oa", "发票已关联 OA，不再属于待使用"
+        elif row["bankRelationStatus"] == "linked":
+            reason_code, reason = "already_has_active_bank", "发票已关联流水，不再属于待使用"
+        elif row["paymentStatus"]["matchedRuleId"]:
+            reason_code, reason = "already_classified_by_rule", "发票已命中支付规则，不再属于待使用"
+        else:
+            raise ValueError("Used invoice has no active relation or matched rule evidence.")
         return {
             "invoiceId": str(row["invoiceId"]),
-            "reasonCode": "already_has_active_oa" if has_oa else "already_has_active_bank",
-            "reason": "发票已关联 OA，不再属于待使用" if has_oa else "发票已关联流水，不再属于待使用",
+            "reasonCode": reason_code,
+            "reason": reason,
             "oaRelationStatus": "linked" if has_oa else "unlinked",
         }
 
@@ -976,25 +984,9 @@ class InputInvoiceUsageOaReverseService:
                 "label": str(payment_status.get("label") or ""),
                 "reason": str(payment_status.get("reason") or ""),
             },
-            "oaRelationStatus": InputInvoiceUsageOaReverseService._oa_relation_status(row),
+            "oaRelationStatus": row["oaRelationStatus"],
             "bankRelationStatus": row["bankRelationStatus"],
         }
-
-    @staticmethod
-    def _oa_relation_status(row: dict[str, object]) -> str:
-        oa_payload = row.get("oa") if isinstance(row.get("oa"), dict) else {}
-        summaries = [summary for summary in list(oa_payload.get("summaries") or []) if isinstance(summary, dict)]
-        statuses = {
-            str(summary.get("relationStatus") or summary.get("relation_status") or "linked").strip() or "linked"
-            for summary in summaries
-        }
-        if "linked" in statuses:
-            return "linked"
-        if summaries:
-            return "unlinked"
-        if int(oa_payload.get("relationCount") or 0) > 0:
-            return "linked"
-        return "unlinked"
 
     @staticmethod
     def _resolve_target_applicant(value: Any, applicants: list[dict[str, str]]) -> tuple[str, str]:
