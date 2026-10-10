@@ -1,3 +1,4 @@
+import { RelationAnimatedCell, useRelationMotion } from './RelationRowsMotion';
 import { Chip, Pagination, Table, Tooltip } from "@heroui/react";
 import { createContext, useContext } from "react";
 import type { ComponentProps, CSSProperties, MouseEventHandler, PointerEventHandler, ReactNode, Ref } from "react";
@@ -165,6 +166,7 @@ type FinanceTableCellProps = {
 
 export function FinanceTableCell({ children, columnRole, className, colSpan, dataHighlight, dataTone, dataTestId, onClick, textValue }: FinanceTableCellProps) {
   const selectableText = useContext(FinanceTableTextSelectionContext);
+  const relationMotion = useRelationMotion();
   return (
     <Table.Cell
       colSpan={colSpan}
@@ -178,7 +180,7 @@ export function FinanceTableCell({ children, columnRole, className, colSpan, dat
       onPointerDown={selectableText ? keepNativeTextSelectionOnPointerDown : undefined}
       textValue={textValue}
     >
-      {children}
+      <RelationAnimatedCell motion={relationMotion}>{children}</RelationAnimatedCell>
     </Table.Cell>
   );
 }

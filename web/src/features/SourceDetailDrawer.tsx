@@ -1,7 +1,7 @@
 import type { ComponentProps } from 'react';
 import AppDrawer from '../components/common/AppDrawer';
 import { preparePublicDetailSections, type EntityDetailSection } from '../components/common/EntityDetailContent';
-import type { SourceDetailTarget } from '../components/common/RelationGroupExpansion';
+import type { SourceDetailTarget } from './relations/types';
 import BankTransactionDetailContent from './bankSplits/BankTransactionDetailContent';
 import { useBankSplitClose } from './bankSplits/useBankSplitClose';
 

@@ -94,17 +94,9 @@ export type OutputInvoiceCollectionBankSummary = {
   detailAvailable: boolean;
 };
 
-export type OutputInvoiceCollectionRelatedInvoiceSummary = {
-  id: string;
-  displayNo: string;
-  invoiceNo: string;
-  invoiceCode: string;
-  digitalInvoiceNo: string;
+export type OutputInvoiceCollectionRelatedInvoiceSummary = Omit<OutputInvoiceCollectionInvoiceSummary, 'issueDate'> & {
+  memberRow?: { collectionStatus: OutputInvoiceCollectionStatus; bank: OutputInvoiceCollectionRelationSummary<OutputInvoiceCollectionBankSummary> };
   invoiceDate: string;
-  buyerName: string;
-  buyerTaxNo: string;
-  totalWithTax: string;
-  taxableItemName: string;
   relationId?: string;
   relationMode?: string;
   relationCaseId?: string;
@@ -126,7 +118,6 @@ export type OutputInvoiceCollectionRelationSummary<T> = {
 };
 
 export type OutputInvoiceCollectionRow = {
-  relationSources: import("../../components/common/RelationGroupExpansion").RelationColumn[];
   id: string;
   invoiceId: string;
   invoiceIdentityKey?: string;

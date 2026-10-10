@@ -850,7 +850,20 @@ describe("Input invoice usage page", () => {
     expect(searchInput).toHaveValue("");
   });
 
-  test("shows relation totals with +N entry points for multi OA, bank, and invoice relations", async () => {
+  test("duplicate invoice members show an explicit table error rather than duplicate rows", async () => {
+    const source = rowsPayload.rows[0];
+    const member = { ...source.invoice, invoiceDate: source.invoice.issueDate };
+    installInputInvoiceUsageFetch({ ...rowsPayload, rows: [{ ...source,
+      invoiceRelations: { relationCount: 2, hasMultiple: true, summaries: [member, member] },
+    }] });
+    const user = userEvent.setup();
+    renderAuthenticatedAppAt('/input-invoice-usage');
+    await user.click(await screen.findByRole('button', { name: /查看发票 .* 关联发票 2 张/ }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('关系摘要不完整');
+    expect(document.querySelectorAll('tr[data-relation-group]')).toHaveLength(0);
+  });
+
+  test("renders real members in ten columns for each relation kind without adding a summary", async () => {
     const user = userEvent.setup();
     const multiRowsPayload = {
       ...rowsPayload,
@@ -866,7 +879,7 @@ describe("Input invoice usage page", () => {
           },
           oa: {
             primary: {
-              id: "oa-multi-a",
+              id: "oa-multi-a", relationCaseId: "case-a",
               applicant: "刘际涛",
               applicationType: "支付申请",
               projectName: "昭通卷烟厂2025年度信息化不可预见维护采购项目",
@@ -878,7 +891,7 @@ describe("Input invoice usage page", () => {
             detailMode: "list",
             summaries: [
               {
-                id: "oa-multi-a",
+                id: "oa-multi-a", relationCaseId: "case-a",
                 applicant: "刘际涛",
                 applicationType: "支付申请",
                 projectName: "昭通卷烟厂2025年度信息化不可预见维护采购项目",
@@ -886,7 +899,7 @@ describe("Input invoice usage page", () => {
                 detailAvailable: true,
               },
               {
-                id: "oa-multi-b",
+                id: "oa-multi-b", relationCaseId: "case-b",
                 applicant: "张三",
                 applicationType: "支付申请",
                 projectName: "红塔集团2025年度信息化维护采购项目",
@@ -898,7 +911,7 @@ describe("Input invoice usage page", () => {
           bank: {
             primary: {
               ...rowsPayload.rows[0].bank.primary,
-              id: "bank-multi-a",
+              id: "bank-multi-a", relationCaseId: "case-a",
               amount: "100.00",
               original_amount: "100.00",
               netAmount: "100.00",
@@ -911,7 +924,7 @@ describe("Input invoice usage page", () => {
             summaries: [
               {
                 ...rowsPayload.rows[0].bank.primary,
-                id: "bank-multi-a",
+                id: "bank-multi-a", relationCaseId: "case-a",
                 amount: "40.00",
                 original_amount: "40.00",
                 netAmount: "40.00",
@@ -920,7 +933,7 @@ describe("Input invoice usage page", () => {
               },
               {
                 ...rowsPayload.rows[0].bank.primary,
-                id: "bank-multi-b",
+                id: "bank-multi-b", relationCaseId: "case-b",
                 amount: "60.00",
                 original_amount: "60.00",
                 netAmount: "60.00",
@@ -993,20 +1006,21 @@ describe("Input invoice usage page", () => {
     const firstBodyRow = page.querySelector(".input-invoice-usage-table tbody > tr") as HTMLElement;
     const firstRowCells = firstBodyRow.querySelectorAll("th, td");
     expect(within(firstRowCells[2] as HTMLElement).getByText("-100.00")).toBeInTheDocument();
-    expect(within(firstRowCells[5] as HTMLElement).getByText("合计 100.00")).toBeInTheDocument();
+    expect(within(firstRowCells[5] as HTMLElement).queryByText("合计 100.00")).not.toBeInTheDocument();
     expect(within(firstRowCells[8] as HTMLElement).getByText("100.00")).toBeInTheDocument();
-    expect(within(page).queryByRole("button", { name: "查看OA 刘际涛 详情" })).not.toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "查看OA 刘际涛 详情" })).toBeInTheDocument();
 
     const requestsBefore = fetchMock.mock.calls.length;
     const toggle = within(page).getByRole('button', {name: '查看刘际涛关联OA 2 条'});
     await user.click(toggle);
-    const expansion = within(page).getByRole('region', {name: '配对关系'});
-    expect(within(expansion).getByText('张三')).toBeInTheDocument();
-    expect(within(expansion).getAllByRole('button', {name: /详情$/})).toHaveLength(4);
+    const oaRows = page.querySelectorAll('tr[data-relation-group]');
+    expect(oaRows).toHaveLength(2);
+    expect(within(oaRows[1] as HTMLElement).getByText('张三')).toBeInTheDocument();
+    for (const row of oaRows) expect(row.querySelectorAll('th, td')).toHaveLength(10);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.length).toBe(requestsBefore);
     await user.click(within(page).getByRole('button', {name: '查看云南银行交易对方户名很长很长需要换行显示关联流水 2 条'}));
-    await waitFor(() => expect(within(page).queryByRole('region', {name: '配对关系'})).not.toBeInTheDocument());
+    expect(page.querySelectorAll('tr[data-relation-group]')).toHaveLength(2);
     await user.click(within(page).getByRole('button', {name: '查看发票 SD-INV-2026-0001 关联发票 2 张'}));
     expect(within(page).queryByRole('region', {name: '配对关系'})).not.toBeInTheDocument();
     const invoiceRows = page.querySelectorAll(".input-invoice-usage-table tbody > tr");
@@ -1016,7 +1030,7 @@ describe("Input invoice usage page", () => {
     expect(within(invoiceRows[1] as HTMLElement).getByRole('button', {name: '查看发票 SD-INV-2026-0002 详情'})).toBeInTheDocument();
     expect(fetchMock.mock.calls.length).toBe(requestsBefore);
     await user.click(within(page).getByRole('button', {name: '查看发票 SD-INV-2026-0001 关联发票 2 张'}));
-    expect(page.querySelectorAll(".input-invoice-usage-table tbody > tr")).toHaveLength(1);
+    await waitFor(() => expect(page.querySelectorAll(".input-invoice-usage-table tbody > tr")).toHaveLength(1));
 
   });
 

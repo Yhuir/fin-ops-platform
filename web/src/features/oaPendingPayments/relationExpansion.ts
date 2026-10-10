@@ -1,23 +1,54 @@
-import type { RelationColumn } from '../../components/common/RelationGroupExpansion';
 import { originalRelationMembers } from '../bankSplits/originalRelationMembers';
-import type { OaPendingPaymentRow } from './types';
+import type { RelationKind } from '../relations/types';
+import type { OaPendingPaymentBankTransactionSummary, OaPendingPaymentInvoiceSummary, OaPendingPaymentOaRelationSummary, OaPendingPaymentRow } from './types';
 
-export function oaPendingRelationColumns(row: OaPendingPaymentRow): RelationColumn[] | null {
-  if (!row.oa.summaries || !row.bankTransaction.summaries || !row.bankTransaction.nonOutflowRelationEdges || !row.invoice.summaries) return null;
-  const banks = originalRelationMembers([...row.bankTransaction.summaries!, ...row.bankTransaction.nonOutflowRelationEdges!].map(item => ({
-    id: item.bankTransactionId!, originalId: item.parent_row_id, title: item.counterpartyName!,
-    subtitle: [item.bankAccount, item.summary, item.remark].filter(Boolean).join(' · '), date: item.tradeTime,
-    amount: item.original_amount, status: item.directionLabel, detailAvailable: Boolean(item.bankTransactionId), relationId: item.relationCaseId,
-  })));
-  return [
-    { kind: 'oa', count: row.oa.relationCount!, members: row.oa.summaries!.map(item => ({
-      id: item.oaId!, title: item.applicantName!, subtitle: [item.projectName, item.reason].filter(Boolean).join(' · '), date: item.applicationTime,
-      amount: item.amount, status: item.applicationType, detailAvailable: Boolean(item.oaId), relationId: item.relationCaseId,
-    })) },
-    { kind: 'bank', count: banks.length, members: banks },
-    { kind: 'invoice', count: row.invoice.relationCount, members: row.invoice.summaries!.map(item => ({
-      id: item.invoiceId!, title: item.digitalInvoiceNo!, subtitle: item.sellerName, date: item.invoiceDate,
-      amount: item.totalWithTax, detailAvailable: Boolean(item.invoiceId), relationId: item.relationCaseId,
-    })) },
-  ];
+type OaMember = OaPendingPaymentOaRelationSummary & { id: string; detailAvailable: boolean };
+type BankMember = OaPendingPaymentBankTransactionSummary & { id: string; relationIds?: string[] };
+type InvoiceMember = OaPendingPaymentInvoiceSummary & { id: string };
+
+export type OaPendingDisplayRow = {
+  id: string;
+  oa: OaMember | null;
+  bank: BankMember | null;
+  invoice: InvoiceMember | null;
+};
+
+export function oaPendingMembers(row: OaPendingPaymentRow): { oa: OaMember[]; bank: BankMember[]; invoice: InvoiceMember[] } {
+  const oa = row.oa.summaries?.length ? row.oa.summaries.map(member => ({
+    ...member, id: member.oaId!, detailAvailable: Boolean(member.oaId),
+  })) : [{ ...row.oa, id: row.oa.primaryOaId || row.oa.id, oaId: row.oa.primaryOaId || row.oa.id }];
+  const summaries = [...(row.bankTransaction.summaries ?? []), ...(row.bankTransaction.nonOutflowRelationEdges ?? [])];
+  const bank = summaries.length ? originalRelationMembers(summaries.map(member => ({
+    ...member, id: member.bankTransactionId!, originalId: member.parent_row_id, relationId: member.relationCaseId,
+  }))) : row.bankTransaction.primaryBankTransactionId ? [{
+    ...row.bankTransaction, id: row.bankTransaction.primaryBankTransactionId, bankTransactionId: row.bankTransaction.primaryBankTransactionId,
+  }] : [];
+  const invoice = row.invoice.summaries?.length ? row.invoice.summaries.map(member => ({ ...member, id: member.invoiceId! }))
+    : row.invoice.primaryInvoiceId ? [{ ...row.invoice, id: row.invoice.primaryInvoiceId, invoiceId: row.invoice.primaryInvoiceId }] : [];
+  return { oa, bank, invoice };
+}
+
+export function oaPendingDisplayRows(kind: RelationKind, members: ReturnType<typeof oaPendingMembers>, ownerOaId: string | null): OaPendingDisplayRow[] {
+  const owner = members.oa.length === 1 && members.oa[0].id === ownerOaId ? members.oa[0] : null;
+  const oaByCase = new Map<string, OaMember>();
+  members.oa.forEach(member => { if (member.relationCaseId && !oaByCase.has(member.relationCaseId)) oaByCase.set(member.relationCaseId, member); });
+  const banksByCase = new Map<string, BankMember>();
+  members.bank.forEach(member => {
+    const ids = member.relationIds ?? (member.relationCaseId ? [member.relationCaseId] : []);
+    ids.forEach(id => { if (!banksByCase.has(id)) banksByCase.set(id, member); });
+  });
+  const invoicesByCase = new Map<string, InvoiceMember>();
+  members.invoice.forEach(member => { if (member.relationCaseId && !invoicesByCase.has(member.relationCaseId)) invoicesByCase.set(member.relationCaseId, member); });
+  return members[kind].map(member => {
+    const caseIds = 'relationIds' in member ? member.relationIds ?? [] : member.relationCaseId ? [member.relationCaseId] : [];
+    // Canonical single-OA rows own all their bank/invoice relations; groups resolve by case.
+    const sourceOnly = kind === 'oa' && owner !== null && !member.relationCaseId;
+    const oa = kind === 'oa' ? member as OaMember
+      : owner ?? caseIds.map(id => oaByCase.get(id)).find(Boolean) ?? null;
+    const bank = kind === 'bank' ? member as BankMember
+      : sourceOnly ? members.bank[0] ?? null : caseIds.map(id => banksByCase.get(id)).find(Boolean) ?? null;
+    const invoice = kind === 'invoice' ? member as InvoiceMember
+      : sourceOnly ? members.invoice[0] ?? null : caseIds.map(id => invoicesByCase.get(id)).find(Boolean) ?? null;
+    return { id: member.id, oa, bank, invoice };
+  });
 }

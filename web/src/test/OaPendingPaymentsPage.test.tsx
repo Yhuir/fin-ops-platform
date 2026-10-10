@@ -93,6 +93,7 @@ const rowsPayload = {
         detailMode: "list",
         summaries: [
           {
+            workflowStatus: "completed",
             oaId: "oa-group-001",
             applicantName: "刘际涛",
             applicationType: "支付申请",
@@ -102,6 +103,7 @@ const rowsPayload = {
             relationCaseId: "case-group-001",
           },
           {
+            workflowStatus: "completed",
             oaId: "oa-group-002",
             applicantName: "刘际涛",
             applicationType: "支付申请",
@@ -111,6 +113,7 @@ const rowsPayload = {
             relationCaseId: "case-group-001",
           },
           {
+            workflowStatus: "completed",
             oaId: "oa-group-003",
             applicantName: "刘际涛",
             applicationType: "支付申请",
@@ -1058,17 +1061,18 @@ describe("OA pending payments page", () => {
     expect(within(paidRow).queryByRole("button", { name: "写回 OA 张三" })).not.toBeInTheDocument();
     const groupedRow = within(page).getByRole("row", { name: /刘际涛/ });
     const groupedCells = groupedRow.querySelectorAll(".oa-pending-payments-table-cell");
-    expect(groupedCells[0]).toHaveTextContent("4450.00");
+    expect(groupedCells[0]).toHaveTextContent("1690.00");
+    expect(groupedCells[0]).not.toHaveTextContent("4450.00");
     expect(groupedCells[0]).toHaveTextContent("共 3 条");
     expect(groupedCells[1]).toHaveTextContent("已支付");
     expect(within(page).queryByText("同步状态异常")).not.toBeInTheDocument();
     expect(groupedCells[1]).not.toHaveTextContent("OA写回状态");
     expect(groupedCells[1]).not.toHaveTextContent("写回失败");
-    expect(groupedCells[2]).toHaveTextContent("4450.00");
+    expect(groupedCells[2]).toHaveTextContent("3000.00");
     expect(groupedCells[2]).toHaveTextContent("共 2 笔");
-    expect(groupedCells[2]).not.toHaveTextContent("3000.00");
-    expect(within(page).getByText(/补充住宿费/)).toBeInTheDocument();
-    expect(within(page).getByText(/补充流水备注/)).toBeInTheDocument();
+    expect(groupedCells[2]).not.toHaveTextContent("4450.00");
+    expect(within(page).queryByText(/补充住宿费/)).not.toBeInTheDocument();
+    expect(within(page).queryByText(/补充流水备注/)).not.toBeInTheDocument();
     const noInvoiceRow = within(page).getByRole("row", { name: /王五/ });
     expect(noInvoiceRow.querySelector(".oa-pending-payments-empty-invoice-cell")).not.toBeNull();
     expect(within(noInvoiceRow).queryByText("开票日期为空")).not.toBeInTheDocument();
@@ -1527,12 +1531,15 @@ describe("OA pending payments page", () => {
 
     const readsBefore = fetchMock.mock.calls.length;
     await user.click(within(page).getByRole("button", { name: "展开配对关系，OA共 3 条" }));
-    const expansion = await screen.findByRole("region", {name:"配对关系"});
+    await waitFor(() => expect(document.querySelectorAll('tr[data-relation-group]')).toHaveLength(3));
+    expect(screen.queryByRole('region', { name: '配对关系' })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(fetchMock.mock.calls).toHaveLength(readsBefore);
-    expect(within(expansion).getAllByRole("button", {name:/详情$/})).toHaveLength(7);
-    await user.click(within(page).getByRole("button", { name: "收起配对关系，流水共 2 笔" }));
-    await waitFor(()=>expect(screen.queryByRole("region", {name:"配对关系"})).not.toBeInTheDocument());
+    const expandedRows = [...document.querySelectorAll('tr[data-relation-group]')] as HTMLElement[];
+    expect(expandedRows.map(item => item.querySelectorAll('td,th').length)).toEqual([4, 4, 4]);
+    expect(expandedRows.map(item => item.querySelector('.oa-pending-payments-oa-grid__amount')?.textContent)).toEqual([expect.stringContaining('1690.00'), '1980.00', '780.00']);
+    await user.click(within(page).getByRole("button", { name: "收起配对关系，OA共 3 条" }));
+    await waitFor(() => expect(document.querySelectorAll('tr[data-relation-group]')).toHaveLength(0));
     await user.click(within(page).getByRole("button", { name: "支出流水无需开票规则设置" }));
     await screen.findByRole("heading", { name: "支出流水无需开票规则设置" });
     expect(screen.queryByRole("heading", { name: "待找发票规则设置" })).not.toBeInTheDocument();
@@ -1796,4 +1803,136 @@ test('split original bank total and full chips stay inside the bank amount cell 
   expect(within(amountCell).queryByText('1497.22')).toBeNull();
   expect(screen.getAllByText('1497.22').length).toBeGreaterThan(0);
   expect(screen.queryByText('¥1000000.00')).toBeNull();
+});
+
+
+test("does not use a grouped OA aggregate as a member when source summaries are incomplete", async () => {
+  const grouped = rowsPayload.rows[1];
+  installOaPendingPaymentsFetch({ rowsPayload: { ...rowsPayload, rows: [{ ...grouped,
+    oa: { ...grouped.oa, summaries: grouped.oa.summaries?.slice(0, 1) },
+  }] } });
+  renderAuthenticatedAppAt('/oa-pending-payments');
+  await screen.findByTestId('oa-pending-payments-page');
+  expect(await screen.findByRole('alert')).toHaveTextContent('关系摘要不完整');
+  expect(screen.queryByText('4450.00', { exact: true })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /展开配对关系/ })).not.toBeInTheDocument();
+});
+
+test("retains an unlinked source OA whose formal relation count is zero", async () => {
+  const base = rowsPayload.rows[0];
+  installOaPendingPaymentsFetch({ rowsPayload: { ...rowsPayload, rows: [{ ...base,
+    oa: { ...base.oa, relationCount: 0 },
+    bankTransaction: { ...base.bankTransaction, primaryBankTransactionId: '', relationCount: 0, original_amount: '', original_transaction_count: 0 },
+    invoice: { ...base.invoice, primaryInvoiceId: '', relationCount: 0 },
+  }] } });
+  renderAuthenticatedAppAt('/oa-pending-payments');
+  expect(await screen.findByText('张三')).toBeVisible();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(screen.getByRole('row', { name: /张三/ }).querySelectorAll('td')).toHaveLength(4);
+});
+
+test("includes refund members without comparing them against the outflow original count", async () => {
+  const grouped = rowsPayload.rows[1];
+  const refund = { ...grouped.bankTransaction.summaries![0], bankTransactionId: 'bank-refund',
+    directionLabel: '收入', counterpartyName: '退回款项', amount: '50.00', original_amount: '50.00' };
+  installOaPendingPaymentsFetch({ rowsPayload: { ...rowsPayload, rows: [{ ...grouped,
+    bankTransaction: { ...grouped.bankTransaction, nonOutflowRelationEdges: [refund] },
+  }] } });
+  const user = userEvent.setup();
+  renderAuthenticatedAppAt('/oa-pending-payments');
+  await user.click(await screen.findByRole('button', { name: '展开配对关系，流水共 3 笔' }));
+  const rows = document.querySelectorAll('tr[data-relation-group]');
+  expect(rows).toHaveLength(3);
+  expect(rows[0].querySelector('.oa-pending-payments-bank-amount-line')).toHaveTextContent('3000.00');
+  expect(rows[1].querySelector('.oa-pending-payments-bank-amount-line')).toHaveTextContent('1450.00');
+  expect(rows[2].querySelector('.oa-pending-payments-bank-amount-line')).toHaveTextContent('50.00');
+  expect(rows[2]).toHaveTextContent('收入');
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+test("rejects missing original outflow members even when refund data is present", async () => {
+  const grouped = rowsPayload.rows[1];
+  const refund = { ...grouped.bankTransaction.summaries![0], bankTransactionId: 'bank-refund', directionLabel: '收入' };
+  installOaPendingPaymentsFetch({ rowsPayload: { ...rowsPayload, rows: [{ ...grouped,
+    bankTransaction: { ...grouped.bankTransaction, summaries: grouped.bankTransaction.summaries?.slice(0, 1), nonOutflowRelationEdges: [refund] },
+  }] } });
+  renderAuthenticatedAppAt('/oa-pending-payments');
+  expect(await screen.findByRole('alert')).toHaveTextContent('关系摘要不完整');
+  expect(screen.queryByRole('button', { name: /展开配对关系/ })).not.toBeInTheDocument();
+});
+
+test("rejects duplicate OA members instead of rendering duplicate rows", async () => {
+  const grouped = rowsPayload.rows[1];
+  installOaPendingPaymentsFetch({ rowsPayload: { ...rowsPayload, rows: [{ ...grouped,
+    oa: { ...grouped.oa, summaries: [grouped.oa.summaries![0], grouped.oa.summaries![0], grouped.oa.summaries![2]] },
+  }] } });
+  renderAuthenticatedAppAt('/oa-pending-payments');
+  expect(await screen.findByRole('alert')).toHaveTextContent('关系摘要不完整');
+  expect(screen.queryByRole('button', { name: /展开配对关系/ })).not.toBeInTheDocument();
+});
+
+test("preserves the canonical single OA owner in every related bank and invoice row", async () => {
+  const base = rowsPayload.rows[0];
+  const grouped = rowsPayload.rows[1];
+  const banks = grouped.bankTransaction.summaries!.map((member, index) => ({ ...member, relationCaseId: `owner-case-${index}` }));
+  const invoices = grouped.invoice.summaries!.map((member, index) => ({ ...member, relationCaseId: `owner-case-${index}` }));
+  installOaPendingPaymentsFetch({ rowsPayload: { ...rowsPayload, rows: [{ ...grouped,
+    oa: { ...base.oa, primaryOaId: base.oa.id, relationCount: 1, hasMultiple: false,
+      summaries: [{ ...base.oa, oaId: base.oa.id }],
+    },
+    bankTransaction: { ...grouped.bankTransaction, summaries: banks },
+    invoice: { ...grouped.invoice, summaries: invoices },
+  }] } });
+  const user = userEvent.setup();
+  renderAuthenticatedAppAt('/oa-pending-payments');
+  await user.click(await screen.findByRole('button', { name: '展开配对关系，流水共 2 笔' }));
+  let rows = document.querySelectorAll('tr[data-relation-group]');
+  expect(rows).toHaveLength(2);
+  for (const row of rows) {
+    expect(row.querySelectorAll('td')).toHaveLength(4);
+    const oaCell = row.querySelector('.oa-pending-payments-table-cell--oa') as HTMLElement;
+    expect(oaCell).toHaveTextContent('张三');
+    expect(oaCell).toHaveTextContent('红河卷烟厂能源管理系统运维服务');
+    expect(oaCell).toHaveTextContent('红河卷烟厂运维服务保证金');
+    expect(oaCell).toHaveTextContent('中招国际招标有限公司云南分公司');
+    expect(oaCell).toHaveTextContent('10000.00');
+    expect(within(oaCell).getByRole('button', { name: '查看 OA 张三 详情' })).toBeEnabled();
+  }
+  expect(rows[0].querySelector('.oa-pending-payments-bank-amount-line')).toHaveTextContent('3000.00');
+  expect(rows[1].querySelector('.oa-pending-payments-bank-amount-line')).toHaveTextContent('1450.00');
+  await user.click(screen.getByRole('button', { name: '展开配对关系，发票共 2 张' }));
+  rows = document.querySelectorAll('tr[data-relation-group]');
+  expect(rows).toHaveLength(2);
+  for (const row of rows) expect(row.querySelector('.oa-pending-payments-table-cell--oa')).toHaveTextContent('张三');
+  expect(rows[0].querySelector('.oa-pending-payments-invoice-amount-line')).toHaveTextContent('3000.00');
+  expect(rows[1].querySelector('.oa-pending-payments-invoice-amount-line')).toHaveTextContent('1450.00');
+  expect(rows[1].querySelector('.oa-pending-payments-bank-amount-line')).toHaveTextContent('1450.00');
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+test("keeps multiple OA owners isolated by case when bank and invoice orders differ", async () => {
+  const grouped = rowsPayload.rows[1];
+  const names = ['甲申请人', '乙申请人', '丙申请人'];
+  const oa = grouped.oa.summaries!.map((member, index) => ({ ...member, applicantName: names[index], relationCaseId: `isolated-case-${index}` }));
+  const banks = grouped.bankTransaction.summaries!.map((member, index) => ({ ...member, relationCaseId: `isolated-case-${index}` }));
+  const invoices = grouped.invoice.summaries!.map((member, index) => ({ ...member, relationCaseId: `isolated-case-${index}` })).reverse();
+  installOaPendingPaymentsFetch({ rowsPayload: { ...rowsPayload, rows: [{ ...grouped,
+    oa: { ...grouped.oa, summaries: oa },
+    bankTransaction: { ...grouped.bankTransaction, summaries: banks },
+    invoice: { ...grouped.invoice, summaries: invoices },
+  }] } });
+  const user = userEvent.setup();
+  renderAuthenticatedAppAt('/oa-pending-payments');
+  await user.click(await screen.findByRole('button', { name: '展开配对关系，流水共 2 笔' }));
+  let rows = document.querySelectorAll('tr[data-relation-group]');
+  expect(rows[0].querySelector('.oa-pending-payments-table-cell--oa')).toHaveTextContent('甲申请人');
+  expect(rows[1].querySelector('.oa-pending-payments-table-cell--oa')).toHaveTextContent('乙申请人');
+  expect(screen.queryByText('丙申请人')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: '展开配对关系，发票共 2 张' }));
+  rows = document.querySelectorAll('tr[data-relation-group]');
+  expect(rows[0].querySelector('.oa-pending-payments-table-cell--oa')).toHaveTextContent('乙申请人');
+  expect(rows[0].querySelector('.oa-pending-payments-bank-amount-line')).toHaveTextContent('1450.00');
+  expect(rows[1].querySelector('.oa-pending-payments-table-cell--oa')).toHaveTextContent('甲申请人');
+  expect(rows[1].querySelector('.oa-pending-payments-bank-amount-line')).toHaveTextContent('3000.00');
+  expect(screen.queryByText('丙申请人')).not.toBeInTheDocument();
 });

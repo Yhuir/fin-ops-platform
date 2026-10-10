@@ -122,3 +122,18 @@ test("failed lazy chunk preserves navigation and manual reload recovers", async 
   await expect(page.getByRole("heading", { name: "进项发票使用情况", exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test("retired output member DTO shows an error in an old tab and reload reads the new native-row contract", async ({ page }) => {
+  await installDeterministicApiMocks(page, { sessionMode: 'admin' });
+  await page.goto(`${origin}/fin-ops/bank-details`);
+  await expect(page.getByRole('heading', { name: '银行明细', exact: true })).toBeVisible();
+  publish(candidate);
+  await page.getByRole('link', { name: '销项发票收款情况', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('配对关系摘要不完整');
+  await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: '销项发票收款情况', exact: true })).toBeVisible();
+  await page.locator('.relation-count-button').filter({ hasText: /张/ }).first().click();
+  await expect(page.locator('tr[data-relation-group]')).toHaveCount(2);
+  await expect(page.getByRole('region', { name: '配对关系', exact: true })).toHaveCount(0);
+});

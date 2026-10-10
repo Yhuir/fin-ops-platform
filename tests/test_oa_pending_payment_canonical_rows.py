@@ -84,6 +84,29 @@ class OaPendingPaymentProjectionRowsTests(unittest.TestCase):
         self.assertEqual([item["oaId"] for item in rows[0]["oa"]["summaries"]], [may.id, june.id])
         self.assertEqual(rows[0]["oa"]["amount"], "300.00")
 
+    def test_each_oa_member_retains_original_table_fields_without_group_values(self) -> None:
+        first = self._oa("oa-first", "40.00")
+        second = self._oa("oa-second", "60.00")
+        second.applicant = "第二申请人"
+        second.project_name_display = "第二项目"
+        second.reason = "第二付款原因"
+        second.counterparty_name = "第二供应商"
+        second.workflow_status = "in_progress"
+        second.detail_fields = {"申请时间": "2026-05-22 11:30:00"}
+        rows = self._build(records=[first, second],
+                           relations=[self._relation("members", [first.id, second.id])])
+
+        members = rows[0]["oa"]["summaries"]
+        self.assertEqual([member["amount"] for member in members], ["40.00", "60.00"])
+        self.assertEqual(rows[0]["oa"]["amount"], "100.00")
+        self.assertEqual(members[1]["applicantName"], "第二申请人")
+        self.assertEqual(members[1]["projectName"], "第二项目")
+        self.assertEqual(members[1]["reason"], "第二付款原因")
+        self.assertEqual(members[1]["counterpartyName"], "第二供应商")
+        self.assertEqual(members[1]["workflowStatus"], "in_progress")
+        self.assertEqual(members[1]["applicationTime"], "2026-05-22 11:30:00")
+        self.assertEqual(members[1]["relationCaseId"], "members")
+
     def test_workflow_groups_have_distinct_stable_identities(self) -> None:
         relation = self._relation("case-states", ["oa-done", "oa-pending", "bank-1"])
         bank = self._bank("bank-1", "100.00")

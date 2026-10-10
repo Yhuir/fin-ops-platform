@@ -57,7 +57,7 @@ test('invoice groups persist after pointer leaves, retain ten columns, and share
   }
   await parent.getByRole('button', { name: /关联OA/ }).click();
   await expect(table.locator('tr[data-relation-group]')).toHaveCount(2);
-  await expect(page.getByRole('region', { name: '配对关系', exact: true })).toBeVisible();
+  await expect(table.locator('tr[data-relation-group] th, tr[data-relation-group] td')).toHaveCount(20);
   await expect(first).toHaveAttribute('aria-expanded', 'false');
   await second.click();
   await expect(page.getByRole('region', { name: '配对关系', exact: true })).toHaveCount(0);
@@ -82,12 +82,11 @@ test('source group survives a rapid close and reopen without losing its parent o
   await sourceButtons.first().click();
   await sourceButtons.first().click();
   await sourceButtons.nth(1).click();
-  const motion = page.locator('.relation-expansion-motion');
-  await expect.poll(() => motion.evaluate(node => node.getAnimations().length)).toBe(0);
+  await expect.poll(() => page.locator('.relation-motion-clip').evaluateAll(nodes => nodes.flatMap(node => node.getAnimations()).length)).toBe(0);
   await expect(page.locator('tr[data-relation-group]')).toHaveCount(2);
   const groups = await page.locator('tr[data-relation-group]').evaluateAll(rows => rows.map(row => row.getAttribute('data-relation-group')));
   expect(groups).toEqual(['second-parent', 'second-parent']);
-  await page.getByRole('region', { name: '配对关系', exact: true }).getByRole('button', { name: '收起', exact: true }).click();
+  await sourceButtons.nth(1).click();
   await expect(page.locator('tr[data-relation-group]')).toHaveCount(0);
   await expect(sourceButtons.nth(1)).toBeFocused();
 });

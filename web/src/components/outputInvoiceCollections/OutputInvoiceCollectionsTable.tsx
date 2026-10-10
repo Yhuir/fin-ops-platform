@@ -2,9 +2,10 @@ import BankSplitChips from "../../features/bankSplits/BankSplitChips";
 import { ListBox, Select } from "@heroui/react";
 import { ArrowUpDown, Info } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
-import RelationGroupExpansion, { RelationCountButton } from "../common/RelationGroupExpansion";
-import { useRelationExpansion } from "../../hooks/useRelationExpansion";
-import { outputInvoiceRelationColumns } from "../../features/outputInvoiceCollections/relationExpansion";
+import { RelationCountButton } from "../common/RelationCountButton";
+import RelationRowsMotion from "../common/RelationRowsMotion";
+import { useRelationExpansion, useRelationRowExpansion } from "../../hooks/useRelationExpansion";
+import { outputInvoiceDisplayRows } from "../../features/outputInvoiceCollections/relationExpansion";
 
 import type {
   OutputInvoiceCollectionDetailTarget,
@@ -241,9 +242,13 @@ function DataRow({
   onToggleCellExpand: (rowId: string, cellId: string) => void;
   onOpenDetail: (target: OutputInvoiceCollectionDetailTarget) => void;
 }) {
+  const root = row;
+  const presence = useRelationRowExpansion(root.id, expansion);
+  const displays = presence.view === 'invoice' || presence.view === 'bank' ? outputInvoiceDisplayRows(root, presence.view) : [root];
+  const renderRow = (row: OutputInvoiceCollectionRow, additional = false) => {
   const bank = row.bank.primary;
-  const invoiceRelationTarget = row.invoiceRelations.relationCount > 1;
-  const bankRelationTarget = (row.bank.originalTransactionCount ?? 0) > 1;
+  const invoiceRelationTarget = !additional && root.invoiceRelations.relationCount > 1;
+  const bankRelationTarget = !additional && (root.bank.originalTransactionCount ?? 0) > 1;
   const statusCode = row.collectionStatus.code || "pending_collection";
   const showCollectionAmounts = ["pending_collection", "partial_collected", "collected"].includes(statusCode);
   const polarity = invoicePolarityPresentation(row.invoice.polarity);
@@ -254,22 +259,21 @@ function DataRow({
     ...reversalTargetInvoiceNos,
   ].filter(Boolean).join(" ");
 
-  return (
-    <Fragment><FinanceTableRow className="output-invoice-collections-table-row" dataRelationGroup={expansion.rowId === row.id ? row.id : undefined} id={row.id} textValue={displayInvoiceNo(row)}>
+  return <FinanceTableRow className="output-invoice-collections-table-row" dataRelationGroup={presence.view ? root.id : undefined} id={additional ? `${root.id}-${presence.view}-${row.invoice.id}-${bank?.id ?? ""}` : root.id} textValue={displayInvoiceNo(row)}>
       <FinanceTableCell className="output-invoice-collections-table-cell" columnRole="identity" textValue={displayInvoiceNo(row)}>
         <span className="output-invoice-collections-inline-row">
           <TextLine strong value={displayInvoiceNo(row)} />
           <IconDetailButton
             label={`查看发票 ${displayInvoiceNo(row)} 详情`}
-            onClick={() => onOpenDetail({ kind: "invoice", id: row.invoice.id, rowId: row.id })}
+            onClick={() => onOpenDetail({ kind: "invoice", id: row.invoice.id, rowId: root.id })}
           />
         </span>
         <span className="output-invoice-collections-tag-row">
           <FinanceTag>{dateOnly(row.invoice.issueDate)}</FinanceTag>
           <FinanceTag tone={polarity.tone}>{polarity.label}</FinanceTag>
           {invoiceRelationTarget ? (
-            <RelationCountButton kind="invoice" count={row.invoiceRelations.relationCount}
-              expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id, 'sources')} />
+            <RelationCountButton kind="invoice" count={root.invoiceRelations.relationCount}
+              expanded={presence.view === 'invoice' && presence.expanded} onClick={() => expansion.toggle(root.id, 'invoice')} />
           ) : null}
         </span>
       </FinanceTableCell>
@@ -326,29 +330,29 @@ function DataRow({
               {bank.detailAvailable ? (
                 <IconDetailButton
                   label={`查看流水 ${bank.counterpartyName || bank.id} 详情`}
-                  onClick={() => onOpenDetail({ kind: "bank", id: bank.id, rowId: row.id })}
+                  onClick={() => onOpenDetail({ kind: "bank", id: bank.id, rowId: root.id })}
                 />
               ) : null}
             </span>
             <span className="output-invoice-collections-tag-row">
               <FinanceTag>{dateOnly(bank.tradeTime)}</FinanceTag>
               {bankRelationTarget ? (
-                <RelationCountButton kind="bank" count={row.bank.originalTransactionCount!}
-                  expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id, 'sources')} />
+                <RelationCountButton kind="bank" count={root.bank.originalTransactionCount!}
+                  expanded={presence.view === 'bank' && presence.expanded} onClick={() => expansion.toggle(root.id, 'bank')} />
               ) : null}
             </span>
           </>
         ) : <EmptyValue />}
       </FinanceTableCell>
-      <FinanceTableCell className="output-invoice-collections-table-cell output-invoice-collections-table-cell--amount output-invoice-collections-table-cell--small-border" columnRole="amount" textValue={row.bank.originalAmount || "—"}>
+      <FinanceTableCell className="output-invoice-collections-table-cell output-invoice-collections-table-cell--amount output-invoice-collections-table-cell--small-border" columnRole="amount" textValue={bank?.originalAmount || "—"}>
         {bank ? (
           <>
-            <TextLine numeric strong value={formatMoney(row.bank.originalAmount, "—")} />
+            <TextLine numeric strong value={formatMoney(bank.originalAmount, "—")} />
             <span className="output-invoice-collections-tag-row output-invoice-collections-tag-row--right">
               <FinanceTag tone={bank.directionLabel === "收入" ? "success" : "neutral"}>{bank.directionLabel || "收入"}</FinanceTag>
               <BankAccountValue value={[bank.bankShortName || bank.bankName, bank.accountLast4].filter(Boolean).join(" ") || "—"} />
             </span>
-            {row.bank.bankSplitParts?.length ? <BankSplitChips parts={row.bank.bankSplitParts} /> : null}
+            {bank.bankSplitParts?.length ? <BankSplitChips parts={bank.bankSplitParts} /> : null}
           </>
         ) : <EmptyValue />}
       </FinanceTableCell>
@@ -361,14 +365,13 @@ function DataRow({
           />
         ) : <EmptyValue />}
       </FinanceTableCell>
-    </FinanceTableRow>
-    {expansion.rowId === row.id && <FinanceTableRow id={`${row.id}:relation`} className="relation-expansion-row" dataRelationGroup={row.id}><FinanceTableCell columnRole="description" colSpan={8}>
-      <RelationGroupExpansion columns={outputInvoiceRelationColumns(row)} expanded={expansion.expanded}
-        onClose={() => expansion.toggle(row.id, 'sources')} onExited={expansion.exited}
-        onOpenDetail={target => onOpenDetail({ ...target, rowId: row.id })} />
-    </FinanceTableCell></FinanceTableRow>}
-    </Fragment>
-  );
+    </FinanceTableRow>;
+  };
+  return <Fragment>{renderRow(displays[0])}
+    {presence.view && <RelationRowsMotion key={presence.view} expanded={presence.expanded} onExited={presence.onExited}>
+      {displays.slice(1).map((display, index) => <Fragment key={`${display.invoice.id}:${display.bank.primary?.id}:${index}`}>{renderRow(display, true)}</Fragment>)}
+    </RelationRowsMotion>}
+  </Fragment>;
 }
 
 function SortButton({ label, onClick }: { label: string; onClick: () => void }) {

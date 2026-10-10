@@ -1,6 +1,7 @@
 import { expect, test, type Page, type TestInfo } from "./fixtures/strictTest";
 
-import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+import { installDeterministicApiMocks, pendingInvoiceRowsPayload } from "./fixtures/apiMocks";
+import { pendingAcquisitionFixture } from "../src/test/pendingInvoiceFixtures";
 import { createOperationLatencyRecorder } from "./fixtures/operationLatency";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { dragSelectVisibleText } from "./fixtures/textSelection";
@@ -94,4 +95,66 @@ test("transaction time chips remain visible inside identity cells at narrow desk
   }));
   expect(geometry.length).toBeGreaterThan(0);
   expect(geometry.every((item) => item.fits && Boolean(item.text))).toBe(true);
+});
+
+
+test("related invoices stay in nine original columns, use member amounts and preserve case context", async ({ page }, info) => {
+  const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
+  const payload = pendingInvoiceRowsPayload(true);
+  const row: any = payload.rows[0];
+  const firstCase = "CASE-202603-101";
+  const secondCase = "CASE-OTHER";
+  row.bank_transaction.original_amount = "58000.00";
+  row.bank_transactions = {
+    primary: { ...row.bank_transaction, relation_case_id: firstCase },
+    relation_count: 2, linked_relation_count: 2, has_multiple: true, detail_mode: "list",
+    original_amount: "58300.00", original_transaction_count: 2,
+    summaries: [{ ...row.bank_transaction, relation_case_id: firstCase },
+      { ...row.bank_transaction, id: "bank-extra", counterparty_name: "另一配对供应商", amount: "300.00", original_amount: "300.00", debit_amount: "300.00", relation_case_id: secondCase }],
+    payment_summary: { paid_total: "58300.00" },
+  };
+  const invoice = row.input_invoices.summaries[0];
+  row.input_invoices = { ...row.input_invoices, relation_count: 3, has_multiple: true,
+    summaries: [invoice,
+      { ...invoice, id: "invoice-extra-red", invoice_no: "EXP-RED", total_with_tax: "-20.00" },
+      { ...invoice, id: "invoice-extra-other", invoice_no: "EXP-OTHER", seller_name: "另一配对供应商", total_with_tax: "100.00", relation_case_id: secondCase }],
+  };
+  const oa = row.oa.primary;
+  row.oa = { ...row.oa, relation_count: 2, has_multiple: true, summaries: [oa,
+    { ...oa, id: "oa-extra", applicant: "另一申请人", relation_case_id: secondCase }],
+  };
+  row.relation_case_ids = [firstCase, secondCase];
+  (payload as any).acquisition_summary = pendingAcquisitionFixture(payload.rows);
+  await page.route("**/api/pending-invoices/rows**", route => route.fulfill({ json: payload }));
+  await page.goto("/pending-invoices");
+  const table = page.getByRole("grid", { name: "待找发票四区表" });
+  const invoiceButton = table.getByRole("button", { name: "展开配对关系，发票共 3 张" });
+  await expect(invoiceButton).toBeVisible();
+  const requests = api.calls.length;
+  await invoiceButton.click();
+  const rows = table.locator("tr[data-relation-group]");
+  await expect(rows).toHaveCount(3);
+  await expect(page.getByRole("region", { name: "配对关系" })).toHaveCount(0);
+  for (const item of await rows.all()) await expect(item.locator("td,th")).toHaveCount(9);
+  await expect(rows.locator(".relation-motion-clip")).toHaveCount(18);
+  await expect(rows.nth(1).locator(".pending-invoices-col-invoice-no")).toContainText("EXP-RED");
+  await expect(rows.nth(1).locator(".pending-invoices-col-invoice-amount")).toHaveText("-20.00");
+  await expect(rows.nth(1).locator(".pending-invoices-col-amount")).toContainText("58000.00");
+  await expect(rows.nth(2).locator(".pending-invoices-col-oa-applicant")).toContainText("另一申请人");
+  await expect(rows.nth(2).locator(".pending-invoices-col-amount")).toContainText("300.00");
+  await expect(rows.nth(2).locator(".pending-invoices-col-invoice-amount")).toHaveText("100.00");
+  const geometry = await rows.evaluateAll(nodes => nodes.map(node => [...node.querySelectorAll("td,th")].map(cell => ({ x: cell.getBoundingClientRect().x, width: cell.getBoundingClientRect().width }))));
+  expect(geometry[1]).toEqual(geometry[0]);
+  expect(geometry[2]).toEqual(geometry[0]);
+  expect(api.calls.length).toBe(requests);
+  await page.screenshot({ path: info.outputPath("pending-original-column-expansion.png"), animations: "disabled" });
+  await table.getByRole("button", { name: "展开配对关系，流水共 2 笔" }).click();
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(1).locator(".pending-invoices-col-counterparty")).toContainText("另一配对供应商");
+  await table.getByRole("button", { name: "展开配对关系，OA共 2 条" }).click();
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(1).locator(".pending-invoices-col-oa-applicant")).toContainText("另一申请人");
+  await table.getByRole("button", { name: "收起配对关系，OA共 2 条" }).click();
+  await expect(rows).toHaveCount(0);
+  expect(api.calls.length).toBe(requests);
 });

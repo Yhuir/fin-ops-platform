@@ -373,7 +373,7 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         )
         self.assertEqual(rows["ambiguous-red"]["invoiceRelations"]["summaries"], [])
 
-    def test_inline_sources_are_projected_from_the_authorized_snapshot(self) -> None:
+    def test_member_rows_keep_authorized_bank_identity_without_card_projection(self) -> None:
         invoice = self._invoice("invoice", "4001", total_with_tax="100.00")
         bank = self._bank("bank", "100.00", TransactionDirection.INFLOW)
         assembler = self._service(
@@ -395,13 +395,93 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         row_id = assembler.list_rows()["rows"][0]["id"]
 
         row = canonical.row_by_id(row_id)
-        sources = {column["kind"]: column for column in row["relationSources"]}
-        self.assertEqual(sources["bank"]["count"], 1)
-        self.assertEqual(sources["bank"]["members"][0]["id"], "bank")
-        self.assertEqual(sources["invoice"]["count"], 1)
-        self.assertEqual(sources["invoice"]["members"][0]["id"], "invoice")
-        self.assertEqual(sources["oa"]["members"], [])
-        self.assertEqual(sources["bank"]["members"][0]["relationIds"], ["case"])
+        self.assertNotIn("relationSources", row)
+        self.assertEqual(row["invoice"]["id"], "invoice")
+        self.assertEqual(row["bankTransactions"]["original_transaction_count"], 1)
+        bank_member = row["bankTransactions"]["summaries"][0]
+        self.assertEqual(bank_member["bankTransactionId"], "bank")
+        self.assertEqual(bank_member["original_amount"], "100.00")
+        self.assertEqual(bank_member["direction"], "inflow")
+        self.assertEqual(bank_member["relationCaseId"], "case")
+
+    def test_expanded_members_keep_own_invoice_status_and_bank_context_with_one_projection_each(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        blue = self._invoice("blue-member", "26532000000809302711", total_with_tax="100.00")
+        red = self._invoice("red-member", "26532000000808367761", amount="-45", tax_amount="-5",
+                            total_with_tax="-50.00", is_positive_invoice="否",
+                            remark="被红冲蓝字数电发票号码：26532000000809302711")
+        red.tax_rate = "13%"
+        red.taxable_item_name = "红字服务"
+        other = self._invoice("other-member", "OTHER", total_with_tax="180.00")
+        bank = self._bank("other-bank", "180.00", TransactionDirection.INFLOW)
+        assembler = self._service(invoices=[blue, red, other], transactions=[bank])
+        groups = assembler._invoice_groups(month=None, context=assembler._query_context())
+        group_by_id = {group["primary"].id: group for group in groups}
+        blue_group, red_group = group_by_id[blue.id], group_by_id[red.id]
+        blue_group["supporting_group_keys"] = [red_group["group_key"]]
+        red_group["supporting_group_keys"] = [blue_group["group_key"]]
+        snapshot = SimpleNamespace(
+            groups=[blue_group, red_group],
+            supporting_groups=[group_by_id[other.id]],
+            transactions=[bank], oa_records=[], bank_account_mappings=[],
+            relations=[{**self._relation("other-case", [other.id, bank.id], ["invoice", "bank"]), "status": "active"}],
+        )
+        original = assembler._row_payload
+        assembler._row_payload = Mock(wraps=original)
+        canonical = OutputInvoiceCollectionCanonicalQueryService(repository=None, row_assembler=assembler)
+
+        rows = canonical._rows_from_snapshot(snapshot)
+
+        self.assertEqual(assembler._row_payload.call_count, 2)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(assembler.summary_for_rows(rows), assembler.summary_for_rows([
+            original(blue_group, [blue_group, red_group], context=assembler._query_context()),
+            original(red_group, [red_group, blue_group], context=assembler._query_context()),
+        ]))
+        by_id = {row["invoiceId"]: row for row in rows}
+        members = by_id[blue.id]["invoiceRelations"]["summaries"]
+        self.assertEqual([item["invoiceId"] for item in members], [blue.id, red.id])
+        self.assertEqual([item["totalWithTax"] for item in members], ["100.00", "-50.00"])
+        self.assertEqual([item["taxRate"] for item in members], ["6%", "13%"])
+        self.assertEqual([item["isPositiveInvoice"] for item in members], ["是", "否"])
+        self.assertEqual(members[1]["taxAmount"], "-5.00")
+        self.assertEqual(members[1]["amountWithoutTax"], "-45.00")
+        self.assertEqual(members[1]["taxableItemName"], "红字服务")
+        self.assertEqual(members[1]["relationCaseId"], "invoice-remark-reversal")
+        self.assertEqual([item["memberRow"]["collectionStatus"]["code"] for item in members],
+                         ["reversed_by_red", "reverses_blue"])
+        self.assertTrue(all(item["memberRow"]["bankTransactions"]["summaries"] == [] for item in members))
+        self.assertTrue(all("invoiceRelations" not in item["memberRow"] for item in members))
+        self.assertTrue(all("relationSources" not in row for row in rows))
+
+    def test_supporting_member_does_not_expand_beyond_the_page_snapshot(self) -> None:
+        from types import SimpleNamespace
+
+        blue = self._invoice("blue", "26532000000809302711")
+        red = self._invoice("red", "26532000000808367761", amount="-94.34", tax_amount="-5.66",
+                            total_with_tax="-100", is_positive_invoice="否",
+                            remark="被红冲蓝字数电发票号码：26532000000809302711")
+        assembler = self._service(invoices=[blue, red])
+        groups = assembler._invoice_groups(month=None, context=assembler._query_context())
+        by_id = {group["primary"].id: group for group in groups}
+        blue_group, red_group = by_id[blue.id], by_id[red.id]
+        red_group["supporting_group_keys"] = [blue_group["group_key"]]
+        blue_group["supporting_group_keys"] = [red_group["group_key"], "another-red-outside-page"]
+        blue_group.update(status_code="reversed_by_red", collected_amount="0", pending_amount="0")
+        red_group.update(status_code="reverses_blue", collected_amount="0", pending_amount="0")
+        snapshot = SimpleNamespace(groups=[red_group], supporting_groups=[blue_group], transactions=[],
+                                   relations=[], bank_account_mappings=[])
+        canonical = OutputInvoiceCollectionCanonicalQueryService(repository=None, row_assembler=assembler)
+
+        rows = canonical._rows_from_snapshot(snapshot)
+
+        self.assertEqual(len(rows), 1)
+        members = rows[0]["invoiceRelations"]["summaries"]
+        self.assertEqual([member["invoiceId"] for member in members], [red.id, blue.id])
+        self.assertEqual([member["memberRow"]["collectionStatus"]["code"] for member in members],
+                         ["reverses_blue", "reversed_by_red"])
 
     def test_page_size_is_bounded(self) -> None:
         service = self._service(invoices=[])

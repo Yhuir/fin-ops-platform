@@ -40,13 +40,18 @@ function collectionStatusRow({
 }) {
   const hasBank = bankRelationCount > 0;
   const invoiceId = `invoice-${id}`;
+  const bankMembers = Array.from({ length: bankRelationCount }, (_, index) => ({
+    id: index === 0 ? `bank-${id}` : `bank-${id}-${index}`,
+    counterparty_name: "云南驰林科技有限公司",
+    trade_time: `2026-06-06 10:3${index}:00`,
+    amount: (Number(collectedAmount) / bankRelationCount).toFixed(2),
+    original_amount: (Number(collectedAmount) / bankRelationCount).toFixed(2),
+    direction: "inflow", direction_label: "收入",
+    bank_name: "建设银行", bank_short_name: "建行", account_last4: "8106",
+    summary: `第${index + 1}笔客户回款`, remark: "销项收款", relation_status: "linked",
+  }));
   return {
     id,
-    relationSources: [
-      {kind:'invoice',count:1,members:[{id:invoiceId,title:displayNo,amount:totalWithTax,detailAvailable:true}]},
-      {kind:'oa',count:0,members:[]},
-      {kind:'bank',count:bankRelationCount,members:Array.from({length:bankRelationCount},(_,index)=>({id:`bank-${id}-${index}`,title:'云南驰林科技有限公司',amount:collectedAmount,detailAvailable:true}))},
-    ],
     invoice_id: invoiceId,
     invoice_identity_key: `id:${invoiceId}`,
     invoice: {
@@ -76,26 +81,12 @@ function collectionStatusRow({
     bank: {
       original_amount: collectedAmount,
       original_transaction_count: bankRelationCount,
-      primary: hasBank ? {
-        id: `bank-${id}`,
-        counterparty_name: "云南驰林科技有限公司",
-        trade_time: "2026-06-06 10:30:00",
-        amount: collectedAmount,
-        original_amount: collectedAmount,
-        direction: "inflow",
-        direction_label: "收入",
-        bank_name: "建设银行",
-        bank_short_name: "建行",
-        account_last4: "8106",
-        summary: "客户回款",
-        remark: "销项收款",
-        relation_status: "linked",
-      } : null,
+      primary: bankMembers[0] ?? null,
       relation_count: bankRelationCount,
       has_multiple: bankRelationCount > 1,
       received_total: collectedAmount,
       detail_mode: bankRelationCount > 1 ? "list" : hasBank ? "single" : "none",
-      summaries: [],
+      summaries: bankMembers,
     },
     invoice_relations: {
       primary: null,
@@ -343,16 +334,17 @@ const rowsPayload = {
 
 function jsonResponse(payload: unknown, status = 200) {
   if (payload && typeof payload === 'object' && 'rows' in payload && Array.isArray(payload.rows)) {
-    payload = {...payload, rows: payload.rows.map((row: any) => {
-      const invoices = new Map<string, any>();
-      invoices.set(row.invoice_id, {...row.invoice, id:row.invoice_id});
-      for (const member of row.invoice_relations.summaries) invoices.set(member.id, member);
-      return {...row, relationSources: row.relationSources ?? [
-        {kind:'invoice',count:invoices.size,members:[...invoices.values()].map(item=>({id:item.id,title:item.display_no,amount:item.total_with_tax,detailAvailable:true}))},
-        {kind:'oa',count:0,members:[]},
-        {kind:'bank',count:row.bank.summaries.length,members:row.bank.summaries.map((item:any)=>({id:item.id,title:item.counterparty_name,amount:item.original_amount,detailAvailable:true}))},
-      ]};
-    })};
+    const sourceRows = new Map([...rowsPayload.rows, ...payload.rows].map((row: any) => [row.invoice_id, row]));
+    payload = { ...payload, rows: payload.rows.map((row: any) => {
+      const summaries = row.invoice_relations.summaries.map((summary: any) => {
+        const source = sourceRows.get(summary.id);
+        if (!source) throw new Error(`Missing output invoice fixture member ${summary.id}`);
+        return { ...source.invoice, ...summary, memberRow: {
+          collectionStatus: source.collection_status, bankTransactions: source.bank,
+        } };
+      }).sort((left: any, right: any) => Number(right.id === row.invoice_id) - Number(left.id === row.invoice_id));
+      return { ...row, invoice_relations: { ...row.invoice_relations, summaries } };
+    }) };
   }
   return new Response(JSON.stringify(payload), {
     status,
@@ -603,7 +595,7 @@ describe("销项发票收款情况", () => {
     expect(within(collectedRow).getByRole("button", { name: "展开配对关系，流水共 2 笔" })).toBeVisible();
     const bankAmountCell = collectedRow.querySelectorAll("td")[6] as HTMLElement;
     const bankMetadata = bankAmountCell.querySelector(".output-invoice-collections-tag-row--right") as HTMLElement;
-    expect(bankAmountCell.querySelector(".output-invoice-collections-table-text--numeric")).toHaveTextContent("1020032.00");
+    expect(bankAmountCell.querySelector(".output-invoice-collections-table-text--numeric")).toHaveTextContent("510016.00");
     expect(within(bankMetadata).getByText("收入")).toBeVisible();
     expect(bankMetadata.querySelector(".bank-account-value")).toHaveTextContent("建行");
     expect(bankMetadata.querySelector(".bank-account-value")).not.toHaveTextContent("建设银行");
@@ -726,6 +718,29 @@ describe("销项发票收款情况", () => {
     expect(screen.getByRole("button", { name: "筛选内容导出" })).toBeDisabled();
   });
 
+  test("共两笔流水仅增加一条原表格行且同额不同身份不会合并", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock();
+    renderAuthenticatedAppAt('/output-invoice-collections');
+    const table = await screen.findByRole('grid', {name:'销项发票收款情况表'});
+    const countBefore = table.querySelectorAll('tbody tr').length;
+    const readsBefore = fetchMock.mock.calls.length;
+    await user.click(within(table).getByRole('button', {name:'展开配对关系，流水共 2 笔'}));
+    const members = Array.from(table.querySelectorAll('tr[data-relation-group="output-collected-multiple"]')) as HTMLElement[];
+    expect(members).toHaveLength(2);
+    expect(table.querySelectorAll('tbody tr')).toHaveLength(countBefore + 1);
+    expect(members.map(member => member.querySelectorAll('td').length)).toEqual([8,8]);
+    expect(members.map(member => member.querySelectorAll('td')[6].textContent)).toEqual([
+      expect.stringContaining('510016.00'), expect.stringContaining('510016.00'),
+    ]);
+    expect(members[0].querySelectorAll('td')[7]).toHaveTextContent('第1笔客户回款');
+    expect(members[1].querySelectorAll('td')[7]).toHaveTextContent('第2笔客户回款');
+    expect(within(members[1]).getByRole('button', {name:/查看流水/})).toBeVisible();
+    expect(fetchMock.mock.calls).toHaveLength(readsBefore);
+    await user.click(within(members[0]).getByRole('button', {name:'收起配对关系，流水共 2 笔'}));
+    await waitFor(() => expect(table.querySelectorAll('tbody tr')).toHaveLength(countBefore));
+  });
+
   test("详情只读取统一事实源与正式关联关系", async () => {
     const fetchMock = installFetchMock();
     const user = userEvent.setup();
@@ -745,11 +760,19 @@ describe("销项发票收款情况", () => {
 
     const readsBefore = fetchMock.mock.calls.length;
     await user.click(screen.getByRole("button", { name: "展开配对关系，发票共 2 张" }));
-    const expansion = await screen.findByRole("region", { name: "配对关系" });
+    const table = screen.getByRole("grid", { name: "销项发票收款情况表" });
+    const members = Array.from(table.querySelectorAll('tr[data-relation-group="output-blue"]')) as HTMLElement[];
+    expect(members).toHaveLength(2);
+    expect(members.map(member => member.querySelectorAll('td').length)).toEqual([8, 8]);
+    expect(within(members[0]).getByText("XSFP-BLUE-001")).toBeVisible();
+    expect(within(members[1]).getByText("XSFP-RED-001")).toBeVisible();
+    expect(members[1].querySelectorAll('td')[2]).toHaveTextContent('-182400.00');
+    expect(members[1].querySelectorAll('td')[4]).toHaveTextContent('已关联蓝字');
+    expect(within(members[1]).getByText('红字')).toBeVisible();
+    expect(screen.queryByRole("region", { name: "配对关系" })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(fetchMock.mock.calls).toHaveLength(readsBefore);
-    expect(within(expansion).getByRole("button", { name: "查看发票 XSFP-BLUE-001 详情" })).toBeVisible();
-    await user.click(within(expansion).getByRole("button", { name: "查看发票 XSFP-RED-001 详情" }));
+    await user.click(within(members[1]).getByRole("button", { name: "查看发票 XSFP-RED-001 详情" }));
     const singleDrawer = await screen.findByRole("dialog", { name: "发票详情" });
     expect(await within(singleDrawer).findByText("被红冲蓝字数电发票号码：26532000000395506981")).toBeVisible();
     expect(within(singleDrawer).queryByRole("tablist", { name: "单据导航" })).not.toBeInTheDocument();

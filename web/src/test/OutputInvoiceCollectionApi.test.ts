@@ -1,16 +1,32 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { fetchOutputInvoiceCollectionRows, fetchOutputInvoiceCollectionExportSummary, downloadOutputInvoiceCollectionExport } from "../features/outputInvoiceCollections/api";
+import { outputInvoiceDisplayRows } from "../features/outputInvoiceCollections/relationExpansion";
 import { normalizeOutputTaxRate } from "../features/outputInvoiceCollections/taxRate";
 import { OUTPUT_COLLECTION_STATUS_CODES } from "../features/outputInvoiceCollections/types";
 
 const request = { page: 1, pageSize: 20, keyword: "", invoiceDateFrom: "", invoiceDateTo: "", month: "", filters: [], sortField: "", sortDirection: "" as const };
 const options = () => OUTPUT_COLLECTION_STATUS_CODES.map((value, index) => ({ value, label: `状态 ${index}`, count: index === 0 ? 3 : 0 }));
-const payload = () => ({ rows: [{ relationSources: ['invoice','oa','bank'].map(kind => ({kind, count:0, members:[]})), invoiceId: "invoice-1", collectionStatus: { code: "pending_collection", label: "待收款" } }],
+const payload = () => ({ rows: [{ invoiceId: "invoice-1", collectionStatus: { code: "pending_collection", label: "待收款" } }],
   filterOptions: [{ field: "collection_status", options: options() }], pagination: { page: 1, pageSize: 20, total: 3 } });
 function mockResponse(value: unknown) {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(value), { headers: { "Content-Type": "application/json" } }));
 }
 afterEach(() => vi.restoreAllMocks());
+
+test.each(['missing', 'duplicate', 'missing-member-row'])('rejects %s invoice members before rendering instead of copying the anchor', async kind => {
+  const member = (id: string) => ({ id, totalWithTax: '100.00', memberRow: { collectionStatus: { code: 'collected', label: '已收款' }, bankTransactions: {} } });
+  const summaries: Record<string, unknown>[] = [member('invoice-1'), member('invoice-2')];
+  if (kind === 'missing') summaries.pop();
+  if (kind === 'duplicate') summaries[1].id = 'invoice-1';
+  if (kind === 'missing-member-row') delete summaries[1].memberRow;
+  mockResponse({ ...payload(), rows: [{ ...payload().rows[0], invoiceRelations: { relationCount: 2, summaries } }] });
+  await expect(fetchOutputInvoiceCollectionRows(request)).rejects.toThrow('关联发票成员信息不完整');
+});
+
+test('rejects missing original bank members rather than presenting a fabricated second bank', async () => {
+  mockResponse({ ...payload(), rows: [{ ...payload().rows[0], bank: { original_transaction_count: 2, summaries: [{ id: 'bank-1', original_amount: '100.00' }] } }] });
+  await expect(fetchOutputInvoiceCollectionRows(request)).rejects.toThrow('关联流水成员信息不完整');
+});
 
 test.each([["0.13", "13%"], ["13.00%", "13%"], ["0", "0%"], ["", "—"], ["免税", "免税"], ["不征税", "不征税"], ["mixed", "多税率"]])("restores tax rate %s as %s", (raw, expected) => {
   expect(normalizeOutputTaxRate(raw)).toBe(expected);
@@ -81,10 +97,40 @@ test.each([
 });
 
 
-test.each([undefined, [], [{kind:'invoice',count:1,members:[]}], [
-  {kind:'invoice',count:1,members:[{id:'invoice',detailAvailable:true}]},
-  {kind:'bank',count:0,members:[]},{kind:'oa',count:0,members:[]},
-]])('rejects incomplete or reordered relationship sources without manufacturing members', async sources => {
-  mockResponse({...payload(),rows:[{...payload().rows[0],relationSources:sources}]});
-  await expect(fetchOutputInvoiceCollectionRows(request)).rejects.toThrow('配对关系摘要不完整');
+test("normalizes complete invoice members and own status/bank context without card sources", async () => {
+  const root = payload().rows[0];
+  const member = {
+    id: 'red-member', invoiceId: 'red-member', displayNo: 'RED-2', invoiceNo: 'RED-2',
+    invoiceDate: '2026-07-10', buyerName: '红票购方', buyerTaxNo: 'RED-TAX',
+    totalWithTax: '-106.00', amountWithoutTax: '-100.00', taxAmount: '-6.00',
+    taxRate: '6%', taxableItemName: '红字服务', isPositiveInvoice: '否',
+    relationCaseId: 'reversal-case',
+    memberRow: {
+      collectionStatus: { code: 'reverses_blue', label: '已关联蓝字', collectedAmount: '0.00', pendingAmount: '0.00' },
+      bankTransactions: { relationCount: 0, original_transaction_count: 0, summaries: [] },
+    },
+  };
+  mockResponse({ ...payload(), rows: [{ ...root, invoice: { totalWithTax: '113.00', taxRate: '13%', isPositiveInvoice: '是' },
+    invoiceRelations: { relationCount: 1, summaries: [member] } }] });
+  const response = await fetchOutputInvoiceCollectionRows(request);
+  expect(response.rows[0]).not.toHaveProperty('relationSources');
+  const display = outputInvoiceDisplayRows(response.rows[0], 'invoice')[0];
+  expect(display.invoice).toMatchObject({ id:'red-member', totalWithTax:'-106.00', taxRate:'6%', polarity:'red', taxableItemName:'红字服务' });
+  expect(display.collectionStatus.code).toBe('reverses_blue');
+  expect(display.bank.summaries).toEqual([]);
+});
+
+test("missing member context cannot copy the parent row into an expanded invoice", async () => {
+  mockResponse({ ...payload(), rows: [{ ...payload().rows[0], invoiceRelations: { relationCount: 1,
+    summaries: [{ id: 'red-member', invoiceNo: 'RED-2', totalWithTax: '-106.00' }] } }] });
+  const response = await fetchOutputInvoiceCollectionRows(request);
+  expect(() => outputInvoiceDisplayRows(response.rows[0], 'invoice')).toThrow('关联发票成员信息不完整');
+});
+
+test("invalid member collection state is rejected independently of the parent state", async () => {
+  mockResponse({ ...payload(), rows: [{ ...payload().rows[0], invoiceRelations: { relationCount: 1,
+    summaries: [{ id: 'red-member', invoiceNo: 'RED-2', totalWithTax: '-106.00', memberRow: {
+      collectionStatus: { code: 'invented', label: '错误状态' }, bankTransactions: { summaries: [] },
+    } }] } }] });
+  await expect(fetchOutputInvoiceCollectionRows(request)).rejects.toThrow('状态数据无效');
 });

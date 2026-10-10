@@ -99,8 +99,14 @@ function upgradedRows() {
             amount: "1200.00",
             debit_amount: "1200.00",
             bank_name: "建设银行",
+            bank_short_name: "建行",
             account_last4: "8106",
             summary: "电子转账",
+            effective_tag_code: "equipment_purchase",
+            effective_tag_label: "设备采购",
+            effective_tag_primary_label: "货款",
+            effective_tag_sub_label: "设备采购",
+            effective_tag_label_path: ["货款", "设备采购"],
             original_amount: "1200.00",
             original_transaction_count: 1,
           },
@@ -215,19 +221,19 @@ function upgradedRows() {
         relation_count: 2,
         has_multiple: true,
         summaries: [
-          { id: "inv-001", digital_invoice_no: "DIG-001", issue_date: "2026-05-04", seller_name: "分期供应商", seller_tax_no: "915300001111", total_with_tax: "2000.00" },
-          { id: "inv-002", digital_invoice_no: "DIG-002", issue_date: "2026-05-05", seller_name: "分期供应商二号", seller_tax_no: "915300002222", total_with_tax: "800.00" },
+          { id: "inv-001", relation_case_id: "case-001", digital_invoice_no: "DIG-001", issue_date: "2026-05-04", seller_name: "分期供应商", seller_tax_no: "915300001111", total_with_tax: "2000.00" },
+          { id: "inv-002", relation_case_id: "case-old", digital_invoice_no: "DIG-002", issue_date: "2026-05-05", seller_name: "分期供应商二号", seller_tax_no: "915300002222", total_with_tax: "800.00" },
         ],
         payment_summary: { paid_total: "1500.00", invoice_total: "2800.00", remaining_amount: "1300.00", difference_amount: "-1300.00" },
       },
       oa: {
-        primary: { id: "oa-001", applicant: "李四", application_type: "支付", project_name: "建设项目", status: "进行中" },
+        primary: { id: "oa-001", relation_case_id: "case-001", applicant: "李四", application_type: "支付", project_name: "建设项目", status: "进行中" },
         relation_count: 2,
         has_multiple: true,
         detail_available: true,
         summaries: [
-          { id: "oa-001", applicant: "李四", application_type: "支付", project_name: "建设项目", status: "进行中" },
-          { id: "oa-002", applicant: "王五", application_type: "报销", project_name: "建设项目二期", status: "已完成" },
+          { id: "oa-001", relation_case_id: "case-001", applicant: "李四", application_type: "支付", project_name: "建设项目", status: "进行中" },
+          { id: "oa-002", relation_case_id: "case-old", applicant: "王五", application_type: "报销", project_name: "建设项目二期", status: "已完成" },
         ],
       },
       can_create_invoice: false,
@@ -939,7 +945,8 @@ afterEach(() => {
 });
 
 describe("Pending invoices page", () => {
-  it("shows missing invoice totals without displaying the primary invoice as a complete group total", async () => {
+  it("shows real member amounts while retaining missing group totals and missing member amounts", async () => {
+    const user = userEvent.setup();
     const base = upgradedRows()[1];
     const row = {
       ...base,
@@ -947,6 +954,7 @@ describe("Pending invoices page", () => {
       input_invoices: {
         ...base.input_invoices,
         payment_summary: { invoice_total: "", paid_total: "1500.00", remaining_amount: "" },
+        summaries: base.input_invoices.summaries.map((invoice, index) => index === 1 ? { ...invoice, total_with_tax: "" } : invoice),
       },
     };
     installPendingInvoiceFetch({ rowsPayload: () => [row] });
@@ -955,8 +963,11 @@ describe("Pending invoices page", () => {
     expect(await screen.findByText("已开票·金额缺失")).toBeVisible();
     expect(screen.queryByText("待付 —")).not.toBeInTheDocument();
     const moneyCell = document.querySelector("tbody .pending-invoices-col-invoice-amount") as HTMLElement;
-    expect(within(moneyCell).getByText("—", { exact: true })).toBeVisible();
-    expect(within(moneyCell).queryByText("2000.00", { exact: true })).not.toBeInTheDocument();
+    expect(within(moneyCell).getByText("2000.00", { exact: true })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '展开配对关系，发票共 2 张' }));
+    const extra = document.querySelectorAll('tr[data-relation-group]')[1] as HTMLElement;
+    expect(within(extra.querySelector('.pending-invoices-col-invoice-amount') as HTMLElement).getByText('—', { exact: true })).toBeVisible();
+    expect(within(extra).queryByText('800.00', { exact: true })).not.toBeInTheDocument();
   });
 
   test("targets project primitives for page shell, tables, drawers, and dialogs", () => {
@@ -1118,12 +1129,13 @@ describe("Pending invoices page", () => {
     expect(within(pendingRow).queryByRole("button", { name: /云南开票供应商 补票/ })).not.toBeInTheDocument();
     expect(within(pendingRow).queryByRole("button", { name: "云南开票供应商 发票获取操作" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "补票" })).not.toBeInTheDocument();
-    expect(within(page).queryByText("DIG-001")).not.toBeInTheDocument();
-    expect(within(page).queryByText("李四")).not.toBeInTheDocument();
-    expect(within(page).getByText(/分期供应商二号/)).toBeInTheDocument();
+    expect(within(page).getByText("DIG-001")).toBeInTheDocument();
+    expect(within(page).getByText("李四")).toBeInTheDocument();
+    expect(within(page).queryByText(/分期供应商二号/)).not.toBeInTheDocument();
     expect(within(page).getAllByText("共 2 张")).toHaveLength(1);
     expect(within(page).getAllByText("共 2 条")).toHaveLength(1);
-    expect(within(page).getByText("2800.00")).toBeInTheDocument();
+    expect(within(page).queryByText("2800.00")).not.toBeInTheDocument();
+    expect(within(page).getByText("2000.00")).toBeInTheDocument();
     expect(within(page).queryByText("已付 1500.00")).not.toBeInTheDocument();
     expect(within(page).queryByText("待付 1300.00")).not.toBeInTheDocument();
     const invoicedRow = within(page).getByRole("row", { name: /分期供应商/ });
@@ -1300,12 +1312,18 @@ describe("Pending invoices page", () => {
     await within(page).findByText("云南开票供应商");
     const before = fetchMock.mock.calls.length;
     await user.click(within(page).getByRole("button", { name: "展开配对关系，发票共 2 张" }));
-    const expansion = await screen.findByRole("region", {name:"配对关系"});
+    await waitFor(() => expect(document.querySelectorAll('tr[data-relation-group]')).toHaveLength(2));
+    expect(screen.queryByRole('region', { name: '配对关系' })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(fetchMock.mock.calls).toHaveLength(before);
-    expect(within(expansion).getAllByRole("button", {name:/详情$/}).length).toBeGreaterThan(2);
-    await user.click(within(page).getByRole("button", { name: "收起配对关系，OA共 2 条" }));
-    await waitFor(()=>expect(screen.queryByRole("region", {name:"配对关系"})).not.toBeInTheDocument());
+    const expandedRows = [...document.querySelectorAll('tr[data-relation-group]')] as HTMLElement[];
+    expect(expandedRows.map(item => item.querySelectorAll('td,th').length)).toEqual([9, 9]);
+    expect(within(expandedRows[0]).getByText('DIG-001')).toBeVisible();
+    expect(within(expandedRows[1]).getByText('DIG-002')).toBeVisible();
+    expect(within(expandedRows[1]).getAllByText('分期供应商二号')).toHaveLength(2);
+    expect(within(expandedRows[1]).getByText('王五')).toBeVisible();
+    await user.click(within(page).getByRole("button", { name: "收起配对关系，发票共 2 张" }));
+    await waitFor(() => expect(document.querySelectorAll('tr[data-relation-group]')).toHaveLength(0));
     expect(pendingInvoiceRelationRequests(fetchMock)).toHaveLength(0);
 
     await user.click(within(page).getByRole("button", { name: "支出待找发票规则设置" }));
@@ -1832,4 +1850,28 @@ test("shows the actual bank time below the category without using booked date", 
   expect(chip).toHaveTextContent("2026-04-19 10:52:02");
   expect(chip.previousElementSibling).toHaveTextContent("货款 / 设备采购");
   expect(chip).not.toHaveTextContent("2026-05-02");
+});
+
+
+test("does not render a partial invoice relation or aggregate member when summaries are incomplete", async () => {
+  const base = upgradedRows()[1];
+  installPendingInvoiceFetch({ rowsPayload: () => [{ ...base,
+    input_invoices: { ...base.input_invoices, summaries: base.input_invoices.summaries.slice(0, 1) },
+  }] });
+  renderAppAt('/pending-invoices');
+  await findPendingInvoicesPage();
+  expect(await screen.findByRole('alert')).toHaveTextContent('关系摘要不完整');
+  expect(screen.queryByText('DIG-001')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /展开配对关系/ })).not.toBeInTheDocument();
+});
+
+test("rejects duplicate invoice members instead of rendering duplicate rows", async () => {
+  const base = upgradedRows()[1];
+  installPendingInvoiceFetch({ rowsPayload: () => [{ ...base,
+    input_invoices: { ...base.input_invoices, summaries: [base.input_invoices.summaries[0], base.input_invoices.summaries[0]] },
+  }] });
+  renderAppAt('/pending-invoices');
+  await findPendingInvoicesPage();
+  expect(await screen.findByRole('alert')).toHaveTextContent('关系摘要不完整');
+  expect(screen.queryByRole('button', { name: /展开配对关系/ })).not.toBeInTheDocument();
 });

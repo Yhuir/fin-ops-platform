@@ -14,7 +14,7 @@ test.each([
   ['input', fetchInputInvoiceUsageRows],
   ['output', fetchOutputInvoiceCollectionRows],
 ] as const)('%s preserves business amount and reads parent display aggregate without summing child identities', async (_name, fetchRows) => {
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ filterOptions: [{ field: 'collection_status', options: OUTPUT_COLLECTION_STATUS_CODES.map((value, index) => ({ value, label: value, count: index === 0 ? 1 : 0 })) }], rows: [{ id: 'invoice', relationSources: ['invoice','oa','bank'].map(kind=>({kind,count:0,members:[]})), collectionStatus: { code: 'pending_collection', label: '待收款' }, invoice: {}, bank: {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ filterOptions: [{ field: 'collection_status', options: OUTPUT_COLLECTION_STATUS_CODES.map((value, index) => ({ value, label: value, count: index === 0 ? 1 : 0 })) }], rows: [{ id: 'invoice', collectionStatus: { code: 'pending_collection', label: '待收款' }, invoice: {}, bank: {
     primary: bank, summaries: [bank, { ...bank, id: 'principal', amount: '1000000.00' }],
     original_amount: '1001497.22', original_transaction_count: 1, bank_split_parts: parts,
     relationCount: 2, receivedTotal: '1497.22',

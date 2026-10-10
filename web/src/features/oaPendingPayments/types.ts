@@ -56,6 +56,7 @@ export type OaPendingPaymentOaRelationSummary = {
   amount?: string;
   month?: string;
   workflowNo?: string;
+  workflowStatus?: string;
   reason?: string;
   counterpartyName?: string;
   relationCaseId?: string;
@@ -120,6 +121,7 @@ export type OaPendingPaymentBankTransaction = {
 };
 
 export type OaPendingPaymentBankTransactionSummary = {
+  bank_split_parts?: BankSplitPart[];
   parent_row_id?: string;
   original_amount: string;
   bankTransactionId?: string | null;

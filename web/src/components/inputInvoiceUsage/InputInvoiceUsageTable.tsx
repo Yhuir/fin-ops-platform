@@ -18,9 +18,10 @@ import ExpandableCellText from "./ExpandableCellText";
 import InputInvoiceUsageFilterMenu from "./InputInvoiceUsageFilterMenu";
 import BankAccountValue from "../BankAccountValue";
 import type { InputInvoiceUsageFilterValue } from "./InputInvoiceUsageFilterMenu";
-import RelationGroupExpansion, { RelationCountButton } from '../common/RelationGroupExpansion';
-import { useRelationExpansion } from '../../hooks/useRelationExpansion';
-import { inputInvoiceSourceRelationColumns } from '../../features/inputInvoiceUsage/relationExpansion';
+import { RelationCountButton } from '../common/RelationCountButton';
+import RelationRowsMotion, { RelationAnimatedCell } from '../common/RelationRowsMotion';
+import { useRelationExpansion, useRelationRowExpansion } from '../../hooks/useRelationExpansion';
+import { inputInvoiceDisplayRows } from '../../features/inputInvoiceUsage/relationExpansion';
 import { FinanceStatusTag } from "../common/FinanceTable";
 
 type InputInvoiceUsageTableProps = {
@@ -471,175 +472,8 @@ export default function InputInvoiceUsageTable({
                 <tr className="finance-table__row" id="input-invoice-usage-empty">
                   <td className="finance-table__cell input-invoice-usage-table-state-cell" colSpan={10}>{emptyStateMessage}</td>
                 </tr>
-              ) : rows.map((row) => {
-                const groupActive = expansion.rowId === row.id && (expansion.view === "sources" || expansion.expanded);
-                const invoicesExpanded = expansion.rowId === row.id && expansion.view === "invoices" && expansion.expanded;
-                const sourcesExpanded = expansion.rowId === row.id && expansion.view === "sources" && expansion.expanded;
-                const renderInvoiceRow = (invoice: InputInvoiceUsageRow["invoice"], additional = false) => {
-                  const invoiceNo = displayInvoiceNo({ ...row, invoice });
-                  const invoiceRowId = additional ? `${row.id}-invoice-${invoice.id}` : row.id;
-                  const invoiceCellExpanded = expandedCells.has(`${invoiceRowId}:invoice-business`);
-                  const projectCellExpanded = expandedCells.has(`${row.id}:oa-project`);
-                  const bankNameCellExpanded = expandedCells.has(`${row.id}:bank-name`);
-                  const bankRemarkCellExpanded = expandedCells.has(`${row.id}:bank-remark`);
-                  const oa = row.oa.primary;
-                  const bank = row.bank.primary;
-                  const oaRelationTarget = row.oa.relationCount > 1;
-                  const bankRelationTarget = row.bank.relationCount > 1;
-                  const invoiceRelationTarget = !additional && row.invoiceRelations.relationCount > 1;
-                  const oaTotalCount = relationCount(row.oa.relationCount);
-                  const bankTotalCount = relationCount(row.bank.originalTransactionCount);
-                  const invoiceTotalCount = relationCount(row.invoiceRelations.relationCount);
-
-                  return (
-                    <tr className="finance-table__row input-invoice-usage-table-row" id={invoiceRowId} data-invoice-id={invoice.id} data-relation-group={groupActive ? row.id : undefined}>
-                      <th className="finance-table__cell input-invoice-usage-table-cell" data-column-role="identity" scope="row">
-                        <div className="input-invoice-usage-inline-row">
-                          <span className="input-invoice-usage-cell-primary" title={invoiceNo}>{invoiceNo}</span>
-                          <DetailButton
-                            iconOnly
-                            label={`查看发票 ${invoiceNo} 详情`}
-                            onClick={() => onOpenDetail({ kind: "invoice", id: invoice.id, rowId: row.id })}
-                          />
-                          {invoiceRelationTarget ? (
-                            <RelationCountButton
-                              count={invoiceTotalCount} kind="invoice" expanded={invoicesExpanded}
-                              label={`查看发票 ${invoiceNo} 关联发票 ${row.invoiceRelations.relationCount} 张`}
-                              onClick={() => expansion.toggle(row.id, 'invoices')}
-                            />
-                          ) : null}
-                        </div>
-                        <div className="input-invoice-usage-tag-row">
-                          <Tag>{dateOnly(invoice.issueDate)}</Tag>
-                        </div>
-                      </th>
-                      <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" data-column-role="identity">
-                        <div className="input-invoice-usage-cell-primary">{invoice.sellerName || "-"}</div>
-                        <div className="input-invoice-usage-cell-secondary">{invoice.sellerTaxNo || "-"}</div>
-                      </td>
-                      <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--amount input-invoice-usage-table-cell--separator" data-column-role="amount">
-                        <div className="input-invoice-usage-money-primary input-invoice-usage-invoice-total">{formatMoney(invoice.totalWithTax, "—")}</div>
-                        <div className="input-invoice-usage-cell-secondary input-invoice-usage-tax-rate">{invoice.taxRate}</div>
-                      </td>
-                      <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" data-column-role="description">
-                        <ExpandableCellText
-                          text={invoice.taxableItemName}
-                          expanded={invoiceCellExpanded}
-                          onToggle={() => onToggleCellExpand(invoiceRowId, "invoice-business")}
-                        />
-                      </td>
-                      <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--strong-separator input-invoice-usage-payment-cell" data-column-role="status">
-                        <Tag tone={paymentStatusTone(row.paymentStatus.code)}>{row.paymentStatus.label}</Tag>
-                        {row.paymentStatus.code === "unclassified" ? <div className="input-invoice-usage-cell-secondary">{row.paymentStatus.reason}</div> : null}
-                      </td>
-                      <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--strong-separator" data-column-role="identity">
-                        {oa ? (
-                          <>
-                            <div className="input-invoice-usage-inline-row">
-                              <span className="input-invoice-usage-cell-primary">{oa.applicant || "-"}</span>
-                              {oa.detailAvailable && !oaRelationTarget ? (
-                                <DetailButton
-                                  iconOnly
-                                  label={`查看OA ${oa.applicant || oa.id} 详情`}
-                                  onClick={() => onOpenDetail({ kind: "oa", id: oa.id, rowId: row.id })}
-                                />
-                              ) : null}
-                              {oaRelationTarget ? (
-                                <RelationCountButton
-                                  count={oaTotalCount} kind="oa" expanded={sourcesExpanded}
-                                  label={`查看${oa.applicant || "该发票"}关联OA ${row.oa.relationCount} 条`}
-                                  onClick={() => expansion.toggle(row.id, 'sources')}
-                                />
-                              ) : null}
-                            </div>
-                            <div className="input-invoice-usage-tag-row">
-                              <FinanceStatusTag>{oa.applicationType || "类型为空"}</FinanceStatusTag>
-                              {row.oa.hasMultiple && oa.amount ? (
-                                <Tag tone="info">{`合计 ${formatMoney(oa.amount)}`}</Tag>
-                              ) : null}
-                            </div>
-                          </>
-                        ) : <EmptyCell />}
-                      </td>
-                      <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" data-column-role="description">
-                        {oa ? (
-                          <ExpandableCellText
-                            text={oa.projectName}
-                            expanded={projectCellExpanded}
-                            onToggle={() => onToggleCellExpand(row.id, "oa-project")}
-                          />
-                        ) : <EmptyCell />}
-                      </td>
-                      <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--strong-separator" data-column-role="identity">
-                        {bank ? (
-                          <>
-                            <ExpandableCellText
-                              text={bank.counterpartyName}
-                              expanded={bankNameCellExpanded}
-                              onToggle={() => onToggleCellExpand(row.id, "bank-name")}
-                            />
-                            <div className="input-invoice-usage-tag-row">
-                              <Tag>{bank.tradeTime ? formatDateTimeText(bank.tradeTime) : "交易日期为空"}</Tag>
-                              {bank.detailAvailable && !bankRelationTarget ? (
-                                <DetailButton
-                                  label={`查看流水 ${bank.counterpartyName || bank.id} 详情`}
-                                  onClick={() => onOpenDetail({ kind: "bank", id: bank.id, rowId: row.id })}
-                                >
-                                  详情
-                                </DetailButton>
-                              ) : null}
-                            </div>
-                          </>
-                        ) : <EmptyCell />}
-                      </td>
-                      <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--amount input-invoice-usage-table-cell--separator" data-column-role="amount">
-                        {bank ? (
-                          <>
-                            <div className="input-invoice-usage-bank-amount-line">
-                              <span className="input-invoice-usage-money-primary">{formatMoney(row.bank.netAmount, "—")}</span>
-                              {bankRelationTarget ? (
-                                <RelationCountButton
-                                  count={bankTotalCount} kind="bank" expanded={sourcesExpanded}
-                                  label={`查看${bank.counterpartyName || "该发票"}关联流水 ${row.bank.originalTransactionCount} 条`}
-                                  onClick={() => expansion.toggle(row.id, 'sources')}
-                                />
-                              ) : null}
-                            </div>
-                            <div className="input-invoice-usage-bank-tag-row">
-                              <Tag tone="info">{row.bank.netDirectionLabel}</Tag>
-                              <BankAccountValue value={bankAccountLabel(bank) || "—"} />
-                            </div>
-                          </>
-                        ) : <EmptyCell />}
-                      </td>
-                      <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" data-column-role="description">
-                        {bank ? (
-                          <>
-                            <div className="input-invoice-usage-cell-primary">{bank.summary || "-"}</div>
-                            <ExpandableCellText
-                              text={bank.remark}
-                              expanded={bankRemarkCellExpanded}
-                              onToggle={() => onToggleCellExpand(row.id, "bank-remark")}
-                            />
-                          </>
-                        ) : <EmptyCell />}
-                      </td>
-                    </tr>
-                  );
-                };
-                return <Fragment key={row.id}>
-                  {renderInvoiceRow(row.invoice)}
-                  {invoicesExpanded ? row.invoiceRelations.summaries
-                    .filter(member => member.id !== row.invoice.id)
-                    .map(({ invoiceDate, relationCaseId: _relationCaseId, ...invoice }) =>
-                      <Fragment key={invoice.id}>{renderInvoiceRow({ ...invoice, issueDate: invoiceDate }, true)}</Fragment>) : null}
-                  {expansion.rowId === row.id && expansion.view === "sources" && <tr className="finance-table__row relation-expansion-row" data-relation-group={row.id}><td className="finance-table__cell" colSpan={10}>
-                    <RelationGroupExpansion columns={inputInvoiceSourceRelationColumns(row)} expanded={expansion.expanded}
-                      onClose={() => expansion.toggle(row.id, 'sources')} onExited={expansion.exited}
-                      onOpenDetail={target => onOpenDetail({ ...target, rowId: row.id })} />
-                  </td></tr>}
-                  </Fragment>;
-              })}
+              ) : rows.map((row) => <InputRelationRows key={row.id} row={row} expansion={expansion}
+                expandedCells={expandedCells} onToggleCellExpand={onToggleCellExpand} onOpenDetail={onOpenDetail} />)}
             </tbody>
           </table>
         </div>
@@ -657,4 +491,173 @@ export default function InputInvoiceUsageTable({
       </div>
     </div>
   );
+}
+
+function InputRelationRows({ row, expansion, expandedCells, onToggleCellExpand, onOpenDetail }: {
+  row: InputInvoiceUsageRow; expansion: ReturnType<typeof useRelationExpansion>;
+  expandedCells: Set<string>; onToggleCellExpand: InputInvoiceUsageTableProps['onToggleCellExpand'];
+  onOpenDetail: InputInvoiceUsageTableProps['onOpenDetail'];
+}) {
+  const presence = useRelationRowExpansion(row.id, expansion);
+  const groupActive = presence.view !== null;
+  const invoicesExpanded = presence.view === 'invoice' && presence.expanded;
+  const displays = presence.view ? inputInvoiceDisplayRows(row, presence.view) : [{ invoice: row.invoice, oa: row.oa.primary, bank: row.bank.primary, id: row.invoice.id }];
+  const expected = presence.view === 'invoice' ? row.invoiceRelations.relationCount : presence.view === 'oa' ? row.oa.relationCount : row.bank.originalTransactionCount;
+  if (presence.view && (displays.length !== expected || new Set(displays.map(display => display.id)).size !== expected || displays.some(display => !display.id))) {
+    return <tr className="finance-table__row"><td className="finance-table__cell" colSpan={10}><div role="alert">关系摘要不完整，请重新查询后查看。</div></td></tr>;
+  }
+  const renderInvoiceRow = (display: { invoice: InputInvoiceUsageRow["invoice"]; oa: InputInvoiceUsageRow["oa"]["primary"]; bank: InputInvoiceUsageRow["bank"]["primary"]; id: string }, additional = false) => {
+                  const { invoice, oa, bank } = display;
+                  const invoiceNo = displayInvoiceNo({ ...row, invoice });
+                  const invoiceRowId = additional ? `${row.id}-${presence.view}-${display.id}` : row.id;
+                  const invoiceCellExpanded = expandedCells.has(`${invoiceRowId}:invoice-business`);
+                  const projectCellExpanded = expandedCells.has(`${row.id}:oa-project`);
+                  const bankNameCellExpanded = expandedCells.has(`${row.id}:bank-name`);
+                  const bankRemarkCellExpanded = expandedCells.has(`${row.id}:bank-remark`);
+                  const oaRelationTarget = !additional && row.oa.relationCount > 1;
+                  const bankRelationTarget = !additional && (row.bank.originalTransactionCount ?? 0) > 1;
+                  const invoiceRelationTarget = !additional && row.invoiceRelations.relationCount > 1;
+                  const oaTotalCount = relationCount(row.oa.relationCount);
+                  const bankTotalCount = relationCount(row.bank.originalTransactionCount);
+                  const invoiceTotalCount = relationCount(row.invoiceRelations.relationCount);
+
+                  return (
+                    <tr className="finance-table__row input-invoice-usage-table-row" id={invoiceRowId} data-invoice-id={invoice.id} data-relation-group={groupActive ? row.id : undefined}>
+                      <th className="finance-table__cell input-invoice-usage-table-cell" data-column-role="identity" scope="row"><RelationAnimatedCell>
+                        <div className="input-invoice-usage-inline-row">
+                          <span className="input-invoice-usage-cell-primary" title={invoiceNo}>{invoiceNo}</span>
+                          <DetailButton
+                            iconOnly
+                            label={`查看发票 ${invoiceNo} 详情`}
+                            onClick={() => onOpenDetail({ kind: "invoice", id: invoice.id, rowId: row.id })}
+                          />
+                        </div>
+                        <div className="input-invoice-usage-tag-row">
+                          <Tag>{dateOnly(invoice.issueDate)}</Tag>
+                          {invoiceRelationTarget ? (
+                            <RelationCountButton
+                              count={invoiceTotalCount} kind="invoice" expanded={invoicesExpanded}
+                              label={`查看发票 ${invoiceNo} 关联发票 ${row.invoiceRelations.relationCount} 张`}
+                              onClick={() => expansion.toggle(row.id, 'invoice')}
+                            />
+                          ) : null}
+                        </div>
+                      </RelationAnimatedCell></th>
+                      <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" data-column-role="identity"><RelationAnimatedCell>
+                        <div className="input-invoice-usage-cell-primary">{invoice.sellerName || "-"}</div>
+                        <div className="input-invoice-usage-cell-secondary">{invoice.sellerTaxNo || "-"}</div>
+                      </RelationAnimatedCell></td>
+                      <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--amount input-invoice-usage-table-cell--separator" data-column-role="amount"><RelationAnimatedCell>
+                        <div className="input-invoice-usage-money-primary input-invoice-usage-invoice-total">{formatMoney(invoice.totalWithTax, "—")}</div>
+                        <div className="input-invoice-usage-cell-secondary input-invoice-usage-tax-rate">{invoice.taxRate}</div>
+                      </RelationAnimatedCell></td>
+                      <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" data-column-role="description"><RelationAnimatedCell>
+                        <ExpandableCellText
+                          text={invoice.taxableItemName}
+                          expanded={invoiceCellExpanded}
+                          onToggle={() => onToggleCellExpand(invoiceRowId, "invoice-business")}
+                        />
+                      </RelationAnimatedCell></td>
+                      <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--strong-separator input-invoice-usage-payment-cell" data-column-role="status"><RelationAnimatedCell>
+                        <Tag tone={paymentStatusTone(row.paymentStatus.code)}>{row.paymentStatus.label}</Tag>
+                        {row.paymentStatus.code === "unclassified" ? <div className="input-invoice-usage-cell-secondary">{row.paymentStatus.reason}</div> : null}
+                      </RelationAnimatedCell></td>
+                      <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--strong-separator" data-column-role="identity"><RelationAnimatedCell>
+                        {oa ? (
+                          <>
+                            <div className="input-invoice-usage-inline-row">
+                              <span className="input-invoice-usage-cell-primary">{oa.applicant || "-"}</span>
+                              {oa.detailAvailable ? (
+                                <DetailButton
+                                  iconOnly
+                                  label={`查看OA ${oa.applicant || oa.id} 详情`}
+                                  onClick={() => onOpenDetail({ kind: "oa", id: oa.id, rowId: row.id })}
+                                />
+                              ) : null}
+                            </div>
+                            <div className="input-invoice-usage-tag-row">
+                              <FinanceStatusTag>{oa.applicationType || "类型为空"}</FinanceStatusTag>
+                              {oaRelationTarget ? (
+                                <RelationCountButton
+                                  count={oaTotalCount} kind="oa" expanded={presence.expanded && presence.view === "oa"}
+                                  label={`查看${oa.applicant || "该发票"}关联OA ${row.oa.relationCount} 条`}
+                                  onClick={() => expansion.toggle(row.id, 'oa')}
+                                />
+                              ) : null}
+                            </div>
+                          </>
+                        ) : <><EmptyCell />{oaRelationTarget ? <RelationCountButton kind="oa" count={oaTotalCount}
+                          expanded={presence.expanded && presence.view === 'oa'} onClick={() => expansion.toggle(row.id, 'oa')} /> : null}</>}
+                      </RelationAnimatedCell></td>
+                      <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" data-column-role="description"><RelationAnimatedCell>
+                        {oa ? (
+                          <ExpandableCellText
+                            text={oa.projectName}
+                            expanded={projectCellExpanded}
+                            onToggle={() => onToggleCellExpand(row.id, "oa-project")}
+                          />
+                        ) : <EmptyCell />}
+                      </RelationAnimatedCell></td>
+                      <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--strong-separator" data-column-role="identity"><RelationAnimatedCell>
+                        {bank ? (
+                          <>
+                            <ExpandableCellText
+                              text={bank.counterpartyName}
+                              expanded={bankNameCellExpanded}
+                              onToggle={() => onToggleCellExpand(row.id, "bank-name")}
+                            />
+                            <div className="input-invoice-usage-tag-row">
+                              <Tag>{bank.tradeTime ? formatDateTimeText(bank.tradeTime) : "交易日期为空"}</Tag>
+                              {bank.detailAvailable ? (
+                                <DetailButton
+                                  label={`查看流水 ${bank.counterpartyName || bank.id} 详情`}
+                                  onClick={() => onOpenDetail({ kind: "bank", id: bank.id, rowId: row.id })}
+                                >
+                                  详情
+                                </DetailButton>
+                              ) : null}
+                            </div>
+                          </>
+                        ) : <EmptyCell />}
+                      </RelationAnimatedCell></td>
+                      <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--amount input-invoice-usage-table-cell--separator" data-column-role="amount"><RelationAnimatedCell>
+                        {bank ? (
+                          <>
+                            <div className="input-invoice-usage-bank-amount-line">
+                              <span className="input-invoice-usage-money-primary">{formatMoney(presence.view === "bank" ? bank.originalAmount : row.bank.netAmount, "—")}</span>
+                              {bankRelationTarget ? (
+                                <RelationCountButton
+                                  count={bankTotalCount} kind="bank" expanded={presence.expanded && presence.view === "bank"}
+                                  label={`查看${bank.counterpartyName || "该发票"}关联流水 ${row.bank.originalTransactionCount} 条`}
+                                  onClick={() => expansion.toggle(row.id, 'bank')}
+                                />
+                              ) : null}
+                            </div>
+                            <div className="input-invoice-usage-bank-tag-row">
+                              <Tag tone="info">{presence.view === "bank" ? bank.directionLabel : row.bank.netDirectionLabel}</Tag>
+                              <BankAccountValue value={bankAccountLabel(bank) || "—"} />
+                            </div>
+                          </>
+                        ) : <EmptyCell />}
+                      </RelationAnimatedCell></td>
+                      <td className="finance-table__cell input-invoice-usage-table-cell input-invoice-usage-table-cell--separator" data-column-role="description"><RelationAnimatedCell>
+                        {bank ? (
+                          <>
+                            <div className="input-invoice-usage-cell-primary">{bank.summary || "-"}</div>
+                            <ExpandableCellText
+                              text={bank.remark}
+                              expanded={bankRemarkCellExpanded}
+                              onToggle={() => onToggleCellExpand(row.id, "bank-remark")}
+                            />
+                          </>
+                        ) : <EmptyCell />}
+                      </RelationAnimatedCell></td>
+                    </tr>
+                  );
+                };
+  return <Fragment>{renderInvoiceRow(displays[0])}
+    {presence.view && <RelationRowsMotion key={presence.view} expanded={presence.expanded} onExited={presence.onExited}>
+      {displays.slice(1).map(display => <Fragment key={display.id}>{renderInvoiceRow(display, true)}</Fragment>)}
+    </RelationRowsMotion>}
+  </Fragment>;
 }

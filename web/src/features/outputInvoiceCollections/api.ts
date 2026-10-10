@@ -236,22 +236,19 @@ function mapRelatedInvoice(rawValue: unknown): OutputInvoiceCollectionRowsRespon
   if (!id && !invoiceNo && !totalWithTax) {
     return null;
   }
+  const memberRow = raw.memberRow === undefined ? undefined : objectValue(raw.memberRow);
   return {
-    id,
-    displayNo: stringValue(camelOrSnake(raw, "displayNo", "display_no") ?? invoiceNo),
-    invoiceNo,
-    invoiceCode: stringValue(camelOrSnake(raw, "invoiceCode", "invoice_code")),
-    digitalInvoiceNo: stringValue(camelOrSnake(raw, "digitalInvoiceNo", "digital_invoice_no")),
+    ...mapInvoice(raw), id,
     invoiceDate: stringValue(camelOrSnake(raw, "invoiceDate", "invoice_date")),
-    buyerName: stringValue(camelOrSnake(raw, "buyerName", "buyer_name")),
-    buyerTaxNo: stringValue(camelOrSnake(raw, "buyerTaxNo", "buyer_tax_no")),
-    totalWithTax,
-    taxableItemName: stringValue(camelOrSnake(raw, "taxableItemName", "taxable_item_name")),
     relationId: stringValue(camelOrSnake(raw, "relationId", "relation_id")),
     relationMode: stringValue(camelOrSnake(raw, "relationMode", "relation_mode")),
     relationCaseId: stringValue(camelOrSnake(raw, "relationCaseId", "relation_case_id")),
     relationStatus: formalRelationStatus(camelOrSnake(raw, "relationStatus", "relation_status")),
     relationSource: stringValue(camelOrSnake(raw, "relationSource", "relation_source")),
+    memberRow: memberRow ? {
+      collectionStatus: mapCollectionStatus(memberRow.collectionStatus),
+      bank: mapRelation(memberRow.bankTransactions, mapBank),
+    } : undefined,
   };
 }
 
@@ -291,6 +288,17 @@ function mapRowsResponse(payload: unknown): OutputInvoiceCollectionRowsResponse 
   return {
     rows: arrayValue(raw.rows).map((item) => {
       const row = objectValue(item);
+      const bank = mapRelation(camelOrSnake(row, "bank", "bankTransactions"), mapBank);
+      const invoiceRelations = mapRelation(camelOrSnake(row, "invoiceRelations", "invoice_relations"), mapRelatedInvoice);
+      if (invoiceRelations.relationCount > 1 && (invoiceRelations.summaries.length !== invoiceRelations.relationCount
+        || new Set(invoiceRelations.summaries.map(member => member.id)).size !== invoiceRelations.relationCount
+        || invoiceRelations.summaries.some(member => !member.id || !member.memberRow))) {
+        throw new Error('关联发票成员信息不完整，请重新查询。');
+      }
+      if (bank.originalTransactionCount > 1 && (bank.summaries.some(member => !member.id)
+        || new Set(bank.summaries.map(member => member.parentRowId || member.id)).size !== bank.originalTransactionCount)) {
+        throw new Error('关联流水成员信息不完整，请重新查询。');
+      }
       return {
         id: stringValue(row.id),
         invoiceId: stringValue(camelOrSnake(row, "invoiceId", "invoice_id")),
@@ -300,9 +308,8 @@ function mapRowsResponse(payload: unknown): OutputInvoiceCollectionRowsResponse 
           id: stringValue(camelOrSnake(row, "invoiceId", "invoice_id") ?? objectValue(row.invoice).id),
         },
         collectionStatus: mapCollectionStatus(camelOrSnake(row, "collectionStatus", "collection_status")),
-        bank: mapRelation(camelOrSnake(row, "bank", "bankTransactions"), mapBank),
-        relationSources: relationSourceColumns(row.relationSources),
-        invoiceRelations: mapRelation(camelOrSnake(row, "invoiceRelations", "invoice_relations"), mapRelatedInvoice),
+        bank,
+        invoiceRelations,
       };
     }),
     summary: raw.summary && typeof raw.summary === "object" ? (() => {
@@ -357,15 +364,6 @@ function mapBankDetailResponse(payload: unknown): OutputInvoiceCollectionDetailR
   const raw = objectValue(payload);
   return {title: "银行流水详情", detailAvailable: raw.detailAvailable !== false,
     sections: raw.detailAvailable === false ? [] : sourceDetailSections(raw.sections)};
-}
-
-function relationSourceColumns(value: unknown): OutputInvoiceCollectionRowsResponse['rows'][number]['relationSources'] {
-  if (!Array.isArray(value) || value.length !== 3 || value.some((column, index) => !column || column.kind !== ['invoice', 'oa', 'bank'][index]
-    || !Array.isArray(column.members) || column.count !== column.members.length || column.members.some((member: Record<string, unknown>) =>
-      typeof member.id !== 'string' || !member.id || typeof member.detailAvailable !== 'boolean'))) {
-    throw new Error('配对关系摘要不完整，请重新查询。');
-  }
-  return value;
 }
 
 function mapFilterOptionsResponse(payload: unknown): OutputInvoiceCollectionFilterOptionsResponse {

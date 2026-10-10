@@ -39,19 +39,19 @@ test.describe("销项发票收款情况", () => {
     await expect(groups.getByText("收入流水", {exact:true})).toHaveCount(1);
     await expect(table.getByText("已被冲")).toBeVisible();
     await expect(table.getByText("已关联蓝字")).toBeVisible();
-    await expect(table.getByRole("button", { name: "红蓝票 · 2" })).toHaveCount(2);
+    await expect(table.getByRole("button", { name: "展开配对关系，发票共 2 张" })).toHaveCount(2);
     const blueInvoiceRow = table.getByRole("row", { name: /XSFP-E2E-0001/ });
     const redInvoiceRow = table.getByRole("row", { name: /XSFP-E2E-0002/ });
     await expect(blueInvoiceRow.getByText("蓝字", { exact: true })).toBeVisible();
     await expect(redInvoiceRow.getByText("红字", { exact: true })).toBeVisible();
-    await expect(blueInvoiceRow.locator(".output-invoice-collections-tag-row").first()).toHaveText(/2026-05-02蓝字红蓝票 · 2/);
-    await expect(redInvoiceRow.locator(".output-invoice-collections-tag-row").first()).toHaveText(/2026-05-06红字红蓝票 · 2/);
+    await expect(blueInvoiceRow.locator(".output-invoice-collections-tag-row").first()).toHaveText(/2026-05-02蓝字共 2 张/);
+    await expect(redInvoiceRow.locator(".output-invoice-collections-tag-row").first()).toHaveText(/2026-05-06红字共 2 张/);
     const multiBankRow = table.getByRole("row", { name: /XSFP-E2E-0003/ });
     const statusCell = multiBankRow.locator(".output-invoice-collections-table-cell--status");
     await expect(multiBankRow.getByText("已收款")).toBeVisible();
     await expect(multiBankRow.getByText("已收 1020032.00")).toBeVisible();
     await expect(multiBankRow.getByText("待收 0.00")).toBeVisible();
-    await expect(multiBankRow.getByRole("button", { name: "收入流水 · 2" })).toBeVisible();
+    await expect(multiBankRow.getByRole("button", { name: "展开配对关系，流水共 2 笔" })).toBeVisible();
     expect(await statusCell.evaluate((cell) => getComputedStyle(cell).display)).toBe("table-cell");
     expect(await multiBankRow.evaluate((row) => {
       const status = row.querySelector<HTMLElement>(".output-invoice-collections-table-cell--status");
@@ -63,16 +63,26 @@ test.describe("销项发票收款情况", () => {
     await expect(page.getByRole("button", { name: "收款状态规则" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "收据编号设置" })).toHaveCount(0);
 
-    await blueInvoiceRow.getByRole("button", { name: "红蓝票 · 2" }).click();
+    await page.waitForLoadState('networkidle');
+    const rowReads = api.count('GET /api/output-invoice-collections/rows');
+    const expand = blueInvoiceRow.getByRole('button', {name:'展开配对关系，发票共 2 张'});
+    await expand.click();
+    const members = table.locator('tr[data-relation-group="output-collection-row-e2e-001"]');
+    await expect(members).toHaveCount(2);
+    await expect(members.nth(1)).toContainText('XSFP-E2E-0002');
+    for (const member of await members.all()) await expect(member.locator('th,td')).toHaveCount(8);
+    expect(api.count('GET /api/output-invoice-collections/rows')).toBe(rowReads);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await members.nth(1).getByRole('button', {name:'查看发票 XSFP-E2E-0002 详情'}).click();
     const sourceDrawer = page.getByRole("dialog", { name: "发票详情" });
-    await expect(sourceDrawer.getByRole("tab")).toHaveCount(2);
-    await expect(sourceDrawer.getByRole("tabpanel")).toHaveCount(1);
-    await expect(sourceDrawer.getByText("XSFP-E2E-0001", { exact: true })).toBeVisible();
-    await sourceDrawer.getByRole("tab").nth(1).click();
+    await expect(sourceDrawer.getByRole("tablist")).toHaveCount(0);
     await expect(sourceDrawer.getByText("XSFP-E2E-0001", { exact: true })).toHaveCount(0);
     await expect(sourceDrawer.getByText("XSFP-E2E-0002", { exact: true })).toBeVisible();
     await expect(sourceDrawer.getByText("output_invoice_reversal", { exact: true })).toHaveCount(0);
     await sourceDrawer.getByRole("button", { name: "关闭详情抽屉" }).click();
+    await expect(members).toHaveCount(2);
+    await members.first().getByRole('button', {name:'收起配对关系，发票共 2 张'}).click();
+    await expect(members).toHaveCount(0);
     await expect(page.getByRole("button", { name: "状态/提醒" })).toHaveCount(0);
 
     const rowsBeforeSearch = api.count("GET /api/output-invoice-collections/rows");

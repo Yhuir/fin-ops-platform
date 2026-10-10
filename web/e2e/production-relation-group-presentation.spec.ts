@@ -4,7 +4,12 @@ const enabled = process.env.FIN_OPS_E2E_PRODUCTION_SMOKE === '1';
 const token = process.env.FIN_OPS_E2E_ADMIN_TOKEN;
 test.use({ screenshot: 'off', trace: 'off', video: 'off' });
 
-for (const routeName of ['input-invoice-usage', 'oa-pending-payments', 'pending-invoices', 'output-invoice-collections']) {
+for (const [routeName, columns, kinds] of [
+  ['input-invoice-usage', 10, ['invoice', 'oa', 'bank']],
+  ['oa-pending-payments', 4, ['invoice', 'oa', 'bank']],
+  ['pending-invoices', 9, ['invoice', 'oa', 'bank']],
+  ['output-invoice-collections', 8, ['invoice', 'bank']],
+] as const) {
   test(`production ${routeName}: grouped expansion is read-only and clears on collapse`, async ({ page }, info) => {
     test.skip(!enabled || !token, 'Requires explicit production read-only verification and controlled local token.');
     await page.context().addCookies([{ name: 'Admin-Token', value: token!, domain: 'www.yn-sourcing.com', path: '/', secure: true, sameSite: 'Lax' }]);
@@ -24,38 +29,70 @@ for (const routeName of ['input-invoice-usage', 'oa-pending-payments', 'pending-
       await route.continue();
     });
     await page.goto(`/fin-ops/${routeName}`);
-    const trigger = page.locator('.relation-count-button').first();
-    await expect(trigger).toBeVisible();
+    await expect(page.locator('.relation-count-button').first()).toBeVisible();
     await page.waitForLoadState('networkidle');
-    const before = businessReads;
-    await trigger.click();
-    await page.mouse.move(5, 5);
-    await trigger.evaluate(button => (button as HTMLElement).blur());
-    const groupedRows = page.locator('tr[data-relation-group]');
-    await expect.poll(() => groupedRows.count()).toBeGreaterThan(1);
-    const parentId = await trigger.locator('xpath=ancestor::tr').getAttribute('data-relation-group');
-    expect(parentId).toBeTruthy();
-    await expect.poll(() => groupedRows.evaluateAll(rows => rows.flatMap(row => [...row.children].map(cell => getComputedStyle(cell).backgroundColor))))
-      .toEqual(Array(await groupedRows.locator('th,td').count()).fill('rgb(244, 247, 251)'));
-    const presentation = await groupedRows.evaluateAll(rows => rows.map(row => ({
-      group: row.getAttribute('data-relation-group'),
-      line: getComputedStyle(row.firstElementChild!).backgroundImage,
-      lineSize: getComputedStyle(row.firstElementChild!).backgroundSize,
-    })));
-    for (const row of presentation) {
-      expect(row.group).toBe(parentId);
-      expect(row.line).toContain('rgb(158, 181, 219)');
-      expect(row.lineSize).toBe('3px 100%');
-    }
-    expect(businessReads).toBe(before);
     await page.setViewportSize({ width: 1920, height: 1100 });
-    await page.screenshot({ path: info.outputPath(`production-${routeName}-group.png`), animations: 'disabled' });
-    await trigger.click();
-    await expect(groupedRows).toHaveCount(0);
-    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    expect(businessReads).toBe(before);
+    const checked: Array<Record<string, unknown>> = [];
+    const absent: string[] = [];
+    for (const kind of kinds) {
+      const trigger = page.locator('.relation-count-button').filter({ hasText: kind === 'invoice' ? /张/ : kind === 'oa' ? /条/ : /笔/ }).first();
+      // Real production can have no multi-member group of a kind on this page;
+      // deterministic tests separately exercise all eleven kinds without fabricated production facts.
+      if (!await trigger.count()) { absent.push(kind); continue; }
+      const count = Number((await trigger.innerText()).match(/\d+/)![0]);
+      const before = businessReads;
+      const opened = Date.now();
+      await trigger.click();
+      const groupedRows = page.locator('tr[data-relation-group]');
+      await expect(groupedRows).toHaveCount(count);
+      await expect(page.getByRole('region', { name: '配对关系', exact: true })).toHaveCount(0);
+      await expect.poll(() => page.locator('.relation-motion-clip').evaluateAll(nodes => nodes.flatMap(node => node.getAnimations()).length)).toBe(0);
+      const settledMs = Date.now() - opened;
+      await page.mouse.move(5, 5);
+      await trigger.evaluate(button => (button as HTMLElement).blur());
+      const parentId = await trigger.locator('xpath=ancestor::tr').getAttribute('data-relation-group');
+      const presentation = await groupedRows.evaluateAll(rows => rows.map(row => ({
+        group: row.getAttribute('data-relation-group'),
+        line: getComputedStyle(row.firstElementChild!).backgroundImage,
+        lineSize: getComputedStyle(row.firstElementChild!).backgroundSize,
+        cells: [...row.children].map(cell => ({ x: cell.getBoundingClientRect().x, width: cell.getBoundingClientRect().width, background: getComputedStyle(cell).backgroundColor })),
+      })));
+      for (const row of presentation) {
+        expect(row.group).toBe(parentId);
+        expect(row.line).toContain('rgb(158, 181, 219)');
+        expect(row.lineSize).toBe('3px 100%');
+        expect(row.cells).toHaveLength(columns);
+        expect(row.cells).toEqual(presentation[0].cells);
+        expect(row.cells.map(cell => cell.background)).toEqual(Array(columns).fill('rgb(244, 247, 251)'));
+      }
+      expect(businessReads).toBe(before);
+      await page.screenshot({ path: info.outputPath(`production-${routeName}-${kind}-group.png`), animations: 'disabled' });
+      let detailReads = 0;
+      if (kind === 'invoice') {
+        const detail = groupedRows.nth(1).getByRole('button', { name: /(?:查看发票 .* 详情|发票详情 .*)/ });
+        const label = (await detail.getAttribute('aria-label'))!;
+        const invoiceNumber = label.replace(/^查看发票\s+|\s+详情$/g, '').replace(/^发票详情\s+/, '');
+        const response = page.waitForResponse(response => /\/invoices\/[^/]+\/detail(?:\?|$)/.test(response.url()));
+        await detail.click();
+        expect((await response).ok()).toBe(true);
+        const drawer = page.getByRole('dialog', { name: '发票详情', exact: true });
+        await expect(drawer.getByText(invoiceNumber, { exact: true }).first()).toBeVisible();
+        await expect(drawer.getByRole('alert')).toHaveCount(0);
+        detailReads = businessReads - before;
+        expect(detailReads).toBe(1);
+        await drawer.getByRole('button', { name: '关闭详情抽屉' }).click();
+        await expect(drawer).toHaveCount(0);
+        await expect(groupedRows).toHaveCount(count);
+      }
+      await trigger.click();
+      await expect(groupedRows).toHaveCount(0);
+      await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      expect(businessReads).toBe(before + detailReads);
+      checked.push({ kind, parentId, count, columns, settledMs, additionalBusinessReads: businessReads - before - detailReads, clickedDetailReads: detailReads });
+    }
+    expect(checked.length).toBeGreaterThan(0);
     expect(errors).toEqual([]);
     expect(writes).toEqual([]);
-    await info.attach('production-relation-group', { body: JSON.stringify({ routeName, parentId, presentation, additionalBusinessReads: businessReads - before, errors, writes }), contentType: 'application/json' });
+    await info.attach('production-relation-group', { body: JSON.stringify({ routeName, checked, absentKindsOnCurrentPage: absent, errors, writes }), contentType: 'application/json' });
   });
 }

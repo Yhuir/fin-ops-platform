@@ -538,7 +538,9 @@ test.describe("input invoice usage browser flow", () => {
     await expect(page.getByRole("table", { name: "进项发票使用情况表" })).toBeVisible();
     const row = page.getByRole("row", { name: /SD-INV-E2E-0001/ });
     await expect(row).toBeVisible();
-    await expect(row.getByText("合计 188.00")).toBeVisible();
+    await expect(row.getByText("合计 188.00")).toHaveCount(0);
+    await page.waitForLoadState('networkidle');
+    const rowReads = api.count('GET /api/input-invoice-usage/rows');
 
     await expect(row.getByRole("button", { name: "查看陈秀云关联OA 2 条" })).toHaveText("共 2 条");
     await recordLatency({
@@ -547,9 +549,14 @@ test.describe("input invoice usage browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       await row.getByRole("button", { name: "查看陈秀云关联OA 2 条" }).click();
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("region", {name:"配对关系"})).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByRole("region", {name:"配对关系"}).getByText("刘际涛",{exact:true})).toBeVisible());
+      const members = page.locator('tr[data-relation-group="input-usage-row-e2e-001"]');
+      await mark("firstVisibleResponseLatencyMs", expect(members).toHaveCount(2));
+      await mark("finalSettledLatencyMs", expect(members.nth(1).getByText("刘际涛",{exact:true})).toBeVisible());
+      await expect(members.nth(1).getByText('88.00', {exact:true})).toBeVisible();
+      for (const member of await members.all()) await expect(member.locator('th,td')).toHaveCount(10);
     });
+    await expect(page.getByRole('region', {name:'配对关系'})).toHaveCount(0);
+    expect(api.count('GET /api/input-invoice-usage/rows')).toBe(rowReads);
     await expect(page.getByRole("dialog")).toHaveCount(0);
     expect(api.calls.some(call=>call.includes('relation-details'))).toBe(false);
     expect(mutationCalls(api.calls)).toEqual([]);

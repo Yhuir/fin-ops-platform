@@ -3361,7 +3361,7 @@ export function inputInvoiceUsageRowsPayload(
           applicant: "陈秀云",
           application_type: "费用报销",
           project_name: "浏览器进项项目",
-          amount: includeRelationDetailList ? "188.00" : "88.00",
+          amount: "88.00",
           detail_available: true,
         },
         relation_count: includeRelationDetailList ? 2 : 1,
@@ -4436,6 +4436,8 @@ function oaPendingPaymentRelationFanoutRowsPayload(relationConfirmed: boolean) {
           remark: relationConfirmed ? "关联台已确认" : "",
           amount: "58000.00",
           paidTotal: relationConfirmed ? "58000.00" : "0.00",
+          original_amount: relationConfirmed ? "58000.00" : "",
+          original_transaction_count: relationConfirmed ? 1 : 0,
           relationCount: relationConfirmed ? 1 : 0,
           ...relationFields,
           hasMultiple: false,
@@ -5979,12 +5981,26 @@ export function outputInvoiceCollectionRowsPayload(
             counterparty_name: "云南驰林科技有限公司",
             trade_time: "2026-05-29 15:32:37",
             amount: "600,000.00",
+            original_amount: "600,000.00",
+            direction: "inflow",
+            direction_label: "收入",
+            bank_name: "建设银行",
+            account_last4: "8106",
+            summary: "第一笔客户回款",
+            relation_status: "linked",
           },
           {
             id: "bank-output-e2e-003-b",
             counterparty_name: "云南驰林科技有限公司",
             trade_time: "2026-05-29 15:35:10",
             amount: "420,032.00",
+            original_amount: "420,032.00",
+            direction: "inflow",
+            direction_label: "收入",
+            bank_name: "建设银行",
+            account_last4: "8106",
+            summary: "第二笔客户回款",
+            relation_status: "linked",
           },
         ],
       },
@@ -6067,16 +6083,17 @@ export function outputInvoiceCollectionRowsPayload(
 
   return {
     rows: pageRows.map(row => {
-      const invoice = row.invoice as Record<string,string>;
-      const related = (row.invoice_relations as {summaries: Record<string,string>[]}).summaries;
-      const invoices = related.length ? related : [{id: invoice.id, display_no: invoice.display_no, total_with_tax: invoice.total_with_tax}];
-      const bank = row.bank as {summaries: Record<string,string>[]; primary?:Record<string,string>};
-      const banks = bank.summaries.length ? bank.summaries : bank.primary ? [bank.primary] : [];
-      return {...row, relationSources: [
-        {kind:'invoice',count:invoices.length,members:invoices.map(item=>({id:item.id || item.invoice_id,title:item.digital_invoice_no || item.invoice_no || item.display_no,subtitle:item.buyer_name,date:item.invoice_date,amount:item.total_with_tax,status:item.is_positive_invoice === "否" ? "红字" : "蓝字",detailAvailable:true}))},
-        {kind:'oa',count:0,members:[]},
-        {kind:'bank',count:banks.length,members:banks.map(item=>({id:item.id || item.bank_transaction_id,title:item.counterparty_name,date:item.trade_time,amount:item.original_amount,detailAvailable:true}))},
-      ]};
+      const relation = row.invoice_relations as {summaries: Record<string, unknown>[]};
+      const summaries = relation.summaries.map(summary => {
+        const source = rows.find(candidate => candidate.invoice_id === summary.id);
+        if (!source) throw new Error(`Missing output invoice fixture member ${summary.id}`);
+        return {
+          ...source.invoice as Record<string, unknown>,
+          ...summary,
+          memberRow: { collectionStatus: source.collection_status, bankTransactions: source.bank },
+        };
+      }).sort((left, right) => Number(right.id === row.invoice_id) - Number(left.id === row.invoice_id));
+      return { ...row, invoice_relations: { ...relation, summaries } };
     }),
     summary: {
       invoice_count: filteredRows.length,

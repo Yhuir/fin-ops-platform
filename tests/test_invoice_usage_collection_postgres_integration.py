@@ -589,12 +589,42 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
         rows = query_service.list_rows(page=1, page_size=20, month="2026-07")["rows"]
         blue_row = next(row for row in rows if row["invoiceId"] == "output-blue-1")
 
-        invoices = next(column for column in blue_row["relationSources"] if column["kind"] == "invoice")
-        self.assertEqual(invoices["count"], 2)
-        self.assertEqual({member["id"] for member in invoices["members"]}, {"output-blue-1", "output-red-1"})
-        for member in invoices["members"]:
-            detail = query_service.invoice_detail(member["id"])
-            self.assertEqual({section["document_id"] for section in detail["sections"]}, {member["id"]})
+        invoices = blue_row["invoiceRelations"]
+        self.assertEqual(invoices["relationCount"], 2)
+        self.assertEqual([member["invoiceId"] for member in invoices["summaries"]], ["output-blue-1", "output-red-1"])
+        self.assertEqual([member["totalWithTax"] for member in invoices["summaries"]], ["118.00", "-118.00"])
+        self.assertEqual([member["memberRow"]["collectionStatus"]["code"] for member in invoices["summaries"]],
+                         ["reversed_by_red", "reverses_blue"])
+        self.assertNotIn("relationSources", blue_row)
+        for member in invoices["summaries"]:
+            detail = query_service.invoice_detail(member["invoiceId"])
+            self.assertEqual({section["document_id"] for section in detail["sections"]}, {member["invoiceId"]})
+
+        filtered = query_service.list_rows(keyword="OUT-RED-001", page=1, page_size=1)
+        self.assertEqual(filtered["pagination"], {"page": 1, "pageSize": 1, "total": 1})
+        self.assertEqual([row["invoiceId"] for row in filtered["rows"]], ["output-red-1"])
+        self.assertEqual(filtered["summary"]["invoiceCount"], 1)
+        self.assertEqual(filtered["summary"]["totalWithTax"], "-118.00")
+        filtered_members = filtered["rows"][0]["invoiceRelations"]["summaries"]
+        self.assertEqual([member["invoiceId"] for member in filtered_members], ["output-red-1", "output-blue-1"])
+        self.assertTrue(all(set(member["memberRow"]) == {"collectionStatus", "bankTransactions"}
+                            for member in filtered_members))
+        json.dumps(filtered)
+        export_query = {"keyword": ["OUT-RED-001"]}
+        self.assertEqual(query_service.export_summary(export_query), {"row_count": 1})
+        from io import BytesIO
+        from openpyxl import load_workbook
+
+        _filename, content, count = query_service.export(export_query)
+        self.assertEqual(count, 1)
+        workbook = load_workbook(BytesIO(content), read_only=True)
+        try:
+            exported = list(workbook.active.values)
+            self.assertEqual(len(exported), 2)
+            self.assertEqual(exported[1][1], "26532000000808367761")
+            self.assertEqual(exported[1][8], -118)
+        finally:
+            workbook.close()
 
     def test_output_over_collection_is_collected_with_zero_pending_amount(self) -> None:
         self.connection.execute(

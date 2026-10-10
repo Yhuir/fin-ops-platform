@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { fetchBankDetailTransactions } from "../features/bankDetails/api";
 import { fetchTurnoverLedger, fetchTurnoverRelationDetail } from "../features/turnoverLedger/api";
-import { inputInvoiceSourceRelationColumns } from "../features/inputInvoiceUsage/relationExpansion";
+import { inputInvoiceMembers } from "../features/inputInvoiceUsage/relationExpansion";
 import { fetchInputInvoiceUsageRows } from "../features/inputInvoiceUsage/api";
 import { fetchOutputInvoiceCollectionRows } from "../features/outputInvoiceCollections/api";
 import { OUTPUT_COLLECTION_STATUS_CODES } from "../features/outputInvoiceCollections/types";
@@ -18,7 +18,7 @@ test.each(["camel", "snake"])("invoice bank APIs preserve %s source names, leadi
     ? { id: "bank-1", bankName: "建设银行", bankShortName: "建行", accountLast4: "0012", bankAccount: "建设银行 0012" }
     : { id: "bank-1", bank_name: "建设银行", bank_short_name: "建行", account_last4: "0012", bank_account: "建设银行 0012" };
   const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({
-    rows: [{ id: "row-1", relationSources: ["invoice","oa","bank"].map(kind=>({kind,count:0,members:[]})), invoiceId: "invoice-1", bankTransactions: { ...bank, summaries: [bank] },
+    rows: [{ id: "row-1", invoiceId: "invoice-1", bankTransactions: { ...bank, summaries: [bank] },
       collectionStatus: { code: "pending_collection", label: "待收款" } }],
     pagination: { page: 1, pageSize: 20, total: 1 },
     filterOptions: [{ field: "collection_status", options: OUTPUT_COLLECTION_STATUS_CODES.map(value => ({ value, label: value, count: 0 })) }],
@@ -96,8 +96,7 @@ test("input expansion keeps independent formal cases and deduplicates their shar
     invoiceRelations: {relationCount: 1, summaries: [{id: "invoice-1", relationCaseId: "case-a"}]},
   }]}));
   const {rows} = await fetchInputInvoiceUsageRows(request);
-  const columns = inputInvoiceSourceRelationColumns(rows[0]);
-  expect(columns).toHaveLength(2);
-  expect(columns[0].members.map(member => member.relationId)).toEqual(["case-a", "case-b"]);
-  expect(columns[1]).toMatchObject({count: 1, members: [{id: "original-bank", amount: "100", relationIds: ["case-a", "case-b"]}]});
+  const members = inputInvoiceMembers(rows[0]);
+  expect(members.oa.map(member => member.relationCaseId)).toEqual(["case-a", "case-b"]);
+  expect(members.bank).toEqual([expect.objectContaining({id: "original-bank", originalAmount: "100", relationIds: ["case-a", "case-b"]})]);
 });
