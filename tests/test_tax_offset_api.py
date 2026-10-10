@@ -1,13 +1,18 @@
 import json
 import unittest
 from http import HTTPStatus
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from openpyxl import load_workbook
+
 from fin_ops_platform.app.routes_tax import TaxApiRoutes
+from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.import_job_queue import ImportJobIdempotencyConflict
 from fin_ops_platform.services.tax_certified_import_job_service import TaxCertifiedImportJobService
 from fin_ops_platform.services.tax_offset_query_service import TaxOffsetQueryService
+from tests.test_tax_offset_canonical_repository import FakeConnection
 
 
 def json_body(body):
@@ -106,6 +111,28 @@ class TaxOffsetApiTests(unittest.TestCase):
         self.assertEqual(status, HTTPStatus.OK)
         self.assertEqual(payload, {'filename': '专票清单.xlsx', 'content': b'xlsx'})
         self.exporter.export.assert_called_once_with(filters, ['invoice_no', 'tax_amount'])
+
+    def test_application_wiring_exports_real_xlsx_with_two_argument_download_port(self):
+        connection = FakeConnection(count=1)
+        app = Application.__new__(Application)
+        app._state_store = SimpleNamespace(_sql_read_connection=connection)
+        app._tax_certified_import_service = Mock()
+        app._resolve_tax_offset_read_session = lambda headers: (self.session, None)
+        app._load_json_body = json_body
+        app._configure_tax_offset_application_services()
+        response = app._tax_api_routes.route('POST', '/api/tax-offset/export', {}, json.dumps({
+            'filters': {'status': 'certified', 'issue_year': '2026'},
+            'fields': ['digital_invoice_no', 'tax_amount'],
+        }), {})
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+        self.assertIn('spreadsheetml.sheet', response.headers['Content-Type'])
+        self.assertIn("filename*=UTF-8''", response.headers['Content-Disposition'])
+        response.headers['Content-Disposition'].encode('ascii')
+        workbook = load_workbook(BytesIO(response.body), read_only=True)
+        self.addCleanup(workbook.close)
+        self.assertEqual(list(workbook.active.values), [('数电发票号码', '税额'), ('001234567890123456789', 0)])
+        self.assertEqual(len(connection.queries), 2)
+        self.assertEqual(connection.queries[-1][1][-2:], (20001, 0))
 
     def test_export_rejects_invalid_shapes_and_surfaces_failures(self):
         for payload in ({'filters': []}, {'fields': 'invoice_no'}, {'fields': [123]}, {'unknown': 1}):

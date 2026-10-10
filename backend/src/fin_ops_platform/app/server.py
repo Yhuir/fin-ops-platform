@@ -1210,7 +1210,7 @@ class Application:
         self._tax_api_routes = TaxApiRoutes(
             query_service=self._tax_offset_query_service,
             export_service=self._tax_offset_export_service,
-            export_response=self._turnover_ledger_export_response,
+            export_response=self._xlsx_file_response,
             revoke_batch_provider=self._tax_certified_import_application_service.revoke_batch,
             certified_import_job_service=self._tax_certified_import_job_service,
             json_response=self._json_response,
@@ -1303,7 +1303,7 @@ class Application:
         self._cost_statistics_api_routes = CostStatisticsApiRoutes(
             query_service=self._cost_statistics_query_service,
             json_response=self._json_response,
-            file_response=self._cost_statistics_file_response,
+            file_response=self._xlsx_file_response,
             metric_emitter=self._emit_cost_statistics_explorer_metric,
             entry_count=CostStatisticsQueryService.explorer_entry_count,
             duration_ms=self._duration_ms,
@@ -6274,7 +6274,7 @@ class Application:
             flush=True,
         )
 
-    def _cost_statistics_file_response(self, filename: str, content: bytes) -> Response:
+    def _xlsx_file_response(self, filename: str, content: bytes) -> Response:
         return Response(
             status_code=int(HTTPStatus.OK),
             body=content,
