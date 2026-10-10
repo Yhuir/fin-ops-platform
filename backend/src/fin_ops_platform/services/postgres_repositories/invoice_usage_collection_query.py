@@ -1184,6 +1184,24 @@ def _fact_cte(
         if invoice_type == "output"
         else ""
     )
+    group_relation_scopes_sql = (
+        """
+            select distinct 'relation:' || assigned.scope_id as group_key, assigned.scope_id
+            from assigned_relation assigned
+        """
+        if invoice_type == "input"
+        else f"""
+            select distinct grouped.group_key, scope.scope_id
+            from grouped_invoices grouped
+            cross join lateral unnest(grouped.invoice_ids) invoice_member(invoice_id)
+            join invoice_aliases alias on alias.invoice_id = invoice_member.invoice_id
+            join relation_members member on member.row_id = alias.row_id
+             and member.row_type in ('invoice', 'input_invoice', 'output_invoice')
+             and (grouped.relation_case_id is null or member.case_id = grouped.relation_case_id)
+            join relation_scopes scope on scope.relation_id = member.relation_id
+            {bank_owner_join_sql}
+        """
+    )
     final_status_sql = (
         f"""
         , payment_facts as (
@@ -1594,18 +1612,7 @@ def _fact_cte(
         )
         {bank_owner_ctes_sql},
         group_relation_scopes as (
-            select distinct
-                grouped.group_key,
-                scope.scope_id
-            from grouped_invoices grouped
-            cross join lateral unnest(grouped.invoice_ids) invoice_member(invoice_id)
-            join invoice_aliases alias on alias.invoice_id = invoice_member.invoice_id
-            join relation_members member on member.row_id = alias.row_id
-             and member.row_type in ('invoice', 'input_invoice', 'output_invoice')
-             and (grouped.relation_case_id is null or member.case_id = grouped.relation_case_id)
-            join relation_scopes scope
-              on scope.relation_id = member.relation_id
-            {bank_owner_join_sql}
+            {group_relation_scopes_sql}
         ),
         group_relation_ids as (
             select distinct
