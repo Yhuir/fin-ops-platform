@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 
 import { sidebarGroups } from "../components/shell/sidebarItems";
 import {
@@ -11,6 +11,11 @@ import {
   createStoredPayload,
 } from "../contexts/pageSessionStorage";
 import { renderAuthenticatedAppAt } from "./renderHelpers";
+
+beforeAll(async () => {
+  // Keep Vite's first module transform outside the bank amount interaction assertions.
+  await import("../pages/InputInvoiceUsagePage");
+});
 
 const inputInvoiceUsageSourceFiles = [
   "src/pages/InputInvoiceUsagePage.tsx",
