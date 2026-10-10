@@ -9,9 +9,16 @@ export type PendingInvoiceDisplayRow = {
   oa: PendingInvoiceOaSummary | null;
 };
 
+function relationCases(member: { relationCaseId?: string; relationCaseIds?: string[]; relationIds?: string[] }) {
+  return [...new Set([
+    ...(member.relationIds ?? []), ...(member.relationCaseIds ?? []),
+    ...(member.relationCaseId ? [member.relationCaseId] : []),
+  ])];
+}
+
 export function pendingInvoiceMembers(row: PendingInvoiceRow) {
   const banks = originalRelationMembers(row.bankTransactions.summaries.map(member => ({
-    ...member, originalId: member.parentRowId, relationId: member.relationCaseId,
+    ...member, originalId: member.parentRowId, relationIds: relationCases(member),
   })));
   const oa = row.oa.relationCount === 1 && row.oa.summaries.length === 0 && row.oa.primary ? [row.oa.primary] : row.oa.summaries;
   return { bank: banks, invoice: row.inputInvoices.summaries, oa };
@@ -24,11 +31,11 @@ export function pendingInvoiceDisplayRows(row: PendingInvoiceRow, kind: Relation
   const banksByCase = new Map<string, typeof members.bank[number]>();
   members.bank.forEach(member => member.relationIds.forEach(id => { if (!banksByCase.has(id)) banksByCase.set(id, member); }));
   const invoicesByCase = new Map<string, PendingInvoiceSummary>();
-  members.invoice.forEach(member => { if (!invoicesByCase.has(member.relationCaseId)) invoicesByCase.set(member.relationCaseId, member); });
+  members.invoice.forEach(member => relationCases(member).forEach(id => { if (!invoicesByCase.has(id)) invoicesByCase.set(id, member); }));
   const oaByCase = new Map<string, PendingInvoiceOaSummary>();
-  members.oa.forEach(member => { if (!oaByCase.has(member.relationCaseId)) oaByCase.set(member.relationCaseId, member); });
+  members.oa.forEach(member => relationCases(member).forEach(id => { if (!oaByCase.has(id)) oaByCase.set(id, member); }));
   return members[kind].map(member => {
-    const caseIds = 'relationIds' in member ? member.relationIds ?? [] : member.relationCaseId ? [member.relationCaseId] : [];
+    const caseIds = relationCases(member);
     const singleSource = kind === 'bank' && members.bank.length === 1 && caseIds.length === 0
       && row.inputInvoices.relationCount <= 1 && row.oa.relationCount <= 1;
     const bank = kind === 'bank' ? member as PendingInvoiceBankTransactionSummary

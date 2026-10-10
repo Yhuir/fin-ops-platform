@@ -61,6 +61,7 @@ type ApiTagDictionary = {
 };
 
 type ApiInvoiceSummary = Partial<{
+  relation_case_ids: string[];
   id: string | null;
   invoice_id: string | null;
   invoice_no: string | null;
@@ -81,6 +82,7 @@ type ApiInvoiceSummary = Partial<{
 }>;
 
 type ApiOaSummary = Partial<{
+  relation_case_ids: string[];
   id: string | null;
   amount: string | null;
   applicant: string | null;
@@ -99,6 +101,7 @@ type ApiOaSummary = Partial<{
 }>;
 
 type ApiBankTransactionPayload = Partial<{
+  relation_case_ids: string[];
   parent_row_id: string;
   bank_split_parts: BankSplitPart[];
   original_amount: string | null;
@@ -481,6 +484,7 @@ function mapBankTransactionSummary(value: ApiBankTransactionPayload | null | und
   const mapped = mapBankTransaction(value, fallbackId);
   return {
     ...mapped,
+    relationCaseIds: stringList(value?.relation_case_ids),
     relationCaseId: stringValue(value?.relation_case_id, stringValue(value?.relationCaseId)),
     relationStatus: formalRelationStatus(value?.relation_status ?? value?.relationStatus),
     relationSource: stringValue(value?.relation_source, stringValue(value?.relationSource)),
@@ -490,6 +494,7 @@ function mapBankTransactionSummary(value: ApiBankTransactionPayload | null | und
 function mapInvoice(value: ApiInvoiceSummary | null | undefined): PendingInvoiceSummary {
   const id = stringValue(value?.id, stringValue(value?.invoice_id));
   return {
+    relationCaseIds: stringList(value?.relation_case_ids),
     id,
     invoiceNo: stringValue(value?.invoice_no),
     digitalInvoiceNo: stringValue(value?.digital_invoice_no),
@@ -512,6 +517,7 @@ function hasInvoiceIdentity(invoice: PendingInvoiceSummary) {
 
 function mapOa(value: ApiOaSummary | null | undefined): PendingInvoiceOaSummary {
   return {
+    relationCaseIds: stringList(value?.relation_case_ids),
     id: stringValue(value?.id),
     amount: stringValue(value?.amount),
     applicant: stringValue(value?.applicant),

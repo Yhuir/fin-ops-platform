@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from fin_ops_platform.services.pending_invoice_canonical_query import (
     PendingInvoiceCanonicalQueryService,
@@ -14,6 +16,7 @@ from fin_ops_platform.services.postgres_connection import (
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.runtime_paths import default_data_dir
 
+from tests.app_test_support import build_local_state_application
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,
@@ -36,6 +39,124 @@ class PendingInvoicePostgresIntegrationTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.connection.close()
         truncate_test_database(self.database_url)
+
+    def _rows_via_api(self) -> dict[str, object]:
+        with tempfile.TemporaryDirectory() as directory:
+            app = build_local_state_application(data_dir=Path(directory))
+            app._pending_invoice_page_query_service = PendingInvoiceCanonicalQueryService(
+                repository=PostgresPendingInvoiceCanonicalRepository(self.connection),
+            )
+            response = app.handle_request(
+                "GET", "/api/pending-invoices/rows?direction=expense&filter=all&include_statistics=false&page_size=200",
+            )
+        self.assertEqual(response.status_code, 200)
+        return json.loads(response.body)
+
+    def test_single_bank_six_invoice_api_members_publish_the_same_exact_case(self) -> None:
+        self.connection.execute("""
+            insert into app.bank_transactions(legacy_mongo_id, account_no, txn_direction,
+                counterparty_name_raw, amount, signed_amount, txn_date, txn_month, status)
+            values ('bank-six', '8106', 'outflow', '樊祖芳', 650, -650,
+                '2026-10-09', '2026-10-01', 'active')
+        """)
+        for index, amount in enumerate((100, 50, 50, 100, 50, 300), start=1):
+            self.connection.execute("""
+                insert into app.invoices(legacy_mongo_id, invoice_type, invoice_no, invoice_date,
+                    invoice_month, seller_name, amount, signed_amount, total_with_tax, status)
+                values (%s, 'input', %s, '2026-09-10', '2026-09-01', '真实原件销方', %s, %s, %s, 'active')
+            """, (f'invoice-six-{index}', f'SIX-{index}', amount, amount, amount))
+        self.connection.execute("""
+            insert into app.oa_applications(oa_source_id, form_id, row_id, status, applicant,
+                form_type, project_name, application_date, amount, scope_month)
+            values ('source-six', 'form-six', 'oa-six', 'completed', '樊祖芳',
+                '日常报销', '云南溯源科技', '2026-10-09', 650, '2026-10-01')
+        """)
+        self.connection.execute("""
+            insert into app.workbench_pair_relations(case_id, relation_mode, status, month_scope, row_ids, row_types)
+            values ('CASE-SIX', 'manual_confirmed', 'active', '2026-10-01',
+                array['bank-six','oa-six','invoice-six-1','invoice-six-2','invoice-six-3',
+                      'invoice-six-4','invoice-six-5','invoice-six-6'],
+                array['bank','oa','invoice','invoice','invoice','invoice','invoice','invoice'])
+        """)
+        payload = self._rows_via_api()
+        self.assertEqual(payload['pagination']['total'], 1)
+        self.assertEqual(payload['acquisition_summary']['bank_count'], 1)
+        self.assertEqual(payload['acquisition_summary']['invoice_count'], 6)
+        row = payload['rows'][0]
+        self.assertEqual(row['relation_case_ids'], ['CASE-SIX'])
+        self.assertEqual(row['bank_transactions']['primary']['relation_case_ids'], ['CASE-SIX'])
+        self.assertEqual(row['bank_transactions']['primary']['original_amount'], '650.00')
+        self.assertEqual(row['bank_transactions']['original_transaction_count'], 1)
+        self.assertEqual(row['bank_transactions']['summaries'], [])
+        self.assertEqual(row['input_invoices']['relation_count'], 6)
+        self.assertEqual(row['input_invoices']['payment_summary']['invoice_total'], '650.00')
+        self.assertEqual(row['input_invoices']['payment_summary']['paid_total'], '650.00')
+        self.assertEqual({member['id'] for member in row['input_invoices']['summaries']},
+                         {f'invoice-six-{index}' for index in range(1, 7)})
+        for member in row['input_invoices']['summaries'] + row['oa']['summaries']:
+            self.assertEqual(member['relation_case_ids'], ['CASE-SIX'])
+        self.assertEqual(row['oa']['primary']['id'], 'oa-six')
+        self.assertEqual(row['oa']['primary']['relation_case_ids'], ['CASE-SIX'])
+
+    def test_multi_case_api_members_keep_exact_case_sets_without_duplicate_invoice_or_oa_amounts(self) -> None:
+        for identity, amount, day in (('bank-owner', 650, 30), ('bank-a', 50, 29), ('bank-b', 75, 28)):
+            self.connection.execute("""
+                insert into app.bank_transactions(legacy_mongo_id, account_no, txn_direction,
+                    counterparty_name_raw, amount, signed_amount, txn_date, txn_month, status)
+                values (%s, '8106', 'outflow', %s, %s, %s, %s::date, '2026-09-01', 'active')
+            """, (identity, identity, amount, -amount, f'2026-09-{day}'))
+        for identity in ('invoice-shared', 'invoice-a', 'invoice-b'):
+            self.connection.execute("""
+                insert into app.invoices(legacy_mongo_id, invoice_type, invoice_no, invoice_date,
+                    invoice_month, seller_name, amount, signed_amount, total_with_tax, status)
+                values (%s, 'input', %s, '2026-09-10', '2026-09-01', %s, 100, 100, 100, 'active')
+            """, (identity, identity, identity))
+        for identity in ('oa-shared', 'oa-a', 'oa-b'):
+            self.connection.execute("""
+                insert into app.oa_applications(oa_source_id, form_id, row_id, status, applicant,
+                    form_type, project_name, application_date, amount, scope_month)
+                values (%s, %s, %s, 'completed', %s, '日常报销', %s, '2026-09-10', 100, '2026-09-01')
+            """, (identity, identity, identity, identity, identity))
+        self.connection.execute("""
+            insert into app.workbench_pair_relations(case_id, relation_mode, status, month_scope, row_ids, row_types)
+            values
+                ('CASE-A', 'manual_confirmed', 'active', '2026-09-01',
+                 array['bank-owner','bank-a','invoice-shared','invoice-a','oa-shared','oa-a'],
+                 array['bank','bank','invoice','invoice','oa','oa']),
+                ('CASE-B', 'manual_confirmed', 'active', '2026-09-01',
+                 array['bank-owner','bank-b','invoice-shared','invoice-b','oa-shared','oa-b'],
+                 array['bank','bank','invoice','invoice','oa','oa']),
+                ('CASE-WITHDRAWN', 'manual_confirmed', 'withdrawn', '2026-09-01',
+                 array['bank-owner','invoice-shared','oa-shared'], array['bank','invoice','oa'])
+        """)
+        payload = self._rows_via_api()
+        row = next(item for item in payload['rows'] if item['id'] == 'bank-owner')
+        self.assertEqual(row['relation_case_ids'], ['CASE-A', 'CASE-B'])
+        self.assertEqual(row['bank_transactions']['primary']['relation_case_ids'], ['CASE-A', 'CASE-B'])
+        invoice_cases = {member['id']: member['relation_case_ids'] for member in row['input_invoices']['summaries']}
+        oa_cases = {member['id']: member['relation_case_ids'] for member in row['oa']['summaries']}
+        self.assertEqual(invoice_cases, {'invoice-shared': ['CASE-A', 'CASE-B'],
+                                         'invoice-a': ['CASE-A'], 'invoice-b': ['CASE-B']})
+        self.assertEqual(oa_cases, {'oa-shared': ['CASE-A', 'CASE-B'], 'oa-a': ['CASE-A'], 'oa-b': ['CASE-B']})
+        self.assertEqual(row['input_invoices']['relation_count'], 3)
+        self.assertEqual(row['oa']['relation_count'], 3)
+        self.assertEqual(row['input_invoices']['payment_summary']['invoice_total'], '300.00')
+        self.assertEqual(payload['acquisition_summary']['invoice_count'], 3)
+        bank_cases: dict[str, set[str]] = {}
+        for member in row['bank_transactions']['summaries']:
+            self.assertEqual(member['relation_case_ids'], [member['relation_case_id']])
+            bank_cases.setdefault(member['id'], set()).update(member['relation_case_ids'])
+        self.assertEqual(bank_cases, {'bank-owner': {'CASE-A', 'CASE-B'}, 'bank-a': {'CASE-A'}})
+        self.assertEqual(row['bank_transactions']['original_transaction_count'], 2)
+        self.assertEqual(row['bank_transactions']['original_amount'], '700.00')
+        self.assertEqual(payload['pagination']['total'], 2)
+        self.assertEqual(payload['acquisition_summary']['bank_count'], 3)
+        other_row = next(item for item in payload['rows'] if item['id'] == 'bank-b')
+        self.assertEqual(other_row['bank_transactions']['primary']['relation_case_ids'], ['CASE-B'])
+        self.assertEqual(other_row['bank_transactions']['original_transaction_count'], 1)
+        self.assertEqual(other_row['bank_transactions']['original_amount'], '75.00')
+        self.assertEqual({member['id']: member['relation_case_ids'] for member in other_row['input_invoices']['summaries']},
+                         {'invoice-shared': ['CASE-B'], 'invoice-b': ['CASE-B']})
 
     def test_missing_gross_stays_unknown_through_page_status_filters_and_candidates(self) -> None:
         self.connection.execute("""
@@ -139,6 +260,9 @@ class PendingInvoicePostgresIntegrationTests(unittest.TestCase):
         self.connection.execute("update app.workbench_pair_relations set status='withdrawn' where case_id='counts-case'")
         restored = query.rows(request)
         self.assertEqual(restored["acquisition_summary"], before["acquisition_summary"])
+        for row in restored['rows']:
+            self.assertEqual(row['relation_case_ids'], [])
+            self.assertEqual(row['bank_transactions']['primary']['relation_case_ids'], [])
         self.assertEqual(query.rows(filtered_request)["pagination"]["total"], 0)
 
     def test_excluded_relation_members_remain_visible_in_their_own_status(self) -> None:

@@ -28,7 +28,14 @@ for (const [routeName, columns, kinds] of [
       if (path.startsWith('/fin-ops-api/api/') && !['/fin-ops-api/api/app-health', '/fin-ops-api/api/background-jobs/active'].includes(path)) businessReads++;
       await route.continue();
     });
+    const pendingPayload = routeName === 'pending-invoices'
+      ? page.waitForResponse(response => {
+        const url = new URL(response.url());
+        return url.pathname.endsWith('/api/pending-invoices/rows') && url.searchParams.get('include_statistics') !== 'true' && response.ok();
+      })
+      : null;
     await page.goto(`/fin-ops/${routeName}`);
+    const canonicalRows = pendingPayload ? (await (await pendingPayload).json()).rows : [];
     await expect(page.locator('.relation-count-button').first()).toBeVisible();
     await page.waitForLoadState('networkidle');
     await page.setViewportSize({ width: 1920, height: 1100 });
@@ -49,7 +56,10 @@ for (const [routeName, columns, kinds] of [
       await expect.poll(() => page.locator('.relation-motion-clip').evaluateAll(nodes => nodes.flatMap(node => node.getAnimations()).length)).toBe(0);
       const settledMs = Date.now() - opened;
       await page.mouse.move(5, 5);
-      await trigger.evaluate(button => (button as HTMLElement).blur());
+      await page.getByRole('heading', { level: 1 }).click();
+      await expect.poll(() => groupedRows.evaluateAll(rows => rows.map(row =>
+        [...row.children].map(cell => getComputedStyle(cell).backgroundColor),
+      ))).toEqual(Array.from({ length: count }, () => Array(columns).fill('rgb(244, 247, 251)')));
       const parentId = await trigger.locator('xpath=ancestor::tr').getAttribute('data-relation-group');
       const presentation = await groupedRows.evaluateAll(rows => rows.map(row => ({
         group: row.getAttribute('data-relation-group'),
@@ -66,6 +76,34 @@ for (const [routeName, columns, kinds] of [
         expect(row.cells.map(cell => cell.background)).toEqual(Array(columns).fill('rgb(244, 247, 251)'));
       }
       expect(businessReads).toBe(before);
+      if (routeName === 'pending-invoices' && kind === 'invoice') {
+        const source = canonicalRows.find((row: { id: string }) => row.id === parentId);
+        expect(source).toBeDefined();
+        const bankMembers = source.bank_transactions.summaries.length
+          ? source.bank_transactions.summaries : [source.bank_transactions.primary];
+        const oaMembers = source.oa.summaries.length ? source.oa.summaries : [source.oa.primary].filter(Boolean);
+        const expectedInvoices = source.input_invoices.summaries;
+        expect(expectedInvoices).toHaveLength(count);
+        for (let index = 0; index < count; index++) {
+          const invoice = expectedInvoices[index];
+          const cells = groupedRows.nth(index).locator('th,td');
+          await expect(cells.nth(4)).toContainText(invoice.digital_invoice_no || invoice.invoice_no);
+          await expect(cells.nth(6)).toContainText(Number(invoice.total_with_tax).toFixed(2));
+          const caseIds: string[] = invoice.relation_case_ids;
+          expect(caseIds.length).toBeGreaterThan(0);
+          const belongs = (member: { relation_case_ids: string[] }) => member.relation_case_ids.some(id => caseIds.includes(id));
+          const exactBanks = bankMembers.filter(belongs);
+          const exactOas = oaMembers.filter(belongs);
+          if (exactBanks.length === 1) {
+            await expect(cells.nth(0)).toContainText(exactBanks[0].counterparty_name);
+            await expect(cells.nth(1)).toContainText(Number(exactBanks[0].original_amount).toFixed(2));
+          }
+          if (exactOas.length === 1) {
+            await expect(cells.nth(7)).toContainText(exactOas[0].applicant);
+            await expect(cells.nth(8)).toContainText(exactOas[0].project_name);
+          }
+        }
+      }
       await page.screenshot({ path: info.outputPath(`production-${routeName}-${kind}-group.png`), animations: 'disabled' });
       let detailReads = 0;
       if (kind === 'invoice') {

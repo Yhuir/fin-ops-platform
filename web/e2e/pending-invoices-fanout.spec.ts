@@ -158,3 +158,42 @@ test("related invoices stay in nine original columns, use member amounts and pre
   await expect(rows).toHaveCount(0);
   expect(api.calls.length).toBe(requests);
 });
+
+test('six compact canonical invoice members retain their bank and OA columns without additional reads', async ({ page }) => {
+  const api = await installDeterministicApiMocks(page, { sessionMode: 'user' });
+  const payload = pendingInvoiceRowsPayload(true);
+  const row: any = payload.rows[0];
+  const caseIds = ['CASE-SIX-COMPACT'];
+  const bank = { ...row.bank_transaction, counterparty_name: '六票报销人', original_amount: '650.00', debit_amount: '650.00', amount: '650.00', relation_case_ids: caseIds };
+  row.bank_transaction = bank;
+  row.bank_transactions = { primary: bank, relation_count: 1, original_transaction_count: 1, has_multiple: false, summaries: [] };
+  const invoices = ['100.00', '50.00', '50.00', '100.00', '50.00', '300.00'].map((amount, index) => ({
+    ...row.input_invoices.summaries[0], id: `compact-invoice-${index}`, invoice_no: `COMPACT-${index}`, relation_case_id: '', relation_case_ids: caseIds, total_with_tax: amount,
+  }));
+  row.input_invoices = { ...row.input_invoices, primary: invoices[0], summaries: invoices, relation_count: 6, has_multiple: true };
+  row.oa = { ...row.oa, primary: { ...row.oa.primary, applicant: '六票报销人', project_name: '六票项目', relation_case_id: '', relation_case_ids: caseIds }, relation_count: 1, has_multiple: false, summaries: [] };
+  payload.rows = [row];
+  (payload as any).acquisition_summary = pendingAcquisitionFixture(payload.rows);
+  await page.route('**/api/pending-invoices/rows**', route => route.fulfill({ json: payload }));
+  await page.goto('/pending-invoices');
+  const trigger = page.getByRole('button', { name: '展开配对关系，发票共 6 张' });
+  await expect(trigger).toBeVisible();
+  const reads = api.calls.length;
+  await trigger.click();
+  const rows = page.locator('tr[data-relation-group]');
+  await expect(rows).toHaveCount(6);
+  for (let index = 0; index < invoices.length; index++) {
+    const cells = rows.nth(index).locator('th,td');
+    await expect(cells).toHaveCount(9);
+    await expect(cells.nth(0)).toContainText('六票报销人');
+    await expect(cells.nth(1)).toContainText('650.00');
+    await expect(cells.nth(4)).toContainText(`COMPACT-${index}`);
+    await expect(cells.nth(6)).toContainText(invoices[index].total_with_tax);
+    await expect(cells.nth(7)).toContainText('六票报销人');
+    await expect(cells.nth(8)).toContainText('六票项目');
+  }
+  expect(api.calls).toHaveLength(reads);
+  await page.getByRole('button', { name: '收起配对关系，发票共 6 张' }).click();
+  await expect(rows).toHaveCount(0);
+  expect(api.calls).toHaveLength(reads);
+});

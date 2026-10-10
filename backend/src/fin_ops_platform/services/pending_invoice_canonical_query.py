@@ -325,6 +325,8 @@ relation_case_bank_facts as materialized (
                 'statement_serial_no', bank.bank_serial_no,
                 'account_name', bank.account_name,
                 'account_last4', right(regexp_replace(bank.account_no, '\\D', '', 'g'), 4),
+                'relation_case_id', member.case_id,
+                'relation_case_ids', jsonb_build_array(member.case_id),
                 'relation_status', 'linked'
             )
             order by bank.trade_time desc nulls last, bank.row_id
@@ -361,9 +363,11 @@ relation_bank_original_totals as materialized (
     group by bank_id
 ),
 case_invoice_members as materialized (
-    select distinct owner.bank_id, member.row_id as invoice_id
+    select owner.bank_id, member.row_id as invoice_id,
+           array_agg(distinct member.case_id order by member.case_id) as relation_case_ids
     from bank_cases owner
     join relation_members member on member.case_id = owner.case_id and member.row_type = 'invoice'
+    group by owner.bank_id, member.row_id
 ),
 invoice_identity_rows as materialized (
     select
@@ -419,6 +423,7 @@ relation_invoice_facts as materialized (
                              then coalesce(invoice.seller_name, '')
                              else coalesce(invoice.buyer_name, '') end,
                     'relation_status', 'linked',
+                    'relation_case_ids', member.relation_case_ids,
                     'relation_source', 'workbench_pair_relations'
                 )
                 order by invoice.invoice_date desc nulls last, invoice.id
@@ -430,9 +435,11 @@ relation_invoice_facts as materialized (
     group by member.bank_id
 ),
 case_oa_members as materialized (
-    select distinct owner.bank_id, member.row_id as oa_id
+    select owner.bank_id, member.row_id as oa_id,
+           array_agg(distinct member.case_id order by member.case_id) as relation_case_ids
     from bank_cases owner
     join relation_members member on member.case_id = owner.case_id and member.row_type = 'oa'
+    group by owner.bank_id, member.row_id
 ),
 workflow_oa as materialized (
     select
@@ -478,6 +485,7 @@ relation_oa_facts as materialized (
                     'amount', coalesce(oa.amount, 0)::text,
                     'detail_available', true,
                     'relation_status', 'linked',
+                    'relation_case_ids', member.relation_case_ids,
                     'relation_source', 'workbench_pair_relations'
                 )
                 order by oa.application_date desc nulls last, oa.row_id
@@ -2609,6 +2617,7 @@ def _row_payload(row: dict[str, Any]) -> dict[str, Any]:
         "is_split": bool(row.get("is_split")),
         "bank_split_version": int(row.get("bank_split_version") or 0),
         "bank_split_parts": list(row.get("bank_split_parts") or []),
+        "relation_case_ids": list(row.get("relation_case_ids") or []),
     }
     if not bank_summaries:
         bank_summaries = [
@@ -2627,6 +2636,7 @@ def _row_payload(row: dict[str, Any]) -> dict[str, Any]:
                 "statement_serial_no": bank_transaction["statement_serial_no"],
                 "account_name": bank_transaction["account_name"],
                 "account_last4": bank_transaction["account_last4"],
+                "relation_case_ids": bank_transaction["relation_case_ids"],
                 "relation_status": "unlinked",
             }
         ]

@@ -152,6 +152,7 @@ export type PendingInvoiceBankTransaction = {
 };
 
 export type PendingInvoiceBankTransactionSummary = PendingInvoiceBankTransaction & {
+  relationCaseIds?: string[];
   relationCaseId: string;
   relationStatus: string;
   relationSource: string;
@@ -194,6 +195,7 @@ export type PendingInvoiceAcquisitionStatus = {
 };
 
 export type PendingInvoiceSummary = {
+  relationCaseIds?: string[];
   id: string;
   invoiceNo: string;
   digitalInvoiceNo: string;
@@ -227,6 +229,7 @@ export type PendingInvoiceInvoiceZone = {
 };
 
 export type PendingInvoiceOaSummary = {
+  relationCaseIds?: string[];
   id: string;
   amount?: string;
   applicant: string;

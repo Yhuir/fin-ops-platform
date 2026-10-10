@@ -1875,3 +1875,42 @@ test("rejects duplicate invoice members instead of rendering duplicate rows", as
   expect(await screen.findByRole('alert')).toHaveTextContent('关系摘要不完整');
   expect(screen.queryByRole('button', { name: /展开配对关系/ })).not.toBeInTheDocument();
 });
+
+test('renders all nine original columns for six invoices with compact canonical bank and OA membership', async () => {
+  const user = userEvent.setup();
+  const base = upgradedRows()[1];
+  const bank = { ...base.bank_transaction, id: 'bank-six', counterparty_name: '六票报销人', amount: '650.00', debit_amount: '650.00', original_amount: '650.00', relation_case_ids: ['case-six'] };
+  const invoices = ['100.00', '50.00', '50.00', '100.00', '50.00', '300.00'].map((amount, index) => ({
+    id: `six-${index}`, digital_invoice_no: `SIX-${index}`, issue_date: '2026-09-10', seller_name: '六票供应商', total_with_tax: amount, relation_case_ids: ['case-six'],
+  }));
+  const oa = { ...base.oa.primary, id: 'oa-six', relation_case_id: '', relation_case_ids: ['case-six'], applicant: '六票报销人', project_name: '六票项目' };
+  const fetchMock = installPendingInvoiceFetch({ rowsPayload: () => [{ ...base, id: bank.id, bank_transaction: bank,
+    bank_transactions: { ...base.bank_transactions, primary: bank, summaries: [], relation_count: 1, original_transaction_count: 1, has_multiple: false },
+    input_invoices: { ...base.input_invoices, primary: invoices[0], summaries: invoices, relation_count: 6 },
+    oa: { ...base.oa, primary: oa, summaries: [], relation_count: 1, has_multiple: false },
+    relation_case_ids: ['case-six'],
+  }] });
+  renderAppAt('/pending-invoices');
+  const page = await findPendingInvoicesPage();
+  const trigger = await within(page).findByRole('button', { name: '展开配对关系，发票共 6 张' });
+  const readsBefore = fetchMock.mock.calls.length;
+  await user.click(trigger);
+  const rows = page.querySelectorAll('tr[data-relation-group="bank-six"]');
+  expect(rows).toHaveLength(6);
+  rows.forEach((row, index) => {
+    const cells = row.querySelectorAll('th,td');
+    expect(cells).toHaveLength(9);
+    expect(cells[0]).toHaveTextContent('六票报销人');
+    expect(cells[1]).toHaveTextContent('650.00');
+    expect(cells[2]).toHaveTextContent('合同付款');
+    expect(cells[4]).toHaveTextContent(`SIX-${index}`);
+    expect(cells[5]).toHaveTextContent('六票供应商');
+    expect(cells[6]).toHaveTextContent(invoices[index].total_with_tax);
+    expect(cells[7]).toHaveTextContent('六票报销人');
+    expect(cells[8]).toHaveTextContent('六票项目');
+  });
+  expect(fetchMock.mock.calls).toHaveLength(readsBefore);
+  await user.click(within(page).getByRole('button', { name: '收起配对关系，发票共 6 张' }));
+  await waitFor(() => expect(page.querySelectorAll('tr[data-relation-group="bank-six"]')).toHaveLength(0));
+  expect(fetchMock.mock.calls).toHaveLength(readsBefore);
+});
