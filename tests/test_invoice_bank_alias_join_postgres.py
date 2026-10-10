@@ -56,7 +56,8 @@ class InvoiceBankAliasJoinPostgresTests(unittest.TestCase):
                         tx.execute("set local fin_ops.correction_reason='isolated alias equivalence fixture'")
                         tx.execute('update app.invoices set invoice_type=%s',(invoice_type,))
                         tx.execute("update app.workbench_pair_relations set amount_check=jsonb_build_object('matched',%s::boolean)",(matched,))
-                    optimized = _fact_cte(invoice_type=invoice_type,month=None,status_case="'pending'::text")
+                    status_case = "null::jsonb" if invoice_type == "input" else "'pending'::text"
+                    optimized = _fact_cte(invoice_type=invoice_type,month=None,status_case=status_case)
                     self.assertIn(optimized_join,optimized)
                     reference = optimized.replace(optimized_join,reference_join)
                     params = ('default',) if invoice_type=='input' else ()
