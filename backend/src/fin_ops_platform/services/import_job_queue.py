@@ -450,7 +450,8 @@ class ImportJobCompletion:
             AuditTrailService(PostgresOperationsAuditRepository(transaction)).record_action(
                 actor_id=actor["actor_id"], action="import_job.completed", entity_type="import_job",
                 entity_id=self.job.import_job_id, metadata={**actor, "creator": self.job.created_by,
-                    "stage": self.job.stage, "status": status, "summary": "导入任务执行结果"},
+                    "stage": self.job.stage, "status": status, "summary": "导入任务执行结果",
+                    "outcome": "failed" if status == "failed" else "success" if status == "succeeded" else "pending"},
             )
 
 

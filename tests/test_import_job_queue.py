@@ -11,6 +11,7 @@ from unittest.mock import patch
 from fin_ops_platform.app import worker as worker_app
 from fin_ops_platform.services.import_job_queue import (
     ImportJob,
+    ImportJobCompletion,
     ImportJobIdempotencyConflict,
     ImportJobRepository,
     ImportJobWorker,
@@ -156,6 +157,25 @@ def import_job(**overrides: object) -> ImportJob:
         created_by=str(overrides.get("created_by", "operator")),
         trace_id="trace-1",
     )
+
+
+class ImportJobCompletionAuditTests(unittest.TestCase):
+    def test_job_audit_outcome_matches_failed_succeeded_and_preview_state(self):
+        for status, expected in (("failed", "failed"), ("succeeded", "success"), ("needs_review", "pending")):
+            with self.subTest(status=status):
+                calls = []
+                class Transaction:
+                    def fetch_one(self, sql, params):
+                        calls.append((sql, params))
+                        if "insert into audit.events" in sql:
+                            return {"id": "audit-id", "occurred_at": "2026-10-11T00:00:00Z"}
+                        return {"id": "job-id"}
+                job = import_job(payload={"command_actor": {"actor_id": "admin", "actor_account": "YNSYLP005", "request_id": "origin-request"}})
+                completion = ImportJobCompletion(job)
+                completion._finish(Transaction(), {}, status, error="failure" if status == "failed" else None)
+                audit = next(params for sql, params in calls if "insert into audit.events" in sql)
+                self.assertEqual(audit[-3], expected)
+                self.assertEqual(audit[-2], "origin-request")
 
 
 class ImportJobRepositoryTests(unittest.TestCase):

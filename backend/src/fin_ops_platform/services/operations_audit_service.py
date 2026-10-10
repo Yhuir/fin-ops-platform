@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Protocol
 from uuid import UUID
 
-from fin_ops_platform.services.operation_history_evidence import normalize_operation_evidence
-from fin_ops_platform.services.operation_history_semantics import semantics_from_audit_row
+from fin_ops_platform.services.operation_history_evidence import normalize_operation_evidence, recorded_api_call
+from fin_ops_platform.services.operation_history_semantics import (
+    OPERATION_CATEGORIES,
+    operation_category,
+    semantics_from_audit_row,
+)
 from fin_ops_platform.services.page_audit_registry import page_audit_registration
 from fin_ops_platform.services.postgres_repositories.common import serialize_value
 
 
 class OperationsAuditRepository(Protocol):
     def list_logical_operations(self, **kwargs: Any) -> list[dict[str, Any]]: ...
+
+    def get_operation_history_snapshot(self, operation_key: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]: ...
 
     def list_operation_actors(self) -> list[dict[str, Any]]: ...
 
@@ -61,12 +67,21 @@ class OperationsAuditService:
         page_key: str | None = None,
         object_type: str | None = None,
         outcome: str | None = None,
+        category: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
         search: str | None = None,
         known_actor: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        page_size = max(1, min(int(limit), 200))
+        page_size = int(limit)
+        if not 1 <= page_size <= 200:
+            raise ValueError("Operation history limit must be between 1 and 200.")
+        if category and category not in OPERATION_CATEGORIES:
+            raise ValueError("Invalid operation history category.")
+        if outcome and outcome not in {"success", "failed", "pending", "incomplete", "unknown"}:
+            raise ValueError("Invalid operation history outcome.")
+        if date_from and date_to and self._date(date_from) > self._date(date_to):
+            raise ValueError("Operation history date range is reversed.")
         cursor_time, cursor_key = self._parse_cursor(cursor)
         rows = self._repository.list_logical_operations(
             limit=page_size + 1,
@@ -77,6 +92,7 @@ class OperationsAuditService:
             page_key=self._text(page_key),
             object_type=self._text(object_type),
             outcome=self._text(outcome),
+            category=self._text(category),
             date_from=self._date(date_from),
             date_to=self._date(date_to),
             search=self._text(search),
@@ -112,50 +128,58 @@ class OperationsAuditService:
         known_actor: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         normalized = self._operation_key(operation_key)
-        events = self._repository.list_operation_events_for_key(normalized)
-        if not events:
+        logical, events = self._repository.get_operation_history_snapshot(normalized)
+        if logical is None:
             return None
-        latest = self._with_known_actor(events[-1], known_actor)
-        completed = next(
-            (event for event in reversed(events) if event.get("event_type") == "operation.completed"),
-            None,
-        )
-        completed_payload = completed.get("payload") if isinstance(completed, dict) else {}
-        completed_metadata = (
-            completed_payload.get("metadata")
-            if isinstance(completed_payload, dict) and isinstance(completed_payload.get("metadata"), dict)
-            else {}
-        )
-        stored_evidence = completed_metadata.get("evidence") if isinstance(completed_metadata, dict) else None
-        request_id = self._text(latest.get("request_id"))
-        histories = (
-            self._repository.list_workbench_relation_history_for_request(request_id)
-            if (
-                not isinstance(stored_evidence, dict)
-                and request_id
-                and latest.get("page_key") == "reconciliation-workbench"
-            )
-            else []
-        )
-        operation = self._operation_summary(
-            {
-                **latest,
-                "operation_key": normalized,
-                "started_at": events[0].get("occurred_at"),
-                "completed_at": completed.get("occurred_at") if completed else None,
-                "outcome": completed.get("outcome") if completed else latest.get("outcome"),
-            }
-        )
-        detail = (
-            normalize_operation_evidence(stored_evidence)
-            if isinstance(stored_evidence, dict)
-            else self._workbench_relation_detail(histories, action_code=operation["action_code"])
-        )
-        detail["legacy_evidence_missing"] = not any(
-            detail.get(key) for key in ("target", "artifacts", "records", "changes", "failure")
-        )
-        operation["detail"] = detail
-        operation["reason"] = self._text(latest.get("reason"))
+        operation = self._operation_summary(self._with_known_actor(logical, known_actor))
+        payload = logical.get("evidence_payload") if isinstance(logical.get("evidence_payload"), dict) else logical.get("payload")
+        metadata = payload.get("metadata") if isinstance(payload, dict) and isinstance(payload.get("metadata"), dict) else {}
+        stored_evidence = metadata.get("evidence")
+        request_id = self._text(logical.get("request_id"))
+        histories = (self._repository.list_workbench_relation_history_for_request(request_id)
+                     if not isinstance(stored_evidence, dict) and request_id and logical.get("page_key") == "reconciliation-workbench"
+                     else [])
+        detail = (normalize_operation_evidence(stored_evidence) if isinstance(stored_evidence, dict)
+                  else self._workbench_relation_detail(histories, action_code=operation["action_code"]))
+        calls_by_request: dict[str, dict[str, Any]] = {}
+        api_priorities: dict[str, tuple[bool, bool]] = {}
+        activities = []
+        for event in events:
+            call = recorded_api_call(event)
+            if call:
+                key = f"{call.get('request_id') or event.get('id') or 'request'}:{call.get('path') or ''}"
+                previous = calls_by_request.get(key, {})
+                event_payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+                event_metadata = event_payload.get("metadata") if isinstance(event_payload.get("metadata"), dict) else {}
+                priority = (event.get("event_type") == "operation.completed", isinstance(event_metadata.get("api_call"), dict))
+                merged = dict(previous or call)
+                for field, value in call.items():
+                    if value is not None and (field != "parameters" or value) and (priority >= api_priorities.get(key, (False, False)) or previous.get(field) is None):
+                        merged[field] = value
+                calls_by_request[key] = merged
+                api_priorities[key] = max(priority, api_priorities.get(key, (False, False)))
+            if event.get("event_type") in {"operation.requested", "operation.completed"}:
+                continue
+            semantics = semantics_from_audit_row(event)
+            event_payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            event_metadata = event_payload.get("metadata") if isinstance(event_payload.get("metadata"), dict) else {}
+            fields = [{"label": label, "value": str(event_metadata[key])}
+                      for key, label in (("stage", "阶段"), ("status", "任务状态"), ("outcome", "实际结果"), ("row_count", "记录数"), ("filename", "文件"))
+                      if event_metadata.get(key) is not None]
+            activity_outcome = {"started": "pending", "partial": "incomplete"}.get(event.get("outcome"), event.get("outcome"))
+            activities.append({"title": semantics.action_label, "occurred_at": self._iso(event.get("occurred_at")),
+                               "outcome": activity_outcome if activity_outcome in {"success", "failed", "pending", "incomplete"} else "unknown", "fields": fields})
+        if operation["outcome"] == "pending" and any(call.get("status_code") == 202 for call in calls_by_request.values()):
+            accepted = next((event for event in reversed(events) if (recorded_api_call(event) or {}).get("status_code") == 202), None)
+            activities.append({"title": "请求已接收", "occurred_at": self._iso(accepted.get("occurred_at")) if accepted else None,
+                               "outcome": "pending", "fields": [{"label": "后续处理", "value": "请求已接收；后续结果未记录"}]})
+        detail["api_calls"] = list(calls_by_request.values())
+        detail["activities"] = activities
+        detail["source"] = ("HTTP 请求" if detail["api_calls"] else "系统任务" if str(logical.get("action") or "").startswith(("import_job.", "system.", "job."))
+                            else "数据库操作" if str(logical.get("actor_id") or "").endswith(("-repair", "-persistence")) else "审计事件")
+        detail["legacy_evidence_missing"] = not any(detail.get(key) for key in ("target", "artifacts", "records", "changes", "failure"))
+        operation["detail"] = serialize_value(detail)
+        operation["reason"] = self._text(logical.get("reason"))
         return operation
 
     def audit_page(
@@ -191,7 +215,8 @@ class OperationsAuditService:
             return None, None
         try:
             occurred_at, operation_key = normalized.rsplit("|", 1)
-            datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
+            if datetime.fromisoformat(occurred_at.replace("Z", "+00:00")).tzinfo is None:
+                raise ValueError("Cursor timezone is required.")
             OperationsAuditService._operation_key(operation_key)
         except (ValueError, TypeError) as exc:
             raise ValueError("Invalid operation history cursor.") from exc
@@ -203,7 +228,8 @@ class OperationsAuditService:
         if not normalized:
             return None
         try:
-            datetime.fromisoformat(normalized)
+            if len(normalized) != 10 or date.fromisoformat(normalized).isoformat() != normalized:
+                raise ValueError("Date must use YYYY-MM-DD.")
         except ValueError as exc:
             raise ValueError("Invalid operation history date filter.") from exc
         return normalized
@@ -235,6 +261,11 @@ class OperationsAuditService:
     @classmethod
     def _operation_summary(cls, row: dict[str, Any]) -> dict[str, Any]:
         semantics = semantics_from_audit_row(row)
+        category = row.get("category") or operation_category(semantics.action_code)
+        evidence_payload = row.get("evidence_payload") if isinstance(row.get("evidence_payload"), dict) else row.get("payload")
+        metadata = evidence_payload.get("metadata", {}) if isinstance(evidence_payload, dict) else {}
+        evidence = metadata.get("evidence", {}) if isinstance(metadata, dict) else {}
+        target = evidence.get("target", {}) if isinstance(evidence, dict) else {}
         return serialize_value(
             {
                 "operation_key": row.get("operation_key"),
@@ -242,15 +273,18 @@ class OperationsAuditService:
                 "actor_name": row.get("actor_name"),
                 "actor_account": row.get("actor_account"),
                 "page_key": row.get("page_key"),
-                "action_code": semantics.action_code,
-                "action_label": semantics.action_label,
-                "action_description": semantics.description,
+                "action_code": row.get("action_code") or semantics.action_code,
+                "action_label": row.get("action_label") or semantics.action_label,
+                "action_description": row.get("action_description") if "action_description" in row else semantics.description,
                 "object_type": semantics.object_type,
-                "object_label": semantics.object_label,
+                "object_label": row.get("object_label") or semantics.object_label,
+                "object_title": row.get("object_title") or (target.get("title") if isinstance(target, dict) else None),
+                "category": category,
+                "category_label": OPERATION_CATEGORIES[category],
                 "started_at": row.get("started_at") or row.get("occurred_at"),
                 "completed_at": row.get("completed_at"),
                 "occurred_at": row.get("occurred_at"),
-                "outcome": row.get("outcome") or "success",
+                "outcome": row.get("outcome") or "unknown",
             }
         )
 

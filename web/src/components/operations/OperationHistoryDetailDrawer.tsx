@@ -1,5 +1,5 @@
 import { Alert, Button, Chip, Spinner } from "@heroui/react";
-import { ArrowRight, FileImage, FileText } from "lucide-react";
+import { ArrowRight, Copy, FileImage, FileText } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { pageLabelForKey } from "../../app/pageRegistry";
@@ -11,30 +11,15 @@ import {
   type OperationHistoryOperation,
 } from "../../features/operationHistory/api";
 import AppDrawer from "../common/AppDrawer";
+import { actorLabel, outcomeView } from "../../features/operationHistory/presentation";
 
 type OperationHistoryDetailDrawerProps = {
   operation: OperationHistoryOperation | null;
   loading: boolean;
   error: string | null;
   onClose: () => void;
+  onRetry: () => void;
 };
-
-function actorLabel(operation: OperationHistoryOperation) {
-  const actorId = String(operation.actor_id ?? "");
-  if (!actorId || actorId === "system" || actorId === "database" || actorId.includes("-persistence") || actorId.includes("-repair")) {
-    return "系统";
-  }
-  const name = String(operation.actor_name || "").trim();
-  const account = String(operation.actor_account || "").trim();
-  return name && account ? `${name} · ${account}` : name || account || actorId;
-}
-
-function outcomeView(outcome: string) {
-  if (outcome === "success") return { color: "success" as const, label: "成功" };
-  if (outcome === "failed") return { color: "danger" as const, label: "失败" };
-  if (outcome === "incomplete") return { color: "danger" as const, label: "执行未完成" };
-  return { color: "warning" as const, label: "进行中" };
-}
 
 function fieldList(fields: OperationHistoryField[]) {
   return (
@@ -63,7 +48,7 @@ function availabilityLabel(artifact: OperationHistoryArtifact) {
   return "未保存";
 }
 
-export default function OperationHistoryDetailDrawer({ operation, loading, error, onClose }: OperationHistoryDetailDrawerProps) {
+export default function OperationHistoryDetailDrawer({ operation, loading, error, onClose, onRetry }: OperationHistoryDetailDrawerProps) {
   const availableArtifacts = useMemo(
     () => operation?.detail?.artifacts.filter((artifact) => artifact.availability === "available" && artifact.preview_url) ?? [],
     [operation],
@@ -82,14 +67,17 @@ export default function OperationHistoryDetailDrawer({ operation, loading, error
     if (!selectedArtifact?.preview_url) {
       setPreviewUrl(null);
       setPreviewError(null);
+      setPreviewLoading(false);
       return undefined;
     }
     const controller = new AbortController();
     let objectUrl: string | null = null;
     setPreviewLoading(true);
+    setPreviewUrl(null);
     setPreviewError(null);
     void fetchOperationArtifact(selectedArtifact.preview_url, controller.signal)
       .then((blob) => {
+        if (controller.signal.aborted) return;
         objectUrl = URL.createObjectURL(blob);
         setPreviewUrl(objectUrl);
       })
@@ -108,18 +96,22 @@ export default function OperationHistoryDetailDrawer({ operation, loading, error
     };
   }, [selectedArtifact]);
 
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  useEffect(() => setCopyFeedback(null), [operation?.operation_key]);
+  const copyCall = async (text: string) => {
+    try { await navigator.clipboard.writeText(text); setCopyFeedback("API 调用信息已复制"); }
+    catch { setCopyFeedback("复制失败，请手动复制"); }
+  };
   const detail = operation?.detail;
   const outcome = outcomeView(operation?.outcome ?? "pending");
 
   return (
-    <AppDrawer ariaBusy={loading} open={operation !== null} title="操作详情" width={720} onClose={onClose}>
+    <AppDrawer ariaBusy={loading} open={operation !== null} title="操作详情" width={800} className="operation-history-drawer" onClose={onClose}>
       {operation ? (
         <div className="flex flex-col gap-5 pb-6">
           <header className="flex items-start justify-between gap-5 border-b border-default-200 pb-4">
             <div className="min-w-0">
-              <p className="m-0 text-xs font-medium text-default-500">具体操作</p>
-              <h3 className="mt-1 text-lg font-semibold text-default-950">{operation.action_label}</h3>
-              <p className="mt-1 text-sm leading-6 text-default-600">{operation.action_description}</p>
+              <h3 className="m-0 text-lg font-semibold text-default-950">{operation.action_label}</h3>
             </div>
             <Chip color={outcome.color} size="sm">{outcome.label}</Chip>
           </header>
@@ -127,7 +119,7 @@ export default function OperationHistoryDetailDrawer({ operation, loading, error
           {error ? (
             <Alert role="alert" status="danger">
               <Alert.Indicator />
-              <Alert.Content><Alert.Description>{error}</Alert.Description></Alert.Content>
+              <Alert.Content><Alert.Description>{error}</Alert.Description><Button size="sm" variant="secondary" onPress={onRetry}>重试详情</Button></Alert.Content>
             </Alert>
           ) : null}
           {loading ? <div className="flex items-center gap-2 py-4 text-sm text-default-600"><Spinner size="sm" />正在加载操作证据</div> : null}
@@ -138,8 +130,8 @@ export default function OperationHistoryDetailDrawer({ operation, loading, error
                 {[
                   ["操作人", actorLabel(operation)],
                   ["页面", pageLabelForKey(operation.page_key)],
-                  ["影响对象", operation.object_label || "业务记录"],
-                  ["处理结果", outcome.label],
+                  ["分类", operation.category_label],
+                  ["来源", detail?.source],
                   ["开始时间", formatDateTimeText(operation.started_at)],
                   ["完成时间", formatDateTimeText(operation.completed_at)],
                 ].map(([label, value]) => (
@@ -163,8 +155,8 @@ export default function OperationHistoryDetailDrawer({ operation, loading, error
               {detail?.target ? (
                 <section aria-labelledby="operation-target-heading" className="border-t border-default-300 pt-4">
                   <div className="mb-2 flex items-baseline justify-between gap-3">
-                    <h3 className="m-0 text-sm font-semibold text-default-950" id="operation-target-heading">操作对象</h3>
-                    <span className="truncate text-xs text-default-500">{detail.target.title}</span>
+                    <h3 className="m-0 text-sm font-semibold text-default-950" id="operation-target-heading">实际影响</h3>
+                    <span className="break-words text-xs text-default-500">{detail.target.title}</span>
                   </div>
                   {fieldList(detail.target.fields)}
                 </section>
@@ -178,9 +170,9 @@ export default function OperationHistoryDetailDrawer({ operation, loading, error
                       <div className="grid grid-cols-[6rem_minmax(0,1fr)] items-center gap-3 py-2 text-sm" key={`${change.label}-${change.before}-${change.after}`}>
                         <span className="text-default-500">{change.label}</span>
                         <span className="flex min-w-0 items-center gap-2 text-default-900">
-                          <span className="truncate">{change.before || "—"}</span>
+                          <span className="break-words">{change.before || "—"}</span>
                           <ArrowRight aria-hidden="true" className="shrink-0 text-default-400" size={14} />
-                          <span className="truncate font-medium">{change.after || "—"}</span>
+                          <span className="break-words font-medium">{change.after || "—"}</span>
                         </span>
                       </div>
                     ))}
@@ -245,9 +237,44 @@ export default function OperationHistoryDetailDrawer({ operation, loading, error
               {detail?.legacy_evidence_missing ? (
                 <Alert status="default">
                   <Alert.Indicator />
-                  <Alert.Content><Alert.Description>这条历史记录产生于详情证据启用之前，未保存可核验的对象快照。</Alert.Description></Alert.Content>
+                  <Alert.Content><Alert.Description>未保存可核验的对象快照。</Alert.Description></Alert.Content>
                 </Alert>
               ) : null}
+
+              <section aria-labelledby="operation-api-heading" className="operation-api-section">
+                <h3 id="operation-api-heading">API 调用</h3>
+                {detail?.api_calls.length ? detail.api_calls.map((call, index) => (
+                  <div className="operation-api-call" key={`${call.request_id}-${index}`}>
+                    <div className="operation-api-call__heading">
+                      <span className="operation-api-method">{call.method ?? "方法未记录"}</span>
+                      <code>{call.path ?? "路径未记录"}</code>
+                      <Button aria-label="复制 API 调用信息" size="sm" variant="tertiary" isIconOnly onPress={() => void copyCall(`${call.method ?? "方法未记录"} ${call.path ?? "路径未记录"}\n请求 ID：${call.request_id ?? "未记录"}`)}><Copy size={16} aria-hidden="true" /></Button>
+                    </div>
+                    {fieldList([
+                      { label: "HTTP 状态", value: call.status_code === null ? "未记录" : String(call.status_code) },
+                      { label: "请求耗时", value: call.duration_ms === null ? "未记录" : `${call.duration_ms} ms` },
+                      { label: "请求 ID", value: call.request_id ?? "未记录" },
+                    ])}
+                    {call.parameters.length ? <div className="operation-api-parameters"><h4>请求参数</h4>{fieldList(call.parameters)}</div> : null}
+                  </div>
+                )) : <p className="operation-history-missing">未记录 API 调用信息。</p>}
+                {copyFeedback ? <p role="status" className="operation-copy-feedback">{copyFeedback}</p> : null}
+              </section>
+              {detail?.activities.length ? (
+                <section aria-labelledby="operation-activities-heading" className="operation-activities">
+                  <h3 id="operation-activities-heading">后续处理</h3>
+                  {detail.activities.map((activity, index) => {
+                    const phase = outcomeView(activity.outcome);
+                    return <div className="operation-activity" key={`${activity.occurred_at}-${index}`}>
+                      <div className="operation-activity__heading"><strong>{activity.title}</strong><Chip size="sm" color={phase.color}>{phase.label}</Chip></div>
+                      <time>{formatDateTimeText(activity.occurred_at)}</time>
+                      {fieldList(activity.fields)}
+                    </div>;
+                  })}
+                </section>
+              ) : null}
+
+
             </>
           ) : null}
         </div>

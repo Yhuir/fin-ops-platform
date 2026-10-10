@@ -88,15 +88,15 @@ class OperationHistorySemanticsTests(unittest.TestCase):
         self.assertEqual(semantics.description, "记录系统识别关联异常的审阅与分区决定。")
         self.assertNotIn("人工分类", semantics.description)
 
-    def test_unknown_mutation_uses_bounded_page_fallback_without_raw_route(self) -> None:
+    def test_unknown_mutation_is_explicit_without_guessed_business_action(self) -> None:
         semantics = operation_semantics(
             "PATCH",
             "/api/bank-details/future-action/secret-id",
             page_key="bank-details",
         )
 
-        self.assertEqual(semantics.action_label, "更新银行流水")
-        self.assertEqual(semantics.object_label, "银行流水")
+        self.assertEqual(semantics.action_label, "未登记操作")
+        self.assertEqual(semantics.object_label, "对象未记录")
         self.assertNotIn("future-action", str(semantics))
 
 

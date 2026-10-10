@@ -17,6 +17,22 @@ class FakeOperationsAuditRepository:
         self.calls.append(("history", kwargs))
         return list(self.history_rows)
 
+    def get_operation_history_snapshot(self, operation_key: str):
+        return self.get_logical_operation(operation_key), self.list_operation_events_for_key(operation_key)
+
+    def get_logical_operation(self, operation_key: str) -> dict[str, object] | None:
+        explicit = next((row for row in self.history_rows if row.get("operation_key") == operation_key), None)
+        if explicit is not None:
+            return explicit
+        events = self.events_by_key.get(operation_key, [])
+        if not events:
+            return None
+        terminal = next((row for row in reversed(events) if row.get("event_type") == "operation.completed"), None)
+        return {**events[0], "operation_key": operation_key, "started_at": events[0]["occurred_at"],
+                "outcome": terminal["outcome"] if terminal else "pending",
+                "completed_at": terminal["occurred_at"] if terminal else None,
+                "evidence_payload": terminal.get("payload") if terminal else None}
+
     def list_operation_actors(self) -> list[dict[str, object]]:
         return [{"actor_id": "6", "actor_name": "刘汉金", "actor_account": "YNSYLP006"}]
 
@@ -104,6 +120,42 @@ class OperationsAuditServiceTests(unittest.TestCase):
             service.list_operation_history(date_from="not-a-date")
         with self.assertRaises(ValueError):
             service.get_operation_history("not-an-id")
+
+    def test_rejects_unknown_category_outcome_unbounded_page_and_reversed_dates(self):
+        repository = FakeOperationsAuditRepository()
+        service = OperationsAuditService(repository)
+        for query in ({"category": "other"}, {"outcome": "succeeded"}, {"limit": 0}, {"limit": 201},
+                      {"date_from": "2026-10-11", "date_to": "2026-10-10"}, {"date_from": "20261011"},
+                      {"cursor": "2026-10-11T00:00:00|request:x"}):
+            with self.subTest(query=query), self.assertRaises(ValueError):
+                service.list_operation_history(**query)
+        self.assertEqual(repository.calls, [])
+
+    def test_historical_http_metadata_exposes_only_recorded_method_and_safe_parameters(self):
+        repository = FakeOperationsAuditRepository()
+        occurred_at = datetime(2026, 10, 11, tzinfo=UTC)
+        repository.events_by_key["request:old"] = [{"event_type": "operation.completed", "request_id": "old",
+            "action": "settings.oa_credential.save", "operation_location": "/api/workbench/settings/oa-applicant-credentials?token=must-not-escape",
+            "occurred_at": occurred_at, "outcome": "success", "payload": {"metadata": {"status_code": 200}}}]
+        detail = OperationsAuditService(repository).get_operation_history("request:old")["detail"]
+        self.assertIsNone(detail["api_calls"][0]["method"])
+        self.assertEqual(detail["api_calls"][0]["status_code"], 200)
+        self.assertEqual(detail["api_calls"][0]["path"], "/api/workbench/settings/oa-applicant-credentials")
+        self.assertNotIn("must-not-escape", str(detail))
+        self.assertEqual(detail["source"], "HTTP 请求")
+        self.assertTrue(detail["legacy_evidence_missing"])
+
+    def test_activity_outcomes_are_limited_to_the_display_contract(self):
+        repository = FakeOperationsAuditRepository()
+        repository.events_by_key["request:activity"] = [
+            {"event_type": "operation.action", "request_id": "activity", "action": "not_registered",
+             "occurred_at": datetime(2026, 10, 11, tzinfo=UTC), "outcome": outcome}
+            for outcome in ("started", "partial", "foreign_status", None)
+        ]
+        detail = OperationsAuditService(repository).get_operation_history("request:activity")["detail"]
+        self.assertEqual([activity["outcome"] for activity in detail["activities"]],
+                         ["pending", "incomplete", "unknown", "unknown"])
+        self.assertEqual(detail["source"], "审计事件")
 
     def test_returns_actor_facets_with_name_and_account(self) -> None:
         service = OperationsAuditService(FakeOperationsAuditRepository())

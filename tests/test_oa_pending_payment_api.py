@@ -289,7 +289,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         audit = audit_entries[-1]
         self.assertEqual(audit["action"], "oa_pending_payment_source_export_downloaded")
         self.assertEqual(audit["entity_type"], "oa_pending_payment_source_export")
-        self.assertEqual(audit["metadata"]["event_type"], "operation.completed")
+        self.assertEqual(audit["metadata"]["event_type"], "operation.action")
         self.assertEqual(audit["metadata"]["outcome"], "success")
         self.assertEqual(audit["metadata"]["page_key"], "oa-pending-payments")
         self.assertEqual(audit["metadata"]["operation_location"], "/api/oa-pending-payments/export")

@@ -205,6 +205,12 @@ class FakeOperationHistoryRepository:
         self.list_calls.append(dict(kwargs))
         return [{**self._event(), "operation_key": self.OPERATION_KEY, "started_at": self._event()["occurred_at"]}]
 
+    def get_operation_history_snapshot(self, operation_key: str):
+        return self.get_logical_operation(operation_key), self.list_operation_events_for_key(operation_key)
+
+    def get_logical_operation(self, operation_key: str) -> dict[str, object] | None:
+        return {**self._event(), "operation_key": operation_key} if operation_key == self.OPERATION_KEY else None
+
     def list_operation_actors(self) -> list[dict[str, object]]:
         return [{"actor_id": "005", "actor_name": "权限管理员", "actor_account": "YNSYLP005"}]
 
@@ -411,6 +417,22 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(detail_payload["operation"]["operation_key"], repository.OPERATION_KEY)
         self.assertEqual(json.loads(actors_response.body)["rows"][0]["actor_account"], "YNSYLP005")
 
+    def test_operation_history_rejects_invalid_filters_and_passes_category_and_outcome(self):
+        app = build_application(test_username="YNSYLP005")
+        self.addCleanup(app.close)
+        repository = FakeOperationHistoryRepository()
+        app._runtime_repositories = SimpleNamespace(operations_audit_repository=repository)
+        for query in ("category=other", "outcome=succeeded", "limit=201", "limit=0", "date_from=2026-10-11&date_to=2026-10-10"):
+            response = app.handle_request("GET", "/api/operations/history?" + query)
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(json.loads(response.body)["error"], "invalid_operation_history_query")
+        self.assertEqual(repository.list_calls, [])
+        response = app.handle_request("GET", "/api/operations/history?category=oa&outcome=failed&limit=200")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(repository.list_calls[0]["category"], "oa")
+        self.assertEqual(repository.list_calls[0]["outcome"], "failed")
+        self.assertEqual(repository.list_calls[0]["limit"], 201)
+
     def test_operation_history_rejects_non_admin_without_querying_repository(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -467,6 +489,56 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(repository.events[0]["actor_account"], repository.events[1]["actor_account"])
         self.assertTrue(repository.events[0]["actor_name"])
         self.assertTrue(repository.events[0]["actor_account"])
+
+    def test_mutation_api_trace_records_timing_and_allowlisted_parameters_without_secrets(self):
+        app = build_application()
+        self.addCleanup(app.close)
+        repository = FakeDurableAuditRepository()
+        app._audit_service = AuditTrailService(repository)
+        app.handle_request("PUT", "/api/bank-details/auto-tag-rules?token=never-appear&month=2026-10",
+            body=json.dumps({"password": "never-appear", "nested": {"cookie": "never-appear"}, "unknown": "never-appear"}))
+        trace = repository.events[-1]["payload"]["metadata"]["api_call"]
+        self.assertEqual(trace["method"], "PUT")
+        self.assertEqual(trace["path"], "/api/bank-details/auto-tag-rules")
+        self.assertEqual(trace["parameters"], {"month": "2026-10"})
+        self.assertGreaterEqual(trace["duration_ms"], 0)
+        self.assertIsInstance(trace["status_code"], int)
+        self.assertNotIn("never-appear", str(repository.events))
+
+    def test_registered_download_records_real_get_completion_without_auditing_normal_reads(self):
+        app = build_application(test_username="YNSYLP005")
+        self.addCleanup(app.close)
+        repository = FakeDurableAuditRepository()
+        app._audit_service = AuditTrailService(repository)
+        def export_route(method, path, query, body, headers):
+            if path.endswith("/export"):
+                app._record_input_invoice_usage_export_download(None, "发票.xlsx", query)
+                return app._input_invoice_usage_xlsx_response("发票.xlsx", b"xlsx", 3)
+            return app._json_response(200, {"rows": []})
+        app._input_invoice_usage_routes = lambda: SimpleNamespace(route=export_route)
+        response = app.handle_request("GET", "/api/input-invoice-usage/export?month=2026-10")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(repository.events[0]["event_type"], "operation.requested")
+        completed = repository.events[-1]
+        self.assertEqual(completed["event_type"], "operation.completed")
+        self.assertEqual(completed["outcome"], "success")
+        self.assertEqual(completed["payload"]["metadata"]["api_call"]["method"], "GET")
+        self.assertEqual(completed["payload"]["metadata"]["api_call"]["status_code"], 200)
+        self.assertEqual(completed["payload"]["metadata"]["evidence"]["target"]["title"], "发票.xlsx")
+        recorded_count = len(repository.events)
+        app.handle_request("GET", "/api/input-invoice-usage")
+        self.assertEqual(len(repository.events), recorded_count)
+        app._input_invoice_usage_routes = lambda: SimpleNamespace(route=lambda *args: app._json_response(400, {"error": "invalid_month"}))
+        response = app.handle_request("GET", "/api/input-invoice-usage/export?month=invalid")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(repository.events[-1]["outcome"], "failed")
+        self.assertEqual(repository.events[-1]["payload"]["metadata"]["evidence"]["failure"]["code"], "invalid_month")
+        app._input_invoice_usage_routes = lambda: SimpleNamespace(route=lambda *args: app._input_invoice_usage_xlsx_response("完整清单.xlsx", b"xlsx", 4))
+        response = app.handle_request("GET", "/api/input-invoice-usage/export")
+        self.assertEqual(response.status_code, 200)
+        evidence = repository.events[-1]["payload"]["metadata"]["evidence"]
+        self.assertEqual(evidence["target"]["title"], "完整清单.xlsx")
+        self.assertEqual(evidence["target"]["fields"], [{"label": "记录数", "value": "4"}])
 
     def test_mutation_audit_normalizes_operation_routes_to_page_keys(self) -> None:
         self.assertEqual(

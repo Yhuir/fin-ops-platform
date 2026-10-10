@@ -42,6 +42,21 @@ export type OperationHistoryDetail = {
   changes: OperationHistoryChange[];
   failure?: { code?: string | null; message: string } | null;
   legacy_evidence_missing: boolean;
+  source: string;
+  api_calls: {
+    method: string | null;
+    path: string | null;
+    status_code: number | null;
+    request_id: string | null;
+    duration_ms: number | null;
+    parameters: OperationHistoryField[];
+  }[];
+  activities: {
+    title: string;
+    occurred_at: string;
+    outcome: string;
+    fields: OperationHistoryField[];
+  }[];
 };
 
 export type OperationHistoryOperation = {
@@ -55,6 +70,9 @@ export type OperationHistoryOperation = {
   action_description: string;
   object_type?: string | null;
   object_label: string;
+  object_title: string | null;
+  category: string;
+  category_label: string;
   started_at: string;
   completed_at?: string | null;
   occurred_at: string;
@@ -70,6 +88,8 @@ export type OperationHistoryActor = {
 };
 
 export type OperationHistoryFilters = {
+  category?: string;
+  outcome?: string;
   search?: string;
   actorId?: string;
   pageKey?: string;
@@ -81,8 +101,11 @@ export async function fetchOperationHistory(
   filters: OperationHistoryFilters,
   cursor?: string | null,
   signal?: AbortSignal,
+  limit = 50,
 ) {
-  const query = new URLSearchParams({ limit: "50" });
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (filters.category) query.set("category", filters.category);
+  if (filters.outcome) query.set("outcome", filters.outcome);
   if (filters.search) query.set("search", filters.search);
   if (filters.actorId) query.set("actor_id", filters.actorId);
   if (filters.pageKey) query.set("page_key", filters.pageKey);

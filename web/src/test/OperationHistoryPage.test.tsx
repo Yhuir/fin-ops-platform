@@ -47,20 +47,22 @@ describe("OperationHistoryPage", () => {
     expect(table).toHaveTextContent("权限管理员");
     expect(table).toHaveTextContent("YNSYLP005");
     expect(table).toHaveTextContent("关联台");
-    expect(table).toHaveTextContent("关联关系");
+    expect(table).toHaveTextContent("1 条银行流水");
+    expect(table).not.toHaveTextContent("/api/workbench/actions/confirm-link");
     expect(table).not.toHaveTextContent("workbench_relation");
     expect(table).toHaveTextContent("确认关联");
 
     await userEvent.click(within(table).getByRole("button", { name: "查看确认关联详情" }));
     const drawer = await screen.findByRole("dialog", { name: "操作详情" });
     expect(drawer).toHaveTextContent("关联台");
-    expect(drawer).not.toHaveTextContent("/api/workbench/actions/confirm-link");
-    expect(drawer).toHaveTextContent("将所选 OA、流水和发票确认关联。");
+    expect(await within(drawer).findByText("/api/workbench/actions/confirm-link")).toBeInTheDocument();
+    expect(drawer).toHaveTextContent("125 ms");
+    expect(drawer).not.toHaveTextContent("将所选 OA、流水和发票确认关联。");
     expect(drawer).toHaveTextContent("1 条银行流水");
     expect(drawer).toHaveTextContent("未配对");
     expect(drawer).toHaveTextContent("已配对");
     expect(drawer).not.toHaveTextContent("request:request-1");
-    expect(drawer).not.toHaveTextContent("request-1");
+    expect(drawer).toHaveTextContent("request-1");
     expect(drawer).not.toHaveTextContent("event-1");
     expect(drawer).not.toHaveTextContent("internal-relation-1");
     expect(drawer).not.toHaveTextContent("trace-1");
@@ -117,6 +119,7 @@ describe("OperationHistoryPage", () => {
             outcome: "success",
             detail: {
               schema_version: 1,
+              source: "HTTP 请求", api_calls: [], activities: [],
               target: {
                 kind: "oa_expense_item_relation",
                 title: "关联关系 CASE-1",

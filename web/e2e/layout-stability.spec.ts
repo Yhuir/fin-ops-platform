@@ -65,7 +65,7 @@ test('OA retains its frame, horizontal position and errors through delayed class
   await page.getByRole('button', { name: '导出 OA', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   stable(before, await geometry(page, table));
-  await page.getByRole('button', { name: '关闭导出 OA 抽屉' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: '关闭导出 OA', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   stable(before, await geometry(page, table));
 });

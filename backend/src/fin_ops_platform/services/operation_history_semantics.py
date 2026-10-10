@@ -19,6 +19,7 @@ class OperationSemantics:
             "object_label": self.object_label,
             "description": self.description,
             "summary": self.action_label,
+            "category": operation_category(self.action_code),
         }
 
 
@@ -45,6 +46,21 @@ def _semantic(
     description: str,
 ) -> OperationSemantics:
     return OperationSemantics(action_code, action_label, object_type, object_label, description)
+
+
+_EXPORT_ROUTES = {
+    "/api/input-invoice-usage/export": ("export.input_invoice_usage", "导出进项发票使用情况", "进项发票清单"),
+    "/api/pending-invoices/export": ("export.pending_invoice", "导出待找发票", "待找发票清单"),
+    "/api/oa-pending-payments/export": ("export.oa_payment", "导出 OA 付款情况", "OA 付款清单"),
+    "/api/tax-offset/export": ("export.certified_invoice", "导出认证发票清单", "认证发票清单"),
+    "/api/bank-details/transactions/export": ("export.bank_transactions", "导出银行流水", "银行流水清单"),
+    "/api/cost-statistics/export": ("export.cost_statistics", "导出成本统计", "成本统计清单"),
+    "/api/turnover-ledger/export": ("export.turnover_ledger", "导出往来账", "往来账清单"),
+}
+
+
+def is_operation_export_request(method: str, route_path: str) -> bool:
+    return method == "GET" and route_path in _EXPORT_ROUTES
 
 
 _EXACT_ROUTES = {
@@ -311,6 +327,10 @@ _EXACT_ROUTES = {
         "imports.files.discard", "放弃文件导入", "file_import", "文件导入", "放弃当前文件导入会话。"
     ),
 }
+
+_EXACT_ROUTES.update({("GET", path): _semantic(code, label, "export_file", object_label,
+                                           "生成清单文件并返回下载响应。")
+                      for path, (code, label, object_label) in _EXPORT_ROUTES.items()})
 
 
 _WORKBENCH_ACTIONS = {
@@ -776,19 +796,64 @@ _DYNAMIC_RULES = (
 )
 
 
-_PAGE_FALLBACKS = {
-    "reconciliation-workbench": ("workbench_record", "关联台记录", "关联台"),
-    "bank-details": ("bank_transaction", "银行流水", "银行明细"),
-    "pending-invoices": ("pending_invoice", "待找发票记录", "待找发票"),
-    "input-invoice-usage": ("input_invoice", "进项发票", "进项发票使用情况"),
-    "oa-pending-payments": ("oa_payment", "OA 付款项", "OA 待付款核对"),
-    "turnover-ledger": ("turnover_relation", "往来关系", "外部往来款管理"),
-    "etc-tickets": ("etc_reconciliation_task", "ETC 对账任务", "ETC 票据管理"),
-    "settings": ("application_setting", "App 设置", "设置"),
-    "imports.bank-transactions": ("bank_import", "流水导入", "银行流水导入"),
-    "imports.invoices": ("invoice_import", "发票导入", "发票导入"),
-    "imports.etc-invoices": ("etc_import", "ETC 发票导入", "ETC 发票导入"),
+OPERATION_CATEGORIES = {
+    "oa": "OA 申请与凭据",
+    "settings": "App 设置",
+    "business": "业务处理",
+    "transfer": "导入与导出",
+    "system": "系统任务",
+    "unclassified": "未分类",
 }
+
+
+def operation_category(action_code: str) -> str:
+    if action_code.startswith("settings.oa_credential") or action_code.startswith(("input_invoice.oa_reverse", "input_invoice.oa_draft")):
+        return "oa"
+    if action_code.startswith(("imports.", "import.", "export.", "import_job.", "tax_offset.certified_import", "settings.oa_manual_import")):
+        return "transfer"
+    if action_code.startswith(("settings.", "bank.auto_tag_rules", "pending_invoices.rules", "cost_statistics.no_oa_rules", "input_invoice.payment_rules", "no_oa_batch.tags", "bank_flow_batch.rules", "batch_accounting.rules", "turnover.tags")):
+        return "settings"
+    if action_code.startswith(("system.", "runtime.", "job.", "audit.", "oa_sync.")):
+        return "system"
+    return "unclassified" if action_code == "unregistered" else "business"
+
+
+_EVENT_SEMANTICS = {
+    "input_invoice_usage_export_downloaded": _semantic("export.input_invoice_usage", "导出进项发票使用情况", "export_file", "进项发票清单", "生成进项发票使用情况文件并返回下载响应。"),
+    "pending_invoice_export_downloaded": _semantic("export.pending_invoice", "导出待找发票", "export_file", "待找发票清单", "生成待找发票清单并返回下载响应。"),
+    "oa_pending_payment_source_export_downloaded": _semantic("export.oa_payment", "导出 OA 付款情况", "export_file", "OA 付款清单", "生成 OA 付款情况文件并返回下载响应。"),
+    "import_job.completed": _semantic("import_job.completed", "导入任务执行结果", "import_job", "导入任务", "记录导入任务的实际执行阶段和结果。"),
+    "tax_certified_import.revoke": _semantic("tax_offset.certified_import.revoke", "撤销认证发票导入", "tax_certified_import_batch", "认证发票导入批次", "撤销指定认证发票导入批次。"),
+    "reset_bank_transactions": _semantic("system.data_reset.bank", "重置银行流水", "settings_data_reset_job", "银行流水数据重置", "执行已登记的银行流水重置任务。"),
+    "reset_invoices": _semantic("system.data_reset.invoice", "重置发票数据", "settings_data_reset_job", "发票数据重置", "执行已登记的发票重置任务。"),
+    "reset_oa_and_rebuild": _semantic("system.data_reset.oa", "重置 OA 并重建关联", "settings_data_reset_job", "OA 数据重置", "执行已登记的 OA 重置及关联重建任务。"),
+
+}
+
+
+_UNREGISTERED = _semantic("unregistered", "未登记操作", "unknown", "对象未记录", "")
+
+
+def operation_semantics_catalog() -> list[dict[str, Any]]:
+    """One registry supplies list SQL filtering and detail presentation, including historical event names."""
+    rows: dict[tuple[str, bool], OperationSemantics] = {}
+    for (method, path), semantic in _EXACT_ROUTES.items():
+        rows[(f"{method} {path}", False)] = semantic
+        rows[(semantic.action_code, False)] = semantic
+    for name, semantic in _WORKBENCH_ACTIONS.items():
+        rows[(f"POST /api/workbench/actions/{name}", False)] = semantic
+        rows[(semantic.action_code, False)] = semantic
+    for rule in _DYNAMIC_RULES:
+        rows[(f"{rule.method} {rule.prefix}%{rule.suffix}", True)] = rule.semantics
+        rows[(rule.semantics.action_code, False)] = rule.semantics
+    for action, semantic in _EVENT_SEMANTICS.items():
+        rows[(action, False)] = semantic
+        rows[(semantic.action_code, False)] = semantic
+    return [{"action": action, "is_pattern": pattern, "action_code": semantic.action_code,
+             "action_label": semantic.action_label, "object_type": semantic.object_type,
+             "object_label": semantic.object_label, "description": semantic.description,
+             "category": operation_category(semantic.action_code)}
+            for (action, pattern), semantic in rows.items()]
 
 
 def operation_semantics(method: str, route_path: str, *, page_key: str = "") -> OperationSemantics:
@@ -826,18 +891,7 @@ def operation_semantics(method: str, route_path: str, *, page_key: str = "") -> 
     for rule in _DYNAMIC_RULES:
         if rule.matches(normalized_method, normalized_path):
             return rule.semantics
-    object_type, object_label, page_label = _PAGE_FALLBACKS.get(
-        page_key,
-        ("business_record", "业务记录", "当前页面"),
-    )
-    verb = "删除" if normalized_method == "DELETE" else "更新"
-    return _semantic(
-        f"{page_key or 'application'}.operation",
-        f"{verb}{object_label}",
-        object_type,
-        object_label,
-        f"在{page_label}中提交了一项数据变更。历史记录未保存更细的业务明细。",
-    )
+    return _UNREGISTERED
 
 
 def semantics_from_audit_row(row: dict[str, Any]) -> OperationSemantics:
@@ -857,20 +911,18 @@ def semantics_from_audit_row(row: dict[str, Any]) -> OperationSemantics:
         )
     action = str(row.get("action") or "").strip()
     method, separator, route_path = action.partition(" ")
-    if separator and method in {"POST", "PUT", "PATCH", "DELETE"} and route_path.startswith("/"):
+    if separator and method in {"GET", "POST", "PUT", "PATCH", "DELETE"} and route_path.startswith("/"):
         return operation_semantics(method, route_path, page_key=str(row.get("page_key") or ""))
+    registered = _EVENT_SEMANTICS.get(action)
+    if registered is not None:
+        return registered
+    for entry in operation_semantics_catalog():
+        if not entry["is_pattern"] and entry["action"] == action:
+            return OperationSemantics(entry["action_code"], entry["action_label"], entry["object_type"],
+                                      entry["object_label"], entry["description"])
     summary = str(payload.get("summary") or "").strip()
-    fallback = operation_semantics("POST", "", page_key=str(row.get("page_key") or ""))
-    if (
-        summary
-        and not summary.startswith(("GET /", "POST /", "PUT /", "PATCH /", "DELETE /"))
-        and summary != "业务操作"
-    ):
-        return OperationSemantics(
-            action or fallback.action_code,
-            summary,
-            str(row.get("object_type") or fallback.object_type),
-            stored_object_label or fallback.object_label,
-            stored_description or summary,
-        )
-    return fallback
+    # Preserve an explicitly recorded human title. Unknown codes and HTTP methods are never guessed.
+    if summary and any("\u4e00" <= char <= "\u9fff" for char in summary):
+        return OperationSemantics(action or "unregistered", summary, str(row.get("object_type") or "unknown"),
+                                  stored_object_label or "对象未记录", stored_description)
+    return _UNREGISTERED

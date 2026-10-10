@@ -1,10 +1,58 @@
 from __future__ import annotations
 
+from contextvars import ContextVar
 from typing import Any
+from urllib.parse import urlsplit
 
 from fin_ops_platform.services.postgres_repositories.common import serialize_value
 
 EVIDENCE_SCHEMA_VERSION = 1
+operation_evidence_context: ContextVar[dict[str, Any] | None] = ContextVar("request_audit_evidence", default=None)
+
+# Safe scalar request fields are an explicit allowlist, never a copy of request payloads.
+REQUEST_PARAMETER_LABELS = {
+    "month": "月份", "period": "所属期", "tax_period": "税款所属期", "status": "状态",
+    "page_key": "页面", "reason": "原因", "oaUserId": "OA 用户", "expectedVersion": "预期版本",
+    "limit": "每页条数", "date_from": "开始日期", "date_to": "结束日期",
+}
+
+
+def safe_request_parameters(payload: Any) -> dict[str, str | int | float | bool]:
+    if not isinstance(payload, dict):
+        return {}
+    return {key: value[:200] if isinstance(value, str) else value
+            for key, value in payload.items() if key in REQUEST_PARAMETER_LABELS
+            and isinstance(value, (str, int, float, bool)) and value is not None}
+
+
+def request_parameter_fields(payload: Any) -> list[dict[str, str]]:
+    if not isinstance(payload, dict):
+        return []
+    return [{"label": label, "value": str(payload[key])[:200]}
+            for key, label in REQUEST_PARAMETER_LABELS.items()
+            if key in payload and isinstance(payload[key], (str, int, float, bool)) and payload[key] is not None]
+
+
+def recorded_api_call(event: dict[str, Any]) -> dict[str, Any] | None:
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    recorded = metadata.get("api_call")
+    if isinstance(recorded, dict):
+        return {"method": _text(recorded.get("method")), "path": urlsplit(str(recorded["path"])).path if recorded.get("path") else None,
+                "status_code": _integer(recorded.get("status_code")), "request_id": _text(recorded.get("request_id")),
+                "duration_ms": recorded.get("duration_ms") if isinstance(recorded.get("duration_ms"), (int, float)) else None,
+                "parameters": request_parameter_fields(recorded.get("parameters"))}
+    # A historical HTTP action can provide a method only if that exact method was stored.
+    method, separator, path = str(event.get("action") or "").partition(" ")
+    method = method if separator and method in {"GET", "POST", "PUT", "PATCH", "DELETE"} and path.startswith("/") else None
+    location = _text(event.get("operation_location"))
+    path = path if method else location if location and location.startswith("/") else None
+    path = urlsplit(path).path if path else None
+    if not path and metadata.get("status_code") is None:
+        return None
+    return {"method": method, "path": path, "status_code": _integer(metadata.get("status_code")),
+            "request_id": _text(event.get("request_id")), "duration_ms": None, "parameters": []}
+
 
 
 def workbench_oa_target(

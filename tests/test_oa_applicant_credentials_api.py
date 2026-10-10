@@ -86,6 +86,7 @@ class OaApplicantCredentialApiTests(unittest.TestCase):
 
     def test_api_rejects_old_fields_wrong_types_and_failed_verification(self):
         from fin_ops_platform.services.target_oa_applicant_token_provider import TargetOaApplicantLoginError
+
         from tests.test_oa_applicant_credentials_service import credential_service
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -104,6 +105,45 @@ class OaApplicantCredentialApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 400)
             self.assertEqual(json.loads(response.body), {"error": "oa_applicant_verification_failed", "message": "密码错误"})
             self.assertEqual(app._oa_applicant_credential_service_instance.applicant_options(), [])
+
+    def test_credential_history_records_safe_target_changes_delete_and_verification_failure(self):
+        from fin_ops_platform.services.audit import AuditTrailService
+        from fin_ops_platform.services.target_oa_applicant_token_provider import TargetOaApplicantLoginError
+
+        from tests.test_app_health_api import FakeDurableAuditRepository
+        from tests.test_oa_applicant_credentials_service import credential_service
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._install_identity_resolver(app)
+            repository = FakeDurableAuditRepository()
+            app._audit_service = AuditTrailService(repository)
+            app._oa_applicant_credential_service_instance = credential_service()
+            endpoint = "/api/workbench/settings/oa-applicant-credentials"
+            response = app.handle_request("POST", endpoint, headers=self._admin_headers(),
+                body=json.dumps({"oaUserId": "7", "password": "secret", "remark": "差旅"}))
+            self.assertEqual(response.status_code, 200)
+            saved = json.loads(response.body)["credential"]
+            metadata = repository.events[-1]["payload"]["metadata"]
+            self.assertEqual(metadata["evidence"]["target"]["title"], saved["targetApplicantName"])
+            self.assertIn({"label": "登录账号", "value": saved["oaUsername"]}, metadata["evidence"]["target"]["fields"])
+            self.assertEqual(metadata["api_call"]["parameters"], {"oaUserId": "7"})
+            path = endpoint + "/" + saved["targetApplicantCode"]
+            response = app.handle_request("PUT", path, headers=self._admin_headers(),
+                body=json.dumps({"oaUserId": "7", "remark": "新版", "expectedVersion": 1}))
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(repository.events[-1]["payload"]["metadata"]["evidence"]["changes"],
+                             [{"label": "备注", "before": "差旅", "after": "新版"}])
+            response = app.handle_request("DELETE", path, headers=self._admin_headers(), body=json.dumps({"expectedVersion": 2}))
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(repository.events[-1]["payload"]["metadata"]["evidence"]["target"]["title"], saved["targetApplicantName"])
+            app._oa_applicant_credential_service_instance = credential_service(
+                login=lambda *args: (_ for _ in ()).throw(TargetOaApplicantLoginError("密码错误")))
+            response = app.handle_request("POST", endpoint, headers=self._admin_headers(),
+                body=json.dumps({"oaUserId": "7", "password": "secret"}))
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(repository.events[-1]["outcome"], "failed")
+            self.assertEqual(repository.events[-1]["payload"]["metadata"]["evidence"]["failure"]["code"], "oa_applicant_verification_failed")
+            self.assertNotIn("secret", str(repository.events))
 
     def test_non_admin_cannot_maintain_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

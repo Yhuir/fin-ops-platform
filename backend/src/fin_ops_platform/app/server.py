@@ -10,6 +10,8 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, field, is_dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
+from email.message import Message
+from email.utils import collapse_rfc2231_value
 from enum import Enum
 from hmac import compare_digest
 from http import HTTPStatus
@@ -262,8 +264,8 @@ from fin_ops_platform.services.oa_draft_prefill import (
 from fin_ops_platform.services.oa_identity_service import (
     OAIdentityConfigurationError,
     OAIdentityService,
-    OAIdentitySettings,
     OAIdentityServiceError,
+    OAIdentitySettings,
     OASessionExpiredError,
 )
 from fin_ops_platform.services.oa_manual_import_service import OAManualImportService
@@ -279,10 +281,12 @@ from fin_ops_platform.services.operation_history_evidence import (
     attempted_supporting_document_artifacts,
     build_operation_evidence,
     manual_invoice_record,
+    operation_evidence_context,
+    safe_request_parameters,
     supporting_document_artifact,
     workbench_oa_target,
 )
-from fin_ops_platform.services.operation_history_semantics import operation_semantics
+from fin_ops_platform.services.operation_history_semantics import is_operation_export_request, operation_semantics
 from fin_ops_platform.services.operations_audit_service import OperationsAuditService, PageAuditUnavailableError
 from fin_ops_platform.services.operations_dashboard import OperationsDashboardService
 from fin_ops_platform.services.output_invoice_collection_canonical_query_service import (
@@ -364,6 +368,7 @@ from fin_ops_platform.services.postgres_repositories.ops_tax_etc import (
 from fin_ops_platform.services.postgres_repositories.settings_data_reset_request import (
     PostgresSettingsDataResetRequestRepository,
 )
+from fin_ops_platform.services.postgres_repositories.tax_certified_imports import PostgresTaxCertifiedImportRepository
 from fin_ops_platform.services.postgres_repositories.tax_offset import (
     PostgresTaxOffsetCanonicalRepository,
 )
@@ -403,9 +408,8 @@ from fin_ops_platform.services.target_oa_applicant_token_provider import (
 from fin_ops_platform.services.tax_certified_import_application_service import TaxCertifiedImportApplicationService
 from fin_ops_platform.services.tax_certified_import_job_service import TaxCertifiedImportJobService
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService
-from fin_ops_platform.services.postgres_repositories.tax_certified_imports import PostgresTaxCertifiedImportRepository
-from fin_ops_platform.services.tax_offset_query_service import TaxOffsetQueryService
 from fin_ops_platform.services.tax_offset_export_service import TaxOffsetExportService
+from fin_ops_platform.services.tax_offset_query_service import TaxOffsetQueryService
 from fin_ops_platform.services.turnover_bank_row_version import turnover_bank_row_version
 from fin_ops_platform.services.turnover_ledger_export_service import (
     XLSX_MIME_TYPE,
@@ -529,10 +533,7 @@ _REQUEST_AUDIT_REQUEST_ID: ContextVar[str | None] = ContextVar(
     "request_audit_request_id",
     default=None,
 )
-_REQUEST_AUDIT_EVIDENCE: ContextVar[dict[str, Any] | None] = ContextVar(
-    "request_audit_evidence",
-    default=None,
-)
+_REQUEST_AUDIT_EVIDENCE = operation_evidence_context
 _REQUEST_OA_SESSION: ContextVar[OARequestSession | None] = ContextVar(
     "request_oa_session",
     default=None,
@@ -1483,6 +1484,18 @@ class Application:
         )
         return normalized_row_id in canonical_rows
 
+    @staticmethod
+    def _operation_request_parameters(path: str, body: str | bytes | None) -> dict[str, Any]:
+        values: dict[str, Any] = {key: items[0] for key, items in parse_qs(urlparse(path).query).items() if items}
+        if body and len(body) <= 1_048_576:
+            try:
+                parsed = json.loads(body)
+            except (ValueError, UnicodeDecodeError):
+                parsed = None
+            if isinstance(parsed, dict):
+                values.update(safe_request_parameters(parsed))
+        return safe_request_parameters(values)
+
     def handle_request(
         self,
         method: str,
@@ -1495,7 +1508,7 @@ class Application:
         route_path = self._normalize_route_path(urlparse(path).path)
         mutation_request = is_state_changing_request(method, route_path)
         cash_request = is_cash_request(route_path)
-        request_audit_enabled = mutation_request and not cash_request and self._audit_service.is_durable
+        request_audit_enabled = (mutation_request or is_operation_export_request(method, route_path)) and not cash_request and self._audit_service.is_durable
         effective_request_id = request_id or (uuid4().hex if request_audit_enabled else None)
         status_code = int(HTTPStatus.INTERNAL_SERVER_ERROR)
         response: Response | None = None
@@ -1526,6 +1539,35 @@ class Application:
                     try:
                         page_key = self._audit_page_key_for_route(route_path)
                         semantics = operation_semantics(method, route_path, page_key=page_key)
+                        if response is not None and request_error is None:
+                            evidence = _REQUEST_AUDIT_EVIDENCE.get()
+                            if status_code < 400 and is_operation_export_request(method, route_path) and evidence is None:
+                                disposition = Message()
+                                disposition["Content-Disposition"] = response.headers.get("Content-Disposition", "")
+                                filename = next((collapse_rfc2231_value(value)
+                                                 for name, value in disposition.get_params(header="Content-Disposition") or []
+                                                 if name == "filename" and isinstance(value, tuple)), disposition.get_filename())
+                                if filename:
+                                    _REQUEST_AUDIT_EVIDENCE.set(build_operation_evidence(target={
+                                        "kind": "export_file", "title": filename,
+                                        "fields": [{"label": "记录数", "value": response.headers.get("X-Export-Count")}],
+                                    }))
+                            elif status_code >= 400 and str(response.headers.get("Content-Type") or "").startswith("application/json"):
+                                try:
+                                    error_payload = json.loads(response.body)
+                                except (json.JSONDecodeError, UnicodeDecodeError):
+                                    error_payload = None
+                                failure = error_payload.get("error") if isinstance(error_payload, dict) else None
+                                failure_code = failure.get("code") if isinstance(failure, dict) else failure if isinstance(failure, str) else None
+                                failure_message = failure.get("message") if isinstance(failure, dict) else error_payload.get("message") if isinstance(error_payload, dict) else None
+                                if failure_code or failure_message:
+                                    _REQUEST_AUDIT_EVIDENCE.set(build_operation_evidence(
+                                        target=evidence.get("target") if evidence else None,
+                                        artifacts=evidence.get("artifacts") if evidence else None,
+                                        records=evidence.get("records") if evidence else None,
+                                        changes=evidence.get("changes") if evidence else None,
+                                        failure_code=failure_code, failure_message=failure_message,
+                                    ))
                         self._audit_service.record_action(
                             actor_id=actor_id,
                             action=semantics.action_code,
@@ -1537,10 +1579,16 @@ class Application:
                                 "actor_account": actor_account,
                                 "page_key": page_key,
                                 "operation_location": route_path,
-                                "outcome": "success" if request_error is None and status_code < 400 else "failed",
+                                "outcome": ("pending" if status_code == HTTPStatus.ACCEPTED else "success") if request_error is None and status_code < 400 else "failed",
                                 "request_id": effective_request_id,
                                 **semantics.audit_metadata(),
                                 "status_code": status_code,
+                                "api_call": {
+                                    "method": method, "path": route_path, "status_code": status_code,
+                                    "request_id": effective_request_id,
+                                    "duration_ms": round((monotonic() - request_started_at) * 1000, 2),
+                                    "parameters": self._operation_request_parameters(path, body),
+                                },
                                 "evidence": _REQUEST_AUDIT_EVIDENCE.get(),
                             },
                         )
@@ -1650,7 +1698,7 @@ class Application:
             return auth_error
         if is_cash_request(route_path):
             return self._handle_cash_request(method, route_path, query, body, access_session)
-        if is_state_changing_request(method, route_path):
+        if is_state_changing_request(method, route_path) or is_operation_export_request(method, route_path):
             actor_id = actor_id_for_session(access_session) if access_session is not None else ""
             identity = access_session.identity if access_session is not None else None
             actor_name = str(
@@ -1679,6 +1727,7 @@ class Application:
                             "outcome": "pending",
                             "request_id": request_id,
                             **semantics.audit_metadata(),
+                            "api_call": {"method": method, "path": route_path, "request_id": request_id},
                         },
                     )
                 except Exception as exc:
@@ -3580,6 +3629,7 @@ class Application:
                 page_key=value("page_key"),
                 object_type=value("object_type"),
                 outcome=value("outcome"),
+                category=value("category"),
                 date_from=value("date_from"),
                 date_to=value("date_to"),
                 search=value("search"),
@@ -5454,12 +5504,14 @@ class Application:
         query: dict[str, list[str]],
     ) -> None:
         identity = getattr(session, "identity", None)
+        _REQUEST_AUDIT_EVIDENCE.set(build_operation_evidence(target={"kind": "export_file", "title": filename,
+            "fields": [{"label": "文件", "value": filename}]}))
         self._audit_service.record_action(
             actor_id=str(getattr(identity, "username", None) or "input_invoice_usage_export"),
             action="input_invoice_usage_export_downloaded",
             entity_type="input_invoice_usage_export",
             entity_id=filename,
-            metadata={"query": {key: values[0] for key, values in query.items() if values}},
+            metadata={"filename": filename},
         )
 
     def _input_invoice_usage_xlsx_response(self, filename: str, content: bytes, row_count: int) -> Response:
@@ -5696,13 +5748,15 @@ class Application:
         counts: dict[str, int],
     ) -> None:
         actor_id = actor_id_for_session(session) if session is not None else "oa_pending_payment_export"
+        _REQUEST_AUDIT_EVIDENCE.set(build_operation_evidence(target={"kind": "export_file", "title": filename,
+            "fields": [{"label": "文件", "value": filename}, {"label": "记录数", "value": str(sum(counts.values()))}]}))
         self._audit_service.record_action(
             actor_id=actor_id,
             action="oa_pending_payment_source_export_downloaded",
             entity_type="oa_pending_payment_source_export",
             entity_id=filename,
             metadata={
-                "event_type": "operation.completed",
+                "event_type": "operation.action",
                 "outcome": "success",
                 "page_key": "oa-pending-payments",
                 "operation_location": "/api/oa-pending-payments/export",
@@ -5860,12 +5914,14 @@ class Application:
         query: dict[str, list[str]],
         result: PendingInvoiceExportFile,
     ) -> Response:
+        _REQUEST_AUDIT_EVIDENCE.set(build_operation_evidence(target={"kind": "export_file", "title": result.filename,
+            "fields": [{"label": "文件", "value": result.filename}, {"label": "记录数", "value": str(result.row_count)}]}))
         self._audit_service.record_action(
             actor_id=str(session.identity.username or "pending_invoice_export") if session is not None else "pending_invoice_export",
             action="pending_invoice_export_downloaded",
             entity_type="pending_invoice_export",
             entity_id=result.filename,
-            metadata={"query": {key: values[0] for key, values in query.items() if values}},
+            metadata={"filename": result.filename, "row_count": result.row_count},
         )
         return Response(
             status_code=int(HTTPStatus.OK),

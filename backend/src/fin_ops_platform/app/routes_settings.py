@@ -20,8 +20,8 @@ from fin_ops_platform.services.mongo_oa_adapter import OASearchUnavailable
 from fin_ops_platform.services.oa_applicant_credentials import (
     OaApplicantCredentialConfigurationError,
     OaApplicantCredentialConflictError,
-    OaApplicantCredentialNotFoundError,
     OaApplicantCredentialError,
+    OaApplicantCredentialNotFoundError,
     OaApplicantCredentialPermissionError,
     OaApplicantCredentialService,
     OaApplicantCredentialValidationError,
@@ -38,6 +38,7 @@ from fin_ops_platform.services.oa_draft_prefill import (
 )
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError
 from fin_ops_platform.services.oa_source_identity import OASourceIdentityConflict
+from fin_ops_platform.services.operation_history_evidence import build_operation_evidence, operation_evidence_context
 from fin_ops_platform.services.postgres_repositories.settings_data_reset_request import (
     SettingsDataResetAlreadyActive,
     SettingsDataResetIdempotencyConflict,
@@ -491,13 +492,19 @@ class SettingsApiRoutes:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
+        before: dict[str, object] | None = None
+        operation_evidence_context.set(build_operation_evidence(target={"kind": "oa_credential", "title": "OA 申请人凭据"}))
         try:
             allowed = {"oaUserId", "password", "remark"}
             if target_applicant_code is not None:
                 allowed.add("expectedVersion")
             if set(payload) - allowed:
                 raise OaApplicantCredentialValidationError("请求包含不支持的字段。")
-            credential = self._oa_applicant_credential_service().save_credential(
+            service = self._oa_applicant_credential_service()
+            if target_applicant_code is not None:
+                before = next((item for item in service.list_credentials(can_admin_access=True)["credentials"]
+                               if item["targetApplicantCode"] == target_applicant_code), None)
+            credential = service.save_credential(
                 target_applicant_code=target_applicant_code, oa_user_id=payload.get("oaUserId"),
                 remark=payload.get("remark", ""),
                 expected_version=payload.get("expectedVersion"),
@@ -505,7 +512,16 @@ class SettingsApiRoutes:
                 **({"password": payload["password"]} if "password" in payload else {}),
             )
         except OaApplicantCredentialError as exc:
+            operation_evidence_context.set(build_operation_evidence(target={"kind": "oa_credential", "title": "OA 申请人凭据"},
+                failure_code=exc.code, failure_message=str(exc)))
             return self._oa_applicant_credential_error_response(exc)
+        operation_evidence_context.set(build_operation_evidence(target={
+            "kind": "oa_credential", "title": str(credential["targetApplicantName"]),
+            "fields": [{"label": "登录账号", "value": str(credential["oaUsername"])},
+                       {"label": "备注", "value": str(credential["remark"])},
+                       {"label": "凭据状态", "value": "已验证"}],
+        }, changes=[{"label": "备注", "before": str(before["remark"]) if before is not None else None,
+                     "after": str(credential["remark"])}] if before is not None and before["remark"] != credential["remark"] else []))
         return self._json_response(HTTPStatus.OK, {"credential": credential})
 
     def delete_oa_applicant_credential(
@@ -520,12 +536,23 @@ class SettingsApiRoutes:
         try:
             if set(payload) - {"expectedVersion"}:
                 raise OaApplicantCredentialValidationError("请求包含不支持的字段。")
-            deleted = self._oa_applicant_credential_service().delete_credential(
+            service = self._oa_applicant_credential_service()
+            before = next((item for item in service.list_credentials(can_admin_access=True)["credentials"]
+                           if item["targetApplicantCode"] == target_applicant_code), None)
+            operation_evidence_context.set(build_operation_evidence(target={"kind": "oa_credential",
+                "title": str(before["targetApplicantName"]) if before is not None else "OA 申请人凭据",
+                "fields": [{"label": "登录账号", "value": str(before["oaUsername"])}] if before is not None else []}))
+            deleted = service.delete_credential(
                 target_applicant_code=target_applicant_code, expected_version=payload.get("expectedVersion"),
                 actor_id=actor_id_for_session(session), can_admin_access=True,
             )
         except OaApplicantCredentialError as exc:
+            operation_evidence_context.set(build_operation_evidence(target={"kind": "oa_credential", "title": "OA 申请人凭据"},
+                failure_code=exc.code, failure_message=str(exc)))
             return self._oa_applicant_credential_error_response(exc)
+        evidence = operation_evidence_context.get()
+        operation_evidence_context.set(build_operation_evidence(target=evidence["target"],
+            changes=[{"label": "凭据配置", "before": "已配置", "after": "已删除"}]))
         return self._json_response(HTTPStatus.OK, deleted)
 
     def oa_manual_search(self, query: dict[str, list[str]]) -> Any:

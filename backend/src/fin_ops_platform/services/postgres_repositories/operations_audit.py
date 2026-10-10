@@ -4,6 +4,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from fin_ops_platform.services.operation_history_semantics import operation_semantics_catalog
 from fin_ops_platform.services.page_audit_registry import (
     PAGE_AUDIT_REGISTRY,
     PageAuditRegistration,
@@ -75,6 +76,15 @@ class PostgresOperationsAuditRepository:
             raise RuntimeError("Audit event was not persisted.")
         return row
 
+    def get_operation_history_snapshot(self, operation_key: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+        with self._connection.transaction() as transaction:
+            transaction.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            repository = PostgresOperationsAuditRepository(transaction)
+            rows = repository.list_logical_operations(limit=1, operation_key=operation_key)
+            if not rows:
+                return None, []
+            return rows[0], repository.list_operation_events_for_key(operation_key)
+
     def list_logical_operations(
         self,
         *,
@@ -86,107 +96,131 @@ class PostgresOperationsAuditRepository:
         page_key: str | None = None,
         object_type: str | None = None,
         outcome: str | None = None,
+        category: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
         search: str | None = None,
+        operation_key: str | None = None,
     ) -> list[dict[str, Any]]:
         conditions = ["true"]
-        params: list[Any] = []
+        params: list[Any] = [jsonb(operation_semantics_catalog())]
+        covered_condition = "true"
+        if operation_key:
+            if operation_key.startswith("request:"):
+                covered_condition = "event.request_id = %s"
+                params.append(operation_key.removeprefix("request:"))
+            else:
+                covered_condition = "event.id = %s::uuid"
+                params.append(operation_key.removeprefix("event:"))
         if cursor_occurred_at and cursor_key:
             conditions.append("(logical.occurred_at, logical.operation_key) < (%s::timestamptz, %s)")
             params.extend((cursor_occurred_at, cursor_key))
         for column, value in (
-            ("actor_id", actor_id),
-            ("action", action),
-            ("page_key", page_key),
-            ("object_type", object_type),
-            ("outcome", outcome),
+            ("actor_id", actor_id), ("action", action), ("page_key", page_key),
+            ("object_type", object_type), ("outcome", outcome), ("category", category),
         ):
             if value:
                 conditions.append(f"logical.{column} = %s")
                 params.append(value)
         if date_from:
-            conditions.append("logical.occurred_at >= %s::timestamptz")
+            conditions.append("logical.occurred_at >= (%s::date::timestamp at time zone 'Asia/Shanghai')")
             params.append(date_from)
         if date_to:
-            conditions.append("logical.occurred_at < (%s::date + interval '1 day')")
+            conditions.append("logical.occurred_at < ((%s::date + 1)::timestamp at time zone 'Asia/Shanghai')")
             params.append(date_to)
         if search:
             conditions.append(
-                "lower(concat_ws(' ', logical.actor_id, logical.actor_name, logical.actor_account, "
-                "logical.event_type, logical.action, logical.page_key, logical.object_type, "
-                "logical.payload->>'summary')) like %s"
+                "strpos(lower(concat_ws(' ', logical.actor_id, logical.actor_name, logical.actor_account, "
+                "logical.action_label, logical.object_label, logical.object_title, logical.page_key, "
+                "logical.category_label)), %s) > 0"
             )
-            params.append(f"%{search.lower()}%")
+            params.append(search.lower())
         params.append(max(1, min(int(limit), 201)))
         return self._connection.fetch_all(
             f"""
-            with covered as (
-                select
-                    event.*,
-                    case
-                        when event.request_id is not null then 'request:' || event.request_id
-                        else 'event:' || event.id::text
-                    end as operation_key
+            with catalog as materialized (
+                select * from jsonb_to_recordset(%s::jsonb) as c(
+                    action text, is_pattern boolean, action_code text, action_label text,
+                    object_type text, object_label text, description text, category text
+                )
+            ), covered as (
+                select event.id, event.request_id, event.event_type, event.action, event.occurred_at,
+                    (case when event.request_id is not null then 'request:' || event.request_id
+                          else 'event:' || event.id::text end) collate "C" as operation_key
                 from audit.events event
-                where event.occurred_at >= coalesce(
+                where {covered_condition}
+                  and event.occurred_at >= coalesce(
                     (select max(occurred_at) from audit.events where event_type = 'audit.coverage_started'),
                     '-infinity'::timestamptz
-                )
-            ),
-            grouped as (
-                select operation_key, min(occurred_at) as started_at
-                from covered
-                group by operation_key
-            ),
-            latest as (
-                select distinct on (operation_key) covered.*
-                from covered
-                order by operation_key, occurred_at desc, id desc
-            ),
-            terminal as (
-                select distinct on (operation_key)
-                    operation_key, occurred_at as completed_at, outcome as completed_outcome
-                from covered
-                where event_type = 'operation.completed'
-                order by operation_key, occurred_at desc, id desc
-            ),
-            logical as (
-                select
-                    latest.operation_key,
-                    latest.id::text as latest_event_id,
-                    latest.event_type,
-                    latest.object_type,
-                    latest.object_id,
-                    latest.actor_id,
-                    latest.actor_name,
-                    latest.actor_account,
-                    latest.scope,
-                    latest.trace_id,
-                    grouped.started_at,
-                    latest.occurred_at,
-                    terminal.completed_at,
-                    latest.action,
-                    latest.page_key,
-                    latest.operation_location,
-                    latest.reason,
-                    case
-                        when latest.request_id is null then latest.outcome
-                        when terminal.completed_at is not null then terminal.completed_outcome
-                        when grouped.started_at < now() - interval '5 minutes' then 'incomplete'
-                        else 'pending'
-                    end as outcome,
-                    latest.request_id,
-                    latest.payload
-                from latest
-                join grouped using (operation_key)
-                left join terminal using (operation_key)
+                  )
+            ), grouped as (
+                select operation_key, min(occurred_at) as started_at,
+                    bool_or(event_type = 'operation.requested') as was_requested,
+                    (array_agg(id order by (event_type = 'operation.requested') desc, occurred_at, id))[1] as origin_id,
+                    (array_agg(id order by occurred_at desc, id desc)
+                        filter (where event_type = 'operation.completed'))[1] as terminal_id,
+                    (array_agg(id order by occurred_at desc, id desc)
+                        filter (where action = 'import_job.completed' or event_type in
+                            ('settings.data_reset.success', 'settings.data_reset.failed', 'settings.data_reset.partial')))[1] as task_id
+                from covered group by operation_key
+            ), origin as (
+                select event.*, grouped.operation_key, grouped.started_at, grouped.was_requested,
+                       grouped.terminal_id, grouped.task_id
+                from grouped join audit.events event on event.id = grouped.origin_id
+            ), projected as (
+                select origin.*, origin.started_at as operation_time,
+                    case when terminal.outcome = 'pending' and task_result.outcome in ('success','failed','partial','incomplete')
+                         then task_result.occurred_at when terminal.outcome = 'pending' then null
+                         else terminal.occurred_at end as completed_at,
+                    terminal.payload as evidence_payload,
+                    case when origin.request_id is null then
+                            case when origin.outcome in ('success','failed','pending','incomplete') then origin.outcome else 'unknown' end
+                         when terminal.outcome = 'pending' and task_result.outcome in ('success','failed','partial','incomplete')
+                            then case when task_result.outcome = 'partial' then 'incomplete' else task_result.outcome end
+                         when terminal.occurred_at is not null then
+                            case when terminal.outcome in ('success','failed','pending','incomplete') then terminal.outcome else 'unknown' end
+                         when not origin.was_requested then 'unknown'
+                         when origin.started_at < now() - interval '5 minutes' then 'incomplete'
+                         else 'pending' end as operation_outcome,
+                    coalesce(nullif(origin.payload #>> '{{metadata,action_label}}', ''), semantic.action_label,
+                        case when origin.payload->>'summary' ~ '[一-鿿]' then origin.payload->>'summary' end, '未登记操作') as action_label,
+                    coalesce(nullif(origin.payload #>> '{{metadata,object_label}}', ''), semantic.object_label, '对象未记录') as object_label,
+                    coalesce(nullif(origin.payload #>> '{{metadata,action_code}}', ''), semantic.action_code, 'unregistered') as action_code,
+                    coalesce(nullif(origin.payload #>> '{{metadata,description}}', ''), semantic.description, '') as action_description,
+                    coalesce(nullif(origin.payload #>> '{{metadata,category}}', ''), semantic.category,
+                        case when origin.action like 'settings.oa_credential%%' then 'oa'
+                             when origin.action like 'settings.%%' then 'settings'
+                             when origin.action like 'imports.%%' or origin.action like 'import_job.%%' then 'transfer'
+                             when origin.action like 'system.%%' or origin.action like 'audit.%%' then 'system'
+                             else 'unclassified' end) as category,
+                    coalesce(terminal.payload #>> '{{metadata,evidence,target,title}}',
+                             origin.payload #>> '{{metadata,evidence,target,title}}') as object_title,
+                    coalesce(semantic.object_type, origin.object_type) as semantic_object_type
+                from origin
+                left join audit.events terminal on terminal.id = origin.terminal_id
+                left join audit.events task_result on task_result.id = origin.task_id
+                left join lateral (
+                    select c.* from catalog c
+                    where not (nullif(origin.payload #>> '{{metadata,action_code}}', '') is not null
+                               and nullif(origin.payload #>> '{{metadata,action_label}}', '') is not null
+                               and nullif(origin.payload #>> '{{metadata,object_label}}', '') is not null)
+                      and ((not c.is_pattern and c.action = origin.action)
+                           or (c.is_pattern and origin.action like c.action))
+                    order by c.is_pattern, length(c.action) desc limit 1
+                ) semantic on true
+            ), logical as (
+                select operation_key, id::text as latest_event_id, event_type,
+                    semantic_object_type as object_type, object_id, actor_id, actor_name, actor_account,
+                    scope, trace_id, started_at, operation_time as occurred_at, completed_at,
+                    action, page_key, operation_location, reason, operation_outcome as outcome,
+                    request_id, payload, evidence_payload, action_code, action_label, action_description,
+                    object_label, object_title, category,
+                    case category when 'oa' then 'OA 申请与凭据' when 'settings' then 'App 设置'
+                         when 'business' then '业务处理' when 'transfer' then '导入与导出' when 'system' then '系统任务' when 'unclassified' then '未分类' end as category_label
+                from projected
             )
-            select *
-            from logical
-            where {' and '.join(conditions)}
-            order by logical.occurred_at desc, logical.operation_key desc
-            limit %s
+            select * from logical where {' and '.join(conditions)}
+            order by logical.occurred_at desc, logical.operation_key desc limit %s
             """,
             tuple(params),
         )
