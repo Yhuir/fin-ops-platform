@@ -18,6 +18,17 @@ import {
 } from "../components/common/FinanceTable";
 
 describe("FinanceTable shared primitives", () => {
+  test("only explicitly grouped rows carry relation presentation identity", () => {
+    render(<FinanceTable ariaLabel="关系分组">
+      <FinanceTableHeader><FinanceTableColumn id="name" isRowHeader>名称</FinanceTableColumn></FinanceTableHeader>
+      <FinanceTableBody>
+        <FinanceTableRow id="grouped" dataRelationGroup="relation-a" textValue="组内"><FinanceTableCell columnRole="identity">组内</FinanceTableCell></FinanceTableRow>
+        <FinanceTableRow id="ordinary" textValue="普通"><FinanceTableCell columnRole="identity">普通</FinanceTableCell></FinanceTableRow>
+      </FinanceTableBody>
+    </FinanceTable>);
+    expect(screen.getByRole("rowheader", { name: "组内" }).closest("tr")).toHaveAttribute("data-relation-group", "relation-a");
+    expect(screen.getByRole("rowheader", { name: "普通" }).closest("tr")).not.toHaveAttribute("data-relation-group");
+  });
   test("forwards optional native sorting without sorting the supplied rows itself", async () => {
     const onSortChange = vi.fn();
     render(<FinanceTable ariaLabel="原生排序" sortDescriptor={{ column: "name", direction: "ascending" }} onSortChange={onSortChange}>

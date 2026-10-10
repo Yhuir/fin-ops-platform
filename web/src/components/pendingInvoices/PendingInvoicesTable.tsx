@@ -606,7 +606,7 @@ function PendingInvoiceTableRow({
   const counterpartyLabel = bankHasMultiple ? uniqueCounterpartyLabel(row) : row.bankTransaction.counterpartyName;
 
   return (
-    <Fragment><FinanceTableRow className="pending-invoices-table-row" id={row.id}>
+    <Fragment><FinanceTableRow className="pending-invoices-table-row" dataRelationGroup={expansion.rowId === row.id ? row.id : undefined} id={row.id}>
       <FinanceTableCell className="pending-invoices-table-cell pending-invoices-col-counterparty" columnRole="identity">
         <span className="pending-invoices-counterparty-cell pending-invoices-counterparty-cell--selectable">
           <span className="pending-invoices-row-select-slot">
@@ -625,7 +625,7 @@ function PendingInvoiceTableRow({
                 <span className="pending-invoices-counterparty-name" title={counterpartyLabel}>
                   {counterpartyLabel}
                 </span>
-                <RelationCountButton kind="bank" count={bankRelationCount} expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id)} />
+                <RelationCountButton kind="bank" count={bankRelationCount} expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id, 'sources')} />
               </span>
             ) : (
               <>
@@ -679,7 +679,7 @@ function PendingInvoiceTableRow({
       </FinanceTableCell>
       <FinanceTableCell className="pending-invoices-table-cell pending-invoices-table-cell--left-border pending-invoices-col-invoice-no" columnRole="identity">
         {invoiceHasMultiple ? (
-          <RelationCountButton kind="invoice" count={invoiceRelationCount} expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id)} />
+          <RelationCountButton kind="invoice" count={invoiceRelationCount} expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id, 'sources')} />
         ) : primaryInvoice ? (
           <TextCell
             primary={invoiceNumberLabel}
@@ -718,7 +718,7 @@ function PendingInvoiceTableRow({
       </FinanceTableCell>
       <FinanceTableCell className="pending-invoices-table-cell pending-invoices-table-cell--left-border pending-invoices-col-oa-applicant" columnRole="identity">
         {oaHasMultiple ? (
-          <RelationCountButton kind="oa" count={oaRelationCount} expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id)} />
+          <RelationCountButton kind="oa" count={oaRelationCount} expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id, 'sources')} />
         ) : primaryOa ? (
           <TextCell
             primary={primaryOa.applicant || <EmptyValue />}
@@ -752,9 +752,9 @@ function PendingInvoiceTableRow({
         ) : <EmptyValue />}
       </FinanceTableCell>
     </FinanceTableRow>
-    {expansion.rowId === row.id && <FinanceTableRow id={`${row.id}:relation`} className="relation-expansion-row"><FinanceTableCell columnRole="description" colSpan={9}>
+    {expansion.rowId === row.id && <FinanceTableRow id={`${row.id}:relation`} className="relation-expansion-row" dataRelationGroup={row.id}><FinanceTableCell columnRole="description" colSpan={9}>
       <RelationGroupExpansion columns={pendingInvoiceRelationColumns(row)} expanded={expansion.expanded}
-        onClose={() => expansion.toggle(row.id)} onExited={expansion.exited}
+        onClose={() => expansion.toggle(row.id, 'sources')} onExited={expansion.exited}
         onOpenDetail={target => onOpenObjectDetail({ ...target, kind: target.kind === 'bank' ? 'bankTransaction' : target.kind, rowId: row.id })} />
     </FinanceTableCell></FinanceTableRow>}
     </Fragment>

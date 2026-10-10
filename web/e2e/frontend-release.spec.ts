@@ -85,7 +85,7 @@ test("old and new tabs keep loading lazy routes across publish and rollback", as
   await context.close();
 });
 
-test("failed lazy chunk preserves navigation and manual reload recovers", async ({ page }, testInfo) => {
+test("failed lazy chunk preserves navigation and manual reload recovers", async ({ page, browserDiagnostics }, testInfo) => {
   publish(candidate);
   await installDeterministicApiMocks(page, { sessionMode: "admin" });
   const errors: string[] = [];
@@ -93,11 +93,20 @@ test("failed lazy chunk preserves navigation and manual reload recovers", async 
   await page.goto(`${origin}/fin-ops/bank-details`);
   await expect(page.getByRole("heading", { name: "银行明细", exact: true })).toBeVisible();
   const chunk = /\/assets\/InputInvoiceUsagePage-[^/]+\.js$/;
+  const assertInjectedChunkFailure = () => {
+    // Consume only the two diagnostics required by this deliberately injected 404.
+    expect(browserDiagnostics).toEqual([
+      { category: "console.error", detail: expect.stringMatching(/^TypeError: Failed to fetch dynamically imported module: http:\/\/127\.0\.0\.1:\d+\/fin-ops\/assets\/InputInvoiceUsagePage-[^/]+\.js$/) },
+      { category: "console.error", detail: expect.stringMatching(/^fin-ops route failure \{build: [^,]+, route: \/input-invoice-usage, phase: render, kind: module_load_failed, asset: \/fin-ops\/assets\/InputInvoiceUsagePage-[^/]+\.js\}$/) },
+    ]);
+    browserDiagnostics.splice(0, 2);
+  };
   await page.route(chunk, r => r.fulfill({ status: 404, contentType: "text/plain", body: "not found" }));
   await page.getByRole("link", { name: "进项发票使用情况", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("页面暂时无法显示");
   await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("route-failure-desktop.png") });
+  assertInjectedChunkFailure();
   await page.setViewportSize({ width: 800, height: 900 });
   await expect(page.getByRole("button", { name: "重新加载页面" })).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -107,6 +116,7 @@ test("failed lazy chunk preserves navigation and manual reload recovers", async 
   await expect(page.getByRole("heading", { name: "银行明细", exact: true })).toBeVisible();
   await page.getByRole("link", { name: "进项发票使用情况", exact: true }).click();
   await expect(page.getByRole("alert")).toBeVisible();
+  assertInjectedChunkFailure();
   await page.unroute(chunk);
   await page.getByRole("button", { name: "重新加载页面" }).click();
   await expect(page.getByRole("heading", { name: "进项发票使用情况", exact: true })).toBeVisible();

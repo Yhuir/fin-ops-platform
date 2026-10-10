@@ -195,6 +195,7 @@ type FinanceTableRowProps = {
   textValue?: string;
   dataTestId?: string;
   dataHighlight?: string;
+  dataRelationGroup?: string;
 };
 
 export function FinanceTableRow({
@@ -203,6 +204,7 @@ export function FinanceTableRow({
   className,
   dataCertifiedHighlighted,
   dataHighlight,
+  dataRelationGroup,
   dataTestId,
   onClick,
   textValue,
@@ -212,6 +214,7 @@ export function FinanceTableRow({
       className={cx("finance-table__row", className)}
       data-certified-highlighted={dataCertifiedHighlighted === undefined ? undefined : String(dataCertifiedHighlighted)}
       data-highlight={dataHighlight}
+      data-relation-group={dataRelationGroup}
       data-testid={dataTestId}
       id={id}
       onClick={onClick}

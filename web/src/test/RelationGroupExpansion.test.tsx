@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, within } from '@testing-library/react';
 import { expect, test, vi } from 'vitest';
 import RelationGroupExpansion, { RelationCountButton, type RelationColumn } from '../components/common/RelationGroupExpansion';
 import { useRelationExpansion } from '../hooks/useRelationExpansion';
@@ -12,10 +12,10 @@ const columns: RelationColumn[] = [
 function List({rows,detail}: {rows:string[];detail:ReturnType<typeof vi.fn>}) {
   const expansion = useRelationExpansion(rows);
   return <>{rows.map(id=><div key={id}>
-    <RelationCountButton count={2} kind="oa" expanded={expansion.rowId===id && expansion.expanded} onClick={()=>expansion.toggle(id)} label={`${id} OA`} />
-    <RelationCountButton count={2} kind="bank" expanded={expansion.rowId===id && expansion.expanded} onClick={()=>expansion.toggle(id)} label={`${id} 流水`} />
+    <RelationCountButton count={2} kind="oa" expanded={expansion.rowId===id && expansion.expanded} onClick={()=>expansion.toggle(id,'sources')} label={`${id} OA`} />
+    <RelationCountButton count={2} kind="bank" expanded={expansion.rowId===id && expansion.expanded} onClick={()=>expansion.toggle(id,'sources')} label={`${id} 流水`} />
     {expansion.rowId===id && <RelationGroupExpansion columns={columns} expanded={expansion.expanded}
-      onClose={()=>expansion.toggle(id)} onExited={expansion.exited} onOpenDetail={detail} />}
+      onClose={()=>expansion.toggle(id,'sources')} onExited={expansion.exited} onOpenDetail={detail} />}
   </div>)}</>;
 }
 
@@ -39,6 +39,39 @@ test('each row shares one expansion, replacing list data clears it, and detail t
   expect(screen.getAllByRole('region',{name:'配对关系'})).toHaveLength(1);
   view.rerender(<List rows={[...rows]} detail={detail} />);
   expect(screen.queryByRole('region',{name:'配对关系'})).not.toBeInTheDocument();
+});
+
+test('invoice and source views share one parent selection and replacing rows clears both views', () => {
+  const rows = ['first', 'second'];
+  const { result, rerender } = renderHook(({ rows }) => useRelationExpansion(rows), { initialProps: { rows } });
+  act(() => result.current.toggle('first', 'invoices'));
+  expect(result.current).toMatchObject({ rowId: 'first', view: 'invoices', expanded: true });
+  act(() => result.current.toggle('first', 'sources'));
+  expect(result.current).toMatchObject({ rowId: 'first', view: 'sources', expanded: true });
+  act(() => result.current.toggle('second', 'invoices'));
+  expect(result.current).toMatchObject({ rowId: 'second', view: 'invoices', expanded: true });
+  rerender({ rows: [...rows] });
+  expect(result.current).toMatchObject({ rowId: null, view: null, expanded: false });
+});
+
+test('an old exit cannot clear another closing parent or view, and the owned exit clears it', () => {
+  // Keep one list identity across renders, just as a loaded response does.
+  const rows: string[] = [];
+  const owned = renderHook(() => useRelationExpansion(rows));
+  act(() => owned.result.current.toggle('first', 'sources'));
+  const firstExit = owned.result.current.exited;
+  act(() => owned.result.current.toggle('second', 'sources'));
+  act(() => owned.result.current.toggle('second', 'sources'));
+  act(firstExit);
+  expect(owned.result.current).toMatchObject({ rowId: 'second', view: 'sources', expanded: false });
+  act(owned.result.current.exited);
+  expect(owned.result.current.rowId).toBeNull();
+  act(() => owned.result.current.toggle('first', 'sources'));
+  const sourceExit = owned.result.current.exited;
+  act(() => owned.result.current.toggle('first', 'invoices'));
+  act(() => owned.result.current.toggle('first', 'invoices'));
+  act(sourceExit);
+  expect(owned.result.current).toMatchObject({ rowId: 'first', view: 'invoices', expanded: false });
 });
 
 test.each([null,[{kind:'oa',count:3,members:columns[0].members}] as RelationColumn[]])('incomplete relationship is explicit and does not open a partial source list', columns => {

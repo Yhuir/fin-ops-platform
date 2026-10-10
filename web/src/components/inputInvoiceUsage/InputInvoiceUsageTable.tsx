@@ -357,7 +357,6 @@ export default function InputInvoiceUsageTable({
   tableWrapRef,
 }: InputInvoiceUsageTableProps) {
   const expansion = useRelationExpansion(rows);
-  const invoiceExpansion = useRelationExpansion(rows);
   const configsByField = new Map(filterConfigs.map((config) => [config.field, config]));
   const filterFor = (field: string) => filters.find((filter) => filter.field === field) as InputInvoiceUsageFilterValue | undefined;
   const filterMenu = (field: string, label: string) => {
@@ -473,6 +472,9 @@ export default function InputInvoiceUsageTable({
                   <td className="finance-table__cell input-invoice-usage-table-state-cell" colSpan={10}>{emptyStateMessage}</td>
                 </tr>
               ) : rows.map((row) => {
+                const groupActive = expansion.rowId === row.id && (expansion.view === "sources" || expansion.expanded);
+                const invoicesExpanded = expansion.rowId === row.id && expansion.view === "invoices" && expansion.expanded;
+                const sourcesExpanded = expansion.rowId === row.id && expansion.view === "sources" && expansion.expanded;
                 const renderInvoiceRow = (invoice: InputInvoiceUsageRow["invoice"], additional = false) => {
                   const invoiceNo = displayInvoiceNo({ ...row, invoice });
                   const invoiceRowId = additional ? `${row.id}-invoice-${invoice.id}` : row.id;
@@ -490,7 +492,7 @@ export default function InputInvoiceUsageTable({
                   const invoiceTotalCount = relationCount(row.invoiceRelations.relationCount);
 
                   return (
-                    <tr className="finance-table__row input-invoice-usage-table-row" id={invoiceRowId} data-invoice-id={invoice.id}>
+                    <tr className="finance-table__row input-invoice-usage-table-row" id={invoiceRowId} data-invoice-id={invoice.id} data-relation-group={groupActive ? row.id : undefined}>
                       <th className="finance-table__cell input-invoice-usage-table-cell" data-column-role="identity" scope="row">
                         <div className="input-invoice-usage-inline-row">
                           <span className="input-invoice-usage-cell-primary" title={invoiceNo}>{invoiceNo}</span>
@@ -501,9 +503,9 @@ export default function InputInvoiceUsageTable({
                           />
                           {invoiceRelationTarget ? (
                             <RelationCountButton
-                              count={invoiceTotalCount} kind="invoice" expanded={invoiceExpansion.rowId === row.id && invoiceExpansion.expanded}
+                              count={invoiceTotalCount} kind="invoice" expanded={invoicesExpanded}
                               label={`查看发票 ${invoiceNo} 关联发票 ${row.invoiceRelations.relationCount} 张`}
-                              onClick={() => invoiceExpansion.toggle(row.id)}
+                              onClick={() => expansion.toggle(row.id, 'invoices')}
                             />
                           ) : null}
                         </div>
@@ -544,9 +546,9 @@ export default function InputInvoiceUsageTable({
                               ) : null}
                               {oaRelationTarget ? (
                                 <RelationCountButton
-                                  count={oaTotalCount} kind="oa" expanded={expansion.rowId === row.id && expansion.expanded}
+                                  count={oaTotalCount} kind="oa" expanded={sourcesExpanded}
                                   label={`查看${oa.applicant || "该发票"}关联OA ${row.oa.relationCount} 条`}
-                                  onClick={() => expansion.toggle(row.id)}
+                                  onClick={() => expansion.toggle(row.id, 'sources')}
                                 />
                               ) : null}
                             </div>
@@ -597,9 +599,9 @@ export default function InputInvoiceUsageTable({
                               <span className="input-invoice-usage-money-primary">{formatMoney(row.bank.netAmount, "—")}</span>
                               {bankRelationTarget ? (
                                 <RelationCountButton
-                                  count={bankTotalCount} kind="bank" expanded={expansion.rowId === row.id && expansion.expanded}
+                                  count={bankTotalCount} kind="bank" expanded={sourcesExpanded}
                                   label={`查看${bank.counterpartyName || "该发票"}关联流水 ${row.bank.originalTransactionCount} 条`}
-                                  onClick={() => expansion.toggle(row.id)}
+                                  onClick={() => expansion.toggle(row.id, 'sources')}
                                 />
                               ) : null}
                             </div>
@@ -627,13 +629,13 @@ export default function InputInvoiceUsageTable({
                 };
                 return <Fragment key={row.id}>
                   {renderInvoiceRow(row.invoice)}
-                  {invoiceExpansion.rowId === row.id && invoiceExpansion.expanded ? row.invoiceRelations.summaries
+                  {invoicesExpanded ? row.invoiceRelations.summaries
                     .filter(member => member.id !== row.invoice.id)
                     .map(({ invoiceDate, relationCaseId: _relationCaseId, ...invoice }) =>
                       <Fragment key={invoice.id}>{renderInvoiceRow({ ...invoice, issueDate: invoiceDate }, true)}</Fragment>) : null}
-                  {expansion.rowId === row.id && <tr className="relation-expansion-row"><td colSpan={10}>
+                  {expansion.rowId === row.id && expansion.view === "sources" && <tr className="finance-table__row relation-expansion-row" data-relation-group={row.id}><td className="finance-table__cell" colSpan={10}>
                     <RelationGroupExpansion columns={inputInvoiceSourceRelationColumns(row)} expanded={expansion.expanded}
-                      onClose={() => expansion.toggle(row.id)} onExited={expansion.exited}
+                      onClose={() => expansion.toggle(row.id, 'sources')} onExited={expansion.exited}
                       onOpenDetail={target => onOpenDetail({ ...target, rowId: row.id })} />
                   </td></tr>}
                   </Fragment>;

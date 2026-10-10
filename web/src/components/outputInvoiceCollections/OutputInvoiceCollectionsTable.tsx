@@ -255,7 +255,7 @@ function DataRow({
   ].filter(Boolean).join(" ");
 
   return (
-    <Fragment><FinanceTableRow className="output-invoice-collections-table-row" id={row.id} textValue={displayInvoiceNo(row)}>
+    <Fragment><FinanceTableRow className="output-invoice-collections-table-row" dataRelationGroup={expansion.rowId === row.id ? row.id : undefined} id={row.id} textValue={displayInvoiceNo(row)}>
       <FinanceTableCell className="output-invoice-collections-table-cell" columnRole="identity" textValue={displayInvoiceNo(row)}>
         <span className="output-invoice-collections-inline-row">
           <TextLine strong value={displayInvoiceNo(row)} />
@@ -269,7 +269,7 @@ function DataRow({
           <FinanceTag tone={polarity.tone}>{polarity.label}</FinanceTag>
           {invoiceRelationTarget ? (
             <RelationCountButton kind="invoice" count={row.invoiceRelations.relationCount}
-              expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id)} />
+              expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id, 'sources')} />
           ) : null}
         </span>
       </FinanceTableCell>
@@ -334,7 +334,7 @@ function DataRow({
               <FinanceTag>{dateOnly(bank.tradeTime)}</FinanceTag>
               {bankRelationTarget ? (
                 <RelationCountButton kind="bank" count={row.bank.originalTransactionCount!}
-                  expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id)} />
+                  expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id, 'sources')} />
               ) : null}
             </span>
           </>
@@ -362,9 +362,9 @@ function DataRow({
         ) : <EmptyValue />}
       </FinanceTableCell>
     </FinanceTableRow>
-    {expansion.rowId === row.id && <FinanceTableRow id={`${row.id}:relation`} className="relation-expansion-row"><FinanceTableCell columnRole="description" colSpan={8}>
+    {expansion.rowId === row.id && <FinanceTableRow id={`${row.id}:relation`} className="relation-expansion-row" dataRelationGroup={row.id}><FinanceTableCell columnRole="description" colSpan={8}>
       <RelationGroupExpansion columns={outputInvoiceRelationColumns(row)} expanded={expansion.expanded}
-        onClose={() => expansion.toggle(row.id)} onExited={expansion.exited}
+        onClose={() => expansion.toggle(row.id, 'sources')} onExited={expansion.exited}
         onOpenDetail={target => onOpenDetail({ ...target, rowId: row.id })} />
     </FinanceTableCell></FinanceTableRow>}
     </Fragment>

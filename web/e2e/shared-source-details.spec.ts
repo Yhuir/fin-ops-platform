@@ -56,6 +56,30 @@ for (const route of ['input-invoice-usage', 'oa-pending-payments', 'pending-invo
     // The live browser observes the native slide; timing details are attached for inspection.
     await info.attach('motion-duration',{body:JSON.stringify(durations),contentType:'application/json'});
     await expect.poll(()=>motion.evaluate(node=>node.getAnimations().length)).toBe(0);
+    await page.mouse.move(5, 5);
+    await trigger.evaluate(button => (button as HTMLElement).blur());
+    const groupId = await row.getAttribute('data-relation-group');
+    expect(groupId).toBeTruthy();
+    const groupRows = page.locator('tr[data-relation-group]');
+    await expect(groupRows).toHaveCount(2);
+    await expect.poll(() => groupRows.evaluateAll(rows => rows.flatMap(row => [...row.children].map(cell => getComputedStyle(cell).backgroundColor))))
+      .toEqual(Array(await groupRows.locator('th,td').count()).fill('rgb(244, 247, 251)'));
+    const presentation = await groupRows.evaluateAll(rows => rows.map(row => ({
+      group: row.getAttribute('data-relation-group'),
+      cells: [...row.children].map(cell => ({
+        background: getComputedStyle(cell).backgroundColor,
+        line: getComputedStyle(cell).backgroundImage,
+        lineWidth: getComputedStyle(cell).backgroundSize,
+      })),
+    })));
+    await info.attach('relation-group-style', { body: JSON.stringify(presentation), contentType: 'application/json' });
+    for (const item of presentation) {
+      expect(item.group).toBe(groupId);
+      expect(item.cells.map(cell => cell.background)).toEqual(Array(item.cells.length).fill('rgb(244, 247, 251)'));
+      expect(item.cells[0].line).toContain('rgb(158, 181, 219)');
+      expect(item.cells[0].lineWidth).toBe('3px 100%');
+    }
+    expect(await expansion.evaluate(node => getComputedStyle(node).backgroundColor)).toBe('rgb(244, 247, 251)');
     await expect(expansion.locator('li')).toHaveCount(await expansion.locator('.relation-expansion__detail').count());
     expect(sourceReads).toEqual([]);
     expect(api.calls.filter(call=>call.startsWith(`GET /api/${route}/rows`)).length).toBe(initialRows);
@@ -78,6 +102,7 @@ for (const route of ['input-invoice-usage', 'oa-pending-payments', 'pending-invo
     await page.emulateMedia({reducedMotion:'reduce'});
     await page.getByRole('region',{name:'配对关系'}).getByRole('button',{name:'收起',exact:true}).click();
     await expect(page.getByRole('region',{name:'配对关系'})).toHaveCount(0);
+    await expect(page.locator('tr[data-relation-group]')).toHaveCount(0);
     expect(sourceReads).toHaveLength(1);
   });
 }

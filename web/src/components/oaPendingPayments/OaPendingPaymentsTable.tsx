@@ -229,7 +229,7 @@ export default function OaPendingPaymentsTable({
               const rowOaIds = oaRowIds(row);
               const selected = rowOaIds.length > 0 && rowOaIds.every((oaId) => selectedOaRowIds.has(oaId));
               return (
-                <Fragment key={row.id}><FinanceTableRow className="oa-pending-payments-table-row" id={row.id}>
+                <Fragment key={row.id}><FinanceTableRow className="oa-pending-payments-table-row" dataRelationGroup={expansion.rowId === row.id ? row.id : undefined} id={row.id}>
                   <FinanceTableCell className="oa-pending-payments-table-cell oa-pending-payments-table-cell--oa" columnRole="identity">
                     <div className="oa-pending-payments-oa-grid">
                       <div className="oa-pending-payments-oa-grid__applicant">
@@ -276,7 +276,7 @@ export default function OaPendingPaymentsTable({
                         <span className="oa-pending-payments-oa-amount-row">
                           <TextLine numeric strong value={row.oa.amount} />
                           {Number(row.oa.relationCount) > 1 && <RelationCountButton kind="oa" count={row.oa.relationCount!}
-                            expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id)} />}
+                            expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id, 'sources')} />}
                         </span>
                       </div>
                     </div>
@@ -300,7 +300,7 @@ export default function OaPendingPaymentsTable({
                           <span className="oa-pending-payments-inline-row">
                             <TextLine strong value={counterpartyDisplay(row)} />
                             {row.bankTransaction.original_transaction_count > 1 ? <RelationCountButton kind="bank" count={row.bankTransaction.original_transaction_count}
-                              expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id)} /> :
+                              expanded={expansion.rowId === row.id && expansion.expanded} onClick={() => expansion.toggle(row.id, 'sources')} /> :
                               <DetailButton disabled={!bankTarget} label={bankDetailLabel(row)} onClick={() => { if (bankTarget) onOpenDetail(bankTarget); }} />}
                           </span>
                           <span className="oa-pending-payments-tag-row">
@@ -330,12 +330,12 @@ export default function OaPendingPaymentsTable({
                     )}
                   </FinanceTableCell>
                   <FinanceTableCell className="oa-pending-payments-table-cell oa-pending-payments-table-cell--invoice oa-pending-payments-table-cell--left-border" columnRole="identity">
-                    <InvoiceCell row={row} onOpenDetail={onOpenDetail} expanded={expansion.rowId === row.id && expansion.expanded} onToggle={() => expansion.toggle(row.id)} />
+                    <InvoiceCell row={row} onOpenDetail={onOpenDetail} expanded={expansion.rowId === row.id && expansion.expanded} onToggle={() => expansion.toggle(row.id, 'sources')} />
                   </FinanceTableCell>
                 </FinanceTableRow>
-                {expansion.rowId === row.id && <FinanceTableRow id={`${row.id}:relation`} className="relation-expansion-row"><FinanceTableCell columnRole="description" colSpan={4}>
+                {expansion.rowId === row.id && <FinanceTableRow id={`${row.id}:relation`} className="relation-expansion-row" dataRelationGroup={row.id}><FinanceTableCell columnRole="description" colSpan={4}>
                   <RelationGroupExpansion columns={oaPendingRelationColumns(row)} expanded={expansion.expanded}
-                    onClose={() => expansion.toggle(row.id)} onExited={expansion.exited}
+                    onClose={() => expansion.toggle(row.id, 'sources')} onExited={expansion.exited}
                     onOpenDetail={target => onOpenDetail({ ...target, rowId: row.id })} />
                 </FinanceTableCell></FinanceTableRow>}
                 </Fragment>
