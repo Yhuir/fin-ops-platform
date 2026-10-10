@@ -3136,80 +3136,13 @@ function etcBusinessBatchPagePayload(batchId: string, batchStatus: EtcBusinessBa
 }
 
 function taxCertifiedImportPreviewPayload() {
+  const summary = { source_count: 2, recognized_count: 2, new_count: 2, relink_count: 0,
+    invalid_count: 0, matched_invoice_count: 2, outside_invoices_count: 0,
+    conflict_count: 0, duplicate_count: 0, ignored_count: 0, blocking_count: 0 };
   return {
-    session: {
-      id: "tax-certified-session-e2e-001",
-      imported_by: "E2EUSER001",
-      file_count: 1,
-      status: "preview_ready",
-    },
-    files: [
-      {
-        id: "tax-certified-file-e2e-001",
-        file_name: "2026年3月 进项认证结果.xlsx",
-        month: "2026-03",
-        recognized_count: 2,
-        invalid_count: 0,
-        matched_invoice_count: 1,
-        outside_invoices_count: 1,
-          conflict_count: 0, duplicate_count: 0, ignored_count: 0, blocking_count: 0,
-        rows: [
-          {
-            id: "tax-certified-row-e2e-001",
-            month: "2026-03",
-            row_status: "recognized",
-            match_status: "matched_invoice",
-            matched_invoice_id: "ti-202603-001",
-            dedupe_status: "new",
-            unique_key: "test-key", expected_version: null, buyer_tax_no: "91530100BUYER",
-            error_message: null,
-            digital_invoice_no: null,
-            invoice_code: "5300261130",
-            invoice_no: "11203490",
-            issue_date: "2026-03-22",
-            seller_tax_no: "91530100E2E0001",
-            seller_name: "设备供应商",
-            tax_amount: "12,480.00",
-            deductible_tax_amount: "12,480.00",
-            selection_status: "用途确认",
-            invoice_status: "正常",
-            selection_time: "2026-04-01 09:10:00",
-            source_file_name: "2026年3月 进项认证结果.xlsx",
-            source_row_number: 1,
-          },
-          {
-            id: "tax-certified-row-e2e-002",
-            month: "2026-03",
-            row_status: "recognized",
-            match_status: "outside_invoices",
-            matched_invoice_id: null,
-            dedupe_status: "new",
-            unique_key: "test-key", expected_version: null, buyer_tax_no: "91530100BUYER",
-            error_message: null,
-            digital_invoice_no: "ETC-202603-7788",
-            invoice_code: null,
-            invoice_no: "ETC-202603-7788",
-            issue_date: "2026-03-28",
-            seller_tax_no: "91530100E2E0002",
-            seller_name: "高速通行服务商",
-            tax_amount: "1,600.00",
-            deductible_tax_amount: "1,600.00",
-            selection_status: "用途确认",
-            invoice_status: "正常",
-            selection_time: "2026-04-01 09:12:00",
-            source_file_name: "2026年3月 进项认证结果.xlsx",
-            source_row_number: 2,
-          },
-        ],
-      },
-    ],
-    summary: {
-      recognized_count: 2,
-      invalid_count: 0,
-      matched_invoice_count: 1,
-      outside_invoices_count: 1,
-          conflict_count: 0, duplicate_count: 0, ignored_count: 0, blocking_count: 0,
-    },
+    session: { id: "tax-certified-session-e2e-001", imported_by: "E2EUSER001", file_count: 1, status: "preview_ready" },
+    files: [{ id: "tax-certified-file-e2e-001", file_name: "2026年3月 进项认证结果.xlsx", month: "2026-03", missing_metadata: [], ...summary, rows: [] }],
+    summary,
   };
 }
 
@@ -3223,6 +3156,7 @@ function taxCertifiedImportConfirmPayload() {
       file_count: 1,
       months: ["2026-03"],
       persisted_record_count: 2,
+      new_record_count: 2, corrected_record_count: 0, linked_record_count: 0, duplicate_count: 0, matched_record_count: 2, unmatched_record_count: 0,
     },
   };
 }

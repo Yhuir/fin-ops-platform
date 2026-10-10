@@ -41,24 +41,32 @@ test.describe("special invoice certification", () => {
     expect(api.count("POST /api/tax-offset/plans")).toBe(0); expect(api.count("POST /api/tax-offset/calculate")).toBe(0);
     await expectNoUnexpectedSuccessUiErrors(page);
   });
-  test("imports certification in a native drawer and refreshes canonical status", async ({ page }, info) => {
+  test("dropping a file analyzes automatically and one confirmation refreshes canonical status", async ({ page }, info) => {
     const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     await page.goto("/tax-offset"); await expect(page.getByText("11203490")).toBeVisible();
     const inventoryBefore = await page.getByLabel("进项发票统计", { exact: true }).textContent();
     await page.locator(".tax-certification-page").getByRole("button", { name: "导入认证记录", exact: true }).click();
     const drawer = page.getByRole("dialog", { name: "导入认证记录" });
-    await drawer.locator('input[type="file"]').setInputFiles({ name: "认证.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: Buffer.from("fixture") });
-    await drawer.getByRole("button", { name: "识别", exact: true }).click();
-    await expect(drawer.getByText("识别 2 条")).toBeVisible();
+    const transfer = await page.evaluateHandle(() => {
+      const data = new DataTransfer();
+      data.items.add(new File(["fixture"], "认证.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+      return data;
+    });
+    await drawer.locator("label.finance-file-dropzone").dispatchEvent("drop", { dataTransfer: transfer });
+    await transfer.dispose();
+    await expect(drawer.getByRole("region", { name: "认证文件统计" })).toContainText(/文件内发票\s*2 张/);
+    await expect(drawer.getByRole("button", { name: "识别", exact: true })).toHaveCount(0);
+    expect(api.count("GET /api/tax-offset/certified-imports")).toBe(0);
     await page.screenshot({ animations: "disabled", path: info.outputPath("tax-certification-import.png") });
     await drawer.getByRole("button", { name: "确认导入" }).click();
-    await expect(drawer.getByRole("status").filter({ hasText: "已导入 2 条" })).toBeVisible();
+    await expect(drawer.getByRole("status").filter({ hasText: "导入完成：新增 2 张，更正 0 张，补关联 0 张，重复跳过 0 张，待核对 0 张" })).toBeVisible();
     await expect(drawer.getByRole("button", { name: "关闭抽屉" })).toBeEnabled();
     await page.keyboard.press("Escape"); await expect(drawer).toHaveCount(0);
     await expect(page.getByLabel("已认证统计")).toContainText("2 张");
     await expect(page.getByLabel("进项发票统计", { exact: true })).toHaveText(inventoryBefore!);
     const row = page.getByRole("grid", { name: "专票认证明细" }).getByRole("row").filter({ hasText: "11203490" });
     await expect(row).toContainText("已认证");
+    expect(api.count("POST /api/tax-offset/certified-import/preview")).toBe(1);
     expect(api.count("POST /api/tax-offset/certified-import/confirm")).toBe(1);
     await expectNoUnexpectedSuccessUiErrors(page);
   });
@@ -86,9 +94,9 @@ test("conflict correction is explicit and a failed job requires a fresh preview"
   let previews = 0; let submitted: unknown;
   await page.route("**/api/tax-offset/certified-import/preview", route => {
     previews += 1;
-    const summary = { blocking_count: 0, recognized_count: 1, invalid_count: 0, ignored_count: 1, matched_invoice_count: 1, outside_invoices_count: 0, conflict_count: 1, duplicate_count: 0 };
+    const summary = { source_count: 2, new_count: 0, relink_count: 0, blocking_count: 0, recognized_count: 1, invalid_count: 0, ignored_count: 1, matched_invoice_count: 1, outside_invoices_count: 0, conflict_count: 1, duplicate_count: 0 };
     return route.fulfill({ json: { session: { id: `s${previews}`, imported_by: "user", file_count: 1, status: "preview_ready" }, summary,
-      files: [{ id: "f1", file_name: "认证.xlsx", month: "2026-03", ...summary, rows: [{ id: "r1", unique_key: "key1", expected_version: 3, month: "2026-03", buyer_tax_no: "buyer", row_status: "recognized", match_status: "matched_invoice", dedupe_status: "conflict", digital_invoice_no: "11203490", seller_name: "设备供应商", source_file_name: "认证.xlsx", source_row_number: 4 }] }] } });
+      files: [{ id: "f1", file_name: "认证.xlsx", month: "2026-03", missing_metadata: [], ...summary, rows: [{ id: "r1", unique_key: "key1", expected_version: 3, month: "2026-03", buyer_tax_no: "buyer", row_status: "recognized", match_status: "matched_invoice", dedupe_status: "conflict", correction_changes: [{ field: "deductible_tax_amount", label: "可抵扣税额", previous: "9.00", incoming: "10.00" }], digital_invoice_no: "11203490", seller_name: "设备供应商", source_file_name: "认证.xlsx", source_row_number: 4 }] }] } });
   });
   await page.route("**/api/tax-offset/certified-import/confirm", route => {
     submitted = route.request().postDataJSON();
@@ -99,16 +107,16 @@ test("conflict correction is explicit and a failed job requires a fresh preview"
   await page.locator(".tax-certification-page").getByRole("button", { name: "导入认证记录", exact: true }).click();
   const drawer = page.getByRole("dialog", { name: "导入认证记录" });
   await drawer.locator('input[type="file"]').setInputFiles({ name: "认证.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: Buffer.from("fixture") });
-  await drawer.getByRole("button", { name: "识别", exact: true }).click();
-  await expect(drawer.getByText("非专票 1 条")).toBeVisible();
+  await expect(drawer.getByRole("region", { name: "认证文件统计" })).toContainText(/非专票忽略\s*1 张/);
   await expect(drawer.getByRole("button", { name: "确认导入" })).toBeDisabled();
+  await expect(drawer.getByRole("region", { name: "需处理的记录" })).toContainText(/可抵扣税额.*9\.00.*→.*10\.00/);
   await drawer.getByText("更正", { exact: true }).click();
   await expect(drawer.getByRole("checkbox", { name: "更正 11203490" })).toBeChecked();
   await drawer.getByRole("button", { name: "确认导入" }).click();
-  await expect(drawer.getByRole("alert")).toContainText("请重新识别");
+  await expect(drawer.getByRole("alert")).toContainText("请重新分析");
   expect(submitted).toEqual({ session_id: "s1", corrections: [{ unique_key: "key1", expected_version: 3 }] });
   await expect(drawer.getByRole("button", { name: "确认导入" })).toBeDisabled();
-  await drawer.getByRole("button", { name: "识别", exact: true }).click();
+  await drawer.getByRole("button", { name: "重试分析", exact: true }).click();
   await expect(drawer.getByRole("checkbox", { name: "更正 11203490" })).not.toBeChecked();
   expect(previews).toBe(2);
   await expectNoUnexpectedSuccessUiErrors(page);
@@ -128,6 +136,7 @@ test("pending records and import batches paginate independently and revoke refre
   await page.goto("/tax-offset"); await expect(page.getByText("11203490")).toBeVisible();
   await page.locator(".tax-certification-page").getByRole("button", { name: "导入认证记录", exact: true }).click();
   const drawer = page.getByRole("dialog", { name: "导入认证记录" });
+  await drawer.getByRole("button", { name: "历史批次", exact: true }).click();
   await expect(drawer.getByText("待核对-1")).toBeVisible();
   const pending = drawer.getByRole("region", { name: "待核对记录" });
   await pending.getByRole("button", { name: "下一页" }).click();
@@ -141,33 +150,25 @@ test("pending records and import batches paginate independently and revoke refre
   await expectNoUnexpectedSuccessUiErrors(page);
 });
 
-test("large import exceptions render one page and keep corrections across pages", async ({ page }) => {
+test("large imports render only actionable conflicts without a normal preview table", async ({ page }) => {
   await installDeterministicApiMocks(page, { sessionMode: "user" });
-  let generation = 0;
   await page.route("**/api/tax-offset/certified-import/preview", route => {
-    generation += 1;
-    const summary = { recognized_count: 60, invalid_count: 0, ignored_count: 0, blocking_count: 0, matched_invoice_count: 0, outside_invoices_count: 60, conflict_count: 2, duplicate_count: 0 };
-    const rows = Array.from({ length: 60 }, (_, index) => ({ id: `r${index}`, unique_key: `key${index}`, expected_version: index === 0 || index === 50 ? 3 : null, month: "2026-03", buyer_tax_no: "buyer", row_status: "recognized", match_status: "outside_invoices", dedupe_status: index === 0 || index === 50 ? "conflict" : "new", digital_invoice_no: `票号${index}`, seller_name: "测试销方", source_file_name: "认证.xlsx", source_row_number: index + 4 }));
-    return route.fulfill({ json: { session: { id: `s${generation}`, imported_by: "user", file_count: 1, status: "preview_ready" }, summary, files: [{ id: "f1", file_name: "认证.xlsx", month: "2026-03", ...summary, rows }] } });
+    const summary = { source_count: 60, new_count: 58, relink_count: 0, recognized_count: 60, invalid_count: 0, ignored_count: 0, blocking_count: 0, matched_invoice_count: 0, outside_invoices_count: 60, conflict_count: 2, duplicate_count: 0 };
+    const rows = [0, 50].map(index => ({ id: `r${index}`, unique_key: `key${index}`, expected_version: 3, month: "2026-03", buyer_tax_no: "buyer", row_status: "recognized", match_status: "outside_invoices", dedupe_status: "conflict", digital_invoice_no: `票号${index}`, seller_name: "测试销方", source_file_name: "认证.xlsx", source_row_number: index + 4 }));
+    return route.fulfill({ json: { session: { id: "s1", imported_by: "user", file_count: 1, status: "preview_ready" }, summary, files: [{ id: "f1", file_name: "认证.xlsx", month: "2026-03", missing_metadata: [], ...summary, rows }] } });
   });
   await page.goto("/tax-offset"); await expect(page.getByText("11203490")).toBeVisible();
   await page.getByRole("button", { name: "导入认证记录", exact: true }).click();
   const drawer = page.getByRole("dialog", { name: "导入认证记录" });
   await drawer.locator('input[type="file"]').setInputFiles({ name: "认证.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: Buffer.from("fixture") });
-  await drawer.getByRole("button", { name: "识别", exact: true }).click();
-  const preview = drawer.getByRole("region", { name: "识别结果" });
-  await expect(preview.getByRole("row")).toHaveCount(51);
-  await preview.getByText("更正", { exact: true }).click();
-  await preview.getByRole("button", { name: "下一页" }).click();
-  await expect(preview.getByRole("row")).toHaveCount(11);
-  await preview.getByText("更正", { exact: true }).click();
+  await expect(drawer.getByRole("region", { name: "认证文件统计" })).toContainText(/本次专票\s*60 张/);
+  await expect(drawer.getByRole("grid")).toHaveCount(0);
+  await expect(drawer.getByRole("checkbox")).toHaveCount(2);
+  await expect(drawer.getByRole("button", { name: "确认导入" })).toBeDisabled();
+  await drawer.getByText("更正", { exact: true }).nth(0).click();
+  await expect(drawer.getByRole("button", { name: "确认导入" })).toBeDisabled();
+  await drawer.getByText("更正", { exact: true }).nth(1).click();
   await expect(drawer.getByRole("button", { name: "确认导入" })).toBeEnabled();
-  await preview.getByRole("button", { name: "上一页" }).click();
-  await expect(preview.getByRole("checkbox", { name: "更正 票号0" })).toBeChecked();
-  await preview.getByRole("button", { name: "下一页" }).click();
-  await drawer.getByRole("button", { name: "识别", exact: true }).click();
-  await expect(preview.getByText("显示 1-50 / 60")).toBeVisible();
-  await expect(preview.getByRole("checkbox", { name: "更正 票号0" })).not.toBeChecked();
   await expectNoUnexpectedSuccessUiErrors(page);
 });
 

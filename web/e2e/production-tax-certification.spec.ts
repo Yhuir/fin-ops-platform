@@ -33,7 +33,9 @@ test("production certification query, filters, import records and export remain 
   await page.getByRole("radio", { name: "全部", exact: true }).click(); await restore;
   const records = page.waitForResponse(response => new URL(response.url()).pathname === `${apiPath}/certified-imports`);
   started = performance.now(); await page.locator(".tax-certification-page").getByRole("button", { name: "导入认证记录", exact: true }).click();
-  expect((await records).status()).toBe(200); const importer = page.getByRole("dialog", { name: "导入认证记录" });
+  const importer = page.getByRole("dialog", { name: "导入认证记录" });
+  await importer.getByRole("button", { name: "历史批次", exact: true }).click();
+  expect((await records).status()).toBe(200);
   await expect(importer.getByRole("button", { name: "确认导入" })).toBeDisabled();
   samples.push({ operation: "import-records-open", durationMs: performance.now() - started });
   await page.keyboard.press("Escape"); await expect(importer).toHaveCount(0);
@@ -150,6 +152,7 @@ test("production certification filters, fixed header and real export preserve qu
   const historyResponse = page.waitForResponse(response => new URL(response.url()).pathname === "/fin-ops-api/api/tax-offset/certified-imports");
   await page.getByRole("button", { name: "导入认证记录", exact: true }).click();
   const imports = page.getByRole("dialog", { name: "导入认证记录" });
+  await imports.getByRole("button", { name: "历史批次", exact: true }).click();
   const history = await historyResponse;
   expect(history.status()).toBe(200);
   const records = await history.json();

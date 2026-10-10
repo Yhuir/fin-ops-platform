@@ -1,5 +1,4 @@
 import { apiFetch, apiRequestJson } from "../apiClient";
-import { formatMoney } from "../money";
 import type { TaxCertificationQuery, TaxCertificationResult, TaxImportHistoryQuery, TaxImportHistory, TaxCertificationFilters, TaxImportCorrection,
   TaxCertifiedImportConfirmResult, TaxCertifiedImportConfirmedResult, TaxCertifiedImportJob,
   TaxCertifiedImportPreviewFile, TaxCertifiedImportPreviewResult, TaxCertifiedImportPreviewRow } from "./types";
@@ -35,8 +34,6 @@ export async function exportTaxCertifications(filters: TaxCertificationFilters, 
 
 type ApiTaxCertifiedImportPreviewRow = {
   id: string;
-  month: string | null;
-  buyer_tax_no: string | null;
   row_status: TaxCertifiedImportPreviewRow["rowStatus"];
   match_status: TaxCertifiedImportPreviewRow["matchStatus"];
   unique_key: string | null;
@@ -45,24 +42,19 @@ type ApiTaxCertifiedImportPreviewRow = {
   error_message?: string | null;
   blocking: boolean;
   digital_invoice_no?: string | null;
-  invoice_code?: string | null;
   invoice_no?: string | null;
-  issue_date?: string | null;
-  seller_tax_no?: string | null;
-  seller_name?: string | null;
-  tax_amount?: string | null;
-  deductible_tax_amount?: string | null;
-  selection_status?: string | null;
-  invoice_status?: string | null;
-  selection_time?: string | null;
   source_file_name: string;
   source_row_number: number;
+  correction_changes?: TaxCertifiedImportPreviewRow["correctionChanges"];
 };
 
 type ApiTaxCertifiedImportPreviewFile = {
   id: string;
   file_name: string;
-  month: string;
+  month: string | null;
+  source_count: number;
+  new_count: number;
+  relink_count: number;
   recognized_count: number;
   invalid_count: number;
   ignored_count: number;
@@ -70,6 +62,7 @@ type ApiTaxCertifiedImportPreviewFile = {
   outside_invoices_count: number;
   conflict_count: number;
   duplicate_count: number;
+  missing_metadata: ("month" | "buyer_tax_no")[];
   rows: ApiTaxCertifiedImportPreviewRow[];
 };
 
@@ -83,9 +76,12 @@ type ApiTaxCertifiedImportPreviewPayload = {
   files: ApiTaxCertifiedImportPreviewFile[];
   summary: {
     blocking_count: number;
+    source_count: number;
+    new_count: number;
+    relink_count: number;
     recognized_count: number;
     invalid_count: number;
-  ignored_count: number;
+    ignored_count: number;
     matched_invoice_count: number;
     outside_invoices_count: number;
     conflict_count: number;
@@ -100,6 +96,12 @@ type ApiTaxCertifiedImportBatch = {
   file_count: number;
   months: string[];
   persisted_record_count: number;
+  new_record_count: number;
+  corrected_record_count: number;
+  linked_record_count: number;
+  duplicate_count: number;
+  matched_record_count: number;
+  unmatched_record_count: number;
 };
 
 type ApiTaxCertifiedImportJob = {
@@ -130,8 +132,6 @@ type ApiTaxCertifiedImportJobPayload = {
 function mapPreviewRow(row: ApiTaxCertifiedImportPreviewRow): TaxCertifiedImportPreviewRow {
   return {
     id: row.id,
-    month: row.month,
-    buyerTaxNo: row.buyer_tax_no,
     rowStatus: row.row_status,
     matchStatus: row.match_status,
     uniqueKey: row.unique_key,
@@ -140,18 +140,10 @@ function mapPreviewRow(row: ApiTaxCertifiedImportPreviewRow): TaxCertifiedImport
     errorMessage: row.error_message ?? null,
     blocking: row.blocking,
     digitalInvoiceNo: row.digital_invoice_no ?? null,
-    invoiceCode: row.invoice_code ?? null,
     invoiceNo: row.invoice_no ?? null,
-    issueDate: row.issue_date ?? null,
-    sellerTaxNo: row.seller_tax_no ?? null,
-    sellerName: row.seller_name ?? null,
-    taxAmount: row.tax_amount == null ? null : formatMoney(row.tax_amount),
-    deductibleTaxAmount: row.deductible_tax_amount == null ? null : formatMoney(row.deductible_tax_amount),
-    selectionStatus: row.selection_status ?? null,
-    invoiceStatus: row.invoice_status ?? null,
-    selectionTime: row.selection_time ?? null,
     sourceFileName: row.source_file_name,
     sourceRowNumber: row.source_row_number,
+    correctionChanges: row.correction_changes,
   };
 }
 
@@ -160,6 +152,10 @@ function mapPreviewFile(file: ApiTaxCertifiedImportPreviewFile): TaxCertifiedImp
     id: file.id,
     fileName: file.file_name,
     month: file.month,
+    sourceCount: file.source_count,
+    newCount: file.new_count,
+    relinkCount: file.relink_count,
+    missingMetadata: file.missing_metadata,
     recognizedCount: file.recognized_count,
     invalidCount: file.invalid_count,
     ignoredCount: file.ignored_count,
@@ -180,6 +176,12 @@ function mapCertifiedImportBatch(batch: ApiTaxCertifiedImportBatch): TaxCertifie
     fileCount: batch.file_count,
     months: batch.months,
     persistedRecordCount: batch.persisted_record_count,
+    newRecordCount: batch.new_record_count,
+    correctedRecordCount: batch.corrected_record_count,
+    linkedRecordCount: batch.linked_record_count,
+    duplicateCount: batch.duplicate_count,
+    matchedRecordCount: batch.matched_record_count,
+    unmatchedRecordCount: batch.unmatched_record_count,
   };
 }
 
@@ -195,7 +197,9 @@ function isApiTaxCertifiedImportBatch(value: unknown): value is ApiTaxCertifiedI
     && typeof candidate.file_count === "number"
     && Array.isArray(candidate.months)
     && candidate.months.every((item) => typeof item === "string")
-    && typeof candidate.persisted_record_count === "number"
+    && [candidate.persisted_record_count, candidate.new_record_count, candidate.corrected_record_count,
+      candidate.linked_record_count, candidate.duplicate_count, candidate.matched_record_count, candidate.unmatched_record_count]
+      .every(value => Number.isSafeInteger(value) && Number(value) >= 0)
   );
 }
 
@@ -222,6 +226,7 @@ export async function previewTaxCertifiedImport(params: {
   files: File[];
   month?: string;
   buyerTaxNo?: string;
+  signal?: AbortSignal;
 }): Promise<TaxCertifiedImportPreviewResult> {
   const formData = new FormData();
   formData.append("imported_by", params.importedBy);
@@ -232,9 +237,18 @@ export async function previewTaxCertifiedImport(params: {
   }
   const payload = await apiRequestJson<ApiTaxCertifiedImportPreviewPayload>("/api/tax-offset/certified-import/preview", {
     method: "POST",
-    body: formData,
-  });
+    body: formData, signal: params.signal,
+  }, { timeoutMs: 60000, allowHtmlFallback: false });
 
+  const counts = [payload.summary.source_count, payload.summary.recognized_count, payload.summary.new_count,
+    payload.summary.relink_count, payload.summary.duplicate_count, payload.summary.conflict_count,
+    payload.summary.invalid_count, payload.summary.ignored_count, payload.summary.blocking_count,
+    payload.summary.matched_invoice_count, payload.summary.outside_invoices_count];
+  if (counts.some(value => !Number.isSafeInteger(value) || value < 0)
+    || payload.files.some(file => !Array.isArray(file.missing_metadata)
+      || file.missing_metadata.some(field => field !== "month" && field !== "buyer_tax_no"))) {
+    throw new Error("认证文件统计不完整，请重新分析。");
+  }
   return {
     sessionId: payload.session.id,
     importedBy: payload.session.imported_by,
@@ -243,6 +257,9 @@ export async function previewTaxCertifiedImport(params: {
     files: payload.files.map(mapPreviewFile),
     summary: {
       blockingCount: payload.summary.blocking_count,
+      sourceCount: payload.summary.source_count,
+      newCount: payload.summary.new_count,
+      relinkCount: payload.summary.relink_count,
       recognizedCount: payload.summary.recognized_count,
       invalidCount: payload.summary.invalid_count,
       ignoredCount: payload.summary.ignored_count,
@@ -254,15 +271,15 @@ export async function previewTaxCertifiedImport(params: {
   };
 }
 
-export async function confirmTaxCertifiedImport(sessionId: string, corrections: TaxImportCorrection[] = []): Promise<TaxCertifiedImportConfirmResult> {
+export async function confirmTaxCertifiedImport(sessionId: string, corrections: TaxImportCorrection[] = [], signal?: AbortSignal): Promise<TaxCertifiedImportConfirmResult> {
   const payload = await apiRequestJson<ApiTaxCertifiedImportConfirmPayload>("/api/tax-offset/certified-import/confirm", {
-    method: "POST",
+    method: "POST", signal,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       session_id: sessionId,
       corrections,
     }),
-  });
+  }, { timeoutMs: 30000, allowHtmlFallback: false });
 
   if (payload.status !== "queued" || !payload.import_job) {
     throw new Error("认证导入未返回后台任务");
@@ -270,10 +287,11 @@ export async function confirmTaxCertifiedImport(sessionId: string, corrections: 
   return { status: "queued", importJob: mapImportJob(payload.import_job) };
 }
 
-export async function fetchTaxCertifiedImportJob(importJobId: string): Promise<TaxCertifiedImportJob> {
+export async function fetchTaxCertifiedImportJob(importJobId: string, signal?: AbortSignal): Promise<TaxCertifiedImportJob> {
   const payload = await apiRequestJson<ApiTaxCertifiedImportJobPayload>(
     `/api/tax-offset/certified-import/jobs/${encodeURIComponent(importJobId)}`,
-    { method: "GET" },
+    { method: "GET", signal },
+    { timeoutMs: 15000, allowHtmlFallback: false },
   );
   return mapImportJob(payload.import_job);
 }

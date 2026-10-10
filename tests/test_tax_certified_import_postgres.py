@@ -64,7 +64,9 @@ class TaxCertifiedImportPostgresTests(unittest.TestCase):
         app = TaxCertifiedImportApplicationService(certified_import_service=self.service)
         preview = app.preview_payload(imported_by="owner", uploads=[certified_upload()])
         self.assertEqual(preview["summary"]["matched_invoice_count"], 1)
-        self.assertEqual(preview["files"][0]["rows"][0]["dedupe_status"], "new")
+        self.assertEqual(preview["summary"]["new_count"], 1)
+        self.assertEqual(preview["files"][0]["rows"], [])
+        self.assertEqual(preview["files"][0]["missing_metadata"], [])
         job = self.jobs.create_or_get_job(import_type="tax_certified_import.confirm", created_by="owner",
                                          payload={"session_id": preview["session"]["id"]})
         self.assertEqual(self.worker.run_once(), RuntimeWorkerResult.PROCESSED)
@@ -72,6 +74,8 @@ class TaxCertifiedImportPostgresTests(unittest.TestCase):
         self.assertEqual(result.status, "succeeded")
         batch = result.result_payload["batch"]
         self.assertEqual(batch["persisted_record_count"], 1)
+        self.assertEqual((batch["new_record_count"], batch["corrected_record_count"], batch["linked_record_count"],
+                          batch["duplicate_count"], batch["matched_record_count"], batch["unmatched_record_count"]), (1, 0, 0, 0, 1, 0))
         row = self.current()
         self.assertEqual(row["matched_invoice_id"], self.invoice_id)
         page = PostgresTaxOffsetCanonicalRepository(self.connection).load_page(TaxOffsetQuery())
@@ -108,6 +112,7 @@ class TaxCertifiedImportPostgresTests(unittest.TestCase):
         correction = {"unique_key": "digital:TEST-DIGITAL-1", "expected_version": 1}
         corrected = self.confirm(correction_session, corrections=[correction])
         self.assertEqual(self.current()["version"], 2)
+        self.assertEqual((corrected["new_record_count"], corrected["corrected_record_count"]), (0, 1))
         self.assertNotIn("previous_records", corrected)
         with self.assertRaises(TaxCertifiedImportConflict):
             self.service.revoke_batch(first["id"], actor_id="owner", expected_version=1)
@@ -138,6 +143,8 @@ class TaxCertifiedImportPostgresTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=2) as executor:
             batches = list(executor.map(self.confirm, sessions))
         self.assertEqual(sorted(batch["persisted_record_count"] for batch in batches), [0, 1])
+        self.assertEqual(sorted(batch["new_record_count"] for batch in batches), [0, 1])
+        self.assertEqual(sorted(batch["duplicate_count"] for batch in batches), [0, 1])
         self.assertEqual(self.connection.fetch_one("SELECT count(*) AS n FROM app.tax_certified_import_records")["n"], 1)
 
     def test_worker_audit_failure_rolls_back_batch_records_and_success(self):
@@ -226,8 +233,12 @@ class TaxCertifiedImportPostgresTests(unittest.TestCase):
             buyer_tax_no,amount,signed_amount,status,raw_payload)
             VALUES ('input','NUMBER-1','LATE-DIGITAL','TEST-BUYER',100,100,'active',%s) RETURNING id::text AS id""",
             (jsonb({"normalized_payload": {**invoice_kind_fields("增值税专用发票")}}),))
-        second = self.confirm(self.preview(digital="LATE-DIGITAL"))
-        self.assertEqual((second["persisted_record_count"], second["duplicate_count"]), (0, 1))
+        app = TaxCertifiedImportApplicationService(certified_import_service=self.service)
+        preview = app.preview_payload(imported_by="owner", uploads=[certified_upload(digital="LATE-DIGITAL")])
+        self.assertEqual((preview["summary"]["new_count"], preview["summary"]["relink_count"],
+                          preview["summary"]["duplicate_count"]), (0, 1, 0))
+        second = self.service.confirm_session(preview["session"]["id"], actor_id="owner")
+        self.assertEqual((second["persisted_record_count"], second["linked_record_count"], second["duplicate_count"]), (0, 1, 0))
         self.assertEqual(self.current()["matched_invoice_id"], invoice["id"])
         self.assertEqual(self.current()["batch_id"], first["id"])
         self.service.revoke_batch(second["id"], actor_id="owner", expected_version=1)
@@ -300,3 +311,59 @@ class TaxCertifiedImportPostgresTests(unittest.TestCase):
         self.assertTrue(all(file["rows"][0]["blocking"] for file in preview["files"]))
         with self.assertRaises(TaxCertifiedImportConflict):
             self.service.confirm_session(preview["session"]["id"], actor_id="owner")
+
+    def test_repeated_sources_count_skipped_rows_and_confirmation_is_idempotent(self):
+        app = TaxCertifiedImportApplicationService(certified_import_service=self.service)
+        preview = app.preview_payload(imported_by="owner", uploads=[certified_upload(), certified_upload()])
+        self.assertEqual((preview["summary"]["new_count"], preview["summary"]["duplicate_count"]), (1, 1))
+        batch = self.service.confirm_session(preview["session"]["id"], actor_id="owner")
+        self.assertEqual((batch["new_record_count"], batch["duplicate_count"]), (1, 1))
+        self.assertEqual(self.service.confirm_session(preview["session"]["id"], actor_id="owner"), batch)
+        repeated = app.preview_payload(imported_by="owner", uploads=[certified_upload(), certified_upload()])
+        self.assertEqual((repeated["summary"]["new_count"], repeated["summary"]["duplicate_count"]), (0, 2))
+        second = self.service.confirm_session(repeated["session"]["id"], actor_id="owner")
+        self.assertEqual((second["new_record_count"], second["duplicate_count"]), (0, 2))
+        self.assertEqual(self.connection.fetch_one("SELECT count(*) AS n FROM app.tax_certified_import_records")["n"], 1)
+
+    def test_missing_metadata_cannot_create_partial_evidence_even_when_bypassing_ui(self):
+        app = TaxCertifiedImportApplicationService(certified_import_service=self.service)
+        for kwargs, missing in (({"month": None}, ["month"]), ({"buyer": None}, ["buyer_tax_no"])):
+            with self.subTest(kwargs=kwargs):
+                preview = app.preview_payload(imported_by="owner", uploads=[certified_upload(**kwargs)])
+                self.assertEqual(preview["files"][0]["missing_metadata"], missing)
+                with self.assertRaisesRegex(ValueError, "缺少所属期或买方税号"):
+                    self.service.confirm_session(preview["session"]["id"], actor_id="owner")
+        self.assertEqual(self.connection.fetch_one("SELECT count(*) AS n FROM app.tax_certified_import_records")["n"], 0)
+        self.assertEqual(self.repository.records_payload()["batches_total"], 0)
+
+    def test_persisted_session_keeps_each_source_once_and_confirmation_uses_recognized_evidence(self):
+        session = self.service.preview_files(imported_by="owner", uploads=[
+            certified_upload(), certified_upload(label="通行费发票"), certified_upload(amount="NaN")])
+        stored = self.service.get_session(session.id)
+        self.assertEqual(len(session.files[0].row_results), 1)
+        self.assertEqual(stored.files[0]["row_results"], [])
+        self.assertEqual(len(stored.files[0]["rows"]), 1)
+        self.assertEqual(len(stored.files[0]["rows"][0]["source_fields"]), 19)
+        self.assertEqual(stored.files[0]["rows"][0]["source_fields"], session.files[0].rows[0].source_fields)
+        self.assertEqual(stored.files[1]["row_results"][0]["row_status"], "ignored")
+        self.assertEqual(stored.files[2]["row_results"][0]["row_status"], "invalid")
+        self.assertTrue(all(len(file["row_results"][0]["source_fields"]) == 19 for file in stored.files[1:]))
+        result = self.confirm(session)
+        self.assertEqual((result["new_record_count"], result["matched_record_count"]), (1, 1))
+        self.assertEqual(self.current()["matched_invoice_id"], self.invoice_id)
+
+    def test_conflict_exposes_only_actual_labeled_changes_with_decimal_equivalence(self):
+        self.confirm(self.preview(amount="100.00", deductible="0.00"))
+        app = TaxCertifiedImportApplicationService(certified_import_service=self.service)
+        preview = app.preview_payload(imported_by="owner", uploads=[certified_upload(
+            amount="100", deductible="9", month="202610", selection_time="2026-10-03 13:14:15")])
+        row = preview["files"][0]["rows"][0]
+        self.assertEqual(row["dedupe_status"], "conflict")
+        self.assertEqual(row["correction_changes"], [
+            {"field": "month", "label": "所属期", "previous": "2026-09", "incoming": "2026-10"},
+            {"field": "deductible_tax_amount", "label": "有效抵扣税额", "previous": "0.00", "incoming": "9"},
+            {"field": "selection_time", "label": "勾选时间", "previous": "2026-10-02 13:14:15", "incoming": "2026-10-03 13:14:15"}])
+        self.assertNotIn("source_fields", row)
+        corrected = self.service.confirm_session(preview["session"]["id"], actor_id="owner", corrections=[
+            {"unique_key": row["unique_key"], "expected_version": row["expected_version"]}])
+        self.assertEqual(corrected["corrected_record_count"], 1)

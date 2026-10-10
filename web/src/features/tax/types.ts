@@ -50,8 +50,6 @@ export type TaxCertificationResult = {
 
 export type TaxCertifiedImportPreviewRow = {
   id: string;
-  month: string | null;
-  buyerTaxNo: string | null;
   rowStatus: "recognized" | "invalid" | "ignored";
   matchStatus: "matched_invoice" | "outside_invoices" | "ambiguous" | "unknown";
   uniqueKey: string | null;
@@ -60,24 +58,19 @@ export type TaxCertifiedImportPreviewRow = {
   errorMessage: string | null;
   blocking: boolean;
   digitalInvoiceNo: string | null;
-  invoiceCode: string | null;
   invoiceNo: string | null;
-  issueDate: string | null;
-  sellerTaxNo: string | null;
-  sellerName: string | null;
-  taxAmount: string | null;
-  deductibleTaxAmount: string | null;
-  selectionStatus: string | null;
-  invoiceStatus: string | null;
-  selectionTime: string | null;
   sourceFileName: string;
   sourceRowNumber: number;
+  correctionChanges?: { field: string; label: string; previous: string | null; incoming: string | null }[];
 };
 
 export type TaxCertifiedImportPreviewFile = {
   id: string;
   fileName: string;
   month: string | null;
+  sourceCount: number;
+  newCount: number;
+  relinkCount: number;
   recognizedCount: number;
   invalidCount: number;
   ignoredCount: number;
@@ -85,6 +78,7 @@ export type TaxCertifiedImportPreviewFile = {
   outsideInvoicesCount: number;
   conflictCount: number;
   duplicateCount: number;
+  missingMetadata: ("month" | "buyer_tax_no")[];
   rows: TaxCertifiedImportPreviewRow[];
 };
 
@@ -96,13 +90,16 @@ export type TaxCertifiedImportPreviewResult = {
   files: TaxCertifiedImportPreviewFile[];
   summary: {
     blockingCount: number;
+    sourceCount: number;
+    newCount: number;
+    relinkCount: number;
     recognizedCount: number;
     invalidCount: number;
-  ignoredCount: number;
+    ignoredCount: number;
     matchedInvoiceCount: number;
     outsideInvoicesCount: number;
-  conflictCount: number;
-  duplicateCount: number;
+    conflictCount: number;
+    duplicateCount: number;
   };
 };
 
@@ -130,6 +127,12 @@ export type TaxCertifiedImportConfirmedResult = {
   fileCount: number;
   months: string[];
   persistedRecordCount: number;
+  newRecordCount: number;
+  correctedRecordCount: number;
+  linkedRecordCount: number;
+  duplicateCount: number;
+  matchedRecordCount: number;
+  unmatchedRecordCount: number;
 };
 
 export type TaxCertifiedImportQueuedResult = {

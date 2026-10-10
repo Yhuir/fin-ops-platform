@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 from openpyxl import Workbook
 
+from fin_ops_platform.services.tax_certified_import_application_service import TaxCertifiedImportApplicationService
 from fin_ops_platform.services.tax_certified_import_service import (
     SOURCE_COLUMNS,
     TaxCertifiedImportService,
@@ -151,3 +152,56 @@ class TaxCertifiedImportServiceTests(unittest.TestCase):
                 self.preview()
         self.assertEqual(consumed, 50_000)
         workbook.close.assert_called_once()
+
+
+class TaxCertifiedImportSummaryTests(unittest.TestCase):
+    def preview(self, uploads, classifications=None, **kwargs):
+        repository = Mock()
+        repository.classify_rows.side_effect = lambda rows: {
+            row["unique_key"]: {"blocking": False, "match_status": "outside_invoices",
+                "matched_invoice_id": None, "expected_version": 0, "dedupe_status": "new",
+                "error_message": None, "correction_changes": [], **(classifications or {}).get(row["unique_key"], {})} for row in rows}
+        service = TaxCertifiedImportService(repository=repository)
+        return TaxCertifiedImportApplicationService(certified_import_service=service).preview_payload(
+            imported_by="owner", uploads=uploads, **kwargs)
+
+    def test_mixed_file_counts_source_and_omits_normal_rows_and_ignored_metadata(self):
+        result = self.preview([certified_upload(), certified_upload(label="通行费发票")])
+        self.assertEqual(result["summary"], {"source_count": 2, "recognized_count": 1,
+            "invalid_count": 0, "ignored_count": 1, "matched_invoice_count": 0,
+            "outside_invoices_count": 1, "conflict_count": 0, "duplicate_count": 0,
+            "blocking_count": 0, "new_count": 1, "relink_count": 0})
+        self.assertTrue(all(file["rows"] == [] and file["missing_metadata"] == [] for file in result["files"]))
+
+    def test_repeated_source_count_matches_commit_and_each_processing_action_is_distinct(self):
+        cases = {"new": (1, 0, 1, 0), "duplicate": (0, 0, 2, 0),
+                 "relink": (0, 1, 1, 0), "conflict": (0, 0, 1, 1)}
+        for status, expected in cases.items():
+            with self.subTest(status=status):
+                result = self.preview([certified_upload(), certified_upload()],
+                    {"digital:TEST-DIGITAL-1": {"dedupe_status": status}})
+                counts = result["summary"]
+                self.assertEqual((counts["source_count"], counts["recognized_count"]), (2, 2))
+                self.assertEqual(tuple(counts[key] for key in ("new_count", "relink_count", "duplicate_count", "conflict_count")), expected)
+                exceptions = [row for file in result["files"] for row in file["rows"]]
+                self.assertEqual(len(exceptions), int(status == "conflict"))
+                self.assertTrue(all("source_fields" not in row for row in exceptions))
+
+    def test_missing_metadata_only_considers_eligible_rows_and_explicit_values_resolve_it(self):
+        uploads = [certified_upload(month=None, buyer=None), certified_upload(label="通行费发票", month=None, buyer=None)]
+        result = self.preview(uploads)
+        self.assertEqual(result["files"][0]["missing_metadata"], ["month", "buyer_tax_no"])
+        self.assertEqual(result["files"][1]["missing_metadata"], [])
+        result = self.preview(uploads, month="2026-09", buyer_tax_no="TEST-BUYER")
+        self.assertTrue(all(file["missing_metadata"] == [] for file in result["files"]))
+
+    def test_invalid_and_blocking_rows_remain_visible_without_source_field_payload(self):
+        result = self.preview([certified_upload(amount="NaN"), certified_upload(digital="BLOCKED")],
+            {"digital:BLOCKED": {"blocking": True, "error_message": "发票身份匹配不唯一。"}})
+        self.assertEqual(result["summary"]["invalid_count"], 2)
+        self.assertEqual(result["summary"]["blocking_count"], 1)
+        self.assertEqual(result["summary"]["recognized_count"], 0)
+        for file in result["files"]:
+            self.assertEqual(file["rows"][0]["row_status"], "invalid")
+            self.assertTrue(file["rows"][0]["error_message"])
+            self.assertNotIn("source_fields", file["rows"][0])

@@ -3048,97 +3048,11 @@ function buildWorkbenchDetail(rowId: string) {
   return payload;
 }
 
-function buildMockCertifiedPreviewRows(month: string) {
-  if (month === "2026-03") {
-    return [
-      {
-        id: "tc-preview-202603-001",
-        month: "2026-03",
-        source_file_name: "2026年3月 进项认证结果  用途确认信息.xlsx",
-        source_row_number: 8,
-        digital_invoice_no: null,
-        invoice_code: "031001900111",
-        invoice_no: "11203490",
-        issue_date: "2026-03-22",
-        seller_tax_no: "91310108MA1N22179P",
-        seller_name: "设备供应商",
-        amount: "96,000.00",
-        tax_amount: "12,480.00",
-        deductible_tax_amount: "12,480.00",
-        selection_status: "已勾选",
-        invoice_status: "正常",
-        selection_time: "2026-03-31 10:00:00",
-      },
-      {
-        id: "tc-preview-202603-099",
-        month: "2026-03",
-        source_file_name: "2026年3月 进项认证结果  用途确认信息.xlsx",
-        source_row_number: 15,
-        digital_invoice_no: null,
-        invoice_code: "031001900199",
-        invoice_no: "11203999",
-        issue_date: "2026-03-28",
-        seller_tax_no: "91530000123456789P",
-        seller_name: "物业服务商",
-        amount: "12,000.00",
-        tax_amount: "1,600.00",
-        deductible_tax_amount: "1,600.00",
-        selection_status: "已勾选",
-        invoice_status: "正常",
-        selection_time: "2026-03-31 10:05:00",
-      },
-    ];
-  }
-
-  const count = month === "2026-01" ? 60 : month === "2026-02" ? 39 : 0;
-  return Array.from({ length: count }, (_, index) => ({
-    id: `tc-preview-${month.replace("-", "")}-${String(index + 1).padStart(3, "0")}`,
-    month,
-    source_file_name: `${month} 已认证导入.xlsx`,
-    source_row_number: index + 8,
-    digital_invoice_no: null,
-    invoice_code: null,
-    invoice_no: `${month.replace("-", "")}${String(index + 1).padStart(6, "0")}`,
-    issue_date: `${month}-15`,
-    seller_tax_no: `91530000${String(index + 1).padStart(10, "0")}`,
-    seller_name: `测试销方 ${index + 1}`,
-    amount: "100.00",
-    tax_amount: "13.00",
-    deductible_tax_amount: "13.00",
-    selection_status: "已勾选",
-    invoice_status: "正常",
-    selection_time: `${month}-28 09:00:00`,
-  }));
-}
-
 function resolveMockCertifiedPreview(fileName: string) {
-  const month = fileName.includes("2026年1月")
-    ? "2026-01"
-    : fileName.includes("2026年2月")
-      ? "2026-02"
-      : "2026-03";
-  const rows = buildMockCertifiedPreviewRows(month).map((row, index) => {
-    const matchedInvoice = month === "2026-03" && index === 0;
-    return {
-      ...row,
-      row_status: "recognized",
-      match_status: matchedInvoice ? "matched_invoice" : "outside_invoices",
-      matched_invoice_id: matchedInvoice ? "ti-202603-001" : null,
-      dedupe_status: "new",
-            unique_key: "test-key", expected_version: null, buyer_tax_no: "91530100BUYER",
-      error_message: null,
-    };
-  });
+  const month = fileName.includes("2026年1月") ? "2026-01" : fileName.includes("2026年2月") ? "2026-02" : "2026-03";
+  const recognizedCount = month === "2026-01" ? 60 : month === "2026-02" ? 39 : 2;
   const matchedInvoiceCount = month === "2026-03" ? 1 : 0;
-  const outsideInvoicesCount = rows.length - matchedInvoiceCount;
-  return {
-    month,
-    rows,
-    recognizedCount: rows.length,
-    invalidCount: 0,
-    matchedInvoiceCount,
-    outsideInvoicesCount,
-  };
+  return { month, recognizedCount, invalidCount: 0, matchedInvoiceCount, outsideInvoicesCount: recognizedCount - matchedInvoiceCount };
 }
 
 type CostProjectRow = {
@@ -4043,9 +3957,11 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       invalid_count: number;
       matched_invoice_count: number;
       outside_invoices_count: number;
-      rows: ReturnType<typeof buildMockCertifiedPreviewRows>;
+      rows: never[];
+      missing_metadata: string[]; source_count: number; new_count: number; relink_count: number;
     }>;
     summary: {
+      source_count: number; new_count: number; relink_count: number;
       recognized_count: number;
       invalid_count: number;
       matched_invoice_count: number;
@@ -4996,15 +4912,18 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             id: `tax-certified-file-${String(index + 1).padStart(4, "0")}`,
             file_name: file.name,
             month: preview.month,
+            missing_metadata: [], source_count: preview.recognizedCount, new_count: preview.recognizedCount, relink_count: 0,
             recognized_count: preview.recognizedCount,
             invalid_count: preview.invalidCount,
             matched_invoice_count: preview.matchedInvoiceCount,
             outside_invoices_count: preview.outsideInvoicesCount,
           conflict_count: 0, duplicate_count: 0, ignored_count: 0, blocking_count: 0,
-            rows: preview.rows,
+            rows: [],
           };
         }),
         summary: {
+          source_count: files.reduce((sum, file) => sum + resolveMockCertifiedPreview(file.name).recognizedCount, 0),
+          new_count: files.reduce((sum, file) => sum + resolveMockCertifiedPreview(file.name).recognizedCount, 0), relink_count: 0,
           recognized_count: files.reduce((sum, file) => sum + resolveMockCertifiedPreview(file.name).recognizedCount, 0),
           invalid_count: files.reduce((sum, file) => sum + resolveMockCertifiedPreview(file.name).invalidCount, 0),
           matched_invoice_count: files.reduce((sum, file) => sum + resolveMockCertifiedPreview(file.name).matchedInvoiceCount, 0),
@@ -5028,7 +4947,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       taxCertifiedImported = true;
       return { status: 202, body: { status: "queued", import_job: { import_job_id: "tax-job-1", import_type: "tax_certified_import", status: "queued", stage: "queued" } } };
     },
-    "/api/tax-offset/certified-import/jobs/tax-job-1": () => ({ body: { import_job: { import_job_id: "tax-job-1", import_type: "tax_certified_import", status: "succeeded", stage: "completed", result_payload: { batch: { id: "tax-batch-1", session_id: latestTaxCertifiedPreview!.session.id, imported_by: latestTaxCertifiedPreview!.session.imported_by, file_count: latestTaxCertifiedPreview!.session.file_count, months: latestTaxCertifiedPreview!.files.map(file => file.month), persisted_record_count: latestTaxCertifiedPreview!.summary.recognized_count } } } } }),
+    "/api/tax-offset/certified-import/jobs/tax-job-1": () => ({ body: { import_job: { import_job_id: "tax-job-1", import_type: "tax_certified_import", status: "succeeded", stage: "completed", result_payload: { batch: { id: "tax-batch-1", session_id: latestTaxCertifiedPreview!.session.id, imported_by: latestTaxCertifiedPreview!.session.imported_by, file_count: latestTaxCertifiedPreview!.session.file_count, months: latestTaxCertifiedPreview!.files.map(file => file.month), persisted_record_count: latestTaxCertifiedPreview!.summary.recognized_count, new_record_count: latestTaxCertifiedPreview!.summary.recognized_count, corrected_record_count: 0, linked_record_count: 0, duplicate_count: 0, matched_record_count: latestTaxCertifiedPreview!.summary.matched_invoice_count, unmatched_record_count: latestTaxCertifiedPreview!.summary.outside_invoices_count } } } } }),
     "/api/cost-statistics/no-oa-rules": ({ init, jsonBody }) => ({
       body: {
         version: init?.method === "PUT" ? 2 : 1,

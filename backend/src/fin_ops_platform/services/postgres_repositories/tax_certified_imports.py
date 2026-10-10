@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
@@ -13,7 +14,8 @@ from fin_ops_platform.services.postgres_repositories.operations_audit import Pos
 from fin_ops_platform.services.postgres_repositories.tax_offset import SPECIAL_INVOICE_CODE, PostgresTaxOffsetCanonicalRepository
 
 BATCH_FIELDS = ("id", "session_id", "imported_by", "file_count", "months", "persisted_record_count", "duplicate_count",
-                "status", "version", "created_at", "revoked_record_count", "restored_record_count", "revoked_at")
+                "status", "version", "created_at", "revoked_record_count", "restored_record_count", "revoked_at",
+                "new_record_count", "corrected_record_count", "linked_record_count", "matched_record_count", "unmatched_record_count")
 RECORD_FIELDS = ("id", "unique_key", "month", "source_file_name", "source_row_number", "buyer_tax_no", "digital_invoice_no",
                  "invoice_code", "invoice_no", "issue_date", "selection_time", "amount", "tax_amount", "deductible_tax_amount",
                  "invoice_kind_label", "batch_id", "seller_name", "seller_tax_no")
@@ -29,15 +31,22 @@ FACT_FIELDS = ("month", "buyer_tax_no", "digital_invoice_no", "invoice_code", "i
                "risk_status", "domestic_sales_certificate_no")
 
 
-def same_facts(left: dict[str, Any], right: dict[str, Any]) -> bool:
+def fact_changes(left: dict[str, Any], right: dict[str, Any]) -> list[dict[str, Any]]:
+    changes = []
     for key in FACT_FIELDS:
         a, b = left.get(key), right.get(key)
         if key in {"amount", "tax_amount", "deductible_tax_amount"} and a is not None and b is not None:
-            if Decimal(str(a)) != Decimal(str(b)):
-                return False
-        elif a != b:
-            return False
-    return True
+            equal = Decimal(str(a)) == Decimal(str(b))
+        else:
+            equal = a == b
+        if not equal:
+            changes.append({"field": key, "previous": str(a) if a is not None else None,
+                            "incoming": str(b) if b is not None else None})
+    return changes
+
+
+def same_facts(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    return not fact_changes(left, right)
 
 
 class TaxCertifiedImportConflict(ValueError):
@@ -51,7 +60,10 @@ class PostgresTaxCertifiedImportRepository:
         self._connection = connection
 
     def save_session(self, session: Any) -> None:
-        payload = serialize_value(session)
+        # Recognized source evidence is already complete in rows; row_results only stores excluded evidence.
+        payload = serialize_value(replace(session, files=[replace(file, row_results=[
+            row for row in file.row_results if row["row_status"] != "recognized"
+        ]) for file in session.files]))
         self._connection.execute("""
             INSERT INTO app.tax_certified_import_sessions(session_id,status,imported_by,record_count,raw_payload)
             VALUES (%s,%s,%s,%s,%s)
@@ -131,10 +143,14 @@ class PostgresTaxCertifiedImportRepository:
         for row in rows:
             key = row["unique_key"]
             old = current.get(key)
-            matches[key].update(dedupe_status="duplicate" if old and old["status"] == "active" and same_facts(old, row)
+            unchanged = bool(old and old["status"] == "active" and same_facts(old, row))
+            relink = unchanged and old.get("matched_invoice_id") is None and matches[key]["matched_invoice_id"] is not None
+            matches[key].update(dedupe_status="relink" if relink else "duplicate" if unchanged
                                 else "conflict" if old and old["status"] == "active" else "new",
                                 expected_version=old["version"] if old else 0,
                                 blocking=key in errors, error_message=errors.get(key))
+            if matches[key]["dedupe_status"] == "conflict":
+                matches[key]["correction_changes"] = fact_changes(old, row)
         return matches
 
     def confirm_session(self, session_id: str, *, actor_id: str, corrections: list[dict[str, Any]]) -> dict[str, Any]:
@@ -152,8 +168,12 @@ class PostgresTaxCertifiedImportRepository:
             return public_batch({**row_payload(existing), "status": existing["status"], "version": existing["version"]})
         session = row_payload(session_row)
         rows_by_key: dict[str, dict[str, Any]] = {}
+        source_count = 0
         for file in session["files"]:
             for row in file["rows"]:
+                source_count += 1
+                if not row.get("month") or not row.get("buyer_tax_no"):
+                    raise ValueError("认证记录缺少所属期或买方税号，请补充后重新分析。")
                 old = rows_by_key.get(row["unique_key"])
                 if old and not same_facts(old, row):
                     raise TaxCertifiedImportConflict("同一文件批次含冲突认证记录，请更正来源文件。")
@@ -178,7 +198,7 @@ class PostgresTaxCertifiedImportRepository:
             raise TaxCertifiedImportConflict(next(iter(errors.values())))
         current = self._current(tx, rows)
         batch_id = f"tax-certified-batch-{uuid4().hex}"
-        changed, duplicates, before, links = [], 0, [], []
+        changed, duplicates, before, links = [], source_count - len(rows), [], []
         invoice_ids = set()
         for source in rows:
             row = deepcopy(source)
@@ -199,7 +219,8 @@ class PostgresTaxCertifiedImportRepository:
                     linked = {**old, "matched_invoice_id": invoice_id, "match_status": "matched_invoice",
                               "version": old["version"] + 1}
                     links.append(linked)
-                duplicates += 1
+                else:
+                    duplicates += 1
                 continue
             if old and old["status"] == "active":
                 if correction_map.get(key) != old["version"]:
@@ -213,6 +234,10 @@ class PostgresTaxCertifiedImportRepository:
         batch = {"id": batch_id, "session_id": session_id, "imported_by": actor_id,
                  "file_count": len(session["files"]), "months": sorted({row["month"] for row in rows if row.get("month")}),
                  "persisted_record_count": len(changed), "duplicate_count": duplicates,
+                 "new_record_count": len(changed) - len(before), "corrected_record_count": len(before),
+                 "linked_record_count": len(links),
+                 "matched_record_count": sum(bool(match["matched_invoice_id"]) for match in matches.values()),
+                 "unmatched_record_count": sum(not match["matched_invoice_id"] for match in matches.values()),
                  "status": "confirmed", "version": 1, "created_at": datetime.now(UTC).isoformat(),
                  "record_keys": [row["unique_key"] for row in changed], "previous_records": before}
         batch_db = tx.fetch_one("""

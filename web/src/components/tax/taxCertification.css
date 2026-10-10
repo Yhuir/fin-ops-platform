@@ -61,3 +61,12 @@
 
 .tax-export-heading { display: flex; align-items: center; gap: 10px; }
 .tax-export-heading > button { margin-left: auto; }
+
+.tax-import-statistics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; margin-block: 12px; }
+.tax-import-statistics > div { display: flex; justify-content: space-between; gap: 12px; padding-block: 10px; border-bottom: 1px solid var(--fp-border); }
+.tax-import-statistics dt { color: var(--fp-text-muted); }
+.tax-import-statistics dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tax-import-issues { list-style: none; padding: 0; margin-block: 12px; }
+.tax-import-issues li { display: flex; flex-wrap: wrap; gap: 8px 16px; padding-block: 12px; border-bottom: 1px solid var(--fp-border); overflow-wrap: anywhere; }
+.tax-import-issues li > span { flex: 1 1 200px; }
+@media (max-width: 480px) { .tax-import-statistics { grid-template-columns: 1fr; } }
