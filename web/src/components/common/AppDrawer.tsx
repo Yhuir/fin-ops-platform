@@ -198,6 +198,10 @@ export default function AppDrawer({
       isKeyboardDismissDisabled={!isDismissable || closeDisabled}
       onOpenChange={nextOpen => { if (!nextOpen && !closeDisabled) onClose(); }}
       isOpen={open}
+      onMouseDown={event => {
+        // Keep the active focus scope until native dismissal restores the opener.
+        if (event.target === event.currentTarget) event.preventDefault();
+      }}
     >
       <Drawer.Content className="finance-drawer__content" data-placement="right" placement="right">
         <Drawer.Dialog

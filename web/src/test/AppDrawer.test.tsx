@@ -5,6 +5,16 @@ import { useState } from "react";
 import AppDrawer from "../components/common/AppDrawer";
 
 describe("AppDrawer explicit dismissal", () => {
+  it("prevents the backdrop from taking focus without blocking form interactions", () => {
+    const onClose = vi.fn();
+    render(<AppDrawer open title="编辑" onClose={onClose}><input aria-label="内容" defaultValue="未保存" /></AppDrawer>);
+    const input = screen.getByRole("textbox", { name: "内容" });
+    const backdrop = document.querySelector(".finance-drawer__backdrop")!;
+    expect(fireEvent.mouseDown(backdrop)).toBe(false);
+    expect(fireEvent.mouseDown(input)).toBe(true);
+    expect(input).toHaveValue("未保存");
+    expect(onClose).not.toHaveBeenCalled();
+  });
   it("allows opt-in Escape dismissal but blocks it while submitting", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();

@@ -42,10 +42,12 @@ test("task notification opens one interactive detail and survives removal from t
   await expect(page.getByRole("dialog", { name: "共享导入任务" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator(".app-sidebar-brand-mark")).toBeFocused();
   await page.locator(".app-sidebar-brand-mark").click();
   await page.getByRole("button", { name: "查看待处理任务", exact: true }).click();
   await page.locator(".finance-drawer__backdrop").click({ position: { x: 4, y: 4 } });
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator(".app-sidebar-brand-mark")).toBeFocused();
   // Development StrictMode replays mount effects; closing must stop reads in either build.
   const readsAfterClose = listReads;
   const closedRefresh = page.waitForResponse("**/api/background-jobs/active");
