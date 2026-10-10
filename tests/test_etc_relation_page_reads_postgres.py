@@ -22,6 +22,7 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_query im
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentSourceSnapshotRepository,
 )
+from fin_ops_platform.services.postgres_repositories.relation_invoice_members import expand_relation_invoices
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
 
@@ -98,6 +99,33 @@ class EtcRelationPageReadsTests(unittest.TestCase):
         self.assertEqual(oa.rows({'view_mode':['in_progress']},tenant_id='default')['rows'][0]['invoice']['relationCount'],46)
         self.connection.execute("update app.workbench_pair_relations set status='withdrawn' where case_id='CASE-ETC'")
         self.assertEqual(oa.rows({'view_mode':['in_progress']},tenant_id='default')['rows'][0]['invoice']['relationCount'],0)
+
+    def test_submission_aliases_expand_once_and_preserve_stored_relation(self):
+        self.connection.execute("""insert into app.etc_submission_batches(submission_batch_id,status,raw_payload)
+            values ('submission-legacy','submitted','{"normalized_payload":{"etc_batch_id":"legacy"}}')""")
+        self.connection.execute("""update app.invoices set raw_payload=jsonb_build_object('normalized_payload',
+            jsonb_build_object('etc_submission_batch_id', case when legacy_mongo_id='inv-1'
+                then 'submission-legacy' else 'legacy' end))
+            where legacy_mongo_id in ('inv-1','inv-2','inv-3')""")
+        self.connection.execute("update app.invoices set status='deleted' where legacy_mongo_id='inv-3'")
+        self.connection.execute("""insert into app.workbench_pair_relations(case_id,relation_mode,status,row_ids,row_types)
+            values ('CASE-LEGACY','batch_accounting','active',array['etc-summary-legacy','inv-1'],array['invoice','invoice'])""")
+        relation = {'case_id': 'CASE-LEGACY', 'row_ids': ['etc-summary-legacy', 'inv-1'], 'row_types': ['invoice', 'invoice']}
+        expanded = expand_relation_invoices(self.connection, [relation])[0]
+        self.assertCountEqual(expanded['row_ids'], ['inv-1', 'inv-2'])
+        self.assertEqual(expanded['row_types'], ['invoice', 'invoice'])
+        for alias in ('submission-legacy', None):
+            with self.subTest(alias=alias):
+                self.connection.execute("""update app.etc_submission_batches
+                    set raw_payload=jsonb_build_object('normalized_payload',jsonb_build_object('etc_batch_id',%s::text))
+                    where submission_batch_id='submission-legacy'""", (alias,))
+                self.connection.execute("""update app.workbench_pair_relations
+                    set row_ids=array['etc-summary-submission-legacy','inv-1'] where case_id='CASE-LEGACY'""")
+                current = {**relation, 'row_ids': ['etc-summary-submission-legacy', 'inv-1']}
+                self.assertEqual(expand_relation_invoices(self.connection, [current])[0]['row_ids'], ['inv-1'])
+                self.assertEqual(self.connection.fetch_one(
+                    "select row_ids from app.workbench_pair_relations where case_id='CASE-LEGACY'",
+                )['row_ids'], current['row_ids'])
 
     def test_independent_batches_sharing_invoice_keep_their_own_rows_details_and_totals(self):
         from pathlib import Path

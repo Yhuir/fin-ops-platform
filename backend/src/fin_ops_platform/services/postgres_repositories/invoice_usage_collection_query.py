@@ -1622,6 +1622,15 @@ def _fact_cte(
             join relation_scopes scope
               on scope.scope_id = grouped.scope_id
         ),
+        bank_tag_definitions as materialized (
+            select definition.value->>'code' as code,
+                   definition.value->>'turnover_role' as turnover_role
+            from app.app_settings settings
+            cross join lateral jsonb_array_elements(
+                settings.settings_payload#>'{{bank_transaction_tags,definitions}}'
+            ) definition(value)
+            where settings.settings_key = 'app_settings'
+        ),
         raw_group_bank_rows as (
             select
                 relation.group_key,
@@ -1631,7 +1640,7 @@ def _fact_cte(
                 bank.is_split,
                 bank.parent_row_id,
                 bank.parent_amount,
-                definition.value->>'turnover_role' as turnover_role,
+                definition.turnover_role,
                 bank.amount,
                 bank.counterparty_name_raw,
                 bank.trade_time,
@@ -1657,9 +1666,7 @@ def _fact_cte(
                 select distinct alias
                 from (values (coalesce(bank.legacy_mongo_id, '')), (bank.id::text)) names(alias)
             ) bank_alias on bank_alias.alias = member.row_id
-            left join app.app_settings settings on settings.settings_key='app_settings'
-            left join lateral jsonb_array_elements(settings.settings_payload#>'{{bank_transaction_tags,definitions}}') definition(value)
-              on definition.value->>'code'=bank.split_category_code
+            left join bank_tag_definitions definition on definition.code = bank.split_category_code
             where member.row_type in ('bank', 'bank_transaction')
               and bank.status <> 'deleted'
             group by
@@ -1670,7 +1677,7 @@ def _fact_cte(
                 bank.is_split,
                 bank.parent_row_id,
                 bank.parent_amount,
-                definition.value->>'turnover_role',
+                definition.turnover_role,
                 bank.amount,
                 bank.counterparty_name_raw,
                 bank.trade_time,

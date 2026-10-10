@@ -45,10 +45,12 @@ RELATION_INVOICE_READ_SQL = """
                 union
                 select coalesce(invoice.legacy_mongo_id, invoice.id::text), 'invoice'
                 from app.etc_submission_batches submission
+                cross join lateral (
+                    values (submission.submission_batch_id),
+                           (submission.raw_payload->'normalized_payload'->>'etc_batch_id')
+                ) submission_alias(batch_id)
                 join app.invoices invoice
-                  on invoice.raw_payload->'normalized_payload'->>'etc_submission_batch_id' in (
-                      submission.submission_batch_id,
-                      submission.raw_payload->'normalized_payload'->>'etc_batch_id')
+                  on invoice.raw_payload->'normalized_payload'->>'etc_submission_batch_id' = submission_alias.batch_id
                 where source.row_type = 'invoice' and invoice.status <> 'deleted'
                   and invoice.invoice_type = 'input'
                   and submission.status in ('submitted_confirmed', 'submitted', 'closed')
