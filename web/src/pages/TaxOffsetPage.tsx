@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button } from "@heroui/react";
 import PageScaffold from "../components/common/PageScaffold";
+import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import QuerySearch from "../components/common/QuerySearch";
 import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
 import SegmentedControl from "../components/common/SegmentedControl";
@@ -24,6 +25,7 @@ export default function TaxOffsetPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [exportSnapshot, setExportSnapshot] = useState<{ filters: TaxCertificationFilters; fields: TaxExportField[] } | null>(null);
   const { result, loading, error, refresh } = useTaxCertifications(query, active, activationGeneration);
+  const inventory = result?.inventory_statistics;
   function changeFilters(next: Partial<TaxCertificationFilters>) { setQuery(current => ({ ...current, ...next, page: 1 })); }
   function period(prefix: "issue" | "selection", label: string) {
     const month = query[`${prefix}_month`]; const year = query[`${prefix}_year`];
@@ -34,6 +36,17 @@ export default function TaxOffsetPage() {
         [`${prefix}_month`]: selection.mode === "month" ? selection.month : undefined })} />;
   }
   return <PageScaffold fillViewport title="专票认证情况" className="tax-certification-page"
+    titleAccessory={<div className="tax-certification-inventory" title="全部进项发票，不随下方筛选变化">
+      <PageStatisticsPopover ariaLabel="进项发票统计" loading={loading} coreItems={[
+        { label: "进项发票", value: inventory?.input_invoice_count, unit: "张" },
+        { label: "专票", value: inventory?.special_invoice_count, unit: "张" },
+        { label: "普票", value: inventory?.general_invoice_count, unit: "张" },
+        { label: "通行费", value: inventory?.toll_invoice_count, unit: "张" },
+        { label: "其他", value: inventory?.other_invoice_count, unit: "张" },
+      ]} detailItems={inventory && inventory.unclassified_invoice_count > 0
+        ? [{ label: "未识别票种", value: inventory.unclassified_invoice_count, unit: "张", tone: "warning" }]
+        : []} />
+    </div>}
     query={<QuerySearch ariaLabel="搜索专票" placeholder="票号、销方名称或税号" value={search} onChange={setSearch} maxLength={200}
       onSubmit={() => changeFilters({ search: search.trim() || undefined })} onClear={() => { setSearch(""); changeFilters({ search: undefined }); }} pending={loading} />}
     actions={<><Button variant="secondary" isDisabled={!result || result.total === 0 || loading || Boolean(error)} onPress={() => {

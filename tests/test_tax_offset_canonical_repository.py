@@ -30,6 +30,10 @@ class FakeConnection:
 
     def fetch_all(self, sql, params=()):
         self.queries.append((sql, params))
+        if "group by invoice_kind_code" in sql:
+            return [{"invoice_kind_code": code, "count": count} for code, count in
+                    (("vat_special", self.count), ("vat_general", 3), ("toll", 2),
+                     ("rail_ticket", 1), (None, 1), ("unknown", 1))]
         if "group by certification_status" in sql:
             return [{"certification_status": "certified", "count": self.count, "amount": None,
                      "tax_amount": Decimal("0"), "deductible_tax_amount": Decimal("1.234567"),
@@ -50,7 +54,7 @@ class TaxOffsetCanonicalRepositoryTests(unittest.TestCase):
         payload = PostgresTaxOffsetCanonicalRepository(connection).load_page(query)
         self.assertEqual(connection.transaction_count, 1)
         self.assertEqual(connection.commands, ["set transaction isolation level repeatable read read only"])
-        self.assertEqual(len(connection.queries), 2)
+        self.assertEqual(len(connection.queries), 3)
         self.assertEqual(connection.queries[0][1], connection.queries[1][1][:-2])
         self.assertEqual(connection.queries[1][1][-2:], (20, 20))
         sql = connection.queries[1][0]
@@ -66,6 +70,13 @@ class TaxOffsetCanonicalRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["certified"]["missing_amount_count"], 1)
         self.assertIsNone(payload["summary"]["certified"]["amount"])
         self.assertEqual(payload["total"], 21)
+        self.assertEqual(payload["inventory_statistics"], {
+            "input_invoice_count": 29, "special_invoice_count": 21, "general_invoice_count": 3,
+            "toll_invoice_count": 2, "other_invoice_count": 1, "unclassified_invoice_count": 2})
+        inventory_sql, inventory_params = connection.queries[2]
+        self.assertEqual(inventory_params, ())
+        for fragment in (" join ", "selection_time", "ilike", " limit "):
+            self.assertNotIn(fragment, inventory_sql)
         self.assertNotIn("unresolved_record_count", payload)
 
     def test_out_of_range_page_clamps_inside_snapshot(self):
@@ -79,7 +90,9 @@ class TaxOffsetCanonicalRepositoryTests(unittest.TestCase):
     def test_export_ignores_page_and_matching_never_uses_amount_or_name(self):
         connection = FakeConnection()
         repo = PostgresTaxOffsetCanonicalRepository(connection)
-        repo.load_page(TaxOffsetQuery(page=4), limit_override=20001)
+        payload = repo.load_page(TaxOffsetQuery(page=4), limit_override=20001)
+        self.assertEqual(len(connection.queries), 2)
+        self.assertNotIn("inventory_statistics", payload)
         self.assertEqual(connection.queries[-1][1][-2:], (20001, 0))
         self.assertEqual(repo.match_certified_rows([]), {})
         class MatchConnection:
@@ -97,3 +110,12 @@ class TaxOffsetCanonicalRepositoryTests(unittest.TestCase):
         self.assertNotIn("i.amount", matching.sql)
         self.assertNotIn("i.seller_name", matching.sql)
         self.assertIn("i.buyer_tax_no = r.buyer_tax_no", matching.sql)
+
+    def test_statistics_query_failure_is_not_replaced_with_zero_counts(self):
+        class BrokenConnection(FakeConnection):
+            def fetch_all(self, sql, params=()):
+                if "group by invoice_kind_code" in sql:
+                    raise RuntimeError("statistics unavailable")
+                return super().fetch_all(sql, params)
+        with self.assertRaisesRegex(RuntimeError, "statistics unavailable"):
+            PostgresTaxOffsetCanonicalRepository(BrokenConnection()).load_page(TaxOffsetQuery())

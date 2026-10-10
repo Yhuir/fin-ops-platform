@@ -7,7 +7,16 @@ import type { TaxCertificationQuery, TaxCertificationResult, TaxImportHistoryQue
 export async function fetchTaxCertifications(query: TaxCertificationQuery, signal?: AbortSignal): Promise<TaxCertificationResult> {
   const params = new URLSearchParams();
   Object.entries(query).forEach(([key, value]) => { if (value !== undefined && value !== "") params.set(key, String(value)); });
-  return apiRequestJson<TaxCertificationResult>(`/api/tax-offset?${params}`, { signal });
+  const result = await apiRequestJson<TaxCertificationResult>(`/api/tax-offset?${params}`, { signal });
+  const statistics = result.inventory_statistics;
+  const fields = ["input_invoice_count", "special_invoice_count", "general_invoice_count", "toll_invoice_count",
+    "other_invoice_count", "unclassified_invoice_count"] as const;
+  if (!statistics || fields.some(field => !Number.isSafeInteger(statistics[field]) || statistics[field] < 0)
+    || statistics.input_invoice_count !== statistics.special_invoice_count + statistics.general_invoice_count
+      + statistics.toll_invoice_count + statistics.other_invoice_count + statistics.unclassified_invoice_count) {
+    throw new Error("进项发票统计数据不完整或数量不一致，请重试。");
+  }
+  return result;
 }
 
 export async function exportTaxCertifications(filters: TaxCertificationFilters, fields: string[]) {

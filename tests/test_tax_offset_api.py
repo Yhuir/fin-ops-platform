@@ -28,6 +28,9 @@ class TaxOffsetApiTests(unittest.TestCase):
             'rows': [{'id': 'invoice-1', 'certification_status': 'certified', 'tax_amount': '6.00'}],
             'total': 1, 'page': 1, 'page_size': 50,
             'summary': {'certified': {'count': 1, 'tax_amount': '6.00'}, 'uncertified': {'count': 0}},
+            'inventory_statistics': {'input_invoice_count': 9, 'special_invoice_count': 1,
+                'general_invoice_count': 3, 'toll_invoice_count': 2, 'other_invoice_count': 2,
+                'unclassified_invoice_count': 1},
         }
         self.exporter = Mock()
         self.exporter.export.return_value = ('专票清单.xlsx', b'xlsx')
@@ -61,6 +64,7 @@ class TaxOffsetApiTests(unittest.TestCase):
         self.assertEqual(payload['total'], 1)
         self.assertEqual(payload['rows'][0]['tax_amount'], '6.00')
         self.assertEqual(payload['summary']['certified']['count'], 1)
+        self.assertEqual(payload['inventory_statistics'], self.repository.load_page.return_value['inventory_statistics'])
         self.assertEqual(sum(field['default_selected'] for field in payload['export_fields']), 8)
         query = self.repository.load_page.call_args.args[0]
         self.assertEqual(query.issue_month, '2026-09')

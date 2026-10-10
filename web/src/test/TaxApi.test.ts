@@ -16,7 +16,9 @@ function importJob(resultPayload: Record<string, unknown>): TaxCertifiedImportJo
 describe("tax certification API", () => {
   afterEach(() => vi.unstubAllGlobals());
   test("serializes independent filters, server sorting and pagination without changing monetary source values", async () => {
-    const payload = { rows: [{ amount: null, tax_amount: "0.00" }], total: 1 };
+    const payload = { rows: [{ amount: null, tax_amount: "0.00" }], total: 1,
+      inventory_statistics: { input_invoice_count: 3, special_invoice_count: 1, general_invoice_count: 1,
+        toll_invoice_count: 1, other_invoice_count: 0, unclassified_invoice_count: 0 } };
     const fetch = vi.fn(async () => new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetch);
     expect(await fetchTaxCertifications({ status: "certified", issue_month: "2026-03", selection_month: "2026-04", search: "销方", sort_by: "selection_time", sort_direction: "asc", page: 2, page_size: 50 })).toEqual(payload);

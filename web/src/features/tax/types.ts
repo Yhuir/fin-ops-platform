@@ -30,8 +30,17 @@ export type TaxCertificationTotals = {
   missing_amount_count: number; missing_tax_count: number;
 };
 export type TaxExportField = { key: string; label: string; default_selected: boolean };
+export type TaxInventoryStatistics = {
+  input_invoice_count: number;
+  special_invoice_count: number;
+  general_invoice_count: number;
+  toll_invoice_count: number;
+  other_invoice_count: number;
+  unclassified_invoice_count: number;
+};
 export type TaxCertificationResult = {
   rows: TaxCertificationRow[]; total: number; page: number; page_size: number;
+  inventory_statistics: TaxInventoryStatistics;
   summary: {
     certified: TaxCertificationTotals & { deductible_tax_amount: string | null; missing_deductible_tax_count: number };
     uncertified: TaxCertificationTotals;

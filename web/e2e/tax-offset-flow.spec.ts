@@ -9,6 +9,7 @@ test.describe("special invoice certification", () => {
     await page.goto("/tax-offset");
     await expect(page.getByRole("grid", { name: "专票认证明细" })).toBeVisible();
     await expect(page.getByLabel("未认证统计")).toContainText("92 张");
+    await expect(page.getByLabel("进项发票统计", { exact: true })).toContainText("进项发票99张专票92张普票3张通行费1张其他2张");
     await page.screenshot({ animations: "disabled", path: info.outputPath("tax-certification-main.png") });
     await page.getByRole("button", { name: "下一页" }).click();
     await expect(page.getByText("显示 51-92 / 92")).toBeVisible();
@@ -43,6 +44,7 @@ test.describe("special invoice certification", () => {
   test("imports certification in a native drawer and refreshes canonical status", async ({ page }, info) => {
     const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     await page.goto("/tax-offset"); await expect(page.getByText("11203490")).toBeVisible();
+    const inventoryBefore = await page.getByLabel("进项发票统计", { exact: true }).textContent();
     await page.locator(".tax-certification-page").getByRole("button", { name: "导入认证记录", exact: true }).click();
     const drawer = page.getByRole("dialog", { name: "导入认证记录" });
     await drawer.locator('input[type="file"]').setInputFiles({ name: "认证.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: Buffer.from("fixture") });
@@ -54,6 +56,7 @@ test.describe("special invoice certification", () => {
     await expect(drawer.getByRole("button", { name: "关闭抽屉" })).toBeEnabled();
     await page.keyboard.press("Escape"); await expect(drawer).toHaveCount(0);
     await expect(page.getByLabel("已认证统计")).toContainText("2 张");
+    await expect(page.getByLabel("进项发票统计", { exact: true })).toHaveText(inventoryBefore!);
     const row = page.getByRole("grid", { name: "专票认证明细" }).getByRole("row").filter({ hasText: "11203490" });
     await expect(row).toContainText("已认证");
     expect(api.count("POST /api/tax-offset/certified-import/confirm")).toBe(1);
@@ -67,6 +70,7 @@ test.describe("special invoice certification", () => {
     await page.getByRole("radio", { name: "已认证", exact: true }).click();
     await expect(page.getByText("暂无专票")).toBeVisible();
     await expect(page.getByLabel("未认证统计")).toContainText("0 张");
+    await expect(page.getByLabel("进项发票统计", { exact: true })).toContainText("进项发票9张专票2张");
     await page.getByRole("button", { name: "勾选月份：年月" }).click();
     const picker = page.getByRole("dialog", { name: "勾选月份选择器" });
     await picker.getByRole("radio", { name: "按月", exact: true }).click();
@@ -185,6 +189,13 @@ test("compact layout keeps the header and footer fixed while rows scroll", async
   await expect.poll(() => scroll.evaluate(element => element.scrollTop)).toBe(0);
   for (const width of [1440, 1280, 1024]) {
     await page.setViewportSize({ width, height: 900 });
+    const statistics = page.getByLabel("进项发票统计", { exact: true });
+    await expect(statistics).toBeVisible();
+    const titleBox = (await page.getByRole("heading", { name: "专票认证情况" }).boundingBox())!;
+    const statisticsBox = (await statistics.boundingBox())!;
+    const queryBox = (await page.getByRole("searchbox", { name: "搜索专票" }).boundingBox())!;
+    expect(statisticsBox.x).toBeGreaterThanOrEqual(titleBox.x + titleBox.width);
+    if (width === 1440) expect(queryBox.x).toBeGreaterThanOrEqual(statisticsBox.x + statisticsBox.width);
     const toolbar = page.locator(".tax-certification-toolbar");
     expect((await toolbar.boundingBox())!.height).toBeLessThanOrEqual(width === 1440 ? 70 : 130);
     const aligned = await page.locator(".tax-certification-summary-group").evaluateAll(groups => groups.every(group => {
@@ -195,4 +206,21 @@ test("compact layout keeps the header and footer fixed while rows scroll", async
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ animations: "disabled", path: info.outputPath(`tax-compact-${width}.png`) });
   }
+});
+
+test("inventory kinds open with the keyboard and preserve their total on empty filters", async ({ page }) => {
+  await installDeterministicApiMocks(page, { sessionMode: "user" });
+  await page.goto("/tax-offset");
+  const statistics = page.getByRole("button", { name: "进项发票统计", exact: true });
+  await expect(statistics).toContainText("进项发票9张");
+  await statistics.focus(); await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog", { name: "进项发票统计详情" })).toContainText("未识别票种1张");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "进项发票统计详情" })).toHaveCount(0);
+  await expect(statistics).toBeFocused();
+  await page.getByRole("searchbox", { name: "搜索专票" }).fill("不存在");
+  await page.locator(".tax-certification-page").getByRole("button", { name: "查询", exact: true }).click();
+  await expect(page.getByText("暂无专票")).toBeVisible();
+  await expect(statistics).toContainText("进项发票9张专票2张");
+  await expectNoUnexpectedSuccessUiErrors(page);
 });

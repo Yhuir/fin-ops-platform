@@ -5,10 +5,9 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Iterator
 
+from fin_ops_platform.services.invoice_kind import INVOICE_KIND_NAMES, SPECIAL_INVOICE_CODE
 from fin_ops_platform.services.postgres_repositories.common import jsonb
 from fin_ops_platform.services.tax_offset_query_service import TaxOffsetQuery
-
-from fin_ops_platform.services.invoice_kind import SPECIAL_INVOICE_CODE
 
 _RAW_INVOICE = "coalesce(i.raw_payload->'normalized_payload', i.raw_payload)"
 SPECIAL_INVOICE_SCOPE_SQL = f"i.status <> 'deleted' and i.invoice_type = 'input' and {_RAW_INVOICE}->>'invoice_kind_code' = %s"
@@ -31,7 +30,10 @@ class PostgresTaxOffsetCanonicalRepository:
 
     def load_page(self, query: TaxOffsetQuery, *, limit_override: int | None = None) -> dict[str, Any]:
         with self._snapshot() as transaction:
-            return load_tax_offset_page(transaction, query, limit_override=limit_override)
+            payload = load_tax_offset_page(transaction, query, limit_override=limit_override)
+            if limit_override is None:
+                payload["inventory_statistics"] = _inventory_statistics(transaction)
+            return payload
 
     def match_certified_rows(self, rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         if not rows:
@@ -68,6 +70,29 @@ class PostgresTaxOffsetCanonicalRepository:
                 "matched_invoice_id": ids[0] if len(ids) == 1 else None,
             }
         return result
+
+
+def _inventory_statistics(connection: Any) -> dict[str, int]:
+    """Count canonical input invoices once, independently of certification filters."""
+    statistics = dict.fromkeys(("input_invoice_count", "special_invoice_count", "general_invoice_count",
+                                "toll_invoice_count", "other_invoice_count", "unclassified_invoice_count"), 0)
+    primary_kinds = {SPECIAL_INVOICE_CODE: "special_invoice_count", "vat_general": "general_invoice_count",
+                     "toll": "toll_invoice_count"}
+    groups = connection.fetch_all(f"""
+        select {_RAW_INVOICE}->>'invoice_kind_code' as invoice_kind_code, count(*) as count
+        from app.invoices i
+        where i.status <> 'deleted' and i.invoice_type = 'input'
+        group by invoice_kind_code""")
+    for group in groups:
+        code, count = group["invoice_kind_code"], int(group["count"])
+        statistics["input_invoice_count"] += count
+        if code in primary_kinds:
+            statistics[primary_kinds[code]] += count
+        elif code in INVOICE_KIND_NAMES:
+            statistics["other_invoice_count"] += count
+        else:
+            statistics["unclassified_invoice_count"] += count
+    return statistics
 
 
 def _inventory_query(query: TaxOffsetQuery) -> tuple[str, tuple[Any, ...]]:

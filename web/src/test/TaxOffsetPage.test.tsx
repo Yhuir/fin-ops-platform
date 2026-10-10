@@ -18,6 +18,7 @@ test("shows a single canonical table and compact statistics with no plan control
   expect(screen.queryByRole("button", { name: /保存.*计划/ })).not.toBeInTheDocument();
   expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   expect(screen.getByLabelText("已认证统计")).toHaveTextContent("0 张");
+  expect(screen.getByLabelText("进项发票统计")).toHaveTextContent("进项发票9张专票2张普票3张通行费1张其他2张");
   expect(fetch.mock.calls.some(([input]) => /calculate|tax-offset\/plans/.test(String(input)))).toBe(false);
 });
 test("search and status use server filters and reset pagination", async () => {
@@ -31,6 +32,7 @@ test("search and status use server filters and reset pagination", async () => {
   expect(urls.at(-1)?.searchParams.get("search")).toBe("材料");
   expect(urls.at(-1)?.searchParams.get("status")).toBe("uncertified");
   expect(urls.at(-1)?.searchParams.get("page")).toBe("1");
+  expect(screen.getByLabelText("进项发票统计")).toHaveTextContent("进项发票9张专票2张");
 });
 test("sorts through the server and allows empty results without disabling import", async () => {
   const user = userEvent.setup(); const fetch = open(); await screen.findByText("11203490");
@@ -38,8 +40,28 @@ test("sorts through the server and allows empty results without disabling import
   await waitFor(() => expect(fetch.mock.calls.some(([input]) => requestUrl(input).searchParams.get("sort_by") === "selection_time")).toBe(true));
   await user.type(screen.getByRole("searchbox"), "不存在"); await user.click(within(document.querySelector(".tax-certification-page") as HTMLElement).getByRole("button", { name: "查询" }));
   expect(await screen.findByText("暂无专票")).toBeInTheDocument();
+  expect(screen.getByLabelText("进项发票统计")).toHaveTextContent("进项发票9张专票2张");
   expect(screen.getByRole("button", { name: "导出专票清单", exact: true })).toBeDisabled();
   expect(within(document.querySelector(".tax-certification-page") as HTMLElement).getByRole("button", { name: "导入认证记录", exact: true })).toBeEnabled();
+});
+test("unknown invoice kinds remain visible in the shared statistics detail", async () => {
+  const user = userEvent.setup(); open(); await screen.findByText("11203490");
+  await user.click(screen.getByRole("button", { name: "进项发票统计" }));
+  const detail = await screen.findByRole("dialog", { name: "进项发票统计详情" });
+  expect(detail).toHaveTextContent("未识别票种1张");
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "进项发票统计详情" })).not.toBeInTheDocument());
+});
+test.each([undefined, null, { input_invoice_count: 0 },
+  { ...taxCertificationFixture().inventory_statistics, special_invoice_count: -1 },
+  { ...taxCertificationFixture().inventory_statistics, special_invoice_count: "2" },
+  { ...taxCertificationFixture().inventory_statistics, special_invoice_count: 1.5 },
+  { ...taxCertificationFixture().inventory_statistics, input_invoice_count: 100 },
+])("rejects invalid inventory statistics instead of showing zero (%j)", async statistics => {
+  open({ taxQueryHandler: () => ({ body: { ...taxCertificationFixture(), inventory_statistics: statistics } }) });
+  expect(await screen.findByRole("alert")).toHaveTextContent("进项发票统计数据不完整或数量不一致");
+  expect(screen.getByLabelText("进项发票统计")).toHaveTextContent("进项发票—");
+  expect(screen.queryByText("11203490")).not.toBeInTheDocument();
 });
 test("export uses API defaults, collapses extra columns, and closing keeps the parent search", async () => {
   const user = userEvent.setup(); open(); await screen.findByText("11203490");

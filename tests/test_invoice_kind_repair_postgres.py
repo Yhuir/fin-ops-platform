@@ -56,13 +56,19 @@ class InvoiceKindRepairPostgresTests(unittest.TestCase):
 
     def test_repair_query_summary_and_repeat_preserve_all_financial_facts(self):
         before = self.connection.fetch_one("select * from app.invoices where id=%s::uuid", (self.id,))
-        self.assertEqual(self.query.list_payload({})["total"], 0)
+        initial = self.query.list_payload({})
+        self.assertEqual(initial["total"], 0)
+        self.assertEqual(initial["inventory_statistics"]["input_invoice_count"], 1)
+        self.assertEqual(initial["inventory_statistics"]["unclassified_invoice_count"], 1)
         with self.connection.transaction() as tx:
             snapshot = load_snapshot(tx, lock=True)
             plan = build_source_attribute_repair_plan(snapshot, [self.source], [])
             apply_updates(tx, plan["updates"])
         result = self.query.list_payload({})
         self.assertEqual(result["total"], 1)
+        self.assertEqual(result["inventory_statistics"]["input_invoice_count"], 1)
+        self.assertEqual(result["inventory_statistics"]["special_invoice_count"], 1)
+        self.assertEqual(result["inventory_statistics"]["unclassified_invoice_count"], 0)
         self.assertEqual(result["summary"]["uncertified"]["tax_amount"], "13.00")
         after = self.connection.fetch_one("select * from app.invoices where id=%s::uuid", (self.id,))
         for field in (
