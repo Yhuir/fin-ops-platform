@@ -51,7 +51,6 @@
 .payment-rules-body [role="alert"] { color: var(--danger); font-size: 13px; }
 .input-invoice-usage-invoice-heading { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px 14px; }
 .input-invoice-usage-filtered-summary { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
-.input-invoice-usage-filtered-summary small { font-size: inherit; color: #9a6700; }
 
 .payment-rules-row-actions { display: flex; justify-content: center; color: var(--danger); }
 .payment-rules-grid .finance-table__cell--selection, .payment-rules-grid [data-column-role="selection"] { text-align: center; }

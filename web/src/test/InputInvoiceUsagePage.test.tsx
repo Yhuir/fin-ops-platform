@@ -541,13 +541,20 @@ describe("Input invoice usage page", () => {
     expect(compositeFilter).toContain("grid-template-columns: repeat(2, minmax(160px, 1fr))");
   });
 
-  test.each([{ taxAmount: null, missingTaxAmountCount: 1, expected: "税额合计 —（缺失 1 张）" }, { taxAmount: "0.00", missingTaxAmountCount: 0, expected: "税额合计 0.00" }])("filtered summary preserves missing tax versus a real zero: $taxAmount", async ({ taxAmount, missingTaxAmountCount, expected }) => {
+  test.each([
+    { taxAmount: null, missingTaxAmountCount: 10, expected: "税额合计 —" },
+    { taxAmount: "0.00", missingTaxAmountCount: 0, expected: "税额合计 0.00" },
+    { taxAmount: "44549.92", missingTaxAmountCount: 4, expected: "税额合计 44549.92" },
+    { taxAmount: "-123.45", missingTaxAmountCount: 2, expected: "税额合计 -123.45" },
+  ])("filtered summary keeps the server tax value without a missing-count notice: $taxAmount", async ({ taxAmount, missingTaxAmountCount, expected }) => {
     installInputInvoiceUsageFetch({ ...rowsPayload, summary: { ...rowsPayload.summary, taxAmount, missingTaxAmountCount } });
     renderAuthenticatedAppAt("/input-invoice-usage");
     const summary = await screen.findByLabelText("当前筛选发票汇总");
     await waitFor(() => expect(summary).toHaveTextContent(expected));
     expect(summary).toHaveTextContent("787 张");
     expect(summary).not.toHaveTextContent("51 张");
+    expect(summary).toHaveTextContent("价税合计 12345.67");
+    expect(summary).not.toHaveTextContent(/缺失|已知税额/);
   });
 
   test("renders a direct empty result without filter-options polling", async () => {
@@ -660,7 +667,7 @@ describe("Input invoice usage page", () => {
     const headerRows = table.querySelectorAll("thead > tr");
     expect(headerRows).toHaveLength(2);
     const groupHeaders = Array.from(headerRows[0].querySelectorAll("th"));
-    expect(groupHeaders.map((header) => header.textContent)).toEqual(["进项发票787 张价税合计 12345.67税额合计 1200.00（缺失 2 张）", "支付状态", "OA", "流水"]);
+    expect(groupHeaders.map((header) => header.textContent)).toEqual(["进项发票787 张价税合计 12345.67税额合计 1200.00", "支付状态", "OA", "流水"]);
     expect(groupHeaders.map((header) => header.colSpan)).toEqual([4, 1, 2, 3]);
     expect(groupHeaders[1]).toHaveAttribute("rowspan", "2");
     expect(groupHeaders[1]).toHaveAttribute("scope", "col");

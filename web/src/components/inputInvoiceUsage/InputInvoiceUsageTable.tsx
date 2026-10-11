@@ -409,7 +409,7 @@ export default function InputInvoiceUsageTable({
                   <span className="input-invoice-usage-filtered-summary" aria-label="当前筛选发票汇总">
                     <span>{summary ? `${summary.invoiceCount} 张` : "— 张"}</span>
                     <span>价税合计 {formatMoney(summary?.totalWithTax, "—")}</span>
-                    <span>税额合计 {formatMoney(summary?.taxAmount, "—")}{summary && summary.missingTaxAmountCount > 0 ? <small>（缺失 {summary.missingTaxAmountCount} 张）</small> : null}</span>
+                    <span>税额合计 {formatMoney(summary?.taxAmount, "—")}</span>
                   </span></div></th>
                 <HeaderCell align="center" label="支付状态" rowSpan={2} strongSeparated emphasized />
                 <th className="input-invoice-usage-table-group-header input-invoice-usage-table-cell--strong-separator" colSpan={2} scope="colgroup">

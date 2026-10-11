@@ -34,13 +34,14 @@ test("payment fact hierarchy, usage parents and rule edits retain scope and serv
   const classification = page.getByRole("region", { name: "进项发票使用分类" });
   await expect(classification.getByRole("button", { name: /待使用|已使用/ })).toHaveCount(2);
   await expect(classification.getByRole("button", { name: "未付款 9 张", exact: true })).toBeVisible();
-  await expect(page.getByLabel("当前筛选发票汇总")).toHaveText("13 张价税合计 8765.43税额合计 350.10（缺失 2 张）");
+  await expect(page.getByLabel("当前筛选发票汇总")).toHaveText("13 张价税合计 8765.43税额合计 350.10");
   await classification.getByRole("button", { name: "待使用 0 张", exact: true }).click();
   const categoryRequest = page.waitForRequest(request => request.url().includes("/api/input-invoice-usage/rows?"));
   await classification.getByRole("button", { name: "待核对 9 张", exact: true }).click();
   expect(JSON.parse(decodeURIComponent(new URL((await categoryRequest).url()).searchParams.get("filters")!))).toEqual(expect.arrayContaining([
     { field: "usage_status", operator: "in", values: ["used"] }, { field: "payment_group", operator: "in", values: ["unpaid"] }, { field: "payment_status", operator: "in", values: ["custom_review"] },
   ]));
+  await expect(page.getByLabel("当前筛选发票汇总")).toHaveText("13 张价税合计 8765.43税额合计 350.10");
   await page.screenshot({ animations: "disabled", path: info.outputPath("input-invoice-main.png") });
   if (await page.getByRole("button", { name: "更多页面操作" }).isVisible()) await page.getByRole("button", { name: "更多页面操作" }).click();
   await page.getByRole("button", { name: "发票与支付状态规则设置" }).click();

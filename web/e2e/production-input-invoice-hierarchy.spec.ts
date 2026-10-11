@@ -1,4 +1,5 @@
 import { expect, test } from './fixtures/strictTest';
+import type { InvoiceUsageClassificationGroup } from '../src/features/inputInvoiceUsage/types';
 
 const enabled = process.env.FIN_OPS_E2E_PRODUCTION_SMOKE === '1';
 const token = process.env.FIN_OPS_E2E_ADMIN_TOKEN;
@@ -72,6 +73,73 @@ test('production hierarchy preserves counts and search without writes', async ({
   expect(errors).toEqual([]);
   expect(writes).toEqual([]);
   await info.attach('production-hierarchy-readonly', { body: JSON.stringify(evidence), contentType: 'application/json' });
+});
+
+test('production tax summary keeps API amounts across every classification without missing-count notices or writes', async ({ page }, info) => {
+  test.skip(!enabled || !token, 'Requires explicit production read-only verification and local token.');
+  test.setTimeout(120_000);
+  await page.context().addCookies([{ name: 'Admin-Token', value: token!, domain: 'www.yn-sourcing.com', path: '/', secure: true, sameSite: 'Lax' }]);
+  const writes: string[] = [];
+  const errors: string[] = [];
+  let reads = 0;
+  page.on('pageerror', error => errors.push(error.message));
+  await page.route('**/*', async route => {
+    const request = route.request();
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) {
+      writes.push(`${request.method()} ${new URL(request.url()).pathname}`);
+      await route.abort('blockedbyclient');
+      return;
+    }
+    if (new URL(request.url()).pathname === rowsPath) reads++;
+    await route.continue();
+  });
+  const first = page.waitForResponse(response => new URL(response.url()).pathname === rowsPath);
+  await page.goto('/fin-ops/input-invoice-usage');
+  const initial = await (await first).json();
+  const panel = page.getByRole('region', { name: '进项发票使用分类' });
+  await expect(panel).toHaveAttribute('aria-busy', 'false');
+  const summary = page.getByLabel('当前筛选发票汇总');
+  const evidence: Array<Record<string, unknown>> = [];
+  const assertSummary = async (label: string, payload: typeof initial) => {
+    const expected = payload.summary;
+    await expect(summary.locator(':scope > span')).toHaveText([
+      `${expected.invoiceCount} 张`,
+      `价税合计 ${expected.totalWithTax === '' ? '—' : expected.totalWithTax}`,
+      `税额合计 ${expected.taxAmount === null ? '—' : expected.taxAmount}`,
+    ]);
+    await expect(summary).not.toContainText(/缺失|已知税额/);
+    evidence.push({ label, summary: expected });
+  };
+  await assertSummary('全部发票', initial);
+  for (const width of [1920, 1440, 1024]) {
+    await page.setViewportSize({ width, height: 1100 });
+    await info.attach(`tax-summary-${width}`, { body: await page.screenshot({ animations: 'disabled' }), contentType: 'image/png' });
+  }
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page.locator('body').evaluate(node => { node.style.zoom = '2'; });
+  await expect(summary).toBeVisible();
+  expect(await summary.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+  await info.attach('tax-summary-200-percent', { body: await page.screenshot({ animations: 'disabled' }), contentType: 'image/png' });
+  await page.locator('body').evaluate(node => { node.style.zoom = ''; });
+  await page.setViewportSize({ width: 1920, height: 1100 });
+  const choices = [initial.classification.used, initial.classification.unused,
+    ...initial.classification.groups.flatMap((group: InvoiceUsageClassificationGroup) => [group, ...group.children])];
+  for (const choice of choices) {
+    const response = page.waitForResponse(response => new URL(response.url()).pathname === rowsPath);
+    const previousReads = reads;
+    await panel.getByRole('button', { name: `${choice.label} ${choice.count} 张`, exact: true }).click();
+    const selected = await response;
+    expect(selected.status()).toBe(200);
+    const payload = await selected.json();
+    await assertSummary(choice.label, payload);
+    expect(reads - previousReads).toBe(1);
+    if (payload.summary.missingTaxAmountCount > 0) {
+      await info.attach(`tax-summary-classification-${evidence.length}`, { body: await page.screenshot({ animations: 'disabled' }), contentType: 'image/png' });
+    }
+  }
+  expect(writes).toEqual([]);
+  expect(errors).toEqual([]);
+  await info.attach('production-tax-summary-readonly', { body: JSON.stringify({ classifications: evidence, rowReads: reads, writes, errors }), contentType: 'application/json' });
 });
 
 test('production zero-net pair uses unpaid rule, preserves signed invoices and expands matching rows', async ({ page }, info) => {
