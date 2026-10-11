@@ -98,13 +98,15 @@ test.describe("settings data reset browser flow", () => {
     for (const name of ["项目状态", "待找发票筛选", "冲账规则"]) {
       await expect(page.getByRole("tab", { name, exact: true })).toHaveCount(0);
     }
+    await expect(page.getByRole("button", { name: "保存设置" })).toBeDisabled();
+    await page.getByRole("textbox", { name: / 银行名称$/ }).first().fill("规范保存验证银行");
     const request = page.waitForRequest(request => request.url().endsWith("/api/workbench/settings") && request.method() === "POST");
     await page.getByRole("button", { name: "保存设置" }).click();
     expect(Object.keys((await request).postDataJSON()).sort()).toEqual(["bank_account_mappings", "oa_import", "oa_retention", "workbench_column_layouts"]);
     await expect(page.getByText("已保存银行账户与 OA 导入设置。")).toBeVisible();
   });
 
-  test("fits all four settings editors and five native tabs to the full-width workspace", async ({ page }, testInfo) => {
+  test("fits all four settings editors and five native tabs to the centered workspace", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     let settingsReads = 0;
     page.on("request", (request) => {
@@ -114,7 +116,7 @@ test.describe("settings data reset browser flow", () => {
     await page.goto("/settings");
     const tabs = page.getByRole("tablist", { name: "设置分类" });
     await expect(tabs.getByRole("tab")).toHaveCount(5);
-    await expect(tabs.getByRole("tab").last()).toHaveText("批量账务");
+    await expect(tabs.getByRole("tab").last()).toHaveText("数据重置");
     const initialSettingsReads = settingsReads;
     const sections = [
       { nav: "银行账户", region: "银行账户映射" },
@@ -144,8 +146,8 @@ test.describe("settings data reset browser flow", () => {
         samples.push({width, section: section.nav, elapsedMs: performance.now() - started});
         const workspace = await page.locator(".settings-workspace").boundingBox();
         const layout = await page.locator(".settings-layout").boundingBox();
-        expect(Math.abs(workspace!.x - layout!.x - 16)).toBeLessThan(2);
-        expect(Math.abs(workspace!.width - layout!.width + 32)).toBeLessThan(2);
+        expect(Math.abs(workspace!.width - Math.min(1280, layout!.width - 32))).toBeLessThan(2);
+        expect(Math.abs(workspace!.x - layout!.x - (layout!.width - workspace!.width) / 2)).toBeLessThan(2);
         const panel = await page.getByRole("tabpanel", { name: section.nav, exact: true }).boundingBox();
         expect(Math.abs(panel!.x - workspace!.x)).toBeLessThan(2);
         expect(Math.abs(panel!.width - workspace!.width)).toBeLessThan(2);
@@ -333,6 +335,7 @@ test.describe("settings data reset browser flow", () => {
     await expect(page.getByRole("tab", { name: "待找发票筛选", exact: true })).toHaveCount(0);
     await expect(page.getByRole("tab", { name: "冲账规则", exact: true })).toHaveCount(0);
     const saveRequest = page.waitForRequest(request => request.url().endsWith("/api/workbench/settings") && request.method() === "POST");
+    await page.getByRole("textbox", { name: / 银行名称$/ }).first().fill("链路保存验证银行");
     await page.getByRole("button", { name: "保存设置" }).click();
     const saveBody = (await saveRequest).postDataJSON();
     expect(Object.keys(saveBody).sort()).toEqual(["bank_account_mappings", "oa_import", "oa_retention", "workbench_column_layouts"]);

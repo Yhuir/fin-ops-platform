@@ -1,8 +1,7 @@
 import { Button } from "@heroui/react";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-
-
+import BatchAccountingHistory from "../batchAccounting/BatchAccountingHistory";
 import { usePageSessionState } from "../../contexts/PageSessionStateContext";
 import type {
   BankAccountMapping,
@@ -21,6 +20,7 @@ import SettingsDataResetDialogs from "./SettingsDataResetDialogs";
 import SettingsDataResetSection from "./SettingsDataResetSection";
 import SettingsOaRetentionSection from "./SettingsOaRetentionSection";
 import SettingsTabs from "./SettingsTabs";
+import { settingsNavigation } from "./navigation";
 import type {
   DataResetActionConfig,
   DataResetStatus,
@@ -46,7 +46,7 @@ type SettingsPageContentProps = {
     workbenchColumnLayouts: WorkbenchSettings["workbenchColumnLayouts"];
     oaRetention: WorkbenchSettings["oaRetention"];
     oaImport: WorkbenchSettings["oaImport"];
-  }) => void;
+  }) => Promise<WorkbenchSettings | null>;
   onSaveAccessControl: (accounts: WorkbenchAccessAccount[]) => Promise<void>;
   onSearchAccessUsers: (query: string, signal?: AbortSignal) => Promise<WorkbenchAccessUser[]>;
   onDataReset: (payload: {
@@ -228,15 +228,29 @@ export default function SettingsPageContent({
   const [isDataResetting, setIsDataResetting] = useState(false);
 
   const controlsDisabled = !canSave || isSaving || isDataResetting;
-  const hasUnsavedSettings = useMemo(() => {
+  const dirtySectionIds = useMemo(() => {
     const sameValues = (left: string[], right: string[]) => JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
-    return JSON.stringify(mappings) !== JSON.stringify(settings.bankAccountMappings)
-      || oaRetentionCutoffDate !== settings.oaRetention.cutoffDate
+    const sections = new Set<SettingsSectionId>();
+    if (JSON.stringify(mappings) !== JSON.stringify(settings.bankAccountMappings)
+      || bankNameDraft || bankShortNameDraft || last4Draft) sections.add("bank_accounts");
+    if (oaRetentionCutoffDate !== settings.oaRetention.cutoffDate
       || !sameValues(oaImportFormTypes, settings.oaImport.formTypes)
       || !sameValues(oaImportStatuses, settings.oaImport.statuses)
-      || oaAttachmentInvoicePromotionMode !== settings.oaImport.attachmentInvoicePromotionMode;
+      || oaAttachmentInvoicePromotionMode !== settings.oaImport.attachmentInvoicePromotionMode) sections.add("oa_retention");
+    return sections;
   }, [mappings, oaRetentionCutoffDate, oaImportFormTypes, oaImportStatuses,
-    oaAttachmentInvoicePromotionMode, settings]);
+    oaAttachmentInvoicePromotionMode, settings, bankNameDraft, bankShortNameDraft, last4Draft]);
+  const hasPendingMapping = Boolean(bankNameDraft || bankShortNameDraft || last4Draft);
+  const hasUnsavedSettings = JSON.stringify(mappings) !== JSON.stringify(settings.bankAccountMappings)
+    || dirtySectionIds.has("oa_retention");
+  const invalidMappingIds = useMemo(() => {
+    const counts = new Map<string, number>();
+    mappings.forEach((mapping) => counts.set(mapping.last4, (counts.get(mapping.last4) ?? 0) + 1));
+    return new Set(mappings.filter((mapping) => !mapping.bankName.trim()
+      || !/^\d{4}$/.test(mapping.last4) || counts.get(mapping.last4)! > 1).map((mapping) => mapping.id));
+  }, [mappings]);
+  const mappingValidationMessage = invalidMappingIds.size ? "银行名称不能为空，后四位须为 4 位数字且不能重复。" : null;
+  const cutoffDateError = oaRetentionCutoffDate ? null : "请选择 OA 导入起始日期。";
   const changedAccountIds = useMemo(() => {
     const before = new Map(buildManagedAccessAccounts(accessControl).map((account) => [account.id, [...account.pageKeys].sort().join(",")]));
     const after = new Map(managedAccessAccounts.map((account) => [account.id, [...account.pageKeys].sort().join(",")]));
@@ -287,34 +301,10 @@ export default function SettingsPageContent({
         : normalizedAccessAccounts.some((account) => account.pageKeys.length === 0)
           ? "每个访问账户至少需要选择一个页面。"
           : null;
-  const settingsNavigationItems = useMemo<SettingsNavigationItem[]>(() => {
-    const items = [
-      {
-        id: "bank_accounts" as const,
-        label: "银行账户",
-        visible: true,
-      },
-      {
-        id: "oa_retention" as const,
-        label: "OA导入设置",
-        visible: true,
-      },
-      {
-        id: "access_accounts" as const,
-        label: "访问账户",
-        visible: canManageAccessControl,
-      },
-      {
-        id: "data_reset" as const,
-        label: "数据重置",
-        visible: canManageAccessControl,
-      },
-      { id: "batch-accounting" as const, label: "批量账务", visible: canViewBatchHistory },
-    ];
-    return items.filter((item) => item.visible).map(({ visible: _visible, ...item }) => item);
-  }, [
-    canManageAccessControl, canViewBatchHistory,
-  ]);
+  const settingsNavigationItems = useMemo<SettingsNavigationItem[]>(
+    () => settingsNavigation(true, canManageAccessControl, canViewBatchHistory),
+    [canManageAccessControl, canViewBatchHistory],
+  );
 
   useEffect(() => {
     if (!settingsNavigationItems.some((item) => item.id === activeSectionId)) {
@@ -374,13 +364,27 @@ export default function SettingsPageContent({
     });
   }
 
-  function handleSave() {
-    if (controlsDisabled) return;
-    onSave({
+  function restoreOrdinarySettings(saved: WorkbenchSettings) {
+    setMappings(saved.bankAccountMappings);
+    setOaRetentionCutoffDate(saved.oaRetention.cutoffDate);
+    setOaImportFormTypes(saved.oaImport.formTypes);
+    setOaImportStatuses(saved.oaImport.statuses);
+    setOaAttachmentInvoicePromotionMode(saved.oaImport.attachmentInvoicePromotionMode);
+  }
+
+  function handleCancelSettings() {
+    restoreOrdinarySettings(settings);
+    draftSession.setValue((current) => ({ ...current, bankNameDraft: "", bankShortNameDraft: "", last4Draft: "" }));
+    onFeedback(null);
+  }
+
+  async function handleSave() {
+    if (controlsDisabled || !hasUnsavedSettings || mappingValidationMessage || cutoffDateError) return;
+    const saved = await onSave({
       bankAccountMappings: mappings,
       workbenchColumnLayouts: settings.workbenchColumnLayouts,
       oaRetention: {
-        cutoffDate: oaRetentionCutoffDate || "2026-01-01",
+        cutoffDate: oaRetentionCutoffDate,
       },
       oaImport: {
         ...settings.oaImport,
@@ -389,6 +393,7 @@ export default function SettingsPageContent({
         attachmentInvoicePromotionMode: oaAttachmentInvoicePromotionMode,
       },
     });
+    if (saved !== null) restoreOrdinarySettings(saved);
   }
 
   async function handleSaveAccessControl() {
@@ -488,10 +493,12 @@ export default function SettingsPageContent({
               {activeSectionId === "bank_accounts" || activeSectionId === "oa_retention" ? (
                 <>
                   <div className="settings-save-context">
-                    <span className="settings-draft-status" role="status">{hasUnsavedSettings ? "有未保存修改" : ""}</span>
-
+                    <span className="settings-draft-status" role="status">{hasUnsavedSettings ? "有未保存修改" : hasPendingMapping ? "有尚未添加的账户" : ""}</span>
+                    {activeSectionId === "bank_accounts" && cutoffDateError ? <small className="settings-field-help--error" role="alert">{cutoffDateError}</small> : null}
+                    {activeSectionId === "oa_retention" && mappingValidationMessage ? <small className="settings-field-help--error" role="alert">请修正银行账户后保存。</small> : null}
                   </div>
-                  <Button className="settings-primary-save" isDisabled={controlsDisabled} isPending={isSaving} variant="primary" onPress={handleSave}>
+                  <Button variant="secondary" isDisabled={controlsDisabled || (!hasUnsavedSettings && !hasPendingMapping)} onPress={handleCancelSettings}>取消修改</Button>
+                  <Button className="settings-primary-save" isDisabled={controlsDisabled || !hasUnsavedSettings || Boolean(mappingValidationMessage || cutoffDateError)} isPending={isSaving} variant="primary" onPress={() => void handleSave()}>
                     {isSaving ? "保存中..." : "保存设置"}
                   </Button>
                 </>
@@ -500,7 +507,7 @@ export default function SettingsPageContent({
               {activeSectionId === "access_accounts" && canManageAccessControl ? (
                 <>
                   <div className="settings-save-context">
-                    <span className="settings-draft-status" role="status">{changedAccountIds.size ? `${changedAccountIds.size} 个账户有未保存修改` : "无未保存修改"}</span>
+                    <span className="settings-draft-status" role="status">{changedAccountIds.size ? `${changedAccountIds.size} 个账户有未保存修改` : ""}</span>
                     <small className={accessControlValidationMessage ? "settings-field-help--error" : undefined}
                       role={accessControlValidationMessage ? "alert" : undefined}>
                       {accessControlValidationMessage}
@@ -516,7 +523,8 @@ export default function SettingsPageContent({
               ) : null}
             </div>
           </header>
-          <SettingsTabs items={settingsNavigationItems} activeSectionId={activeSectionId} onSelect={setActiveSectionId}>
+          <SettingsTabs items={settingsNavigationItems} activeSectionId={activeSectionId} onSelect={setActiveSectionId}
+            dirtySectionIds={new Set([...dirtySectionIds, ...(changedAccountIds.size ? ["access_accounts" as const] : [])])}>
             <section aria-label="设置内容" className="settings-content-panel">
 
 
@@ -528,6 +536,9 @@ export default function SettingsPageContent({
                   bankShortNameDraft={bankShortNameDraft}
                   last4Draft={last4Draft}
                   canAddMapping={canAddMapping}
+                  hasPendingMapping={hasPendingMapping}
+                  invalidMappingIds={invalidMappingIds}
+                  validationMessage={mappingValidationMessage}
                   onChangeBankNameDraft={setBankNameDraft}
                   onChangeBankShortNameDraft={setBankShortNameDraft}
                   onChangeLast4Draft={setLast4Draft}
@@ -545,6 +556,7 @@ export default function SettingsPageContent({
                 <SettingsOaRetentionSection
                   controlsDisabled={controlsDisabled}
                   cutoffDate={oaRetentionCutoffDate}
+                  cutoffDateError={cutoffDateError}
                   oaImport={{
                     ...settings.oaImport,
                     formTypes: oaImportFormTypes,
@@ -559,6 +571,8 @@ export default function SettingsPageContent({
               ) : null}
 
 
+
+              {activeSectionId === "batch-accounting" && canViewBatchHistory ? <BatchAccountingHistory /> : null}
 
               {activeSectionId === "access_accounts" && canManageAccessControl ? (
                 <SettingsAccessAccountsSection

@@ -22,6 +22,9 @@ export default function SettingsBankAccountsSection({
   bankShortNameDraft,
   last4Draft,
   canAddMapping,
+  hasPendingMapping,
+  invalidMappingIds,
+  validationMessage,
   onChangeBankNameDraft,
   onChangeBankShortNameDraft,
   onChangeLast4Draft,
@@ -38,8 +41,10 @@ export default function SettingsBankAccountsSection({
     >
       <header className="settings-section-header">
         <h3 id="settings-section-bank-accounts-title">银行账户映射</h3>
+        <span className="settings-section-count">{mappings.length} 个账户</span>
       </header>
       <div className="settings-section-body">
+        <div className="settings-bank-new-account">
         <div className="settings-bank-mapping-form">
           <label className="settings-field">
             <span>银行名称</span>
@@ -78,6 +83,9 @@ export default function SettingsBankAccountsSection({
             新增映射
           </Button>
         </div>
+        {hasPendingMapping ? <small className="settings-field-help" role="status">尚未添加</small> : null}
+        </div>
+        {validationMessage ? <p className="settings-field-help--error" role="alert" id="settings-bank-validation">{validationMessage}</p> : null}
 
         {mappings.length === 0 ? (
           <div className="settings-inline-alert settings-inline-alert--info" role="status">
@@ -85,7 +93,7 @@ export default function SettingsBankAccountsSection({
           </div>
         ) : (
           <div className="settings-native-table-shell">
-            <FinanceTable ariaLabel="银行账户映射" className="settings-native-table" minWidth={720}>
+            <FinanceTable ariaLabel="银行账户映射" className="settings-native-table settings-bank-table" minWidth={620}>
               <FinanceTableHeader>
                 <FinanceTableColumn id="bank" isRowHeader columnRole="identity">银行名称</FinanceTableColumn>
                 <FinanceTableColumn id="last4" columnRole="account">后四位</FinanceTableColumn>
@@ -100,6 +108,8 @@ export default function SettingsBankAccountsSection({
                         aria-label={`${mapping.bankName || mapping.last4} 银行名称`}
                         className="settings-table-input"
                         disabled={controlsDisabled}
+                        aria-invalid={invalidMappingIds.has(mapping.id)}
+                        aria-describedby={invalidMappingIds.has(mapping.id) ? "settings-bank-validation" : undefined}
                         value={mapping.bankName}
                         onChange={(event) => {
                           const bankName = event.currentTarget.value.trim();
@@ -115,6 +125,8 @@ export default function SettingsBankAccountsSection({
                         aria-label={`${mapping.bankName || mapping.last4} 后四位`}
                         className="settings-table-input settings-table-input--code"
                         disabled={controlsDisabled}
+                        aria-invalid={invalidMappingIds.has(mapping.id)}
+                        aria-describedby={invalidMappingIds.has(mapping.id) ? "settings-bank-validation" : undefined}
                         inputMode="numeric"
                         maxLength={4}
                         value={mapping.last4}
@@ -148,7 +160,8 @@ export default function SettingsBankAccountsSection({
                         isDisabled={controlsDisabled}
                         isIconOnly
                         size="sm"
-                        variant="danger"
+                        className="settings-bank-delete"
+                        variant="ghost"
                         onPress={() => onDeleteMapping(mapping.id)}
                       >
                         <Trash2 aria-hidden="true" size={16} />

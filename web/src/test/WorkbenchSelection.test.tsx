@@ -1621,7 +1621,14 @@ describe("Workbench row selection and detail drawer", () => {
 
   test("confirm action performs exactly one direct combined reread after the mutation", async () => {
     const user = userEvent.setup();
-    const fetchMock = installMockApiFetch({ actionDelayMs: 20, workbenchBackgroundLoadDelayMs: 180 });
+    const fetchMock = installMockApiFetch({ workbenchBackgroundLoadDelayMs: 180 });
+    let releaseConfirm!: () => void;
+    const confirmGate = new Promise<void>((resolve) => { releaseConfirm = resolve; });
+    const defaultFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      if (fetchPath(input) === "/api/workbench/actions/confirm-link") await confirmGate;
+      return defaultFetch(input, init);
+    });
     renderWorkbenchPage();
 
     const unpairedZone = await screen.findByTestId("zone-unpaired");
@@ -1646,6 +1653,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(preview).getByText("正在确认关联...")).toBeInTheDocument();
     expect(unpairedZone).toHaveTextContent("2026-03-28");
     expect(unpairedZone).toHaveTextContent("智能工厂设备商");
+    releaseConfirm();
     await screen.findByText("关联操作已完成");
     await user.click(screen.getByRole("button", { name: "关闭关联预览" }));
     expect(
@@ -3437,7 +3445,7 @@ describe("Workbench row selection and detail drawer", () => {
     const settingsPage = await openWorkbenchSettingsPage(user);
     const settingsTree = within(settingsPage).getByRole("tablist", { name: "设置分类" });
     expect(within(settingsTree).getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
-      "银行账户", "OA导入设置", "访问账户", "数据重置", "批量账务",
+      "银行账户", "OA导入设置", "访问账户", "批量账务", "数据重置",
     ]);
     expect(within(settingsPage).getByRole("heading", { name: "银行账户映射" })).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/settings/projects"))).toBe(false);
@@ -4031,6 +4039,10 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
     const settingsPage = await openWorkbenchSettingsPage(user);
+    expect(within(settingsPage).getByRole("button", { name: "保存设置" })).toBeDisabled();
+    await user.type(within(settingsPage).getByLabelText("银行名称", { exact: true }), "新增账户");
+    await user.type(within(settingsPage).getByLabelText("银行卡后四位"), "0011");
+    await user.click(within(settingsPage).getByRole("button", { name: "新增映射" }));
     expect(within(settingsPage).getByRole("button", { name: "保存设置" })).toBeEnabled();
   });
 

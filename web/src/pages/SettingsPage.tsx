@@ -6,7 +6,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import StatePanel from "../components/common/StatePanel";
 import BatchAccountingHistory from "../components/batchAccounting/BatchAccountingHistory";
 import SettingsTabs from "../components/settings/SettingsTabs";
-import type { SettingsNavigationItem, SettingsSectionId } from "../components/settings/types";
+import { settingsNavigation } from "../components/settings/navigation";
+import type { SettingsSectionId } from "../components/settings/types";
 import SettingsPageContent from "../components/settings/SettingsPageContent";
 import { useAppChrome } from "../contexts/AppChromeContext";
 import { useAppHealthStatus, useCanMutateWithHealth } from "../contexts/AppHealthStatusContext";
@@ -62,11 +63,7 @@ export default function SettingsPage() {
 
 function HistorySettingsWorkspace({ canViewSettings, canAdminAccess }: { canViewSettings: boolean; canAdminAccess: boolean }) {
   const [, setSearchParams] = useSearchParams();
-  const items: SettingsNavigationItem[] = [
-    ...(canViewSettings ? [{ id: "bank_accounts" as const, label: "银行账户" }, { id: "oa_retention" as const, label: "OA导入设置" }] : []),
-    ...(canViewSettings && canAdminAccess ? [{ id: "access_accounts" as const, label: "访问账户" }, { id: "data_reset" as const, label: "数据重置" }] : []),
-    { id: "batch-accounting", label: "批量账务" },
-  ];
+  const items = settingsNavigation(canViewSettings, canAdminAccess, true);
   return <div className="settings-layout"><div className="settings-workspace">
     <header className="settings-content-header"><div className="settings-content-title"><h1>设置</h1></div><div className="settings-save-actions" /></header>
     <SettingsTabs items={items} activeSectionId="batch-accounting" onSelect={(section: SettingsSectionId) => setSearchParams({ section }, { replace: true })}>
@@ -233,10 +230,10 @@ function EditableSettingsPage() {
     workbenchColumnLayouts: WorkbenchSettings["workbenchColumnLayouts"];
     oaRetention: WorkbenchSettings["oaRetention"];
     oaImport: WorkbenchSettings["oaImport"];
-  }) => {
+  }): Promise<WorkbenchSettings | null> => {
     if (healthStatus.blocksMutations) {
       setPageFeedback({ tone: "error", message: "登录已失效或系统不可用，不能保存设置。" });
-      return;
+      return null;
     }
     setIsSaving(true);
     setPageFeedback(null);
@@ -244,8 +241,10 @@ function EditableSettingsPage() {
       const saved = await saveWorkbenchSettings(payload);
       setSettings(saved);
       setPageFeedback({ tone: "success", message: "已保存银行账户与 OA 导入设置。" });
+      return saved;
     } catch (error) {
       setPageFeedback({ tone: "error", message: `保存设置失败：${normalizeSettingsError(error, "请稍后重试。")}` });
+      return null;
     } finally {
       setIsSaving(false);
     }
@@ -337,9 +336,8 @@ function EditableSettingsPage() {
           <Button aria-label="关闭设置反馈" isIconOnly size="sm" variant="ghost" onPress={() => setPageFeedback(null)}><X size={16} aria-hidden="true" /></Button>
         </div>
       ) : null}
-      {showingHistory ? <HistorySettingsWorkspace canViewSettings canAdminAccess={canAdminAccess} /> : null}
-      <div hidden={showingHistory}>
-      <div className="settings-route-status">
+      {showingHistory && settings === null ? <HistorySettingsWorkspace canViewSettings canAdminAccess={canAdminAccess} /> : null}
+      <div className="settings-route-status" hidden={showingHistory}>
         {loadError ? <StatePanel compact tone="error">{loadError}</StatePanel> : null}
         {isLoading && !loadError ? (
           <StatePanel compact tone="loading">
@@ -368,7 +366,6 @@ function EditableSettingsPage() {
           onSearchAccessUsers={searchWorkbenchAccessUsers}
         />
       ) : null}
-      </div>
     </div>
   );
 }

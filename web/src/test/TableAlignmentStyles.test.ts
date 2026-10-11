@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
-const source = readFileSync("src/app/styles.css", "utf8");
+const source = ["src/app/styles.css", "src/components/settings/settings.css"]
+  .map(path => readFileSync(path, "utf8")).join("\n");
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

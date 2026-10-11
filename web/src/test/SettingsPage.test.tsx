@@ -78,7 +78,7 @@ describe("Settings page", () => {
   });
 
   test("removes the old settings navigation while preserving shared table semantics", () => {
-    const styles = readWebSource("src/app/styles.css");
+    const styles = readWebSource("src/components/settings/settings.css");
     expect(styles).not.toMatch(/settings-tree-item|settings-nav-shell|settings-mobile-section-select|settings-section-panel--compact/);
     expect(cssRule(styles, ".settings-table-code,\n.settings-table-input--code,\n.settings-table-amount")).toContain("font-variant-numeric: tabular-nums");
     expect(cssRule(styles, ".oa-manual-import__table")).toContain("min-width: 1500px");
@@ -165,6 +165,102 @@ describe("Settings page", () => {
     expect(screen.queryByRole("button", { name: "搜索" })).not.toBeInTheDocument();
   });
 
+  test("cancels both ordinary drafts and new account input without writing or losing access drafts", async () => {
+    const user = userEvent.setup();
+    const api = installMockApiFetch({ sessionRole: "admin", sessionUsername: "YNSYLP005" });
+    renderAppAt("/settings");
+    const tabs = await screen.findByRole("tablist", { name: "设置分类" });
+    const bankName = screen.getAllByRole("textbox", { name: / 银行名称$/ })[0];
+    const original = (bankName as HTMLInputElement).value;
+    await user.clear(bankName);
+    await user.type(bankName, "修改中的银行");
+    await user.type(screen.getByLabelText("银行名称", { exact: true }), "未添加账户");
+    await user.click(within(tabs).getByRole("tab", { name: "OA导入设置" }));
+    await user.clear(screen.getByLabelText("OA导入起始日期"));
+    await user.type(screen.getByLabelText("OA导入起始日期"), "2026-02-01");
+    await user.click(within(tabs).getByRole("tab", { name: "访问账户" }));
+    await user.click(screen.getByRole("button", { name: "新增账户", exact: true }));
+    await user.type(screen.getByRole("searchbox", { name: "搜索 OA 账户" }), "READONLY001");
+    await user.click(await screen.findByRole("button", { name: "新增账户 READONLY001" }));
+    await user.click(screen.getByRole("checkbox", { name: "关联台" }));
+    await user.click(within(tabs).getByRole("tab", { name: "OA导入设置" }));
+    await user.click(screen.getByRole("button", { name: "取消修改" }));
+    expect(screen.getByLabelText("OA导入起始日期")).toHaveValue("2026-01-01");
+    await user.click(within(tabs).getByRole("tab", { name: "银行账户" }));
+    expect(screen.getByLabelText("银行名称", { exact: true })).toHaveValue("");
+    expect(screen.getAllByRole("textbox", { name: / 银行名称$/ })[0]).toHaveValue(original);
+    await user.click(within(tabs).getByRole("tab", { name: "访问账户" }));
+    expect(screen.getByRole("checkbox", { name: "关联台" })).toBeChecked();
+    await user.click(screen.getByRole("button", { name: "取消修改" }));
+    expect(screen.queryByText("READONLY001")).not.toBeInTheDocument();
+    expect(api.mock.calls.filter(([url, init]) => String(url).includes("/workbench/settings") && ["POST", "PUT"].includes(init?.method ?? "GET"))).toHaveLength(0);
+  });
+
+  test("rejects empty dates, invalid mappings and duplicate last four digits before saving", async () => {
+    const user = userEvent.setup();
+    const api = installMockApiFetch({ sessionRole: "admin", sessionUsername: "YNSYLP005" });
+    renderAppAt("/settings");
+    const tabs = await screen.findByRole("tablist", { name: "设置分类" });
+    const last4 = screen.getByLabelText("工商银行 后四位");
+    await user.clear(last4);
+    await user.type(last4, "0093");
+    expect(last4).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("button", { name: "保存设置" })).toBeDisabled();
+    await user.clear(last4);
+    await user.type(last4, "123");
+    expect(screen.getByRole("button", { name: "保存设置" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "取消修改" }));
+    const bankName = screen.getByLabelText("工商银行 银行名称");
+    await user.clear(bankName);
+    expect(bankName).toHaveAttribute("aria-invalid", "true");
+    await user.click(screen.getByRole("button", { name: "取消修改" }));
+    await user.click(within(tabs).getByRole("tab", { name: "OA导入设置" }));
+    await user.clear(screen.getByLabelText("OA导入起始日期"));
+    expect(screen.getByRole("alert")).toHaveTextContent("请选择 OA 导入起始日期。");
+    expect(screen.getByRole("button", { name: "保存设置" })).toBeDisabled();
+    expect(api.mock.calls.filter(([url, init]) => String(url).endsWith("/workbench/settings") && init?.method === "POST")).toHaveLength(0);
+  });
+
+  test("uses the server-normalized save result and retains unadded input outside the save payload", async () => {
+    const user = userEvent.setup();
+    const base = installMockApiFetch({ sessionRole: "admin", sessionUsername: "YNSYLP005" });
+    const api = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const response = await base(input, init);
+      if (String(input).endsWith("/api/workbench/settings") && init?.method === "POST") {
+        const saved = await response.json();
+        saved.bank_account_mappings.reverse();
+        saved.bank_account_mappings[0].short_name = "服务端简称";
+        return new Response(JSON.stringify(saved), { headers: { "Content-Type": "application/json" } });
+      }
+      return response;
+    });
+    vi.stubGlobal("fetch", api);
+    renderAppAt("/settings");
+    const tabs = await screen.findByRole("tablist", { name: "设置分类" });
+    await user.type(screen.getByLabelText("银行名称", { exact: true }), "待添加银行");
+    await user.type(screen.getByLabelText("银行卡后四位"), "0066");
+    await user.click(within(tabs).getByRole("tab", { name: "OA导入设置" }));
+    await user.clear(screen.getByLabelText("OA导入起始日期"));
+    await user.type(screen.getByLabelText("OA导入起始日期"), "2026-02-01");
+    await user.click(screen.getByRole("button", { name: "保存设置" }));
+    await screen.findByText("已保存银行账户与 OA 导入设置。");
+    expect(screen.queryByText("有未保存修改")).not.toBeInTheDocument();
+    await user.click(within(tabs).getByRole("tab", { name: "银行账户" }));
+    expect(screen.getByLabelText("银行名称", { exact: true })).toHaveValue("待添加银行");
+    expect(screen.getByLabelText("银行卡后四位")).toHaveValue("0066");
+    expect(screen.getByText("尚未添加", { exact: true })).toBeInTheDocument();
+    expect(screen.getAllByRole("textbox", { name: / 简称$/ })[0]).toHaveValue("服务端简称");
+    expect(screen.getAllByRole("textbox", { name: / 银行名称$/ })[0]).toHaveValue("建设银行");
+    expect(screen.getByRole("button", { name: "保存设置" })).toBeDisabled();
+    const write = api.mock.calls.find(([url, init]) => String(url).endsWith("/api/workbench/settings") && init?.method === "POST");
+    const payload = JSON.parse(String(write![1]!.body));
+    expect(payload.bank_account_mappings).toHaveLength(3);
+    expect(payload.bank_account_mappings.some((mapping: { last4: string }) => mapping.last4 === "0066")).toBe(false);
+    expect(payload.bank_account_mappings.some((mapping: { last4: string }) => mapping.last4 === "0093")).toBe(true);
+    expect(payload).not.toHaveProperty("accounts");
+    expect(payload).not.toHaveProperty("oa_applicant_credentials");
+  });
+
   test("lets a user assigned to settings use normal settings actions", async () => {
     installMockApiFetch({
       sessionRole: "user",
@@ -173,7 +269,13 @@ describe("Settings page", () => {
     renderAppAt("/settings");
 
     expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "保存设置" })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "保存设置" })).toBeDisabled();
+    await userEvent.type(screen.getByLabelText("银行名称", { exact: true }), "新账户");
+    expect(screen.getByLabelText("银行名称", { exact: true })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "取消修改" })).toBeEnabled();
+    await userEvent.type(screen.getByLabelText("银行卡后四位"), "0011");
+    await userEvent.click(screen.getByRole("button", { name: "新增映射" }));
+    expect(screen.getByRole("button", { name: "保存设置" })).toBeEnabled();
   });
 
   test("removes credential management and its requests from settings", async () => {

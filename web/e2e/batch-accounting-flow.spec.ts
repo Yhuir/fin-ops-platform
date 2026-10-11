@@ -20,9 +20,15 @@ test("history entry moves to settings, preserves drafts and renders readonly com
   for (const width of [1920, 1440, 900]) {
     await page.setViewportSize({ width, height: 1000 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    const geometry = await page.locator(".settings-layout:visible").evaluate((el) => ({ padding: getComputedStyle(el).paddingLeft, width: el.getBoundingClientRect().width, workspace: el.querySelector(".settings-workspace")!.getBoundingClientRect().width }));
+    const geometry = await page.locator(".settings-layout:visible").evaluate((el) => {
+      const outer = el.getBoundingClientRect();
+      const workspace = el.querySelector(".settings-workspace")!.getBoundingClientRect();
+      return { padding: getComputedStyle(el).paddingLeft, width: outer.width, workspace: workspace.width,
+        left: workspace.left - outer.left, right: outer.right - workspace.right };
+    });
     expect(geometry.padding).toBe("16px");
-    expect(Math.abs(geometry.width - geometry.workspace - 32)).toBeLessThan(2);
+    expect(Math.abs(geometry.workspace - Math.min(1280, geometry.width - 32))).toBeLessThan(2);
+    expect(Math.abs(geometry.left - geometry.right)).toBeLessThan(2);
     await page.screenshot({ path: testInfo.outputPath(`batch-history-${width}.png`) });
   }
   await page.setViewportSize({ width: 1440, height: 1000 });

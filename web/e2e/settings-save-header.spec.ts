@@ -2,6 +2,8 @@ import { expect, test, type Page } from "./fixtures/strictTest";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
+test.use({ video: 'on' });
+
 async function geometry(page: Page) {
   return page.evaluate(() => {
     const rect = (selector: string) => {
@@ -30,6 +32,11 @@ test("all settings save actions share a stable desktop header and switching does
     await expect(page.getByRole('tab', { name: '银行账户', exact: true })).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByRole('button', { name: '保存设置', exact: true })).toBeVisible();
     const baseline = await geometry(page);
+    for (const name of [...tabs, '批量账务']) {
+      const bounds = await page.getByRole('tab', { name, exact: true }).boundingBox();
+      expect(bounds!.x).toBeGreaterThanOrEqual(baseline.tabs.x);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(baseline.tabs.x + baseline.tabs.width);
+    }
     for (const [index, name] of tabs.entries()) {
       await page.getByRole('tab', { name, exact: true }).click();
       await expect(page.getByRole('tab', { name, exact: true })).toHaveAttribute('aria-selected', 'true');
@@ -43,10 +50,56 @@ test("all settings save actions share a stable desktop header and switching does
         await expect(page.getByRole('tabpanel').getByRole('button', { name: /^保存/ })).toHaveCount(0);
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await page.evaluate(async () => {
+        await Promise.all(document.getAnimations().filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished));
+      });
       await page.screenshot({ path: testInfo.outputPath(`settings-${width}-${index}.png`) });
     }
   }
   expect(requests.length).toBe(initialRequests);
+});
+
+test("settings stays contained on narrow screens, supports keyboard navigation and cancels drafts without writes", async ({ page }, testInfo) => {
+  const api = await installDeterministicApiMocks(page, { sessionMode: 'admin' });
+  await page.goto('/settings');
+  const name = page.getByRole('textbox', { name: / 银行名称$/ }).first();
+  const savedName = await name.inputValue();
+  await name.fill('云南源采财务运营平台长银行名称草稿');
+  await page.getByLabel('银行名称', { exact: true }).fill('尚未添加的银行');
+  await page.getByRole('tab', { name: 'OA导入设置', exact: true }).click();
+  const date = page.getByLabel('OA导入起始日期');
+  const savedDate = await date.inputValue();
+  await date.fill('2026-02-01');
+  await page.getByRole('tab', { name: '批量账务', exact: true }).click();
+  await expect(page.getByRole('grid', { name: '批量账务历史记录' })).toBeVisible();
+  await expect(page.locator('.settings-tab-draft')).toHaveCount(2);
+  await page.getByRole('tab', { name: '银行账户', exact: true }).click();
+  await expect(name).toHaveValue('云南源采财务运营平台长银行名称草稿');
+  for (const width of [1920, 1440, 1280, 900, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await expect(page.getByRole('button', { name: '取消修改' })).toBeInViewport();
+    await expect(page.getByRole('button', { name: '保存设置', exact: true })).toBeInViewport();
+    await page.screenshot({ path: testInfo.outputPath(`settings-draft-${width}.png`) });
+  }
+  await page.getByRole('button', { name: '取消修改' }).click();
+  await expect(name).toHaveValue(savedName);
+  await expect(page.getByLabel('银行名称', { exact: true })).toHaveValue('');
+  await expect(page.locator('.settings-tab-draft')).toHaveCount(0);
+  const bankTab = page.getByRole('tab', { name: '银行账户', exact: true });
+  await bankTab.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('tab', { name: 'OA导入设置', exact: true })).toBeFocused();
+  await expect(date).toHaveValue(savedDate);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.getByRole('tab', { name: '银行账户', exact: true }).click();
+  expect(await page.locator('.settings-workspace').evaluate(el => getComputedStyle(el).animationName)).toBe('none');
+  await expectNoUnexpectedSuccessUiErrors(page);
+  expect(api.calls.filter(call => /^(POST|PUT|DELETE)/.test(call))).toEqual([]);
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.locator('body').evaluate(el => { el.style.zoom = '2'; });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('settings-200-percent.png') });
 });
 
 test("settings no longer loads or exposes applicant credentials", async ({ page }) => {

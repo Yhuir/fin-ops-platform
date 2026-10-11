@@ -65,25 +65,25 @@ test.describe("finance table system browser flow", () => {
     await page.setViewportSize({ width: 390, height: 820 });
     await page.goto("/operations/app-health");
 
-    await expect(page.getByRole("heading", { name: "AppHealth 运维状态" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "数据与导入" })).toBeVisible();
     await expect(page.getByTestId("app-health-data")).toBeVisible();
-    await expect(page.getByTestId("app-health-requests")).toBeVisible();
-    await expect(page.getByTestId("app-health-runtime")).toBeVisible();
+    await expect(page.getByTestId("app-health-recent-imports")).toBeVisible();
+    await expect(page.getByTestId("app-health-requests")).toHaveCount(0);
+    await expect(page.getByTestId("app-health-runtime")).toHaveCount(0);
     await expectVisibleAndUncovered(page.getByRole("button", { name: "刷新", exact: true }), "AppHealth refresh button");
 
-    const requestTableScroll = page.getByTestId("app-health-requests").locator(".finance-table__scroll");
-    await expectHorizontalScroll(requestTableScroll, "request performance table");
-    await expectVisibleAndUncovered(page.getByRole("columnheader", { name: "连接 p95" }), "rightmost request-performance column");
-    await expect(page.getByRole("row", { name: /\/api\/session\/me/ })).toContainText("45 ms");
-
-    const workerTableScroll = page.getByTestId("app-health-runtime").locator(".finance-table__scroll").nth(2);
-    await expectHorizontalScroll(workerTableScroll, "worker status table");
-    await expectVisibleAndUncovered(page.getByRole("columnheader", { name: "warning" }), "rightmost worker column");
-
-    await expect(page.getByRole("columnheader", { name: "Worker" })).toBeVisible();
-    await expect(page.getByRole("row", { name: /runtime-worker/ })).toContainText("1 s");
+    const importTableScroll = page.getByTestId("app-health-recent-imports").locator(".finance-table__scroll");
+    expect(await importTableScroll.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await expectVisibleAndUncovered(page.getByRole("columnheader", { name: "操作" }), "rightmost import-record column");
+    await expectVisibleAndUncovered(page.getByRole("button", { name: "导入历史", exact: true }), "import-history entry");
     await expect(page.getByText("正在加载系统状态。")).toHaveCount(0);
     expect(api.count("GET /api/operations/app-health-dashboard")).toBeGreaterThan(0);
+
+    await page.goto("/settings");
+    await page.getByRole("tab", { name: "OA导入设置", exact: true }).click();
+    const oaTable = page.getByRole("grid", { name: "OA全量搜索导入结果" });
+    await expectHorizontalScroll(page.locator(".oa-manual-import__table .finance-table__scroll"), "wide OA search table");
+    await expectVisibleAndUncovered(oaTable.getByRole("columnheader").last(), "rightmost OA search column");
     expect(errors).toEqual([]);
   });
 });

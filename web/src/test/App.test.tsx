@@ -59,6 +59,10 @@ describe("Finance operations shell", () => {
       expect(within(settingsTree).getAllByRole("tab").filter((item) => item.textContent?.includes("访问账户"))).toHaveLength(
         canAdminAccess ? 1 : 0,
       );
+      expect(screen.getByRole("button", { name: "保存设置" })).toBeDisabled();
+      await userEvent.type(screen.getByLabelText("银行名称", { exact: true }), "新增账户");
+      await userEvent.type(screen.getByLabelText("银行卡后四位"), "0011");
+      await userEvent.click(screen.getByRole("button", { name: "新增映射" }));
       expect(screen.getByRole("button", { name: "保存设置" })).toHaveProperty("disabled", !canSaveSettings);
     },
   );

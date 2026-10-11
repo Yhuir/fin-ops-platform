@@ -91,6 +91,19 @@ for (const path of ["input-invoice-usage", "output-invoice-collections", "pendin
       await page.screenshot({ path: testInfo.outputPath(`contrast-${path}.png`), animations: "disabled" });
       return;
     }
+    if (path === "settings" || path === "batch-accounting") {
+      const scope = page.getByRole('tablist', { name: '设置分类' });
+      const selected = scope.getByRole('tab', { selected: true });
+      await expect(selected).toHaveCSS('color', 'rgb(29, 78, 216)');
+      await expect(selected).toHaveCSS('background-color', 'rgb(232, 240, 255)');
+      expect(await selected.evaluate(el => getComputedStyle(el, '::after').height)).toBe('2px');
+      const sibling = scope.getByRole('tab', { selected: false }).first();
+      await expect(sibling).toHaveCSS('color', 'rgb(71, 85, 105)');
+      await sibling.hover();
+      await expect(sibling).toHaveCSS('color', 'rgb(71, 85, 105)');
+      await page.screenshot({ path: testInfo.outputPath(`contrast-${path}.png`), animations: 'disabled' });
+      return;
+    }
     const controls = page.locator('.app-segments [data-selected="true"], .invoice-count-segments [data-selected="true"]');
     await expect(controls.first()).toBeVisible();
     for (const control of await controls.all()) {
@@ -171,7 +184,12 @@ for (const path of ['oa-pending-payments', 'input-invoice-usage', 'pending-invoi
     expect(tableBox!.y).toBeGreaterThanOrEqual(panelBox!.y + panelBox!.height - 1);
     expect(tableBox!.y - (panelBox!.y + panelBox!.height)).toBeLessThanOrEqual(24);
     const groups = classification.locator('[role="group"]');
-    expect(await groups.count()).toBe(2);
+    if (path === 'input-invoice-usage') {
+      await expect(groups).toHaveCount(3);
+      await expect(classification.getByRole('group', { name: '已使用', exact: true })).toBeVisible();
+      await expect(classification.getByRole('group', { name: '已付款', exact: true })).toBeVisible();
+      await expect(classification.getByRole('group', { name: '未付款', exact: true })).toBeVisible();
+    } else await expect(groups).toHaveCount(2);
     const leaves = classification.locator('.table-classification__leaf, .invoice-usage-classification__child');
     expect(await leaves.count()).toBeGreaterThan(0);
     for (const leaf of await leaves.all()) {
@@ -218,13 +236,13 @@ test('settings scope tabs retain consistent styling and show only active setting
   await installDeterministicApiMocks(page, { sessionMode: 'admin' });
   await page.goto('/settings');
   const scope = page.getByRole('tablist', { name: '设置分类' });
-  await expect(scope.getByRole('tab')).toHaveText(['银行账户', 'OA导入设置', '访问账户', '数据重置']);
+  await expect(scope.getByRole('tab')).toHaveText(['银行账户', 'OA导入设置', '访问账户', '批量账务', '数据重置']);
   await expect(scope.getByRole('tab', { selected: true })).toHaveText('银行账户');
-  await expect(scope.getByRole('tab', { selected: true })).toHaveCSS('height', '40px');
+  await expect(scope.getByRole('tab', { selected: true })).toHaveCSS('height', '42px');
   await expect(page.getByRole('region', { name: '银行账户映射', exact: true })).toBeVisible();
   await scope.getByRole('tab', { name: 'OA导入设置', exact: true }).click();
   await expect(scope.getByRole('tab', { selected: true })).toHaveText('OA导入设置');
-  await expect(scope.getByRole('tab', { selected: true })).toHaveCSS('height', '40px');
+  await expect(scope.getByRole('tab', { selected: true })).toHaveCSS('height', '42px');
   await expect(page.getByRole('region', { name: 'OA导入设置', exact: true })).toBeVisible();
   await expect(page.getByRole('region', { name: '银行账户映射', exact: true })).toHaveCount(0);
   await expect(scope.getByRole('tab', { name: /项目状态|待找发票筛选|冲账规则/ })).toHaveCount(0);

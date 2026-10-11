@@ -16,6 +16,7 @@ const attachmentInvoicePromotionOptions: Array<{
 export default function SettingsOaRetentionSection({
   controlsDisabled,
   cutoffDate,
+  cutoffDateError,
   oaImport,
   onChangeCutoffDate,
   onChangeAttachmentInvoicePromotionMode,
@@ -43,13 +44,18 @@ export default function SettingsOaRetentionSection({
         <div className="settings-oa-config">
           <label className="settings-field settings-preference-row">
             <span>OA导入起始日期</span>
+            <div className="settings-preference-control">
             <Input
               aria-label="OA导入起始日期"
               disabled={controlsDisabled}
               type="date"
               value={cutoffDate}
+              aria-invalid={Boolean(cutoffDateError)}
+              aria-describedby={cutoffDateError ? "settings-cutoff-error" : undefined}
               onChange={(event) => onChangeCutoffDate(event.currentTarget.value)}
             />
+            {cutoffDateError ? <small className="settings-field-help--error" id="settings-cutoff-error" role="alert">{cutoffDateError}</small> : null}
+            </div>
           </label>
 
           <div className="settings-preference-row">

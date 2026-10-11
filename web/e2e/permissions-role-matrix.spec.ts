@@ -76,6 +76,7 @@ test.describe("page access browser matrix", () => {
 
     await page.goto("/settings");
     await expect(page.getByTestId("settings-page")).toBeVisible();
+    await page.getByRole("textbox", { name: / 银行名称$/ }).first().fill("权限验证银行草稿");
     await expect(page.getByRole("button", { name: "保存设置" })).toBeEnabled();
     const tree = page.getByRole("tablist", { name: "设置分类" });
     await expect(tree.getByRole("tab", { name: /访问账户/ })).toHaveCount(0);

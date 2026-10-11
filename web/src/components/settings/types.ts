@@ -50,6 +50,9 @@ export type SettingsBankAccountsSectionProps = {
   bankShortNameDraft: string;
   last4Draft: string;
   canAddMapping: boolean;
+  hasPendingMapping: boolean;
+  invalidMappingIds: ReadonlySet<string>;
+  validationMessage: string | null;
   onChangeBankNameDraft: (value: string) => void;
   onChangeBankShortNameDraft: (value: string) => void;
   onChangeLast4Draft: (value: string) => void;
@@ -61,6 +64,7 @@ export type SettingsBankAccountsSectionProps = {
 export type SettingsOaRetentionSectionProps = {
   controlsDisabled: boolean;
   cutoffDate: string;
+  cutoffDateError: string | null;
   oaImport: WorkbenchOaImportSettings;
   onChangeCutoffDate: (value: string) => void;
   onChangeAttachmentInvoicePromotionMode: (value: WorkbenchOaImportSettings["attachmentInvoicePromotionMode"]) => void;
