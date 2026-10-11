@@ -13,6 +13,7 @@ export function importWorkflowPath(mode: ImportWorkflowMode) {
 
 // Navigation context only. These defaults never become source-document facts.
 const importEntries = {
+  "etc-tickets": { mode: "etc_invoice", label: "返回 ETC 批次", path: "/etc-tickets", invoiceBatchType: "" },
   "bank-details": { mode: "bank_transaction", label: "返回银行明细", path: "/bank-details", invoiceBatchType: "" },
   "input-invoice-usage": { mode: "invoice", label: "返回进项发票", path: "/input-invoice-usage", invoiceBatchType: "input_invoice" },
   "output-invoice-collections": { mode: "invoice", label: "返回销项发票", path: "/output-invoice-collections", invoiceBatchType: "output_invoice" },

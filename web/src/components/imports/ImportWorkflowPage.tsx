@@ -43,6 +43,7 @@ import {
   previewEtcZipFiles,
 } from "../../features/etc/api";
 import { formatMoney } from "../../features/money";
+import { etcReturnPath } from "../../features/etc/workspaceNavigation";
 import { formatDateTimeText } from "../../features/dateTime";
 import { fetchWorkbenchSettings } from "../../features/workbench/api";
 import type {
@@ -479,6 +480,9 @@ export default function ImportWorkflowPage({ mode, taskId, onBusyChange }: Impor
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const entry = taskId ? null : importEntryFor(mode, searchParams.get("from"));
+  const requestedEtcTaskId = mode === "etc_invoice" && entry && !taskId && !searchParams.get("import_job")
+    ? searchParams.get("etc_task") : null;
+  const returnPath = entry?.mode === "etc_invoice" ? etcReturnPath(searchParams) : entry?.path ?? "/";
   const [returnConfirmationOpen, setReturnConfirmationOpen] = useState(false);
   const [contextRefreshToken, setContextRefreshToken] = useState(0);
   const [submittedJob, setSubmittedJob] = useState<BackgroundJob | null>(null);
@@ -636,6 +640,14 @@ export default function ImportWorkflowPage({ mode, taskId, onBusyChange }: Impor
           return;
         }
         setReadyEtcTasks(payload.items);
+        if (requestedEtcTaskId && !etcPreviewPayload) {
+          if (payload.items.some((item) => item.taskId === requestedEtcTaskId)) {
+            setSelectedEtcTaskId(requestedEtcTaskId);
+          } else {
+            setSelectedEtcTaskId("");
+            setErrorMessage("当前批次的核对任务不可导入，请返回 ETC 批次核对状态。");
+          }
+        }
       })
       .catch((error) => {
         if (!controller.signal.aborted) {
@@ -649,7 +661,7 @@ export default function ImportWorkflowPage({ mode, taskId, onBusyChange }: Impor
       });
 
     return () => controller.abort();
-  }, [activationGeneration, contextRefreshToken, mode, pageActive, taskId, setErrorMessage]);
+  }, [activationGeneration, contextRefreshToken, mode, pageActive, taskId, requestedEtcTaskId, setSelectedEtcTaskId, setErrorMessage]);
 
   useEffect(() => {
     const sessionId = previewPayload?.session.id;
@@ -1174,7 +1186,7 @@ export default function ImportWorkflowPage({ mode, taskId, onBusyChange }: Impor
       <ConfirmActionDialog open={returnConfirmationOpen} title="放弃未上传的文件？"
         description="这些文件尚未上传，返回后需要重新选择。" confirmLabel="放弃并返回" cancelLabel="继续导入"
         onCancel={() => setReturnConfirmationOpen(false)}
-        onConfirm={() => navigate(entry?.path ?? "/")} />
+        onConfirm={() => navigate(returnPath)} />
       <PageScaffold
         title={title}
         actions={
@@ -1186,7 +1198,7 @@ export default function ImportWorkflowPage({ mode, taskId, onBusyChange }: Impor
               onPress={() => {
                 if (selectedFiles.length > 0 && !previewPayload && !etcPreviewPayload) {
                   setReturnConfirmationOpen(true);
-                } else navigate(entry?.path ?? "/");
+                } else navigate(returnPath);
               }}>
               <ArrowLeft aria-hidden="true" size={16} strokeWidth={2.2} />
               {entry?.label ?? "返回关联台"}
@@ -1293,7 +1305,7 @@ export default function ImportWorkflowPage({ mode, taskId, onBusyChange }: Impor
                 {mode === "etc_invoice" ? (
                   <div className="import-workflow-field-stack">
                     <ImportSelect
-                      disabled={hasPreview || isPreviewing || isConfirming || readyEtcTasksLoading || readyEtcTasks.length === 0}
+                      disabled={Boolean(requestedEtcTaskId) || hasPreview || isPreviewing || isConfirming || readyEtcTasksLoading || readyEtcTasks.length === 0}
                       id="etc-reconciliation-task"
                       label="ETC对账任务"
                       onChange={handleEtcTaskChange}

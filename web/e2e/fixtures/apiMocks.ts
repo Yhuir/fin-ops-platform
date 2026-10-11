@@ -4146,6 +4146,8 @@ export function oaPendingPaymentRowsPayload(includeInvoiceImportEvidence = false
             summary: "发票导入后待付款已闭环",
             remark: "发票导入下游刷新",
             amount: "18320.00",
+            original_amount: "18320.00",
+            original_transaction_count: 1,
             paidTotal: "18320.00",
             relationCount: 1,
             relationStatus: "linked",

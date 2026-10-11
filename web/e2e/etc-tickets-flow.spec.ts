@@ -73,6 +73,8 @@ function createEtcLatencyRecorder(page: Page, testInfo: TestInfo) {
 }
 
 async function openEtcDisclosure(page: Page, name: RegExp | string) {
+  const stage = /双侧核对|人工处理/.test(String(name)) ? /确认核对结果/ : /准备核对资料/;
+  await page.getByRole("button", { name: stage }).click();
   const trigger = page.getByRole("button", { name });
   await expect(trigger).toBeVisible();
   if ((await trigger.getAttribute("aria-expanded")) !== "true") {
@@ -99,6 +101,7 @@ test.describe("ETC ticket management browser flow", () => {
       task.source_files.push({ file_id: `uploaded-${posts.length}`, source_kind: "ticket_root", original_name: name, content_type: "text/plain", has_blocking_issue: false });
       await route.fulfill({ json: task });
     });
+    await page.getByRole("button", { name: /准备核对资料/ }).click();
     const box = page.getByLabel("上传票根网");
     const input = box.locator('input[type="file"]');
     await expect(box).toBeVisible();
@@ -375,6 +378,7 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(lifecycle.getByText("确认核对结果", { exact: true })).toBeVisible();
     await expect(lifecycle.getByText("导入 ETC 发票", { exact: true })).toBeVisible();
     await expect(lifecycle.getByText("提交 OA 审批", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: /导入 ETC 发票/ }).click();
     await expect(page.getByRole("grid", { name: "ETC发票明细" })).toBeVisible();
     await expect(page.getByRole("rowheader", { name: "ETC-E2E-001" })).toBeVisible();
     await expect(page.getByRole("button", { name: "提交审批" })).toBeEnabled();
@@ -929,6 +933,7 @@ test.describe("ETC ticket management browser flow", () => {
     await expect(row).toBeVisible();
     await expect(row).toContainText("2026年3月 ETC发票");
     await expect(row).toContainText("2 张 · 32.26 元");
+    await page.getByRole("button", { name: /导入 ETC 发票/ }).click();
     await expect(page.getByRole("grid", { name: "ETC发票明细" })).toBeVisible();
     await expect(page.getByRole("rowheader", { name: "ETC-E2E-001" })).toBeVisible();
 

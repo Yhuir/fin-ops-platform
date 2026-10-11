@@ -19,6 +19,8 @@ type EtcBatchProgressProps = {
   task: EtcReconciliationTask | null;
   taskLoading?: boolean;
   taskError?: string | null;
+  viewedStage: EtcBatchProgressStep["id"];
+  onStageChange: (stage: EtcBatchProgressStep["id"]) => void;
 };
 
 const stepDefinitions: Array<Pick<EtcBatchProgressStep, "id" | "label" | "description">> = [
@@ -164,14 +166,14 @@ export function deriveEtcBatchProgress(
 
 const stateLabels: Record<EtcBatchProgressState, string> = {
   complete: "已完成",
-  current: "当前阶段",
+  current: "业务当前阶段",
   pending: "待开始",
   processing: "处理中",
   manual: "待人工确认",
   problem: "需要处理",
 };
 
-export default function EtcBatchProgress({ batch, task, taskLoading = false, taskError = null }: EtcBatchProgressProps) {
+export default function EtcBatchProgress({ batch, task, taskLoading = false, taskError = null, viewedStage, onStageChange }: EtcBatchProgressProps) {
   if (!batch) {
     return null;
   }
@@ -190,13 +192,13 @@ export default function EtcBatchProgress({ batch, task, taskLoading = false, tas
             data-state={step.state}
             aria-current={isCurrent ? "step" : undefined}
           >
-            <span className="etc-batch-progress__marker" aria-hidden="true">
-              {step.state === "complete" ? "✓" : index + 1}
-            </span>
-            <span className="etc-batch-progress__copy">
-              <strong>{step.label}</strong>
-              {step.state !== "complete" ? <span>{stateLabels[step.state]} · {step.description}</span> : null}
-            </span>
+            <button type="button" className="etc-stage-button" aria-pressed={viewedStage === step.id}
+              aria-controls="etc-stage-content" onClick={() => onStageChange(step.id)}>
+              <span className="etc-batch-progress__marker" aria-hidden="true">{index + 1}</span>
+              <span className="etc-batch-progress__copy">
+                <strong>{step.label}</strong><span>{stateLabels[step.state]}{viewedStage === step.id ? " · 正在查看" : ""}</span>
+              </span>
+            </button>
           </li>
         );
       })}

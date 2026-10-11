@@ -13,8 +13,8 @@ import {
 } from "lucide-react";
 import { Button, Checkbox, Chip, Disclosure, DisclosureGroup } from "@heroui/react";
 import type { Key } from "@heroui/react";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent, type ReactNode } from "react";
-import { Link as RouterLink } from "react-router-dom";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent, type ReactNode } from "react";
+import { Link as RouterLink, useSearchParams } from "react-router-dom";
 
 import AppDialog from "../components/common/AppDialog";
 import OaDraftPrefillDrawer from "../components/common/OaDraftPrefillDrawer";
@@ -34,7 +34,9 @@ import StatePanel from "../components/common/StatePanel";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
-import EtcBatchProgress from "../features/etc/EtcBatchProgress";
+import EtcBatchProgress, { deriveEtcBatchProgress, type EtcBatchProgressStep } from "../features/etc/EtcBatchProgress";
+import { etcImportPath, etcReturnContext } from "../features/etc/workspaceNavigation";
+import "../features/etc/etcWorkspace.css";
 import { formatMoney } from "../features/money";
 import { formatDateTimeText } from "../features/dateTime";
 import {
@@ -80,10 +82,11 @@ const MANUAL_OA_SUBMITTED_REASON = "用户确认已在 OA 系统完成 OA 草稿
 const MANUAL_OA_NOT_SUBMITTED_REASON = "用户确认已在 OA 系统删除 OA 草稿。";
 
 function moneyDifference(left: string | number, right: string | number) {
+  if (!String(left).trim() || !String(right).trim()) return "—";
   const leftCents = Math.round(Number(left) * 100);
   const rightCents = Math.round(Number(right) * 100);
   if (!Number.isFinite(leftCents) || !Number.isFinite(rightCents)) {
-    return "0.00";
+    return "—";
   }
   return (Math.abs(leftCents - rightCents) / 100).toFixed(2);
 }
@@ -114,6 +117,11 @@ function formatDateRange(startDate: string | null, endDate: string | null) {
     return endDate;
   }
   return `${startDate} 至 ${endDate}`;
+}
+
+function DateRangeValue({ startDate, endDate }: { startDate: string | null; endDate: string | null }) {
+  return <>{formatDateRange(startDate, endDate).split(" ").map((part, index) =>
+    <Fragment key={index}>{index > 0 ? " " : null}<span className="etc-date-part">{part}</span></Fragment>)}</>;
 }
 
 function splitDateParts(value: string | null | undefined) {
@@ -497,6 +505,7 @@ type EtcDisclosureSectionProps = {
   headerAction?: ReactNode;
   children: ReactNode;
   className?: string;
+  hidden?: boolean;
 };
 
 function EtcDisclosureSection({
@@ -507,9 +516,10 @@ function EtcDisclosureSection({
   headerAction,
   children,
   className,
+  hidden = false,
 }: EtcDisclosureSectionProps) {
   return (
-    <Disclosure id={id} className={["etc-disclosure-section", className ?? ""].filter(Boolean).join(" ")}>
+    <Disclosure id={id} style={hidden ? { display: "none" } : undefined} className={["etc-disclosure-section", className ?? ""].filter(Boolean).join(" ")}>
       <div className="etc-disclosure-header">
         <Disclosure.Heading>
           <Button slot="trigger" className="etc-disclosure-trigger" fullWidth size="sm" variant="tertiary">
@@ -673,6 +683,9 @@ function ReconciliationDescriptionCell({
 
 export default function EtcTicketManagementPage() {
   const { active, activationGeneration } = useOptionalPageActivation("etc-tickets");
+  const [searchParams] = useSearchParams();
+  const returnContext = etcReturnContext(searchParams);
+  const [viewedStages, setViewedStages] = useState<Record<string, EtcBatchProgressStep["id"]>>({});
   const { jobs } = useBackgroundJobProgress();
   const { canOperateData } = useSessionPermissions();
   const [activeStatus, setActiveStatus] = useState<EtcBusinessBatchBucket>("unsubmitted");
@@ -706,7 +719,7 @@ export default function EtcTicketManagementPage() {
   const [batchDetailError, setBatchDetailError] = useState<string | null>(null);
   const [taskActionLoading, setTaskActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [workflowExpandedKeys, setWorkflowExpandedKeys] = useState<Set<Key>>(() => new Set(["upload", "reconciliation"]));
+  const [workflowExpandedKeys, setWorkflowExpandedKeys] = useState<Set<Key>>(() => new Set(["upload", "sources", "reconciliation"]));
   const [batchDetailExpandedKeys, setBatchDetailExpandedKeys] = useState<Set<Key>>(() => new Set(["invoices"]));
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
@@ -746,11 +759,13 @@ export default function EtcTicketManagementPage() {
     bucket = activeStatusRef.current,
     page = batchPageRef.current,
     preferredBatchId,
+    exactSelection = false,
     clearActionError = true,
   }: {
     bucket?: EtcBusinessBatchBucket;
     page?: number;
     preferredBatchId?: string;
+    exactSelection?: boolean;
     clearActionError?: boolean;
   } = {}) => {
     activeBatchListRequestRef.current?.controller.abort();
@@ -796,7 +811,10 @@ export default function EtcTicketManagementPage() {
       const currentSelection = preferredBatchId ?? selectedBatchIdRef.current;
       const nextSelection = payload.items.some((batch) => batch.businessBatchId === currentSelection)
         ? currentSelection
-        : payload.items[0]?.businessBatchId ?? "";
+        : exactSelection ? "" : payload.items[0]?.businessBatchId ?? "";
+      if (exactSelection && !nextSelection) {
+        setBatchListError("原批次已不在当前分组或页码，请重新选择批次。");
+      }
       if (nextSelection !== currentSelection) {
         setSelectedTask(null);
         setTaskListError(null);
@@ -848,9 +866,9 @@ export default function EtcTicketManagementPage() {
     if (!active) {
       return undefined;
     }
-    void loadBatches();
+    void loadBatches(returnContext ? { bucket: returnContext.bucket, page: returnContext.page, preferredBatchId: returnContext.batchId, exactSelection: true } : undefined);
     return () => activeBatchListRequestRef.current?.controller.abort();
-  }, [active, activationGeneration, loadBatches]);
+  }, [active, activationGeneration, loadBatches, returnContext?.batchId, returnContext?.bucket, returnContext?.page]);
 
   useEffect(() => {
     if (!active) {
@@ -942,9 +960,8 @@ export default function EtcTicketManagementPage() {
   );
   const selectedBatch = selectedBusinessBatch;
   const visibleBatches = businessBatches;
-  const importedInvoiceCount = businessBatchDetail?.invoiceSummary.count ?? selectedTask?.importedInvoiceCount ?? 0;
-  const importedInvoiceAmount = businessBatchDetail?.invoiceSummary.amount ?? selectedTask?.importedInvoiceAmount ?? "0.00";
-  const showTaskImportedInvoices = Boolean(selectedTask && businessBatchDetail?.invoiceItems?.length);
+  const importedInvoiceCount = businessBatchDetail?.invoiceSummary.count ?? selectedTask?.importedInvoiceCount;
+  const importedInvoiceAmount = businessBatchDetail?.invoiceSummary.amount ?? selectedTask?.importedInvoiceAmount ?? "—";
 
   const ticketRootManualSources = useMemo(
     () => (selectedTask?.sourceFiles ?? []).filter(isManualTicketRootSource),
@@ -988,6 +1005,15 @@ export default function EtcTicketManagementPage() {
     setReviewNote("");
   }, [selectedTask?.taskId]);
 
+  const progressSteps = selectedBusinessBatch
+    ? deriveEtcBatchProgress(selectedBusinessBatch, selectedTask, { taskLoading, taskError: taskListError }) : [];
+  const actualStage = progressSteps.find((step) => step.state !== "complete")?.id ?? "oa";
+  const viewedStage = viewedStages[selectedBatchId] ?? actualStage;
+  const selectStage = (step: EtcBatchProgressStep["id"]) => {
+    setViewedStages((current) => ({ ...current, [selectedBatchId]: step }));
+  };
+  const currentImportPath = selectedBusinessBatch
+    ? etcImportPath(selectedBusinessBatch.taskId, selectedBatchId, activeStatus, batchPage) : "/imports/etc-invoices";
   const invoiceRows = businessBatchDetail?.invoiceItems ?? [];
   const businessBatchDeleteBlockReason = (_batch: EtcBusinessBatchSummary) => canOperateData ? "" : "当前页面暂不可删除 ETC 批次。";
   const canDeleteBusinessBatch = (batch: EtcBusinessBatchSummary) => !businessBatchDeleteBlockReason(batch);
@@ -1149,7 +1175,7 @@ export default function EtcTicketManagementPage() {
   const currentBusinessBatch = selectedBusinessBatch;
   const currentOaDraftBatchId = currentBusinessBatch?.businessBatchId ?? "";
   const currentOaDraftBatchLabel = selectedBatch ? batchDisplayTitle(selectedBatch) : "";
-  const oaDraftAmount = selectedTask?.oaTotalAmount ?? "0.00";
+  const oaDraftAmount = selectedTask?.oaTotalAmount ?? "—";
   const displayedOaDraftAmount = draftResult ? draftOaAmount : oaDraftAmount;
   const oaInvoiceAmountDifference = moneyDifference(oaDraftAmount, importedInvoiceAmount);
   const hasOaInvoiceAmountDifference = Number(oaInvoiceAmountDifference) > 0;
@@ -1174,6 +1200,10 @@ export default function EtcTicketManagementPage() {
     && currentBusinessBatch.createOaDraftAction?.enabled === true
     && hasCurrentOaAmountContract
     && !detailLoading;
+  const submitBlockReason = !canOperateData ? "当前账号不可提交审批。"
+    : taskLoading || detailLoading ? "正在读取批次，请稍候。"
+    : currentBusinessBatch?.createOaDraftAction?.enabled === false ? currentBusinessBatch.createOaDraftAction.message
+    : !hasCurrentOaAmountContract ? "核对任务尚未加载，暂不可提交。" : "";
   const currentOaActionBatch = useMemo(() => {
     if (draftResult) {
       return draftResult;
@@ -1263,6 +1293,7 @@ export default function EtcTicketManagementPage() {
     if (!taskMutationTarget || files.length === 0) {
       return;
     }
+    selectStage("sources");
     await runTaskAction(() => uploadEtcCreditCardStatement(taskMutationTarget.taskId, files[0], taskMutationTarget.version));
   };
 
@@ -1279,6 +1310,7 @@ export default function EtcTicketManagementPage() {
       setActionError(`票根网入口仅支持 TXT 或无扩展名文本；本次未上传任何文件。不支持：${unsupportedFiles.map((file) => file.name).join("、")}`);
       return;
     }
+    selectStage("sources");
     const batchId = selectedBatchIdRef.current;
     const viewController = taskDetailControllerRef.current;
     const isCurrentUpload = () => selectedBatchIdRef.current === batchId && viewController !== null && !viewController.signal.aborted;
@@ -1968,7 +2000,7 @@ export default function EtcTicketManagementPage() {
             >
               重试读取
             </Button>}
-            <RouterLink className="button button--sm button--outline etc-page-action-link" to="/imports/etc-invoices">
+            <RouterLink className="button button--sm button--outline etc-page-action-link" to={currentImportPath}>
               导入发票
               <ArrowRight aria-hidden="true" size={16} />
             </RouterLink>
@@ -2120,8 +2152,9 @@ export default function EtcTicketManagementPage() {
                         </StatusChip>
                       ) : null}
                     </div>
+                    {selectedTask ? <p className="etc-task-identity">{formatTaskTitle(selectedTask)}</p> : null}
                   </div>
-                  {activeStatus === "unsubmitted" ? (
+                  {selectedBatch && activeStatus === "unsubmitted" ? (
                     <div className="etc-section-actions" aria-label="当前批次操作">
                       {selectedTask?.status === "ready_for_import" ? (
                         <Button
@@ -2134,17 +2167,7 @@ export default function EtcTicketManagementPage() {
                           重新打开
                         </Button>
                       ) : null}
-                      <Button
-                        className="etc-secondary-action"
-                        isDisabled={!taskMutationTarget || !canConfirmSelectedTask || taskActionLoading}
-                        isPending={taskActionLoading}
-                        onPress={handleConfirmReconciliationTask}
-                        size="sm"
-                        variant="secondary"
-                      >
-                        确认对账
-                      </Button>
-                      <Button
+                      {canSubmitCurrentBatch || viewedStage === "oa" ? <div className="etc-submit-action"><Button
                         className="etc-primary-action"
                         isDisabled={!canSubmitCurrentBatch || draftCreating}
                         isPending={draftCreating}
@@ -2154,7 +2177,7 @@ export default function EtcTicketManagementPage() {
                         variant="primary"
                       >
                         提交审批
-                      </Button>
+                      </Button>{viewedStage === "oa" && !canSubmitCurrentBatch && submitBlockReason ? <p role="status">{submitBlockReason}</p> : null}</div> : null}
                     </div>
                   ) : null}
                 </div>
@@ -2165,26 +2188,32 @@ export default function EtcTicketManagementPage() {
                 task={selectedTask}
                 taskLoading={taskLoading}
                 taskError={taskListError}
+                viewedStage={viewedStage}
+                onStageChange={selectStage}
               />
+              {!selectedBatch && !loading && !batchListError ? <div className="etc-workspace-empty"><h3>选择或新建一个批次</h3><p>上传资料后开始核对</p></div> : null}
+              {taskListError ? <StatePanel tone="error" compact>{taskListError}</StatePanel> : null}
+              {taskLoading || detailLoading ? <StatePanel tone="loading" compact>正在读取批次…</StatePanel> : null}
+              {batchDetailError ? <StatePanel tone="error" compact>{batchDetailError}</StatePanel> : null}
 
-              {selectedBatch ? (
+              {selectedBatch && (viewedStage === "import" || viewedStage === "oa") ? (
                 <section className="etc-batch-summary" aria-label="批次摘要">
                   <div className="etc-detail-metrics" aria-label="批次指标">
                     <div>
-                      <span>发票金额</span>
+                      <span>已导入发票金额</span>
                       <strong>{formatMoney(selectedBatch.invoiceSummary.amount)}</strong>
                     </div>
                     <div>
-                      <span>发票数</span>
+                      <span>已导入发票</span>
                       <strong>{selectedBatch.invoiceSummary.count} 张</strong>
                     </div>
                     <div>
                       <span>开票日期</span>
-                      <strong>{formatDateRange(selectedBatchMetrics?.issueStartDate ?? null, selectedBatchMetrics?.issueEndDate ?? null)}</strong>
+                      <strong><DateRangeValue startDate={selectedBatchMetrics?.issueStartDate ?? null} endDate={selectedBatchMetrics?.issueEndDate ?? null} /></strong>
                     </div>
                     <div>
                       <span>通行日期</span>
-                      <strong>{formatDateRange(selectedBatchMetrics?.passageStartDate ?? null, selectedBatchMetrics?.passageEndDate ?? null)}</strong>
+                      <strong><DateRangeValue startDate={selectedBatchMetrics?.passageStartDate ?? null} endDate={selectedBatchMetrics?.passageEndDate ?? null} /></strong>
                     </div>
                   </div>
                   {hasSelectedBatchAmountGap ? (
@@ -2217,27 +2246,26 @@ export default function EtcTicketManagementPage() {
                 </section>
               ) : null}
 
-              {selectedBusinessBatch && isOaDecisionPendingStatus(selectedBusinessBatch.status)
+              {viewedStage === "oa" && selectedBusinessBatch && isOaDecisionPendingStatus(selectedBusinessBatch.status)
                 ? renderOaStatusPanel(selectedBusinessBatch)
                 : null}
 
-              {activeStatus === "unsubmitted" ? (
-              <section className="etc-workflow-surface" aria-label="ETC批次流程">
+              {selectedBatch && (viewedStage === "sources" || viewedStage === "reconciliation") ? (
+              <section data-stage={viewedStage} id="etc-stage-content" className="etc-workflow-surface" aria-label="ETC批次流程">
                 <div className="etc-workflow-surface__content">
                   <div className="etc-current-task-heading">
                     <div>
-                      <h3>核对工作区</h3>
-                      {selectedTask ? <p>{formatTaskTitle(selectedTask)}</p> : null}
+                      <h3>{viewedStage === "sources" ? "准备核对资料" : "确认核对结果"}</h3>
                     </div>
                   </div>
 
                   <div id="etc-reconciliation-task-content" aria-busy={taskLoading}>
-                    {taskListError ? <StatePanel tone="error" compact>{taskListError}</StatePanel> : null}
                     {!taskLoading && !taskListError && selectedTask ? (
                       <div className="etc-reconciliation-task-content">
+{viewedStage === "reconciliation" ? <>
                         <div className="etc-workflow-command-strip" aria-label="本次确认预览">
                           <div>
-                            <span>金额</span>
+                            <span>本次确认金额</span>
                             <strong>{formatMoney(selectedReconciliationSummary.oaTotalAmount)}</strong>
                           </div>
                           <div>
@@ -2245,25 +2273,23 @@ export default function EtcTicketManagementPage() {
                             <strong>{formatDateRange(selectedReconciliationSummary.periodStart, selectedReconciliationSummary.periodEnd)}</strong>
                           </div>
                           <div>
-                            <span>数量</span>
+                            <span>本次确认数量</span>
                             <strong>{taskCountText(selectedReconciliationSummary)}</strong>
                           </div>
+                        <div className="etc-confirm-actions">
+                      <Button
+                        className="etc-secondary-action"
+                        isDisabled={!taskMutationTarget || !canConfirmSelectedTask || taskActionLoading}
+                        isPending={taskActionLoading}
+                        onPress={handleConfirmReconciliationTask}
+                        size="sm"
+                        variant="secondary"
+                      >
+                        确认对账
+                      </Button>
+                          </div>
                         </div>
-
-                        <section className="etc-oa-amount-summary" aria-label="OA草稿金额口径">
-                          <div>
-                            <span>OA 草稿金额</span>
-                            <strong>{formatMoney(oaDraftAmount)} 元</strong>
-                          </div>
-                          <div>
-                            <span>已导入 ETC 发票</span>
-                            <strong>{importedInvoiceCount} 张 / {formatMoney(importedInvoiceAmount)} 元</strong>
-                          </div>
-                          {hasOaInvoiceAmountDifference ? (
-                            <p role="status">差额 {oaInvoiceAmountDifference} 元</p>
-                          ) : null}
-                        </section>
-
+</> : null}
                         <DisclosureGroup
                           allowsMultipleExpanded
                           className="etc-disclosure-group"
@@ -2272,6 +2298,7 @@ export default function EtcTicketManagementPage() {
                         >
                           <EtcDisclosureSection
                             id="upload"
+                            hidden={viewedStage !== "sources"}
                             title="上传文件"
                             summary="信用卡账单 / 票根网"
                             meta={<CountChip>{selectedTask.sourceFiles.length} 个文件</CountChip>}
@@ -2302,8 +2329,8 @@ export default function EtcTicketManagementPage() {
 
                           <EtcDisclosureSection
                             id="sources"
+                            hidden={viewedStage !== "sources"}
                             title="已上传文件"
-                            summary={selectedTask.sourceFiles.length === 0 ? "暂无文件" : `${selectedTask.sourceFiles.length} 个来源`}
                             meta={<CountChip>{selectedTask.sourceFiles.length} 个文件</CountChip>}
                           >
                             <section aria-label="已上传文件">
@@ -2364,8 +2391,162 @@ export default function EtcTicketManagementPage() {
                             </section>
                           </EtcDisclosureSection>
 
+                          {selectedTask.parseIssues.length > 0 ? (
+                            <EtcDisclosureSection
+                              id="issues"
+                            hidden={viewedStage !== "sources"}
+                              title="解析异常"
+                              summary={`${selectedTask.parseIssues.length} 条`}
+                              meta={<StatusChip tone="warning">{selectedTask.parseIssues.length} 条</StatusChip>}
+                            >
+                              <div className="etc-source-issue-list">
+                                {selectedTask.parseIssues.map((issue) => (
+                                  <div
+                                    key={issue.issueId || `${issue.fileId}-${issue.sourcePage ?? ""}-${issue.sourceLine ?? ""}-${issue.message}`}
+                                    role="alert"
+                                    className={`etc-source-issue etc-source-issue--${issue.severity === "blocking" ? "error" : "warning"}`}
+                                  >
+                                    <div className="etc-source-issue__header">
+                                      <strong>{issue.originalName || "未知文件"}</strong>
+                                      <span className="etc-status-tag">{sourceKindLabel(issue.sourceKind)}</span>
+                                      {parseIssueContextLabel(issue) ? (
+                                        <span>{parseIssueContextLabel(issue)}</span>
+                                      ) : null}
+                                    </div>
+                                    <p>{issue.message}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </EtcDisclosureSection>
+                          ) : null}
+
+                          <EtcDisclosureSection
+                            id="reconciliation"
+                            hidden={viewedStage !== "reconciliation"}
+                            title="双侧核对"
+                            summary={`已选 ${selectedReconciliationRowIds.size}`}
+                            meta={<CountChip>{pairedReconciliationRowIds.length} 个配对</CountChip>}
+                          >
+                            <div
+                              className="etc-reconciliation-table-block"
+                              style={{ "--etc-reconciliation-row-height": "32px" } as CSSProperties}
+                            >
+                              <div className="etc-reconciliation-table-toolbar">
+                                <span className="etc-count-tag">{reconciliationRows.length} 行</span>
+                                <button
+                                  type="button"
+                                  className="etc-secondary-action"
+                                  disabled={reconciliationRows.length === 0}
+                                  onClick={handleSelectAllReconciliationRows}
+                                >
+                                  全选
+                                </button>
+                                <button
+                                  type="button"
+                                  className="etc-secondary-action"
+                                  disabled={pairedReconciliationRowIds.length === 0}
+                                  onClick={handleSelectPairedReconciliationRows}
+                                >
+                                  全选配对项
+                                </button>
+                                <button
+                                  type="button"
+                                  className="etc-secondary-action"
+                                  disabled={selectedReconciliationRowIds.size === 0}
+                                  onClick={handleClearReconciliationSelection}
+                                >
+                                  清空
+                                </button>
+                                <button
+                                  type="button"
+                                  className="etc-secondary-action"
+                                  title="重新计算匹配"
+                                  disabled={!taskMutationTarget || taskActionLoading}
+                                  onClick={handleRefreshReconciliationMatches}
+                                >
+                                  <RefreshCw aria-hidden="true" size={16} />
+                                  刷新匹配
+                                </button>
+                              </div>
+                              <FinanceTable ariaLabel="ETC双侧核对明细" className="etc-reconciliation-table etc-reconciliation-table-container" minWidth={980} scrollMode="contained">
+                                  <FinanceTableHeader>
+                                      <FinanceTableColumn className="etc-reconciliation-select-column" columnRole="selection">选择</FinanceTableColumn>
+                                      <FinanceTableColumn className="etc-reconciliation-date-column" columnRole="date">信用卡侧 / 交易日</FinanceTableColumn>
+                                      <FinanceTableColumn className="etc-reconciliation-description-column" columnRole="description" isRowHeader>信用卡侧 / 交易描述</FinanceTableColumn>
+                                      <FinanceTableColumn className="etc-reconciliation-amount-column" columnRole="amount">信用卡侧 / 金额</FinanceTableColumn>
+                                      <FinanceTableColumn className="etc-reconciliation-time-column etc-reconciliation-divider" columnRole="date">票根/补充凭证侧 / 交易时间</FinanceTableColumn>
+                                      <FinanceTableColumn className="etc-reconciliation-evidence-column" columnRole="description">票根/补充凭证侧 / 金额 / 车牌</FinanceTableColumn>
+                                  </FinanceTableHeader>
+                                  <FinanceTableBody>
+                                    {reconciliationRows.map((row) => (
+                                      <FinanceTableRow
+                                        key={row.id}
+                                        className="etc-reconciliation-table-row"
+                                        dataHighlight={row.highlight || undefined}
+                                        dataTestId={`etc-reconciliation-row-${row.id}`}
+                                        id={row.id}
+                                      >
+                                        <FinanceTableCell className="etc-reconciliation-select-column" columnRole="selection">
+                                          <Checkbox
+                                            aria-label={`选择核对行 ${row.card?.description || row.evidence?.plateOrMerchant || "未命名记录"}`}
+                                            isSelected={selectedReconciliationRowIds.has(row.id)}
+                                            onChange={() => handleToggleReconciliationRow(row.id)}
+                                          >
+                                            <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                                          </Checkbox>
+                                        </FinanceTableCell>
+                                        <FinanceTableCell
+                                          className="etc-reconciliation-card-cell etc-reconciliation-date-column"
+                                          columnRole="date"
+                                          dataHighlight={row.cardHighlight || undefined}
+                                          onClick={() => { if (row.card) { setSelectedCardItemId(row.card.itemId); setWorkflowExpandedKeys((keys) => new Set([...keys, "review"])); } }}
+                                        >
+                                          {renderCardDateCell(row.card)}
+                                        </FinanceTableCell>
+                                        <FinanceTableCell
+                                          className="etc-reconciliation-card-cell etc-reconciliation-description-column"
+                                          columnRole="description"
+                                          dataHighlight={row.cardHighlight || undefined}
+                                          dataTestId={row.card ? `etc-reconciliation-card-cell-${row.card.itemId}` : undefined}
+                                          onClick={() => { if (row.card) { setSelectedCardItemId(row.card.itemId); setWorkflowExpandedKeys((keys) => new Set([...keys, "review"])); } }}
+                                        >
+                                          {renderCardDescriptionCell(row.card)}
+                                        </FinanceTableCell>
+                                        <FinanceTableCell
+                                          className="etc-reconciliation-card-cell etc-reconciliation-amount-column"
+                                          columnRole="amount"
+                                          dataHighlight={row.cardHighlight || undefined}
+                                          onClick={() => { if (row.card) { setSelectedCardItemId(row.card.itemId); setWorkflowExpandedKeys((keys) => new Set([...keys, "review"])); } }}
+                                        >
+                                          {renderCardAmountCell(row.card)}
+                                        </FinanceTableCell>
+                                        <FinanceTableCell
+                                          className="etc-reconciliation-evidence-side-cell etc-reconciliation-time-column etc-reconciliation-divider"
+                                          columnRole="date"
+                                          dataHighlight={row.evidenceHighlight || undefined}
+                                          onClick={() => row.evidence && setSelectedEvidenceRowId(row.evidence.id)}
+                                        >
+                                          {renderEvidenceTimeCell(row.evidence, row.card)}
+                                        </FinanceTableCell>
+                                        <FinanceTableCell
+                                          className="etc-reconciliation-evidence-side-cell etc-reconciliation-evidence-column"
+                                          columnRole="description"
+                                          dataHighlight={row.evidenceHighlight || undefined}
+                                          dataTestId={row.evidence ? `etc-reconciliation-evidence-cell-${row.evidence.id}` : undefined}
+                                          onClick={() => row.evidence && setSelectedEvidenceRowId(row.evidence.id)}
+                                        >
+                                          {renderEvidenceSummaryCell(row.evidence, row.card)}
+                                        </FinanceTableCell>
+                                      </FinanceTableRow>
+                                    ))}
+                                  </FinanceTableBody>
+                              </FinanceTable>
+                            </div>
+                          </EtcDisclosureSection>
+
                           <EtcDisclosureSection
                             id="review"
+                            hidden={viewedStage !== "reconciliation" || !selectedCardItem}
                             title="人工处理"
                             summary={selectedCardItem ? `${selectedCardItem.transactionDate} / ${formatMoney(selectedCardItem.settlementAmount)}` : "选择信用卡侧明细"}
                             meta={<StatusChip tone={selectedCardItem ? "primary" : "default"}>{selectedCardItem ? "已选择" : "待选择"}</StatusChip>}
@@ -2462,175 +2643,6 @@ export default function EtcTicketManagementPage() {
                             </section>
                           </EtcDisclosureSection>
 
-                          {selectedTask.parseIssues.length > 0 ? (
-                            <EtcDisclosureSection
-                              id="issues"
-                              title="解析异常"
-                              summary={`${selectedTask.parseIssues.length} 条`}
-                              meta={<StatusChip tone="warning">{selectedTask.parseIssues.length} 条</StatusChip>}
-                            >
-                              <div className="etc-source-issue-list">
-                                {selectedTask.parseIssues.map((issue) => (
-                                  <div
-                                    key={issue.issueId || `${issue.fileId}-${issue.sourcePage ?? ""}-${issue.sourceLine ?? ""}-${issue.message}`}
-                                    role="alert"
-                                    className={`etc-source-issue etc-source-issue--${issue.severity === "blocking" ? "error" : "warning"}`}
-                                  >
-                                    <div className="etc-source-issue__header">
-                                      <strong>{issue.originalName || "未知文件"}</strong>
-                                      <span className="etc-status-tag">{sourceKindLabel(issue.sourceKind)}</span>
-                                      {parseIssueContextLabel(issue) ? (
-                                        <span>{parseIssueContextLabel(issue)}</span>
-                                      ) : null}
-                                    </div>
-                                    <p>{issue.message}</p>
-                                  </div>
-                                ))}
-                              </div>
-                            </EtcDisclosureSection>
-                          ) : null}
-
-                          <EtcDisclosureSection
-                            id="reconciliation"
-                            title="双侧核对"
-                            summary={`${reconciliationRows.length} 行 / 已选 ${selectedReconciliationRowIds.size}`}
-                            meta={<CountChip>{pairedReconciliationRowIds.length} 个配对</CountChip>}
-                          >
-                            <div
-                              className="etc-reconciliation-table-block"
-                              style={{ "--etc-reconciliation-row-height": "32px" } as CSSProperties}
-                            >
-                              <div className="etc-reconciliation-table-toolbar">
-                                <span className="etc-count-tag">{reconciliationRows.length} 行</span>
-                                <button
-                                  type="button"
-                                  className="etc-secondary-action"
-                                  disabled={reconciliationRows.length === 0}
-                                  onClick={handleSelectAllReconciliationRows}
-                                >
-                                  全选
-                                </button>
-                                <button
-                                  type="button"
-                                  className="etc-secondary-action"
-                                  disabled={pairedReconciliationRowIds.length === 0}
-                                  onClick={handleSelectPairedReconciliationRows}
-                                >
-                                  全选配对项
-                                </button>
-                                <button
-                                  type="button"
-                                  className="etc-secondary-action"
-                                  disabled={selectedReconciliationRowIds.size === 0}
-                                  onClick={handleClearReconciliationSelection}
-                                >
-                                  清空
-                                </button>
-                                <button
-                                  type="button"
-                                  className="etc-secondary-action"
-                                  title="重新计算匹配"
-                                  disabled={!taskMutationTarget || taskActionLoading}
-                                  onClick={handleRefreshReconciliationMatches}
-                                >
-                                  <RefreshCw aria-hidden="true" size={16} />
-                                  刷新匹配
-                                </button>
-                              </div>
-                              <FinanceTable ariaLabel="ETC双侧核对明细" className="etc-reconciliation-table etc-reconciliation-table-container" minWidth={980} scrollMode="contained">
-                                  <FinanceTableHeader>
-                                      <FinanceTableColumn className="etc-reconciliation-select-column" columnRole="selection">选择</FinanceTableColumn>
-                                      <FinanceTableColumn className="etc-reconciliation-date-column" columnRole="date">信用卡侧 / 交易日</FinanceTableColumn>
-                                      <FinanceTableColumn className="etc-reconciliation-description-column" columnRole="description" isRowHeader>信用卡侧 / 交易描述</FinanceTableColumn>
-                                      <FinanceTableColumn className="etc-reconciliation-amount-column" columnRole="amount">信用卡侧 / 金额</FinanceTableColumn>
-                                      <FinanceTableColumn className="etc-reconciliation-time-column etc-reconciliation-divider" columnRole="date">票根/补充凭证侧 / 交易时间</FinanceTableColumn>
-                                      <FinanceTableColumn className="etc-reconciliation-evidence-column" columnRole="description">票根/补充凭证侧 / 金额 / 车牌</FinanceTableColumn>
-                                  </FinanceTableHeader>
-                                  <FinanceTableBody>
-                                    {reconciliationRows.map((row) => (
-                                      <FinanceTableRow
-                                        key={row.id}
-                                        className="etc-reconciliation-table-row"
-                                        dataHighlight={row.highlight || undefined}
-                                        dataTestId={`etc-reconciliation-row-${row.id}`}
-                                        id={row.id}
-                                      >
-                                        <FinanceTableCell className="etc-reconciliation-select-column" columnRole="selection">
-                                          <Checkbox
-                                            aria-label={`选择核对行 ${row.card?.description || row.evidence?.plateOrMerchant || "未命名记录"}`}
-                                            isSelected={selectedReconciliationRowIds.has(row.id)}
-                                            onChange={() => handleToggleReconciliationRow(row.id)}
-                                          />
-                                        </FinanceTableCell>
-                                        <FinanceTableCell
-                                          className="etc-reconciliation-card-cell etc-reconciliation-date-column"
-                                          columnRole="date"
-                                          dataHighlight={row.cardHighlight || undefined}
-                                          onClick={() => row.card && setSelectedCardItemId(row.card.itemId)}
-                                        >
-                                          {renderCardDateCell(row.card)}
-                                        </FinanceTableCell>
-                                        <FinanceTableCell
-                                          className="etc-reconciliation-card-cell etc-reconciliation-description-column"
-                                          columnRole="description"
-                                          dataHighlight={row.cardHighlight || undefined}
-                                          dataTestId={row.card ? `etc-reconciliation-card-cell-${row.card.itemId}` : undefined}
-                                          onClick={() => row.card && setSelectedCardItemId(row.card.itemId)}
-                                        >
-                                          {renderCardDescriptionCell(row.card)}
-                                        </FinanceTableCell>
-                                        <FinanceTableCell
-                                          className="etc-reconciliation-card-cell etc-reconciliation-amount-column"
-                                          columnRole="amount"
-                                          dataHighlight={row.cardHighlight || undefined}
-                                          onClick={() => row.card && setSelectedCardItemId(row.card.itemId)}
-                                        >
-                                          {renderCardAmountCell(row.card)}
-                                        </FinanceTableCell>
-                                        <FinanceTableCell
-                                          className="etc-reconciliation-evidence-side-cell etc-reconciliation-time-column etc-reconciliation-divider"
-                                          columnRole="date"
-                                          dataHighlight={row.evidenceHighlight || undefined}
-                                          onClick={() => row.evidence && setSelectedEvidenceRowId(row.evidence.id)}
-                                        >
-                                          {renderEvidenceTimeCell(row.evidence, row.card)}
-                                        </FinanceTableCell>
-                                        <FinanceTableCell
-                                          className="etc-reconciliation-evidence-side-cell etc-reconciliation-evidence-column"
-                                          columnRole="description"
-                                          dataHighlight={row.evidenceHighlight || undefined}
-                                          dataTestId={row.evidence ? `etc-reconciliation-evidence-cell-${row.evidence.id}` : undefined}
-                                          onClick={() => row.evidence && setSelectedEvidenceRowId(row.evidence.id)}
-                                        >
-                                          {renderEvidenceSummaryCell(row.evidence, row.card)}
-                                        </FinanceTableCell>
-                                      </FinanceTableRow>
-                                    ))}
-                                  </FinanceTableBody>
-                              </FinanceTable>
-                            </div>
-                          </EtcDisclosureSection>
-
-                          {showTaskImportedInvoices ? (
-                            <EtcDisclosureSection
-                              id="imported"
-                              title="已导入发票"
-                              summary={importedInvoiceCount > 0 ? `${importedInvoiceCount} 张 / ${formatMoney(importedInvoiceAmount)}` : "暂无明细"}
-                              meta={Number(importedInvoiceAmount.replace(/,/g, "")) > 0 ? <StatusChip tone="success">合计 {formatMoney(importedInvoiceAmount)}</StatusChip> : null}
-                            >
-                              <section className="etc-task-imported-invoices" aria-label="已导入ETC发票">
-                                {renderEtcInvoiceTable(
-                                  businessBatchDetail?.invoiceItems ?? [],
-                                  {
-                                    ariaLabel: "已导入ETC发票明细",
-                                    emptyText: "暂无明细。",
-                                    loadingText: "",
-                                    tableKey: selectedBusinessBatch?.businessBatchId ?? "",
-                                  },
-                                )}
-                              </section>
-                            </EtcDisclosureSection>
-                          ) : null}
                         </DisclosureGroup>
 
                       </div>
@@ -2642,8 +2654,19 @@ export default function EtcTicketManagementPage() {
               </section>
               ) : null}
 
-              {selectedBatch ? (
-              <section className="etc-batch-records" aria-label="ETC批次详情">
+              {selectedBatch && viewedStage === "import" ? (
+                <section id="etc-stage-content" className="etc-import-entry" aria-label="导入当前批次">
+                  <div><h3>导入 ETC 发票</h3><p>{progressSteps[2]?.description}</p></div>
+                  {selectedTask?.status === "ready_for_import" && !taskLoading ? <RouterLink className="button button--sm button--primary etc-primary-action" to={currentImportPath}>导入当前批次 <ArrowRight aria-hidden="true" size={16} /></RouterLink> : null}
+                </section>
+              ) : null}
+              {selectedBatch && viewedStage === "oa" ? <section className="etc-oa-amount-summary etc-oa-stage" aria-label="OA草稿金额口径">
+                <div><span>OA 草稿金额</span><strong>{formatMoney(oaDraftAmount, "—")} 元</strong></div>
+                <div><span>已导入 ETC 发票</span><strong>{importedInvoiceCount ?? "—"} 张 / {formatMoney(importedInvoiceAmount, "—")} 元</strong></div>
+                {hasOaInvoiceAmountDifference ? <p role="status">差额 {oaInvoiceAmountDifference} 元</p> : null}
+              </section> : null}
+              {selectedBatch && (viewedStage === "import" || viewedStage === "oa") ? (
+              <section key={viewedStage} id={viewedStage === "oa" ? "etc-stage-content" : undefined} className="etc-batch-records" aria-label="ETC批次详情">
                   <DisclosureGroup
                     allowsMultipleExpanded
                     className="etc-disclosure-group etc-disclosure-group--detail"
@@ -2653,7 +2676,6 @@ export default function EtcTicketManagementPage() {
                     <EtcDisclosureSection
                       id="invoices"
                       title="发票明细"
-                      summary={`${invoiceRows.length} 行`}
                       meta={<CountChip>{invoiceRows.length} 行</CountChip>}
                       headerAction={isSubmittedBusinessStatus(selectedBatch.status) ? (
                         <button
