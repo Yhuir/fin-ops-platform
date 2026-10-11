@@ -29,7 +29,10 @@ test("production ETC workspace reads real batches and switches stages without wr
     const start = Date.now();
     const response = await page.request.get(endpoint);
     expect(response.status()).toBe(200);
-    const payload = await response.json();
+    const envelope = await response.json();
+    expect(envelope.ok).toBe(true);
+    expect(envelope.error).toBeNull();
+    const payload = envelope.data;
     expect(payload.counts).toEqual(expect.objectContaining({ unsubmitted: expect.any(Number), staged: expect.any(Number), submitted: expect.any(Number) }));
     expect(payload.pagination.page).toBe(1);
     expect(Array.isArray(payload.items)).toBe(true);
